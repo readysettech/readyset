@@ -189,6 +189,10 @@ impl ReadysetServerBuilder {
     pub fn wait_for_failpoint(self) -> Self {
         self.push_arg("--wait-for-failpoint")
     }
+
+    pub fn allow_full_materialization(self) -> Self {
+        self.push_arg("--allow-full-materialization")
+    }
 }
 
 /// Manages running a readyset binary with the correct arguments.
@@ -340,5 +344,9 @@ impl AdapterBuilder {
 
     pub fn embedded_readers(self) -> Self {
         self.push_arg("--embedded-readers")
+    }
+
+    pub fn allow_full_materialization(self) -> Self {
+        self.push_arg("--allow-full-materialization")
     }
 }

@@ -73,8 +73,8 @@ impl Builder {
         if opts.no_partial {
             builder.disable_partial();
         }
-        if opts.forbid_full_materialization {
-            builder.forbid_full_materialization();
+        if opts.allow_full_materialization {
+            builder.allow_full_materialization();
         }
         if opts.enable_packet_filters {
             builder.enable_packet_filters();
@@ -114,6 +114,7 @@ impl Builder {
     pub fn for_tests() -> Self {
         let mut builder = Self::default();
         builder.set_abort_on_task_failure(false);
+        builder.allow_full_materialization();
         builder
     }
 
@@ -137,6 +138,16 @@ impl Builder {
     /// Which nodes should be placed beyond the materialization frontier?
     pub fn set_frontier_strategy(&mut self, f: FrontierStrategy) {
         self.config.materialization_config.frontier_strategy = f;
+    }
+
+    /// Allow the creation of all fully materialized nodes.
+    ///
+    /// Unless this is called, any migrations that add fully materialized nodes will return
+    /// [`ReadySetError::Unsupported`]
+    pub fn allow_full_materialization(&mut self) {
+        self.config
+            .materialization_config
+            .allow_full_materialization = true;
     }
 
     /// Forbid the creation of all fully materialized nodes.

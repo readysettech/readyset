@@ -95,7 +95,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             packet_filters_enabled: false,
-            allow_full_materialization: true,
+            allow_full_materialization: false,
             partial_enabled: true,
             frontier_strategy: FrontierStrategy::None,
         }

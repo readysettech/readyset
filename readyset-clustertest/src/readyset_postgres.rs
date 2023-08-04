@@ -120,6 +120,7 @@ async fn embedded_readers_adapters_lt_replicas() {
         .with_adapters(1)
         .with_servers(1, ServerParams::default().no_readers())
         .embedded_readers(true)
+        .allow_full_materialization()
         .start()
         .await
         .unwrap();

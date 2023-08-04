@@ -20,6 +20,7 @@ fn readyset_mysql(name: &str) -> DeploymentBuilder {
     DeploymentBuilder::new(DatabaseType::MySQL, name)
         .deploy_upstream()
         .deploy_adapter()
+        .allow_full_materialization()
 }
 
 async fn last_statement_destination(conn: &mut mysql_async::Conn) -> QueryDestination {
@@ -677,6 +678,7 @@ async fn cached_queries_filtering() {
 async fn correct_data_after_restart() {
     let mut deployment = readyset_mysql("ct_correct_data_after_restart")
         .min_workers(2)
+        .allow_full_materialization()
         .add_server(ServerParams::default().with_volume("v1"))
         .add_server(ServerParams::default().with_volume("v2"))
         .start()

@@ -379,6 +379,8 @@ pub struct ServerStartParams {
     /// Whether the server should wait to receive a failpoint request before proceeding with the
     /// rest of it's startup.
     wait_for_failpoint: bool,
+    /// Whether to allow full materialization nodes or not
+    allow_full_materialization: bool,
 }
 
 /// Set of parameters defining an entire cluster's topology.
@@ -453,6 +455,8 @@ pub struct DeploymentBuilder {
     enable_experimental_placeholder_inlining: bool,
     /// Whether to enable embedded readers mode in the adapter
     embedded_readers: bool,
+    /// Whether to allow fully materialized nodes or not
+    allow_full_materialization: bool,
 }
 
 pub enum FailpointDestination {
@@ -526,6 +530,7 @@ impl DeploymentBuilder {
             cleanup: false,
             enable_experimental_placeholder_inlining: false,
             embedded_readers: false,
+            allow_full_materialization: false,
         }
     }
     /// The number of shards in the graph, `shards` <= 1 disables sharding.
@@ -676,6 +681,12 @@ impl DeploymentBuilder {
         self
     }
 
+    /// Allows fully materialized nodes
+    pub fn allow_full_materialization(mut self) -> Self {
+        self.allow_full_materialization = true;
+        self
+    }
+
     /// Sets whether or not to automatically create inlined caches for queries with unsupported
     /// placeholders
     pub fn enable_experimental_placeholder_inlining(mut self) -> Self {
@@ -710,6 +721,7 @@ impl DeploymentBuilder {
             cleanup: self.cleanup,
             enable_experimental_placeholder_inlining: self.enable_experimental_placeholder_inlining,
             embedded_readers: self.embedded_readers,
+            allow_full_materialization: self.allow_full_materialization,
         }
     }
 
@@ -729,6 +741,7 @@ impl DeploymentBuilder {
             reader_replicas: self.reader_replicas,
             auto_restart: self.auto_restart,
             wait_for_failpoint,
+            allow_full_materialization: self.allow_full_materialization,
         }
     }
 
@@ -1523,6 +1536,8 @@ pub struct AdapterStartParams {
     enable_experimental_placeholder_inlining: bool,
     /// Whether to enable embedded readers mode
     embedded_readers: bool,
+    /// Whether or not to allow full materializations
+    allow_full_materialization: bool,
 }
 
 async fn start_server(
@@ -1563,6 +1578,9 @@ async fn start_server(
     }
     if server_start_params.wait_for_failpoint {
         builder = builder.wait_for_failpoint();
+    }
+    if server_start_params.allow_full_materialization {
+        builder = builder.allow_full_materialization();
     }
     let addr = Url::parse(&format!("http://127.0.0.1:{}", port)).unwrap();
     Ok(ServerHandle {
@@ -1659,6 +1677,10 @@ async fn start_adapter(
 
     if params.embedded_readers {
         builder = builder.embedded_readers();
+    }
+
+    if params.allow_full_materialization {
+        builder = builder.allow_full_materialization();
     }
 
     builder.start().await

@@ -546,6 +546,7 @@ async fn assert_deployment_health(mut dh: DeploymentHandle) {
 async fn server_ready_before_adapter() {
     let mut deployment = DeploymentBuilder::new(DatabaseType::MySQL, "ct_server_before_adapter")
         .auto_restart(true)
+        .allow_full_materialization()
         .start()
         .await
         .unwrap();
@@ -566,6 +567,7 @@ async fn server_ready_before_adapter() {
 async fn adapter_ready_before_server() {
     let mut deployment = DeploymentBuilder::new(DatabaseType::MySQL, "ct_adapter_before_server")
         .auto_restart(true)
+        .allow_full_materialization()
         .start()
         .await
         .unwrap();
