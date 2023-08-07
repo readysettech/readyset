@@ -21,6 +21,7 @@ mod types {
 
     use cidr::IpInet;
     use eui48::MacAddress;
+    use proptest::collection::vec;
     use proptest::prelude::*;
     use proptest::string::string_regex;
     use readyset_adapter::backend::QueryDestination;
@@ -40,7 +41,7 @@ mod types {
 
     use super::*;
 
-    async fn test_type_roundtrip<T, V>(type_name: T, val: V)
+    async fn test_type_roundtrip<T, V>(type_name: T, vals: Vec<V>)
     where
         T: Display,
         V: ToSql + Sync + PartialEq + RefUnwindSafe,
@@ -50,55 +51,63 @@ mod types {
         let mut client = connect(config).await;
 
         client
-            .simple_query(&format!("CREATE TABLE t (x {})", type_name))
+            .simple_query(&format!("CREATE TABLE t (id int, x {})", type_name))
             .await
             .unwrap();
 
-        // check writes (going to fallback)
-        client
-            .execute("INSERT INTO t (x) VALUES ($1)", &[&val])
-            .await
-            .unwrap();
+        for (i, v) in vals.iter().enumerate() {
+            // check writes (going to fallback)
+            client
+                .execute("INSERT INTO t VALUES ($1, $2)", &[&(i as i32), v])
+                .await
+                .unwrap();
+        }
 
         // check values coming out of noria
         eventually!(run_test: {
-            client.query("SELECT * FROM t", &[])
+            client.query("SELECT x FROM t ORDER BY id", &[])
                 .await
                 .unwrap()
                 .iter()
                 .map(|row| row.get::<_, V>(0))
                 .collect::<Vec<_>>()
-        }, then_assert: |star_results| {
-            assert_eq!(star_results.len(), 1);
-            assert_eq!(star_results[0], val);
+        }, then_assert: |results| {
+            assert_eq!(results, vals);
         });
 
         // check parameter parsing
         if type_name.to_string().as_str() != "json" {
-            let count_where_result = client
-                .query_one(
-                    format!("SELECT count(*) FROM t WHERE x = cast($1 as {type_name})").as_str(),
-                    &[&val],
-                )
-                .await
-                .unwrap()
-                .get::<_, i64>(0);
-            assert_eq!(count_where_result, 1);
+            for v in vals.iter() {
+                let count_where_result = client
+                    .query_one(
+                        format!("SELECT count(*) FROM t WHERE x = cast($1 as {type_name})")
+                            .as_str(),
+                        &[v],
+                    )
+                    .await
+                    .unwrap()
+                    .get::<_, i64>(0);
+                assert!(count_where_result >= 1);
+            }
         }
 
         // Can't compare JSON for equality in postgres
         if type_name.to_string() != "json" {
             // check parameter passing and value returning when going through fallback
 
-            let fallback_result = client
-                .transaction()
-                .await
-                .unwrap()
-                .query_one("SELECT x FROM t WHERE x = $1", &[&val])
-                .await
-                .unwrap()
-                .get::<_, V>(0);
-            assert_eq!(fallback_result, val);
+            for v in vals.iter() {
+                let fallback_result = client
+                    .transaction()
+                    .await
+                    .unwrap()
+                    .query("SELECT x FROM t WHERE x = $1", &[v])
+                    .await
+                    .unwrap()
+                    .get(0)
+                    .expect("Should have at least one value equal to {v:?}")
+                    .get::<_, V>(0);
+                assert_eq!(fallback_result, *v);
+            }
         }
 
         shutdown_tx.shutdown().await;
@@ -117,17 +126,18 @@ mod types {
             // these are pretty slow, so we only run a few cases at a time
             #[test_strategy::proptest(ProptestConfig {
                 cases: 5,
+                max_shrink_iters: 200, // May need many shrink iters for large vecs
                 ..ProptestConfig::default()
             })]
             #[serial_test::serial]
             $(#[$meta])*
-            fn $test_name(#[strategy($strategy)] val: $rust_type) {
+            fn $test_name(#[strategy(vec($strategy, 1..20))] vals: Vec<$rust_type>) {
                 readyset_tracing::init_test_logging();
                 let rt = tokio::runtime::Builder::new_multi_thread()
                     .enable_all()
                     .build()
                     .unwrap();
-                rt.block_on(test_type_roundtrip($pg_type_name, val));
+                rt.block_on(test_type_roundtrip($pg_type_name, vals));
             }
         };
     }
