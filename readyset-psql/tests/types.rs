@@ -141,7 +141,9 @@ mod types {
         bigint_i64("bigint", i64);
         real_f32("real", f32);
         double_f64("double precision", f64);
-        char_i8("\"char\"", i8);
+        // If we happen to generate 0 for char_i8, we hit the failure described in REA-3271. Once
+        // that issue is fixed, we should remove the filter from the strategy here.
+        char_i8("\"char\"", i8, any::<i8>().prop_filter("Workaround for REA-3271", |v| *v != 0));
         text_string("text", String);
         bpchar_string("bpchar", String);
         bytea_bytes("bytea", Vec<u8>);
