@@ -21,7 +21,7 @@ mod types {
 
     use cidr::IpInet;
     use eui48::MacAddress;
-    use proptest::prelude::ProptestConfig;
+    use proptest::prelude::*;
     use proptest::string::string_regex;
     use readyset_adapter::backend::QueryDestination;
     use readyset_client_test_helpers::psql_helpers::{last_query_info, upstream_config};
@@ -105,11 +105,15 @@ mod types {
     }
 
     macro_rules! test_types {
-        ($($(#[$meta:meta])*$test_name:ident($pg_type_name: expr, $(#[$strategy:meta])*$rust_type: ty);)+) => {
-            $(test_types!(@impl, $(#[$meta])* $test_name, $pg_type_name, $(#[$strategy])* $rust_type);)+
+        ($($(#[$meta:meta])* $test_name:ident($pg_type_name: expr, $rust_type: ty $(, $strategy:expr)?);)+) => {
+            $(test_types!(@impl, $(#[$meta])* $test_name, $pg_type_name, $rust_type $(, $strategy)?);)+
         };
 
-        (@impl, $(#[$meta:meta])* $test_name: ident, $pg_type_name: expr, $(#[$strategy:meta])* $rust_type: ty) => {
+        (@impl, $(#[$meta:meta])* $test_name: ident, $pg_type_name: expr, $rust_type: ty) => {
+            test_types!(@impl, $(#[$meta])* $test_name, $pg_type_name, $rust_type, any::<$rust_type>());
+        };
+
+        (@impl, $(#[$meta:meta])* $test_name: ident, $pg_type_name: expr, $rust_type: ty, $strategy: expr) => {
             // these are pretty slow, so we only run a few cases at a time
             #[test_strategy::proptest(ProptestConfig {
                 cases: 5,
@@ -117,7 +121,7 @@ mod types {
             })]
             #[serial_test::serial]
             $(#[$meta])*
-            fn $test_name($(#[$strategy])* val: $rust_type) {
+            fn $test_name(#[strategy($strategy)] val: $rust_type) {
                 readyset_tracing::init_test_logging();
                 let rt = tokio::runtime::Builder::new_multi_thread()
                     .enable_all()
@@ -141,26 +145,26 @@ mod types {
         text_string("text", String);
         bpchar_string("bpchar", String);
         bytea_bytes("bytea", Vec<u8>);
-        name_string("name", #[strategy(string_regex("[a-zA-Z0-9]{1,63}").unwrap())] String);
+        name_string("name", String, string_regex("[a-zA-Z0-9]{1,63}").unwrap());
         // TODO(fran): Add numeric with precision and scale when we start correctly
         //  handling them.
-        numeric_decimal("numeric", #[strategy(arbitrary_decimal())] Decimal);
-        decimal("decimal", #[strategy(arbitrary_decimal())] Decimal);
-        timestamp_systemtime("timestamp", #[strategy(arbitrary_systemtime())] std::time::SystemTime);
-        inet_ipaddr("inet", #[strategy(arbitrary_ipinet())] IpInet);
-        macaddr_string("macaddr", #[strategy(arbitrary_mac_address())] MacAddress);
-        uuid_string("uuid", #[strategy(arbitrary_uuid())] Uuid);
-        date_naivedate("date", #[strategy(arbitrary_naive_date())] chrono::NaiveDate);
-        time_naivetime("time", #[strategy(arbitrary_naive_time())] chrono::NaiveTime);
-        json_string("json", #[strategy(arbitrary_json())] serde_json::Value);
-        jsonb_string("jsonb", #[strategy(arbitrary_json_without_f64())] serde_json::Value);
-        bit_bitvec("bit", #[strategy(arbitrary_bitvec(1..=1))] bit_vec::BitVec);
-        bit_sized_bitvec("bit(20)", #[strategy(arbitrary_bitvec(20..=20))] bit_vec::BitVec);
-        varbit_unlimited_bitvec("varbit", #[strategy(arbitrary_bitvec(0..=20))] bit_vec::BitVec);
-        varbit_bitvec("varbit(10)", #[strategy(arbitrary_bitvec(0..=10))] bit_vec::BitVec);
-        bit_varying_unlimited_bitvec("bit varying", #[strategy(arbitrary_bitvec(0..=20))] bit_vec::BitVec);
-        bit_varying_bitvec("bit varying(10)", #[strategy(arbitrary_bitvec(0..=10))] bit_vec::BitVec);
-        timestamp_tz_datetime("timestamp with time zone", #[strategy(arbitrary_date_time())] chrono::DateTime::<chrono::FixedOffset>);
+        numeric_decimal("numeric", Decimal, arbitrary_decimal());
+        decimal("decimal", Decimal, arbitrary_decimal());
+        timestamp_systemtime("timestamp", std::time::SystemTime, arbitrary_systemtime());
+        inet_ipaddr("inet", IpInet, arbitrary_ipinet());
+        macaddr_string("macaddr", MacAddress, arbitrary_mac_address());
+        uuid_string("uuid", Uuid, arbitrary_uuid());
+        date_naivedate("date", chrono::NaiveDate, arbitrary_naive_date());
+        time_naivetime("time", chrono::NaiveTime, arbitrary_naive_time());
+        json_string("json", serde_json::Value, arbitrary_json());
+        jsonb_string("jsonb", serde_json::Value, arbitrary_json_without_f64());
+        bit_bitvec("bit", bit_vec::BitVec, arbitrary_bitvec(1..=1));
+        bit_sized_bitvec("bit(20)", bit_vec::BitVec, arbitrary_bitvec(20..=20));
+        varbit_unlimited_bitvec("varbit", bit_vec::BitVec, arbitrary_bitvec(0..=20));
+        varbit_bitvec("varbit(10)", bit_vec::BitVec, arbitrary_bitvec(0..=10));
+        bit_varying_unlimited_bitvec("bit varying", bit_vec::BitVec, arbitrary_bitvec(0..=20));
+        bit_varying_bitvec("bit varying(10)", bit_vec::BitVec, arbitrary_bitvec(0..=10));
+        timestamp_tz_datetime("timestamp with time zone", chrono::DateTime::<chrono::FixedOffset>, arbitrary_date_time());
         text_array("text[]", Vec<String>);
     }
 
