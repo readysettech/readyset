@@ -1975,6 +1975,35 @@ mod tests {
                 "SELECT `x`, count(*) FROM `t` HAVING (count(*) > 1)"
             );
         }
+
+        #[test]
+        fn left_join_inner_join() {
+            let res = test_parse!(
+                selection(Dialect::MySQL),
+                b"select * from t1 left join t2 on x inner join t3 on z"
+            );
+            assert_eq!(
+                res.join,
+                vec![
+                    JoinClause {
+                        operator: JoinOperator::LeftJoin,
+                        right: JoinRightSide::Table(TableExpr {
+                            inner: TableExprInner::Table("t2".into()),
+                            alias: None
+                        }),
+                        constraint: JoinConstraint::On(Expr::Column("x".into()))
+                    },
+                    JoinClause {
+                        operator: JoinOperator::InnerJoin,
+                        right: JoinRightSide::Table(TableExpr {
+                            inner: TableExprInner::Table("t3".into()),
+                            alias: None
+                        }),
+                        constraint: JoinConstraint::On(Expr::Column("z".into()))
+                    },
+                ]
+            )
+        }
     }
 
     mod postgres {

@@ -7,7 +7,7 @@ use itertools::Itertools;
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::character::complete::char;
-use nom::combinator::{complete, map, opt, value};
+use nom::combinator::{complete, map, opt, peek, value};
 use nom::multi::{many0, many1, separated_list0, separated_list1};
 use nom::sequence::{delimited, pair, preceded, terminated, tuple};
 use nom::Parser;
@@ -880,12 +880,15 @@ fn binary_operator_no_and_or(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Binar
 }
 
 fn in_or_not_in(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], TokenTree> {
-    alt((value(TokenTree::In, tag_no_case("in")), |i| {
+    let (i, res) = alt((value(TokenTree::In, tag_no_case("in")), |i| {
         let (i, _) = tag_no_case("not")(i)?;
         let (i, _) = whitespace1(i)?;
         let (i, _) = tag_no_case("in")(i)?;
         Ok((i, TokenTree::NotIn))
-    }))(i)
+    }))(i)?;
+    let (i, _) = peek(preceded(whitespace0, tag("(")))(i)?;
+
+    Ok((i, res))
 }
 
 fn infix_no_and_or(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], TokenTree> {
