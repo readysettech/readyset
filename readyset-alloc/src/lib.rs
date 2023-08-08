@@ -115,6 +115,7 @@ pub use crate::imp::*;
 pub use crate::thread::*;
 pub use crate::trace::*;
 
+#[cfg(not(feature = "sys-malloc"))]
 #[global_allocator]
 static ALLOC: imp::Allocator = imp::allocator();
 
