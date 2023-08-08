@@ -1,3 +1,4 @@
+use std::env;
 use std::fs::read_dir;
 use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -623,6 +624,7 @@ fn start_adapter_with_options(
     let database_type = DatabaseURL::from_str(upstream_url)?.database_type();
     let database_type_flag = format!("--database-type={}", database_type);
     let temp_dir = temp_dir::TempDir::new().unwrap();
+    let log_level = env::var("LOG_LEVEL").unwrap_or_else(|_| "error".into());
     let mut options = vec![
         "bench", // This is equivalent to the program name in argv, ignored
         "--deployment",
@@ -638,7 +640,7 @@ fn start_adapter_with_options(
         "--authority-address",
         temp_dir.path().to_str().unwrap(),
         "--log-level",
-        "error",
+        &log_level,
         "--eviction-policy",
         "lru",
         "--noria-metrics",
