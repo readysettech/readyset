@@ -2892,6 +2892,11 @@ impl Domain {
                                 key: k.clone(),
                             })
                         });
+                    } else if !self.reader_triggered.contains_key(dst) {
+                        internal!(
+                            "Received replay targeted at node {dst} that is not waiting for any \
+                             replays"
+                        );
                     }
 
                     if let Some(prev) = self.reader_triggered.get(dst) {
@@ -3419,9 +3424,8 @@ impl Domain {
 
                                         // TODO: could there have been multiple
                                         invariant_eq!(tags.len(), 1);
-                                        #[allow(clippy::indexing_slicing)]
-                                        // we check len is 1 first
-                                        evict_tags.push(tags[0]);
+                                        #[allow(clippy::unwrap_used)] // we check len is 1 first
+                                        evict_tags.push(*tags.iter().next().unwrap());
                                     }
                                 }
                             }

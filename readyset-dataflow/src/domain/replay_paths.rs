@@ -1,5 +1,5 @@
 use std::borrow::{Borrow, Cow};
-use std::collections::{btree_map, BTreeMap, HashMap};
+use std::collections::{btree_map, BTreeMap, HashMap, HashSet};
 use std::hash::Hash;
 use std::{iter, ops};
 
@@ -107,7 +107,7 @@ pub(super) struct ReplayPaths {
     /// joins][straddled-joins] for more information about extended replay paths
     ///
     /// [straddled-joins]: http://docs/dataflow/replay_paths.html#straddled-joins
-    by_dst: NodeMap<NodeMap<HashMap<Index, Vec<Tag>>>>,
+    by_dst: NodeMap<NodeMap<HashMap<Index, HashSet<Tag>>>>,
 
     /// Map from nodes, to columns which are "generated" by that node, meaning those columns do not
     /// appear unchanged in exactly one of that node's parents, to information about the source of
@@ -144,7 +144,7 @@ impl ReplayPaths {
         Destination(destination): Destination,
         Target(target): Target,
         index: &Index,
-    ) -> Option<&Vec<Tag>> {
+    ) -> Option<&HashSet<Tag>> {
         let indexes = self.by_dst.get(destination)?.get(target)?;
         indexes.get(index).or_else(|| {
             // we might be doing what is effectively a point lookup into a BTree index if we do
@@ -310,7 +310,7 @@ impl ReplayPaths {
                 .or_default()
                 .entry(target_index.clone())
                 .or_default()
-                .push(tag);
+                .insert(tag);
 
             Some(target_index)
         } else {
@@ -399,7 +399,7 @@ mod tests {
             &Index::hash_map(vec![0]),
         );
 
-        assert_eq!(resolved_tags, Some(&vec![Tag::new(1)]));
+        assert_eq!(resolved_tags, Some(&HashSet::from([Tag::new(1)])));
     }
 
     #[test]
@@ -428,6 +428,6 @@ mod tests {
             &Index::hash_map(vec![0]),
         );
 
-        assert_eq!(resolved_tags, Some(&vec![Tag::new(1)]));
+        assert_eq!(resolved_tags, Some(&HashSet::from([Tag::new(1)])));
     }
 }
