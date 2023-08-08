@@ -1,0 +1,76 @@
+name: readyset-mysql
+services:
+  cache:
+    image: public.ecr.aws/readyset/readyset:beta-2023-07-26
+    platform: linux/amd64
+    expose:
+      - 6033  # ReadySet Server Prometheus metrics at http://readyset:6033/metrics
+      - 6034  # ReadySet Adapter Prometheus metrics at http://readyset:6034/metrics
+    ports:
+      # The ReadySet Adapter listen port, i.e. what your application / SQL shell connects to
+      - "3307:3307"
+    environment:
+      DEPLOYMENT_ENV: quickstart_docker
+      DB_DIR: /state
+      PROMETHEUS_METRICS: true
+      QUERY_CACHING: explicit
+      QUERY_LOG: true
+      QUERY_LOG_AD_HOC: true
+      STANDALONE: true
+      DEPLOYMENT: docker_compose_deployment
+      LISTEN_ADDRESS: 0.0.0.0:3307
+      UPSTREAM_DB_URL: mysql://root:readyset@mysql/testdb
+      CONTROLLER_ADDRESS: 0.0.0.0
+    volumes:
+      - "readyset:/state"
+    healthcheck:
+      test: [ "CMD", "curl", "--fail", "127.0.0.1:6033/health" ]
+      interval: 2s
+      timeout: 1s
+      retries: 5
+      start_period: 5s
+    depends_on:
+      mysql:
+        condition: service_healthy
+  prometheus:
+    image: public.ecr.aws/readyset/readyset-prometheus:latest
+    healthcheck:
+      test: ["CMD", "nc", "-vz", "localhost", "9090"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    expose:
+      - 9090
+    volumes:
+      - "prometheus:/prometheus"
+  pushgateway:
+    image: prom/pushgateway
+    expose:
+      - 9091
+  grafana:
+    image: public.ecr.aws/readyset/readyset-grafana:latest
+    ports:
+      - "4000:4000"
+    environment:
+      UPSTREAM_DB_URL: mysql://root:readyset@mysql/testdb
+      RS_PORT: 3307
+      RS_GRAFANA_PORT: 4000
+  mysql:
+    image: mysql:8
+    environment:
+      - MYSQL_ROOT_PASSWORD=readyset
+      - MYSQL_DATABASE=testdb
+    expose:
+      - 3306
+    healthcheck:
+      test: "mysqladmin ping -h127.0.0.1 -P3306 -uroot -preadyset"
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    stop_grace_period: 30s
+    volumes:
+      - mysql:/var/lib/mysql
+volumes:
+  mysql: ~
+  prometheus: ~
+  readyset: ~
