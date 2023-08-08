@@ -14,6 +14,7 @@ use std::task::{Context, Poll};
 use async_bincode::{AsyncBincodeWriter, AsyncDestination};
 use futures_util::sink::{Sink, SinkExt};
 use tokio::io::BufWriter;
+use tokio::sync::broadcast;
 
 pub mod tcp;
 
@@ -23,6 +24,13 @@ use crate::{ReadySetError, ReadySetResult};
 
 pub const CONNECTION_FROM_BASE: u8 = 1;
 pub const CONNECTION_FROM_DOMAIN: u8 = 2;
+
+/// Buffer size to use for the broadcast channel to notify replicas about changes to the addresses
+/// of other replicas
+///
+/// If more than this number of changes to replica addresses are enqueued without all replicas
+/// reading them, the replicas that lag behind will reconnect to all other replicas
+const COORDINATOR_CHANGE_CHANNEL_BUFFER_SIZE: usize = 64;
 
 pub struct Remote;
 pub struct MaybeLocal;
@@ -192,6 +200,8 @@ struct ChannelCoordinatorInner<K: Eq + Hash + Clone, T> {
 
 pub struct ChannelCoordinator<K: Eq + Hash + Clone, T> {
     inner: RwLock<ChannelCoordinatorInner<K, T>>,
+    /// Broadcast channel that can be used to be notified when the address for a key changes
+    changes_tx: broadcast::Sender<K>,
 }
 
 impl<K: Eq + Hash + Clone, T> Default for ChannelCoordinator<K, T> {
@@ -207,32 +217,56 @@ impl<K: Eq + Hash + Clone, T> ChannelCoordinator<K, T> {
                 addrs: Default::default(),
                 locals: Default::default(),
             }),
+            changes_tx: broadcast::channel(COORDINATOR_CHANGE_CHANNEL_BUFFER_SIZE).0,
         }
+    }
+
+    /// Create a new [`broadcast::Receiver`] which will be notified whenver the *remote* address for
+    /// a key is changed (but *not* when a new key is added, or when the local address changes!)
+    pub fn subscribe(&self) -> broadcast::Receiver<K> {
+        self.changes_tx.subscribe()
     }
 
     pub fn insert_remote(&self, key: K, addr: SocketAddr) {
         #[allow(clippy::expect_used)]
         // This can only fail if the mutex is poisoned, in which case we can't recover,
         // so we allow to panic if that happens.
-        let mut guard = self.inner.write().expect("poisoned mutex");
-        guard.addrs.insert(key, addr);
+        let changed = {
+            let mut guard = self.inner.write().expect("poisoned mutex");
+            let old = guard.addrs.insert(key.clone(), addr);
+
+            old.is_some() // Don't publish if we're inserting a *new* address
+                && old != Some(addr)
+        };
+
+        if changed {
+            let _ = self.changes_tx.send(key);
+        }
     }
 
     pub fn remove(&self, key: K) {
         #[allow(clippy::expect_used)]
         // This can only fail if the mutex is poisoned, in which case we can't recover,
         // so we allow to panic if that happens.
-        let mut guard = self.inner.write().expect("poisoned mutex");
-        guard.addrs.remove(&key);
-        guard.locals.remove(&key);
+        let removed = {
+            let mut guard = self.inner.write().expect("poisoned mutex");
+            guard.locals.remove(&key);
+            guard.addrs.remove(&key).is_some()
+        };
+
+        if removed {
+            let _ = self.changes_tx.send(key);
+        }
     }
 
     pub fn insert_local(&self, key: K, chan: tokio::sync::mpsc::UnboundedSender<T>) {
         #[allow(clippy::expect_used)]
         // This can only fail if the mutex is poisoned, in which case we can't recover,
         // so we allow to panic if that happens.
-        let mut guard = self.inner.write().expect("poisoned mutex");
-        guard.locals.insert(key, chan);
+        {
+            let mut guard = self.inner.write().expect("poisoned mutex");
+            guard.locals.insert(key, chan);
+        }
     }
 
     pub fn has<Q>(&self, key: &Q) -> bool
