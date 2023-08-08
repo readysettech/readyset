@@ -9,6 +9,8 @@ edition = "2021"
 # Build jemalloc's profiling features. Without this
 # certain profile functions will return nothing.
 mem-profiling = ["tikv-jemallocator/profiling"]
+# Build with system OS memory allocator
+sys-malloc = []
 
 [dependencies]
 futures = { version = "0.3", features = ["executor", "thread-pool"]}
