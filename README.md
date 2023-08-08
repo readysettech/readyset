@@ -137,7 +137,7 @@ docker run -d \
 --volume='readyset:/state' \
 --pull=always \
 -e DEPLOYMENT_ENV=quickstart_github \
-public.ecr.aws/readyset/readyset:beta-2023-06-29 \
+public.ecr.aws/readyset/readyset:beta-2023-07-26 \
 --standalone \
 --deployment='github-postgres' \
 --database-type=postgresql \
@@ -158,7 +158,7 @@ docker run -d \
 --volume='readyset:/state' \
 --pull=always \
 -e DEPLOYMENT_ENV=quickstart_github \
-public.ecr.aws/readyset/readyset:beta-2023-06-29 \
+public.ecr.aws/readyset/readyset:beta-2023-07-26 \
 --standalone \
 --deployment='github-mysql' \
 --database-type=mysql \
