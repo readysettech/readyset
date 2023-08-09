@@ -1,7 +1,7 @@
 use std::{fmt, str};
 
 use nom::branch::alt;
-use nom::combinator::map;
+use nom::combinator::{map, opt};
 use nom_locate::LocatedSpan;
 use readyset_util::fmt::fmt_with;
 use readyset_util::redacted::Sensitive;
@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::alter::{alter_table_statement, AlterTableStatement};
 use crate::comment::{comment, CommentStatement};
+use crate::common::statement_terminator;
 use crate::compound_select::{compound_selection, CompoundSelectStatement};
 use crate::create::{
     create_cached_query, create_table, key_specification, view_creation, CreateCacheStatement,
@@ -141,7 +142,9 @@ pub fn sql_query(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResul
         let (i, _) = whitespace0(i)?;
 
         // `alt` supports a maximum of 21 parsers, so we split the parser up to handle more
-        alt((sql_query_part1(dialect), sql_query_part2(dialect)))(i)
+        let (i, o) = alt((sql_query_part1(dialect), sql_query_part2(dialect)))(i)?;
+        let (i, _) = opt(statement_terminator)(i)?;
+        Ok((i, o))
     }
 }
 
