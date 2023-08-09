@@ -5,7 +5,7 @@ use std::str::FromStr;
 use std::{fmt, mem};
 
 use readyset_data::{Array, DfValue};
-use readyset_errors::{invalid_err, ReadySetError, ReadySetResult};
+use readyset_errors::{invalid_query_err, ReadySetError, ReadySetResult};
 use serde::Serialize;
 use serde_json::map::Entry as JsonEntry;
 use serde_json::{Number as JsonNumber, Value as JsonValue};
@@ -33,7 +33,7 @@ impl FromStr for NullValueTreatment {
             "return_target" => Ok(Self::ReturnTarget),
             "use_json_null" => Ok(Self::UseJsonNull),
             "raise_exception" => Ok(Self::RaiseException),
-            _ => Err(invalid_err!(
+            _ => Err(invalid_query_err!(
                 "null_value_treatment must be \"delete_key\", \"return_target\", \
                 \"use_json_null\", or \"raise_exception\""
             )),
@@ -156,7 +156,7 @@ pub(crate) fn json_remove_path<'k>(
     keys: impl IntoIterator<Item = &'k DfValue>,
 ) -> ReadySetResult<()> {
     if !json.is_array() && !json.is_object() {
-        return Err(invalid_err!(
+        return Err(invalid_query_err!(
             "Cannot delete path in non-array, non-object JSON value"
         ));
     }
@@ -252,7 +252,9 @@ pub(crate) fn json_object_from_pairs(
     match kv_pairs.num_dimensions() {
         1 => {
             if kv_pairs.total_len() % 2 != 0 {
-                return Err(invalid_err!("array must have even number of elements"));
+                return Err(invalid_query_err!(
+                    "array must have even number of elements"
+                ));
             }
 
             let mut kv_pairs = kv_pairs.values();
@@ -262,7 +264,7 @@ pub(crate) fn json_object_from_pairs(
             }
         }
         2 => {
-            let arity_error = || invalid_err!("array must have two columns");
+            let arity_error = || invalid_query_err!("array must have two columns");
 
             for outer_view in kv_pairs.outer_dimension() {
                 let mut kv_pair = outer_view.values();
@@ -277,7 +279,7 @@ pub(crate) fn json_object_from_pairs(
                 result_kv_pairs.push((k.clone(), v.clone()));
             }
         }
-        _ => return Err(invalid_err!("wrong number of array dimensions")),
+        _ => return Err(invalid_query_err!("wrong number of array dimensions")),
     }
 
     let mut result =
@@ -301,11 +303,11 @@ pub(crate) fn json_object_from_keys_and_values(
     }
 
     if keys.num_dimensions() != 1 || values.num_dimensions() != 1 {
-        return Err(invalid_err!("wrong number of array dimensions"));
+        return Err(invalid_query_err!("wrong number of array dimensions"));
     }
 
     if keys.total_len() != values.total_len() {
-        return Err(invalid_err!("mismatched array dimensions"));
+        return Err(invalid_query_err!("mismatched array dimensions"));
     }
 
     let mut result =
@@ -491,7 +493,7 @@ pub(crate) fn json_insert<'k>(
     insert_after: bool,
 ) -> ReadySetResult<()> {
     if !target_json.is_array() && !target_json.is_object() {
-        return Err(invalid_err!(
+        return Err(invalid_query_err!(
             "Cannot insert path in non-array, non-object JSON value"
         ));
     }
@@ -530,7 +532,7 @@ pub(crate) fn json_set<'k>(
     create_if_missing: bool,
 ) -> ReadySetResult<()> {
     if !target_json.is_array() && !target_json.is_object() {
-        return Err(invalid_err!(
+        return Err(invalid_query_err!(
             "Cannot set path in non-array, non-object JSON value"
         ));
     }
@@ -615,7 +617,7 @@ fn parse_json_index(index: &str) -> Option<isize> {
 ///
 /// `iter_count` is the zero-based iteration offset, such as from [`Iterator::enumerate`].
 fn parse_json_index_error(iter_count: usize) -> ReadySetError {
-    invalid_err!(
+    invalid_query_err!(
         "path element at position {} is not an integer",
         iter_count + 1
     )

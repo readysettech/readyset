@@ -7,7 +7,8 @@ use nom_sql::{
 use readyset_data::dialect::SqlEngine;
 use readyset_data::{DfType, DfValue};
 use readyset_errors::{
-    internal, internal_err, invalid, invalid_err, unsupported, ReadySetError, ReadySetResult,
+    internal, internal_err, invalid_query, invalid_query_err, unsupported, ReadySetError,
+    ReadySetResult,
 };
 use readyset_util::redacted::Sensitive;
 use vec1::Vec1;
@@ -59,7 +60,7 @@ fn unify_postgres_types(types: Vec<&DfType>) -> ReadySetResult<DfType> {
         .filter(|t| t.is_known())
         .any(|t| t.pg_category() != first_known_type.pg_category())
     {
-        invalid_err!(
+        invalid_query_err!(
             "Cannot coerce type {} to type {}",
             first_ty,
             types
@@ -586,7 +587,7 @@ impl BinaryOperator {
                 Right => ("right", right_type),
             };
 
-            Err(invalid_err!(
+            Err(invalid_query_err!(
                 "cannot invoke '{self}' on {side_name}-side operand type {offending_type}; \
                 expected {expected_type}"
             ))
@@ -1042,7 +1043,7 @@ impl Expr {
             //                  ^
             // LOCATION:  make_scalar_array_op, parse_oper.c:814
             // Time: 0.396 ms
-            invalid!("op ANY/ALL (array) requires an array on the right-hand side")
+            invalid_query!("op ANY/ALL (array) requires an array on the right-hand side")
         };
 
         let ty = op.output_type(left.ty(), right_member_ty)?;
@@ -1053,7 +1054,7 @@ impl Expr {
             //                  ^
             // LOCATION:  make_scalar_array_op, parse_oper.c:856
             // Time: 0.330 ms
-            invalid!("op ANY/ALL (array) requires the operator to yield a boolean")
+            invalid_query!("op ANY/ALL (array) requires the operator to yield a boolean")
         }
 
         let (left_coerce_target, right_coerce_target) =

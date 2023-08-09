@@ -847,16 +847,16 @@ macro_rules! internal_err {
 /// # Examples
 ///
 /// ```
-/// use readyset_errors::invalid_err;
+/// use readyset_errors::invalid_query_err;
 ///
 /// let x = 4;
-/// let my_err = invalid_err!("{x} things were wrong about your query!");
+/// let my_err = invalid_query_err!("{x} things were wrong about your query!");
 /// assert!(my_err
 ///     .to_string()
 ///     .contains("4 things were wrong about your query!"));
 /// ```
 #[macro_export]
-macro_rules! invalid_err {
+macro_rules! invalid_query_err {
     ($($format_args:tt)*) => {
         $crate::ReadySetError::InvalidQuery(format!(
             "{}{}",
@@ -952,9 +952,9 @@ macro_rules! internal {
 /// When building in debug mode, the returned error also captures file, line, and column information
 /// for further debugging purposes.
 #[macro_export]
-macro_rules! invalid {
+macro_rules! invalid_query {
     ($($format_args:tt)*) => {
-        return Err($crate::invalid_err!($($format_args)*).into())
+        return Err($crate::invalid_query_err!($($format_args)*).into())
     };
 }
 

@@ -6,7 +6,9 @@ use nom_sql::{
     BinaryOperator, Column, Expr, FieldDefinitionExpr, JoinConstraint, JoinRightSide, Relation,
     SelectStatement, SqlIdentifier, SqlQuery, TableExpr, TableExprInner,
 };
-use readyset_errors::{internal_err, invalid_err, unsupported, unsupported_err, ReadySetResult};
+use readyset_errors::{
+    internal_err, invalid_query_err, unsupported, unsupported_err, ReadySetResult,
+};
 
 pub trait DetectProblematicSelfJoins: Sized {
     /// Detect and return an unsupported error for any joins where both sides of the join key are
@@ -85,7 +87,7 @@ fn check_select_statement<'a>(
                         _ => None,
                     })
                     .ok_or_else(|| {
-                        invalid_err!(
+                        invalid_query_err!(
                             "Could not resolve column reference {}.{}",
                             table.display_unquoted(),
                             col_name

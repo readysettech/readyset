@@ -8,7 +8,7 @@ use chrono_tz::Tz;
 use itertools::Either;
 use mysql_time::MySqlTime;
 use readyset_data::{DfType, DfValue};
-use readyset_errors::{invalid_err, ReadySetError, ReadySetResult};
+use readyset_errors::{invalid_query_err, ReadySetError, ReadySetResult};
 use readyset_util::math::integer_rnd;
 use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 use rust_decimal::Decimal;
@@ -597,7 +597,7 @@ impl BuiltinFunction {
                 .to_json()?
                 .as_array()
                 .map(|array| DfValue::from(array.len()))
-                .ok_or_else(|| invalid_err!("cannot get array length of a non-array")),
+                .ok_or_else(|| invalid_query_err!("cannot get array length of a non-array")),
             BuiltinFunction::JsonDepth(expr) => non_null!(expr.eval(record)?)
                 .to_json()
                 .map(|json| crate::eval::json::json_depth(&json).into()),
@@ -684,7 +684,7 @@ impl BuiltinFunction {
                         }
                         Some(NullValueTreatment::ReturnTarget) => return Ok(target_json.into()),
                         Some(NullValueTreatment::RaiseException) => {
-                            return Err(invalid_err!("JSON value must not be null"))
+                            return Err(invalid_query_err!("JSON value must not be null"))
                         }
                     }
                 } else {
@@ -784,7 +784,7 @@ impl BuiltinFunction {
                             .unwrap_or("")
                             .into())
                     }
-                    Ordering::Equal => Err(invalid_err!("field position must not be zero")),
+                    Ordering::Equal => Err(invalid_query_err!("field position must not be zero")),
                     Ordering::Greater => {
                         Ok(parts
                             .nth((field - 1/* 1-indexed */).try_into().unwrap())

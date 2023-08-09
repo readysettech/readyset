@@ -8,7 +8,7 @@ use nom_sql::analysis::visit_mut::{
 use nom_sql::{
     Column, FieldDefinitionExpr, Relation, SelectStatement, SqlIdentifier, SqlQuery, TableExprInner,
 };
-use readyset_errors::{internal, invalid_err, ReadySetError, ReadySetResult};
+use readyset_errors::{internal, invalid_query_err, ReadySetError, ReadySetResult};
 use tracing::warn;
 
 use crate::{outermost_table_exprs, util};
@@ -174,7 +174,7 @@ impl<'ast, 'schema> VisitorMut<'ast> for ExpandImpliedTablesVisitor<'schema> {
                 .collect::<Vec<_>>();
 
             if matches.len() > 1 {
-                return Err(invalid_err!(
+                return Err(invalid_query_err!(
                     "Table reference {} is ambiguous",
                     table.display_unquoted()
                 ));

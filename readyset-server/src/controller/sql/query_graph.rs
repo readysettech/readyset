@@ -16,8 +16,8 @@ use nom_sql::{
 };
 use readyset_client::{PlaceholderIdx, ViewPlaceholder};
 use readyset_errors::{
-    internal, invalid, invalid_err, invariant, invariant_eq, no_table_for_col, unsupported,
-    unsupported_err, ReadySetResult,
+    internal, invalid_query, invalid_query_err, invariant, invariant_eq, no_table_for_col,
+    unsupported, unsupported_err, ReadySetResult,
 };
 use readyset_sql_passes::{is_aggregate, is_correlated, is_predicate, map_aggregates, LogicalOp};
 use serde::{Deserialize, Serialize};
@@ -796,7 +796,7 @@ fn table_expr_name(table_expr: &TableExpr) -> ReadySetResult<Relation> {
         TableExprInner::Subquery(_) => Ok(table_expr
             .alias
             .as_ref()
-            .ok_or_else(|| invalid_err!("All subqueries must have an alias"))?
+            .ok_or_else(|| invalid_query_err!("All subqueries must have an alias"))?
             .clone()
             .into()),
     }
@@ -901,7 +901,7 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                     .insert(t.clone(), new_node(t.clone(), vec![], &stmt.fields)?)
                     .is_some()
                 {
-                    invalid!(
+                    invalid_query!(
                         "Table name {} specified more than once",
                         t.display_unquoted()
                     );
@@ -913,7 +913,7 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                     table_expr
                         .alias
                         .as_ref()
-                        .ok_or_else(|| invalid_err!("All subqueries must have an alias"))?
+                        .ok_or_else(|| invalid_query_err!("All subqueries must have an alias"))?
                         .clone(),
                 );
                 if let Entry::Vacant(e) = relations.entry(rel.clone()) {
@@ -921,7 +921,7 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                     node.subgraph = Some(Box::new(to_query_graph((**sq).clone())?));
                     e.insert(node);
                 } else {
-                    invalid!(
+                    invalid_query!(
                         "Table name {} specified more than once",
                         rel.display_unquoted()
                     );
@@ -1114,7 +1114,7 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
     for param in query_parameters.into_iter() {
         if let Some(table) = &param.col.table {
             let rel = relations.get_mut(table).ok_or_else(|| {
-                invalid_err!(
+                invalid_query_err!(
                     "Column {} references non-existent table {}",
                     param.col.name,
                     table.display_unquoted()

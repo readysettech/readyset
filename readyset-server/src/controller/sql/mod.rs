@@ -14,7 +14,8 @@ use readyset_client::recipe::changelist::{AlterTypeChange, Change};
 use readyset_client::recipe::ChangeList;
 use readyset_data::{DfType, Dialect, PgEnumMetadata};
 use readyset_errors::{
-    internal, internal_err, invalid_err, invariant, unsupported, ReadySetError, ReadySetResult,
+    internal, internal_err, invalid_query_err, invariant, unsupported, ReadySetError,
+    ReadySetResult,
 };
 use readyset_sql_passes::alias_removal::TableAliasRewrite;
 use readyset_sql_passes::{AliasRemoval, DetectUnsupportedPlaceholders, Rewrite, RewriteContext};
@@ -625,7 +626,7 @@ impl SqlIncorporator {
     ) -> ReadySetResult<(&DfType, Option<Relation>)> {
         let old_name = if !self.custom_types.contains_key(name) {
             let Some(old_name) = self.custom_types_by_oid.remove(&oid) else {
-                return Err(invalid_err!("Could not find custom type with oid {oid}"));
+                return Err(invalid_query_err!("Could not find custom type with oid {oid}"));
             };
             self.custom_types_by_oid.insert(oid, name.clone());
             let ty = self
@@ -657,7 +658,7 @@ impl SqlIncorporator {
                         if new_variants.len() > variants.len()
                             && new_variants[..variants.len()] != **variants
                         {
-                            return Err(invalid_err!(
+                            return Err(invalid_query_err!(
                                 "Cannot drop variants or add new variants unless they're at the \
                                  end"
                             ));
@@ -673,7 +674,7 @@ impl SqlIncorporator {
                         metadata.take()
                     }
                     _ => {
-                        return Err(invalid_err!(
+                        return Err(invalid_query_err!(
                             "Custom type {} is not an enum",
                             name.display_unquoted()
                         ))

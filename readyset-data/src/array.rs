@@ -9,7 +9,7 @@ use nom_sql::NomSqlError;
 use postgres_protocol::types::ArrayDimension;
 use proptest::arbitrary::Arbitrary;
 use proptest::prop_oneof;
-use readyset_errors::{invalid_err, ReadySetError, ReadySetResult};
+use readyset_errors::{invalid_query_err, ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
 use smallvec::{smallvec, SmallVec};
 use tokio_postgres::types::{to_sql_checked, FromSql, IsNull, Kind, ToSql};
@@ -53,7 +53,7 @@ impl Array {
     {
         let lower_bounds = lower_bounds.into();
         if lower_bounds.len() != contents.ndim() {
-            return Err(invalid_err!(
+            return Err(invalid_query_err!(
                 "Specified array dimensions do not match array contents",
             ));
         }

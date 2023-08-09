@@ -22,7 +22,7 @@ use readyset_client::{
 use readyset_data::{DfType, DfValue, Dialect};
 use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
 use readyset_errors::{
-    internal, internal_err, invalid, invariant_eq, table_err, unsupported, unsupported_err,
+    internal, internal_err, invalid_query, invariant_eq, table_err, unsupported, unsupported_err,
     ReadySetResult,
 };
 use readyset_server::worker::readers::{CallResult, ReadRequestHandler};
@@ -1614,7 +1614,7 @@ fn verify_no_placeholders(statement: &SelectStatement) -> ReadySetResult<()> {
 
         fn visit_literal(&mut self, literal: &'ast Literal) -> Result<(), Self::Error> {
             if matches!(literal, Literal::Placeholder(_)) {
-                invalid!("Ad-hoc queries may not contain placeholders")
+                invalid_query!("Ad-hoc queries may not contain placeholders")
             } else {
                 Ok(())
             }

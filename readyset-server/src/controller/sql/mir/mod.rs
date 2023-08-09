@@ -25,7 +25,7 @@ use petgraph::visit::Reversed;
 use petgraph::Direction;
 use readyset_client::ViewPlaceholder;
 use readyset_errors::{
-    internal, internal_err, invalid, invalid_err, invariant, invariant_eq, unsupported,
+    internal, internal_err, invalid_query, invalid_query_err, invariant, invariant_eq, unsupported,
     ReadySetError, ReadySetResult,
 };
 use readyset_sql_passes::is_correlated;
@@ -546,7 +546,7 @@ impl SqlToMirConverter {
                         //  Furthermore, we could check if the depending queries can still work
                         // under  the new table schema and avoid dropping
                         // queries.
-                        invalid_err!("a base table already exists with a different schema");
+                        invalid_query_err!("a base table already exists with a different schema");
                     }
                 }
                 _ => internal!(
@@ -1145,7 +1145,7 @@ impl SqlToMirConverter {
 
         let cols = self.columns(subquery_leaf);
         if cols.len() != 1 {
-            invalid!("Subquery on right-hand side of IN must have exactly one column");
+            invalid_query!("Subquery on right-hand side of IN must have exactly one column");
         }
         let col = cols.into_iter().next().expect("Just checked");
         let distinct = self.make_distinct_node(
@@ -1545,7 +1545,9 @@ impl SqlToMirConverter {
 
                 let cols = self.columns(subquery_leaf);
                 if cols.len() != 1 {
-                    invalid!("Subquery on right-hand side of IN must have exactly one column");
+                    invalid_query!(
+                        "Subquery on right-hand side of IN must have exactly one column"
+                    );
                 }
                 let col = cols.into_iter().next().expect("Just checked");
                 let distinct = self.make_distinct_node(

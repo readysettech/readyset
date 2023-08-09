@@ -10,7 +10,9 @@ use nom_sql::{
     BinaryOperator, Expr, InValue, ItemPlaceholder, LimitClause, Literal, SelectStatement,
 };
 use readyset_data::{DfType, DfValue};
-use readyset_errors::{internal_err, invalid_err, unsupported, ReadySetError, ReadySetResult};
+use readyset_errors::{
+    internal_err, invalid_query_err, unsupported, ReadySetError, ReadySetResult,
+};
 use tracing::trace;
 
 /// Struct storing information about parameters processed from a raw user supplied query, which
@@ -108,15 +110,14 @@ impl ProcessedQueryParams {
             match lit {
                 Literal::Placeholder(_) => match params_iter
                     .next()
-                    .ok_or_else(|| invalid_err!("Wrong number of parameters"))
+                    .ok_or_else(|| invalid_query_err!("Wrong number of parameters"))
                     .and_then(|v| v.coerce_to(&DfType::UnsignedBigInt, &DfType::Unknown))?
                 {
                     DfValue::UnsignedInt(v) => Ok(v as usize),
                     _ => unreachable!("Successfully coerced"),
                 },
-                Literal::Integer(v) => {
-                    usize::try_from(*v).map_err(|_| invalid_err!("Non negative integer expected"))
-                }
+                Literal::Integer(v) => usize::try_from(*v)
+                    .map_err(|_| invalid_query_err!("Non negative integer expected")),
                 Literal::UnsignedInteger(v) => Ok(*v as usize),
                 Literal::Null => Ok(0), // Invalid in MySQL but 0 for Postgres
                 Literal::Float(_)
@@ -131,7 +132,7 @@ impl ProcessedQueryParams {
                         _ => unreachable!("Successfully coerced"),
                     }
                 }
-                _ => Err(invalid_err!("Non negative integer expected")),
+                _ => Err(invalid_query_err!("Non negative integer expected")),
             }
         };
 

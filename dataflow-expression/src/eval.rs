@@ -1,7 +1,7 @@
 use std::borrow::Borrow;
 
 use readyset_data::{Array, ArrayD, DfValue, IxDyn};
-use readyset_errors::{invalid_err, unsupported, ReadySetError, ReadySetResult};
+use readyset_errors::{invalid_query_err, unsupported, ReadySetError, ReadySetResult};
 use serde_json::Value as JsonValue;
 
 use crate::like::{CaseInsensitive, CaseSensitive, LikePattern};
@@ -176,7 +176,7 @@ fn eval_binary_op(op: BinaryOperator, left: &DfValue, right: &DfValue) -> ReadyS
                         obj.remove(k);
                     }
                 } else {
-                    return Err(invalid_err!(
+                    return Err(invalid_query_err!(
                         "Can't subtract array from non-object, non-array JSON value"
                     ));
                 }
@@ -186,7 +186,7 @@ fn eval_binary_op(op: BinaryOperator, left: &DfValue, right: &DfValue) -> ReadyS
                 } else if let Some(map) = json.as_object_mut() {
                     map.remove(str);
                 } else {
-                    return Err(invalid_err!(
+                    return Err(invalid_query_err!(
                         "Can't subtract string from non-object, non-array JSON value"
                     ));
                 }
@@ -196,12 +196,12 @@ fn eval_binary_op(op: BinaryOperator, left: &DfValue, right: &DfValue) -> ReadyS
                         utils::remove_bidirectional(vec, index);
                     }
                 } else {
-                    return Err(invalid_err!(
+                    return Err(invalid_query_err!(
                         "Can't subtract integer value from non-array JSON value"
                     ));
                 }
             } else {
-                return Err(invalid_err!(
+                return Err(invalid_query_err!(
                     "Invalid type {} on right-hand side of JSONB subtract operator",
                     right.infer_dataflow_type()
                 ));
@@ -308,7 +308,7 @@ impl Expr {
 
                 Ok(DfValue::from(Array::from(
                     ArrayD::from_shape_vec(IxDyn(shape.as_slice()), elements).map_err(|e| {
-                        invalid_err!("Mismatched array lengths in array expression: {e}")
+                        invalid_query_err!("Mismatched array lengths in array expression: {e}")
                     })?,
                 )))
             }

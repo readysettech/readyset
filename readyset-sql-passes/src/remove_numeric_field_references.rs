@@ -1,5 +1,5 @@
 use nom_sql::{Expr, FieldDefinitionExpr, FieldReference, SelectStatement, SqlQuery};
-use readyset_errors::{internal, invalid_err, ReadySetResult};
+use readyset_errors::{internal, invalid_query_err, ReadySetResult};
 
 pub trait RemoveNumericFieldReferences: Sized {
     /// Rewrite any [numeric field references][0] in the `GROUP BY` and `ORDER BY` clauses of the
@@ -13,7 +13,7 @@ pub trait RemoveNumericFieldReferences: Sized {
 impl RemoveNumericFieldReferences for SelectStatement {
     fn remove_numeric_field_references(mut self) -> ReadySetResult<Self> {
         let lookup_field = |n: usize| -> ReadySetResult<Expr> {
-            let oob = invalid_err!("Out-of-bounds index in numeric field reference");
+            let oob = invalid_query_err!("Out-of-bounds index in numeric field reference");
 
             if n == 0 {
                 return Err(oob);

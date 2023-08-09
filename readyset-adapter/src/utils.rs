@@ -11,8 +11,8 @@ use nom_sql::{
 use readyset_client::{Modification, Operation};
 use readyset_data::{DfType, DfValue, Dialect};
 use readyset_errors::{
-    bad_request_err, invalid, invalid_err, invariant, invariant_eq, unsupported, unsupported_err,
-    ReadySetResult,
+    bad_request_err, invalid_query, invalid_query_err, invariant, invariant_eq, unsupported,
+    unsupported_err, ReadySetResult,
 };
 use readyset_util::hash::hash;
 
@@ -524,7 +524,7 @@ pub(crate) fn extract_insert(
         .as_ref()
         .map(|f| f.len())
         .or_else(|| stmt.data.first().map(|r| r.len()))
-        .ok_or_else(|| invalid_err!("INSERT statement must have either fields or rows"))?;
+        .ok_or_else(|| invalid_query_err!("INSERT statement must have either fields or rows"))?;
     let param_cols = insert_statement_parameter_columns(stmt);
     params
         .iter()
@@ -539,7 +539,10 @@ pub(crate) fn extract_insert(
                         .iter()
                         .find(|field| col.name == field.column.name)
                         .ok_or_else(|| {
-                            invalid_err!("Column {} not found in table", col.display_unquoted())
+                            invalid_query_err!(
+                                "Column {} not found in table",
+                                col.display_unquoted()
+                            )
                         })?;
                     let target_type = DfType::from_sql_type(&field.sql_type, dialect, |_| None)?;
                     val.coerce_to(
@@ -550,7 +553,7 @@ pub(crate) fn extract_insert(
                 })
                 .collect::<ReadySetResult<Vec<_>>>()?;
             if row.len() != num_cols {
-                invalid!("Not enough parameters for INSERT");
+                invalid_query!("Not enough parameters for INSERT");
             }
             Ok(row)
         })

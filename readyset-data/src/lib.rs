@@ -19,7 +19,7 @@ use eui48::{MacAddress, MacAddressFormat};
 use itertools::Itertools;
 use mysql_time::MySqlTime;
 use nom_sql::{Double, Float, Literal, SqlType};
-use readyset_errors::{internal, invalid_err, unsupported, ReadySetError, ReadySetResult};
+use readyset_errors::{internal, invalid_query_err, unsupported, ReadySetError, ReadySetResult};
 use readyset_util::arbitrary::{arbitrary_decimal, arbitrary_duration};
 use readyset_util::redacted::Sensitive;
 use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
@@ -720,7 +720,7 @@ impl DfValue {
     pub fn to_json(&self) -> ReadySetResult<JsonValue> {
         let json_str = <&str>::try_from(self)?;
         serde_json::from_str(json_str).map_err(|e| {
-            invalid_err!(
+            invalid_query_err!(
                 "Could not convert value to JSON: {}. JSON error: {}",
                 Sensitive(self),
                 Sensitive(&e)
@@ -2060,7 +2060,7 @@ macro_rules! arithmetic_operation (
             }
 
 
-            (first, second) => return Err(invalid_err!(
+            (first, second) => return Err(invalid_query_err!(
                 "can't {} a {:?} and {:?}",
                 stringify!($op),
                 DfValueKind::from(first),
