@@ -20,9 +20,7 @@ use readyset_client::metrics::recorded::{self, SnapshotStatusTag};
 use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_client::{ReadySetHandle, Table, TableOperation};
 use readyset_data::Dialect;
-use readyset_errors::{
-    internal_err, invalid_err, set_failpoint_return_err, ReadySetError, ReadySetResult,
-};
+use readyset_errors::{internal_err, set_failpoint_return_err, ReadySetError, ReadySetResult};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
 use readyset_util::select;
 use replication_offset::{ReplicationOffset, ReplicationOffsets};
@@ -90,7 +88,9 @@ pub async fn cleanup(config: UpstreamConfig) -> ReadySetResult<()> {
         .as_ref()
         .ok_or_else(|| internal_err!("Replication URL not supplied"))?
         .parse()
-        .map_err(|e| invalid_err!("Invalid URL supplied to --upstream-db-url: {e}"))?
+        .map_err(|e| {
+            ReadySetError::UrlParseFailed(format!("Invalid URL supplied to --upstream-db-url: {e}"))
+        })?
     {
         let connector = {
             let mut builder = native_tls::TlsConnector::builder();
@@ -175,7 +175,11 @@ impl NoriaAdapter {
             .take()
             .ok_or_else(|| internal_err!("Replication URL not supplied"))?
             .parse()
-            .map_err(|e| invalid_err!("Invalid URL supplied to --upstream-db-url: {e}"))?;
+            .map_err(|e| {
+                ReadySetError::UrlParseFailed(format!(
+                    "Invalid URL supplied to --upstream-db-url: {e}"
+                ))
+            })?;
 
         while let Err(err) = match url.clone() {
             DatabaseURL::MySQL(options) => {
