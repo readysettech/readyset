@@ -1897,7 +1897,21 @@ where
                 self.show_caches(query_id).await
             }
             SqlQuery::Show(ShowStatement::ReadySetStatus) => {
-                self.noria.readyset_status(&self.authority).await
+                // Add upstream connectivity status
+                let additional_meta = if let Some(upstream) = &mut self.upstream {
+                    let connection_status = upstream
+                        .is_connected()
+                        .await
+                        .then(|| "Connected".to_string())
+                        .unwrap_or_else(|| "Unreachable".to_string());
+                    vec![("Database Connection".to_string(), connection_status)]
+                } else {
+                    vec![]
+                };
+
+                self.noria
+                    .readyset_status(&self.authority, additional_meta)
+                    .await
             }
             SqlQuery::Show(ShowStatement::ReadySetMigrationStatus(id)) => {
                 self.noria.migration_status(*id).await

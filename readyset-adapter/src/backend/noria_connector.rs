@@ -940,9 +940,12 @@ impl NoriaConnector {
         Ok(QueryResult::Empty)
     }
 
+    /// Returns status provided by the Controller and persisted in the Authority. Also appends
+    /// additional_meta provided by the caller to the status.
     pub(crate) async fn readyset_status(
         &mut self,
         authority: &Authority,
+        mut additional_meta: Vec<(String, String)>,
     ) -> ReadySetResult<QueryResult<'static>> {
         let mut status =
             match noria_await!(self.inner.get_mut()?, self.inner.get_mut()?.noria.status()) {
@@ -977,7 +980,8 @@ impl NoriaConnector {
             ));
         }
 
-        // Converts from ReadySetStatus -> Vec<(String, String)> -> QueryResult
+        status.append(&mut additional_meta);
+
         Ok(QueryResult::MetaVariables(
             status.into_iter().map(MetaVariable::from).collect(),
         ))
