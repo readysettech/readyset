@@ -190,7 +190,14 @@ macro_rules! export_parser {
             T: AsRef<[u8]>,
         {
             match $parser(dialect)(LocatedSpan::new(input.as_ref())) {
-                Ok((_, o)) => Ok(o),
+                Ok((i, o)) if i.is_empty() => Ok(o),
+                Ok((i, _)) => Err(format!(
+                    "failed to parse query, expected end of input but got: '{}'",
+                    String::from_utf8_lossy(&i)
+                        .chars()
+                        .take(16)
+                        .collect::<String>()
+                )),
                 Err(e) => Err(format!(
                     "failed to parse query: {}",
                     Sensitive(&e.to_string())
