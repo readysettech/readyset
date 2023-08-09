@@ -229,6 +229,11 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         drop(old_self);
         Ok(())
     }
+
+    async fn is_connected(&mut self) -> bool {
+        !self.client.is_closed()
+    }
+
     // Returns the upstream server's version, with ReadySet's info appended, to indicate to clients
     // that they're going via ReadySet
     fn version(&self) -> String {

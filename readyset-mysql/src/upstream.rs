@@ -285,6 +285,10 @@ impl UpstreamDatabase for MySqlUpstream {
         Ok(())
     }
 
+    async fn is_connected(&mut self) -> bool {
+        self.conn.ping().await.is_ok()
+    }
+
     /// Prepares the given query using the mysql connection. Note, queries are prepared on a
     /// per connection basis. They are not universal.
     async fn prepare<'a, 'b, S>(
