@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use futures_util::future;
 use hyper::client::HttpConnector;
-use nom_sql::{Relation, SelectStatement};
+use nom_sql::{CreateCacheStatement, Relation};
 use parking_lot::RwLock;
 use petgraph::graph::NodeIndex;
 use readyset_errors::{
@@ -463,12 +463,12 @@ impl ReadySetHandle {
         self.simple_post_request("views").await
     }
 
-    /// Enumerate all known external views. Includes the SqlQuery that created the view
+    /// Enumerate all known external views. Includes the SqlQuery that created
+    /// the view and the fallback behavior.
     ///
-    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub async fn verbose_views(
-        &mut self,
-    ) -> ReadySetResult<BTreeMap<Relation, (SelectStatement, bool)>> {
+    /// `Self::poll_ready` must have returned `Async::Ready` before you call
+    /// this method.
+    pub async fn verbose_views(&mut self) -> ReadySetResult<Vec<CreateCacheStatement>> {
         self.simple_post_request("verbose_views").await
     }
 
