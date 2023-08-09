@@ -92,6 +92,9 @@ pub trait UpstreamDatabase: Sized + Send {
     /// Resets the connection with the upstream database
     async fn reset(&mut self) -> Result<(), Self::Error>;
 
+    /// Test the connection with the upstream database
+    async fn is_connected(&mut self) -> bool;
+
     /// Returns the SQL dialect for which to format queries.
     fn sql_dialect() -> nom_sql::Dialect;
 
