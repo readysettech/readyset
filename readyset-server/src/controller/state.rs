@@ -31,9 +31,7 @@ use futures::stream::{self, FuturesUnordered, StreamExt, TryStreamExt};
 use futures::{FutureExt, TryFutureExt, TryStream};
 use lazy_static::lazy_static;
 use metrics::{gauge, histogram};
-use nom_sql::{
-    CacheInner, CreateCacheStatement, Relation, SelectStatement, SqlIdentifier, SqlQuery,
-};
+use nom_sql::{CreateCacheStatement, Relation, SqlIdentifier, SqlQuery};
 use petgraph::visit::Bfs;
 use rand::Rng;
 use readyset_client::builders::{
@@ -260,7 +258,7 @@ impl DfState {
     /// Get a map of all known views created from `CREATE CACHE` statements, mapping the name of the
     /// view to a tuple of (`SelectStatement`, always) where always is a bool that indicates whether
     /// the `CREATE CACHE` statement was created with the optional `ALWAYS` argument.
-    pub(super) fn verbose_views(&self) -> BTreeMap<Relation, (SelectStatement, bool)> {
+    pub(super) fn verbose_views(&self) -> Vec<CreateCacheStatement> {
         self.ingredients
             .externals(petgraph::EdgeDirection::Outgoing)
             .filter_map(|n| {
@@ -278,11 +276,7 @@ impl DfState {
                     // Only return ingredients created from "CREATE CACHE"
                     match query {
                         // CacheInner::ID should have been expanded to CacheInner::Statement
-                        SqlQuery::CreateCache(CreateCacheStatement {
-                            inner: Ok(CacheInner::Statement(stmt)),
-                            always,
-                            ..
-                        }) => Some((name.clone(), ((*stmt).clone(), always))),
+                        SqlQuery::CreateCache(stmt) if stmt.inner.is_ok() => Some(stmt),
                         _ => None,
                     }
                 } else {
