@@ -1,0 +1,119 @@
+steps:
+  # TODO: ronh: decide what kind of linting we want in the OSS pipeline
+  # - label: ':git: Lint commits'
+  #   key: lint-commits
+  #   branches: '!refs/heads/main'
+  #   commands:
+  #     - ./scripts/commit_lint.sh
+  #   agents:
+  #     queue: t3a-small
+
+  - label: ':buildkite: Compose build image tag'
+    command: buildkite-agent meta-data set 'build-image-tag' "github-${BUILDKITE_BUILD_NUMBER}"
+
+  - label: ':docker: Build build image'
+    key: build-image
+    command: .buildkite/build-image.sh build/Dockerfile readyset-build .
+    env:
+      VERSION: "github-${BUILDKITE_BUILD_NUMBER}"
+    plugins:
+      ecr#v2.5.0:
+        login: true
+        retries: 3
+
+  - label: ':rust: Check rustfmt'
+    key: check-rustfmt
+    commands:
+    - "cargo --locked fmt -- --check"
+    depends_on:
+    - build-image
+    plugins:
+      - docker#v3.8.0:
+          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:github-${BUILDKITE_BUILD_NUMBER}'
+          volumes:
+          - 'target:/workdir/target'
+          environment:
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
+          - CARGO_INCREMENTAL=0
+          - RUST_BACKTRACE=full
+      - ecr#v2.5.0:
+          login: true
+          retries: 3
+
+  - label: ':docker: Build cargo-deny image'
+    key: cargo-deny-image
+    command: .buildkite/build-image.sh build/Dockerfile.cargo-deny cargo-deny .
+    env:
+      VERSION: "github-${BUILDKITE_BUILD_NUMBER}"
+    plugins:
+      ecr#v2.5.0:
+        login: true
+        retries: 3
+
+  - label: ':rust: :lock: Check cargo-deny'
+    commands:
+    - export RUST_BACKTRACE=full
+    - cargo --locked deny check
+    depends_on:
+    - cargo-deny-image
+    plugins:
+      - docker#v3.8.0:
+          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/cargo-deny:github-${BUILDKITE_BUILD_NUMBER}'
+          environment:
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
+          - CARGO_INCREMENTAL=0
+          - RUST_BACKTRACE=full
+      - ecr#v2.5.0:
+          login: true
+          retries: 3
+
+  - label: ':clippy: Check clippy'
+    key: check-clippy
+    commands:
+    - export RUST_BACKTRACE=full
+    - cargo --locked clippy --workspace --all-targets --features bench -- -W clippy::disallowed_methods -D warnings
+    depends_on:
+    - build-image
+    plugins:
+      - docker#v3.8.0:
+          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:github-${BUILDKITE_BUILD_NUMBER}'
+          volumes:
+          - 'target:/workdir/target'
+          environment:
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
+          - CARGO_INCREMENTAL=0
+          - RUST_BACKTRACE=full
+      - ecr#v2.5.0:
+          login: true
+          retries: 3
+
+  - label: ':rust: Run tests'
+    key: rust-tests
+    command: .buildkite/run-tests.sh
+    timeout_in_minutes: 60
+    depends_on:
+    - build-image
+    plugins:
+      - docker-compose#v3.7.0:
+          run: app
+          env:
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
+          - CARGO_INCREMENTAL=0
+          - RUST_BACKTRACE=full
+          - MYSQL_HOST=mysql
+          - MYSQL_PWD=noria
+          - MYSQL_DB=noria
+          config:
+            - build/docker-compose.yml
+            - build/docker-compose.ci-test.yml
+          mount-buildkite-agent: true
+          pull-retries: 3
+      - ecr#v2.5.0:
+          login: true
+          retries: 3
+    agents:
+      queue: c6a-4xlarge
