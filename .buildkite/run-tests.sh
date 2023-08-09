@@ -8,7 +8,6 @@ upload_artifacts() {
     exit 1
 }
 
-cd public
 echo "+++ :rust: Run tests"
 export DISABLE_TELEMETRY=true
 cargo --locked test --all --features failure_injection --exclude readyset-clustertest || upload_artifacts
