@@ -2,7 +2,7 @@ FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/rustlang/rust:nightly
 
 WORKDIR /tmp
 
-COPY crates/rust-toolchain .
+COPY rust-toolchain .
 
 RUN rustup default "$(cat public/rust-toolchain)"; rm rust-toolchain
 
