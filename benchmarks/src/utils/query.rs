@@ -213,6 +213,7 @@ impl ArbitraryQueryParameters {
             name: Some("q".into()),
             inner: Ok(nom_sql::CacheInner::Statement(Box::new(stmt))),
             always: false,
+            concurrently: false,
         };
 
         conn.query_drop(create_cache_query.display(conn.dialect()).to_string())

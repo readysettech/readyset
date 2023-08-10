@@ -197,6 +197,7 @@ impl ChangeList {
                                 name,
                                 inner,
                                 always,
+                                ..
                             }) => {
                                 let statement = match inner {
                                     Ok(CacheInner::Statement(stmt)) => stmt,
