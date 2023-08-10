@@ -1849,6 +1849,7 @@ where
             SqlQuery::Explain(nom_sql::ExplainStatement::Domains) => {
                 self.noria.explain_domains().await
             }
+            SqlQuery::Explain(nom_sql::ExplainStatement::Caches) => self.export_caches().await,
             SqlQuery::CreateCache(CreateCacheStatement {
                 name,
                 inner,
@@ -2507,6 +2508,37 @@ where
 
     pub fn does_require_authentication(&self) -> bool {
         self.settings.require_authentication
+    }
+
+    /// Gets a list of all `CREATE CACHE ...` statements
+    async fn export_caches(&mut self) -> ReadySetResult<noria_connector::QueryResult<'static>> {
+        let create_dummy_column = |n: &str| ColumnSchema {
+            column: nom_sql::Column {
+                name: n.into(),
+                table: None,
+            },
+            column_type: DfType::DEFAULT_TEXT,
+            base: None,
+        };
+
+        let results: Vec<Vec<DfValue>> = self
+            .noria
+            .list_create_cache_stmts()
+            .await?
+            .into_iter()
+            .map(|s| vec![DfValue::from(s)])
+            .collect();
+
+        let select_schema = SelectSchema {
+            use_bogo: false,
+            schema: Cow::Owned(vec![create_dummy_column("query text")]),
+            columns: Cow::Owned(vec!["query text".into()]),
+        };
+
+        Ok(noria_connector::QueryResult::from_owned(
+            select_schema,
+            vec![Results::new(results)],
+        ))
     }
 }
 

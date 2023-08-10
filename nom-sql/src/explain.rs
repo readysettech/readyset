@@ -22,6 +22,9 @@ pub enum ExplainStatement {
     LastStatement,
     /// List domain shard replicas and what worker they're running on
     Domains,
+    /// List all CREATE CACHE statements that have been executed, for the
+    /// purpose of exporting them
+    Caches,
 }
 
 impl Display for ExplainStatement {
@@ -36,6 +39,7 @@ impl Display for ExplainStatement {
             }
             ExplainStatement::LastStatement => write!(f, "LAST STATEMENT;"),
             ExplainStatement::Domains => write!(f, "DOMAINS;"),
+            ExplainStatement::Caches => write!(f, "CACHES;"),
         }
     }
 }
@@ -61,6 +65,7 @@ pub(crate) fn explain_statement(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Ex
             tuple((tag_no_case("last"), whitespace1, tag_no_case("statement"))),
         ),
         value(ExplainStatement::Domains, tag_no_case("domains")),
+        value(ExplainStatement::Caches, tag_no_case("caches")),
     ))(i)?;
     let (i, _) = statement_terminator(i)?;
     Ok((i, stmt))
@@ -96,5 +101,13 @@ mod tests {
             test_parse!(explain_statement, b"explain domains;"),
             ExplainStatement::Domains
         );
+    }
+
+    #[test]
+    fn explain_caches() {
+        assert_eq!(
+            test_parse!(explain_statement, b"explain caches;"),
+            ExplainStatement::Caches
+        )
     }
 }
