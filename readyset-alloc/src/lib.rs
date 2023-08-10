@@ -22,7 +22,7 @@
 //! Profiling with jemalloc requires both build-time and run-time
 //! configuration. At build time cargo needs the `--mem-profiling`
 //! feature, and at run-time jemalloc needs to set the `opt.prof`
-//! option to true, ala `MALLOC_CONF="opt.prof:true".
+//! option to true, ala `MALLOC_CONF="opt.prof:true"`.
 //!
 //! In production you might also set `opt.prof_active` to `false` to
 //! keep profiling off until there's an incident. Jemalloc has
@@ -42,6 +42,8 @@
 //! `MALLOC_CONF` only temporarily, e.g. `MALLOC_CONF="..." cargo test
 //! ...`).
 //!
+//! > Note to Mac OS users: use `_RJEM_MALLOC_CONF` instead of `MALLOC_CONF`.
+//!
 //! When running cargo while `prof:true`, you will see messages like
 //!
 //! ```notrust
@@ -52,7 +54,7 @@
 //! This is normal - they are being emitting by the jemalloc in cargo
 //! and rustc, which are both configured without profiling.
 //! jemalloc is configured for profiling if you pass
-//! `--features=mem-profiling` to cargo for `memory-utils`
+//! `--features mem-profiling` to cargo build.
 
 #![cfg_attr(test, feature(test))]
 #![cfg_attr(test, feature(custom_test_frameworks))]
