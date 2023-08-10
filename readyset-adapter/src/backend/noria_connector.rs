@@ -587,7 +587,6 @@ impl NoriaConnector {
         Ok(QueryResult::from_owned(schema, vec![Results::new(data)]))
     }
 
-    #[allow(unused)]
     pub(crate) async fn list_create_cache_stmts(&mut self) -> ReadySetResult<Vec<String>> {
         let noria = &mut self.inner.get_mut()?.noria;
         Ok(noria
