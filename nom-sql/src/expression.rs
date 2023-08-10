@@ -950,45 +950,41 @@ fn primary_inner(
 }
 
 fn primary(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], TokenTree> {
-    enum PrimarySuffix {
-        Cast(SqlType),
-        OpSuffix(BinaryOperator, OperatorSuffix, Box<TokenTree>),
-    }
+    struct OpSuffix(BinaryOperator, OperatorSuffix, Box<TokenTree>);
 
     move |i| {
         let (i, lhs) = primary_inner(dialect)(i)?;
-        let (i, suffix) = opt(alt((
-            move |i| {
-                let (i, _) = whitespace0(i)?;
-                let (i, _) = tag("::")(i)?;
-                let (i, _) = whitespace0(i)?;
-                map(type_identifier(dialect), PrimarySuffix::Cast)(i)
-            },
-            move |i| {
-                let (i, _) = whitespace0(i)?;
-                let (i, op) = binary_operator(i)?;
-                let (i, _) = whitespace0(i)?;
-                let (i, suffix) = operator_suffix(i)?;
-                let (i, _) = whitespace0(i)?;
-                let (i, _) = tag("(")(i)?;
-                let (i, _) = whitespace0(i)?;
-                let (i, rhs) = token_tree(dialect)(i)?;
-                let (i, _) = whitespace0(i)?;
-                let (i, _) = tag(")")(i)?;
+        let (i, cast) = opt(move |i| {
+            let (i, _) = whitespace0(i)?;
+            let (i, _) = tag("::")(i)?;
+            let (i, _) = whitespace0(i)?;
+            type_identifier(dialect)(i)
+        })(i)?;
+        let (i, suffix) = opt(move |i| {
+            let (i, _): (LocatedSpan<&[u8]>, _) = whitespace0(i)?;
+            let (i, op) = binary_operator(i)?;
+            let (i, _) = whitespace0(i)?;
+            let (i, suffix) = operator_suffix(i)?;
+            let (i, _) = whitespace0(i)?;
+            let (i, _) = tag("(")(i)?;
+            let (i, _) = whitespace0(i)?;
+            let (i, rhs) = token_tree(dialect)(i)?;
+            let (i, _) = whitespace0(i)?;
+            let (i, _) = tag(")")(i)?;
 
-                Ok((
-                    i,
-                    PrimarySuffix::OpSuffix(op, suffix, Box::new(TokenTree::Group(rhs))),
-                ))
-            },
-        )))(i)?;
+            Ok((i, OpSuffix(op, suffix, Box::new(TokenTree::Group(rhs)))))
+        })(i)?;
 
+        let lhs = if let Some(ty) = cast {
+            TokenTree::PgsqlCast(Box::new(lhs), ty)
+        } else {
+            lhs
+        };
         Ok((
             i,
             match suffix {
                 None => lhs,
-                Some(PrimarySuffix::Cast(ty)) => TokenTree::PgsqlCast(Box::new(lhs), ty),
-                Some(PrimarySuffix::OpSuffix(op, suffix, rhs)) => {
+                Some(OpSuffix(op, suffix, rhs)) => {
                     TokenTree::OpSuffix(Box::new(lhs), op, suffix, rhs)
                 }
             },
@@ -1536,7 +1532,7 @@ mod tests {
     use test_strategy::proptest;
 
     use super::*;
-    use crate::to_nom_result;
+    use crate::{to_nom_result, Relation};
 
     #[test]
     fn column_then_column() {
@@ -1544,6 +1540,26 @@ mod tests {
             to_nom_result(expression(Dialect::MySQL)(LocatedSpan::new(b"x y"))).unwrap();
         assert_eq!(res, Expr::Column("x".into()));
         assert_eq!(rem, b" y");
+    }
+
+    #[test]
+    fn cast_less_than_all_binary_op() {
+        let res = test_parse!(expression(Dialect::PostgreSQL), b"'a'::abc < all('{b,c}')");
+        assert_eq!(
+            res,
+            Expr::OpAll {
+                lhs: Box::new(Expr::Cast {
+                    expr: Box::new(Expr::Literal(Literal::String("a".to_string()))),
+                    ty: SqlType::Other(Relation {
+                        schema: None,
+                        name: "abc".into(),
+                    }),
+                    postgres_style: true,
+                }),
+                op: BinaryOperator::Less,
+                rhs: Box::new(Expr::Literal(Literal::String("{b,c}".to_string()))),
+            }
+        )
     }
 
     #[proptest]
