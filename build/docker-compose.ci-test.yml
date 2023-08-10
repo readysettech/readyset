@@ -25,7 +25,7 @@ services:
     expose:
       - '6379'
   app:
-    image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:github-${BUILDKITE_BUILD_NUMBER}"
+    image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_PIPELINE_NAME}-${BUILDKITE_BUILD_NUMBER}"
     working_dir: /workdir
     volumes:
     - 'target:/workdir/target'
