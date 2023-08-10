@@ -18,8 +18,23 @@ pub struct ExtendRecipeSpec<'a> {
     pub replication_offset: Option<Cow<'a, ReplicationOffset>>,
     /// Parameter that indicates if the leader is required to be ready before handling
     /// this RecipeSpec.
+    ///
     /// Defaults to true.
     pub require_leader_ready: bool,
+    /// Optional parameter to request a non-blocking migration. If set, the controller will return
+    /// immediately with an id that can be used to query the status of the migration.
+    ///
+    /// Defaults to false.
+    pub concurrently: bool,
+}
+
+impl<'a> ExtendRecipeSpec<'a> {
+    /// Sets the `concurrently` flag, requesting that the controller returns immediately with an id
+    /// that can be used to query the status of the migration.
+    pub fn concurrently(mut self) -> Self {
+        self.concurrently = true;
+        self
+    }
 }
 
 impl<'a> From<ChangeList> for ExtendRecipeSpec<'a> {
@@ -28,6 +43,7 @@ impl<'a> From<ChangeList> for ExtendRecipeSpec<'a> {
             changes,
             replication_offset: None,
             require_leader_ready: true,
+            concurrently: false,
         }
     }
 }

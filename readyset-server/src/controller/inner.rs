@@ -502,6 +502,7 @@ impl Leader {
                 if body.require_leader_ready {
                     require_leader_ready()?;
                 }
+                let concurrently = body.concurrently;
                 let ret = {
                     // Start the migration running in the background
                     let dataflow_state_handle = Arc::clone(&self.dataflow_state_handle);
@@ -514,17 +515,26 @@ impl Leader {
                     })
                     .fuse();
 
-                    // Either the migration completes synchronously (under
-                    // EXTEND_RECIPE_MAX_SYNC_TIME), or we place it in `self.running_migrations` and
-                    // return a `Pending` result.
-                    select! {
-                        res = &mut migration => {
-                            res.map_err(|e| internal_err!("{e}"))?.map(|_| ExtendRecipeResult::Done)
-                        }
-                        _ = sleep(EXTEND_RECIPE_MAX_SYNC_TIME) => {
-                            let mut running_migrations = self.running_migrations.lock().await;
-                            let migration_id = running_migrations.insert(migration);
-                            Ok(ExtendRecipeResult::Pending(migration_id.data().as_ffi()))
+                    // If a non-blocking migration is requested, return immediately. We do not want
+                    // to handle this case inside the select!, with a timeout of 0, in the (very
+                    // unlikely) event that the migration task yields first.
+                    if concurrently {
+                        let mut running_migrations = self.running_migrations.lock().await;
+                        let migration_id = running_migrations.insert(migration);
+                        Ok(ExtendRecipeResult::Pending(migration_id.data().as_ffi()))
+                    } else {
+                        // Either the migration completes synchronously (under
+                        // EXTEND_RECIPE_MAX_SYNC_TIME), or we place it in `self.running_migrations`
+                        // and return a `Pending` result.
+                        select! {
+                            res = &mut migration => {
+                                res.map_err(|e| internal_err!("{e}"))?.map(|_| ExtendRecipeResult::Done)
+                            }
+                            _ = sleep(EXTEND_RECIPE_MAX_SYNC_TIME) => {
+                                let mut running_migrations = self.running_migrations.lock().await;
+                                let migration_id = running_migrations.insert(migration);
+                                Ok(ExtendRecipeResult::Pending(migration_id.data().as_ffi()))
+                            }
                         }
                     }
                 }?;

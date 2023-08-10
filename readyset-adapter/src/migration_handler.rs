@@ -174,6 +174,7 @@ impl MigrationHandler {
                         &query.query().statement,
                         Some(query.query().schema_search_path.clone()),
                         false,
+                        false,
                     )
                     .await;
                 // Inform the query status cache of completed migrations
@@ -296,8 +297,10 @@ impl MigrationHandler {
                 &inlined_query,
                 Some(view_request.schema_search_path.clone()),
                 false,
+                false,
             )
-            .await
+            .await?;
+        Ok(())
     }
 
     async fn perform_dry_run_migration(&mut self, view_request: &ViewCreateRequest) {

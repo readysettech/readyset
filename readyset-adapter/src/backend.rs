@@ -1612,7 +1612,7 @@ where
         ]))
     }
 
-    /// Forwards a `CREATE CACHE` request to noria
+    /// Forwards a `CREATE CACHE` request to ReadySet
     #[instrument(skip(self))]
     async fn create_cached_query(
         &mut self,
@@ -1620,6 +1620,7 @@ where
         mut stmt: SelectStatement,
         override_schema_search_path: Option<Vec<SqlIdentifier>>,
         always: bool,
+        concurrently: bool,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         // If we have another query with the same name, drop that query first
         if let Some(name) = name {
@@ -1637,10 +1638,13 @@ where
         rewrite::process_query(&mut stmt, self.noria.server_supports_pagination())?;
         let migration_state = match self
             .noria
-            .handle_create_cached_query(name, &stmt, override_schema_search_path, always)
+            .handle_create_cached_query(name, &stmt, override_schema_search_path, always, concurrently)
             .await
         {
-            Ok(()) => MigrationState::Successful,
+            Ok(None) => MigrationState::Successful,
+            Ok(Some(id)) => return Ok(noria_connector::QueryResult::Meta(
+                vec![("Migration Id".to_string(), id.to_string()).into()]
+            )),
             // If the query fails because it contains unsupported placeholders, then mark it as an
             // inlined query in the query status cache.
             Err(e) if let Some(placeholders) = e.unsupported_placeholders_cause() => {
@@ -1841,11 +1845,6 @@ where
                 always,
                 concurrently,
             }) => {
-                if *concurrently {
-                    return Some(Err(unsupported_err!(
-                        "CREATE CACHE CONCURRENTLY not yet implemented"
-                    )));
-                }
                 let (stmt, search_path) = match inner {
                     Ok(CacheInner::Statement(st)) => (*st.clone(), None),
                     Ok(CacheInner::Id(id)) => {
@@ -1884,7 +1883,7 @@ where
                     trace!("No telemetry sender. not sending metric for CREATE CACHE");
                 }
 
-                self.create_cached_query(name.as_ref(), stmt, search_path, *always)
+                self.create_cached_query(name.as_ref(), stmt, search_path, *always, *concurrently)
                     .await
             }
             SqlQuery::DropCache(DropCacheStatement { name }) => self.drop_cached_query(name).await,

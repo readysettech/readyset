@@ -1035,13 +1035,18 @@ impl NoriaConnector {
 impl NoriaConnector {
     /// This function handles CREATE CACHE statements. When explicit-migrations is enabled,
     /// this function is the only way to create a view in noria.
+    ///
+    /// Returns Ok(Some(id)) if CREATE CACHE CONCURRENTLY is issued, where id is a unique identifier
+    /// that can be used to query the status of the migration. Otherwise, returns Ok(None) on
+    /// success and Err(_) on failure.
     pub async fn handle_create_cached_query(
         &mut self,
         name: Option<&Relation>,
         statement: &nom_sql::SelectStatement,
         override_schema_search_path: Option<Vec<SqlIdentifier>>,
         always: bool,
-    ) -> ReadySetResult<()> {
+        concurrently: bool,
+    ) -> ReadySetResult<Option<u64>> {
         let name = name.cloned().unwrap_or_else(|| {
             utils::generate_query_name(statement, self.schema_search_path()).into()
         });
@@ -1053,22 +1058,30 @@ impl NoriaConnector {
         )
         .with_schema_search_path(schema_search_path.clone());
 
-        noria_await!(
-            self.inner.get_mut()?,
-            self.inner.get_mut()?.noria.extend_recipe(changelist)
-        )?;
+        if concurrently {
+            let id = noria_await!(
+                self.inner.get_mut()?,
+                self.inner.get_mut()?.noria.extend_recipe_async(changelist)
+            )?;
+            Ok(Some(id))
+        } else {
+            noria_await!(
+                self.inner.get_mut()?,
+                self.inner.get_mut()?.noria.extend_recipe(changelist)
+            )?;
 
-        // If the query is already in there with a different name, we don't need to make a new name
-        // for it, as *lookups* only need one of the names for the query, and when we drop it we'll
-        // be hitting noria anyway
-        self.view_cache
-            .register_statement(
-                &name,
-                ViewCreateRequest::new(statement.clone(), schema_search_path),
-            )
-            .await;
+            // If the query is already in there with a different name, we don't need to make a new
+            // name for it, as *lookups* only need one of the names for the query, and
+            // when we drop it we'll be hitting noria anyway
+            self.view_cache
+                .register_statement(
+                    &name,
+                    ViewCreateRequest::new(statement.clone(), schema_search_path),
+                )
+                .await;
 
-        Ok(())
+            Ok(None)
+        }
     }
 
     pub(crate) async fn get_view(

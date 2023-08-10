@@ -701,6 +701,26 @@ impl ReadySetHandle {
         }
     }
 
+    /// Asynchronous version of extend_recipe(). The Controller should immediately return an ID that
+    /// can be used to query the migration status.
+    pub fn extend_recipe_async(
+        &mut self,
+        changes: ChangeList,
+    ) -> impl Future<Output = ReadySetResult<u64>> + '_ {
+        let request = ExtendRecipeSpec::from(changes).concurrently();
+        async move {
+            match self
+                .rpc("extend_recipe", request, self.migration_timeout)
+                .await?
+            {
+                ExtendRecipeResult::Pending(migration_id) => Ok(migration_id),
+                ExtendRecipeResult::Done => {
+                    internal!("CREATE CACHE CONCURRENTLY did not return migration id")
+                }
+            }
+        }
+    }
+
     /// Extend the existing recipe with the given set of queries and don't require leader ready.
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
@@ -729,6 +749,7 @@ impl ReadySetHandle {
             changes,
             replication_offset: Some(Cow::Borrowed(replication_offset)),
             require_leader_ready,
+            concurrently: false,
         };
 
         self.rpc("extend_recipe", request, self.migration_timeout)
