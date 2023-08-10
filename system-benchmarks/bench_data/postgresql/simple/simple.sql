@@ -3,4 +3,4 @@ CREATE TABLE users (
   name text NOT NULL
 );
 
-COMMENT ON TABLE users IS 'ROWS = 100000';
+COMMENT ON TABLE users IS 'ROWS=100000';

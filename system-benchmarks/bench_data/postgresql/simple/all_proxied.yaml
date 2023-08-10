@@ -12,4 +12,4 @@ queries:
         distribution: ids
         col: 0
     weight: 1
-    migrate: false
+    migrate: true
