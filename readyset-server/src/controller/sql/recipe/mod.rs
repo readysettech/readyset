@@ -65,6 +65,7 @@ impl Recipe {
                 name: Some(name.clone()),
                 inner: Ok(CacheInner::Statement(Box::new(statement.clone()))),
                 always: *always,
+                concurrently: false, // concurrently not relevant after migrating
             }),
         });
         if expr.is_none() {

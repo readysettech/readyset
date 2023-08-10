@@ -7,6 +7,7 @@ use nom::branch::alt;
 use nom::bytes::complete::{is_not, tag, tag_no_case};
 use nom::character::complete::digit1;
 use nom::combinator::{map, map_res, opt};
+use nom::error::{ErrorKind, ParseError};
 use nom::multi::{separated_list0, separated_list1};
 use nom::sequence::{delimited, preceded, terminated, tuple};
 use nom_locate::LocatedSpan;
@@ -25,7 +26,7 @@ use crate::order::{order_type, OrderType};
 use crate::select::{nested_selection, selection, SelectStatement};
 use crate::table::{relation, Relation};
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, NomSqlResult, SqlIdentifier};
+use crate::{Dialect, NomSqlError, NomSqlResult, SqlIdentifier};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct CreateTableBody {
@@ -203,7 +204,14 @@ impl CacheInner {
     }
 }
 
-/// `CREATE CACHE [ALWAYS] [<name>] FROM ...`
+/// Optional `CREATE CACHE` arguments. This struct is only used for parsing.
+#[derive(Default)]
+struct CreateCacheOptions {
+    always: bool,
+    concurrently: bool,
+}
+
+/// `CREATE CACHE [CONCURRENTLY] [ALWAYS] [<name>] FROM ...`
 ///
 /// This is a non-standard ReadySet specific extension to SQL
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -216,12 +224,17 @@ pub struct CreateCacheStatement {
     /// that could not be parsed.
     pub inner: Result<CacheInner, String>,
     pub always: bool,
+    /// Whether the CREATE CACHE STATEMENT should block or run concurrently
+    pub concurrently: bool,
 }
 
 impl CreateCacheStatement {
     pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             write!(f, "CREATE CACHE ")?;
+            if self.concurrently {
+                write!(f, "CONCURRENTLY ")?;
+            }
             if self.always {
                 write!(f, "ALWAYS ")?;
             }
@@ -755,6 +768,49 @@ pub fn view_creation(
     }
 }
 
+/// Extract the [`CreateCacheOption`] from a `CREATE CACHE statement.
+fn cached_query_options(mut i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CreateCacheOptions> {
+    // Create an error given the position
+    fn error(i: LocatedSpan<&[u8]>) -> nom::Err<NomSqlError<&[u8]>> {
+        nom::Err::Failure(NomSqlError::from_error_kind(i, ErrorKind::Permutation))
+    }
+
+    // A CREATE CACHE optional argument. Used to avoid string matching
+    enum Option {
+        Always,
+        Concurrently,
+    }
+
+    let mut opts = CreateCacheOptions::default();
+
+    // Parse a subset of the options in any order. Ignore errors since all options are optional.
+    while let Ok((remaining, opt)) = alt((
+        map(tuple((tag_no_case("always"), whitespace1)), |_| {
+            Option::Always
+        }),
+        map(tuple((tag_no_case("concurrently"), whitespace1)), |_| {
+            Option::Concurrently
+        }),
+    ))(i)
+    {
+        // Error if the same option appears twice.
+        match opt {
+            Option::Always => {
+                if std::mem::replace(&mut opts.always, true) {
+                    return Err(error(i));
+                }
+            }
+            Option::Concurrently => {
+                if std::mem::replace(&mut opts.concurrently, true) {
+                    return Err(error(i));
+                }
+            }
+        }
+        i = remaining;
+    }
+    Ok((i, opts))
+}
+
 /// Extract the [`SelectStatement`] or Query ID from a CREATE CACHE statement. Query ID is
 /// parsed as a SqlIdentifier
 pub fn cached_query_inner(
@@ -777,7 +833,7 @@ pub fn create_cached_query(
         let (i, _) = whitespace1(i)?;
         let (i, _) = tag_no_case("cache")(i)?;
         let (i, _) = whitespace1(i)?;
-        let (i, always) = opt(terminated(tag_no_case("always"), whitespace1))(i)?;
+        let (i, opts) = cached_query_options(i)?;
         let (i, name) = opt(terminated(relation(dialect), whitespace1))(i)?;
         let (i, _) = tag_no_case("from")(i)?;
         let (i, _) = whitespace1(i)?;
@@ -788,7 +844,8 @@ pub fn create_cached_query(
             CreateCacheStatement {
                 name,
                 inner,
-                always: always.is_some(),
+                always: opts.always,
+                concurrently: opts.concurrently,
             },
         ))
     }
@@ -1558,33 +1615,55 @@ mod tests {
         }
 
         #[test]
-        fn create_cached_query_with_always() {
-            let res = test_parse!(
+        fn create_cached_query_with_optional_args() {
+            let q1 = test_parse!(
+                create_cached_query(Dialect::MySQL),
+                b"CREATE CACHE CONCURRENTLY ALWAYS FROM SELECT id FROM users WHERE name = ?"
+            );
+            let q2 = test_parse!(
                 create_cached_query(Dialect::MySQL),
                 b"CREATE CACHE ALWAYS FROM SELECT id FROM users WHERE name = ?"
             );
-            assert!(res.name.is_none());
-            let statement = match res.inner {
-                Ok(CacheInner::Statement(s)) => s,
-                _ => panic!(),
-            };
-            assert_eq!(
-                statement.tables,
-                vec![TableExpr::from(Relation::from("users"))]
+            let q3 = test_parse!(
+                create_cached_query(Dialect::MySQL),
+                b"CREATE CACHE CONCURRENTLY FROM SELECT id FROM users WHERE name = ?"
             );
-            assert!(res.always);
+            let q4 = test_parse!(
+                create_cached_query(Dialect::MySQL),
+                b"CREATE CACHE ALWAYS CONCURRENTLY FROM SELECT id FROM users WHERE name = ?"
+            );
+            assert!(q1.always);
+            assert!(q1.concurrently);
+            assert!(q2.always);
+            assert!(!q2.concurrently);
+            assert!(!q3.always);
+            assert!(q3.concurrently);
+            assert!(q4.always);
+            assert!(q4.concurrently);
+            let q = vec![q1, q2, q3, q4];
+            for stmt in q {
+                assert!(stmt.name.is_none());
+                let statement = match stmt.inner {
+                    Ok(CacheInner::Statement(s)) => s,
+                    _ => panic!(),
+                };
+                assert_eq!(
+                    statement.tables,
+                    vec![TableExpr::from(Relation::from("users"))]
+                );
+            }
         }
 
         #[test]
         fn display_create_query_cache() {
             let stmt = test_parse!(
                 create_cached_query(Dialect::MySQL),
-                b"CREATE CACHE foo FROM SELECT id FROM users WHERE name = ?"
+                b"CREATE CACHE CONCURRENTLY ALWAYS foo FROM SELECT id FROM users WHERE name = ?"
             );
             let res = stmt.display(Dialect::MySQL).to_string();
             assert_eq!(
                 res,
-                "CREATE CACHE `foo` FROM SELECT `id` FROM `users` WHERE (`name` = ?)"
+                "CREATE CACHE CONCURRENTLY ALWAYS `foo` FROM SELECT `id` FROM `users` WHERE (`name` = ?)"
             );
         }
 

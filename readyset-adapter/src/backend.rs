@@ -1839,7 +1839,13 @@ where
                 name,
                 inner,
                 always,
+                concurrently,
             }) => {
+                if *concurrently {
+                    return Some(Err(unsupported_err!(
+                        "CREATE CACHE CONCURRENTLY not yet implemented"
+                    )));
+                }
                 let (stmt, search_path) = match inner {
                     Ok(CacheInner::Statement(st)) => (*st.clone(), None),
                     Ok(CacheInner::Id(id)) => {

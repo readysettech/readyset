@@ -270,6 +270,7 @@ impl WorkloadSpec {
                     name: None,
                     inner: Ok(nom_sql::CacheInner::Statement(Box::new(stmt))),
                     always: false,
+                    concurrently: false,
                 };
 
                 let _ = conn
