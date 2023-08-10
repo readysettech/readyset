@@ -1,0 +1,153 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+if [ -z ${GERRIT_CHANGE_ID+x} ] && [ -z ${GERRIT_PATCHSET+x} ]; then
+    echo "Not a CL build, skipping"
+    exit 0
+fi
+
+run_query() {
+    local query variables
+    query="$1"
+    variables="$(cat)"
+
+    jq -n \
+        --arg query "$query" \
+        --argjson variables "$variables" \
+        '{ query: $query, variables: $variables }' \
+        | curl 'https://graphql.buildkite.com/v1' \
+        --silent \
+        -H "Authorization: Bearer $BUILDKITE_GRAPHQL_API_TOKEN" \
+        -d@-
+        }
+
+# Step 1: Has the set-gerrit-status step already run?
+
+read -r -d '' query <<EOF || true
+query SetGerritStatusFinished(\$buildID: ID!) {
+  build(uuid: \$buildID) {
+    jobs(first: 15, step: {key: "set-gerrit-status"}, state: FINISHED) {
+      edges {
+        node {
+          ...on JobTypeCommand {
+            id
+          }
+        }
+      }
+    }
+  }
+}
+EOF
+
+set_gerrit_status_run=$(
+    jq -n \
+      --arg buildID "$BUILDKITE_BUILD_ID" \
+      '{ buildID: $buildID }' \
+      | run_query "$query" \
+      | jq -r '.data.build.jobs.edges | length'
+)
+if [ "$set_gerrit_status_run" = 0 ]; then
+    echo "Set gerrit status not run"
+    exit 0
+fi
+
+# Step 2: It has! That means this step (and potentially some other steps) have
+# been retried.
+#
+# Now, grab a list of all steps that failed (note this includes steps that
+# failed the first time)
+
+read -r -d '' query <<EOF || true
+query FailedSteps(\$buildID: ID!) {
+  build(uuid: \$buildID) {
+    jobs(first: 15, passed: false) {
+      edges {
+        node {
+          ...on JobTypeCommand {
+            uuid
+            step {
+              key
+            }
+            softFailed
+          }
+        }
+      }
+    }
+  }
+}
+EOF
+
+readarray -t failed_steps < <(
+  jq -n \
+      --arg buildID "$BUILDKITE_BUILD_ID" \
+      '{ buildID: $buildID }' \
+      | run_query "$query" \
+      | jq -cr '.data.build.jobs.edges
+          | map(select(.node.softFailed | not) | {step_key: .node.step.key, job_uuid: .node.uuid})
+          | .[]' \
+)
+
+# Next up, check whether all of the steps that originally failed now have a
+# different job that passed
+
+read -r -d '' query <<EOF || true
+query OtherPassedSteps(\$buildID: ID!, \$stepKey: String!) {
+  build(uuid: \$buildID) {
+    jobs(first: 15, step: { key: [\$stepKey] }, passed: true) {
+      edges {
+        node {
+          ...on JobTypeCommand {
+            uuid
+          }
+        }
+      }
+    }
+  }
+}
+EOF
+
+for step in "${failed_steps[@]}"; do
+    # Is *this* step the step in question?
+    if [ "$BUILDKITE_STEP_KEY" = "$(echo "$step" | jq -r .step_key)" ]; then
+        # If so, check the exit status of this job
+        if [ "$BUILDKITE_COMMAND_EXIT_STATUS" = 0 ]; then
+            echo "Step passed"
+        else
+            echo "--- :bk-status-failed: Step still failing, not (yet) marking build as passed"
+            exit 0
+        fi
+    else
+        # Otherwise, query the buildkite API for a passing job in the build of the same step
+
+        # NOTE: we're looking for *any* other passed job within the build of the
+        # same step, not necessarily a *later* passed job - this is a conscious
+        # tradeoff because this script is already really complex
+        passed_jobs=$(
+          jq -n \
+              --arg buildID "$BUILDKITE_BUILD_ID" \
+              --argjson step "$step" \
+              '{ buildID: $buildID, stepKey: $step.step_key }' \
+              | tee /tmp/json \
+              | run_query "$query" \
+              | jq -r \
+              --argjson step "$step" \
+              '.data.build.jobs.edges | map(select(.node.uuid != $step.job_uuid)) | length'
+        )
+
+        step_key="$(echo "$step" | jq -r .step_key)"
+        if [ "$passed_jobs" = 0 ]; then
+            echo "--- :bk-status-failed: Step $step_key still failing, not (yet) marking build as passed"
+            exit 0
+        else
+            echo "Step $step_key passed"
+        fi
+    fi
+done
+
+# We've gotten to this point, which means all failed jobs have a different job
+# within the same build that passed; this means we can mark the build as passed
+# now!
+
+echo "--- :bk-status-passed: All steps have passed at least once; marking build as passed"
+.buildkite/set_gerrit_status.sh passed
