@@ -3,7 +3,9 @@
 pub mod changelist;
 
 use std::borrow::Cow;
+use std::fmt::Display;
 
+use readyset_errors::ReadySetError;
 use serde::{Deserialize, Serialize};
 
 pub use crate::recipe::changelist::ChangeList;
@@ -59,12 +61,24 @@ pub enum ExtendRecipeResult {
 }
 
 /// The status of an actively running migration
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum MigrationStatus {
     /// The migration has completed
     Done,
+    /// The migration has completed with an error
+    Failed(ReadySetError),
     /// The migration has not yet completed
     Pending,
+}
+
+impl Display for MigrationStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MigrationStatus::Done => f.write_str("Completed"),
+            MigrationStatus::Failed(e) => write!(f, "Failed with error {e}"),
+            MigrationStatus::Pending => f.write_str("Pending"),
+        }
+    }
 }
 
 impl MigrationStatus {

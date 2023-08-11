@@ -1903,6 +1903,9 @@ where
             SqlQuery::Show(ShowStatement::ReadySetStatus) => {
                 self.noria.readyset_status(&self.authority).await
             }
+            SqlQuery::Show(ShowStatement::ReadySetMigrationStatus(id)) => {
+                self.noria.migration_status(*id).await
+            }
             SqlQuery::Show(ShowStatement::ReadySetVersion) => readyset_version(),
             SqlQuery::Show(ShowStatement::ReadySetTables) => self.noria.table_statuses().await,
             SqlQuery::Show(ShowStatement::ProxiedQueries(q_id)) => {

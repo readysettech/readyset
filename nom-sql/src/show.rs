@@ -21,6 +21,7 @@ pub enum ShowStatement {
     CachedQueries(Option<QueryID>),
     ProxiedQueries(Option<QueryID>),
     ReadySetStatus,
+    ReadySetMigrationStatus(u64),
     ReadySetVersion,
     ReadySetTables,
 }
@@ -47,6 +48,7 @@ impl ShowStatement {
                     }
                 }
                 Self::ReadySetStatus => write!(f, "READYSET STATUS"),
+                Self::ReadySetMigrationStatus(id) => write!(f, "READYSET MIGRATION STATUS {}", id),
                 Self::ReadySetVersion => write!(f, "READYSET VERSION"),
                 Self::ReadySetTables => write!(f, "READYSET TABLES"),
             }
@@ -90,6 +92,18 @@ fn proxied_queries(
     }
 }
 
+/// Parses READYSET MIGRATION STATUS <u64_id>
+pub fn readyset_migration_status(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ShowStatement> {
+    let (i, _) = tag_no_case("readyset")(i)?;
+    let (i, _) = whitespace1(i)?;
+    let (i, _) = tag_no_case("migration")(i)?;
+    let (i, _) = whitespace1(i)?;
+    let (i, _) = tag_no_case("status")(i)?;
+    let (i, _) = whitespace1(i)?;
+    let (i, id) = nom::character::complete::u64(i)?;
+    Ok((i, ShowStatement::ReadySetMigrationStatus(id)))
+}
+
 pub fn show(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ShowStatement> {
     move |i| {
         let (i, _) = tag_no_case("show")(i)?;
@@ -97,6 +111,7 @@ pub fn show(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u
         let (i, statement) = alt((
             cached_queries(dialect),
             proxied_queries(dialect),
+            readyset_migration_status,
             value(
                 ShowStatement::ReadySetStatus,
                 tuple((tag_no_case("readyset"), whitespace1, tag_no_case("status"))),
@@ -372,5 +387,14 @@ mod tests {
     fn show_readyset_tables() {
         let res = test_parse!(show(Dialect::MySQL), b"SHOW READYSET TABLES");
         assert_eq!(res, ShowStatement::ReadySetTables);
+    }
+
+    #[test]
+    fn show_readyset_migration_status() {
+        let res = test_parse!(
+            show(Dialect::MySQL),
+            b"SHOW\t READYSET\t MIGRATION\t STATUS\t 123456"
+        );
+        assert_eq!(res, ShowStatement::ReadySetMigrationStatus(123456))
     }
 }

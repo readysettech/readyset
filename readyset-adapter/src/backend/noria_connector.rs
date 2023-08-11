@@ -984,6 +984,25 @@ impl NoriaConnector {
         ))
     }
 
+    /// Query the status of a pending migration identified by the given `migration_id`. Once the
+    /// function returns a result (completed or an error), calling again with the same id will lead
+    /// to undefined behavior.
+    pub(crate) async fn migration_status(
+        &mut self,
+        id: u64,
+    ) -> ReadySetResult<QueryResult<'static>> {
+        let status = noria_await!(
+            self.inner.get_mut()?,
+            self.inner.get_mut()?.noria.migration_status(id)
+        )?
+        .to_string();
+        Ok(QueryResult::Meta(vec![(
+            "Migration Status".to_string(),
+            status,
+        )
+            .into()]))
+    }
+
     pub(crate) async fn table_statuses(&mut self) -> ReadySetResult<QueryResult<'static>> {
         let statuses = noria_await!(
             self.inner.get_mut()?,

@@ -550,17 +550,19 @@ impl Leader {
                         .ok_or_else(|| ReadySetError::UnknownMigration(migration_id))?;
 
                     match (&mut migration).now_or_never() {
-                        None => ReadySetResult::Ok(MigrationStatus::Pending),
+                        None => MigrationStatus::Pending,
                         Some(res) => {
                             // Migration is done, remove it from the map
                             // Note that this means that only one thread can poll on the status of a
                             // particular migration!
                             running_migrations.remove(migration_key);
-                            res.map_err(|e| internal_err!("{e}"))??;
-                            Ok(MigrationStatus::Done)
+                            match res.map_err(|e| internal_err!("{e}"))? {
+                                Ok(_) => MigrationStatus::Done,
+                                Err(e) => MigrationStatus::Failed(e),
+                            }
                         }
                     }
-                }?;
+                };
                 return_serialized!(ret)
             }
             (&Method::POST, "/remove_query") => {

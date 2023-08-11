@@ -701,6 +701,14 @@ impl ReadySetHandle {
         }
     }
 
+    /// Query the status of a pending migration identified by the given `migration_id`.
+    pub fn migration_status(
+        &mut self,
+        migration_id: u64,
+    ) -> impl Future<Output = ReadySetResult<MigrationStatus>> + '_ {
+        self.rpc::<_, MigrationStatus>("migration_status", migration_id, self.migration_timeout)
+    }
+
     /// Asynchronous version of extend_recipe(). The Controller should immediately return an ID that
     /// can be used to query the migration status.
     pub fn extend_recipe_async(
