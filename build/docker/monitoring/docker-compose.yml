@@ -1,0 +1,47 @@
+version: "3.8"
+services:
+  prometheus:
+    image: prom/prometheus
+    # Required to access a local noria-server.
+    network_mode: "host"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    healthcheck:
+      test: ["CMD", "nc", "-vz", "localhost", "9090"]
+      interval: 10s
+      timeout: 2s
+      retries: 5
+      start_period: 5s
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+  pushgateway:
+    image: prom/pushgateway
+    network_mode: "host"
+  grafana:
+    image: grafana/grafana:8.0.6
+    network_mode: "host"
+    volumes:
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/config/grafana.ini:/etc/grafana/grafana.ini
+  vector:
+    image: timberio/vector:0.16.1-debian
+    network_mode: "host"
+    volumes:
+      - ./vector/aggregator.toml:/etc/vector/vector.toml
+  node_exporter:
+    image: quay.io/prometheus/node-exporter:latest
+    container_name: node_exporter
+    command:
+      - '--path.rootfs=/host'
+    network_mode: host
+    pid: host
+    restart: unless-stopped
+    volumes:
+      - '/:/host:ro,rslave'
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    network_mode: "host"
+    environment:
+      SPAN_STORAGE_TYPE: "badger"
+      BADGER_EPHEMERAL: "false"

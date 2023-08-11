@@ -1,0 +1,33 @@
+version: "3.8"
+services:
+  consul-server:
+    image: hashicorp/consul:1.15
+    restart: always
+    volumes:
+      - ./docker/consul/server.json:/consul/config/server.json:ro
+    command: 'agent -bootstrap-expect=1'
+  mysql:
+    image: mysql:8.0
+    environment:
+      - MYSQL_ROOT_PASSWORD=noria
+      - MYSQL_DATABASE=noria
+  postgres:
+    image: postgres:14
+    environment:
+      - POSTGRES_PASSWORD=noria
+      - POSTGRES_DB=noria
+    command:
+      - "postgres"
+      - "-c"
+      - "wal_level=logical"
+  postgres13:
+    image: postgres:13
+    environment:
+      - POSTGRES_PASSWORD=noria
+      - POSTGRES_DB=noria
+    command:
+      - "postgres"
+      - "-c"
+      - "wal_level=logical"
+      - "-p"
+      - "5433"

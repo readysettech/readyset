@@ -1,0 +1,18 @@
+global:
+  scrape_interval: 15s
+  external_labels:
+    monitor: 'readyset'
+
+scrape_configs:
+  - job_name: 'prometheus'
+    scrape_interval: 5s
+    static_configs:
+      - targets:
+        - 'cache:6033'
+        - 'cache:6034'
+    honor_labels: true
+  - job_name: 'pushgateway'
+    scrape_interval: 5s
+    static_configs:
+      - targets: ['pushgateway:9091']
+    honor_labels: true
