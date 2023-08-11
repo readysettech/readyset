@@ -143,7 +143,7 @@ steps:
           - RUST_BACKTRACE=full
           config:
             - build/docker-compose.yml
-            - build/docker-compose.ci-test.yaml
+            - build/docker-compose.ci-test.yml
           pull-retries: 3
       - ecr#v2.5.0:
           login: true
@@ -174,7 +174,7 @@ steps:
           - 'target:/workdir/target'
           config:
           - build/docker-compose.yml
-          - build/docker-compose.ci-test.yaml
+          - build/docker-compose.ci-test.yml
           mount-buildkite-agent: true
       - ecr#v2.2.0:
           login: true
@@ -200,7 +200,7 @@ steps:
           - RUST_BACKTRACE=full
           config:
             - build/docker-compose.yml
-            - build/docker-compose.ci-test.yaml
+            - build/docker-compose.ci-test.yml
           pull-retries: 3
       - ecr#v2.5.0:
           login: true
