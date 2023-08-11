@@ -1,3 +1,6 @@
+env:
+    BUILD_CONTAINER_NAME: "${BUILDKITE_PIPELINE_NAME}-${BUILDKITE_BUILD_NUMBER}"
+
 steps:
   # TODO: ronh: decide what kind of linting we want in the OSS pipeline
   # - label: ':git: Lint commits'
@@ -9,13 +12,13 @@ steps:
   #     queue: t3a-small
 
   - label: ':buildkite: Compose build image tag'
-    command: buildkite-agent meta-data set 'build-image-tag' "${BUILDKITE_PIPELINE_NAME}-${BUILDKITE_BUILD_NUMBER}"
+    command: buildkite-agent meta-data set 'build-image-tag' "${BUILD_CONTAINER_NAME}"
 
   - label: ':docker: Build build image'
     key: build-image
     command: .buildkite/build-image.sh build/Dockerfile readyset-build .
     env:
-      VERSION: "${BUILDKITE_PIPELINE_NAME}-${BUILDKITE_BUILD_NUMBER}"
+      VERSION: "${BUILD_CONTAINER_NAME}"
     plugins:
       ecr#v2.5.0:
         login: true
@@ -29,7 +32,7 @@ steps:
     - build-image
     plugins:
       - docker#v3.8.0:
-          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_PIPELINE_NAME}-${BUILDKITE_BUILD_NUMBER}'
+          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILD_CONTAINER_NAME}'
           volumes:
           - 'target:/workdir/target'
           environment:
@@ -45,7 +48,7 @@ steps:
     key: cargo-deny-image
     command: .buildkite/build-image.sh build/Dockerfile.cargo-deny cargo-deny .
     env:
-      VERSION: "${BUILDKITE_PIPELINE_NAME}-${BUILDKITE_BUILD_NUMBER}"
+      VERSION: "${BUILD_CONTAINER_NAME}"
     plugins:
       ecr#v2.5.0:
         login: true
@@ -59,7 +62,7 @@ steps:
     - cargo-deny-image
     plugins:
       - docker#v3.8.0:
-          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/cargo-deny:${BUILDKITE_PIPELINE_NAME}-${BUILDKITE_BUILD_NUMBER}'
+          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/cargo-deny:${BUILD_CONTAINER_NAME}'
           environment:
           - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
           - CACHEPOT_REGION=us-east-2
@@ -78,7 +81,7 @@ steps:
     - build-image
     plugins:
       - docker#v3.8.0:
-          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_PIPELINE_NAME}-${BUILDKITE_BUILD_NUMBER}'
+          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILD_CONTAINER_NAME}'
           volumes:
           - 'target:/workdir/target'
           environment:
@@ -188,7 +191,7 @@ steps:
     - build-image
     plugins:
       - docker-compose#v3.7.0:
-          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_PIPELINE_NAME}-${BUILDKITE_BUILD_NUMBER}'
+          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILD_CONTAINER_NAME}'
           run: app
           environment:
           - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
