@@ -119,3 +119,86 @@ steps:
           retries: 3
     agents:
       queue: c6a-4xlarge
+
+  - label: 'Run logictest'
+    key: logictest
+    command:
+    - 'echo +++ Running readyset-logictest'
+    - export RUST_BACKTRACE=full
+    - cargo --locked run --bin readyset-logictest -- verify logictests
+    - cargo --locked run --bin readyset-logictest -- verify logictests/psql --database-type postgresql
+    timeout_in_minutes: 60
+    depends_on:
+    - build-image
+    plugins:
+      - docker-compose#v3.7.0:
+          run: app
+          env:
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
+          - CARGO_INCREMENTAL=0
+          - RUST_BACKTRACE=full
+          config:
+            - build/docker-compose.yml
+            - build/docker-compose.ci-test.yaml
+          pull-retries: 3
+      - ecr#v2.5.0:
+          login: true
+          retries: 3
+
+  - label: 'Run clustertests'
+    key: readyset-clustertest
+    command:
+    - 'echo +++ Building binaries for clustertest'
+    - cargo --locked build --bin readyset-server --bin readyset --features failure_injection
+    - 'echo +++ Running Clustertests'
+    - cargo --locked test -p readyset-clustertest
+    timeout_in_minutes: 60
+    depends_on:
+    - build-image
+    plugins:
+      - docker-compose#v3.7.0:
+          run: app
+          env:
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
+          - CARGO_INCREMENTAL=0
+          - RUST_BACKTRACE=full
+          - DISABLE_TELEMETRY=true
+          - BINARY_PATH=/workdir/target/debug/
+          - MYSQL_ROOT_PASSWORD=noria
+          volumes:
+          - 'target:/workdir/target'
+          config:
+          - build/docker-compose.yml
+          - build/docker-compose.ci-test.yaml
+          mount-buildkite-agent: true
+      - ecr#v2.2.0:
+          login: true
+
+  - label: 'Test benchmark framework'
+    key: test-benchmark
+    command:
+    - 'echo +++ Running benchmarks'
+    - export RUST_BACKTRACE=full
+    - cargo --locked run --bin benchmarks -- --local --database-type mysql --benchmark benchmarks/src/yaml/benchmarks/test/benchmark_test.yaml
+    - cargo --locked run --bin benchmarks -- --local-with-upstream mysql://root:noria@mysql/noria --database-type mysql --benchmark benchmarks/src/yaml/benchmarks/test/benchmark_test.yaml
+    timeout_in_minutes: 60
+    depends_on:
+    - build-image
+    plugins:
+      - docker-compose#v3.7.0:
+          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_PIPELINE_NAME}-${BUILDKITE_BUILD_NUMBER}'
+          run: app
+          environment:
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
+          - CARGO_INCREMENTAL=0
+          - RUST_BACKTRACE=full
+          config:
+            - build/docker-compose.yml
+            - build/docker-compose.ci-test.yaml
+          pull-retries: 3
+      - ecr#v2.5.0:
+          login: true
+          retries: 3
