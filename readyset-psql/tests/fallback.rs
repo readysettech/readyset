@@ -1406,3 +1406,33 @@ async fn show_proxied_queries_show_caches_query_text_matches() {
 
     shutdown_tx.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pgsql_ddl_test_repro() {
+    readyset_tracing::init_test_logging();
+    let (config, _handle, shutdown_tx) = setup().await;
+    let client = connect(config).await;
+
+    let queries = [
+        "CREATE TABLE CJ6X7yZe8u_6_eMmOZPe_ ( id INT PRIMARY KEY, F_w2___J3_7T_MJzW9paX1CJ__78k62H TIMESTAMP WITH TIME ZONE, X_SwxN_RBL3ss1odtK REAL);",
+        "CREATE CACHE ALWAYS FROM SELECT FROM CJ6X7yZe8u_6_eMmOZPe_;",
+        "ALTER TABLE CJ6X7yZe8u_6_eMmOZPe_ RENAME COLUMN X_SwxN_RBL3ss1odtK TO X_GaURwT8k577KlpC3m_5J_moI;",
+        "CREATE TABLE __v3OWm_0XITf6c7 (id INT PRIMARY KEY, FG4Ty0bPTf4qL_D0XpDLlEc8U2 REAL);",
+        "CREATE CACHE ALWAYS FROM SELECT FROM __v3OWm_0XITf6c7;",
+        "CREATE VIEW LK50UF576S___1KCDEa0X4qkT AS SELECT CJ6X7yZe8u_6_eMmOZPe_.F_w2___J3_7T_MJzW9paX1CJ__78k62H AS c0, CJ6X7yZe8u_6_eMmOZPe_.X_GaURwT8k577KlpC3m_5J_moI AS c1, __v3OWm_0XITf6c7.FG4Ty0bPTf4qL_D0XpDLlEc8U2 AS c2 FROM CJ6X7yZe8u_6_eMmOZPe_ JOIN __v3OWm_0XITf6c7 ON CJ6X7yZe8u_6_eMmOZPe_.id = __v3OWm_0XITf6c7.id;",
+        "CREATE CACHE ALWAYS FROM SELECT * FROM LK50UF576S___1KCDEa0X4qkT;",
+    ];
+
+    for query in queries {
+        eventually!(run_test: {
+            let result = client
+                .simple_query(query)
+                .await;
+            AssertUnwindSafe(|| result)
+        }, then_assert: |result| {
+            result().unwrap();
+        });
+    }
+
+    shutdown_tx.shutdown().await;
+}
