@@ -1425,6 +1425,7 @@ async fn pgsql_ddl_test_repro() {
     ];
 
     for query in queries {
+        tracing::error!("RUNNING QUERY {query}");
         eventually!(run_test: {
             let result = client
                 .simple_query(query)

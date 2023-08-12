@@ -14,12 +14,36 @@ use crate::ReplicationOffset;
 /// the LSNs of **COMMIT** events we receive will monotonically increase. We leverage this by
 /// including the LSN of the last COMMIT we saw in our definition of [`PostgresPosition`], which
 /// gives us an ordering key of `(last_commit_lsn, lsn)`.
-#[derive(Debug, PartialEq, PartialOrd, Ord, Eq, Clone, Copy, Default, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Ord, Eq, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct PostgresPosition {
     /// The LSN of the last COMMIT we saw
     pub last_commit_lsn: CommitLsn,
     /// The LSN of the position
     pub lsn: Lsn,
+}
+
+impl PartialOrd for PostgresPosition {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        if self.lsn == other.lsn {
+            debug_assert!(
+                self.last_commit_lsn == other.last_commit_lsn,
+                "If two positions have the same lsn, they should have the same last_commit_lsn."
+            );
+
+            return Some(std::cmp::Ordering::Equal);
+        }
+
+        // If our lsn is greater than other.lsn, we are greater.
+        // TODO: This doesn't really make sense since it won't be the same with the arguments
+        // reversed, right? Or does it since we are looking at a stream of lsns?
+        //
+        if self.lsn > other.lsn {
+            return Some(std::cmp::Ordering::Greater);
+        }
+
+        // Otherwise use the commit first and then the lsn to determine ordering
+        (self.last_commit_lsn, self.lsn).partial_cmp(&(other.last_commit_lsn, other.lsn))
+    }
 }
 
 impl PostgresPosition {
