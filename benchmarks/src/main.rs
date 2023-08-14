@@ -259,6 +259,9 @@ impl BenchmarkRunner {
 
                 (target_conn_str, handle, shutdown_tx)
             }
+            DatabaseType::Vitess => {
+                todo!()
+            }
         };
         let setup_conn_str = upstream_addr.unwrap_or_else(|| target_conn_str.clone());
 

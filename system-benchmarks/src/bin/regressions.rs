@@ -126,6 +126,7 @@ async fn get_bench_descriptor(
         match database_type {
             DatabaseType::MySQL => a.filename == format!("{build}-bench.json"),
             DatabaseType::PostgreSQL => a.filename == format!("{build}-bench-postgresql.json"),
+            DatabaseType::Vitess => a.filename == format!("{build}-bench-vitess.json"),
         }
     }))
 }

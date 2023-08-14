@@ -123,6 +123,7 @@ impl From<SqlQueryType> for SharedString {
 pub enum DatabaseType {
     MySql,
     Psql,
+    Vitess,
     ReadySet,
 }
 
@@ -132,6 +133,7 @@ impl From<DatabaseType> for SharedString {
             DatabaseType::MySql => SharedString::const_str("mysql"),
             DatabaseType::Psql => SharedString::const_str("psql"),
             DatabaseType::ReadySet => SharedString::const_str("readyset"),
+            DatabaseType::Vitess => SharedString::const_str("vitess"),
         }
     }
 }

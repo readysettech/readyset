@@ -33,5 +33,6 @@ fn main() -> anyhow::Result<()> {
             expr_dialect: readyset_data::Dialect::DEFAULT_POSTGRESQL,
         }
         .run(options),
+        DatabaseType::Vitess => todo!(),
     }
 }

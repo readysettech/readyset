@@ -263,6 +263,15 @@ struct Env {
     mysql_user: String,
     #[serde(default = "default_mysql_password")]
     mysql_password: String,
+
+    #[serde(default = "default_vitess_host")]
+    vitess_host: String,
+    #[serde(default = "default_vitess_port")]
+    vitess_port: String,
+    #[serde(default = "default_vitess_user")]
+    vitess_user: String,
+    #[serde(default = "default_vitess_password")]
+    vitess_password: String,
 }
 
 fn default_pguser() -> String {
@@ -311,6 +320,22 @@ fn default_pgpassword() -> String {
 
 fn default_mysql_password() -> String {
     "noria".to_string()
+}
+
+fn default_vitess_host() -> String {
+    "127.0.0.1".to_string()
+}
+
+fn default_vitess_port() -> String {
+    "15991".to_string()
+}
+
+fn default_vitess_user() -> String {
+    "root".to_string()
+}
+
+fn default_vitess_password() -> String {
+    "".to_string()
 }
 
 /// Source of the readyset binaries.
@@ -496,6 +521,12 @@ impl DeploymentBuilder {
                 env.pgpassword,
                 env.postgresql_host,
                 env.postgresql_port,
+            ),
+            DatabaseType::Vitess => (
+                env.vitess_user,
+                env.vitess_password,
+                env.vitess_host,
+                env.vitess_port,
             ),
         };
 
@@ -830,6 +861,9 @@ impl DeploymentBuilder {
                     // changing types and a bit of work to support.
 
                     drop(handle);
+                }
+                DatabaseType::Vitess => {
+                    todo!("Vitess upstream not yet supported")
                 }
             }
 

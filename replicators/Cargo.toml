@@ -34,6 +34,10 @@ postgres-native-tls = { workspace = true }
 postgres-protocol = { workspace = true }
 mysql_async = { workspace = true }
 
+readyset-vitess-data = { path = "../readyset-vitess-data" }
+vitess-grpc = "0.1.2"
+tonic = { version = "0.9", features = ["tls"] }
+
 nom-sql = { path = "../nom-sql" }
 readyset-client = { path = "../readyset-client" }
 readyset-errors = { path = "../readyset-errors" }

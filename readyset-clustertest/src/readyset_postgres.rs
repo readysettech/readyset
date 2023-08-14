@@ -35,7 +35,7 @@ async fn last_statement_destination(conn: &mut DatabaseConnection) -> QueryDesti
 async fn replication_slot_exists(conn: &mut DatabaseConnection) -> bool {
     const QUERY: &str = "SELECT slot_name FROM pg_replication_slots WHERE slot_name = 'readyset'";
     if let Ok(row) = match conn {
-        DatabaseConnection::MySQL(_) => return false,
+        DatabaseConnection::MySQL(_) | DatabaseConnection::Vitess(_) => return false,
         DatabaseConnection::PostgreSQL(client, _) => client.query_one(QUERY, &[]).await,
         DatabaseConnection::PostgreSQLPool(client) => client.query_one(QUERY, &[]).await,
     } {
@@ -49,7 +49,7 @@ async fn replication_slot_exists(conn: &mut DatabaseConnection) -> bool {
 async fn publication_exists(conn: &mut DatabaseConnection) -> bool {
     const QUERY: &str = "SELECT pubname FROM pg_publication WHERE pubname = 'readyset'";
     if let Ok(row) = match conn {
-        DatabaseConnection::MySQL(_) => return false,
+        DatabaseConnection::MySQL(_) | DatabaseConnection::Vitess(_) => return false,
         DatabaseConnection::PostgreSQL(client, _) => client.query_one(QUERY, &[]).await,
         DatabaseConnection::PostgreSQLPool(client) => client.query_one(QUERY, &[]).await,
     } {

@@ -244,6 +244,21 @@ impl NoriaAdapter {
                 )
                 .await
             }
+            DatabaseURL::Vitess(vitess_config) => {
+                let noria = noria.clone();
+                let config = config.clone();
+
+                NoriaAdapter::start_inner_vitess(
+                    vitess_config,
+                    noria,
+                    config,
+                    &mut notify,
+                    resnapshot,
+                    &telemetry_sender,
+                    enable_statement_logging,
+                )
+                .await
+            }
         } {
             match err {
                 ReadySetError::ResnapshotNeeded => {
@@ -711,6 +726,19 @@ impl NoriaAdapter {
             .await?;
 
         unreachable!("`main_loop` will never stop with an Ok status if `until = None`");
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn start_inner_vitess(
+        vitess_config: database_utils::VitessConfig,
+        noria: ReadySetHandle,
+        config: UpstreamConfig,
+        ready_notify: &mut Option<Arc<Notify>>,
+        resnapshot: bool,
+        telemetry_sender: &TelemetrySender,
+        enable_statement_logging: bool,
+    ) -> Result<!, ReadySetError> {
+        todo!()
     }
 
     /// Apply a DDL string to noria with the current log position

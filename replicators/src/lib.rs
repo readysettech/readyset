@@ -11,6 +11,7 @@ pub(crate) mod mysql_connector;
 pub(crate) mod noria_adapter;
 pub(crate) mod postgres_connector;
 pub(crate) mod table_filter;
+pub(crate) mod vitess_connector;
 
 use std::time::Duration;
 

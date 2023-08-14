@@ -129,6 +129,7 @@ pub(crate) async fn recreate_test_database(url: &DatabaseURL) -> anyhow::Result<
     admin_url.set_db_name(match url.database_type() {
         DatabaseType::PostgreSQL => "postgres".to_owned(),
         DatabaseType::MySQL => "mysql".to_owned(),
+        DatabaseType::Vitess => "vitess".to_owned(),
     });
     let mut admin_conn = admin_url
         .connect(None)
@@ -552,19 +553,23 @@ impl TestScript {
         let task = tokio::spawn(async move {
             let (s, _) = listener.accept().await.unwrap();
 
+            let dialect = match database_type {
+                DatabaseType::MySQL | DatabaseType::Vitess => readyset_data::Dialect::DEFAULT_MYSQL,
+                DatabaseType::PostgreSQL => readyset_data::Dialect::DEFAULT_POSTGRESQL,
+            };
+
+            let parse_dialect = match database_type {
+                DatabaseType::MySQL | DatabaseType::Vitess => nom_sql::Dialect::MySQL,
+                DatabaseType::PostgreSQL => nom_sql::Dialect::PostgreSQL,
+            };
+
             let noria = NoriaConnector::new(
                 rh,
                 auto_increments,
                 query_cache,
                 ReadBehavior::Blocking,
-                match database_type {
-                    DatabaseType::MySQL => readyset_data::Dialect::DEFAULT_MYSQL,
-                    DatabaseType::PostgreSQL => readyset_data::Dialect::DEFAULT_POSTGRESQL,
-                },
-                match database_type {
-                    DatabaseType::MySQL => nom_sql::Dialect::MySQL,
-                    DatabaseType::PostgreSQL => nom_sql::Dialect::PostgreSQL,
-                },
+                dialect,
+                parse_dialect,
                 Default::default(),
                 server_supports_pagination,
             )
@@ -617,6 +622,7 @@ impl TestScript {
                     )
                     .await
                 }
+                DatabaseType::Vitess => todo!(),
             }
         });
 
@@ -631,6 +637,7 @@ impl TestScript {
                     config.dbname("noria");
                     config.into()
                 }
+                DatabaseType::Vitess => todo!(),
             },
         )
     }
