@@ -1,0 +1,115 @@
+# Test that reproduces #286
+
+statement ok
+create table t1 (x int, y text)
+
+statement ok
+insert into t1 (x, y)
+values
+(1, 'a'),
+(2, 'b'),
+(3, 'c')
+
+statement ok
+create table t2 (x int, y text, z int)
+
+statement ok
+insert into t2 (x, y, z)
+values
+(1, 'a', 3),
+(1, 'b', 3),
+(1, 'c', 3),
+(2, 'a', 3),
+(3, 'a', 3);
+
+
+onlyif readyset
+statement ok
+create cache from
+select t1.x
+from t2
+join t1
+on t1.x = t2.x
+where t1.x = ?
+
+onlyif readyset
+statement ok
+create cache from
+select t1.x
+from t2
+join t1
+on t1.y = t2.y
+where t1.x = 1
+
+onlyif readyset
+statement ok
+create cache from
+select t1.x
+from t2
+join t1
+on t1.x = t2.z
+where t2.y = 'a'
+
+
+query I nosort
+select t1.x
+from t2
+join t1
+on t1.x = t2.x
+where t1.x = ?
+? = 1
+----
+1
+1
+1
+
+# Now we have a strict partial index on [0] with a filled hole on [0] = [1]
+
+query I nosort
+select t1.x
+from t2
+join t1
+on t1.y = t2.y
+where t1.x = 1
+----
+1
+1
+1
+
+# Now we have a strict partial index on [1] with a filled hole on [1] = ['a']
+
+
+query I nosort
+select t1.x
+from t2
+join t1
+on t1.x = t2.z
+where t2.y = 'a'
+----
+3
+3
+3
+
+# Now we have a filled hole in the ingress on `[1] = ['a']`
+# and also our weak index on [2] has some rows  for [3]
+
+graphviz
+
+# (try to) do a regular write that does a weak lookup on [2] = [3]
+
+statement ok
+insert into t1 (x, y) values (3, 'c');
+
+query I nosort
+select t1.x
+from t2
+join t1
+on t1.x = t2.z
+where t2.y = 'a'
+----
+3
+3
+3
+3
+3
+3
