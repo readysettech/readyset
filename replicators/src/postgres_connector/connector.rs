@@ -387,12 +387,12 @@ impl PostgresWalConnector {
         use bytes::{BufMut, BytesMut};
 
         // The difference between UNIX and Postgres epoch
-        const J2000_EPOCH_GAP: u64 = 946_684_800_000_000;
+        const J2000_EPOCH_GAP: i64 = 946_684_800_000_000;
 
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
-            .as_micros() as u64
+            .as_micros() as i64
             - J2000_EPOCH_GAP;
 
         let pos = ack.0 + 1;
@@ -405,7 +405,7 @@ impl PostgresWalConnector {
         b.put_i64(pos); // Acked
         b.put_i64(pos); // Flushed
         b.put_i64(pos); // Applied - this tells the server that it can remove prior WAL entries for this slot
-        b.put_u64(now.to_be());
+        b.put_i64(now);
         b.put_u8(0);
         self.client
             .inner()
