@@ -631,6 +631,7 @@ fn start_adapter_with_options(
         DB_NAME,
         "--standalone",
         "--allow-unauthenticated-connections",
+        "--allow-full-materialization",
         "--upstream-db-url",
         upstream_url,
         "--durability",
