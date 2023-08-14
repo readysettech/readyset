@@ -1,0 +1,7 @@
+distributions: []
+queries:
+  - spec: >-
+      select * from articles
+    params: []
+    weight: 1
+    migrate: true
