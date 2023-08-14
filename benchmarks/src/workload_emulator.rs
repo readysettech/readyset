@@ -207,8 +207,11 @@ impl QuerySet {
 impl Query {
     /// Get params for this query in a specific index
     pub fn get_params_index(&self, index: usize) -> Option<Vec<DfValue>> {
-        let mut ret = Vec::with_capacity(self.cols.len());
+        if self.cols.is_empty() {
+            return None;
+        }
 
+        let mut ret = Vec::with_capacity(self.cols.len());
         let mut last_row: &Vec<DfValue> = &vec![];
         let mut last_set: Option<Arc<_>> = None;
 
