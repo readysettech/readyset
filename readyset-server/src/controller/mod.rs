@@ -223,7 +223,7 @@ impl Worker {
 type WorkerIdentifier = Url;
 
 /// Channel used to notify the controller of replicator events. This channel conveys information on
-/// replicator status or allows us to gracefully kill the controller loop in the event of an
+/// replicator status and allows us to gracefully kill the controller loop in the event of an
 /// unrecoverable replicator error.
 pub struct ReplicatorChannel {
     sender: UnboundedSender<ReplicatorMessage>,

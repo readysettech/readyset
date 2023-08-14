@@ -140,6 +140,8 @@ impl Leader {
             // Controller must be notified that snapshot is completed even though we don't have an
             // upstream db. This is only relevant for tests as users will not run without an
             // upstream.
+            // Ignore the result since we will not error unless we have somehow dropped the rx half
+            // of the channel
             let _ = notification_channel.send(ReplicatorMessage::SnapshotDone);
             info!("No primary instance specified");
             return;
