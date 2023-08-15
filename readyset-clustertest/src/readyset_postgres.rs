@@ -345,3 +345,82 @@ async fn reader_domain_panic_handling() {
 
     deployment.teardown().await.unwrap();
 }
+
+/// Test that a base table domain panicking in a deployment eventually recovers
+#[clustertest]
+async fn base_domain_panic_handling() {
+    let deployment_name = "base_domain_panic_handling";
+    let mut deployment = DeploymentBuilder::new(DatabaseType::PostgreSQL, deployment_name)
+        .deploy_upstream()
+        .reader_replicas(1)
+        .with_adapters(1)
+        .with_servers(1, ServerParams::default().no_readers())
+        .embedded_readers(true)
+        .allow_full_materialization()
+        .start()
+        .await
+        .unwrap();
+
+    let mut adapter = deployment.first_adapter().await;
+
+    adapter.query_drop("CREATE TABLE t (x int);").await.unwrap();
+    adapter
+        .query_drop("INSERT INTO t (x) VALUES (1);")
+        .await
+        .unwrap();
+
+    eventually! {
+        adapter
+            .query_drop("CREATE CACHE FROM SELECT x FROM t;")
+            .await
+            .is_ok()
+    }
+
+    eventually! {
+        run_test: {
+            let res: Vec<Vec<DfValue>> = adapter
+                .query("SELECT x FROM t")
+                .await
+                .unwrap()
+                .try_into()
+                .unwrap();
+            let dest = last_statement_destination(&mut adapter).await;
+            (res, dest)
+        },
+        then_assert: |(res, dest)| {
+            assert_eq!(dest, QueryDestination::Readyset);
+            assert_eq!(res, vec![vec![1.into()]]);
+        }
+    }
+
+    // Force the base table domain to panic *once* by setting a failpoint then sending it a write
+    let controller_uri = deployment.handle.controller_uri().await.unwrap();
+    let server_handle = deployment.server_handle(&controller_uri).unwrap();
+    server_handle
+        .set_failpoint("handle-packet", "1*panic->off")
+        .await;
+
+    adapter
+        .query_drop("INSERT INTO t (x) VALUES (1);")
+        .await
+        .unwrap();
+
+    eventually! {
+        run_test: {
+            let res: Vec<Vec<DfValue>> = adapter
+                .query("SELECT x FROM t")
+                .await
+                .unwrap()
+                .try_into()
+                .unwrap();
+            let dest = last_statement_destination(&mut adapter).await;
+            (res, dest)
+        },
+        then_assert: |(res, dest)| {
+            assert_eq!(dest, QueryDestination::Readyset);
+            assert_eq!(res, vec![vec![1.into()], vec![1.into()]]);
+        }
+    }
+
+    deployment.teardown().await.unwrap();
+}
