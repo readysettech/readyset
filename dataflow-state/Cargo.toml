@@ -39,6 +39,8 @@ partial-map = { path = "../partial-map" }
 replication-offset = { path = "../replication-offset" }
 
 [dev-dependencies]
+proptest-stateful = { path = "../proptest-stateful" }
+async-trait = "0.1"
 pretty_assertions = "0.7.2"
 lazy_static = "1.0.0"
 criterion = { version = "0.3", features=['real_blackbox', 'async_tokio'] }

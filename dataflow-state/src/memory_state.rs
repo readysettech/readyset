@@ -985,4 +985,188 @@ mod tests {
             );
         }
     }
+
+    mod weak_index_proptest {
+        use std::ops::RangeInclusive;
+        use std::time::Duration;
+
+        use async_trait::async_trait;
+        use proptest::prelude::*;
+        use proptest::sample;
+        use proptest_stateful::{
+            proptest_config_with_local_failure_persistence, ModelState, ProptestStatefulConfig,
+        };
+
+        use super::*;
+
+        const NUM_COLS: usize = 3;
+        const ELEM_RANGE: RangeInclusive<u8> = 0..=2;
+
+        // Three elements is kind of arbitrary but seems like a good enough balance of small rows
+        // that are more likely to have collisions but big enough to cover a good variety of edge
+        // cases. (Keep in mind values range from 0..=2 so that gives us 3^3 = 27 possible rows.)
+        type TestRow = [u8; NUM_COLS];
+
+        #[derive(Clone, Debug)]
+        enum Operation {
+            InsertRow(TestRow),
+            DeleteRow(TestRow),
+            #[allow(unused)]
+            ReplayKey(Tag, TestRow),
+            CreateStrictIndex(Vec<usize>, Tag),
+            #[allow(unused)]
+            CreateWeakIndex(Vec<usize>),
+        }
+
+        #[derive(Clone, Debug, Default)]
+        struct IndexModelState {
+            rows: Vec<TestRow>,
+            strict_indexes: BTreeMap<Tag, Vec<usize>>,
+            #[allow(unused)]
+            weak_indexes: Vec<Vec<usize>>,
+        }
+
+        fn gen_test_row() -> impl Strategy<Value = TestRow> {
+            [ELEM_RANGE; NUM_COLS]
+        }
+
+        prop_compose! {
+            fn gen_insert_row()(row in gen_test_row()) -> Operation {
+                Operation::InsertRow(row)
+            }
+        }
+
+        prop_compose! {
+            fn gen_delete_row(rows: Vec<TestRow>)(r in sample::select(rows)) -> Operation {
+                Operation::DeleteRow(r)
+            }
+        }
+
+        // Create a Vec<usize> to represent a key by generating a column index for each bit that's
+        // set to 1 in `columns`. This is the simplest way to generate a key that I've found since
+        // we can use a range from 1..=16 to avoid generating an empty key Vec, we don't need to
+        // worry about generating duplicate column indexes.
+        fn col_vec_from_int(key: usize) -> Vec<usize> {
+            let mut v = Vec::with_capacity(NUM_COLS);
+            for i in 0..NUM_COLS {
+                if key & 1 << i != 0 {
+                    v.push(i);
+                }
+            }
+            v
+        }
+
+        prop_compose! {
+            fn gen_create_strict(tag: Tag)(columns in 1_usize..(1 << NUM_COLS)) -> Operation {
+                let columns = col_vec_from_int(columns);
+                Operation::CreateStrictIndex(columns, tag)
+            }
+        }
+
+        prop_compose! {
+            fn gen_create_weak()(columns in 1_usize..(1 << NUM_COLS)) -> Operation {
+                let columns = col_vec_from_int(columns);
+                Operation::CreateWeakIndex(columns)
+            }
+        }
+
+        #[async_trait(?Send)]
+        impl ModelState for IndexModelState {
+            type Operation = Operation;
+            type RunContext = MemoryState;
+            type OperationStrategy = BoxedStrategy<Operation>;
+
+            fn op_generators(&self) -> Vec<Self::OperationStrategy> {
+                // We can always perform any op except DeleteRow (since that one requires we have
+                // at least one row to delete), so most of the ops just get unconditionally thrown
+                // into a vec right from the beginning.
+
+                let insert_row_strat = gen_insert_row().boxed();
+                let create_strict_strat = gen_create_strict(self.next_tag()).boxed();
+                //let create_weak_strat = gen_create_weak().boxed();
+
+                let mut ops = vec![insert_row_strat, create_strict_strat];
+
+                if !self.rows.is_empty() {
+                    let delete_row_strat = gen_delete_row(self.rows.clone()).boxed();
+                    ops.push(delete_row_strat);
+                }
+
+                ops
+            }
+
+            fn preconditions_met(&self, op: &Self::Operation) -> bool {
+                match op {
+                    Operation::InsertRow(_)
+                    | Operation::CreateStrictIndex(_, _)
+                    | Operation::CreateWeakIndex(_) => true,
+                    Operation::DeleteRow(row) => self.rows.contains(row),
+                    _ => todo!(),
+                }
+            }
+
+            fn next_state(&mut self, op: &Operation) {
+                match op {
+                    Operation::InsertRow(row) => {
+                        self.rows.push(*row);
+                    }
+                    Operation::DeleteRow(row) => {
+                        let row_index = self.rows.iter().position(|r| r == row).unwrap();
+                        self.rows.remove(row_index);
+                    }
+                    Operation::CreateStrictIndex(columns, tag) => {
+                        self.strict_indexes.insert(*tag, columns.clone());
+                    }
+                    _ => todo!(),
+                }
+            }
+
+            async fn init_test_run(&self) -> Self::RunContext {
+                MemoryState::default()
+            }
+
+            async fn run_op(&self, op: &Self::Operation, ctxt: &mut Self::RunContext) {
+                match op {
+                    Operation::InsertRow(row) => {
+                        let row = row.iter().map(|v| DfValue::Int(*v as i64)).collect();
+                        ctxt.insert(row, None);
+                    }
+                    Operation::DeleteRow(row) => {
+                        let row: Vec<DfValue> =
+                            row.iter().map(|v| DfValue::Int(*v as i64)).collect();
+                        ctxt.remove(&row);
+                    }
+                    Operation::CreateStrictIndex(columns, tag) => {
+                        let index = Index::new(IndexType::HashMap, columns.clone());
+                        ctxt.add_key(index, Some(vec![*tag]));
+                    }
+                    _ => todo!(),
+                }
+            }
+
+            async fn check_postconditions(&self, _ctxt: &mut Self::RunContext) {
+                // TODO check that the weak index contents are correct
+            }
+
+            async fn clean_up_test_run(&self, _: &mut Self::RunContext) {}
+        }
+
+        impl IndexModelState {
+            fn next_tag(&self) -> Tag {
+                Tag::new(self.strict_indexes.len() as u32)
+            }
+        }
+
+        #[test]
+        fn run_cases() {
+            let config = ProptestStatefulConfig {
+                min_ops: 10,
+                max_ops: 100,
+                test_case_timeout: Duration::from_secs(5),
+                proptest_config: proptest_config_with_local_failure_persistence!(),
+            };
+
+            proptest_stateful::test::<IndexModelState>(config);
+        }
+    }
 }
