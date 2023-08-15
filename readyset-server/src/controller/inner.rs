@@ -555,9 +555,9 @@ impl Leader {
                 require_leader_ready()?;
                 let query_name = bincode::deserialize(&body)?;
                 let mut writer = self.dataflow_state_handle.write().await;
-                writer.as_mut().remove_query(&query_name).await?;
+                let result = writer.as_mut().remove_query(&query_name).await?;
                 self.dataflow_state_handle.commit(writer, authority).await?;
-                return_serialized!(());
+                return_serialized!(result);
             }
             (&Method::POST, "/remove_all_queries") => {
                 require_leader_ready()?;

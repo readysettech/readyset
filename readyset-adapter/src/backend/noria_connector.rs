@@ -1136,13 +1136,13 @@ impl NoriaConnector {
 
     /// Make a request to ReadySet to drop the query with the given name, and remove it from all
     /// internal state.
-    pub async fn drop_view(&mut self, name: &Relation) -> ReadySetResult<()> {
-        noria_await!(
+    pub async fn drop_view(&mut self, name: &Relation) -> ReadySetResult<u64> {
+        let result = noria_await!(
             self.inner.get_mut()?,
             self.inner.get_mut()?.noria.remove_query(name)
         )?;
         self.view_cache.remove_statement(name).await;
-        Ok(())
+        Ok(result)
     }
 
     /// Make a request to ReadySet to drop all cached queries, and empty all internal state
