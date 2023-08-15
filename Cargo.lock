@@ -1222,6 +1222,7 @@ version = "0.0.1"
 dependencies = [
  "ahash 0.7.6",
  "anyhow",
+ "async-trait",
  "bincode",
  "clap 4.3.2",
  "criterion",
@@ -1235,6 +1236,7 @@ dependencies = [
  "partial-map",
  "pretty_assertions",
  "proptest",
+ "proptest-stateful",
  "rand 0.7.3",
  "readyset-alloc",
  "readyset-client",
