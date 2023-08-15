@@ -17,9 +17,9 @@ use futures_util::sink::SinkExt;
 use futures_util::stream::StreamExt;
 use metrics::{counter, gauge, histogram};
 use readyset_alloc::StdThreadBuildWrapper;
-use readyset_client::channel;
 use readyset_client::internal::ReplicaAddress;
 use readyset_client::metrics::recorded;
+use readyset_client::{channel, ReadySetHandle};
 use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
 use readyset_util::select;
 use readyset_util::shutdown::ShutdownReceiver;
@@ -44,6 +44,9 @@ pub mod readers;
 mod replica;
 
 type ChannelCoordinator = channel::ChannelCoordinator<ReplicaAddress, Box<Packet>>;
+
+/// Timeout for requests made from the controller to the server
+const CONTROLLER_REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Some kind of request for a running ReadySet worker.
 ///
@@ -107,11 +110,37 @@ pub struct WorkerRequest {
 }
 
 /// Information stored in the worker about what the currently active controller is.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct WorkerElectionState {
     /// The URI of the currently active controller.
-    #[allow(dead_code)] // never read - do we care?
     controller_uri: Url,
+    /// A (potentially cached) client for the currently active controller
+    controller: Option<ReadySetHandle>,
+}
+
+impl WorkerElectionState {
+    /// Create a new [`WorkerElectionState`] for the given new controller URL
+    fn new(controller_uri: Url) -> Self {
+        Self {
+            controller_uri,
+            controller: None,
+        }
+    }
+
+    /// Obtain a [`ReadySetHandle`] for the controller we currently know about
+    fn handle(
+        &mut self,
+        request_timeout: Option<Duration>,
+        migration_timeout: Option<Duration>,
+    ) -> &mut ReadySetHandle {
+        self.controller.get_or_insert_with(|| {
+            ReadySetHandle::make_raw(
+                self.controller_uri.clone(),
+                request_timeout,
+                migration_timeout,
+            )
+        })
+    }
 }
 
 /// A handle for sending messages to a domain in-process.
@@ -154,32 +183,15 @@ pub(crate) type FinishedDomainFuture = Box<
         + Send,
 >;
 
-/// Domains failures typically indicate that the system has entered an unrecoverable
-/// state. When these situations occur, panic, to kill the worker and in production abort the
-/// process. The future may be cancelled or gracefully complete when torndown, in these cases
-/// do not panic.
-fn handle_domain_future_completion(
-    result: (Result<Result<(), anyhow::Error>, JoinError>, ReplicaAddress),
+fn log_domain_result(
+    domain: ReplicaAddress,
+    result: &Result<Result<(), anyhow::Error>, JoinError>,
 ) {
-    let (handle, replica_address) = result;
-    match handle {
-        Ok(Ok(())) => {
-            warn!(
-                domain = %replica_address,
-                "domain future completed without error"
-            )
-        }
-        Ok(Err(e)) => {
-            error!(domain = %replica_address, err = %e, "domain failed with an error");
-            panic!("domain failed: {}", e);
-        }
-        Err(e) if e.is_cancelled() => {
-            warn!(domain = %replica_address, err = %e, "domain future cancelled")
-        }
-        Err(e) => {
-            error!(domain = %replica_address, err = %e, "domain future failed");
-            panic!("domain future failure: {}", e);
-        }
+    match result {
+        Ok(Ok(())) => info!(%domain, "domain exited"),
+        Ok(Err(error)) => error!(%domain, %error, "domain failed with an error"),
+        Err(e) if e.is_cancelled() => info!(%domain, "domain future cancelled"),
+        Err(error) => error!(%domain, %error, "domain failed with an error"),
     }
 }
 
@@ -241,15 +253,15 @@ impl Worker {
         match req {
             WorkerRequestKind::NewController { controller_uri } => {
                 info!(%controller_uri, "worker informed of new controller");
-                self.election_state = Some(WorkerElectionState { controller_uri });
+                self.election_state = Some(WorkerElectionState::new(controller_uri));
                 Ok(None)
             }
             WorkerRequestKind::ClearDomains => {
                 info!("controller requested that this worker clears its existing domains");
                 self.coord.clear();
                 self.domains.clear();
-                while let Some(res) = self.domain_wait_queue.next().await {
-                    handle_domain_future_completion(res);
+                while let Some((result, domain)) = self.domain_wait_queue.next().await {
+                    log_domain_result(domain, &result)
                 }
 
                 Ok(None)
@@ -408,6 +420,25 @@ impl Worker {
         }
     }
 
+    async fn handle_domain_future_completion(
+        &mut self,
+        addr: ReplicaAddress,
+        result: Result<Result<(), anyhow::Error>, JoinError>,
+    ) -> ReadySetResult<()> {
+        log_domain_result(addr, &result);
+
+        if matches!(result, Err(e) if e.is_cancelled()) {
+            return Ok(());
+        }
+
+        self.election_state
+            .as_mut()
+            .ok_or_else(|| internal_err!("Domain {addr} failed when controller is unknown!"))?
+            .handle(Some(CONTROLLER_REQUEST_TIMEOUT), None)
+            .domain_died(addr)
+            .await
+    }
+
     /// Run the worker continuously, processing worker requests, heartbeats, and domain failures.
     ///
     /// This function returns if the worker request sender is dropped.
@@ -439,8 +470,20 @@ impl Worker {
                 _ = eviction => {
                     self.process_eviction();
                 }
-                Some(res) = self.domain_wait_queue.next() => {
-                    handle_domain_future_completion(res);
+                Some((result, replica_address)) = self.domain_wait_queue.next() => {
+                    if let Err(error) = self.handle_domain_future_completion(
+                        replica_address,
+                        result
+                    ).await {
+                        // If we can't notify the controller about the death of a domain, we have to
+                        // exit, since the cluster can no longer be considered healthy
+                        error!(
+                            %error,
+                            %replica_address,
+                            "Error notifying controller about the death of domain"
+                        );
+                        panic!("Could not notify controller about the death of domain")
+                    }
                 }
             }
         }
