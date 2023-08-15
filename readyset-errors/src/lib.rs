@@ -1,4 +1,7 @@
 //! Error handling, definitions, and utilities
+#![feature(never_type, exhaustive_patterns)]
+
+pub mod rpc;
 
 use std::error::Error;
 use std::io;
@@ -99,6 +102,28 @@ pub enum ReadySetError {
         #[source]
         source: Box<ReadySetError>,
     },
+
+    /// Attempted to issue a `call` to a [`tokio-tower`] service, but the underlying transport has
+    /// been closed.
+    #[error("Client was dropped")]
+    ClientDropped,
+
+    /// Attempted to issue a `call` to a [`tokio-tower`] service when no more requests can be in
+    /// flight.
+    #[error("no more in-flight requests allowed")]
+    TransportFull,
+
+    /// The server sent a response  to a [`tokio-tower`] service that the client was not expecting.
+    #[error("server sent a response the client did not expect")]
+    Desynchronized,
+
+    /// An underlying transport for a [`tokio-tower`] service failed to send a request.
+    #[error("Transport send failed: {0}")]
+    TransportSendFailed(String),
+
+    /// An underlying transport for a [`tokio-tower`] service failed while receiving a response.
+    #[error("Transport receive failed")]
+    TransportRecvFailed,
 
     /// A SQL SELECT query couldn't be created.
     #[error("SQL SELECT query '{qname}' couldn't be added: {source}")]
@@ -1069,23 +1094,6 @@ pub fn rpc_err_no_downcast<T: Into<String>>(during: T, err: ReadySetError) -> Re
     }
 }
 
-/// Make a new [`ReadySetError::RpcFailed`] with the provided string-able `during` value
-/// and the provided `err` as cause.
-///
-/// This attempts to downcast the `err` into a `Box<ReadySetError>`. If the downcasting
-/// fails, the error is formatted as a [`ReadySetError::Internal`].
-pub fn rpc_err<T: Into<String>>(during: T, err: Box<dyn std::error::Error>) -> ReadySetError {
-    // TODO(eta): this downcast WILL always fail, because I haven't really had a chance to
-    // unravel the complete madness that is `tokio_tower` yet.
-    let rse: Box<ReadySetError> = err
-        .downcast()
-        .unwrap_or_else(|e| Box::new(internal_err!("failed to downcast: {}", e)));
-    ReadySetError::RpcFailed {
-        during: during.into(),
-        source: rse,
-    }
-}
-
 /// Make a new [`ReadySetError::ViewError`] with the provided `idx` and `err` values.
 pub fn view_err<A: Into<NodeIndex>, B: Into<ReadySetError>>(idx: A, err: B) -> ReadySetError {
     ReadySetError::ViewError {
@@ -1100,26 +1108,6 @@ pub fn table_err<E: Into<ReadySetError>>(table: Relation, err: E) -> ReadySetErr
         table,
         source: Box::new(err.into()),
     }
-}
-
-/// Generates a closure, suitable as an argument to `.map_err()`, that maps the provided error
-/// argument into a [`ReadySetError::RpcFailed`] with the given `during` argument (anything
-/// that implements `Display`).
-///
-/// When building in debug mode, the `during` argument generated also captures file, line, and
-/// column information for further debugging purposes.
-///
-/// # Example
-///
-/// ```ignore
-/// let rpc_result = do_rpc_call()
-///     .map_err(rpc_err!("do_rpc_call"));
-/// ```
-#[macro_export]
-macro_rules! rpc_err {
-    ($during:expr) => {
-        |e| $crate::rpc_err(format!("{}{}", $during, $crate::__location_info!()), e)
-    };
 }
 
 /// Generate a `From` impl for the given error type and variant that just stringifies the error, so

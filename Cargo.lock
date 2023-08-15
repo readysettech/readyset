@@ -4651,6 +4651,7 @@ dependencies = [
  "deadpool-postgres",
  "derive_more",
  "failpoint-macros",
+ "futures",
  "hyper",
  "mysql_async",
  "nom-sql",
@@ -4663,6 +4664,7 @@ dependencies = [
  "tikv-jemalloc-ctl",
  "tokio-native-tls",
  "tokio-postgres",
+ "tokio-tower",
  "url",
  "vec1",
 ]
