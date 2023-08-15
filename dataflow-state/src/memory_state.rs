@@ -119,14 +119,14 @@ impl State for MemoryState {
                 // we need to check that we're not erroneously filling any holes
                 // there are two cases here:
                 //
-                //  - if the incoming record is a partial replay (i.e., partial.is_some()), then we
-                //    *know* that we are the target of the replay, and therefore we *know* that the
-                //    materialization must already have marked the given key as "not a hole".
-                //  - if the incoming record is a normal message (i.e., partial.is_none()), then we
-                //    need to be careful. since this materialization is partial, it may be that we
-                //    haven't yet replayed this `r`'s key, in which case we shouldn't forward that
-                //    record! if all of our indices have holes for this record, there's no need for
-                //    us to forward it. it would just be wasted work.
+                //  - if the incoming record is a partial replay (i.e., partial_tag.is_some()), then
+                //    we *know* that we are the target of the replay, and therefore we *know* that
+                //    the materialization must already have marked the given key as "not a hole".
+                //  - if the incoming record is a normal message (i.e., partial_tag.is_none()), then
+                //    we need to be careful. since this materialization is partial, it may be that
+                //    we haven't yet replayed this `r`'s key, in which case we shouldn't forward
+                //    that record! if all of our indices have holes for this record, there's no need
+                //    for us to forward it. it would just be wasted work.
                 //
                 //    XXX: we could potentially save come computation here in joins by not forcing
                 //    `right` to backfill the lookup key only to then throw the record away
