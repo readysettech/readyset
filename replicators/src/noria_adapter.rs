@@ -966,6 +966,10 @@ impl NoriaAdapter {
                 // In some cases, we may fail to replicate because of unsupported operations, stop
                 // replicating a table if we encounter this type of error.
                 Err(ReadySetError::TableError { table, source }) => {
+                    if source.is_networking_related() {
+                        // Don't deny replication of the error is caused by networking
+                        return Err(ReadySetError::TableError { table, source });
+                    }
                     self.deny_replication_for_table(table, source).await?;
                     continue;
                 }
