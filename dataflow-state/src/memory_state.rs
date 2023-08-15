@@ -396,8 +396,8 @@ impl State for MemoryState {
     }
 
     fn add_weak_key(&mut self, index: Index) {
-        let state = KeyedState::from(&index);
-        self.weak_indices.insert(index.columns, state);
+        let weak_index = KeyedState::from(&index);
+        self.weak_indices.insert(index.columns, weak_index);
     }
 
     fn lookup_weak<'a>(&'a self, columns: &[usize], key: &PointKey) -> Option<RecordResult<'a>> {
