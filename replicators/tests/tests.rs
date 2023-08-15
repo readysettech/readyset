@@ -135,10 +135,10 @@ impl TestChannel {
     /// message, which should not happen if this is called when waiting for snapshotting to
     /// complete.
     async fn snapshot_completed(&mut self) -> ReadySetResult<()> {
-        match tokio::time::timeout(Duration::from_secs(10), self.0.recv()).await {
-            Ok(Some(ReplicatorMessage::SnapshotDone)) => Ok(()),
-            Ok(_) => internal!(),
-            Err(_) => internal!("Timeout reached"),
+        match self.0.recv().await {
+            Some(ReplicatorMessage::SnapshotDone) => Ok(()),
+            Some(ReplicatorMessage::Error(e)) => Err(e),
+            _ => internal!(),
         }
     }
 }
@@ -368,6 +368,7 @@ impl TestHandle {
             .await
             {
                 error!(%error, "Error in replicator");
+                let _ = sender.send(ReplicatorMessage::Error(error));
             }
         });
 
