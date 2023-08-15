@@ -1222,7 +1222,11 @@ impl Service<ViewQuery> for ReaderHandle {
                 self.shards
                     .first_mut()
                     .call(request)
-                    .map_err(rpc_err!("<View as Service<ViewQuery>>::call"))
+                    .map_err(rpc_err!(
+                        "<View as Service<ViewQuery>>::call",
+                        multiplex::MultiplexTransport<Transport, Tagger>,
+                        Instrumented<Tagged<ReadQuery>>,
+                    ))
                     .and_then(move |reply| {
                         let future = async move {
                             reply

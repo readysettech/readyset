@@ -496,9 +496,13 @@ impl Table {
                 let request = Tagged::from(i);
                 let _guard = span.as_ref().map(Span::enter);
                 trace!("submit request");
-                future::Either::Left(future::Either::Right(
-                    table_rpc.call(request).map_err(rpc_err!("Table::input")),
-                ))
+                future::Either::Left(future::Either::Right(table_rpc.call(request).map_err(
+                    rpc_err!(
+                        "Table::input",
+                        multiplex::MultiplexTransport<Transport, Tagger>,
+                        Tagged<PacketData>,
+                    ),
+                )))
             }
             _ => {
                 let key_len = self.key.len();
@@ -583,7 +587,11 @@ impl Table {
                 future::Either::Right(
                     wait_for
                         .try_for_each(|_| async { Ok(()) })
-                        .map_err(rpc_err!("Table::input"))
+                        .map_err(rpc_err!(
+                            "Table::input",
+                            multiplex::MultiplexTransport<Transport, Tagger>,
+                            Tagged<PacketData>,
+                        ))
                         .map_ok(Tagged::from),
                 )
             }
@@ -600,11 +608,11 @@ impl Table {
         match self.shards.first_mut() {
             Some(table_rpc) if nshards == 1 => {
                 let request = Tagged::from(t);
-                future::Either::Left(
-                    table_rpc
-                        .call(request)
-                        .map_err(rpc_err!("Table::timestamp")),
-                )
+                future::Either::Left(table_rpc.call(request).map_err(rpc_err!(
+                    "Table::timestamp",
+                    multiplex::MultiplexTransport<Transport, Tagger>,
+                    Tagged<PacketData>,
+                )))
             }
             _ => {
                 if self.key.is_empty() {
@@ -628,7 +636,11 @@ impl Table {
                 future::Either::Right(future::Either::Right(
                     wait_for
                         .try_for_each(|_| async { Ok(()) })
-                        .map_err(rpc_err!("Table::timestamp"))
+                        .map_err(rpc_err!(
+                            "Table::timestamp",
+                            multiplex::MultiplexTransport<Transport, Tagger>,
+                            Tagged<PacketData>,
+                        ))
                         .map_ok(Tagged::from),
                 ))
             }
