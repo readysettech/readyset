@@ -796,6 +796,11 @@ impl ReadySetError {
             matches!(
                 e,
                 Self::RpcFailed { .. }
+                    | Self::ClientDropped
+                    | Self::TransportFull
+                    | Self::Desynchronized
+                    | Self::TransportSendFailed(..)
+                    | Self::TransportRecvFailed
                     | Self::IOError(..)
                     | Self::TcpSendError(..)
                     | Self::ServiceUnavailable
