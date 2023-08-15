@@ -627,7 +627,7 @@ impl ReadySetHandle {
     pub fn remove_query(
         &mut self,
         name: &Relation,
-    ) -> impl Future<Output = ReadySetResult<()>> + '_ {
+    ) -> impl Future<Output = ReadySetResult<u64>> + '_ {
         self.rpc("remove_query", name, self.migration_timeout)
     }
 

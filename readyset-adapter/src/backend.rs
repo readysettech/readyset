@@ -1673,7 +1673,7 @@ where
         name: &Relation,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         let maybe_view_request = self.noria.view_create_request_from_name(name).await;
-        self.noria.drop_view(name).await?;
+        let result = self.noria.drop_view(name).await?;
         if let Some(view_request) = maybe_view_request {
             // drop_query() should not be called if we have no view for this query.
             self.state.query_status_cache.drop_query(&view_request);
@@ -1682,7 +1682,9 @@ where
                 .always_attempt_readyset(&view_request, false);
             self.invalidate_prepared_statements_cache(&view_request);
         }
-        Ok(noria_connector::QueryResult::Empty)
+        Ok(noria_connector::QueryResult::Delete {
+            num_rows_deleted: result,
+        })
     }
 
     /// Forwards a `DROP ALL CACHES` request to noria
