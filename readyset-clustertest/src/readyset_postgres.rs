@@ -226,6 +226,56 @@ async fn embedded_readers_adapters_lt_replicas() {
         }
     }
 
+    // Spin up a second adapter - it should join the cluster and start serving reads
+
+    deployment.start_adapter(true).await.unwrap();
+    let mut second_adapter = deployment.adapter(1).await;
+
+    eventually! {
+        run_test: {
+            let res: Vec<Vec<DfValue>> = second_adapter
+                .execute(&"SELECT count(*) FROM t WHERE x = $1;", [DfValue::from(1i32)])
+                .await
+                .unwrap()
+                .try_into()
+                .unwrap();
+            let dest = last_statement_destination(&mut second_adapter).await;
+            (res, dest)
+        },
+        then_assert: |(res, dest)| {
+            assert_eq!(dest, QueryDestination::Readyset);
+            assert_eq!(res, vec![vec![2.into()]]);
+        }
+    }
+
+    adapter
+        .query_drop("INSERT INTO t (x) VALUES (1);")
+        .await
+        .unwrap();
+
+    // *both* adapters should now receive writes
+
+    eventually! {
+        run_test: {
+            let res1: Vec<Vec<DfValue>> = adapter
+                .execute(&"SELECT count(*) FROM t WHERE x = $1;", [DfValue::from(1i32)])
+                .await
+                .unwrap()
+                .try_into()
+                .unwrap();
+            let res2: Vec<Vec<DfValue>> = second_adapter
+                .execute(&"SELECT count(*) FROM t WHERE x = $1;", [DfValue::from(1i32)])
+                .await
+                .unwrap()
+                .try_into()
+                .unwrap();
+            (res1, res2)
+        },
+        then_assert: |(res1, res2)| {
+            assert_eq!(res1, vec![vec![3.into()]]);
+            assert_eq!(res2, vec![vec![3.into()]]);
+        }
+    }
     deployment.teardown().await.unwrap();
 }
 
