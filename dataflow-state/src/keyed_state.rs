@@ -609,6 +609,26 @@ impl KeyedState {
             }
         }
     }
+
+    pub(super) fn values<'a>(&'a self) -> Box<dyn Iterator<Item = &'a Rows> + 'a> {
+        match self {
+            KeyedState::AllRows(ref rows) => Box::new(iter::once(rows)),
+            KeyedState::SingleBTree(ref map) => Box::new(map.values()),
+            KeyedState::DoubleBTree(ref map) => Box::new(map.values()),
+            KeyedState::TriBTree(ref map) => Box::new(map.values()),
+            KeyedState::QuadBTree(ref map) => Box::new(map.values()),
+            KeyedState::QuinBTree(ref map) => Box::new(map.values()),
+            KeyedState::SexBTree(ref map) => Box::new(map.values()),
+            KeyedState::MultiBTree(ref map, _) => Box::new(map.values()),
+            KeyedState::SingleHash(ref map) => Box::new(map.values()),
+            KeyedState::DoubleHash(ref map) => Box::new(map.values()),
+            KeyedState::TriHash(ref map) => Box::new(map.values()),
+            KeyedState::QuadHash(ref map) => Box::new(map.values()),
+            KeyedState::QuinHash(ref map) => Box::new(map.values()),
+            KeyedState::SexHash(ref map) => Box::new(map.values()),
+            KeyedState::MultiHash(ref map, _) => Box::new(map.values()),
+        }
+    }
 }
 
 impl From<&Index> for KeyedState {
