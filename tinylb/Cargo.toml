@@ -1,0 +1,12 @@
+[package]
+name = "tinylb"
+version = "0.1.0"
+publish = false
+authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0"
+clap = { workspace = true, features = ["derive", "env"] }
+futures = "0.3"
+tokio = { workspace = true, features = ["full"] }

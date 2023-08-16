@@ -55,6 +55,7 @@ members = [
     "replicators",
     "proptest-stateful",
     "system-benchmarks",
+    "tinylb",
     "test-utils",
     "timestamp-service",
     "tournament-kway"
