@@ -2143,6 +2143,7 @@ mod tests {
     use pretty_assertions::assert_eq;
     use readyset_data::Collation;
     use replication_offset::mysql::MySqlPosition;
+    use replication_offset::postgres::PostgresPosition;
     use rust_decimal::Decimal;
     use test_strategy::proptest;
 
@@ -2976,7 +2977,10 @@ mod tests {
         let mut state = setup_persistent("replication_offset_roundtrip_postgres", None);
         state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
         let mut records: Records = vec![(vec![1.into(), "A".into()], true)].into();
-        let replication_offset = ReplicationOffset::Postgres(12.into());
+        let replication_offset = ReplicationOffset::Postgres(PostgresPosition {
+            last_commit_lsn: 12.into(),
+            lsn: 0.into(),
+        });
         state
             .process_records(&mut records, None, Some(replication_offset.clone()))
             .unwrap();
@@ -3039,7 +3043,10 @@ mod tests {
                     .map(|n| Record::from(vec![n.into()]))
                     .collect::<Records>(),
                 None,
-                Some(ReplicationOffset::Postgres(1.into())),
+                Some(ReplicationOffset::Postgres(PostgresPosition {
+                    last_commit_lsn: 1.into(),
+                    lsn: 0.into(),
+                })),
             )
             .unwrap();
 
@@ -3054,7 +3061,10 @@ mod tests {
                     .map(|n| Record::from(vec![n.into()]))
                     .collect::<Records>(),
                 None,
-                Some(ReplicationOffset::Postgres(2.into())),
+                Some(ReplicationOffset::Postgres(PostgresPosition {
+                    last_commit_lsn: 2.into(),
+                    lsn: 0.into(),
+                })),
             )
             .unwrap();
 
@@ -3064,7 +3074,10 @@ mod tests {
         rh.process_records(
             &mut Records::from(Vec::<Record>::new()),
             None,
-            Some(ReplicationOffset::Postgres(2.into())),
+            Some(ReplicationOffset::Postgres(PostgresPosition {
+                last_commit_lsn: 2.into(),
+                lsn: 0.into(),
+            })),
         )
         .unwrap();
 
