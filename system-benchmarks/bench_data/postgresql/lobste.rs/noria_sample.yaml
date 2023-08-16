@@ -1,0 +1,19 @@
+distributions:
+  - name: ids
+    range:
+      start: 0
+      end: 10000
+      # zipf(1.15) means that 90% of the queries gonna be for 10% of the keys
+    zipf: 1.15
+queries:
+  - spec: 'SELECT id, author, title, url, count(1) as vcount
+           FROM stories
+           JOIN votes ON votes.story_id = stories.id
+           WHERE stories.id = $1
+           group by id, author, title, url'
+    params:
+      - sql_type: bigint
+        distribution: ids
+        col: 0
+    weight: 2000000
+    migrate: true
