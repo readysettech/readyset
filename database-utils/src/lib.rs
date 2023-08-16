@@ -47,7 +47,7 @@ pub struct UpstreamConfig {
     /// trusted, any certificate for any site will be trusted for use, including expired
     /// certificates. This introduces significant vulnerabilities, and should only be used as a
     /// last resort.
-    #[clap(long, env = "DISABLE_UPSTREAM_SSL_VERIFICATION")]
+    #[clap(long, env = "DISABLE_UPSTREAM_SSL_VERIFICATION", hide = true)]
     #[serde(default)]
     pub disable_upstream_ssl_verification: bool,
 
@@ -59,7 +59,7 @@ pub struct UpstreamConfig {
     /// Disable running DDL Streaming Replication Setup for PostgreSQL. If this flag is set
     /// the DDL Streaming Replication Setup SQL queries will need to be manually run on the
     /// primary server before streaming replication will start.
-    #[clap(long, env = "DISABLE_SETUP_DDL_REPLICATION")]
+    #[clap(long, env = "DISABLE_SETUP_DDL_REPLICATION", hide = true)]
     #[serde(default)]
     pub disable_setup_ddl_replication: bool,
 
@@ -67,7 +67,7 @@ pub struct UpstreamConfig {
     ///
     /// This can be used to differentiate different ReadySet deployments connected to the same
     /// upstream DB.
-    #[clap(long, env = "REPLICATION_SERVER_ID")]
+    #[clap(long, env = "REPLICATION_SERVER_ID", hide = true)]
     #[serde(default)]
     pub replication_server_id: Option<u32>,
 
@@ -82,12 +82,12 @@ pub struct UpstreamConfig {
 
     /// Sets the time (in seconds) between reports of progress snapshotting the database. A value
     /// of 0 disables reporting.
-    #[clap(long, default_value = "30")]
+    #[clap(long, default_value = "30", hide = true)]
     #[serde(default = "default_snapshot_report_interval_secs")]
     pub snapshot_report_interval_secs: u16,
 
     /// Sets the connection count for the pool that is used for replication and snapshotting.
-    #[clap(long, default_value = "50")]
+    #[clap(long, default_value = "50", hide = true)]
     #[serde(default)]
     pub replication_pool_size: usize,
 }

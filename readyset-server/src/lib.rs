@@ -545,11 +545,11 @@ pub struct WorkerOptions {
     /// on disk, but `ephemeral` deletes the data when the ReadySet Server is stopped.
     /// `memory` stores base tables entirely in memory. `ephemeral` and `memory` are
     /// suitable for testing only. Use `persistent` for production deployments.
-    #[clap(long, default_value = "persistent")]
+    #[clap(long, default_value = "persistent", hide = true)]
     pub durability: DurabilityMode,
 
     /// Number of background threads used by RocksDB
-    #[clap(long, default_value = "6")]
+    #[clap(long, default_value = "6", hide = true)]
     pub persistence_threads: i32,
 
     /// Memory high water mark, in bytes. If process heap memory exceeds this value, we
@@ -562,12 +562,13 @@ pub struct WorkerOptions {
     #[clap(
         long = "memory-check-every",
         default_value = "1",
-        env = "MEMORY_CHECK_EVERY"
+        env = "MEMORY_CHECK_EVERY",
+        hide = true
     )]
     pub memory_check_freq: u64,
 
     /// The strategy to use when memory is freed from reader nodes
-    #[clap(long = "eviction-policy", default_value_t = dataflow::EvictionKind::LRU)]
+    #[clap(long = "eviction-policy", default_value_t = dataflow::EvictionKind::LRU, hide = true)]
     pub eviction_kind: dataflow::EvictionKind,
 
     /// Disable partial
@@ -575,7 +576,7 @@ pub struct WorkerOptions {
     pub no_partial: bool,
 
     /// Allow the creation of fully materialized nodes.
-    #[clap(long, env = "ALLOW_FULL_MATERIALIZATION")]
+    #[clap(long, env = "ALLOW_FULL_MATERIALIZATION", hide = true)]
     pub allow_full_materialization: bool,
 
     /// Enable packet filters in egresses before readers
@@ -623,7 +624,12 @@ pub struct WorkerOptions {
     pub replicator_config: UpstreamConfig,
 
     /// Timeout in seconds for all requests made from the controller to workers
-    #[clap(long, env = "WORKER_REQUEST_TIMEOUT_SECONDS", default_value = "1800")]
+    #[clap(
+        long,
+        env = "WORKER_REQUEST_TIMEOUT_SECONDS",
+        default_value = "1800",
+        hide = true
+    )]
     pub worker_request_timeout_seconds: u64,
 }
 
