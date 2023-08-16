@@ -1330,7 +1330,7 @@ impl DeploymentHandle {
 
         self.adapters.push(AdapterHandle {
             metrics_port,
-            conn_str: format!("mysql://127.0.0.1:{}", port),
+            conn_str: format!("{}://127.0.0.1:{}/{}", database_type, port, &self.name),
             process,
         });
 

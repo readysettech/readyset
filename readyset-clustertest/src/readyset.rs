@@ -495,16 +495,17 @@ async fn server_auto_restarts() {
 async fn assert_deployment_health(mut dh: DeploymentHandle) {
     let mut adapter = dh.first_adapter().await;
     adapter
-        .query_drop(
-            r"CREATE TABLE t1 (
-        uid INT NOT NULL,
-        value INT NOT NULL
-    );",
-        )
+        .query_drop(format!(
+            r"CREATE TABLE {}.t1 (
+                uid INT NOT NULL,
+                value INT NOT NULL
+            );",
+            dh.name()
+        ))
         .await
         .unwrap();
     adapter
-        .query_drop(r"INSERT INTO t1 VALUES (1, 4);")
+        .query_drop(format!(r"INSERT INTO {}.t1 VALUES (1, 4);", dh.name()))
         .await
         .unwrap();
 
