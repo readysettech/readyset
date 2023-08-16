@@ -1014,7 +1014,6 @@ mod tests {
             #[allow(unused)]
             ReplayKey(Tag, TestRow),
             CreateStrictIndex(Vec<usize>, Tag),
-            #[allow(unused)]
             CreateWeakIndex(Vec<usize>),
         }
 
@@ -1022,7 +1021,6 @@ mod tests {
         struct IndexModelState {
             rows: Vec<TestRow>,
             strict_indexes: BTreeMap<Tag, Vec<usize>>,
-            #[allow(unused)]
             weak_indexes: Vec<Vec<usize>>,
         }
 
@@ -1083,9 +1081,9 @@ mod tests {
 
                 let insert_row_strat = gen_insert_row().boxed();
                 let create_strict_strat = gen_create_strict(self.next_tag()).boxed();
-                //let create_weak_strat = gen_create_weak().boxed();
+                let create_weak_strat = gen_create_weak().boxed();
 
-                let mut ops = vec![insert_row_strat, create_strict_strat];
+                let mut ops = vec![insert_row_strat, create_strict_strat, create_weak_strat];
 
                 if !self.rows.is_empty() {
                     let delete_row_strat = gen_delete_row(self.rows.clone()).boxed();
@@ -1117,6 +1115,9 @@ mod tests {
                     Operation::CreateStrictIndex(columns, tag) => {
                         self.strict_indexes.insert(*tag, columns.clone());
                     }
+                    Operation::CreateWeakIndex(columns) => {
+                        self.weak_indexes.push(columns.clone());
+                    }
                     _ => todo!(),
                 }
             }
@@ -1139,6 +1140,10 @@ mod tests {
                     Operation::CreateStrictIndex(columns, tag) => {
                         let index = Index::new(IndexType::HashMap, columns.clone());
                         ctxt.add_key(index, Some(vec![*tag]));
+                    }
+                    Operation::CreateWeakIndex(columns) => {
+                        let index = Index::new(IndexType::HashMap, columns.clone());
+                        ctxt.add_weak_key(index);
                     }
                     _ => todo!(),
                 }
