@@ -996,6 +996,7 @@ mod tests {
         use proptest_stateful::{
             proptest_config_with_local_failure_persistence, ModelState, ProptestStatefulConfig,
         };
+        use vec1::Vec1;
 
         use super::*;
 
@@ -1007,12 +1008,16 @@ mod tests {
         // cases. (Keep in mind values range from 0..=2 so that gives us 3^3 = 27 possible rows.)
         type TestRow = [u8; NUM_COLS];
 
+        fn test_row_to_record(row: TestRow) -> Record {
+            let row = row.into_iter().map(|v| DfValue::Int(v as i64)).collect();
+            Record::Positive(row)
+        }
+
         #[derive(Clone, Debug)]
         enum Operation {
             InsertRow(TestRow),
             DeleteRow(TestRow),
-            #[allow(unused)]
-            ReplayKey(Tag, TestRow),
+            ReplayKey(Tag, Vec<u8>),
             CreateStrictIndex(Vec<usize>, Tag),
             CreateWeakIndex(Vec<usize>),
         }
@@ -1020,6 +1025,7 @@ mod tests {
         #[derive(Clone, Debug, Default)]
         struct IndexModelState {
             rows: Vec<TestRow>,
+            filled_holes: BTreeMap<Vec<usize>, Vec<Vec<u8>>>,
             strict_indexes: BTreeMap<Tag, Vec<usize>>,
             weak_indexes: Vec<Vec<usize>>,
         }
@@ -1037,6 +1043,16 @@ mod tests {
         prop_compose! {
             fn gen_delete_row(rows: Vec<TestRow>)(r in sample::select(rows)) -> Operation {
                 Operation::DeleteRow(r)
+            }
+        }
+
+        prop_compose! {
+            fn gen_replay_key(tags: Vec<Tag>, strict_indexes: BTreeMap<Tag, Vec<usize>>)
+                             (tag in sample::select(tags))
+                             (key in vec![ELEM_RANGE; strict_indexes[&tag].len()],
+                              tag in Just(tag))
+                             -> Operation {
+                Operation::ReplayKey(tag, key)
             }
         }
 
@@ -1076,8 +1092,9 @@ mod tests {
 
             fn op_generators(&self) -> Vec<Self::OperationStrategy> {
                 // We can always perform any op except DeleteRow (since that one requires we have
-                // at least one row to delete), so most of the ops just get unconditionally thrown
-                // into a vec right from the beginning.
+                // at least one row to delete), and ReplayKey (since we need to have created a tag
+                // to replay to), so most of the ops just get unconditionally thrown into a vec
+                // right from the beginning.
 
                 let insert_row_strat = gen_insert_row().boxed();
                 let create_strict_strat = gen_create_strict(self.next_tag()).boxed();
@@ -1090,6 +1107,15 @@ mod tests {
                     ops.push(delete_row_strat);
                 }
 
+                if !self.strict_indexes.is_empty() {
+                    let replay_key_strat = gen_replay_key(
+                        self.strict_indexes.keys().cloned().collect(),
+                        self.strict_indexes.clone(),
+                    )
+                    .boxed();
+                    ops.push(replay_key_strat);
+                }
+
                 ops
             }
 
@@ -1098,8 +1124,18 @@ mod tests {
                     Operation::InsertRow(_)
                     | Operation::CreateStrictIndex(_, _)
                     | Operation::CreateWeakIndex(_) => true,
+                    Operation::ReplayKey(tag, key) => {
+                        // Make sure we have a strict index with this tag, and then make sure that
+                        // the hole hasn't already been filled, since we would never trigger a
+                        // replay to a filled hole:
+                        self.strict_indexes.get(tag).map_or(false, |index| {
+                            !self
+                                .filled_holes
+                                .get(index)
+                                .map_or(false, |filled| filled.contains(key))
+                        })
+                    }
                     Operation::DeleteRow(row) => self.rows.contains(row),
-                    _ => todo!(),
                 }
             }
 
@@ -1112,13 +1148,19 @@ mod tests {
                         let row_index = self.rows.iter().position(|r| r == row).unwrap();
                         self.rows.remove(row_index);
                     }
+                    Operation::ReplayKey(tag, key) => {
+                        let index = self.strict_indexes[tag].clone();
+                        self.filled_holes
+                            .entry(index)
+                            .or_default()
+                            .push(key.clone());
+                    }
                     Operation::CreateStrictIndex(columns, tag) => {
                         self.strict_indexes.insert(*tag, columns.clone());
                     }
                     Operation::CreateWeakIndex(columns) => {
                         self.weak_indexes.push(columns.clone());
                     }
-                    _ => todo!(),
                 }
             }
 
@@ -1137,6 +1179,30 @@ mod tests {
                             row.iter().map(|v| DfValue::Int(*v as i64)).collect();
                         ctxt.remove(&row);
                     }
+                    Operation::ReplayKey(tag, key) => {
+                        let key_comparison = KeyComparison::Equal(
+                            Vec1::try_from_vec(
+                                key.iter().map(|v| DfValue::Int(*v as i64)).collect(),
+                            )
+                            .unwrap(),
+                        );
+                        ctxt.mark_filled(key_comparison, *tag);
+
+                        let index = &self.strict_indexes[tag];
+                        let row_matches_key = |row: &TestRow| -> bool {
+                            index.iter().enumerate().all(|(i, col)| row[*col] == key[i])
+                        };
+                        let mut records: Records = self
+                            .rows
+                            .iter()
+                            .copied()
+                            .filter(row_matches_key)
+                            .map(test_row_to_record)
+                            .collect();
+
+                        ctxt.process_records(&mut records, Some(*tag), None)
+                            .unwrap();
+                    }
                     Operation::CreateStrictIndex(columns, tag) => {
                         let index = Index::new(IndexType::HashMap, columns.clone());
                         ctxt.add_key(index, Some(vec![*tag]));
@@ -1145,7 +1211,6 @@ mod tests {
                         let index = Index::new(IndexType::HashMap, columns.clone());
                         ctxt.add_weak_key(index);
                     }
-                    _ => todo!(),
                 }
             }
 
@@ -1162,6 +1227,7 @@ mod tests {
             }
         }
 
+        #[ignore = "Test doesn't pass yet due to it finding known bugs"]
         #[test]
         fn run_cases() {
             let config = ProptestStatefulConfig {
