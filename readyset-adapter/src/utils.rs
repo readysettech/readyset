@@ -8,7 +8,7 @@ use nom_sql::{
     BinaryOperator, Column, ColumnConstraint, CreateTableBody, DeleteStatement, Expr,
     InsertStatement, Literal, SelectStatement, SqlIdentifier, SqlQuery, TableKey, UpdateStatement,
 };
-use readyset_client::{Modification, Operation};
+use readyset_client::{ColumnSchema, Modification, Operation};
 use readyset_data::{DfType, DfValue, Dialect};
 use readyset_errors::{
     bad_request_err, invalid_query, invalid_query_err, invariant, invariant_eq, unsupported,
@@ -594,6 +594,17 @@ pub(crate) fn generate_query_name(
     schema_search_path: &[SqlIdentifier],
 ) -> String {
     format!("q_{:x}", hash(&(statement, schema_search_path)))
+}
+
+pub(crate) fn create_dummy_column(name: &str) -> ColumnSchema {
+    ColumnSchema {
+        column: nom_sql::Column {
+            name: name.into(),
+            table: None,
+        },
+        column_type: DfType::DEFAULT_TEXT,
+        base: None,
+    }
 }
 
 #[cfg(test)]
