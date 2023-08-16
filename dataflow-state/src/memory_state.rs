@@ -991,6 +991,7 @@ mod tests {
         use std::time::Duration;
 
         use async_trait::async_trait;
+        use hashbag::HashBag;
         use proptest::prelude::*;
         use proptest::sample;
         use proptest_stateful::{
@@ -1214,8 +1215,33 @@ mod tests {
                 }
             }
 
-            async fn check_postconditions(&self, _ctxt: &mut Self::RunContext) {
-                // TODO check that the weak index contents are correct
+            async fn check_postconditions(&self, ctxt: &mut Self::RunContext) {
+                let materialized_rows: HashBag<Vec<u8>> = self
+                    .rows
+                    .iter()
+                    .filter(|r| {
+                        self.filled_holes.iter().any(|(index, filled)| {
+                            let row_key = index.iter().map(|col| r[*col]).collect();
+                            filled.contains(&row_key)
+                        })
+                    })
+                    .map(|r| r.to_vec())
+                    .collect();
+
+                for weak_index_key in self.weak_indexes.iter() {
+                    let keyed_state = &ctxt.weak_indices[weak_index_key];
+                    let weak_index_rows: HashBag<_> = keyed_state
+                        .values()
+                        .flatten()
+                        .map(|row| {
+                            (0..NUM_COLS)
+                                .map(|i| (&row[i]).try_into().unwrap())
+                                .collect::<Vec<u8>>()
+                        })
+                        .collect();
+
+                    assert_eq!(materialized_rows, weak_index_rows);
+                }
             }
 
             async fn clean_up_test_run(&self, _: &mut Self::RunContext) {}
