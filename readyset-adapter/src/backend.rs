@@ -91,7 +91,7 @@ use readyset_client::results::Results;
 use readyset_client::{ColumnSchema, PlaceholderIdx, ViewCreateRequest};
 pub use readyset_client_metrics::QueryDestination;
 use readyset_client_metrics::{recorded, EventType, QueryExecutionEvent, SqlQueryType};
-use readyset_data::{DfType, DfValue};
+use readyset_data::DfValue;
 use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
 use readyset_errors::{internal, internal_err, unsupported, unsupported_err, ReadySetResult};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
@@ -106,6 +106,7 @@ use crate::backend::noria_connector::ExecuteSelectContext;
 use crate::query_handler::SetBehavior;
 use crate::query_status_cache::QueryStatusCache;
 pub use crate::upstream_database::UpstreamPrepare;
+use crate::utils::create_dummy_column;
 use crate::{rewrite, QueryHandler, UpstreamDatabase, UpstreamDestination};
 
 pub mod noria_connector;
@@ -1713,15 +1714,6 @@ where
         &mut self,
         query_id: &Option<String>,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
-        let create_dummy_column = |n: &str| ColumnSchema {
-            column: nom_sql::Column {
-                name: n.into(),
-                table: None,
-            },
-            column_type: DfType::DEFAULT_TEXT,
-            base: None,
-        };
-
         let mut queries = self.state.query_status_cache.deny_list();
         if let Some(q_id) = query_id {
             queries.retain(|q| &q.id.to_string() == q_id);
@@ -1771,15 +1763,6 @@ where
         &mut self,
         query_id: &Option<String>,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
-        let create_dummy_column = |n: &str| ColumnSchema {
-            column: nom_sql::Column {
-                name: n.into(),
-                table: None,
-            },
-            column_type: DfType::DEFAULT_TEXT,
-            base: None,
-        };
-
         let mut queries = self.state.query_status_cache.allow_list();
 
         // Filter on query ID
@@ -1851,7 +1834,7 @@ where
             SqlQuery::Explain(nom_sql::ExplainStatement::Domains) => {
                 self.noria.explain_domains().await
             }
-            SqlQuery::Explain(nom_sql::ExplainStatement::Caches) => self.export_caches().await,
+            SqlQuery::Explain(nom_sql::ExplainStatement::Caches) => self.explain_caches().await,
             SqlQuery::CreateCache(CreateCacheStatement {
                 name,
                 inner,
@@ -2513,16 +2496,7 @@ where
     }
 
     /// Gets a list of all `CREATE CACHE ...` statements
-    async fn export_caches(&mut self) -> ReadySetResult<noria_connector::QueryResult<'static>> {
-        let create_dummy_column = |n: &str| ColumnSchema {
-            column: nom_sql::Column {
-                name: n.into(),
-                table: None,
-            },
-            column_type: DfType::DEFAULT_TEXT,
-            base: None,
-        };
-
+    async fn explain_caches(&mut self) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         let results: Vec<Vec<DfValue>> = self
             .noria
             .list_create_cache_stmts()
