@@ -1,5 +1,3 @@
-use std::time::{Duration, Instant};
-
 use async_trait::async_trait;
 use database_utils::UpstreamConfig;
 #[cfg(feature = "failure_injection")]
@@ -53,9 +51,6 @@ pub struct PostgresWalConnector {
     pub(crate) replication_slot: Option<CreatedSlot>,
     /// Whether to log statements received by the connector
     enable_statement_logging: bool,
-    /// The time at which we last sent a status update to the upstream database reporting our
-    /// current WAL position
-    time_last_position_reported: Instant,
 }
 
 /// The decoded response to `IDENTIFY_SYSTEM`
@@ -93,19 +88,6 @@ pub(crate) struct CreatedSlot {
 }
 
 impl PostgresWalConnector {
-    /// The max number of replication actions we buffer before returning them as a batch.
-    ///
-    /// Calling the ReadySet API is a bit expensive, therefore we try to queue as many actions
-    /// as possible before calling into the API. We therefore try to stop batching actions when
-    /// we hit this limit, BUT note that we may substantially exceed this limit in cases where
-    /// we receive many consecutive events that share the same LSN.
-    const MAX_QUEUED_INDEPENDENT_ACTIONS: usize = 100;
-
-    /// The interval at which we will send status updates to the upstream database. This matches the
-    /// default value for Postgres's `wal_receiver_status_interval`, which is the interval between
-    /// status updates given by Postgres's own WAL receiver during replication.
-    const STATUS_UPDATE_INTERVAL: Duration = Duration::from_secs(10);
-
     /// Connects to postgres and if needed creates a new replication slot for itself with an
     /// exported snapshot.
     pub(crate) async fn connect<S: AsRef<str>>(
@@ -133,12 +115,6 @@ impl PostgresWalConnector {
             next_position,
             replication_slot: None,
             enable_statement_logging,
-            // We initialize `time_last_position_reported` to be more than
-            // `Self::STATUS_UPDATE_INTERVAL` seconds ago to ensure that we report our position in
-            // the logs the next time we have an opportunity to
-            time_last_position_reported: Instant::now()
-                - Self::STATUS_UPDATE_INTERVAL
-                - Duration::from_secs(1),
         };
 
         if next_position.is_none() {
@@ -369,20 +345,6 @@ impl PostgresWalConnector {
         Ok(())
     }
 
-    /// Send a status update to the upstream database, reporting our position in
-    /// the WAL as `ack`.
-    ///
-    /// Sending a standby status update to the upstream database involves "ACKing"
-    /// the point in the WAL up to which we've successfully persisted data. This lets
-    /// the upstream database know that it can remove all the WAL entries up to this
-    /// point.
-    ///
-    /// The LSNs of events sent to us from Postgres do not monotonically increase
-    /// with each event. For this reason, we cannot "ACK" the LSN of the last event
-    /// we saw because we have no guarantee that we've seen all the events with LSNs
-    /// less than that of the last event we saw. However, LSNs across *COMMITs* are
-    /// guaranteed to increase monotonically, so we *can* safely "ACK" the LSN of the
-    /// last COMMIT we saw.
     fn send_standby_status_update(&self, ack: CommitLsn) -> ReadySetResult<()> {
         use bytes::{BufMut, BytesMut};
 
@@ -534,19 +496,11 @@ impl Connector for PostgresWalConnector {
     ) -> ReadySetResult<(ReplicationAction, ReplicationOffset)> {
         set_failpoint_return_err!(failpoints::POSTGRES_REPLICATION_NEXT_ACTION);
 
-        // If it has been longer than the defined status update interval, send a status update to
-        // the upstream database to report our position in the WAL as the LSN of the last COMMIT we
-        // successfully applied to ReadySet
-        if self.time_last_position_reported.elapsed() > Self::STATUS_UPDATE_INTERVAL {
-            let last_commit_lsn: CommitLsn = last_pos.clone().try_into()?;
-            debug!(
-                "Reporting our position in the WAL to the upstream database as {last_commit_lsn}"
-            );
-
-            self.send_standby_status_update(last_commit_lsn)?;
-            self.time_last_position_reported = Instant::now();
-        }
-
+        // Calling the ReadySet API is a bit expensive, therefore we try to queue as many actions
+        // as possible before calling into the API. We therefore try to stop batching actions when
+        // we hit this limit, BUT note that we may substantially exceed this limit in cases where
+        // we receive many consecutive events that share the same LSN:
+        const MAX_QUEUED_INDEPENDENT_ACTIONS: usize = 100;
         let mut cur_table = Relation {
             schema: None,
             name: "".into(),
@@ -555,7 +509,7 @@ impl Connector for PostgresWalConnector {
             last_commit_lsn: last_pos.clone().try_into()?,
             lsn: 0.into(),
         };
-        let mut actions = Vec::with_capacity(Self::MAX_QUEUED_INDEPENDENT_ACTIONS);
+        let mut actions = Vec::with_capacity(MAX_QUEUED_INDEPENDENT_ACTIONS);
 
         loop {
             debug_assert!(
@@ -600,8 +554,7 @@ impl Connector for PostgresWalConnector {
                 // the next position would be `(n, n)`, which is distinct from and greater than `(n,
                 // 0)`.
                 Ok(Some(lsn))
-                    if actions.len() >= Self::MAX_QUEUED_INDEPENDENT_ACTIONS
-                        && *lsn != cur_pos.lsn =>
+                    if actions.len() >= MAX_QUEUED_INDEPENDENT_ACTIONS && *lsn != cur_pos.lsn =>
                 {
                     self.peek = Some(event);
                     return Ok((
@@ -761,8 +714,18 @@ impl Connector for PostgresWalConnector {
                     }
                 }
                 WalEvent::WantsKeepaliveResponse => {
+                    // Sending a standby status update to the upstream database involves "ACKing"
+                    // the point in the WAL up to which we've successfully persisted data. This lets
+                    // the upstream database know that it can remove all the WAL entries up to this
+                    // point.
+                    //
+                    // The LSNs of events sent to us from Postgres do not monotonically increase
+                    // with each event. For this reason, we cannot "ACK" the LSN of the last event
+                    // we saw because we have no guarantee that we've seen all the events with LSNs
+                    // less than that of the last event we saw. However, LSNs across *COMMITs* are
+                    // guaranteed to increase monotonically, so we *can* safely "ACK" the LSN of the
+                    // last COMMIT we saw.
                     self.send_standby_status_update(last_pos.clone().try_into()?)?;
-                    self.time_last_position_reported = Instant::now();
                 }
                 WalEvent::Commit { lsn } => {
                     // On commit we flush, because there is no knowing when the next commit is
