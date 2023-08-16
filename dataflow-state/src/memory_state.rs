@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
 use common::{IndexType, Record, Records, SizeOf, Tag};
+use hashbag::HashBag;
 use rand::{self, Rng};
 use readyset_client::internal::Index;
 use readyset_client::{KeyComparison, KeyCount};
@@ -396,7 +397,48 @@ impl State for MemoryState {
     }
 
     fn add_weak_key(&mut self, index: Index) {
-        let weak_index = KeyedState::from(&index);
+        let mut weak_index = KeyedState::from(&index);
+
+        let mut strict_index_iter = self.state.iter();
+
+        if let Some(first_strict_index) = strict_index_iter.next() {
+            // The first strict index we merge into the weak index is a special case. We don't need
+            // to worry about duplicate rows yet, so we can just copy in every row directly:
+            for row in first_strict_index.values().flatten() {
+                // SAFETY: row remains inside the same state
+                weak_index.insert(&index.columns, unsafe { row.clone() }, false);
+            }
+        }
+
+        for strict_index in strict_index_iter {
+            // If there are any additional indexes, we need to take care to avoid duplicating rows:
+            for (row, duplicate_count) in strict_index.values().flat_map(HashBag::set_iter) {
+                // If a row is present in a strict index, then *all* the copies of that row must be
+                // present in that index, because all copies of a row share the same key, and
+                // therefore a hole wouldn't actually be filled if only some of the copies were
+                // present in that index. As such, we can safely assume that encountering the same
+                // row again in any other strict index must imply that that row is a duplicate of a
+                // row we already inserted into the weak index.
+                //
+                // It might be more efficient here to use some sort of seperate temporary data
+                // structure to track whether we've seen each row before, since having to
+                // repeatedly re-create lookup keys from the rows we're iterating over seems like
+                // an expensive way to check whether the weak index already contains a given row.
+                // But, on the other hand, that would probably be more memory-intensive, so it's
+                // unclear what's the better tradeoff, and we can always look at optimizing this
+                // later if need be.
+                let key = PointKey::from(index.columns.iter().map(|i| row[*i].clone()));
+                if weak_index.lookup(&key).is_none() {
+                    // If one copy of the row isn't a duplicate, none of the copies are, so go
+                    // ahead and insert every copy in one go to save on repeated checks:
+                    for _ in 0..duplicate_count {
+                        // SAFETY: row remains inside the same state
+                        weak_index.insert(&index.columns, unsafe { row.clone() }, false);
+                    }
+                }
+            }
+        }
+
         self.weak_indices.insert(index.columns, weak_index);
     }
 
