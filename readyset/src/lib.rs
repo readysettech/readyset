@@ -165,7 +165,8 @@ pub struct Options {
         long,
         env = "DATABASE_TYPE",
         value_enum,
-        required_unless_present("upstream_db_url")
+        required_unless_present("upstream_db_url"),
+        hide = true
     )]
     pub database_type: Option<DatabaseType>,
 
@@ -174,11 +175,13 @@ pub struct Options {
     standalone: bool,
 
     /// The authority to use
+    // NOTE: hidden because the value can be derived from `--standalone`
     #[clap(
         long,
         env = "AUTHORITY",
         default_value_if("standalone", "true", Some("standalone")),
-        default_value = "consul"
+        default_value = "consul",
+        hide = true
     )]
     authority: AuthorityType,
 
@@ -199,7 +202,7 @@ pub struct Options {
     log_slow: bool,
 
     /// Don't require authentication for any client connections
-    #[clap(long, env = "ALLOW_UNAUTHENTICATED_CONNECTIONS")]
+    #[clap(long, env = "ALLOW_UNAUTHENTICATED_CONNECTIONS", hide = true)]
     allow_unauthenticated_connections: bool,
 
     /// Specify the migration mode for ReadySet to use. The default "explicit" mode is the only
@@ -221,7 +224,12 @@ pub struct Options {
     max_processing_minutes: u64,
 
     /// Sets the migration handlers's loop interval in milliseconds.
-    #[clap(long, env = "MIGRATION_TASK_INTERVAL", default_value = "20000")]
+    #[clap(
+        long,
+        env = "MIGRATION_TASK_INTERVAL",
+        default_value = "20000",
+        hide = true
+    )]
     migration_task_interval: u64,
 
     /// IP:PORT to host endpoint for scraping metrics from the adapter.
@@ -281,7 +289,7 @@ pub struct Options {
     /// Allow executing, but ignore, unsupported `SET` statements.
     ///
     /// Takes precedence over any value passed to `--unsupported-set-mode`
-    #[clap(long, hide = true, env = "ALLOW_UNSUPPORTED_SET")]
+    #[clap(long, hide = true, env = "ALLOW_UNSUPPORTED_SET", hide = true)]
     allow_unsupported_set: bool,
 
     /// Configure how ReadySet behaves when receiving unsupported SET statements.
@@ -292,12 +300,17 @@ pub struct Options {
     /// * "proxy" - proxy all subsequent statements
     // NOTE: In order to keep `allow_unsupported_set` hidden, we're keeping these two flags separate
     // and *not* marking them as conflicting with each other.
-    #[clap(long, env = "UNSUPPORTED_SET_MODE", default_value = "error")]
+    #[clap(
+        long,
+        env = "UNSUPPORTED_SET_MODE",
+        default_value = "error",
+        hide = true
+    )]
     unsupported_set_mode: UnsupportedSetMode,
 
     // TODO(DAN): require explicit migrations
     /// Specifies the polling interval in seconds for requesting views from the Leader.
-    #[clap(long, env = "VIEWS_POLLING_INTERVAL", default_value = "5")]
+    #[clap(long, env = "VIEWS_POLLING_INTERVAL", default_value = "5", hide = true)]
     views_polling_interval: u64,
 
     /// The time to wait before canceling a migration request. Defaults to 30 minutes.
@@ -334,7 +347,7 @@ pub struct Options {
     fallback_recovery_seconds: u64,
 
     /// Whether to use non-blocking or blocking reads against the cache.
-    #[clap(long, env = "NON_BLOCKING_READS")]
+    #[clap(long, env = "NON_BLOCKING_READS", hide = true)]
     non_blocking_reads: bool,
 
     /// Run ReadySet in embedded readers mode, running reader replicas (and only reader replicas)
@@ -367,14 +380,14 @@ pub struct Options {
     ///
     /// If set, we will create a cache with literals inlined in the unsupported placeholder
     /// positions every time the statement is executed with a new set of parameters.
-    #[clap(long, env = "EXPERIMENTAL_PLACEHOLDER_INLINING")]
+    #[clap(long, env = "EXPERIMENTAL_PLACEHOLDER_INLINING", hide = true)]
     experimental_placeholder_inlining: bool,
 
     /// Don't make connections to the upstream aatabase for new client connections.
     ///
     /// If this flag is set queries will never be proxied upstream - even if they are unsupported,
     /// fail to execute, or are run in a transaction.
-    #[clap(long, env = "NO_UPSTREAM_CONNECTIONS")]
+    #[clap(long, env = "NO_UPSTREAM_CONNECTIONS", hide = true)]
     no_upstream_connections: bool,
 
     /// If supplied we will clean up assets for the supplied deployment. If an upstream url is
