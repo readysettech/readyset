@@ -1458,11 +1458,6 @@ async fn resnapshot_inner(url: &str) -> ReadySetResult<()> {
         })
         .collect();
     let rs: Vec<&[DfValue]> = rs.iter().map(|r| r.as_slice()).collect();
-
-    // TODO(REA-3284): There appears to be an issue causing a view to remain stale even after being
-    // dropped and recreated, which causes the below call to `check_results()` to fail due to
-    // `repl2_view` missing a column. This sleep prevents the issue from happening.
-    tokio::time::sleep(Duration::from_secs(1)).await;
     ctx.check_results("repl2_view", "Resnapshot repl2", rs.as_slice())
         .await
         .unwrap();

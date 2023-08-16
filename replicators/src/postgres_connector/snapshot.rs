@@ -676,8 +676,7 @@ impl<'a> PostgresReplicator<'a> {
         snapshot_report_interval_secs: u16,
         full_snapshot: bool,
     ) -> ReadySetResult<()> {
-        let wal_position =
-            PostgresPosition::from_commit_lsn(replication_slot.consistent_point).into();
+        let wal_position = PostgresPosition::from(replication_slot.consistent_point).into();
         self.set_snapshot(&replication_slot.snapshot_name).await?;
 
         let table_list = self.get_table_list(TableKind::RegularTable).await?;

@@ -12,7 +12,7 @@ use readyset_client::failpoints;
 use readyset_client::TableOperation;
 use readyset_errors::{invariant, set_failpoint_return_err, ReadySetError, ReadySetResult};
 use readyset_util::select;
-use replication_offset::postgres::{CommitLsn, PostgresPosition};
+use replication_offset::postgres::PostgresPosition;
 use replication_offset::ReplicationOffset;
 use tokio_postgres as pgsql;
 use tracing::{debug, error, info, trace, warn};
@@ -46,7 +46,7 @@ pub struct PostgresWalConnector {
     /// Stores an event or error that was read but not handled
     peek: Option<Result<WalEvent, WalError>>,
     /// If we just want to continue reading the log from a previous point
-    next_position: Option<CommitLsn>,
+    next_position: Option<PostgresPosition>,
     /// The replication slot if was created for this connector
     pub(crate) replication_slot: Option<CreatedSlot>,
     /// Whether to log statements received by the connector
@@ -64,7 +64,7 @@ pub(crate) struct ServerIdentity {
     pub(crate) timeline: i8,
     /// Current WAL flush location. Useful to get a known location in the write-ahead log where
     /// streaming can start.
-    pub(crate) xlogpos: CommitLsn,
+    pub(crate) xlogpos: i64,
     /// Database connected to or null.
     pub(crate) dbname: Option<String>,
 }
@@ -77,7 +77,7 @@ pub(crate) struct CreatedSlot {
     pub(crate) slot_name: String,
     /// The WAL location at which the slot became consistent. This is the earliest location
     /// from which streaming can start on this replication slot.
-    pub(crate) consistent_point: CommitLsn,
+    pub(crate) consistent_point: i64,
     /// The identifier of the snapshot exported by the command. The snapshot is valid until a
     /// new command is executed on this connection or the replication connection is closed.
     /// Null if the created slot is physical.
@@ -94,7 +94,7 @@ impl PostgresWalConnector {
         mut pg_config: pgsql::Config,
         dbname: S,
         config: UpstreamConfig,
-        next_position: Option<CommitLsn>,
+        next_position: Option<PostgresPosition>,
         tls_connector: MakeTlsConnector,
         repl_slot_name: &str,
         enable_statement_logging: bool,
@@ -135,7 +135,7 @@ impl PostgresWalConnector {
         debug!(
             id = %system.id,
             timeline = %system.timeline,
-            xlogpos = %PostgresPosition::from_commit_lsn(system.xlogpos),
+            xlogpos = %PostgresPosition::from(system.xlogpos),
             dbname = ?system.dbname
         );
 
@@ -215,7 +215,7 @@ impl PostgresWalConnector {
         let timeline: i8 = row.get(1).unwrap().parse().map_err(|_| {
             ReadySetError::ReplicationFailed("Unable to parse identify system".into())
         })?;
-        let xlogpos = CommitLsn(parse_wal(row.get(2).unwrap())?);
+        let xlogpos = parse_wal(row.get(2).unwrap())?;
         let dbname = row.get(3).map(Into::into);
 
         Ok(ServerIdentity {
@@ -261,12 +261,12 @@ impl PostgresWalConnector {
         let row = self.one_row_query(&query, 4).await?;
 
         let slot_name = row.get(0).unwrap().to_string(); // Can unwrap all because checked by `one_row_query`
-        let consistent_point = CommitLsn(parse_wal(row.get(1).unwrap())?);
+        let consistent_point = parse_wal(row.get(1).unwrap())?;
         let snapshot_name = row.get(2).map(Into::into).unwrap();
         let output_plugin = row.get(3).map(Into::into).unwrap();
         debug!(
             slot_name,
-            %consistent_point, snapshot_name, output_plugin, "Created replication slot"
+            consistent_point, snapshot_name, output_plugin, "Created replication slot"
         );
 
         Ok(CreatedSlot {
@@ -345,7 +345,7 @@ impl PostgresWalConnector {
         Ok(())
     }
 
-    fn send_standby_status_update(&self, ack: CommitLsn) -> ReadySetResult<()> {
+    fn send_standby_status_update(&self, ack: PostgresPosition) -> ReadySetResult<()> {
         use bytes::{BufMut, BytesMut};
 
         // The difference between UNIX and Postgres epoch
@@ -357,7 +357,7 @@ impl PostgresWalConnector {
             .as_micros() as i64
             - J2000_EPOCH_GAP;
 
-        let pos = ack.0 + 1;
+        let pos = ack.lsn.0 + 1;
 
         // Can reply with StandbyStatusUpdate or HotStandbyFeedback
         let mut b = BytesMut::with_capacity(39);
@@ -505,10 +505,7 @@ impl Connector for PostgresWalConnector {
             schema: None,
             name: "".into(),
         };
-        let mut cur_pos = PostgresPosition {
-            last_commit_lsn: last_pos.clone().try_into()?,
-            lsn: 0.into(),
-        };
+        let mut cur_lsn: PostgresPosition = 0.into();
         let mut actions = Vec::with_capacity(MAX_QUEUED_INDEPENDENT_ACTIONS);
 
         loop {
@@ -534,27 +531,14 @@ impl Connector for PostgresWalConnector {
                             actions,
                             txid: None,
                         },
-                        cur_pos.into(),
+                        cur_lsn.into(),
                     ));
                 }
                 // If our next event has an LSN, if our batch size has exceeded the max, and if the
                 // LSN of the event does not match the LSN of the prior event, we need to flush the
-                // buffered actions. This is to ensure that we apply all of the actions with a given
-                // LSN atomically: if the next event has an LSN that is different than the LSN of
-                // our current position, we need to stash the event with a different LSN, apply the
-                // batch of actions we have buffered, and then come back to the stashed event the
-                // next time this method is called.
-                //
-                // Note that COMMITs are counted as events that don't have LSNs and thus will never
-                // result in an early return here, since WalEvent::lsn will return None. A COMMIT
-                // always results in the flushing of our buffered events with the replication offset
-                // reported to be `(LSN of the COMMIT, 0)`. For a COMMIT with LSN `n`, even if the
-                // LSN of the event after a COMMIT were to match that of the COMMIT (i.e. it were
-                // also `n`), the event's LSN would be treated as an `Lsn` and not a `CommitLsn`, so
-                // the next position would be `(n, n)`, which is distinct from and greater than `(n,
-                // 0)`.
+                // buffered actions.
                 Ok(Some(lsn))
-                    if actions.len() >= MAX_QUEUED_INDEPENDENT_ACTIONS && *lsn != cur_pos.lsn =>
+                    if actions.len() >= MAX_QUEUED_INDEPENDENT_ACTIONS && *lsn != cur_lsn.lsn =>
                 {
                     self.peek = Some(event);
                     return Ok((
@@ -563,15 +547,15 @@ impl Connector for PostgresWalConnector {
                             actions,
                             txid: None,
                         },
-                        cur_pos.into(),
+                        cur_lsn.into(),
                     ));
                 }
                 // If we have no buffered actions, an `until` was passed, and the LSN is >= `until`,
                 // we report the log position
                 _ if actions.is_empty()
-                    && matches!(until, Some(until) if &ReplicationOffset::from(cur_pos) >= until) =>
+                    && matches!(until, Some(until) if &ReplicationOffset::from(cur_lsn) >= until) =>
                 {
-                    return Ok((ReplicationAction::LogPosition, cur_pos.into()));
+                    return Ok((ReplicationAction::LogPosition, cur_lsn.into()));
                 }
                 _ => {}
             }
@@ -635,7 +619,7 @@ impl Connector for PostgresWalConnector {
                                     actions,
                                     txid: None,
                                 },
-                                cur_pos.with_lsn(*lsn).into(),
+                                PostgresPosition::from(*lsn).into(),
                             ));
                         } else {
                             // Empty truncate op
@@ -659,7 +643,7 @@ impl Connector for PostgresWalConnector {
                                 actions,
                                 txid: None,
                             },
-                            cur_pos.into(),
+                            cur_lsn.into(),
                         ));
                     }
                 }
@@ -679,7 +663,7 @@ impl Connector for PostgresWalConnector {
                                 actions,
                                 txid: None,
                             },
-                            cur_pos.into(),
+                            cur_lsn.into(),
                         ));
                     } else {
                         cur_table = Relation {
@@ -691,6 +675,10 @@ impl Connector for PostgresWalConnector {
                 _ => {}
             }
 
+            if let Some(lsn) = event.lsn() {
+                cur_lsn = lsn.into();
+            }
+
             match event {
                 WalEvent::DdlEvent { ddl_event, lsn } => {
                     if actions.is_empty() {
@@ -699,7 +687,7 @@ impl Connector for PostgresWalConnector {
                                 schema: ddl_event.schema().to_string(),
                                 changes: vec![ddl_event.into_change()],
                             },
-                            cur_pos.with_lsn(lsn).into(),
+                            PostgresPosition::from(lsn).into(),
                         ));
                     } else {
                         self.peek = Some(Ok(WalEvent::DdlEvent { ddl_event, lsn }));
@@ -709,75 +697,48 @@ impl Connector for PostgresWalConnector {
                                 actions,
                                 txid: None,
                             },
-                            cur_pos.into(),
+                            cur_lsn.into(),
                         ));
                     }
                 }
                 WalEvent::WantsKeepaliveResponse => {
-                    // Sending a standby status update to the upstream database involves "ACKing"
-                    // the point in the WAL up to which we've successfully persisted data. This lets
-                    // the upstream database know that it can remove all the WAL entries up to this
-                    // point.
-                    //
-                    // The LSNs of events sent to us from Postgres do not monotonically increase
-                    // with each event. For this reason, we cannot "ACK" the LSN of the last event
-                    // we saw because we have no guarantee that we've seen all the events with LSNs
-                    // less than that of the last event we saw. However, LSNs across *COMMITs* are
-                    // guaranteed to increase monotonically, so we *can* safely "ACK" the LSN of the
-                    // last COMMIT we saw.
-                    self.send_standby_status_update(last_pos.clone().try_into()?)?;
+                    self.send_standby_status_update(last_pos.try_into()?)?;
                 }
                 WalEvent::Commit { lsn } => {
-                    // On commit we flush, because there is no knowing when the next commit is
-                    // coming. We report our current position to reflect the COMMIT we just saw.
-                    // If we crash after returning this position but before persisting this new
-                    // position in the base tables, we will begin replicating from a COMMIT prior to
-                    // this one, guaranteeing that we don't miss any events.
-                    let position = PostgresPosition::from_commit_lsn(lsn);
-
                     if !actions.is_empty() {
+                        // On commit we flush, because there is no knowing when the next commit is
+                        // coming
                         return Ok((
                             ReplicationAction::TableAction {
                                 table: cur_table,
                                 actions,
                                 txid: None,
                             },
-                            position.into(),
+                            lsn.into(),
                         ));
                     } else {
-                        return Ok((ReplicationAction::LogPosition, position.into()));
+                        return Ok((ReplicationAction::LogPosition, lsn.into()));
                     }
                 }
-                WalEvent::Insert { tuple, lsn, .. } => {
-                    cur_pos = cur_pos.with_lsn(lsn);
-                    actions.push(TableOperation::Insert(tuple));
+                WalEvent::Insert { tuple, .. } => actions.push(TableOperation::Insert(tuple)),
+                WalEvent::DeleteRow { tuple, .. } => {
+                    actions.push(TableOperation::DeleteRow { row: tuple })
                 }
-                WalEvent::DeleteRow { tuple, lsn, .. } => {
-                    cur_pos = cur_pos.with_lsn(lsn);
-                    actions.push(TableOperation::DeleteRow { row: tuple });
-                }
-                WalEvent::DeleteByKey { key, lsn, .. } => {
-                    cur_pos = cur_pos.with_lsn(lsn);
+                WalEvent::DeleteByKey { key, .. } => {
                     actions.push(TableOperation::DeleteByKey { key })
                 }
                 WalEvent::UpdateRow {
                     old_tuple,
                     new_tuple,
-                    lsn,
                     ..
                 } => {
-                    cur_pos = cur_pos.with_lsn(lsn);
                     actions.push(TableOperation::DeleteRow { row: old_tuple });
                     actions.push(TableOperation::Insert(new_tuple));
                 }
-                WalEvent::UpdateByKey { key, set, lsn, .. } => {
-                    cur_pos = cur_pos.with_lsn(lsn);
+                WalEvent::UpdateByKey { key, set, .. } => {
                     actions.push(TableOperation::Update { key, update: set })
                 }
-                WalEvent::Truncate { lsn, .. } => {
-                    cur_pos = cur_pos.with_lsn(lsn);
-                    actions.push(TableOperation::Truncate)
-                }
+                WalEvent::Truncate { .. } => actions.push(TableOperation::Truncate),
             }
         }
     }

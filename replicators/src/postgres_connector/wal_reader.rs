@@ -7,7 +7,7 @@ use mysql_time::MySqlTime;
 use postgres_types::Kind;
 use readyset_data::{Array, Collation, DfType, DfValue, Dialect};
 use readyset_errors::{unsupported, ReadySetError};
-use replication_offset::postgres::{CommitLsn, Lsn};
+use replication_offset::postgres::Lsn;
 use rust_decimal::prelude::FromStr;
 use rust_decimal::Decimal;
 use tokio_postgres as pgsql;
@@ -40,7 +40,7 @@ pub struct WalReader {
 pub(crate) enum WalEvent {
     WantsKeepaliveResponse,
     Commit {
-        lsn: CommitLsn,
+        lsn: Lsn,
     },
     Insert {
         schema: String,
@@ -94,8 +94,9 @@ impl WalEvent {
             | Self::UpdateRow { lsn, .. }
             | Self::UpdateByKey { lsn, .. }
             | Self::Truncate { lsn, .. }
-            | Self::DdlEvent { lsn, .. } => Some(*lsn),
-            Self::Commit { .. } | Self::WantsKeepaliveResponse => None,
+            | Self::DdlEvent { lsn, .. }
+            | Self::Commit { lsn, .. } => Some(*lsn),
+            Self::WantsKeepaliveResponse => None,
         }
     }
 }
