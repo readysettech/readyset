@@ -137,7 +137,7 @@ impl TestChannel {
     async fn snapshot_completed(&mut self) -> ReadySetResult<()> {
         match self.0.recv().await {
             Some(ReplicatorMessage::SnapshotDone) => Ok(()),
-            Some(ReplicatorMessage::Error(e)) => Err(e),
+            Some(ReplicatorMessage::UnrecoverableError(e)) => Err(e),
             _ => internal!(),
         }
     }
@@ -368,7 +368,7 @@ impl TestHandle {
             .await
             {
                 error!(%error, "Error in replicator");
-                let _ = sender.send(ReplicatorMessage::Error(error));
+                let _ = sender.send(ReplicatorMessage::UnrecoverableError(error));
             }
         });
 

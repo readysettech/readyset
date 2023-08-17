@@ -53,6 +53,10 @@ pub struct PersistentStats {
     pub last_completed_snapshot: Option<u64>,
     /// Time in millis when we last started the main replication loop.
     pub last_started_replication: Option<u64>,
+    /// Last error reported by the replicator that caused it to restart. This message is cleared
+    /// when we enter the main replication loop, because it is primarily intended to help debug
+    /// issues with starting replication and holding onto errors forever can be confusing.
+    pub last_replicator_error: Option<String>,
 }
 
 /// Statistics about the Soup data-flow.

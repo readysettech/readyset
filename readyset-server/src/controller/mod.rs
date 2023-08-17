@@ -17,7 +17,6 @@ use readyset_client::consensus::{
     Authority, AuthorityControl, AuthorityWorkerHeartbeatResponse, GetLeaderResult,
     WorkerDescriptor, WorkerId, WorkerSchedulingConfig,
 };
-use readyset_client::debug::stats::PersistentStats;
 #[cfg(feature = "failure_injection")]
 use readyset_client::failpoints;
 use readyset_client::metrics::recorded;
@@ -658,38 +657,52 @@ impl Controller {
                     }
                 }
                 req = self.replicator_channel.receiver.recv() => {
+                    fn now() -> u64 {
+                        #[allow(clippy::unwrap_used)] // won't error comparing to UNIX EPOCH
+                        SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64
+                    }
+
                     match req {
                         Some(msg) => match msg {
-                            ReplicatorMessage::Error(e)=> return Err(e),
+                            ReplicatorMessage::UnrecoverableError(e) => return Err(e),
                             ReplicatorMessage::SnapshotDone => {
                                 self.leader_ready.store(true, Ordering::Release);
 
-                                let now = SystemTime::now()
-                                        .duration_since(UNIX_EPOCH)
-                                        .unwrap()
-                                        .as_millis() as u64;
-
-                                if let Err(error) = self.authority.update_persistent_stats(|stats: Option<PersistentStats>| {
+                                let now = now();
+                                if let Err(error) = self.authority.update_persistent_stats(|stats| {
                                     let mut stats = stats.unwrap_or_default();
                                     stats.last_completed_snapshot = Some(now);
                                     Ok(stats)
                                 }).await {
-                                    error!(%error, "Failed to persist status in the Authority");
+                                    error!(%error, "Failed to persist stats in the Authority");
                                 }
                             },
                             ReplicatorMessage::ReplicationStarted => {
-                                let now = SystemTime::now()
-                                .duration_since(UNIX_EPOCH)
-                                .unwrap()
-                                .as_millis() as u64;
-                                if let Err(error) = self.authority.update_persistent_stats(|stats: Option<PersistentStats>| {
+                                let now = now();
+                                if let Err(error) = self.authority.update_persistent_stats(|stats| {
                                     let mut stats = stats.unwrap_or_default();
                                     stats.last_started_replication = Some(now);
+                                    // Clear the last replicator error if we have started the main loop.
+                                    stats.last_replicator_error = None;
                                     Ok(stats)
                                 }).await {
-                                    error!(%error, "Failed to persist status in the Authority");
+                                    error!(%error, "Failed to persist stats in the Authority");
                                 }
-
+                            },
+                            ReplicatorMessage::RecoverableError(e) => {
+                                if let Err(error) = self.authority.update_persistent_stats(|stats| {
+                                    let mut stats = stats.unwrap_or_default();
+                                    let error = if let ReadySetError::ReplicationFailed(msg) = &e {
+                                        // If we have `ReplicationFailed` we can just show the error message
+                                        msg.to_string()
+                                    } else {
+                                        e.to_string()
+                                    };
+                                    stats.last_replicator_error = Some(error);
+                                    Ok(stats)
+                                }).await {
+                                    error!(%error, "Failed to persist stats in the Authority");
+                                }
                             },
                         },
                         _ => {

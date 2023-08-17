@@ -967,17 +967,20 @@ impl NoriaConnector {
 
         if let Ok(Some(stats)) = authority.persistent_stats().await {
             status.push((
-                "Last Started Controller".to_string(),
+                "Last started Controller".to_string(),
                 val_or_null(stats.last_controller_startup),
             ));
             status.push((
-                "Last Completed Snapshot".to_string(),
+                "Last completed snapshot".to_string(),
                 val_or_null(stats.last_completed_snapshot),
             ));
             status.push((
-                "Last Started Replication".to_string(),
+                "Last started replication".to_string(),
                 val_or_null(stats.last_started_replication),
             ));
+            if let Some(err) = stats.last_replicator_error {
+                status.push(("Last replicator error".to_string(), err))
+            }
         }
 
         status.append(&mut additional_meta);
