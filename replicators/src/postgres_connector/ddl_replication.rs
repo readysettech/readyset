@@ -46,6 +46,7 @@ use nom_sql::{
 use pgsql::tls::MakeTlsConnect;
 use readyset_client::recipe::changelist::{AlterTypeChange, Change};
 use readyset_data::{DfType, PgEnumMetadata};
+use readyset_errors::ReadySetError::ReplicationFailed;
 use readyset_errors::ReadySetResult;
 use serde::{Deserialize, Deserializer};
 use tokio_postgres as pgsql;
@@ -61,12 +62,16 @@ where
     T: MakeTlsConnect<pgsql::Socket> + Send,
     <T as MakeTlsConnect<pgsql::Socket>>::Stream: Send + 'static,
 {
-    let (client, conn) = config.connect(tls).await?;
+    let (client, conn) = config
+        .connect(tls)
+        .await
+        .map_err(|e| ReplicationFailed(format!("Failed to connect: {e}")))?;
     let conn_handle = tokio::spawn(conn);
     info!("Setting up DDL replication");
     client
         .batch_execute(include_str!("./ddl_replication.sql"))
-        .await?;
+        .await
+        .map_err(|e| ReplicationFailed(format!("Failed to install event triggers: {e}")))?;
     info!("Set up DDL replication");
     conn_handle.abort();
 
