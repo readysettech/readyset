@@ -1,13 +1,20 @@
 (ns jepsen.readyset.client
   "Utilities for interacting with a ReadySet cluster"
   (:require
+   [clojure.set :as set]
    [clojure.tools.logging :refer [info warn]]
    [dom-top.core :refer [with-retry]]
+   [jepsen.client :as client]
    [next.jdbc :as jdbc]
-   [slingshot.slingshot :refer [throw+]]
-   [clojure.set :as set])
+   [slingshot.slingshot :refer [throw+ try+]]
+   [clojure.java.io :as io]
+   [jepsen.readyset.nodes :as nodes])
   (:import
    (org.postgresql.util PSQLException)))
+
+(def pguser "postgres")
+(def pgpassword "password")
+(def pgdatabase "jepsen")
 
 (defn make-datasource
   "Make a new JDBC DataSource for connecting to ReadySet, using the options
@@ -21,6 +28,18 @@
           ;; Avoid sending `SET extra_float_digits = 3` on connection
           ;; (see https://github.com/pgjdbc/pgjdbc/issues/168)
           :assumeMinServerVersion "9.0")))
+
+(defn test-datasource
+  "Build a JDBC DataSource for connecting to the ReadySet cluster in the given
+  test"
+  [test]
+  (make-datasource
+   {:dbtype "postgres"
+    :dbname pgdatabase
+    :user pguser
+    :password pgpassword
+    :host (name (nodes/node-with-role test :node-role/load-balancer))
+    :port 5432}))
 
 (defn wait-for-connection
   "Wait for a connection to the given ReadySet datasource (as creaated by
@@ -80,3 +99,42 @@
 
   (readyset-status --ds)
   )
+
+(defn r [_ _] {:type :invoke, :f :read, :value nil})
+(defn w [_ _] {:type :invoke, :f :write, :value (rand-int 5)})
+
+(defrecord Client [conn table-created?]
+  client/Client
+  (open! [this test node]
+    (assoc this :conn (test-datasource test)))
+
+  (setup! [this test]
+    (when (compare-and-set! table-created? false true)
+      (jdbc/execute! conn ["drop table if exists t1;"])
+      (jdbc/execute! conn ["create table t1 (x int)"])
+      (with-retry [attempts 5]
+        (jdbc/execute! conn ["create cache from select x from t1"])
+        (catch PSQLException e
+          (if (pos? attempts)
+            (do
+              (Thread/sleep 200)
+              (retry (dec attempts)))
+            (throw+ {:error :retry-attempts-exceeded
+                     :exception e}))))))
+
+  (invoke! [_ test op]
+    (case (:f op)
+      :read (try+
+             (assoc op
+                    :type :ok
+                    :value (jdbc/execute! conn ["select x from t1"]))
+             (catch PSQLException e
+               (assoc op :type :fail :value e)))))
+
+  (teardown! [this test])
+
+  (close! [this test]
+    (dissoc this :conn)))
+
+(defn new-client []
+  (map->Client {:table-created? (atom false)}))
