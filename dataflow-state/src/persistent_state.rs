@@ -2978,7 +2978,7 @@ mod tests {
         state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
         let mut records: Records = vec![(vec![1.into(), "A".into()], true)].into();
         let replication_offset = ReplicationOffset::Postgres(PostgresPosition {
-            last_commit_lsn: 12.into(),
+            commit_lsn: 12.into(),
             lsn: 0.into(),
         });
         state
@@ -3044,7 +3044,7 @@ mod tests {
                     .collect::<Records>(),
                 None,
                 Some(ReplicationOffset::Postgres(PostgresPosition {
-                    last_commit_lsn: 1.into(),
+                    commit_lsn: 1.into(),
                     lsn: 0.into(),
                 })),
             )
@@ -3062,7 +3062,7 @@ mod tests {
                     .collect::<Records>(),
                 None,
                 Some(ReplicationOffset::Postgres(PostgresPosition {
-                    last_commit_lsn: 2.into(),
+                    commit_lsn: 2.into(),
                     lsn: 0.into(),
                 })),
             )
@@ -3075,7 +3075,7 @@ mod tests {
             &mut Records::from(Vec::<Record>::new()),
             None,
             Some(ReplicationOffset::Postgres(PostgresPosition {
-                last_commit_lsn: 2.into(),
+                commit_lsn: 2.into(),
                 lsn: 0.into(),
             })),
         )

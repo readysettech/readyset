@@ -12,23 +12,34 @@ use crate::ReplicationOffset;
 /// monotonically increase. This means the event LSN on its own is not enough to ensure that we
 /// can define a [`ReplicationOffset`] that is well-ordered. However, there *is* a guarantee that
 /// the LSNs of **COMMIT** events we receive will monotonically increase. We leverage this by
-/// including the LSN of the last COMMIT we saw in our definition of [`PostgresPosition`], which
-/// gives us an ordering key of `(last_commit_lsn, lsn)`.
+/// defining a [`PostgresPosition`] as `(commit_lsn, lsn)`, where `commit_lsn` is the LSN of the
+/// the COMMIT that will end the current transaction.
 #[derive(Debug, PartialEq, PartialOrd, Ord, Eq, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct PostgresPosition {
-    /// The LSN of the last COMMIT we saw
-    pub last_commit_lsn: CommitLsn,
+    /// The LSN of the COMMIT that ends the current transaction
+    pub commit_lsn: CommitLsn,
     /// The LSN of the position
     pub lsn: Lsn,
 }
 
 impl PostgresPosition {
-    /// Constructs a [`PostgresPosition`] from a [`CommitLsn`]. This function initializes the
-    /// [`Lsn`] of the [`PostgresPosition`] to zero.
-    pub fn from_commit_lsn(commit_lsn: impl Into<CommitLsn>) -> Self {
+    /// Constructs a [`PostgresPosition`] from a [`CommitLsn`] that points to the lowest possible
+    /// position in the given commit. In other words, this method constructs a [`PostgresPosition`]
+    /// that points to `(commit_lsn, 0)`.
+    pub fn commit_start(commit_lsn: CommitLsn) -> Self {
         Self {
-            last_commit_lsn: commit_lsn.into(),
+            commit_lsn,
             lsn: 0.into(),
+        }
+    }
+
+    /// Constructs a [`PostgresPosition`] from a [`CommitLsn`] that points to the highest possible
+    /// position in the given commit. In other words, this method constructs a [`PostgresPosition`]
+    /// that points to `(commit_lsn, commit_lsn)`.
+    pub fn commit_end(commit_lsn: CommitLsn) -> Self {
+        Self {
+            commit_lsn,
+            lsn: Lsn(commit_lsn.0),
         }
     }
 
@@ -36,7 +47,7 @@ impl PostgresPosition {
     /// given [`Lsn`].
     pub fn with_lsn(self, lsn: impl Into<Lsn>) -> Self {
         Self {
-            last_commit_lsn: self.last_commit_lsn,
+            commit_lsn: self.commit_lsn,
             lsn: lsn.into(),
         }
     }
@@ -50,7 +61,7 @@ impl From<PostgresPosition> for ReplicationOffset {
 
 impl fmt::Display for PostgresPosition {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "({}, {})", self.last_commit_lsn, self.lsn)
+        write!(f, "({}, {})", self.commit_lsn, self.lsn)
     }
 }
 
@@ -76,7 +87,7 @@ impl TryFrom<ReplicationOffset> for CommitLsn {
     type Error = ReadySetError;
 
     fn try_from(offset: ReplicationOffset) -> Result<Self, Self::Error> {
-        Ok(PostgresPosition::try_from(offset)?.last_commit_lsn)
+        Ok(PostgresPosition::try_from(offset)?.commit_lsn)
     }
 }
 
@@ -110,16 +121,16 @@ mod tests {
     use super::PostgresPosition;
 
     // The `PartialOrd` derivation on `PostgresPosition` relies upon the ordering of the members
-    // in the struct: `last_commit_lsn` *must* be listed before `lsn`. This test will fail if
+    // in the struct: `commit_lsn` *must* be listed before `lsn`. This test will fail if
     // the members of the struct are ever reordered.
     #[test]
     fn test_postgres_position_partial_ord() {
         let pos1 = PostgresPosition {
-            last_commit_lsn: 1.into(),
+            commit_lsn: 1.into(),
             lsn: 0.into(),
         };
         let pos2 = PostgresPosition {
-            last_commit_lsn: 0.into(),
+            commit_lsn: 0.into(),
             lsn: 1.into(),
         };
 
