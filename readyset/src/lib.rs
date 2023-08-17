@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::fs::remove_dir_all;
 use std::io;
 use std::marker::Send;
-use std::net::{IpAddr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs};
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::atomic::AtomicUsize;
@@ -126,6 +126,15 @@ impl From<UnsupportedSetMode> for readyset_adapter::backend::UnsupportedSetMode 
             UnsupportedSetMode::Proxy => Self::Proxy,
         }
     }
+}
+
+/// Parse and normalize the given string as an [`IpAddr`]
+pub fn resolve_addr(addr: &str) -> anyhow::Result<IpAddr> {
+    Ok(format!("{addr}:0")
+        .to_socket_addrs()?
+        .next()
+        .ok_or_else(|| anyhow!("Could not resolve address: {}", addr))?
+        .ip())
 }
 
 pub struct NoriaAdapter<H>
@@ -266,10 +275,11 @@ pub struct Options {
     )]
     query_log_ad_hoc: bool,
 
-    /// Use the AWS EC2 metadata service to determine the external address of this noria adapter's
-    /// http endpoint.
-    #[clap(long)]
-    use_aws_external_address: bool,
+    /// IP address to advertise to other ReadySet instances running in the same deployment.
+    ///
+    /// If not specified, defaults to the value of `address`
+    #[clap(long, env = "EXTERNAL_ADDRESS", value_parser = resolve_addr)]
+    external_address: Option<IpAddr>,
 
     #[clap(flatten)]
     pub tracing: readyset_tracing::Options,
@@ -981,6 +991,10 @@ where
                 builder.set_listen_addr(addr);
             }
 
+            if let Some(external_addr) = options.external_address.or(options.controller_address) {
+                builder.set_external_addr(SocketAddr::new(external_addr, 0));
+            }
+
             let server_handle = rt.block_on(async move {
                 let authority = Arc::new(authority.to_authority(&authority_address, &deployment));
 
@@ -988,10 +1002,7 @@ where
                     .start_with_readers(
                         authority,
                         r,
-                        SocketAddr::new(
-                            std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)),
-                            4000,
-                        ),
+                        SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 4000),
                     )
                     .await
             })?;
