@@ -148,6 +148,28 @@ impl Records {
     {
         self.has(q, false)
     }
+
+    // This function checks every Negative record and ensures that there isn't a Positive record
+    // before it that matches its content. If there is, then both the Negative and Positive
+    // records are removed. This will prevent unnecessary writes to RocksDB.
+    pub fn remove_deleted(&mut self) {
+        let mut i = 0;
+        while i < self.0.len() {
+            if let Record::Negative(val) = &self.0[i] {
+                for j in (0..i).rev() {
+                    if let Record::Positive(pos_val) = &self.0[j] {
+                        if pos_val == val {
+                            self.0.remove(j);
+                            i -= 1;
+                            self.0.remove(i); // index decreased due to previous removal
+                            break;
+                        }
+                    }
+                }
+            }
+            i += 1;
+        }
+    }
 }
 
 impl Deref for Records {
@@ -199,5 +221,56 @@ mod tests {
         assert!(
             Record::Positive(vec![1.into(), 2.into()]) < Record::Negative(vec![1.into(), 2.into()])
         )
+    }
+
+    // Transactions sometimes include records that negate each other. The following test
+    // ensures that the simplify function handles them correctly.
+    #[test]
+    fn test_simplify() {
+        let mut records: Records = vec![
+            Record::Positive(vec![1.into(), "2".into(), 3.into()]),
+            Record::Negative(vec![1.into(), "2".into(), 3.into()]),
+            Record::Positive(vec![4.into(), "5".into(), 6.into()]),
+            Record::Negative(vec![4.into(), "5".into(), 6.into()]),
+            Record::Positive(vec!["last".into(), 8.into(), 9.into()]),
+        ]
+        .into();
+
+        records.remove_deleted();
+
+        let mut result: Records =
+            vec![Record::Positive(vec!["last".into(), 8.into(), 9.into()])].into();
+
+        assert_eq!(records, result);
+
+        records = vec![
+            Record::Positive(vec![1.into(), "2".into(), 3.into()]),
+            Record::Negative(vec![9.into(), "2".into(), 3.into()]),
+            Record::Positive(vec![7.into(), "5".into(), 6.into()]),
+            Record::Negative(vec![1.into(), "2".into(), 3.into()]),
+            Record::Positive(vec!["last".into(), 8.into(), 9.into()]),
+        ]
+        .into();
+
+        records.remove_deleted();
+
+        result = vec![
+            Record::Negative(vec![9.into(), "2".into(), 3.into()]),
+            Record::Positive(vec![7.into(), "5".into(), 6.into()]),
+            Record::Positive(vec!["last".into(), 8.into(), 9.into()]),
+        ]
+        .into();
+
+        assert_eq!(records, result);
+
+        records = vec![
+            Record::Positive(vec![1.into(), "2".into(), 3.into()]),
+            Record::Negative(vec![1.into(), "2".into(), 3.into()]),
+        ]
+        .into();
+
+        records.remove_deleted();
+
+        assert!(records.is_empty());
     }
 }

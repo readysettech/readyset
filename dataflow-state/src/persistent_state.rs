@@ -643,6 +643,10 @@ impl State for PersistentState {
         replication_offset: Option<ReplicationOffset>,
     ) -> ReadySetResult<()> {
         invariant!(partial_tag.is_none(), "PersistentState can't be partial");
+
+        // Streamline the records by eliminating pairs that would negate each other.
+        records.remove_deleted();
+
         if records.len() == 0 && replication_offset.is_none() {
             return Ok(());
         }
@@ -666,47 +670,7 @@ impl State for PersistentState {
                 }
             }
         }
-
-        let mut opts = rocksdb::WriteOptions::default();
-        if self.snapshot_mode.is_enabled()
-            // if we're setting the replication offset, that means we've snapshot the full table, so
-            // set sync to true there even if snapshot_mode is enabled, to make sure that makes it
-            // onto disk (not doing this *will* cause the write to get lost if the server restarts!)
-            && replication_offset.is_none()
-        {
-            opts.disable_wal(true);
-        } else {
-            let db = &self.db.handle();
-            if self.snapshot_mode.is_enabled() && replication_offset.is_some() {
-                // We are setting the replication offset, which is great, but all of our previous
-                // writes are not guaranteed to flush to disk even if the next write is synced. We
-                // therefore perform a flush before handling the next write.
-                //
-                // See: https://github.com/facebook/rocksdb/wiki/RocksDB-FAQhttps://github.com/facebook/rocksdb/wiki/RocksDB-FAQ
-                // Q: After a write following option.disableWAL=true, I write another record with
-                // options.sync=true,    will it persist the previous write too?
-                // A: No. After the program crashes, writes with option.disableWAL=true will be
-                // lost, if they are not flushed to SST files.
-                for index in self.db.inner().indices.iter() {
-                    db.flush_cf(db.cf_handle(&index.column_family).unwrap())
-                        .map_err(|e| internal_err!("Flush to disk failed: {e}"))?;
-                }
-
-                db.flush()
-                    .map_err(|e| internal_err!("Flush to disk failed: {e}"))?;
-            }
-            opts.set_sync(true);
-        }
-
-        if let Some(offset) = replication_offset {
-            self.set_replication_offset(&mut batch, offset);
-        }
-
-        self.db
-            .handle()
-            .write_opt(batch, &opts)
-            .map_err(|e| internal_err!("Write failed: {e}"))?;
-
+        self.write_to_db(batch, &replication_offset)?;
         Ok(())
     }
 
@@ -1964,6 +1928,57 @@ impl PersistentState {
     ) -> Vec<RecordResult<'a>> {
         self.db.lookup_multi(columns, keys)
     }
+
+    /// Takes the provided batch and optionally a replication offset and writes to the RocksDB
+    /// database.
+    fn write_to_db(
+        &mut self,
+        batch: WriteBatch,
+        replication_offset: &Option<ReplicationOffset>,
+    ) -> ReadySetResult<()> {
+        let mut batch = batch;
+        let mut write_options = rocksdb::WriteOptions::default();
+        if self.snapshot_mode.is_enabled()
+            // if we're setting the replication offset, that means we've snapshot the full table, so
+            // set sync to true there even if snapshot_mode is enabled, to make sure that makes it
+            // onto disk (not doing this *will* cause the write to get lost if the server restarts!)
+            && replication_offset.is_none()
+        {
+            write_options.disable_wal(true);
+        } else {
+            let db = &self.db.handle();
+            if self.snapshot_mode.is_enabled() && replication_offset.is_some() {
+                // We are setting the replication offset, which is great, but all of our previous
+                // writes are not guaranteed to flush to disk even if the next write is synced. We
+                // therefore perform a flush before handling the next write.
+                //
+                // See: https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ
+                // Q: After a write following option.disableWAL=true, I write another record with
+                // options.sync=true,    will it persist the previous write too?
+                // A: No. After the program crashes, writes with option.disableWAL=true will be
+                // lost, if they are not flushed to SST files.
+                for index in self.db.inner().indices.iter() {
+                    db.flush_cf(db.cf_handle(&index.column_family).unwrap())
+                        .map_err(|e| internal_err!("Flush to disk failed: {e}"))?;
+                }
+
+                db.flush()
+                    .map_err(|e| internal_err!("Flush to disk failed: {e}"))?;
+            }
+            write_options.set_sync(true);
+        }
+
+        if let Some(offset) = replication_offset {
+            self.set_replication_offset(&mut batch, offset.clone());
+        }
+
+        self.db
+            .handle()
+            .write_opt(batch, &write_options)
+            .map_err(|e| internal_err!("Write failed: {e}"))?;
+
+        Ok(())
+    }
 }
 
 /// Checks if the given index is unique for this base table.
@@ -2263,6 +2278,20 @@ mod tests {
             }
             _ => unreachable!(),
         }
+    }
+
+    #[test]
+    fn persistent_state_add_remove_same_record() {
+        let mut state = setup_persistent("persistent_state_multiple_indices", None);
+        let first: Vec<DfValue> = vec![10.into(), "Cat".into(), 1.into()];
+        let second: Vec<DfValue> = vec![10.into(), "Cat".into(), 1.into()];
+        let mut records: Records = Default::default();
+        records.push(Record::Positive(first));
+        records.push(Record::Negative(second));
+
+        state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
+        state.add_key(Index::new(IndexType::HashMap, vec![1, 2]), None);
+        state.process_records(&mut records, None, None).unwrap();
     }
 
     #[test]

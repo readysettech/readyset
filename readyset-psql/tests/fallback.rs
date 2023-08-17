@@ -1406,3 +1406,35 @@ async fn show_proxied_queries_show_caches_query_text_matches() {
 
     shutdown_tx.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn insert_delete_a_record_in_the_same_transaction() {
+    readyset_tracing::init_test_logging();
+    let (config, _handle, shutdown_tx) = setup().await;
+    let mut client = connect(config).await;
+    client.simple_query("create table t(a int)").await.unwrap();
+    {
+        let transaction = client.transaction().await.unwrap();
+        // Begin transaction
+        transaction.batch_execute("BEGIN").await.unwrap();
+
+        // Value to be inserted
+        let val = 1;
+
+        transaction
+            .execute("INSERT INTO t VALUES($1)", &[&val])
+            .await
+            .unwrap();
+        transaction.execute("delete from t", &[]).await.unwrap();
+
+        // Commit the transaction
+        transaction.batch_execute("COMMIT").await.unwrap();
+    }
+
+    // Check if all the records have been deleted
+    let rows = client.query("SELECT COUNT(*) FROM t", &[]).await.unwrap();
+    let count: i64 = rows[0].get(0);
+    assert_eq!(count, 0);
+    shutdown_tx.shutdown().await;
+}
