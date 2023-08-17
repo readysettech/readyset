@@ -176,7 +176,8 @@ impl Leader {
                         // Unrecoverable errors, propagate the error the controller and kill the
                         // loop.
                         Err(err @ ReadySetError::RecipeInvariantViolated(_)) => {
-                            if let Err(e) = notification_channel.send(ReplicatorMessage::Error(err))
+                            if let Err(e) = notification_channel
+                                .send(ReplicatorMessage::UnrecoverableError(err))
                             {
                                 error!(error = %e, "Could not notify controller of critical error. The system may be in an invalid state");
                             }
@@ -191,6 +192,10 @@ impl Leader {
                                 timeout_sec=replicator_restart_timeout.as_secs(),
                                 "Error in replication, will retry after timeout"
                             );
+                            // Send the error to the controller so that we can update the replicator
+                            // status
+                            let _ = notification_channel
+                                .send(ReplicatorMessage::RecoverableError(error));
                             tokio::time::sleep(replicator_restart_timeout).await;
                         }
                     }

@@ -26,7 +26,10 @@ pub enum ReplicatorMessage {
     /// The replicator finished startup and entered the main replication loop
     ReplicationStarted,
     /// The replicator encountered an unrecoverable error
-    Error(ReadySetError),
+    UnrecoverableError(ReadySetError),
+    /// The replicator encountered an error that caused it to restart, but the error could be
+    /// recoverable. The controller is notified so that it can update status for the user.
+    RecoverableError(ReadySetError),
 }
 
 /// Provide a simplistic human-readable estimate for how much time remains to complete an operation
