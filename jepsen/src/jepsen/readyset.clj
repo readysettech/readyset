@@ -251,7 +251,7 @@
     :db (db "1eebd43bd6befd8acc9104b4239a414d72a4bd55"  ; Needs at least this commit
             #_"refs/tags/beta-2023-07-26")
     :client (rs/new-client)
-    :generator (->> rs/r
+    :generator (->> (gen/mix [rs/r rs/w])
                     (gen/stagger 1)
                     (gen/nemesis nil)
                     (gen/time-limit 15))
