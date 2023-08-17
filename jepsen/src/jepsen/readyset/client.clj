@@ -1,14 +1,15 @@
 (ns jepsen.readyset.client
   "Utilities for interacting with a ReadySet cluster"
   (:require
+   [clojure.java.io :as io]
    [clojure.set :as set]
    [clojure.tools.logging :refer [info warn]]
    [dom-top.core :refer [with-retry]]
    [jepsen.client :as client]
+   [jepsen.readyset.nodes :as nodes]
+   [knossos.model :as model]
    [next.jdbc :as jdbc]
-   [slingshot.slingshot :refer [throw+ try+]]
-   [clojure.java.io :as io]
-   [jepsen.readyset.nodes :as nodes])
+   [slingshot.slingshot :refer [throw+ try+]])
   (:import
    (org.postgresql.util PSQLException)))
 
@@ -123,15 +124,23 @@
                      :exception e}))))))
 
   (invoke! [_ test op]
-    (case (:f op)
-      :read (try+
-             (assoc op
+    (try+
+     (case (:f op)
+       :read (assoc op
                     :type :ok
                     :value (jdbc/execute! conn ["select x from t1"]))
-             (catch PSQLException e
-               (assoc op :type :fail :value e)))))
+       :write
+       (do (jdbc/execute! conn ["insert into t1 (x) values (?)"
+                                (:value op)])
+           (assoc op :type :ok)))
+     (catch PSQLException e
+       (assoc op :type :fail :message (ex-message e)))))
 
-  (teardown! [this test])
+  (teardown! [this test]
+    (try
+      (some-> conn (jdbc/execute! ["drop table if exists t1;"]))
+      (catch PSQLException e
+        (warn "Could not drop table:" e))))
 
   (close! [this test]
     (dissoc this :conn)))
