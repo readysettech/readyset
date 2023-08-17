@@ -48,6 +48,7 @@ use readyset_dataflow::Readers;
 use readyset_errors::ReadySetError;
 use readyset_server::metrics::{CompositeMetricsRecorder, MetricsRecorder};
 use readyset_server::worker::readers::{retry_misses, Ack, BlockingRead, ReadRequestHandler};
+use readyset_server::resolve_addr;
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetryInitializer};
 use readyset_util::futures::abort_on_panic;
 use readyset_util::redacted::RedactedString;
@@ -393,9 +394,13 @@ pub struct Options {
     cleanup: bool,
 
     /// In standalone or embedded-readers mode, the IP address on which the ReadySet controller
-    /// will listen.
-    #[clap(long, env = "CONTROLLER_ADDRESS")]
+    /// will listen to other ReadySet instances running in the same deployment.
+    #[clap(long, env = "CONTROLLER_ADDRESS", value_parser = resolve_addr)]
     controller_address: Option<IpAddr>,
+
+    /// Port to advertise to other ReadySet instances running in the same deployment.
+    #[clap(long, default_value = "6033", env = "CONTROLLER_PORT")]
+    controller_port: u16,
 }
 
 impl Options {
@@ -987,9 +992,14 @@ where
 
             builder.set_telemetry_sender(telemetry_sender.clone());
 
-            if let Some(addr) = options.controller_address {
-                builder.set_listen_addr(addr);
-            }
+            let reader_ip = options
+                .controller_address
+                .unwrap_or_else(|| std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)));
+
+            let reader_addr = SocketAddr::new(reader_ip, options.controller_port);
+
+            builder.set_listen_addr(reader_ip);
+            builder.set_external_addr(reader_addr);
 
             if let Some(external_addr) = options.external_address.or(options.controller_address) {
                 builder.set_external_addr(SocketAddr::new(external_addr, 0));
@@ -998,13 +1008,7 @@ where
             let server_handle = rt.block_on(async move {
                 let authority = Arc::new(authority.to_authority(&authority_address, &deployment));
 
-                builder
-                    .start_with_readers(
-                        authority,
-                        r,
-                        SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 4000),
-                    )
-                    .await
+                builder.start_with_readers(authority, r, reader_addr).await
             })?;
 
             Some(server_handle)
