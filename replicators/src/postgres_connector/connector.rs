@@ -124,7 +124,10 @@ impl PostgresWalConnector {
         }
         pg_config.dbname(dbname.as_ref()).set_replication_database();
 
-        let (client, connection) = pg_config.connect(tls_connector).await?;
+        let (client, connection) = pg_config
+            .connect(tls_connector)
+            .await
+            .map_err(|e| ReadySetError::ReplicationFailed(format!("Failed to connect: {e}")))?;
         let connection_handle = tokio::spawn(connection);
 
         let mut connector = PostgresWalConnector {
@@ -256,7 +259,9 @@ impl PostgresWalConnector {
     /// The user must have superuser privileges for that to work.
     async fn create_publication(&mut self, name: &str) -> ReadySetResult<()> {
         let query = format!("CREATE PUBLICATION {} FOR ALL TABLES", name);
-        self.simple_query(&query).await?;
+        self.simple_query(&query).await.map_err(|e| {
+            ReadySetError::ReplicationFailed(format!("Failed to create publication: {e}"))
+        })?;
         Ok(())
     }
 
@@ -284,7 +289,9 @@ impl PostgresWalConnector {
             if temporary { "TEMPORARY" } else { "" }
         );
 
-        let row = self.one_row_query(&query, 4).await?;
+        let row = self.one_row_query(&query, 4).await.map_err(|e| {
+            ReadySetError::ReplicationFailed(format!("Failed to create replication slot: {e}"))
+        })?;
 
         let slot_name = row.get(0).unwrap().to_string(); // Can unwrap all because checked by `one_row_query`
         let consistent_point = row.get(1).unwrap().parse()?;
