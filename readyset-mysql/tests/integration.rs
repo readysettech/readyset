@@ -36,8 +36,9 @@ async fn setup_telemetry() -> (TelemetryReporter, mysql_async::Opts, Handle, Shu
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "Reproduces known failure (REA-3207)"]
 async fn duplicate_join_key() {
+    // This used to trigger a bug involving weak indexes. See issue #179 for more info.
+
     let (opts, _handle, shutdown_tx) = setup().await;
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();
 
