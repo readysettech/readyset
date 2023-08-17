@@ -10,9 +10,11 @@ use postgres_protocol::escape::escape_literal;
 #[cfg(feature = "failure_injection")]
 use readyset_client::failpoints;
 use readyset_client::TableOperation;
-use readyset_errors::{invariant, set_failpoint_return_err, ReadySetError, ReadySetResult};
+use readyset_errors::{
+    invariant, invariant_eq, set_failpoint_return_err, ReadySetError, ReadySetResult,
+};
 use readyset_util::select;
-use replication_offset::postgres::{CommitLsn, PostgresPosition};
+use replication_offset::postgres::{CommitLsn, Lsn, PostgresPosition};
 use replication_offset::ReplicationOffset;
 use tokio_postgres as pgsql;
 use tracing::{debug, error, info, trace, warn};
@@ -46,7 +48,7 @@ pub struct PostgresWalConnector {
     /// Stores an event or error that was read but not handled
     peek: Option<Result<WalEvent, WalError>>,
     /// If we just want to continue reading the log from a previous point
-    next_position: Option<CommitLsn>,
+    next_position: Option<Lsn>,
     /// The replication slot if was created for this connector
     pub(crate) replication_slot: Option<CreatedSlot>,
     /// Whether to log statements received by the connector
@@ -64,7 +66,7 @@ pub(crate) struct ServerIdentity {
     pub(crate) timeline: i8,
     /// Current WAL flush location. Useful to get a known location in the write-ahead log where
     /// streaming can start.
-    pub(crate) xlogpos: CommitLsn,
+    pub(crate) xlogpos: Lsn,
     /// Database connected to or null.
     pub(crate) dbname: Option<String>,
 }
@@ -94,7 +96,7 @@ impl PostgresWalConnector {
         mut pg_config: pgsql::Config,
         dbname: S,
         config: UpstreamConfig,
-        next_position: Option<CommitLsn>,
+        next_position: Option<Lsn>,
         tls_connector: MakeTlsConnector,
         repl_slot_name: &str,
         enable_statement_logging: bool,
@@ -135,7 +137,7 @@ impl PostgresWalConnector {
         debug!(
             id = %system.id,
             timeline = %system.timeline,
-            xlogpos = %PostgresPosition::from_commit_lsn(system.xlogpos),
+            xlogpos = %system.xlogpos,
             dbname = ?system.dbname
         );
 
@@ -215,7 +217,7 @@ impl PostgresWalConnector {
         let timeline: i8 = row.get(1).unwrap().parse().map_err(|_| {
             ReadySetError::ReplicationFailed("Unable to parse identify system".into())
         })?;
-        let xlogpos = CommitLsn(parse_wal(row.get(2).unwrap())?);
+        let xlogpos = Lsn(parse_wal(row.get(2).unwrap())?);
         let dbname = row.get(3).map(Into::into);
 
         Ok(ServerIdentity {
@@ -345,7 +347,7 @@ impl PostgresWalConnector {
         Ok(())
     }
 
-    fn send_standby_status_update(&self, ack: CommitLsn) -> ReadySetResult<()> {
+    fn send_standby_status_update(&self, ack: Lsn) -> ReadySetResult<()> {
         use bytes::{BufMut, BytesMut};
 
         // The difference between UNIX and Postgres epoch
@@ -505,10 +507,7 @@ impl Connector for PostgresWalConnector {
             schema: None,
             name: "".into(),
         };
-        let mut cur_pos = PostgresPosition {
-            last_commit_lsn: last_pos.clone().try_into()?,
-            lsn: 0.into(),
-        };
+        let mut cur_pos = PostgresPosition::commit_start(CommitLsn::try_from(last_pos.clone())?);
         let mut actions = Vec::with_capacity(MAX_QUEUED_INDEPENDENT_ACTIONS);
 
         loop {
@@ -545,14 +544,29 @@ impl Connector for PostgresWalConnector {
                 // batch of actions we have buffered, and then come back to the stashed event the
                 // next time this method is called.
                 //
-                // Note that COMMITs are counted as events that don't have LSNs and thus will never
-                // result in an early return here, since WalEvent::lsn will return None. A COMMIT
-                // always results in the flushing of our buffered events with the replication offset
-                // reported to be `(LSN of the COMMIT, 0)`. For a COMMIT with LSN `n`, even if the
-                // LSN of the event after a COMMIT were to match that of the COMMIT (i.e. it were
-                // also `n`), the event's LSN would be treated as an `Lsn` and not a `CommitLsn`, so
-                // the next position would be `(n, n)`, which is distinct from and greater than `(n,
-                // 0)`.
+                // Note that COMMITs and BEGINs are counted as events that don't have LSNs and thus
+                // will never result in an early return here, since WalEvent::lsn() will return
+                // None.
+                //
+                // There are two situations in which we will receive a BEGIN: 1) if the last event
+                // we've received was a COMMIT and 2) if we are starting replication in the middle
+                // of a transaction after a restart. If the last event we received was a COMMIT, we
+                // know that we've already flushed all of our actions in the prior invocation of
+                // `handle_action`, so there would be no reason to return early here. If we are
+                // starting replication in the middle of a transaction after a restart, we will end
+                // up throwing out the actions that occur between this BEGIN and `last_pos`, since
+                // we've already processed them.
+                //
+                // A COMMIT always results in the flushing of our buffered events with the
+                // replication offset reported to be `(LSN of the COMMIT, LSN of the COMMIT)`. For a
+                // COMMIT event with LSN `x`, the `PostgresPosition` of that COMMIT event would be
+                // `(x, x)`. Even if the next event were to share an LSN with the COMMIT that came
+                // directly before it, the LSN `y` of the COMMIT that ends the next transaction
+                // would be greater than the LSN of the prior commit, which means
+                // `(x, x) != (y, x)`. In simpler terms, this guarantees that there will never be an
+                // event that comes after a COMMIT that shares the same `PostgresPosition`, so we
+                // don't need to worry about applying these events atomically to a base table
+                // domain.
                 Ok(Some(lsn))
                     if actions.len() >= MAX_QUEUED_INDEPENDENT_ACTIONS && *lsn != cur_pos.lsn =>
                 {
@@ -716,24 +730,26 @@ impl Connector for PostgresWalConnector {
                 WalEvent::WantsKeepaliveResponse => {
                     // Sending a standby status update to the upstream database involves "ACKing"
                     // the point in the WAL up to which we've successfully persisted data. This lets
-                    // the upstream database know that it can remove all the WAL entries up to this
-                    // point.
-                    //
-                    // The LSNs of events sent to us from Postgres do not monotonically increase
-                    // with each event. For this reason, we cannot "ACK" the LSN of the last event
-                    // we saw because we have no guarantee that we've seen all the events with LSNs
-                    // less than that of the last event we saw. However, LSNs across *COMMITs* are
-                    // guaranteed to increase monotonically, so we *can* safely "ACK" the LSN of the
-                    // last COMMIT we saw.
+                    // the upstream database know that it can remove any WAL entries that are no
+                    // longer needed.
                     self.send_standby_status_update(last_pos.clone().try_into()?)?;
                 }
+                WalEvent::Begin { final_lsn } => {
+                    // Update our current position to be `(final_lsn, 0)`, which points to the first
+                    // position in the transaction that is ended by the COMMIT at `final_lsn`.
+                    cur_pos = PostgresPosition::commit_start(final_lsn);
+                }
                 WalEvent::Commit { lsn } => {
+                    // If the `CommitLsn` from the COMMIT does not match the `CommitLsn` from the
+                    // BEGIN, something has gone very wrong
+                    invariant_eq!(lsn, cur_pos.commit_lsn);
+
                     // On commit we flush, because there is no knowing when the next commit is
                     // coming. We report our current position to reflect the COMMIT we just saw.
                     // If we crash after returning this position but before persisting this new
                     // position in the base tables, we will begin replicating from a COMMIT prior to
                     // this one, guaranteeing that we don't miss any events.
-                    let position = PostgresPosition::from_commit_lsn(lsn);
+                    let position = PostgresPosition::commit_end(lsn);
 
                     if !actions.is_empty() {
                         return Ok((

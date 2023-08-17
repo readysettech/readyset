@@ -1438,3 +1438,217 @@ async fn insert_delete_a_record_in_the_same_transaction() {
     assert_eq!(count, 0);
     shutdown_tx.shutdown().await;
 }
+
+// Tests that we correctly replicate the events that occur while we are handling a resnapshot
+#[cfg(feature = "failure_injection")]
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn pgsql_test_replication_after_resnapshot() {
+    use std::time::Duration;
+
+    readyset_tracing::init_test_logging();
+
+    let (config, mut handle, shutdown_tx) = TestBuilder::default()
+        .migration_mode(MigrationMode::InRequestPath)
+        .fallback(true)
+        .build::<PostgreSQLAdapter>()
+        .await;
+    let client = connect(config).await;
+
+    client
+        .simple_query("DROP TABLE IF EXISTS cats")
+        .await
+        .unwrap();
+    client
+        .simple_query("CREATE TABLE cats (id int, PRIMARY KEY(id))")
+        .await
+        .unwrap();
+
+    // Wait to make sure the table is replicated
+    tokio::time::sleep(Duration::from_secs(3)).await;
+
+    // This failpoint is placed after we've created the replication slot and before we've started
+    // replication, which means any data we insert into the upstream database while the replicator
+    // is paused there will not be present in our initial snapshot
+    handle
+        .set_failpoint(
+            readyset_client::failpoints::POSTGRES_SNAPSHOT_START,
+            "pause",
+        )
+        .await;
+
+    // This will trigger a resnapshot
+    client
+        .simple_query("ALTER TABLE cats ADD COLUMN a int")
+        .await
+        .unwrap();
+
+    // Wait for the replicator to reach the failpoint
+    tokio::time::sleep(Duration::from_secs(3)).await;
+
+    // Since the replicator has reached the failpoint, we know a replication slot has been created,
+    // which means any data added here won't be reflected in the re-snapshot
+    for i in 0..10 {
+        client
+            .simple_query(&format!("INSERT INTO cats (id) VALUES ({i})"))
+            .await
+            .unwrap();
+    }
+
+    // Unpause the replicator to allow it to finish snapshotting and catch up with the data we added
+    handle
+        .set_failpoint(readyset_client::failpoints::POSTGRES_SNAPSHOT_START, "off")
+        .await;
+
+    tokio::time::sleep(Duration::from_secs(3)).await;
+
+    let cached_results: Vec<DfValue> = client
+        .query("SELECT * FROM cats", &[])
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|row| row.get::<_, DfValue>(0))
+        .collect();
+
+    let mut upstream_config = upstream_config();
+    upstream_config.dbname("noria");
+    let upstream = connect(upstream_config.clone()).await;
+
+    let upstream_results: Vec<DfValue> = upstream
+        .query("SELECT * FROM cats", &[])
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|row| row.get::<_, DfValue>(0))
+        .collect();
+
+    assert_eq!(cached_results, upstream_results);
+
+    shutdown_tx.shutdown().await;
+}
+
+// Tests that we end up with the correct data if replication restarts after we've partially applied
+// a commit
+#[cfg(feature = "failure_injection")]
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn start_replication_in_middle_of_commit() {
+    use std::time::Duration;
+
+    use readyset_errors::ReadySetError;
+
+    readyset_tracing::init_test_logging();
+    let (config, mut handle, shutdown_tx) = TestBuilder::default()
+        .fallback(true)
+        .migration_mode(MigrationMode::InRequestPath)
+        .build::<PostgreSQLAdapter>()
+        .await;
+    let client = connect(config).await;
+
+    client
+        .simple_query("DROP TABLE IF EXISTS cats1 CASCADE")
+        .await
+        .unwrap();
+    client
+        .simple_query("DROP TABLE IF EXISTS cats2 CASCADE")
+        .await
+        .unwrap();
+    client
+        .simple_query("CREATE TABLE cats1 (id int, PRIMARY KEY(id))")
+        .await
+        .unwrap();
+    client
+        .simple_query("CREATE TABLE cats2 (id int, PRIMARY KEY(id))")
+        .await
+        .unwrap();
+
+    sleep().await;
+
+    // Add a delay between our handling of replication actions to ensure that the transaction is
+    // only partially applied to the base tables before we are able to trigger an error
+    handle
+        .set_failpoint(readyset_client::failpoints::UPSTREAM, "sleep(50)")
+        .await;
+
+    // Execute a transaction with many entries. We alternate inserts between two tables to ensure
+    // that a replication action is returned for every insert (typically, replication actions are
+    // batched when they originate from the same table)
+    client.simple_query("BEGIN").await.unwrap();
+    for i in 0..10 {
+        if i % 2 == 0 {
+            client
+                .simple_query(&format!("INSERT INTO cats1 (id) VALUES ({i})"))
+                .await
+                .unwrap();
+        } else {
+            client
+                .simple_query(&format!("INSERT INTO cats2 (id) VALUES ({i})"))
+                .await
+                .unwrap();
+        }
+    }
+    client.simple_query("COMMIT;").await.unwrap();
+
+    // Sleep to ensure that some of the inserts from above are applied to the base tables
+    sleep().await;
+
+    // By now, only some of insert events will have been applied to base tables. We trigger an error
+    // here to prompt a restart of the replication loop. Since we are restarting the replication
+    // loop in the middle of a commit, we'll be starting replication at an LSN in the middle of a
+    // commit, which is exactly what we want to test here
+    handle
+        .set_failpoint(
+            readyset_client::failpoints::UPSTREAM,
+            &format!(
+                "1*return({})",
+                serde_json::ser::to_string(&ReadySetError::ReplicationFailed("error".into()))
+                    .expect("failed to serialize error")
+            ),
+        )
+        .await;
+
+    // Sleep to wait out the replicator's error timeout period and allow the replicator to catch up
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    let mut upstream_config = upstream_config();
+    upstream_config.dbname("noria");
+    let upstream = connect(upstream_config).await;
+
+    let cached_results_cats1: Vec<DfValue> = client
+        .query("SELECT * FROM cats1", &[])
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|row| row.get::<_, DfValue>(0))
+        .collect();
+
+    let upstream_results_cats1: Vec<DfValue> = upstream
+        .query("SELECT * FROM cats1", &[])
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|row| row.get::<_, DfValue>(0))
+        .collect();
+
+    let cached_results_cats2: Vec<DfValue> = client
+        .query("SELECT * FROM cats2", &[])
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|row| row.get::<_, DfValue>(0))
+        .collect();
+
+    let upstream_results_cats2: Vec<DfValue> = upstream
+        .query("SELECT * FROM cats2", &[])
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|row| row.get::<_, DfValue>(0))
+        .collect();
+
+    // Check to make sure the results are the same between the upstream database and ReadySet
+    assert_eq!(cached_results_cats1, upstream_results_cats1);
+    assert_eq!(cached_results_cats2, upstream_results_cats2);
+
+    shutdown_tx.shutdown().await;
+}

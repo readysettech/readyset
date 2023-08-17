@@ -564,6 +564,8 @@ impl NoriaAdapter {
         let mut create_schema = CreateSchema::new(dbname.to_string(), nom_sql::Dialect::PostgreSQL);
 
         if let Some(replication_slot) = replication_slot {
+            set_failpoint!(failpoints::POSTGRES_SNAPSHOT_START);
+
             let snapshot_start = Instant::now();
             // If snapshot name exists, it means we need to make a snapshot to noria
 

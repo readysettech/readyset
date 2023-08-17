@@ -16,3 +16,5 @@ pub const UPSTREAM: &str = "upstream";
 pub const REPLICATION_HANDLE_ACTION: &str = "replication-handle-action";
 /// Imitates a failure during `PostgresWalConnector::next_action` in replication
 pub const POSTGRES_REPLICATION_NEXT_ACTION: &str = "postgres-replication-next-action";
+/// Imitates a failure right before we begin snapshotting against a Postgres upstream
+pub const POSTGRES_SNAPSHOT_START: &str = "postgres-snapshot-start";

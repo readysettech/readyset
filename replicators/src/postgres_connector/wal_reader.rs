@@ -39,6 +39,9 @@ pub struct WalReader {
 #[derive(Debug)]
 pub(crate) enum WalEvent {
     WantsKeepaliveResponse,
+    Begin {
+        final_lsn: CommitLsn,
+    },
     Commit {
         lsn: CommitLsn,
     },
@@ -95,7 +98,7 @@ impl WalEvent {
             | Self::UpdateByKey { lsn, .. }
             | Self::Truncate { lsn, .. }
             | Self::DdlEvent { lsn, .. } => Some(*lsn),
-            Self::Commit { .. } | Self::WantsKeepaliveResponse => None,
+            Self::Begin { .. } | Self::Commit { .. } | Self::WantsKeepaliveResponse => None,
         }
     }
 }
@@ -142,9 +145,10 @@ impl WalReader {
                 }
             };
 
-            trace!(?record);
+            trace!(?lsn, ?record);
 
             match record {
+                WalRecord::Begin { final_lsn, .. } => return Ok(WalEvent::Begin { final_lsn }),
                 WalRecord::Commit { lsn, .. } => return Ok(WalEvent::Commit { lsn }),
                 WalRecord::Relation(mapping) => {
                     // Store the relation in the hash map for future use
@@ -406,7 +410,6 @@ impl WalReader {
                         }
                     }
                 }
-                WalRecord::Begin { .. } => {}
                 WalRecord::Message {
                     prefix,
                     payload,
