@@ -62,7 +62,7 @@ struct Options {
     )]
     address: IpAddr,
 
-    /// IP address to advertise to other noria instances running in the same deployment.
+    /// IP address to advertise to other ReadySet instances running in the same deployment.
     ///
     /// If not specified, defaults to the value of `address`
     #[clap(long, env = "EXTERNAL_ADDRESS", value_parser = resolve_addr)]
@@ -72,7 +72,8 @@ struct Options {
     #[clap(long, short = 'p', default_value = "6033")]
     external_port: u16,
 
-    /// Use the AWS EC2 metadata service to determine the external address of this noria instance.
+    /// Use the AWS EC2 metadata service to determine the external address of this ReadySet
+    /// instance.
     ///
     /// If specified, overrides the value of --external-address
     #[clap(long)]
