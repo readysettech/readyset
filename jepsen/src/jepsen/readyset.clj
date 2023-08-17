@@ -11,89 +11,21 @@
    [jepsen.control.util :as cu]
    [jepsen.core :as jepsen]
    [jepsen.db :as db]
+   [jepsen.generator :as gen]
    [jepsen.os.debian :as debian]
    [jepsen.os.ubuntu :as ubuntu]
    [jepsen.readyset.client :as rs]
+   [jepsen.readyset.nodes :as nodes]
    [jepsen.tests :as tests]
    [slingshot.slingshot :refer [try+]]))
-
-(def pguser "postgres")
-(def pgpassword "password")
-(def pgdatabase "jepsen")
-
-(defn- node->role
-  [test]
-  (zipmap
-   (:nodes test)
-   (concat [:node-role/load-balancer
-            :node-role/consul
-            :node-role/readyset-server
-            :node-role/upstream]
-           (repeat :node-role/readyset-adapter))))
-
-(defn role->node
-  [test]
-  (into {} (map (comp vec reverse)) (node->role test)))
-
-(defn- node-role
-  "Given a test and a node in that test, returns what will be running on that
-  node for the test, represented as a keyword in
-  `#{:node-role/consul
-     :node-role/readyset-adapter
-     :node-role/load-balancer
-     :node-role/readyset-server
-     :node-role/upstream}`.
-
-  Note that we must always have at least 5 nodes to run a test.
-
-  Roles will be assigned to nodes in the following order:
-
-    1. `:node-role/load-balancer`
-    2. `:node-role/consul`
-    3. `:node-role/readyset-server`
-    4. `:node-role/upstream`
-    5. ... and all remaining nodes will have `:node-role/readyset-adapter`"
-  [test node]
-  (assert
-   (>= (count (:nodes test)) 5)
-   "Must have at least 5 nodes to run a high-availability ReadySet cluster")
-  (get (node->role test) node))
-
-(defn- node-with-role
-  "Returns the node with the given role in the given test"
-  [test role]
-  (get (role->node test) role))
-
-(defn- adapter-nodes
-  "Returns a sequence of adapter nodes in the given test"
-  [test]
-  (->> test :nodes (drop 4)))
-
-(defn- num-adapters
-  "Returns the number of adapter instances that will be running in the given
-  test"
-  [test]
-  (- (count (:nodes test)) 4))
 
 (defn- upstream-db-url
   "Returns the upstream DB URL for the given test"
   [test]
   (str "postgresql://"
-       pguser ":" pgpassword
-       "@" (node-with-role test :node-role/upstream)
-       "/" pgdatabase))
-
-(defn- readyset-datasource
-  "Build a JDBC DataSource for connecting to the ReadySet cluster in the given
-  test"
-  [test]
-  (rs/make-datasource
-   {:dbtype "postgres"
-    :dbname pgdatabase
-    :user pguser
-    :password pgpassword
-    :host (name (node-with-role test :node-role/load-balancer))
-    :port 5432}))
+       rs/pguser ":" rs/pgpassword
+       "@" (nodes/node-with-role test :node-role/upstream)
+       "/" rs/pgdatabase))
 
 (defn- ensure-git-cloned
   "Ensure that a git repository `repo` is cloned at ref `ref` in dir `dir`"
@@ -137,7 +69,7 @@
 
 (defn- authority-address
   [test]
-  (str (name (node-with-role test :node-role/consul))
+  (str (name (nodes/node-with-role test :node-role/consul))
        ":8500"))
 
 (defn- append-to-file [s file]
@@ -149,7 +81,7 @@
   (let [consul (consul.db/db "1.16.1")]
     (reify db/DB
       (setup! [_ test node]
-        (if-let [role (node-role test node)]
+        (if-let [role (nodes/node-role test node)]
           (do
             (info node "role is" role)
             (case role
@@ -158,7 +90,7 @@
                 (debian/install ["haproxy"])
                 (let [haproxy-servers
                       (->> test
-                           adapter-nodes
+                           nodes/adapter-nodes
                            (map #(str "server " (name %) " " (name %) ":5432 check"))
                            (str/join "\n"))
                       haproxy-cfg (-> (io/resource "haproxy.cfg.tpl")
@@ -177,16 +109,16 @@
               :node-role/upstream
               (do
                 (debian/install ["postgresql"])
-                (info node "setting up postgresql database " pgdatabase)
+                (info node "setting up postgresql database " rs/pgdatabase)
                 (c/sudo
                  "postgres"
 
                  (try+
-                  (c/exec "psql" :-c (str "create database " pgdatabase))
+                  (c/exec "psql" :-c (str "create database " rs/pgdatabase))
                   (catch #(re-find #"database \".*?\" already exists"
                                    (:err %)) _))
-                 (c/exec "psql" :-c (str "alter user " pguser
-                                         " password '" pgpassword "'"))
+                 (c/exec "psql" :-c (str "alter user " rs/pguser
+                                         " password '" rs/pgpassword "'"))
 
                  (append-to-file
                   "listen_addresses = '*'\nwal_level = logical"
@@ -216,12 +148,13 @@
                   :--log-level (:log-level test "info")
                   :--deployment "jepsen"
                   :-a "0.0.0.0:5432"
+                  :--controller-address "0.0.0.0"
                   :--external-address (net/ip (name node))
                   :--authority-address (authority-address test)
                   :--upstream-db-url (upstream-db-url test)
                   :--disable-upstream-ssl-verification
                   :--embedded-readers
-                  :--reader-replicas (str (num-adapters test)))))
+                  :--reader-replicas (str (nodes/num-adapters test)))))
 
               :node-role/readyset-server
               (do
@@ -247,18 +180,19 @@
                   :--external-address (net/ip (name node))
                   :--authority-address (authority-address test)
                   :--upstream-db-url (upstream-db-url test)
+                  :--allow-full-materialization
                   :--disable-upstream-ssl-verification
                   :--no-readers
-                  :--reader-replicas (str (num-adapters test))))
+                  :--reader-replicas (str (nodes/num-adapters test))))
 
-                (let [ds (readyset-datasource test)]
+                (let [ds (rs/test-datasource test)]
                   (rs/wait-for-snapshot-completed ds))
                 (info "ReadySet is running"))))
 
           (error node "unknown role")))
 
       (teardown! [_ test node]
-        (if-let [role (node-role test node)]
+        (if-let [role (nodes/node-role test node)]
           (do
             (info node "tearing down for role" role)
             (case role
@@ -267,9 +201,9 @@
 
               :node-role/upstream
               (try+
-               (info node "dropping database" pgdatabase)
+               (info node "dropping database" rs/pgdatabase)
                (c/sudo "postgres" (c/exec "psql"
-                                          :-c (str "drop database " pgdatabase)))
+                                          :-c (str "drop database " rs/pgdatabase)))
                (catch #(re-find #"psql: command not found" (:err %)) _)
                (catch #(re-find #"database \".*?\" does not exist" (:err %)) _)
                (catch
@@ -298,7 +232,7 @@
 
       db/LogFiles
       (log-files [_ test node]
-        (if-let [role (node-role test node)]
+        (if-let [role (nodes/node-role test node)]
           (case role
             :node-role/load-balancer nil
             :node-role/consul (db/log-files consul test node)
@@ -316,6 +250,11 @@
     :os ubuntu/os
     :db (db "1eebd43bd6befd8acc9104b4239a414d72a4bd55"  ; Needs at least this commit
             #_"refs/tags/beta-2023-07-26")
+    :client (rs/new-client)
+    :generator (->> rs/r
+                    (gen/stagger 1)
+                    (gen/nemesis nil)
+                    (gen/time-limit 15))
     :pure-generators true}))
 
 (def opt-spec
