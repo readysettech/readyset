@@ -5120,6 +5120,7 @@ checksum = "436b050e76ed2903236f032a59761c1eb99e1b0aead2c257922771dab1fc8c78"
 name = "replication-offset"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "nom-sql",
  "readyset-errors",
  "readyset-util",
