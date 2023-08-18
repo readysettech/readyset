@@ -1058,8 +1058,14 @@ impl ModelState for DDLModelState {
                     result().unwrap()
                 });
             }
+            Operation::WriteRow { pkey, col_vals, .. } => {
+                let pkey = DfValue::from(*pkey);
+                let params: Vec<&DfValue> = once(&pkey).chain(col_vals.iter()).collect();
+                let query = format!("{:?}", op);
+                rs_conn.query_raw(&query, &params).await.unwrap();
+                pg_conn.query_raw(&query, &params).await.unwrap();
+            }
             Operation::DropTable(_)
-            | Operation::WriteRow { .. }
             | Operation::AddColumn(_, _)
             | Operation::DropColumn(_, _)
             | Operation::AlterColumnName { .. }
