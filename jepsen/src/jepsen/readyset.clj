@@ -13,6 +13,7 @@
    [jepsen.core :as jepsen]
    [jepsen.db :as db]
    [jepsen.generator :as gen]
+   [jepsen.nemesis :as nemesis]
    [jepsen.os.debian :as debian]
    [jepsen.os.ubuntu :as ubuntu]
    [jepsen.readyset.client :as rs]
@@ -253,13 +254,19 @@
     :db (db "1eebd43bd6befd8acc9104b4239a414d72a4bd55"  ; Needs at least this commit
             #_"refs/tags/beta-2023-07-26")
     :client (rs/new-client)
+    :nemesis (nemesis/partition-random-halves)
     :checker (checker/linearizable
               {:model (rs.model/eventually-consistent-table)
                :algorithm :linear})
     :generator (->> (gen/mix [rs/r rs/w])
                     (gen/stagger 1)
-                    (gen/nemesis nil)
-                    (gen/time-limit 15))
+                    (gen/nemesis
+                     (cycle
+                      [(gen/sleep 5)
+                       {:type :info, :f :start}
+                       (gen/sleep 5)
+                       {:type :info, :f :stop}]))
+                    (gen/time-limit 30))
     :pure-generators true}))
 
 (def opt-spec
