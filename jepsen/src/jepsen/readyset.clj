@@ -258,25 +258,38 @@
     :checker (checker/linearizable
               {:model (rs.model/eventually-consistent-table)
                :algorithm :linear})
-    :generator (->> (gen/mix [rs/r rs/w])
-                    (gen/stagger (/ (:rate opts)))
-                    (gen/nemesis
-                     (cycle
-                      [(gen/sleep 5)
-                       {:type :info, :f :start}
-                       (gen/sleep 5)
-                       {:type :info, :f :stop}]))
-                    (gen/time-limit (:time-limit opts)))
+    :generator (gen/phases
+                (->> (gen/mix [rs/r rs/w])
+                     (gen/stagger (/ (:rate opts)))
+                     (gen/nemesis
+                      (cycle
+                       [(gen/sleep 5)
+                        {:type :info, :f :start}
+                        (gen/sleep 5)
+                        {:type :info, :f :stop}]))
+                     (gen/time-limit (:time-limit opts)))
+                (gen/log "Waiting for dataflow to converge")
+                (gen/sleep (:converge-time opts))
+                (gen/synchronize
+                 (gen/once rs/final-r)))
     :pure-generators true}))
 
 (def opt-spec
-  [[nil "--log-level LOG_LEVEL" "Log level for ReadySet processes"
-    :default "info"]
-   [nil "--force-install" "Force install readyset binaries"]
-   ["-r" "--rate HZ" "Approximate number of requests per second, per thread"
-    :default 10
-    :parse-fn read-string
-    :validate [#(and (number? %) (pos? %)) "Must be a positive number"]]])
+  (let [validate-pos-number [#(and (number? %) (pos? %))
+                             "Must be a positive number"]]
+    [[nil "--log-level LOG_LEVEL" "Log level for ReadySet processes"
+      :default "info"]
+     [nil "--force-install" "Force install readyset binaries"]
+     ["-r" "--rate HZ" "Approximate number of requests per second, per thread"
+      :default 10
+      :parse-fn read-string
+      :validate validate-pos-number]
+     [nil
+      "--converge-time SECONDS"
+      "Number of seconds to wait for dataflow to converge"
+      :default 15
+      :parse-fn read-string
+      :validate validate-pos-number]]))
 
 (defn -main
   [& args]
