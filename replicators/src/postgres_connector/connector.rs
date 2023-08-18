@@ -217,7 +217,7 @@ impl PostgresWalConnector {
         let timeline: i8 = row.get(1).unwrap().parse().map_err(|_| {
             ReadySetError::ReplicationFailed("Unable to parse identify system".into())
         })?;
-        let xlogpos = Lsn(parse_wal(row.get(2).unwrap())?);
+        let xlogpos = row.get(2).unwrap().parse()?;
         let dbname = row.get(3).map(Into::into);
 
         Ok(ServerIdentity {
@@ -263,7 +263,7 @@ impl PostgresWalConnector {
         let row = self.one_row_query(&query, 4).await?;
 
         let slot_name = row.get(0).unwrap().to_string(); // Can unwrap all because checked by `one_row_query`
-        let consistent_point = CommitLsn(parse_wal(row.get(1).unwrap())?);
+        let consistent_point = row.get(1).unwrap().parse()?;
         let snapshot_name = row.get(2).map(Into::into).unwrap();
         let output_plugin = row.get(3).map(Into::into).unwrap();
         debug!(
@@ -359,16 +359,16 @@ impl PostgresWalConnector {
             .as_micros() as i64
             - J2000_EPOCH_GAP;
 
-        let pos = ack.0 + 1;
+        let pos = ack + 1;
 
         // Can reply with StandbyStatusUpdate or HotStandbyFeedback
         let mut b = BytesMut::with_capacity(39);
         b.put_u8(b'd'); // Copy data
         b.put_i32(38); // Message length (including this field)
         b.put_u8(b'r'); // Status update
-        b.put_i64(pos); // Acked
-        b.put_i64(pos); // Flushed
-        b.put_i64(pos); // Applied - this tells the server that it can remove prior WAL entries for this slot
+        pos.put_into(&mut b); // Acked
+        pos.put_into(&mut b); // Flushed
+        pos.put_into(&mut b); // Applied - this tells the server that it can remove prior WAL entries for this slot
         b.put_i64(now);
         b.put_u8(0);
         self.client
@@ -466,20 +466,6 @@ pub async fn drop_readyset_schema(client: &mut pgsql::Client) -> ReadySetResult<
         .await
         .map_err(ReadySetError::from)
         .map(|_| ())
-}
-
-fn parse_wal(wal: &str) -> ReadySetResult<i64> {
-    // Internally, an LSN is a 64-bit integer, representing a byte position in the write-ahead log
-    // stream. It is printed as two hexadecimal numbers of up to 8 digits each, separated by a
-    // slash; for example, 16/B374D848
-    let (hi, lo) = wal
-        .split_once('/')
-        .ok_or_else(|| ReadySetError::ReplicationFailed(format!("Invalid wal {wal}")))?;
-    let hi = i64::from_str_radix(hi, 16)
-        .map_err(|e| ReadySetError::ReplicationFailed(format!("Invalid wal {e:?}")))?;
-    let lo = i64::from_str_radix(lo, 16)
-        .map_err(|e| ReadySetError::ReplicationFailed(format!("Invalid wal {e:?}")))?;
-    Ok(hi << 32 | lo)
 }
 
 impl Drop for PostgresWalConnector {
