@@ -104,7 +104,7 @@
 (defn r [_ _] {:type :invoke, :f :read, :value nil})
 (defn w [_ _] {:type :invoke, :f :write, :value (rand-int 5)})
 
-(defrecord Client [conn table-created?]
+(defrecord Client [conn table-created? tables]
   client/Client
   (open! [this test node]
     (assoc this :conn (test-datasource test)))
@@ -128,7 +128,9 @@
      (case (:f op)
        :read (assoc op
                     :type :ok
-                    :value (jdbc/execute! conn ["select x from t1"]))
+                    :value
+                    (map (some-fn :t1/x :x)
+                         (jdbc/execute! conn ["select x from t1"])))
        :write
        (do (jdbc/execute! conn ["insert into t1 (x) values (?)"
                                 (:value op)])

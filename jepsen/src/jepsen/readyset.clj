@@ -4,6 +4,7 @@
    [clojure.java.io :as io]
    [clojure.string :as str]
    [clojure.tools.logging :refer [error info warn]]
+   [jepsen.checker :as checker]
    [jepsen.cli :as cli]
    [jepsen.consul.db :as consul.db]
    [jepsen.control :as c]
@@ -15,6 +16,7 @@
    [jepsen.os.debian :as debian]
    [jepsen.os.ubuntu :as ubuntu]
    [jepsen.readyset.client :as rs]
+   [jepsen.readyset.model :as rs.model]
    [jepsen.readyset.nodes :as nodes]
    [jepsen.tests :as tests]
    [slingshot.slingshot :refer [try+]]))
@@ -251,6 +253,9 @@
     :db (db "1eebd43bd6befd8acc9104b4239a414d72a4bd55"  ; Needs at least this commit
             #_"refs/tags/beta-2023-07-26")
     :client (rs/new-client)
+    :checker (checker/linearizable
+              {:model (rs.model/eventually-consistent-table)
+               :algorithm :linear})
     :generator (->> (gen/mix [rs/r rs/w])
                     (gen/stagger 1)
                     (gen/nemesis nil)
