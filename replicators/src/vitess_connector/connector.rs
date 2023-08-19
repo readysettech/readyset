@@ -15,10 +15,7 @@ use crate::noria_adapter::{Connector, ReplicationAction};
 
 /// A connector that connects to a Vitess cluster following its VStream from a given position.
 pub struct VitessConnector {
-    /// This is the underlying gRPC client for Vitess
-    client: VitessClient<Channel>,
-
-    // Vitess VStream API response used to fetch binlog events
+    // Channel with separate VStream API response events
     vstream_events: mpsc::Receiver<VEvent>,
 
     /// Reader is a decoder for binlog events
@@ -72,7 +69,7 @@ impl VitessConnector {
             ..Default::default()
         };
 
-        let mut vstream = client
+        let vstream = client
             .v_stream(request)
             .await
             .map_err(|_| readyset_errors::ReadySetError::InvalidUpstreamDatabase)?
@@ -80,12 +77,9 @@ impl VitessConnector {
 
         // Run the VStream API request in a separate task, getting events via a channel
         let (tx, rx) = mpsc::channel(1);
-        tokio::spawn(async move {
-            Self::run_v_stream(&mut vstream, tx).await.unwrap();
-        });
+        tokio::spawn(Self::run_v_stream(vstream, tx));
 
         let connector = VitessConnector {
-            client,
             vstream_events: rx,
             current_position: None,
             enable_statement_logging,
@@ -95,7 +89,7 @@ impl VitessConnector {
     }
 
     async fn run_v_stream(
-        vstream: &mut Streaming<VStreamResponse>,
+        mut vstream: Streaming<VStreamResponse>,
         tx: mpsc::Sender<VEvent>,
     ) -> Result<(), readyset_errors::ReadySetError> {
         loop {
