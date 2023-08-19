@@ -9,6 +9,7 @@
                  [com.github.seancorfield/next.jdbc "1.3.883"]
                  [org.postgresql/postgresql "42.6.0"]
                  [slingshot "0.12.2"]]
+  :plugins [[com.github.clj-kondo/lein-clj-kondo "0.2.5"]]
   :repl-options {:init-ns jepsen.readyset}
   :main jepsen.readyset
   :resource-paths ["resources"])
