@@ -22,5 +22,6 @@ async-trait = "0.1"
 nom-sql = { path = "../nom-sql" }
 readyset-client = { path = "../readyset-client" }
 deadpool-postgres = "0.10.3"
-vitess-grpc = "0.1.2"
+vitess-grpc = "0.2"
 tonic = "0.9"
+url = "2.4"
