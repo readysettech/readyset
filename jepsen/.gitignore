@@ -7,3 +7,4 @@
 /.prepl-port
 /.cpcache
 /store
+/.clj-kondo/.cache

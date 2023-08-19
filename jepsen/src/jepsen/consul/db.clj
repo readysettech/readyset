@@ -2,7 +2,6 @@
   "Adapted from https://github.com/jepsen-io/jepsen/blob/main/consul/src/jepsen/consul/db.clj"
   (:require [clojure.tools.logging :refer [info]]
             [jepsen.consul.client :as client]
-            [jepsen.core :as jepsen]
             [jepsen.db :as db]
             [jepsen.control :as c]
             [jepsen.control.net :as net]
@@ -41,7 +40,7 @@
   "Install and cleanup a specific version of consul"
   [version]
   (reify db/DB
-    (setup! [_ test node]
+    (setup! [_ _test node]
       (info node "installing consul" version)
       (c/su
        (let [url (str "https://releases.hashicorp.com/consul/"

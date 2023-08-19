@@ -1,13 +1,11 @@
 (ns jepsen.readyset.client
   "Utilities for interacting with a ReadySet cluster"
   (:require
-   [clojure.java.io :as io]
    [clojure.set :as set]
    [clojure.tools.logging :refer [info warn]]
    [dom-top.core :refer [with-retry]]
    [jepsen.client :as client]
    [jepsen.readyset.nodes :as nodes]
-   [knossos.model :as model]
    [next.jdbc :as jdbc]
    [slingshot.slingshot :refer [throw+ try+]])
   (:import
@@ -107,10 +105,10 @@
 
 (defrecord Client [conn table-created? tables]
   client/Client
-  (open! [this test node]
+  (open! [this test _node]
     (assoc this :conn (test-datasource test)))
 
-  (setup! [this test]
+  (setup! [_this _test]
     (when (compare-and-set! table-created? false true)
       (jdbc/execute! conn ["drop table if exists t1;"])
       (jdbc/execute! conn ["create table t1 (x int)"])
@@ -124,7 +122,7 @@
             (throw+ {:error :retry-attempts-exceeded
                      :exception e}))))))
 
-  (invoke! [_ test op]
+  (invoke! [_ _test op]
     (try+
      (case (:f op)
        (:read :final-read)
@@ -141,13 +139,13 @@
      (catch PSQLException e
        (assoc op :type :fail :message (ex-message e)))))
 
-  (teardown! [this test]
+  (teardown! [_this _test]
     (try
       (some-> conn (jdbc/execute! ["drop table if exists t1;"]))
       (catch PSQLException e
         (warn "Could not drop table:" e))))
 
-  (close! [this test]
+  (close! [this _test]
     (dissoc this :conn)))
 
 (defn new-client []
