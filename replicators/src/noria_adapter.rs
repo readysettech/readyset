@@ -34,6 +34,7 @@ use crate::postgres_connector::{
     PostgresWalConnector, PUBLICATION_NAME, REPLICATION_SLOT,
 };
 use crate::table_filter::TableFilter;
+use crate::vitess_connector::VitessConnector;
 use crate::{ControllerMessage, ReplicatorMessage};
 
 /// Time to wait for requests to coalesce between snapshotting. Useful for preventing a series of
@@ -731,14 +732,56 @@ impl NoriaAdapter {
     #[allow(clippy::too_many_arguments)]
     async fn start_inner_vitess(
         vitess_config: database_utils::VitessConfig,
-        noria: ReadySetHandle,
+        mut noria: ReadySetHandle,
         config: UpstreamConfig,
         ready_notify: &mut Option<Arc<Notify>>,
         resnapshot: bool,
         telemetry_sender: &TelemetrySender,
         enable_statement_logging: bool,
     ) -> Result<!, ReadySetError> {
-        todo!()
+        let replication_offsets = noria.replication_offsets().await?;
+        trace!(?replication_offsets, "Loaded replication offsets");
+
+        info!("Connecting to Vitess...");
+        let connector = Box::new(
+            VitessConnector::connect(
+                vitess_config.clone(),
+                config.clone(),
+                enable_statement_logging,
+            )
+            .await?,
+        );
+
+        let table_filter = TableFilter::try_new(
+            nom_sql::Dialect::MySQL,
+            config.replication_tables.clone(),
+            Some(&vitess_config.keyspace),
+        )?;
+
+        let mut adapter = NoriaAdapter {
+            noria,
+            connector,
+            replication_offsets,
+            mutator_map: HashMap::new(),
+            warned_missing_tables: HashSet::new(),
+            table_filter,
+            supports_resnapshot: false,
+            dialect: Dialect::DEFAULT_MYSQL,
+        };
+
+        // let pos = replication_offsets
+        //     .max_offset()?
+        //     .map(Into::into)
+        //     .unwrap_or_default();
+
+        let mut pos = ReplicationOffset {
+            offset: 0,
+            replication_log_name: "fake-log".to_string(),
+        };
+
+        adapter.main_loop(&mut pos, None).await?;
+
+        unreachable!("`main_loop` will never stop with an Ok status if `until = None`");
     }
 
     /// Apply a DDL string to noria with the current log position

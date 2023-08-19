@@ -4,6 +4,7 @@
 pub mod mysql;
 pub mod psql;
 mod query_logger;
+pub mod vitess;
 
 use std::collections::HashMap;
 use std::fs::remove_dir_all;
