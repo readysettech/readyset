@@ -1,4 +1,3 @@
-#![feature(fmt_helpers_for_derive)]
 //! This test suite implements the [Replicator Vertical Testing Doc][doc].
 //!
 //! [doc]: https://docs.google.com/document/d/1GRYV7okEzz2T-KuF06M5Y4EkyRv7euMSb1viroT9JTk
@@ -141,7 +140,7 @@ impl Display for EnumPos {
 }
 
 /// Each Operation represents one step to take in a given test run.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 enum Operation {
     /// Create a new table with the given name and columns
     CreateTable(String, Vec<ColumnSpec>),
@@ -210,139 +209,6 @@ enum Operation {
     Evict {
         inner: RefCell<Option<SingleKeyEviction>>,
     },
-}
-
-impl Debug for Operation {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-        // TODO: After we upgrade proptest to >= 1.2.0, invert these since :#? will be used to
-        // produce minimum failing cases
-        if f.alternate() {
-            self.derived_debug_fmt(f)
-        } else {
-            match self {
-                Operation::CreateTable(table_name, cols) => {
-                    let non_pkey_cols = cols.iter().map(|ColumnSpec { name, sql_type, .. }| {
-                        format!(
-                            "\"{name}\" {}",
-                            sql_type.display(nom_sql::Dialect::PostgreSQL)
-                        )
-                    });
-                    let col_defs: Vec<String> = once("id INT PRIMARY KEY".to_string())
-                        .chain(non_pkey_cols)
-                        .collect();
-                    let col_defs = col_defs.join(", ");
-                    writeln!(f, "CREATE TABLE \"{table_name}\" ({col_defs});")?;
-                    writeln!(
-                        f,
-                        "CREATE CACHE ALWAYS FROM SELECT * FROM \"{table_name}\";"
-                    )
-                }
-                Operation::DropTable(name) => {
-                    writeln!(f, "DROP TABLE \"{name}\" CASCADE")
-                }
-                Operation::WriteRow {
-                    table,
-                    pkey,
-                    col_vals,
-                    ..
-                } => {
-                    let pkey = DfValue::from(*pkey);
-                    let params: Vec<&DfValue> = once(&pkey).chain(col_vals.iter()).collect();
-                    let placeholders: Vec<_> =
-                        (1..=params.len()).map(|n| format!("${n}")).collect();
-                    let placeholders = placeholders.join(", ");
-                    writeln!(f, "INSERT INTO \"{table}\" VALUES ({placeholders});")
-                }
-                Operation::DeleteRow(table_name, key) => {
-                    writeln!(f, "DELETE FROM \"{table_name}\" WHERE id = ({key})")
-                }
-                Operation::AddColumn(table_name, col_spec) => {
-                    writeln!(
-                        f,
-                        "ALTER TABLE \"{}\" ADD COLUMN \"{}\" {};",
-                        table_name,
-                        col_spec.name,
-                        col_spec.sql_type.display(nom_sql::Dialect::PostgreSQL)
-                    )
-                }
-                Operation::DropColumn(table_name, col_name) => {
-                    writeln!(
-                        f,
-                        "ALTER TABLE \"{}\" DROP COLUMN \"{}\";",
-                        table_name, col_name
-                    )
-                }
-                Operation::AlterColumnName {
-                    table,
-                    col_name,
-                    new_name,
-                } => {
-                    writeln!(
-                        f,
-                        "ALTER TABLE \"{}\" RENAME COLUMN \"{}\" TO \"{}\";",
-                        table, col_name, new_name
-                    )
-                }
-                Operation::CreateSimpleView { name, table_source } => {
-                    writeln!(
-                        f,
-                        "CREATE VIEW \"{name}\" AS SELECT * FROM \"{table_source}\";"
-                    )?;
-                    writeln!(f, "CREATE CACHE ALWAYS FROM SELECT * FROM \"{name}\";")
-                }
-                Operation::CreateJoinView { .. } => self.derived_debug_fmt(f),
-                Operation::DropView(name) => {
-                    writeln!(f, "DROP VIEW \"{name}\";")
-                }
-                Operation::CreateEnum(name, elements) => {
-                    let elements: Vec<String> = elements.iter().map(|e| format!("'{e}'")).collect();
-                    let element_list = elements.join(", ");
-                    // Quote the type name to prevent clashes with builtin types or reserved
-                    // keywords
-                    writeln!(f, "CREATE TYPE \"{}\" AS ENUM ({})", name, element_list)
-                }
-                Operation::DropEnum(name) => {
-                    writeln!(f, "DROP TYPE \"{name}\";")
-                }
-                Operation::AppendEnumValue {
-                    type_name,
-                    value_name,
-                } => {
-                    writeln!(f, "ALTER TYPE \"{type_name}\" ADD VALUE '{value_name}';")
-                }
-                Operation::InsertEnumValue {
-                    type_name,
-                    value_name,
-                    position,
-                    next_to_value,
-                } => {
-                    writeln!(
-                        f,
-                        "ALTER TYPE \"{}\" ADD VALUE '{}' {} '{}'",
-                        type_name, value_name, position, next_to_value
-                    )
-                }
-                Operation::RenameEnumValue {
-                    type_name,
-                    value_name,
-                    new_name,
-                } => {
-                    writeln!(
-                        f,
-                        "ALTER TYPE \"{}\" RENAME VALUE '{}' TO '{}'",
-                        type_name, value_name, new_name
-                    )
-                }
-                Operation::Evict { inner } => {
-                    let payload = serde_json::to_string(inner).unwrap();
-                    writeln!(f, "curl -x POST \\")?;
-                    writeln!(f, "-H \"Content-Type: application/json\" \\")?;
-                    writeln!(f, "- '{payload}' \\")?;
-                    writeln!(f, "http://<host>:6033/evict_single")
-                }
-            }
-        }
-    }
 }
 
 /// Returns an iterator that yields names of tables that use the given type.
@@ -1037,20 +903,23 @@ impl ModelState for DDLModelState {
         } = ctxt;
 
         match op {
-            Operation::CreateTable(_, _)
-            | Operation::CreateSimpleView { .. }
-            | Operation::CreateJoinView { .. } => {
-                // These enum variants create 2 queries. A Create _ and then a CREATE CACHE
-                let queries = format!("{:?}", op);
-                let mut lines = queries.lines();
-                let query: String = lines.next().unwrap().into();
-                let create_cache: String = lines.next().unwrap().into();
-
+            Operation::CreateTable(table_name, cols) => {
+                let non_pkey_cols = cols.iter().map(|ColumnSpec { name, sql_type, .. }| {
+                    format!(
+                        "\"{name}\" {}",
+                        sql_type.display(nom_sql::Dialect::PostgreSQL)
+                    )
+                });
+                let col_defs: Vec<String> = once("id INT PRIMARY KEY".to_string())
+                    .chain(non_pkey_cols)
+                    .collect();
+                let col_defs = col_defs.join(", ");
+                let query = format!("CREATE TABLE \"{table_name}\" ({col_defs})");
                 rs_conn.simple_query(&query).await.unwrap();
                 pg_conn.simple_query(&query).await.unwrap();
 
-                // We use eventually for the cache creation to give time for the first create to
-                // propagate.
+                let create_cache =
+                    format!("CREATE CACHE ALWAYS FROM SELECT * FROM \"{table_name}\"");
                 eventually!(run_test: {
                     let result = rs_conn.simple_query(&create_cache).await;
                     AssertUnwindSafe(move || result)
@@ -1058,30 +927,157 @@ impl ModelState for DDLModelState {
                     result().unwrap()
                 });
             }
-            Operation::DropTable(_)
-            | Operation::WriteRow { .. }
-            | Operation::AddColumn(_, _)
-            | Operation::DropColumn(_, _)
-            | Operation::AlterColumnName { .. }
-            | Operation::DeleteRow(_, _)
-            | Operation::DropView(_)
-            | Operation::CreateEnum(_, _)
-            | Operation::DropEnum(_) => {
-                let query = format!("{:?}", op);
+            Operation::DropTable(name) => {
+                let query = format!("DROP TABLE \"{name}\" CASCADE");
                 rs_conn.simple_query(&query).await.unwrap();
                 pg_conn.simple_query(&query).await.unwrap();
             }
-            Operation::AppendEnumValue { type_name, .. }
-            | Operation::InsertEnumValue { type_name, .. }
-            | Operation::RenameEnumValue { type_name, .. } => {
-                let query = format!("{:?}", op);
+            Operation::WriteRow {
+                table,
+                pkey,
+                col_vals,
+                ..
+            } => {
+                let pkey = DfValue::from(*pkey);
+                let params: Vec<&DfValue> = once(&pkey).chain(col_vals.iter()).collect();
+                let placeholders: Vec<_> = (1..=params.len()).map(|n| format!("${n}")).collect();
+                let placeholders = placeholders.join(", ");
+                let query = format!("INSERT INTO \"{table}\" VALUES ({placeholders})");
+                rs_conn.query_raw(&query, &params).await.unwrap();
+                pg_conn.query_raw(&query, &params).await.unwrap();
+            }
+            Operation::AddColumn(table_name, col_spec) => {
+                let query = format!(
+                    "ALTER TABLE \"{}\" ADD COLUMN \"{}\" {}",
+                    table_name,
+                    col_spec.name,
+                    col_spec.sql_type.display(nom_sql::Dialect::PostgreSQL)
+                );
+                rs_conn.simple_query(&query).await.unwrap();
+                pg_conn.simple_query(&query).await.unwrap();
+            }
+            Operation::DropColumn(table_name, col_name) => {
+                let query = format!(
+                    "ALTER TABLE \"{}\" DROP COLUMN \"{}\"",
+                    table_name, col_name
+                );
+                rs_conn.simple_query(&query).await.unwrap();
+                pg_conn.simple_query(&query).await.unwrap();
+            }
+            Operation::AlterColumnName {
+                table,
+                col_name,
+                new_name,
+            } => {
+                let query = format!(
+                    "ALTER TABLE \"{}\" RENAME COLUMN \"{}\" TO \"{}\"",
+                    table, col_name, new_name
+                );
+                rs_conn.simple_query(&query).await.unwrap();
+                pg_conn.simple_query(&query).await.unwrap();
+            }
+            Operation::DeleteRow(table_name, key) => {
+                let query = format!("DELETE FROM \"{table_name}\" WHERE id = ({key})");
+                rs_conn.simple_query(&query).await.unwrap();
+                pg_conn.simple_query(&query).await.unwrap();
+            }
+            Operation::CreateSimpleView { name, table_source } => {
+                let query = format!("CREATE VIEW \"{name}\" AS SELECT * FROM \"{table_source}\"");
+                rs_conn.simple_query(&query).await.unwrap();
+                pg_conn.simple_query(&query).await.unwrap();
+                let create_cache = format!("CREATE CACHE ALWAYS FROM SELECT * FROM \"{name}\"");
+                eventually!(run_test: {
+                    let result = rs_conn.simple_query(&create_cache).await;
+                    AssertUnwindSafe(move || result)
+                }, then_assert: |result| {
+                    result().unwrap()
+                });
+            }
+            Operation::CreateJoinView {
+                name,
+                table_a,
+                table_b,
+            } => {
+                // Must give a unique alias to each column in the source tables to avoid issues
+                // with duplicate column names in the resulting view
+                let select_list: Vec<String> = self.tables[table_a]
+                    .iter()
+                    .map(|cs| (table_a, &cs.name))
+                    .chain(self.tables[table_b].iter().map(|cs| (table_b, &cs.name)))
+                    .enumerate()
+                    .map(|(i, (tab, col))| format!("\"{tab}\".\"{col}\" AS c{i}"))
+                    .collect();
+                let select_list = select_list.join(", ");
+                let view_def = format!(
+                    "SELECT {} FROM \"{}\" JOIN \"{}\" ON \"{}\".id = \"{}\".id",
+                    select_list, table_a, table_b, table_a, table_b
+                );
+                let query = format!("CREATE VIEW \"{}\" AS {}", name, view_def);
+                rs_conn.simple_query(&query).await.unwrap();
+                pg_conn.simple_query(&query).await.unwrap();
+                let create_cache = format!("CREATE CACHE ALWAYS FROM SELECT * FROM \"{name}\"");
+                eventually!(run_test: {
+                    let result = rs_conn.simple_query(&create_cache).await;
+                    AssertUnwindSafe(move || result)
+                }, then_assert: |result| {
+                    result().unwrap()
+                });
+            }
+            Operation::DropView(name) => {
+                let query = format!("DROP VIEW \"{name}\"");
+                rs_conn.simple_query(&query).await.unwrap();
+                pg_conn.simple_query(&query).await.unwrap();
+            }
+            Operation::CreateEnum(name, elements) => {
+                let elements: Vec<String> = elements.iter().map(|e| format!("'{e}'")).collect();
+                let element_list = elements.join(", ");
+                // Quote the type name to prevent clashes with builtin types or reserved keywords
+                let query = format!("CREATE TYPE \"{}\" AS ENUM ({})", name, element_list);
+                rs_conn.simple_query(&query).await.unwrap();
+                pg_conn.simple_query(&query).await.unwrap();
+            }
+            Operation::DropEnum(name) => {
+                let query = format!("DROP TYPE \"{name}\"");
+                rs_conn.simple_query(&query).await.unwrap();
+                pg_conn.simple_query(&query).await.unwrap();
+            }
+            Operation::AppendEnumValue {
+                type_name,
+                value_name,
+            } => {
+                let query = format!("ALTER TYPE \"{type_name}\" ADD VALUE '{value_name}'");
+                rs_conn.simple_query(&query).await.unwrap();
+                pg_conn.simple_query(&query).await.unwrap();
+                recreate_caches_using_type(type_name, &self.tables, rs_conn).await;
+            }
+            Operation::InsertEnumValue {
+                type_name,
+                value_name,
+                position,
+                next_to_value,
+            } => {
+                let query = format!(
+                    "ALTER TYPE \"{}\" ADD VALUE '{}' {} '{}'",
+                    type_name, value_name, position, next_to_value
+                );
+                rs_conn.simple_query(&query).await.unwrap();
+                pg_conn.simple_query(&query).await.unwrap();
+                recreate_caches_using_type(type_name, &self.tables, rs_conn).await;
+            }
+            Operation::RenameEnumValue {
+                type_name,
+                value_name,
+                new_name,
+            } => {
+                let query = format!(
+                    "ALTER TYPE \"{}\" RENAME VALUE '{}' TO '{}'",
+                    type_name, value_name, new_name
+                );
                 rs_conn.simple_query(&query).await.unwrap();
                 pg_conn.simple_query(&query).await.unwrap();
                 recreate_caches_using_type(type_name, &self.tables, rs_conn).await;
             }
             Operation::Evict { inner } => {
-                // Note: This doesn't use the debug implementation because it is a special
-                // POST
                 let client = reqwest::Client::new();
                 let body =
                     bincode::serialize::<Option<SingleKeyEviction>>(&*inner.borrow()).unwrap();
@@ -1240,169 +1236,6 @@ async fn recreate_caches_using_type(
         }, then_assert: |result| {
             result().unwrap()
         });
-    }
-}
-
-// This is the automatically derived Debug implementation of Operation if we were to
-// #[derive(Debug)] for it. If extending Operation, you can re-generate this with
-// ```sh
-// rustc -Zunpretty=expanded ddl_vertical.rs
-// ```
-//
-impl Operation {
-    fn derived_debug_fmt(&self, f: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
-        match self {
-            Operation::CreateTable(__self_0, __self_1) => {
-                ::core::fmt::Formatter::debug_tuple_field2_finish(
-                    f,
-                    "CreateTable",
-                    __self_0,
-                    &__self_1,
-                )
-            }
-            Operation::DropTable(__self_0) => {
-                ::core::fmt::Formatter::debug_tuple_field1_finish(f, "DropTable", &__self_0)
-            }
-            Operation::WriteRow {
-                table: __self_0,
-                pkey: __self_1,
-                col_vals: __self_2,
-                col_types: __self_3,
-            } => ::core::fmt::Formatter::debug_struct_field4_finish(
-                f,
-                "WriteRow",
-                "table",
-                __self_0,
-                "pkey",
-                __self_1,
-                "col_vals",
-                __self_2,
-                "col_types",
-                &__self_3,
-            ),
-            Operation::DeleteRow(__self_0, __self_1) => {
-                ::core::fmt::Formatter::debug_tuple_field2_finish(
-                    f,
-                    "DeleteRow",
-                    __self_0,
-                    &__self_1,
-                )
-            }
-            Operation::AddColumn(__self_0, __self_1) => {
-                ::core::fmt::Formatter::debug_tuple_field2_finish(
-                    f,
-                    "AddColumn",
-                    __self_0,
-                    &__self_1,
-                )
-            }
-            Operation::DropColumn(__self_0, __self_1) => {
-                ::core::fmt::Formatter::debug_tuple_field2_finish(
-                    f,
-                    "DropColumn",
-                    __self_0,
-                    &__self_1,
-                )
-            }
-            Operation::AlterColumnName {
-                table: __self_0,
-                col_name: __self_1,
-                new_name: __self_2,
-            } => ::core::fmt::Formatter::debug_struct_field3_finish(
-                f,
-                "AlterColumnName",
-                "table",
-                __self_0,
-                "col_name",
-                __self_1,
-                "new_name",
-                &__self_2,
-            ),
-            Operation::CreateSimpleView {
-                name: __self_0,
-                table_source: __self_1,
-            } => ::core::fmt::Formatter::debug_struct_field2_finish(
-                f,
-                "CreateSimpleView",
-                "name",
-                __self_0,
-                "table_source",
-                &__self_1,
-            ),
-            Operation::CreateJoinView {
-                name: __self_0,
-                table_a: __self_1,
-                table_b: __self_2,
-            } => ::core::fmt::Formatter::debug_struct_field3_finish(
-                f,
-                "CreateJoinView",
-                "name",
-                __self_0,
-                "table_a",
-                __self_1,
-                "table_b",
-                &__self_2,
-            ),
-            Operation::DropView(__self_0) => {
-                ::core::fmt::Formatter::debug_tuple_field1_finish(f, "DropView", &__self_0)
-            }
-            Operation::CreateEnum(__self_0, __self_1) => {
-                ::core::fmt::Formatter::debug_tuple_field2_finish(
-                    f,
-                    "CreateEnum",
-                    __self_0,
-                    &__self_1,
-                )
-            }
-            Operation::DropEnum(__self_0) => {
-                ::core::fmt::Formatter::debug_tuple_field1_finish(f, "DropEnum", &__self_0)
-            }
-            Operation::AppendEnumValue {
-                type_name: __self_0,
-                value_name: __self_1,
-            } => ::core::fmt::Formatter::debug_struct_field2_finish(
-                f,
-                "AppendEnumValue",
-                "type_name",
-                __self_0,
-                "value_name",
-                &__self_1,
-            ),
-            Operation::InsertEnumValue {
-                type_name: __self_0,
-                value_name: __self_1,
-                position: __self_2,
-                next_to_value: __self_3,
-            } => ::core::fmt::Formatter::debug_struct_field4_finish(
-                f,
-                "InsertEnumValue",
-                "type_name",
-                __self_0,
-                "value_name",
-                __self_1,
-                "position",
-                __self_2,
-                "next_to_value",
-                &__self_3,
-            ),
-            Operation::RenameEnumValue {
-                type_name: __self_0,
-                value_name: __self_1,
-                new_name: __self_2,
-            } => ::core::fmt::Formatter::debug_struct_field3_finish(
-                f,
-                "RenameEnumValue",
-                "type_name",
-                __self_0,
-                "value_name",
-                __self_1,
-                "new_name",
-                &__self_2,
-            ),
-            Operation::Evict { inner: __self_0 } => {
-                ::core::fmt::Formatter::debug_struct_field1_finish(f, "Evict", "inner", &__self_0)
-            }
-        }
     }
 }
 
