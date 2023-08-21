@@ -223,7 +223,8 @@
                 (gen/sleep (:converge-time opts))
 
                 (gen/synchronize
-                 (gen/once rs/final-r)))
+                 (gen/clients
+                  (gen/once rs/final-r))))
     :pure-generators true}))
 
 (def opt-spec
