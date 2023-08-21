@@ -1,6 +1,7 @@
 use std::convert::TryFrom;
 use std::fmt;
 use std::sync::Arc;
+use bit_vec::BitVec;
 
 use readyset_errors::{ReadySetError, ReadySetResult};
 use rust_decimal::Decimal;
@@ -178,16 +179,71 @@ where
             Ok(DfValue::from(r#enum::apply_enum_limits(idx, variants)))
         }
 
+        DfType::Bit(size) => {
+            // Bit values, when treated as numbers, are always unsigned.
+            let mut bit_vec = u64::try_from(val).map_err(|_| err())
+            .map(|u| BitVec::from_bytes(&u.to_be_bytes()))?;
+            // bit_vec.shrink_to_fit();
+            let size = size as usize;
+            if bit_vec.len() > size {
+                // Take the `size` most significant bits (stored in new_bit_vec)
+                let new_bit_vec = bit_vec.split_off(bit_vec.len() - size);
+                // Check that the remaining bits are all zero. Otherwise we would be truncating, which
+                // would mean we were out of bounds to begin with
+                if bit_vec.any() {
+                    // If there was any non-zero leftover, return an out of bounds error
+                    return Err(err());
+                }
+                bit_vec = new_bit_vec;
+            }
+            Ok(DfValue::from(bit_vec))
+        }
+
         DfType::Unknown
         | DfType::MacAddr
         | DfType::Inet
         | DfType::Uuid
-        | DfType::Bit(_)
         | DfType::VarBit(_)
         | DfType::Array(_) => Err(ReadySetError::DfValueConversionError {
             src_type: from_ty.to_string(),
             target_type: to_ty.to_string(),
             details: "Not allowed".to_string(),
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use test_strategy::proptest;
+    use crate::DfType;
+    use crate::integer::coerce_integer;
+
+    /// Test coercion from integer to bit types.
+    mod bit {
+        use bit_vec::BitVec;
+        use proptest::strategy::Strategy;
+        use readyset_util::arbitrary::arbitrary_bitvec;
+        use super::*;
+
+        fn bit_strategy() -> impl Strategy<Value = (BitVec, u16)> {
+            (1..=64usize).prop_flat_map(|size| arbitrary_bitvec(1..=size).prop_map(move |mut vec| {
+                // Make it so we can transform this into bytes by prepending zeroes (instead
+                // of appending them, as that's the behavior of `BitVec::to_bytes`.
+                let mut val = BitVec::with_capacity(64);
+                val.grow(64 - vec.len(), false);
+                val.append(&mut vec);
+                (val, size as u16)
+            }))
+        }
+
+        #[proptest]
+        fn uint_to_bit(#[strategy(bit_strategy())] params: (BitVec, u16)) {
+            let (bitvec, size) = params;
+            let mut buf = [0u8; 8];
+            let bytes = bitvec.to_bytes();
+            buf[8-bytes.len()..].copy_from_slice(bytes.as_slice());
+            let val = u64::from_be_bytes(buf);
+            coerce_integer(val, &DfType::Bit(size), &DfType::Unknown).unwrap();
+        }
     }
 }

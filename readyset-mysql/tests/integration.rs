@@ -2041,3 +2041,32 @@ async fn test_proxied_queries_telemetry() {
 
     shutdown_tx.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "REA-3381"]
+async fn query_bit_column() {
+    let (opts, _handle, shutdown_tx) = setup().await;
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    conn.query_drop("CREATE TABLE t (id bit(4));").await.unwrap();
+    sleep().await;
+
+
+    conn.query_drop("INSERT INTO t VALUES (13);")
+        .await
+        .unwrap();
+
+    conn.query_drop("CREATE CACHE test FROM SELECT id FROM t WHERE id = 5;")
+        .await
+        .unwrap();
+    sleep().await;
+
+    let rows: Vec<i64> = conn
+        .query("SELECT * FROM t WHERE id = 1")
+        .await
+        .unwrap();
+    assert_eq!(
+        rows,
+        vec![1]
+    );
+    shutdown_tx.shutdown().await;
+}
