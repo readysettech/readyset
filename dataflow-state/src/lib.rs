@@ -10,6 +10,7 @@ mod single_state;
 use std::borrow::Cow;
 use std::fmt::{self, Debug};
 use std::iter::FromIterator;
+use std::mem::size_of;
 use std::ops::{Bound, Deref};
 use std::rc::Rc;
 use std::vec;
@@ -586,11 +587,13 @@ impl Deref for Row {
 
 impl SizeOf for Row {
     fn size_of(&self) -> u64 {
-        use std::mem::size_of;
         size_of::<Self>() as u64
     }
     fn deep_size_of(&self) -> u64 {
-        (*self.0).deep_size_of()
+        // We need to account for the size of Rc (plus RcBox which is 2 * usize)
+        size_of::<Rc<Vec<DfValue>>>() as u64
+            + 2 * size_of::<usize>() as u64
+            + (*self.0).deep_size_of()
     }
     fn is_empty(&self) -> bool {
         false
