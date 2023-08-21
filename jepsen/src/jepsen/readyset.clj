@@ -20,7 +20,6 @@
    [jepsen.readyset.client :as rs]
    [jepsen.readyset.nemesis :as rs.nemesis]
    [jepsen.readyset.nodes :as nodes]
-   [jepsen.readyset.model :as rs.model]
    [jepsen.tests :as tests]
    [slingshot.slingshot :refer [try+]]))
 
@@ -195,9 +194,7 @@
     :checker (checker/compose
               {:liveness (rs.checker/liveness)
                :eventually-consistent
-               (checker/linearizable
-                {:model (rs.model/eventually-consistent-table)
-                 :algorithm :linear})})
+               (rs.checker/commutative-eventual-consistency)})
     :generator (gen/phases
                 (->> (gen/mix [rs/r rs/w])
                      (gen/stagger (/ (:rate opts)))
