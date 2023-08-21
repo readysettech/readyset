@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
+use nom_sql::SqlIdentifier;
 use postgres::error::ErrorPosition;
 pub use postgres::error::SqlState;
 use postgres::SimpleQueryRow;
@@ -126,7 +127,7 @@ pub enum ErrorSeverity {
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct FieldDescription {
-    pub field_name: String,
+    pub field_name: SqlIdentifier,
     pub table_id: i32,
     pub col_id: i16,
     pub data_type: Type,

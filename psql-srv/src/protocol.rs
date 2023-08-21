@@ -1006,11 +1006,11 @@ mod tests {
                 Ok(QueryResponse::Select {
                     schema: vec![
                         Column {
-                            name: "col1".to_string(),
+                            name: "col1".into(),
                             col_type: Type::INT4,
                         },
                         Column {
-                            name: "col2".to_string(),
+                            name: "col2".into(),
                             col_type: Type::FLOAT8,
                         },
                     ],
@@ -1038,11 +1038,11 @@ mod tests {
                     param_schema: vec![Type::FLOAT8, Type::INT4],
                     row_schema: vec![
                         Column {
-                            name: "col1".to_string(),
+                            name: "col1".into(),
                             col_type: Type::INT4,
                         },
                         Column {
-                            name: "col2".to_string(),
+                            name: "col2".into(),
                             col_type: Type::FLOAT8,
                         },
                     ],
@@ -1063,11 +1063,11 @@ mod tests {
                 Ok(QueryResponse::Select {
                     schema: vec![
                         Column {
-                            name: "col1".to_string(),
+                            name: "col1".into(),
                             col_type: Type::INT4,
                         },
                         Column {
-                            name: "col2".to_string(),
+                            name: "col2".into(),
                             col_type: Type::FLOAT8,
                         },
                     ],
@@ -1423,7 +1423,7 @@ mod tests {
                     Some(RowDescription {
                         field_descriptions: vec![
                             FieldDescription {
-                                field_name: "col1".to_string(),
+                                field_name: "col1".into(),
                                 table_id: UNKNOWN_TABLE,
                                 col_id: UNKNOWN_COLUMN,
                                 data_type: Type::INT4,
@@ -1432,7 +1432,7 @@ mod tests {
                                 transfer_format: TransferFormat::Text
                             },
                             FieldDescription {
-                                field_name: "col2".to_string(),
+                                field_name: "col2".into(),
                                 table_id: UNKNOWN_TABLE,
                                 col_id: UNKNOWN_COLUMN,
                                 data_type: Type::FLOAT8,
@@ -1547,11 +1547,11 @@ mod tests {
                 param_schema: vec![Type::FLOAT8, Type::INT4],
                 row_schema: vec![
                     Column {
-                        name: "col1".to_string(),
+                        name: "col1".into(),
                         col_type: Type::INT4
                     },
                     Column {
-                        name: "col2".to_string(),
+                        name: "col2".into(),
                         col_type: Type::FLOAT8
                     },
                 ],
@@ -1941,7 +1941,7 @@ mod tests {
                     RowDescription {
                         field_descriptions: vec![
                             FieldDescription {
-                                field_name: "col1".to_string(),
+                                field_name: "col1".into(),
                                 table_id: UNKNOWN_TABLE,
                                 col_id: UNKNOWN_COLUMN,
                                 data_type: Type::INT4,
@@ -1950,7 +1950,7 @@ mod tests {
                                 transfer_format: TransferFormat::Text
                             },
                             FieldDescription {
-                                field_name: "col2".to_string(),
+                                field_name: "col2".into(),
                                 table_id: UNKNOWN_TABLE,
                                 col_id: UNKNOWN_COLUMN,
                                 data_type: Type::FLOAT8,
@@ -2028,7 +2028,7 @@ mod tests {
                 RowDescription {
                     field_descriptions: vec![
                         FieldDescription {
-                            field_name: "col1".to_string(),
+                            field_name: "col1".into(),
                             table_id: UNKNOWN_TABLE,
                             col_id: UNKNOWN_COLUMN,
                             data_type: Type::INT4,
@@ -2037,7 +2037,7 @@ mod tests {
                             transfer_format: TransferFormat::Text
                         },
                         FieldDescription {
-                            field_name: "col2".to_string(),
+                            field_name: "col2".into(),
                             table_id: UNKNOWN_TABLE,
                             col_id: UNKNOWN_COLUMN,
                             data_type: Type::FLOAT8,

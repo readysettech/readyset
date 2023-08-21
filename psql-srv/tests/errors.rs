@@ -59,7 +59,7 @@ impl PsqlBackend for ErrorBackend {
                 prepared_statement_id: 1,
                 param_schema: vec![],
                 row_schema: vec![Column {
-                    name: "x".to_owned(),
+                    name: "x".into(),
                     col_type: Type::BOOL,
                 }],
             })
@@ -75,7 +75,7 @@ impl PsqlBackend for ErrorBackend {
             ErrorPosition::Execute => Err(Error::InternalError("a database".to_owned())),
             ErrorPosition::Serialize => Ok(QueryResponse::Select {
                 schema: vec![Column {
-                    name: "x".to_owned(),
+                    name: "x".into(),
                     col_type: Type::BOOL,
                 }],
                 resultset: stream::iter(vec![Err(Error::InternalError("factory".to_owned()))]),
