@@ -237,12 +237,15 @@ impl DdlEvent {
                     });
 
                 match create_table_body {
-                    Ok(body) => Change::CreateTable(CreateTableStatement {
-                        if_not_exists: false,
-                        table,
-                        body: Ok(body),
-                        options: Ok(vec![]),
-                    }),
+                    Ok(body) => Change::CreateTable {
+                        statement: CreateTableStatement {
+                            if_not_exists: false,
+                            table,
+                            body: Ok(body),
+                            options: Ok(vec![]),
+                        },
+                        pg_meta: None, // TODO
+                    },
                     Err(_) => Change::AddNonReplicatedRelation(table),
                 }
             }
