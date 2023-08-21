@@ -256,7 +256,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
                 .iter()
                 .map(|col| -> Result<_, Error> {
                     Ok(Column {
-                        name: col.name().to_owned(),
+                        name: col.name().into(),
                         col_type: col.type_().clone(),
                     })
                 })

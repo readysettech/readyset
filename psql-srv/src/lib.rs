@@ -30,6 +30,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::Stream;
+use nom_sql::SqlIdentifier;
 use postgres::SimpleQueryMessage;
 use postgres_types::Type;
 use protocol::Protocol;
@@ -120,7 +121,7 @@ pub trait PsqlBackend {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Column {
     /// The name of the column
-    pub name: String,
+    pub name: SqlIdentifier,
 
     /// The type of the column
     pub col_type: Type,

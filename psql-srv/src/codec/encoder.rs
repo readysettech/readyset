@@ -1089,7 +1089,7 @@ mod tests {
                 RowDescription {
                     field_descriptions: vec![
                         FieldDescription {
-                            field_name: "one".to_string(),
+                            field_name: "one".into(),
                             table_id: 1,
                             col_id: 2,
                             data_type: Type::INT4,
@@ -1098,7 +1098,7 @@ mod tests {
                             transfer_format: Binary,
                         },
                         FieldDescription {
-                            field_name: "two".to_string(),
+                            field_name: "two".into(),
                             table_id: 3,
                             col_id: 4,
                             data_type: Type::INT8,
@@ -1107,7 +1107,7 @@ mod tests {
                             transfer_format: Text,
                         },
                         FieldDescription {
-                            field_name: "three".to_string(),
+                            field_name: "three".into(),
                             table_id: 5,
                             col_id: 6,
                             data_type: Type::TEXT,
