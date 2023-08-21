@@ -215,7 +215,7 @@ fn encode(message: BackendMessage, dst: &mut BytesMut) -> Result<(), Error> {
             set_i16(i16::try_from(n_values)?, dst, start_ofs + 5)?;
         }
 
-        PassThroughDataRow(row) => {
+        PassThroughSimpleRow(row) => {
             put_u8(ID_DATA_ROW, dst);
             // Put the length of this row in bytes. The length is equal to the length of the data,
             // plus 4 bytes for the length field itself and two bytes for the number of values in
@@ -894,7 +894,7 @@ mod tests {
         data.extend_from_slice(b"fake data for testing");
         codec
             .encode(
-                PassThroughDataRow(
+                PassThroughSimpleRow(
                     SimpleQueryRow::new(
                         vec![OwnedField::new("name".into(), 1, 2, 3, 4, 5, 6)].into(),
                         DataRowBody::new(data.into(), 1),
