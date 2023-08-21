@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use nom_sql::Relation;
 use readyset_client::TableOperation;
+use readyset_data::DfValue;
 use readyset_errors::{ReadySetError, ReadySetResult};
 use readyset_vitess_data::{SchemaCache, VStreamPosition};
 use replication_offset::mysql::MySqlPosition;
@@ -9,6 +10,7 @@ use tokio::sync::mpsc;
 use tonic::Streaming;
 use tracing::{error, info, warn};
 use vitess_grpc::binlogdata::{ShardGtid, VEvent, VEventType, VGtid};
+use vitess_grpc::query::Row;
 use vitess_grpc::topodata::TabletType;
 use vitess_grpc::vtgate::{VStreamFlags, VStreamRequest, VStreamResponse};
 use vitess_grpc::vtgateservice::vitess_client::VitessClient;
@@ -167,15 +169,10 @@ impl VitessConnector {
             // Generate a table operation for the row
             match row_operation {
                 readyset_vitess_data::RowOperation::Insert => {
-                    let row = table
-                        .vstream_row_to_noria_row(&row_change.after.as_ref().unwrap())
-                        .map_err(|e| {
-                            ReadySetError::ReplicationFailed(format!(
-                                "Could not convert VStream row to Noria row: {}",
-                                e
-                            ))
-                        })?;
-                    table_ops.push(TableOperation::Insert(row));
+                    table_ops.push(TableOperation::Insert(self.row_change_to_noria_row(
+                        &table,
+                        &row_change.after.as_ref().unwrap(),
+                    )?));
                 }
                 readyset_vitess_data::RowOperation::Update => todo!(),
                 readyset_vitess_data::RowOperation::Delete => todo!(),
@@ -197,6 +194,19 @@ impl VitessConnector {
         );
 
         Ok((action, pos))
+    }
+
+    fn row_change_to_noria_row(
+        &self,
+        table: &readyset_vitess_data::Table,
+        row_change: &Row,
+    ) -> ReadySetResult<Vec<DfValue>> {
+        table.vstream_row_to_noria_row(row_change).map_err(|e| {
+            ReadySetError::ReplicationFailed(format!(
+                "Could not convert VStream row to Noria row: {}",
+                e
+            ))
+        })
     }
 }
 
