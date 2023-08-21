@@ -26,7 +26,7 @@ impl Backend {
 
         match DatabaseURL::from_str(url)? {
             DatabaseURL::MySQL(_) => {
-                let upstream = MySqlUpstream::connect(UpstreamConfig::from_url(url), None).await?;
+                let upstream = MySqlUpstream::connect(UpstreamConfig::from_url(url)).await?;
 
                 Ok(Self::MySql(
                     BackendBuilder::new()
@@ -36,8 +36,7 @@ impl Backend {
                 ))
             }
             DatabaseURL::PostgreSQL(_) => {
-                let upstream =
-                    PostgreSqlUpstream::connect(UpstreamConfig::from_url(url), None).await?;
+                let upstream = PostgreSqlUpstream::connect(UpstreamConfig::from_url(url)).await?;
 
                 Ok(Self::PostgreSql(
                     BackendBuilder::new()

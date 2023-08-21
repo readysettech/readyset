@@ -23,7 +23,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::cache_hit_benchmark::CacheHitBenchmark;
 use crate::eviction_benchmark::EvictionBenchmark;
-use crate::fallback_benchmark::FallbackBenchmark;
 use crate::graph::ArgOverride;
 use crate::migration_benchmark::MigrationBenchmark;
 use crate::query_benchmark::QueryBenchmark;
@@ -54,7 +53,6 @@ pub enum Benchmark {
     MigrationBenchmark,
     EvictionBenchmark,
     ReadWriteBenchmark,
-    FallbackBenchmark,
     SingleQueryBenchmark,
     WorkloadEmulator,
 }
@@ -72,7 +70,6 @@ impl Benchmark {
             Self::MigrationBenchmark(_) => "migration_benchmark",
             Self::EvictionBenchmark(_) => "eviction",
             Self::ReadWriteBenchmark(_) => "read_write_benchmark",
-            Self::FallbackBenchmark(_) => "fallback_benchmark",
             Self::SingleQueryBenchmark(_) => "single_query_benchmark",
             Self::WorkloadEmulator(_) => "workload_emulator",
         }
@@ -91,7 +88,6 @@ impl Benchmark {
                 Benchmark::MigrationBenchmark(x) => x.update_from(itr),
                 Benchmark::EvictionBenchmark(x) => x.update_from(itr),
                 Benchmark::ReadWriteBenchmark(x) => x.update_from(itr),
-                Benchmark::FallbackBenchmark(x) => x.update_from(itr),
                 Benchmark::SingleQueryBenchmark(x) => x.update_from(itr),
                 Benchmark::WorkloadEmulator(x) => x.update_from(itr),
             },
@@ -125,9 +121,6 @@ pub struct DeploymentParameters {
     /// Setup database connection string.
     #[clap(long, env = "SETUP_CONN_STR", default_value = "")]
     pub setup_conn_str: String,
-
-    #[clap(long)]
-    pub enable_fallback_cache: bool,
 
     #[clap(long)]
     pub database_type: DatabaseType,

@@ -53,8 +53,6 @@ pub enum QueryDestination {
     ReadysetThenUpstream,
     Upstream,
     Both,
-    #[cfg(feature = "fallback_cache")]
-    FallbackCache,
 }
 
 impl TryFrom<&str> for QueryDestination {
@@ -65,8 +63,6 @@ impl TryFrom<&str> for QueryDestination {
             "readyset_then_upstream" => Ok(QueryDestination::ReadysetThenUpstream),
             "upstream" => Ok(QueryDestination::Upstream),
             "both" => Ok(QueryDestination::Both),
-            #[cfg(feature = "fallback_cache")]
-            "fallback_cache" => Ok(QueryDestination::FallbackCache),
             _ => Err(ReadySetError::Internal(
                 "Invalid query destination".to_string(),
             )),
@@ -81,8 +77,6 @@ impl fmt::Display for QueryDestination {
             QueryDestination::ReadysetThenUpstream => "readyset_then_upstream",
             QueryDestination::Upstream => "upstream",
             QueryDestination::Both => "both",
-            #[cfg(feature = "fallback_cache")]
-            QueryDestination::FallbackCache => "fallback_cache",
         };
         write!(f, "{}", s)
     }

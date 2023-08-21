@@ -29,9 +29,6 @@ use metrics_exporter_prometheus::PrometheusBuilder;
 use nom_sql::Relation;
 use readyset_adapter::backend::noria_connector::{NoriaConnector, ReadBehavior};
 use readyset_adapter::backend::MigrationMode;
-use readyset_adapter::fallback_cache::{
-    DiskModeledCache, EvictionModeledCache, FallbackCache, SimpleFallbackCache,
-};
 use readyset_adapter::http_router::NoriaAdapterHttpRouter;
 use readyset_adapter::migration_handler::MigrationHandler;
 use readyset_adapter::proxied_queries_reporter::ProxiedQueriesReporter;
@@ -380,11 +377,6 @@ pub struct Options {
     #[clap(long, hide = true)]
     wait_for_failpoint: bool,
 
-    // TODO: This feature in general needs to be fleshed out significantly more. Off by default for
-    // now.
-    #[clap(flatten)]
-    fallback_cache_options: FallbackCacheOptions,
-
     /// Whether to allow ReadySet to automatically create inlined caches when we receive a CREATE
     /// CACHE command for a query with unsupported placeholders.
     ///
@@ -436,58 +428,6 @@ impl Options {
             }
         }
     }
-}
-
-// Command-line options for running the experimental fallback_cache.
-//
-// This option struct is intended to be embedded inside of a larger option struct using
-// `#[clap(flatten)]`.
-#[allow(missing_docs)] // Allows us to exclude docs (from doc comments) from --help text
-#[derive(Parser, Debug)]
-pub struct FallbackCacheOptions {
-    /// Used to enable the fallback cache, which can handle serving all queries that we can't parse
-    /// or support from an in-memory cache that lives in the adapter.
-    #[clap(long, hide = true)]
-    enable_fallback_cache: bool,
-
-    /// Specifies a ttl in seconds for queries cached using the fallback cache.
-    #[clap(long, hide = true, default_value = "120")]
-    ttl_seconds: u64,
-
-    /// If enabled, will model running the fallback cache off spinning disk.
-    #[clap(long, hide = true)]
-    model_disk: bool,
-
-    #[clap(flatten)]
-    eviction_options: FallbackCacheEvictionOptions,
-}
-
-// TODO:
-// Change this to an enum that allows for a probabilistic strategy
-//
-// enum FallbackCacheEvictionStrategy {
-// /// Don't model eviction
-// None,
-// /// This Cl's strategy
-// Rate(f64),
-// /// probabilistic strategy
-// Random(f64)
-// }
-//
-// Command-line options for running the experimental fallback_cache with eviction modeling.
-//
-// This option struct is intended to be embedded inside of a larger option struct using
-// `#[clap(flatten)]`.
-#[allow(missing_docs)] // Allows us to exclude docs (from doc comments) from --help text
-#[derive(Parser, Debug)]
-pub struct FallbackCacheEvictionOptions {
-    /// If enabled, will model running the fallback cache with eviction.
-    #[clap(long, hide = true)]
-    model_eviction: bool,
-
-    /// Provides a rate at which we will randomly evict queries.
-    #[clap(long, hide = true, default_value = "0.01")]
-    eviction_rate: f64,
 }
 
 impl<H> NoriaAdapter<H>
@@ -828,41 +768,6 @@ where
             rt.block_on(fut);
         }
 
-        let fallback_cache: Option<
-            FallbackCache<
-                <<H as ConnectionHandler>::UpstreamDatabase as UpstreamDatabase>::CachedReadResult,
-            >,
-        > = if cfg!(feature = "fallback_cache")
-            && options.fallback_cache_options.enable_fallback_cache
-        {
-            let cache = if options.fallback_cache_options.model_disk {
-                DiskModeledCache::new(Duration::new(options.fallback_cache_options.ttl_seconds, 0))
-                    .into()
-            } else if options
-                .fallback_cache_options
-                .eviction_options
-                .model_eviction
-            {
-                EvictionModeledCache::new(
-                    Duration::new(options.fallback_cache_options.ttl_seconds, 0),
-                    options
-                        .fallback_cache_options
-                        .eviction_options
-                        .eviction_rate,
-                )
-                .into()
-            } else {
-                SimpleFallbackCache::new(Duration::new(
-                    options.fallback_cache_options.ttl_seconds,
-                    0,
-                ))
-                .into()
-            };
-            Some(cache)
-        } else {
-            None
-        };
-
         if let MigrationMode::OutOfBand = migration_mode {
             set_failpoint!("adapter-out-of-band");
             let rh = rh.clone();
@@ -874,7 +779,6 @@ where
             let upstream_config = options.server_worker_options.replicator_config.clone();
             let expr_dialect = self.expr_dialect;
             let parse_dialect = self.parse_dialect;
-            let fallback_cache = fallback_cache.clone();
 
             rs_connect.in_scope(|| info!("Spawning migration handler task"));
             let fut = async move {
@@ -886,26 +790,23 @@ where
                     Default::default()
                 } else {
                     loop {
-                        let mut upstream = match H::UpstreamDatabase::connect(
-                            upstream_config.clone(),
-                            fallback_cache.clone(),
-                        )
-                        .instrument(
-                            connection
-                                .in_scope(|| span!(Level::INFO, "Connecting to upstream database")),
-                        )
-                        .await
-                        {
-                            Ok(upstream) => upstream,
-                            Err(error) => {
-                                error!(
-                                    %error,
-                                    "Error connecting to upstream database, retrying after 1s"
-                                );
-                                tokio::time::sleep(UPSTREAM_CONNECTION_RETRY_INTERVAL).await;
-                                continue;
-                            }
-                        };
+                        let mut upstream =
+                            match H::UpstreamDatabase::connect(upstream_config.clone())
+                                .instrument(connection.in_scope(|| {
+                                    span!(Level::INFO, "Connecting to upstream database")
+                                }))
+                                .await
+                            {
+                                Ok(upstream) => upstream,
+                                Err(error) => {
+                                    error!(
+                                        %error,
+                                        "Error connecting to upstream database, retrying after 1s"
+                                    );
+                                    tokio::time::sleep(UPSTREAM_CONNECTION_RETRY_INTERVAL).await;
+                                    continue;
+                                }
+                            };
 
                         match upstream.schema_search_path().await {
                             Ok(ssp) => break ssp,
@@ -1072,14 +973,13 @@ where
 
             let query_status_cache = query_status_cache;
             let upstream_config = upstream_config.clone();
-            let fallback_cache = fallback_cache.clone();
             let fut = async move {
                 let upstream_res =
                     if upstream_config.upstream_db_url.is_some() && !no_upstream_connections {
                         set_failpoint!(failpoints::UPSTREAM);
                         timeout(
                             UPSTREAM_CONNECTION_TIMEOUT,
-                            H::UpstreamDatabase::connect(upstream_config, fallback_cache),
+                            H::UpstreamDatabase::connect(upstream_config),
                         )
                         .instrument(debug_span!("Connecting to upstream database"))
                         .await
