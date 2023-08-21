@@ -103,7 +103,10 @@
 (defn w [_ _] {:type :invoke, :f :write, :value (rand-int 5)})
 (defn final-r [_ _] {:type :invoke, :f :final-read, :value nil})
 
-(defrecord Client [conn table-created? tables]
+(defrecord Client [conn
+                   tables
+                   table-created?
+                   retry-queries?]
   client/Client
   (open! [this test _node]
     (assoc this :conn (test-datasource test)))
@@ -123,21 +126,31 @@
                      :exception e}))))))
 
   (invoke! [_ _test op]
-    (try+
-     (case (:f op)
-       (:read :final-read)
-       (assoc op
-              :type :ok
-              :value
-              (map (some-fn :t1/x :x)
-                   (jdbc/execute! conn ["select x from t1"])))
+    (letfn [(maybe-retry-once [f]
+              (with-retry [attempts (if retry-queries? 1 0)]
+                (f)
+                (catch PSQLException e
+                  (if (pos? attempts)
+                    (retry (dec attempts))
+                    (throw e)))))]
+      (try+
+       (case (:f op)
+         (:read :final-read)
+         (maybe-retry-once
+          #(assoc op
+                  :type :ok
+                  :value
+                  (map (some-fn :t1/x :x)
+                       (jdbc/execute! conn ["select x from t1"]))))
 
-       :write
-       (do (jdbc/execute! conn ["insert into t1 (x) values (?)"
-                                (:value op)])
-           (assoc op :type :ok)))
-     (catch PSQLException e
-       (assoc op :type :fail :message (ex-message e)))))
+         :write
+         (maybe-retry-once
+          #(do (jdbc/execute! conn ["insert into t1 (x) values (?)"
+                                    (:value op)])
+               (assoc op :type :ok))))
+
+       (catch PSQLException e
+         (assoc op :type :fail :message (ex-message e))))))
 
   (teardown! [_this _test]
     (try
@@ -148,5 +161,8 @@
   (close! [this _test]
     (dissoc this :conn)))
 
-(defn new-client []
-  (map->Client {:table-created? (atom false)}))
+(defn new-client [& [opts]]
+  (-> opts
+      (select-keys [:retry-queries?])
+      (merge {:table-created? (atom false)})
+      map->Client))
