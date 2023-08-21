@@ -39,9 +39,17 @@
   (get (node->role test) node))
 
 (defn node-with-role
-  "Returns the node with the given role in the given test"
+  "Returns the first node with the given role in the given test"
   [test role]
   (get (role->node test) role))
+
+(defn nodes-with-role
+  "Returns a list of the nodes with the given role in the given test"
+  [test role]
+  (->> test
+       node->role
+       (filter (comp #{role} val))
+       (map key)))
 
 (defn adapter-nodes
   "Returns a sequence of adapter nodes in the given test"
@@ -53,3 +61,9 @@
   test"
   [test]
   (- (count (:nodes test)) 4))
+
+(comment
+  (def example-test {:nodes (map #(str "node-" %) (range 10))})
+
+  (nodes-with-role example-test :node-role/readyset-adapter)
+  )

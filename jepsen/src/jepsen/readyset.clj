@@ -18,6 +18,7 @@
    [jepsen.readyset.automation :as rs.auto]
    [jepsen.readyset.client :as rs]
    [jepsen.readyset.model :as rs.model]
+   [jepsen.readyset.nemesis :as rs.nemesis]
    [jepsen.readyset.nodes :as nodes]
    [jepsen.tests :as tests]
    [slingshot.slingshot :refer [try+]]))
@@ -89,7 +90,7 @@
 
                 ;; Don't try to start readyset processes until Consul is up
                 (jepsen/synchronize test (* 60 30))
-                (rs.auto/start-readyset-adapter! node test))
+                (rs.auto/start-readyset-adapter! test node))
 
               :node-role/readyset-server
               (do
@@ -101,7 +102,7 @@
 
                 ;; Don't try to start readyset processes until Consul is up
                 (jepsen/synchronize test (* 60 30))
-                (rs.auto/start-readyset-server! node test)
+                (rs.auto/start-readyset-server! test node)
 
                 (let [ds (rs/test-datasource test)]
                   (rs/wait-for-snapshot-completed ds))
@@ -157,7 +158,23 @@
             :node-role/upstream nil
             :node-role/readyset-adapter ["/var/log/readyset.log"]
             :node-role/readyset-server ["/var/log/readyset-server.log"])
-          (error node "unknown role"))))))
+          (error node "unknown role")))
+
+      db/Kill
+      (kill! [_ test node]
+        (case (nodes/node-role test node)
+          :node-role/load-balancer nil
+          :node-role/consul nil
+          :node-role/upstream nil
+          :node-role/readyset-adapter (rs.auto/kill-readyset-adapter!)
+          :node-role/readyset-server (rs.auto/kill-readyset-server!)))
+      (start! [_ test node]
+        (case (nodes/node-role test node)
+          :node-role/load-balancer nil
+          :node-role/consul nil
+          :node-role/upstream nil
+          :node-role/readyset-adapter (rs.auto/start-readyset-adapter! test node)
+          :node-role/readyset-server (rs.auto/start-readyset-server! test node))))))
 
 (defn readyset-test
   [opts]
@@ -169,24 +186,41 @@
     :db (db "1eebd43bd6befd8acc9104b4239a414d72a4bd55"  ; Needs at least this commit
             #_"refs/tags/beta-2023-07-26")
     :client (rs/new-client)
-    :nemesis (nemesis/partition-random-halves)
+    :nemesis (nemesis/compose
+              {{:kill-adapter :start
+                :start-adapter :stop} (rs.nemesis/kill-adapters)
+               {:kill-server :start
+                :start-server :stop} (rs.nemesis/kill-server)})
     :checker (checker/linearizable
               {:model (rs.model/eventually-consistent-table)
                :algorithm :linear})
     :generator (gen/phases
                 (->> (gen/mix [rs/r rs/w])
                      (gen/stagger (/ (:rate opts)))
+
                      (gen/nemesis
-                      (cycle
-                       [(gen/sleep 5)
-                        {:type :info, :f :start}
-                        (gen/sleep 5)
-                        {:type :info, :f :stop}]))
+                      (->> (gen/mix
+                            [(cycle
+                              [{:type :info :f :kill-adapter}
+                               {:type :info :f :start-adapter}])
+
+                             (cycle
+                              [{:type :info :f :kill-server}
+                               {:type :info :f :start-server}])])
+                           (gen/stagger 2)))
                      (gen/time-limit (:time-limit opts)))
+
+                (gen/nemesis
+                 (gen/phases
+                  (gen/once {:type :info, :f :start-server})
+                  (gen/once {:type :info, :f :start-adapter})))
+
                 (gen/log "Waiting for dataflow to converge")
                 (gen/sleep (:converge-time opts))
+
                 (gen/synchronize
-                 (gen/once rs/final-r)))
+                 (gen/clients
+                  (gen/once rs/final-r))))
     :pure-generators true}))
 
 (def opt-spec
