@@ -422,38 +422,41 @@ impl TableDescription {
     }
 
     fn try_into_change(self) -> ReadySetResult<Change> {
-        Ok(Change::CreateTable(CreateTableStatement {
-            if_not_exists: false,
-            table: self.name.clone(),
-            body: Ok(CreateTableBody {
-                fields: self
-                    .columns
-                    .into_iter()
-                    .map(|c| {
-                        Ok(ColumnSpecification {
-                            column: Column {
-                                name: c.name.into(),
-                                table: Some(self.name.clone()),
-                            },
-                            sql_type: parse_sql_type(Dialect::PostgreSQL, c.sql_type)
-                                .map_err(|e| internal_err!("Could not parse SQL type: {e}"))?,
-                            constraints: if c.not_null {
-                                vec![ColumnConstraint::NotNull]
-                            } else {
-                                vec![]
-                            },
-                            comment: None,
+        Ok(Change::CreateTable {
+            statement: CreateTableStatement {
+                if_not_exists: false,
+                table: self.name.clone(),
+                body: Ok(CreateTableBody {
+                    fields: self
+                        .columns
+                        .into_iter()
+                        .map(|c| {
+                            Ok(ColumnSpecification {
+                                column: Column {
+                                    name: c.name.into(),
+                                    table: Some(self.name.clone()),
+                                },
+                                sql_type: parse_sql_type(Dialect::PostgreSQL, c.sql_type)
+                                    .map_err(|e| internal_err!("Could not parse SQL type: {e}"))?,
+                                constraints: if c.not_null {
+                                    vec![ColumnConstraint::NotNull]
+                                } else {
+                                    vec![]
+                                },
+                                comment: None,
+                            })
                         })
-                    })
-                    .collect::<ReadySetResult<_>>()?,
-                keys: if self.constraints.is_empty() {
-                    None
-                } else {
-                    Some(self.constraints.into_iter().map(|c| c.definition).collect())
-                },
-            }),
-            options: Ok(vec![]),
-        }))
+                        .collect::<ReadySetResult<_>>()?,
+                    keys: if self.constraints.is_empty() {
+                        None
+                    } else {
+                        Some(self.constraints.into_iter().map(|c| c.definition).collect())
+                    },
+                }),
+                options: Ok(vec![]),
+            },
+            pg_meta: None, // TODO
+        })
     }
 
     /// Copy a table's contents from PostgreSQL to ReadySet

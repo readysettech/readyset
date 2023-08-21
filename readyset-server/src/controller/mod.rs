@@ -1474,20 +1474,22 @@ mod tests {
                         schema: Some("s1".into()),
                         name: "t".into(),
                     }),
-                    Change::CreateTable(
-                        parse_create_table(
+                    Change::CreateTable {
+                        statement: parse_create_table(
                             Dialect::MySQL,
                             "CREATE TABLE s2.snapshotting_t (x int);",
                         )
                         .unwrap(),
-                    ),
-                    Change::CreateTable(
-                        parse_create_table(
+                        pg_meta: None,
+                    },
+                    Change::CreateTable {
+                        statement: parse_create_table(
                             Dialect::MySQL,
                             "CREATE TABLE s2.snapshotted_t (x int);",
                         )
                         .unwrap(),
-                    ),
+                        pg_meta: None,
+                    },
                 ],
                 DataDialect::DEFAULT_MYSQL,
             ))
@@ -1562,9 +1564,11 @@ mod tests {
         let (mut noria, shutdown_tx) = start_simple("domains").await;
         noria
             .extend_recipe(ChangeList::from_change(
-                Change::CreateTable(
-                    parse_create_table(Dialect::MySQL, "CREATE TABLE t1 (x int);").unwrap(),
-                ),
+                Change::CreateTable {
+                    statement: parse_create_table(Dialect::MySQL, "CREATE TABLE t1 (x int);")
+                        .unwrap(),
+                    pg_meta: None,
+                },
                 DataDialect::DEFAULT_MYSQL,
             ))
             .await

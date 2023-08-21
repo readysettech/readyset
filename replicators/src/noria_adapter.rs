@@ -688,15 +688,15 @@ impl NoriaAdapter {
         // Remove DDL changes outside the filtered scope
         let mut non_replicated_tables = vec![];
         changelist.changes_mut().retain(|change| match change {
-            Change::CreateTable(stmt) => {
+            Change::CreateTable { statement, .. } => {
                 let keep = self
                     .table_filter
-                    .should_be_processed(schema.as_str(), stmt.table.name.as_str())
-                    && stmt.body.is_ok();
+                    .should_be_processed(schema.as_str(), statement.table.name.as_str())
+                    && statement.body.is_ok();
                 if !keep {
                     non_replicated_tables.push(Relation {
                         schema: Some(schema.clone().into()),
-                        name: stmt.table.name.clone(),
+                        name: statement.table.name.clone(),
                     })
                 }
                 keep
@@ -731,7 +731,7 @@ impl NoriaAdapter {
         let tables = changelist
             .changes()
             .filter_map(|change| match change {
-                Change::CreateTable(t) => Some(t.table.clone()),
+                Change::CreateTable { statement, .. } => Some(statement.table.clone()),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -754,7 +754,7 @@ impl NoriaAdapter {
                     .changes_mut()
                     .extend(changes.into_iter().filter_map(|change| {
                         Some(Change::AddNonReplicatedRelation(match change {
-                            Change::CreateTable(stmt) => stmt.table,
+                            Change::CreateTable { statement, .. } => statement.table,
                             Change::CreateView(stmt) => stmt.name,
                             Change::AddNonReplicatedRelation(rel) => rel,
                             _ => return None,
