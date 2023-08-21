@@ -16,10 +16,11 @@
    [jepsen.os.debian :as debian]
    [jepsen.os.ubuntu :as ubuntu]
    [jepsen.readyset.automation :as rs.auto]
+   [jepsen.readyset.checker :as rs.checker]
    [jepsen.readyset.client :as rs]
-   [jepsen.readyset.model :as rs.model]
    [jepsen.readyset.nemesis :as rs.nemesis]
    [jepsen.readyset.nodes :as nodes]
+   [jepsen.readyset.model :as rs.model]
    [jepsen.tests :as tests]
    [slingshot.slingshot :refer [try+]]))
 
@@ -191,9 +192,12 @@
                 :start-adapter :stop} (rs.nemesis/kill-adapters)
                {:kill-server :start
                 :start-server :stop} (rs.nemesis/kill-server)})
-    :checker (checker/linearizable
-              {:model (rs.model/eventually-consistent-table)
-               :algorithm :linear})
+    :checker (checker/compose
+              {:liveness (rs.checker/liveness)
+               :eventually-consistent
+               (checker/linearizable
+                {:model (rs.model/eventually-consistent-table)
+                 :algorithm :linear})})
     :generator (gen/phases
                 (->> (gen/mix [rs/r rs/w])
                      (gen/stagger (/ (:rate opts)))
