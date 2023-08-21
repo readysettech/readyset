@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use readyset_errors::{internal, ReadySetResult};
+use tracing::info;
 use vitess_grpc::binlogdata::FieldEvent;
 
 use crate::Table;
@@ -18,22 +20,27 @@ impl SchemaCache {
     }
 
     pub fn add_table(&mut self, table: Table) {
+        info!("Adding table: {}", table.name);
         self.tables.insert(table.name.clone(), table);
     }
 
-    pub fn process_field_event(&mut self, field_event: &FieldEvent) {
+    pub fn process_field_event(&mut self, field_event: &FieldEvent) -> ReadySetResult<()> {
         let table_name = &field_event.table_name;
         let table_name_parts: Vec<&str> = table_name.split('.').collect();
         if table_name_parts.len() != 2 {
-            panic!("Invalid table name: {}", table_name);
+            internal!(
+                "Invalid table name: {}, expected format: keyspace.table",
+                table_name
+            );
         }
 
         let keyspace = table_name_parts[0];
         let table_name = table_name_parts[1];
         if keyspace != self.keyspace {
-            panic!(
+            internal!(
                 "Invalid keyspace: {}, expected: {}",
-                keyspace, self.keyspace
+                keyspace,
+                self.keyspace
             );
         }
 
@@ -41,5 +48,6 @@ impl SchemaCache {
         table.set_columns(&field_event.fields);
 
         self.add_table(table);
+        Ok(())
     }
 }

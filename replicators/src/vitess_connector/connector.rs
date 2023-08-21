@@ -251,7 +251,7 @@ impl Connector for VitessConnector {
                         "Received VStream FIELD event for table: {}",
                         &field_event.table_name
                     );
-                    self.schema_cache.process_field_event(&field_event);
+                    self.schema_cache.process_field_event(&field_event)?
                 }
 
                 // This assumes that:

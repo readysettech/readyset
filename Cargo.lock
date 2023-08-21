@@ -5319,7 +5319,9 @@ dependencies = [
  "bit-vec",
  "mysql-time",
  "readyset-data",
+ "readyset-errors",
  "rust_decimal",
+ "tracing",
  "vitess-grpc 0.1.2+vitess-16.0.2",
 ]
 
