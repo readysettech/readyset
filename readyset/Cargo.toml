@@ -49,4 +49,3 @@ replicators = { path = "../replicators" }
 
 [features]
 failure_injection = ["fail/failpoints", "readyset-client/failure_injection", "readyset-server/failure_injection"]
-fallback_cache = ["readyset-adapter/fallback_cache", "readyset-client-metrics/fallback_cache"]

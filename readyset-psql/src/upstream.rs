@@ -14,7 +14,6 @@ use pgsql::types::Type;
 use pgsql::{GenericResult, ResultStream, Row, SimpleQueryMessage};
 use postgres_types::Kind;
 use psql_srv::Column;
-use readyset_adapter::fallback_cache::FallbackCache;
 use readyset_adapter::upstream_database::UpstreamDestination;
 use readyset_adapter::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
 use readyset_data::DfValue;
@@ -156,16 +155,11 @@ fn convert_params_for_upstream(params: &[DfValue], types: &[Type]) -> ReadySetRe
 impl UpstreamDatabase for PostgreSqlUpstream {
     type StatementMeta = StatementMeta;
     type QueryResult<'a> = QueryResult;
-    // TODO: Actually fill this in.
-    type CachedReadResult = ();
     type PrepareData<'a> = &'a [Type];
     type Error = Error;
     const DEFAULT_DB_VERSION: &'static str = "13.4 (ReadySet)";
 
-    async fn connect(
-        upstream_config: UpstreamConfig,
-        _: Option<FallbackCache<Self::CachedReadResult>>,
-    ) -> Result<Self, Error> {
+    async fn connect(upstream_config: UpstreamConfig) -> Result<Self, Error> {
         let url = upstream_config
             .upstream_db_url
             .as_ref()
@@ -231,10 +225,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
     }
 
     async fn reset(&mut self) -> Result<(), Error> {
-        let old_self = std::mem::replace(
-            self,
-            Self::connect(self.upstream_config.clone(), None).await?,
-        );
+        let old_self = std::mem::replace(self, Self::connect(self.upstream_config.clone()).await?);
         drop(old_self);
         Ok(())
     }

@@ -1,15 +1,9 @@
-#[cfg(feature = "fallback_cache")]
-use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::convert::TryInto;
-#[cfg(feature = "fallback_cache")]
-use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures_util::Stream;
-#[cfg(feature = "fallback_cache")]
-use futures_util::StreamExt;
 use mysql_async::consts::{CapabilityFlags, StatusFlags};
 use mysql_async::prelude::Queryable;
 use mysql_async::{
@@ -17,9 +11,6 @@ use mysql_async::{
 };
 use nom_sql::{SqlIdentifier, StartTransactionStatement};
 use pin_project::pin_project;
-use readyset_adapter::fallback_cache::FallbackCache;
-#[cfg(feature = "fallback_cache")]
-use readyset_adapter::fallback_cache::FallbackCacheApi;
 use readyset_adapter::upstream_database::UpstreamDestination;
 use readyset_adapter::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
 use readyset_client_metrics::QueryDestination;
@@ -80,16 +71,6 @@ pub enum QueryResult<'a> {
 }
 
 impl<'a> UpstreamDestination for QueryResult<'a> {
-    #[cfg(feature = "fallback_cache")]
-    fn destination(&self) -> QueryDestination {
-        if matches!(self, QueryResult::CachedReadResult(..)) {
-            QueryDestination::FallbackCache
-        } else {
-            QueryDestination::Upstream
-        }
-    }
-
-    #[cfg(not(feature = "fallback_cache"))]
     fn destination(&self) -> QueryDestination {
         QueryDestination::Upstream
     }
@@ -108,49 +89,11 @@ impl<'a> From<CachedReadResult> for QueryResult<'a> {
     }
 }
 
-#[cfg(feature = "fallback_cache")]
-impl<'a> QueryResult<'a> {
-    /// Can convert a stream ReadResult into a CachedReadResult.
-    async fn async_try_into(self) -> Result<CachedReadResult, Error> {
-        match self {
-            QueryResult::ReadResult {
-                mut stream,
-                columns,
-            } => {
-                let mut rows = vec![];
-                while let Some(row) = stream.next().await {
-                    match row {
-                        Ok(row) => rows.push(row),
-                        Err(e) => {
-                            // TODO: Update to be more sophisticated than this hack.
-                            return Err(Error::ReadySet(internal_err!(
-                                "Found error from MySQL rather than row {}",
-                                e
-                            )));
-                        }
-                    }
-                }
-                let status_flags = stream.status_flags();
-                Ok(CachedReadResult {
-                    data: rows,
-                    columns: columns.clone(),
-                    status_flags,
-                })
-            }
-            _ => Err(Error::ReadySet(internal_err!(
-                "Temp error: Can't convert because not a read result"
-            ))),
-        }
-    }
-}
-
 /// A connector to an underlying mysql store. This is really just a wrapper for the mysql crate.
 pub struct MySqlUpstream {
     conn: Conn,
     prepared_statements: HashMap<StatementID, mysql_async::Statement>,
     upstream_config: UpstreamConfig,
-    #[cfg(feature = "fallback_cache")]
-    fallback_cache: Option<FallbackCache<CachedReadResult>>,
 }
 
 #[derive(Debug, Clone)]
@@ -289,32 +232,12 @@ impl MySqlUpstream {
 #[async_trait]
 impl UpstreamDatabase for MySqlUpstream {
     type QueryResult<'a> = QueryResult<'a>;
-    type CachedReadResult = CachedReadResult;
     type StatementMeta = StatementMeta;
     type PrepareData<'a> = ();
     type Error = Error;
     const DEFAULT_DB_VERSION: &'static str = "8.0.26-readyset\0";
 
-    #[cfg(feature = "fallback_cache")]
-    async fn connect(
-        upstream_config: UpstreamConfig,
-        fallback_cache: Option<FallbackCache<Self::CachedReadResult>>,
-    ) -> Result<Self, Error> {
-        let (conn, prepared_statements, upstream_config) =
-            Self::connect_inner(upstream_config).await?;
-        Ok(Self {
-            conn,
-            prepared_statements,
-            upstream_config,
-            fallback_cache,
-        })
-    }
-
-    #[cfg(not(feature = "fallback_cache"))]
-    async fn connect(
-        upstream_config: UpstreamConfig,
-        _: Option<FallbackCache<Self::CachedReadResult>>,
-    ) -> Result<Self, Error> {
+    async fn connect(upstream_config: UpstreamConfig) -> Result<Self, Error> {
         let (conn, prepared_statements, upstream_config) =
             Self::connect_inner(upstream_config).await?;
         Ok(Self {
@@ -345,32 +268,6 @@ impl UpstreamDatabase for MySqlUpstream {
         format!("{major}.{minor}.{patch}-readyset\0")
     }
 
-    #[cfg(feature = "fallback_cache")]
-    async fn reset(&mut self) -> Result<(), Error> {
-        let opts = self.conn.opts().clone();
-        let conn = Conn::new(opts).await?;
-        let prepared_statements = HashMap::new();
-        let upstream_config = self.upstream_config.clone();
-        let fallback_cache = if let Some(ref cache) = self.fallback_cache {
-            cache.clear().await;
-            Some(cache.clone())
-        } else {
-            None
-        };
-        let old_self = std::mem::replace(
-            self,
-            Self {
-                conn,
-                prepared_statements,
-                upstream_config,
-                fallback_cache,
-            },
-        );
-        let _ = old_self.conn.disconnect().await as Result<(), _>;
-        Ok(())
-    }
-
-    #[cfg(not(feature = "fallback_cache"))]
     async fn reset(&mut self) -> Result<(), Error> {
         let opts = self.conn.opts().clone();
         let conn = Conn::new(opts).await?;
@@ -410,54 +307,6 @@ impl UpstreamDatabase for MySqlUpstream {
         })
     }
 
-    #[cfg(feature = "fallback_cache")]
-    async fn execute<'a>(
-        &'a mut self,
-        id: u32,
-        params: &[DfValue],
-    ) -> Result<Self::QueryResult<'a>, Error> {
-        if let Some(ref mut cache) = self.fallback_cache {
-            let mut s = DefaultHasher::new();
-            (id, params).hash(&mut s);
-            let hash = format!("{:x}", s.finish());
-            if let Some(query_r) = cache.get(&hash).await {
-                return Ok(query_r.into());
-            }
-            let params = dt_to_value_params(params)?;
-            let result = self
-                .conn
-                .exec_iter(
-                    self.prepared_statements.get(&id).ok_or(Error::ReadySet(
-                        ReadySetError::PreparedStatementMissing { statement_id: id },
-                    ))?,
-                    params,
-                )
-                .await?;
-            let r = handle_query_result!(result);
-            match r {
-                Ok(query_result @ QueryResult::ReadResult { .. }) => {
-                    let cached_result: CachedReadResult = query_result.async_try_into().await?;
-                    cache.insert(hash, cached_result.clone()).await;
-                    Ok(cached_result.into())
-                }
-                _ => r,
-            }
-        } else {
-            let params = dt_to_value_params(params)?;
-            let result = self
-                .conn
-                .exec_iter(
-                    self.prepared_statements.get(&id).ok_or(Error::ReadySet(
-                        ReadySetError::PreparedStatementMissing { statement_id: id },
-                    ))?,
-                    params,
-                )
-                .await?;
-            handle_query_result!(result)
-        }
-    }
-
-    #[cfg(not(feature = "fallback_cache"))]
     async fn execute<'a>(
         &'a mut self,
         id: u32,
@@ -476,30 +325,6 @@ impl UpstreamDatabase for MySqlUpstream {
         handle_query_result!(result)
     }
 
-    #[cfg(feature = "fallback_cache")]
-    async fn query<'a>(&'a mut self, query: &'a str) -> Result<Self::QueryResult<'a>, Error> {
-        if let Some(ref mut cache) = self.fallback_cache {
-            if let Some(query_r) = cache.get(query.as_ref()).await {
-                return Ok(query_r.into());
-            }
-            let query_str = query.as_ref().to_owned();
-            let result = self.conn.query_iter(query).await?;
-            let r = handle_query_result!(result);
-            match r {
-                Ok(query_result @ QueryResult::ReadResult { .. }) => {
-                    let cached_result: CachedReadResult = query_result.async_try_into().await?;
-                    cache.insert(query_str, cached_result.clone()).await;
-                    Ok(cached_result.into())
-                }
-                _ => r,
-            }
-        } else {
-            let result = self.conn.query_iter(query).await?;
-            handle_query_result!(result)
-        }
-    }
-
-    #[cfg(not(feature = "fallback_cache"))]
     async fn query<'a>(&'a mut self, query: &'a str) -> Result<Self::QueryResult<'a>, Error> {
         let result = self.conn.query_iter(query).await?;
         handle_query_result!(result)

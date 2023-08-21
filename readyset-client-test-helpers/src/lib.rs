@@ -47,7 +47,7 @@ pub trait Adapter: Send {
     fn upstream_url(_db_name: &str) -> String;
 
     async fn make_upstream(addr: String) -> Self::Upstream {
-        Self::Upstream::connect(UpstreamConfig::from_url(addr), None)
+        Self::Upstream::connect(UpstreamConfig::from_url(addr))
             .await
             .unwrap()
     }

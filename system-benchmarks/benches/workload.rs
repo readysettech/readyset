@@ -570,57 +570,8 @@ async fn prepare_db<P: Into<PathBuf>>(path: P, args: &SystemBenchArgs) -> anyhow
     Ok(())
 }
 
-/// Start the ReadySet adapter in standalone mode without fallback cache enabled.
-#[cfg(not(feature = "fallback_cache"))]
-fn start_adapter(upstream_url: &str) -> anyhow::Result<()> {
-    start_adapter_with_options(
-        FallbackCacheOptions {
-            enable: false,
-            disk_modeled: false,
-        },
-        upstream_url,
-    )
-}
-
-/// Start the ReadySet adapter in standalone mode with fallback cache enabled and disk
-/// modeling disabled.
-#[cfg(all(feature = "fallback_cache", not(feature = "disk_modeled")))]
-fn start_adapter(upstream_url: &str) -> anyhow::Result<()> {
-    start_adapter_with_options(
-        FallbackCacheOptions {
-            enable: true,
-            disk_modeled: false,
-        },
-        upstream_url,
-    )
-}
-
-/// Start the ReadySet adapter in standalone mode with fallback cache enabled and disk
-/// modeling enabled.
-#[cfg(all(feature = "fallback_cache", feature = "disk_modeled"))]
-fn start_adapter(upstream_url: &str) -> anyhow::Result<()> {
-    start_adapter_with_options(
-        FallbackCacheOptions {
-            enable: true,
-            disk_modeled: true,
-        },
-        upstream_url,
-    )
-}
-
-/// Various options for enabling and configuring the fallback cache.
-struct FallbackCacheOptions {
-    /// Whether the fallback cache is enabled or not.
-    enable: bool,
-    /// Whether the fallback cache should model running off spinning disk.
-    disk_modeled: bool,
-}
-
 /// Start the ReadySet adapter in standalone mode with options.
-fn start_adapter_with_options(
-    fallback_cache_options: FallbackCacheOptions,
-    upstream_url: &str,
-) -> anyhow::Result<()> {
+fn start_adapter(upstream_url: &str) -> anyhow::Result<()> {
     let database_type = DatabaseURL::from_str(upstream_url)?.database_type();
     let database_type_flag = format!("--database-type={}", database_type);
     let temp_dir = temp_dir::TempDir::new().unwrap();
@@ -647,14 +598,6 @@ fn start_adapter_with_options(
         "--noria-metrics",
         &database_type_flag,
     ];
-
-    if fallback_cache_options.enable {
-        options.push("--enable-fallback-cache");
-    }
-
-    if fallback_cache_options.disk_modeled {
-        options.push("--model-disk");
-    }
 
     let adapter_options = Options::parse_from(options);
 

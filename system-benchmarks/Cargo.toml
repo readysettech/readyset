@@ -51,7 +51,3 @@ bench = false
 [[bench]]
 name = "workload"
 harness = false
-
-[features]
-fallback_cache = ["readyset/fallback_cache", "readyset-mysql/fallback_cache"]
-disk_modeled = ["fallback_cache", "readyset/fallback_cache", "readyset-mysql/fallback_cache"]
