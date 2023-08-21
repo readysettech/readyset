@@ -61,7 +61,7 @@
        "@" (nodes/node-with-role test :node-role/upstream)
        "/" rs/pgdatabase))
 
-(defn start-readyset-adapter! [node test]
+(defn start-readyset-adapter! [test node]
   (c/su
    (cu/start-daemon!
     {:logfile "/var/log/readyset.log"
@@ -79,7 +79,13 @@
     :--embedded-readers
     :--reader-replicas (str (nodes/num-adapters test)))))
 
-(defn start-readyset-server! [node test]
+(defn kill-readyset-adapter!
+  "Kill the readyset adapter process running on the current node."
+  [& [_test _node]]
+  (c/su
+   (cu/stop-daemon! "/var/run/readyset.pid")))
+
+(defn start-readyset-server! [test node]
   (c/su
    (c/exec :mkdir :-p "/opt/readyset/data")
    (cu/start-daemon!
@@ -98,3 +104,9 @@
     :--disable-upstream-ssl-verification
     :--no-readers
     :--reader-replicas (str (nodes/num-adapters test)))))
+
+(defn kill-readyset-server!
+  "Kill the readyset server process running on the current node."
+  [& [_test _node]]
+  (c/su
+   (cu/stop-daemon! "/var/run/readyset-server.pid")))
