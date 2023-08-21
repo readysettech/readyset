@@ -72,7 +72,7 @@ pub(crate) fn convert_column(col: &ColumnSchema) -> ReadySetResult<mysql_srv::Co
         DfType::Uuid => unsupported!("MySQL does not support the UUID type"),
         DfType::Jsonb => unsupported!("MySQL does not support the JSONB type"),
         DfType::Bit(size) => {
-            if size < 64 {
+            if size <= 64 {
                 MYSQL_TYPE_BIT
             } else {
                 unsupported!("MySQL bit type cannot have a size bigger than 64")
