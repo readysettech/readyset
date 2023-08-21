@@ -46,7 +46,6 @@ impl Table {
                 continue;
             }
 
-            println!("field_start: {}, len: {}", field_start, len);
             let raw_value = &row.values[field_start..field_start + len as usize];
             let value = column.vstream_value_to_noria_value(raw_value)?;
             noria_row.push(value);

@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use nom_sql::Relation;
+use readyset_client::TableOperation;
 use readyset_errors::{ReadySetError, ReadySetResult};
 use readyset_vitess_data::{SchemaCache, VStreamPosition};
 use replication_offset::mysql::MySqlPosition;
@@ -120,6 +121,83 @@ impl VitessConnector {
             }
         }
     }
+
+    fn process_row_event(
+        &self,
+        event: &VEvent,
+        schema_cache: &SchemaCache,
+    ) -> ReadySetResult<(ReplicationAction, ReplicationOffset)> {
+        let row_event = event.row_event.as_ref().unwrap();
+        let keyspace = &row_event.keyspace;
+        let fully_qualified_table_name = &row_event.table_name;
+        let table_name = fully_qualified_table_name
+            .split('.')
+            .last()
+            .ok_or_else(|| {
+                ReadySetError::ReplicationFailed(format!(
+                    "Could not extract table name from fully qualified name: {}",
+                    fully_qualified_table_name
+                ))
+            })?;
+
+        if schema_cache.keyspace != *keyspace {
+            return Err(ReadySetError::ReplicationFailed(format!(
+                "Unexpected keyspace '{}' encountered in a ROW event while following the '{}' keyspace",
+                keyspace, schema_cache.keyspace
+            )));
+        }
+
+        let table = schema_cache.tables.get(table_name).ok_or_else(|| {
+            ReadySetError::ReplicationFailed(format!(
+                "Unknown table '{}' in keyspace '{}'",
+                table_name, row_event.keyspace
+            ))
+        })?;
+
+        // Process all row changes for the table
+        info!(
+            "Received a ROW event for table '{}' with {} changes",
+            table_name,
+            row_event.row_changes.len()
+        );
+        let mut table_ops = Vec::with_capacity(row_event.row_changes.len());
+        for row_change in row_event.row_changes.iter() {
+            let row_operation = readyset_vitess_data::row_operation(&row_change);
+
+            // Generate a table operation for the row
+            match row_operation {
+                readyset_vitess_data::RowOperation::Insert => {
+                    let row = table
+                        .vstream_row_to_noria_row(&row_change.after.as_ref().unwrap())
+                        .map_err(|e| {
+                            ReadySetError::ReplicationFailed(format!(
+                                "Could not convert VStream row to Noria row: {}",
+                                e
+                            ))
+                        })?;
+                    table_ops.push(TableOperation::Insert(row));
+                }
+                readyset_vitess_data::RowOperation::Update => todo!(),
+                readyset_vitess_data::RowOperation::Delete => todo!(),
+            }
+        }
+
+        let action = ReplicationAction::TableAction {
+            table: Relation {
+                schema: Some(keyspace.into()),
+                name: table_name.into(),
+            },
+            actions: table_ops,
+            txid: None, // VStream does not provide transaction IDs
+        };
+
+        // FIXME: Fix this
+        let pos = ReplicationOffset::MySql(
+            MySqlPosition::from_file_name_and_position("binlog.00001".to_owned(), 12).unwrap(),
+        );
+
+        Ok((action, pos))
+    }
 }
 
 #[async_trait]
@@ -172,7 +250,7 @@ impl Connector for VitessConnector {
                 // 3. Each generated ReplicationAction will have a single action inside (performance
                 // issues may be caused by too granular rpc calls to Noria; may want to buffer
                 // events like the Postgres connector does)
-                VEventType::Row => return process_row_event(&event, &self.schema_cache),
+                VEventType::Row => return self.process_row_event(&event, &self.schema_cache),
 
                 // TODO: Maybe handle these?
                 VEventType::Ddl => info!("Received VStream DDL"),
@@ -203,48 +281,4 @@ impl Connector for VitessConnector {
             // Ok((ReplicationAction::LogPosition, &self.next_position));
         }
     }
-}
-
-fn process_row_event(
-    event: &VEvent,
-    schema_cache: &SchemaCache,
-) -> ReadySetResult<(ReplicationAction, ReplicationOffset)> {
-    let row_event = event.row_event.as_ref().unwrap();
-    let keyspace = &row_event.keyspace;
-    let table_name = &row_event.table_name;
-
-    if schema_cache.keyspace != *keyspace {
-        return Err(ReadySetError::ReplicationFailed(format!(
-            "Unexpected keyspace '{}' encountered in a ROW event while following the '{}' keyspace",
-            keyspace, schema_cache.keyspace
-        )));
-    }
-
-    let table = schema_cache.tables.get(table_name).ok_or_else(|| {
-        ReadySetError::ReplicationFailed(format!(
-            "Unknown table '{}' in keyspace '{}'",
-            table_name, row_event.keyspace
-        ))
-    })?;
-
-    // TODO: figure out the type of the event and process it accordingly
-    // 1. Determine operation type
-    // 2. Generate a table operation for the row
-
-    let table_ops = vec![];
-    let action = ReplicationAction::TableAction {
-        table: Relation {
-            schema: Some(keyspace.into()),
-            name: table_name.into(),
-        },
-        actions: table_ops,
-        txid: None, // VStream does not provide transaction IDs
-    };
-
-    // FIXME: Fix this
-    let pos = ReplicationOffset::MySql(
-        MySqlPosition::from_file_name_and_position("binlog.00001".to_owned(), 12).unwrap(),
-    );
-
-    Ok((action, pos))
 }
