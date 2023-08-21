@@ -69,10 +69,10 @@ pub enum DatabaseURLParseError {
     #[error("Invalid database URL format; ReadySet requires that Postgres database URLs contain a database name")]
     MissingPostgresDbName,
 
-    #[error(transparent)]
+    #[error("Invalid database URL format: {0}; Make sure any special characters are percent-encoded. See https://docs.readyset.io/reference/cli/readyset#--upstream-db-url for more details.")]
     PostgreSQL(#[from] pgsql::Error),
 
-    #[error(transparent)]
+    #[error("Invalid database URL format: {0}; Make sure any special characters are percent-encoded. See https://docs.readyset.io/reference/cli/readyset#--upstream-db-url for more details.")]
     MySQL(#[from] mysql::UrlError),
 }
 
