@@ -1,8 +1,9 @@
 use async_trait::async_trait;
 use nom_sql::Relation;
-use readyset_client::replication::ReplicationOffset;
 use readyset_errors::{ReadySetError, ReadySetResult};
 use readyset_vitess_data::{SchemaCache, VStreamPosition};
+use replication_offset::mysql::MySqlPosition;
+use replication_offset::ReplicationOffset;
 use tokio::sync::mpsc;
 use tonic::Streaming;
 use tracing::{error, info, warn};
@@ -14,7 +15,7 @@ use vitess_grpc::vtgateservice::vitess_client::VitessClient;
 use crate::noria_adapter::{Connector, ReplicationAction};
 
 /// A connector that connects to a Vitess cluster following its VStream from a given position.
-pub struct VitessConnector {
+pub(crate) struct VitessConnector {
     // Channel with separate VStream API response events
     vstream_events: mpsc::Receiver<VEvent>,
 
@@ -126,7 +127,7 @@ impl Connector for VitessConnector {
     /// Process VStream events until an actionable event occurs.
     async fn next_action(
         &mut self,
-        _: &ReplicationOffset,
+        _last_pos: &ReplicationOffset,
         _until: Option<&ReplicationOffset>,
     ) -> ReadySetResult<(ReplicationAction, ReplicationOffset)> {
         // This loop runs until we have something to return to the caller
@@ -169,7 +170,7 @@ impl Connector for VitessConnector {
                 // 1. We are following a single keyspace
                 // 2. Each ROW event will be converted to a single ReplicationAction
                 // 3. Each generated ReplicationAction will have a single action inside (performance
-                // issues may be caused by too granular rpc calls to Noria; ,ay want to buffer
+                // issues may be caused by too granular rpc calls to Noria; may want to buffer
                 // events like the Postgres connector does)
                 VEventType::Row => return process_row_event(&event, &self.schema_cache),
 
@@ -240,10 +241,10 @@ fn process_row_event(
         txid: None, // VStream does not provide transaction IDs
     };
 
-    let pos = ReplicationOffset {
-        replication_log_name: String::new(),
-        offset: 0,
-    };
+    // FIXME: Fix this
+    let pos = ReplicationOffset::MySql(
+        MySqlPosition::from_file_name_and_position("binlog.00001".to_owned(), 12).unwrap(),
+    );
 
     Ok((action, pos))
 }

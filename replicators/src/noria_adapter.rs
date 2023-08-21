@@ -22,6 +22,7 @@ use readyset_data::Dialect;
 use readyset_errors::{internal_err, set_failpoint_return_err, ReadySetError, ReadySetResult};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
 use readyset_util::select;
+use replication_offset::mysql::MySqlPosition;
 use replication_offset::{ReplicationOffset, ReplicationOffsets};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::{debug, error, info, info_span, trace, warn, Instrument};
@@ -253,7 +254,7 @@ impl NoriaAdapter {
                     vitess_config,
                     noria,
                     config,
-                    &mut notify,
+                    notification_channel,
                     resnapshot,
                     &telemetry_sender,
                     enable_statement_logging,
@@ -734,7 +735,7 @@ impl NoriaAdapter {
         vitess_config: database_utils::VitessConfig,
         mut noria: ReadySetHandle,
         config: UpstreamConfig,
-        ready_notify: &mut Option<Arc<Notify>>,
+        notification_channel: &UnboundedSender<ReplicatorMessage>,
         resnapshot: bool,
         telemetry_sender: &TelemetrySender,
         enable_statement_logging: bool,
@@ -774,12 +775,14 @@ impl NoriaAdapter {
         //     .map(Into::into)
         //     .unwrap_or_default();
 
-        let mut pos = ReplicationOffset {
-            offset: 0,
-            replication_log_name: "fake-log".to_string(),
-        };
+        // FIXME: Fix this
+        let mut replication_offset = ReplicationOffset::MySql(
+            MySqlPosition::from_file_name_and_position("binlog.00001".to_owned(), 12).unwrap(),
+        );
 
-        adapter.main_loop(&mut pos, None).await?;
+        adapter
+            .main_loop(&mut replication_offset, None, notification_channel)
+            .await?;
 
         unreachable!("`main_loop` will never stop with an Ok status if `until = None`");
     }

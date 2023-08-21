@@ -1,4 +1,4 @@
 mod connector;
 mod snapshot;
 
-pub use connector::VitessConnector;
+pub(crate) use connector::VitessConnector;
