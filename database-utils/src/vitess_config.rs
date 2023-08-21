@@ -36,6 +36,10 @@ impl VitessConfig {
         })
     }
 
+    pub fn keyspace(&self) -> String {
+        self.keyspace.clone()
+    }
+
     pub fn grpc_url(&self) -> String {
         format!(
             "http://{}:{}@{}:{}/{}",
