@@ -210,7 +210,9 @@ impl SqlIncorporator {
 
         for change in changes {
             match change {
-                Change::CreateTable(mut cts) => {
+                Change::CreateTable {
+                    statement: mut cts, ..
+                } => {
                     cts = self.rewrite(cts, &schema_search_path, dialect, None)?;
                     let body = match cts.body {
                         Ok(body) => body,

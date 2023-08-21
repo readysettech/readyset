@@ -31,6 +31,8 @@
 //     b. The `statement_terminator` matches whitespaces, semicolons, line ending and eof. For
 //    simplicity, it should only match semicolons (or semicolons and eof, at most).
 
+use std::collections::HashMap;
+
 use dataflow_expression::Dialect;
 use nom_locate::LocatedSpan;
 use nom_sql::{
@@ -68,7 +70,10 @@ pub trait IntoChanges {
 
 impl IntoChanges for CreateTableStatement {
     fn into_changes(self) -> Vec<Change> {
-        vec![Change::CreateTable(self)]
+        vec![Change::CreateTable {
+            statement: self,
+            pg_meta: None,
+        }]
     }
 }
 
@@ -181,7 +186,10 @@ impl ChangeList {
                     }
                     acc.and_then(|mut changes| {
                         match parsed {
-                            SqlQuery::CreateTable(cts) => changes.push(Change::CreateTable(cts)),
+                            SqlQuery::CreateTable(statement) => changes.push(Change::CreateTable {
+                                statement,
+                                pg_meta: None,
+                            }),
                             SqlQuery::CreateView(cvs) => changes.push(Change::CreateView(cvs)),
                             SqlQuery::CreateCache(CreateCacheStatement {
                                 name,
@@ -314,11 +322,25 @@ pub struct CreateCache {
     pub always: bool,
 }
 
+/// Metadata about a PostgreSQL table
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PostgresTableMetadata {
+    /// The OID of the table
+    pub oid: u32,
+    /// A map from column name to the attribute number of that column
+    pub column_oids: HashMap<SqlIdentifier, i16>,
+}
+
 /// Describes a singe change to be made to the MIR and dataflow graphs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Change {
     /// Add a new base table to the graph, represented by the given `CREATE TABLE`` statement
-    CreateTable(CreateTableStatement),
+    CreateTable {
+        /// The `CREATE TABLE` statement
+        statement: CreateTableStatement,
+        /// Metadata about the table in Postgres, if it is a postgres table
+        pg_meta: Option<PostgresTableMetadata>,
+    },
     /// Record that a relation (a table or a view) with the given name exists in the upstream
     /// database, but is not being replicated.
     ///
@@ -431,7 +453,7 @@ impl Change {
                     },
                 ..
             } => true,
-            Change::CreateTable(_)
+            Change::CreateTable { .. }
             | Change::CreateView(_)
             | Change::CreateCache { .. }
             | Change::CreateType { .. }

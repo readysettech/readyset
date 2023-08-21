@@ -8948,9 +8948,11 @@ async fn multiple_simultaneous_migrations() {
     let mut g2 = g.clone();
 
     g.extend_recipe(ChangeList::from_change(
-        Change::CreateTable(
-            parse_create_table(nom_sql::Dialect::MySQL, "CREATE TABLE t (x int, y int)").unwrap(),
-        ),
+        Change::CreateTable {
+            statement: parse_create_table(nom_sql::Dialect::MySQL, "CREATE TABLE t (x int, y int)")
+                .unwrap(),
+            pg_meta: None,
+        },
         Dialect::DEFAULT_MYSQL,
     ))
     .await
