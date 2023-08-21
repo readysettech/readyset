@@ -11,6 +11,9 @@ description = "Artifacts commonly shared among other ReadySet crates"
 chrono = { version = "0.4.0", features = ["serde"] }
 serde = { version = "1.0.8", features = ["rc", "derive"] }
 petgraph = { version = "0.5", features = ["serde-1"] }
+bit-vec = { version = "0.6", features = ["serde"] }
+rust_decimal = { version = "1.26", features = ["db-tokio-postgres", "serde-str"] }
+ndarray = { version = "0.15.4", features = ["serde"] }
 vec1 = "1.6.0"
 tuple = "0.5"
 triomphe = "0.1"
