@@ -82,7 +82,7 @@ pub enum BackendMessage {
         field_descriptions: Vec<FieldDescription>,
     },
     PassThroughRowDescription(Vec<OwnedField>),
-    PassThroughDataRow(SimpleQueryRow),
+    PassThroughSimpleRow(SimpleQueryRow),
     SSLResponse {
         byte: u8,
     },

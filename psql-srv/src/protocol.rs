@@ -636,7 +636,7 @@ impl Protocol {
                                         processing_select = true;
                                     }
                                     // Create a message for each row
-                                    messages.push(BackendMessage::PassThroughDataRow(row))
+                                    messages.push(BackendMessage::PassThroughSimpleRow(row))
                                 }
                                 SimpleQueryMessage::CommandComplete(CommandCompleteContents {
                                     fields,
