@@ -22,16 +22,9 @@ pub(crate) struct VitessConnector {
     // Channel with separate VStream API response events
     vstream_events: mpsc::Receiver<VEvent>,
 
-    /// Reader is a decoder for binlog events
-    // reader: binlog::EventStreamReader,
-    /// The binlog "slave" must be assigned a unique `server_id` in the replica topology
-    /// if one is not assigned we will use (u32::MAX - 55)
-    // server_id: Option<u32>,
-    /// If we just want to continue reading the binlog from a previous point
-    // next_position: BinlogPosition,
-
-    /// The GTID of the current transaction. Table modification events will have
-    /// the current GTID attached if enabled in mysql.
+    /// The GTID of the current transaction, we only receive and change it on VGTID events,
+    /// which are delivered at the end of a transaction. So, if we ever need to recover,
+    /// we'll do that from the end of the last transaction.
     current_position: Option<VStreamPosition>,
 
     // Schema cache for all the tables we have seen so far
@@ -50,7 +43,10 @@ impl VitessConnector {
         // Connect to Vitess
         let mut client = VitessClient::connect(vitess_config.grpc_url())
             .await
-            .map_err(|_| readyset_errors::ReadySetError::InvalidUpstreamDatabase)?;
+            .map_err(|err| {
+                error!("Could not connect to Vitess: {}", err);
+                readyset_errors::ReadySetError::InvalidUpstreamDatabase
+            })?;
         info!("Connected to Vitess");
 
         // Configure the details of VStream
@@ -80,19 +76,22 @@ impl VitessConnector {
             ..Default::default()
         };
 
-        let vstream = client
-            .v_stream(request)
-            .await
-            .map_err(|_| readyset_errors::ReadySetError::InvalidUpstreamDatabase)?
-            .into_inner();
+        let vstream = client.v_stream(request).await.map_err(|err| {
+            error!("Could not start VStream: {}", err);
+            readyset_errors::ReadySetError::InvalidUpstreamDatabase
+        })?;
+
+        // If we were given an initial position, we should use it as the current position
+        // since no VGTID events will be sent to us until the end of the first transaction
+        let current_position = initial_position.cloned();
 
         // Run the VStream API request in a separate task, getting events via a channel
         let (tx, rx) = mpsc::channel(1);
-        tokio::spawn(Self::run_v_stream(vstream, tx));
+        tokio::spawn(Self::run_v_stream(vstream.into_inner(), tx));
 
         let connector = VitessConnector {
             vstream_events: rx,
-            current_position: None,
+            current_position,
             schema_cache: SchemaCache::new(vitess_config.keyspace().as_ref()),
             enable_statement_logging,
         };
