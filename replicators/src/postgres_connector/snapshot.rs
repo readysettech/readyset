@@ -14,7 +14,7 @@ use nom_sql::{
 };
 use postgres_types::{accepts, FromSql, Kind, Type};
 use readyset_client::metrics::recorded;
-use readyset_client::recipe::changelist::{Change, ChangeList};
+use readyset_client::recipe::changelist::{Change, ChangeList, PostgresTableMetadata};
 use readyset_client::TableOperation;
 use readyset_data::{DfType, DfValue, Dialect as DataDialect, PgEnumMetadata};
 use readyset_errors::{internal, internal_err, unsupported, ReadySetError, ReadySetResult};
@@ -72,6 +72,7 @@ struct TableEntry {
 
 #[derive(Debug, Clone)]
 struct TableDescription {
+    oid: u32,
     name: Relation,
     columns: Vec<ColumnEntry>,
     constraints: Vec<ConstraintEntry>,
@@ -79,6 +80,7 @@ struct TableDescription {
 
 #[derive(Debug, Clone)]
 struct ColumnEntry {
+    attnum: i16,
     name: String,
     sql_type: String,
     not_null: bool,
@@ -130,14 +132,14 @@ impl TryFrom<pgsql::Row> for ColumnEntry {
     type Error = ReadySetError;
 
     fn try_from(row: pgsql::Row) -> Result<Self, Self::Error> {
-        let type_oid = row.try_get(4 /* pg_type.oid */)?;
+        let type_oid = row.try_get(5 /* pg_type.oid */)?;
 
         let typtype_to_kind = |typtype: i8| -> ReadySetResult<Kind> {
             match typtype as u8 as char {
                 'b' => Ok(Kind::Simple),
                 'c' => unsupported!("Composite types are not supported"),
                 'd' => unsupported!("Domain types are not supported"),
-                'e' => Ok(Kind::Enum(row.try_get(12 /* array_agg(e.enumlabel)... */)?)),
+                'e' => Ok(Kind::Enum(row.try_get(13 /* array_agg(e.enumlabel)... */)?)),
                 'p' => Ok(Kind::Pseudo),
                 'r' => unsupported!("Range types are not supported"),
                 'm' => unsupported!("Multirange types are not supported"),
@@ -148,29 +150,30 @@ impl TryFrom<pgsql::Row> for ColumnEntry {
         let pg_type = if let Some(t) = Type::from_oid(type_oid) {
             t
         } else {
-            let kind = if row.try_get(7 /* is_array */)? {
+            let kind = if row.try_get(8 /* is_array */)? {
                 Kind::Array(Type::new(
-                    row.try_get(8)?,
                     row.try_get(9)?,
-                    typtype_to_kind(row.try_get(10)?)?,
-                    row.try_get(11)?,
+                    row.try_get(10)?,
+                    typtype_to_kind(row.try_get(11)?)?,
+                    row.try_get(12)?,
                 ))
             } else {
-                typtype_to_kind(row.try_get(5)?)?
+                typtype_to_kind(row.try_get(6)?)?
             };
 
             Type::new(
                 row.try_get(3 /* pg_type.typname */)?,
                 type_oid,
                 kind,
-                row.try_get(6 /* pg_namespace.nspname */)?,
+                row.try_get(7 /* pg_namespace.nspname */)?,
             )
         };
 
         Ok(ColumnEntry {
-            name: row.try_get(0 /* pg_attribute.attname */)?,
-            not_null: row.try_get(1 /* pg_attribute.attnotnull */)?,
-            sql_type: row.try_get(3)?,
+            attnum: row.try_get(0 /* pg_attribute.attnum */)?,
+            name: row.try_get(1 /* pg_attribute.attname */)?,
+            not_null: row.try_get(2 /* pg_attribute.attnotnull */)?,
+            sql_type: row.try_get(4)?,
             pg_type,
         })
     }
@@ -283,6 +286,7 @@ impl TableEntry {
     ) -> Result<Vec<ColumnEntry>, ReadySetError> {
         let query = r#"
             SELECT
+                a.attnum,
                 a.attname,
                 a.attnotnull,
                 t.typname,
@@ -366,6 +370,7 @@ impl TableEntry {
             })?;
 
         Ok(TableDescription {
+            oid: self.oid,
             name: Relation {
                 schema: Some(self.schema.clone().into()),
                 name: self.name.clone().into(),
@@ -423,6 +428,14 @@ impl TableDescription {
 
     fn try_into_change(self) -> ReadySetResult<Change> {
         Ok(Change::CreateTable {
+            pg_meta: Some(PostgresTableMetadata {
+                oid: self.oid,
+                column_oids: self
+                    .columns
+                    .iter()
+                    .map(|c| (c.name.clone().into(), c.attnum))
+                    .collect(),
+            }),
             statement: CreateTableStatement {
                 if_not_exists: false,
                 table: self.name.clone(),
@@ -455,7 +468,6 @@ impl TableDescription {
                 }),
                 options: Ok(vec![]),
             },
-            pg_meta: None, // TODO
         })
     }
 
@@ -1108,30 +1120,35 @@ mod tests {
     #[test]
     fn table_description_with_reserved_keywords_to_string_parses() {
         let desc = TableDescription {
+            oid: 32541,
             name: Relation {
                 schema: Some("public".into()),
                 name: "ar_internal_metadata".into(),
             },
             columns: vec![
                 ColumnEntry {
+                    attnum: 0,
                     name: "key".into(),
                     sql_type: "varchar".into(),
                     not_null: true,
                     pg_type: Type::VARCHAR,
                 },
                 ColumnEntry {
+                    attnum: 1,
                     name: "value".into(),
                     sql_type: "varchar".into(),
                     not_null: false,
                     pg_type: Type::VARCHAR,
                 },
                 ColumnEntry {
+                    attnum: 2,
                     name: "created_at".into(),
                     sql_type: "timestamp(6) without time zone".into(),
                     not_null: true,
                     pg_type: Type::TIMESTAMP,
                 },
                 ColumnEntry {
+                    attnum: 3,
                     name: "updated_at".into(),
                     sql_type: "timestamp(6) without time zone".into(),
                     not_null: true,
