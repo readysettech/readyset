@@ -6,6 +6,7 @@ use nom_sql::{
     CreateTableBody, CreateTableStatement, CreateViewStatement, ItemPlaceholder, Literal, Relation,
     SelectSpecification, SelectStatement, SqlType,
 };
+use readyset_client::recipe::changelist::PostgresTableMetadata;
 use readyset_client::PlaceholderIdx;
 use readyset_errors::{internal_err, unsupported_err, ReadySetError, ReadySetResult};
 use readyset_sql_passes::SelectStatementSkeleton;
@@ -25,6 +26,7 @@ pub(crate) enum RecipeExpr {
     Table {
         name: Relation,
         body: CreateTableBody,
+        pg_meta: Option<PostgresTableMetadata>,
     },
     /// Expression that represents a `CREATE VIEW` statement.
     View {
@@ -137,9 +139,14 @@ impl RecipeExpr {
         use sha1::{Digest, Sha1};
         let mut hasher = Sha1::new();
         match self {
-            RecipeExpr::Table { name, body } => {
+            RecipeExpr::Table {
+                name,
+                body,
+                pg_meta,
+            } => {
                 hasher.update(hash(name).to_le_bytes());
                 hasher.update(hash(body).to_le_bytes());
+                hasher.update(hash(pg_meta).to_le_bytes());
             }
             RecipeExpr::View { name, definition } => {
                 hasher.update(hash(name).to_le_bytes());
@@ -664,6 +671,7 @@ impl TryFrom<CreateTableStatement> for RecipeExpr {
                     Sensitive(&unparsed)
                 )
             })?,
+            pg_meta: None,
         })
     }
 }

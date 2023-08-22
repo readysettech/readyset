@@ -5,7 +5,7 @@ use readyset_data::DfType;
 use tracing::trace;
 
 use super::keys::provenance_of;
-use super::sql::{Recipe, Schema};
+use super::sql::{BaseSchema, Recipe, Schema};
 
 type Path<'a> = &'a [(
     petgraph::graph::NodeIndex,
@@ -57,18 +57,20 @@ fn get_base_for_column(
 
         let source_node = &graph[*ni];
         if source_node.is_base() {
-            if let Some(Schema::Table(schema)) = recipe.schema_for(source_node.name()) {
+            if let Some(Schema::Table(BaseSchema { statement, .. })) =
+                recipe.schema_for(source_node.name())
+            {
                 let col_index = cols.first().unwrap().unwrap();
                 #[allow(clippy::unwrap_used)] // occurs after implied table rewrite
                 return Ok(Some(ColumnBase {
-                    column: schema.fields[col_index].column.name.clone(),
-                    table: schema.fields[col_index]
+                    column: statement.fields[col_index].column.name.clone(),
+                    table: statement.fields[col_index]
                         .column
                         .table
                         .as_ref()
                         .unwrap()
                         .clone(),
-                    constraints: schema.fields[col_index].constraints.clone(),
+                    constraints: statement.fields[col_index].constraints.clone(),
                 }));
             }
         }

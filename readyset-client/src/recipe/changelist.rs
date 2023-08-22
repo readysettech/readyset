@@ -32,6 +32,7 @@
 //    simplicity, it should only match semicolons (or semicolons and eof, at most).
 
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 
 use dataflow_expression::Dialect;
 use nom_locate::LocatedSpan;
@@ -43,6 +44,7 @@ use nom_sql::{
 use readyset_data::DfType;
 use readyset_errors::{internal, unsupported, ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
+use test_strategy::Arbitrary;
 use tracing::error;
 
 /// The specification for a list of changes that must be made
@@ -323,12 +325,21 @@ pub struct CreateCache {
 }
 
 /// Metadata about a PostgreSQL table
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Arbitrary)]
 pub struct PostgresTableMetadata {
     /// The OID of the table
     pub oid: u32,
     /// A map from column name to the attribute number of that column
     pub column_oids: HashMap<SqlIdentifier, i16>,
+}
+
+impl Hash for PostgresTableMetadata {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.oid.hash(state);
+        let mut column_oids = self.column_oids.iter().collect::<Vec<_>>();
+        column_oids.sort();
+        column_oids.hash(state);
+    }
 }
 
 /// Describes a singe change to be made to the MIR and dataflow graphs.
@@ -515,7 +526,11 @@ mod parse {
 
 #[cfg(test)]
 mod tests {
+    use readyset_util::hash_laws;
+
     use super::*;
+
+    hash_laws!(PostgresTableMetadata);
 
     #[test]
     fn it_handles_multiple_statements_per_line() {

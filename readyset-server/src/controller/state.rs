@@ -634,7 +634,7 @@ impl DfState {
             .schema_for(base)
             .map(|s| -> ReadySetResult<_> {
                 match s {
-                    Schema::Table(s) => Ok(s.clone()),
+                    Schema::Table(s) => Ok(s.statement.clone()),
                     _ => internal!(
                         "non-base schema {:?} returned for table {}",
                         s,
