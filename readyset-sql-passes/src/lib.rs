@@ -66,7 +66,7 @@ pub struct RewriteContext<'a> {
     /// Map from names of *tables* in the database, to the body of the `CREATE TABLE` statement
     /// that was used to create that table. Each key in this map should also exist in
     /// [`view_schemas`].
-    pub base_schemas: &'a HashMap<Relation, CreateTableBody>,
+    pub base_schemas: HashMap<&'a Relation, &'a CreateTableBody>,
 
     /// List of views that are known to exist but have not yet been compiled (so we can't know
     /// their fields yet)
@@ -171,7 +171,7 @@ impl Rewrite for SelectStatement {
             .normalize_topk_with_aggregate()?
             .detect_problematic_self_joins()?
             .remove_numeric_field_references()?
-            .order_limit_removal(context.base_schemas)
+            .order_limit_removal(&context.base_schemas)
     }
 }
 

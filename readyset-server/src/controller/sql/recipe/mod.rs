@@ -1,8 +1,8 @@
 use std::str;
 
 use nom_sql::{
-    CacheInner, CreateCacheStatement, CreateTableBody, CreateTableStatement, CreateViewStatement,
-    Relation, SqlIdentifier, SqlQuery,
+    CacheInner, CreateCacheStatement, CreateTableStatement, CreateViewStatement, Relation,
+    SqlIdentifier, SqlQuery,
 };
 use petgraph::graph::NodeIndex;
 use readyset_client::recipe::changelist::ChangeList;
@@ -14,6 +14,7 @@ use tracing::warn;
 use vec1::Vec1;
 
 use super::registry::{MatchedCache, RecipeExpr};
+use super::BaseSchema;
 use crate::controller::sql::SqlIncorporator;
 use crate::controller::Migration;
 
@@ -36,7 +37,7 @@ impl PartialEq for Recipe {
 
 #[derive(Debug)]
 pub(crate) enum Schema<'a> {
-    Table(&'a CreateTableBody),
+    Table(&'a BaseSchema),
     View(&'a [SqlIdentifier]),
 }
 
@@ -44,7 +45,7 @@ impl Recipe {
     /// Get the id associated with an alias
     pub(crate) fn expression_by_alias(&self, alias: &Relation) -> Option<SqlQuery> {
         let expr = self.inc.registry.get(alias).map(|e| match e {
-            RecipeExpr::Table { name, body } => SqlQuery::CreateTable(CreateTableStatement {
+            RecipeExpr::Table { name, body, .. } => SqlQuery::CreateTable(CreateTableStatement {
                 if_not_exists: false,
                 table: name.clone(),
                 body: Ok(body.clone()),

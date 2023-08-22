@@ -10,7 +10,7 @@ use nom_sql::{
     Relation, SelectSpecification, SelectStatement, SqlIdentifier, SqlType, TableExpr,
 };
 use petgraph::graph::NodeIndex;
-use readyset_client::recipe::changelist::{AlterTypeChange, Change};
+use readyset_client::recipe::changelist::{AlterTypeChange, Change, PostgresTableMetadata};
 use readyset_client::recipe::ChangeList;
 use readyset_data::{DfType, Dialect, PgEnumMetadata};
 use readyset_errors::{
@@ -72,6 +72,15 @@ struct UncompiledView {
     schema_search_path: Vec<SqlIdentifier>,
 }
 
+/// Schema for a SQL base node
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct BaseSchema {
+    /// The body of the original `CREATE TABLE` statement for the table
+    pub statement: CreateTableBody,
+    /// Metadata about the table from PostgreSQL, if any
+    pub pg_meta: Option<PostgresTableMetadata>,
+}
+
 /// Long-lived struct that holds information about the SQL queries (tables, views, and caches) that
 /// have been incorporated into the dataflow graph.
 ///
@@ -97,7 +106,7 @@ pub(crate) struct SqlIncorporator {
     /// (schema-qualified!) name of the view to the *post-rewrite* SelectStatement for the view.
     uncompiled_views: HashMap<Relation, UncompiledView>,
 
-    base_schemas: HashMap<Relation, CreateTableBody>,
+    base_schemas: HashMap<Relation, BaseSchema>,
     view_schemas: HashMap<Relation, Vec<SqlIdentifier>>,
 
     /// User-defined custom types, indexed by (schema-qualified) name.
@@ -175,7 +184,11 @@ impl SqlIncorporator {
     {
         stmt.rewrite(&mut RewriteContext {
             view_schemas: &self.view_schemas,
-            base_schemas: &self.base_schemas,
+            base_schemas: self
+                .base_schemas
+                .iter()
+                .map(|(k, BaseSchema { statement, .. })| (k, statement))
+                .collect(),
             uncompiled_views: &self.uncompiled_views.keys().collect::<Vec<_>>(),
             non_replicated_relations: &self.mir_converter.non_replicated_relations,
             custom_types: &self
@@ -211,7 +224,8 @@ impl SqlIncorporator {
         for change in changes {
             match change {
                 Change::CreateTable {
-                    statement: mut cts, ..
+                    statement: mut cts,
+                    pg_meta,
                 } => {
                     cts = self.rewrite(cts, &schema_search_path, dialect, None)?;
                     let body = match cts.body {
@@ -241,7 +255,12 @@ impl SqlIncorporator {
                                     table = %cts.table.display_unquoted(),
                                     "table exists and has changed. Dropping and recreating..."
                                 );
-                                self.drop_and_recreate_table(&cts.table.clone(), body, mig)?;
+                                self.drop_and_recreate_table(
+                                    &cts.table.clone(),
+                                    body,
+                                    pg_meta,
+                                    mig,
+                                )?;
                                 continue;
                             }
                             trace!(
@@ -256,10 +275,11 @@ impl SqlIncorporator {
                         }
                         _ => {
                             self.invalidate_queries_for_added_relation(&cts.table, mig)?;
-                            self.add_table(cts.table.clone(), body.clone(), mig)?;
+                            self.add_table(cts.table.clone(), body.clone(), pg_meta.clone(), mig)?;
                             self.registry.add_query(RecipeExpr::Table {
                                 name: cts.table,
                                 body,
+                                pg_meta,
                             })?;
                         }
                     }
@@ -339,8 +359,12 @@ impl SqlIncorporator {
                             .collect::<Vec<_>>()
                         {
                             match expr {
-                                RecipeExpr::Table { name, body } => {
-                                    self.drop_and_recreate_table(&name, body, mig)?;
+                                RecipeExpr::Table {
+                                    name,
+                                    body,
+                                    pg_meta,
+                                } => {
+                                    self.drop_and_recreate_table(&name, body, pg_meta, mig)?;
                                 }
                                 RecipeExpr::View { name, .. } | RecipeExpr::Cache { name, .. } => {
                                     self.remove_expression(&name, mig)?;
@@ -421,6 +445,7 @@ impl SqlIncorporator {
                             RecipeExpr::Table {
                                 name: table_name,
                                 body,
+                                pg_meta: _,
                             } => {
                                 for field in body.fields.iter() {
                                     if matches!(&field.sql_type, SqlType::Other(t) if t == &name) {
@@ -486,9 +511,10 @@ impl SqlIncorporator {
         &mut self,
         name: Relation,
         body: CreateTableBody,
+        pg_meta: Option<PostgresTableMetadata>,
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<()> {
-        let (name, dataflow_idx) = self.add_base_via_mir(name, body, mig)?;
+        let (name, dataflow_idx) = self.add_base_via_mir(name, body, pg_meta, mig)?;
         self.remove_non_replicated_relation(&name);
         self.leaf_addresses.insert(name, dataflow_idx);
         Ok(())
@@ -729,6 +755,7 @@ impl SqlIncorporator {
         let idx = self
             .get_base_schema(table)
             .ok_or_else(not_found_err)?
+            .statement
             .fields
             .iter()
             .position(|f| f.column == *column)
@@ -793,6 +820,7 @@ impl SqlIncorporator {
         &mut self,
         table: &Relation,
         body: CreateTableBody,
+        pg_meta: Option<PostgresTableMetadata>,
         mig: &mut Migration,
     ) -> ReadySetResult<()> {
         let removed_node_indices = self.remove_expression(table, mig)?;
@@ -806,15 +834,16 @@ impl SqlIncorporator {
                 schema: table.schema.clone().map(Into::into),
             });
         };
-        self.add_table(table.clone(), body.clone(), mig)?;
+        self.add_table(table.clone(), body.clone(), pg_meta.clone(), mig)?;
         self.registry.add_query(RecipeExpr::Table {
             name: table.clone(),
             body,
+            pg_meta,
         })?;
         Ok(())
     }
 
-    pub(super) fn get_base_schema<'a>(&'a self, table: &Relation) -> Option<&'a CreateTableBody> {
+    pub(super) fn get_base_schema<'a>(&'a self, table: &Relation) -> Option<&'a BaseSchema> {
         self.base_schemas.get(table)
     }
 
@@ -836,11 +865,14 @@ impl SqlIncorporator {
     fn add_base_via_mir(
         &mut self,
         name: Relation,
-        body: CreateTableBody,
+        statement: CreateTableBody,
+        pg_meta: Option<PostgresTableMetadata>,
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<(Relation, NodeIndex)> {
         // first, compute the MIR representation of the SQL query
-        let mir = self.mir_converter.named_base_to_mir(name.clone(), &body)?;
+        let mir = self
+            .mir_converter
+            .named_base_to_mir(name.clone(), &statement)?;
 
         trace!(base_node_mir = ?mir);
 
@@ -850,7 +882,8 @@ impl SqlIncorporator {
                 .ok_or_else(|| internal_err!("Base MIR nodes must have a Dataflow node assigned"))?
                 .address();
 
-        self.base_schemas.insert(name.clone(), body);
+        self.base_schemas
+            .insert(name.clone(), BaseSchema { statement, pg_meta });
 
         let fields = mir.fields;
         self.register_query(name.clone(), fields);

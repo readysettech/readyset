@@ -3804,7 +3804,8 @@ async fn finkelstein1982_queries() {
                     let stmt = inc
                         .rewrite(stmt, &[], Dialect::DEFAULT_MYSQL, None)
                         .unwrap();
-                    inc.add_table(stmt.table, stmt.body.unwrap(), mig).unwrap();
+                    inc.add_table(stmt.table, stmt.body.unwrap(), None, mig)
+                        .unwrap();
                 }
                 SqlQuery::Select(stmt) => {
                     inc.add_query(None, stmt, false, &[], mig).unwrap();

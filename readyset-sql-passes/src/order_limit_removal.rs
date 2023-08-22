@@ -14,13 +14,13 @@ pub trait OrderLimitRemoval: Sized {
     /// column have an associated table name.
     fn order_limit_removal(
         self,
-        base_schemas: &HashMap<Relation, CreateTableBody>,
+        base_schemas: &HashMap<&Relation, &CreateTableBody>,
     ) -> ReadySetResult<Self>;
 }
 
 fn is_unique_or_primary(
     col: &Column,
-    base_schemas: &HashMap<Relation, CreateTableBody>,
+    base_schemas: &HashMap<&Relation, &CreateTableBody>,
     table_exprs: &[TableExpr],
 ) -> ReadySetResult<bool> {
     // This assumes that we will find exactly one table matching col.table and exactly one col
@@ -90,7 +90,7 @@ fn is_unique_or_primary(
 
 fn compares_unique_key_against_literal(
     expr: &Expr,
-    base_schemas: &HashMap<Relation, CreateTableBody>,
+    base_schemas: &HashMap<&Relation, &CreateTableBody>,
     table_exprs: &[TableExpr],
 ) -> ReadySetResult<bool> {
     match expr {
@@ -121,7 +121,7 @@ fn compares_unique_key_against_literal(
 impl OrderLimitRemoval for SelectStatement {
     fn order_limit_removal(
         mut self,
-        base_schemas: &HashMap<Relation, CreateTableBody>,
+        base_schemas: &HashMap<&Relation, &CreateTableBody>,
     ) -> ReadySetResult<Self> {
         let has_limit = matches!(
             self.limit_clause,
@@ -144,7 +144,7 @@ impl OrderLimitRemoval for SelectStatement {
 impl OrderLimitRemoval for SqlQuery {
     fn order_limit_removal(
         self,
-        base_schemas: &HashMap<Relation, CreateTableBody>,
+        base_schemas: &HashMap<&Relation, &CreateTableBody>,
     ) -> ReadySetResult<Self> {
         match self {
             SqlQuery::Select(stmt) => Ok(SqlQuery::Select(stmt.order_limit_removal(base_schemas)?)),
@@ -219,8 +219,9 @@ mod tests {
 
     fn removes_limit_order(input: &str) {
         let input_query = parse_query(Dialect::MySQL, input).unwrap();
+        let base_schemas = generate_base_schemas();
         let revised_query = input_query
-            .order_limit_removal(&generate_base_schemas())
+            .order_limit_removal(&base_schemas.iter().map(|(k, v)| (k, v)).collect())
             .unwrap();
         match revised_query {
             SqlQuery::Select(stmt) => {
@@ -239,11 +240,12 @@ mod tests {
 
     fn does_not_change_limit_order(input: &str) {
         let input_query = parse_query(Dialect::MySQL, input).unwrap();
+        let base_schemas = generate_base_schemas();
         assert_eq!(
             input_query,
             input_query
                 .clone()
-                .order_limit_removal(&generate_base_schemas())
+                .order_limit_removal(&base_schemas.iter().map(|(k, v)| (k, v)).collect(),)
                 .unwrap()
         );
     }
@@ -336,7 +338,7 @@ mod tests {
             input_query,
             input_query
                 .clone()
-                .order_limit_removal(&base_schema)
+                .order_limit_removal(&base_schema.iter().map(|(k, v)| (k, v)).collect())
                 .unwrap()
         );
         // compound Unique
@@ -351,11 +353,13 @@ mod tests {
             input_query,
             input_query
                 .clone()
-                .order_limit_removal(&base_schema)
+                .order_limit_removal(&base_schema.iter().map(|(k, v)| (k, v)).collect())
                 .unwrap()
         );
         // compound unique but col is separately specified to be unique
-        let revised_query = input_query2.order_limit_removal(&base_schema).unwrap();
+        let revised_query = input_query2
+            .order_limit_removal(&base_schema.iter().map(|(k, v)| (k, v)).collect())
+            .unwrap();
         match revised_query {
             SqlQuery::Select(stmt) => {
                 assert!(stmt.order.is_none());
