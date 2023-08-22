@@ -83,7 +83,6 @@ pub enum BackendMessage {
     },
     PassThroughRowDescription(Vec<OwnedField>),
     PassThroughSimpleRow(SimpleQueryRow),
-    #[allow(unused)]
     PassThroughDataRow(Row),
     SSLResponse {
         byte: u8,
@@ -136,4 +135,23 @@ pub struct FieldDescription {
     pub data_type_size: i16,
     pub type_modifier: i32,
     pub transfer_format: TransferFormat,
+}
+
+#[derive(Debug)]
+pub enum PsqlSrvRow {
+    #[allow(unused)]
+    RawRow(Row),
+    ValueVec(Vec<PsqlValue>),
+}
+
+impl From<Vec<PsqlValue>> for PsqlSrvRow {
+    fn from(value: Vec<PsqlValue>) -> Self {
+        Self::ValueVec(value)
+    }
+}
+
+impl From<Row> for PsqlSrvRow {
+    fn from(value: Row) -> Self {
+        Self::RawRow(value)
+    }
 }

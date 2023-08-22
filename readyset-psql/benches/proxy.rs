@@ -24,7 +24,7 @@ use futures::stream::Peekable;
 use futures::{ready, Stream, StreamExt, TryStreamExt};
 use postgres_types::Type;
 use psql_srv::{
-    Credentials, CredentialsNeeded, PrepareResponse, PsqlBackend, PsqlValue, QueryResponse,
+    Credentials, CredentialsNeeded, PrepareResponse, PsqlBackend, PsqlSrvRow, QueryResponse,
 };
 use readyset_data::DfValue;
 use readyset_psql::ParamRef;
@@ -84,18 +84,25 @@ enum ResultStream {
 }
 
 impl Stream for ResultStream {
-    type Item = Result<Vec<PsqlValue>, psql_srv::Error>;
+    type Item = Result<PsqlSrvRow, psql_srv::Error>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match self.get_mut() {
-            ResultStream::Owned(iter) => Poll::Ready(
-                iter.next()
-                    .map(|r| (0..r.len()).map(|i| Ok(r.get(i))).collect()),
-            ),
+            ResultStream::Owned(iter) => Poll::Ready(iter.next().map(|r| {
+                (0..r.len())
+                    .map(|i| Ok(r.get(i)))
+                    .collect::<Result<_, _>>()
+                    .map(PsqlSrvRow::ValueVec)
+            })),
             ResultStream::Streaming(stream) => {
-                Poll::Ready(ready!(stream.as_mut().poll_next(cx)).map(|res| match res {
-                    Ok(r) => (0..r.len()).map(|i| Ok(r.get(i))).collect(),
-                    Err(e) => Err(e.into()),
+                Poll::Ready(ready!(stream.as_mut().poll_next(cx)).map(|res| {
+                    match res {
+                        Ok(r) => (0..r.len())
+                            .map(|i| Ok(r.get(i)))
+                            .collect::<Result<_, _>>()
+                            .map(PsqlSrvRow::ValueVec),
+                        Err(e) => Err(e.into()),
+                    }
                 }))
             }
         }

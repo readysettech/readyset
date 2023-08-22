@@ -8,8 +8,8 @@ use postgres::error::SqlState;
 use postgres::NoTls;
 use postgres_types::Type;
 use psql_srv::{
-    run_backend, Credentials, CredentialsNeeded, Error, PrepareResponse, PsqlBackend, PsqlValue,
-    QueryResponse,
+    run_backend, Credentials, CredentialsNeeded, Error, PrepareResponse, PsqlBackend, PsqlSrvRow,
+    PsqlValue, QueryResponse,
 };
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
@@ -33,7 +33,7 @@ struct ScramSha256Backend {
 
 #[async_trait]
 impl PsqlBackend for ScramSha256Backend {
-    type Resultset = stream::Iter<vec::IntoIter<Result<Vec<PsqlValue>, psql_srv::Error>>>;
+    type Resultset = stream::Iter<vec::IntoIter<Result<PsqlSrvRow, psql_srv::Error>>>;
 
     fn version(&self) -> String {
         "13.4 ReadySet".to_string()

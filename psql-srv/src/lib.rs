@@ -39,6 +39,7 @@ use tokio_native_tls::TlsAcceptor;
 
 pub use crate::bytes::BytesStr;
 pub use crate::error::Error;
+pub use crate::message::PsqlSrvRow;
 pub use crate::value::PsqlValue;
 
 pub enum CredentialsNeeded {
@@ -61,7 +62,7 @@ pub enum Credentials<'a> {
 pub trait PsqlBackend {
     /// An associated type representing a resultset returned by a SQL query, which can be iterated
     /// to produce `Self::Row`s.
-    type Resultset: Stream<Item = Result<Vec<PsqlValue>, Error>> + Unpin;
+    type Resultset: Stream<Item = Result<PsqlSrvRow, Error>> + Unpin;
 
     /// The postgresql server version number to send to the client on startup, along with ReadySet
     /// info
