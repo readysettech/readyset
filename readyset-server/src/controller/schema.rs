@@ -57,7 +57,7 @@ fn get_base_for_column(
 
         let source_node = &graph[*ni];
         if source_node.is_base() {
-            if let Some(Schema::Table(ref schema)) = recipe.schema_for(source_node.name()) {
+            if let Some(Schema::Table(schema)) = recipe.schema_for(source_node.name()) {
                 let col_index = cols.first().unwrap().unwrap();
                 #[allow(clippy::unwrap_used)] // occurs after implied table rewrite
                 return Ok(Some(ColumnBase {

@@ -1,9 +1,8 @@
 use std::str;
-use std::vec::Vec;
 
 use nom_sql::{
     CacheInner, CreateCacheStatement, CreateTableBody, CreateTableStatement, CreateViewStatement,
-    Relation, SqlQuery,
+    Relation, SqlIdentifier, SqlQuery,
 };
 use petgraph::graph::NodeIndex;
 use readyset_client::recipe::changelist::ChangeList;
@@ -36,9 +35,9 @@ impl PartialEq for Recipe {
 }
 
 #[derive(Debug)]
-pub(crate) enum Schema {
-    Table(CreateTableBody),
-    View(Vec<String>),
+pub(crate) enum Schema<'a> {
+    Table(&'a CreateTableBody),
+    View(&'a [SqlIdentifier]),
 }
 
 impl Recipe {
@@ -142,7 +141,7 @@ impl Recipe {
     }
 
     /// Get schema for a base table or view in the recipe.
-    pub(crate) fn schema_for(&self, name: &Relation) -> Option<Schema> {
+    pub(crate) fn schema_for<'a>(&'a self, name: &Relation) -> Option<Schema<'a>> {
         match self.inc.get_base_schema(name) {
             None => {
                 let s = match self.resolve_alias(name) {
