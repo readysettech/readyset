@@ -5,9 +5,8 @@ use tokio_util::codec::Framed;
 
 use crate::codec::{Codec, DecodeError, EncodeError};
 use crate::error::Error;
-use crate::message::FrontendMessage;
+use crate::message::{FrontendMessage, PsqlSrvRow};
 use crate::response::Response;
-use crate::value::PsqlValue;
 
 const CHANNEL_INITIAL_CAPACITY: usize = 4096;
 
@@ -66,7 +65,7 @@ where
     /// Write a `Response` (actually the `BackendMessage`s generated a `Response`) to the channel.
     pub async fn send<S>(&mut self, item: Response<S>) -> Result<(), EncodeError>
     where
-        S: Stream<Item = Result<Vec<PsqlValue>, Error>> + Unpin,
+        S: Stream<Item = Result<PsqlSrvRow, Error>> + Unpin,
     {
         item.write(&mut self.0).await
     }

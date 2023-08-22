@@ -5,8 +5,7 @@ use smallvec::SmallVec;
 
 use crate::codec::EncodeError;
 use crate::error::Error;
-use crate::message::{BackendMessage, CommandCompleteTag, TransferFormat};
-use crate::value::PsqlValue;
+use crate::message::{BackendMessage, CommandCompleteTag, PsqlSrvRow, TransferFormat};
 
 /// An encapsulation of a complete response produced by a Postgresql backend in response to a
 /// request. The response will be sent to the frontend as a sequence of zero or more
@@ -31,7 +30,7 @@ pub enum Response<S> {
 
 impl<S> Response<S>
 where
-    S: Stream<Item = Result<Vec<PsqlValue>, Error>> + Unpin,
+    S: Stream<Item = Result<PsqlSrvRow, Error>> + Unpin,
 {
     pub async fn write<K>(self, sink: &mut K) -> Result<(), EncodeError>
     where
@@ -63,12 +62,16 @@ where
                 let mut n_rows = 0;
                 while let Some(r) = resultset.next().await {
                     match r {
-                        Ok(row) => {
+                        Ok(PsqlSrvRow::ValueVec(row)) => {
                             sink.feed(BackendMessage::DataRow {
                                 values: row,
                                 explicit_transfer_formats: result_transfer_formats.clone(),
                             })
                             .await?;
+                            n_rows += 1;
+                        }
+                        Ok(PsqlSrvRow::RawRow(row)) => {
+                            sink.feed(BackendMessage::PassThroughDataRow(row)).await?;
                             n_rows += 1;
                         }
                         Err(e) => {
@@ -102,7 +105,7 @@ mod tests {
     use super::*;
     use crate::value::PsqlValue;
 
-    type TestResponse = Response<stream::Iter<vec::IntoIter<Result<Vec<PsqlValue>, Error>>>>;
+    type TestResponse = Response<stream::Iter<vec::IntoIter<Result<PsqlSrvRow, Error>>>>;
 
     #[test]
     fn write_empty() {
@@ -189,8 +192,8 @@ mod tests {
                 field_descriptions: vec![],
             }),
             resultset: stream::iter(vec![
-                Ok(vec![PsqlValue::Int(5), PsqlValue::Double(0.123)]),
-                Ok(vec![PsqlValue::Int(99), PsqlValue::Double(0.456)]),
+                Ok(vec![PsqlValue::Int(5), PsqlValue::Double(0.123)].into()),
+                Ok(vec![PsqlValue::Int(99), PsqlValue::Double(0.456)].into()),
             ]),
             result_transfer_formats: Some(Arc::new(vec![
                 TransferFormat::Text,

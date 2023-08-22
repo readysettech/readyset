@@ -934,7 +934,7 @@ mod tests {
 
     use super::*;
     use crate::bytes::BytesStr;
-    use crate::message::ErrorSeverity;
+    use crate::message::{ErrorSeverity, PsqlSrvRow};
     use crate::value::PsqlValue;
     use crate::{Credentials, CredentialsNeeded, PrepareResponse, QueryResponse};
 
@@ -980,7 +980,7 @@ mod tests {
 
     #[async_trait]
     impl PsqlBackend for Backend {
-        type Resultset = stream::Iter<vec::IntoIter<Result<Vec<PsqlValue>, Error>>>;
+        type Resultset = stream::Iter<vec::IntoIter<Result<PsqlSrvRow, Error>>>;
 
         fn version(&self) -> String {
             "14.5 ReadySet".to_string()
@@ -1019,8 +1019,8 @@ mod tests {
                         },
                     ],
                     resultset: stream::iter(vec![
-                        Ok(vec![PsqlValue::Int(88), PsqlValue::Double(0.123)]),
-                        Ok(vec![PsqlValue::Int(22), PsqlValue::Double(0.456)]),
+                        Ok(vec![PsqlValue::Int(88), PsqlValue::Double(0.123)].into()),
+                        Ok(vec![PsqlValue::Int(22), PsqlValue::Double(0.456)].into()),
                     ]),
                 })
             } else {
@@ -1084,8 +1084,8 @@ mod tests {
                         },
                     ],
                     resultset: stream::iter(vec![
-                        Ok(vec![PsqlValue::Int(88), PsqlValue::Double(0.123)]),
-                        Ok(vec![PsqlValue::Int(22), PsqlValue::Double(0.456)]),
+                        Ok(vec![PsqlValue::Int(88), PsqlValue::Double(0.123)].into()),
+                        Ok(vec![PsqlValue::Int(22), PsqlValue::Double(0.456)].into()),
                     ]),
                 })
             } else {
@@ -1412,13 +1412,14 @@ mod tests {
                     trailer,
                     Some(BackendMessage::ReadyForQuery { .. })
                 ));
-                assert_eq!(
-                    resultset.try_collect::<Vec<_>>().await.unwrap(),
-                    vec![
-                        vec![PsqlValue::Int(88), PsqlValue::Double(0.123)],
-                        vec![PsqlValue::Int(22), PsqlValue::Double(0.456)]
-                    ]
-                );
+                let results = resultset.try_collect::<Vec<_>>().await.unwrap();
+                match &results[..] {
+                    [PsqlSrvRow::ValueVec(first), PsqlSrvRow::ValueVec(second)] => {
+                        assert_eq!(*first, vec![PsqlValue::Int(88), PsqlValue::Double(0.123)]);
+                        assert_eq!(*second, vec![PsqlValue::Int(22), PsqlValue::Double(0.456)]);
+                    }
+                    _ => panic!(),
+                }
             }
             _ => panic!(),
         }
@@ -2101,13 +2102,14 @@ mod tests {
                 trailer,
             } => {
                 assert!(matches!(header, None));
-                assert_eq!(
-                    resultset.try_collect::<Vec<_>>().await.unwrap(),
-                    vec![
-                        vec![PsqlValue::Int(88), PsqlValue::Double(0.123)],
-                        vec![PsqlValue::Int(22), PsqlValue::Double(0.456)]
-                    ]
-                );
+                let results = resultset.try_collect::<Vec<_>>().await.unwrap();
+                match &results[..] {
+                    [PsqlSrvRow::ValueVec(first), PsqlSrvRow::ValueVec(second)] => {
+                        assert_eq!(*first, vec![PsqlValue::Int(88), PsqlValue::Double(0.123)]);
+                        assert_eq!(*second, vec![PsqlValue::Int(22), PsqlValue::Double(0.456)]);
+                    }
+                    _ => panic!(),
+                }
                 assert_eq!(
                     result_transfer_formats,
                     Some(Arc::new(vec![TransferFormat::Text, TransferFormat::Binary]))
