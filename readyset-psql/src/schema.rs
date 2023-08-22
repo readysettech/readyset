@@ -15,15 +15,7 @@ pub struct SelectSchema<'a>(pub cl::SelectSchema<'a>);
 impl<'a> TryFrom<SelectSchema<'a>> for Vec<ps::Column> {
     type Error = Error;
     fn try_from(s: SelectSchema) -> Result<Self, Self::Error> {
-        s.0.schema
-            .iter()
-            .map(|c| {
-                Ok(ps::Column {
-                    name: c.column.name.clone(),
-                    col_type: type_to_pgsql(&c.column_type)?,
-                })
-            })
-            .collect()
+        NoriaSchema(&s.0.schema).try_into()
     }
 }
 
@@ -50,6 +42,8 @@ impl<'a> TryFrom<NoriaSchema<'a>> for Vec<ps::Column> {
                 Ok(ps::Column {
                     name: c.column.name.clone(),
                     col_type: type_to_pgsql(&c.column_type)?,
+                    table_oid: c.base.as_ref().and_then(|b| b.table_oid),
+                    attnum: c.base.as_ref().and_then(|b| b.attnum),
                 })
             })
             .collect()

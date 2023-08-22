@@ -123,6 +123,12 @@ pub struct Column {
     /// The name of the column
     pub name: SqlIdentifier,
 
+    /// The OID of the column's table, if known
+    pub table_oid: Option<u32>,
+
+    /// The attribute number of the column, if known
+    pub attnum: Option<i16>,
+
     /// The type of the column
     pub col_type: Type,
 }
