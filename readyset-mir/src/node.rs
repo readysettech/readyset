@@ -133,6 +133,7 @@ mod tests {
             graph.add_node(MirNode::new(
                 "base".into(),
                 MirNodeInner::Base {
+                    pg_meta: None,
                     column_specs: vec![
                         ColumnSpecification {
                             column: "base.a".into(),
@@ -157,6 +158,7 @@ mod tests {
             graph.add_node(MirNode::new(
                 "base2".into(),
                 MirNodeInner::Base {
+                    pg_meta: None,
                     column_specs: vec![
                         ColumnSpecification {
                             column: "base2.a".into(),
@@ -570,6 +572,7 @@ mod tests {
                 name: "a".into(),
                 owners: HashSet::new(),
                 inner: MirNodeInner::Base {
+                    pg_meta: None,
                     column_specs: vec![cspec("c1"), cspec("c2"), cspec("c3")],
                     primary_key: Some([Column::from("c1")].into()),
                     unique_keys: Default::default(),
@@ -614,6 +617,7 @@ mod tests {
                 name: "a".into(),
                 owners: HashSet::new(),
                 inner: MirNodeInner::Base {
+                    pg_meta: None,
                     column_specs: vec![cspec("c1"), cspec("c2"), cspec("c3")],
                     primary_key: Some([Column::from("c1")].into()),
                     unique_keys: Default::default(),
@@ -652,6 +656,7 @@ mod tests {
                 name: "a".into(),
                 owners: HashSet::new(),
                 inner: MirNodeInner::Base {
+                    pg_meta: None,
                     column_specs: vec![cspec("c1")],
                     primary_key: Some([Column::from("c1")].into()),
                     unique_keys: Default::default(),

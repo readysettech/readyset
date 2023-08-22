@@ -133,6 +133,7 @@ mod tests {
         let t = graph.add_node(MirNode::new(
             "t".into(),
             MirNodeInner::Base {
+                pg_meta: None,
                 column_specs: vec![ColumnSpecification {
                     column: "t.x".into(),
                     sql_type: SqlType::Int(None),

@@ -23,6 +23,7 @@ use nom_sql::{
 };
 use petgraph::visit::Reversed;
 use petgraph::Direction;
+use readyset_client::recipe::changelist::PostgresTableMetadata;
 use readyset_client::ViewPlaceholder;
 use readyset_errors::{
     internal, internal_err, invalid_query, invalid_query_err, invariant, invariant_eq, unsupported,
@@ -353,8 +354,9 @@ impl SqlToMirConverter {
         &mut self,
         name: Relation,
         body: &CreateTableBody,
+        pg_meta: Option<&PostgresTableMetadata>,
     ) -> ReadySetResult<MirBase<'_>> {
-        let n = self.make_base_node(&name, &body.fields, body.keys.as_ref())?;
+        let n = self.make_base_node(&name, &body.fields, body.keys.as_ref(), pg_meta)?;
         Ok(MirBase {
             name,
             mir_node: n,
@@ -528,11 +530,16 @@ impl SqlToMirConverter {
         table_name: &Relation,
         cols: &[ColumnSpecification],
         keys: Option<&Vec<TableKey>>,
+        pg_meta: Option<&PostgresTableMetadata>,
     ) -> ReadySetResult<NodeIndex> {
         if let Some(ni) = self.get_relation(table_name) {
             match &self.mir_graph[ni].inner {
-                MirNodeInner::Base { column_specs, .. } => {
-                    if column_specs.as_slice() == cols {
+                MirNodeInner::Base {
+                    column_specs,
+                    pg_meta: our_meta,
+                    ..
+                } => {
+                    if column_specs.as_slice() == cols && our_meta.as_ref() == pg_meta {
                         debug!(
                             table_name = %table_name.display_unquoted(),
                             "base table already exists with identical schema; reusing it.",
@@ -597,6 +604,7 @@ impl SqlToMirConverter {
         let node = MirNode::new(
             table_name.clone(),
             MirNodeInner::Base {
+                pg_meta: pg_meta.cloned(),
                 column_specs: cols.to_vec(),
                 primary_key,
                 unique_keys,

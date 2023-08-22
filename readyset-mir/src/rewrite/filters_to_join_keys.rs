@@ -197,6 +197,7 @@ mod tests {
         let t1 = mir_graph.add_node(MirNode::new(
             "t1".into(),
             MirNodeInner::Base {
+                pg_meta: None,
                 column_specs: vec![
                     ColumnSpecification {
                         column: nom_sql::Column::from("t1.a"),
@@ -233,6 +234,7 @@ mod tests {
         let t2 = mir_graph.add_node(MirNode::new(
             "t2".into(),
             MirNodeInner::Base {
+                pg_meta: None,
                 column_specs: vec![
                     ColumnSpecification {
                         column: nom_sql::Column::from("t2.a"),

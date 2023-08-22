@@ -112,6 +112,7 @@ mod tests {
         let base = mir_graph.add_node(MirNode::new(
             "base".into(),
             MirNodeInner::Base {
+                pg_meta: None,
                 column_specs: vec![ColumnSpecification {
                     column: nom_sql::Column::from("a"),
                     sql_type: SqlType::Int(None),
@@ -178,6 +179,7 @@ mod tests {
         let base = mir_graph.add_node(MirNode::new(
             "base".into(),
             MirNodeInner::Base {
+                pg_meta: None,
                 column_specs: vec![ColumnSpecification {
                     column: nom_sql::Column::from("a"),
                     sql_type: SqlType::Int(None),
@@ -258,6 +260,7 @@ mod tests {
         let base = mir_graph.add_node(MirNode::new(
             "base".into(),
             MirNodeInner::Base {
+                pg_meta: None,
                 column_specs: vec![ColumnSpecification {
                     column: nom_sql::Column::from("a"),
                     sql_type: SqlType::Int(None),

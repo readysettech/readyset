@@ -45,7 +45,7 @@ impl Recipe {
     /// Get the id associated with an alias
     pub(crate) fn expression_by_alias(&self, alias: &Relation) -> Option<SqlQuery> {
         let expr = self.inc.registry.get(alias).map(|e| match e {
-            RecipeExpr::Table { name, body } => SqlQuery::CreateTable(CreateTableStatement {
+            RecipeExpr::Table { name, body, .. } => SqlQuery::CreateTable(CreateTableStatement {
                 if_not_exists: false,
                 table: name.clone(),
                 body: Ok(body.clone()),

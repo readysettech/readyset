@@ -10,7 +10,7 @@ use nom_sql::{
     Relation, SelectSpecification, SelectStatement, SqlIdentifier, SqlType, TableExpr,
 };
 use petgraph::graph::NodeIndex;
-use readyset_client::recipe::changelist::{AlterTypeChange, Change};
+use readyset_client::recipe::changelist::{AlterTypeChange, Change, PostgresTableMetadata};
 use readyset_client::recipe::ChangeList;
 use readyset_data::{DfType, Dialect, PgEnumMetadata};
 use readyset_errors::{
@@ -211,7 +211,8 @@ impl SqlIncorporator {
         for change in changes {
             match change {
                 Change::CreateTable {
-                    statement: mut cts, ..
+                    statement: mut cts,
+                    pg_meta,
                 } => {
                     cts = self.rewrite(cts, &schema_search_path, dialect, None)?;
                     let body = match cts.body {
@@ -241,7 +242,12 @@ impl SqlIncorporator {
                                     table = %cts.table.display_unquoted(),
                                     "table exists and has changed. Dropping and recreating..."
                                 );
-                                self.drop_and_recreate_table(&cts.table.clone(), body, mig)?;
+                                self.drop_and_recreate_table(
+                                    &cts.table.clone(),
+                                    body,
+                                    pg_meta,
+                                    mig,
+                                )?;
                                 continue;
                             }
                             trace!(
@@ -256,10 +262,11 @@ impl SqlIncorporator {
                         }
                         _ => {
                             self.invalidate_queries_for_added_relation(&cts.table, mig)?;
-                            self.add_table(cts.table.clone(), body.clone(), mig)?;
+                            self.add_table(cts.table.clone(), body.clone(), pg_meta.as_ref(), mig)?;
                             self.registry.add_query(RecipeExpr::Table {
                                 name: cts.table,
                                 body,
+                                pg_meta,
                             })?;
                         }
                     }
@@ -339,8 +346,12 @@ impl SqlIncorporator {
                             .collect::<Vec<_>>()
                         {
                             match expr {
-                                RecipeExpr::Table { name, body } => {
-                                    self.drop_and_recreate_table(&name, body, mig)?;
+                                RecipeExpr::Table {
+                                    name,
+                                    body,
+                                    pg_meta,
+                                } => {
+                                    self.drop_and_recreate_table(&name, body, pg_meta, mig)?;
                                 }
                                 RecipeExpr::View { name, .. } | RecipeExpr::Cache { name, .. } => {
                                     self.remove_expression(&name, mig)?;
@@ -421,6 +432,7 @@ impl SqlIncorporator {
                             RecipeExpr::Table {
                                 name: table_name,
                                 body,
+                                pg_meta: _,
                             } => {
                                 for field in body.fields.iter() {
                                     if matches!(&field.sql_type, SqlType::Other(t) if t == &name) {
@@ -486,9 +498,10 @@ impl SqlIncorporator {
         &mut self,
         name: Relation,
         body: CreateTableBody,
+        pg_meta: Option<&PostgresTableMetadata>,
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<()> {
-        let (name, dataflow_idx) = self.add_base_via_mir(name, body, mig)?;
+        let (name, dataflow_idx) = self.add_base_via_mir(name, body, pg_meta, mig)?;
         self.remove_non_replicated_relation(&name);
         self.leaf_addresses.insert(name, dataflow_idx);
         Ok(())
@@ -793,6 +806,7 @@ impl SqlIncorporator {
         &mut self,
         table: &Relation,
         body: CreateTableBody,
+        pg_meta: Option<PostgresTableMetadata>,
         mig: &mut Migration,
     ) -> ReadySetResult<()> {
         let removed_node_indices = self.remove_expression(table, mig)?;
@@ -806,10 +820,11 @@ impl SqlIncorporator {
                 schema: table.schema.clone().map(Into::into),
             });
         };
-        self.add_table(table.clone(), body.clone(), mig)?;
+        self.add_table(table.clone(), body.clone(), pg_meta.as_ref(), mig)?;
         self.registry.add_query(RecipeExpr::Table {
             name: table.clone(),
             body,
+            pg_meta,
         })?;
         Ok(())
     }
@@ -839,10 +854,13 @@ impl SqlIncorporator {
         &mut self,
         name: Relation,
         body: CreateTableBody,
+        pg_meta: Option<&PostgresTableMetadata>,
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<(Relation, NodeIndex)> {
         // first, compute the MIR representation of the SQL query
-        let mir = self.mir_converter.named_base_to_mir(name.clone(), &body)?;
+        let mir = self
+            .mir_converter
+            .named_base_to_mir(name.clone(), &body, pg_meta)?;
 
         trace!(base_node_mir = ?mir);
 

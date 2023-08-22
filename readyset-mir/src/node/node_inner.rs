@@ -8,6 +8,7 @@ use dataflow::PostLookupAggregates;
 use derive_more::From;
 use itertools::Itertools;
 use nom_sql::{BinaryOperator, ColumnSpecification, Expr, OrderType, Relation, SqlIdentifier};
+use readyset_client::recipe::changelist::PostgresTableMetadata;
 use readyset_client::{PlaceholderIdx, ViewPlaceholder};
 use readyset_errors::{internal, ReadySetResult};
 use serde::{Deserialize, Serialize};
@@ -91,6 +92,7 @@ pub enum MirNodeInner {
     ///
     /// [`Aggregator`]: dataflow::node::special::Base
     Base {
+        pg_meta: Option<PostgresTableMetadata>,
         column_specs: Vec<ColumnSpecification>,
         primary_key: Option<Box<[Column]>>,
         unique_keys: Box<[Box<[Column]>]>,
