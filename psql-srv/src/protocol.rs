@@ -571,7 +571,9 @@ impl Protocol {
                         .portals
                         .get(portal_name.borrow() as &str)
                         .ok_or_else(|| Error::MissingPreparedStatement(portal_name.to_string()))?;
-                    let response = backend.on_execute(*prepared_statement_id, params).await?;
+                    let response = backend
+                        .on_execute(*prepared_statement_id, params, result_transfer_formats)
+                        .await?;
                     let res = if let Select { resultset, .. } = response {
                         Ok(Response::Select {
                             header: None,
@@ -958,6 +960,7 @@ mod tests {
         last_close: Option<u32>,
         last_execute_id: Option<u32>,
         last_execute_params: Option<Vec<PsqlValue>>,
+        last_transfer_formats: Option<Vec<TransferFormat>>,
         needed_credentials: Option<Credentials<'static>>,
     }
 
@@ -973,6 +976,7 @@ mod tests {
                 last_close: None,
                 last_execute_id: None,
                 last_execute_params: None,
+                last_transfer_formats: None,
                 needed_credentials: None,
             }
         }
@@ -1062,9 +1066,11 @@ mod tests {
             &mut self,
             statement_id: u32,
             params: &[PsqlValue],
+            result_transfer_formats: &[TransferFormat],
         ) -> Result<QueryResponse<Self::Resultset>, Error> {
             self.last_execute_id = Some(statement_id);
             self.last_execute_params = Some(params.to_vec());
+            self.last_transfer_formats = Some(result_transfer_formats.to_vec());
             if self.is_query_err {
                 Err(Error::InternalError("error requested".to_string()))
             } else if self.is_query_read {
@@ -2123,6 +2129,10 @@ mod tests {
             backend.last_execute_params.unwrap(),
             vec![PsqlValue::Double(0.8887), PsqlValue::Int(45678)]
         );
+        assert_eq!(
+            backend.last_transfer_formats.unwrap(),
+            vec![TransferFormat::Text, TransferFormat::Binary]
+        );
     }
 
     #[test]
@@ -2214,6 +2224,10 @@ mod tests {
         assert_eq!(
             backend.last_execute_params.unwrap(),
             vec![PsqlValue::Double(0.8887), PsqlValue::Int(45678)]
+        );
+        assert_eq!(
+            backend.last_transfer_formats.unwrap(),
+            vec![TransferFormat::Text, TransferFormat::Binary]
         );
     }
 

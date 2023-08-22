@@ -39,7 +39,7 @@ use tokio_native_tls::TlsAcceptor;
 
 pub use crate::bytes::BytesStr;
 pub use crate::error::Error;
-pub use crate::message::PsqlSrvRow;
+pub use crate::message::{PsqlSrvRow, TransferFormat};
 pub use crate::value::PsqlValue;
 
 pub enum CredentialsNeeded {
@@ -104,12 +104,15 @@ pub trait PsqlBackend {
     ///
     /// * `statement_id` - The identifier of the previously created prepared statement.
     /// * `params` - The values to substitute for the prepared statement's parameter placeholders.
+    /// * `result_transfer_formats` - The Postgres protocol formats requested for result columns in
+    ///   the Bind message that preceded this Execute.
     /// * returns - A `QueryResponse` containing either the data retrieved (for a read query) or a
     ///   confirmation (for a write query), or else an `Error` if a failure occurs.
     async fn on_execute(
         &mut self,
         statement_id: u32,
         params: &[PsqlValue],
+        result_transfer_formats: &[TransferFormat],
     ) -> Result<QueryResponse<Self::Resultset>, Error>;
 
     /// Closes (deallocates) a prepared statement.

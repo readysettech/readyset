@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use clap::ValueEnum;
 use eui48::MacAddressFormat;
 use postgres_types::Type;
-use ps::PsqlValue;
+use ps::{PsqlValue, TransferFormat};
 use psql_srv as ps;
 use readyset_adapter::backend as cl;
 use readyset_data::DfValue;
@@ -141,6 +141,7 @@ impl ps::PsqlBackend for Backend {
         &mut self,
         statement_id: u32,
         params: &[PsqlValue],
+        _result_transfer_formats: &[TransferFormat],
     ) -> Result<ps::QueryResponse<Resultset>, ps::Error> {
         let params = params
             .iter()

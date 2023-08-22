@@ -9,7 +9,7 @@ use postgres::NoTls;
 use postgres_types::Type;
 use psql_srv::{
     run_backend, Credentials, CredentialsNeeded, Error, PrepareResponse, PsqlBackend, PsqlSrvRow,
-    PsqlValue, QueryResponse,
+    PsqlValue, QueryResponse, TransferFormat,
 };
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
@@ -67,6 +67,7 @@ impl PsqlBackend for ScramSha256Backend {
         &mut self,
         _statement_id: u32,
         _params: &[PsqlValue],
+        _result_transfer_formats: &[TransferFormat],
     ) -> Result<QueryResponse<Self::Resultset>, Error> {
         unreachable!()
     }

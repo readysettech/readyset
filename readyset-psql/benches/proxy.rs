@@ -25,6 +25,7 @@ use futures::{ready, Stream, StreamExt, TryStreamExt};
 use postgres_types::Type;
 use psql_srv::{
     Credentials, CredentialsNeeded, PrepareResponse, PsqlBackend, PsqlSrvRow, QueryResponse,
+    TransferFormat,
 };
 use readyset_data::DfValue;
 use readyset_psql::ParamRef;
@@ -205,6 +206,7 @@ impl PsqlBackend for Backend {
         &mut self,
         statement_id: u32,
         params: &[psql_srv::PsqlValue],
+        _result_transfer_formats: &[TransferFormat],
     ) -> Result<QueryResponse<Self::Resultset>, psql_srv::Error> {
         let stmt = self
             .statements

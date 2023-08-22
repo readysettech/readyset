@@ -5,7 +5,9 @@ use async_trait::async_trait;
 use database_utils::{DatabaseURL, QueryableConnection};
 use futures::stream;
 use postgres_types::Type;
-use psql_srv::{run_backend, Credentials, CredentialsNeeded, Error, PsqlBackend, PsqlSrvRow};
+use psql_srv::{
+    run_backend, Credentials, CredentialsNeeded, Error, PsqlBackend, PsqlSrvRow, TransferFormat,
+};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio_native_tls::{native_tls, TlsAcceptor};
@@ -58,6 +60,7 @@ impl PsqlBackend for TestBackend {
         &mut self,
         _statement_id: u32,
         _params: &[psql_srv::PsqlValue],
+        _result_transfer_formats: &[TransferFormat],
     ) -> Result<psql_srv::QueryResponse<Self::Resultset>, psql_srv::Error> {
         panic!() // never called
     }
