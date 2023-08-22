@@ -68,9 +68,12 @@ BEGIN
         json_build_object(
             'schema', object.schema_name,
             'data', json_build_object('CreateTable', json_build_object(
+                -- OID->json makes a string by default, so cast to bigint
+                'oid', cls.oid::bigint,
                 'name', cls.relname,
                 'columns', (
                     SELECT json_agg(json_build_object(
+                        'attnum', attr.attnum,
                         'name', attr.attname,
                         'column_type', pg_catalog.format_type(
                             attr.atttypid,

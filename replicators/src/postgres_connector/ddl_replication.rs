@@ -44,7 +44,7 @@ use nom_sql::{
     SqlType, TableKey,
 };
 use pgsql::tls::MakeTlsConnect;
-use readyset_client::recipe::changelist::{AlterTypeChange, Change};
+use readyset_client::recipe::changelist::{AlterTypeChange, Change, PostgresTableMetadata};
 use readyset_data::{DfType, PgEnumMetadata};
 use readyset_errors::ReadySetResult;
 use serde::{Deserialize, Deserializer};
@@ -85,6 +85,7 @@ pub(crate) enum DdlEventOperation {
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 pub(crate) struct DdlCreateTableColumn {
+    attnum: i16,
     name: String,
     #[serde(deserialize_with = "parse_sql_type")]
     column_type: Result<SqlType, String>,
@@ -141,6 +142,7 @@ make_parse_deserialize_with!(parse_create_view_statement -> CreateViewStatement,
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 pub(crate) enum DdlEventData {
     CreateTable {
+        oid: u32,
         name: String,
         columns: Vec<DdlCreateTableColumn>,
         constraints: Vec<DdlCreateTableConstraint>,
@@ -193,6 +195,7 @@ impl DdlEvent {
     pub(crate) fn into_change(self) -> Change {
         match self.data {
             DdlEventData::CreateTable {
+                oid,
                 name,
                 columns,
                 constraints,
@@ -201,6 +204,11 @@ impl DdlEvent {
                     schema: Some(self.schema.into()),
                     name: name.into(),
                 };
+
+                let column_oids = columns
+                    .iter()
+                    .map(|c| (c.name.clone().into(), c.attnum))
+                    .collect();
 
                 let create_table_body: Result<_, String> = columns
                     .into_iter()
@@ -244,7 +252,7 @@ impl DdlEvent {
                             body: Ok(body),
                             options: Ok(vec![]),
                         },
-                        pg_meta: None, // TODO
+                        pg_meta: Some(PostgresTableMetadata { oid, column_oids }),
                     },
                     Err(_) => Change::AddNonReplicatedRelation(table),
                 }
@@ -501,20 +509,31 @@ mod tests {
 
         match ddl.data {
             DdlEventData::CreateTable {
+                oid,
                 name,
                 columns,
                 constraints,
             } => {
+                assert_eq!(
+                    oid,
+                    client
+                        .query_one("select 't1'::regclass::oid", &[])
+                        .await
+                        .unwrap()
+                        .get::<_, u32>(0)
+                );
                 assert_eq!(name, "t1");
                 assert_eq!(
                     columns,
                     vec![
                         DdlCreateTableColumn {
+                            attnum: 1,
                             name: "id".into(),
                             column_type: Ok(SqlType::Int(None)),
                             not_null: true
                         },
                         DdlCreateTableColumn {
+                            attnum: 2,
                             name: "value".into(),
                             column_type: Ok(SqlType::Text),
                             not_null: false
