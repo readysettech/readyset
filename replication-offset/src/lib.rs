@@ -2,6 +2,7 @@
 
 pub mod mysql;
 pub mod postgres;
+pub mod vitess;
 
 use std::borrow::Borrow;
 use std::cmp::Ordering;
@@ -14,6 +15,7 @@ use nom_sql::Relation;
 use postgres::PostgresPosition;
 use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
+use vitess::VStreamPosition;
 
 /// Enum representing whether a base table node was already initialized (and has a replication
 /// offset assigned), or if it is still pending initialization.
@@ -36,6 +38,7 @@ pub enum ReplicationOffsetState {
 pub enum ReplicationOffset {
     MySql(MySqlPosition),
     Postgres(PostgresPosition),
+    Vitess(VStreamPosition),
 }
 
 impl TryFrom<ReplicationOffset> for MySqlPosition {
@@ -87,6 +90,7 @@ impl fmt::Display for ReplicationOffset {
         match self {
             Self::MySql(pos) => write!(f, "{pos}"),
             Self::Postgres(pos) => write!(f, "{pos}"),
+            Self::Vitess(pos) => write!(f, "{pos}"),
         }
     }
 }

@@ -306,8 +306,6 @@ impl NoriaAdapter {
         enable_statement_logging: bool,
         full_snapshot: bool,
     ) -> ReadySetResult<!> {
-        use replication_offset::mysql::MySqlPosition;
-
         if let Some(cert_path) = config.ssl_root_cert.clone() {
             let ssl_opts = SslOpts::default().with_root_cert_path(Some(cert_path));
             mysql_options = OptsBuilder::from_opts(mysql_options)
@@ -736,18 +734,26 @@ impl NoriaAdapter {
         mut noria: ReadySetHandle,
         config: UpstreamConfig,
         notification_channel: &UnboundedSender<ReplicatorMessage>,
-        resnapshot: bool,
-        telemetry_sender: &TelemetrySender,
+        _resnapshot: bool,
+        _telemetry_sender: &TelemetrySender,
         enable_statement_logging: bool,
     ) -> Result<!, ReadySetError> {
         let replication_offsets = noria.replication_offsets().await?;
         trace!(?replication_offsets, "Loaded replication offsets");
 
+        let latest_position = match &replication_offsets.schema {
+            None => None,
+            Some(offset) => match offset {
+                ReplicationOffset::Vitess(pos) => Some(pos),
+                _ => None,
+            },
+        };
+
         info!("Connecting to Vitess...");
         let connector = Box::new(
             VitessConnector::connect(
                 vitess_config.clone(),
-                config.clone(),
+                latest_position,
                 enable_statement_logging,
             )
             .await?,

@@ -1269,7 +1269,7 @@ dependencies = [
  "tokio-postgres",
  "tonic 0.9.2",
  "url",
- "vitess-grpc 0.2.0+vitess-17.0.1",
+ "vitess-grpc",
 ]
 
 [[package]]
@@ -5322,7 +5322,7 @@ dependencies = [
  "readyset-errors",
  "rust_decimal",
  "tracing",
- "vitess-grpc 0.1.2+vitess-16.0.2",
+ "vitess-grpc",
 ]
 
 [[package]]
@@ -5415,6 +5415,7 @@ dependencies = [
  "readyset-errors",
  "readyset-util",
  "serde",
+ "vitess-grpc",
 ]
 
 [[package]]
@@ -5472,7 +5473,7 @@ dependencies = [
  "tonic 0.9.2",
  "tracing",
  "tracing-futures",
- "vitess-grpc 0.1.2+vitess-16.0.2",
+ "vitess-grpc",
 ]
 
 [[package]]
@@ -7300,17 +7301,6 @@ name = "version_check"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
-
-[[package]]
-name = "vitess-grpc"
-version = "0.1.2+vitess-16.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f7d198c50e831769b366b4e4dace82eaff2b410a6cf41be83e7203e0bf7ed252"
-dependencies = [
- "prost",
- "tonic 0.9.2",
- "tonic-build",
-]
 
 [[package]]
 name = "vitess-grpc"

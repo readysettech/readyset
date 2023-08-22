@@ -35,7 +35,7 @@ postgres-protocol = { workspace = true }
 mysql_async = { workspace = true }
 
 readyset-vitess-data = { path = "../readyset-vitess-data" }
-vitess-grpc = "0.1.2"
+vitess-grpc = "0.2.0"
 tonic = { version = "0.9", features = ["tls"] }
 
 nom-sql = { path = "../nom-sql" }

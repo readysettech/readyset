@@ -1,4 +1,4 @@
-use readyset_vitess_data::VStreamPosition;
+use replication_offset::vitess::VStreamPosition;
 use vitess_grpc::binlogdata::{ShardGtid, VGtid};
 
 #[test]

@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0"
-vitess-grpc = "0.1.2"
+vitess-grpc = "0.2"
 rust_decimal = { version = "1.26" }
 bit-vec = { version = "0.6", features = ["serde"] }
 tracing = { version = "0.1", features = ["release_max_level_debug"] }

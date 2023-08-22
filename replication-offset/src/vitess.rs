@@ -1,15 +1,16 @@
 use std::fmt::Display;
 
+use serde::{Deserialize, Serialize};
 use vitess_grpc::binlogdata::VGtid;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ShardPosition {
     keyspace: String,
     shard: String,
     gtid: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VStreamPosition {
     shard_positions: Vec<ShardPosition>,
 }
@@ -62,6 +63,12 @@ impl From<VStreamPosition> for VGtid {
             .collect();
 
         Self { shard_gtids }
+    }
+}
+
+impl From<&VStreamPosition> for VGtid {
+    fn from(position: &VStreamPosition) -> Self {
+        position.clone().into()
     }
 }
 

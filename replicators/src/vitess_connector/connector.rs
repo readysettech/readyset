@@ -1,10 +1,11 @@
 use async_trait::async_trait;
 use nom_sql::Relation;
+use readyset_client::debug::info;
 use readyset_client::TableOperation;
 use readyset_data::DfValue;
-use readyset_errors::{ReadySetError, ReadySetResult};
-use readyset_vitess_data::{SchemaCache, VStreamPosition};
-use replication_offset::mysql::MySqlPosition;
+use readyset_errors::{invariant, ReadySetError, ReadySetResult};
+use readyset_vitess_data::SchemaCache;
+use replication_offset::vitess::VStreamPosition;
 use replication_offset::ReplicationOffset;
 use tokio::sync::mpsc;
 use tonic::Streaming;
@@ -44,7 +45,7 @@ pub(crate) struct VitessConnector {
 impl VitessConnector {
     pub(crate) async fn connect(
         vitess_config: database_utils::VitessConfig,
-        _config: database_utils::UpstreamConfig,
+        initial_position: Option<&VStreamPosition>,
         enable_statement_logging: bool,
     ) -> ReadySetResult<Self> {
         // Connect to Vitess
@@ -56,21 +57,25 @@ impl VitessConnector {
         // Configure the details of VStream
         let vstream_flags = VStreamFlags {
             stop_on_reshard: true,
-            heartbeat_interval: 5,
+            heartbeat_interval: 60,
             ..Default::default()
         };
 
-        // Start from the beginning (run copy, then follow the changes)
-        let initial_position = VGtid {
-            shard_gtids: vec![ShardGtid {
-                keyspace: vitess_config.keyspace(),
-                ..Default::default()
-            }],
+        // Start from the beginning (run copy, then follow the changes) or use the latest position
+        let initial_vgtid = match initial_position {
+            Some(pos) => pos.into(),
+            None => VGtid {
+                shard_gtids: vec![ShardGtid {
+                    keyspace: vitess_config.keyspace(),
+                    ..Default::default()
+                }],
+            },
         };
+        info!("Starting VStream from: {:?}", initial_vgtid);
 
         // Make the VStream API request to start streaming changes from the cluster
         let request = VStreamRequest {
-            vgtid: Some(initial_position),
+            vgtid: Some(initial_vgtid),
             tablet_type: TabletType::Primary.into(),
             flags: Some(vstream_flags),
             ..Default::default()
@@ -164,7 +169,7 @@ impl VitessConnector {
         );
         let mut table_ops = Vec::with_capacity(row_event.row_changes.len());
         for row_change in row_event.row_changes.iter() {
-            let row_operation = readyset_vitess_data::row_operation(&row_change);
+            let row_operation = readyset_vitess_data::row_operation(row_change);
 
             // Generate a table operation for the row
             match row_operation {
@@ -188,10 +193,12 @@ impl VitessConnector {
             txid: None, // VStream does not provide transaction IDs
         };
 
-        // FIXME: Fix this
-        let pos = ReplicationOffset::MySql(
-            MySqlPosition::from_file_name_and_position("binlog.00001".to_owned(), 12).unwrap(),
+        invariant!(
+            self.current_position.is_some(),
+            "We haven't seen a VGTID event yet trying to process a ROW. No current position information can be found!"
         );
+
+        let pos = ReplicationOffset::Vitess(self.current_position.clone().unwrap());
 
         Ok((action, pos))
     }
@@ -243,7 +250,17 @@ impl Connector for VitessConnector {
 
                 // TODO: When adding support for event buffering, we may want to flush on commit
                 VEventType::Begin => info!("Received VStream begin"),
-                VEventType::Commit => info!("Received VStream commit"),
+                VEventType::Commit => {
+                    info!("Received VStream commit");
+
+                    if let Some(current_posision) = &self.current_position {
+                        info!("Returning VStream position: {}", &current_posision);
+                        return Ok((
+                            ReplicationAction::LogPosition,
+                            ReplicationOffset::Vitess(current_posision.clone()),
+                        ));
+                    }
+                }
 
                 VEventType::Field => {
                     let field_event = event.field_event.unwrap();
@@ -266,7 +283,17 @@ impl Connector for VitessConnector {
                 VEventType::Ddl => info!("Received VStream DDL"),
 
                 // TODO: Handle this specially as a part of snapshot implementation
-                VEventType::CopyCompleted => info!("Received VStream copy completed"),
+                VEventType::CopyCompleted => {
+                    info!("Received VStream copy completed");
+
+                    if let Some(current_posision) = &self.current_position {
+                        info!("Returning VStream position: {}", &current_posision);
+                        return Ok((
+                            ReplicationAction::LogPosition,
+                            ReplicationOffset::Vitess(current_posision.clone()),
+                        ));
+                    }
+                }
 
                 // Probably safe to ignore
                 VEventType::Unknown
