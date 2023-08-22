@@ -1652,3 +1652,26 @@ async fn start_replication_in_middle_of_commit() {
 
     shutdown_tx.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn column_metadata() {
+    let (config, _handle, shutdown_tx) = setup().await;
+    let client = connect(config).await;
+    client.simple_query("create table t(a int)").await.unwrap();
+    let table_oid = client
+        .query_one("select 't'::regclass::oid", &[])
+        .await
+        .unwrap()
+        .get::<_, u32>(0);
+
+    let cached_stmt = client.prepare("select a from t").await.unwrap();
+    assert_eq!(cached_stmt.columns()[0].table_oid(), Some(table_oid));
+    assert_eq!(cached_stmt.columns()[0].column_id(), Some(1));
+
+    let proxied_stmt = client.prepare("select a, now() from t").await.unwrap();
+    assert_eq!(proxied_stmt.columns()[0].table_oid(), Some(table_oid));
+    assert_eq!(proxied_stmt.columns()[0].column_id(), Some(1));
+
+    shutdown_tx.shutdown().await;
+}
