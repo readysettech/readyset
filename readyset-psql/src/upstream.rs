@@ -302,6 +302,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
                 .generic_query_raw(
                     statement,
                     &convert_params_for_upstream(params, statement.params())?,
+                    Some(1), // Hardcode to binary for now
                 )
                 .await?,
         );
