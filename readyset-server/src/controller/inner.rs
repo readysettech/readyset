@@ -712,7 +712,7 @@ impl Leader {
         // kill
         let mut downstream_domains = HashSet::new();
         for wi in failed {
-            warn!(worker = %wi, "handling failure of worker");
+            info!(worker = %wi, "handling failure of worker");
             for di in ds.remove_worker(&wi) {
                 downstream_domains.extend(ds.downstream_domains(di.domain_index)?);
             }
