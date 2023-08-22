@@ -258,10 +258,8 @@ impl UpstreamDatabase for PostgreSqlUpstream {
                     Ok(Column {
                         name: col.name().into(),
                         col_type: col.type_().clone(),
-                        // TODO: Load the following two fields from upstream, once tokio-postgres
-                        // provides them
-                        table_oid: None,
-                        attnum: None,
+                        table_oid: col.table_oid(),
+                        attnum: col.column_id(),
                     })
                 })
                 .collect::<Result<Vec<_>, _>>()?,

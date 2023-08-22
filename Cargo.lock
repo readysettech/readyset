@@ -3695,7 +3695,7 @@ dependencies = [
 [[package]]
 name = "postgres"
 version = "0.19.4"
-source = "git+https://github.com/readysettech/rust-postgres.git#5302d7ed0b9cca0b4672b8a3fdde21c7b0643f3d"
+source = "git+https://github.com/readysettech/rust-postgres.git#265eda970565382032371db11106d2d152dce846"
 dependencies = [
  "bytes",
  "fallible-iterator",
@@ -3708,7 +3708,7 @@ dependencies = [
 [[package]]
 name = "postgres-derive"
 version = "0.4.3"
-source = "git+https://github.com/readysettech/rust-postgres.git#5302d7ed0b9cca0b4672b8a3fdde21c7b0643f3d"
+source = "git+https://github.com/readysettech/rust-postgres.git#265eda970565382032371db11106d2d152dce846"
 dependencies = [
  "proc-macro2 1.0.63",
  "quote 1.0.26",
@@ -3718,7 +3718,7 @@ dependencies = [
 [[package]]
 name = "postgres-native-tls"
 version = "0.5.0"
-source = "git+https://github.com/readysettech/rust-postgres.git#5302d7ed0b9cca0b4672b8a3fdde21c7b0643f3d"
+source = "git+https://github.com/readysettech/rust-postgres.git#265eda970565382032371db11106d2d152dce846"
 dependencies = [
  "native-tls",
  "tokio",
@@ -3729,7 +3729,7 @@ dependencies = [
 [[package]]
 name = "postgres-protocol"
 version = "0.6.4"
-source = "git+https://github.com/readysettech/rust-postgres.git#5302d7ed0b9cca0b4672b8a3fdde21c7b0643f3d"
+source = "git+https://github.com/readysettech/rust-postgres.git#265eda970565382032371db11106d2d152dce846"
 dependencies = [
  "base64 0.20.0",
  "byteorder",
@@ -3746,7 +3746,7 @@ dependencies = [
 [[package]]
 name = "postgres-types"
 version = "0.2.4"
-source = "git+https://github.com/readysettech/rust-postgres.git#5302d7ed0b9cca0b4672b8a3fdde21c7b0643f3d"
+source = "git+https://github.com/readysettech/rust-postgres.git#265eda970565382032371db11106d2d152dce846"
 dependencies = [
  "bit-vec",
  "bytes",
@@ -6288,7 +6288,7 @@ dependencies = [
 [[package]]
 name = "tokio-postgres"
 version = "0.7.7"
-source = "git+https://github.com/readysettech/rust-postgres.git#5302d7ed0b9cca0b4672b8a3fdde21c7b0643f3d"
+source = "git+https://github.com/readysettech/rust-postgres.git#265eda970565382032371db11106d2d152dce846"
 dependencies = [
  "async-trait",
  "byteorder",
