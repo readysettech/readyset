@@ -123,7 +123,7 @@ mod tests {
         let validating_sink = sink::unfold(0, |i, m: BackendMessage| {
             async move {
                 match i {
-                    0 => assert_eq!(m, BackendMessage::BindComplete),
+                    0 => assert!(matches!(m, BackendMessage::BindComplete)),
                     // No further messages are expected.
                     _ => panic!(),
                 }
@@ -143,8 +143,8 @@ mod tests {
         let validating_sink = sink::unfold(0, |i, m: BackendMessage| {
             async move {
                 match i {
-                    0 => assert_eq!(m, BackendMessage::BindComplete),
-                    1 => assert_eq!(m, BackendMessage::CloseComplete),
+                    0 => assert!(matches!(m, BackendMessage::BindComplete)),
+                    1 => assert!(matches!(m, BackendMessage::CloseComplete)),
                     // No further messages are expected.
                     _ => panic!(),
                 }
@@ -166,12 +166,12 @@ mod tests {
         let validating_sink = sink::unfold(0, |i, m: BackendMessage| {
             async move {
                 match i {
-                    0 => assert_eq!(
+                    0 => assert!(matches!(
                         m,
                         BackendMessage::CommandComplete {
                             tag: CommandCompleteTag::Select(0)
                         }
-                    ),
+                    )),
                     // No further messages are expected.
                     _ => panic!(),
                 }
@@ -201,39 +201,53 @@ mod tests {
         let validating_sink = sink::unfold(0, |i, m: BackendMessage| {
             async move {
                 match i {
-                    0 => assert_eq!(
+                    0 => assert!(matches!(
                         m,
                         BackendMessage::RowDescription {
-                            field_descriptions: vec![]
-                        }
-                    ),
-                    1 => assert_eq!(
-                        m,
+                            field_descriptions
+                        } if field_descriptions == vec![]
+                    )),
+                    1 => match m {
                         BackendMessage::DataRow {
-                            values: vec![PsqlValue::Int(5), PsqlValue::Double(0.123)],
-                            explicit_transfer_formats: Some(Arc::new(vec![
-                                TransferFormat::Text,
-                                TransferFormat::Binary
-                            ]))
+                            values,
+                            explicit_transfer_formats,
+                        } => {
+                            assert_eq!(values, vec![PsqlValue::Int(5), PsqlValue::Double(0.123)]);
+                            assert_eq!(
+                                explicit_transfer_formats,
+                                Some(Arc::new(vec![TransferFormat::Text, TransferFormat::Binary]))
+                            );
                         }
-                    ),
-                    2 => assert_eq!(
-                        m,
+                        _ => panic!("Unexpected message {:?}", m),
+                    },
+                    2 => match m {
                         BackendMessage::DataRow {
-                            values: vec![PsqlValue::Int(99), PsqlValue::Double(0.456)],
-                            explicit_transfer_formats: Some(Arc::new(vec![
-                                TransferFormat::Text,
-                                TransferFormat::Binary
-                            ]))
+                            values,
+                            explicit_transfer_formats,
+                        } => {
+                            assert_eq!(values, vec![PsqlValue::Int(99), PsqlValue::Double(0.456)]);
+                            assert_eq!(
+                                explicit_transfer_formats,
+                                Some(Arc::new(vec![TransferFormat::Text, TransferFormat::Binary]))
+                            );
                         }
-                    ),
-                    3 => assert_eq!(
+                        _ => panic!("Unexpected message {:?}", m),
+                    },
+                    3 => assert!(matches!(
                         m,
                         BackendMessage::CommandComplete {
-                            tag: CommandCompleteTag::Select(2)
-                        }
-                    ),
-                    4 => assert_eq!(m, BackendMessage::ready_for_query_idle()),
+                            tag
+                        } if tag == CommandCompleteTag::Select(2)
+                    )),
+                    4 => match (m, BackendMessage::ready_for_query_idle()) {
+                        (
+                            BackendMessage::ReadyForQuery { status },
+                            BackendMessage::ReadyForQuery {
+                                status: expected_status,
+                            },
+                        ) => assert_eq!(status, expected_status),
+                        _ => panic!(),
+                    },
                     // No further messages are expected.
                     _ => panic!(),
                 }

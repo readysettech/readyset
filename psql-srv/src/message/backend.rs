@@ -26,7 +26,7 @@ const SSL_RESPONSE_WILLING: u8 = b'S';
 /// * `R` - Represents a row of data values. `BackendMessage` implementations are provided wherein a
 ///   value of type `R` will, upon iteration, emit values that are convertible into type
 ///   `PsqlValue`, which can be serialized along with the rest of the `BackendMessage`.
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 #[allow(clippy::large_enum_variant)] // TODO: benchmark if this matters
 pub enum BackendMessage {
     AuthenticationCleartextPassword,
