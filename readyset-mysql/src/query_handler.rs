@@ -850,7 +850,6 @@ impl QueryHandler for MySqlQueryHandler {
                     format!("@@{}", MAX_ALLOWED_PACKET_VARIABLE_NAME).into();
                 Ok(QueryResult::from_owned(
                     SelectSchema {
-                        use_bogo: false,
                         schema: Cow::Owned(vec![ColumnSchema {
                             column: Column {
                                 name: field_name.clone(),
@@ -865,7 +864,6 @@ impl QueryHandler for MySqlQueryHandler {
                 ))
             }
             _ => Ok(QueryResult::empty(SelectSchema {
-                use_bogo: false,
                 schema: Cow::Owned(vec![]),
                 columns: Cow::Owned(vec![]),
             })),

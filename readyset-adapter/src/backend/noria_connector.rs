@@ -538,7 +538,6 @@ impl NoriaConnector {
     pub(crate) async fn explain_domains(&mut self) -> ReadySetResult<QueryResult<'static>> {
         let domains = self.inner.get_mut()?.noria.domains().await?;
         let schema = SelectSchema {
-            use_bogo: false,
             schema: Cow::Owned(vec![
                 ColumnSchema {
                     column: nom_sql::Column {
@@ -1010,7 +1009,6 @@ impl NoriaConnector {
         )?;
 
         let schema = SelectSchema {
-            use_bogo: false,
             schema: Cow::Owned(
                 ["table", "status"]
                     .iter()
@@ -1775,8 +1773,6 @@ async fn do_read<'a>(
 
     Ok(QueryResult::from_iter(
         SelectSchema {
-            // TODO(vlad): looks like poor `use_bogo` is unused except in js? Should just remove it.
-            use_bogo: false,
             schema: Cow::Borrowed(
                 reader_handle
                     .schema()

@@ -94,7 +94,6 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                 let columns = vars.iter().map(|v| v.name.clone()).collect::<Vec<_>>();
 
                 let select_schema = SelectSchema(readyset_adapter::backend::SelectSchema {
-                    use_bogo: false,
                     schema: Cow::Owned(
                         vars.iter()
                             .map(|v| ColumnSchema {
@@ -124,7 +123,6 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
             }
             Noria(NoriaResult::MetaVariables(vars)) => {
                 let select_schema = SelectSchema(readyset_adapter::backend::SelectSchema {
-                    use_bogo: false,
                     schema: Cow::Owned(vec![
                         ColumnSchema {
                             column: nom_sql::Column {
@@ -163,7 +161,6 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                 let (col1_header, col2_header): (SqlIdentifier, SqlIdentifier) =
                     (vars[0].name.clone(), vars[0].value.clone().into());
                 let select_schema = SelectSchema(readyset_adapter::backend::SelectSchema {
-                    use_bogo: false,
                     schema: Cow::Owned(vec![
                         ColumnSchema {
                             column: nom_sql::Column {

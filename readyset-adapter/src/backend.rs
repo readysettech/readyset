@@ -614,7 +614,6 @@ pub enum MigrationMode {
 
 #[derive(Debug, Clone)]
 pub struct SelectSchema<'a> {
-    pub use_bogo: bool,
     pub schema: Cow<'a, [ColumnSchema]>,
     pub columns: Cow<'a, [SqlIdentifier]>,
 }
@@ -622,7 +621,6 @@ pub struct SelectSchema<'a> {
 impl<'a> SelectSchema<'a> {
     pub fn into_owned(self) -> SelectSchema<'static> {
         SelectSchema {
-            use_bogo: self.use_bogo,
             schema: Cow::Owned(self.schema.into_owned()),
             columns: Cow::Owned(self.columns.into_owned()),
         }
@@ -1723,7 +1721,6 @@ where
             queries.retain(|q| &q.id.to_string() == q_id);
         }
         let select_schema = SelectSchema {
-            use_bogo: false,
             schema: Cow::Owned(vec![
                 create_dummy_column("query id"),
                 create_dummy_column("proxied query"),
@@ -1795,7 +1792,6 @@ where
         }
 
         let select_schema = SelectSchema {
-            use_bogo: false,
             schema: Cow::Owned(vec![
                 create_dummy_column("query id"),
                 create_dummy_column("cache name"),
@@ -2514,7 +2510,6 @@ where
             .collect();
 
         let select_schema = SelectSchema {
-            use_bogo: false,
             schema: Cow::Owned(vec![create_dummy_column("query text")]),
             columns: Cow::Owned(vec!["query text".into()]),
         };

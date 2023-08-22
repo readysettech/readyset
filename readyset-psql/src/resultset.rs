@@ -148,7 +148,6 @@ mod tests {
     async fn create_resultset() {
         let results = vec![];
         let schema = SelectSchema(cl::SelectSchema {
-            use_bogo: false,
             schema: Cow::Owned(vec![ColumnSchema {
                 column: "tab1.col1".into(),
                 column_type: DfType::BigInt,
@@ -168,7 +167,6 @@ mod tests {
     async fn stream_resultset() {
         let results = vec![Results::new(vec![vec![DfValue::Int(10)]])];
         let schema = SelectSchema(cl::SelectSchema {
-            use_bogo: false,
             schema: Cow::Owned(vec![ColumnSchema {
                 column: "tab1.col1".into(),
                 column_type: DfType::BigInt,
@@ -191,7 +189,6 @@ mod tests {
             Results::new(vec![vec![DfValue::Int(11)], vec![DfValue::Int(12)]]),
         ];
         let schema = SelectSchema(cl::SelectSchema {
-            use_bogo: false,
             schema: Cow::Owned(vec![ColumnSchema {
                 column: "tab1.col1".into(),
                 column_type: DfType::BigInt,
