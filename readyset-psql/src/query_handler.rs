@@ -347,7 +347,6 @@ impl QueryHandler for PostgreSqlQueryHandler {
 
     fn default_response(_: &SqlQuery) -> ReadySetResult<QueryResult<'static>> {
         Ok(noria_connector::QueryResult::empty(SelectSchema {
-            use_bogo: false,
             schema: Cow::Owned(vec![]),
             columns: Cow::Owned(vec![]),
         }))
