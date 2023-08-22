@@ -148,6 +148,10 @@ pub struct ColumnBase {
     pub table: Relation,
     /// A list of constraints on the column
     pub constraints: Vec<ColumnConstraint>,
+    /// If known, the PostgreSQL OID for the column's base table
+    pub table_oid: Option<u32>,
+    /// If known, the PostgreSQL `attnum` for the column
+    pub attnum: Option<i16>,
 }
 
 /// Combines the specification for a columns with its base name
@@ -174,6 +178,8 @@ impl ColumnSchema {
                 column: spec.column.name.clone(),
                 table,
                 constraints: spec.constraints,
+                table_oid: None,
+                attnum: None,
             }),
             column: spec.column,
             column_type: DfType::from_sql_type(
@@ -2083,6 +2089,8 @@ mod tests {
                             table: "t".into(),
                             column: "x".into(),
                             constraints: vec![],
+                            table_oid: None,
+                            attnum: None,
                         }),
                     },
                     ColumnSchema {
@@ -2095,6 +2103,8 @@ mod tests {
                             table: "t".into(),
                             column: "y".into(),
                             constraints: vec![],
+                            table_oid: None,
+                            attnum: None,
                         }),
                     },
                 ],
@@ -2109,6 +2119,8 @@ mod tests {
                             table: "t".into(),
                             column: "x".into(),
                             constraints: vec![],
+                            table_oid: None,
+                            attnum: None,
                         }),
                     },
                     ColumnSchema {
@@ -2121,6 +2133,8 @@ mod tests {
                             table: "t".into(),
                             column: "y".into(),
                             constraints: vec![],
+                            table_oid: None,
+                            attnum: None,
                         }),
                     },
                 ],

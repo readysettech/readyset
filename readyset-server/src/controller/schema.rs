@@ -57,13 +57,18 @@ fn get_base_for_column(
 
         let source_node = &graph[*ni];
         if source_node.is_base() {
-            if let Some(Schema::Table(BaseSchema { statement, .. })) =
+            if let Some(Schema::Table(BaseSchema { statement, pg_meta })) =
                 recipe.schema_for(source_node.name())
             {
                 let col_index = cols.first().unwrap().unwrap();
+                let column_name = statement.fields[col_index].column.name.clone();
                 #[allow(clippy::unwrap_used)] // occurs after implied table rewrite
                 return Ok(Some(ColumnBase {
-                    column: statement.fields[col_index].column.name.clone(),
+                    attnum: pg_meta
+                        .as_ref()
+                        .and_then(|m| m.column_oids.get(&column_name))
+                        .copied(),
+                    column: column_name,
                     table: statement.fields[col_index]
                         .column
                         .table
@@ -71,6 +76,7 @@ fn get_base_for_column(
                         .unwrap()
                         .clone(),
                     constraints: statement.fields[col_index].constraints.clone(),
+                    table_oid: pg_meta.as_ref().map(|m| m.oid),
                 }));
             }
         }
