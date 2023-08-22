@@ -9,3 +9,12 @@ pub enum TransferFormat {
     Binary,
     Text,
 }
+
+impl From<TransferFormat> for i16 {
+    fn from(value: TransferFormat) -> Self {
+        match value {
+            TransferFormat::Text => 0,
+            TransferFormat::Binary => 1,
+        }
+    }
+}
