@@ -358,7 +358,7 @@ fn encode(message: BackendMessage, dst: &mut BytesMut) -> Result<(), Error> {
             put_i16(i16::try_from(field_descriptions.len())?, dst);
             for d in field_descriptions {
                 put_str(&d.field_name, dst);
-                put_i32(d.table_id, dst);
+                put_u32(d.table_id, dst);
                 put_i16(d.col_id, dst);
                 put_type(d.data_type, dst)?;
                 put_i16(d.data_type_size, dst);

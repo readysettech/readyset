@@ -60,6 +60,8 @@ impl PsqlBackend for ErrorBackend {
                 param_schema: vec![],
                 row_schema: vec![Column {
                     name: "x".into(),
+                    table_oid: None,
+                    attnum: None,
                     col_type: Type::BOOL,
                 }],
             })
@@ -76,6 +78,8 @@ impl PsqlBackend for ErrorBackend {
             ErrorPosition::Serialize => Ok(QueryResponse::Select {
                 schema: vec![Column {
                     name: "x".into(),
+                    table_oid: None,
+                    attnum: None,
                     col_type: Type::BOOL,
                 }],
                 resultset: stream::iter(vec![Err(Error::InternalError("factory".to_owned()))]),

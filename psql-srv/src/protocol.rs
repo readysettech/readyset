@@ -41,7 +41,7 @@ const TYPLEN_32: i16 = 32;
 const TYPLEN_VARLENA: i16 = -1;
 const TYPLEN_CSTRING: i16 = -2; // Null-terminated C string
 const UNKNOWN_COLUMN: i16 = 0;
-const UNKNOWN_TABLE: i32 = 0;
+const UNKNOWN_TABLE: u32 = 0;
 
 /// State machine for an ongoing SASL authentication flow
 ///
@@ -907,8 +907,8 @@ async fn make_field_description<B: PsqlBackend>(
 
     Ok(FieldDescription {
         field_name: col.name.clone(),
-        table_id: UNKNOWN_TABLE,
-        col_id: UNKNOWN_COLUMN,
+        table_id: col.table_oid.unwrap_or(UNKNOWN_TABLE),
+        col_id: col.attnum.unwrap_or(UNKNOWN_COLUMN),
         data_type: col.col_type.clone(),
         data_type_size,
         type_modifier: ATTTYPMOD_NONE,
@@ -1007,10 +1007,14 @@ mod tests {
                     schema: vec![
                         Column {
                             name: "col1".into(),
+                            table_oid: None,
+                            attnum: None,
                             col_type: Type::INT4,
                         },
                         Column {
                             name: "col2".into(),
+                            table_oid: None,
+                            attnum: None,
                             col_type: Type::FLOAT8,
                         },
                     ],
@@ -1039,10 +1043,14 @@ mod tests {
                     row_schema: vec![
                         Column {
                             name: "col1".into(),
+                            table_oid: None,
+                            attnum: None,
                             col_type: Type::INT4,
                         },
                         Column {
                             name: "col2".into(),
+                            table_oid: None,
+                            attnum: None,
                             col_type: Type::FLOAT8,
                         },
                     ],
@@ -1064,10 +1072,14 @@ mod tests {
                     schema: vec![
                         Column {
                             name: "col1".into(),
+                            table_oid: None,
+                            attnum: None,
                             col_type: Type::INT4,
                         },
                         Column {
                             name: "col2".into(),
+                            table_oid: None,
+                            attnum: None,
                             col_type: Type::FLOAT8,
                         },
                     ],
@@ -1548,10 +1560,14 @@ mod tests {
                 row_schema: vec![
                     Column {
                         name: "col1".into(),
+                        table_oid: None,
+                        attnum: None,
                         col_type: Type::INT4
                     },
                     Column {
                         name: "col2".into(),
+                        table_oid: None,
+                        attnum: None,
                         col_type: Type::FLOAT8
                     },
                 ],

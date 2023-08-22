@@ -128,7 +128,7 @@ pub enum ErrorSeverity {
 #[derive(Debug, PartialEq, Eq)]
 pub struct FieldDescription {
     pub field_name: SqlIdentifier,
-    pub table_id: i32,
+    pub table_id: u32,
     pub col_id: i16,
     pub data_type: Type,
     pub data_type_size: i16,

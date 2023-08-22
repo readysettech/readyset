@@ -153,6 +153,8 @@ impl PsqlBackend for Backend {
                         .map(|col| psql_srv::Column {
                             name: col.name().into(),
                             col_type: col.type_().clone(),
+                            table_oid: None,
+                            attnum: None,
                         })
                         .collect()
                 })
@@ -181,6 +183,8 @@ impl PsqlBackend for Backend {
                 .map(|c| psql_srv::Column {
                     name: c.name().into(),
                     col_type: c.type_().clone(),
+                    table_oid: None,
+                    attnum: None,
                 })
                 .collect(),
         };
@@ -223,6 +227,8 @@ impl PsqlBackend for Backend {
                     .map(|col| psql_srv::Column {
                         name: col.name().into(),
                         col_type: col.type_().clone(),
+                        table_oid: None,
+                        attnum: None,
                     })
                     .collect()
             })
