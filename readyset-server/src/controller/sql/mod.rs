@@ -814,14 +814,12 @@ impl SqlIncorporator {
         Ok(())
     }
 
-    pub(super) fn get_base_schema(&self, table: &Relation) -> Option<CreateTableBody> {
-        self.base_schemas.get(table).cloned()
+    pub(super) fn get_base_schema<'a>(&'a self, table: &Relation) -> Option<&'a CreateTableBody> {
+        self.base_schemas.get(table)
     }
 
-    pub(super) fn get_view_schema(&self, name: &Relation) -> Option<Vec<String>> {
-        self.view_schemas
-            .get(name)
-            .map(|s| s.iter().map(SqlIdentifier::to_string).collect())
+    pub(super) fn get_view_schema<'a>(&'a self, name: &Relation) -> Option<&'a [SqlIdentifier]> {
+        self.view_schemas.get(name).as_ref().map(|v| v.as_slice())
     }
 
     /// Retrieves the flow node associated with a given query's leaf view.
