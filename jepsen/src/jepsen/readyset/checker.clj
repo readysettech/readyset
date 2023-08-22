@@ -43,15 +43,20 @@
          history)))))
 
 (defn commutative-eventual-consistency
-  "A simpler, faster (than Knossos) checker for eventual consistency of a single
-  table, which works if writes are commutative.
+  "A simpler, faster (than Knossos) checker for eventual consistency of a
+  database, which works if writes are commutative.
 
-  * `{:f :write, :value x}` ops are inserted into the table
-  * `{:f :read, :value rows}` ops must return the state of the table as of *some
-    point* in the past
-  * `{:f :final-read :value rows}` ops must return the *current* state of the
-    table"
-  []
+  Passed a map from query-id, to function which takes a map from tables to rows
+  known to exist in those tables, and returns the expected results for that
+  query
+
+  * `{:type :ok, :f :insert, :value {:table table :rows rows}}` ops are inserted
+    into the table
+  * `{:f :query, :value {:query-id query-id :results results}}` ops must return
+    the results for the query as of *some point* in the past
+  * `{:f :consistent-query, :value {:query-id query-id :results results}}` ops
+    must return the *current* results for the query"
+  [expected-query-results]
   (reify checker/Checker
     (check [_this _test history _opts]
       (->
@@ -59,24 +64,42 @@
         (fn [{:keys [rows past-results] :as state}
              {:keys [index type f value]}]
           (case [type f]
-            [:ok :write]
-            (let [new-rows (-> rows (conj value) sort)]
+            [:ok :insert]
+            (let [{:keys [table] inserted-rows :rows} value
+                  new-rows (update rows table into inserted-rows)]
               (-> state
                   (assoc :rows new-rows)
-                  (update :past-results conj (sort new-rows))))
+                  (update
+                   :past-results
+                   (fn [results]
+                     (reduce-kv
+                      (fn [results query-id compute-results]
+                        (update results
+                                query-id
+                                conj
+                                (compute-results new-rows)))
+                      results
+                      expected-query-results)))))
 
-            [:ok :read]
-            (if (contains? past-results (sort value))
-              state
-              (reduced
-               (assoc state
-                      :valid? false
-                      :failed-at index)))
+            [:ok :query]
+            (let [{:keys [query-id results]} value
+                  past-results (get past-results query-id)]
+              (if (contains? past-results results)
+                state
+                (reduced
+                 (assoc state
+                        :valid? false
+                        :failed-at index
+                        :expected past-results
+                        :got results))))
 
             state))
         {:valid? true
-         :rows []
-         :past-results #{[]}}
+         :rows {}
+         :past-results
+         (into {}
+               (map (fn [[k _]] [k #{[]}]))
+               expected-query-results)}
         history)
        ;; Don't include these keys in the final map; they get big and are
        ;; mostly noise
@@ -85,12 +108,74 @@
 (comment
   (require '[jepsen.store :as store])
 
-  (def t (store/test -2))
+  (def t (store/latest))
 
-  (checker/check
-   (commutative-eventual-consistency)
-   t
-   (:history t)
-   {}
-   )
+  ;; Looking at consistency
+
+  (->> t
+       :history
+       (filter (comp #{:query :insert :consistent-query} :f))
+       (filter (comp #{:ok} :type)))
+
+  (def example-result
+    (->> t
+         :history
+         (filter (comp #{:query} :f))
+         (filter (comp #{:ok} :type))
+         first))
+
+  (def rows
+    (->> t
+         :history
+         (filter (comp #{:insert} :f))
+         (filter (comp #{:ok} :type))
+         (map :value)
+         (group-by :table)
+         (map (fn [[k ops]] [k (mapcat :rows ops)]))
+         (into {})))
+
+  (require '[jepsen.readyset.workloads :as workloads])
+  (def compute-votes
+    (get-in workloads/votes [:queries :votes :expected-results]))
+
+  (compute-votes rows)
+
+  (def final-consistent-result
+    (->> t
+         :history
+         (filter (comp #{:consistent-query} :f))
+         (filter (comp #{:ok} :type))
+         first
+         :value
+         :results))
+
+  (assert
+   (= final-consistent-result (compute-votes rows)))
+
+  (assert
+   (:valid?
+    (checker/check
+     (commutative-eventual-consistency
+      {:votes compute-votes})
+     t
+     (:history t)
+     {})))
+
+  ;; looking at failures
+
+  (def first-failure
+    (->> t
+         :history
+         (filter (comp #{:fail} :type))
+         first))
+
+  (def upto-first-failure
+    (->> t
+         :history
+         (take-while #(not= :fail (:type %)))))
+
+  (def after-first-failure
+    (second (split-at (:index first-failure) (:history t))))
+
+  (filter (comp #{:kill-adapter} :f) upto-first-failure)
   )
