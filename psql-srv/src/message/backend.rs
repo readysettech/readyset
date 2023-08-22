@@ -4,7 +4,7 @@ use bytes::Bytes;
 use nom_sql::SqlIdentifier;
 use postgres::error::ErrorPosition;
 pub use postgres::error::SqlState;
-use postgres::SimpleQueryRow;
+use postgres::{Row, SimpleQueryRow};
 use postgres_types::Type;
 use tokio_postgres::OwnedField;
 
@@ -83,6 +83,8 @@ pub enum BackendMessage {
     },
     PassThroughRowDescription(Vec<OwnedField>),
     PassThroughSimpleRow(SimpleQueryRow),
+    #[allow(unused)]
+    PassThroughDataRow(Row),
     SSLResponse {
         byte: u8,
     },

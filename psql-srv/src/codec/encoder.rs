@@ -227,6 +227,21 @@ fn encode(message: BackendMessage, dst: &mut BytesMut) -> Result<(), Error> {
             put_slice(row.body().buffer(), dst);
         }
 
+        PassThroughDataRow(row) => {
+            // Note that this body is the same as that of the match arm for PassThroughSimpleRow,
+            // but we need to duplicate it since `row` is a different type in each variant - they
+            // just happen to both have `body()` and `len()` methods that return the same things.
+            put_u8(ID_DATA_ROW, dst);
+            // Put the length of this row in bytes. The length is equal to the length of the data,
+            // plus 4 bytes for the length field itself and two bytes for the number of values in
+            // the row.
+            put_i32(row.body().buffer().len() as i32 + 4 + 2, dst);
+            // Put the number of values in this row
+            put_i16(row.len() as i16, dst);
+            // Put the data
+            put_slice(row.body().buffer(), dst);
+        }
+
         ErrorResponse {
             severity,
             sqlstate,
