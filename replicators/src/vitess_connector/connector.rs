@@ -1,6 +1,5 @@
 use async_trait::async_trait;
 use nom_sql::Relation;
-use readyset_client::debug::info;
 use readyset_client::TableOperation;
 use readyset_data::DfValue;
 use readyset_errors::{invariant, ReadySetError, ReadySetResult};
