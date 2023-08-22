@@ -7,6 +7,7 @@
                  [cheshire "5.9.0"]
                  [clj-http "3.10.0"]
                  [com.github.seancorfield/next.jdbc "1.3.883"]
+                 [com.github.seancorfield/honeysql "2.4.1045"]
                  [org.postgresql/postgresql "42.6.0"]
                  [slingshot "0.12.2"]
                  [org.clojure/core.match "1.0.1"]]

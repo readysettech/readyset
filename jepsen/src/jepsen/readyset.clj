@@ -20,6 +20,7 @@
    [jepsen.readyset.client :as rs]
    [jepsen.readyset.nemesis :as rs.nemesis]
    [jepsen.readyset.nodes :as nodes]
+   [jepsen.readyset.workloads :as workloads]
    [jepsen.tests :as tests]
    [slingshot.slingshot :refer [try+]]))
 
@@ -178,51 +179,63 @@
 
 (defn readyset-test
   [opts]
-  (merge
-   tests/noop-test
-   opts
-   {:name "ReadySet"
-    :os ubuntu/os
-    :db (db "1eebd43bd6befd8acc9104b4239a414d72a4bd55"  ; Needs at least this commit
-            #_"refs/tags/beta-2023-07-26")
-    :client (rs/new-client)
-    :nemesis (nemesis/compose
-              {{:kill-adapter :start
-                :start-adapter :stop} (rs.nemesis/kill-adapters)
-               {:kill-server :start
-                :start-server :stop} (rs.nemesis/kill-server)})
-    :checker (checker/compose
-              {:liveness (rs.checker/liveness)
-               :eventually-consistent
-               (rs.checker/commutative-eventual-consistency)})
-    :generator (gen/phases
-                (->> (gen/mix [rs/r rs/w])
-                     (gen/stagger (/ (:rate opts)))
+  (let [workload workloads/votes]
+    (merge
+     tests/noop-test
+     opts
+     {:name "ReadySet"
+      :os ubuntu/os
+      :db (db "92e5b6b70a3a4da3f7f33c4401be443c728afa77"  ; Needs at least this commit
+              #_"refs/tags/beta-2023-07-26")
+      :client (rs/new-client
+               {:retry-queries? true
+                :tables (:tables workload)
+                :queries (->> workload
+                              :queries
+                              (map (fn [[k {:keys [query]}]] [k query]))
+                              (into {}))})
+      :nemesis (nemesis/compose
+                {{:kill-adapter :start
+                  :start-adapter :stop} (rs.nemesis/kill-adapters)
+                 {:kill-server :start
+                  :start-server :stop} (rs.nemesis/kill-server)})
+      :checker (checker/compose
+                {:liveness (rs.checker/liveness)
+                 :eventually-consistent
+                 (rs.checker/commutative-eventual-consistency
+                  (->> workload
+                       :queries
+                       (map (fn [[k {:keys [expected-results]}]]
+                              [k expected-results]))
+                       (into {})))})
+      :generator (gen/phases
+                  (->>
+                   (gen/any (rs/inserts (:gen-insert workload))
+                            (repeat (rs/query :votes)))
+                   (gen/stagger (/ (:rate opts)))
+                   (gen/nemesis
+                    (->> (gen/mix
+                          [(cycle
+                            [{:type :info :f :kill-adapter}
+                             {:type :info :f :start-adapter}])
 
-                     (gen/nemesis
-                      (->> (gen/mix
-                            [(cycle
-                              [{:type :info :f :kill-adapter}
-                               {:type :info :f :start-adapter}])
+                           (cycle
+                            [{:type :info :f :kill-server}
+                             {:type :info :f :start-server}])])
+                         (gen/stagger 2)))
+                   (gen/time-limit (:time-limit opts)))
 
-                             (cycle
-                              [{:type :info :f :kill-server}
-                               {:type :info :f :start-server}])])
-                           (gen/stagger 2)))
-                     (gen/time-limit (:time-limit opts)))
+                  (gen/nemesis
+                   (gen/phases
+                    (gen/once {:type :info, :f :start-server})
+                    (gen/once {:type :info, :f :start-adapter})))
 
-                (gen/nemesis
-                 (gen/phases
-                  (gen/once {:type :info, :f :start-server})
-                  (gen/once {:type :info, :f :start-adapter})))
+                  (gen/log "Waiting for dataflow to converge")
+                  (gen/sleep (:converge-time opts))
 
-                (gen/log "Waiting for dataflow to converge")
-                (gen/sleep (:converge-time opts))
-
-                (gen/synchronize
-                 (gen/clients
-                  (gen/once rs/final-r))))
-    :pure-generators true}))
+                  (gen/synchronize
+                   (gen/clients
+                    (map rs/consistent-query (keys (:queries workload))))))})))
 
 (def opt-spec
   (let [validate-pos-number [#(and (number? %) (pos? %))

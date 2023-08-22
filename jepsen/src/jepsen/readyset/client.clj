@@ -4,10 +4,12 @@
    [clojure.set :as set]
    [clojure.tools.logging :refer [info warn]]
    [dom-top.core :refer [with-retry]]
+   [honey.sql :as sql]
    [jepsen.client :as client]
    [jepsen.readyset.nodes :as nodes]
    [next.jdbc :as jdbc]
-   [slingshot.slingshot :refer [throw+ try+]])
+   [slingshot.slingshot :refer [throw+ try+]]
+   [jepsen.generator :as gen])
   (:import
    (org.postgresql.util PSQLException)))
 
@@ -99,33 +101,81 @@
   (readyset-status --ds)
   )
 
-(defn r [_ _] {:type :invoke, :f :read, :value nil})
-(defn w [_ _] {:type :invoke, :f :write, :value (rand-int 5)})
-(defn final-r [_ _] {:type :invoke, :f :final-read, :value nil})
+;;;
+
+(defn recreate-table
+  "Given a honeysql-compatible `:create-table` map, drops and recreates that
+  table in the given db"
+  [db {table-name :create-table :as create-table}]
+  (jdbc/execute! db (sql/format {:drop-table [:if-exists table-name]}
+                                {:dialect :ansi}))
+  (jdbc/execute! db (sql/format create-table
+                                {:dialect :ansi})))
+
+(defn format-create-cache [_ n]
+  [(cond-> "CREATE CACHE"
+     (not= :_ n) (str " " (sql/format-entity n))
+     true (str " FROM"))])
+(sql/register-clause! :create-cache #'format-create-cache :select)
+
+(defrecord Inserts [gen-insert rows]
+  gen/Generator
+  (op [this _test ctx]
+    (when-let [insert (gen-insert rows)]
+      [(gen/fill-in-op {:type :invoke :f :insert :value insert} ctx) this]))
+
+  (update [this _test _ctx {:keys [type f value]}]
+    (case [type f]
+      [:ok :insert]
+      (let [{:keys [table rows]} value]
+        (update-in this [:rows table] into rows))
+
+      this)))
+
+(defn inserts
+  "Given a function to generate insert statements, returns a `Generator` for
+  generating insert ops for those statements
+
+  The `gen-insert` function will be passed a map from table names, to a list of
+  rows known to exist in that table. It should return a `honey.sql`-compatible
+  `:insert-into` map, or `nil` if no more inserts should be generated"
+  [gen-insert]
+  (map->Inserts {:gen-insert gen-insert :rows {}}))
+
+(defn query [q]
+  {:type :invoke, :f :query, :value q})
+
+(defn consistent-query [q]
+  {:type :invoke, :f :consistent-query, :value q})
 
 (defrecord Client [conn
                    tables
-                   table-created?
+                   queries
+                   tables-created?
                    retry-queries?]
   client/Client
   (open! [this test _node]
     (assoc this :conn (test-datasource test)))
 
   (setup! [_this _test]
-    (when (compare-and-set! table-created? false true)
-      (jdbc/execute! conn ["drop table if exists t1;"])
-      (jdbc/execute! conn ["create table t1 (x int)"])
-      (with-retry [attempts 5]
-        (jdbc/execute! conn ["create cache from select x from t1"])
-        (catch PSQLException e
-          (if (pos? attempts)
-            (do
-              (Thread/sleep 200)
-              (retry (dec attempts)))
-            (throw+ {:error :retry-attempts-exceeded
-                     :exception e}))))))
+    (when (compare-and-set! tables-created? false true)
+      (doseq [table tables]
+        (recreate-table conn table))
 
-  (invoke! [_ _test op]
+      (doseq [query (vals queries)]
+        (with-retry [attempts 5]
+          (jdbc/execute! conn (sql/format
+                               (assoc query :create-cache :_)
+                               {:dialect :ansi}))
+          (catch PSQLException e
+            (if (pos? attempts)
+              (do
+                (Thread/sleep 200)
+                (retry (dec attempts)))
+              (throw+ {:error :retry-attempts-exceeded
+                       :exception e})))))))
+
+  (invoke! [_ _test {:keys [f value] :as op}]
     (letfn [(maybe-retry-once [f]
               (with-retry [attempts (if retry-queries? 1 0)]
                 (f)
@@ -134,20 +184,32 @@
                     (retry (dec attempts))
                     (throw e)))))]
       (try+
-       (case (:f op)
-         (:read :final-read)
+       (case f
+         (:query :consistent-query)
+         (if-let [q (get queries value)]
+           (maybe-retry-once
+            #(assoc op
+                    :type :ok
+                    :value
+                    {:query-id value
+                     :results
+                     (jdbc/execute! conn (sql/format q {:dialect :ansi}))}))
+           (throw+ {:error :unknown-query
+                    :query-id value
+                    :known-queries (into #{} (keys queries))}))
+
+         :insert
          (maybe-retry-once
           #(assoc op
                   :type :ok
                   :value
-                  (map (some-fn :t1/x :x)
-                       (jdbc/execute! conn ["select x from t1"]))))
-
-         :write
-         (maybe-retry-once
-          #(do (jdbc/execute! conn ["insert into t1 (x) values (?)"
-                                    (:value op)])
-               (assoc op :type :ok))))
+                  {:table (:insert-into value)
+                   :rows
+                   (jdbc/execute!
+                    conn
+                    (-> value
+                        (assoc :returning [:*])
+                        (sql/format {:dialect :ansi}))) })))
 
        (catch PSQLException e
          (assoc op :type :fail :message (ex-message e))))))
@@ -161,8 +223,23 @@
   (close! [this _test]
     (dissoc this :conn)))
 
-(defn new-client [& [opts]]
+(defn new-client
+  "Create a new jepsen Client for ReadySet
+
+  Options supported:
+
+  * `:retry-queries?` (optional) if set to true, all queries will be retried
+    once before being considered failed
+  * `:tables` (required) A list of tables, represented as HoneySQL
+    `:create-table` maps, to install in the DB
+  * `queries` (required) A map from query ID, which should be a keyword, to
+    queries. represented as HoneySQL `:select` maps. The key in this map will be
+    used to execute the query as part of the `query` op. Queries with parameters
+    are not yet supported (TODO)"
+  [opts]
   (-> opts
-      (select-keys [:retry-queries?])
-      (merge {:table-created? (atom false)})
+      (select-keys [:retry-queries?
+                    :tables
+                    :queries])
+      (merge {:tables-created? (atom false)})
       map->Client))
