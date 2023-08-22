@@ -287,6 +287,7 @@ impl NoriaAdapter {
         let table_filter = TableFilter::try_new(
             nom_sql::Dialect::MySQL,
             config.replication_tables.take(),
+            config.replication_tables_ignore.take(),
             mysql_options.db_name(),
         )?;
 
@@ -497,6 +498,7 @@ impl NoriaAdapter {
         let table_filter = TableFilter::try_new(
             nom_sql::Dialect::PostgreSQL,
             config.replication_tables.take(),
+            config.replication_tables_ignore.take(),
             None,
         )?;
 

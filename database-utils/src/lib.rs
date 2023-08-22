@@ -80,6 +80,10 @@ pub struct UpstreamConfig {
     #[serde(default)]
     pub replication_tables: Option<RedactedString>,
 
+    #[clap(long, env = "REPLICATION_TABLES_IGNORE")]
+    #[serde(default)]
+    pub replication_tables_ignore: Option<RedactedString>,
+
     /// Sets the time (in seconds) between reports of progress snapshotting the database. A value
     /// of 0 disables reporting.
     #[clap(long, default_value = "30", hide = true)]
@@ -140,6 +144,7 @@ impl Default for UpstreamConfig {
             replication_server_id: Default::default(),
             replicator_restart_timeout: Duration::from_secs(1),
             replication_tables: Default::default(),
+            replication_tables_ignore: Default::default(),
             snapshot_report_interval_secs: 30,
             ssl_root_cert: None,
             replication_pool_size: 50,
