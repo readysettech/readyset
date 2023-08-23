@@ -20,6 +20,10 @@ data:
         -hcl='ports { grpc = 8502 }' \
         -config-dir=/consul/config \
         -data-dir=/consul/data \
+        {{- if .Values.consul.enabled }}
         -retry-join="provider=k8s namespace=${CONSUL_SERVER_NAMESPACE} label_selector=\"app=consul,component=server,release=readyset\"" \
+        {{- else }}
+        -retry-join=${AUTHORITY_ADDRESS} \
+        {{- end }}
         -node="${MY_POD_NAME}" \
         -serf-lan-port=8301

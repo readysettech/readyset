@@ -8,6 +8,15 @@ readyset:
   # readyset.deployment -- (required) A name that uniquely identifies the readyset-deployment
   deployment:
 
+  # readyset.authority_address -- (optional) In case you have a Consul cluster already deployed, you will need to configure consul.enabled=false
+  # and set this value to the Consul cluster hostname (optionally, adding the port).
+  #
+  # Default port for the authority_address is 8500, if you have a custom port please include it in the value.
+  #
+  # For example: consul.example.com:8585
+  #
+  authority_address: ""
+
   # readyset.queryCachingMode -- (optional) tells ReadySet how it should cache queries
   # Accepted values: explicit (default), async, in-request-path
   queryCachingMode: explicit
@@ -140,7 +149,9 @@ kubernetes:
 # on how to configure consul.
 consul:
 
-  # consul.enabled -- Whether to enable starting/running a consul cluster within this Kubernetes cluster
+  # consul.enabled -- Set this to true to deploy a Consul cluster using the official Helm Chart as a dependency of Readyset Helm Chart
+  #
+  # If you currently have a Consul cluster that you would like to use, set this as false and configure readyset.authority_address
   enabled: true
 
   # consul.server -- Options for the consul server
