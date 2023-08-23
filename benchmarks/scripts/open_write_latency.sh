@@ -24,7 +24,7 @@ done
 cargo build --release --bin benchmarks
 for num_indices in "${indices[@]}"; do
     echo "=== Benchmarking ${num_indices} indices ==="
-    heaptrack target/release/benchmarks \
+    target/release/benchmarks \
         --local \
         --database-type "${DATABASE_TYPE:-mysql}" \
         --graph \
