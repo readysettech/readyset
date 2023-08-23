@@ -196,3 +196,16 @@ readyset.queryCachingMode -- Ensure the value is one of the three currently acce
     {{ default "default" .Values.serviceAccount.name }}
 {{- end -}}
 {{- end -}}
+
+{{- define "readyset.authority_address" -}}
+{{- $endpointIncludesPort := mustRegexFind ".*:[0-9]+$" .Values.readyset.authority_address }}
+{{- if .Values.consul.enabled -}}
+{{ printf "%s-%s:8500" .Chart.Name "consul-server" | trunc 63 }}
+{{- else if and .Values.readyset.authority_address $endpointIncludesPort -}}
+{{ printf "%s" .Values.readyset.authority_address }}
+{{- else if .Values.readyset.authority_address -}}
+{{ printf "%s:8500" .Values.readyset.authority_address }}
+{{- else -}}
+{{ fail "You must configure readyset.authority_address if consul.enabled is false" }}
+{{- end -}}
+{{- end -}}

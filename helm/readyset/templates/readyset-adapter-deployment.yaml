@@ -102,7 +102,7 @@ spec:
             - name: DEPLOYMENT_ENV
               value: "helm"
             - name: AUTHORITY_ADDRESS
-              value: "readyset-consul-server:8500"
+              value: "{{ ( include "readyset.authority_address" . ) }}"
             - name: AUTHORITY
               value: "consul"
             - name: METRICS_ADDRESS
