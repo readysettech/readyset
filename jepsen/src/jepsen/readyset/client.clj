@@ -6,10 +6,11 @@
    [dom-top.core :refer [with-retry]]
    [honey.sql :as sql]
    [jepsen.client :as client]
+   [jepsen.generator :as gen]
+   [jepsen.readyset.memory-db :as memory-db]
    [jepsen.readyset.nodes :as nodes]
    [next.jdbc :as jdbc]
-   [slingshot.slingshot :refer [throw+ try+]]
-   [jepsen.generator :as gen])
+   [slingshot.slingshot :refer [throw+ try+]])
   (:import
    (org.postgresql.util PSQLException)))
 
@@ -118,29 +119,27 @@
      true (str " FROM"))])
 (sql/register-clause! :create-cache #'format-create-cache :select)
 
-(defrecord Inserts [gen-insert rows]
+(defrecord Writes [gen-write rows]
   gen/Generator
   (op [this _test ctx]
-    (when-let [insert (gen-insert rows)]
-      [(gen/fill-in-op {:type :invoke :f :insert :value insert} ctx) this]))
+    (when-let [write (gen-write rows)]
+      [(gen/fill-in-op {:type :invoke :f :write :value write} ctx) this]))
 
   (update [this _test _ctx {:keys [type f value]}]
-    (case [type f]
-      [:ok :insert]
-      (let [{:keys [table rows]} value]
-        (update-in this [:rows table] into rows))
-
+    (if (= [type f] [:ok :write])
+      (memory-db/apply-write this value)
       this)))
 
-(defn inserts
-  "Given a function to generate insert statements, returns a `Generator` for
-  generating insert ops for those statements
+(defn writes
+  "Given a function to generate write statements, returns a `Generator` for
+  generating write ops for those statements
 
-  The `gen-insert` function will be passed a map from table names, to a list of
+  The `gen-write` function will be passed a map from table names, to a list of
   rows known to exist in that table. It should return a `honey.sql`-compatible
-  `:insert-into` map, or `nil` if no more inserts should be generated"
-  [gen-insert]
-  (map->Inserts {:gen-insert gen-insert :rows {}}))
+  `:insert-into` or `:delete-from` map, or `nil` if no more inserts should be
+  generated"
+  [gen-write]
+  (map->Writes {:gen-write gen-write :rows {}}))
 
 (defn query [q]
   {:type :invoke, :f :query, :value q})
@@ -198,18 +197,23 @@
                     :query-id value
                     :known-queries (into #{} (keys queries))}))
 
-         :insert
+         :write
          (maybe-retry-once
-          #(assoc op
-                  :type :ok
-                  :value
-                  {:table (:insert-into value)
-                   :rows
-                   (jdbc/execute!
-                    conn
-                    (-> value
-                        (assoc :returning [:*])
-                        (sql/format {:dialect :ansi}))) })))
+          (fn []
+            (let [res (jdbc/execute!
+                       conn
+                       (cond-> value
+                         (contains? value :insert-into)
+                         (assoc :returning [:*])
+                         true
+                         (sql/format {:dialect :ansi})))]
+              (cond-> op
+                true
+                (assoc :type :ok)
+                (contains? value :insert-into)
+                (->
+                 (update :value dissoc :columns)
+                 (assoc-in [:value :values] res)))))))
 
        (catch PSQLException e
          (assoc op :type :fail :message (ex-message e))))))
