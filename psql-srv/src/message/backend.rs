@@ -139,7 +139,6 @@ pub struct FieldDescription {
 
 #[derive(Debug)]
 pub enum PsqlSrvRow {
-    #[allow(unused)]
     RawRow(Row),
     ValueVec(Vec<PsqlValue>),
 }

@@ -102,22 +102,7 @@ impl Stream for Resultset {
                     },
                 };
 
-                row.map(|r| {
-                    r.and_then(|r| {
-                        (0..r.columns().len())
-                            .map(|i| {
-                                r.try_get(i).map_err(|e| {
-                                    psql_srv::Error::InternalError(format!(
-                                        "could not retrieve expected column index {} from row \
-                                         while parsing psql result: {}",
-                                        i, e
-                                    ))
-                                })
-                            })
-                            .collect()
-                    })
-                    .map(PsqlSrvRow::ValueVec)
-                })
+                row.map(|res| res.map(PsqlSrvRow::RawRow))
             }
         };
 
