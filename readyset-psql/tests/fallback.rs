@@ -680,7 +680,6 @@ async fn deletion_propagation_after_alter() {
     shutdown_tx.shutdown().await;
 }
 
-#[ignore = "ENG-3041 Test reproduces write drop due to known bug"]
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn write_propagation_after_alter_and_drop() {
