@@ -156,6 +156,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
     type StatementMeta = StatementMeta;
     type QueryResult<'a> = QueryResult;
     type PrepareData<'a> = &'a [Type];
+    type ExecMeta<'a> = ();
     type Error = Error;
     const DEFAULT_DB_VERSION: &'static str = "13.4 (ReadySet)";
 
@@ -296,6 +297,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         &'a mut self,
         statement_id: u32,
         params: &[DfValue],
+        _exec_meta: Self::ExecMeta<'_>,
     ) -> Result<Self::QueryResult<'a>, Error> {
         let statement = self
             .prepared_statements

@@ -234,6 +234,7 @@ impl UpstreamDatabase for MySqlUpstream {
     type QueryResult<'a> = QueryResult<'a>;
     type StatementMeta = StatementMeta;
     type PrepareData<'a> = ();
+    type ExecMeta<'a> = ();
     type Error = Error;
     const DEFAULT_DB_VERSION: &'static str = "8.0.26-readyset\0";
 
@@ -315,6 +316,7 @@ impl UpstreamDatabase for MySqlUpstream {
         &'a mut self,
         id: u32,
         params: &[DfValue],
+        _exec_meta: Self::ExecMeta<'_>,
     ) -> Result<Self::QueryResult<'a>, Error> {
         let params = dt_to_value_params(params)?;
         let result = self
