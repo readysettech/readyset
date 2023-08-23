@@ -1211,6 +1211,7 @@ where
         upstream: &'a mut Option<DB>,
         prep: &UpstreamPrepare<DB>,
         params: &[DfValue],
+        exec_meta: DB::ExecMeta<'_>,
         event: &mut QueryExecutionEvent,
         is_fallback: bool,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
@@ -1227,7 +1228,7 @@ where
         let _t = event.start_upstream_timer();
 
         upstream
-            .execute(prep.statement_id, params)
+            .execute(prep.statement_id, params, exec_meta)
             .await
             .map(|r| QueryResult::Upstream(r))
     }
@@ -1240,6 +1241,7 @@ where
         noria_prep: &noria_connector::PrepareResult,
         upstream_prep: &UpstreamPrepare<DB>,
         params: &[DfValue],
+        exec_meta: DB::ExecMeta<'_>,
         ex_info: Option<&mut ExecutionInfo>,
         ticket: Option<Timestamp>,
         event: &mut QueryExecutionEvent,
@@ -1271,7 +1273,8 @@ where
                           "Error received from noria, sending query to fallback");
                 }
 
-                Self::execute_upstream(upstream, upstream_prep, params, event, true).await
+                Self::execute_upstream(upstream, upstream_prep, params, exec_meta, event, true)
+                    .await
             }
         }
     }
@@ -1379,6 +1382,7 @@ where
         &mut self,
         id: u32,
         params: &[DfValue],
+        exec_meta: DB::ExecMeta<'_>,
     ) -> Result<QueryResult<'_, DB>, DB::Error> {
         self.last_query = None;
         let cached_statement = self
@@ -1490,10 +1494,10 @@ where
                         .query_status_cache
                         .inlined_cache_miss(cached_statement.as_view_request()?, params.to_vec())
                 }
-                Self::execute_upstream(upstream, prep, params, &mut event, false).await
+                Self::execute_upstream(upstream, prep, params, exec_meta, &mut event, false).await
             }
             PrepareResult::Both(.., uprep) if should_fallback => {
-                Self::execute_upstream(upstream, uprep, params, &mut event, false).await
+                Self::execute_upstream(upstream, uprep, params, exec_meta, &mut event, false).await
             }
             PrepareResult::Both(nprep, uprep) => {
                 if cached_statement.execution_info.is_none() {
@@ -1508,6 +1512,7 @@ where
                     nprep,
                     uprep,
                     params,
+                    exec_meta,
                     cached_statement.execution_info.as_mut(),
                     ticket,
                     &mut event,

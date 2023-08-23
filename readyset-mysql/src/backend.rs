@@ -614,7 +614,7 @@ where
             info!(target: "client_statement", "Execute: {{id: {id}, params: {:?}}}", value_params)
         }
 
-        match self.execute(id, &value_params).await {
+        match self.execute(id, &value_params, ()).await {
             Ok(QueryResult::Noria(noria_connector::QueryResult::Select { mut rows, schema })) => {
                 let CachedSchema {
                     mysql_schema,

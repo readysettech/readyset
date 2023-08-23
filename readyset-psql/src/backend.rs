@@ -93,7 +93,7 @@ impl Backend {
     }
 
     async fn execute(&mut self, id: u32, params: &[DfValue]) -> Result<QueryResponse<'_>, Error> {
-        Ok(QueryResponse(self.inner.execute(id, params).await?))
+        Ok(QueryResponse(self.inner.execute(id, params, ()).await?))
     }
 }
 

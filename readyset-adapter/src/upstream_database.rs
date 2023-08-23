@@ -73,6 +73,11 @@ pub trait UpstreamDatabase: Sized + Send {
     /// [`prepare`](UpstreamDatabase::prepaare)
     type PrepareData<'a>: Default + Send;
 
+    /// Metadata passed to [`execute`] by the protocol shim
+    ///
+    /// [`execute`](UpstreamDatabase::execute)
+    type ExecMeta<'a>;
+
     /// Errors that can be returned from operations on this database
     ///
     /// This type, which must have at least one enum variant that includes a
@@ -129,14 +134,19 @@ pub trait UpstreamDatabase: Sized + Send {
 
     /// Execute a statement that was prepared earlier with ['on_prepare'], with the given params
     ///
+    /// The `exec_meta` argument is database-specific, and is generally passed through by the
+    /// caller of [`Backend::execute`] if that call ends up being passed to the upstream.
+    ///
     /// If 'on_execute' is called with a 'statement_id' that was not previously passed to
     /// 'on_prepare', this method should return
     /// ['Err(Error::ReadySet(ReadySetError::PreparedStatementMissing))'
     /// ](readyset_client::ReadySetError:: PreparedStatementMissing)
+    /// [`Backend::execute`](readyset_client::Backend::execute)
     async fn execute<'a>(
         &'a mut self,
         statement_id: u32,
         params: &[DfValue],
+        exec_meta: Self::ExecMeta<'_>,
     ) -> Result<Self::QueryResult<'a>, Self::Error>;
 
     /// Execute a raw, un-prepared query
