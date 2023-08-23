@@ -92,8 +92,17 @@ impl Backend {
         ))
     }
 
-    async fn execute(&mut self, id: u32, params: &[DfValue]) -> Result<QueryResponse<'_>, Error> {
-        Ok(QueryResponse(self.inner.execute(id, params, ()).await?))
+    async fn execute(
+        &mut self,
+        id: u32,
+        params: &[DfValue],
+        result_transfer_formats: &[TransferFormat],
+    ) -> Result<QueryResponse<'_>, Error> {
+        Ok(QueryResponse(
+            self.inner
+                .execute(id, params, result_transfer_formats)
+                .await?,
+        ))
     }
 }
 
@@ -141,13 +150,15 @@ impl ps::PsqlBackend for Backend {
         &mut self,
         statement_id: u32,
         params: &[PsqlValue],
-        _result_transfer_formats: &[TransferFormat],
+        result_transfer_formats: &[TransferFormat],
     ) -> Result<ps::QueryResponse<Resultset>, ps::Error> {
         let params = params
             .iter()
             .map(|p| ParamRef(p).try_into())
             .collect::<Result<Vec<DfValue>, ps::Error>>()?;
-        self.execute(statement_id, &params).await?.try_into()
+        self.execute(statement_id, &params, result_transfer_formats)
+            .await?
+            .try_into()
     }
 
     async fn on_close(&mut self, _statement_id: u32) -> Result<(), ps::Error> {

@@ -13,7 +13,7 @@ use pgsql::config::Host;
 use pgsql::types::Type;
 use pgsql::{GenericResult, ResultStream, Row, SimpleQueryMessage};
 use postgres_types::Kind;
-use psql_srv::Column;
+use psql_srv::{Column, TransferFormat};
 use readyset_adapter::upstream_database::UpstreamDestination;
 use readyset_adapter::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
 use readyset_data::DfValue;
@@ -156,7 +156,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
     type StatementMeta = StatementMeta;
     type QueryResult<'a> = QueryResult;
     type PrepareData<'a> = &'a [Type];
-    type ExecMeta<'a> = ();
+    type ExecMeta<'a> = &'a [TransferFormat];
     type Error = Error;
     const DEFAULT_DB_VERSION: &'static str = "13.4 (ReadySet)";
 
@@ -297,7 +297,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         &'a mut self,
         statement_id: u32,
         params: &[DfValue],
-        _exec_meta: Self::ExecMeta<'_>,
+        exec_meta: &'_ [TransferFormat],
     ) -> Result<Self::QueryResult<'a>, Error> {
         let statement = self
             .prepared_statements
@@ -309,7 +309,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
                 .generic_query_raw(
                     statement,
                     &convert_params_for_upstream(params, statement.params())?,
-                    Some(1), // Hardcode to binary for now
+                    exec_meta.iter().map(|tf| (*tf).into()),
                 )
                 .await?,
         );
