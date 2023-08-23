@@ -76,10 +76,30 @@ pub struct UpstreamConfig {
     #[serde(default = "default_replicator_restart_timeout")]
     pub replicator_restart_timeout: Duration,
 
+    /// By default, ReadySet attempts to snapshot and replicate all tables in the database
+    /// specified in --upstream-db-url. However, if the queries you want to cache in ReadySet
+    /// access only a subset of tables in the database, you can use this option to limit the tables
+    /// ReadySet snapshots and replicates. Filtering out tables that will not be used in caches
+    /// will speed up the snapshotting process.
+    ///
+    /// This option accepts a comma-separated list of `<schema>.<table>` (specific table in a
+    /// schema) or `<schema>.*` (all tables in a schema) for Postgres and `<database>.<table>`
+    /// for MySQL. Only tables specified in the list will be eligible to be used by caches.
     #[clap(long, env = "REPLICATION_TABLES")]
     #[serde(default)]
     pub replication_tables: Option<RedactedString>,
 
+    /// By default, ReadySet attempts to snapshot and replicate all tables in the database
+    /// specified in --upstream-db-url. However, if you know the queries you want to cache in
+    /// ReadySet won't access a subset of tables in the database, you can use this option to
+    /// limit the tables ReadySet snapshots and replicates. Filtering out tables that will not be
+    /// used in caches will speed up the snapshotting process.
+    ///
+    /// This option accepts a comma-separated list of `<schema>.<table>` (specific table in a
+    /// schema) or `<schema>.*` (all tables in a schema) for Postgres and `<database>.<table>`
+    /// for MySQL.
+    ///
+    /// Tables specified in the list will not be eligible to be used by caches.
     #[clap(long, env = "REPLICATION_TABLES_IGNORE")]
     #[serde(default)]
     pub replication_tables_ignore: Option<RedactedString>,
