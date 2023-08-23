@@ -210,8 +210,9 @@
                        (into {})))})
       :generator (gen/phases
                   (->>
-                   (gen/any (rs/writes (:gen-write workload))
-                            (repeat (rs/query :votes)))
+                   (gen/any
+                    (rs/with-rows (:gen-write workload))
+                    (repeat (rs/query :votes)))
                    (gen/stagger (/ (:rate opts)))
                    (gen/nemesis
                     (->> (gen/mix

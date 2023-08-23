@@ -130,16 +130,27 @@
       (memory-db/apply-write this value)
       this)))
 
-(defn writes
-  "Given a function to generate write statements, returns a `Generator` for
-  generating write ops for those statements
+(defrecord WithRows [gen rows]
+  gen/Generator
+  (op [this test ctx]
+    (when-let [[op gen'] (gen/op gen test (assoc ctx :rows rows))]
+      [op (assoc this :gen gen')]))
 
-  The `gen-write` function will be passed a map from table names, to a list of
-  rows known to exist in that table. It should return a `honey.sql`-compatible
-  `:insert-into` or `:delete-from` map, or `nil` if no more inserts should be
-  generated"
-  [gen-write]
-  (map->Writes {:gen-write gen-write :rows {}}))
+  (update [this test ctx {:keys [type f value] :as op}]
+    (let [this' (if (= [type f] [:ok :write])
+                  (memory-db/apply-write this value)
+                  this)]
+      (update this' :gen gen/update test ctx op))))
+
+(defn with-rows
+  "Wraps a generator such that the passed `context` will include a `:rows` key,
+  which will contain a map from table names (as keywords) to a list of rows that
+  have been inserted into that table so far"
+  [gen]
+  (map->WithRows {:gen gen, :rows {}}))
+
+(defn write [q]
+  {:type :invoke, :f :write, :value q})
 
 (defn query [q]
   {:type :invoke, :f :query, :value q})
