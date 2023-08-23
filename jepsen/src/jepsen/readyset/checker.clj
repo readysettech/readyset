@@ -3,7 +3,8 @@
    [clojure.core.match :refer [match]]
    [clojure.set :as set]
    [jepsen.checker :as checker]
-   [jepsen.readyset.nodes :as nodes]))
+   [jepsen.readyset.nodes :as nodes]
+   [jepsen.readyset.memory-db :as memory-db]))
 
 (defn liveness
   "All queries should succeed if at least one adapter is alive"
@@ -50,8 +51,7 @@
   known to exist in those tables, and returns the expected results for that
   query
 
-  * `{:type :ok, :f :insert, :value {:table table :rows rows}}` ops are inserted
-    into the table
+  * `{:type :ok, :f :value, :value query}` ops are applied to the db
   * `{:f :query, :value {:query-id query-id :results results}}` ops must return
     the results for the query as of *some point* in the past
   * `{:f :consistent-query, :value {:query-id query-id :results results}}` ops
@@ -64,9 +64,8 @@
         (fn [{:keys [rows past-results] :as state}
              {:keys [index type f value]}]
           (case [type f]
-            [:ok :insert]
-            (let [{:keys [table] inserted-rows :rows} value
-                  new-rows (update rows table into inserted-rows)]
+            [:ok :write]
+            (let [new-rows (:rows (memory-db/apply-write {:rows rows} value))]
               (-> state
                   (assoc :rows new-rows)
                   (update
@@ -127,9 +126,9 @@
   (def rows
     (->> t
          :history
-         (filter (comp #{:insert} :f))
+         (filter (comp #{:write} :f))
          (filter (comp #{:ok} :type))
-         (map :value)
+         (map :values)
          (group-by :table)
          (map (fn [[k ops]] [k (mapcat :rows ops)]))
          (into {})))
