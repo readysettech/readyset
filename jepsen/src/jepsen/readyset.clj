@@ -210,9 +210,12 @@
                        (into {})))})
       :generator (gen/phases
                   (->>
-                   (gen/any
+                   (apply
+                    gen/any
                     (rs/with-rows (:gen-write workload))
-                    (repeat (rs/query :votes)))
+                    (for [[query-id query] (:queries workload)]
+                      (repeat
+                       (workloads/gen-query query-id query))))
                    (gen/stagger (/ (:rate opts)))
                    (gen/nemesis
                     (->> (gen/mix
@@ -236,7 +239,11 @@
 
                   (gen/synchronize
                    (gen/clients
-                    (map rs/consistent-query (keys (:queries workload))))))})))
+                    (->> workload
+                         :queries
+                         (filter #(not (contains? (val %) :gen-params)))
+                         keys
+                         (map rs/consistent-query)))))})))
 
 (def opt-spec
   (let [validate-pos-number [#(and (number? %) (pos? %))
