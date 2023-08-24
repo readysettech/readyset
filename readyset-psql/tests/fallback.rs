@@ -1460,6 +1460,9 @@ async fn pgsql_test_replication_after_resnapshot() {
         .build::<PostgreSQLAdapter>()
         .await;
     let client = connect(config).await;
+    let mut upstream_config = upstream_config();
+    upstream_config.dbname("noria");
+    let upstream = connect(upstream_config).await;
 
     client
         .simple_query("DROP TABLE IF EXISTS cats")
@@ -1470,16 +1473,13 @@ async fn pgsql_test_replication_after_resnapshot() {
         .await
         .unwrap();
 
-    // Wait to make sure the table is replicated
-    tokio::time::sleep(Duration::from_secs(3)).await;
-
     // This failpoint is placed after we've created the replication slot and before we've started
     // replication, which means any data we insert into the upstream database while the replicator
     // is paused there will not be present in our initial snapshot
     handle
         .set_failpoint(
             readyset_client::failpoints::POSTGRES_SNAPSHOT_START,
-            "pause",
+            "sleep(5000)",
         )
         .await;
 
@@ -1489,10 +1489,10 @@ async fn pgsql_test_replication_after_resnapshot() {
         .await
         .unwrap();
 
-    // Wait for the replicator to reach the failpoint
-    tokio::time::sleep(Duration::from_secs(3)).await;
+    // Sleep until the resnapshot has started
+    tokio::time::sleep(Duration::from_secs(5)).await;
 
-    // Since the replicator has reached the failpoint, we know a replication slot has been created,
+    // The replicator is sleeping at the failpoint, so we know a replication slot has been created,
     // which means any data added here won't be reflected in the re-snapshot
     for i in 0..10 {
         client
@@ -1500,25 +1500,6 @@ async fn pgsql_test_replication_after_resnapshot() {
             .await
             .unwrap();
     }
-
-    // Unpause the replicator to allow it to finish snapshotting and catch up with the data we added
-    handle
-        .set_failpoint(readyset_client::failpoints::POSTGRES_SNAPSHOT_START, "off")
-        .await;
-
-    tokio::time::sleep(Duration::from_secs(3)).await;
-
-    let cached_results: Vec<DfValue> = client
-        .query("SELECT * FROM cats", &[])
-        .await
-        .unwrap()
-        .into_iter()
-        .map(|row| row.get::<_, DfValue>(0))
-        .collect();
-
-    let mut upstream_config = upstream_config();
-    upstream_config.dbname("noria");
-    let upstream = connect(upstream_config.clone()).await;
 
     let upstream_results: Vec<DfValue> = upstream
         .query("SELECT * FROM cats", &[])
@@ -1528,7 +1509,20 @@ async fn pgsql_test_replication_after_resnapshot() {
         .map(|row| row.get::<_, DfValue>(0))
         .collect();
 
-    assert_eq!(cached_results, upstream_results);
+    eventually!(run_test: {
+        let result = client
+            .query("SELECT * FROM cats", &[])
+            .await;
+        AssertUnwindSafe(|| result)
+    }, then_assert: |result| {
+        let cached_results: Vec<DfValue> = result()
+            .unwrap()
+            .into_iter()
+            .map(|row| row.get::<_, DfValue>(0))
+            .collect();
+
+        assert_eq!(upstream_results, cached_results);
+    });
 
     shutdown_tx.shutdown().await;
 }
