@@ -4,7 +4,8 @@
    [clojure.set :as set]
    [jepsen.checker :as checker]
    [jepsen.readyset.nodes :as nodes]
-   [jepsen.readyset.memory-db :as memory-db]))
+   [jepsen.readyset.memory-db :as memory-db]
+   [jepsen.readyset.workloads :as workloads]))
 
 (defn liveness
   "All queries should succeed if at least one adapter is alive"
@@ -49,11 +50,12 @@
 
   The argument is a map where the key is query-id, and the value is a function
   which takes a map from tables to rows known to exist in those tables, and
-  returns the expected results for that query
+  returns the expected results for that query. For parameterized queries,
+  expected results can be a *function* from params to expected results
 
   * `{:type :ok, :f :value, :value query}` ops are applied to the db
-  * `{:f :query, :value {:query-id query-id :results results}}` ops must return
-    the results for the query as of *some point* in the past
+  * `{:f :query, :value {:query-id query-id :params params :results results}}`
+    ops must return the results for the query as of *some point* in the past
   * `{:f :consistent-query, :value {:query-id query-id :results results}}` ops
     must return the *current* results for the query"
   [expected-query-results]
@@ -73,23 +75,35 @@
                    (fn [results]
                      (reduce-kv
                       (fn [results query-id compute-results]
-                        (update results
-                                query-id
-                                conj
-                                (compute-results new-rows)))
+                        (let [expected (compute-results new-rows)]
+                          (update-in results
+                                     [query-id
+                                      (if (fn? expected)
+                                        :expected-results/fns
+                                        :expected-results/set)]
+                                     conj
+                                     expected)))
                       results
                       expected-query-results)))))
 
             [:ok :query]
-            (let [{:keys [query-id results]} value
-                  past-results (get past-results query-id)]
-              (if (contains? past-results results)
+            (let [{:keys [query-id params results]} value
+
+                  {:expected-results/keys [set fns] :as expected}
+                  (get past-results query-id)
+
+                  in-set? (contains? set results)
+                  fn-results (into #{} (map #(% params)) fns)]
+              (if (or in-set? (some #{results} fn-results))
                 state
                 (reduced
                  (assoc state
                         :valid? false
                         :failed-at index
-                        :expected past-results
+                        :query-id query-id
+                        :expected (assoc expected
+                                         :expected-results/fns
+                                         fn-results)
                         :got results))))
 
             state))
@@ -97,7 +111,7 @@
          :rows {}
          :past-results
          (into {}
-               (map (fn [[k _]] [k #{[]}]))
+               (map (fn [[k _]] [k {:expected-results/set #{[]}}]))
                expected-query-results)}
         history)
        ;; Don't include these keys in the final map; they get big and are
@@ -123,42 +137,16 @@
          (filter (comp #{:ok} :type))
          first))
 
-  (def rows
-    (->> t
-         :history
-         (filter (comp #{:write} :f))
-         (filter (comp #{:ok} :type))
-         (map :values)
-         (group-by :table)
-         (map (fn [[k ops]] [k (mapcat :rows ops)]))
-         (into {})))
-
-  (require '[jepsen.readyset.workloads :as workloads])
-  (def compute-votes
-    (get-in workloads/votes [:queries :votes :expected-results]))
-
-  (compute-votes rows)
-
-  (def final-consistent-result
-    (->> t
-         :history
-         (filter (comp #{:consistent-query} :f))
-         (filter (comp #{:ok} :type))
-         first
-         :value
-         :results))
-
-  (assert
-   (= final-consistent-result (compute-votes rows)))
-
-  (assert
-   (:valid?
-    (checker/check
-     (commutative-eventual-consistency
-      {:votes compute-votes})
-     t
-     (:history t)
-     {})))
+  (def res (checker/check
+            (commutative-eventual-consistency
+             (->> workloads/votes
+                  :queries
+                  (map (fn [[k v]] [k (:expected-results v)]))
+                  (into {})))
+            t
+            (:history t)
+            {}))
+  (assert (:valid? res))
 
   ;; looking at failures
 

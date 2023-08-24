@@ -1,8 +1,10 @@
 (ns jepsen.readyset.client
   "Utilities for interacting with a ReadySet cluster"
   (:require
+   [clojure.core.match :refer [match]]
    [clojure.set :as set]
    [clojure.tools.logging :refer [info warn]]
+   [clojure.walk :as walk]
    [dom-top.core :refer [with-retry]]
    [honey.sql :as sql]
    [jepsen.client :as client]
@@ -152,11 +154,28 @@
 (defn write [q]
   {:type :invoke, :f :write, :value q})
 
-(defn query [q]
-  {:type :invoke, :f :query, :value q})
+(defn query
+  ([query-id] {:type :invoke, :f :query, :value {:query-id query-id}})
+  ([query-id params]
+   (when params
+     {:type :invoke, :f :query, :value {:query-id query-id :params params}})))
 
-(defn consistent-query [q]
-  {:type :invoke, :f :consistent-query, :value q})
+(defn consistent-query
+  ([query-id]
+   {:type :invoke, :f :consistent-query, :value {:query-id query-id}})
+  ([query-id params]
+   {:type :invoke
+    :f :consistent-query
+    :value {:query-id query-id :params params}}))
+
+(defn- with-inline-params [q]
+  (let [param-num (atom 0)]
+    (walk/prewalk
+     (fn [x]
+       (match x
+         [:param _] [:raw (str "$" (swap! param-num inc))]
+         :else x))
+     q)))
 
 (defrecord Client [conn
                    tables
@@ -174,9 +193,10 @@
 
       (doseq [query (vals queries)]
         (with-retry [attempts 5]
-          (jdbc/execute! conn (sql/format
-                               (assoc query :create-cache :_)
-                               {:dialect :ansi}))
+          (jdbc/execute! conn (-> query
+                                  with-inline-params
+                                  (assoc :create-cache :_)
+                                  (sql/format {:dialect :ansi})))
           (catch PSQLException e
             (if (pos? attempts)
               (do
@@ -196,17 +216,21 @@
       (try+
        (case f
          (:query :consistent-query)
-         (if-let [q (get queries value)]
-           (maybe-retry-once
-            #(assoc op
-                    :type :ok
-                    :value
-                    {:query-id value
-                     :results
-                     (jdbc/execute! conn (sql/format q {:dialect :ansi}))}))
-           (throw+ {:error :unknown-query
-                    :query-id value
-                    :known-queries (into #{} (keys queries))}))
+         (let [{:keys [query-id params]} value]
+           (if-let [q (get queries query-id)]
+             (maybe-retry-once
+              #(assoc op
+                      :type :ok
+                      :value
+                      {:query-id query-id
+                       :params params
+                       :results
+                       (jdbc/execute!
+                        conn
+                        (sql/format q {:dialect :ansi :params params}))}))
+             (throw+ {:error :unknown-query
+                      :query-id value
+                      :known-queries (into #{} (keys queries))})))
 
          :write
          (maybe-retry-once
@@ -249,8 +273,7 @@
     `:create-table` maps, to install in the DB
   * `queries` (required) A map from query ID, which should be a keyword, to
     queries. represented as HoneySQL `:select` maps. The key in this map will be
-    used to execute the query as part of the `query` op. Queries with parameters
-    are not yet supported (TODO)"
+    used to execute the query as part of the `query` op"
   [opts]
   (-> opts
       (select-keys [:retry-queries?
