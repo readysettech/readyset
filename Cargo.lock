@@ -2159,7 +2159,7 @@ dependencies = [
  "httpdate",
  "itoa 0.4.8",
  "pin-project-lite",
- "socket2",
+ "socket2 0.4.9",
  "tokio",
  "tower-service",
  "tracing",
@@ -2525,9 +2525,9 @@ dependencies = [
 
 [[package]]
 name = "libc"
-version = "0.2.141"
+version = "0.2.147"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3304a64d199bb964be99741b7a14d26972741915b3649639149b2479bb46f4b5"
+checksum = "b4668fb0ea861c1df094127ac5f1da3409a82116a4ba74fca2e58ef927159bb3"
 
 [[package]]
 name = "libloading"
@@ -2848,14 +2848,14 @@ dependencies = [
 
 [[package]]
 name = "mio"
-version = "0.8.5"
+version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e5d732bc30207a6423068df043e3d02e0735b155ad7ce1a6f76fe2baa5b158de"
+checksum = "927a765cd3fc26206e66b296465fa9d3e5ab003e651c1b3c060e7956d96b19d2"
 dependencies = [
  "libc",
  "log",
  "wasi 0.11.0+wasi-snapshot-preview1",
- "windows-sys 0.42.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -2903,7 +2903,7 @@ dependencies = [
  "percent-encoding",
  "serde",
  "serde_json",
- "socket2",
+ "socket2 0.4.9",
  "twox-hash",
  "url",
 ]
@@ -2961,7 +2961,7 @@ dependencies = [
  "futures-util",
  "lazy_static",
  "lru 0.10.0",
- "mio 0.8.5",
+ "mio 0.8.8",
  "mysql_common",
  "native-tls",
  "once_cell",
@@ -2970,7 +2970,7 @@ dependencies = [
  "pin-project",
  "serde",
  "serde_json",
- "socket2",
+ "socket2 0.4.9",
  "thiserror",
  "tokio",
  "tokio-native-tls",
@@ -3616,9 +3616,9 @@ dependencies = [
 
 [[package]]
 name = "pin-project-lite"
-version = "0.2.9"
+version = "0.2.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e0a7ae3ac2f1173085d398531c705756c94a4c56843785df85a60c1a0afac116"
+checksum = "12cc1b0bf1727a77a54b6654e7b5f1af8604923edc8b81885f8ec92f9e3f0a05"
 
 [[package]]
 name = "pin-utils"
@@ -3695,7 +3695,7 @@ dependencies = [
 [[package]]
 name = "postgres"
 version = "0.19.4"
-source = "git+https://github.com/readysettech/rust-postgres.git#530ae67367c8286bb78648772dc265a873e14761"
+source = "git+https://github.com/readysettech/rust-postgres.git#13206f685bb47265964cacfa0986c4e47a852aa1"
 dependencies = [
  "bytes",
  "fallible-iterator",
@@ -3708,7 +3708,7 @@ dependencies = [
 [[package]]
 name = "postgres-derive"
 version = "0.4.3"
-source = "git+https://github.com/readysettech/rust-postgres.git#530ae67367c8286bb78648772dc265a873e14761"
+source = "git+https://github.com/readysettech/rust-postgres.git#13206f685bb47265964cacfa0986c4e47a852aa1"
 dependencies = [
  "proc-macro2 1.0.63",
  "quote 1.0.26",
@@ -3718,7 +3718,7 @@ dependencies = [
 [[package]]
 name = "postgres-native-tls"
 version = "0.5.0"
-source = "git+https://github.com/readysettech/rust-postgres.git#530ae67367c8286bb78648772dc265a873e14761"
+source = "git+https://github.com/readysettech/rust-postgres.git#13206f685bb47265964cacfa0986c4e47a852aa1"
 dependencies = [
  "native-tls",
  "tokio",
@@ -3729,7 +3729,7 @@ dependencies = [
 [[package]]
 name = "postgres-protocol"
 version = "0.6.4"
-source = "git+https://github.com/readysettech/rust-postgres.git#530ae67367c8286bb78648772dc265a873e14761"
+source = "git+https://github.com/readysettech/rust-postgres.git#13206f685bb47265964cacfa0986c4e47a852aa1"
 dependencies = [
  "base64 0.20.0",
  "byteorder",
@@ -3746,7 +3746,7 @@ dependencies = [
 [[package]]
 name = "postgres-types"
 version = "0.2.4"
-source = "git+https://github.com/readysettech/rust-postgres.git#530ae67367c8286bb78648772dc265a873e14761"
+source = "git+https://github.com/readysettech/rust-postgres.git#13206f685bb47265964cacfa0986c4e47a852aa1"
 dependencies = [
  "bit-vec",
  "bytes",
@@ -4424,7 +4424,7 @@ dependencies = [
  "serial_test",
  "slab",
  "smallvec",
- "socket2",
+ "socket2 0.4.9",
  "streaming-iterator",
  "tempfile",
  "test-strategy",
@@ -5738,6 +5738,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "socket2"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2538b18701741680e0322a2302176d3253a35388e2e62f172f64f4f16605f877"
+dependencies = [
+ "libc",
+ "windows-sys 0.48.0",
+]
+
+[[package]]
 name = "speedy"
 version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6237,19 +6247,19 @@ checksum = "cda74da7e1a664f795bb1f8a87ec406fb89a02522cf6e50620d016add6dbbf5c"
 
 [[package]]
 name = "tokio"
-version = "1.28.1"
+version = "1.32.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0aa32867d44e6f2ce3385e89dceb990188b8bb0fb25b0cf576647a6f98ac5105"
+checksum = "17ed6077ed6cd6c74735e21f37eb16dc3935f96878b1fe961074089cc80893f9"
 dependencies = [
- "autocfg",
+ "backtrace",
  "bytes",
  "libc",
- "mio 0.8.5",
+ "mio 0.8.8",
  "num_cpus",
  "parking_lot 0.12.1",
  "pin-project-lite",
  "signal-hook-registry",
- "socket2",
+ "socket2 0.5.3",
  "tokio-macros",
  "windows-sys 0.48.0",
 ]
@@ -6288,7 +6298,7 @@ dependencies = [
 [[package]]
 name = "tokio-postgres"
 version = "0.7.7"
-source = "git+https://github.com/readysettech/rust-postgres.git#530ae67367c8286bb78648772dc265a873e14761"
+source = "git+https://github.com/readysettech/rust-postgres.git#13206f685bb47265964cacfa0986c4e47a852aa1"
 dependencies = [
  "async-trait",
  "byteorder",
@@ -6303,7 +6313,7 @@ dependencies = [
  "pin-project-lite",
  "postgres-protocol",
  "postgres-types",
- "socket2",
+ "socket2 0.5.3",
  "tokio",
  "tokio-util 0.7.2",
 ]

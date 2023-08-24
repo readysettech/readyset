@@ -66,7 +66,6 @@ impl Handle {
                 .unwrap()
                 .send(HandleRequest::QueryReadiness(tx))
                 .await
-                .ok()
                 .expect("Controller dropped, failed, or panicked");
 
             if rx.await.unwrap() {
@@ -104,7 +103,6 @@ impl Handle {
                 done_tx: fin_tx,
             })
             .await
-            .ok()
             .expect("Controller dropped, failed, or panicked");
 
         fin_rx.await.unwrap().unwrap();
