@@ -6,7 +6,7 @@ use bit_vec::BitVec;
 use mysql_time::MySqlTime;
 use postgres_types::Kind;
 use readyset_data::{Array, Collation, DfType, DfValue, Dialect};
-use readyset_errors::{unsupported, ReadySetError};
+use readyset_errors::ReadySetError;
 use replication_offset::postgres::{CommitLsn, Lsn};
 use rust_decimal::prelude::FromStr;
 use rust_decimal::Decimal;
@@ -548,7 +548,10 @@ impl wal::TupleData {
                                     PGType::UUID => DfType::Uuid,
                                     PGType::BIT => DfType::DEFAULT_BIT,
                                     PGType::VARBIT => DfType::VarBit(None),
-                                    ref ty => unsupported!("Unsupported type: {ty}"),
+                                    ref ty => {
+                                        trace!("got unsupported type '{}'", ty.to_string());
+                                        return Err(unsupported_type_err());
+                                    }
                                 }));
 
                                 DfValue::from(str.parse::<Array>()?)
