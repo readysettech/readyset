@@ -1,10 +1,10 @@
 <p align="center">
-  <img src="https://user-images.githubusercontent.com/38481289/172237414-023c0b04-c597-44b7-8b14-b5b0c382dc07.png" width='70%'>
+  <img src="https://user-images.githubusercontent.com/38481289/172237414-023c0b04-c597-44b7-8b14-b5b0c382dc07.png" width='40%'>
 </p>
 
 ---
 
-Lightning fast SQL cache _without_ code changes. 
+Lightning fast SQL cache without code changes. 
 
 ## What is ReadySet?
 
