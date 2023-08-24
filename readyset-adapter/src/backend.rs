@@ -1715,11 +1715,17 @@ where
     async fn show_proxied_queries(
         &mut self,
         query_id: &Option<String>,
+        only_supported: bool,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         let mut queries = self.state.query_status_cache.deny_list();
         if let Some(q_id) = query_id {
             queries.retain(|q| &q.id.to_string() == q_id);
         }
+
+        if only_supported {
+            queries.retain(|q| q.status.migration_state.is_supported());
+        }
+
         let select_schema = SelectSchema {
             schema: Cow::Owned(vec![
                 create_dummy_column("query id"),
@@ -1918,7 +1924,7 @@ where
             }
             SqlQuery::Show(ShowStatement::ReadySetVersion) => readyset_version(),
             SqlQuery::Show(ShowStatement::ReadySetTables) => self.noria.table_statuses().await,
-            SqlQuery::Show(ShowStatement::ProxiedQueries(q_id)) => {
+            SqlQuery::Show(ShowStatement::ProxiedQueries(proxied_queries_options)) => {
                 // Log a telemetry event
                 if let Some(ref telemetry_sender) = self.telemetry_sender {
                     if let Err(e) = telemetry_sender.send_event(TelemetryEvent::ShowProxiedQueries)
@@ -1929,7 +1935,11 @@ where
                     trace!("No telemetry sender. not sending metric for SHOW PROXIED QUERIES");
                 }
 
-                self.show_proxied_queries(q_id).await
+                self.show_proxied_queries(
+                    &proxied_queries_options.query_id,
+                    proxied_queries_options.only_supported,
+                )
+                .await
             }
             _ => {
                 drop(_t);

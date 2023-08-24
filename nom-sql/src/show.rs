@@ -19,7 +19,7 @@ pub enum ShowStatement {
     Events,
     Tables(Tables),
     CachedQueries(Option<QueryID>),
-    ProxiedQueries(Option<QueryID>),
+    ProxiedQueries(ProxiedQueriesOptions),
     ReadySetStatus,
     ReadySetMigrationStatus(u64),
     ReadySetVersion,
@@ -40,11 +40,15 @@ impl ShowStatement {
                         write!(f, "CACHES")
                     }
                 }
-                Self::ProxiedQueries(maybe_query_id) => {
-                    if let Some(query_id) = maybe_query_id {
-                        write!(f, "PROXIED QUERIES WHERE query_id = {}", query_id)
+                Self::ProxiedQueries(options) => {
+                    write!(f, "PROXIED ")?;
+                    if options.only_supported {
+                        write!(f, "SUPPORTED ")?;
+                    }
+                    if let Some(query_id) = &options.query_id {
+                        write!(f, "QUERIES WHERE query_id = {}", query_id)
                     } else {
-                        write!(f, "PROXIED QUERIES")
+                        write!(f, "QUERIES")
                     }
                 }
                 Self::ReadySetStatus => write!(f, "READYSET STATUS"),
@@ -79,16 +83,31 @@ fn cached_queries(
     }
 }
 
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+pub struct ProxiedQueriesOptions {
+    pub query_id: Option<String>,
+    pub only_supported: bool,
+}
+
 fn proxied_queries(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ShowStatement> {
     move |i| {
         let (i, _) = tag_no_case("proxied")(i)?;
+        let (i, only_supported) = map(
+            opt(tuple((whitespace1, tag_no_case("supported")))),
+            |only_supported| only_supported.is_some(),
+        )(i)?;
         let (i, _) = whitespace1(i)?;
         let (i, _) = tag_no_case("queries")(i)?;
-        let (i, q_id) = opt(preceded(whitespace1, where_query_id(dialect)))(i)?;
-
-        Ok((i, ShowStatement::ProxiedQueries(q_id)))
+        let (i, query_id) = opt(preceded(whitespace1, where_query_id(dialect)))(i)?;
+        Ok((
+            i,
+            ShowStatement::ProxiedQueries(ProxiedQueriesOptions {
+                query_id,
+                only_supported,
+            }),
+        ))
     }
 }
 
@@ -337,8 +356,42 @@ mod tests {
         let res2 = show(Dialect::MySQL)(LocatedSpan::new(qstring2.as_bytes()))
             .unwrap()
             .1;
-        assert_eq!(res1, ShowStatement::ProxiedQueries(None));
-        assert_eq!(res2, ShowStatement::ProxiedQueries(None));
+        let qstring3 = "SHOW PROXIED SUPPORTED QUERIES";
+        let res3 = show(Dialect::MySQL)(LocatedSpan::new(qstring3.as_bytes()))
+            .unwrap()
+            .1;
+        let qstring4 = "SHOW\tPROXIED\tSUPPORTED\tQUERIES";
+        let res4 = show(Dialect::MySQL)(LocatedSpan::new(qstring4.as_bytes()))
+            .unwrap()
+            .1;
+        assert_eq!(
+            res1,
+            ShowStatement::ProxiedQueries(ProxiedQueriesOptions {
+                query_id: None,
+                only_supported: false
+            })
+        );
+        assert_eq!(
+            res2,
+            ShowStatement::ProxiedQueries(ProxiedQueriesOptions {
+                query_id: None,
+                only_supported: false
+            })
+        );
+        assert_eq!(
+            res3,
+            ShowStatement::ProxiedQueries(ProxiedQueriesOptions {
+                query_id: None,
+                only_supported: true
+            })
+        );
+        assert_eq!(
+            res4,
+            ShowStatement::ProxiedQueries(ProxiedQueriesOptions {
+                query_id: None,
+                only_supported: true
+            })
+        );
     }
 
     #[test]
@@ -347,9 +400,23 @@ mod tests {
         let res1 = show(Dialect::MySQL)(LocatedSpan::new(qstring1.as_bytes()))
             .unwrap()
             .1;
+        let qstring2 = "SHOW PROXIED SUPPORTED QUERIES where query_id = 'test'";
+        let res2 = show(Dialect::MySQL)(LocatedSpan::new(qstring2.as_bytes()))
+            .unwrap()
+            .1;
         assert_eq!(
             res1,
-            ShowStatement::ProxiedQueries(Some("test".to_string()))
+            ShowStatement::ProxiedQueries(ProxiedQueriesOptions {
+                query_id: Some("test".to_string()),
+                only_supported: false
+            })
+        );
+        assert_eq!(
+            res2,
+            ShowStatement::ProxiedQueries(ProxiedQueriesOptions {
+                query_id: Some("test".to_string()),
+                only_supported: true
+            })
         );
     }
 

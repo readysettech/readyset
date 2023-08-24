@@ -366,6 +366,14 @@ impl MigrationState {
             MigrationState::Pending | MigrationState::DryRunSucceeded
         )
     }
+
+    /// Returns true if the query should be considered "supported"
+    pub fn is_supported(&self) -> bool {
+        matches!(
+            self,
+            MigrationState::Dropped | MigrationState::DryRunSucceeded | MigrationState::Successful
+        )
+    }
 }
 
 impl Display for MigrationState {
