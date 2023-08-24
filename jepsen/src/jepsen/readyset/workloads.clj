@@ -7,11 +7,47 @@
     :queries
     {:query-id-one
      {:query ; honeysql :select map
+      :gen-params ; optional, generate params for this query
       :expected-results ; fn from rows map (from table kw to list of rows) to
                           expected results for this query
       :gen-write ; fn from rows map to generated honeysql query maps for writes
      }}``"
-  (:require [jepsen.readyset.client :as rs]))
+  (:require
+   [jepsen.generator :as gen]
+   [jepsen.readyset.client :as rs])
+  (:import
+   (java.util Collections)))
+
+(defn gen-query
+  "Make a jepsen Generator for a query op for a query within a workload"
+  [query-id {:keys [gen-params]}]
+  (if gen-params
+    (rs/with-rows
+      (reify gen/Generator
+        (op [this _ ctx]
+          (let [params (gen-params (:rows ctx))]
+            (if (= params :pending)
+              [:pending this]
+              [(gen/fill-in-op (rs/query query-id params) ctx) this])))
+        (update [this _ _ _] this)))
+    (rs/query query-id)))
+
+(defn compute-votes [rows & [_]]
+  (let [vote-counts
+        (->> rows
+             :votes
+             (group-by :votes/story-id)
+             (map
+              (fn [[story-id rows]]
+                [story-id (count rows)]))
+             (into {}))]
+    (->> rows
+         :stories
+         (map #(select-keys % [:stories/id :stories/title]))
+         (map (fn [{:stories/keys [id] :as story}]
+                (assoc story :vcount (get vote-counts id))))
+         (sort-by :stories/id)
+         (into []))))
 
 (def votes
   {:tables
@@ -35,22 +71,38 @@
         :vote-count]
        [:= :stories.id :vote-count.story-id]]
       :order-by [:stories.id]}
+     :expected-results compute-votes}
+
+    :votes-single
+    {:query
+     {:select [:id :title :vcount]
+      :from [:stories]
+      :left-join
+      [[{:select [:story-id [:%count.* :vcount]]
+         :from [:votes]
+         :group-by :story-id}
+        :vote-count]
+       [:= :stories.id :vote-count.story-id]]
+      :where [:= :stories.id [:param :story-id]]}
+     :gen-params
+     (fn [rows]
+       (if-some [story-ids (->> rows :stories (map :stories/id) seq)]
+         {:story-id (rand-nth story-ids)}
+         :pending))
      :expected-results
-     (fn compute-votes [rows]
-       (let [vote-counts
-             (->> rows
-                  :votes
-                  (group-by :votes/story-id)
-                  (map
-                   (fn [[story-id rows]]
-                     [story-id (count rows)]))
-                  (into {}))]
-         (->> rows
-              :stories
-              (map #(select-keys % [:stories/id :stories/title]))
-              (map (fn [{:stories/keys [id] :as story}]
-                     (assoc story :vcount (get vote-counts id))))
-              (sort-by :stories/id))))}}
+     (fn [rows]
+       (fn compute-votes-single [{:keys [story-id]}]
+         (let [all-votes (vec (compute-votes rows))
+               ;; `compute-votes` sorts, so we can use a binary rather than a
+               ;; linear search to find our row
+               pos (Collections/binarySearch
+                    all-votes
+                    {:stories/id story-id}
+                    (fn [x y] (compare (:stories/id x)
+                                       (:stories/id y))))]
+           (if (neg? pos)
+             []
+             [(get all-votes pos)]))))}}
 
    :gen-write
    (fn [_test {:keys [rows]}]
