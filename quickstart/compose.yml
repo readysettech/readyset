@@ -1,7 +1,7 @@
 name: readyset
 services:
   cache:
-    image: "public.ecr.aws/readyset/readyset:beta-2023-07-26"
+    image: "public.ecr.aws/readyset/readyset:beta-latest"
     platform: linux/amd64
     expose:
       - 6033  # ReadySet Server Prometheus metrics at http://readyset:6033/metrics
