@@ -1,0 +1,11 @@
+statement ok
+create table t1 (x int, y int);
+
+statement ok
+insert into t1 (x, y) values (1, null);
+
+query II nosort
+select x, COALESCE(y, 2) FROM t1;
+----
+1
+2
