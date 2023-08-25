@@ -99,7 +99,7 @@ A: You can if you want to, but it’s not required. You can manually route a sub
 
 **Q: Does ReadySet automatically determine which queries will be cached?**
 
-A: No - by default, ReadySet [proxies queries](https://docs.readyset.io/guides/cache/cache-queries/#check-query-support) to your upstream database so you can profile your application. Only after you run `CREATE CACHE` will ReadySet begin caching a query.
+A: No - by default, ReadySet proxies queries to your upstream database so you can profile your application. Only after you run [`CREATE CACHE FROM <query>`](https://docs.readyset.io/cache/creating-a-cache) will ReadySet begin caching a query.
 
 ## License
 
