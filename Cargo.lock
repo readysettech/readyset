@@ -2557,6 +2557,7 @@ dependencies = [
  "libc",
  "libz-sys",
  "lz4-sys",
+ "tikv-jemalloc-sys",
 ]
 
 [[package]]
