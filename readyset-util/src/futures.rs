@@ -141,12 +141,12 @@ where
 ///
 /// As noted above, `then_assert` must be defined inline. The following will fail to compile:
 /// ```no_compile
-/// # use readyset_util::eventually_assert;
+/// # use readyset_util::eventually;
 /// # let mut rt = tokio::runtime::Runtime::new().unwrap();
 /// # rt.block_on(async move {
 /// let x = 1;
 /// let assert_closure = |result| assert_eq!(result, 1);
-/// eventually_assert!(
+/// eventually!(
 ///     run_test: { futures::future::ready(x).await },
 ///     then_assert: assert_closure
 /// );
