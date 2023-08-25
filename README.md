@@ -82,6 +82,16 @@ We welcome contributions as [GitHub pull requests](https://github.com/readysette
 ### Building from source
 See our [instructions](./community-development.md) on how to build ReadySet from source.
 
+### Project Roadmaps
+
+| Project Name | Progress | Notes |
+| ----------- | ----------- | ----------- |
+| High Availability (V1) | [Track](https://github.com/readysettech/readyset/issues/433) | Achieving an intial form of high availability (dubbed as warm read HA). When completed ReadySet deployments will be able to accept connections, handle queries, serve warm reads from the cache, and replicate writes from the primary databse at all times and as often as possible. |
+| Expanded Benchmarking Suite & Analysis  | [Track](https://github.com/readysettech/readyset/issues/432) | Ensuring that ReadySet is performant in a wide array of use cases by investing in upgrading our benchmarking infrastructure: apps, tests, and analysis and tackle any potential areas for improvement that are surfaced by this work. In addition to measuring cache performance, these new benchmarks will stress test our networking/proxying, protocol emulation, serialization, and any other components on the hot path. | 
+| Usability Improvements | [Track](https://github.com/readysettech/readyset/issues/442) | Focusing on improving the experience around configuring, interacting with, and debugging ReadySet. | 
+| General System Testing | [Track](https://github.com/readysettech/readyset/issues/434) | Validatinge ReadySet's production readiness by running ReadySet in a production-like environment and validate its robustness in the presence of faults.| 
+| Dataflow Testing | [Track](https://github.com/readysettech/readyset/issues/431) | Expanding the testing of our core caching engine (dataflow), with the end goal of getting ReadySet production ready.|
+
 ---
 ## FAQs
 
