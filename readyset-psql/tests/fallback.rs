@@ -1381,13 +1381,20 @@ async fn show_proxied_queries_show_caches_query_text_matches() {
         .simple_query("CREATE TABLE t (id INT)")
         .await
         .unwrap();
-    client.simple_query("SELECT id FROM t").await.unwrap();
-    sleep().await;
 
-    let cached_queries = client.simple_query("SHOW CACHES").await.unwrap();
-    let (cache_name, cached_query_text) = match cached_queries.first().unwrap() {
-        SimpleQueryMessage::Row(row) => (row.get(1).unwrap(), row.get(2).unwrap()),
-        _ => panic!(),
+    let (cache_name, cached_query_text) = eventually! {
+        run_test: {
+            client.simple_query("SELECT id FROM t").await.unwrap();
+            client.simple_query("SHOW CACHES").await.unwrap()
+        },
+        then_assert: |cached_queries| {
+            match cached_queries.into_iter().next().unwrap() {
+                SimpleQueryMessage::Row(row) => {
+                    (row.get(1).unwrap().to_owned(), row.get(2).unwrap().to_owned())
+                },
+                _ => panic!(),
+            }
+        }
     };
 
     client
