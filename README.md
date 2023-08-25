@@ -4,7 +4,7 @@
 
 ---
 
-Lightning fast SQL cache without code changes. 
+Lightning fast SQL caching without code changes. 
 
 ## What is ReadySet?
 
