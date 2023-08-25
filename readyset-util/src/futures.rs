@@ -110,6 +110,26 @@ where
 /// # })
 /// ```
 ///
+/// the `run_test`/`then_assert` form can yield a result, which will be returned by the overall
+/// `eventually!` invocation:
+/// ```
+/// # use readyset_util::eventually;
+/// # let mut rt = tokio::runtime::Runtime::new().unwrap();
+/// # rt.block_on(async move {
+/// let x = 1;
+/// let res = eventually!(
+///     run_test: { Some(futures::future::ready(x).await) },
+///     then_assert: |result| {
+///         let result = result.unwrap();
+///         assert!(result > 0);
+///         assert_eq!(result, 1);
+///         result
+///     }
+/// );
+/// assert_eq!(res, x);
+/// # })
+/// ```
+///
 /// Configuring the number of attempts (these next two examples also work the same way for the
 /// `run_test`/`then_assert` form):
 /// ```
@@ -155,29 +175,39 @@ where
 #[macro_export]
 macro_rules! eventually {
     ($(attempts: $attempts: expr,)? $(sleep: $sleep: expr,)? run_test: { $($test_body: tt)* },
-            then_assert: |$test_res: pat_param| $($assert_body: tt)+) => {
+            then_assert: |$test_res: pat_param| $($assert_body: tt)+) => {{
         let attempts = 40;
         let sleep = std::time::Duration::from_millis(500);
         // Shadow the above defaults if custom values were provided:
         $(let attempts = $attempts;)?
         $(let sleep = $sleep;)?
 
-        for attempt in 1..=attempts {
+
+        let mut res = None;
+        for attempt in 1..=(attempts - 1) {
             let $test_res = async { $($test_body)* }.await;
-            if attempt == attempts {
-                // Run the last attempt without the catch_unwind wrapper so that panics are visible
-                // in the test failure results if they occur:
-                async { $($assert_body)* }.await;
-            } else {
-                if ::futures::FutureExt::catch_unwind(async { $($assert_body)* }).await.is_err() {
+            match ::futures::FutureExt::catch_unwind(async { $($assert_body)* }).await {
+                Err(_) => {
                     println!("Assertion failed on attempt {attempt}, retrying after delay...");
                     tokio::time::sleep(sleep).await;
-                } else {
-                    break;
                 }
+                Ok(r) => {
+                    res = Some(r);
+                    break;
+                },
             }
         }
-    };
+
+        match res {
+            Some(r) => r,
+            None => {
+                // Run the last attempt without the catch_unwind wrapper so that panics are visible
+                // in the test failure results if they occur:
+                let $test_res = async { $($test_body)* }.await;
+                async { $($assert_body)* }.await
+            }
+        }
+    }};
     ($(attempts: $attempts: expr,)? $(sleep: $sleep: expr,)? run_test: { $($test_body: tt)* },
             then_assert: $($assert_body: tt)+) => {
         compile_error!(concat!("`then_assert` must be specified using closure syntax",
