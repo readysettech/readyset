@@ -105,13 +105,22 @@ impl Default for Config {
 /// Struct containing (authoritative!) information about which nodes in a graph are materialized
 /// (store their output state either in-memory or on-disk), and in what way those materializations
 /// are indexed.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(in crate::controller) struct Materializations {
     /// Nodes that are (fully or partially) materialized.
     // Skipping this field as we will rebuild the [`Materializations`] state
     // upon recovery.
     #[serde(skip)]
     have: HashMap<NodeIndex, Indices>,
+    /// Nodes that *were* (fully or partially) as of the last time we called [`commit`].
+    ///
+    /// Used to validate that we're not adding any materializations we shouldn't (eg newly
+    /// materialized nodes with materialized children)
+    ///
+    /// [`extend`]: Materializations::extend
+    /// [`commit`]: Materializations::commit
+    #[serde(skip)]
+    had: HashSet<NodeIndex>,
     /// Nodes materialized since the last time `commit()` was invoked.
     #[serde(skip)]
     added: HashMap<NodeIndex, Indices>,
@@ -148,6 +157,7 @@ impl Materializations {
     pub(in crate::controller) fn new() -> Self {
         Materializations {
             have: HashMap::default(),
+            had: HashSet::default(),
             added: HashMap::default(),
             new_readers: HashSet::default(),
 
@@ -1027,7 +1037,7 @@ impl Materializations {
             let mut index_on = self.added.remove(&node).unwrap();
 
             // are they trying to make a non-materialized node materialized?
-            if self.have[&node] == index_on {
+            if !self.had.contains(&node) && !index_on.is_empty() {
                 if self.partial.contains(&node) {
                     // we can't make this node partial if any of its children are materialized, as
                     // we might stop forwarding updates to them, which would make them very sad.
@@ -1035,6 +1045,21 @@ impl Materializations {
                     // the exception to this is for new children, or old children that are now
                     // becoming materialized; those are necessarily empty, and so we won't be
                     // violating key monotonicity.
+                    //
+                    // NOTE(aspen): We haven't actually seen this happen in the real world yet, but
+                    // it might be possible, especially once we bring back reuse. If we do start
+                    // seeing this (and we're not just seeing it because of a bug like #421), there
+                    // are a couple of options here:
+                    //
+                    // 1. We could split the graph at this point similar to what we do for the
+                    //    full-below-partial case (see `validate`)
+                    // 2. We could always send evictions downstream of nodes that become newly
+                    //    partially materialized
+                    //
+                    // I'm personally partial (ha!) to the second option because it feels *always*
+                    // correct in an elegant way and also creates smaller graphs with fewer
+                    // materializations, but there might be some weirdness I'm not thinking of. But
+                    // this also might just be impossible anyway, which makes this all moot.
                     let mut stack: Vec<_> = graph
                         .neighbors_directed(node, petgraph::EdgeDirection::Outgoing)
                         .collect();
@@ -1048,7 +1073,7 @@ impl Materializations {
                             != self.have.get(&child).map(|i| i.len()).unwrap_or(0)
                         {
                             // node was previously materialized!
-                            println!("{}", graphviz(graph, true, None, self, None));
+                            eprintln!("{}", graphviz(graph, true, None, self, None));
                             error!(
                                 node = %node.index(),
                                 child = %child.index(),
@@ -1140,6 +1165,7 @@ impl Materializations {
         }
 
         self.added.clear();
+        self.had.extend(self.have.keys().copied());
         Ok(())
     }
 

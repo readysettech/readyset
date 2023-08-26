@@ -84,3 +84,36 @@ ORDER BY A.title, A.id LIMIT 20
 3
 4
 5
+
+statement ok
+CREATE TABLE title_basics (
+    tconst text NOT NULL,
+    titletype text,
+    primarytitle text,
+    originaltitle text,
+    isadult boolean,
+    startyear integer,
+    endyear integer,
+    runtimeminutes integer,
+    genres text
+);
+
+statement ok
+CREATE TABLE title_ratings (
+    tconst text NOT NULL,
+    averagerating numeric,
+    numvotes integer
+);
+
+
+onlyif readyset
+statement ok
+CREATE CACHE FROM SELECT count(*) FROM title_ratings
+JOIN title_basics ON title_ratings.tconst = title_basics.tconst
+WHERE title_basics.startyear = 2000 AND title_ratings.averagerating > 5;
+
+onlyif readyset
+statement ok
+CREATE CACHE FROM SELECT count(*) FROM title_ratings
+JOIN title_basics ON title_ratings.tconst = title_basics.tconst
+WHERE title_basics.endyear = 2000 AND title_ratings.averagerating > 5;
