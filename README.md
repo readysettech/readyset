@@ -95,7 +95,7 @@ We anticipate PostgreSQL support will be production ready by the end of 2023; My
 ### Contribute
 If you're interested in contributing, we gratefully welcome helping hands! We welcome contributions as [GitHub pull requests](https://github.com/readysettech/readyset/pulls), creating [issues](https://github.com/readysettech/readyset/issues), advocacy, and participating in our [community](#join-the-community)! 
 
-### Build from source
+### Build from Source
 See our [instructions](./community-development.md) on how to build ReadySet from source.
 
 ---
