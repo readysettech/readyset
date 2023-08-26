@@ -48,6 +48,18 @@ impl VitessConfig {
     }
 }
 
+impl Into<mysql_async::Opts> for &VitessConfig {
+    fn into(self) -> mysql_async::Opts {
+        mysql_async::OptsBuilder::default()
+            .ip_or_hostname(self.host.clone())
+            .tcp_port(self.mysql_port)
+            .user(Some(self.username.clone()))
+            .pass(Some(self.password.clone()))
+            .db_name(Some(self.keyspace()))
+            .into()
+    }
+}
+
 fn get_param<T: FromStr>(url: &Url, param: &str, default: T) -> Result<T, DatabaseURLParseError> {
     url.query_pairs()
         .find_map(|(k, v)| if k == param { Some(v.parse()) } else { None })

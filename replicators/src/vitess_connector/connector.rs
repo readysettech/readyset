@@ -99,6 +99,7 @@ impl VitessConnector {
         Ok(connector)
     }
 
+    // A separate task that receives VStream events and sends them to a channel
     async fn run_v_stream(
         mut vstream: Streaming<VStreamResponse>,
         tx: mpsc::Sender<VEvent>,
@@ -127,6 +128,7 @@ impl VitessConnector {
         }
     }
 
+    // Process a VStream ROW event and return a ReplicationAction object to be used by Noria
     fn process_row_event(
         &self,
         event: &VEvent,
@@ -245,9 +247,9 @@ impl Connector for VitessConnector {
                     info!("Received VStream VGTID");
                     self.current_position = Some(event.vgtid.unwrap().into());
                 }
-
-                // TODO: When adding support for event buffering, we may want to flush on commit
                 VEventType::Begin => info!("Received VStream begin"),
+
+                // TODO: When adding support for event buffering, we will want to flush on commit
                 VEventType::Commit => {
                     info!("Received VStream commit");
 
@@ -260,6 +262,7 @@ impl Connector for VitessConnector {
                     }
                 }
 
+                // We receive this right before the first time we see a new table within the stream
                 VEventType::Field => {
                     let field_event = event.field_event.unwrap();
                     info!(

@@ -26,6 +26,7 @@ use replication_offset::mysql::MySqlPosition;
 use replication_offset::{ReplicationOffset, ReplicationOffsets};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::{debug, error, info, info_span, trace, warn, Instrument};
+use vitess_grpc::binlogdata::VGtid;
 use {mysql_async as mysql, tokio_postgres as pgsql};
 
 use crate::db_util::{CreateSchema, DatabaseSchemas};
@@ -35,7 +36,7 @@ use crate::postgres_connector::{
     PostgresWalConnector, PUBLICATION_NAME, REPLICATION_SLOT,
 };
 use crate::table_filter::TableFilter;
-use crate::vitess_connector::VitessConnector;
+use crate::vitess_connector::{VitessConnector, VitessReplicator};
 use crate::{ControllerMessage, ReplicatorMessage};
 
 /// Time to wait for requests to coalesce between snapshotting. Useful for preventing a series of
@@ -734,7 +735,7 @@ impl NoriaAdapter {
         mut noria: ReadySetHandle,
         config: UpstreamConfig,
         notification_channel: &UnboundedSender<ReplicatorMessage>,
-        _resnapshot: bool,
+        resnapshot: bool,
         _telemetry_sender: &TelemetrySender,
         enable_statement_logging: bool,
     ) -> Result<!, ReadySetError> {
@@ -749,6 +750,45 @@ impl NoriaAdapter {
             },
         };
 
+        let table_filter = TableFilter::try_new(
+            nom_sql::Dialect::MySQL,
+            config.replication_tables.clone(),
+            Some(&vitess_config.keyspace),
+        )?;
+
+        let mut db_schemas = DatabaseSchemas::new();
+
+        if resnapshot {
+            info!("Re-snapshotting Vitess schema");
+
+            // The default min is already 10, so we keep that the same to reduce complexity
+            // overhead of too many flags.
+            // The only way PoolConstraints::new() can panic on unwrap is if min is not less
+            // than or equal to max, so we naively reset min if max is below 10.
+            let constraints = if config.replication_pool_size <= 10 {
+                PoolConstraints::new(config.replication_pool_size, config.replication_pool_size)
+                    .unwrap()
+            } else {
+                PoolConstraints::new(10, config.replication_pool_size).unwrap()
+            };
+            let pool_opts = PoolOpts::default().with_constraints(constraints);
+            let mysql_opts: mysql_async::Opts = (&vitess_config).into();
+            let replicator_opts: mysql_async::Opts = OptsBuilder::from_opts(mysql_opts)
+                .pool_opts(pool_opts)
+                .into();
+            debug!(?replicator_opts, "Connecting to Vitess for snapshotting");
+            let pool = mysql::Pool::new(replicator_opts);
+
+            let replicator = VitessReplicator {
+                pool,
+                table_filter: table_filter.clone(),
+            };
+
+            replicator
+                .snapshot_schema_to_noria(&mut noria, &mut db_schemas)
+                .await?;
+        }
+
         info!("Connecting to Vitess...");
         let connector = Box::new(
             VitessConnector::connect(
@@ -758,12 +798,6 @@ impl NoriaAdapter {
             )
             .await?,
         );
-
-        let table_filter = TableFilter::try_new(
-            nom_sql::Dialect::MySQL,
-            config.replication_tables.clone(),
-            Some(&vitess_config.keyspace),
-        )?;
 
         let mut adapter = NoriaAdapter {
             noria,
@@ -782,9 +816,7 @@ impl NoriaAdapter {
         //     .unwrap_or_default();
 
         // FIXME: Fix this
-        let mut replication_offset = ReplicationOffset::MySql(
-            MySqlPosition::from_file_name_and_position("binlog.00001".to_owned(), 12).unwrap(),
-        );
+        let mut replication_offset = ReplicationOffset::Vitess(VGtid::default().into());
 
         adapter
             .main_loop(&mut replication_offset, None, notification_channel)
