@@ -80,8 +80,15 @@ impl MySqlBinlogConnector {
         info!(next_position = %self.next_position, "Starting binlog replication");
         let filename = self.next_position.binlog_file_name().to_string();
 
+        // TODO: we should require a re-snapshot if we are in the middle of a transaction and
+        //  the position has overflow u32.
         let cmd = mysql_common::packets::ComBinlogDump::new(self.server_id())
-            .with_pos(self.next_position.position)
+            .with_pos(
+                self.next_position
+                    .position
+                    .try_into()
+                    .expect("Impossible binlog start position. Please re-snapshot."),
+            )
             .with_filename(filename.as_bytes());
 
         self.connection.write_command(&cmd).await?;
@@ -152,7 +159,15 @@ impl MySqlBinlogConnector {
         loop {
             let binlog_event = self.next_event().await?;
 
-            self.next_position.position = binlog_event.header().log_pos();
+            if u64::from(binlog_event.header().log_pos()) < self.next_position.position
+                && self.next_position.position + u64::from(binlog_event.header().event_size())
+                    > u64::from(u32::MAX)
+            {
+                self.next_position.position =
+                    u64::from(u32::MAX) + 1 + u64::from(binlog_event.header().log_pos());
+            } else {
+                self.next_position.position = u64::from(binlog_event.header().log_pos());
+            }
 
             match binlog_event.header().event_type().map_err(|ev| {
                 mysql_async::Error::Other(Box::new(internal_err!(
@@ -172,9 +187,7 @@ impl MySqlBinlogConnector {
 
                     self.next_position = MySqlPosition::from_file_name_and_position(
                         ev.name().to_string(),
-                        // This should never happen, but better to panic than to get the wrong
-                        // position
-                        u32::try_from(ev.position()).unwrap(),
+                        ev.position(),
                     )
                     .map_err(|e| {
                         mysql_async::Error::Other(Box::new(internal_err!(

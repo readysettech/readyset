@@ -24,7 +24,7 @@ pub struct MySqlPosition {
     /// filename in [`MySqlPosition::binlog_file_name()`].
     binlog_file_suffix_length: usize,
     /// The position within the binlog file represented by this type.
-    pub position: u32,
+    pub position: u64,
 }
 
 impl fmt::Display for MySqlPosition {
@@ -35,7 +35,7 @@ impl fmt::Display for MySqlPosition {
 
 impl MySqlPosition {
     /// Converts a raw binlog file name and a position within that file to a [`MySqlPosition`].
-    pub fn from_file_name_and_position(file_name: String, position: u32) -> ReadySetResult<Self> {
+    pub fn from_file_name_and_position(file_name: String, position: u64) -> ReadySetResult<Self> {
         let (binlog_file_base_name, binlog_file_suffix) =
             file_name.rsplit_once('.').ok_or_else(|| {
                 ReadySetError::ReplicationFailed(format!("Invalid binlog name {}", file_name))
