@@ -350,7 +350,7 @@ impl MySqlReplicator {
         })?;
 
         let file: String = pos.get(0).expect("Binlog file name");
-        let offset: u32 = pos.get(1).expect("Binlog offset");
+        let offset: u64 = pos.get(1).expect("Binlog offset");
 
         MySqlPosition::from_file_name_and_position(file, offset)
             .map_err(|err| mysql_async::Error::Other(Box::new(err)))
