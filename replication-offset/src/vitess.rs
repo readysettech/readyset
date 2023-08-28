@@ -27,6 +27,91 @@ impl VStreamPosition {
     }
 }
 
+impl PartialOrd for VStreamPosition {
+    fn partial_cmp(&self, other_pos: &Self) -> Option<std::cmp::Ordering> {
+        // Cannot compare positions with different number of shards/keyspaces
+        if self.shard_positions.len() != other_pos.shard_positions.len() {
+            return None;
+        }
+
+        // Check all gtids while making sure that the keyspaces and shards match
+        for (self_shard_pos, other_shard_pos) in self
+            .shard_positions
+            .iter()
+            .zip(other_pos.shard_positions.iter())
+        {
+            if self_shard_pos.keyspace != other_shard_pos.keyspace
+                || self_shard_pos.shard != other_shard_pos.shard
+            {
+                return None;
+            }
+
+            let res = vgtid_partial_cmp(&self_shard_pos.gtid, &other_shard_pos.gtid);
+            if res != Some(std::cmp::Ordering::Equal) {
+                return res;
+            }
+        }
+
+        Some(std::cmp::Ordering::Equal)
+    }
+}
+
+// Compare two VGTID values from vitess for ordering purposes.
+// FIXME: This is a hacky implementation that works for vttestserver, but need to verify it against
+// the actual vitess implementation.
+fn vgtid_partial_cmp(vgtid1: &str, vgtid2: &str) -> Option<std::cmp::Ordering> {
+    if vgtid1 == vgtid2 {
+        return Some(std::cmp::Ordering::Equal);
+    }
+
+    // Format: MySQL56/b6f64869-4457-11ee-a149-4a61a0626815:1-35
+    // Fields: <prefix>/<uuid>:<start>-<end>
+    let gtid1_parts: Vec<&str> = vgtid1.split('/').collect();
+    let gtid2_parts: Vec<&str> = vgtid2.split('/').collect();
+
+    if gtid1_parts.len() != 2 || gtid2_parts.len() != 2 {
+        return None;
+    }
+
+    if gtid1_parts[0] != gtid2_parts[0] {
+        return None;
+    }
+
+    let gtid1_uuid_parts: Vec<&str> = gtid1_parts[1].split(':').collect();
+    let gtid2_uuid_parts: Vec<&str> = gtid2_parts[1].split(':').collect();
+
+    if gtid1_uuid_parts.len() != 2 || gtid2_uuid_parts.len() != 2 {
+        return None;
+    }
+
+    if gtid1_uuid_parts[0] != gtid2_uuid_parts[0] {
+        return None;
+    }
+
+    let gtid1_start_end_parts: Vec<&str> = gtid1_uuid_parts[1].split('-').collect();
+    let gtid2_start_end_parts: Vec<&str> = gtid2_uuid_parts[1].split('-').collect();
+
+    if gtid1_start_end_parts.len() != 2 || gtid2_start_end_parts.len() != 2 {
+        return None;
+    }
+
+    let gtid1_start: u64 = gtid1_start_end_parts[0].parse().ok()?;
+    let gtid1_end: u64 = gtid1_start_end_parts[1].parse().ok()?;
+    let gtid2_start: u64 = gtid2_start_end_parts[0].parse().ok()?;
+    let gtid2_end: u64 = gtid2_start_end_parts[1].parse().ok()?;
+    if gtid1_start != gtid2_start {
+        return None;
+    }
+
+    if gtid1_end < gtid2_end {
+        return Some(std::cmp::Ordering::Less);
+    } else if gtid1_end > gtid2_end {
+        return Some(std::cmp::Ordering::Greater);
+    }
+
+    None
+}
+
 impl From<&VGtid> for VStreamPosition {
     fn from(vgtid: &VGtid) -> Self {
         let shard_positions = vgtid

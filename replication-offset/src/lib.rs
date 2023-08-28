@@ -100,6 +100,7 @@ impl PartialOrd for ReplicationOffset {
         match (self, other) {
             (Self::MySql(pos), Self::MySql(other_pos)) => pos.partial_cmp(other_pos),
             (Self::Postgres(pos), Self::Postgres(other_pos)) => pos.partial_cmp(other_pos),
+            (Self::Vitess(pos), Self::Vitess(other_pos)) => pos.partial_cmp(other_pos),
             _ => None,
         }
     }
