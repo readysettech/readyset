@@ -19,29 +19,42 @@
         (reduce
          (fn [state {:keys [index type f value]}]
            (match [type f value]
+             [:info :kill-adapter nil]
+             (update state :pending-kills inc)
+
              [:info :kill-adapter (_ :guard map?)]
-             (update
-              state
-              :live-adapters
-              #(set/difference %
-                               ;; `value` looks like a map from node name to ""
-                               (into #{} (keys value))))
+             (-> state
+                 (update :pending-kills (comp (partial max 0) dec))
+                 (update
+                  :live-adapters
+                  #(set/difference
+                    %
+                    ;; `value` looks like a map from node name to ""
+                    (into #{} (keys value)))))
 
              [:info :start-adapter (_ :guard map?)]
              (update state :live-adapters into (keys value))
 
              [:fail _ _]
-             (if (seq (:live-adapters state))
+             (if ;; are we actively killing as many adapters as there are that
+                 ;; aren't yet dead?
+                 (and (seq (:live-adapters state))
+                      (= (:pending-kills state)
+                         (count (:live-adapters state))))
+               ;; if so, a fail is fine (since it might have hit an adapter
+               ;; we're currently killing)
+               state
+               ;; otherwise, no! we can't fail if things are still alive
                (reduced
                 (assoc state
                        :valid? false
-                       :failed-at index))
-               state)
+                       :failed-at index)))
 
              :else state))
          {:valid? true
           :failed-at nil
-          :live-adapters initial-live-adapters}
+          :live-adapters initial-live-adapters
+          :pending-kills 0}
          history)))))
 
 (defn commutative-eventual-consistency
