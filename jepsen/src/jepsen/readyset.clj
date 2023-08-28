@@ -239,11 +239,16 @@
 
                   (gen/synchronize
                    (gen/clients
-                    (->> workload
-                         :queries
-                         (filter #(not (contains? (val %) :gen-params)))
-                         keys
-                         (map rs/consistent-query)))))})))
+                    (filter
+                     some?
+                     (for [[query-id query] (:queries workload)]
+                       (cond
+                         (not (contains? query :gen-params))
+                         (rs/consistent-query query-id)
+
+                         (contains? query :final-consistent-read-params)
+                         (map (partial rs/consistent-query query-id)
+                              (:final-consistent-read-params query))))))))})))
 
 (def opt-spec
   (let [validate-pos-number [#(and (number? %) (pos? %))

@@ -11,6 +11,9 @@
       :expected-results ; fn from rows map (from table kw to list of rows) to
                           expected results for this query
       :gen-write ; fn from rows map to generated honeysql query maps for writes
+      :final-consistent-read-params ; list of param maps to use for final
+                                    ; consistent reads at the end of the test,
+                                    ; after sleeping to settle
      }}``"
   (:require
    [jepsen.generator :as gen]
@@ -51,7 +54,9 @@
                     (->> rows
                          :t
                          (filter (comp #{(:grp params)} :t/grp))
-                         count)}]))}}
+                         count)}]))
+              :final-consistent-read-params (for [n (range 10)]
+                                              {:grp n})}}
 
    :gen-write (fn [_test {:keys [rows]}]
                 (rs/write
