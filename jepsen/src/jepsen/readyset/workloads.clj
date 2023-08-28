@@ -8,6 +8,7 @@
     {:query-id-one
      {:query ; honeysql :select map
       :gen-params ; optional, generate params for this query
+      :initial-expected-results ; allowed results before any insert op
       :expected-results ; fn from rows map (from table kw to list of rows) to
                           expected results for this query
       :gen-write ; fn from rows map to generated honeysql query maps for writes
@@ -47,6 +48,7 @@
                :where [:= :grp [:param :grp]]}
 
               :gen-params (fn [_] {:grp (rand-int 10)})
+              :initial-expected-results #{[{:count 0}]}
               :expected-results
               (fn [rows]
                 (fn [params]

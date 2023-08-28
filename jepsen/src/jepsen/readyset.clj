@@ -203,11 +203,7 @@
                 {:liveness (rs.checker/liveness)
                  :eventually-consistent
                  (rs.checker/commutative-eventual-consistency
-                  (->> workload
-                       :queries
-                       (map (fn [[k {:keys [expected-results]}]]
-                              [k expected-results]))
-                       (into {})))})
+                  (:queries workload))})
       :generator (gen/phases
                   (->>
                    (apply
