@@ -5,6 +5,7 @@
    [clojure.string :as str]
    [clojure.tools.logging :refer [error info warn]]
    [jepsen.checker :as checker]
+   [jepsen.checker.timeline :as timeline]
    [jepsen.cli :as cli]
    [jepsen.consul.db :as consul.db]
    [jepsen.control :as c]
@@ -203,7 +204,8 @@
                 {:liveness (rs.checker/liveness)
                  :eventually-consistent
                  (rs.checker/commutative-eventual-consistency
-                  (:queries workload))})
+                  (:queries workload))
+                 :timeline (timeline/html)})
       :generator (gen/phases
                   (->>
                    (apply
