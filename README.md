@@ -89,7 +89,7 @@ We anticipate PostgreSQL support will be production ready by the end of 2023; My
 | General System Testing | [Track](https://github.com/readysettech/readyset/issues/434) | Run ReadySet in a production-like environment and validate its robustness in the presence of faults.| 
 | Dataflow Testing | [Track](https://github.com/readysettech/readyset/issues/431) | Expand testing of the ReadySet caching engine. |
 | Benchmarking & Analysis  | [Track](https://github.com/readysettech/readyset/issues/432) | Expand ReadySet's performance benchmarks to a wider array of workloads. | 
-| Usability Improvements | [Track](https://github.com/readysettech/readyset/issues/442) | Make it easier to configure, interact with, and debug ReadySet. | 
+| Usability Improvements | [Track](https://github.com/readysettech/readyset/issues/443) | Make it easier to configure, interact with, and debug ReadySet. | 
 | High Availability | [Track](https://github.com/readysettech/readyset/issues/433) | Ensure that ReadySet can accept connections, proxy queries, serve warm reads from the cache, and replicate writes from the primary database in the presence of certain failures. |
 
 ### Contribute
