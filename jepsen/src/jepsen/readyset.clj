@@ -179,7 +179,7 @@
 
 (defn readyset-test
   [opts]
-  (let [workload workloads/votes]
+  (let [workload workloads/grouped-count]
     (merge
      tests/noop-test
      opts
