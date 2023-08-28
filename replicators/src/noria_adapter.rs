@@ -736,7 +736,7 @@ impl NoriaAdapter {
         config: UpstreamConfig,
         notification_channel: &UnboundedSender<ReplicatorMessage>,
         resnapshot: bool,
-        _telemetry_sender: &TelemetrySender,
+        telemetry_sender: &TelemetrySender,
         enable_statement_logging: bool,
     ) -> Result<!, ReadySetError> {
         let replication_offsets = noria.replication_offsets().await?;
@@ -787,6 +787,8 @@ impl NoriaAdapter {
             replicator
                 .snapshot_schema_to_noria(&mut noria, &mut db_schemas)
                 .await?;
+
+            db_schemas.send_schemas(telemetry_sender).await;
         }
 
         info!("Connecting to Vitess...");
