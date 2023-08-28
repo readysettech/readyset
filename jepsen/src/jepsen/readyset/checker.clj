@@ -87,8 +87,8 @@
                    :past-results
                    (fn [results]
                      (reduce-kv
-                      (fn [results query-id compute-results]
-                        (let [expected (compute-results new-rows)]
+                      (fn [results query-id {:keys [expected-results]}]
+                        (let [expected (expected-results new-rows)]
                           (update-in results
                                      [query-id
                                       (if (fn? expected)
@@ -124,7 +124,9 @@
          :rows {}
          :past-results
          (into {}
-               (map (fn [[k _]] [k {:expected-results/set #{[]}}]))
+               (map (fn [[k {:keys [initial-expected-results]}]]
+                      [k {:expected-results/set (or initial-expected-results
+                                                    #{[]})}]))
                expected-query-results)}
         history)
        ;; Don't include these keys in the final map; they get big and are
