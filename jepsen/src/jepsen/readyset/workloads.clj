@@ -71,7 +71,7 @@
         :vote-count]
        [:= :stories.id :vote-count.story-id]]
       :order-by [:stories.id]}
-     :expected-results compute-votes}
+     :expected-results #'compute-votes}
 
     :votes-single
     {:query
@@ -105,51 +105,53 @@
              [(get all-votes pos)]))))}}
 
    :gen-write
-   (fn [_test {:keys [rows]}]
-     (rs/write
-      (let [write-candidates (if (seq (:stories rows))
-                               [:stories :votes]
-                               [:stories])
-            delete-candidates (->> rows (filter (comp seq val)) (map key))
-            candidates (concat
-                        (map (partial vector :insert) write-candidates)
-                        (map (partial vector :delete) delete-candidates))]
-        (case (rand-nth candidates)
-          [:insert :stories]
-          {:insert-into :stories
-           :columns [:title]
-           ;; generate between 1 and 5 stories
-           :values (for [_ (range 0 (inc (rand-int 5)))]
-                     [(str "story-" (rand-int (Integer/MAX_VALUE)))])}
-
-          [:insert :votes]
-          (let [candidate-stories (->> rows :stories (map :stories/id))]
-            {:insert-into :votes
-             :columns [:story-id :user-id]
-             ;; generate between 1 and 5 votes
+   (let [story-id (atom 0)]
+     (fn [_test {:keys [rows]}]
+       (rs/write
+        (let [write-candidates (if (seq (:stories rows))
+                                 [:stories :votes]
+                                 [:stories])
+              delete-candidates (->> rows (filter (comp seq val)) (map key))
+              candidates (concat
+                          (map (partial vector :insert) write-candidates)
+                          (map (partial vector :delete) delete-candidates))]
+          (case (rand-nth candidates)
+            [:insert :stories]
+            {:insert-into :stories
+             :columns [:id :title]
+             ;; generate between 1 and 5 stories
              :values (for [_ (range 0 (inc (rand-int 5)))]
-                       [(rand-nth candidate-stories)
-                        (rand-int Integer/MAX_VALUE)])})
+                       [(swap! story-id inc)
+                        (str "story-" (rand-int (Integer/MAX_VALUE)))])}
 
-          [:delete :stories]
-          ;; delete between 1 and 5 stories
-          (let [ids-to-delete (->> rows
-                                   :stories
-                                   (map :stories/id)
-                                   shuffle
-                                   (take (inc (rand-int 5))))]
-            {:delete-from :stories
-             :where (if (= 1 (count ids-to-delete))
-                      [:= :id (first ids-to-delete)]
-                      [:in :id ids-to-delete])})
+            [:insert :votes]
+            (let [candidate-stories (->> rows :stories (map :stories/id))]
+              {:insert-into :votes
+               :columns [:story-id :user-id]
+               ;; generate between 1 and 5 votes
+               :values (for [_ (range 0 (inc (rand-int 5)))]
+                         [(rand-nth candidate-stories)
+                          (rand-int Integer/MAX_VALUE)])})
 
-          [:delete :votes]
-          ;; delete 1 vote
-          (let [vote-to-delete (rand-nth (:votes rows))]
-            {:delete-from :votes
-             :where [:and
-                     [:= :story-id (:votes/story-id vote-to-delete)]
-                     [:= :user-id (:votes/user-id vote-to-delete)]]})))))})
+            [:delete :stories]
+            ;; delete between 1 and 5 stories
+            (let [ids-to-delete (->> rows
+                                     :stories
+                                     (map :stories/id)
+                                     shuffle
+                                     (take (inc (rand-int 5))))]
+              {:delete-from :stories
+               :where (if (= 1 (count ids-to-delete))
+                        [:= :id (first ids-to-delete)]
+                        [:in :id ids-to-delete])})
+
+            [:delete :votes]
+            ;; delete 1 vote
+            (let [vote-to-delete (rand-nth (:votes rows))]
+              {:delete-from :votes
+               :where [:and
+                       [:= :story-id (:votes/story-id vote-to-delete)]
+                       [:= :user-id (:votes/user-id vote-to-delete)]]}))))))})
 
 (comment
   (def sample-rows

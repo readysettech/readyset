@@ -10,7 +10,11 @@
                  [com.github.seancorfield/honeysql "2.4.1045"]
                  [org.postgresql/postgresql "42.6.0"]
                  [slingshot "0.12.2"]
-                 [org.clojure/core.match "1.0.1"]]
+                 [org.clojure/core.match "1.0.1"]
+                 [org.clojure/math.combinatorics "0.2.0"]
+
+                 ;; REPL-only utilities
+                 [lambdaisland/deep-diff2 "2.10.211"]]
   :plugins [[com.github.clj-kondo/lein-clj-kondo "0.2.5"]]
   :repl-options {:init-ns jepsen.readyset}
   :main jepsen.readyset

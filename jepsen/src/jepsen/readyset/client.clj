@@ -139,7 +139,7 @@
       [op (assoc this :gen gen')]))
 
   (update [this test ctx {:keys [type f value] :as op}]
-    (let [this' (if (= [type f] [:ok :write])
+    (let [this' (if (= [type f] [:invoke :write])
                   (memory-db/apply-write this value)
                   this)]
       (update this' :gen gen/update test ctx op))))
