@@ -32,6 +32,42 @@
         (update [this _ _ _] this)))
     (rs/query query-id)))
 
+(def grouped-count
+  {:tables [{:create-table :t
+             :with-columns [[:id :int]
+                            [:grp :int]]}]
+
+   :queries {:q
+             {:query
+              {:select [[:%count.* :count]]
+               :from [:t]
+               :where [:= :grp [:param :grp]]}
+
+              :gen-params (fn [_] {:grp (rand-int 10)})
+              :expected-results
+              (fn [rows]
+                (fn [params]
+                  [{:count
+                    (->> rows
+                         :t
+                         (filter (comp #{(:grp params)} :t/grp))
+                         count)}]))}}
+
+   :gen-write (fn [_test {:keys [rows]}]
+                (rs/write
+                 (case (rand-nth [:insert :delete])
+                   :insert {:insert-into :t
+                            :columns [:id :grp]
+                            :values [[(rand-int 100)
+                                      (rand-int 10)]]}
+
+                   :delete {:delete-from :t
+                            :where [:= :id (if (seq (:t rows))
+                                             (->> rows :t (map :t/id) rand-nth)
+                                             (rand-int 100))]})))})
+
+;;;
+
 (defn compute-votes [rows & [_]]
   (let [vote-counts
         (->> rows
@@ -50,6 +86,12 @@
          (into []))))
 
 (def votes
+  "A workload similar to the Votes example from the Noria thesis
+
+  NOTE: This currently fails the eventual-consistency checker due to internal
+  inconsistency issues! See
+  https://www.scattered-thoughts.net/writing/internal-consistency-in-streaming-systems/
+  for more information"
   {:tables
    [{:create-table :stories
      :with-columns [[:id :serial]
