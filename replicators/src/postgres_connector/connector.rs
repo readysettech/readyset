@@ -538,7 +538,7 @@ impl Connector for PostgresWalConnector {
             schema: None,
             name: "".into(),
         };
-        let mut cur_pos = PostgresPosition::commit_start(CommitLsn::try_from(last_pos.clone())?);
+        let mut cur_pos = PostgresPosition::try_from(last_pos.clone())?;
         let mut actions = Vec::with_capacity(Self::MAX_QUEUED_INDEPENDENT_ACTIONS);
 
         loop {
@@ -546,6 +546,14 @@ impl Connector for PostgresWalConnector {
                 cur_table.schema.is_some() || cur_table.name.is_empty(),
                 "We should either have no current table, or the current table should have a schema"
             );
+
+            // If we have no buffered actions, an `until` was passed, and the LSN is >= `until`,
+            // we report the log position
+            if actions.is_empty()
+                && matches!(until, Some(until) if &ReplicationOffset::from(cur_pos) >= until)
+            {
+                return Ok((ReplicationAction::LogPosition, cur_pos.into()));
+            }
 
             // Get the next buffered event or error, or read a new event from the WAL stream.
             let event = match self.peek.take() {
@@ -611,13 +619,6 @@ impl Connector for PostgresWalConnector {
                         },
                         cur_pos.into(),
                     ));
-                }
-                // If we have no buffered actions, an `until` was passed, and the LSN is >= `until`,
-                // we report the log position
-                _ if actions.is_empty()
-                    && matches!(until, Some(until) if &ReplicationOffset::from(cur_pos) >= until) =>
-                {
-                    return Ok((ReplicationAction::LogPosition, cur_pos.into()));
                 }
                 _ => {}
             }

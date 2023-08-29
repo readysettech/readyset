@@ -569,7 +569,6 @@ impl NoriaAdapter {
             set_failpoint!(failpoints::POSTGRES_SNAPSHOT_START);
 
             let snapshot_start = Instant::now();
-            // If snapshot name exists, it means we need to make a snapshot to noria
 
             let (mut client, connection) = pgsql_opts.connect(tls_connector.clone()).await?;
 
