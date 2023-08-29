@@ -1675,3 +1675,90 @@ async fn column_metadata() {
 
     shutdown_tx.shutdown().await;
 }
+
+// Tests that we correctly replicate the events that occur while we are handling a resnapshot with a
+// subsequent catchup period
+#[cfg(feature = "failure_injection")]
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn pgsql_test_replication_after_resnapshot_with_catchup() {
+    readyset_tracing::init_test_logging();
+
+    let (config, mut handle, shutdown_tx) = TestBuilder::default()
+        .migration_mode(MigrationMode::InRequestPath)
+        .fallback(true)
+        .build::<PostgreSQLAdapter>()
+        .await;
+    let client = connect(config).await;
+
+    client
+        .simple_query("DROP TABLE IF EXISTS cats1")
+        .await
+        .unwrap();
+    client
+        .simple_query("DROP TABLE IF EXISTS cats2")
+        .await
+        .unwrap();
+    client
+        .simple_query("CREATE TABLE cats1 (id int, PRIMARY KEY(id))")
+        .await
+        .unwrap();
+    client
+        .simple_query("CREATE TABLE cats2 (id int, PRIMARY KEY(id))")
+        .await
+        .unwrap();
+
+    // This failpoint is placed after we've created the replication slot and before we've started
+    // replication, which means any data we insert into the upstream database while the replicator
+    // is paused there will not be present in our initial snapshot
+    handle
+        .set_failpoint(
+            readyset_client::failpoints::POSTGRES_SNAPSHOT_START,
+            "sleep(5000)",
+        )
+        .await;
+
+    // This will cause `cats1` to be re-snapshotted. Since `cats2` is not being re-snapshotted here,
+    // once the snapshot is completed, `cats1` and `cats2` will have different replication offsets,
+    // which will prompt us to enter catchup mode
+    client
+        .simple_query("ALTER TABLE cats1 ADD COLUMN a int")
+        .await
+        .unwrap();
+
+    // Sleep until the re-snapshot has started
+    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+
+    // Since a replication slot has been created and that slot has a Postgres snapshot and an
+    // associated consistent point, any data written after the creation of the slot won't be
+    // reflected in ReadySet's re-snapshot using this slot. In other words, any data added here will
+    // only be replicated as part of the "catchup" that occurs after the re-snapshot finishes.
+    //
+    // Only the cats1 table is going to be re-snapshotted, so we perform writes here to ensure that
+    // the min and max replication offsets across the schema/our tables are different. This prompts
+    // us to enter "catchup" mode after the resnapshot is finished.
+    client
+        .simple_query("INSERT INTO cats2 (id) VALUES (1)")
+        .await
+        .unwrap();
+
+    eventually!(run_test: {
+        let res = client
+            .simple_query("SELECT * FROM cats2")
+            .await;
+        AssertUnwindSafe(|| res)
+    }, then_assert: |result| {
+        let res: Vec<u32> = result()
+            .unwrap()
+            .iter()
+            .filter_map(|m| match m {
+                SimpleQueryMessage::Row(r) => Some(r.get(0).unwrap().parse().unwrap()),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(res, [1]);
+    });
+
+    shutdown_tx.shutdown().await;
+}
