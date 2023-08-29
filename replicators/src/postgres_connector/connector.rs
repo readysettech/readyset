@@ -774,7 +774,7 @@ impl Connector for PostgresWalConnector {
                     // position in the transaction that is ended by the COMMIT at `final_lsn`.
                     cur_pos = PostgresPosition::commit_start(final_lsn);
                 }
-                WalEvent::Commit { lsn } => {
+                WalEvent::Commit { lsn, end_lsn } => {
                     // If the `CommitLsn` from the COMMIT does not match the `CommitLsn` from the
                     // BEGIN, something has gone very wrong
                     invariant_eq!(lsn, cur_pos.commit_lsn);
@@ -784,7 +784,7 @@ impl Connector for PostgresWalConnector {
                     // If we crash after returning this position but before persisting this new
                     // position in the base tables, we will begin replicating from a COMMIT prior to
                     // this one, guaranteeing that we don't miss any events.
-                    let position = PostgresPosition::commit_end(lsn);
+                    let position = cur_pos.with_lsn(end_lsn);
 
                     if !actions.is_empty() {
                         return Ok((

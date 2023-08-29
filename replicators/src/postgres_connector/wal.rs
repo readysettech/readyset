@@ -220,9 +220,7 @@ pub enum WalRecord {
         flags: u8,
         /// The LSN of the commit. This value matches `final_lsn` in `WalData::Begin`.
         lsn: CommitLsn,
-        /// The end LSN of the transaction. This LSN may be the same as the subsequent BEGIN
-        /// operation, so it should **not** be used to report our position in the WAL to the
-        /// upstream database or to advance replication offsets on base tables.
+        /// The end LSN of the transaction.
         end_lsn: Lsn,
         /// Commit timestamp of the transaction. The value is in number of microseconds since
         /// PostgreSQL epoch (2000-01-01).
