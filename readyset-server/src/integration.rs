@@ -8489,7 +8489,7 @@ async fn forbid_full_materialization() {
     let err = res.err().unwrap();
     assert!(err
         .to_string()
-        .contains("Creation of fully materialized query is forbidden"));
+        .contains("Creation of fully materialized query is disabled."));
     assert!(err.caused_by_unsupported());
 
     shutdown_tx.shutdown().await;

@@ -612,7 +612,7 @@ impl Materializations {
                     replay_obligations.entry(mi).or_default().extend(indices);
                 }
             } else if !graph[ni].is_base() && !self.config.allow_full_materialization {
-                unsupported!("Creation of fully materialized query is forbidden");
+                unsupported!("Creation of fully materialized query is disabled.");
             } else {
                 invariant!(
                     !graph[ni].purge,
