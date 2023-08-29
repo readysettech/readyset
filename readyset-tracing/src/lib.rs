@@ -52,6 +52,10 @@ pub struct Options {
     #[clap(long, env = "LOG_FORMAT", default_value = "full", value_enum)]
     log_format: LogFormat,
 
+    /// Disable colors in all log output
+    #[clap(long, env = "NO_COLOR")]
+    no_color: bool,
+
     /// Log level filter for spans and events. The log level filter string is a comma separated
     /// list of directives.
     /// See [`tracing_subscriber::EnvFilter`] for full documentation on the directive syntax.
@@ -93,6 +97,7 @@ impl Default for Options {
     fn default() -> Self {
         Self {
             log_format: LogFormat::Full,
+            no_color: false,
             log_level: "info".to_owned(),
             tracing_host: None,
             tracing_sample_percent: Percent(0.01),
@@ -155,10 +160,15 @@ impl Options {
         S: Subscriber + Send + Sync + for<'span> LookupSpan<'span>,
     {
         let layer: Box<dyn Layer<S> + Send + Sync> = match self.log_format {
-            LogFormat::Compact => Box::new(fmt::layer().compact()),
-            LogFormat::Full => Box::new(fmt::layer()),
-            LogFormat::Pretty => Box::new(fmt::layer().pretty()),
-            LogFormat::Json => Box::new(fmt::layer().json().with_current_span(true)),
+            LogFormat::Compact => Box::new(fmt::layer().compact().with_ansi(!self.no_color)),
+            LogFormat::Full => Box::new(fmt::layer().with_ansi(!self.no_color)),
+            LogFormat::Pretty => Box::new(fmt::layer().pretty().with_ansi(!self.no_color)),
+            LogFormat::Json => Box::new(
+                fmt::layer()
+                    .json()
+                    .with_current_span(true)
+                    .with_ansi(!self.no_color),
+            ),
         };
         Ok(layer)
     }
