@@ -554,8 +554,15 @@ impl wal::TupleData {
                                     }
                                 }));
 
-                                DfValue::from(str.parse::<Array>()?)
-                                    .coerce_to(&target_type, &DfType::Unknown)?
+                                DfValue::from(str.parse::<Array>().map_err(|_| {
+                                    WalError::TableError {
+                                        kind: TableErrorKind::ArrayParseError,
+                                        schema: relation.schema_name_lossy(),
+                                        table: relation.relation_name_lossy(),
+                                    }
+                                })?)
+                                .coerce_to(&target_type, &DfType::Unknown)
+                                .map_err(|_| unsupported_type_err())?
                             }
                             Kind::Enum(variants) => DfValue::from(
                                 variants
