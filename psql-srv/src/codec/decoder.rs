@@ -8,7 +8,7 @@ use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime};
 use cidr::IpInet;
 use eui48::MacAddress;
 use postgres_types::{FromSql, Kind, Type};
-use readyset_data::{Array, Collation};
+use readyset_data::{Array, Collation, PassThroughFormat};
 use rust_decimal::prelude::FromStr;
 use rust_decimal::Decimal;
 use tokio_util::codec::Decoder;
@@ -389,6 +389,7 @@ fn get_binary_value(src: &mut Bytes, t: &Type) -> Result<PsqlValue, Error> {
             )),
             _ => Ok(PsqlValue::PassThrough(readyset_data::PassThrough {
                 ty: t.clone(),
+                format: PassThroughFormat::Binary,
                 data: buf.to_vec().into_boxed_slice(),
             })),
         },

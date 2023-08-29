@@ -5,7 +5,7 @@ use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime};
 use cidr::IpInet;
 use eui48::MacAddress;
 use postgres_types::{FromSql, Kind, Type};
-use readyset_data::{Array, Text};
+use readyset_data::{Array, PassThroughFormat, Text};
 use rust_decimal::Decimal;
 use uuid::Uuid;
 
@@ -107,6 +107,7 @@ impl<'a> FromSql<'a> for PsqlValue {
                 Type::VARBIT => BitVec::from_sql(ty, raw).map(PsqlValue::VarBit),
                 _ => Ok(PsqlValue::PassThrough(readyset_data::PassThrough {
                     ty: ty.clone(),
+                    format: PassThroughFormat::Binary,
                     data: Box::from(raw),
                 })),
             },
