@@ -63,7 +63,14 @@ const MAX_SECONDS_DATETIME_OFFSET: i32 = 85_940;
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct PassThrough {
     pub ty: Type,
+    pub format: PassThroughFormat,
     pub data: Box<[u8]>,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub enum PassThroughFormat {
+    Binary,
+    Text,
 }
 
 /// The main type used for user data throughout the codebase.
@@ -220,6 +227,7 @@ impl DfValue {
             DfValue::Array(_) => DfValue::empty_array(),
             DfValue::PassThrough(p) => DfValue::PassThrough(Arc::new(PassThrough {
                 ty: p.ty.clone(),
+                format: PassThroughFormat::Binary,
                 data: [].into(),
             })),
             DfValue::Max => DfValue::None,
@@ -1914,6 +1922,7 @@ impl<'a> FromSql<'a> for DfValue {
                 )),
                 ref ty => Ok(DfValue::PassThrough(Arc::new(PassThrough {
                     ty: ty.clone(),
+                    format: PassThroughFormat::Binary,
                     data: Box::from(raw),
                 }))),
             },
@@ -2142,6 +2151,7 @@ impl Arbitrary for DfValue {
                             Kind::Simple,
                             "Test Schema".to_string(),
                         ),
+                        format: PassThroughFormat::Binary,
                         data: data.into_boxed_slice(),
                     }))
                 })
