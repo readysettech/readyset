@@ -58,6 +58,8 @@ pub struct PostgresWalConnector {
     /// The time at which we last sent a status update to the upstream database reporting our
     /// current WAL position
     time_last_position_reported: Instant,
+    /// Whether we are currently in the middle of processing a transaction
+    in_transaction: bool,
 }
 
 /// The decoded response to `IDENTIFY_SYSTEM`
@@ -144,6 +146,11 @@ impl PostgresWalConnector {
             time_last_position_reported: Instant::now()
                 - Self::STATUS_UPDATE_INTERVAL
                 - Duration::from_secs(1),
+            // We'll never start replicating in the middle of a transaction, since Postgres's
+            // logical replication protocol only streams whole transactions to us at a time. This
+            // means we know that when we first initiate a replication connection to the upstream
+            // database, we'll always start replicating outside of a transaction
+            in_transaction: false,
         };
 
         if next_position.is_none() {
@@ -765,11 +772,25 @@ impl Connector for PostgresWalConnector {
                         ));
                     }
                 }
-                WalEvent::WantsKeepaliveResponse => {
-                    self.send_standby_status_update(last_pos.clone().try_into()?)?;
+                WalEvent::WantsKeepaliveResponse { end } => {
+                    if !self.in_transaction && actions.is_empty() {
+                        // If the last event we applied to our base tables was a COMMIT and we have
+                        // no buffered actions, we can safely report the "end LSN" given to us in
+                        // the keepalive request as our current position.
+                        self.send_standby_status_update(end)?;
+                    } else {
+                        // If we have buffered actions, we have to report the position of the *last*
+                        // event we applied, since we haven't yet applied the events associated with
+                        // `cur_pos`
+                        self.send_standby_status_update(last_pos.clone().try_into()?)?;
+                    }
                     self.time_last_position_reported = Instant::now();
                 }
                 WalEvent::Begin { final_lsn } => {
+                    // BEGINs should only happen if we aren't already in a transaction
+                    invariant!(!self.in_transaction);
+                    self.in_transaction = true;
+
                     // Update our current position to be `(final_lsn, 0)`, which points to the first
                     // position in the transaction that is ended by the COMMIT at `final_lsn`.
                     cur_pos = PostgresPosition::commit_start(final_lsn);
@@ -778,6 +799,10 @@ impl Connector for PostgresWalConnector {
                     // If the `CommitLsn` from the COMMIT does not match the `CommitLsn` from the
                     // BEGIN, something has gone very wrong
                     invariant_eq!(lsn, cur_pos.commit_lsn);
+
+                    // COMMITs should only happen in the context of a transaction
+                    invariant!(self.in_transaction);
+                    self.in_transaction = false;
 
                     // On commit we flush, because there is no knowing when the next commit is
                     // coming. We report our current position to reflect the COMMIT we just saw.

@@ -38,7 +38,9 @@ pub struct WalReader {
 
 #[derive(Debug)]
 pub(crate) enum WalEvent {
-    WantsKeepaliveResponse,
+    WantsKeepaliveResponse {
+        end: Lsn,
+    },
     Begin {
         final_lsn: CommitLsn,
     },
@@ -89,7 +91,8 @@ pub(crate) enum WalEvent {
 }
 
 impl WalEvent {
-    /// Returns the `Lsn` associated with `self` if `self` has an `Lsn`.
+    /// Returns the `Lsn` associated with `self` if `self` is an event that includes a data
+    /// modification.
     pub(crate) fn lsn(&self) -> Option<Lsn> {
         match self {
             Self::Insert { lsn, .. }
@@ -99,7 +102,7 @@ impl WalEvent {
             | Self::UpdateByKey { lsn, .. }
             | Self::Truncate { lsn, .. }
             | Self::DdlEvent { lsn, .. } => Some(*lsn),
-            Self::Begin { .. } | Self::Commit { .. } | Self::WantsKeepaliveResponse => None,
+            Self::Begin { .. } | Self::Commit { .. } | Self::WantsKeepaliveResponse { .. } => None,
         }
     }
 }
@@ -135,8 +138,8 @@ impl WalReader {
             };
 
             let (lsn, record) = match data {
-                WalData::Keepalive { reply, .. } if reply == 1 => {
-                    return Ok(WalEvent::WantsKeepaliveResponse);
+                WalData::Keepalive { reply, end, .. } if reply == 1 => {
+                    return Ok(WalEvent::WantsKeepaliveResponse { end });
                 }
                 WalData::XLogData { start, data, .. } => (start, data),
                 msg => {
