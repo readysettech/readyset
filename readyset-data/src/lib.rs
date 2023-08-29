@@ -19,6 +19,7 @@ use eui48::{MacAddress, MacAddressFormat};
 use itertools::Itertools;
 use mysql_time::MySqlTime;
 use nom_sql::{Double, Float, Literal, SqlType};
+use postgres_types::Format;
 use readyset_errors::{internal, invalid_query_err, unsupported, ReadySetError, ReadySetResult};
 use readyset_util::arbitrary::{arbitrary_decimal, arbitrary_duration};
 use readyset_util::redacted::Sensitive;
@@ -1801,6 +1802,13 @@ impl ToSql for DfValue {
 
     fn accepts(_: &Type) -> bool {
         true
+    }
+
+    fn encode_format(&self, _ty: &Type) -> Format {
+        match self {
+            Self::PassThrough(p) if p.format == PassThroughFormat::Text => Format::Text,
+            _ => Format::Binary,
+        }
     }
 
     to_sql_checked!();
