@@ -41,15 +41,6 @@ dependencies = [
 
 [[package]]
 name = "aho-corasick"
-version = "0.7.20"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc936419f96fa211c1b9166887b38e5e40b19958e5b895be7c1f93adec7071ac"
-dependencies = [
- "memchr",
-]
-
-[[package]]
-name = "aho-corasick"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "43f6cb1bf222025340178f382c426f13757b2960e89779dfcb319c32542a5a41"
@@ -2007,9 +1998,9 @@ dependencies = [
 
 [[package]]
 name = "hashbrown"
-version = "0.13.2"
+version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43a3c133739dddd0d2990f9a4bdf8eb4b21ef50e4851ca85ab661199821d510e"
+checksum = "33ff8ae62cd3a9102e5637afc8452c55acf3844001bd5374e0b0bd7b6616c038"
 dependencies = [
  "ahash 0.8.3",
 ]
@@ -2633,7 +2624,7 @@ version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03f1160296536f10c833a82dca22267d5486734230d47bf00bf435885814ba1e"
 dependencies = [
- "hashbrown 0.13.2",
+ "hashbrown 0.13.1",
 ]
 
 [[package]]
@@ -2744,9 +2735,8 @@ dependencies = [
 
 [[package]]
 name = "metrics"
-version = "0.21.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aa8ebbd1a9e57bbab77b9facae7f5136aea44c356943bf9a198f647da64285d6"
+version = "0.21.1"
+source = "git+https://github.com/readysettech/metrics.git#9834afdd26f6dea20cd6bc1003fa15bf350cc0f5"
 dependencies = [
  "ahash 0.8.3",
  "metrics-macros",
@@ -2756,8 +2746,7 @@ dependencies = [
 [[package]]
 name = "metrics-exporter-prometheus"
 version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a4964177ddfdab1e3a2b37aec7cf320e14169abb0ed73999f558136409178d5"
+source = "git+https://github.com/readysettech/metrics.git#9834afdd26f6dea20cd6bc1003fa15bf350cc0f5"
 dependencies = [
  "base64 0.21.0",
  "hyper",
@@ -2774,8 +2763,7 @@ dependencies = [
 [[package]]
 name = "metrics-macros"
 version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ddece26afd34c31585c74a4db0630c376df271c285d682d1e55012197830b6df"
+source = "git+https://github.com/readysettech/metrics.git#9834afdd26f6dea20cd6bc1003fa15bf350cc0f5"
 dependencies = [
  "proc-macro2 1.0.63",
  "quote 1.0.26",
@@ -2784,14 +2772,13 @@ dependencies = [
 
 [[package]]
 name = "metrics-util"
-version = "0.15.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "111cb375987443c3de8d503580b536f77dc8416d32db62d9456db5d93bd7ac47"
+version = "0.15.1"
+source = "git+https://github.com/readysettech/metrics.git#9834afdd26f6dea20cd6bc1003fa15bf350cc0f5"
 dependencies = [
- "aho-corasick 0.7.20",
+ "aho-corasick",
  "crossbeam-epoch",
  "crossbeam-utils",
- "hashbrown 0.13.2",
+ "hashbrown 0.13.1",
  "indexmap",
  "metrics",
  "num_cpus",
@@ -4279,7 +4266,6 @@ dependencies = [
  "readyset-version",
  "replicators",
  "reqwest",
- "rlimit",
  "tokio",
  "tokio-native-tls",
  "tokio-stream",
@@ -5093,7 +5079,7 @@ version = "1.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0ab3ca65655bb1e41f2a8c8cd662eb4fb035e67c3f78da1d61dffe89d07300f"
 dependencies = [
- "aho-corasick 1.0.2",
+ "aho-corasick",
  "memchr",
  "regex-syntax 0.7.2",
 ]

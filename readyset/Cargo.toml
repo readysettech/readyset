@@ -13,9 +13,8 @@ clap = { workspace = true, features = ["derive","env"] }
 futures-util = "0.3.0"
 fail = "0.5.0"
 failpoint-macros = { path = "../failpoint-macros" }
-metrics = "0.21"
-metrics-exporter-prometheus = "0.12.1"
-rlimit = "0.10.1"
+metrics = { workspace = true }
+metrics-exporter-prometheus = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tokio-native-tls = "0.3.1"
 tokio-stream = { version = "0.1.5", features = ["net"] }

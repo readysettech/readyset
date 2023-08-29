@@ -1,7 +1,7 @@
 #![allow(clippy::option_map_unit_fn)]
 use std::sync::Arc;
 
-use metrics::{Counter, Gauge, Histogram, KeyName, Recorder, SharedString, Unit};
+use metrics::{Counter, Gauge, Histogram, KeyName, Metadata, Recorder, SharedString, Unit};
 use metrics_exporter_prometheus::PrometheusRecorder;
 use readyset_client::metrics::Key;
 
@@ -110,40 +110,40 @@ impl Clear for CompositeMetricsRecorder {
 }
 
 impl Recorder for CompositeMetricsRecorder {
-    fn register_counter(&self, key: &Key) -> Counter {
+    fn register_counter(&self, key: &Key, metadata: &Metadata<'_>) -> Counter {
         match (&self.prom_recorder, &self.noria_recorder) {
-            (Some(p), None) => p.register_counter(key),
-            (None, Some(n)) => n.register_counter(key),
+            (Some(p), None) => p.register_counter(key, metadata),
+            (None, Some(n)) => n.register_counter(key, metadata),
             (None, None) => Counter::noop(),
             (Some(p), Some(n)) => Arc::new(CompositeCounter {
-                noria: n.register_counter(key),
-                prom: p.register_counter(key),
+                noria: n.register_counter(key, metadata),
+                prom: p.register_counter(key, metadata),
             })
             .into(),
         }
     }
 
-    fn register_gauge(&self, key: &Key) -> Gauge {
+    fn register_gauge(&self, key: &Key, metadata: &Metadata<'_>) -> Gauge {
         match (&self.prom_recorder, &self.noria_recorder) {
-            (Some(p), None) => p.register_gauge(key),
-            (None, Some(n)) => n.register_gauge(key),
+            (Some(p), None) => p.register_gauge(key, metadata),
+            (None, Some(n)) => n.register_gauge(key, metadata),
             (None, None) => Gauge::noop(),
             (Some(p), Some(n)) => Arc::new(CompositeGauge {
-                noria: n.register_gauge(key),
-                prom: p.register_gauge(key),
+                noria: n.register_gauge(key, metadata),
+                prom: p.register_gauge(key, metadata),
             })
             .into(),
         }
     }
 
-    fn register_histogram(&self, key: &Key) -> Histogram {
+    fn register_histogram(&self, key: &Key, metadata: &Metadata<'_>) -> Histogram {
         match (&self.prom_recorder, &self.noria_recorder) {
-            (Some(p), None) => p.register_histogram(key),
-            (None, Some(n)) => n.register_histogram(key),
+            (Some(p), None) => p.register_histogram(key, metadata),
+            (None, Some(n)) => n.register_histogram(key, metadata),
             (None, None) => Histogram::noop(),
             (Some(p), Some(n)) => Arc::new(CompositeHistogram {
-                noria: n.register_histogram(key),
-                prom: p.register_histogram(key),
+                noria: n.register_histogram(key, metadata),
+                prom: p.register_histogram(key, metadata),
             })
             .into(),
         }
