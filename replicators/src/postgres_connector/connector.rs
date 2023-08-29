@@ -398,16 +398,14 @@ impl PostgresWalConnector {
             .as_micros() as i64
             - J2000_EPOCH_GAP;
 
-        let pos = ack + 1;
-
         // Can reply with StandbyStatusUpdate or HotStandbyFeedback
         let mut b = BytesMut::with_capacity(39);
         b.put_u8(b'd'); // Copy data
         b.put_i32(38); // Message length (including this field)
         b.put_u8(b'r'); // Status update
-        pos.put_into(&mut b); // Acked
-        pos.put_into(&mut b); // Flushed
-        pos.put_into(&mut b); // Applied - this tells the server that it can remove prior WAL entries for this slot
+        ack.put_into(&mut b); // Acked
+        ack.put_into(&mut b); // Flushed - this tells the server that it can remove prior WAL entries for this slot
+        ack.put_into(&mut b); // Applied
         b.put_i64(now);
         b.put_u8(0);
         self.client
