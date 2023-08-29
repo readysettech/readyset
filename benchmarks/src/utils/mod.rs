@@ -108,7 +108,8 @@ macro_rules! benchmark_gauge {
     ($name: expr, $unit: ident, $description: expr, $value: expr $(, $label_key: expr => $label_value: expr)*) => {
         if let Some(recorder) = metrics::try_recorder() {
             let key = $crate::make_key!($name, $unit $(, $label_key => $label_value)*);
-            let g = recorder.register_gauge(&key);
+            let meta = metrics::Metadata::new("", metrics::Level::INFO, None);
+            let g = recorder.register_gauge(&key, &meta);
             recorder.describe_gauge(key.into_parts().0, Some(::metrics::Unit::$unit), $description);
             g.set($value);
         }
@@ -120,7 +121,8 @@ macro_rules! benchmark_counter {
     ($name: expr, $unit: ident, $description: expr, $value: expr $(, $label_key: expr => $label_value: expr)*) => {
         if let Some(recorder) = metrics::try_recorder() {
             let key = $crate::make_key!($name, $unit $(, $label_key => $label_value)*);
-            let c = recorder.register_counter(&key);
+            let meta = metrics::Metadata::new("", metrics::Level::INFO, None);
+            let c = recorder.register_counter(&key, &meta);
             recorder.describe_counter(key.into_parts().0, Some(::metrics::Unit::$unit), $description);
             c.increment($value);
         }
@@ -135,7 +137,8 @@ macro_rules! benchmark_increment_counter {
     ($name: expr, $unit: ident, $value: expr $(, $label_key: expr => $label_value: expr)*) => {
         if let Some(recorder) = metrics::try_recorder() {
             let key = $crate::make_key!($name, $unit $(, $label_key => $label_value)*);
-            let c = recorder.register_counter(&key);
+            let meta = metrics::Metadata::new("", metrics::Level::INFO, None);
+            let c = recorder.register_counter(&key, &meta);
             c.increment($value);
         }
     };
@@ -149,7 +152,8 @@ macro_rules! benchmark_histogram {
     ($name: expr, $unit: ident, $description: expr, $value: expr $(, $label_key: expr => $label_value: expr)*) => {
         if let Some(recorder) = metrics::try_recorder() {
             let key = $crate::make_key!($name, $unit $(, $label_key => $label_value)*);
-            let h = recorder.register_histogram(&key);
+            let meta = metrics::Metadata::new("", metrics::Level::INFO, None);
+            let h = recorder.register_histogram(&key, &meta);
             recorder.describe_histogram(key.into_parts().0, Some(::metrics::Unit::$unit), $description);
             h.record($value);
         }

@@ -4,6 +4,9 @@ eui48 = { git = "https://github.com/readysettech/eui48.git", branch = "master" }
 opentelemetry = { git = "https://github.com/open-telemetry/opentelemetry-rust" }
 opentelemetry-otlp = { git = "https://github.com/open-telemetry/opentelemetry-rust" }
 opentelemetry-semantic-conventions = { git = "https://github.com/open-telemetry/opentelemetry-rust" }
+metrics-exporter-prometheus = { git = "https://github.com/readysettech/metrics.git" }
+metrics = { git = "https://github.com/readysettech/metrics.git" }
+metrics-util = { git = "https://github.com/readysettech/metrics.git" }
 
 [workspace]
 members = [
@@ -75,6 +78,9 @@ postgres-types = {  git = "https://github.com/readysettech/rust-postgres.git"}
 tokio-postgres = {  git = "https://github.com/readysettech/rust-postgres.git"}
 tokio = { version = "1.32",  features = ["full"] }
 rocksdb = { git = "https://github.com/readysettech/rust-rocksdb.git", default-features = false, features = ["lz4", "jemalloc"] }
+metrics-exporter-prometheus = { version = "0.12.1" }
+metrics = { version = "0.21.1" }
+metrics-util = { version = "0.15.1"}
 
 [profile.release]
 debug=true

@@ -16,7 +16,7 @@ fail = "0.5.0"
 bytes = "1.0"
 chrono = "0.4"
 itertools = "0.10"
-metrics = "0.21"
+metrics = { workspace = true }
 tracing = { version = "0.1", features = ["release_max_level_debug"] }
 tracing-futures = "0.2.5"
 serde_json = { version = "1", features = ["arbitrary_precision"] }

@@ -36,9 +36,9 @@ pin-project = "1.0"
 hyper = { version = "0.14.10", features = [ "stream", "server" ] }
 querystring = "1.1.0"
 itertools = "0.10"
-metrics = "0.21"
-metrics-util = "0.15"
-metrics-exporter-prometheus = "0.12.1"
+metrics = { workspace = true }
+metrics-util = { workspace = true }
+metrics-exporter-prometheus = { workspace = true }
 nom = "7.1"
 petgraph = { version = "0.5", features = ["serde-1"] }
 rand = "0.7.0"

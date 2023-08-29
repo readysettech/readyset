@@ -3,7 +3,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
 
-use metrics::{Counter, Gauge, Histogram, KeyName, Recorder, SharedString, Unit};
+use metrics::{Counter, Gauge, Histogram, KeyName, Metadata, Recorder, SharedString, Unit};
 use parking_lot::Mutex;
 use readyset_client::metrics::{Key, MetricsDump};
 
@@ -47,7 +47,7 @@ impl metrics::HistogramFn for NoriaHistogram {
 }
 
 impl Recorder for NoriaMetricsRecorder {
-    fn register_counter(&self, key: &Key) -> Counter {
+    fn register_counter(&self, key: &Key, _metadata: &Metadata<'_>) -> Counter {
         let mut counters = self.counters.lock();
         counters
             .raw_entry_mut()
@@ -58,7 +58,7 @@ impl Recorder for NoriaMetricsRecorder {
             .into()
     }
 
-    fn register_gauge(&self, key: &Key) -> Gauge {
+    fn register_gauge(&self, key: &Key, _metadata: &Metadata<'_>) -> Gauge {
         let mut gauges = self.gauges.lock();
         gauges
             .raw_entry_mut()
@@ -69,7 +69,7 @@ impl Recorder for NoriaMetricsRecorder {
             .into()
     }
 
-    fn register_histogram(&self, key: &Key) -> Histogram {
+    fn register_histogram(&self, key: &Key, _metadata: &Metadata<'_>) -> Histogram {
         let mut histograms = self.histograms.lock();
         histograms
             .raw_entry_mut()
