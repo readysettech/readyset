@@ -596,7 +596,7 @@ impl Arbitrary for DfType {
         ];
 
         base_type
-            .prop_recursive(4, 6, 1, |df_type_strat| {
+            .prop_recursive(2, 3, 1, |df_type_strat| {
                 df_type_strat
                     .prop_map(|df_type| DfType::Array(Box::new(df_type)))
                     .boxed()

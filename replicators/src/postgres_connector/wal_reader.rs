@@ -766,3 +766,151 @@ impl wal::TupleData {
         Ok(ret)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use bytes::Bytes;
+    use postgres_types::Type as PGType;
+    use proptest::arbitrary::any;
+    use proptest::strategy::Strategy;
+    use readyset_data::arbitrary::generate_dfvalue;
+    use readyset_data::{DfType, DfValue};
+    use test_strategy::proptest;
+
+    use crate::postgres_connector::wal::{
+        ColumnSpec, RelationMapping, TupleData, TupleEntry, WalError,
+    };
+
+    fn to_oid(ty: &DfType) -> u32 {
+        let pg_type = match ty {
+            DfType::Unknown => PGType::UNKNOWN,
+            DfType::Array(ty) => match ty.as_ref() {
+                DfType::Bool => PGType::BOOL_ARRAY,
+                DfType::TinyInt | DfType::UnsignedTinyInt => PGType::INT2_ARRAY,
+                DfType::SmallInt | DfType::UnsignedSmallInt => PGType::INT4_ARRAY,
+                DfType::Int | DfType::UnsignedInt | DfType::BigInt | DfType::UnsignedBigInt => {
+                    PGType::INT8_ARRAY
+                }
+                DfType::Float => PGType::FLOAT4_ARRAY,
+                DfType::Double => PGType::FLOAT8_ARRAY,
+                DfType::Numeric { .. } => PGType::NUMERIC_ARRAY,
+                DfType::Text(_) => PGType::TEXT_ARRAY,
+                DfType::Char(_, _) => PGType::CHAR_ARRAY,
+                DfType::VarChar(_, _) => PGType::VARCHAR_ARRAY,
+                DfType::Blob | DfType::Binary(_) | DfType::VarBinary(_) => PGType::BYTEA_ARRAY,
+                DfType::Bit(_) => PGType::BIT_ARRAY,
+                DfType::VarBit(_) => PGType::VARBIT_ARRAY,
+                DfType::Date => PGType::DATE_ARRAY,
+                DfType::DateTime { .. } => PGType::TIMESTAMP_ARRAY,
+                DfType::Time { .. } => PGType::TIME_ARRAY,
+                DfType::Timestamp { .. } => PGType::TIMESTAMP_ARRAY,
+                DfType::TimestampTz { .. } => PGType::TIMESTAMPTZ_ARRAY,
+                DfType::MacAddr => PGType::MACADDR_ARRAY,
+                DfType::Inet => PGType::INET_ARRAY,
+                DfType::Uuid => PGType::UUID_ARRAY,
+                DfType::Json => PGType::JSON_ARRAY,
+                DfType::Jsonb => PGType::JSONB_ARRAY,
+                _ => PGType::UNKNOWN,
+            },
+            DfType::Bool => PGType::BOOL,
+            DfType::TinyInt | DfType::UnsignedTinyInt => PGType::INT2,
+            DfType::SmallInt | DfType::UnsignedSmallInt => PGType::INT4,
+            DfType::Int | DfType::UnsignedInt | DfType::BigInt | DfType::UnsignedBigInt => {
+                PGType::INT8
+            }
+            DfType::Float => PGType::FLOAT4,
+            DfType::Double => PGType::FLOAT8,
+            DfType::Numeric { .. } => PGType::NUMERIC,
+            DfType::Text(_) => PGType::TEXT,
+            DfType::Char(_, _) => PGType::CHAR,
+            DfType::VarChar(_, _) => PGType::VARCHAR,
+            DfType::Blob | DfType::Binary(_) | DfType::VarBinary(_) => PGType::BYTEA,
+            DfType::Bit(_) => PGType::BIT,
+            DfType::VarBit(_) => PGType::VARBIT,
+            DfType::Date => PGType::DATE,
+            DfType::DateTime { .. } => PGType::TIMESTAMP,
+            DfType::Time { .. } => PGType::TIME,
+            DfType::Timestamp { .. } => PGType::TIMESTAMP,
+            DfType::TimestampTz { .. } => PGType::TIMESTAMPTZ,
+            DfType::MacAddr => PGType::MACADDR,
+            DfType::Inet => PGType::INET,
+            DfType::Uuid => PGType::UUID,
+            DfType::Json => PGType::JSON,
+            DfType::Jsonb => PGType::JSONB,
+            _ => PGType::UNKNOWN,
+        };
+        pg_type.oid()
+    }
+
+    fn to_column_specs(types: Vec<DfType>) -> Vec<ColumnSpec> {
+        types
+            .into_iter()
+            .map(|ty| ColumnSpec {
+                flags: 0,
+                name: Default::default(),
+                type_oid: to_oid(&ty),
+                type_modifier: 0,
+            })
+            .collect()
+    }
+
+    fn to_relation_mapping(types: Vec<DfType>) -> RelationMapping {
+        RelationMapping {
+            id: 0,
+            schema: Default::default(),
+            name: Default::default(),
+            relreplident: 0,
+            n_cols: types.len() as i16,
+            cols: to_column_specs(types),
+        }
+    }
+
+    fn to_wal_tuple_entry(val: &DfValue) -> TupleEntry {
+        if let DfValue::None = val {
+            TupleEntry::Null
+        } else {
+            // NOTE(fran): Is this correct?
+            TupleEntry::Text(Bytes::copy_from_slice(val.to_string().as_bytes()))
+        }
+    }
+
+    fn arbitrary_types_and_val() -> impl Strategy<Value = (Vec<DfType>, Vec<DfValue>)> {
+        let type_and_val = any::<DfType>()
+            .prop_flat_map(|ty| generate_dfvalue(Some(&ty)).prop_map(move |val| (ty.clone(), val)))
+            .boxed();
+        proptest::collection::vec(type_and_val, 1..=3).prop_map(|vec| {
+            vec.into_iter().fold(
+                (Vec::new(), Vec::new()),
+                |(mut accum_ty, mut accum_val), (ty, val)| {
+                    accum_ty.push(ty);
+                    accum_val.push(val);
+                    (accum_ty, accum_val)
+                },
+            )
+        })
+    }
+
+    /// This test makes sure that whenever we call `TupleData::into_noria_vec`, the error we return
+    /// is a `WalError::TableError`.
+    #[proptest]
+    fn into_noria_vec_correct_error(
+        #[strategy(arbitrary_types_and_val())] setup: (Vec<DfType>, Vec<DfValue>),
+    ) {
+        let (types, values) = setup;
+        let tuple_data = TupleData {
+            n_cols: values.len() as i16,
+            cols: values.iter().map(to_wal_tuple_entry).collect(),
+        };
+        let relation_mapping = to_relation_mapping(types);
+
+        let res = tuple_data.into_noria_vec(&relation_mapping, &HashSet::new(), false);
+        if let Err(e) = res {
+            assert!(
+                matches!(e, WalError::TableError { .. }),
+                "WAL errors should be table errors, so replication doesn't fail!"
+            )
+        }
+    }
+}

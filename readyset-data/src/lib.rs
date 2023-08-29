@@ -2167,7 +2167,7 @@ impl Arbitrary for DfValue {
     }
 }
 
-mod arbitrary {
+pub mod arbitrary {
     use std::sync::Arc;
 
     use bit_vec::BitVec;
@@ -2180,8 +2180,7 @@ mod arbitrary {
     use crate::array::Array;
     use crate::{DfType, DfValue, TimestampTz};
 
-    #[allow(dead_code)]
-    pub(crate) fn generate_dfvalue(ty: Option<&DfType>) -> impl Strategy<Value = DfValue> {
+    pub fn generate_dfvalue(ty: Option<&DfType>) -> impl Strategy<Value = DfValue> {
         match ty {
             Some(DfType::Bool) => (0..=1u64).prop_map(DfValue::UnsignedInt).boxed(),
             // NOTE: Depending on the DfType, this might result in a recursive call
@@ -2220,7 +2219,7 @@ mod arbitrary {
                     .prop_map(DfValue::from)
                     .boxed()
             }
-            Some(DfType::Blob) => vec(any::<u8>(), 0..=usize::MAX)
+            Some(DfType::Blob) => vec(any::<u8>(), 0..=64)
                 .prop_map(|b| DfValue::ByteArray(Arc::new(b)))
                 .boxed(),
             Some(DfType::Binary(len)) => {
@@ -2242,7 +2241,7 @@ mod arbitrary {
                     .boxed()
             }
             Some(DfType::VarBit(len)) => {
-                let len = len.unwrap_or(u16::MAX) as usize;
+                let len = len.unwrap_or(64) as usize;
                 vec(any::<u8>(), 0..=len)
                     .prop_map(|b| DfValue::BitVector(Arc::new(BitVec::from_bytes(&b))))
                     .boxed()
@@ -2257,9 +2256,15 @@ mod arbitrary {
                 any::<TimestampTz>().prop_map(DfValue::TimestampTz).boxed()
             }
             Some(DfType::Time { .. }) => any::<MySqlTime>().prop_map(DfValue::Time).boxed(),
-            Some(DfType::Enum { variants, .. }) => proptest::sample::select(variants.to_vec())
-                .prop_map(DfValue::from)
-                .boxed(),
+            Some(DfType::Enum { variants, .. }) => {
+                if variants.is_empty() {
+                    Just(DfValue::None).boxed()
+                } else {
+                    proptest::sample::select(variants.to_vec())
+                        .prop_map(DfValue::from)
+                        .boxed()
+                }
+            }
             Some(DfType::Unknown) | None => Just(DfValue::None).boxed(),
             // These are ignored for now
             Some(DfType::Jsonb)
