@@ -36,44 +36,44 @@
         (update [this _ _ _] this)))
     (rs/query query-id)))
 
-(def grouped-count
-  {:tables [{:create-table :t
-             :with-columns [[:id :int]
-                            [:grp :int]
-                            [[:primary-key :id]]]}]
+(defn grouped-count [& [num-groups]]
+  (let [num-groups (or num-groups 10)]
+    {:tables [{:create-table :t
+               :with-columns [[:id :int]
+                              [:grp :int]
+                              [[:primary-key :id]]]}]
 
-   :queries {:q
-             {:query
-              {:select [[:%count.* :count]]
-               :from [:t]
-               :where [:= :grp [:param :grp]]}
+     :queries {:q
+               {:query
+                {:select [[:%count.* :count]]
+                 :from [:t]
+                 :where [:= :grp [:param :grp]]}
+                :gen-params (fn [_] {:grp (rand-int num-groups)})
+                :initial-expected-results #{[{:count 0}]}
+                :expected-results
+                (fn [rows]
+                  (fn [params]
+                    [{:count
+                      (->> rows
+                           :t
+                           (filter (comp #{(:grp params)} :t/grp))
+                           count)}]))
+                :final-consistent-read-params (for [n (range num-groups)]
+                                                {:grp n})}}
 
-              :gen-params (fn [_] {:grp (rand-int 10)})
-              :initial-expected-results #{[{:count 0}]}
-              :expected-results
-              (fn [rows]
-                (fn [params]
-                  [{:count
-                    (->> rows
-                         :t
-                         (filter (comp #{(:grp params)} :t/grp))
-                         count)}]))
-              :final-consistent-read-params (for [n (range 10)]
-                                              {:grp n})}}
+     :gen-write (fn [_test {:keys [rows]}]
+                  (rs/write
+                   (case (rand-nth [:insert #_:delete])
+                     :insert {:insert-into :t
+                              :columns [:id :grp]
+                              :values [[(rand-int 100)
+                                        (rand-int num-groups)]]
+                              :on-conflict {:do-nothing []}}
 
-   :gen-write (fn [_test {:keys [rows]}]
-                (rs/write
-                 (case (rand-nth [:insert :delete])
-                   :insert {:insert-into :t
-                            :columns [:id :grp]
-                            :values [[(rand-int 100)
-                                      (rand-int 10)]]
-                            :on-conflict {:do-nothing []}}
-
-                   :delete {:delete-from :t
-                            :where [:= :id (if (seq (:t rows))
-                                             (->> rows :t (map :t/id) rand-nth)
-                                             (rand-int 100))]})))})
+                     :delete {:delete-from :t
+                              :where [:= :id (if (seq (:t rows))
+                                               (->> rows :t (map :t/id) rand-nth)
+                                               (rand-int 100))]})))}))
 
 ;;;
 

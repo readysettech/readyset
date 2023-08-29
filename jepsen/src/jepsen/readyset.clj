@@ -180,7 +180,7 @@
 
 (defn readyset-test
   [opts]
-  (let [workload workloads/grouped-count]
+  (let [workload (workloads/grouped-count (:num-groups opts))]
     (merge
      tests/noop-test
      opts
@@ -262,6 +262,12 @@
       "--converge-time SECONDS"
       "Number of seconds to wait for dataflow to converge"
       :default 15
+      :parse-fn read-string
+      :validate validate-pos-number]
+     [nil
+      "--num-groups GROUPS"
+      "Number of groups to generate for grouped workloads"
+      :default 10
       :parse-fn read-string
       :validate validate-pos-number]]))
 
