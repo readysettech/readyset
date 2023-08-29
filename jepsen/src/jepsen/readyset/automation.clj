@@ -69,6 +69,7 @@
      :chdir "/"}
     "/usr/local/bin/readyset"
     :--log-level (:log-level test "info")
+    :--no-color
     :--deployment "jepsen"
     :-a "0.0.0.0:5432"
     :--controller-address "0.0.0.0"
@@ -94,6 +95,7 @@
      :chdir "/"}
     "/usr/local/bin/readyset-server"
     :--log-level (:log-level test "info")
+    :--no-color
     :--deployment "jepsen"
     :--db-dir "/opt/readyset/data"
     :-a "0.0.0.0"

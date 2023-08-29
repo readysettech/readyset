@@ -186,7 +186,7 @@
      opts
      {:name "ReadySet"
       :os ubuntu/os
-      :db (db "92e5b6b70a3a4da3f7f33c4401be443c728afa77"  ; Needs at least this commit
+      :db (db "d7232218f74d9af117046fa1101b107d0d5f848d"  ; Needs at least this commit
               #_"refs/tags/beta-2023-07-26")
       :client (rs/new-client
                {:retry-queries 2
