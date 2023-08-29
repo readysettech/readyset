@@ -56,6 +56,7 @@ pub enum TableErrorKind {
     TimeParseError(mysql_time::ConvertError),
     NumericParseError(rust_decimal::Error),
     BitVectorParseError(String),
+    ArrayParseError,
     InvalidMapping(String),
     UnsupportedTypeConversion { type_oid: u32 },
     UnknownEnumVariant(Bytes),
