@@ -39,7 +39,8 @@
 (def grouped-count
   {:tables [{:create-table :t
              :with-columns [[:id :int]
-                            [:grp :int]]}]
+                            [:grp :int]
+                            [[:primary-key :id]]]}]
 
    :queries {:q
              {:query
@@ -66,7 +67,8 @@
                    :insert {:insert-into :t
                             :columns [:id :grp]
                             :values [[(rand-int 100)
-                                      (rand-int 10)]]}
+                                      (rand-int 10)]]
+                            :on-conflict {:do-nothing []}}
 
                    :delete {:delete-from :t
                             :where [:= :id (if (seq (:t rows))
