@@ -2,6 +2,7 @@
   "Utilities for interacting with a ReadySet cluster"
   (:require
    [clojure.core.match :refer [match]]
+   [clojure.datafy :refer [datafy]]
    [clojure.set :as set]
    [clojure.tools.logging :refer [info warn]]
    [clojure.walk :as walk]
@@ -206,13 +207,17 @@
                        :exception e})))))))
 
   (invoke! [_ _test {:keys [f value] :as op}]
-    (letfn [(maybe-retry-once [f]
-              (with-retry [attempts (if retry-queries? 1 0)]
-                (f)
-                (catch PSQLException e
-                  (if (pos? attempts)
-                    (retry (dec attempts))
-                    (throw e)))))]
+    (let [retried (atom 0)
+          exceptions (atom [])
+          maybe-retry-once (fn [f]
+                             (with-retry [attempts (if retry-queries? 1 0)]
+                               (swap! retried inc)
+                               (f)
+                               (catch PSQLException e
+                                 (swap! exceptions conj e)
+                                 (if (pos? attempts)
+                                   (retry (dec attempts))
+                                   (throw e)))))]
       (try+
        (case f
          (:query :consistent-query)
@@ -244,14 +249,18 @@
                          (sql/format {:dialect :ansi})))]
               (cond-> op
                 true
-                (assoc :type :ok)
+                (assoc :type :ok
+                       :retried @retried)
                 (contains? value :insert-into)
                 (->
                  (update :value dissoc :columns)
                  (assoc-in [:value :values] res)))))))
 
        (catch PSQLException e
-         (assoc op :type :fail :message (ex-message e))))))
+         (assoc op
+                :type :fail
+                :exceptions (map datafy @exceptions)
+                :retried @retried)))))
 
   (teardown! [_this _test]
     (try
