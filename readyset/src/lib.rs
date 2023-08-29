@@ -459,64 +459,54 @@ where
             return rt.block_on(async { self.cleanup(upstream_config, deployment_dir).await });
         }
 
-        let mut parsed_upstream_url = None;
+        let users: &'static HashMap<String, String> = Box::leak(Box::new(
+            if !options.allow_unauthenticated_connections {
+                HashMap::from([{
+                    let upstream_url = upstream_config
+                        .upstream_db_url
+                        .as_ref()
+                        .and_then(|s| s.parse::<DatabaseURL>().ok());
 
-        let users: &'static HashMap<String, String> =
-            Box::leak(Box::new(if !options.allow_unauthenticated_connections {
-                HashMap::from([(
-                    options
-                        .username
-                        .or_else(|| {
-                            // Default to the username in the upstream_db_url, if it's set and
-                            // parseable
-                            parsed_upstream_url
-                                .get_or_insert_with(|| {
-                                    upstream_config
-                                        .upstream_db_url
-                                        .as_ref()?
-                                        .parse::<DatabaseURL>()
-                                        .ok()
-                                })
-                                .as_ref()?
-                                .user()
-                                .map(ToOwned::to_owned)
-                        })
-                        .ok_or_else(|| {
-                            anyhow!(
-                                "Must specify --username/-u if one of \
-                                 --allow-unauthenticated-connections or --upstream-db-url is not \
-                                 passed"
-                            )
-                        })?,
-                    options
-                        .password
-                        .map(|x| x.0)
-                        .or_else(|| {
-                            // Default to the password in the upstream_db_url, if it's set and
-                            // parseable
-                            parsed_upstream_url
-                                .get_or_insert_with(|| {
-                                    upstream_config
-                                        .upstream_db_url
-                                        .as_ref()?
-                                        .parse::<DatabaseURL>()
-                                        .ok()
-                                })
-                                .as_ref()?
-                                .password()
-                                .map(ToOwned::to_owned)
-                        })
-                        .ok_or_else(|| {
-                            anyhow!(
-                                "Must specify --password/-p if one of \
-                                 --allow-unauthenticated-connections or --upstream-db-url is not \
-                                 passed"
-                            )
-                        })?,
-                )])
+                    match (
+                        (options.username, options.password),
+                        (
+                            upstream_url.as_ref().and_then(|url| url.user()),
+                            upstream_url.as_ref().and_then(|url| url.password()),
+                        ),
+                    ) {
+                        // --username and --password
+                        ((Some(user), Some(pass)), _) => (user, pass.0),
+                        // --password, username from url
+                        ((None, Some(pass)), (Some(user), _)) => (user.to_owned(), pass.0),
+                        // username and password from url
+                        (_, (Some(user), Some(pass))) => (user.to_owned(), pass.to_owned()),
+                        _ => {
+                            if upstream_url.is_some() {
+                                bail!(
+                                    "Failed to infer ReadySet username and password from \
+                                    upstream DB URL. Please ensure they are present and \
+                                    correctly formatted as follows: \
+                                    <protocol>://<username>:<password>@<address>[:<port>][/<database>] \
+                                    You can also configure ReadySet to accept credentials \
+                                    different from those of your upstream database via \
+                                    --username/-u and --password/-p, or use \
+                                    --allow-unauthenticated-connections."
+                                )
+                            } else {
+                                bail!(
+                                    "Must specify --username/-u and --password/-p if one of \
+                                    --allow-unauthenticated-connections or --upstream-db-url is not \
+                                    passed"
+                                )
+                            }
+                        }
+                    }
+                }])
             } else {
                 HashMap::new()
-            }));
+            },
+        ));
+
         info!(version = %VERSION_STR_ONELINE);
 
         if options.allow_unsupported_set {
