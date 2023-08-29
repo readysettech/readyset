@@ -182,7 +182,7 @@
                    tables
                    queries
                    tables-created?
-                   retry-queries?]
+                   retry-queries]
   client/Client
   (open! [this test _node]
     (assoc this :conn (test-datasource test)))
@@ -209,21 +209,23 @@
   (invoke! [_ _test {:keys [f value] :as op}]
     (let [retried (atom 0)
           exceptions (atom [])
-          maybe-retry-once (fn [f]
-                             (with-retry [attempts (if retry-queries? 1 0)]
-                               (swap! retried inc)
-                               (f)
-                               (catch PSQLException e
-                                 (swap! exceptions conj e)
-                                 (if (pos? attempts)
-                                   (retry (dec attempts))
-                                   (throw e)))))]
+          maybe-retry (fn [f]
+                        (with-retry [attempts (or retry-queries 0)]
+                          (swap! retried inc)
+                          (f)
+                          (catch PSQLException e
+                            (swap! exceptions conj e)
+                            (if (pos? attempts)
+                              (do
+                                (Thread/sleep 10)
+                                (retry (dec attempts)))
+                              (throw e)))))]
       (try+
        (case f
          (:query :consistent-query)
          (let [{:keys [query-id params]} value]
            (if-let [q (get queries query-id)]
-             (maybe-retry-once
+             (maybe-retry
               #(assoc op
                       :type :ok
                       :value
@@ -238,7 +240,7 @@
                       :known-queries (into #{} (keys queries))})))
 
          :write
-         (maybe-retry-once
+         (maybe-retry
           (fn []
             (let [res (jdbc/execute!
                        conn
@@ -276,8 +278,8 @@
 
   Options supported:
 
-  * `:retry-queries?` (optional) if set to true, all queries will be retried
-    once before being considered failed
+  * `:retry-queries` (optional) if set to a positive number, all queries will be
+    retried that many times before being considered failed
   * `:tables` (required) A list of tables, represented as HoneySQL
     `:create-table` maps, to install in the DB
   * `queries` (required) A map from query ID, which should be a keyword, to
@@ -285,7 +287,7 @@
     used to execute the query as part of the `query` op"
   [opts]
   (-> opts
-      (select-keys [:retry-queries?
+      (select-keys [:retry-queries
                     :tables
                     :queries])
       (merge {:tables-created? (atom false)})
