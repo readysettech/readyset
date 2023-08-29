@@ -470,7 +470,11 @@ fn get_text_value(src: &mut Bytes, t: &Type) -> Result<PsqlValue, Error> {
         Type::BIT => get_bitvec_from_str(text_str).map(PsqlValue::Bit),
         Type::VARBIT => get_bitvec_from_str(text_str).map(PsqlValue::VarBit),
         ref t if t.name() == "citext" => Ok(PsqlValue::Text(text_str.into())),
-        _ => Err(Error::UnsupportedType(t.clone())),
+        _ => Ok(PsqlValue::PassThrough(readyset_data::PassThrough {
+            ty: t.clone(),
+            format: PassThroughFormat::Text,
+            data: text.as_bytes().to_vec().into_boxed_slice(),
+        })),
     }
 }
 
