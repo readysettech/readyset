@@ -607,6 +607,25 @@ pub(crate) fn create_dummy_column(name: &str) -> ColumnSchema {
     }
 }
 
+#[macro_export]
+macro_rules! create_dummy_schema {
+    ($($n:expr),+) => {
+        SelectSchema {
+            schema: Cow::Owned(vec![
+                $(
+                    create_dummy_column($n),
+                )*
+            ]),
+
+            columns: Cow::Owned(vec![
+                $(
+                    $n.into(),
+                )*
+            ]),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use nom_sql::{self, parse_create_table, Dialect, SqlQuery};

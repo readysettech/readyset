@@ -107,7 +107,7 @@ use crate::query_handler::SetBehavior;
 use crate::query_status_cache::QueryStatusCache;
 pub use crate::upstream_database::UpstreamPrepare;
 use crate::utils::create_dummy_column;
-use crate::{rewrite, QueryHandler, UpstreamDatabase, UpstreamDestination};
+use crate::{create_dummy_schema, rewrite, QueryHandler, UpstreamDatabase, UpstreamDestination};
 
 pub mod noria_connector;
 
@@ -1731,19 +1731,7 @@ where
             queries.retain(|q| q.status.migration_state.is_supported());
         }
 
-        let select_schema = SelectSchema {
-            schema: Cow::Owned(vec![
-                create_dummy_column("query id"),
-                create_dummy_column("proxied query"),
-                create_dummy_column("readyset supported"),
-            ]),
-
-            columns: Cow::Owned(vec![
-                "query id".into(),
-                "proxied query".into(),
-                "readyset supported".into(),
-            ]),
-        };
+        let select_schema = create_dummy_schema!("query id", "proxied query", "readyset supported");
 
         let data = queries
             .into_iter()
@@ -1805,21 +1793,8 @@ where
             ]);
         }
 
-        let select_schema = SelectSchema {
-            schema: Cow::Owned(vec![
-                create_dummy_column("query id"),
-                create_dummy_column("cache name"),
-                create_dummy_column("query text"),
-                create_dummy_column("fallback behavior"),
-            ]),
-
-            columns: Cow::Owned(vec![
-                "query id".into(),
-                "cache name".into(),
-                "query text".into(),
-                "fallback behavior".into(),
-            ]),
-        };
+        let select_schema =
+            create_dummy_schema!("query id", "cache name", "query text", "fallback behavior");
 
         Ok(noria_connector::QueryResult::from_owned(
             select_schema,
@@ -2541,10 +2516,7 @@ where
             .map(|s| vec![DfValue::from(s)])
             .collect();
 
-        let select_schema = SelectSchema {
-            schema: Cow::Owned(vec![create_dummy_column("query text")]),
-            columns: Cow::Owned(vec!["query text".into()]),
-        };
+        let select_schema = create_dummy_schema!("query text");
 
         Ok(noria_connector::QueryResult::from_owned(
             select_schema,
