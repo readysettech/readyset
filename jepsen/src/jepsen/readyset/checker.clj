@@ -79,7 +79,7 @@
         (fn [{:keys [rows past-results] :as state}
              {:keys [index type f value]}]
           (case [type f]
-            [:ok :write]
+            [:invoke :write]
             (let [new-rows (:rows (memory-db/apply-write {:rows rows} value))]
               (-> state
                   (assoc :rows new-rows)

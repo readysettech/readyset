@@ -41,10 +41,19 @@
    (fn [rows]
      (remove (where-clause->pred table where-clause) rows))))
 
+(defn- ->rows [rows table columns]
+  (for [row rows]
+    (condp #(%1 %2) row
+      map? row
+      vector? (zipmap (map #(keyword (name table) (name %)) columns) row))))
+
 (defn apply-write
   "Apply the given write, which should be a HoneySQL map, to the given db"
   [db write]
   (match write
+    {:insert-into table :columns columns :values rows}
+    (insert db table (->rows rows table columns))
+
     {:insert-into table :values rows}
     (insert db table rows)
 
