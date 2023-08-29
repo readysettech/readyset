@@ -44,6 +44,7 @@ pub(crate) enum WalEvent {
     },
     Commit {
         lsn: CommitLsn,
+        end_lsn: Lsn,
     },
     Insert {
         schema: String,
@@ -149,7 +150,9 @@ impl WalReader {
 
             match record {
                 WalRecord::Begin { final_lsn, .. } => return Ok(WalEvent::Begin { final_lsn }),
-                WalRecord::Commit { lsn, .. } => return Ok(WalEvent::Commit { lsn }),
+                WalRecord::Commit { lsn, end_lsn, .. } => {
+                    return Ok(WalEvent::Commit { lsn, end_lsn })
+                }
                 WalRecord::Relation(mapping) => {
                     // Store the relation in the hash map for future use
                     let id = mapping.id;
