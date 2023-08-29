@@ -7,6 +7,18 @@
             [jepsen.readyset.client :as rs]
             [jepsen.readyset.nodes :as nodes]))
 
+(def db-dir
+  "The database directory used when running the readyset server"
+  "/opt/readyset/data")
+
+(def deployment
+  "The name of the ReadySet deployment"
+  "jepsen")
+
+(def deployment-dir
+  "The directory that will be used to store deployment data"
+  (str db-dir "/" deployment))
+
 (defn ensure-git-cloned
   "Ensure that a git repository `repo` is cloned at ref `ref` in dir `dir`"
   [repo ref dir]
@@ -70,7 +82,7 @@
     "/usr/local/bin/readyset"
     :--log-level (:log-level test "info")
     :--no-color
-    :--deployment "jepsen"
+    :--deployment deployment
     :-a "0.0.0.0:5432"
     :--controller-address "0.0.0.0"
     :--external-address (net/ip (name node))
@@ -88,7 +100,7 @@
 
 (defn start-readyset-server! [test node]
   (c/su
-   (c/exec :mkdir :-p "/opt/readyset/data")
+   (c/exec :mkdir :-p db-dir)
    (cu/start-daemon!
     {:logfile "/var/log/readyset-server.log"
      :pidfile "/var/run/readyset-server.pid"
@@ -96,8 +108,8 @@
     "/usr/local/bin/readyset-server"
     :--log-level (:log-level test "info")
     :--no-color
-    :--deployment "jepsen"
-    :--db-dir "/opt/readyset/data"
+    :--deployment deployment
+    :--db-dir db-dir
     :-a "0.0.0.0"
     :--external-address (net/ip (name node))
     :--authority-address (authority-address test)

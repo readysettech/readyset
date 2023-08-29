@@ -1,7 +1,10 @@
 (ns jepsen.readyset.nemesis
-  (:require [jepsen.nemesis :as nemesis]
-            [jepsen.readyset.nodes :as nodes]
-            [jepsen.readyset.automation :as rs.auto]))
+  (:require
+   [jepsen.control :as c]
+   [jepsen.control.util :as cu]
+   [jepsen.nemesis :as nemesis]
+   [jepsen.readyset.automation :as rs.auto]
+   [jepsen.readyset.nodes :as nodes]))
 
 (defn- wrap-reflection [fs nemesis]
   (reify
@@ -35,3 +38,29 @@
     (fn [test _nodes] [(nodes/node-with-role test :node-role/readyset-server)])
     rs.auto/kill-readyset-server!
     rs.auto/start-readyset-server!)))
+
+(defrecord BitflipRocksdb [bitflip]
+  nemesis/Nemesis
+  (setup! [this test]
+    (assoc this :bitflip (nemesis/setup! bitflip test)))
+  (invoke! [_ test op]
+    (let [server (nodes/node-with-role test :node-role/readyset-server)
+          rocksdb-dirs (c/on server (cu/ls-full rs.auto/deployment-dir))]
+      (if (empty? rocksdb-dirs)
+        (assoc op :value :no-dbs)
+        (nemesis/invoke! bitflip
+                         test
+                         (assoc op
+                                :value
+                                {server {:file (rand-nth rocksdb-dirs)}})))))
+  (teardown! [this test]
+    (assoc this :bitflip (nemesis/teardown! bitflip test)))
+
+  nemesis/Reflection
+  (fs [_] (nemesis/fs bitflip)))
+
+(defn bitflip-rocksdb
+  "Returns a nemesis which flips bits in random files within the RocksDB
+  database files on the ReadySet server"
+  []
+  (BitflipRocksdb. (nemesis/bitflip)))

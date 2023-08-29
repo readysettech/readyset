@@ -148,7 +148,7 @@
                (c/exec :rm :-rf
                        "/var/run/readyset-server.pid"
                        "/var/log/readyset-server.log"
-                       "/opt/readyset/data"))))
+                       rs.auto/db-dir))))
           (error node "unknown role")))
 
       db/LogFiles
@@ -199,7 +199,8 @@
                 {{:kill-adapter :start
                   :start-adapter :stop} (rs.nemesis/kill-adapters)
                  {:kill-server :start
-                  :start-server :stop} (rs.nemesis/kill-server)})
+                  :start-server :stop} (rs.nemesis/kill-server)
+                 #{:bitflip} (rs.nemesis/bitflip-rocksdb)})
       :checker (checker/compose
                 {:liveness (rs.checker/liveness)
                  :eventually-consistent
@@ -223,7 +224,10 @@
 
                            (cycle
                             [{:type :info :f :kill-server}
-                             {:type :info :f :start-server}])])
+                             {:type :info :f :start-server}])
+
+                           (repeat
+                            {:type :info :f :bitflip})])
                          (gen/stagger 2)))
                    (gen/time-limit (:time-limit opts)))
 
