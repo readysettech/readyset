@@ -1,21 +1,28 @@
 (ns jepsen.readyset.workloads
   "ReadySet workloads.
 
-  Workloads are represented as maps with the following structure:
+  Workloads are represented as maps with the following required keys:
 
-  `{:tables ; list of honeysql :create-table maps
-    :queries
-    {:query-id-one
-     {:query ; honeysql :select map
-      :gen-params ; optional, generate params for this query
-      :initial-expected-results ; allowed results before any insert op
-      :expected-results ; fn from rows map (from table kw to list of rows) to
+  - `:tables` - coll of honeysql :create-table maps
+  - `:queries` - map from query ID to query maps
+  - `:gen-write` - fn from rows map to generated write ops
+
+  Query maps have the following required keys:
+
+  - `:query` - honeysql :select map
+  - `:expected-results` - fn from rows map (from table kw to coll of rows) to
                           expected results for this query
-      :gen-write ; fn from rows map to generated honeysql query maps for writes
-      :final-consistent-read-params ; list of param maps to use for final
-                                    ; consistent reads at the end of the test,
-                                    ; after sleeping to settle
-     }}``"
+
+  For parameterized queries, the following keys are also optionally supported:
+
+  - `:gen-params` - fn from rows to a params map for the query
+  - `:final-consistent-read-params` - coll of param maps to use for final
+                                      consistent reads at the end of the test,
+                                      after sleeping to settle
+
+  The following keys are also optionally supported for all queries:
+
+  - `:initial-expected-results`` ; allowed results before any insert op"
   (:require
    [jepsen.generator :as gen]
    [jepsen.readyset.client :as rs])
