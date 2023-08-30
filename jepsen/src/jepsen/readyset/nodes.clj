@@ -62,8 +62,29 @@
   [test]
   (- (count (:nodes test)) 4))
 
+(defn grudge
+  "Converts a grudge in terms of node roles to a grudge that Jepsen understands
+
+  In Jepsen, grudges are maps from nodes to collections of nodes they should
+  reject messages from. This function takes that map in terms of node roles, and
+  returns a function of the kind accepted by eg `jepsen.nemesis/partitioner`
+  from a list of nodes to a Jepsen grudge."
+  [grudge]
+  (fn [nodes]
+    (let [test {:nodes nodes}]
+      (into
+       {}
+       (mapcat (fn [[node frenemies]]
+                 (for [ns (nodes-with-role test node)]
+                   [ns (mapcat (partial nodes-with-role test) frenemies)])))
+       grudge))))
+
 (comment
-  (def example-test {:nodes (map #(str "node-" %) (range 10))})
+  (def example-nodes (map #(str "node-" %) (range 10)))
+  (def example-test {:nodes example-nodes})
 
   (nodes-with-role example-test :node-role/readyset-adapter)
+
+  ((grudge {:node-role/readyset-server [:node-role/readyset-adapter]})
+   example-nodes)
   )
