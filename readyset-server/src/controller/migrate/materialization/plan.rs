@@ -127,7 +127,7 @@ impl<'a> Plan<'a> {
         .collect::<Vec<_>>();
 
         // don't include paths that don't end at this node.
-        // TODO(grfn): is this necessary anymore? I don't think so
+        // TODO(aspen): is this necessary anymore? I don't think so
         paths.retain(|x| x.last_segment().node == ni);
 
         // since we cut off part of each path, we *may* now have multiple paths that are the same

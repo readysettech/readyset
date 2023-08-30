@@ -433,7 +433,7 @@ struct SharedState {
 
 impl SharedState {
     /// Returns the PersistentIndex for the given index, panicking if it doesn't exist
-    // TODO(grfn): This should actually be an error, since it can be triggered by bad requests
+    // TODO(aspen): This should actually be an error, since it can be triggered by bad requests
     fn index(&self, index_type: IndexType, columns: &[usize]) -> &PersistentIndex {
         self.indices
             .iter()

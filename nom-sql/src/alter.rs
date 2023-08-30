@@ -102,9 +102,9 @@ pub enum AlterTableDefinition {
         drop_behavior: Option<DropBehavior>,
     },
     ReplicaIdentity(ReplicaIdentity),
-    /* TODO(grfn): https://ronsavage.github.io/SQL/sql-2003-2.bnf.html#add%20table%20constraint%20definition
+    /* TODO(aspen): https://ronsavage.github.io/SQL/sql-2003-2.bnf.html#add%20table%20constraint%20definition
      * AddTableConstraint(..),
-     * TODO(grfn): https://ronsavage.github.io/SQL/sql-2003-2.bnf.html#drop%20table%20constraint%20definition
+     * TODO(aspen): https://ronsavage.github.io/SQL/sql-2003-2.bnf.html#drop%20table%20constraint%20definition
      * DropTableConstraint(..), */
 }
 

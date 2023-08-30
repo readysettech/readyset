@@ -3039,7 +3039,7 @@ impl Domain {
                         // processing the records, so that when we materialize the result
                         // we don't miss when processing the redo
                         //
-                        // TODO(grfn): there's an opportunity for an optimization here -
+                        // TODO(aspen): there's an opportunity for an optimization here -
                         // since we're ostensibly querying for considerably more data than
                         // we actually need (think eg paginate where we query for all the
                         // rows in a group in order to satisfy a lookup of an individual

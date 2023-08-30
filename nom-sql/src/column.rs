@@ -93,7 +93,7 @@ pub enum ColumnConstraint {
     AutoIncrement,
     PrimaryKey,
     Unique,
-    /// NOTE(grfn): Yes, this really is its own special thing, not just an expression - see
+    /// NOTE(aspen): Yes, this really is its own special thing, not just an expression - see
     /// <https://dev.mysql.com/doc/refman/8.0/en/timestamp-initialization.html>
     OnUpdateCurrentTimestamp(Option<Literal>),
 }

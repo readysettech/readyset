@@ -27,7 +27,7 @@ fn eval_binary_op(op: BinaryOperator, left: &DfValue, right: &DfValue) -> ReadyS
             return Ok(false.into())
         };
 
-        // NOTE(grfn): At some point, we may want to optimize this to pre-cache
+        // NOTE(aspen): At some point, we may want to optimize this to pre-cache
         // the LikePattern if the value is constant, since constructing a new
         // LikePattern can be kinda slow.
         let pat = LikePattern::new(right, case_sensitivity);

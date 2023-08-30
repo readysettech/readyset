@@ -483,7 +483,7 @@ impl KeyedState {
                 m.swap_remove_index(index).map(|(k, rs)| (rs, k))
             }
 
-            // TODO(grfn): This way of evicting (which also happens in reader_map) is pretty icky -
+            // TODO(aspen): This way of evicting (which also happens in reader_map) is pretty icky -
             // we have to iterate the sequence of keys, *and* we have to clone out the
             // keys themselves! we should find a better way to do that.
             // https://app.clubhouse.io/readysettech/story/154

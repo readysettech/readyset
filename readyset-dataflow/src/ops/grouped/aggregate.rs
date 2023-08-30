@@ -149,7 +149,7 @@ impl Aggregator {
             DfType::BigInt => Ok(DfValue::Int(Default::default())),
             DfType::Double => Ok(DfValue::Double(Default::default())),
             DfType::Numeric { .. } => Ok(DfValue::Numeric(Default::default())),
-            DfType::Text { .. } => Ok(DfValue::from("" /* TODO(grfn): Use collation here */)),
+            DfType::Text { .. } => Ok(DfValue::from("" /* TODO(aspen): Use collation here */)),
             _ => internal!(),
         }
     }

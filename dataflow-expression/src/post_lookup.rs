@@ -10,7 +10,7 @@ use readyset_errors::{internal, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
 /// Representation of an aggregate function
-// TODO(grfn): It would be really nice to deduplicate this somehow with the grouped operator itself
+// TODO(aspen): It would be really nice to deduplicate this somehow with the grouped operator itself
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
 pub enum PostLookupAggregateFunction {
     /// Add together all the input numbers
