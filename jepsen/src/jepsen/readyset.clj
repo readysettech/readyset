@@ -259,7 +259,17 @@
 (def opt-spec
   (let [validate-pos-number [#(and (number? %) (pos? %))
                              "Must be a positive number"]]
-    [[nil "--log-level LOG_LEVEL" "Log level for ReadySet processes"
+    [["-w" "--workload WORKLOAD" "Workload to test"
+      :default :grouped-count
+      :parse-fn keyword
+      :validate [#(contains? workloads/all-workloads %)
+                 (str "Must be a known workload (known workloads: "
+                      (->> workloads/all-workloads
+                           keys
+                           (map name)
+                           (str/join ", "))
+                      ")")]]
+     [nil "--log-level LOG_LEVEL" "Log level for ReadySet processes"
       :default "info"]
      [nil "--force-install" "Force install readyset binaries"]
      ["-r" "--rate HZ" "Approximate number of requests per second, per thread"

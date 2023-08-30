@@ -209,6 +209,10 @@
                      [:= :story-id (:votes/story-id vote-to-delete)]
                      [:= :user-id (:votes/user-id vote-to-delete)]]})))))})
 
+(def all-workloads
+  {:grouped-count grouped-count
+   :votes votes})
+
 (comment
   (def sample-rows
     {:stories [#:stories{:id 1 :title "a"}
