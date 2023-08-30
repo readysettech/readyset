@@ -30,6 +30,7 @@ use nom_sql::Relation;
 use readyset_adapter::backend::noria_connector::{NoriaConnector, ReadBehavior};
 use readyset_adapter::backend::MigrationMode;
 use readyset_adapter::http_router::NoriaAdapterHttpRouter;
+use readyset_adapter::metrics_handle::MetricsHandle;
 use readyset_adapter::migration_handler::MigrationHandler;
 use readyset_adapter::proxied_queries_reporter::ProxiedQueriesReporter;
 use readyset_adapter::query_status_cache::{MigrationStyle, QueryStatusCache};
@@ -744,7 +745,7 @@ where
         };
         let http_server = NoriaAdapterHttpRouter {
             listen_addr: options.metrics_address,
-            prometheus_handle,
+            prometheus_handle: prometheus_handle.clone(),
             health_reporter: health_reporter.clone(),
             failpoint_channel: tx,
         };
@@ -957,9 +958,8 @@ where
                 .query_max_failure_seconds(options.query_max_failure_seconds)
                 .telemetry_sender(telemetry_sender.clone())
                 .fallback_recovery_seconds(options.fallback_recovery_seconds)
-                .enable_experimental_placeholder_inlining(
-                    options.experimental_placeholder_inlining,
-                );
+                .enable_experimental_placeholder_inlining(options.experimental_placeholder_inlining)
+                .metrics_handle(prometheus_handle.clone().map(MetricsHandle::new));
             let telemetry_sender = telemetry_sender.clone();
 
             // Initialize the reader layer for the adapter.
@@ -971,7 +971,6 @@ where
                 ReadRequestHandler::new(readers.clone(), tx, Duration::from_secs(5))
             });
 
-            let query_status_cache = query_status_cache;
             let upstream_config = upstream_config.clone();
             let fut = async move {
                 let upstream_res =

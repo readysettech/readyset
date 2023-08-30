@@ -1782,3 +1782,59 @@ async fn aliased_query_explicitly_cached() {
 
     deployment.teardown().await.unwrap();
 }
+
+#[clustertest]
+async fn show_query_metrics() {
+    readyset_tracing::init_test_logging();
+    let mut deployment = readyset_mysql("show_query_metrics")
+        .standalone()
+        .prometheus_metrics(true)
+        .start()
+        .await
+        .unwrap();
+    let mut adapter = deployment.first_adapter().await;
+
+    adapter.query_drop("CREATE TABLE t (c INT)").await.unwrap();
+
+    // Proxy a query
+    adapter.query_drop("SELECT c FROM t").await.unwrap();
+    // Run a query against ReadySet
+    deployment.leader_handle().ready().await.unwrap();
+    eventually! {
+        adapter
+            .query_drop("CREATE CACHE FROM SELECT c FROM t WHERE c = ?")
+            .await
+            .is_ok()
+    }
+
+    eventually! {
+        adapter.query_drop("SELECT c FROM t where c = 1").await.unwrap();
+        last_statement_destination(adapter.as_mysql_conn().unwrap()).await == QueryDestination::Readyset
+    }
+
+    // Check `SHOW PROXIED QUERIES`
+    let proxied_result: Vec<(String, String, String, String, String, String)> = adapter
+        .as_mysql_conn()
+        .unwrap()
+        .query(r"SHOW PROXIED QUERIES")
+        .await
+        .unwrap();
+
+    // Assert that we get a non-zero value for the metrics
+    assert!(&proxied_result[0].3 != "0.0");
+    assert!(&proxied_result[0].4 != "0.0");
+    assert!(&proxied_result[0].5 != "0.0");
+
+    // Check `SHOW CACHES`
+    let caches_result: Vec<(String, String, String, String, String, String, String)> = adapter
+        .as_mysql_conn()
+        .unwrap()
+        .query(r"SHOW CACHES")
+        .await
+        .unwrap();
+
+    // Assert that we get a non-zero value for the metrics
+    assert!(&caches_result[0].4 != "0.0");
+    assert!(&caches_result[0].5 != "0.0");
+    assert!(&caches_result[0].6 != "0.0");
+}

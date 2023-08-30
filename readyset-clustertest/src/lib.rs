@@ -457,6 +457,8 @@ pub struct DeploymentBuilder {
     embedded_readers: bool,
     /// Whether to allow fully materialized nodes or not
     allow_full_materialization: bool,
+    /// Whether to allow prometheus metrics
+    prometheus_metrics: bool,
 }
 
 pub enum FailpointDestination {
@@ -531,6 +533,7 @@ impl DeploymentBuilder {
             enable_experimental_placeholder_inlining: false,
             embedded_readers: false,
             allow_full_materialization: false,
+            prometheus_metrics: false,
         }
     }
     /// The number of shards in the graph, `shards` <= 1 disables sharding.
@@ -700,6 +703,12 @@ impl DeploymentBuilder {
         self
     }
 
+    /// Sets whether to enable prometheus metrics in the adapter
+    pub fn prometheus_metrics(mut self, prometheus_metrics: bool) -> Self {
+        self.prometheus_metrics = prometheus_metrics;
+        self
+    }
+
     pub fn adapter_start_params(&self) -> AdapterStartParams {
         let wait_for_failpoint = matches!(
             self.wait_for_failpoint,
@@ -722,6 +731,7 @@ impl DeploymentBuilder {
             enable_experimental_placeholder_inlining: self.enable_experimental_placeholder_inlining,
             embedded_readers: self.embedded_readers,
             allow_full_materialization: self.allow_full_materialization,
+            prometheus_metrics: self.prometheus_metrics,
         }
     }
 
@@ -1538,6 +1548,8 @@ pub struct AdapterStartParams {
     embedded_readers: bool,
     /// Whether or not to allow full materializations
     allow_full_materialization: bool,
+    /// Whether to enable prometheus metrics
+    prometheus_metrics: bool,
 }
 
 async fn start_server(
@@ -1681,6 +1693,10 @@ async fn start_adapter(
 
     if params.allow_full_materialization {
         builder = builder.allow_full_materialization();
+    }
+
+    if params.prometheus_metrics {
+        builder = builder.prometheus_metrics()
     }
 
     builder.start().await

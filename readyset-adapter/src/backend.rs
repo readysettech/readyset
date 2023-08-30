@@ -103,6 +103,7 @@ use tracing::{error, instrument, trace, warn};
 use vec1::Vec1;
 
 use crate::backend::noria_connector::ExecuteSelectContext;
+use crate::metrics_handle::MetricsHandle;
 use crate::query_handler::SetBehavior;
 use crate::query_status_cache::QueryStatusCache;
 pub use crate::upstream_database::UpstreamPrepare;
@@ -266,6 +267,7 @@ pub struct BackendBuilder {
     fallback_recovery_seconds: u64,
     telemetry_sender: Option<TelemetrySender>,
     enable_experimental_placeholder_inlining: bool,
+    metrics_handle: Option<MetricsHandle>,
 }
 
 impl Default for BackendBuilder {
@@ -285,6 +287,7 @@ impl Default for BackendBuilder {
             fallback_recovery_seconds: 0,
             telemetry_sender: None,
             enable_experimental_placeholder_inlining: false,
+            metrics_handle: None,
         }
     }
 }
@@ -337,6 +340,7 @@ impl BackendBuilder {
             },
             telemetry_sender: self.telemetry_sender,
             authority,
+            metrics_handle: self.metrics_handle,
             _query_handler: PhantomData,
         }
     }
@@ -412,6 +416,11 @@ impl BackendBuilder {
         enable_experimental_placeholder_inlining: bool,
     ) -> Self {
         self.enable_experimental_placeholder_inlining = enable_experimental_placeholder_inlining;
+        self
+    }
+
+    pub fn metrics_handle(mut self, metrics_handle: Option<MetricsHandle>) -> Self {
+        self.metrics_handle = metrics_handle;
         self
     }
 }
@@ -509,6 +518,9 @@ where
     /// Handle to the Authority. A handle is also stored in Self::noria where it is used to find
     /// the Controller.
     authority: Arc<Authority>,
+
+    /// Handle to the [`metrics_exporter_prometheus::PrometheusRecorder`] that runs in the adapter.
+    metrics_handle: Option<MetricsHandle>,
 
     _query_handler: PhantomData<Handler>,
 }
@@ -1731,7 +1743,20 @@ where
             queries.retain(|q| q.status.migration_state.is_supported());
         }
 
-        let select_schema = create_dummy_schema!("query id", "proxied query", "readyset supported");
+        let select_schema = if let Some(handle) = self.metrics_handle.as_mut() {
+            // Must snapshot histograms to get the latest metrics
+            handle.snapshot_histograms();
+            create_dummy_schema!(
+                "query id",
+                "proxied query",
+                "readyset supported",
+                "p50 (ms)",
+                "p90 (ms)",
+                "p99 (ms)"
+            )
+        } else {
+            create_dummy_schema!("query id", "proxied query", "readyset supported")
+        };
 
         let mut data = queries
             .into_iter()
@@ -1745,13 +1770,24 @@ where
                 }
                 .to_string();
 
-                vec![
+                let mut row = vec![
                     DfValue::from(id.to_string()),
                     DfValue::from(Self::format_query_text(
                         query.display(DB::sql_dialect()).to_string(),
                     )),
                     DfValue::from(s),
-                ]
+                ];
+
+                // Append metrics if we have them
+                if let Some(handle) = self.metrics_handle.as_ref() {
+                    let (p50, p90, p99) =
+                        handle.quantiles(id.to_string()).unwrap_or((0.0, 0.0, 0.0));
+                    row.push(DfValue::from(format!("{:.3}", 1000.0 * p50)));
+                    row.push(DfValue::from(format!("{:.3}", 1000.0 * p90)));
+                    row.push(DfValue::from(format!("{:.3}", 1000.0 * p99)));
+                }
+
+                row
             })
             .collect::<Vec<_>>();
 
@@ -1783,10 +1819,26 @@ where
             queries.retain(|(id, _, _)| id.to_string() == *q_id);
         }
 
+        let select_schema = if let Some(handle) = self.metrics_handle.as_mut() {
+            // Must snapshot histograms to get the latest metrics
+            handle.snapshot_histograms();
+            create_dummy_schema!(
+                "query id",
+                "cache name",
+                "query text",
+                "fallback behavior",
+                "p50 (ms)",
+                "p90 (ms)",
+                "p99 (ms)"
+            )
+        } else {
+            create_dummy_schema!("query id", "cache name", "query text", "fallback behavior")
+        };
+
         // Get the cache name for each query from the view cache
         let mut results: Vec<Vec<DfValue>> = vec![];
         for (id, view, status) in queries {
-            results.push(vec![
+            let mut row = vec![
                 id.to_string().into(),
                 self.noria
                     .get_view(&view.statement, false, false, None)
@@ -1801,11 +1853,18 @@ where
                 } else {
                     "fallback allowed".into()
                 },
-            ]);
-        }
+            ];
 
-        let select_schema =
-            create_dummy_schema!("query id", "cache name", "query text", "fallback behavior");
+            // Append metrics if we have them
+            if let Some(handle) = self.metrics_handle.as_ref() {
+                let (p50, p90, p99) = handle.quantiles(id.to_string()).unwrap_or((0.0, 0.0, 0.0));
+                row.push(DfValue::from(format!("{:.3}", 1000.0 * p50)));
+                row.push(DfValue::from(format!("{:.3}", 1000.0 * p90)));
+                row.push(DfValue::from(format!("{:.3}", 1000.0 * p99)));
+            }
+
+            results.push(row);
+        }
 
         Ok(noria_connector::QueryResult::from_owned(
             select_schema,
