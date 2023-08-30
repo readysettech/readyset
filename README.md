@@ -80,9 +80,7 @@ For questions or support, join us on the [ReadySet Community Slack](https://join
 ---
 
 ## Project Status & Roadmap
-ReadySet is not yet production-ready. Our team is hard at work stabilizing the system. You can learn more about how we're approaching this and follow along on our progress below. 
-
-We anticipate PostgreSQL support will be production ready by the end of 2023; MySQL support will follow from there. 
+ReadySet is currently in beta. Our team is hard at work stabilizing the system with a focus on PostgreSQL. Our MySQL support is considered alpha. You can learn more about how we're approaching this and follow along on our progress below. 
 
 | Project | Progress | Notes |
 | ----------- | ----------- | ----------- |
