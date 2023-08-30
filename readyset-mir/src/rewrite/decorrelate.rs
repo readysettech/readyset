@@ -151,7 +151,7 @@ fn push_dependent_filter(
 /// errors at runtime basically all the time
 #[instrument(skip_all, fields(query = %query.name().display_unquoted()))]
 pub(crate) fn eliminate_dependent_joins(query: &mut MirQuery<'_>) -> ReadySetResult<()> {
-    // TODO(grfn): lots of opportunity for memoization here, but the MIR RefCell mess makes that a
+    // TODO(aspen): lots of opportunity for memoization here, but the MIR RefCell mess makes that a
     // lot harder
     loop {
         let dependent_joins: Vec<NodeIndex> = query

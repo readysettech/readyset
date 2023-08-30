@@ -220,7 +220,7 @@ impl From<nom_sql::Column> for ColumnName {
 
 /// Try to find the [`ColumnSpecification`] for the primary key of the given create table statement
 ///
-/// TODO(grfn): Ideally, this would reuse the `key_def_coalescing` rewrite pass, but that's buried
+/// TODO(aspen): Ideally, this would reuse the `key_def_coalescing` rewrite pass, but that's buried
 /// deep inside readyset-server - if we ever get a chance to extract rewrite passes to their own
 /// crate, this should be updated to use that
 pub fn find_primary_keys(stmt: &CreateTableStatement) -> Option<&ColumnSpecification> {
@@ -239,7 +239,7 @@ pub fn find_primary_keys(stmt: &CreateTableStatement) -> Option<&ColumnSpecifica
                 .iter()
                 .flatten()
                 .find_map(|k| match k {
-                    // TODO(grfn): This doesn't support compound primary keys
+                    // TODO(aspen): This doesn't support compound primary keys
                     TableKey::PrimaryKey { columns, .. } => columns.first(),
                     _ => None,
                 })
@@ -326,7 +326,7 @@ impl From<CreateTableStatement> for TableSpec {
             .flat_map(|k| match k {
                     TableKey::PrimaryKey{columns: ks, .. }
                     | TableKey::UniqueKey { columns: ks, .. }
-                      // HACK(grfn): To get foreign keys filled, we just mark them as unique, which
+                      // HACK(aspen): To get foreign keys filled, we just mark them as unique, which
                       // given that we (currently) generate the same number of rows for each table
                       // means we're coincidentally guaranteed to get values matching the other side
                       // of the fk. This isn't super robust (unsurprisingly) and should probably be

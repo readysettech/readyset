@@ -39,7 +39,7 @@ pub(crate) fn convert_column(col: &ColumnSchema) -> ReadySetResult<mysql_srv::Co
         DfType::DateTime { .. } => MYSQL_TYPE_DATETIME,
         DfType::Blob => MYSQL_TYPE_BLOB,
         DfType::Char(..) => {
-            // TODO(grfn): I'm not sure if this is right
+            // TODO(aspen): I'm not sure if this is right
             MYSQL_TYPE_STRING
         }
         DfType::Float => MYSQL_TYPE_FLOAT,
@@ -50,17 +50,17 @@ pub(crate) fn convert_column(col: &ColumnSchema) -> ReadySetResult<mysql_srv::Co
             unsupported!("MySQL does not support the timestamp with time zone type")
         }
         DfType::Binary(_) => {
-            // TODO(grfn): I don't know if this is right
+            // TODO(aspen): I don't know if this is right
             colflags |= mysql_srv::ColumnFlags::BINARY_FLAG;
             MYSQL_TYPE_STRING
         }
         DfType::VarBinary(_) => {
-            // TODO(grfn): I don't know if this is right
+            // TODO(aspen): I don't know if this is right
             colflags |= mysql_srv::ColumnFlags::BINARY_FLAG;
             MYSQL_TYPE_VAR_STRING
         }
         DfType::Enum { .. } => {
-            // TODO(grfn): I don't know if this is right
+            // TODO(aspen): I don't know if this is right
             colflags |= mysql_srv::ColumnFlags::ENUM_FLAG;
             MYSQL_TYPE_VAR_STRING
         }

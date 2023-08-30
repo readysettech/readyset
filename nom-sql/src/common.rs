@@ -269,7 +269,7 @@ impl TableKey {
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[allow(clippy::large_enum_variant)] // NOTE(grfn): do we actually care about this?
+#[allow(clippy::large_enum_variant)] // NOTE(aspen): do we actually care about this?
 #[derive(Default)]
 pub enum FieldDefinitionExpr {
     #[default]

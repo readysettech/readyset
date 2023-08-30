@@ -224,7 +224,7 @@ pub struct ViewKey {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 // NOTE: Keep in mind this struct has a custom Hash impl - when changing it, remember to update that
 // as well!
-// TODO(grfn): impl Arbitrary for this struct so we can make a proptest for that
+// TODO(aspen): impl Arbitrary for this struct so we can make a proptest for that
 pub struct QueryGraph {
     /// Relations mentioned in the query.
     pub relations: HashMap<Relation, QueryGraphNode>,
@@ -617,7 +617,7 @@ fn classify_conditionals(
                 .collect::<HashSet<_>>();
             let num_tables = tables.len();
             match tables.into_iter().next() {
-                // TODO(grfn): This limitation probably isn't too hard to lift
+                // TODO(aspen): This limitation probably isn't too hard to lift
                 None => {
                     unsupported!("Filter conditions must currently mention at least one column")
                 }
@@ -632,7 +632,7 @@ fn classify_conditionals(
             }
         }
         Expr::Exists(_) => {
-            // TODO(grfn): Look into the query for correlated references to see if it's actually a
+            // TODO(aspen): Look into the query for correlated references to see if it's actually a
             // local predicate in disguise
             global.push(ce.clone())
         }

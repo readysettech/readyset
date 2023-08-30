@@ -16,7 +16,7 @@ fn const_eval(expr: &Expr, dialect: Dialect) -> ReadySetResult<Literal> {
         }
 
         fn resolve_type(&self, _ty: Relation) -> Option<DfType> {
-            // TODO(grfn): Support custom types in constant folding
+            // TODO(aspen): Support custom types in constant folding
             None
         }
     }

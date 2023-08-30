@@ -395,7 +395,7 @@ impl CaseWhenBranch {
 pub enum Expr {
     /// Function call expressions
     ///
-    /// TODO(grfn): Eventually, the members of FunctionExpr should be inlined here
+    /// TODO(aspen): Eventually, the members of FunctionExpr should be inlined here
     Call(FunctionExpr),
 
     /// Literal values

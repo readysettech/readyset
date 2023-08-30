@@ -61,7 +61,7 @@ pub(crate) fn fuse_project_nodes(query: &mut MirQuery<'_>) -> ReadySetResult<()>
         );
         let parent_ni = ancestors[0];
         let parent = query.get_node(parent_ni).unwrap();
-        // TODO(grfn): Fuse through AliasTable?
+        // TODO(aspen): Fuse through AliasTable?
         if !matches!(parent.inner, MirNodeInner::Project { .. }) {
             continue;
         }

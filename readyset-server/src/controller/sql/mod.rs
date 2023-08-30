@@ -168,7 +168,7 @@ impl SqlIncorporator {
     ///
     /// Can optionally provide a mutable reference to a list of names of non-existent tables which,
     /// if created, should invalidate the query
-    // TODO(grfn): This should really be happening as part of the `add_<whatever>` methods (it was,
+    // TODO(aspen): This should really be happening as part of the `add_<whatever>` methods (it was,
     // before this was made pub(crate)) but since the recipe expression registry stores expressions
     // we need it happening earlier. We should move it back to its rightful place once we can get
     // rid of that.
@@ -947,7 +947,7 @@ impl SqlIncorporator {
         // Keep attempting to compile the query to MIR, but every time we run into a TableNotFound
         // error for a view we've yet to migrate, migrate that view then retry
         //
-        // TODO(grfn): This is a janky and inefficient way of making this happen. Someday, when
+        // TODO(aspen): This is a janky and inefficient way of making this happen. Someday, when
         // SqlIncorporator and SqlToMirConverter are merged into one, this ought to not be
         // necesssary - instead, we can just migrate the view as part of the `get_relation` method
         let mut tables = vec![];

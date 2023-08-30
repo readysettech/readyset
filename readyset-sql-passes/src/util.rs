@@ -146,7 +146,7 @@ pub fn map_aggregates(expr: &mut Expr) -> Vec<(FunctionExpr, SqlIdentifier)> {
 
 /// Returns true if the given binary operator is a (boolean-valued) predicate
 ///
-/// TODO(grfn): Replace this with actual typechecking at some point
+/// TODO(aspen): Replace this with actual typechecking at some point
 pub fn is_predicate(op: &BinaryOperator) -> bool {
     use BinaryOperator::*;
 
@@ -168,7 +168,7 @@ pub fn is_predicate(op: &BinaryOperator) -> bool {
 
 /// Returns true if the given binary operator is a (boolean-valued) logical operator
 ///
-/// TODO(grfn): Replace this with actual typechecking at some point
+/// TODO(aspen): Replace this with actual typechecking at some point
 pub fn is_logical_op(op: &BinaryOperator) -> bool {
     use BinaryOperator::*;
 

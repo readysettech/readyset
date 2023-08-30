@@ -706,7 +706,7 @@ impl ReadySetError {
     where
         F: Fn(&Self) -> bool + Clone,
     {
-        // TODO(grfn): Once https://github.com/rust-lang/rust/issues/58520 stabilizes, this can be
+        // TODO(aspen): Once https://github.com/rust-lang/rust/issues/58520 stabilizes, this can be
         // rewritten to use that
         f(self)
             || self

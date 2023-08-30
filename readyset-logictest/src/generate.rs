@@ -47,7 +47,7 @@ impl TryFrom<PathBuf> for Seed {
         for record in script.records() {
             match record {
                 Record::Statement(Statement { command, .. }) => {
-                    // TODO(grfn): Make dialect configurable
+                    // TODO(aspen): Make dialect configurable
                     if let SqlQuery::CreateTable(tbl) =
                         parse_query(Dialect::MySQL, command).map_err(|s| anyhow!("{}", s))?
                     {

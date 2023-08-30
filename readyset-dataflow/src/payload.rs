@@ -432,7 +432,7 @@ pub enum DomainRequest {
 
 /// The primary unit of communication between nodes in the dataflow graph.
 ///
-/// FIXME(grfn): This should be refactored to be an enum-of-enums so that the various parts of
+/// FIXME(aspen): This should be refactored to be an enum-of-enums so that the various parts of
 /// dataflow code that only know how to handle one kind of packet don't have to panic if they
 /// receive the wrong kind of packet. See
 /// [ENG-455](https://readysettech.atlassian.net/browse/ENG-455)

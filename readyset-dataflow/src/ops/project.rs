@@ -43,7 +43,7 @@ impl Ingredient for Project {
     }
 
     fn can_query_through(&self) -> bool {
-        // TODO(grfn): Make query_through just use column provenance (?) or make it pass column
+        // TODO(aspen): Make query_through just use column provenance (?) or make it pass column
         // indices at least
         self.emit
             .iter()

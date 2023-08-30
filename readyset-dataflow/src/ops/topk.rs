@@ -186,8 +186,8 @@ impl TopK {
         }
 
         let mut current = mem::take(current).into_sorted_vec();
-        // TODO(grfn): it'd be nice to skip this reverse - we could maybe do that with minmaxheap if
-        // they merge my addition of retain (https://github.com/tov/min-max-heap-rs/pull/19)
+        // TODO(aspen): it'd be nice to skip this reverse - we could maybe do that with minmaxheap
+        // if they merge my addition of retain (https://github.com/tov/min-max-heap-rs/pull/19)
         current.reverse();
 
         // optimization: if we don't *have to* remove something, we don't
@@ -316,7 +316,7 @@ impl Ingredient for TopK {
                 invariant!(current.is_empty());
 
                 // make ready for the new one
-                // NOTE(grfn): Is this the most optimal way of doing this?
+                // NOTE(aspen): Is this the most optimal way of doing this?
                 current_group_key.clear();
                 current_group_key.extend(self.project_group(r.rec())?.into_iter().cloned());
 
