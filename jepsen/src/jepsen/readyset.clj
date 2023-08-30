@@ -196,11 +196,13 @@
                               (map (fn [[k {:keys [query]}]] [k query]))
                               (into {}))})
       :nemesis (nemesis/compose
-                {{:kill-adapter :start
-                  :start-adapter :stop} (rs.nemesis/kill-adapters)
-                 {:kill-server :start
-                  :start-server :stop} (rs.nemesis/kill-server)
-                 #{:bitflip} (rs.nemesis/bitflip-rocksdb)})
+                [(nemesis/compose
+                  {{:kill-adapter :start
+                    :start-adapter :stop} (rs.nemesis/kill-adapters)
+                   {:kill-server :start
+                    :start-server :stop} (rs.nemesis/kill-server)
+                   #{:bitflip} (rs.nemesis/bitflip-rocksdb)})
+                 rs.nemesis/all-partitioners])
       :checker (checker/compose
                 {:liveness (rs.checker/liveness)
                  :eventually-consistent
@@ -227,7 +229,9 @@
                              {:type :info :f :start-server}])
 
                            (repeat
-                            {:type :info :f :bitflip})])
+                            {:type :info :f :bitflip})
+
+                           rs.nemesis/gen-partitions])
                          (gen/stagger 2)))
                    (gen/time-limit (:time-limit opts)))
 
