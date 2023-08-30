@@ -349,4 +349,8 @@ impl AdapterBuilder {
     pub fn allow_full_materialization(self) -> Self {
         self.push_arg("--allow-full-materialization")
     }
+
+    pub fn prometheus_metrics(self) -> Self {
+        self.push_arg("--prometheus-metrics")
+    }
 }
