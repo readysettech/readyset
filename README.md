@@ -21,7 +21,7 @@ This means:
 - No extra code to evict stale records
 - No TTLs to set - your cache is as up-to-date as your replication lag
 
-ReadySet is based on the [Noria project from MIT](https://pdos.csail.mit.edu/papers/noria:osdi18.pdf).
+ReadySet is wire-compatible with Postgres and MySQL. 
 
 ---
 ### Quickstart
