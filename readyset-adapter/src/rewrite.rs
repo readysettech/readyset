@@ -669,6 +669,12 @@ pub fn auto_parametrize_query(query: &mut SelectStatement) -> Vec<(usize, Litera
                             | BinaryOperator::GreaterOrEqual,
                         rhs: box Expr::Literal(Literal::Placeholder(..)),
                         ..
+                    } | Expr::Between {
+                        min: box Expr::Literal(Literal::Placeholder(..)),
+                        ..
+                    } | Expr::Between {
+                        max: box Expr::Literal(Literal::Placeholder(..)),
+                        ..
                     }
                 )
             })
@@ -1179,6 +1185,15 @@ mod tests {
                 "SELECT * FROM posts WHERE id = 1 ORDER BY SCORE ASC LIMIT 3 OFFSET 6",
                 "SELECT * FROM posts WHERE id = ? ORDER BY SCORE ASC LIMIT 3 OFFSET ?",
                 vec![(0, 1_u32.into()), (1, 6_u32.into())],
+            );
+        }
+
+        #[test]
+        fn constant_filter_with_param_betwen() {
+            test_auto_parametrize(
+                "SELECT * FROM posts WHERE id = 1 AND created_at BETWEEN ? and ?",
+                "SELECT * FROM posts WHERE id = 1 AND created_at BETWEEN ? and ?",
+                vec![],
             );
         }
     }
