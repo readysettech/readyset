@@ -1,0 +1,3 @@
+FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/ecr-public/docker/library/rust:1.70
+
+RUN cargo install cargo-deny --version 0.13.7 && cargo deny --version
