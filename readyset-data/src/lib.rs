@@ -1740,6 +1740,8 @@ impl ToSql for DfValue {
                 | &Type::REGROLE
                 | &Type::REGTYPE,
             ) => u32::try_from(*x)?.to_sql(ty, out),
+            (Self::UnsignedInt(x), &Type::INT2) => (*x as i16).to_sql(ty, out),
+            (Self::UnsignedInt(x), &Type::INT4) => (*x as i32).to_sql(ty, out),
             (Self::UnsignedInt(x), _) => (*x as i64).to_sql(ty, out),
             (Self::Float(x), _) => x.to_sql(ty, out),
             (Self::Double(x), _) => x.to_sql(ty, out),
