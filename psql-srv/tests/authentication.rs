@@ -14,6 +14,7 @@ use psql_srv::{
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio_native_tls::{native_tls, TlsAcceptor};
+use tracing::info;
 
 struct Value(Result<PsqlValue, Error>);
 
@@ -104,7 +105,7 @@ async fn connect_scram_sha256_valid_password() {
     let port = run_server(ScramSha256Backend { username, password }).await;
 
     let (_, _) = tokio_postgres::Config::default()
-        .host("localhost")
+        .host("127.0.0.1")
         .port(port)
         .dbname("noria")
         .user(username)
@@ -122,14 +123,15 @@ async fn connect_scram_sha256_invalid_password() {
     let port = run_server(ScramSha256Backend { username, password }).await;
 
     let res = tokio_postgres::Config::default()
-        .host("localhost")
+        .host("127.0.0.1")
         .port(port)
         .dbname("noria")
         .user(username)
         .password("wrong password")
         .connect(NoTls)
         .await;
-    let err = res.err().unwrap();
+    let err = res.err().expect("ReadySet was able to connect despite the password being wrong");
+    info!(?err);
     assert_eq!(*err.code().unwrap(), SqlState::INVALID_PASSWORD);
 }
 
