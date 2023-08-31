@@ -469,6 +469,18 @@ fn get_text_value(src: &mut Bytes, t: &Type) -> Result<PsqlValue, Error> {
             .map(PsqlValue::Jsonb),
         Type::BIT => get_bitvec_from_str(text_str).map(PsqlValue::Bit),
         Type::VARBIT => get_bitvec_from_str(text_str).map(PsqlValue::VarBit),
+        ref t if matches!(t.kind(), Kind::Array(_)) => {
+            let inner_t = match t.kind() {
+                Kind::Array(inner_t) => inner_t.clone(),
+                _ => unreachable!(),
+            };
+            Ok(PsqlValue::Array(
+                text_str
+                    .parse::<Array>()
+                    .map_err(|e| DecodeError::InvalidArrayValue(e.to_string()))?,
+                inner_t,
+            ))
+        }
         ref t if t.name() == "citext" => Ok(PsqlValue::Text(text_str.into())),
         _ => Ok(PsqlValue::PassThrough(readyset_data::PassThrough {
             ty: t.clone(),
@@ -483,6 +495,7 @@ mod tests {
 
     use bytes::{BufMut, BytesMut};
     use postgres_types::ToSql;
+    use readyset_data::DfValue;
 
     use super::*;
     use crate::value::PsqlValue;
@@ -1489,6 +1502,23 @@ mod tests {
             get_text_value(&mut buf.freeze(), &Type::TIMESTAMPTZ).unwrap(),
             PsqlValue::TimestampTz(expected)
         );
+    }
+
+    #[test]
+    fn test_decode_text_array_int() {
+        let array_string = "{1,2,32767}";
+        let expected = Array::from(vec![
+            DfValue::UnsignedInt(1),
+            DfValue::UnsignedInt(2),
+            DfValue::UnsignedInt(i16::MAX as u64),
+        ]);
+        let mut buf = BytesMut::new();
+        buf.put_i32(11);
+        buf.extend_from_slice(array_string.as_bytes());
+        assert_eq!(
+            get_text_value(&mut buf.freeze(), &Type::INT2_ARRAY).unwrap(),
+            PsqlValue::Array(expected, Type::INT2)
+        )
     }
 
     #[test]
