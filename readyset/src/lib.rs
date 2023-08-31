@@ -41,6 +41,7 @@ use readyset_client::consensus::AuthorityType;
 use readyset_client::failpoints;
 use readyset_client::metrics::recorded;
 use readyset_client::{ReadySetHandle, ViewCreateRequest};
+use readyset_common::ulimit::maybe_increase_nofile_limit;
 use readyset_dataflow::Readers;
 use readyset_errors::ReadySetError;
 use readyset_server::metrics::{CompositeMetricsRecorder, MetricsRecorder};
@@ -443,6 +444,15 @@ where
 
         rt.block_on(async { options.tracing.init("adapter", options.deployment.as_ref()) })?;
         info!(?options, "Starting ReadySet adapter");
+
+        if options.standalone {
+            maybe_increase_nofile_limit(
+                options
+                    .server_worker_options
+                    .replicator_config
+                    .ignore_ulimit_check,
+            )?;
+        }
 
         let deployment_dir = options
             .server_worker_options

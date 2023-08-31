@@ -114,6 +114,15 @@ pub struct UpstreamConfig {
     #[clap(long, default_value = "50", hide = true)]
     #[serde(default)]
     pub replication_pool_size: usize,
+
+    /// Allow ReadySet to start even if the file descriptor limit (ulimit -n) is below our minimum
+    /// requirement.
+    ///
+    /// If set, ReadySet still raises the soft limit to min(our requirement, hard limit). It just
+    /// doesn't treat (our requirement > hard limit) as a fatal error.
+    #[clap(long, env = "IGNORE_ULIMIT_CHECK")]
+    #[serde(default)]
+    pub ignore_ulimit_check: bool,
 }
 
 impl UpstreamConfig {
@@ -168,6 +177,7 @@ impl Default for UpstreamConfig {
             snapshot_report_interval_secs: 30,
             ssl_root_cert: None,
             replication_pool_size: 50,
+            ignore_ulimit_check: false,
         }
     }
 }
