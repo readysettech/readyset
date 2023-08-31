@@ -991,56 +991,6 @@ impl Ingredient for Union {
                 // and swap back replay pieces
                 self.replay_pieces = replay_pieces_tmp;
 
-                // here's another bit that's a little subtle:
-                //
-                // remember how, above, we stripped out the upquery identifier from the replay's
-                // tag? consider what happens if we buffer a replay with, say, tag 7.2 (so, upquery
-                // 7, path 2). later, when some other replay comes along with, say, tag 7.1, we
-                // decide that we're done buffering. we then release the buffered records from the
-                // first replay alongside the ones that were in the 7.1 replay. but, we just
-                // effectively _changed_ the tag for the records in that first replay! is that ok?
-                // it turns out it _is_, and here is the argument for why:
-                //
-                // first, for a given upquery, let's consider what paths flow through us when there
-                // is only a single union on the upquery's path. we know there is then one path for
-                // each parent we have. an upquery from below must query each of our parents once
-                // to get the complete results. those queries will all have the same upquery id,
-                // but different path ids. since there is no union above us or below us on the
-                // path, there are exactly as many paths as we have ancestors, and those paths only
-                // branch _above_ us. below us, those different paths are the _same_. this means
-                // that no matter what path discriminator we forward something with, it will follow
-                // the right path.
-                //
-                // now, what happens if there is a exactly one union on the upquery's path, at or
-                // above one of our parents. well, _that_ parent will have as many distinct path
-                // identifiers as that union has parents. we know that it will only produce _one_
-                // upquery response through (since the union will buffer), and that the response
-                // will have (an arbitrary chosen) one of those path identifiers. we know that path
-                // discriminators are distinct, so whichever identifier our union ancestor chooses,
-                // it will be distinct from the paths that go through our _other_ parents.
-                // furthermore, we know that all those path identifiers ultimately share the same
-                // path below us. and we also know that the path identifiers of the paths through
-                // our other parents share that same path. so choosing any of them is fine.
-                //
-                // if we have unions above multiple of our parents, the same argument holds.
-                //
-                // if those unions again have ancestors that are unions, the same argument holds.
-                //
-                // the missing piece then is how a union that has a union as a _descendant_ knows
-                // that any choice it makes for path identifier is fine for that descendant. this
-                // is trickier to argue, but the argument goes like this:
-                //
-                // imagine you have a union immediately followed by a union, followed by some node
-                // that wishes to make an upquery. imagine that each union has two incoming edges:
-                // the bottom union has two edges to the top union (a "diamond"), and the top union
-                // has two incoming edges from disjoint parts of the graph. i don't know why you'd
-                // have that, but let's imagine. for the one upquery id here, there are four path
-                // identifiers: bottom-left:top-left, bottom-left:top-right, bottom-right:top-left,
-                // and bottom-right:top-right. as the top union, we will therefore receive two
-                // NOPE
-                //
-                // FIXME(eta): why does the above comment just suddenly end in NOPE?
-
                 Ok(RawProcessingResult::ReplayPiece {
                     rows: rs,
                     keys: released,
