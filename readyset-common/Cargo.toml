@@ -16,6 +16,9 @@ tuple = "0.5"
 triomphe = "0.1"
 proptest = "1.0"
 test-strategy = "0.2.0"
+rlimit = "0.10.1"
+anyhow = "1.0"
+tracing = "0.1"
 
 # Local deps
 readyset-client = { path = "../readyset-client" }

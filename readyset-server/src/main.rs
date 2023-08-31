@@ -6,6 +6,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use clap::builder::NonEmptyStringValueParser;
 use clap::Parser;
+use common::ulimit::maybe_increase_nofile_limit;
 use futures_util::future::{self, Either};
 use metrics_exporter_prometheus::PrometheusBuilder;
 use readyset_alloc::ThreadBuildWrapper;
@@ -166,6 +167,8 @@ fn main() -> anyhow::Result<()> {
     info!(?opts, "Starting ReadySet server");
 
     info!(version = %VERSION_STR_ONELINE);
+
+    maybe_increase_nofile_limit(opts.worker_options.replicator_config.ignore_ulimit_check)?;
 
     let telemetry_sender = rt.block_on(TelemetryInitializer::init(
         opts.disable_telemetry,

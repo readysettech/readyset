@@ -3,6 +3,7 @@
 
 mod local;
 mod records;
+pub mod ulimit;
 
 use petgraph::prelude::*;
 pub use readyset_client::internal::{Index, IndexType};

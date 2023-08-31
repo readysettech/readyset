@@ -4265,6 +4265,7 @@ dependencies = [
  "readyset-alloc",
  "readyset-client",
  "readyset-client-metrics",
+ "readyset-common",
  "readyset-data",
  "readyset-dataflow",
  "readyset-errors",
@@ -4278,6 +4279,7 @@ dependencies = [
  "readyset-version",
  "replicators",
  "reqwest",
+ "rlimit",
  "tokio",
  "tokio-native-tls",
  "tokio-stream",
@@ -4525,14 +4527,17 @@ dependencies = [
 name = "readyset-common"
 version = "0.7.0"
 dependencies = [
+ "anyhow",
  "chrono",
  "petgraph",
  "proptest",
  "readyset-client",
  "readyset-data",
  "readyset-util",
+ "rlimit",
  "serde",
  "test-strategy",
+ "tracing",
  "triomphe",
  "tuple",
  "vec1",
@@ -4916,6 +4921,7 @@ dependencies = [
  "replication-offset",
  "replicators",
  "reqwest",
+ "rlimit",
  "rust_decimal",
  "rusty-fork",
  "scopeguard",
@@ -5228,6 +5234,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3603b7d71ca82644f79b5a06d1220e9a58ede60bd32255f698cb1af8838b8db3"
 dependencies = [
  "bytemuck",
+]
+
+[[package]]
+name = "rlimit"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3560f70f30a0f16d11d01ed078a07740fe6b489667abc7c7b029155d9f21c3d8"
+dependencies = [
+ "libc",
 ]
 
 [[package]]
@@ -6651,8 +6666,8 @@ version = "1.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
 dependencies = [
- "cfg-if 0.1.10",
- "rand 0.7.3",
+ "cfg-if 1.0.0",
+ "rand 0.8.5",
  "static_assertions",
 ]
 
