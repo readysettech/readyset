@@ -1,0 +1,21 @@
+apiVersion: 1
+
+datasources:
+  - name: DS_PROMETHEUS
+    type: prometheus
+    # Access mode - proxy (server in the UI) or direct (browser in the UI).
+    access: proxy
+    url: http://prometheus:9090
+    jsonData:
+      httpMethod: POST
+
+  - name: ReadySet_DB
+    type: mysql
+    access: proxy
+    url: cache:${RS_PORT:?}
+    user: ${RS_USER:?}
+    jsonData:
+      tlsAuth: true
+    secureJsonData:
+      password: ${RS_PASS:?}
+    editable: true
