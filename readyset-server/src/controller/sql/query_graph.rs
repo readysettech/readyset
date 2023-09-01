@@ -48,6 +48,26 @@ pub enum OutputColumn {
     Expr(ExprColumn),
 }
 
+impl OutputColumn {
+    /// Returns the final projected name for this [`OutputColumn`]
+    pub fn name(&self) -> &str {
+        match self {
+            OutputColumn::Data { alias, .. } => alias,
+            OutputColumn::Literal(LiteralColumn { name, .. }) => name,
+            OutputColumn::Expr(ExprColumn { name, .. }) => name,
+        }
+    }
+
+    /// Convert this [`OutputColumn`] into an [`Expr`], consuming it
+    pub fn into_expr(self) -> Expr {
+        match self {
+            OutputColumn::Data { column, .. } => Expr::Column(column),
+            OutputColumn::Literal(LiteralColumn { value, .. }) => Expr::Literal(value),
+            OutputColumn::Expr(ExprColumn { expression, .. }) => expression,
+        }
+    }
+}
+
 impl Ord for OutputColumn {
     fn cmp(&self, other: &OutputColumn) -> Ordering {
         match *self {

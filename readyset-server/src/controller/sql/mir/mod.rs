@@ -1990,6 +1990,15 @@ impl SqlToMirConverter {
 
             // Project out any columns that need special handling
             for oc in &query_graph.columns {
+                if expressions_above_grouped
+                    .values()
+                    .any(|alias| alias == oc.name())
+                {
+                    // Already projected, nothing to do
+                    already_computed.push(oc.clone());
+                    continue;
+                }
+
                 if let OutputColumn::Expr(ExprColumn {
                     name,
                     table: None,
