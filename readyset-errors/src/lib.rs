@@ -619,8 +619,9 @@ pub enum ReadySetError {
     #[error("Malformed array literal '{}': {}", Sensitive(&input), message)]
     ArrayParseError { input: String, message: String },
 
-    /// A DDL in upstream database requires a partial resnapshot
-    #[error("Change in DDL requires partial resnapshot")]
+    /// An error occured that requires a resnapshot. This error will trigger a *full* resnapshot
+    /// only if the schema or one of the tables is missing a replication offset.
+    #[error("Resnapshot needed")]
     ResnapshotNeeded,
 
     /// An unrecoverable error occurred, requiring a full resnapshot

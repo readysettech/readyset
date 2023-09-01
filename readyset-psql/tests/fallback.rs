@@ -1852,3 +1852,90 @@ async fn create_view_then_drop_view_then_create_view_with_same_name() {
 
     shutdown_tx.shutdown().await;
 }
+
+// Tests that we correctly perform a full resnapshot when our replication slot becomes invalidated
+#[cfg(feature = "failure_injection")]
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn start_replication_invalidated_replication_slot() {
+    use readyset_errors::ReadySetError;
+
+    readyset_tracing::init_test_logging();
+
+    let (config, mut handle, shutdown_tx) = TestBuilder::default()
+        .migration_mode(MigrationMode::InRequestPath)
+        .fallback(true)
+        .build::<PostgreSQLAdapter>()
+        .await;
+    let client = connect(config).await;
+
+    client
+        .simple_query("DROP TABLE IF EXISTS cats")
+        .await
+        .unwrap();
+
+    client
+        .simple_query("CREATE TABLE cats (id int, PRIMARY KEY(id))")
+        .await
+        .unwrap();
+
+    // Insert some data
+    for i in 0..5 {
+        client
+            .simple_query(&format!("INSERT INTO cats (id) VALUES ({i})"))
+            .await
+            .unwrap();
+    }
+
+    // Set a failpoint that gets triggered when we go to pull the next event off the WAL
+    let err_to_inject = ReadySetError::ReplicationFailed("err injected".into());
+    handle
+        .set_failpoint(
+            readyset_client::failpoints::POSTGRES_NEXT_WAL_EVENT,
+            &format!(
+                "1*return({})",
+                serde_json::ser::to_string(&err_to_inject).expect("failed to serialize error")
+            ),
+        )
+        .await;
+
+    // Set a failpoint that gets triggered when we try to start replication again after the previous
+    // failure
+    let err_to_inject = ReadySetError::FullResnapshotNeeded;
+    handle
+        .set_failpoint(
+            readyset_client::failpoints::POSTGRES_START_REPLICATION,
+            &format!(
+                "1*return({})",
+                serde_json::ser::to_string(&err_to_inject).expect("failed to serialize error")
+            ),
+        )
+        .await;
+
+    // Insert another piece of data to trigger the errors
+    client
+        .simple_query(&format!("INSERT INTO cats (id) VALUES (5)"))
+        .await
+        .unwrap();
+
+    // The full resnapshot should complete successfully
+    eventually!(run_test: {
+        let res = client
+            .simple_query("SELECT * FROM cats")
+            .await;
+        AssertUnwindSafe(|| res)
+    }, then_assert: |result| {
+        let res: Vec<u32> = result()
+            .unwrap()
+            .iter()
+            .filter_map(|m| match m {
+                SimpleQueryMessage::Row(r) => Some(r.get(0).unwrap().parse().unwrap()),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(res, [0, 1, 2, 3, 4, 5]);
+    });
+
+    shutdown_tx.shutdown().await;
+}

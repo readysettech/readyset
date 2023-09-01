@@ -19,7 +19,7 @@ use readyset_util::select;
 use replication_offset::postgres::{CommitLsn, Lsn, PostgresPosition};
 use replication_offset::ReplicationOffset;
 use tokio_postgres as pgsql;
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, info, trace, warn};
 
 use super::ddl_replication::setup_ddl_replication;
 use super::wal_reader::{WalEvent, WalReader};
@@ -211,6 +211,8 @@ impl PostgresWalConnector {
     /// Waits and returns the next WAL event, while monitoring the connection
     /// handle for errors.
     async fn next_event(&mut self) -> ReadySetResult<WalEvent> {
+        set_failpoint_return_err!(failpoints::POSTGRES_NEXT_WAL_EVENT);
+
         let PostgresWalConnector {
             reader,
             connection_handle,
@@ -319,22 +321,39 @@ impl PostgresWalConnector {
         publication: &str,
         version: u32,
     ) -> ReadySetResult<()> {
+        set_failpoint_return_err!(failpoints::POSTGRES_START_REPLICATION);
+
         // Load the confirmed flush LSN for this replication slot so we can log it before starting
-        // replication
-        let confirmed_flush_lsn = self
-            .client
-            .simple_query(&format!(
-                "SELECT confirmed_flush_lsn FROM pg_replication_slots WHERE slot_name = {}",
-                escape_literal(slot),
-            ))
-            .await?
-            .into_iter()
-            .next()
-            .and_then(|m| match m {
-                SimpleQueryMessage::Row(r) => r.get(0).map(|v| v.to_owned()),
-                _ => None,
-            })
-            .unwrap_or_default();
+        // replication, and get the WAL status so we can make sure our replication slot is healthy
+        let [confirmed_flush_lsn, wal_status] = self
+                .one_row_query::<2>(&format!(
+                    "SELECT confirmed_flush_lsn, wal_status FROM pg_replication_slots WHERE slot_name = {}",
+                    escape_literal(slot),
+                ))
+                .await?;
+
+        tracing::info!(?confirmed_flush_lsn, ?wal_status);
+
+        if wal_status == "unreserved" {
+            // If the WAL status is "unreserved," it means Postgres has marked WAL files we need as
+            // being ready for deletion. This happens when the number of WAL files exceeds the
+            // `max_slot_wal_keep_size` setting on the upstream database.
+            warn!(
+                "The upstream database has marked WAL files we need as being ready for deletion. \
+                   This usually means we aren't able to replicate changes as fast as they are \
+                   occurring. If we don't catch up by the next checkpoint on the Postgres server, \
+                   we'll be forced to perform a full resnapshot"
+            );
+        } else if wal_status == "lost" {
+            // If the WAL status is "lost," it means Postgres had to purge WAL entries such that it
+            // can no longer replay the events we need based on the last log position we
+            // reported
+            error!(
+                "Our replication slot has become invalidated, so a full resnapshot is necessary"
+            );
+
+            return Err(ReadySetError::FullResnapshotNeeded);
+        }
 
         let inner_client = self.client.inner();
         let wal_position = self.next_position.unwrap_or_default();
