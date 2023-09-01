@@ -1759,7 +1759,9 @@ where
 
                 vec![
                     DfValue::from(id.to_string()),
-                    DfValue::from(query.display(DB::sql_dialect()).to_string()),
+                    DfValue::from(Self::format_query_text(
+                        query.display(DB::sql_dialect()).to_string(),
+                    )),
                     DfValue::from(s),
                 ]
             })
@@ -1793,7 +1795,8 @@ where
                     .display_unquoted()
                     .to_string()
                     .into(),
-                view.statement.display(DB::sql_dialect()).to_string().into(),
+                Self::format_query_text(view.statement.display(DB::sql_dialect()).to_string())
+                    .into(),
                 if status.always {
                     "no fallback".into()
                 } else {
@@ -2547,6 +2550,16 @@ where
             select_schema,
             vec![Results::new(results)],
         ))
+    }
+
+    /// Prettify queries above an arbitrary length.
+    /// Don't do it for MySQL because the terminal client doesn't handle newlines.
+    fn format_query_text(query: String) -> String {
+        if DB::sql_dialect() != nom_sql::Dialect::MySQL && query.len() > 40 {
+            sqlformat::format(&query, &Default::default(), Default::default())
+        } else {
+            query
+        }
     }
 }
 
