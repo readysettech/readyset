@@ -832,7 +832,6 @@ impl SqlToMirConverter {
                 distinct,
             ),
             Sum { expr, distinct } => mknode(
-                // TODO(celine): replace with ParentRef
                 Column::named(
                     projected_exprs
                         .get(&expr)
@@ -852,7 +851,6 @@ impl SqlToMirConverter {
                 distinct,
             ),
             Count { ref expr, distinct } => mknode(
-                // TODO(celine): replace with ParentRef
                 Column::named(
                     projected_exprs
                         .get(expr)
@@ -871,7 +869,6 @@ impl SqlToMirConverter {
                 distinct,
             ),
             Avg { ref expr, distinct } => mknode(
-                // TODO(celine): replace with ParentRef
                 Column::named(
                     projected_exprs
                         .get(expr)
@@ -881,15 +878,12 @@ impl SqlToMirConverter {
                 GroupedNodeType::Aggregation(Aggregation::Avg),
                 distinct,
             ),
-            // TODO(atsakiris): Support Filters for Extremum/GroupConcat
-            // CH: https://app.clubhouse.io/readysettech/story/198
             Max(box Expr::Column(col)) => mknode(
                 Column::from(col),
                 GroupedNodeType::Extremum(Extremum::Max),
                 false,
             ),
             Max(ref expr) => mknode(
-                // TODO(celine): replace with ParentRef
                 Column::named(
                     projected_exprs
                         .get(expr)
@@ -905,7 +899,6 @@ impl SqlToMirConverter {
                 false,
             ),
             Min(ref expr) => mknode(
-                // TODO(celine): replace with ParentRef
                 Column::named(
                     projected_exprs
                         .get(expr)
