@@ -104,7 +104,7 @@ async fn connect_scram_sha256_valid_password() {
     let port = run_server(ScramSha256Backend { username, password }).await;
 
     let (_, _) = tokio_postgres::Config::default()
-        .host("localhost")
+        .host("127.0.0.1")
         .port(port)
         .dbname("noria")
         .user(username)
@@ -122,7 +122,7 @@ async fn connect_scram_sha256_invalid_password() {
     let port = run_server(ScramSha256Backend { username, password }).await;
 
     let res = tokio_postgres::Config::default()
-        .host("localhost")
+        .host("127.0.0.1")
         .port(port)
         .dbname("noria")
         .user(username)
@@ -141,7 +141,7 @@ async fn connect_scram_sha256_with_escapes_in_username_and_password() {
     let port = run_server(ScramSha256Backend { username, password }).await;
 
     let (_, _) = tokio_postgres::Config::default()
-        .host("localhost")
+        .host("127.0.0.1")
         .port(port)
         .dbname("noria")
         .user(username)
@@ -159,7 +159,7 @@ async fn connect_scram_sha256_over_tls_with_channel_binding_required() {
     let port = run_server(ScramSha256Backend { username, password }).await;
 
     let (_, _) = tokio_postgres::Config::default()
-        .host("localhost")
+        .host("127.0.0.1")
         .port(port)
         .dbname("noria")
         .user(username)
