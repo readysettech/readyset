@@ -11,7 +11,7 @@ use replication_offset::postgres::{CommitLsn, Lsn};
 use rust_decimal::prelude::FromStr;
 use rust_decimal::Decimal;
 use tokio_postgres as pgsql;
-use tracing::{debug, error, trace};
+use tracing::{debug, error, trace, warn};
 
 use super::ddl_replication::DdlEvent;
 use super::wal::{self, RelationMapping, WalData, WalError, WalRecord};
@@ -116,7 +116,28 @@ impl WalReader {
         }
     }
 
-    pub(crate) async fn next_event(&mut self) -> Result<WalEvent, WalError> {
+    pub(crate) async fn next_event(&mut self) -> Result<WalEvent, ReadySetError> {
+        loop {
+            match self.next_event_inner().await {
+                Err(WalError::TableError {
+                    kind: TableErrorKind::UnsupportedTypeConversion { type_oid },
+                    schema,
+                    table,
+                }) => {
+                    warn!(
+                        type_oid,
+                        schema = schema,
+                        table = table,
+                        "Ignoring write with value of unsupported type"
+                    );
+                    continue;
+                }
+                event => return event.map_err(Into::into),
+            }
+        }
+    }
+
+    async fn next_event_inner(&mut self) -> Result<WalEvent, WalError> {
         let WalReader {
             wal,
             relations,

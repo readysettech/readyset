@@ -19,14 +19,13 @@ use readyset_util::select;
 use replication_offset::postgres::{CommitLsn, Lsn, PostgresPosition};
 use replication_offset::ReplicationOffset;
 use tokio_postgres as pgsql;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, info, trace};
 
 use super::ddl_replication::setup_ddl_replication;
 use super::wal_reader::{WalEvent, WalReader};
 use super::PUBLICATION_NAME;
 use crate::db_util::error_is_slot_not_found;
 use crate::noria_adapter::{Connector, ReplicationAction};
-use crate::postgres_connector::wal::{TableErrorKind, WalError};
 
 /// A connector that connects to a PostgreSQL server and starts reading WAL from the "noria"
 /// replication slot with the "noria" publication.
@@ -48,7 +47,7 @@ pub struct PostgresWalConnector {
     /// Reader is a decoder for binlog events
     reader: Option<WalReader>,
     /// Stores an event or error that was read but not handled
-    peek: Option<Result<WalEvent, WalError>>,
+    peek: Option<ReadySetResult<WalEvent>>,
     /// If we just want to continue reading the log from a previous point
     next_position: Option<Lsn>,
     /// The replication slot if was created for this connector
@@ -211,7 +210,7 @@ impl PostgresWalConnector {
 
     /// Waits and returns the next WAL event, while monitoring the connection
     /// handle for errors.
-    async fn next_event(&mut self) -> Result<WalEvent, WalError> {
+    async fn next_event(&mut self) -> ReadySetResult<WalEvent> {
         let PostgresWalConnector {
             reader,
             connection_handle,
@@ -220,17 +219,15 @@ impl PostgresWalConnector {
 
         if let Some(reader) = reader.as_mut() {
             select! {
-                ev = reader.next_event().fuse() => ev,
+                ev = reader.next_event().fuse() => ev.map_err(Into::into),
                 err = connection_handle.fuse() => match err {
-                    Err(e) => Err(WalError::ConnectionLost(e.to_string())),
+                    Err(e) => Err(ReadySetError::UpstreamConnectionLost(e.to_string())),
                     Ok(Ok(_)) => unreachable!(), // Unreachable because it runs in infinite loop unless errors
-                    Ok(Err(err)) => Err(WalError::ReadySetError(err.into())),
+                    Ok(Err(err)) => Err(err.into()),
                 }
             }
         } else {
-            Err(WalError::ReadySetError(ReadySetError::ReplicationFailed(
-                "Not started".to_string(),
-            )))
+            Err(ReadySetError::ReplicationFailed("Not started".to_string()))
         }
     }
 
@@ -641,28 +638,7 @@ impl Connector for PostgresWalConnector {
                 info!(target: "replicator_statement", "{:?}", event);
             }
 
-            // Handle errors or extract the event and LSN.
-            let mut event = match event {
-                Ok(e) => e,
-                // ReadySet will not snapshot tables with unsupported types (e.g., Postgres
-                // user defined types).
-                Err(WalError::TableError {
-                    kind: TableErrorKind::UnsupportedTypeConversion { type_oid },
-                    schema,
-                    table,
-                }) => {
-                    warn!(
-                        type_oid,
-                        schema = schema,
-                        table = table,
-                        "Ignoring write with value of unsupported type"
-                    );
-                    continue;
-                }
-                Err(e) => {
-                    return Err(e.into());
-                }
-            };
+            let mut event = event?;
 
             // Check if next event is for another table, in which case we have to flush the events
             // accumulated for this table and store the next event in `peek`.
