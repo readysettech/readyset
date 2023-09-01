@@ -44,6 +44,7 @@ dashmap = "4.0.2"
 mysql_common = "0.29"
 bincode = "1.3.3"
 parking_lot = "0.11.2"
+sqlformat = "0.2.1"
 
 readyset-alloc = { path = "../readyset-alloc/" }
 readyset-client = { path = "../readyset-client/" }
