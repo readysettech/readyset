@@ -50,8 +50,9 @@ pub(super) fn make_predicates_above_grouped<'a>(
 }
 
 /// Normally, projection happens after grouped nodes - however, if aggregates used in grouped
-/// expressions reference expressions rather than columns directly, we need to project them out
-/// before the grouped nodes.
+/// expressions reference expressions rather than columns directly, or if the `GROUP BY` clause
+/// references columns in the `SELECT` list by name, we need to project them out before the grouped
+/// nodes.
 ///
 /// This does that projection, and returns a mapping from the expressions themselves to the names of
 /// the columns they have been projected to
@@ -67,15 +68,28 @@ pub(super) fn make_expressions_above_grouped(
         .keys()
         .filter(|&f| is_aggregate(f))
         .flat_map(|f| f.arguments())
+        .cloned()
         // We don't need to do any work for bare column expressions
         .filter(|arg| !matches!(arg, Expr::Column(_)))
         .map(|expr| {
             (
                 // FIXME(ENG-2502): Use correct dialect.
                 SqlIdentifier::from(expr.display(nom_sql::Dialect::MySQL).to_string()),
-                expr.clone(),
+                expr,
             )
         })
+        // Also project columns in the SELECT list that're referenced by-name in the group-by clause
+        .chain(
+            qg.group_by
+                .iter()
+                .filter(|gb_col| gb_col.table.is_none())
+                .filter_map(|gb_col| {
+                    qg.columns
+                        .iter()
+                        .find(|oc| oc.name() == gb_col.name.as_str())
+                })
+                .map(|oc| (oc.name().into(), oc.clone().into_expr())),
+        )
         .collect();
 
     if !exprs.is_empty() {
