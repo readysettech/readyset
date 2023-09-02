@@ -78,18 +78,28 @@ pub(super) fn make_expressions_above_grouped(
                 expr,
             )
         })
-        // Also project columns in the SELECT list that're referenced by-name in the group-by clause
-        .chain(
-            qg.group_by
-                .iter()
-                .filter(|gb_col| gb_col.table.is_none())
-                .filter_map(|gb_col| {
+        // Also project expressions, and columns in the SELECT list referenced by name, from the
+        // GROUP BY clause
+        .chain(qg.group_by.iter().filter_map(|gb_expr| {
+            match gb_expr {
+                Expr::Column(c) if c.table.is_none() => {
+                    // Try to find columns with no resolved tables in the select list
                     qg.columns
                         .iter()
-                        .find(|oc| oc.name() == gb_col.name.as_str())
-                })
-                .map(|oc| (oc.name().into(), oc.clone().into_expr())),
-        )
+                        .find(|oc| oc.name() == c.name.as_str())
+                        .map(|oc| (oc.name().into(), oc.clone().into_expr()))
+                }
+                Expr::Column(_) => {
+                    // No need to explicitly project out columns *with* tables here
+                    None
+                }
+                expr => Some((
+                    // FIXME(ENG-2502): Use correct dialect.
+                    SqlIdentifier::from(expr.display(nom_sql::Dialect::MySQL).to_string()),
+                    expr.clone(),
+                )),
+            }
+        }))
         .collect();
 
     if !exprs.is_empty() {
@@ -134,6 +144,19 @@ pub(super) fn make_grouped(
     for (function, alias) in &qg.aggregates {
         let name = mir_converter.generate_label(&name);
 
+        // Convert the GROUP BY exprs into column references
+        let group_by = qg
+            .group_by
+            .iter()
+            .map(|gb_expr| match gb_expr {
+                Expr::Column(c) => c.clone(),
+                expr => nom_sql::Column {
+                    name: expr.display(nom_sql::Dialect::MySQL).to_string().into(),
+                    table: None,
+                },
+            })
+            .collect::<Vec<_>>();
+
         // get any parameter columns that aren't also in the group-by
         // column set
         let param_cols: Vec<_> = qg.relations.values().fold(vec![], |acc, rel| {
@@ -142,14 +165,13 @@ pub(super) fn make_grouped(
                     rel.parameters
                         .iter()
                         .map(|param| &param.col)
-                        .filter(|c| !qg.group_by.contains(c)),
+                        .filter(|c| !group_by.contains(c)),
                 )
                 .collect()
         });
         // combine and dedup
         #[allow(clippy::needless_collect)] // necessary to avoid cloning param_cols
-        let dedup_gb_cols: Vec<_> = qg
-            .group_by
+        let dedup_gb_cols: Vec<_> = group_by
             .iter()
             .filter(|gbc| !param_cols.contains(gbc))
             .collect();
@@ -304,7 +326,13 @@ pub(super) fn post_lookup_aggregates(
         group_by: query_graph
             .group_by
             .iter()
-            .map(|c| Column::from(c).aliased_as_table(query_name.clone()))
+            .map(|c| {
+                match c {
+                    Expr::Column(c) => c.clone().into(),
+                    expr => Column::named(expr.display(nom_sql::Dialect::MySQL).to_string()),
+                }
+                .aliased_as_table(query_name.clone())
+            })
             .collect(),
         aggregates,
     }))

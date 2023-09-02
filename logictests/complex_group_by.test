@@ -1,0 +1,58 @@
+statement ok
+create table events (
+  id int,
+  created_at timestamp
+);
+
+statement ok
+insert into events (id, created_at)
+values
+(1, '2023-09-01 12:22:00'),
+(1, '2023-08-31 12:22:00'),
+(1, '2023-08-18 12:22:00'),
+(1, '2023-06-02 12:22:00');
+
+# GROUP BY a projected col
+query II rowsort
+select month(created_at) as grp, count(*) as count
+from events
+group by grp
+----
+6
+1
+8
+2
+9
+1
+
+statement ok
+CREATE TABLE environments (
+    id integer,
+    project_id integer,
+    name text,
+    environment_type text,
+    state text
+);
+
+statement ok
+insert into environments (id, project_id, name, environment_type, state)
+values
+(1, 1, '1', null, 'available')
+
+query ITT
+SELECT
+    count(*) AS count_all,
+    concat(COALESCE(environment_type, cast(id as text)), 'a') AS coalesce_environment_type_id_text,
+    concat(COALESCE(environment_type, cast(name as text)), 'a') AS coalesce_environment_type_name
+FROM environments
+WHERE (
+    (environments.project_id = ?)
+    AND environments.state IN ('available')
+)
+GROUP BY concat(COALESCE(environment_type, cast(id as text)), 'a'),
+concat(COALESCE(environment_type, cast(name as text)), 'a')
+? = 1
+----
+1
+1a
+1a
