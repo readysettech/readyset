@@ -268,7 +268,7 @@ impl TableKey {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
 #[allow(clippy::large_enum_variant)] // NOTE(aspen): do we actually care about this?
 #[derive(Default)]
 pub enum FieldDefinitionExpr {
@@ -330,7 +330,7 @@ pub enum Sign {
 
 /// A reference to a field in a query, usable in either the `GROUP BY` or `ORDER BY` clauses of the
 /// query
-#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum FieldReference {
     /// A reference to a field in the `SELECT` list by its (1-based) index.
     Numeric(u64),

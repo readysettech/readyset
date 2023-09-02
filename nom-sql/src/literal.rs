@@ -1,3 +1,4 @@
+use core::cmp::Ordering;
 use std::hash::{Hash, Hasher};
 use std::str::FromStr;
 use std::{fmt, str};
@@ -27,7 +28,7 @@ use test_strategy::Arbitrary;
 use crate::dialect::is_sql_identifier;
 use crate::{Dialect, NomSqlResult, SqlType};
 
-#[derive(Clone, Debug, PartialOrd, Serialize, Deserialize, Arbitrary)]
+#[derive(Clone, Debug, Serialize, Deserialize, Arbitrary)]
 pub struct Float {
     pub value: f32,
     pub precision: u8,
@@ -36,6 +37,25 @@ pub struct Float {
 impl PartialEq for Float {
     fn eq(&self, other: &Self) -> bool {
         self.value.to_bits() == other.value.to_bits() && self.precision == other.precision
+    }
+}
+
+impl PartialOrd for Float {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        match self.value.to_bits().partial_cmp(&other.value.to_bits()) {
+            Some(Ordering::Equal) => {}
+            ord => return ord,
+        }
+        self.precision.partial_cmp(&other.precision)
+    }
+}
+
+impl Ord for Float {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.value
+            .to_bits()
+            .cmp(&other.value.to_bits())
+            .then_with(|| self.precision.cmp(&other.precision))
     }
 }
 
@@ -48,7 +68,7 @@ impl Hash for Float {
     }
 }
 
-#[derive(Clone, Debug, PartialOrd, Serialize, Deserialize, Arbitrary)]
+#[derive(Clone, Debug, Serialize, Deserialize, Arbitrary)]
 pub struct Double {
     pub value: f64,
     pub precision: u8,
@@ -69,7 +89,26 @@ impl Hash for Double {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Serialize, Deserialize, Arbitrary)]
+impl PartialOrd for Double {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        match self.value.to_bits().partial_cmp(&other.value.to_bits()) {
+            Some(Ordering::Equal) => {}
+            ord => return ord,
+        }
+        self.precision.partial_cmp(&other.precision)
+    }
+}
+
+impl Ord for Double {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.value
+            .to_bits()
+            .cmp(&other.value.to_bits())
+            .then_with(|| self.precision.cmp(&other.precision))
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize, Arbitrary)]
 pub enum ItemPlaceholder {
     QuestionMark,
     DollarNumber(u32),
@@ -86,7 +125,7 @@ impl ToString for ItemPlaceholder {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize, Arbitrary)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Arbitrary)]
 pub enum Literal {
     Null,
     Boolean(bool),

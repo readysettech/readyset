@@ -17,7 +17,7 @@ use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Dialect, FieldReference, NomSqlResult};
 
 #[derive(
-    Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize, Arbitrary,
+    Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Arbitrary,
 )]
 pub enum OrderType {
     OrderAscending,
@@ -45,7 +45,7 @@ impl fmt::Display for OrderType {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct OrderClause {
     pub order_by: Vec<(FieldReference, Option<OrderType>)>,
 }
