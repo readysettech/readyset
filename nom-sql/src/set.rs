@@ -204,7 +204,7 @@ fn postgres_parameter_value(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Postgr
 
 /// Scope for a [`Variable`]
 #[derive(
-    Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize, Arbitrary,
+    Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Arbitrary,
 )]
 pub enum VariableScope {
     User,
@@ -234,7 +234,7 @@ pub(crate) fn variable_scope_prefix(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8]
     ))(i)
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize, Arbitrary)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Arbitrary)]
 pub struct Variable {
     pub scope: VariableScope,
     pub name: SqlIdentifier,

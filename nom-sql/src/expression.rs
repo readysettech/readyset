@@ -28,7 +28,7 @@ use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Column, Dialect, Literal, NomSqlResult, SelectStatement, SqlIdentifier, SqlType};
 
 /// Function call expressions
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum FunctionExpr {
     /// `AVG` aggregation. The boolean argument is `true` if `DISTINCT`
     Avg { expr: Box<Expr>, distinct: bool },
@@ -165,7 +165,7 @@ impl FunctionExpr {
 /// Note that because all binary operators have expressions on both sides, SQL `IN` is not a binary
 /// operator - since it must have either a subquery or a list of expressions on its right-hand side
 #[derive(
-    Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize, Arbitrary,
+    Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Arbitrary,
 )]
 pub enum BinaryOperator {
     /// `AND`
@@ -334,7 +334,7 @@ impl Display for BinaryOperator {
 }
 
 #[derive(
-    Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize, Arbitrary,
+    Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Arbitrary,
 )]
 pub enum UnaryOperator {
     Neg,
@@ -351,7 +351,7 @@ impl Display for UnaryOperator {
 }
 
 /// Right-hand side of IN
-#[derive(Debug, PartialEq, Eq, PartialOrd, Hash, Clone, Serialize, Deserialize, From)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Serialize, Deserialize, From)]
 pub enum InValue {
     Subquery(Box<SelectStatement>),
     List(Vec<Expr>),
@@ -371,7 +371,7 @@ impl InValue {
 }
 
 /// A single branch of a `CASE WHEN` statement
-#[derive(Debug, PartialEq, Eq, PartialOrd, Hash, Clone, Serialize, Deserialize, From)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Serialize, Deserialize, From)]
 pub struct CaseWhenBranch {
     pub condition: Expr,
     pub body: Expr,
@@ -391,7 +391,7 @@ impl CaseWhenBranch {
 }
 
 /// SQL Expression AST
-#[derive(Debug, PartialEq, Eq, PartialOrd, Hash, Clone, Serialize, Deserialize, From)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Serialize, Deserialize, From)]
 pub enum Expr {
     /// Function call expressions
     ///

@@ -26,7 +26,7 @@ use crate::{
     TableExpr,
 };
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Default, Serialize, Deserialize)]
 pub struct GroupByClause {
     pub fields: Vec<FieldReference>,
 }
@@ -46,7 +46,7 @@ impl GroupByClause {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct JoinClause {
     pub operator: JoinOperator,
     pub right: JoinRightSide,
@@ -67,7 +67,7 @@ impl JoinClause {
     }
 }
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct CommonTableExpr {
     pub name: SqlIdentifier,
     pub statement: SelectStatement,
@@ -87,7 +87,7 @@ impl CommonTableExpr {
 }
 
 /// AST representation of the SQL limit and offset clauses.
-#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum LimitClause {
     /// The standard limit and offset syntax: `LIMIT <limit> OFFSET <offset>`.
     LimitOffset {
@@ -174,7 +174,7 @@ impl LimitClause {
     }
 }
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct SelectStatement {
     pub ctes: Vec<CommonTableExpr>,
     pub distinct: bool,

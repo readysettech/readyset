@@ -26,7 +26,7 @@ use crate::table::relation;
 use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Dialect, NomSqlResult, Relation};
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum SqlType {
     Bool,
     Char(Option<u16>),
@@ -412,6 +412,13 @@ impl PartialOrd for EnumVariants {
     #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         <[String]>::partial_cmp(self, other)
+    }
+}
+
+impl Ord for EnumVariants {
+    #[inline]
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        <[String]>::cmp(self, other)
     }
 }
 
