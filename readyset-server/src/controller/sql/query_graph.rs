@@ -259,8 +259,8 @@ pub struct QueryGraph {
     /// If a single aggregate is projected as multiple aliases, only one will appear in this map,
     /// but both will appear in `self.columns` as [`OutputColumn::Data`] referencing that alias
     pub aggregates: HashMap<FunctionExpr, SqlIdentifier>,
-    /// Set of columns that appear in the GROUP BY clause
-    pub group_by: HashSet<Column>,
+    /// Set of expressions that appear in the GROUP BY clause
+    pub group_by: HashSet<Expr>,
     /// Final set of projected columns in this query; may include literals in addition to the
     /// columns reflected in individual relations' `QueryGraphNode` structures.
     pub columns: Vec<OutputColumn>,
@@ -1227,10 +1227,7 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                 FieldReference::Numeric(_) => {
                     internal!("Numeric field references should have been removed")
                 }
-                FieldReference::Expr(Expr::Column(c)) => Ok(c.clone()),
-                FieldReference::Expr(_) => {
-                    unsupported!("Only column references are currently supported in GROUP BY")
-                }
+                FieldReference::Expr(e) => Ok(e.clone()),
             })
             .collect::<ReadySetResult<HashSet<_>>>()?
     } else {

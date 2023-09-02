@@ -93,7 +93,10 @@ impl Signature for QueryGraph {
             }
         }
 
-        self.group_by.iter().for_each(&mut record_column);
+        self.group_by
+            .iter()
+            .flat_map(|e| e.referred_columns())
+            .for_each(&mut record_column);
 
         // Global predicates are part of the attributes too
         self.global_predicates
