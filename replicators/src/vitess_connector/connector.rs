@@ -245,7 +245,13 @@ impl Connector for VitessConnector {
                 VEventType::Heartbeat => info!("Received VStream heartbeat"),
                 VEventType::Vgtid => {
                     info!("Received VStream VGTID");
-                    self.current_position = Some(event.vgtid.unwrap().into());
+                    let vgtid = event.vgtid.as_ref().unwrap();
+                    self.current_position = Some(vgtid.try_into().map_err(|e| {
+                        ReadySetError::ReplicationFailed(format!(
+                            "Could not convert VGTID to VStream position: {}",
+                            e
+                        ))
+                    })?);
                 }
                 VEventType::Begin => info!("Received VStream begin"),
 

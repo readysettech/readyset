@@ -733,7 +733,7 @@ impl NoriaAdapter {
     async fn start_inner_vitess(
         vitess_config: database_utils::VitessConfig,
         mut noria: ReadySetHandle,
-        config: UpstreamConfig,
+        mut config: UpstreamConfig,
         notification_channel: &UnboundedSender<ReplicatorMessage>,
         resnapshot: bool,
         telemetry_sender: &TelemetrySender,
@@ -752,7 +752,8 @@ impl NoriaAdapter {
 
         let table_filter = TableFilter::try_new(
             nom_sql::Dialect::MySQL,
-            config.replication_tables.clone(),
+            config.replication_tables.take(),
+            config.replication_tables_ignore.take(),
             Some(&vitess_config.keyspace),
         )?;
 
@@ -818,7 +819,7 @@ impl NoriaAdapter {
         //     .unwrap_or_default();
 
         // FIXME: Fix this
-        let mut replication_offset = ReplicationOffset::Vitess(VGtid::default().into());
+        let mut replication_offset = ReplicationOffset::Vitess(VGtid::default().try_into()?);
 
         adapter
             .main_loop(&mut replication_offset, None, notification_channel)
