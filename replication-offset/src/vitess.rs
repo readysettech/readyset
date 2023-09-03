@@ -1,5 +1,7 @@
 use std::fmt::Display;
 
+use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
+use readyset_vitess_data::GtidSet;
 use serde::{Deserialize, Serialize};
 use vitess_grpc::binlogdata::VGtid;
 
@@ -7,7 +9,7 @@ use vitess_grpc::binlogdata::VGtid;
 pub struct ShardPosition {
     keyspace: String,
     shard: String,
-    gtid: String,
+    gtid: GtidSet,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -21,7 +23,7 @@ impl VStreamPosition {
             shard_positions: vec![ShardPosition {
                 keyspace: keyspace.to_string(),
                 shard: "".to_string(),
-                gtid: "current".to_string(),
+                gtid: GtidSet::Current,
             }],
         }
     }
@@ -46,7 +48,7 @@ impl PartialOrd for VStreamPosition {
                 return None;
             }
 
-            let res = vgtid_partial_cmp(&self_shard_pos.gtid, &other_shard_pos.gtid);
+            let res = self_shard_pos.gtid.partial_cmp(&other_shard_pos.gtid);
             if res != Some(std::cmp::Ordering::Equal) {
                 return res;
             }
@@ -56,81 +58,35 @@ impl PartialOrd for VStreamPosition {
     }
 }
 
-// Compare two VGTID values from vitess for ordering purposes.
-// FIXME: This is a hacky implementation that works for vttestserver, but need to verify it against
-// the actual vitess implementation.
-fn vgtid_partial_cmp(vgtid1: &str, vgtid2: &str) -> Option<std::cmp::Ordering> {
-    if vgtid1 == vgtid2 {
-        return Some(std::cmp::Ordering::Equal);
-    }
+impl TryFrom<&VGtid> for VStreamPosition {
+    type Error = ReadySetError;
 
-    // Format: MySQL56/b6f64869-4457-11ee-a149-4a61a0626815:1-35
-    // Fields: <prefix>/<uuid>:<start>-<end>
-    let gtid1_parts: Vec<&str> = vgtid1.split('/').collect();
-    let gtid2_parts: Vec<&str> = vgtid2.split('/').collect();
-
-    if gtid1_parts.len() != 2 || gtid2_parts.len() != 2 {
-        return None;
-    }
-
-    if gtid1_parts[0] != gtid2_parts[0] {
-        return None;
-    }
-
-    let gtid1_uuid_parts: Vec<&str> = gtid1_parts[1].split(':').collect();
-    let gtid2_uuid_parts: Vec<&str> = gtid2_parts[1].split(':').collect();
-
-    if gtid1_uuid_parts.len() != 2 || gtid2_uuid_parts.len() != 2 {
-        return None;
-    }
-
-    if gtid1_uuid_parts[0] != gtid2_uuid_parts[0] {
-        return None;
-    }
-
-    let gtid1_start_end_parts: Vec<&str> = gtid1_uuid_parts[1].split('-').collect();
-    let gtid2_start_end_parts: Vec<&str> = gtid2_uuid_parts[1].split('-').collect();
-
-    if gtid1_start_end_parts.len() != 2 || gtid2_start_end_parts.len() != 2 {
-        return None;
-    }
-
-    let gtid1_start: u64 = gtid1_start_end_parts[0].parse().ok()?;
-    let gtid1_end: u64 = gtid1_start_end_parts[1].parse().ok()?;
-    let gtid2_start: u64 = gtid2_start_end_parts[0].parse().ok()?;
-    let gtid2_end: u64 = gtid2_start_end_parts[1].parse().ok()?;
-    if gtid1_start != gtid2_start {
-        return None;
-    }
-
-    if gtid1_end < gtid2_end {
-        return Some(std::cmp::Ordering::Less);
-    } else if gtid1_end > gtid2_end {
-        return Some(std::cmp::Ordering::Greater);
-    }
-
-    None
-}
-
-impl From<&VGtid> for VStreamPosition {
-    fn from(vgtid: &VGtid) -> Self {
+    fn try_from(vgtid: &VGtid) -> ReadySetResult<Self> {
         let shard_positions = vgtid
             .shard_gtids
             .iter()
-            .map(|shard_gtid| ShardPosition {
-                keyspace: shard_gtid.keyspace.clone(),
-                shard: shard_gtid.shard.clone(),
-                gtid: shard_gtid.gtid.clone(),
-            })
-            .collect();
+            .map(|shard_gtid| {
+                let gtid_string: &str = shard_gtid.gtid.as_ref();
+                let gtid_set = gtid_string
+                    .try_into()
+                    .map_err(|_| internal_err!("invalid VGTID string: {}", gtid_string))?;
 
-        Self { shard_positions }
+                Ok(ShardPosition {
+                    keyspace: shard_gtid.keyspace.clone(),
+                    shard: shard_gtid.shard.clone(),
+                    gtid: gtid_set,
+                })
+            })
+            .collect::<ReadySetResult<Vec<_>>>()?;
+
+        Ok(Self { shard_positions })
     }
 }
 
-impl From<VGtid> for VStreamPosition {
-    fn from(vgtid: VGtid) -> Self {
-        (&vgtid).into()
+impl TryFrom<VGtid> for VStreamPosition {
+    type Error = ReadySetError;
+    fn try_from(vgtid: VGtid) -> ReadySetResult<Self> {
+        (&vgtid).try_into()
     }
 }
 
@@ -142,7 +98,7 @@ impl From<VStreamPosition> for VGtid {
             .map(|shard_position| vitess_grpc::binlogdata::ShardGtid {
                 keyspace: shard_position.keyspace,
                 shard: shard_position.shard,
-                gtid: shard_position.gtid,
+                gtid: shard_position.gtid.to_string(),
                 ..Default::default()
             })
             .collect();

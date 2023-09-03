@@ -11,6 +11,9 @@ vitess-grpc = "0.2"
 rust_decimal = { version = "1.26" }
 bit-vec = { version = "0.6", features = ["serde"] }
 tracing = { version = "0.1", features = ["release_max_level_debug"] }
+hex = "0.4"
+uuid = { version = "1", features = ["serde"] }
+serde = { version = "1.0", features = ["derive"] }
 
 readyset-errors = { path = "../readyset-errors" }
 readyset-data = { path = "../readyset-data" }

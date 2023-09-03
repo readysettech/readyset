@@ -10,5 +10,9 @@ nom-sql = { path = "../nom-sql" }
 readyset-errors = { path = "../readyset-errors" }
 serde = { version = "1.0", features = ["derive"] }
 readyset-util = { path = "../readyset-util" }
+readyset-vitess-data = { path = "../readyset-vitess-data" }
 bytes = "1.0"
 vitess-grpc = "0.2"
+
+[dev-dependencies]
+serde_json = "1.0"

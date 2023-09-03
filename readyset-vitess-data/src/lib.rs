@@ -1,8 +1,11 @@
 mod column;
+mod gtid;
+pub mod mysql56;
 mod schema_cache;
 mod table;
 
 pub use column::Column;
+pub use gtid::GtidSet;
 pub use schema_cache::SchemaCache;
 pub use table::Table;
 use vitess_grpc::binlogdata::RowChange;

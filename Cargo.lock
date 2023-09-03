@@ -5317,11 +5317,14 @@ version = "0.0.1"
 dependencies = [
  "anyhow",
  "bit-vec",
+ "hex",
  "mysql-time",
  "readyset-data",
  "readyset-errors",
  "rust_decimal",
+ "serde",
  "tracing",
+ "uuid 1.3.0",
  "vitess-grpc",
 ]
 
@@ -5414,7 +5417,9 @@ dependencies = [
  "nom-sql",
  "readyset-errors",
  "readyset-util",
+ "readyset-vitess-data",
  "serde",
+ "serde_json",
  "vitess-grpc",
 ]
 
@@ -7265,6 +7270,9 @@ name = "uuid"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1674845326ee10d37ca60470760d4288a6f80f304007d92e5c53bab78c9cfd79"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "valuable"
