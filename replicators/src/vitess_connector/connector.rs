@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use async_trait::async_trait;
 use nom_sql::Relation;
 use readyset_client::TableOperation;
@@ -8,7 +10,7 @@ use replication_offset::vitess::VStreamPosition;
 use replication_offset::ReplicationOffset;
 use tokio::sync::mpsc;
 use tonic::Streaming;
-use tracing::{error, info, warn};
+use tracing::{error, info, trace, warn};
 use vitess_grpc::binlogdata::{ShardGtid, VEvent, VEventType, VGtid};
 use vitess_grpc::query::Row;
 use vitess_grpc::topodata::TabletType;
@@ -30,8 +32,16 @@ pub(crate) struct VitessConnector {
     // Schema cache for all the tables we have seen so far
     schema_cache: SchemaCache,
 
-    // / Whether to log statements received by the connector
+    // Whether to log statements received by the connector
     enable_statement_logging: bool,
+
+    // Event buffer for all ROW events in the current transaction
+    //
+    // We need to return ReplicationAction with the correct position, but the position is
+    // delivered to us in the VGTID event at the very end of the transaction.
+    // So, we need to buffer all the ROW events until we receive the VGTID event
+    // (or, rather, until COMMIT).
+    event_buffer: VecDeque<VEvent>,
 }
 
 impl VitessConnector {
@@ -94,6 +104,7 @@ impl VitessConnector {
             current_position,
             schema_cache: SchemaCache::new(vitess_config.keyspace().as_ref()),
             enable_statement_logging,
+            event_buffer: VecDeque::with_capacity(10),
         };
 
         Ok(connector)
@@ -179,6 +190,8 @@ impl VitessConnector {
                         &row_change.after.as_ref().unwrap(),
                     )?));
                 }
+
+                // TODO: Implement Update and Delete
                 readyset_vitess_data::RowOperation::Update => todo!(),
                 readyset_vitess_data::RowOperation::Delete => todo!(),
             }
@@ -198,7 +211,7 @@ impl VitessConnector {
             "We haven't seen a VGTID event yet trying to process a ROW. No current position information can be found!"
         );
 
-        let pos = ReplicationOffset::Vitess(self.current_position.clone().unwrap());
+        let pos = ReplicationOffset::Vitess(self.current_position.as_ref().unwrap().clone());
 
         Ok((action, pos))
     }
@@ -225,6 +238,11 @@ impl Connector for VitessConnector {
         _last_pos: &ReplicationOffset,
         _until: Option<&ReplicationOffset>,
     ) -> ReadySetResult<(ReplicationAction, ReplicationOffset)> {
+        // First, check if we have any buffered events to return
+        if let Some(row_event) = self.event_buffer.pop_front() {
+            return self.process_row_event(&row_event, &self.schema_cache);
+        }
+
         // This loop runs until we have something to return to the caller
         loop {
             let event = self.vstream_events.recv().await;
@@ -252,18 +270,32 @@ impl Connector for VitessConnector {
                             e
                         ))
                     })?);
-                }
-                VEventType::Begin => info!("Received VStream begin"),
 
-                // TODO: When adding support for event buffering, we will want to flush on commit
+                    // Now that we have our new position, we can return any buffered events
+                    if let Some(row_event) = self.event_buffer.pop_front() {
+                        return self.process_row_event(&row_event, &self.schema_cache);
+                    }
+                }
+
+                VEventType::Begin => {
+                    info!("Received VStream begin");
+                    if !self.event_buffer.is_empty() {
+                        warn!(
+                            "There were {} buffered event(s) from the previous transaction! Dropping them.",
+                            self.event_buffer.len()
+                        );
+                        self.event_buffer.clear();
+                    }
+                }
+
                 VEventType::Commit => {
                     info!("Received VStream commit");
 
-                    if let Some(current_posision) = &self.current_position {
-                        info!("Returning VStream position: {}", &current_posision);
+                    if let Some(pos) = &self.current_position {
+                        info!("Returning VStream position: {}", &pos);
                         return Ok((
                             ReplicationAction::LogPosition,
-                            ReplicationOffset::Vitess(current_posision.clone()),
+                            ReplicationOffset::Vitess(pos.clone()),
                         ));
                     }
                 }
@@ -278,13 +310,12 @@ impl Connector for VitessConnector {
                     self.schema_cache.process_field_event(&field_event)?
                 }
 
-                // This assumes that:
-                // 1. We are following a single keyspace
-                // 2. Each ROW event will be converted to a single ReplicationAction
-                // 3. Each generated ReplicationAction will have a single action inside (performance
-                // issues may be caused by too granular rpc calls to Noria; may want to buffer
-                // events like the Postgres connector does)
-                VEventType::Row => return self.process_row_event(&event, &self.schema_cache),
+                VEventType::Row => {
+                    trace!(
+                        "Received VStream ROW event, buffering until the end of the transaction"
+                    );
+                    self.event_buffer.push_back(event);
+                }
 
                 // TODO: Maybe handle these?
                 VEventType::Ddl => info!("Received VStream DDL"),
@@ -293,11 +324,11 @@ impl Connector for VitessConnector {
                 VEventType::CopyCompleted => {
                     info!("Received VStream copy completed");
 
-                    if let Some(current_posision) = &self.current_position {
-                        info!("Returning VStream position: {}", &current_posision);
+                    if let Some(pos) = &self.current_position {
+                        info!("Returning VStream position: {}", &pos);
                         return Ok((
                             ReplicationAction::LogPosition,
-                            ReplicationOffset::Vitess(current_posision.clone()),
+                            ReplicationOffset::Vitess(pos.clone()),
                         ));
                     }
                 }
