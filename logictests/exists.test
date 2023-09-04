@@ -98,3 +98,12 @@ AND author_id = ?;
 ? = 1
 ----
 1
+
+statement ok
+insert into users (id) values (3);
+
+query I nosort
+select id from users
+where not exists (select * from posts where author_id = users.id);
+----
+3
