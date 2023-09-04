@@ -103,8 +103,10 @@ pub enum JoinKind {
     Inner,
     /// Left joins - see [`MirNodeInner::LeftJoin`]
     Left,
-    /// Dependent joins - see [`MirNodeInner::DependentJoin`]
-    Dependent,
+    /// Dependent inner joins - see [`MirNodeInner::DependentJoin`]
+    DependentInner,
+    /// Dependent left joins - see [`MirNodeInner::DependentLeftJoin`]
+    DependentLeft,
 }
 
 /// Specification for how to treat the leaf node of a query when converting it to MIR
@@ -1020,7 +1022,8 @@ impl SqlToMirConverter {
         let inner = match kind {
             JoinKind::Inner => MirNodeInner::Join { on, project },
             JoinKind::Left => MirNodeInner::LeftJoin { on, project },
-            JoinKind::Dependent => MirNodeInner::DependentJoin { on, project },
+            JoinKind::DependentInner => MirNodeInner::DependentJoin { on, project },
+            JoinKind::DependentLeft => MirNodeInner::DependentLeftJoin { on, project },
         };
         trace!(?inner, "Added join node");
         Ok(self.add_query_node(
@@ -1039,6 +1042,7 @@ impl SqlToMirConverter {
         join_predicates: &[JoinPredicate],
         left_node: NodeIndex,
         right_node: NodeIndex,
+        dependent: bool,
     ) -> ReadySetResult<NodeIndex> {
         let mark_col = SqlIdentifier::from("__mark");
         let right_mark = self.make_project_node(
@@ -1061,7 +1065,11 @@ impl SqlToMirConverter {
             join_predicates,
             left_node,
             right_mark,
-            JoinKind::Left,
+            if dependent {
+                JoinKind::DependentLeft
+            } else {
+                JoinKind::Left
+            },
         )?;
 
         Ok(self.make_filter_node(
@@ -1478,16 +1486,13 @@ impl SqlToMirConverter {
                 }];
 
                 if negated {
-                    if is_correlated(subquery) {
-                        unsupported!("Correlated NOT EXISTS not supported");
-                    }
-
                     self.make_antijoin(
                         query_name,
                         format!("{}_antijoin", name.display_unquoted()).into(),
                         &join_preds,
                         left_literal_join_key_proj,
                         gt_0_filter,
+                        /* dependent = */ is_correlated(subquery),
                     )?
                 } else {
                     // -> ⋈ on: l.__exists_join_key ≡ r.__count_grp
@@ -1498,7 +1503,7 @@ impl SqlToMirConverter {
                         left_literal_join_key_proj,
                         gt_0_filter,
                         if is_correlated(subquery) {
-                            JoinKind::Dependent
+                            JoinKind::DependentInner
                         } else {
                             JoinKind::Inner
                         },
@@ -1593,6 +1598,7 @@ impl SqlToMirConverter {
                         join_preds,
                         parent,
                         distinct,
+                        /* dependent = */ is_correlated(subquery),
                     )?
                 } else {
                     self.make_join_node(
@@ -1602,7 +1608,7 @@ impl SqlToMirConverter {
                         parent,
                         distinct,
                         if is_correlated(subquery) {
-                            JoinKind::Dependent
+                            JoinKind::DependentInner
                         } else {
                             JoinKind::Inner
                         },

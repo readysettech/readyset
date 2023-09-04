@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use mir::NodeIndex;
 use nom_sql::Relation;
-use readyset_errors::{internal, internal_err, invariant, unsupported, ReadySetResult};
+use readyset_errors::{internal_err, invariant, unsupported, ReadySetResult};
 
 use super::JoinKind;
 use crate::controller::sql::mir::SqlToMirConverter;
@@ -58,17 +58,15 @@ pub(super) fn make_joins(
         let (left_chain, right_chain) =
             pick_join_chains(&jref.src, &jref.dst, &mut join_chains, node_for_rel)?;
 
-        // TODO(fran): Use NodeIndex instead of name.
         if correlated_nodes.contains(&right_chain.last_node) {
             match join_kind {
-                JoinKind::Left => internal!(
-                    "Dependent left join not yet supported (when joining to {})",
-                    jref.dst.display_unquoted()
-                ),
-                JoinKind::Inner => {
-                    join_kind = JoinKind::Dependent;
+                JoinKind::Left => {
+                    join_kind = JoinKind::DependentLeft;
                 }
-                JoinKind::Dependent => {}
+                JoinKind::Inner => {
+                    join_kind = JoinKind::DependentInner;
+                }
+                JoinKind::DependentInner | JoinKind::DependentLeft => {}
             }
         }
 
@@ -110,9 +108,8 @@ pub(super) fn make_cross_joins(
         .next()
         .ok_or_else(|| internal_err!("make_cross_joins called with empty nodes"))?;
     nodes.try_fold(first_node, |n1, n2| -> ReadySetResult<_> {
-        // TODO(fran): Use NodeIndex instead of name.
         let join_kind = if correlated_nodes.contains(&n2) {
-            JoinKind::Dependent
+            JoinKind::DependentInner
         } else {
             JoinKind::Inner
         };
