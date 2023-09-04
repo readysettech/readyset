@@ -486,7 +486,7 @@ impl MirNodeInner {
                     .collect::<Vec<_>>()
                     .join(", ");
                 format!(
-                    "⋉ [{} on {}]",
+                    "⟕ [{} on {}]",
                     project
                         .iter()
                         .map(|c| c.name.as_str())
