@@ -46,6 +46,12 @@ where exists (select id from posts where title = 'test1');
 ----
 1
 
+query I nosort
+select id from users
+where not exists (select id from posts where title = 'test3');
+----
+1
+
 # Correlated
 
 statement ok
