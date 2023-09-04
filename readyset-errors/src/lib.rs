@@ -619,8 +619,13 @@ pub enum ReadySetError {
     #[error("Malformed array literal '{}': {}", Sensitive(&input), message)]
     ArrayParseError { input: String, message: String },
 
+    /// A DDL in upstream database requires a partial resnapshot
     #[error("Change in DDL requires partial resnapshot")]
     ResnapshotNeeded,
+
+    /// An unrecoverable error occurred, requiring a full resnapshot
+    #[error("Fatal error requires full resnapshot")]
+    FullResnapshotNeeded,
 
     #[error("Root certificate must be a valid DER or PEM encoded certificate")]
     InvalidRootCertificate,

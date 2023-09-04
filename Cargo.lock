@@ -5147,6 +5147,7 @@ dependencies = [
  "hex",
  "itertools",
  "metrics",
+ "mysql-srv",
  "mysql-time",
  "mysql_async",
  "mysql_common",

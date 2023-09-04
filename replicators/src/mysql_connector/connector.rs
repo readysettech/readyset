@@ -14,10 +14,10 @@ use nom_sql::Relation;
 use readyset_client::metrics::recorded;
 use readyset_client::recipe::ChangeList;
 use readyset_data::{DfValue, Dialect};
-use readyset_errors::{internal_err, ReadySetResult};
+use readyset_errors::{internal, internal_err, ReadySetError, ReadySetResult};
 use replication_offset::mysql::MySqlPosition;
 use replication_offset::ReplicationOffset;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 use crate::noria_adapter::{Connector, ReplicationAction};
 
@@ -80,8 +80,12 @@ impl MySqlBinlogConnector {
         info!(next_position = %self.next_position, "Starting binlog replication");
         let filename = self.next_position.binlog_file_name().to_string();
 
-        // TODO: we should require a re-snapshot if we are in the middle of a transaction and
-        //  the position has overflow u32.
+        // If the next position is greater than u32::MAX, we need to re-snapshot
+        if self.next_position.position > u64::from(u32::MAX) {
+            Err(mysql_async::Error::Other(Box::new(
+                ReadySetError::FullResnapshotNeeded,
+            )))?;
+        }
         let cmd = mysql_common::packets::ComBinlogDump::new(self.server_id())
             .with_pos(
                 self.next_position
@@ -128,8 +132,28 @@ impl MySqlBinlogConnector {
         };
 
         connector.register_as_replica().await?;
-        connector.request_binlog().await?;
-
+        let binlog_request = connector.request_binlog().await;
+        match binlog_request {
+            Ok(()) => (),
+            Err(mysql_async::Error::Server(ref err))
+                if mysql_srv::ErrorKind::from(err.code)
+                    == mysql_srv::ErrorKind::ER_MASTER_FATAL_ERROR_READING_BINLOG =>
+            {
+                // Requested binlog is not available, we need to re-snapshot
+                error!(error = %err, "Failed to request binlog");
+                return Err(ReadySetError::FullResnapshotNeeded);
+            }
+            Err(mysql_async::Error::Other(ref err))
+                if err.downcast_ref::<ReadySetError>()
+                    == Some(&ReadySetError::FullResnapshotNeeded) =>
+            {
+                error!(error = %err, "Failed to request binlog");
+                return Err(ReadySetError::FullResnapshotNeeded);
+            }
+            Err(err) => {
+                internal!("Failed to request binlog: {err}")
+            }
+        }
         Ok(connector)
     }
 
