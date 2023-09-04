@@ -350,7 +350,8 @@ impl MirNodeInner {
             }
             MirNodeInner::Join { project, .. }
             | MirNodeInner::LeftJoin { project, .. }
-            | MirNodeInner::DependentJoin { project, .. } => {
+            | MirNodeInner::DependentJoin { project, .. }
+            | MirNodeInner::DependentLeftJoin { project, .. } => {
                 if !project.contains(&c) {
                     project.push(c);
                 }
@@ -382,11 +383,15 @@ impl MirNodeInner {
         }
     }
 
-    /// Returns `true` if self is a [`DependentJoin`].
+    /// Returns `true` if self is a [`DependentJoin`] or [`DependentLeftJoin`].
     ///
     /// [`DependentJoin`]: MirNodeInner::DependentJoin
+    /// [`DependentLeftJoin`]: MirNodeInner::DependentLeftJoin
     pub fn is_dependent_join(&self) -> bool {
-        matches!(self, Self::DependentJoin { .. })
+        matches!(
+            self,
+            Self::DependentJoin { .. } | Self::DependentLeftJoin { .. }
+        )
     }
 
     /// Returns `true` if self is a [`ViewKey`].

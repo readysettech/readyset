@@ -16,9 +16,9 @@ use crate::{Column, NodeIndex};
 ///
 /// Internally, this uses the following rules to push filters down the graph:
 ///
-/// - [`Project`], [`Join`], [`LeftJoin`], and dependent joins *other* than the one this filter
-///   depends on are all totally commutative with filters, so can be swapped in position with those
-///   filters with impunity
+/// - [`Project`], [`Join`], [`LeftJoin`], and dependent left or inner joins *other* than the one
+///   this filter depends on are all totally commutative with filters, so can be swapped in position
+///   with those filters with impunity
 /// - Grouped nodes ([`Aggregation`] and [`Extremum`]) require adding any *non* dependent columns
 ///   mentioned in the filter to the group-by of the node.
 /// - All other nodes currently return an [unsupported error][] - it *is* theoretically possible to
@@ -83,9 +83,12 @@ fn push_dependent_filter(
         child_idx.index()
     );
     let should_insert = match &mut query.get_node_mut(child_idx).unwrap().inner {
-        MirNodeInner::DependentJoin { on, .. } if child_idx == dependent_join_idx => {
+        MirNodeInner::DependentJoin { on, .. } | MirNodeInner::DependentLeftJoin { on, .. }
+            if child_idx == dependent_join_idx =>
+        {
             match dependency {
                 DependentCondition::JoinKey { lhs, rhs } => {
+                    trace!("Adding {} = {} to ON for {}", lhs, rhs, child_idx.index(),);
                     on.push((lhs.clone(), rhs.clone()));
                     query.graph.add_column(child_idx, lhs)?;
                     query.graph.add_column(child_idx, rhs)?;
@@ -121,8 +124,8 @@ fn push_dependent_filter(
     Ok(())
 }
 
-/// A MIR rewrite pass that attempts to eliminate all [dependent joins][] by algebraically pushing
-/// any dependent filters below the join.
+/// A MIR rewrite pass that attempts to eliminate all dependent [inner][dependent inner join] and
+/// [left][dependent left join] joins by algebraically pushing any dependent filters below the join.
 ///
 /// This approach is roughly based on the papers [The Complete Story of Joins (In HyPer)][NKL17],
 /// [Unnesting Arbitrary Queries][NK15], and [Orthogonal Optimization of Subqueries and
@@ -142,7 +145,8 @@ fn push_dependent_filter(
 /// 3. Attempt to push that filter down the graph, using an algebraic rewrite rule (this is done
 ///    in [`push_dependent_filter`])
 ///
-/// [dependent joins]: MirNodeInner::DependentJoin
+/// [dependent inner join]: MirNodeInner::DependentJoin
+/// [dependent left join]: MirNodeInner::DependentLeftJoin
 /// [NLK17]: http://btw2017.informatik.uni-stuttgart.de/slidesandpapers/F1-10-37/paper_web.pdf
 /// [NK15]: https://cs.emis.de/LNI/Proceedings/Proceedings241/383.pdf
 /// [GJ01]: http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.563.8492&rep=rep1&type=pdf
@@ -272,6 +276,10 @@ pub(crate) fn eliminate_dependent_joins(query: &mut MirQuery<'_>) -> ReadySetRes
                     on: on.clone(),
                     project: project.clone(),
                 },
+                MirNodeInner::DependentLeftJoin { on, project } => MirNodeInner::LeftJoin {
+                    on: on.clone(),
+                    project: project.clone(),
+                },
                 _ => unreachable!("Already checked is_dependent_join above"),
             };
             query.get_node_mut(join).unwrap().inner = new_inner;
@@ -310,9 +318,13 @@ impl DependentCondition {
 #[cfg(test)]
 #[allow(clippy::panic)] // it's a test
 mod tests {
+    use std::iter;
+
     use common::IndexType;
     use dataflow::ops::grouped::aggregate::Aggregation;
-    use nom_sql::{BinaryOperator, ColumnSpecification, Expr, Literal, Relation, SqlType};
+    use nom_sql::{
+        BinaryOperator, ColumnSpecification, Expr, Literal, Relation, SqlIdentifier, SqlType,
+    };
     use petgraph::Direction;
 
     use super::*;
@@ -521,6 +533,229 @@ mod tests {
 
         let pull_result = pull_all_required_columns(&mut query);
         assert!(pull_result.is_ok(), "{}", pull_result.err().unwrap());
+    }
+
+    #[test]
+    fn not_exists_ish() {
+        readyset_tracing::init_test_logging();
+        // query looks something like:
+        //     SELECT t1.a FROM t1 WHERE NOT EXISTS (SELECT * FROM t2 WHERE t2.a = t1.a)
+        let mut graph = MirGraph::new();
+
+        let query_name = Relation::from("q");
+
+        let t2 = graph.add_node(MirNode::new(
+            "t2".into(),
+            MirNodeInner::Base {
+                column_specs: vec![ColumnSpecification {
+                    column: nom_sql::Column::from("t2.a"),
+                    sql_type: SqlType::Int(None),
+                    constraints: vec![],
+                    comment: None,
+                }],
+                primary_key: Some([Column::new(Some("t2"), "a")].into()),
+                unique_keys: Default::default(),
+            },
+        ));
+        graph[t2].add_owner(query_name.clone());
+        // t2 -> ...
+
+        // -> σ[t2.a = t1.a]
+        let t2_filter = graph.add_node(MirNode::new(
+            "t2_filter".into(),
+            MirNodeInner::Filter {
+                conditions: Expr::BinaryOp {
+                    lhs: Box::new(Expr::Column("t2.a".into())),
+                    op: BinaryOperator::Equal,
+                    rhs: Box::new(Expr::Column("t1.a".into())),
+                },
+            },
+        ));
+        graph[t2_filter].add_owner(query_name.clone());
+
+        graph.add_edge(t2, t2_filter, 0);
+
+        // -> AliasTable
+        let t2_alias_table = graph.add_node(MirNode::new(
+            "alias_table".into(),
+            MirNodeInner::AliasTable {
+                table: "rhs".into(),
+            },
+        ));
+        graph[t2_alias_table].add_owner(query_name.clone());
+
+        graph.add_edge(t2_filter, t2_alias_table, 0);
+
+        // -> π[lit: 0, lit: 0]
+        let group_proj = graph.add_node(MirNode::new(
+            "q_prj_hlpr".into(),
+            MirNodeInner::Project {
+                emit: vec![
+                    ProjectExpr::Expr {
+                        alias: "__count_val".into(),
+                        expr: Expr::Literal(0u32.into()),
+                    },
+                    ProjectExpr::Expr {
+                        alias: "__count_grp".into(),
+                        expr: Expr::Literal(0u32.into()),
+                    },
+                ],
+            },
+        ));
+        graph[group_proj].add_owner(query_name.clone());
+        graph.add_edge(t2_alias_table, group_proj, 0);
+        // -> [0, 0] for each row
+
+        // -> |0| γ[1]
+        let exists_count = graph.add_node(MirNode::new(
+            "__exists_count".into(),
+            MirNodeInner::Aggregation {
+                on: Column::named("__count_val"),
+                group_by: vec![Column::named("__count_grp")],
+                output_column: Column::named("__exists_count"),
+                kind: Aggregation::Count,
+            },
+        ));
+        graph[exists_count].add_owner(query_name.clone());
+        graph.add_edge(group_proj, exists_count, 0);
+        // -> [0, <count>] for each row
+
+        // -> σ[c1 > 0]
+        let gt_0_filter = graph.add_node(MirNode::new(
+            "count_gt_0".into(),
+            MirNodeInner::Filter {
+                conditions: Expr::BinaryOp {
+                    lhs: Box::new(Expr::Column("__exists_count".into())),
+                    op: BinaryOperator::Greater,
+                    rhs: Box::new(Expr::Literal(Literal::Integer(0))),
+                },
+            },
+        ));
+        graph[gt_0_filter].add_owner(query_name.clone());
+        graph.add_edge(exists_count, gt_0_filter, 0);
+
+        // -> π[0: mark, ..]
+        let mark_col = SqlIdentifier::from("__mark");
+        let right_mark_emit = graph
+            .columns(gt_0_filter)
+            .into_iter()
+            .map(ProjectExpr::Column)
+            .chain(iter::once(ProjectExpr::Expr {
+                expr: Expr::Literal(0.into()),
+                alias: mark_col.clone(),
+            }))
+            .collect();
+        let right_mark = graph.add_node(MirNode::new(
+            "antijoin_mark".into(),
+            MirNodeInner::Project {
+                emit: right_mark_emit,
+            },
+        ));
+        graph[right_mark].add_owner(query_name.clone());
+        graph.add_edge(gt_0_filter, right_mark, 0);
+
+        let t1 = graph.add_node(MirNode::new(
+            "t1".into(),
+            MirNodeInner::Base {
+                column_specs: vec![ColumnSpecification {
+                    column: nom_sql::Column::from("t1.a"),
+                    sql_type: SqlType::Int(None),
+                    constraints: vec![],
+                    comment: None,
+                }],
+                primary_key: Some([Column::from("a")].into()),
+                unique_keys: Default::default(),
+            },
+        ));
+        graph[t1].add_owner(query_name.clone());
+        // t1 -> ...
+
+        // -> π[..., lit: 0]
+        let left_literal_join_key_proj = graph.add_node(MirNode::new(
+            "t1_join_key".into(),
+            MirNodeInner::Project {
+                emit: vec![
+                    ProjectExpr::Column(Column::new(Some("t1"), "a")),
+                    ProjectExpr::Expr {
+                        alias: "__exists_join_key".into(),
+                        expr: Expr::Literal(0u32.into()),
+                    },
+                ],
+            },
+        ));
+        graph[left_literal_join_key_proj].add_owner(query_name.clone());
+        graph.add_edge(t1, left_literal_join_key_proj, 0);
+
+        // -> ⟕D on: l.__exists_join_key ≡ r.__count_grp
+        let exists_join = graph.add_node(MirNode::new(
+            "exists_join".into(),
+            MirNodeInner::DependentLeftJoin {
+                on: vec![(
+                    Column::named("__exists_join_key"),
+                    Column::named("__count_grp"),
+                )],
+                project: vec![
+                    Column::new(Some("t1"), "a"),
+                    Column::named("__exists_join_key"),
+                    Column::named("__count_grp"),
+                    Column::named("__exists_count"),
+                ],
+            },
+        ));
+        graph[exists_join].add_owner(query_name.clone());
+        graph.add_edge(left_literal_join_key_proj, exists_join, 0);
+        graph.add_edge(right_mark, exists_join, 1);
+
+        let antijoin_filter = graph.add_node(MirNode::new(
+            "antijoin_filter".into(),
+            MirNodeInner::Filter {
+                conditions: Expr::BinaryOp {
+                    lhs: Box::new(Expr::Column(mark_col.into())),
+                    op: BinaryOperator::Is,
+                    rhs: Box::new(Expr::Literal(Literal::Null)),
+                },
+            },
+        ));
+        graph[antijoin_filter].add_owner(query_name.clone());
+        graph.add_edge(exists_join, antijoin_filter, 0);
+
+        let leaf = graph.add_node(MirNode::new(
+            "q".into(),
+            MirNodeInner::leaf(vec![], IndexType::HashMap),
+        ));
+        graph[leaf].add_owner(query_name.clone());
+        graph.add_edge(antijoin_filter, leaf, 0);
+
+        let mut query = MirQuery::new(query_name, leaf, &mut graph);
+
+        eliminate_dependent_joins(&mut query).unwrap();
+
+        eprintln!("{}", query.to_graphviz());
+
+        assert!(
+            matches!(
+                &query.graph[exists_join].inner,
+                MirNodeInner::LeftJoin { .. }
+            ),
+            "should have rewritten dependent to non-dependent join (got: {})",
+            graph[exists_join].name().display_unquoted()
+        );
+
+        let MirNodeInner::LeftJoin { on, .. } = &query.graph[exists_join].inner else {
+            panic!(
+                "should have rewritten dependent to non-dependent join (got: {})",
+                graph[exists_join].name().display_unquoted()
+            );
+        };
+
+        assert!(
+            on.iter().any(|(lc, rc)| {
+                *lc == Column::new(Some("t1"), "a") && *rc == Column::new(Some("rhs"), "a")
+            }),
+            "on = {on:?}"
+        );
+
+        pull_all_required_columns(&mut query).unwrap()
     }
 
     #[test]
