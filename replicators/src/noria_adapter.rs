@@ -780,6 +780,16 @@ impl NoriaAdapter {
             debug!(?replicator_opts, "Connecting to Vitess for snapshotting");
             let pool = mysql::Pool::new(replicator_opts);
 
+            let mut conn = pool.get_conn().await?;
+            let db_version = conn
+                .query_first("SELECT @@version")
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| "unknown".to_owned());
+            debug!(?db_version, "Retrieved Vitess version");
+            drop(conn);
+
             let replicator = VitessReplicator {
                 pool,
                 table_filter: table_filter.clone(),
