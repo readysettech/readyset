@@ -40,6 +40,7 @@ readyset-errors = { path = "../readyset-errors" }
 readyset-util = { path = "../readyset-util" }
 readyset-tracing = { path = "../readyset-tracing" }
 mysql-time = { path = "../mysql-time" }
+mysql-srv = { path = "../mysql-srv" }
 readyset-data = { path = "../readyset-data" }
 database-utils = { path = "../database-utils" }
 test-utils = { path = "../test-utils" }

@@ -131,12 +131,13 @@ fn tx_opts() -> TxOpts {
 
 impl MySqlReplicator {
     /// Load all the `CREATE TABLE` statements for the tables in the MySQL database. Returns the the
-    /// transaction that holds the DDL locks for the tables.
+    /// transaction that holds the DDL locks for the tables and the Vector of tables that requires
+    /// snapshot.
     ///
-    /// If `install` is set to `true`, will also install the tables in ReadySet one-by-one, skipping
-    /// over any tables that fail to install
+    /// # Arguments
     ///
-    /// Returns a list of tables that should be dumped to readyset
+    /// * `noria` - The ReadySet handle
+    /// * `db_schemas` - The database schemas
     async fn load_recipe_with_meta_lock(
         &mut self,
         noria: &mut readyset_client::ReadySetHandle,
@@ -461,14 +462,22 @@ impl MySqlReplicator {
     ///   the schema
     /// * `extend_recipe`: Replicate and install the recipe (`CREATE TABLE` ...; `CREATE VIEW` ...;)
     ///   in addition to the rows
+    /// If `full_snapshot` is set to `true`, *all* tables will be snapshotted, even those that
+    /// already have replication offsets in ReadySet.
     pub(crate) async fn snapshot_to_noria(
         mut self,
         noria: &mut readyset_client::ReadySetHandle,
         db_schemas: &mut DatabaseSchemas,
         snapshot_report_interval_secs: u16,
+        full_snapshot: bool,
     ) -> ReadySetResult<()> {
         let result = self
-            .replicate_to_noria_with_table_locks(noria, db_schemas, snapshot_report_interval_secs)
+            .replicate_to_noria_with_table_locks(
+                noria,
+                db_schemas,
+                snapshot_report_interval_secs,
+                full_snapshot,
+            )
             .await;
 
         // Wait for all connections to finish, not strictly necessary
@@ -486,6 +495,7 @@ impl MySqlReplicator {
         noria: &mut readyset_client::ReadySetHandle,
         db_schemas: &mut DatabaseSchemas,
         snapshot_report_interval_secs: u16,
+        full_snapshot: bool,
     ) -> ReadySetResult<()> {
         // NOTE: There are two ways to prevent DDL changes in MySQL:
         // `FLUSH TABLES WITH READ LOCK` or `LOCK INSTANCE FOR BACKUP`. Both are not
@@ -511,6 +521,10 @@ impl MySqlReplicator {
                 }
             }
         };
+
+        if full_snapshot {
+            self.drop_all_tables(noria).await?;
+        }
 
         let (_meta_lock, table_list) = self
             .load_recipe_with_meta_lock(noria, db_schemas)
@@ -663,6 +677,31 @@ impl MySqlReplicator {
             compaction_result.unwrap()?;
         }
 
+        Ok(())
+    }
+
+    /// This function drops all known tables from Noria. This is used when we require a full
+    /// re-snapshot of the database.
+    ///
+    /// # Arguments
+    /// * `noria`: The target ReadySet deployment
+    async fn drop_all_tables(
+        &mut self,
+        noria: &mut readyset_client::ReadySetHandle,
+    ) -> ReadySetResult<()> {
+        let mut changes = Vec::new();
+        for (table, _) in noria.tables().await? {
+            changes.push(Change::Drop {
+                name: table.clone(),
+                if_exists: true,
+            });
+        }
+        noria
+            .extend_recipe_no_leader_ready(ChangeList::from_changes(
+                changes,
+                Dialect::DEFAULT_MYSQL,
+            ))
+            .await?;
         Ok(())
     }
 }

@@ -170,6 +170,7 @@ impl NoriaAdapter {
         // Resnapshot when restarting the server to apply changes that may have been made to the
         // replication-tables config parameter.
         let mut resnapshot = server_startup;
+        let mut full_snapshot = false;
         let url: DatabaseURL = config
             .upstream_db_url
             .take()
@@ -193,6 +194,7 @@ impl NoriaAdapter {
                     resnapshot,
                     &telemetry_sender,
                     enable_statement_logging,
+                    full_snapshot,
                 )
                 .await
             }
@@ -243,7 +245,15 @@ impl NoriaAdapter {
                 ReadySetError::ResnapshotNeeded => {
                     tokio::time::sleep(WAIT_BEFORE_RESNAPSHOT).await;
                     resnapshot = true;
+                    full_snapshot = false;
                 }
+                ReadySetError::FullResnapshotNeeded => {
+                    tokio::time::sleep(WAIT_BEFORE_RESNAPSHOT).await;
+                    resnapshot = true;
+                    full_snapshot = true;
+                    warn!(error=%err, "Restarting adapter after error encountered. Full resnapshot will be performed");
+                }
+
                 err => {
                     warn!(error=%err, "Restarting adapter after error encountered");
                     return Err(err);
@@ -263,6 +273,7 @@ impl NoriaAdapter {
     /// * Each table is individually replicated into ReadySet
     /// * READ LOCK is released
     /// * Adapter keeps reading binlog from the next position keeping ReadySet up to date
+    #[allow(clippy::too_many_arguments)]
     async fn start_inner_mysql(
         mut mysql_options: mysql::Opts,
         mut noria: ReadySetHandle,
@@ -271,6 +282,7 @@ impl NoriaAdapter {
         resnapshot: bool,
         telemetry_sender: &TelemetrySender,
         enable_statement_logging: bool,
+        full_snapshot: bool,
     ) -> ReadySetResult<!> {
         use replication_offset::mysql::MySqlPosition;
 
@@ -341,6 +353,7 @@ impl NoriaAdapter {
                         &mut noria,
                         &mut db_schemas,
                         config.snapshot_report_interval_secs,
+                        full_snapshot,
                     )
                     .instrument(span.clone())
                     .await;
@@ -398,9 +411,6 @@ impl NoriaAdapter {
             (Some(pos), _) => pos.clone().try_into()?,
         };
 
-        // TODO: it is possible that the binlog position from noria is no longer
-        // present on the primary, in which case the connection will fail, and we would
-        // need to perform a new snapshot
         let connector = Box::new(
             MySqlBinlogConnector::connect(
                 mysql_options.clone(),
