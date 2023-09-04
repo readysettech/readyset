@@ -191,9 +191,28 @@ impl VitessConnector {
                     )?));
                 }
 
-                // TODO: Implement Update and Delete
-                readyset_vitess_data::RowOperation::Update => todo!(),
-                readyset_vitess_data::RowOperation::Delete => todo!(),
+                readyset_vitess_data::RowOperation::Delete => {
+                    table_ops.push(TableOperation::DeleteRow {
+                        row: self.row_change_to_noria_row(
+                            &table,
+                            &row_change.before.as_ref().unwrap(),
+                        )?,
+                    });
+                }
+
+                readyset_vitess_data::RowOperation::Update => {
+                    table_ops.push(TableOperation::DeleteRow {
+                        row: self.row_change_to_noria_row(
+                            &table,
+                            &row_change.before.as_ref().unwrap(),
+                        )?,
+                    });
+
+                    table_ops.push(TableOperation::Insert(self.row_change_to_noria_row(
+                        &table,
+                        &row_change.after.as_ref().unwrap(),
+                    )?));
+                }
             }
         }
 
