@@ -68,3 +68,10 @@ from t1
 3
 0
 1
+
+# Correlated
+
+query I nosort
+select x from t1 where y in (select y from t2 where t2.x = t1.x)
+----
+1
