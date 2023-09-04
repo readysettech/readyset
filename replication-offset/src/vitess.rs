@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::fmt::Display;
 
 use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
@@ -26,6 +27,14 @@ impl VStreamPosition {
                 gtid: GtidSet::Current,
             }],
         }
+    }
+
+    /// This method compares `self` and `other`, returning an [`Ordering`] if the two items are
+    /// comparable and an error otherwise.
+    pub fn try_partial_cmp(&self, other: &Self) -> ReadySetResult<Ordering> {
+        self.partial_cmp(other).ok_or_else(|| {
+            internal_err!("Failed to compare vitess positions: {} and {}", self, other)
+        })
     }
 }
 

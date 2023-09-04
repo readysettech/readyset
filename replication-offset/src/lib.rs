@@ -130,8 +130,13 @@ impl ReplicationOffset {
                 offset.try_partial_cmp(other_offset)
             }
             (Self::Postgres(offset), Self::Postgres(other_offset)) => Ok(offset.cmp(other_offset)),
+            (Self::Vitess(offset), Self::Vitess(other_offset)) => {
+                offset.try_partial_cmp(other_offset)
+            }
             _ => Err(internal_err!(
-                "Cannot compare replication offsets from different database backends"
+                "Cannot compare replication offsets from different database backends: {} and {}",
+                self,
+                other
             )),
         }
     }
