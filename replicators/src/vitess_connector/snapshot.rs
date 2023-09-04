@@ -186,6 +186,7 @@ impl VitessReplicator {
 
         // Wait for all connections to finish, not strictly necessary
         self.pool.disconnect().await?;
+        debug!("Vitess snapshot connection closed");
 
         Ok(())
     }
