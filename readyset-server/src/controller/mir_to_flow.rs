@@ -194,7 +194,7 @@ pub(super) fn mir_node_to_flow_parts(
                         mig,
                     )?)
                 }
-                MirNodeInner::DependentJoin { .. } => {
+                MirNodeInner::DependentJoin { .. } | MirNodeInner::DependentLeftJoin { .. } => {
                     // See the docstring for MirNodeInner::DependentJoin
                     internal!("Encountered dependent join when lowering to dataflow")
                 }

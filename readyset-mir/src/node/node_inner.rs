@@ -187,6 +187,23 @@ pub enum MirNodeInner {
         /// Columns (from both parents) to project in the output.
         project: Vec<Column>,
     },
+    /// Left join where nodes in the right-hand side depend on columns in the left-hand side
+    /// (referencing tables in `dependent_tables`). These are created during compilation for
+    /// correlated subqueries, and must be removed entirely by rewrite passes before lowering
+    /// to dataflow (any dependent joins occurring during dataflow lowering will cause the
+    /// compilation to error).
+    ///
+    /// See [The Complete Story of Joins (in HyPer), §3.1 Dependent Join][hyper-joins] for more
+    /// information.
+    ///
+    /// [hyper-joins]: http://btw2017.informatik.uni-stuttgart.de/slidesandpapers/F1-10-37/paper_web.pdf
+    DependentLeftJoin {
+        /// Columns to use as the join keys. Each tuple corresponds to a column in the left parent
+        /// and column in the right parent.
+        on: Vec<(Column, Column)>,
+        /// Columns (from both parents) to project in the output.
+        project: Vec<Column>,
+    },
     /// Represents view key placeholders in a query that have not yet been added to the [`Leaf`][]
     /// node of the query.
     ///
@@ -502,6 +519,19 @@ impl MirNodeInner {
             } => {
                 format!(
                     "⧑ | {} on: {}",
+                    project.iter().map(|c| &c.name).join(", "),
+                    on.iter()
+                        .map(|(l, r)| format!("{}:{}", l.name, r.name))
+                        .join(", ")
+                )
+            }
+            MirNodeInner::DependentLeftJoin {
+                ref on,
+                ref project,
+                ..
+            } => {
+                format!(
+                    "⟕D | {} on: {}",
                     project.iter().map(|c| &c.name).join(", "),
                     on.iter()
                         .map(|(l, r)| format!("{}:{}", l.name, r.name))
