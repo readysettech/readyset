@@ -254,7 +254,8 @@ impl MirGraph {
                 .collect(),
             MirNodeInner::Join { project, .. }
             | MirNodeInner::LeftJoin { project, .. }
-            | MirNodeInner::DependentJoin { project, .. } => project.clone(),
+            | MirNodeInner::DependentJoin { project, .. }
+            | MirNodeInner::DependentLeftJoin { project, .. } => project.clone(),
             MirNodeInner::JoinAggregates => {
                 let cols = self
                     // see note [edge-ordering]

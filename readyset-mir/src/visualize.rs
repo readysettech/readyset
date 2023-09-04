@@ -298,6 +298,13 @@ impl GraphViz for MirNodeInner {
                     on.iter().map(|(l, r)| format!("{}:{}", l, r)).join(", ")
                 )
             }
+            MirNodeInner::DependentLeftJoin { ref on, .. } => {
+                write!(
+                    f,
+                    "⟕D | on: {}",
+                    on.iter().map(|(l, r)| format!("{}:{}", l, r)).join(", ")
+                )
+            }
             MirNodeInner::Project { ref emit } => {
                 write!(f, "π: {}", emit.iter().join(", "))
             }

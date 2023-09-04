@@ -146,6 +146,7 @@ pub(crate) fn convert_filters_to_join_keys(query: &mut MirQuery<'_>) -> ReadySet
                 | MirNodeInner::Identity
                 | MirNodeInner::JoinAggregates
                 | MirNodeInner::DependentJoin { .. }
+                | MirNodeInner::DependentLeftJoin { .. }
                 | MirNodeInner::ViewKey { .. }
                 | MirNodeInner::Project { .. }
                 | MirNodeInner::Leaf { .. } => {}

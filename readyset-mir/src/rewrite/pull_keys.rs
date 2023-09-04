@@ -65,6 +65,7 @@ fn push_view_key(query: &mut MirQuery<'_>, node_idx: NodeIndex) -> ReadySetResul
         | MirNodeInner::AliasTable { .. }
         | MirNodeInner::Join { .. }
         | MirNodeInner::DependentJoin { .. }
+        | MirNodeInner::DependentLeftJoin { .. }
         | MirNodeInner::Filter { .. }
         | MirNodeInner::Identity => {
             trace!(
