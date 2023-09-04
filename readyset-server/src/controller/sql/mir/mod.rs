@@ -19,7 +19,7 @@ use nom_sql::analysis::ReferredColumns;
 use nom_sql::{
     BinaryOperator, ColumnSpecification, CompoundSelectOperator, CreateTableBody, Expr,
     FieldDefinitionExpr, FieldReference, FunctionExpr, InValue, LimitClause, Literal, OrderClause,
-    OrderType, Relation, SelectStatement, SqlIdentifier, TableKey,
+    OrderType, Relation, SelectStatement, SqlIdentifier, TableKey, UnaryOperator,
 };
 use petgraph::visit::Reversed;
 use petgraph::Direction;
@@ -1393,7 +1393,19 @@ impl SqlToMirConverter {
                 },
             ),
             Expr::Between { .. } => internal!("BETWEEN should have been removed earlier"),
-            Expr::Exists(subquery) => {
+            Expr::Exists(subquery)
+            | Expr::UnaryOp {
+                op: UnaryOperator::Not,
+                rhs: box Expr::Exists(subquery),
+            } => {
+                let negated = matches!(
+                    ce,
+                    Expr::UnaryOp {
+                        op: UnaryOperator::Not,
+                        ..
+                    }
+                );
+
                 let query_graph = to_query_graph((**subquery).clone())?;
                 let subquery_leaf = self.named_query_to_mir(
                     query_name,
@@ -1460,22 +1472,38 @@ impl SqlToMirConverter {
                         .collect(),
                 );
 
-                // -> ⋈ on: l.__exists_join_key ≡ r.__count_grp
-                self.make_join_node(
-                    query_name,
-                    format!("{}_join", name.display_unquoted()).into(),
-                    &[JoinPredicate {
-                        left: "__exists_join_key".into(),
-                        right: "__count_grp".into(),
-                    }],
-                    left_literal_join_key_proj,
-                    gt_0_filter,
+                let join_preds = [JoinPredicate {
+                    left: "__exists_join_key".into(),
+                    right: "__count_grp".into(),
+                }];
+
+                if negated {
                     if is_correlated(subquery) {
-                        JoinKind::Dependent
-                    } else {
-                        JoinKind::Inner
-                    },
-                )?
+                        unsupported!("Correlated NOT EXISTS not supported");
+                    }
+
+                    self.make_antijoin(
+                        query_name,
+                        format!("{}_antijoin", name.display_unquoted()).into(),
+                        &join_preds,
+                        left_literal_join_key_proj,
+                        gt_0_filter,
+                    )?
+                } else {
+                    // -> ⋈ on: l.__exists_join_key ≡ r.__count_grp
+                    self.make_join_node(
+                        query_name,
+                        format!("{}_join", name.display_unquoted()).into(),
+                        &join_preds,
+                        left_literal_join_key_proj,
+                        gt_0_filter,
+                        if is_correlated(subquery) {
+                            JoinKind::Dependent
+                        } else {
+                            JoinKind::Inner
+                        },
+                    )?
+                }
             }
             Expr::Call(_) => {
                 internal!("Function calls should have been handled by projection earlier")
