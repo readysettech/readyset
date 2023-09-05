@@ -177,7 +177,7 @@ pub enum ReadySetError {
         source: Box<ReadySetError>,
     },
 
-    #[error("MIR node '{index}' couldn't be made: {source}")]
+    #[error("MIR node '{index}' couldn't be lowered to dataflow: {source}")]
     MirNodeToDataflowFailed {
         /// The index (within the MirGraph) of the MIR node that couldn't
         /// be made.
