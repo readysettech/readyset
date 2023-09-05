@@ -1138,6 +1138,7 @@ impl SqlToMirConverter {
             }
         };
 
+        let is_correlated = is_correlated(&subquery);
         let query_graph = to_query_graph(subquery)?;
         let subquery_leaf = self.named_query_to_mir(
             query_name,
@@ -1185,7 +1186,11 @@ impl SqlToMirConverter {
             }],
             parent,
             right_mark,
-            JoinKind::Left,
+            if is_correlated {
+                JoinKind::DependentLeft
+            } else {
+                JoinKind::Left
+            },
         )?;
 
         Ok(self.make_project_node(
