@@ -124,7 +124,11 @@ impl KeyedState {
     }
 
     /// Insert the given `row` into this `KeyedState`, using the column indices in `key_cols` to
-    /// derive the key, and return whether or not the row was actually inserted
+    /// derive the key, and return either:
+    ///
+    ///  - `None` if the row was not inserted, or;
+    ///  - `Some(n)' if the raw was inserted, where `n` is the number of copies present after the
+    ///  insert is complete.
     ///
     /// If `partial` is `true`, and the key is not present, the row will not be inserted and
     /// `insert` will return `false`.
@@ -133,7 +137,7 @@ impl KeyedState {
     ///
     /// * The length of `key_cols` must be equal to the length of the key of this KeyedState
     /// * All column indices in `key_cols` must be in-bounds for `row`
-    pub(super) fn insert(&mut self, key_cols: &[usize], row: Row, partial: bool) -> bool {
+    pub(super) fn insert(&mut self, key_cols: &[usize], row: Row, partial: bool) -> Option<usize> {
         macro_rules! single_insert {
             ($map: ident, $key_cols: expr, $row: expr, $partial: expr) => {{
                 // treat this specially to avoid the extra Vec
@@ -142,14 +146,17 @@ impl KeyedState {
                 // in the common case of an entry already existing for the given key...
                 let key = &row[key_cols[0]];
                 if let Some(ref mut rs) = $map.get_mut(key) {
-                    rs.insert(row);
-                    return true;
+                    // [`HashBag::insert`] returns the number of copies prior to the insert, but we
+                    // want the number of copies after the insert, hence the `+ 1`:
+                    Some(rs.insert(row) + 1)
                 } else if $partial {
                     // trying to insert a record into partial materialization hole!
-                    return false;
+                    None
+                } else {
+                    // inserting the first copy of a row into fully materialized state:
+                    $map.insert(key.clone(), iter::once(row).collect());
+                    Some(1)
                 }
-
-                $map.insert(key.clone(), iter::once(row).collect());
             }};
         }
 
@@ -159,11 +166,16 @@ impl KeyedState {
                 use $entry as Entry;
                 match $map.entry(key) {
                     Entry::Occupied(rs) => {
-                        rs.into_mut().insert($row);
+                        // [`HashBag::insert`] returns the number of copies prior to the insert,
+                        // but we want the number of copies after the insert, hence the `+ 1`:
+                        Some(rs.into_mut().insert($row) + 1)
                     }
-                    Entry::Vacant(..) if $partial => return false,
+                    // trying to insert a record into partial materialization hole!
+                    Entry::Vacant(..) if $partial => None,
                     rs @ Entry::Vacant(..) => {
+                        // inserting the first copy of a row into fully materialized state:
                         rs.or_default().insert($row);
+                        Some(1)
                     }
                 }
             }};
@@ -172,7 +184,7 @@ impl KeyedState {
         match self {
             KeyedState::AllRows(rows) => {
                 debug_assert!(key_cols.is_empty());
-                rows.insert(row);
+                Some(rows.insert(row) + 1)
             }
             KeyedState::SingleBTree(map) => single_insert!(map, key_cols, row, partial),
             KeyedState::DoubleBTree(map) => {
@@ -215,8 +227,6 @@ impl KeyedState {
                 multi_insert!(map, key_cols, row, partial, indexmap::map::Entry)
             }
         }
-
-        true
     }
 
     /// Remove one instance of the given `row` from this `KeyedState`, using the column indices in

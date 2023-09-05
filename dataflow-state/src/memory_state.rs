@@ -475,12 +475,12 @@ impl MemoryState {
             };
             self.mem_size += r.deep_size_of();
             // SAFETY: row remains inside the same state
-            self.state[i].insert_row(unsafe { r.clone() })
+            self.state[i].insert_row(unsafe { r.clone() }).is_some()
         } else {
             let mut hit_any = false;
             for i in 0..self.state.len() {
                 // SAFETY: row remains inside the same state
-                hit_any |= self.state[i].insert_row(unsafe { r.clone() });
+                hit_any |= self.state[i].insert_row(unsafe { r.clone() }).is_some();
             }
             if hit_any {
                 self.mem_size += r.deep_size_of();
