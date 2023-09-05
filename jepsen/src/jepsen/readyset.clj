@@ -126,6 +126,7 @@
                (c/sudo "postgres" (c/exec "psql"
                                           :-c (str "drop database " rs/pgdatabase)))
                (catch #(re-find #"psql: command not found" (:err %)) _)
+               (catch #(re-find #"unknown user postgres" (:err %)) _)
                (catch #(re-find #"database \".*?\" does not exist" (:err %)) _)
                (catch
                    #(re-find #"database \".*?\" is used by an active logical"
