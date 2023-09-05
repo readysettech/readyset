@@ -111,11 +111,14 @@ struct Options {
     authority_address: String,
 
     /// Whether this server should only run reader domains
-    #[clap(long, conflicts_with = "no_readers")]
+    #[clap(long, conflicts_with = "no_readers", env = "READER_ONLY")]
     reader_only: bool,
 
     /// If set, this server will never run domains containing reader nodes
-    #[clap(long, conflicts_with = "reader_only")]
+    ///
+    /// Pass this flag to the server instance when running a ReadySet deployment in embedded
+    /// readers mode (eg for high availability)
+    #[clap(long, conflicts_with = "reader_only", env = "NO_READERS")]
     no_readers: bool,
 
     /// Prevent this instance from ever being elected as the leader

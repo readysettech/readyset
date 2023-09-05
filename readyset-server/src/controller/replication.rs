@@ -7,8 +7,11 @@ use tracing::warn;
 #[allow(missing_docs)] // Allows us to exclude docs (from doc comments) from --help text
 #[derive(Debug, Parser, Clone)]
 pub struct ReplicationOptions {
-    /// Number of times to replicate domains that contain readers
-    #[clap(long, hide = true, conflicts_with = "non_base_replicas")]
+    /// Number of times to replicate domains that contain readers.
+    ///
+    /// This flag should be set to the number of adapter instances in the ReadySet deployment when
+    /// running in embbedded readers mode (eg for high availability)
+    #[clap(long, conflicts_with = "non_base_replicas", env = "READER_REPLICAS")]
     reader_replicas: Option<usize>,
 
     /// Number of times to replicate domains that don't contain base nodes
