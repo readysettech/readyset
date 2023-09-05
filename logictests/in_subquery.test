@@ -17,7 +17,6 @@ values
 (1, 1),
 (1, 1);
 
-
 query I nosort
 select count(*) from t1 where x in (select x from t2);
 ----
@@ -74,4 +73,24 @@ from t1
 query I nosort
 select x from t1 where y in (select y from t2 where t2.x = t1.x)
 ----
+1
+
+query I rowsort
+select x from t1 where y not in (select y from t2 where t2.x = t1.x)
+----
+2
+3
+
+query I nosort
+select y in (select y from t2 where t2.x = t1.x) from t1 order by x asc
+----
+1
+0
+0
+
+query I nosort
+select y not in (select y from t2 where t2.x = t1.x) from t1 order by x asc
+----
+0
+1
 1
