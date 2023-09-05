@@ -520,13 +520,13 @@ async fn do_eviction(
     let span = info_span!("evicting");
     let start = std::time::Instant::now();
 
-    let used: usize = memory_tracker.allocated_bytes()?;
+    let mut used: usize = memory_tracker.allocated_bytes()?;
     gauge!(recorded::EVICTION_WORKER_HEAP_ALLOCATED_BYTES, used as f64);
     // Are we over the limit?
     match memory_limit {
         None => Ok(()),
         Some(limit) => {
-            if used >= limit {
+            while used >= limit {
                 // we are! time to evict.
                 // add current state sizes (could be out of date, as packet sent below is not
                 // necessarily received immediately)
@@ -553,7 +553,6 @@ async fn do_eviction(
                 let actual_over = used - limit;
                 let mut proportional_over =
                     ((total_reported as f64 / used as f64) * actual_over as f64).round() as usize;
-
                 // here's how we're going to proceed.
                 // we don't want to _empty_ any views if we can avoid it.
                 // and we also need to be aware that evicting something from one place may cause a
@@ -635,6 +634,8 @@ async fn do_eviction(
                         domain_senders.remove(&target);
                     }
                 }
+                // Check again the allocated memory size
+                used = memory_tracker.allocated_bytes()?;
             }
             histogram!(
                 recorded::EVICTION_WORKER_EVICTION_TIME,
