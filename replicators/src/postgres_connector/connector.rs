@@ -74,7 +74,7 @@ pub(crate) struct ServerIdentity {
     /// streaming can start.
     pub(crate) xlogpos: Lsn,
     /// Database connected to or null.
-    pub(crate) dbname: Option<String>,
+    pub(crate) dbname: String,
 }
 
 /// The decoded response to `CREATE_REPLICATION_SLOT`
@@ -242,14 +242,13 @@ impl PostgresWalConnector {
     ///   write-ahead log where streaming can start.
     /// * dbname (text) - Database connected to or null.
     async fn identify_system(&mut self) -> ReadySetResult<ServerIdentity> {
-        let row = self.one_row_query("IDENTIFY_SYSTEM", 4).await?;
-        // We know we have 4 valid columns because `one_row_query` checks that, so can unwrap here
-        let id = row.get(0).unwrap().to_string();
-        let timeline: i8 = row.get(1).unwrap().parse().map_err(|_| {
+        let [id, timeline_str, xlogpos_str, dbname] =
+            self.one_row_query::<4>("IDENTIFY_SYSTEM").await?;
+
+        let timeline: i8 = timeline_str.parse().map_err(|_| {
             ReadySetError::ReplicationFailed("Unable to parse identify system".into())
         })?;
-        let xlogpos = row.get(2).unwrap().parse()?;
-        let dbname = row.get(3).map(Into::into);
+        let xlogpos = xlogpos_str.parse()?;
 
         Ok(ServerIdentity {
             id,
@@ -293,14 +292,12 @@ impl PostgresWalConnector {
             if temporary { "TEMPORARY" } else { "" }
         );
 
-        let row = self.one_row_query(&query, 4).await.map_err(|e| {
-            ReadySetError::ReplicationFailed(format!("Failed to create replication slot: {e}"))
-        })?;
+        let [slot_name, consistent_point_str, snapshot_name, output_plugin] =
+            self.one_row_query::<4>(&query).await.map_err(|e| {
+                ReadySetError::ReplicationFailed(format!("Failed to create replication slot: {e}"))
+            })?;
+        let consistent_point = consistent_point_str.parse()?;
 
-        let slot_name = row.get(0).unwrap().to_string(); // Can unwrap all because checked by `one_row_query`
-        let consistent_point = row.get(1).unwrap().parse()?;
-        let snapshot_name = row.get(2).map(Into::into).unwrap();
-        let output_plugin = row.get(3).map(Into::into).unwrap();
         debug!(
             slot_name,
             %consistent_point, snapshot_name, output_plugin, "Created replication slot"
@@ -440,11 +437,7 @@ impl PostgresWalConnector {
 
     /// Perform a simple query that expects a singe row in response, check that the response is
     /// indeed one row, and contains exactly `n_cols` columns, then return that row
-    async fn one_row_query(
-        &mut self,
-        query: &str,
-        n_cols: usize,
-    ) -> ReadySetResult<pgsql::SimpleQueryRow> {
+    async fn one_row_query<const N: usize>(&mut self, query: &str) -> ReadySetResult<[String; N]> {
         let mut rows = self.simple_query(query).await?;
 
         if rows.len() != 2 {
@@ -457,9 +450,9 @@ impl PostgresWalConnector {
 
         match (rows.remove(0), rows.remove(0)) {
             (SimpleQueryMessage::Row(row), SimpleQueryMessage::CommandComplete(_))
-                if row.len() == n_cols =>
+                if row.len() == N =>
             {
-                Ok(row)
+                Ok(std::array::from_fn(|i| row.get(i).unwrap().into()))
             }
             _ => Err(ReadySetError::ReplicationFailed(format!(
                 "Incorrect response to query {:?}",
