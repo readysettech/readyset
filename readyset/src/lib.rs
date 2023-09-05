@@ -265,7 +265,7 @@ pub struct Options {
         long,
         env = "QUERY_LOG",
         requires = "metrics",
-        default_value_if("promethues-metrics", "true", Some("true"))
+        default_value_if("prometheus_metrics", "true", Some("true"))
     )]
     query_log: bool,
 
