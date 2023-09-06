@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use database_utils::{DatabaseConnection, DatabaseStatement, QueryableConnection};
 use metrics::Unit;
 use rand::distributions::Uniform;
@@ -32,11 +32,31 @@ const REPORT_RESULTS_INTERVAL: Duration = Duration::from_secs(2);
 
 pub type Distributions = HashMap<String, Arc<(Vec<Vec<DfValue>>, Sampler)>>;
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]
+pub enum BenchmarkType {
+    /// Only execute statements against the upstream database (no cache nor readyset).
+    #[value(name = "upstream")]
+    Upstream,
+
+    /// Send all statements to a ReadySet instance, which is backed by an upstream database.
+    #[value(name = "readyset")]
+    #[default]
+    ReadySet,
+}
+
 #[derive(Parser, Clone, Default, Serialize, Deserialize)]
 pub struct WorkloadEmulator {
     /// Path to the workload yaml schema
     #[clap(long, short)]
     spec: PathBuf,
+
+    /// Install and generate from an arbitrary schema.
+    #[clap(flatten)]
+    data_generator: Option<DataGenerator>,
+
+    #[clap(long, value_enum)]
+    benchmark_type: BenchmarkType,
+
     /// Number of worker connections
     #[clap(long, short)]
     workers: u64,
@@ -66,6 +86,7 @@ pub struct QuerySet {
 pub(crate) struct WorkloadThreadParams {
     deployment: DeploymentParameters,
     query_set: Arc<QuerySet>,
+    benchmark_type: BenchmarkType,
 }
 
 pub enum Sampler {
@@ -108,18 +129,11 @@ impl WorkloadResultBatch {
 #[async_trait]
 impl BenchmarkControl for WorkloadEmulator {
     async fn setup(&self, deployment: &DeploymentParameters) -> anyhow::Result<()> {
-        let yaml = std::fs::read_to_string(&self.spec).unwrap();
-        let spec = WorkloadSpec::from_yaml(&yaml).unwrap();
-
-        let distributions = spec
-            .load_distributions(&mut deployment.connect_to_setup().await?)
-            .await?;
-
-        let queries = spec
-            .load_queries(&distributions, &mut deployment.connect_to_target().await?)
-            .await?;
-
-        *self.query_set.lock().unwrap() = Some(Arc::new(queries));
+        if let Some(ref data_generator) = self.data_generator {
+            // assume the target database exists, so create schema and insert data
+            data_generator.install(&deployment.setup_conn_str).await?;
+            data_generator.generate(&deployment.setup_conn_str).await?;
+        }
 
         Ok(())
     }
@@ -128,9 +142,33 @@ impl BenchmarkControl for WorkloadEmulator {
         &self,
         deployment: &DeploymentParameters,
     ) -> anyhow::Result<BenchmarkResults> {
+        let yaml = std::fs::read_to_string(&self.spec).unwrap();
+        let mut spec = WorkloadSpec::from_yaml(&yaml).unwrap();
+
+        // only migrate when running readyset benches. we still need the
+        // QuerySet we can get from the workload parsing, though.
+        if self.benchmark_type != BenchmarkType::ReadySet {
+            for mut query in &mut spec.queries {
+                query.migrate = false;
+            }
+        }
+
+        let distributions = spec
+            .load_distributions(&mut deployment.connect_to_setup().await?)
+            .await?;
+
+        let mut conn = match self.benchmark_type {
+            BenchmarkType::ReadySet => deployment.connect_to_target().await?,
+            _ => deployment.connect_to_setup().await?,
+        };
+
+        let queries = spec.load_queries(&distributions, &mut conn).await?;
+        *self.query_set.lock().unwrap() = Some(Arc::new(queries));
+
         let thread_data = WorkloadThreadParams {
             deployment: deployment.clone(),
             query_set: Arc::clone(self.query_set.lock().unwrap().deref().as_ref().unwrap()),
+            benchmark_type: self.benchmark_type,
         };
 
         benchmark_counter!(
@@ -155,6 +193,10 @@ impl BenchmarkControl for WorkloadEmulator {
         let mut labels: HashMap<String, String> = [
             ("spec".to_string(), self.spec.display().to_string()),
             ("workers".to_string(), self.workers.to_string()),
+            (
+                "bench_type".to_string(),
+                format!("{:?}", self.benchmark_type),
+            ),
         ]
         .into();
 
@@ -176,7 +218,7 @@ impl BenchmarkControl for WorkloadEmulator {
     }
 
     fn data_generator(&mut self) -> Option<&mut DataGenerator> {
-        None
+        self.data_generator.as_mut()
     }
 }
 
@@ -378,7 +420,10 @@ impl MultithreadBenchmark for WorkloadEmulator {
         params: Self::Parameters,
         sender: UnboundedSender<Self::BenchmarkResult>,
     ) -> anyhow::Result<()> {
-        let mut conn = params.deployment.connect_to_target().await?;
+        let mut conn = match params.benchmark_type {
+            BenchmarkType::ReadySet => params.deployment.connect_to_target().await?,
+            _ => params.deployment.connect_to_setup().await?,
+        };
         let query_set = &params.query_set;
 
         // Only some upstream databases support interrogating the number of cached statements
