@@ -26,6 +26,7 @@ use crate::utils::generate::DataGenerator;
 use crate::utils::multi_thread::{self, MultithreadBenchmark};
 use crate::utils::prometheus::ForwardPrometheusMetrics;
 use crate::utils::us_to_ms;
+use crate::{benchmark_counter, benchmark_histogram, benchmark_increment_counter};
 
 const REPORT_RESULTS_INTERVAL: Duration = Duration::from_secs(2);
 
@@ -131,6 +132,12 @@ impl BenchmarkControl for WorkloadEmulator {
             deployment: deployment.clone(),
             query_set: Arc::clone(self.query_set.lock().unwrap().deref().as_ref().unwrap()),
         };
+
+        benchmark_counter!(
+            "workload_emulator.total_query_count",
+            Count,
+            "Total number of queries executed in this benchmark run".into()
+        );
 
         multi_thread::run_multithread_benchmark::<Self>(
             self.workers,
@@ -317,6 +324,12 @@ impl MultithreadBenchmark for WorkloadEmulator {
                 per_query_hist[query_id as usize]
                     .record(latency_us as _)
                     .unwrap();
+                benchmark_histogram!(
+                    format!("workload_emulator.query_{}_duration", query_id),
+                    Microseconds,
+                    format!("Duration of query {}", query_id).into(),
+                    latency_us as f64
+                );
             }
         }
         benchmark_results
@@ -337,6 +350,7 @@ impl MultithreadBenchmark for WorkloadEmulator {
         }
 
         let qps = hist.len() as f64 / interval.as_secs() as f64;
+        benchmark_increment_counter!("workload_emulator.total_query_count", Count, qps as u64);
         info!(
             "qps: {:.0}\tp50: {:.1} ms\tp90: {:.1} ms\tp99: {:.1} ms\tp99.99: {:.1} ms",
             qps,
