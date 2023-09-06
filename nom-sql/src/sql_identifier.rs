@@ -405,10 +405,9 @@ impl Arbitrary for SqlIdentifier {
     type Strategy = proptest::strategy::BoxedStrategy<SqlIdentifier>;
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        use proptest::arbitrary::any;
         use proptest::prelude::*;
 
-        any::<String>().prop_map(Into::into).boxed()
+        "\\P{Cc}{1,100}".prop_map(Into::into).boxed()
     }
 }
 

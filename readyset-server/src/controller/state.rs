@@ -134,6 +134,8 @@ pub struct DfState {
     pub(super) read_addrs: HashMap<WorkerIdentifier, SocketAddr>,
     #[serde(skip)]
     pub(super) workers: HashMap<WorkerIdentifier, Worker>,
+
+    thing: u64,
 }
 
 impl DfState {
@@ -170,6 +172,7 @@ impl DfState {
             workers: Default::default(),
             domain_node_index_pairs: Default::default(),
             replication_strategy,
+            thing: 4,
         }
     }
 

@@ -27,8 +27,8 @@ use crate::order::{order_clause, OrderClause};
 use crate::table::{table_expr, table_expr_list};
 use crate::whitespace::{whitespace0, whitespace1};
 use crate::{
-    Dialect, Expr, FieldReference, FunctionExpr, Literal, NomSqlError, NomSqlResult, SqlIdentifier,
-    TableExpr,
+    Dialect, Expr, FieldReference, FunctionExpr, Literal, NomSqlError, NomSqlResult, Relation,
+    SqlIdentifier, TableExpr, TableExprInner,
 };
 
 #[derive(
@@ -223,7 +223,7 @@ impl LimitClause {
 }
 
 #[derive(
-    Clone, Debug, Default, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Arbitrary,
+    Clone, Debug, Default, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize
 )]
 pub struct SelectStatement {
     pub ctes: Vec<CommonTableExpr>,
@@ -236,6 +236,139 @@ pub struct SelectStatement {
     pub having: Option<Expr>,
     pub order: Option<OrderClause>,
     pub limit_clause: LimitClause,
+}
+
+impl Arbitrary for SelectStatement {
+    type Parameters = ();
+
+    type Strategy = BoxedStrategy<SelectStatement>;
+
+    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::*;
+
+        let table_expr =
+            (any::<Relation>(), any::<Option<SqlIdentifier>>()).prop_map(|(table, alias)| {
+                TableExpr {
+                    inner: TableExprInner::Table(table),
+                    alias,
+                }
+            });
+
+        let join_right_side = |table_expr: BoxedStrategy<TableExpr>| {
+            prop_oneof![
+                table_expr.clone().prop_map(JoinRightSide::Table),
+                vec(table_expr, 1..24).prop_map(JoinRightSide::Tables)
+            ]
+        };
+
+        let join = move |table_expr: BoxedStrategy<TableExpr>| {
+            vec(
+                (
+                    any::<JoinOperator>(),
+                    join_right_side(table_expr),
+                    any::<JoinConstraint>(),
+                )
+                    .prop_map(|(operator, right, constraint)| JoinClause {
+                        operator,
+                        right,
+                        constraint,
+                    }),
+                1..24,
+            )
+        };
+
+        (
+            any::<bool>(),
+            any_with::<Vec<FieldDefinitionExpr>>(((1..100).into(), ())),
+            vec(table_expr.clone(), 1..24),
+            join(table_expr.boxed()),
+            any::<Option<Expr>>(),
+            any::<Option<GroupByClause>>(),
+            any::<Option<Expr>>(),
+            any::<Option<OrderClause>>(),
+            any::<LimitClause>(),
+        )
+            .prop_map(
+                |(
+                    distinct,
+                    fields,
+                    tables,
+                    join,
+                    where_clause,
+                    group_by,
+                    having,
+                    order,
+                    limit_clause,
+                )| SelectStatement {
+                    ctes: vec![],
+                    distinct,
+                    fields,
+                    tables,
+                    join,
+                    where_clause,
+                    group_by,
+                    having,
+                    order,
+                    limit_clause,
+                },
+            )
+            .prop_recursive(4, 8, 4, move |element| {
+                let table_expr = (
+                    prop_oneof![
+                        any::<Relation>().prop_map(TableExprInner::Table),
+                        element
+                            .clone()
+                            .prop_map(Box::new)
+                            .prop_map(TableExprInner::Subquery)
+                    ],
+                    any::<Option<SqlIdentifier>>(),
+                )
+                    .prop_map(|(inner, alias)| TableExpr { inner, alias });
+
+                (
+                    vec(
+                        (any::<SqlIdentifier>(), element)
+                            .prop_map(|(name, statement)| CommonTableExpr { name, statement }),
+                        0..24,
+                    ),
+                    any::<bool>(),
+                    any_with::<Vec<FieldDefinitionExpr>>(((1..100).into(), ())),
+                    vec(table_expr.clone(), 1..24),
+                    join(table_expr.boxed()),
+                    any::<Option<Expr>>(),
+                    any::<Option<GroupByClause>>(),
+                    any::<Option<Expr>>(),
+                    any::<Option<OrderClause>>(),
+                    any::<LimitClause>(),
+                )
+                    .prop_map(
+                        |(
+                            ctes,
+                            distinct,
+                            fields,
+                            tables,
+                            join,
+                            where_clause,
+                            group_by,
+                            having,
+                            order,
+                            limit_clause,
+                        )| SelectStatement {
+                            ctes,
+                            distinct,
+                            fields,
+                            tables,
+                            join,
+                            where_clause,
+                            group_by,
+                            having,
+                            order,
+                            limit_clause,
+                        },
+                    )
+            })
+            .boxed()
+    }
 }
 
 impl SelectStatement {
@@ -684,14 +817,16 @@ pub fn nested_selection(
 
 #[cfg(test)]
 mod tests {
+    use test_strategy::proptest;
+
     use super::*;
     use crate::column::Column;
     use crate::common::FieldDefinitionExpr;
     use crate::expression::CaseWhenBranch;
     use crate::table::Relation;
     use crate::{
-        to_nom_result, BinaryOperator, Expr, FunctionExpr, InValue, ItemPlaceholder, SqlType,
-        TableExprInner,
+        parse_select_statement, to_nom_result, BinaryOperator, Expr, FunctionExpr, InValue,
+        ItemPlaceholder, SqlType, TableExprInner,
     };
 
     fn columns(cols: &[&str]) -> Vec<FieldDefinitionExpr> {
@@ -699,6 +834,9 @@ mod tests {
             .map(|c| FieldDefinitionExpr::from(Column::from(*c)))
             .collect()
     }
+
+    #[proptest]
+    fn arbitrary_select_statement_doesnt_stack_overflow(_stmt: SelectStatement) {}
 
     #[test]
     fn simple_select() {
@@ -1866,6 +2004,14 @@ mod tests {
         use crate::common::FieldDefinitionExpr;
         use crate::table::Relation;
         use crate::{BinaryOperator, Expr, FunctionExpr, InValue};
+
+        #[proptest]
+        fn format_parse_round_trip(stmt: SelectStatement) {
+            let formatted = stmt.display(Dialect::MySQL).to_string();
+            eprintln!("{formatted}");
+            let round_trip = parse_select_statement(Dialect::MySQL, formatted).unwrap();
+            assert_eq!(round_trip, stmt);
+        }
 
         #[test]
         fn alias_generic_function() {
