@@ -352,22 +352,22 @@ impl MultithreadBenchmark for WorkloadEmulator {
         let qps = hist.len() as f64 / interval.as_secs() as f64;
         benchmark_increment_counter!("workload_emulator.total_query_count", Count, qps as u64);
         info!(
-            "qps: {:.0}\tp50: {:.1} ms\tp90: {:.1} ms\tp99: {:.1} ms\tp99.99: {:.1} ms",
+            "overall -\tqps: {:.0}\tp50: {:.1} ms\tp90: {:.1} ms\tp99: {:.1} ms\tp99.9: {:.1} ms",
             qps,
             us_to_ms(hist.value_at_quantile(0.5)),
             us_to_ms(hist.value_at_quantile(0.9)),
             us_to_ms(hist.value_at_quantile(0.99)),
-            us_to_ms(hist.value_at_quantile(0.9999))
+            us_to_ms(hist.value_at_quantile(0.999))
         );
 
         for (i, hist) in per_query_hist.into_iter().enumerate() {
             let qps = hist.len() as f64 / interval.as_secs() as f64;
             info!(
-                "query {i} qps: {qps:.0}\tp50: {:.1} ms\tp90: {:.1} ms\tp99: {:.1} ms\tp99.99: {:.1} ms",
+                "  query {i} -\tqps: {qps:.0}\tp50: {:.1} ms\tp90: {:.1} ms\tp99: {:.1} ms\tp99.9: {:.1} ms",
                 us_to_ms(hist.value_at_quantile(0.5)),
                 us_to_ms(hist.value_at_quantile(0.9)),
                 us_to_ms(hist.value_at_quantile(0.99)),
-                us_to_ms(hist.value_at_quantile(0.9999))
+                us_to_ms(hist.value_at_quantile(0.999))
             );
         }
 
