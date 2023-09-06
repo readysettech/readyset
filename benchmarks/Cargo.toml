@@ -42,6 +42,7 @@ indicatif = "0.17"
 prometheus-parse = "0.2.2"
 walkdir = "2.3"
 tokio-postgres = { workspace = true }
+redis = { version = "0.23.3", features = ["tokio-comp", "aio"] }
 
 # local dependencies
 database-utils = { path = "../database-utils" }
