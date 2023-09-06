@@ -1745,7 +1745,7 @@ where
             ]),
         };
 
-        let data = queries
+        let mut data = queries
             .into_iter()
             .map(|DeniedQuery { id, query, status }| {
                 let s = match status.migration_state {
@@ -1766,6 +1766,17 @@ where
                 ]
             })
             .collect::<Vec<_>>();
+
+        data.sort_by(|a, b| {
+            let status_order = |s: &str| match s {
+                "yes" => 0,
+                "pending" => 1,
+                "unsupported" => 2,
+                _ => 3,
+            };
+            status_order(&a[2].to_string()).cmp(&status_order(&b[2].to_string()))
+        });
+
         Ok(noria_connector::QueryResult::from_owned(
             select_schema,
             vec![Results::new(data)],
