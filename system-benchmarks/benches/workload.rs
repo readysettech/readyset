@@ -595,7 +595,7 @@ fn start_adapter(upstream_url: &str) -> anyhow::Result<()> {
         &log_level,
         "--eviction-policy",
         "lru",
-        "--noria-metrics",
+        "--prometheus-metrics",
         &database_type_flag,
     ];
 

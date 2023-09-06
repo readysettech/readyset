@@ -107,7 +107,7 @@ impl ReadysetServerBuilder {
     pub fn new(binary: &Path) -> Self {
         Self {
             binary: binary.to_owned(),
-            args: vec!["--noria-metrics".into()],
+            args: vec!["--prometheus-metrics".into()],
             auto_restart: false,
         }
     }
