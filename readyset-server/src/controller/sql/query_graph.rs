@@ -731,7 +731,7 @@ fn extract_having_aggregates(
 
         fn visit_expr(&mut self, expr: &'ast mut Expr) -> Result<(), Self::Error> {
             if matches!(expr, Expr::Call(fun) if is_aggregate(fun)) {
-                // FIXME(ENG-2499): Use correct dialect.
+                // FIXME(REA-2168): Use correct dialect.
                 let name: SqlIdentifier = expr.display(nom_sql::Dialect::MySQL).to_string().into();
                 let col_expr = Expr::Column(nom_sql::Column {
                     name: name.clone(),
@@ -1169,7 +1169,7 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
             FieldDefinitionExpr::Expr { expr, alias } => {
                 let name: SqlIdentifier = alias
                     .clone()
-                    // FIXME(ENG-2499): Use correct dialect.
+                    // FIXME(REA-2168): Use correct dialect.
                     .unwrap_or_else(|| expr.display(nom_sql::Dialect::MySQL).to_string().into());
                 match expr {
                     Expr::Literal(l) => columns.push(OutputColumn::Literal(LiteralColumn {
@@ -1266,14 +1266,14 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                     // the pull_columns pass will make sure the topk/paginate node gets the
                     // aggregate result column
                     aggregates.entry(func.clone()).or_insert_with(|| {
-                        // FIXME(ENG-2499): Use correct dialect.
+                        // FIXME(REA-2168): Use correct dialect.
                         func.display(nom_sql::Dialect::MySQL).to_string().into()
                     });
                 }
                 FieldReference::Expr(expr) => {
                     // This is an expression that we need to add to the list of projected columns
                     columns.push(OutputColumn::Expr(ExprColumn {
-                        // FIXME(ENG-2499): Use correct dialect.
+                        // FIXME(REA-2168): Use correct dialect.
                         name: expr.display(nom_sql::Dialect::MySQL).to_string().into(),
                         table: None,
                         expression: expr.clone(),
@@ -1297,7 +1297,7 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                         match expr {
                             FieldReference::Expr(Expr::Column(col)) => col,
                             FieldReference::Expr(expr) => Column {
-                                // FIXME(ENG-2499): Use correct dialect.
+                                // FIXME(REA-2168): Use correct dialect.
                                 name: expr.display(nom_sql::Dialect::MySQL).to_string().into(),
                                 table: None,
                             },

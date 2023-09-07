@@ -135,7 +135,7 @@ impl MigrationHandler {
                     Err(e) if e.caused_by_unsupported() => {
                         debug!(
                             error = %e,
-                            // FIXME(ENG-2500): Use correct dialect.
+                            // FIXME(REA-2169): Use correct dialect.
                             query = %Sensitive(&query.query().statement.display(nom_sql::Dialect::MySQL)),
                             "Select query is unsupported in ReadySet"
                         );
@@ -148,7 +148,7 @@ impl MigrationHandler {
                     Err(e) => {
                         debug!(
                             error = %e,
-                            // FIXME(ENG-2500): Use correct dialect.
+                            // FIXME(REA-2169): Use correct dialect.
                             query = %Sensitive(&query.query().statement.display(nom_sql::Dialect::MySQL)),
                             "Select query may have transiently failed"
                         );
@@ -238,7 +238,7 @@ impl MigrationHandler {
             Err(e) if e.caused_by_unsupported() => {
                 debug!(
                     error = %e,
-                    // FIXME(ENG-2499 + ENG-2500): Use correct dialect.
+                    // FIXME(REA-2168 + REA-2169): Use correct dialect.
                     query = %Sensitive(&view_request.statement.display(nom_sql::Dialect::MySQL)),
                     "Select query is unsupported in ReadySet"
                 );
@@ -252,7 +252,7 @@ impl MigrationHandler {
             Err(e) => {
                 debug!(
                     error = %e,
-                    // FIXME(ENG-2499 + ENG-2500): Use correct dialect.
+                    // FIXME(REA-2168 + REA-2169): Use correct dialect.
                     query = %Sensitive(&view_request.statement.display(nom_sql::Dialect::MySQL)),
                     "Select query may have transiently failed"
                 );

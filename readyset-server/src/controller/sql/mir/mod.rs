@@ -715,7 +715,7 @@ impl SqlToMirConverter {
     ) -> NodeIndex {
         trace!(
             name = %name.display_unquoted(),
-            // FIXME(ENG-2499+2502): Use correct dialect.
+            // FIXME(REA-2168+2502): Use correct dialect.
             conditions = %conditions.display(nom_sql::Dialect::MySQL),
             "Added filter node"
         );
@@ -1263,7 +1263,7 @@ impl SqlToMirConverter {
                             Expr::Column(col) => Column::from(col),
                             expr => {
                                 let col = Column::named(
-                                    // FIXME(ENG-2499+2502): Use correct dialect.
+                                    // FIXME(REA-2168+2502): Use correct dialect.
                                     expr.display(nom_sql::Dialect::MySQL).to_string(),
                                 );
                                 if self

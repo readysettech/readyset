@@ -171,7 +171,7 @@ impl FromQueryLog {
             .map(Value::try_from)
             .collect::<Result<Vec<_>, _>>()?;
 
-        // FIXME(ENG-2499): Use correct dialect.
+        // FIXME(REA-2168): Use correct dialect.
         let stmt_string = stmt.display(nom_sql::Dialect::MySQL).to_string();
 
         let rows = conn.execute(&stmt_string, &params).await?;
