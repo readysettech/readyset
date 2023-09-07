@@ -122,6 +122,13 @@ const PK_CF: &str = "0";
 // Maximum rows per WriteBatch when building new indices for existing rows.
 const INDEX_BATCH_SIZE: usize = 10_000;
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum WalPersistence {
+    Memory,
+    Flush,
+    Sync,
+}
+
 /// Load the metadata from the database, stored in the `DEFAULT_CF` column family under the
 /// `META_KEY`
 fn get_meta(db: &DB) -> Result<PersistentMeta<'static>> {
@@ -243,6 +250,7 @@ pub struct PersistenceParameters {
     /// An optional path to a directory where to store the DB files, if None will be stored in the
     /// current working directory
     pub db_dir: Option<PathBuf>,
+    pub wal_persistence: WalPersistence,
 }
 
 impl Default for PersistenceParameters {
@@ -252,6 +260,7 @@ impl Default for PersistenceParameters {
             db_filename_prefix: String::from("readyset"),
             persistence_threads: 1,
             db_dir: None,
+            wal_persistence: WalPersistence::Sync,
         }
     }
 }
@@ -284,6 +293,7 @@ impl PersistenceParameters {
             db_filename_prefix,
             persistence_threads,
             db_dir,
+            wal_persistence: WalPersistence::Sync,
         }
     }
 }
@@ -416,6 +426,7 @@ pub struct PersistentState {
     /// writes will bypass WAL and fsync
     snapshot_mode: SnapshotMode,
     compaction_threads: Vec<CompactionThreadHandle>,
+    persistence: WalPersistence,
 }
 
 /// Things that are shared between read handles and the state itself, that can be locked under a
@@ -1078,6 +1089,10 @@ fn base_options(params: &PersistenceParameters) -> rocksdb::Options {
     opts.create_missing_column_families(true);
     opts.set_allow_concurrent_memtable_write(false);
 
+    if params.wal_persistence == WalPersistence::Memory {
+        opts.set_manual_wal_flush(true);
+    }
+
     // Assigns the number of threads for compactions and flushes in RocksDB.
     // Optimally we'd like to use env->SetBackgroundThreads(n, Env::HIGH)
     // and env->SetBackgroundThreads(n, Env::LOW) here, but that would force us to create our
@@ -1538,6 +1553,7 @@ impl PersistentState {
             _tmpdir: None,
             snapshot_mode: SnapshotMode::SnapshotModeDisabled,
             compaction_threads: vec![],
+            persistence: params.wal_persistence,
         };
 
         if let Some(pk) = state.unique_keys.first().cloned() {
@@ -1965,7 +1981,17 @@ impl PersistentState {
                 db.flush()
                     .map_err(|e| internal_err!("Flush to disk failed: {e}"))?;
             }
-            write_options.set_sync(true);
+        }
+
+        match self.persistence {
+            WalPersistence::Sync => {
+                write_options.set_sync(true);
+            }
+            WalPersistence::Memory => {
+                write_options.disable_wal(true);
+                write_options.set_sync(false);
+            }
+            _ => {}
         }
 
         if let Some(offset) = replication_offset {

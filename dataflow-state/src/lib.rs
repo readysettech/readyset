@@ -30,6 +30,7 @@ pub use crate::key::{PointKey, RangeKey};
 pub use crate::memory_state::MemoryState;
 pub use crate::persistent_state::{
     DurabilityMode, PersistenceParameters, PersistentState, PersistentStateHandle, SnapshotMode,
+    WalPersistence,
 };
 
 /// Information about state evicted via a call to [`State::evict_bytes`]
