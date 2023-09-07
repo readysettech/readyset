@@ -50,6 +50,11 @@ pub enum BenchmarkType {
     #[value(name = "cache")]
     Cache,
 
+    /// Send all queries to the ReadySet instance, but do not migrate them.
+    /// This will force ReadySet to proxy queries to the upstream.
+    #[value(name = "proxy")]
+    Proxy,
+
     /// Send all statements to a ReadySet instance, which is backed by an upstream database.
     #[value(name = "readyset")]
     #[default]
@@ -205,7 +210,9 @@ impl BenchmarkControl for WorkloadEmulator {
             .await?;
 
         let mut conn = match self.benchmark_type {
-            BenchmarkType::ReadySet => deployment.connect_to_target().await?,
+            BenchmarkType::ReadySet | BenchmarkType::Proxy => {
+                deployment.connect_to_target().await?
+            }
             _ => deployment.connect_to_setup().await?,
         };
 
@@ -556,7 +563,9 @@ impl MultithreadBenchmark for WorkloadEmulator {
         sender: UnboundedSender<Self::BenchmarkResult>,
     ) -> anyhow::Result<()> {
         let mut conn = match params.benchmark_type {
-            BenchmarkType::ReadySet => params.deployment.connect_to_target().await?,
+            BenchmarkType::ReadySet | BenchmarkType::Proxy => {
+                params.deployment.connect_to_target().await?
+            }
             _ => params.deployment.connect_to_setup().await?,
         };
         let query_set = &params.query_set;
