@@ -11,7 +11,7 @@ use tracing::{error, instrument};
 
 use crate::ConnectionHandler;
 
-/// readyset-psql specific options
+// readyset-psql specific options
 #[derive(Clone, Debug, Parser)]
 pub struct Options {
     /// The pkcs12 identity file (certificate and key) used by ReadySet for establishing TLS
