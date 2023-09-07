@@ -1009,7 +1009,7 @@ impl SqlIncorporator {
         leaf_behavior: LeafBehavior,
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<MirNodeIndex> {
-        // FIXME(ENG-2499): Use correct dialect.
+        // FIXME(REA-2168): Use correct dialect.
         trace!(stmt = %stmt.display(nom_sql::Dialect::MySQL), "Adding select query");
         *stmt = self.rewrite(stmt.clone(), search_path, mig.dialect, invalidating_tables)?;
 
@@ -1060,7 +1060,7 @@ impl SqlIncorporator {
             }
         }
 
-        // FIXME(ENG-2499): Use correct dialect.
+        // FIXME(REA-2168): Use correct dialect.
         trace!(rewritten_query = %stmt.display(nom_sql::Dialect::MySQL));
 
         let query_graph = to_query_graph(stmt.clone())?;

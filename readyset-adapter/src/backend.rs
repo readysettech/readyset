@@ -984,7 +984,7 @@ where
             }
             Err(e) => {
                 warn!(
-                    // FIXME(ENG-2499): Use correct dialect.
+                    // FIXME(REA-2168): Use correct dialect.
                     statement = %Sensitive(&stmt.display(nom_sql::Dialect::MySQL)),
                     "This statement could not be rewritten by ReadySet"
                 );
@@ -1033,7 +1033,7 @@ where
             ) => PrepareMeta::Write { stmt: query },
             Ok(pq) => {
                 warn!(
-                    // FIXME(ENG-2499): Use correct dialect.
+                    // FIXME(REA-2168): Use correct dialect.
                     statement = %Sensitive(&pq.display(nom_sql::Dialect::MySQL)),
                     "Statement cannot be prepared by ReadySet"
                 );
@@ -1629,7 +1629,7 @@ where
         if let Some(name) = name {
             if let Some(view_request) = self.noria.view_create_request_from_name(name).await {
                 warn!(
-                    // FIXME(ENG-2499): Use correct dialect.
+                    // FIXME(REA-2168): Use correct dialect.
                     statement = %Sensitive(&view_request.statement.display(nom_sql::Dialect::MySQL)),
                     name = %name.display(nom_sql::Dialect::MySQL),
                     "Dropping previously cached query",
@@ -2109,7 +2109,7 @@ where
                 should_try
             } else {
                 warn!(
-                    // FIXME(ENG-2499): Use correct dialect.
+                    // FIXME(REA-2168): Use correct dialect.
                     statement = %Sensitive(&q.statement.display(nom_sql::Dialect::MySQL)),
                     "This statement could not be rewritten by ReadySet"
                 );
@@ -2139,7 +2139,7 @@ where
         match Handler::handle_set_statement(set) {
             SetBehavior::Unsupported => {
                 warn!(
-                    // FIXME(ENG-2499): Use correct dialect.
+                    // FIXME(REA-2168): Use correct dialect.
                     set = %set.display(nom_sql::Dialect::MySQL),
                     "received unsupported SET statement"
                 );
@@ -2162,7 +2162,7 @@ where
             SetBehavior::Proxy => { /* Do nothing (the caller will proxy for us) */ }
             SetBehavior::SetAutocommit(on) => {
                 warn!(
-                    // FIXME(ENG-2499): Use correct dialect.
+                    // FIXME(REA-2168): Use correct dialect.
                     set = %set.display(nom_sql::Dialect::MySQL),
                     "received unsupported SET statement"
                 );
@@ -2587,7 +2587,7 @@ fn log_query(
     {
         if let Some(query) = &event.query {
             warn!(
-                // FIXME(ENG-2499): Use correct dialect.
+                // FIXME(REA-2168): Use correct dialect.
                 query = %Sensitive(&query.display(nom_sql::Dialect::MySQL)),
                 readyset_time = ?event.readyset_duration,
                 upstream_time = ?event.upstream_duration,

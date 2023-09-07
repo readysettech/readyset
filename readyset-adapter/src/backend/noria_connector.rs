@@ -55,7 +55,7 @@ pub(crate) struct PreparedSelectStatement {
 
 impl fmt::Debug for PreparedStatement {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        // FIXME(ENG-2499): Use correct dialect.
+        // FIXME(REA-2168): Use correct dialect.
         match self {
             PreparedStatement::Select(PreparedSelectStatement { name, .. }) => {
                 write!(f, "{}", name.display(nom_sql::Dialect::MySQL),)

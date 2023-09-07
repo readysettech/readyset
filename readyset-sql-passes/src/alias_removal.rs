@@ -240,7 +240,7 @@ mod tests {
                  to rewrite to: {} \n\
                        but got: {}",
                 $before,
-                // FIXME(ENG-2499): Use correct dialect.
+                // FIXME(REA-2168): Use correct dialect.
                 expected.display(nom_sql::Dialect::MySQL),
                 res.display(nom_sql::Dialect::MySQL),
             );
@@ -533,7 +533,7 @@ mod tests {
             res,
             expected,
             "\n\n   {}\n!= {}",
-            // FIXME(ENG-2499): Use correct dialect.
+            // FIXME(REA-2168): Use correct dialect.
             res.display(nom_sql::Dialect::MySQL),
             expected.display(nom_sql::Dialect::MySQL)
         );
