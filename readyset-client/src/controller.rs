@@ -684,15 +684,7 @@ impl ReadySetHandle {
             {
                 ExtendRecipeResult::Done => Ok(()),
                 ExtendRecipeResult::Pending(migration_id) => {
-                    while self
-                        .rpc::<_, MigrationStatus>(
-                            "migration_status",
-                            migration_id,
-                            self.migration_timeout,
-                        )
-                        .await?
-                        .is_pending()
-                    {
+                    while self.migration_status(migration_id).await?.is_pending() {
                         tokio::time::sleep(EXTEND_RECIPE_POLL_INTERVAL).await;
                     }
                     Ok(())
@@ -706,7 +698,7 @@ impl ReadySetHandle {
         &mut self,
         migration_id: u64,
     ) -> impl Future<Output = ReadySetResult<MigrationStatus>> + '_ {
-        self.rpc::<_, MigrationStatus>("migration_status", migration_id, self.migration_timeout)
+        self.rpc::<_, MigrationStatus>("migration_status", migration_id, self.request_timeout)
     }
 
     /// Asynchronous version of extend_recipe(). The Controller should immediately return an ID that
