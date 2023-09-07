@@ -8,6 +8,7 @@
 //! The benchmark accepts a yaml file describing the workload, with the schema described in
 //! [`crate::spec`].
 use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -27,6 +28,7 @@ use redis::{AsyncCommands, SetExpiry, SetOptions};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::info;
+use vmemcached::{Client, ConnectionManager, Pool, Settings};
 use zipf::ZipfDistribution;
 
 use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters, MetricGoal};
@@ -60,6 +62,9 @@ pub enum BenchmarkType {
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]
 pub enum LookAsideCacheType {
+    #[value(name = "memcached")]
+    Memcached,
+
     #[value(name = "redis")]
     #[default]
     Redis,
@@ -373,33 +378,69 @@ impl Query {
     }
 }
 
-pub struct LookAsideCacheConnection {
-    conn: redis::aio::Connection,
-    ttl: u32,
+pub enum LookAsideCacheConnection {
+    Memcached(vmemcached::Client, u32),
+    Redis(redis::aio::Connection, u32),
 }
 
 impl LookAsideCacheConnection {
     async fn new(cache_params: LookAsideCache) -> Result<Self> {
-        let client = redis::Client::open(cache_params.cache_url.expect("must provide cache url"))?;
-        let conn = client.get_async_connection().await?;
-        Ok(Self {
-            conn,
-            ttl: cache_params.ttl_secs,
-        })
+        match cache_params.cache_type.expect("must provide cache type") {
+            LookAsideCacheType::Memcached => {
+                let pool = Pool::builder()
+                    .max_size(1)
+                    .build(ConnectionManager::try_from(
+                        cache_params
+                            .cache_url
+                            .expect("must provide cache url")
+                            .as_str(),
+                    )?)
+                    .await?;
+                let options = Settings::new();
+                let client = Client::with_pool(pool, options);
+                Ok(Self::Memcached(client, cache_params.ttl_secs))
+            }
+            LookAsideCacheType::Redis => {
+                let client =
+                    redis::Client::open(cache_params.cache_url.expect("must provide cache url"))?;
+                let conn = client.get_async_connection().await?;
+                Ok(Self::Redis(conn, cache_params.ttl_secs))
+            }
+        }
     }
 
-    /// Look up a key in the look-aside cache.
     async fn get(&mut self, key: &str) -> Result<Option<Vec<u8>>> {
-        let data = self.conn.get(key).await?;
-        Ok(data)
+        match self {
+            Self::Memcached(client, _) => match client.get(key).await? {
+                Some(v) => Ok(Some(v)),
+                None => Ok(None),
+            },
+            Self::Redis(conn, _) => {
+                let data = conn.get(key).await?;
+                Ok(data)
+            }
+        }
     }
 
-    /// Set the value for a key in the look-aside cache.
     async fn set(&mut self, key: &str, value: &str) -> Result<()> {
-        let opts =
-            SetOptions::default().with_expiration(SetExpiry::EX(ttl_jitter(self.ttl) as usize));
-        self.conn.set_options(key, value, opts).await?;
-        Ok(())
+        match self {
+            Self::Memcached(client, ttl) => {
+                client
+                    .set(
+                        key,
+                        value.as_bytes(),
+                        Duration::from_secs(ttl_jitter(*ttl) as u64),
+                    )
+                    .await?;
+                Ok(())
+            }
+            Self::Redis(conn, ttl) => {
+                let opts =
+                    SetOptions::default().with_expiration(SetExpiry::EX(ttl_jitter(*ttl) as usize));
+                conn.set_options(key, value, opts).await?;
+                Ok(())
+            }
+        }
     }
 
     /// Generate a unique key for this entry by concatenating the parameters,
