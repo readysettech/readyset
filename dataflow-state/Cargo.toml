@@ -47,12 +47,5 @@ criterion = { version = "0.3", features=['real_blackbox', 'async_tokio'] }
 rust_decimal = { version = "1.26", features = ["db-tokio-postgres", "serde-str"] }
 
 [[bench]]
-name = "persistent_state"
+name = "persistent_state_write"
 harness = false
-
-# This works around an issue that prevents us from passing arguments to the binary when running
-# `cargo bench` when those arguments are supported by criterion but not libtest. See this link for
-# more info:
-# https://bheisler.github.io/criterion.rs/book/faq.html#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options
-[lib]
-bench = false
