@@ -315,12 +315,15 @@ impl MigrationHandler {
             .or_insert_with(Instant::now);
         if Instant::now() - *start_time > self.max_retry {
             // We've exceeded the max amount of times we'll try running dry runs with this query.
-            // It's probably unsupported, but we'll allow a proper migration determine that.
+            // We can't be certain its unsupported without attempting an actual migration, but
+            // mark it unsupported anyway to avoid confusion.
             debug!(
                 "Max retry time of {:?} exceeded for dry run migration. {:?} is probably unsupported",
                 self.max_retry,
                 view_request.to_anonymized_string()
             );
+            self.query_status_cache
+                .update_query_migration_state(view_request, MigrationState::Unsupported);
             return;
         }
         let qname =

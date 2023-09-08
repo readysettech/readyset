@@ -22,7 +22,7 @@ use tracing::error;
 #[derive(Debug)]
 pub struct QueryStatusCache {
     /// A thread-safe hash map that holds the query status of each successfully parsed query that
-    /// is cached.
+    /// has been sent to this adapter.
     statuses: DashMap<Arc<ViewCreateRequest>, QueryStatus, ahash::RandomState>,
 
     // A thread-safe hash map that holds the query status of each query that has failed to parse.
