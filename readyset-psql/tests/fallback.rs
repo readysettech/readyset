@@ -1762,3 +1762,93 @@ async fn pgsql_test_replication_after_resnapshot_with_catchup() {
 
     shutdown_tx.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn create_view_then_drop_table_then_create_view_with_same_name() {
+    readyset_tracing::init_test_logging();
+
+    let (config, _handle, shutdown_tx) = TestBuilder::default()
+        .migration_mode(MigrationMode::InRequestPath)
+        .fallback(true)
+        .build::<PostgreSQLAdapter>()
+        .await;
+    let client = connect(config).await;
+
+    client
+        .simple_query("DROP TABLE IF EXISTS t1 CASCADE")
+        .await
+        .unwrap();
+    client
+        .simple_query("DROP TABLE IF EXISTS t2 CASCADE")
+        .await
+        .unwrap();
+
+    let queries = [
+        r#"CREATE TABLE "a" (aa int)"#,
+        r#"CREATE TABLE "t2" (id int)"#,
+        r#"CREATE VIEW "v" AS SELECT * FROM "a""#,
+        r#"CREATE CACHE ALWAYS FROM SELECT * FROM "v""#,
+        r#"DROP TABLE "a" CASCADE"#,
+        r#"CREATE VIEW "v" AS SELECT * FROM "t2""#,
+        r#"CREATE CACHE ALWAYS FROM SELECT * FROM "v""#,
+    ];
+
+    for query in queries {
+        eventually!(run_test: {
+            let result = client
+                .simple_query(query)
+                .await;
+            AssertUnwindSafe(|| result)
+        }, then_assert: |result| {
+            result().unwrap();
+        });
+    }
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn create_view_then_drop_view_then_create_view_with_same_name() {
+    readyset_tracing::init_test_logging();
+
+    let (config, _handle, shutdown_tx) = TestBuilder::default()
+        .migration_mode(MigrationMode::InRequestPath)
+        .fallback(true)
+        .build::<PostgreSQLAdapter>()
+        .await;
+    let client = connect(config).await;
+
+    client
+        .simple_query("DROP TABLE IF EXISTS t1 CASCADE")
+        .await
+        .unwrap();
+    client
+        .simple_query("DROP TABLE IF EXISTS t2 CASCADE")
+        .await
+        .unwrap();
+
+    let queries = [
+        r#"CREATE TABLE "a" (aa int)"#,
+        r#"CREATE TABLE "t2" (id int)"#,
+        r#"CREATE VIEW "v" AS SELECT * FROM "a""#,
+        r#"CREATE CACHE ALWAYS FROM SELECT * FROM "v""#,
+        r#"DROP VIEW v"#,
+        r#"CREATE VIEW "v" AS SELECT * FROM "t2""#,
+        r#"CREATE CACHE ALWAYS FROM SELECT * FROM "v""#,
+    ];
+
+    for query in queries {
+        eventually!(run_test: {
+            let result = client
+                .simple_query(query)
+                .await;
+            AssertUnwindSafe(|| result)
+        }, then_assert: |result| {
+            result().unwrap();
+        });
+    }
+
+    shutdown_tx.shutdown().await;
+}
