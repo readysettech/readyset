@@ -10,7 +10,7 @@ use futures::FutureExt;
 use metrics::{counter, histogram};
 use mysql::prelude::Queryable;
 use mysql::{OptsBuilder, PoolConstraints, PoolOpts, SslOpts};
-use nom_sql::Relation;
+use nom_sql::{NonReplicatedRelation, NotReplicatedReason, Relation};
 use postgres_native_tls::MakeTlsConnector;
 use readyset_client::consistency::Timestamp;
 #[cfg(feature = "failure_injection")]
@@ -722,11 +722,14 @@ impl NoriaAdapter {
         });
 
         // Mark all tables that were filtered as non-replicated, too
-        changelist.changes_mut().extend(
-            non_replicated_tables
-                .into_iter()
-                .map(Change::AddNonReplicatedRelation),
-        );
+        changelist
+            .changes_mut()
+            .extend(non_replicated_tables.into_iter().map(|relation| {
+                Change::AddNonReplicatedRelation(NonReplicatedRelation {
+                    name: relation,
+                    reason: NotReplicatedReason::Configuration,
+                })
+            }));
 
         if self.supports_resnapshot && changelist.changes().any(Change::requires_resnapshot) {
             // In case we detect a DDL change that requires a full schema resnapshot exit the loop
@@ -767,11 +770,14 @@ impl NoriaAdapter {
                 changelist
                     .changes_mut()
                     .extend(changes.into_iter().filter_map(|change| {
-                        Some(Change::AddNonReplicatedRelation(match change {
-                            Change::CreateTable { statement, .. } => statement.table,
-                            Change::CreateView(stmt) => stmt.name,
-                            Change::AddNonReplicatedRelation(rel) => rel,
-                            _ => return None,
+                        Some(Change::AddNonReplicatedRelation(NonReplicatedRelation {
+                            name: match change {
+                                Change::CreateTable { statement, .. } => statement.table,
+                                Change::CreateView(stmt) => stmt.name,
+                                Change::AddNonReplicatedRelation(rel) => rel.name,
+                                _ => return None,
+                            },
+                            reason: NotReplicatedReason::from_string(&error.to_string()),
                         }))
                     }));
                 self.noria.extend_recipe(changelist).await?;
@@ -1056,7 +1062,11 @@ impl NoriaAdapter {
                     name: table.clone(),
                     if_exists: true,
                 },
-                Change::AddNonReplicatedRelation(table),
+                Change::AddNonReplicatedRelation(NonReplicatedRelation {
+                    // assuming NonReplicatedRelation has fields `relation` and `reason`
+                    name: table,
+                    reason: NotReplicatedReason::TableDropped,
+                }),
             ],
             self.dialect,
         );

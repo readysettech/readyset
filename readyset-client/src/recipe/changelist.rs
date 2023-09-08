@@ -38,8 +38,8 @@ use dataflow_expression::Dialect;
 use nom_locate::LocatedSpan;
 use nom_sql::{
     AlterTableStatement, CacheInner, CreateCacheStatement, CreateTableStatement,
-    CreateViewStatement, DropTableStatement, DropViewStatement, Relation, SelectStatement,
-    SqlIdentifier, SqlQuery,
+    CreateViewStatement, DropTableStatement, DropViewStatement, NonReplicatedRelation, Relation,
+    SelectStatement, SqlIdentifier, SqlQuery,
 };
 use readyset_data::DfType;
 use readyset_errors::{internal, unsupported, ReadySetError, ReadySetResult};
@@ -359,7 +359,7 @@ pub enum Change {
     /// This is important both to have better error messages for queries that select from
     /// non-replicated relations, and to ensure we don't skip over these tables during schema
     /// resolution, resulting in queries that read from tables in the wrong schema.
-    AddNonReplicatedRelation(Relation),
+    AddNonReplicatedRelation(NonReplicatedRelation),
     /// Add a new view to the graph, represented by the given `CREATE VIEW` statement
     CreateView(CreateViewStatement),
     /// Add a new cached query to the graph

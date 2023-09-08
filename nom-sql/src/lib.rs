@@ -50,7 +50,10 @@ pub use self::set::{
 pub use self::show::ShowStatement;
 pub use self::sql_identifier::SqlIdentifier;
 pub use self::sql_type::{EnumVariants, SqlType, SqlTypeArbitraryOptions};
-pub use self::table::{replicator_table_list, Relation, TableExpr, TableExprInner};
+pub use self::table::{
+    replicator_table_list, NonReplicatedRelation, NotReplicatedReason, Relation, TableExpr,
+    TableExprInner,
+};
 pub use self::transaction::StartTransactionStatement;
 pub use self::update::UpdateStatement;
 pub use self::use_statement::UseStatement;

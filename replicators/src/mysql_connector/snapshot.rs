@@ -12,7 +12,7 @@ use metrics::register_gauge;
 use mysql::prelude::Queryable;
 use mysql::{Transaction, TxOpts};
 use mysql_async as mysql;
-use nom_sql::Relation;
+use nom_sql::{NonReplicatedRelation, NotReplicatedReason, Relation};
 use readyset_client::metrics::recorded;
 use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_data::Dialect;
@@ -177,9 +177,12 @@ impl MySqlReplicator {
                 non_replicated_tables
                     .into_iter()
                     .map(|(schema, name)| {
-                        Change::AddNonReplicatedRelation(Relation {
-                            schema: Some(schema.into()),
-                            name: name.into(),
+                        Change::AddNonReplicatedRelation(NonReplicatedRelation {
+                            name: Relation {
+                                schema: Some(schema.into()),
+                                name: name.into(),
+                            },
+                            reason: NotReplicatedReason::Configuration,
                         })
                     })
                     .collect::<Vec<_>>(),
@@ -230,9 +233,12 @@ impl MySqlReplicator {
 
                     noria
                         .extend_recipe_no_leader_ready(ChangeList::from_change(
-                            Change::AddNonReplicatedRelation(Relation {
-                                schema: Some(db.into()),
-                                name: table.into(),
+                            Change::AddNonReplicatedRelation(NonReplicatedRelation {
+                                name: Relation {
+                                    schema: Some(db.into()),
+                                    name: table.into(),
+                                },
+                                reason: NotReplicatedReason::Configuration,
                             }),
                             Dialect::DEFAULT_MYSQL,
                         ))
@@ -274,9 +280,12 @@ impl MySqlReplicator {
                     warn!(%view, %error, "Error extending CREATE VIEW, view will not be used");
                     noria
                         .extend_recipe_no_leader_ready(ChangeList::from_change(
-                            Change::AddNonReplicatedRelation(Relation {
-                                schema: Some(db.into()),
-                                name: view.into(),
+                            Change::AddNonReplicatedRelation(NonReplicatedRelation {
+                                name: Relation {
+                                    schema: Some(db.into()),
+                                    name: view.into(),
+                                },
+                                reason: NotReplicatedReason::Configuration,
                             }),
                             Dialect::DEFAULT_MYSQL,
                         ))

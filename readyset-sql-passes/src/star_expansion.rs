@@ -3,7 +3,8 @@ use std::mem;
 
 use nom_sql::analysis::visit_mut::{self, VisitorMut};
 use nom_sql::{
-    Column, Expr, FieldDefinitionExpr, Relation, SelectStatement, SqlIdentifier, SqlQuery,
+    Column, Expr, FieldDefinitionExpr, NonReplicatedRelation, Relation, SelectStatement,
+    SqlIdentifier, SqlQuery,
 };
 use readyset_errors::{ReadySetError, ReadySetResult};
 
@@ -15,13 +16,13 @@ pub trait StarExpansion: Sized {
     fn expand_stars(
         self,
         table_columns: &HashMap<Relation, Vec<SqlIdentifier>>,
-        non_replicated_relations: &HashSet<Relation>,
+        non_replicated_relations: &HashSet<NonReplicatedRelation>,
     ) -> ReadySetResult<Self>;
 }
 
 struct ExpandStarsVisitor<'schema> {
     table_columns: &'schema HashMap<Relation, Vec<SqlIdentifier>>,
-    non_replicated_relations: &'schema HashSet<Relation>,
+    non_replicated_relations: &'schema HashSet<NonReplicatedRelation>,
 }
 
 impl<'ast, 'schema> VisitorMut<'ast> for ExpandStarsVisitor<'schema> {
@@ -49,7 +50,11 @@ impl<'ast, 'schema> VisitorMut<'ast> for ExpandStarsVisitor<'schema> {
             }
             .or_else(|| self.table_columns.get(&table).map(|fs| fs.iter().collect()))
             .ok_or_else(|| {
-                if self.non_replicated_relations.contains(&table) {
+                let non_replicated_relation = NonReplicatedRelation::new(table.clone());
+                if self
+                    .non_replicated_relations
+                    .contains(&non_replicated_relation)
+                {
                     ReadySetError::TableNotReplicated {
                         name: table.name.clone().into(),
                         schema: table.schema.clone().map(Into::into),
@@ -99,7 +104,7 @@ impl StarExpansion for SelectStatement {
     fn expand_stars(
         mut self,
         table_columns: &HashMap<Relation, Vec<SqlIdentifier>>,
-        non_replicated_relations: &HashSet<Relation>,
+        non_replicated_relations: &HashSet<NonReplicatedRelation>,
     ) -> ReadySetResult<Self> {
         let mut visitor = ExpandStarsVisitor {
             table_columns,
@@ -114,7 +119,7 @@ impl StarExpansion for SqlQuery {
     fn expand_stars(
         self,
         write_schemas: &HashMap<Relation, Vec<SqlIdentifier>>,
-        non_replicated_relations: &HashSet<Relation>,
+        non_replicated_relations: &HashSet<NonReplicatedRelation>,
     ) -> ReadySetResult<Self> {
         Ok(match self {
             SqlQuery::Select(sq) => {

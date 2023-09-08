@@ -31,8 +31,8 @@ use std::collections::{HashMap, HashSet};
 use dataflow_expression::Dialect;
 pub use nom_sql::analysis::{contains_aggregate, is_aggregate};
 use nom_sql::{
-    CompoundSelectStatement, CreateTableBody, CreateTableStatement, CreateViewStatement, Relation,
-    SelectSpecification, SelectStatement, SqlIdentifier,
+    CompoundSelectStatement, CreateTableBody, CreateTableStatement, CreateViewStatement,
+    NonReplicatedRelation, Relation, SelectSpecification, SelectStatement, SqlIdentifier,
 };
 use readyset_errors::ReadySetResult;
 
@@ -75,7 +75,7 @@ pub struct RewriteContext<'a> {
     /// Set of relations that are known to exist in the upstream database, but are not being
     /// replicated. Used as part of schema resolution to ensure that queries that would resolve to
     /// these tables if they *were* being replicated correctly return an error
-    pub non_replicated_relations: &'a HashSet<Relation>,
+    pub non_replicated_relations: &'a HashSet<NonReplicatedRelation>,
 
     /// Map from schema name to the set of custom types in that schema
     pub custom_types: &'a HashMap<&'a SqlIdentifier, HashSet<&'a SqlIdentifier>>,
@@ -114,7 +114,7 @@ impl<'a> RewriteContext<'a> {
             .chain(
                 self.non_replicated_relations
                     .iter()
-                    .map(|t| (t, CanQuery::No)),
+                    .map(|t| (&(t.name), CanQuery::No)),
             )
             .fold(
                 HashMap::<&SqlIdentifier, HashMap<&SqlIdentifier, CanQuery>>::new(),

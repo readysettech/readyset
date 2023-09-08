@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use futures_util::future;
 use hyper::client::HttpConnector;
-use nom_sql::{CreateCacheStatement, Relation};
+use nom_sql::{CreateCacheStatement, NonReplicatedRelation, Relation};
 use parking_lot::RwLock;
 use petgraph::graph::NodeIndex;
 use readyset_errors::{
@@ -449,7 +449,9 @@ impl ReadySetHandle {
     /// recorded via [`Change::AddNonReplicatedRelation`]).
     ///
     /// [`Change::AddNonReplicatedRelation`]: readyset_client::recipe::changelist::Change::AddNonReplicatedRelation
-    pub async fn non_replicated_relations(&mut self) -> ReadySetResult<HashSet<Relation>> {
+    pub async fn non_replicated_relations(
+        &mut self,
+    ) -> ReadySetResult<HashSet<NonReplicatedRelation>> {
         self.simple_post_request("non_replicated_relations").await
     }
 

@@ -306,8 +306,10 @@ impl DfType {
             MacAddr => Self::MacAddr,
             Inet => Self::Inet,
             Citext => Self::Text(Collation::Citext),
-            Other(ref id) => resolve_custom_type(id.clone())
-                .ok_or_else(|| unsupported_err!("Unsupported type: {}", id.display_unquoted()))?,
+            Other(ref id) => resolve_custom_type(id.clone()).ok_or_else(|| {
+                let id_upper = format!("{}", id.display_unquoted()).to_uppercase();
+                unsupported_err!("Unsupported type: {}", id_upper)
+            })?,
         })
     }
 }

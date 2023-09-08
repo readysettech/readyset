@@ -1,6 +1,6 @@
-use std::fmt::Display;
-use std::hash::Hash;
-use std::str;
+use std::fmt::{Debug, Display, Formatter};
+use std::hash::{Hash, Hasher};
+use std::{fmt, str};
 
 use nom::branch::alt;
 use nom::bytes::complete::tag;
@@ -238,3 +238,106 @@ pub fn replicator_table_list(
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<Relation>> {
     move |i| separated_list1(ws_sep_comma, replicator_table_reference(dialect))(i)
 }
+
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum NotReplicatedReason {
+    /// Configuration indicates that a table is not being replicated because
+    /// it was excluded by configuration.
+    Configuration,
+    /// TableDropped indicates that the table that was snapshotted has been dropped
+    /// and because of this it is no longer being replicated.
+    TableDropped,
+    /// Partitioned indicates that the table is a partitioned table which are not
+    /// supported by ReadySet.
+    Partitioned,
+    /// UnsupportedType indicates that a column type in the table is not supported.
+    /// This will only reference the first unsupported type. If there are more than
+    /// one in a single table they will not be mentioned.
+    UnsupportedType(String),
+    /// OtherError indicates that an error was observed that caused the replication to fail but
+    /// was not one of the previous type and was unexpected.
+    OtherError(String),
+    /// Default is a generic and is used when one of the above enums are not need.
+    Default,
+}
+
+impl NotReplicatedReason {
+    pub fn description(&self) -> String {
+        match self {
+                NotReplicatedReason::Configuration => "The table was either excluded from replicated-tables or included in replication-tables-ignore option.".to_string(),
+                NotReplicatedReason::TableDropped => "Table has been dropped.".to_string(),
+                NotReplicatedReason::Partitioned => "Partitioned tables are not supported.".to_string(),
+                NotReplicatedReason::UnsupportedType(reason) => {
+                    let prefix = "Unsupported type:";
+                    if let Some(start) = reason.find(prefix) {
+                        let start_offset = start + prefix.len();
+                        let type_name_raw = &reason[start_offset..];
+                        let type_name = type_name_raw.trim();  // Trim whitespace 
+                        format!("Column type {} is not supported.", type_name)
+                    } else {
+                        "Column type unknown is not supported.".to_string()
+                    }
+                },
+                NotReplicatedReason::OtherError(error) => format!("An unexpected replication error occurred: {}", error),
+                NotReplicatedReason::Default => "No specific reason provided.".to_string(),
+            }
+    }
+
+    pub fn from_string(reason: &String) -> Self {
+        if reason.contains("Unsupported type:") {
+            NotReplicatedReason::UnsupportedType(reason.to_string())
+        } else {
+            NotReplicatedReason::OtherError(reason.to_string())
+        }
+    }
+}
+impl Debug for NotReplicatedReason {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Configuration => write!(f, "Configuration"),
+            Self::TableDropped => write!(f, "TableDropped"),
+            Self::Partitioned => write!(f, "Partitioned"),
+            Self::UnsupportedType(s) => write!(f, "UnsupportedType({})", s),
+            Self::OtherError(s) => write!(f, "OtherError({})", s),
+            Self::Default => write!(f, ""),
+        }
+    }
+}
+
+/// NonReplicatedRelations is a struct that wraps Relations with a reason why
+/// it is not a replicated relation.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct NonReplicatedRelation {
+    pub name: Relation,
+    pub reason: NotReplicatedReason,
+}
+
+impl NonReplicatedRelation {
+    pub fn new(name: Relation) -> Self {
+        NonReplicatedRelation {
+            name,
+            reason: NotReplicatedReason::Default,
+        }
+    }
+}
+impl Hash for NonReplicatedRelation {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.name.hash(state);
+    }
+}
+impl Debug for NonReplicatedRelation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "NonReplicatedRelation {{ name: {:?}, reason: {:?} }}",
+            self.name, self.reason
+        )
+    }
+}
+
+impl PartialEq for NonReplicatedRelation {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+    }
+}
+impl Eq for NonReplicatedRelation {}
