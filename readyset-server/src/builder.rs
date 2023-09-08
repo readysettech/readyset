@@ -87,8 +87,9 @@ impl Builder {
         builder.set_allow_topk(opts.enable_experimental_topk_support);
         builder.set_allow_paginate(opts.enable_experimental_paginate_support);
         builder.set_allow_mixed_comparisons(opts.enable_experimental_mixed_comparisons);
-        builder.set_worker_timeout(std::time::Duration::from_secs(
-            opts.worker_request_timeout_seconds,
+        builder.set_worker_timeout(Duration::from_secs(opts.worker_request_timeout_seconds));
+        builder.set_background_recovery_interval(Duration::from_secs(
+            opts.background_recovery_interval_seconds,
         ));
 
         builder.set_replication_strategy(opts.domain_replication_options.into());
@@ -214,6 +215,11 @@ impl Builder {
     /// Set the value of [`controller::sql::Config::worker_request_timeout`]
     pub fn set_worker_timeout(&mut self, worker_request_timeout: Duration) {
         self.config.worker_request_timeout = worker_request_timeout;
+    }
+
+    /// Set the value of [`Config::background_recovery_interval`]
+    pub fn set_background_recovery_interval(&mut self, background_recovery_interval: Duration) {
+        self.config.background_recovery_interval = background_recovery_interval;
     }
 
     /// Set the value of [`DomainConfig::aggressively_update_state_sizes`][0]. See the documentation

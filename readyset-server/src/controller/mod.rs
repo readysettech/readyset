@@ -510,6 +510,7 @@ impl Controller {
                     self.config.replicator_statement_logging,
                     self.config.replicator_config.clone(),
                     self.config.worker_request_timeout,
+                    self.config.background_recovery_interval,
                 );
                 self.leader_ready.store(false, Ordering::Release);
 

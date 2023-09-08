@@ -8,6 +8,7 @@
 )]
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -69,6 +70,11 @@ pub struct Leader {
 
     /// The amount of time to wait for a worker request to complete.
     worker_request_timeout: Duration,
+    /// Interval on which to automatically run recovery as long as there are unscheduled domains
+    background_recovery_interval: Duration,
+    /// Are we currently trying to run recovery in the background?
+    background_recovery_running: Arc<AtomicBool>,
+
     /// Whether to log statements received by the replicators
     replicator_statement_logging: bool,
     /// Configuration for the replicator
@@ -743,6 +749,64 @@ impl Leader {
             ds.kill_domains(downstream_domains).await?;
         }
 
+        if !ds.all_replicas_placed()
+            && !self
+                .background_recovery_running
+                .swap(true, Ordering::AcqRel)
+        {
+            // It might be the case that the following events occur, in the following order:
+            //
+            // 1. A worker dies
+            // 2. A new worker shows up to replace it
+            // 3. We are notified by the authority about the worker's death
+            //
+            // But it also might be the case that events occur in the following order:
+            //
+            // 1. A worker dies
+            // 2. We are notified by the authority about the worker's death
+            // 3. A new worker shows up to replace it
+            //
+            // We want to make sure that the domains running on the worker get re-scheduled in the
+            // first case, but don't want to schedule all domains onto the same worker in the second
+            // case. So as a compromise, we always run recovery when workers re-register
+            // (`handle_register_from_authority`), but in the case that a worker *dies*, we wait (a
+            // configurable) 20 seconds before re-running recovery (and then keep re-running
+            // recovery as long as domains are unplaced).
+
+            info!(
+                sleeping_for_seconds = self.background_recovery_interval.as_secs(),
+                "Handled worker failure that resulted in some unplaced domains, scheduling recovery"
+            );
+            let dataflow_state_handle = Arc::clone(&self.dataflow_state_handle);
+            let authority = Arc::clone(&self.authority);
+            let background_recovery_running = Arc::clone(&self.background_recovery_running);
+            let background_recovery_interval = self.background_recovery_interval;
+            self.spawn_background_task(async move {
+                loop {
+                    sleep(background_recovery_interval).await;
+                    let mut writer = dataflow_state_handle.write().await;
+                    let ds = writer.as_mut();
+                    let domain_nodes = ds.unplaced_domain_nodes();
+                    if domain_nodes.is_empty() {
+                        // All replicas placed! Stop trying to recover
+                        break;
+                    }
+
+                    info!(
+                        slept_for_seconds = background_recovery_interval.as_secs(),
+                        "Running automatic recovery after sleeping",
+                    );
+                    ds.plan_recovery(&domain_nodes).await?.apply(ds).await?;
+
+                    dataflow_state_handle.commit(writer, &authority).await?;
+                }
+
+                background_recovery_running.store(false, Ordering::Release);
+                Ok(())
+            })
+            .await;
+        }
+
         self.dataflow_state_handle
             .commit(writer, &self.authority)
             .await
@@ -850,6 +914,7 @@ impl Leader {
         replicator_statement_logging: bool,
         replicator_config: UpstreamConfig,
         worker_request_timeout: Duration,
+        background_recovery_interval: Duration,
     ) -> Self {
         assert_ne!(state.config.min_workers, 0);
 
@@ -865,6 +930,8 @@ impl Leader {
             replicator_config,
             authority,
             worker_request_timeout,
+            background_recovery_interval,
+            background_recovery_running: Arc::new(AtomicBool::new(false)),
             running_migrations: Default::default(),
             background_task_failed,
             running_recovery: None,

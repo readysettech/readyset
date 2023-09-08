@@ -491,6 +491,13 @@ pub struct Config {
     /// The duration to wait before canceling a task waiting on a worker request. Worker requests
     /// are typically issued as part of migrations.
     pub(crate) worker_request_timeout: Duration,
+    /// Interval on which to automatically run recovery as long as there are unscheduled domains
+    #[serde(default = "default_background_recovery_interval")]
+    pub(crate) background_recovery_interval: Duration,
+}
+
+fn default_background_recovery_interval() -> Duration {
+    Duration::from_secs(20)
 }
 
 impl Default for Config {
@@ -520,6 +527,7 @@ impl Default for Config {
             replication_strategy: Default::default(),
             upquery_timeout: Duration::from_millis(5000),
             worker_request_timeout: Duration::from_millis(1800000),
+            background_recovery_interval: default_background_recovery_interval(),
         }
     }
 }
@@ -631,6 +639,16 @@ pub struct WorkerOptions {
         hide = true
     )]
     pub worker_request_timeout_seconds: u64,
+
+    /// Interval, in seconds, on which to automatically run recovery as long as there are
+    /// unscheduled domains
+    #[clap(
+        long,
+        env = "BACKGROUND_RECOVERY_INTERVAL_SECONDS",
+        default_value = "20",
+        hide = true
+    )]
+    pub background_recovery_interval_seconds: u64,
 }
 
 use std::pin::Pin;
