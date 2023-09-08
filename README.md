@@ -3,8 +3,9 @@
 </p>
 
 ---
+[![Build status](https://badge.buildkite.com/76e02771ab1f0706b7840f47c5fed0e315a56c408d86c0de8c.svg?branch=main)](https://buildkite.com/readyset/readyset-public)
 
-ReadySet is a lightweight query cache that sits between your application and database and turns even the most complex SQL reads into lightning-fast lookups. 
+ReadySet is a lightweight query cache that sits between your application and database and turns even the most complex SQL reads into lightning-fast lookups.
 
 
 Unlike other caching solutions, ReadySet keeps the cache in sync with your database automatically and requires no changes to your application code.
@@ -13,7 +14,7 @@ Unlike other caching solutions, ReadySet keeps the cache in sync with your datab
 <p align="center">
   <img src='https://user-images.githubusercontent.com/38481289/172237407-e0546ef3-2095-49ab-be82-a177e507c6d1.png' width='70%'>
 </p>
-<br> 
+<br>
 
 This means:
 
@@ -21,11 +22,11 @@ This means:
 - No extra code to evict stale records
 - No TTLs to set - your cache is as up-to-date as your replication lag
 
-ReadySet is wire-compatible with Postgres and MySQL. 
+ReadySet is wire-compatible with Postgres and MySQL.
 
 ---
 ### Quickstart
-Curious to see how ReadySet works? Run through our [quick start](https://docs.readyset.io/quickstart) to kick the tires and cache queries in under five minutes. 
+Curious to see how ReadySet works? Run through our [quick start](https://docs.readyset.io/quickstart) to kick the tires and cache queries in under five minutes.
 
 ---
 ### Install with Docker
@@ -61,9 +62,9 @@ services:
 docker compose up -d
 ```
 
-#### 4. Configure caching 
+#### 4. Configure caching
 
-Once ReadySet is up and running, you'll need to [create caches](https://docs.readyset.io/cache/creating-a-cache) for the queries you want to speed up. Check out our [caching guide](https://docs.readyset.io/cache/profiling-queries) for more details. 
+Once ReadySet is up and running, you'll need to [create caches](https://docs.readyset.io/cache/creating-a-cache) for the queries you want to speed up. Check out our [caching guide](https://docs.readyset.io/cache/profiling-queries) for more details.
 
 ---
 
@@ -80,18 +81,18 @@ For questions or support, join us on the [ReadySet Community Slack](https://join
 ---
 
 ## Project Status & Roadmap
-ReadySet is currently in beta. Our team is hard at work stabilizing the system with a focus on PostgreSQL. Our MySQL support is considered alpha. You can learn more about how we're approaching this and follow along on our progress below. 
+ReadySet is currently in beta. Our team is hard at work stabilizing the system with a focus on PostgreSQL. Our MySQL support is considered alpha. You can learn more about how we're approaching this and follow along on our progress below.
 
 | Project | Progress | Notes |
 | ----------- | ----------- | ----------- |
-| General System Testing | [Track](https://github.com/readysettech/readyset/issues/434) | Run ReadySet in a production-like environment and validate its robustness in the presence of faults.| 
+| General System Testing | [Track](https://github.com/readysettech/readyset/issues/434) | Run ReadySet in a production-like environment and validate its robustness in the presence of faults.|
 | Dataflow Testing | [Track](https://github.com/readysettech/readyset/issues/431) | Expand testing of the ReadySet caching engine. |
-| Benchmarking & Analysis  | [Track](https://github.com/readysettech/readyset/issues/432) | Expand ReadySet's performance benchmarks to a wider array of workloads. | 
-| Usability Improvements | [Track](https://github.com/readysettech/readyset/issues/443) | Make it easier to configure, interact with, and debug ReadySet. | 
+| Benchmarking & Analysis  | [Track](https://github.com/readysettech/readyset/issues/432) | Expand ReadySet's performance benchmarks to a wider array of workloads. |
+| Usability Improvements | [Track](https://github.com/readysettech/readyset/issues/443) | Make it easier to configure, interact with, and debug ReadySet. |
 | High Availability | [Track](https://github.com/readysettech/readyset/issues/433) | Ensure that ReadySet can accept connections, proxy queries, serve warm reads from the cache, and replicate writes from the primary database in the presence of certain failures. |
 
 ### Contribute
-If you're interested in contributing, we gratefully welcome helping hands! We welcome contributions as [GitHub pull requests](https://github.com/readysettech/readyset/pulls), creating [issues](https://github.com/readysettech/readyset/issues), advocacy, and participating in our [community](#join-the-community)! 
+If you're interested in contributing, we gratefully welcome helping hands! We welcome contributions as [GitHub pull requests](https://github.com/readysettech/readyset/pulls), creating [issues](https://github.com/readysettech/readyset/issues), advocacy, and participating in our [community](#join-the-community)!
 
 ### Build from Source
 See our [instructions](./community-development.md) on how to build ReadySet from source.
