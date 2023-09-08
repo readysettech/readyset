@@ -357,7 +357,7 @@ where
     T: ModelState,
 {
     // Always make sure we have max_shrink_iters high enough to fully shrink a max size test case:
-    stateful_config.proptest_config.max_shrink_iters = stateful_config.max_ops as u32 * 2;
+    stateful_config.proptest_config.max_shrink_iters = 0; // stateful_config.max_ops as u32 * 2;
 
     // Used for optimizing shrinking by letting us immediately discard any steps after the failing
     // step. To enable this, we need to be able to mutate the value from the test itself, and then
@@ -420,6 +420,7 @@ macro_rules! proptest_config_with_local_failure_persistence {
                 proptest::test_runner::FileFailurePersistence::WithSource("proptest-regressions"),
             )),
             source_file: Some(file!()),
+            max_shrink_iters: 1,
             ..ProptestConfig::default()
         }
     };
