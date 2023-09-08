@@ -1157,6 +1157,7 @@ impl SqlIncorporator {
         }
         let mut mir_removal_result = self.mir_converter.remove_query(query_name)?;
         self.process_removal(&mut mir_removal_result, mig);
+        self.view_schemas.remove(query_name);
         Ok(mir_removal_result)
     }
 
@@ -1186,6 +1187,7 @@ impl SqlIncorporator {
         for query in removal_result.relations_removed.iter() {
             self.leaf_addresses.remove(query);
             self.registry.remove_expression(query);
+            self.view_schemas.remove(query);
         }
         // Sadly, we don't use `DfNodeIndex` for migrations/df state, so we need to map them
         // to `NodeIndex`.
