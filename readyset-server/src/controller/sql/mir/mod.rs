@@ -18,8 +18,9 @@ pub use mir::{Column, NodeIndex};
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::{
     BinaryOperator, ColumnSpecification, CompoundSelectOperator, CreateTableBody, Expr,
-    FieldDefinitionExpr, FieldReference, FunctionExpr, InValue, LimitClause, Literal, OrderClause,
-    OrderType, Relation, SelectStatement, SqlIdentifier, TableKey, UnaryOperator,
+    FieldDefinitionExpr, FieldReference, FunctionExpr, InValue, LimitClause, Literal,
+    NonReplicatedRelation, OrderClause, OrderType, Relation, SelectStatement, SqlIdentifier,
+    TableKey, UnaryOperator,
 };
 use petgraph::visit::Reversed;
 use petgraph::Direction;
@@ -175,7 +176,7 @@ pub(super) struct SqlToMirConverter {
     /// Set of relations (tables or views) that exist in the upstream database, but are not being
     /// replicated (either due to lack of support, or because the user explicitly opted out from
     /// them being replicated)
-    pub(in crate::controller::sql) non_replicated_relations: HashSet<Relation>,
+    pub(in crate::controller::sql) non_replicated_relations: HashSet<NonReplicatedRelation>,
 }
 
 impl SqlToMirConverter {
@@ -217,7 +218,8 @@ impl SqlToMirConverter {
     /// upstream database but is not being replicated, or [`ReadySetError::TableNotFound`] if the
     /// table is completely unknown
     pub(super) fn table_not_found_err(&self, name: &Relation) -> ReadySetError {
-        if self.non_replicated_relations.contains(name) || is_catalog_table(name) {
+        let relation = NonReplicatedRelation::new(name.clone());
+        if self.non_replicated_relations.contains(&relation) || is_catalog_table(name) {
             ReadySetError::TableNotReplicated {
                 name: (&name.name).into(),
                 schema: name.schema.as_ref().map(Into::into),

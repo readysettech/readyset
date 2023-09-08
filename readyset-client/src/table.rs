@@ -15,7 +15,7 @@ use futures_util::stream::futures_unordered::FuturesUnordered;
 use futures_util::stream::TryStreamExt;
 use futures_util::{future, ready};
 use itertools::Either;
-use nom_sql::{CreateTableBody, Relation, SqlIdentifier};
+use nom_sql::{CreateTableBody, NotReplicatedReason, Relation, SqlIdentifier};
 use petgraph::graph::NodeIndex;
 use readyset_data::DfValue;
 use readyset_errors::{
@@ -272,10 +272,10 @@ impl fmt::Debug for PacketData {
 }
 
 /// The status of a single table with respect to replication
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum TableReplicationStatus {
     /// The table is not being replicated by ReadySet
-    NotReplicated,
+    NotReplicated(NotReplicatedReason),
     /// The table is currently being snapshotted by ReadySet
     Snapshotting,
     /// The table has been successfully snapshotted by ReadySet
@@ -285,10 +285,13 @@ pub enum TableReplicationStatus {
 impl Display for TableReplicationStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            TableReplicationStatus::NotReplicated => f.write_str("Not Replicated"),
-            TableReplicationStatus::Snapshotting => f.write_str("Snapshotting"),
-            TableReplicationStatus::Snapshotted => f.write_str("Snapshotted"),
+            TableReplicationStatus::NotReplicated(reason) => {
+                write!(f, "Not Replicated : {}", reason.description())?;
+            }
+            TableReplicationStatus::Snapshotting => f.write_str("Snapshotting")?,
+            TableReplicationStatus::Snapshotted => f.write_str("Snapshotted")?,
         }
+        Ok(())
     }
 }
 

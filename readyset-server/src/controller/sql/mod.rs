@@ -7,7 +7,8 @@ use ::mir::DfNodeIndex;
 use ::serde::{Deserialize, Serialize};
 use nom_sql::{
     CompoundSelectOperator, CompoundSelectStatement, CreateTableBody, FieldDefinitionExpr,
-    Relation, SelectSpecification, SelectStatement, SqlIdentifier, SqlType, TableExpr,
+    NonReplicatedRelation, NotReplicatedReason, Relation, SelectSpecification, SelectStatement,
+    SqlIdentifier, SqlType, TableExpr,
 };
 use petgraph::graph::NodeIndex;
 use readyset_client::recipe::changelist::{AlterTypeChange, Change, PostgresTableMetadata};
@@ -284,9 +285,66 @@ impl SqlIncorporator {
                         }
                     }
                 }
-                Change::AddNonReplicatedRelation(name) => {
-                    debug!(name = %name.display_unquoted(), "Adding non-replicated relation");
-                    self.add_non_replicated_relation(name);
+
+                Change::AddNonReplicatedRelation(NonReplicatedRelation {
+                    name,
+                    reason: NotReplicatedReason::OtherError(desc),
+                }) => {
+                    debug!(name = %name.display_unquoted(), desc = %desc, "Adding non-replicated relation with OtherError");
+                    self.add_non_replicated_relation(NonReplicatedRelation {
+                        name,
+                        reason: NotReplicatedReason::OtherError(desc),
+                    });
+                }
+                Change::AddNonReplicatedRelation(NonReplicatedRelation {
+                    name,
+                    reason: NotReplicatedReason::UnsupportedType(desc),
+                }) => {
+                    debug!(name = %name.display_unquoted(), desc = %desc, "Adding non-replicated relation with UnsupportedType");
+                    self.add_non_replicated_relation(NonReplicatedRelation {
+                        name,
+                        reason: NotReplicatedReason::UnsupportedType(desc),
+                    });
+                }
+                Change::AddNonReplicatedRelation(NonReplicatedRelation {
+                    name,
+                    reason: NotReplicatedReason::Partitioned,
+                }) => {
+                    debug!(name = %name.display_unquoted(), "Adding non-replicated relation with Partitioned");
+                    self.add_non_replicated_relation(NonReplicatedRelation {
+                        name,
+                        reason: NotReplicatedReason::Partitioned,
+                    });
+                }
+                Change::AddNonReplicatedRelation(NonReplicatedRelation {
+                    name,
+                    reason: NotReplicatedReason::TableDropped,
+                }) => {
+                    debug!(name = %name.display_unquoted(), "Adding non-replicated relation with TableDropped");
+                    self.add_non_replicated_relation(NonReplicatedRelation {
+                        name,
+                        reason: NotReplicatedReason::TableDropped,
+                    });
+                }
+                Change::AddNonReplicatedRelation(NonReplicatedRelation {
+                    name,
+                    reason: NotReplicatedReason::Configuration,
+                }) => {
+                    debug!(name = %name.display_unquoted(), "Adding non-replicated relation with Configuration");
+                    self.add_non_replicated_relation(NonReplicatedRelation {
+                        name,
+                        reason: NotReplicatedReason::Configuration,
+                    });
+                }
+                Change::AddNonReplicatedRelation(NonReplicatedRelation {
+                    name,
+                    reason: NotReplicatedReason::Default,
+                }) => {
+                    debug!(name = %name.display_unquoted(), "Adding non-replicated relation with Default");
+                    self.add_non_replicated_relation(NonReplicatedRelation {
+                        name,
+                        reason: NotReplicatedReason::Default,
+                    });
                 }
                 Change::CreateView(mut stmt) => {
                     if let Some(first_schema) = schema_search_path.first() {
@@ -383,7 +441,9 @@ impl SqlIncorporator {
                         }
                     }
 
-                    let removed = if self.remove_non_replicated_relation(&name) {
+                    let removed = if self
+                        .remove_non_replicated_relation(&NonReplicatedRelation::new(name.clone()))
+                    {
                         true
                     } else if self.registry.remove_custom_type(&name) {
                         for expr in self
@@ -515,7 +575,7 @@ impl SqlIncorporator {
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<()> {
         let (name, dataflow_idx) = self.add_base_via_mir(name, body, pg_meta, mig)?;
-        self.remove_non_replicated_relation(&name);
+        self.remove_non_replicated_relation(&NonReplicatedRelation::new(name.clone()));
         self.leaf_addresses.insert(name, dataflow_idx);
         Ok(())
     }
@@ -528,7 +588,7 @@ impl SqlIncorporator {
         schema_search_path: Vec<SqlIdentifier>,
     ) -> ReadySetResult<()> {
         trace!(name = %name.display_unquoted(), "Adding uncompiled view");
-        self.remove_non_replicated_relation(&name);
+        self.remove_non_replicated_relation(&NonReplicatedRelation::new(name.clone()));
         self.uncompiled_views.insert(
             name.clone(),
             UncompiledView {
@@ -726,19 +786,19 @@ impl SqlIncorporator {
 
     /// Return a set of all relations (tables or views) which are known to exist in the upstream
     /// database that we are replicating from, but are not being replicated to ReadySet
-    pub(crate) fn non_replicated_relations(&self) -> &HashSet<Relation> {
+    pub(crate) fn non_replicated_relations(&self) -> &HashSet<NonReplicatedRelation> {
         &self.mir_converter.non_replicated_relations
     }
 
     /// Record that a relation (a table or view) with the given `name` exists in the upstream
     /// database, but is not being replicated
-    pub(crate) fn add_non_replicated_relation(&mut self, name: Relation) {
+    pub(crate) fn add_non_replicated_relation(&mut self, name: NonReplicatedRelation) {
         self.mir_converter.non_replicated_relations.insert(name);
     }
 
     /// Remove the given `name` from the set of tables that are known to exist in the upstream
     /// database, but are not being replicated. Returns whether the table was in the set.
-    pub(crate) fn remove_non_replicated_relation(&mut self, name: &Relation) -> bool {
+    pub(crate) fn remove_non_replicated_relation(&mut self, name: &NonReplicatedRelation) -> bool {
         self.mir_converter.non_replicated_relations.remove(name)
     }
 

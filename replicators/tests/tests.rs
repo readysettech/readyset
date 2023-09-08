@@ -8,7 +8,7 @@ use database_utils::UpstreamConfig as Config;
 use itertools::Itertools;
 use mysql_async::prelude::Queryable;
 use mysql_time::MySqlTime;
-use nom_sql::{parse_select_statement, Relation};
+use nom_sql::{parse_select_statement, NonReplicatedRelation, Relation};
 use rand::distributions::Alphanumeric;
 use rand::{Rng, SeedableRng};
 use readyset_client::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
@@ -1204,10 +1204,11 @@ async fn replication_filter_inner(url: &str) -> ReadySetResult<()> {
     ctx.assert_table_exists("noria2", "t4").await;
 
     let non_replicated_rels = ctx.noria.non_replicated_relations().await.unwrap();
-    assert!(non_replicated_rels.contains(&Relation {
+    let relation = Relation {
         schema: Some("public".into()),
-        name: "t2".into()
-    }));
+        name: "t2".into(),
+    };
+    assert!(non_replicated_rels.contains(&NonReplicatedRelation::new(relation.clone()),));
 
     client
         .query(
@@ -1224,10 +1225,8 @@ async fn replication_filter_inner(url: &str) -> ReadySetResult<()> {
 
     eventually! {
         let non_replicated_rels = ctx.noria.non_replicated_relations().await.unwrap();
-        non_replicated_rels.contains(&Relation {
-            schema: Some("noria2".into()),
-            name: "t5".into()
-        })
+        let relation =  Relation{schema: Some("noria2".into()),name: "t5".into()};
+        non_replicated_rels.contains(&NonReplicatedRelation::new( relation))
     }
 
     ctx.noria
@@ -1881,11 +1880,12 @@ async fn applies_replication_table_updates_on_restart(url: &str) {
         .unwrap();
 
     let non_replicated_rels = ctx.noria.non_replicated_relations().await.unwrap();
+    let relation = Relation {
+        schema: Some("public".into()),
+        name: "t2".into(),
+    };
     assert!(
-        non_replicated_rels.contains(&Relation {
-            schema: Some("public".into()),
-            name: "t2".into()
-        }),
+        non_replicated_rels.contains(&NonReplicatedRelation::new(relation)),
         "non_replicated_rels = {non_replicated_rels:?}"
     );
 
@@ -1910,11 +1910,12 @@ async fn applies_replication_table_updates_on_restart(url: &str) {
         .unwrap();
 
     let non_replicated_rels = ctx.noria.non_replicated_relations().await.unwrap();
+    let relation = Relation {
+        schema: Some("public".into()),
+        name: "t2".into(),
+    };
     assert!(
-        !non_replicated_rels.contains(&Relation {
-            schema: Some("public".into()),
-            name: "t2".into()
-        }),
+        !non_replicated_rels.contains(&NonReplicatedRelation::new(relation)),
         "non_replicated_rels = {non_replicated_rels:?}"
     );
 
@@ -2591,23 +2592,22 @@ async fn pgsql_unsupported() {
         .unwrap();
 
     let non_replicated_rels = ctx.noria.non_replicated_relations().await.unwrap();
-    assert!(
-        non_replicated_rels.contains(&Relation {
-            schema: Some("public".into()),
-            name: "t".into()
-        }),
-        "non_replicated_rels = {non_replicated_rels:?}"
-    );
+    let relation = Relation {
+        schema: Some("public".into()),
+        name: "t".into(),
+    };
+    assert!(non_replicated_rels.contains(&NonReplicatedRelation::new(relation)));
 
     // Replicate a new unsupported table
     client.query("CREATE TABLE t2 (x x);").await.unwrap();
 
     eventually! {
         let non_replicated_rels = ctx.noria.non_replicated_relations().await.unwrap();
-        non_replicated_rels.contains(&Relation {
-            schema: Some("public".into()),
-            name: "t2".into()
-        })
+        let relation = Relation{schema: Some("public".into()),
+            name: "t2".into() };
+        non_replicated_rels.contains(&NonReplicatedRelation::new(relation)
+
+        )
     }
 
     shutdown_tx.shutdown().await;
@@ -2724,15 +2724,17 @@ async fn pgsql_dont_replicate_partitioned_table() {
         .unwrap();
 
     ctx.noria.table("t").await.unwrap_err();
+    let relation = Relation {
+        schema: Some("public".into()),
+        name: "t".into(),
+    };
+
     assert!(ctx
         .noria
         .non_replicated_relations()
         .await
         .unwrap()
-        .contains(&Relation {
-            schema: Some("public".into()),
-            name: "t".into()
-        }));
+        .contains(&NonReplicatedRelation::new(relation.clone())));
 
     ctx.noria
         .table(Relation {
@@ -2774,17 +2776,17 @@ async fn pgsql_dont_replicate_partitioned_table() {
         .query("CREATE TABLE t2 (key int, val int) PARTITION BY RANGE (key)")
         .await
         .unwrap();
-
+    let relation = Relation {
+        schema: Some("public".into()),
+        name: "t2".into(),
+    };
     eventually! {
         ctx
             .noria
             .non_replicated_relations()
             .await
             .unwrap()
-            .contains(&Relation {
-                schema: Some("public".into()),
-                name: "t2".into()
-            })
+            .contains(&NonReplicatedRelation::new(relation.clone()))
     }
 
     shutdown_tx.shutdown().await;

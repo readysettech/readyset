@@ -40,8 +40,8 @@
 
 use nom_sql::{
     parse_query, AlterTableStatement, Column, ColumnConstraint, ColumnSpecification,
-    CreateTableBody, CreateTableStatement, CreateViewStatement, Dialect, Relation, SqlQuery,
-    SqlType, TableKey,
+    CreateTableBody, CreateTableStatement, CreateViewStatement, Dialect, NonReplicatedRelation,
+    NotReplicatedReason, Relation, SqlQuery, SqlType, TableKey,
 };
 use pgsql::tls::MakeTlsConnect;
 use readyset_client::recipe::changelist::{AlterTypeChange, Change, PostgresTableMetadata};
@@ -259,13 +259,19 @@ impl DdlEvent {
                         },
                         pg_meta: Some(PostgresTableMetadata { oid, column_oids }),
                     },
-                    Err(_) => Change::AddNonReplicatedRelation(table),
+                    Err(desc) => Change::AddNonReplicatedRelation(NonReplicatedRelation {
+                        name: table,
+                        reason: NotReplicatedReason::from_string(&desc),
+                    }),
                 }
             }
             DdlEventData::AddNonReplicatedTable { name } => {
-                Change::AddNonReplicatedRelation(Relation {
-                    schema: Some(self.schema.into()),
-                    name: name.into(),
+                Change::AddNonReplicatedRelation(NonReplicatedRelation {
+                    name: Relation {
+                        schema: Some(self.schema.into()),
+                        name: name.into(),
+                    },
+                    reason: NotReplicatedReason::Partitioned,
                 })
             }
             DdlEventData::AlterTable { name, statement } => {

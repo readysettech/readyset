@@ -1162,10 +1162,13 @@ async fn handle_controller_request(
 #[cfg(test)]
 mod tests {
 
-    use std::collections::{BTreeMap, HashSet};
+    use std::collections::BTreeMap;
 
     use dataflow::DomainIndex;
-    use nom_sql::{parse_create_table, parse_select_statement, Dialect, Relation};
+    use nom_sql::{
+        parse_create_table, parse_select_statement, Dialect, NonReplicatedRelation,
+        NotReplicatedReason, Relation,
+    };
     use readyset_client::recipe::changelist::{Change, ChangeList};
     use readyset_client::{KeyCount, TableReplicationStatus, TableStatus, ViewCreateRequest};
     use readyset_data::Dialect as DataDialect;
@@ -1446,13 +1449,19 @@ mod tests {
         noria
             .extend_recipe(ChangeList::from_changes(
                 vec![
-                    Change::AddNonReplicatedRelation(Relation {
-                        schema: Some("s1".into()),
-                        name: "t".into(),
+                    Change::AddNonReplicatedRelation(NonReplicatedRelation {
+                        name: Relation {
+                            schema: Some("s1".into()),
+                            name: "t".into(),
+                        },
+                        reason: NotReplicatedReason::Default,
                     }),
-                    Change::AddNonReplicatedRelation(Relation {
-                        schema: Some("s2".into()),
-                        name: "t".into(),
+                    Change::AddNonReplicatedRelation(NonReplicatedRelation {
+                        name: Relation {
+                            schema: Some("s2".into()),
+                            name: "t".into(),
+                        },
+                        reason: NotReplicatedReason::Default,
                     }),
                 ],
                 DataDialect::DEFAULT_MYSQL,
@@ -1461,19 +1470,26 @@ mod tests {
             .unwrap();
 
         let rels = noria.non_replicated_relations().await.unwrap();
-        assert_eq!(
-            rels,
-            HashSet::from([
-                Relation {
+
+        let expected = vec![
+            (NonReplicatedRelation {
+                name: Relation {
                     schema: Some("s1".into()),
                     name: "t".into(),
                 },
-                Relation {
+                reason: NotReplicatedReason::Default,
+            }),
+            (NonReplicatedRelation {
+                name: Relation {
                     schema: Some("s2".into()),
                     name: "t".into(),
                 },
-            ])
-        );
+                reason: NotReplicatedReason::Default,
+            }),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(rels, expected);
 
         shutdown_tx.shutdown().await;
     }
@@ -1484,9 +1500,12 @@ mod tests {
         noria
             .extend_recipe(ChangeList::from_changes(
                 vec![
-                    Change::AddNonReplicatedRelation(Relation {
-                        schema: Some("s1".into()),
-                        name: "t".into(),
+                    Change::AddNonReplicatedRelation(NonReplicatedRelation {
+                        name: Relation {
+                            schema: Some("s1".into()),
+                            name: "t".into(),
+                        },
+                        reason: NotReplicatedReason::Configuration,
                     }),
                     Change::CreateTable {
                         statement: parse_create_table(
@@ -1546,7 +1565,9 @@ mod tests {
                         name: "t".into(),
                     },
                     TableStatus {
-                        replication_status: TableReplicationStatus::NotReplicated
+                        replication_status: TableReplicationStatus::NotReplicated(
+                            NotReplicatedReason::Configuration
+                        )
                     }
                 ),
                 (

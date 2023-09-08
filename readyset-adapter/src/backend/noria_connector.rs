@@ -1017,7 +1017,7 @@ impl NoriaConnector {
 
         let schema = SelectSchema {
             schema: Cow::Owned(
-                ["table", "status"]
+                ["table", "status", "description"]
                     .iter()
                     .map(|name| ColumnSchema {
                         column: nom_sql::Column {
@@ -1029,15 +1029,32 @@ impl NoriaConnector {
                     })
                     .collect(),
             ),
-            columns: Cow::Owned(vec!["table".into(), "replication status".into()]),
+            columns: Cow::Owned(vec![
+                "table".into(),
+                "replication status".into(),
+                "replication status description".into(),
+            ]),
         };
-
         let data = statuses
             .into_iter()
             .map(|(tbl, status)| {
+                let replication_status_str = status.replication_status.to_string();
+                let replication_split = replication_status_str
+                    .splitn(2, ": ")
+                    .collect::<Vec<&str>>();
+                let (replication_status, description) =
+                    if replication_split[0].starts_with("Not Replicated") {
+                        (
+                            replication_split[0].to_string(),
+                            replication_split.get(1).unwrap_or(&"").to_string(),
+                        )
+                    } else {
+                        (status.replication_status.to_string(), "".to_string())
+                    };
                 vec![
                     tbl.display(self.parse_dialect).to_string().into(),
-                    status.replication_status.to_string().into(),
+                    replication_status.into(),
+                    description.into(),
                 ]
             })
             .collect::<Vec<_>>();

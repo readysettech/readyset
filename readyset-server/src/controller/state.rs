@@ -31,7 +31,7 @@ use futures::stream::{self, FuturesUnordered, StreamExt, TryStreamExt};
 use futures::{FutureExt, TryFutureExt, TryStream};
 use lazy_static::lazy_static;
 use metrics::{gauge, histogram};
-use nom_sql::{CreateCacheStatement, Relation, SqlIdentifier, SqlQuery};
+use nom_sql::{CreateCacheStatement, NonReplicatedRelation, Relation, SqlIdentifier, SqlQuery};
 use petgraph::visit::Bfs;
 use rand::Rng;
 use readyset_client::builders::{
@@ -234,7 +234,7 @@ impl DfState {
     /// recorded via [`Change::AddNonReplicatedRelation`]).
     ///
     /// [`Change::AddNonReplicatedRelation`]: readyset_client::recipe::changelist::Change::AddNonReplicatedRelation
-    pub(super) fn non_replicated_relations(&self) -> &HashSet<Relation> {
+    pub(super) fn non_replicated_relations(&self) -> &HashSet<NonReplicatedRelation> {
         self.recipe.sql_inc().non_replicated_relations()
     }
 
@@ -919,9 +919,9 @@ impl DfState {
             })
             .chain(non_replicated_relations.iter().cloned().map(|tbl| {
                 (
-                    tbl,
+                    tbl.name,
                     TableStatus {
-                        replication_status: TableReplicationStatus::NotReplicated,
+                        replication_status: TableReplicationStatus::NotReplicated(tbl.reason),
                     },
                 )
             }))

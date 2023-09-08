@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::convert::{TryFrom, TryInto};
 use std::error::Error;
 use std::fmt::{self, Display};
@@ -10,7 +11,8 @@ use itertools::Itertools;
 use metrics::register_gauge;
 use nom_sql::{
     parse_key_specification_string, parse_sql_type, Column, ColumnConstraint, ColumnSpecification,
-    CreateTableBody, CreateTableStatement, Dialect, Relation, SqlIdentifier, TableKey,
+    CreateTableBody, CreateTableStatement, Dialect, NonReplicatedRelation, NotReplicatedReason,
+    Relation, SqlIdentifier, TableKey,
 };
 use postgres_types::{accepts, FromSql, Kind, Type};
 use readyset_client::metrics::recorded;
@@ -706,7 +708,13 @@ impl<'a> PostgresReplicator<'a> {
 
         // We don't support partitioned tables (only the partitions themselves) so mark those as
         // non-replicated as well
-        non_replicated.extend(self.get_table_list(TableKind::PartitionedTable).await?);
+        let partitioned_tables = self.get_table_list(TableKind::PartitionedTable).await?;
+        let partitioned_identifiers: HashSet<_> = partitioned_tables
+            .iter()
+            .map(|te| format!("{}.{}", te.schema, te.name))
+            .collect();
+
+        non_replicated.extend(partitioned_tables);
 
         // We don't filter the view list by schemas since a view could be in schema 1 (that may not
         // be replicated), but refer to only tables in schema 2 that are all replicated. If we try
@@ -725,9 +733,19 @@ impl<'a> PostgresReplicator<'a> {
                 non_replicated
                     .into_iter()
                     .map(|te| {
-                        Change::AddNonReplicatedRelation(Relation {
-                            schema: Some(te.schema.into()),
-                            name: te.name.into(),
+                        let te_identifier = format!("{}.{}", te.schema, te.name);
+                        let not_replicated_reason: NotReplicatedReason =
+                            if partitioned_identifiers.contains(&te_identifier) {
+                                NotReplicatedReason::Partitioned
+                            } else {
+                                NotReplicatedReason::Configuration
+                            };
+                        Change::AddNonReplicatedRelation(NonReplicatedRelation {
+                            name: Relation {
+                                schema: Some(te.schema.into()),
+                                name: te.name.into(),
+                            },
+                            reason: not_replicated_reason,
                         })
                     })
                     .collect::<Vec<_>>(),
@@ -815,9 +833,12 @@ impl<'a> PostgresReplicator<'a> {
                     warn!(%error, table=%table_name, "Error extending CREATE TABLE, table will not be used");
                     self.noria
                         .extend_recipe_no_leader_ready(ChangeList::from_change(
-                            Change::AddNonReplicatedRelation(Relation {
-                                schema: Some(table.schema.into()),
-                                name: table.name.clone().into(),
+                            Change::AddNonReplicatedRelation(NonReplicatedRelation {
+                                name: Relation {
+                                    schema: Some(table.schema.into()),
+                                    name: table.name.clone().into(),
+                                },
+                                reason: NotReplicatedReason::from_string(&error.to_string()),
                             }),
                             DataDialect::DEFAULT_POSTGRESQL,
                         ))
@@ -862,9 +883,12 @@ impl<'a> PostgresReplicator<'a> {
 
                     self.noria
                         .extend_recipe_no_leader_ready(ChangeList::from_change(
-                            Change::AddNonReplicatedRelation(Relation {
-                                schema: Some(view_schema.into()),
-                                name: view_name.into(),
+                            Change::AddNonReplicatedRelation(NonReplicatedRelation {
+                                name: Relation {
+                                    schema: Some(view_schema.into()),
+                                    name: view_name.into(),
+                                },
+                                reason: NotReplicatedReason::from_string(&error.to_string()),
                             }),
                             DataDialect::DEFAULT_POSTGRESQL,
                         ))
@@ -942,7 +966,13 @@ impl<'a> PostgresReplicator<'a> {
                                         name: table.clone(),
                                         if_exists: false,
                                     },
-                                    Change::AddNonReplicatedRelation(table.clone()),
+                                    Change::AddNonReplicatedRelation(NonReplicatedRelation {
+                                        name: table.clone(),
+                                        reason: NotReplicatedReason::from_string(&format!(
+                                            "{:?}",
+                                            e
+                                        )),
+                                    }),
                                 ],
                                 DataDialect::DEFAULT_POSTGRESQL,
                             ))
