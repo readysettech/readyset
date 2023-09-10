@@ -533,6 +533,7 @@ impl NoriaAdapter {
                 tls_connector.clone(),
                 &repl_slot_name,
                 enable_statement_logging,
+                noria.clone(),
             )
             .await?,
         );

@@ -796,9 +796,14 @@ impl DfState {
                         #[allow(clippy::indexing_slicing)] // internal invariant
                         let table_name = self.ingredients[*ni].name();
                         match offset {
-                            ReplicationOffsetState::Initialized(offset) => {
+                            ReplicationOffsetState::Initialized {
+                                offset,
+                                persisted_up_to,
+                            } => {
                                 // TODO min of all shards
                                 acc.tables.insert(table_name.clone(), offset);
+                                acc.tables_persisted_up_to
+                                    .insert(table_name.clone(), persisted_up_to);
                             }
                             ReplicationOffsetState::Pending => {
                                 internal!(

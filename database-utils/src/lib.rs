@@ -123,6 +123,10 @@ pub struct UpstreamConfig {
     #[clap(long, env = "IGNORE_ULIMIT_CHECK")]
     #[serde(default)]
     pub ignore_ulimit_check: bool,
+
+    /// Sets the time (in seconds) between status updates sent to the upstream database
+    #[clap(long, default_value = "10", hide = true)]
+    pub status_update_interval_secs: u64,
 }
 
 impl UpstreamConfig {
@@ -178,6 +182,7 @@ impl Default for UpstreamConfig {
             ssl_root_cert: None,
             replication_pool_size: 50,
             ignore_ulimit_check: false,
+            status_update_interval_secs: 10,
         }
     }
 }

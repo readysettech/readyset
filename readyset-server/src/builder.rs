@@ -102,6 +102,10 @@ impl Builder {
             Some(deployment.into()),
             opts.persistence_threads,
             Some(deployment_dir),
+            Duration::from_secs(
+                opts.wal_flush_interval
+                    .unwrap_or(builder.config.replicator_config.status_update_interval_secs),
+            ),
         );
         builder.set_persistence(persistence_params);
 

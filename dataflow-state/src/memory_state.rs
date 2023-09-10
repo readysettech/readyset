@@ -396,6 +396,10 @@ impl State for MemoryState {
         self.replication_offset.as_ref()
     }
 
+    fn persisted_up_to(&self) -> Option<ReplicationOffset> {
+        None
+    }
+
     fn add_weak_key(&mut self, index: Index) {
         let mut weak_index = KeyedState::from(&index);
 

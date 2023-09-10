@@ -19,7 +19,10 @@ use serde::{Deserialize, Serialize};
 /// offset assigned), or if it is still pending initialization.
 #[derive(Serialize, Deserialize)]
 pub enum ReplicationOffsetState {
-    Initialized(Option<ReplicationOffset>),
+    Initialized {
+        offset: Option<ReplicationOffset>,
+        persisted_up_to: Option<ReplicationOffset>,
+    },
     Pending,
 }
 
@@ -152,6 +155,8 @@ pub struct ReplicationOffsets {
     ///
     /// A table with [`None`] as its replication offset has not yet been snapshotted successfully
     pub tables: HashMap<Relation, Option<ReplicationOffset>>,
+
+    pub tables_persisted_up_to: HashMap<Relation, Option<ReplicationOffset>>,
 }
 
 impl ReplicationOffsets {
@@ -161,6 +166,7 @@ impl ReplicationOffsets {
         Self {
             schema,
             tables: HashMap::new(),
+            tables_persisted_up_to: HashMap::new(),
         }
     }
 
@@ -285,6 +291,20 @@ impl ReplicationOffsets {
 
         Ok(())
     }
+
+    pub fn min_persisted_up_to(&self) -> ReadySetResult<Option<&ReplicationOffset>> {
+        let mut min = None;
+
+        for offset in self.tables_persisted_up_to.values() {
+            match (min, offset) {
+                (None, Some(_)) => min = offset.as_ref(),
+                (Some(m), Some(o)) if o.try_partial_cmp(m)?.is_gt() => min = offset.as_ref(),
+                _ => (),
+            }
+        }
+
+        Ok(min)
+    }
 }
 
 #[cfg(test)]
@@ -320,6 +340,7 @@ mod tests {
                         ),
                     ),
                 ]),
+                tables_persisted_up_to: HashMap::from([("t1".into(), None), ("t2".into(), None)]),
             };
             let res: MySqlPosition = offsets.max_offset().unwrap().unwrap().try_into().unwrap();
             assert_eq!(res.binlog_file_name().to_string(), "test.00001");
@@ -352,6 +373,7 @@ mod tests {
                         ),
                     ),
                 ]),
+                tables_persisted_up_to: HashMap::from([("t1".into(), None), ("t2".into(), None)]),
             };
             let res = offsets.max_offset();
             res.unwrap_err();
@@ -379,6 +401,7 @@ mod tests {
                         ),
                     ),
                 ]),
+                tables_persisted_up_to: HashMap::from([("t1".into(), None), ("t2".into(), None)]),
             };
             let res = offsets.max_offset().unwrap();
             assert!(res.is_none());
@@ -403,6 +426,7 @@ mod tests {
                     ),
                     ("t2".into(), None),
                 ]),
+                tables_persisted_up_to: HashMap::from([("t1".into(), None), ("t2".into(), None)]),
             };
             let res = offsets.max_offset().unwrap();
             assert!(res.is_none());
