@@ -237,6 +237,7 @@ impl UpstreamDatabase for MySqlUpstream {
     type ExecMeta<'a> = ();
     type Error = Error;
     const DEFAULT_DB_VERSION: &'static str = "8.0.26-readyset\0";
+    const SQL_DIALECT: nom_sql::Dialect = nom_sql::Dialect::MySQL;
 
     async fn connect(upstream_config: UpstreamConfig) -> Result<Self, Error> {
         let (conn, prepared_statements, upstream_config) =
@@ -246,10 +247,6 @@ impl UpstreamDatabase for MySqlUpstream {
             prepared_statements,
             upstream_config,
         })
-    }
-
-    fn sql_dialect() -> nom_sql::Dialect {
-        nom_sql::Dialect::MySQL
     }
 
     fn url(&self) -> &str {

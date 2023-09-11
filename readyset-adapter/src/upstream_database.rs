@@ -89,6 +89,9 @@ pub trait UpstreamDatabase: Sized + Send {
     /// is only used for tests
     const DEFAULT_DB_VERSION: &'static str;
 
+    /// Returns the SQL dialect to use for formatting queries
+    const SQL_DIALECT: nom_sql::Dialect;
+
     /// Create a new connection to this upstream database
     ///
     /// Connect will return an error if the upstream database is running an unsupported version.
@@ -99,9 +102,6 @@ pub trait UpstreamDatabase: Sized + Send {
 
     /// Test the connection with the upstream database
     async fn is_connected(&mut self) -> bool;
-
-    /// Returns the SQL dialect for which to format queries.
-    fn sql_dialect() -> nom_sql::Dialect;
 
     /// Return a reference to the URL used when originally constructing this database via
     /// [`connect`]
