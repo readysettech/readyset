@@ -7,6 +7,15 @@ use metrics_util::Summary;
 use quanta::Instant;
 use readyset_client_metrics::recorded::QUERY_LOG_EXECUTION_TIME;
 
+#[derive(Debug, Default, Clone)]
+pub struct MetricsSummary {
+    // i64 because Postgres doesn't have unsigned ints
+    pub sample_count: i64,
+    pub p50_us: f64,
+    pub p90_us: f64,
+    pub p99_us: f64,
+}
+
 #[derive(Clone)]
 pub struct MetricsHandle {
     inner: PrometheusHandle,
@@ -77,11 +86,12 @@ impl MetricsHandle {
         self.snapshot = histograms;
     }
 
-    /// Return the 0.5, 0.9 and 0.99 quantiles for the query specified by `query_id`.
+    /// Return the count (number of samples), 0.5, 0.9 and 0.99 quantiles for the query specified by
+    /// `query_id`.
     ///
     /// NOTE: Quantiles are queried from the last snapshot obtained by calling
     /// [`Self::snapshot_histograms`]
-    pub fn quantiles(&self, query_id: String) -> Option<(f64, f64, f64)> {
+    pub fn metrics_summary(&self, query_id: String) -> Option<MetricsSummary> {
         let label = format!(
             "{}=\"{}\"",
             sanitize_label_key("query_id"),
@@ -89,10 +99,11 @@ impl MetricsHandle {
         );
         let summary = self.snapshot.as_ref()?.get(&label)?;
 
-        Some((
-            summary.quantile(0.5).unwrap_or_default(),
-            summary.quantile(0.90).unwrap_or_default(),
-            summary.quantile(0.99).unwrap_or_default(),
-        ))
+        Some(MetricsSummary {
+            sample_count: summary.count().try_into().unwrap_or_default(),
+            p50_us: summary.quantile(0.5).unwrap_or_default(),
+            p90_us: summary.quantile(0.90).unwrap_or_default(),
+            p99_us: summary.quantile(0.99).unwrap_or_default(),
+        })
     }
 }
