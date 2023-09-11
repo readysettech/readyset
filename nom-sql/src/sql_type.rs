@@ -8,10 +8,10 @@ use nom::bytes::complete::{tag, tag_no_case};
 use nom::character::complete::digit1;
 #[cfg(feature = "failure_injection")]
 use nom::combinator::fail;
-use nom::combinator::{map, map_parser, opt, value};
+use nom::combinator::{map, map_parser, opt, rest, value};
 use nom::error::{ErrorKind, ParseError};
 use nom::multi::{fold_many0, separated_list0};
-use nom::sequence::{delimited, preceded, terminated, tuple};
+use nom::sequence::{delimited, pair, preceded, terminated, tuple};
 use nom_locate::LocatedSpan;
 use proptest::arbitrary::Arbitrary;
 use proptest::prelude::any_with;
@@ -544,6 +544,11 @@ fn delim_u16(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], u16> {
     map_parser(delim_digit, digit_as_u16)(i)
 }
 
+fn interval_type(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlType> {
+    map(pair(tag_no_case("interval"), rest), |(_, suffix)| {
+        SqlType::Other("interval".into())
+    })(i.into())
+}
 fn int_type<'a, F, G>(
     tag: &str,
     mk_unsigned: F,
@@ -618,6 +623,7 @@ fn type_identifier_part1(
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlType> {
     move |i| {
         alt((
+            interval_type,
             value(SqlType::Int2, tag_no_case("int2")),
             value(SqlType::Int4, tag_no_case("int4")),
             value(SqlType::Int8, tag_no_case("int8")),
@@ -1207,6 +1213,14 @@ mod tests {
         fn int_array() {
             let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"int[]");
             assert_eq!(res, SqlType::Array(Box::new(SqlType::Int(None))));
+        }
+
+        #[test]
+        fn interval() {
+            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"interval");
+            assert_eq!(res, SqlType::Other("interval".into()));
+            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"interval year to month");
+            assert_eq!(res, SqlType::Other("interval".into()));
         }
 
         #[test]
