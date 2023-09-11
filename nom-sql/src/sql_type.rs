@@ -4,7 +4,7 @@ use std::{fmt, str};
 
 use failpoint_macros::set_failpoint;
 use nom::branch::alt;
-use nom::bytes::complete::{tag, tag_no_case};
+use nom::bytes::complete::{tag, tag_no_case, take_till};
 use nom::character::complete::digit1;
 #[cfg(feature = "failure_injection")]
 use nom::combinator::fail;
@@ -544,6 +544,18 @@ fn delim_u16(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], u16> {
     map_parser(delim_digit, digit_as_u16)(i)
 }
 
+fn interval_type(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlType> {
+    let res = preceded(
+        tag_no_case("interval"),
+        take_till(|c| c == b',' || c == b'F' || c == b'f'),
+    )(i);
+
+    match res {
+        Ok((i, _)) => Ok((i, SqlType::Other("interval".into()))),
+        Err(err) => Err(err),
+    }
+}
+
 fn int_type<'a, F, G>(
     tag: &str,
     mk_unsigned: F,
@@ -618,6 +630,7 @@ fn type_identifier_part1(
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlType> {
     move |i| {
         alt((
+            interval_type,
             value(SqlType::Int2, tag_no_case("int2")),
             value(SqlType::Int4, tag_no_case("int4")),
             value(SqlType::Int8, tag_no_case("int8")),
@@ -1207,6 +1220,17 @@ mod tests {
         fn int_array() {
             let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"int[]");
             assert_eq!(res, SqlType::Array(Box::new(SqlType::Int(None))));
+        }
+
+        #[test]
+        fn interval() {
+            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"interval");
+            assert_eq!(res, SqlType::Other("interval".into()));
+            let res = test_parse!(
+                type_identifier(Dialect::PostgreSQL),
+                b"interval year to month"
+            );
+            assert_eq!(res, SqlType::Other("interval".into()));
         }
 
         #[test]
