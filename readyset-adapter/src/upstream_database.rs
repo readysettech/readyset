@@ -7,6 +7,7 @@ use nom_sql::{SqlIdentifier, StartTransactionStatement};
 use readyset_client_metrics::QueryDestination;
 use readyset_data::DfValue;
 use readyset_errors::ReadySetError;
+use tracing::debug;
 
 /// Information about a statement that has been prepared in an [`UpstreamDatabase`]
 pub struct UpstreamPrepare<DB: UpstreamDatabase> {
@@ -76,7 +77,7 @@ pub trait UpstreamDatabase: Sized + Send {
     /// Metadata passed to [`execute`] by the protocol shim
     ///
     /// [`execute`](UpstreamDatabase::execute)
-    type ExecMeta<'a>;
+    type ExecMeta<'a>: Send;
 
     /// Errors that can be returned from operations on this database
     ///
@@ -176,4 +177,139 @@ pub trait UpstreamDatabase: Sized + Send {
     /// supports a multi-element schema search path, the concept of "currently connected database"
     /// in MySQL can be thought of as a schema search path that only has one element
     async fn schema_search_path(&mut self) -> Result<Vec<SqlIdentifier>, Self::Error>;
+}
+
+pub struct LazyUpstream<U> {
+    upstream: Option<U>,
+    upstream_config: UpstreamConfig,
+}
+
+impl<U> LazyUpstream<U>
+where
+    U: UpstreamDatabase,
+{
+    async fn connect(&mut self) -> Result<(), U::Error> {
+        debug!("LazyUpstream connecting to upstream");
+        self.upstream = Some(U::connect(self.upstream_config.clone()).await?);
+        Ok(())
+    }
+
+    async fn upstream(&mut self) -> Result<&mut U, U::Error> {
+        if self.upstream.is_none() {
+            self.connect().await?;
+        }
+
+        Ok(self.upstream.as_mut().unwrap())
+    }
+}
+
+#[async_trait]
+impl<U> UpstreamDatabase for LazyUpstream<U>
+where
+    U: UpstreamDatabase,
+{
+    type QueryResult<'a> = U::QueryResult<'a> where U: 'a;
+    type StatementMeta = U::StatementMeta;
+    type PrepareData<'a> = U::PrepareData<'a>;
+    type ExecMeta<'a> = U::ExecMeta<'a>;
+    type Error = U::Error;
+
+    const DEFAULT_DB_VERSION: &'static str = U::DEFAULT_DB_VERSION;
+    const SQL_DIALECT: nom_sql::Dialect = U::SQL_DIALECT;
+
+    async fn connect(upstream_config: UpstreamConfig) -> Result<Self, Self::Error> {
+        Ok(Self {
+            upstream: None,
+            upstream_config,
+        })
+    }
+
+    async fn reset(&mut self) -> Result<(), Self::Error> {
+        if let Some(u) = &mut self.upstream {
+            u.reset().await?;
+        }
+
+        Ok(())
+    }
+
+    async fn is_connected(&mut self) -> bool {
+        match &mut self.upstream {
+            Some(u) => u.is_connected().await,
+            None => false,
+        }
+    }
+
+    fn database(&self) -> Option<&str> {
+        if let Some(u) = &self.upstream {
+            u.database()
+        } else {
+            None
+        }
+    }
+
+    fn version(&self) -> String {
+        match &self.upstream {
+            Some(u) => u.version(),
+            None => "ReadySet".into(),
+        }
+    }
+
+    async fn prepare<'a, 'b, S>(
+        &'a mut self,
+        query: S,
+        data: Self::PrepareData<'b>,
+    ) -> Result<UpstreamPrepare<Self>, Self::Error>
+    where
+        S: AsRef<str> + Send + Sync + 'a,
+    {
+        let UpstreamPrepare { statement_id, meta } =
+            self.upstream().await?.prepare(query, data).await?;
+        Ok(UpstreamPrepare { statement_id, meta })
+    }
+
+    async fn execute<'a>(
+        &'a mut self,
+        statement_id: u32,
+        params: &[DfValue],
+        exec_meta: Self::ExecMeta<'_>,
+    ) -> Result<Self::QueryResult<'a>, Self::Error> {
+        self.upstream()
+            .await?
+            .execute(statement_id, params, exec_meta)
+            .await
+    }
+
+    async fn query<'a>(&'a mut self, query: &'a str) -> Result<Self::QueryResult<'a>, Self::Error> {
+        self.upstream().await?.query(query).await
+    }
+
+    // TODO: newtype RYW ticket, not just String
+    async fn handle_ryw_write<'a, S>(
+        &'a mut self,
+        query: S,
+    ) -> Result<(Self::QueryResult<'a>, String), Self::Error>
+    where
+        S: AsRef<str> + Send + Sync + 'a,
+    {
+        self.upstream().await?.handle_ryw_write(query).await
+    }
+
+    async fn start_tx<'a>(
+        &'a mut self,
+        stmt: &StartTransactionStatement,
+    ) -> Result<Self::QueryResult<'a>, Self::Error> {
+        self.upstream().await?.start_tx(stmt).await
+    }
+
+    async fn commit<'a>(&'a mut self) -> Result<Self::QueryResult<'a>, Self::Error> {
+        self.upstream().await?.commit().await
+    }
+
+    async fn rollback<'a>(&'a mut self) -> Result<Self::QueryResult<'a>, Self::Error> {
+        self.upstream().await?.rollback().await
+    }
+
+    async fn schema_search_path(&mut self) -> Result<Vec<SqlIdentifier>, Self::Error> {
+        self.upstream().await?.schema_search_path().await
+    }
 }
