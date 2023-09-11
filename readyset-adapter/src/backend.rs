@@ -103,7 +103,7 @@ use tracing::{error, instrument, trace, warn};
 use vec1::Vec1;
 
 use crate::backend::noria_connector::ExecuteSelectContext;
-use crate::metrics_handle::MetricsHandle;
+use crate::metrics_handle::{MetricsHandle, MetricsSummary};
 use crate::query_handler::SetBehavior;
 use crate::query_status_cache::QueryStatusCache;
 pub use crate::upstream_database::UpstreamPrepare;
@@ -1750,6 +1750,7 @@ where
                 "query id",
                 "proxied query",
                 "readyset supported",
+                "count",
                 "p50 (ms)",
                 "p90 (ms)",
                 "p99 (ms)"
@@ -1780,11 +1781,16 @@ where
 
                 // Append metrics if we have them
                 if let Some(handle) = self.metrics_handle.as_ref() {
-                    let (p50, p90, p99) =
-                        handle.quantiles(id.to_string()).unwrap_or((0.0, 0.0, 0.0));
-                    row.push(DfValue::from(format!("{:.3}", 1000.0 * p50)));
-                    row.push(DfValue::from(format!("{:.3}", 1000.0 * p90)));
-                    row.push(DfValue::from(format!("{:.3}", 1000.0 * p99)));
+                    let MetricsSummary {
+                        sample_count,
+                        p50_us,
+                        p90_us,
+                        p99_us,
+                    } = handle.metrics_summary(id.to_string()).unwrap_or_default();
+                    row.push(DfValue::from(format!("{sample_count}")));
+                    row.push(DfValue::from(format!("{:.3}", 1000.0 * p50_us)));
+                    row.push(DfValue::from(format!("{:.3}", 1000.0 * p90_us)));
+                    row.push(DfValue::from(format!("{:.3}", 1000.0 * p99_us)));
                 }
 
                 row
@@ -1827,6 +1833,7 @@ where
                 "cache name",
                 "query text",
                 "fallback behavior",
+                "count",
                 "p50 (ms)",
                 "p90 (ms)",
                 "p99 (ms)"
@@ -1856,10 +1863,16 @@ where
 
             // Append metrics if we have them
             if let Some(handle) = self.metrics_handle.as_ref() {
-                let (p50, p90, p99) = handle.quantiles(id.to_string()).unwrap_or((0.0, 0.0, 0.0));
-                row.push(DfValue::from(format!("{:.3}", 1000.0 * p50)));
-                row.push(DfValue::from(format!("{:.3}", 1000.0 * p90)));
-                row.push(DfValue::from(format!("{:.3}", 1000.0 * p99)));
+                let MetricsSummary {
+                    sample_count,
+                    p50_us,
+                    p90_us,
+                    p99_us,
+                } = handle.metrics_summary(id.to_string()).unwrap_or_default();
+                row.push(DfValue::from(format!("{sample_count}")));
+                row.push(DfValue::from(format!("{:.3}", 1000.0 * p50_us)));
+                row.push(DfValue::from(format!("{:.3}", 1000.0 * p90_us)));
+                row.push(DfValue::from(format!("{:.3}", 1000.0 * p99_us)));
             }
 
             results.push(row);
