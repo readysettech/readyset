@@ -249,10 +249,6 @@ impl UpstreamDatabase for MySqlUpstream {
         })
     }
 
-    fn url(&self) -> &str {
-        self.upstream_config.upstream_db_url.as_deref().unwrap()
-    }
-
     fn database(&self) -> Option<&str> {
         self.conn.opts().db_name()
     }
@@ -393,23 +389,6 @@ impl UpstreamDatabase for MySqlUpstream {
         Ok(QueryResult::Command {
             status_flags: self.conn.status(),
         })
-    }
-
-    async fn schema_dump(&mut self) -> Result<Vec<u8>, anyhow::Error> {
-        let tables: Vec<String> = self.conn.query_iter("SHOW TABLES").await?.collect().await?;
-        let mut dump = String::with_capacity(tables.len());
-        for table in &tables {
-            if let Some(create) = self
-                .conn
-                .query_first(format!("SHOW CREATE TABLE `{}`", &table))
-                .await?
-                .map(|row: (String, String)| row.1)
-            {
-                dump.push_str(&create);
-                dump.push('\n');
-            }
-        }
-        Ok(dump.into_bytes())
     }
 
     async fn schema_search_path(&mut self) -> Result<Vec<SqlIdentifier>, Self::Error> {
