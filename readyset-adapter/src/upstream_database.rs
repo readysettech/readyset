@@ -103,10 +103,6 @@ pub trait UpstreamDatabase: Sized + Send {
     /// Test the connection with the upstream database
     async fn is_connected(&mut self) -> bool;
 
-    /// Return a reference to the URL used when originally constructing this database via
-    /// [`connect`]
-    fn url(&self) -> &str;
-
     /// Returns a database name if it was included in the original connection string, or None if no
     /// database name was included in the original connection string.
     fn database(&self) -> Option<&str> {
@@ -173,9 +169,6 @@ pub trait UpstreamDatabase: Sized + Send {
 
     /// Handle rolling back the ongoing transaction for this connection to the upstream db.
     async fn rollback<'a>(&'a mut self) -> Result<Self::QueryResult<'a>, Self::Error>;
-
-    /// Return schema dump from the upstream database, for inclusion in a query analysis bundle.
-    async fn schema_dump(&mut self) -> Result<Vec<u8>, anyhow::Error>;
 
     /// Query the upstream database for the currently configured schema search path.
     ///

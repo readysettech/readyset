@@ -1,7 +1,5 @@
 use std::collections::HashMap;
-use std::ffi::OsStr;
 use std::fmt::Debug;
-use std::os::unix::ffi::OsStrExt;
 use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -9,7 +7,6 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::StreamExt;
 use nom_sql::{SqlIdentifier, StartTransactionStatement};
-use pgsql::config::Host;
 use pgsql::types::Type;
 use pgsql::{GenericResult, ResultStream, Row, SimpleQueryMessage};
 use postgres_types::Kind;
@@ -18,7 +15,6 @@ use readyset_adapter::upstream_database::UpstreamDestination;
 use readyset_adapter::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
 use readyset_data::DfValue;
 use readyset_errors::{internal_err, invariant_eq, unsupported, ReadySetError, ReadySetResult};
-use tokio::process::Command;
 use tokio_postgres as pgsql;
 use tracing::{debug, info, info_span};
 use tracing_futures::Instrument;
@@ -218,10 +214,6 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         })
     }
 
-    fn url(&self) -> &str {
-        self.upstream_config.upstream_db_url.as_deref().unwrap()
-    }
-
     async fn reset(&mut self) -> Result<(), Error> {
         let old_self = std::mem::replace(self, Self::connect(self.upstream_config.clone()).await?);
         drop(old_self);
@@ -345,35 +337,6 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         Ok(QueryResult::SimpleQuery(
             self.client.simple_query("ROLLBACK").await?,
         ))
-    }
-
-    async fn schema_dump(&mut self) -> Result<Vec<u8>, anyhow::Error> {
-        let config = pgsql::Config::from_str(self.url())?;
-        let mut pg_dump = Command::new("pg_dump");
-        pg_dump.arg("--schema-only");
-        if let Some(host) = config
-            .get_hosts()
-            .iter()
-            .filter_map(|h| match h {
-                Host::Tcp(v) => Some(v),
-                _ => None,
-            })
-            .next()
-        {
-            pg_dump.arg(&format!("-h{}", host));
-        } else {
-            anyhow::bail!("Postgres TCP host not found");
-        }
-        if let Some(user) = config.get_user() {
-            pg_dump.arg(format!("-U{}", user));
-        }
-        if let Some(dbname) = config.get_dbname() {
-            pg_dump.arg(dbname);
-        }
-        if let Some(password) = config.get_password() {
-            pg_dump.env("PGPASSWORD", OsStr::from_bytes(password));
-        }
-        Ok(pg_dump.output().await?.stdout)
     }
 
     async fn schema_search_path(&mut self) -> Result<Vec<SqlIdentifier>, Self::Error> {
