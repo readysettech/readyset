@@ -78,6 +78,33 @@ pub fn drop_table(
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+pub struct DropSnapshotStatement {
+    pub name: Relation,
+}
+
+impl DropSnapshotStatement {
+    pub fn display(&self, dialect: Dialect) -> impl Display + Copy + '_ {
+        fmt_with(move |f| write!(f, "DROP SNAPSHOT FROM {}", self.name.display(dialect)))
+    }
+}
+
+pub fn drop_snapshot_query(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], DropSnapshotStatement> {
+    move |i| {
+        let (i, _) = tag_no_case("drop")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("snapshot")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("from")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, name) = relation(dialect)(i)?;
+        let (i, _) = statement_terminator(i)?;
+        Ok((i, DropSnapshotStatement { name }))
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct DropCacheStatement {
     pub name: Relation,
 }
@@ -200,6 +227,25 @@ mod tests {
         )
     }
 
+    #[test]
+    fn parse_drop_snapshot_query() {
+        let res = test_parse!(
+            drop_snapshot_query(Dialect::MySQL),
+            b"DROP SNAPSHOT FROM test"
+        );
+        assert_eq!(res.name, "test".into());
+        let res = test_parse!(
+            drop_snapshot_query(Dialect::MySQL),
+            b"DROP SNAPSHOT FROM db.test"
+        );
+        assert_eq!(
+            res.name,
+            Relation {
+                name: "test".into(),
+                schema: Some("db".into())
+            }
+        );
+    }
     #[test]
     fn parse_drop_cached_query() {
         let res = test_parse!(drop_cached_query(Dialect::MySQL), b"DROP CACHE test");
