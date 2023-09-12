@@ -26,7 +26,7 @@ use futures_util::future::FutureExt;
 use futures_util::stream::StreamExt;
 use health_reporter::{HealthReporter as AdapterHealthReporter, State as AdapterState};
 use metrics_exporter_prometheus::PrometheusBuilder;
-use nom_sql::Relation;
+use nom_sql::{Relation, SqlIdentifier};
 use readyset_adapter::backend::noria_connector::{NoriaConnector, ReadBehavior};
 use readyset_adapter::backend::MigrationMode;
 use readyset_adapter::http_router::NoriaAdapterHttpRouter;
@@ -44,7 +44,7 @@ use readyset_client::metrics::recorded;
 use readyset_client::{ReadySetHandle, ViewCreateRequest};
 use readyset_common::ulimit::maybe_increase_nofile_limit;
 use readyset_dataflow::Readers;
-use readyset_errors::ReadySetError;
+use readyset_errors::{internal_err, ReadySetError};
 use readyset_server::metrics::{CompositeMetricsRecorder, MetricsRecorder};
 use readyset_server::worker::readers::{retry_misses, Ack, BlockingRead, ReadRequestHandler};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetryInitializer};
@@ -54,7 +54,7 @@ use readyset_util::shutdown;
 use readyset_version::*;
 use tokio::net;
 use tokio::sync::RwLock;
-use tokio::time::timeout;
+use tokio::time::{sleep, timeout};
 use tokio_stream::wrappers::TcpListenerStream;
 use tracing::{debug, debug_span, error, info, info_span, span, warn, Level};
 use tracing_futures::Instrument;
@@ -67,9 +67,6 @@ const UPSTREAM_CONNECTION_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Retry interval to use when attempting to connect to the upstream database
 const UPSTREAM_CONNECTION_RETRY_INTERVAL: Duration = Duration::from_secs(1);
-
-/// Retry interval to use when attempting to load the schema search path from the upstream database
-const LOAD_SCHEMA_SEARCH_PATH_RETRY_INTERVAL: Duration = Duration::from_secs(1);
 
 #[async_trait]
 pub trait ConnectionHandler {
@@ -432,6 +429,87 @@ impl Options {
     }
 }
 
+async fn connect_upstream<U>(
+    upstream_config: UpstreamConfig,
+    no_upstream_connections: bool,
+) -> Result<Option<U>, U::Error>
+where
+    U: UpstreamDatabase,
+{
+    if upstream_config.upstream_db_url.is_some() && !no_upstream_connections {
+        set_failpoint!(failpoints::UPSTREAM);
+        timeout(UPSTREAM_CONNECTION_TIMEOUT, U::connect(upstream_config))
+            .instrument(debug_span!("Connecting to upstream database"))
+            .await
+            .map_err(|_| internal_err!("Connection timed out").into())
+            .and_then(|r| r)
+            .map(Some)
+    } else {
+        Ok(None)
+    }
+}
+
+/// Spawn a task to query the upstream for its currently-configured schema search path in a loop
+/// until it succeeds, returning a lock that will contain the result when it finishes
+///
+/// NOTE: when we start tracking all configuration parameters, this should be folded into whatever
+/// loads those initially
+async fn load_schema_search_path<U>(
+    upstream_config: UpstreamConfig,
+    no_upstream_connections: bool,
+) -> Arc<RwLock<Result<Vec<SqlIdentifier>, U::Error>>>
+where
+    U: UpstreamDatabase,
+{
+    let try_load = move |upstream_config: UpstreamConfig| async move {
+        let upstream =
+            connect_upstream::<U>(upstream_config.clone(), no_upstream_connections).await?;
+
+        match upstream {
+            Some(mut upstream) => upstream.schema_search_path().await,
+            None => Ok(Default::default()),
+        }
+    };
+
+    // First, try to load once outside the loop
+    let e = match try_load(upstream_config.clone()).await {
+        Ok(res) => return Arc::new(RwLock::new(Ok(res))),
+        Err(error) => {
+            warn!(%error, "Loading initial schema search path failed, spawning retry loop");
+            error
+        }
+    };
+
+    // If that fails, spawn a task to keep retrying
+    let out = Arc::new(RwLock::new(Err(e)));
+    tokio::spawn({
+        let out = Arc::clone(&out);
+        async move {
+            let mut first_loop = true;
+            loop {
+                if !first_loop {
+                    sleep(UPSTREAM_CONNECTION_RETRY_INTERVAL).await;
+                }
+                first_loop = false;
+
+                let res = try_load(upstream_config.clone()).await;
+
+                if let Ok(ssp) = &res {
+                    debug!(?ssp, "Successfully loaded schema search path from upstream");
+                }
+
+                let was_ok = res.is_ok();
+                *out.write().await = res;
+                if was_ok {
+                    break;
+                }
+            }
+        }
+    });
+
+    out
+}
+
 impl<H> NoriaAdapter<H>
 where
     H: ConnectionHandler + Clone + Send + Sync + 'static,
@@ -769,6 +847,11 @@ where
             rt.block_on(fut);
         }
 
+        let schema_search_path = rt.block_on(load_schema_search_path::<H::UpstreamDatabase>(
+            upstream_config.clone(),
+            no_upstream_connections,
+        ));
+
         if let MigrationMode::OutOfBand = migration_mode {
             set_failpoint!("adapter-out-of-band");
             let rh = rh.clone();
@@ -777,50 +860,18 @@ where
             let loop_interval = options.migration_task_interval;
             let max_retry = options.max_processing_minutes;
             let dry_run = matches!(migration_style, MigrationStyle::Explicit);
-            let upstream_config = options.server_worker_options.replicator_config.clone();
             let expr_dialect = self.expr_dialect;
             let parse_dialect = self.parse_dialect;
+            let schema_search_path = Arc::clone(&schema_search_path);
 
             rs_connect.in_scope(|| info!("Spawning migration handler task"));
             let fut = async move {
                 let connection = span!(Level::INFO, "migration task upstream database connection");
-                let schema_search_path = if upstream_config.upstream_db_url.is_none()
-                    || no_upstream_connections
-                    || dry_run
-                {
-                    Default::default()
-                } else {
-                    loop {
-                        let mut upstream =
-                            match H::UpstreamDatabase::connect(upstream_config.clone())
-                                .instrument(connection.in_scope(|| {
-                                    span!(Level::INFO, "Connecting to upstream database")
-                                }))
-                                .await
-                            {
-                                Ok(upstream) => upstream,
-                                Err(error) => {
-                                    error!(
-                                        %error,
-                                        "Error connecting to upstream database, retrying after 1s"
-                                    );
-                                    tokio::time::sleep(UPSTREAM_CONNECTION_RETRY_INTERVAL).await;
-                                    continue;
-                                }
-                            };
-
-                        match upstream.schema_search_path().await {
-                            Ok(ssp) => break ssp,
-                            Err(error) => {
-                                error!(
-                                    %error,
-                                    "Error loading schema search path from upstream database, retrying after 1s"
-                                );
-                                tokio::time::sleep(LOAD_SCHEMA_SEARCH_PATH_RETRY_INTERVAL).await;
-                                continue;
-                            }
-                        }
+                let schema_search_path = loop {
+                    if let Ok(ssp) = &*schema_search_path.read().await {
+                        break ssp.clone();
                     }
+                    sleep(UPSTREAM_CONNECTION_RETRY_INTERVAL).await
                 };
 
                 let noria =
@@ -972,49 +1023,24 @@ where
             });
 
             let upstream_config = upstream_config.clone();
+            let schema_search_path = Arc::clone(&schema_search_path);
             let fut = async move {
-                let upstream_res =
-                    if upstream_config.upstream_db_url.is_some() && !no_upstream_connections {
-                        set_failpoint!(failpoints::UPSTREAM);
-                        timeout(
-                            UPSTREAM_CONNECTION_TIMEOUT,
-                            H::UpstreamDatabase::connect(upstream_config),
-                        )
-                        .instrument(debug_span!("Connecting to upstream database"))
-                        .await
-                        .map_err(|_| "Connection timed out".to_owned())
-                        .and_then(|r| r.map_err(|e| e.to_string()))
-                        .map_err(|e| format!("Error connecting to upstream database: {}", e))
-                        .map(Some)
-                    } else {
-                        Ok(None)
-                    };
+                let upstream_res = connect_upstream::<H::UpstreamDatabase>(
+                    upstream_config,
+                    no_upstream_connections,
+                )
+                .await
+                .map_err(|e| format!("Error connecting to upstream database: {}", e));
 
                 match upstream_res {
-                    Ok(mut upstream) => {
+                    Ok(upstream) => {
                         if let Err(e) =
                             telemetry_sender.send_event(TelemetryEvent::UpstreamConnected)
                         {
                             warn!(error = %e, "Failed to send upstream connected metric");
                         }
 
-                        // Query the upstream for its currently-configured schema search path
-                        //
-                        // NOTE: when we start tracking all configuration parameters, this should be
-                        // folded into whatever loads those initially
-                        let schema_search_path_res = if let Some(upstream) = &mut upstream {
-                            upstream.schema_search_path().await.map(|ssp| {
-                                debug!(
-                                    schema_search_path = ?ssp,
-                                    "Setting initial schema search path for backend"
-                                );
-                                ssp
-                            })
-                        } else {
-                            Ok(Default::default())
-                        };
-
-                        match schema_search_path_res {
+                        match &*schema_search_path.read().await {
                             Ok(ssp) => {
                                 let noria = NoriaConnector::new_with_local_reads(
                                     rh.clone(),
@@ -1024,7 +1050,7 @@ where
                                     r,
                                     expr_dialect,
                                     parse_dialect,
-                                    ssp,
+                                    ssp.clone(),
                                     server_supports_pagination,
                                 )
                                 .instrument(debug_span!("Building noria connector"))
