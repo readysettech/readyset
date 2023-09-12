@@ -275,11 +275,11 @@ impl PersistentStateBenchArgs {
         // true, we assume that the state already contains the proper data from a previous run of
         // the benchmarks.
         if !self.reuse_persistence {
-            state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
-            state.add_key(Index::new(IndexType::HashMap, vec![1, 2]), None);
-            state.add_key(Index::new(IndexType::HashMap, vec![3]), None);
+            state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
+            state.add_index(Index::new(IndexType::HashMap, vec![1, 2]), None);
+            state.add_index(Index::new(IndexType::HashMap, vec![3]), None);
 
-            state.add_key(Index::new(IndexType::BTreeMap, vec![1]), None);
+            state.add_index(Index::new(IndexType::BTreeMap, vec![1]), None);
 
             state.set_snapshot_mode(SnapshotMode::SnapshotModeEnabled);
 
@@ -330,11 +330,11 @@ impl PersistentStateBenchArgs {
         if !self.reuse_persistence {
             state.set_snapshot_mode(SnapshotMode::SnapshotModeEnabled);
 
-            state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
-            state.add_key(Index::new(IndexType::HashMap, vec![1]), None);
-            state.add_key(Index::new(IndexType::HashMap, vec![3]), None);
+            state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
+            state.add_index(Index::new(IndexType::HashMap, vec![1]), None);
+            state.add_index(Index::new(IndexType::HashMap, vec![3]), None);
 
-            state.add_key(Index::new(IndexType::BTreeMap, vec![1]), None);
+            state.add_index(Index::new(IndexType::BTreeMap, vec![1]), None);
 
             let batches = (0..self.unique_entries)
                 .map(|i| {

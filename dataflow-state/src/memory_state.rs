@@ -61,7 +61,7 @@ fn base_row_bytes(keys: &[DfValue]) -> u64 {
 }
 
 impl State for MemoryState {
-    fn add_key(&mut self, index: Index, partial: Option<Vec<Tag>>) {
+    fn add_index(&mut self, index: Index, partial: Option<Vec<Tag>>) {
         let (i, exists) = if let Some(i) = self.state_for(&index.columns, index.index_type) {
             // already keyed by this key; just adding tags
             (i, true)
@@ -341,7 +341,7 @@ impl State for MemoryState {
 
     /// Evicts the given `keys` for the state associated with the target of the given `tag`
     fn evict_keys(&mut self, tag: Tag, keys: &[KeyComparison]) -> Option<EvictKeysResult> {
-        // we may be told to evict from a tag that add_key hasn't been called for yet
+        // we may be told to evict from a tag that add_index hasn't been called for yet
         // this can happen if an upstream domain issues an eviction for a replay path that we have
         // been told about, but that has not yet been finalized.
         self.by_tag.get(&tag).cloned().map(move |state_index| {
@@ -396,7 +396,7 @@ impl State for MemoryState {
         self.replication_offset.as_ref()
     }
 
-    fn add_weak_key(&mut self, index: Index) {
+    fn add_weak_index(&mut self, index: Index) {
         let mut weak_index = KeyedState::from(&index);
 
         let mut strict_index_iter = self.state.iter();
@@ -555,7 +555,7 @@ mod tests {
     #[test]
     fn memory_state_key_count_vs_row_count() {
         let mut state = MemoryState::default();
-        state.add_key(Index::hash_map(vec![0]), None);
+        state.add_index(Index::hash_map(vec![0]), None);
         insert(&mut state, vec![1.into(), 10.into()]);
         insert(&mut state, vec![1.into(), 20.into()]);
         insert(&mut state, vec![2.into(), 30.into()]);
@@ -575,7 +575,7 @@ mod tests {
         ]
         .into();
 
-        state.add_key(Index::hash_map(vec![0]), None);
+        state.add_index(Index::hash_map(vec![0]), None);
         state
             .process_records(&mut Vec::from(&records[..3]).into(), None, None)
             .unwrap();
@@ -604,9 +604,9 @@ mod tests {
     fn memory_state_old_records_new_index() {
         let mut state = MemoryState::default();
         let row: Vec<DfValue> = vec![10.into(), "Cat".try_into().unwrap()];
-        state.add_key(Index::hash_map(vec![0]), None);
+        state.add_index(Index::hash_map(vec![0]), None);
         insert(&mut state, row.clone());
-        state.add_key(Index::hash_map(vec![1]), None);
+        state.add_index(Index::hash_map(vec![1]), None);
 
         match state.lookup(&[1], &PointKey::Single(row[1].clone())) {
             LookupResult::Some(RecordResult::Borrowed(rows)) => {
@@ -619,8 +619,8 @@ mod tests {
     #[test]
     fn multiple_indices_on_same_columns() {
         let mut state = MemoryState::default();
-        state.add_key(Index::hash_map(vec![0]), None);
-        state.add_key(Index::btree_map(vec![0]), None);
+        state.add_index(Index::hash_map(vec![0]), None);
+        state.add_index(Index::btree_map(vec![0]), None);
         insert(&mut state, vec![1.into()]);
         insert(&mut state, vec![2.into()]);
         insert(&mut state, vec![3.into()]);
@@ -649,7 +649,7 @@ mod tests {
     #[test]
     fn point_lookup_only_btree() {
         let mut state = MemoryState::default();
-        state.add_key(Index::btree_map(vec![0]), Some(vec![Tag::new(1)]));
+        state.add_index(Index::btree_map(vec![0]), Some(vec![Tag::new(1)]));
         state.mark_filled(KeyComparison::from_range(&(..)), Tag::new(1));
         state.insert(vec![DfValue::from(1), DfValue::from(2)], Some(Tag::new(1)));
 
@@ -664,8 +664,8 @@ mod tests {
     #[test]
     fn shuffled_columns() {
         let mut state = MemoryState::default();
-        state.add_key(Index::hash_map(vec![2, 3]), Some(vec![Tag::new(0)]));
-        state.add_key(Index::hash_map(vec![3, 2]), Some(vec![Tag::new(1)]));
+        state.add_index(Index::hash_map(vec![2, 3]), Some(vec![Tag::new(0)]));
+        state.add_index(Index::hash_map(vec![3, 2]), Some(vec![Tag::new(1)]));
 
         state.mark_filled(KeyComparison::Equal(vec1![1.into(), 1.into()]), Tag::new(0));
         state.insert(
@@ -685,7 +685,7 @@ mod tests {
     #[test]
     fn empty_column_set() {
         let mut state = MemoryState::default();
-        state.add_key(Index::hash_map(vec![]), None);
+        state.add_index(Index::hash_map(vec![]), None);
 
         let mut rows = vec![
             vec![1.into()],
@@ -741,7 +741,7 @@ mod tests {
             fn setup() -> MemoryState {
                 let mut state = MemoryState::default();
                 let tag = Tag::new(1);
-                state.add_key(Index::new(IndexType::BTreeMap, vec![0]), Some(vec![tag]));
+                state.add_index(Index::new(IndexType::BTreeMap, vec![0]), Some(vec![tag]));
                 state.mark_filled(
                     KeyComparison::from_range(&(vec1![DfValue::from(0)]..vec1![DfValue::from(10)])),
                     tag,
@@ -779,8 +779,8 @@ mod tests {
                 let tag_2 = Tag::new(2);
 
                 // Initialize MemoryState with two indices
-                state.add_key(Index::new(IndexType::HashMap, vec![0]), Some(vec![tag_1]));
-                state.add_key(Index::new(IndexType::HashMap, vec![1]), Some(vec![tag_2]));
+                state.add_index(Index::new(IndexType::HashMap, vec![0]), Some(vec![tag_1]));
+                state.add_index(Index::new(IndexType::HashMap, vec![1]), Some(vec![tag_2]));
 
                 // Mark two holes filled for Tag 1, and one for Tag 2
                 state.mark_filled(KeyComparison::from(vec1![DfValue::from(0)]), tag_1);
@@ -805,7 +805,7 @@ mod tests {
 
             fn setup() -> MemoryState {
                 let mut state = MemoryState::default();
-                state.add_key(Index::new(IndexType::BTreeMap, vec![0]), None);
+                state.add_index(Index::new(IndexType::BTreeMap, vec![0]), None);
                 state
                     .process_records(
                         &mut (0..10)
@@ -941,8 +941,8 @@ mod tests {
         fn setup() -> MemoryState {
             let mut state = MemoryState::default();
 
-            state.add_key(Index::hash_map(vec![0]), Some(vec![Tag::new(0)]));
-            state.add_weak_key(Index::hash_map(vec![1]));
+            state.add_index(Index::hash_map(vec![0]), Some(vec![Tag::new(0)]));
+            state.add_weak_index(Index::hash_map(vec![1]));
 
             state
         }
@@ -1248,11 +1248,11 @@ mod tests {
                     }
                     Operation::CreateStrictIndex(columns, tag) => {
                         let index = Index::new(IndexType::HashMap, columns.clone());
-                        ctxt.add_key(index, Some(vec![*tag]));
+                        ctxt.add_index(index, Some(vec![*tag]));
                     }
                     Operation::CreateWeakIndex(columns) => {
                         let index = Index::new(IndexType::HashMap, columns.clone());
-                        ctxt.add_weak_key(index);
+                        ctxt.add_weak_index(index);
                     }
                 }
             }
