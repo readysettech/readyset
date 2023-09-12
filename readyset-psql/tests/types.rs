@@ -16,7 +16,7 @@ async fn setup() -> (tokio_postgres::Config, Handle, ShutdownSender) {
 
 mod types {
     use std::fmt::Display;
-    use std::panic::RefUnwindSafe;
+    use std::panic::{AssertUnwindSafe, RefUnwindSafe};
     use std::time::Duration;
 
     use cidr::IpInet;
@@ -886,16 +886,21 @@ mod types {
             .await
             .unwrap();
 
-        let stmt = client
-            .prepare("SELECT * FROM t WHERE x = $1")
-            .await
-            .unwrap();
-        let res = client.query_one(&stmt, &[&"A"]).await.unwrap();
-        assert_eq!(res.get::<_, String>(0), "a");
-
-        assert_eq!(
-            last_query_info(&client).await.destination,
-            QueryDestination::Readyset
+        eventually!(
+            run_test: {
+                let stmt = client
+                    .prepare("SELECT * FROM t WHERE x = $1")
+                    .await
+                    .unwrap();
+                let res = client.query_one(&stmt, &[&"A"]).await.unwrap();
+                let dest = last_query_info(&client).await.destination;
+                AssertUnwindSafe(move || (res, dest))
+            },
+            then_assert: |res| {
+                let (res, dest) = res();
+                assert_eq!(res.get::<_, String>(0), "a");
+                assert_eq!(dest, QueryDestination::Readyset);
+            }
         );
 
         shutdown_tx.shutdown().await;
