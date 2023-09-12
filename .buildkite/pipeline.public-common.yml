@@ -23,18 +23,6 @@ steps:
           login: true
           retries: 3
 
-  - label: ':docker: Build cargo-deny image'
-    key: cargo-deny-image
-    commands:
-      - '[ -d public ] && cd public'
-      - '.buildkite/build-image.sh build/Dockerfile.cargo-deny cargo-deny .'
-    env:
-      VERSION: "${BUILDKITE_COMMIT}"
-    plugins:
-      ecr#v2.5.0:
-        login: true
-        retries: 3
-
   - label: ':rust: :lock: Check cargo-deny'
     commands:
       - '[ -d public ] && cd public'
