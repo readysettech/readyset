@@ -3842,7 +3842,9 @@ impl Domain {
             reader_write_handles: &mut NodeMap<backlog::WriteHandle>,
             nodes: &DomainNodes,
             remapped_keys: &mut RemappedKeys,
-        ) -> ReadySetResult<()> {
+        ) -> ReadySetResult<u64> {
+            let mut bytes_freed = 0u64;
+
             for (tag, path, keys) in
                 replay_paths.downstream_dependent_paths(node, index, keys, remapped_keys)
             {
@@ -3856,7 +3858,6 @@ impl Domain {
                     reader_write_handles,
                     ex,
                 )?;
-
                 match path.trigger {
                     TriggerEndpoint::Local(_) => {
                         #[allow(clippy::indexing_slicing)] // tag came from replay_paths
@@ -3888,11 +3889,12 @@ impl Domain {
                             "Evicting keys"
                         );
                         #[allow(clippy::indexing_slicing)] // nodes in replay paths must exist
-                        if state[dest.node].evict_keys(tag, &keys).is_some() {
+                        if let Some(result) = state[dest.node].evict_keys(tag, &keys) {
+                            bytes_freed += result.bytes_freed;
                             #[allow(clippy::unwrap_used)]
                             // we can only evict from partial replay paths, so we must have a
                             // partial key
-                            trigger_downstream_evictions(
+                            bytes_freed += trigger_downstream_evictions(
                                 dest.partial_index.as_ref().unwrap(),
                                 &keys,
                                 dest.node,
@@ -3909,12 +3911,14 @@ impl Domain {
                         }
                     }
                     TriggerEndpoint::Start(_) => {
-                        state[path.source.unwrap()].evict_keys(tag, &keys);
+                        if let Some(result) = state[path.source.unwrap()].evict_keys(tag, &keys) {
+                            bytes_freed += result.bytes_freed;
+                        }
                     }
                     _ => (),
                 }
             }
-            Ok(())
+            Ok(bytes_freed)
         }
 
         #[allow(clippy::too_many_arguments)]
@@ -4068,7 +4072,7 @@ impl Domain {
                         freed += bytes_freed;
                         if !keys.is_empty() {
                             let index = index.clone();
-                            trigger_downstream_evictions(
+                            freed += trigger_downstream_evictions(
                                 &index,
                                 &keys[..],
                                 node,
@@ -4147,8 +4151,9 @@ impl Domain {
 
                         trace!(local = %destination, ?keys, ?tag, "Evicting keys");
                         #[allow(clippy::indexing_slicing)] // came from replay paths
-                        if self.state[destination].evict_keys(tag, &keys).is_some() {
-                            trigger_downstream_evictions(
+                        if let Some(result) = self.state[destination].evict_keys(tag, &keys) {
+                            let mut freed = result.bytes_freed;
+                            freed += trigger_downstream_evictions(
                                 &index,
                                 &keys[..],
                                 destination,
@@ -4162,6 +4167,7 @@ impl Domain {
                                 &self.nodes,
                                 &mut self.remapped_keys,
                             )?;
+                            self.state_size.fetch_sub(freed as usize, Ordering::AcqRel);
                         }
                     }
                     TriggerEndpoint::None | TriggerEndpoint::Start(_) => {}
@@ -4252,7 +4258,7 @@ impl Domain {
                                 .map_err(|_| internal_err!("Empty key evicted"))?;
 
                             let index = index.clone();
-                            trigger_downstream_evictions(
+                            let freed = trigger_downstream_evictions(
                                 &index,
                                 &[key],
                                 destination,
@@ -4266,7 +4272,7 @@ impl Domain {
                                 &self.nodes,
                                 &mut self.remapped_keys,
                             )?;
-                            (bytes_freed, Some(key_evicted))
+                            (bytes_freed + freed, Some(key_evicted))
                         };
 
                         debug!(%freed, node = ?n, "evicted from node");
