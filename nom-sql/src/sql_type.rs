@@ -549,6 +549,7 @@ fn interval_type(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlType> {
         SqlType::Other("interval".into())
     })(i.into())
 }
+
 fn int_type<'a, F, G>(
     tag: &str,
     mk_unsigned: F,
@@ -1219,7 +1220,10 @@ mod tests {
         fn interval() {
             let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"interval");
             assert_eq!(res, SqlType::Other("interval".into()));
-            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"interval year to month");
+            let res = test_parse!(
+                type_identifier(Dialect::PostgreSQL),
+                b"interval year to month"
+            );
             assert_eq!(res, SqlType::Other("interval".into()));
         }
 
