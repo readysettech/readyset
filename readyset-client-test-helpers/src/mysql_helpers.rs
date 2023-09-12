@@ -5,6 +5,7 @@ use async_trait::async_trait;
 use mysql_async::prelude::Queryable;
 use mysql_srv::MySqlIntermediary;
 use readyset_adapter::backend::QueryInfo;
+use readyset_adapter::upstream_database::LazyUpstream;
 use readyset_mysql::{Backend, MySqlQueryHandler, MySqlUpstream};
 use tokio::net::TcpStream;
 
@@ -63,7 +64,7 @@ impl MySQLAdapter {
 #[async_trait]
 impl Adapter for MySQLAdapter {
     type ConnectionOpts = mysql_async::Opts;
-    type Upstream = MySqlUpstream;
+    type Upstream = LazyUpstream<MySqlUpstream>;
     type Handler = MySqlQueryHandler;
 
     const DIALECT: nom_sql::Dialect = nom_sql::Dialect::MySQL;

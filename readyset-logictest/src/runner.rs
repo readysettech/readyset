@@ -18,6 +18,7 @@ use nom_sql::{Dialect, Relation};
 use readyset_adapter::backend::noria_connector::ReadBehavior;
 use readyset_adapter::backend::{BackendBuilder, NoriaConnector};
 use readyset_adapter::query_status_cache::QueryStatusCache;
+use readyset_adapter::upstream_database::LazyUpstream;
 use readyset_adapter::{UpstreamConfig, UpstreamDatabase};
 use readyset_client::consensus::{Authority, LocalAuthorityStore};
 use readyset_client::{ReadySetHandle, ViewCreateRequest};
@@ -576,9 +577,11 @@ impl TestScript {
                     #[allow(clippy::manual_map)]
                     let upstream = match &replication_url {
                         Some(url) => Some(
-                            <$upstream as UpstreamDatabase>::connect(UpstreamConfig::from_url(url))
-                                .await
-                                .unwrap(),
+                            <LazyUpstream<$upstream> as UpstreamDatabase>::connect(
+                                UpstreamConfig::from_url(url),
+                            )
+                            .await
+                            .unwrap(),
                         ),
                         None => None,
                     };

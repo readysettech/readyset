@@ -2,6 +2,7 @@ use std::env;
 
 use async_trait::async_trait;
 use readyset_adapter::backend::{QueryDestination, QueryInfo};
+use readyset_adapter::upstream_database::LazyUpstream;
 use readyset_adapter::Backend;
 use readyset_psql::{PostgreSqlQueryHandler, PostgreSqlUpstream};
 use tokio::net::TcpStream;
@@ -33,7 +34,7 @@ pub struct PostgreSQLAdapter;
 #[async_trait]
 impl Adapter for PostgreSQLAdapter {
     type ConnectionOpts = tokio_postgres::Config;
-    type Upstream = PostgreSqlUpstream;
+    type Upstream = LazyUpstream<PostgreSqlUpstream>;
     type Handler = PostgreSqlQueryHandler;
 
     const DIALECT: nom_sql::Dialect = nom_sql::Dialect::PostgreSQL;
