@@ -345,9 +345,9 @@ pub mod test {
             for (tbl, lookup_index) in idx {
                 if let Some(ref mut s) = self.states.get_mut(self.graph[tbl].local_addr()) {
                     if lookup_index.is_weak() {
-                        s.add_weak_key(lookup_index.index().clone())
+                        s.add_weak_index(lookup_index.index().clone())
                     }
-                    s.add_key(lookup_index.into_index(), None);
+                    s.add_index(lookup_index.into_index(), None);
                 }
             }
             // and get rid of states we don't need
@@ -426,8 +426,8 @@ pub mod test {
             for (tbl, lookup_index) in idx {
                 if tbl == base.as_global() {
                     match lookup_index {
-                        LookupIndex::Strict(index) => state.add_key(index, None),
-                        LookupIndex::Weak(index) => state.add_weak_key(index),
+                        LookupIndex::Strict(index) => state.add_index(index, None),
+                        LookupIndex::Weak(index) => state.add_weak_index(index),
                     }
                 }
             }

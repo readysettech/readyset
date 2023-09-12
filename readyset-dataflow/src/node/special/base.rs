@@ -745,8 +745,8 @@ mod tests {
 
             for (_, lookup_index) in graph[global].suggest_indexes(global) {
                 match lookup_index {
-                    LookupIndex::Strict(index) => state.add_key(index, None),
-                    LookupIndex::Weak(index) => state.add_weak_key(index),
+                    LookupIndex::Strict(index) => state.add_index(index, None),
+                    LookupIndex::Weak(index) => state.add_weak_index(index),
                 }
             }
 
@@ -915,7 +915,7 @@ mod tests {
                 .unwrap(),
             );
 
-            state.add_key(Index::hash_map(vec![0]), None);
+            state.add_index(Index::hash_map(vec![0]), None);
 
             let mut recs = vec![Record::Positive(vec![2.into(), 3.into(), 4.into()])].into();
             state.process_records(&mut recs, None, None).unwrap();
@@ -969,7 +969,7 @@ mod tests {
                 .unwrap(),
             );
 
-            state.add_key(Index::hash_map(vec![0]), None);
+            state.add_index(Index::hash_map(vec![0]), None);
 
             let mut recs = vec![Record::Positive(vec![2.into(), 3.into(), 4.into()])].into();
             state.process_records(&mut recs, None, None).unwrap();
@@ -1029,7 +1029,7 @@ mod tests {
                 .unwrap(),
             );
 
-            state.add_key(Index::hash_map(vec![0]), None);
+            state.add_index(Index::hash_map(vec![0]), None);
 
             let mut recs = vec![
                 Record::Positive(vec![1.into(), "a".into()]),
@@ -1086,7 +1086,7 @@ mod tests {
                 .unwrap(),
             );
 
-            state.add_key(Index::hash_map(vec![0]), None);
+            state.add_index(Index::hash_map(vec![0]), None);
             let mut recs = vec![
                 Record::Positive(vec![1.into(), "a".into()]),
                 Record::Positive(vec![1.into(), "b".into()]),

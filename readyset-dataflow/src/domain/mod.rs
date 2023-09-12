@@ -720,7 +720,7 @@ async fn initialize_state(
         .unwrap()?,
     );
     for idx in indices {
-        s.add_key(idx, None);
+        s.add_index(idx, None);
     }
     if reported_once.load(Ordering::Relaxed) {
         info!(%base_name, %node_idx, "Finished initializing state");
@@ -1590,11 +1590,11 @@ impl Domain {
                                 local = %node,
                                 "told to prepare partial state"
                             );
-                            state.add_key(index, Some(tags));
+                            state.add_index(index, Some(tags));
                         }
 
                         for index in weak_indices {
-                            state.add_weak_key(index);
+                            state.add_weak_index(index);
                         }
                     }
                     PrepareStateKind::Full {
@@ -1614,11 +1614,11 @@ impl Domain {
                                 %node,
                                 "told to prepare full state"
                             );
-                            state.add_key(index, None);
+                            state.add_index(index, None);
                         }
 
                         for index in weak_indices {
-                            state.add_weak_key(index);
+                            state.add_weak_index(index);
                         }
                     }
                     PrepareStateKind::PartialReader {
@@ -2158,7 +2158,7 @@ impl Domain {
                         _ => {
                             let mut s = MaterializedNodeState::Memory(MemoryState::default());
                             for idx in index {
-                                s.add_key(idx, None);
+                                s.add_index(idx, None);
                             }
                             assert!(self.state.insert(node_idx, s).is_none());
                             true
@@ -2326,7 +2326,7 @@ impl Domain {
                 self.state
                     .entry(node)
                     .or_insert_with(|| MaterializedNodeState::Memory(MemoryState::default()))
-                    .add_key(index, Some(vec![tag]));
+                    .add_index(index, Some(vec![tag]));
                 Ok(None)
             }
             DomainRequest::IsReady { node } => {

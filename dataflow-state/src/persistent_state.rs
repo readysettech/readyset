@@ -697,7 +697,7 @@ impl State for PersistentState {
     /// Add a new index to the table, the first index we add will contain the data
     /// each additional index we add, will contain pointers to the primary index
     /// Panics if partial is Some
-    fn add_key(&mut self, index: Index, partial: Option<Vec<Tag>>) {
+    fn add_index(&mut self, index: Index, partial: Option<Vec<Tag>>) {
         #[allow(clippy::panic)] // This should definitely never happen!
         {
             assert!(partial.is_none(), "Bases can't be partial");
@@ -706,7 +706,7 @@ impl State for PersistentState {
         let existing = self.db.inner().indices.iter().any(|pi| pi.index == index);
 
         if existing {
-            self.db.add_key(index, partial);
+            self.db.add_index(index, partial);
             return;
         }
 
@@ -788,8 +788,8 @@ impl State for PersistentState {
         unreachable!("can't clear PersistentState")
     }
 
-    fn add_weak_key(&mut self, index: Index) {
-        self.add_key(index, None);
+    fn add_weak_index(&mut self, index: Index) {
+        self.add_index(index, None);
     }
 
     fn lookup_weak<'a>(&'a self, columns: &[usize], key: &PointKey) -> Option<RecordResult<'a>> {
@@ -821,12 +821,12 @@ impl State for PersistentState {
 }
 
 impl State for PersistentStateHandle {
-    fn add_key(&mut self, _: Index, _: Option<Vec<Tag>>) {
-        // Do nothing, as all keys are propagated via the [`PersistentState::add_key`]
+    fn add_index(&mut self, _: Index, _: Option<Vec<Tag>>) {
+        // Do nothing, as all keys are propagated via the [`PersistentState::add_index`]
     }
 
-    fn add_weak_key(&mut self, _: Index) {
-        // Add key does nothing, as all keys are propagated via the [`PersistentState::add_key`]
+    fn add_weak_index(&mut self, _: Index) {
+        // Add key does nothing, as all keys are propagated via the [`PersistentState::add_index`]
     }
 
     fn process_records(
@@ -1492,7 +1492,7 @@ impl PersistentState {
         let indices = meta.get_indices(&unique_keys);
 
         // If there are more column families than indices (+1 to account for the default column
-        // family) we either crashed while trying to build the last index (in Self::add_key), or
+        // family) we either crashed while trying to build the last index (in `Self::add_index`), or
         // something (like failed deserialization) caused us to reset the meta to the default
         // value.
         // Either way, we should drop all column families that are in the db but not in the
@@ -1985,7 +1985,7 @@ impl PersistentState {
 /// An index is unique if any of its subkeys or permutations is unique.
 /// i.e.: if the key [0,2] is unique, [2,0] is also unique, as well as [2,3,0]
 /// This check is not asymptotically efficient, but it doesn't matter as long
-/// as we only use it during add_key.
+/// as we only use it during add_index.
 fn check_if_index_is_unique(unique_indices: &[Box<[usize]>], columns: &[usize]) -> bool {
     // We go over all of the unique indices for the table and check if the
     // provided index contains all of its columns. If so, the index is also
@@ -2176,7 +2176,7 @@ mod tests {
 
     pub(self) fn setup_single_key(name: &str) -> PersistentState {
         let mut state = setup_persistent(name, None);
-        state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
+        state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
         state
     }
 
@@ -2235,7 +2235,7 @@ mod tests {
         let cols = vec![0, 2];
         let index = Index::new(IndexType::HashMap, cols.clone());
         let row: Vec<DfValue> = vec![10.into(), "Cat".into(), 20.into()];
-        state.add_key(index, None);
+        state.add_index(index, None);
         insert(&mut state, row.clone());
 
         match state.lookup(&cols, &PointKey::Double((1.into(), 2.into()))) {
@@ -2256,8 +2256,8 @@ mod tests {
         let mut state = setup_persistent("persistent_state_multiple_indices", None);
         let first: Vec<DfValue> = vec![10.into(), "Cat".into(), 1.into()];
         let second: Vec<DfValue> = vec![20.into(), "Cat".into(), 1.into()];
-        state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
-        state.add_key(Index::new(IndexType::HashMap, vec![1, 2]), None);
+        state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
+        state.add_index(Index::new(IndexType::HashMap, vec![1, 2]), None);
         state
             .process_records(&mut vec![first.clone(), second.clone()].into(), None, None)
             .unwrap();
@@ -2289,15 +2289,15 @@ mod tests {
         records.push(Record::Positive(first));
         records.push(Record::Negative(second));
 
-        state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
-        state.add_key(Index::new(IndexType::HashMap, vec![1, 2]), None);
+        state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
+        state.add_index(Index::new(IndexType::HashMap, vec![1, 2]), None);
         state.process_records(&mut records, None, None).unwrap();
     }
 
     #[test]
     fn empty_column_set() {
         let mut state = setup_persistent("empty_column_set", None);
-        state.add_key(Index::hash_map(vec![]), None);
+        state.add_index(Index::hash_map(vec![]), None);
 
         let mut rows = vec![
             vec![1.into()],
@@ -2341,7 +2341,7 @@ mod tests {
     #[test]
     fn lookup_citext() {
         let mut state = setup_persistent("lookup_citext", None);
-        state.add_key(Index::hash_map(vec![0]), None);
+        state.add_index(Index::hash_map(vec![0]), None);
 
         let abc = vec![
             vec![
@@ -2371,7 +2371,7 @@ mod tests {
     #[test]
     fn lookup_numeric_with_different_precision() {
         let mut state = setup_persistent("lookup_numeric_with_different_precision", None);
-        state.add_key(Index::btree_map(vec![0]), None);
+        state.add_index(Index::btree_map(vec![0]), None);
 
         let records = vec![vec![DfValue::from(Decimal::from_str_exact("4.0").unwrap())]];
 
@@ -2399,8 +2399,8 @@ mod tests {
             let second: Vec<DfValue> = vec![20.into(), "Cat".into(), 1.into()];
             let third: Vec<DfValue> = vec![30.into(), "Dog".into(), 1.into()];
             let fourth: Vec<DfValue> = vec![40.into(), "Dog".into(), 1.into()];
-            state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
-            state.add_key(Index::new(IndexType::HashMap, vec![1, 2]), None);
+            state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
+            state.add_index(Index::new(IndexType::HashMap, vec![1, 2]), None);
             state
                 .process_records(
                     &mut vec![first.clone(), second.clone(), third.clone(), fourth.clone()].into(),
@@ -2482,8 +2482,8 @@ mod tests {
         .unwrap();
         let first: Vec<DfValue> = vec![1.into(), 2.into(), "Cat".into()];
         let second: Vec<DfValue> = vec![10.into(), 20.into(), "Cat".into()];
-        state.add_key(pk, None);
-        state.add_key(Index::new(IndexType::HashMap, vec![2]), None);
+        state.add_index(pk, None);
+        state.add_index(Index::new(IndexType::HashMap, vec![2]), None);
         state
             .process_records(&mut vec![first.clone(), second.clone()].into(), None, None)
             .unwrap();
@@ -2532,7 +2532,7 @@ mod tests {
         .unwrap();
         let first: Vec<DfValue> = vec![1.into(), 2.into()];
         let second: Vec<DfValue> = vec![10.into(), 20.into()];
-        state.add_key(pk, None);
+        state.add_index(pk, None);
         state
             .process_records(&mut vec![first.clone(), second.clone()].into(), None, None)
             .unwrap();
@@ -2568,8 +2568,8 @@ mod tests {
         let mut state = setup_persistent("persistent_state_multiple_indices", None);
         let first: Vec<DfValue> = vec![0.into(), 0.into()];
         let second: Vec<DfValue> = vec![0.into(), 1.into()];
-        state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
-        state.add_key(Index::new(IndexType::HashMap, vec![1]), None);
+        state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
+        state.add_index(Index::new(IndexType::HashMap, vec![1]), None);
         state
             .process_records(&mut vec![first.clone(), second.clone()].into(), None, None)
             .unwrap();
@@ -2597,8 +2597,8 @@ mod tests {
         let mut state = setup_persistent("persistent_state_different_indices", None);
         let first: Vec<DfValue> = vec![10.into(), "Cat".into()];
         let second: Vec<DfValue> = vec![20.into(), "Bob".into()];
-        state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
-        state.add_key(Index::new(IndexType::HashMap, vec![1]), None);
+        state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
+        state.add_index(Index::new(IndexType::HashMap, vec![1]), None);
         state
             .process_records(&mut vec![first.clone(), second.clone()].into(), None, None)
             .unwrap();
@@ -2632,8 +2632,8 @@ mod tests {
         {
             let mut state =
                 PersistentState::new(name.clone(), Vec::<Box<[usize]>>::new(), &params).unwrap();
-            state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
-            state.add_key(Index::new(IndexType::HashMap, vec![1]), None);
+            state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
+            state.add_index(Index::new(IndexType::HashMap, vec![1]), None);
             state
                 .process_records(&mut vec![first.clone(), second.clone()].into(), None, None)
                 .unwrap();
@@ -2668,8 +2668,8 @@ mod tests {
         let second: Vec<DfValue> = vec![20.into(), "Bob".into()];
         {
             let mut state = PersistentState::new(name.clone(), Some(&[0]), &params).unwrap();
-            state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
-            state.add_key(Index::new(IndexType::HashMap, vec![1]), None);
+            state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
+            state.add_index(Index::new(IndexType::HashMap, vec![1]), None);
             state
                 .process_records(&mut vec![first.clone(), second.clone()].into(), None, None)
                 .unwrap();
@@ -2699,8 +2699,8 @@ mod tests {
         let first: Vec<DfValue> = vec![10.into(), "Cat".into()];
         let duplicate: Vec<DfValue> = vec![10.into(), "Other Cat".into()];
         let second: Vec<DfValue> = vec![20.into(), "Cat".into()];
-        state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
-        state.add_key(Index::new(IndexType::HashMap, vec![1]), None);
+        state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
+        state.add_index(Index::new(IndexType::HashMap, vec![1]), None);
         state
             .process_records(
                 &mut vec![first.clone(), duplicate.clone(), second.clone()].into(),
@@ -2759,9 +2759,9 @@ mod tests {
         let first: Vec<DfValue> = vec![10.into(), "Cat".into(), DfValue::None];
         let duplicate: Vec<DfValue> = vec![10.into(), "Other Cat".into(), DfValue::None];
         let second: Vec<DfValue> = vec![20.into(), "Cat".into(), DfValue::None];
-        state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
-        state.add_key(Index::new(IndexType::HashMap, vec![1]), None);
-        state.add_key(Index::new(IndexType::HashMap, vec![2]), None);
+        state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
+        state.add_index(Index::new(IndexType::HashMap, vec![1]), None);
+        state.add_index(Index::new(IndexType::HashMap, vec![2]), None);
         state
             .process_records(
                 &mut vec![first.clone(), duplicate.clone(), second.clone()].into(),
@@ -2803,7 +2803,7 @@ mod tests {
     fn persistent_state_is_useful() {
         let mut state = setup_persistent("persistent_state_is_useful", None);
         assert!(!state.is_useful());
-        state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
+        state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
         assert!(state.is_useful());
     }
 
@@ -2814,7 +2814,7 @@ mod tests {
         for i in 0..30 {
             let row = vec![DfValue::from(i); 30];
             rows.push(row);
-            state.add_key(Index::new(IndexType::HashMap, vec![i]), None);
+            state.add_index(Index::new(IndexType::HashMap, vec![i]), None);
         }
 
         for row in rows.iter().cloned() {
@@ -2837,8 +2837,8 @@ mod tests {
             let mut state = setup_persistent("persistent_state_cloned_records", None);
             let first: Vec<DfValue> = vec![10.into(), "Cat".into()];
             let second: Vec<DfValue> = vec![20.into(), "Cat".into()];
-            state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
-            state.add_key(Index::new(IndexType::HashMap, vec![1]), None);
+            state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
+            state.add_index(Index::new(IndexType::HashMap, vec![1]), None);
             state
                 .process_records(&mut vec![first.clone(), second.clone()].into(), None, None)
                 .unwrap();
@@ -2855,8 +2855,8 @@ mod tests {
             let mut state = setup_persistent("persistent_state_cloned_records", None);
             let first: Vec<DfValue> = vec![10.into(), "Cat".into()];
             let second: Vec<DfValue> = vec![20.into(), "Cat".into()];
-            state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
-            state.add_key(Index::new(IndexType::HashMap, vec![1]), None);
+            state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
+            state.add_index(Index::new(IndexType::HashMap, vec![1]), None);
             state
                 .process_records(&mut vec![first.clone(), second.clone()].into(), None, None)
                 .unwrap();
@@ -2874,8 +2874,8 @@ mod tests {
             let mut state = setup_persistent("persistent_state_cloned_records", None);
             let first: Vec<DfValue> = vec![10.into(), "Cat".into()];
             let second: Vec<DfValue> = vec![20.into(), "Cat".into()];
-            state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
-            state.add_key(Index::new(IndexType::HashMap, vec![1]), None);
+            state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
+            state.add_index(Index::new(IndexType::HashMap, vec![1]), None);
             state
                 .process_records(&mut vec![first.clone(), second.clone()].into(), None, None)
                 .unwrap();
@@ -2913,9 +2913,9 @@ mod tests {
     fn persistent_state_old_records_new_index() {
         let mut state = setup_persistent("persistent_state_old_records_new_index", None);
         let row: Vec<DfValue> = vec![10.into(), "Cat".into()];
-        state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
+        state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
         insert(&mut state, row.clone());
-        state.add_key(Index::new(IndexType::HashMap, vec![1]), None);
+        state.add_index(Index::new(IndexType::HashMap, vec![1]), None);
 
         match state.lookup(&[1], &PointKey::Single(row[1].clone())) {
             LookupResult::Some(RecordResult::Owned(rows)) => assert_eq!(&rows[0], &row),
@@ -2934,7 +2934,7 @@ mod tests {
         ]
         .into();
 
-        state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
+        state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
         state
             .process_records(&mut Vec::from(&records[..3]).into(), None, None)
             .unwrap();
@@ -2960,7 +2960,7 @@ mod tests {
     #[test]
     fn replication_offset_roundtrip_mysql() {
         let mut state = setup_persistent("replication_offset_roundtrip_mysql", None);
-        state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
+        state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
         let mut records: Records = vec![(vec![1.into(), "A".into()], true)].into();
         let replication_offset = ReplicationOffset::MySql(
             MySqlPosition::from_file_name_and_position("binlog.00001".to_owned(), 12).unwrap(),
@@ -2975,7 +2975,7 @@ mod tests {
     #[test]
     fn replication_offset_roundtrip_postgres() {
         let mut state = setup_persistent("replication_offset_roundtrip_postgres", None);
-        state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
+        state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
         let mut records: Records = vec![(vec![1.into(), "A".into()], true)].into();
         let replication_offset = ReplicationOffset::Postgres(PostgresPosition {
             commit_lsn: 12.into(),
@@ -2992,7 +2992,7 @@ mod tests {
     #[allow(clippy::op_ref)]
     fn persistent_state_prefix_transform() {
         let mut state = setup_persistent("persistent_state_prefix_transform", None);
-        state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
+        state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
         let data = (DfValue::from(1), DfValue::from(10));
         let r = PointKey::Double(data.clone());
         let k = PersistentState::serialize_prefix(&r);
@@ -3023,10 +3023,10 @@ mod tests {
     #[test]
     fn reindex_btree_with_nulls() {
         let mut state = setup_persistent("reindex_with_nulls", None);
-        state.add_key(Index::hash_map(vec![0]), None);
+        state.add_index(Index::hash_map(vec![0]), None);
         insert(&mut state, vec![1.into()]);
         insert(&mut state, vec![DfValue::None]);
-        state.add_key(Index::btree_map(vec![0]), None);
+        state.add_index(Index::btree_map(vec![0]), None);
     }
 
     #[test]
@@ -3035,7 +3035,7 @@ mod tests {
     /// and forward processing in nodes that would use the read handle for upqueries.
     fn read_handle_misses_on_binlog() {
         let mut state = setup_persistent("read_handle_misses_on_binlog", None);
-        state.add_key(Index::hash_map(vec![0]), None);
+        state.add_index(Index::hash_map(vec![0]), None);
 
         state
             .process_records(
@@ -3096,7 +3096,7 @@ mod tests {
 
         fn setup() -> PersistentState {
             let mut state = setup_persistent("persistent_state_single_key", None);
-            state.add_key(Index::btree_map(vec![0]), None);
+            state.add_index(Index::btree_map(vec![0]), None);
             state
                 .process_records(
                     &mut (0..10)
@@ -3289,7 +3289,7 @@ mod tests {
                     None,
                 )
                 .unwrap();
-            state.add_key(Index::btree_map(vec![0]), None);
+            state.add_index(Index::btree_map(vec![0]), None);
 
             assert_eq!(
                 state.lookup_range(&[0], &RangeKey::from(&(vec1![DfValue::from(2)]..))),
@@ -3332,7 +3332,7 @@ mod tests {
                     None,
                 )
                 .unwrap();
-            state.add_key(Index::btree_map(vec![1]), None);
+            state.add_index(Index::btree_map(vec![1]), None);
             state
         }
 
@@ -3379,7 +3379,7 @@ mod tests {
                     None,
                 )
                 .unwrap();
-            state.add_key(Index::btree_map(vec![1]), None);
+            state.add_index(Index::btree_map(vec![1]), None);
             assert_eq!(
                 state.lookup_range(
                     &[1],
@@ -3513,7 +3513,7 @@ mod tests {
         #[test]
         fn inclusive_unbounded_secondary_compound() {
             let mut state = setup_secondary();
-            state.add_key(Index::btree_map(vec![0, 1]), None);
+            state.add_index(Index::btree_map(vec![0, 1]), None);
             assert_eq!(
                 state.lookup_range(
                     &[0, 1],
@@ -3564,7 +3564,7 @@ mod tests {
         #[test]
         fn citext() {
             let mut state = setup();
-            state.add_key(Index::btree_map(vec![0]), None);
+            state.add_index(Index::btree_map(vec![0]), None);
             state
                 .process_records(
                     &mut vec![
