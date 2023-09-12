@@ -20,6 +20,7 @@ use readyset_adapter::backend::noria_connector::{
 use readyset_adapter::backend::{
     noria_connector, QueryResult, SinglePrepareResult, UpstreamPrepare,
 };
+use readyset_adapter::upstream_database::LazyUpstream;
 use readyset_data::{DfType, DfValue, DfValueKind};
 use readyset_errors::{internal, ReadySetError};
 use readyset_util::redacted::Sensitive;
@@ -277,14 +278,14 @@ async fn write_meta_with_header<W: AsyncWrite + Unpin>(
 
 pub struct Backend {
     /// Handle to the backing noria client
-    pub noria: readyset_adapter::Backend<MySqlUpstream, MySqlQueryHandler>,
+    pub noria: readyset_adapter::Backend<LazyUpstream<MySqlUpstream>, MySqlQueryHandler>,
     /// Enables logging of statements received from the client. The `Backend` only logs Query,
     /// Prepare and Execute statements.
     pub enable_statement_logging: bool,
 }
 
 impl Deref for Backend {
-    type Target = readyset_adapter::Backend<MySqlUpstream, MySqlQueryHandler>;
+    type Target = readyset_adapter::Backend<LazyUpstream<MySqlUpstream>, MySqlQueryHandler>;
 
     fn deref(&self) -> &Self::Target {
         &self.noria
@@ -478,7 +479,7 @@ where
 }
 
 async fn handle_query_result<'a, W>(
-    result: Result<QueryResult<'a, MySqlUpstream>, Error>,
+    result: Result<QueryResult<'a, LazyUpstream<MySqlUpstream>>, Error>,
     writer: QueryResultWriter<'_, W>,
 ) -> io::Result<()>
 where

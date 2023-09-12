@@ -10,6 +10,7 @@ use postgres_types::Type;
 use ps::{PsqlValue, TransferFormat};
 use psql_srv as ps;
 use readyset_adapter::backend as cl;
+use readyset_adapter::upstream_database::LazyUpstream;
 use readyset_data::DfValue;
 use thiserror::Error;
 
@@ -49,12 +50,14 @@ impl FromStr for AuthenticationMethod {
 /// wrapped `noria_client` `Backend`. All request parameters and response results are forwarded
 /// using type conversion.
 pub struct Backend {
-    inner: cl::Backend<PostgreSqlUpstream, PostgreSqlQueryHandler>,
+    inner: cl::Backend<LazyUpstream<PostgreSqlUpstream>, PostgreSqlQueryHandler>,
     authentication_method: AuthenticationMethod,
 }
 
 impl Backend {
-    pub fn new(inner: cl::Backend<PostgreSqlUpstream, PostgreSqlQueryHandler>) -> Self {
+    pub fn new(
+        inner: cl::Backend<LazyUpstream<PostgreSqlUpstream>, PostgreSqlQueryHandler>,
+    ) -> Self {
         Self {
             inner,
             authentication_method: Default::default(),
@@ -70,7 +73,7 @@ impl Backend {
 }
 
 impl Deref for Backend {
-    type Target = cl::Backend<PostgreSqlUpstream, PostgreSqlQueryHandler>;
+    type Target = cl::Backend<LazyUpstream<PostgreSqlUpstream>, PostgreSqlQueryHandler>;
 
     fn deref(&self) -> &Self::Target {
         &self.inner

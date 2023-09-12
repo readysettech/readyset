@@ -6,6 +6,7 @@ use psql_srv as ps;
 use readyset_adapter::backend::{
     self as cl, noria_connector, SinglePrepareResult, UpstreamPrepare,
 };
+use readyset_adapter::upstream_database::LazyUpstream;
 use readyset_client::results::{ResultIterator, Results};
 use readyset_client::ColumnSchema;
 use readyset_data::DfType;
@@ -17,7 +18,7 @@ use crate::{upstream, PostgreSqlUpstream};
 
 /// A simple wrapper around `noria_client`'s `PrepareResult`, facilitating conversion to
 /// `psql_srv::PrepareResponse`.
-pub struct PrepareResponse<'a>(pub &'a cl::PrepareResult<PostgreSqlUpstream>);
+pub struct PrepareResponse<'a>(pub &'a cl::PrepareResult<LazyUpstream<PostgreSqlUpstream>>);
 
 impl<'a> PrepareResponse<'a> {
     pub fn try_into_ps(self, prepared_statement_id: u32) -> Result<ps::PrepareResponse, ps::Error> {
@@ -63,7 +64,7 @@ impl<'a> PrepareResponse<'a> {
 
 /// A simple wrapper around `noria_client`'s `QueryResult`, facilitating conversion to
 /// `psql_srv::QueryResponse`.
-pub struct QueryResponse<'a>(pub cl::QueryResult<'a, PostgreSqlUpstream>);
+pub struct QueryResponse<'a>(pub cl::QueryResult<'a, LazyUpstream<PostgreSqlUpstream>>);
 
 impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
     type Error = ps::Error;
