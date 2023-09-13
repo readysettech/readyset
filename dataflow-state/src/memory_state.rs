@@ -1026,6 +1026,64 @@ mod tests {
                 Some(RecordResult::Owned(vec![vec![1.into(), "A".into()],]))
             );
         }
+
+        /// https://github.com/readysettech/readyset/issues/286
+        #[test]
+        fn two_overlapping_partial_indexes() {
+            let mut state = MemoryState::default();
+            state.add_key(Index::hash_map(vec![0]), Some(vec![Tag::new(0)]));
+            state.add_key(Index::hash_map(vec![1]), Some(vec![Tag::new(1)]));
+            state.add_weak_key(Index::hash_map(vec![2]));
+
+            // 1. Replay [0] = [1]
+            state.mark_filled(KeyComparison::Equal(vec1![1.into()]), Tag::new(0));
+            state
+                .process_records(
+                    &mut vec![
+                        (vec![1.into(), "a".into(), 3.into()], true),
+                        (vec![1.into(), "b".into(), 3.into()], true),
+                        (vec![1.into(), "c".into(), 3.into()], true),
+                    ]
+                    .into(),
+                    Some(Tag::new(0)),
+                    None,
+                )
+                .unwrap();
+
+            // 2. Replay [1] = [2]
+            state.mark_filled(KeyComparison::Equal(vec1!["a".into()]), Tag::new(1));
+            state
+                .process_records(
+                    &mut vec![
+                        (vec![1.into(), "a".into(), 3.into()], true),
+                        (vec![2.into(), "a".into(), 3.into()], true),
+                        (vec![3.into(), "a".into(), 3.into()], true),
+                    ]
+                    .into(),
+                    Some(Tag::new(1)),
+                    None,
+                )
+                .unwrap();
+
+            // 3. Make sure our weak index has the right number of dupes
+            let mut weak_index_rows = state
+                .lookup_weak(&[2], &PointKey::Single(3.into()))
+                .unwrap()
+                .into_iter()
+                .collect::<Vec<_>>();
+            weak_index_rows.sort();
+
+            assert_eq!(
+                weak_index_rows,
+                vec![
+                    vec![1.into(), "a".into(), 3.into()],
+                    vec![1.into(), "b".into(), 3.into()],
+                    vec![1.into(), "c".into(), 3.into()],
+                    vec![2.into(), "a".into(), 3.into()],
+                    vec![3.into(), "a".into(), 3.into()],
+                ]
+            )
+        }
     }
 
     mod weak_index_proptest {
@@ -1295,7 +1353,6 @@ mod tests {
             }
         }
 
-        #[ignore = "Test doesn't pass yet due to it finding known bugs"]
         #[test]
         fn run_cases() {
             let config = ProptestStatefulConfig {
