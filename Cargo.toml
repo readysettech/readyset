@@ -74,7 +74,7 @@ postgres-protocol = {  git = "https://github.com/readysettech/rust-postgres.git"
 postgres-types = {  git = "https://github.com/readysettech/rust-postgres.git"}
 tokio-postgres = {  git = "https://github.com/readysettech/rust-postgres.git"}
 tokio = { version = "1.32",  features = ["full"] }
-rocksdb = { git = "https://github.com/readysettech/rust-rocksdb.git", default-features = false, features = ["lz4", "jemalloc"] }
+rocksdb = { git = "https://github.com/readysettech/rust-rocksdb.git", branch = "add-sync-wal", default-features = false, features = ["lz4", "jemalloc"] }
 
 [profile.release]
 debug=true

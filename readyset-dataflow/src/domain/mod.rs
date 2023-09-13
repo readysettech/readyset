@@ -4362,8 +4362,9 @@ impl Domain {
                         idx,
                         self.state
                             .get(idx)
-                            .map(|s| {
-                                ReplicationOffsetState::Initialized(s.replication_offset().cloned())
+                            .map(|s| ReplicationOffsetState::Initialized {
+                                offset: s.replication_offset().cloned(),
+                                persisted_up_to: s.persisted_up_to(),
                             })
                             .unwrap_or(ReplicationOffsetState::Pending),
                     ))

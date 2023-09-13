@@ -11,7 +11,7 @@ use postgres_native_tls::MakeTlsConnector;
 use postgres_protocol::escape::escape_literal;
 #[cfg(feature = "failure_injection")]
 use readyset_client::failpoints;
-use readyset_client::TableOperation;
+use readyset_client::{ReadySetHandle, TableOperation};
 use readyset_errors::{
     invariant, invariant_eq, set_failpoint_return_err, ReadySetError, ReadySetResult,
 };
@@ -60,6 +60,7 @@ pub struct PostgresWalConnector {
     time_last_position_reported: Instant,
     /// Whether we are currently in the middle of processing a transaction
     in_transaction: bool,
+    noria: ReadySetHandle,
 }
 
 /// The decoded response to `IDENTIFY_SYSTEM`
@@ -112,6 +113,7 @@ impl PostgresWalConnector {
 
     /// Connects to postgres and if needed creates a new replication slot for itself with an
     /// exported snapshot.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn connect<S: AsRef<str>>(
         mut pg_config: pgsql::Config,
         dbname: S,
@@ -120,6 +122,7 @@ impl PostgresWalConnector {
         tls_connector: MakeTlsConnector,
         repl_slot_name: &str,
         enable_statement_logging: bool,
+        noria: ReadySetHandle,
     ) -> ReadySetResult<Self> {
         if !config.disable_setup_ddl_replication {
             setup_ddl_replication(pg_config.clone(), tls_connector.clone()).await?;
@@ -151,6 +154,7 @@ impl PostgresWalConnector {
             // means we know that when we first initiate a replication connection to the upstream
             // database, we'll always start replicating outside of a transaction
             in_transaction: false,
+            noria,
         };
 
         if next_position.is_none() {
@@ -400,11 +404,20 @@ impl PostgresWalConnector {
     /// receive entire transactions at a time, Postgres will know that when we ack a given LSN, it
     /// just means that we've applied all of the COMMITS up until this point and all of the events
     /// in the current transaction up until this point.
-    fn send_standby_status_update(&self, ack: Lsn) -> ReadySetResult<()> {
+    async fn send_standby_status_update(&mut self, cur_pos: Lsn) -> ReadySetResult<()> {
         use bytes::{BufMut, BytesMut};
 
         // The difference between UNIX and Postgres epoch
         const J2000_EPOCH_GAP: i64 = 946_684_800_000_000;
+
+        let ack = self
+            .noria
+            .replication_offsets()
+            .await?
+            .min_persisted_up_to()?
+            .map(|offset| PostgresPosition::try_from(offset).map(|pg_pos| pg_pos.lsn))
+            .transpose()?
+            .unwrap_or(cur_pos);
 
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -542,7 +555,7 @@ impl Connector for PostgresWalConnector {
             let lsn: Lsn = last_pos.clone().try_into()?;
             debug!("Reporting our position in the WAL to the upstream database as {lsn}");
 
-            self.send_standby_status_update(lsn)?;
+            self.send_standby_status_update(lsn).await?;
             self.time_last_position_reported = Instant::now();
         }
 
@@ -777,12 +790,13 @@ impl Connector for PostgresWalConnector {
                         // If the last event we applied to our base tables was a COMMIT and we have
                         // no buffered actions, we can safely report the "end LSN" given to us in
                         // the keepalive request as our current position.
-                        self.send_standby_status_update(end)?;
+                        self.send_standby_status_update(end).await?;
                     } else {
                         // If we have buffered actions, we have to report the position of the *last*
                         // event we applied, since we haven't yet applied the events associated with
                         // `cur_pos`
-                        self.send_standby_status_update(last_pos.clone().try_into()?)?;
+                        self.send_standby_status_update(last_pos.clone().try_into()?)
+                            .await?;
                     }
                     self.time_last_position_reported = Instant::now();
                 }
