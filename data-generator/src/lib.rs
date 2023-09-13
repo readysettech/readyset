@@ -465,6 +465,7 @@ pub fn value_of_type(typ: &SqlType) -> DfValue {
             DfValue::from(BitVec::with_capacity(size_opt.unwrap_or(1) as usize))
         }
         SqlType::VarBit(_) => DfValue::from(BitVec::new()),
+        SqlType::Interval { .. } => unimplemented!(),
         SqlType::Array(_) => unimplemented!(),
         SqlType::Other(_) => unimplemented!(),
     }
@@ -596,6 +597,7 @@ where
         }
         SqlType::Serial => ((rng.gen::<u32>() + 1) as i32).into(),
         SqlType::BigSerial => ((rng.gen::<u64>() + 1) as i64).into(),
+        SqlType::Interval { .. } => unimplemented!(),
         SqlType::Array(_) => unimplemented!(),
         SqlType::Other(_) => unimplemented!(),
     }
@@ -720,6 +722,7 @@ pub fn unique_value_of_type(typ: &SqlType, idx: u32) -> DfValue {
         }
         SqlType::Serial => ((idx + 1) as i32).into(),
         SqlType::BigSerial => ((idx + 1) as i64).into(),
+        SqlType::Interval { .. } => unimplemented!(),
         SqlType::Array(_) => unimplemented!(),
         SqlType::Other(_) => unimplemented!(),
     }

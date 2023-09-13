@@ -335,6 +335,7 @@ impl Literal {
             SqlType::Time => arbitrary_naive_time()
                 .prop_map(|nt| Self::String(nt.format("%H:%M:%S").to_string()))
                 .boxed(),
+            SqlType::Interval { .. } => unimplemented!("Intervals aren't implemented yet"),
             SqlType::Enum(_) => unimplemented!("Enums aren't implemented yet"),
             SqlType::Json | SqlType::Jsonb => arbitrary_json()
                 .prop_map(|v| Self::String(v.to_string()))

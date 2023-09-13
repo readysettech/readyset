@@ -6,7 +6,7 @@ use nom_sql::{EnumVariants, Relation, SqlIdentifier, SqlType};
 use proptest::arbitrary::{any, any_with, Arbitrary};
 use proptest::prop_oneof;
 use proptest::strategy::{BoxedStrategy, Just};
-use readyset_errors::{unsupported_err, ReadySetResult};
+use readyset_errors::{unsupported, unsupported_err, ReadySetResult};
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
@@ -301,7 +301,7 @@ impl DfType {
             TimestampTz => Self::TimestampTz {
                 subsecond_digits: dialect.default_subsecond_digits(),
             },
-
+            Interval { .. } => unsupported!("Unsupported type: INTERVAL"),
             Uuid => Self::Uuid,
             MacAddr => Self::MacAddr,
             Inet => Self::Inet,

@@ -461,6 +461,7 @@ mod tests {
 
         use super::*;
         use crate::table::Relation;
+        use crate::{FieldDefinitionExpr, TableExpr, TableExprInner};
 
         #[test]
         fn trim_query() {
@@ -726,6 +727,31 @@ mod tests {
                 expected1,
                 res1.unwrap().display(Dialect::PostgreSQL).to_string()
             );
+        }
+
+        #[test]
+        fn cast_to_interval() {
+            assert_eq!(
+                parse_query(Dialect::PostgreSQL, "SELECT '23'::interval as foo from t1").unwrap(),
+                SqlQuery::Select(SelectStatement {
+                    fields: vec![FieldDefinitionExpr::Expr {
+                        expr: Expr::Cast {
+                            expr: Box::new(Expr::Literal("23".into())),
+                            ty: SqlType::Interval {
+                                fields: None,
+                                precision: None
+                            },
+                            postgres_style: true
+                        },
+                        alias: Some("foo".into())
+                    }],
+                    tables: vec![TableExpr {
+                        inner: TableExprInner::Table("t1".into()),
+                        alias: None
+                    }],
+                    ..Default::default()
+                })
+            )
         }
     }
 }

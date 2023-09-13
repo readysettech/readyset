@@ -27,6 +27,43 @@ use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Dialect, NomSqlResult, Relation};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum IntervalFields {
+    Year,
+    Month,
+    Day,
+    Hour,
+    Minute,
+    Second,
+    YearToMonth,
+    DayToHour,
+    DayToMinute,
+    DayToSecond,
+    HourToMinute,
+    HourToSecond,
+    MinuteToSecond,
+}
+
+impl fmt::Display for IntervalFields {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            IntervalFields::Year => write!(f, "YEAR"),
+            IntervalFields::Month => write!(f, "MONTH"),
+            IntervalFields::Day => write!(f, "DAY"),
+            IntervalFields::Hour => write!(f, "HOUR"),
+            IntervalFields::Minute => write!(f, "MINUTE"),
+            IntervalFields::Second => write!(f, "SECOND"),
+            IntervalFields::YearToMonth => write!(f, "YEAR TO MONTH"),
+            IntervalFields::DayToHour => write!(f, "DAY TO HOUR"),
+            IntervalFields::DayToMinute => write!(f, "DAY TO MINUTE"),
+            IntervalFields::DayToSecond => write!(f, "DAY TO SECOND"),
+            IntervalFields::HourToMinute => write!(f, "HOUR TO MINUTE"),
+            IntervalFields::HourToSecond => write!(f, "HOUR TO SECOND"),
+            IntervalFields::MinuteToSecond => write!(f, "MINUTE TO SECOND"),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum SqlType {
     Bool,
     Char(Option<u16>),
@@ -62,6 +99,10 @@ pub enum SqlType {
     Time,
     Timestamp,
     TimestampTz,
+    Interval {
+        fields: Option<IntervalFields>,
+        precision: Option<u16>,
+    },
     Binary(Option<u16>),
     VarBinary(u16),
     Enum(EnumVariants),
@@ -323,6 +364,22 @@ impl SqlType {
                 SqlType::Time => write!(f, "TIME"),
                 SqlType::Timestamp => write!(f, "TIMESTAMP"),
                 SqlType::TimestampTz => write!(f, "TIMESTAMP WITH TIME ZONE"),
+                SqlType::Interval {
+                    ref fields,
+                    ref precision,
+                } => {
+                    write!(f, "INTERVAL")?;
+
+                    if let Some(fields) = fields {
+                        write!(f, " {fields}")?;
+                    }
+
+                    if let Some(precision) = precision {
+                        write!(f, " ({precision})")?;
+                    }
+
+                    Ok(())
+                }
                 SqlType::Binary(len) => write_with_len(f, "BINARY", len),
                 SqlType::VarBinary(len) => write!(f, "VARBINARY({})", len),
                 SqlType::Enum(ref variants) => {
@@ -610,6 +667,95 @@ fn enum_type(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[
     }
 }
 
+fn interval_fields(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], IntervalFields> {
+    alt((
+        value(
+            IntervalFields::YearToMonth,
+            tuple((
+                tag_no_case("YEAR"),
+                whitespace1,
+                tag_no_case("TO"),
+                whitespace1,
+                tag_no_case("MONTH"),
+            )),
+        ),
+        value(
+            IntervalFields::DayToHour,
+            tuple((
+                tag_no_case("DAY"),
+                whitespace1,
+                tag_no_case("TO"),
+                whitespace1,
+                tag_no_case("HOUR"),
+            )),
+        ),
+        value(
+            IntervalFields::DayToMinute,
+            tuple((
+                tag_no_case("DAY"),
+                whitespace1,
+                tag_no_case("TO"),
+                whitespace1,
+                tag_no_case("MINUTE"),
+            )),
+        ),
+        value(
+            IntervalFields::DayToSecond,
+            tuple((
+                tag_no_case("DAY"),
+                whitespace1,
+                tag_no_case("TO"),
+                whitespace1,
+                tag_no_case("SECOND"),
+            )),
+        ),
+        value(
+            IntervalFields::HourToMinute,
+            tuple((
+                tag_no_case("HOUR"),
+                whitespace1,
+                tag_no_case("TO"),
+                whitespace1,
+                tag_no_case("MINUTE"),
+            )),
+        ),
+        value(
+            IntervalFields::HourToSecond,
+            tuple((
+                tag_no_case("HOUR"),
+                whitespace1,
+                tag_no_case("TO"),
+                whitespace1,
+                tag_no_case("SECOND"),
+            )),
+        ),
+        value(
+            IntervalFields::MinuteToSecond,
+            tuple((
+                tag_no_case("MINUTE"),
+                whitespace1,
+                tag_no_case("TO"),
+                whitespace1,
+                tag_no_case("SECOND"),
+            )),
+        ),
+        value(IntervalFields::Year, tag_no_case("YEAR")),
+        value(IntervalFields::Month, tag_no_case("MONTH")),
+        value(IntervalFields::Day, tag_no_case("DAY")),
+        value(IntervalFields::Hour, tag_no_case("HOUR")),
+        value(IntervalFields::Minute, tag_no_case("MINUTE")),
+        value(IntervalFields::Second, tag_no_case("SECOND")),
+    ))(i)
+}
+
+fn interval_type(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlType> {
+    let (i, _) = tag_no_case("interval")(i)?;
+    let (i, fields) = opt(preceded(whitespace1, interval_fields))(i)?;
+    let (i, precision) = opt(preceded(whitespace0, delim_u16))(i)?;
+
+    Ok((i, SqlType::Interval { fields, precision }))
+}
+
 // `alt` has an upper limit on the number of items it supports in tuples, so we have to split out
 // the parsing for types into 3 separate functions
 // (see https://github.com/Geal/nom/pull/1556)
@@ -618,6 +764,7 @@ fn type_identifier_part1(
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlType> {
     move |i| {
         alt((
+            interval_type,
             value(SqlType::Int2, tag_no_case("int2")),
             value(SqlType::Int4, tag_no_case("int4")),
             value(SqlType::Int8, tag_no_case("int8")),
@@ -682,13 +829,13 @@ fn type_identifier_part1(
                 )),
                 |_| SqlType::TimestampTz,
             ),
-            map(tag_no_case("timestamptz"), |_| SqlType::TimestampTz),
         ))(i)
     }
 }
 
 fn type_identifier_part2(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlType> {
     alt((
+        map(tag_no_case("timestamptz"), |_| SqlType::TimestampTz),
         map(
             tuple((
                 tag_no_case("timestamp"),
@@ -754,26 +901,6 @@ fn type_identifier_part2(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlType> 
         map(tag_no_case("uuid"), |_| SqlType::Uuid),
         map(tag_no_case("jsonb"), |_| SqlType::Jsonb),
         map(tag_no_case("json"), |_| SqlType::Json),
-        map(
-            tuple((
-                alt((
-                    // The alt expects the same type to be returned for both entries,
-                    // so both have to be tuples with same number of elements
-                    map(tuple((tag_no_case("varbit"), whitespace0)), |_| ()),
-                    map(
-                        tuple((
-                            tag_no_case("bit"),
-                            whitespace1,
-                            tag_no_case("varying"),
-                            whitespace0,
-                        )),
-                        |_| (),
-                    ),
-                )),
-                opt(delim_u16),
-            )),
-            |t| SqlType::VarBit(t.1),
-        ),
     ))(i)
 }
 
@@ -782,6 +909,26 @@ fn type_identifier_part3(
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlType> {
     move |i| {
         alt((
+            map(
+                tuple((
+                    alt((
+                        // The alt expects the same type to be returned for both entries,
+                        // so both have to be tuples with same number of elements
+                        map(tuple((tag_no_case("varbit"), whitespace0)), |_| ()),
+                        map(
+                            tuple((
+                                tag_no_case("bit"),
+                                whitespace1,
+                                tag_no_case("varying"),
+                                whitespace0,
+                            )),
+                            |_| (),
+                        ),
+                    )),
+                    opt(delim_u16),
+                )),
+                |t| SqlType::VarBit(t.1),
+            ),
             map(tuple((tag_no_case("bit"), opt(delim_u16))), |t| {
                 SqlType::Bit(t.1)
             }),
@@ -1246,6 +1393,36 @@ mod tests {
             assert_eq!(
                 test_parse!(type_identifier(Dialect::PostgreSQL), b"int8"),
                 SqlType::Int8
+            );
+        }
+
+        #[test]
+        fn interval_type() {
+            assert_eq!(
+                test_parse!(type_identifier(Dialect::PostgreSQL), b"interval"),
+                SqlType::Interval {
+                    fields: None,
+                    precision: None
+                }
+            );
+
+            assert_eq!(
+                test_parse!(type_identifier(Dialect::PostgreSQL), b"interval dAY"),
+                SqlType::Interval {
+                    fields: Some(IntervalFields::Day),
+                    precision: None
+                }
+            );
+
+            assert_eq!(
+                test_parse!(
+                    type_identifier(Dialect::PostgreSQL),
+                    b"INTERVAL hour to mINuTe (4)"
+                ),
+                SqlType::Interval {
+                    fields: Some(IntervalFields::HourToMinute),
+                    precision: Some(4),
+                }
             );
         }
     }
