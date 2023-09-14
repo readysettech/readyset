@@ -3,19 +3,21 @@ use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::HashMap;
 use std::future::Future;
 use std::net::{IpAddr, SocketAddr};
+use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::task::{ready, Context, Poll};
 use std::time::Duration;
 
 use dataflow::payload::EvictRequest;
 use dataflow::{DomainBuilder, DomainRequest, Packet, Readers};
 use enum_kinds::EnumKind;
 use futures::stream::FuturesUnordered;
-use futures::FutureExt;
 use futures_util::future::TryFutureExt;
 use futures_util::sink::SinkExt;
 use futures_util::stream::StreamExt;
 use metrics::{counter, gauge, histogram};
+use pin_project::pin_project;
 use readyset_alloc::StdThreadBuildWrapper;
 use readyset_client::internal::ReplicaAddress;
 use readyset_client::metrics::recorded;
@@ -28,7 +30,7 @@ use tikv_jemalloc_ctl::stats::allocated_mib;
 use tikv_jemalloc_ctl::{epoch, epoch_mib, stats};
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::{oneshot, Mutex};
-use tokio::task::JoinError;
+use tokio::task::{JoinError, JoinHandle};
 use tokio::time::Interval;
 use tracing::{debug, error, info, info_span, trace, warn};
 use url::Url;
@@ -176,17 +178,22 @@ impl MemoryTracker {
     }
 }
 
-/// A helper type which is just a map of a JoinHandle, but naming it with no dyn was too hard
-pub(crate) type FinishedDomainFuture = Box<
-    dyn Future<Output = (Result<Result<(), anyhow::Error>, JoinError>, ReplicaAddress)>
-        + Unpin
-        + Send,
->;
+/// A future for a finished domain. Awaiting this future returns a tuple containing the result of
+/// the domain running and the domain's [`ReplicaAddress`]
+#[pin_project]
+struct FinishedDomain(#[pin] JoinHandle<anyhow::Result<()>>, ReplicaAddress);
 
-fn log_domain_result(
-    domain: ReplicaAddress,
-    result: &Result<Result<(), anyhow::Error>, JoinError>,
-) {
+impl Future for FinishedDomain {
+    type Output = (Result<anyhow::Result<()>, JoinError>, ReplicaAddress);
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.project();
+        let res = ready!(this.0.poll(cx));
+        Poll::Ready((res, *this.1))
+    }
+}
+
+fn log_domain_result(domain: ReplicaAddress, result: &Result<anyhow::Result<()>, JoinError>) {
     match result {
         Ok(Ok(())) => info!(%domain, "domain exited"),
         Ok(Err(error)) => error!(%domain, %error, "domain failed with an error"),
@@ -222,7 +229,7 @@ pub struct Worker {
 
     memory: MemoryTracker,
     is_evicting: Arc<AtomicBool>,
-    domain_wait_queue: FuturesUnordered<FinishedDomainFuture>,
+    domain_wait_queue: FuturesUnordered<FinishedDomain>,
     shutdown_rx: ShutdownReceiver,
 }
 
@@ -364,11 +371,7 @@ impl Worker {
                     .build()
                     .unwrap();
 
-                let jh = Box::new(
-                    runtime
-                        .spawn(replica.run())
-                        .map(move |jh| (jh, replica_addr)),
-                );
+                let jh = runtime.spawn(replica.run());
 
                 let (abort, abort_rx) = oneshot::channel::<()>();
                 // Spawn the actual thread to run the domain
@@ -387,7 +390,8 @@ impl Worker {
                 self.domains
                     .insert(replica_addr, DomainHandle { req_tx, abort });
 
-                self.domain_wait_queue.push(jh);
+                self.domain_wait_queue
+                    .push(FinishedDomain(jh, replica_addr));
 
                 span.in_scope(|| debug!(%bind_actual, %bind_external, "domain booted"));
                 let resp = RunDomainResponse {
@@ -451,7 +455,7 @@ impl Worker {
     async fn handle_domain_future_completion(
         &mut self,
         addr: ReplicaAddress,
-        result: Result<Result<(), anyhow::Error>, JoinError>,
+        result: Result<anyhow::Result<()>, JoinError>,
     ) -> ReadySetResult<()> {
         log_domain_result(addr, &result);
 
