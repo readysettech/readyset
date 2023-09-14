@@ -8,7 +8,7 @@ use eui48::{MacAddress, MacAddressFormat};
 use itertools::Itertools;
 use nom::branch::alt;
 use nom::bytes::complete::{is_not, tag, tag_no_case, take};
-use nom::character::complete::{char, digit1, satisfy};
+use nom::character::complete::{char, digit0, digit1, satisfy};
 use nom::combinator::{map, map_parser, map_res, not, opt, peek, recognize};
 use nom::error::ErrorKind;
 use nom::multi::fold_many0;
@@ -415,7 +415,7 @@ pub fn float(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], (Option<&[u8]>, &[u8]
         opt(map(tag("-"), |i: LocatedSpan<&[u8]>| *i)),
         map(digit1, |i: LocatedSpan<&[u8]>| *i),
         map(tag("."), |i: LocatedSpan<&[u8]>| *i),
-        map(digit1, |i: LocatedSpan<&[u8]>| *i),
+        map(digit0, |i: LocatedSpan<&[u8]>| *i),
     ))(i)
 }
 

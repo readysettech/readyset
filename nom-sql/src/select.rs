@@ -2011,7 +2011,7 @@ mod tests {
         use crate::column::Column;
         use crate::common::FieldDefinitionExpr;
         use crate::table::Relation;
-        use crate::{BinaryOperator, Expr, FunctionExpr, InValue};
+        use crate::{BinaryOperator, Double, Expr, FunctionExpr, InValue};
 
         #[test]
         fn alias_generic_function() {
@@ -2187,6 +2187,103 @@ mod tests {
                     alias: None,
                 }]
             );
+        }
+
+        #[test]
+        fn select_with_decimal_limit() {
+            let qstr = br#"SELECT id FROM a LIMIT 0.0"#;
+            let expected = SelectStatement {
+                tables: vec![TableExpr::from(Relation::from("a"))],
+                fields: columns(&["id"]),
+                limit_clause: LimitClause::LimitOffset {
+                    limit: Some(Literal::Double(Double {
+                        value: 0.0,
+                        precision: 1,
+                    })),
+                    offset: None,
+                },
+                ..Default::default()
+            };
+            let res = test_parse!(selection(Dialect::PostgreSQL), qstr);
+            assert_eq!(res, expected);
+        }
+
+        #[test]
+        fn select_with_decimal_limit_zero_no_right_hand_side() {
+            let qstr = br#"SELECT id FROM a LIMIT 0.;"#;
+            let expected = SelectStatement {
+                tables: vec![TableExpr::from(Relation::from("a"))],
+                fields: columns(&["id"]),
+                limit_clause: LimitClause::LimitOffset {
+                    limit: Some(Literal::Double(Double {
+                        value: 0.0,
+                        precision: 0,
+                    })),
+                    offset: None,
+                },
+                ..Default::default()
+            };
+            let res = test_parse!(selection(Dialect::PostgreSQL), qstr);
+            assert_eq!(res, expected);
+        }
+
+        #[test]
+        fn select_with_decimal_limit_non_zero() {
+            let qstr = br#"SELECT id FROM a LIMIT 1.1"#;
+            let expected = SelectStatement {
+                tables: vec![TableExpr::from(Relation::from("a"))],
+                fields: columns(&["id"]),
+                limit_clause: LimitClause::LimitOffset {
+                    limit: Some(Literal::Double(Double {
+                        value: 1.1,
+                        precision: 1,
+                    })),
+                    offset: None,
+                },
+                ..Default::default()
+            };
+            let res = test_parse!(selection(Dialect::PostgreSQL), qstr);
+            assert_eq!(res, expected);
+        }
+
+        #[test]
+        fn select_with_decimal_limit_non_zero_no_right_hand_side() {
+            let qstr = br#"SELECT id FROM a LIMIT 1."#;
+            let expected = SelectStatement {
+                tables: vec![TableExpr::from(Relation::from("a"))],
+                fields: columns(&["id"]),
+                limit_clause: LimitClause::LimitOffset {
+                    limit: Some(Literal::Double(Double {
+                        value: 1.0,
+                        precision: 0,
+                    })),
+                    offset: None,
+                },
+                ..Default::default()
+            };
+
+            let res = test_parse!(selection(Dialect::PostgreSQL), qstr);
+            assert_eq!(res, expected);
+        }
+
+        #[test]
+        fn select_with_decimal_limit_negative_zero() {
+            let qstr = br#"SELECT id FROM a LIMIT -0.0"#;
+            let expected = SelectStatement {
+                tables: vec![TableExpr::from(Relation::from("a"))],
+                fields: columns(&["id"]),
+                limit_clause: LimitClause::LimitOffset {
+                    limit: Some(Literal::Double(Double {
+                        value: -0.0,
+                        precision: 1,
+                    })),
+                    offset: None,
+                },
+                ..Default::default()
+            };
+
+            let res = test_parse!(selection(Dialect::PostgreSQL), qstr);
+            assert_eq!(res, expected);
         }
     }
 }
