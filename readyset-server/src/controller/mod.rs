@@ -1197,7 +1197,9 @@ mod tests {
     };
     use readyset_client::debug::info::KeyCount;
     use readyset_client::recipe::changelist::{Change, ChangeList};
-    use readyset_client::{TableReplicationStatus, TableStatus, ViewCreateRequest};
+    use readyset_client::{
+        PersistencePoint, TableOperation, TableReplicationStatus, TableStatus, ViewCreateRequest,
+    };
     use readyset_data::Dialect as DataDialect;
     use readyset_util::eventually;
     use replication_offset::ReplicationOffset;
@@ -1669,6 +1671,64 @@ mod tests {
         let mat = res.into_iter().next().unwrap();
         assert!(!mat.partial);
         assert_eq!(mat.node_description, "B");
+
+        shutdown_tx.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn min_persisted_replication_offset() {
+        let (mut noria, shutdown_tx) = start_simple("min_persisted_replication_offset").await;
+        noria
+            .extend_recipe(
+                ChangeList::from_str(
+                    "CREATE TABLE persisted_offset_test1 (id INT PRIMARY KEY, stuff TEXT);
+                     CREATE TABLE persisted_offset_test2 (id INT PRIMARY KEY, stuff TEXT);",
+                    DataDialect::DEFAULT_MYSQL,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let min_persisted_offset = noria.min_persisted_replication_offset().await.unwrap();
+
+        assert_eq!(min_persisted_offset, PersistencePoint::Persisted);
+
+        let offset1: ReplicationOffset =
+            MySqlPosition::from_file_name_and_position("binlog.00001".to_owned(), 1)
+                .unwrap()
+                .into();
+        noria
+            .table("persisted_offset_test1")
+            .await
+            .unwrap()
+            .perform_all([
+                TableOperation::Insert(vec![1.into(), "abc".into()]),
+                TableOperation::SetReplicationOffset(offset1.clone()),
+            ])
+            .await
+            .unwrap();
+
+        let offset2 = MySqlPosition::from_file_name_and_position("binlog.00001".to_owned(), 1)
+            .unwrap()
+            .into();
+        noria
+            .table("persisted_offset_test2")
+            .await
+            .unwrap()
+            .perform_all([
+                TableOperation::Insert(vec![2.into(), "def".into()]),
+                TableOperation::SetReplicationOffset(offset2),
+            ])
+            .await
+            .unwrap();
+
+        let min_persisted_offset = noria.min_persisted_replication_offset().await.unwrap();
+
+        // TODO(ethan): This will be updated to be the following once we start flushing writes to
+        // disk in the background:
+        // assert_eq!(min_persisted_offset, PersistencePoint::UpTo(offset1));
+        assert_eq!(min_persisted_offset, PersistencePoint::Persisted);
 
         shutdown_tx.shutdown().await;
     }

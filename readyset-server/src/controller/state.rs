@@ -24,7 +24,8 @@ use common::{IndexPair, Tag};
 use dataflow::payload::EvictRequest;
 use dataflow::prelude::{ChannelCoordinator, DomainIndex, DomainNodes, Graph, NodeIndex};
 use dataflow::{
-    DomainBuilder, DomainConfig, DomainRequest, NodeMap, Packet, PersistenceParameters, Sharding,
+    BaseTableState, DomainBuilder, DomainConfig, DomainRequest, NodeMap, Packet,
+    PersistenceParameters, Sharding,
 };
 use futures::stream::{self, FuturesUnordered, StreamExt, TryStreamExt};
 use futures::{FutureExt, TryFutureExt, TryStream};
@@ -44,14 +45,14 @@ use readyset_client::metrics::recorded;
 use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_client::recipe::ExtendRecipeSpec;
 use readyset_client::{
-    SingleKeyEviction, TableReplicationStatus, TableStatus, ViewCreateRequest, ViewFilter,
-    ViewRequest, ViewSchema,
+    PersistencePoint, SingleKeyEviction, TableReplicationStatus, TableStatus, ViewCreateRequest,
+    ViewFilter, ViewRequest, ViewSchema,
 };
 use readyset_data::{DfValue, Dialect};
 use readyset_errors::{
     internal, internal_err, invariant_eq, NodeType, ReadySetError, ReadySetResult,
 };
-use replication_offset::{ReplicationOffset, ReplicationOffsetState, ReplicationOffsets};
+use replication_offset::{ReplicationOffset, ReplicationOffsets};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, MutexGuard, RwLock, RwLockReadGuard};
@@ -834,6 +835,49 @@ impl DfState {
             .buffer_unordered(CONCURRENT_REQUESTS)
     }
 
+    /// Returns the minimum replication offset up to which data has been persisted across every base
+    /// table. If no unpersisted data exists in any base tables, it returns `None`.
+    ///
+    /// See [the documentation for PersistentState](::readyset_dataflow::state::persistent_state)
+    /// for more information about replication offsets.
+    pub(super) async fn min_persisted_replication_offset(
+        &self,
+    ) -> ReadySetResult<PersistencePoint> {
+        let domains = self.domains_with_base_tables().await?;
+        let mut min_persisted_offsets = self.query_domains::<_, BaseTableState<PersistencePoint>>(
+            domains
+                .into_iter()
+                .map(|domain| (domain, DomainRequest::RequestMinPersistedReplicationOffset)),
+        );
+
+        let mut cur_min = PersistencePoint::Persisted;
+
+        while let Some((_idx, replicas)) = min_persisted_offsets.try_next().await? {
+            for offset in replicas.into_cells() {
+                let min_persisted_offset_for_domain = match offset {
+                    BaseTableState::Initialized(persisted_offset) => persisted_offset,
+                    BaseTableState::Pending => internal!(
+                        "At least one table does not have a replication offset because it is \
+                        not ready yet. The caller should wait for all tables to be ready before \
+                        requesting replication offsets",
+                    ),
+                };
+
+                match (&cur_min, &min_persisted_offset_for_domain) {
+                    (PersistencePoint::Persisted, _) => cur_min = min_persisted_offset_for_domain,
+                    (PersistencePoint::UpTo(_), PersistencePoint::Persisted) => {}
+                    (PersistencePoint::UpTo(min), PersistencePoint::UpTo(persisted_offset)) => {
+                        if persisted_offset.try_partial_cmp(min)?.is_lt() {
+                            cur_min = PersistencePoint::UpTo(persisted_offset.clone());
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(cur_min)
+    }
+
     /// Returns a struct containing the set of all replication offsets within the system, including
     /// the replication offset for the schema stored in the controller and the replication offsets
     /// of all base tables
@@ -842,7 +886,7 @@ impl DfState {
     /// for more information about replication offsets.
     pub(super) async fn replication_offsets(&self) -> ReadySetResult<ReplicationOffsets> {
         let domains = self.domains_with_base_tables().await?;
-        self.query_domains::<_, NodeMap<ReplicationOffsetState>>(
+        self.query_domains::<_, NodeMap<BaseTableState<Option<ReplicationOffset>>>>(
             domains
                 .into_iter()
                 .map(|domain| (domain, DomainRequest::RequestReplicationOffsets)),
@@ -868,11 +912,11 @@ impl DfState {
                         #[allow(clippy::indexing_slicing)] // internal invariant
                         let table_name = self.ingredients[*ni].name();
                         match offset {
-                            ReplicationOffsetState::Initialized(offset) => {
+                            BaseTableState::Initialized(offset) => {
                                 // TODO min of all shards
                                 acc.tables.insert(table_name.clone(), offset);
                             }
-                            ReplicationOffsetState::Pending => {
+                            BaseTableState::Pending => {
                                 internal!(
                                     "Table {} does not have a replication offset because it is \
                                      not ready yet. The caller should wait for all tables to \

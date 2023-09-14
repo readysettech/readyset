@@ -22,10 +22,11 @@ use itertools::Either;
 pub use partial_map::PartialMap;
 use readyset_client::debug::info::KeyCount;
 use readyset_client::internal::Index;
-use readyset_client::KeyComparison;
+use readyset_client::{KeyComparison, PersistencePoint};
 use readyset_data::DfValue;
 use readyset_errors::ReadySetResult;
 use replication_offset::ReplicationOffset;
+use serde::{Deserialize, Serialize};
 
 pub use crate::key::{PointKey, RangeKey};
 pub use crate::memory_state::MemoryState;
@@ -72,12 +73,13 @@ pub enum MaterializedNodeState {
     PersistentReadHandle(PersistentStateHandle),
 }
 
-/// The point up to which data in a state has been persisted.
-pub enum PersistencePoint {
-    /// All of the data in this state has been persisted
-    Persisted,
-    /// The data in this state has been persisted up to this offset
-    UpTo(ReplicationOffset),
+/// Enum representing whether a base table node was already initialized (and has a replication
+/// offset assigned), or if it is still pending initialization. This type is used as a container
+/// for responses from base tables that will only return data if the base table is initialized.
+#[derive(Serialize, Deserialize)]
+pub enum BaseTableState<T> {
+    Initialized(T),
+    Pending,
 }
 
 /// The [`State`] trait is the interface to the state of a non-reader node in the graph, containing
