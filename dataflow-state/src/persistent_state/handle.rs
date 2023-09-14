@@ -1,9 +1,16 @@
+//! We define `PersistentStateHandle` in a submodule to prevent the `persistent_state` module from
+//! accessing its private members. This is done to avoid deadlocks: since `shared_state` and `db`
+//! are locked separately, it is possible for threads to hold write locks separately on each and
+//! then request a write lock on the other. `PersistentStateHandle`'s API requires that threads
+//! already hold a write lock on the RocksDB handle before acquiring a write lock on the shared
+//! state, which prevents deadlocks.
 use std::sync::Arc;
 
 use common::IndexType;
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use readyset_data::DfValue;
 use replication_offset::ReplicationOffset;
+use rocksdb::{self, DB};
 use tracing::debug;
 
 use super::{deserialize_row, PersistentState, SharedState, PK_CF};
@@ -19,25 +26,53 @@ pub struct PersistentStateHandle {
     /// in a miss.
     pub replication_offset: Option<ReplicationOffset>,
     shared_state: Arc<RwLock<SharedState>>,
+    /// The handle to the RocksDB database we are reading from
+    db: Arc<RwLock<DB>>,
+}
+
+pub(super) struct PersistentStateReadGuard<'a> {
+    pub(super) db: RwLockReadGuard<'a, DB>,
+    pub(super) shared_state: RwLockReadGuard<'a, SharedState>,
+}
+
+pub(super) struct PersistentStateWriteGuard<'a> {
+    pub(super) db: RwLockWriteGuard<'a, DB>,
+    pub(super) shared_state: RwLockWriteGuard<'a, SharedState>,
 }
 
 impl PersistentStateHandle {
     pub(super) fn new(
         shared_state: SharedState,
+        db: DB,
         replication_offset: Option<ReplicationOffset>,
     ) -> Self {
         Self {
             shared_state: Arc::new(RwLock::new(shared_state)),
+            db: Arc::new(RwLock::new(db)),
             replication_offset,
         }
     }
 
-    pub(super) fn inner(&self) -> RwLockReadGuard<'_, SharedState> {
-        self.shared_state.read()
+    /// Acquires read locks on both the RocksDB handle and the shared state. The decision not
+    /// to expose the ability to acquire a read lock on the shared state alone was deliberate:
+    /// by requiring that a thread already have a read lock on the RocksDB handle before
+    /// acquiring a read lock on the shared state, we eliminate the potential for deadlocks.
+    pub(super) fn inner(&self) -> PersistentStateReadGuard {
+        PersistentStateReadGuard {
+            db: self.db.read(),
+            shared_state: self.shared_state.read(),
+        }
     }
 
-    pub(super) fn inner_mut(&self) -> RwLockWriteGuard<'_, SharedState> {
-        self.shared_state.write()
+    /// Acquires write locks on both the RocksDB handle and the shared state. The decision not
+    /// to expose the ability to acquire a write lock on the shared state alone was deliberate:
+    /// by requiring that a thread already have a write lock on the RocksDB handle before
+    /// acquiring a write lock on the shared state, we eliminate the potential for deadlocks.
+    pub(super) fn inner_mut(&self) -> PersistentStateWriteGuard {
+        PersistentStateWriteGuard {
+            db: self.db.write(),
+            shared_state: self.shared_state.write(),
+        }
     }
 
     /// Perform a lookup for multiple equal keys at once. The results are returned in the order
@@ -52,7 +87,7 @@ impl PersistentStateHandle {
         }
         let inner = self.inner();
 
-        let index = inner.index(IndexType::HashMap, columns);
+        let index = inner.shared_state.index(IndexType::HashMap, columns);
         let is_primary = index.is_primary;
 
         let cf = inner.db.cf_handle(&index.column_family).unwrap();
@@ -114,7 +149,7 @@ impl PersistentStateHandle {
     /// index
     pub(super) fn do_lookup(&self, columns: &[usize], key: &PointKey) -> Option<Vec<Vec<DfValue>>> {
         let inner = self.inner();
-        if self.replication_offset < inner.replication_offset {
+        if self.replication_offset < inner.shared_state.replication_offset {
             // We are checking the replication offset under a read lock, and the lock remains in
             // place until after the read completed, guaranteeing that no write takes place. An
             // alternative would be to use a transaction that reads the log offset from the meta
@@ -122,7 +157,7 @@ impl PersistentStateHandle {
             debug!("Consistency miss in PersistentStateHandle");
             return None;
         }
-        let index = inner.index(IndexType::HashMap, columns);
+        let index = inner.shared_state.index(IndexType::HashMap, columns);
 
         let cf = inner.db.cf_handle(&index.column_family).unwrap();
         let primary_cf = if !index.is_primary {

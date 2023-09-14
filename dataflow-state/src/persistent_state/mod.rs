@@ -77,7 +77,7 @@ use bincode::Options;
 use clap::ValueEnum;
 use common::{IndexType, Record, Records, SizeOf, Tag};
 pub use handle::PersistentStateHandle;
-use parking_lot::RwLockReadGuard;
+use handle::{PersistentStateReadGuard, PersistentStateWriteGuard};
 use readyset_alloc::thread::StdThreadBuildWrapper;
 use readyset_client::debug::info::KeyCount;
 use readyset_client::internal::Index;
@@ -422,8 +422,6 @@ pub struct PersistentState {
 /// Things that are shared between read handles and the state itself, that can be locked under a
 /// single lock
 struct SharedState {
-    /// The handle to the RocksDB database we are reading from
-    db: DB,
     /// The latest replication offset that has been written to the base table backed by this
     /// [`PersistentState`]
     replication_offset: Option<ReplicationOffset>,
@@ -459,7 +457,7 @@ impl fmt::Debug for PersistentState {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt.debug_struct("PersistentState")
             .field("name", &self.name)
-            .field("indices", &self.db.inner().indices)
+            .field("indices", &self.db.inner().shared_state.indices)
             .field("unique_keys", &self.unique_keys)
             .field("seq", &self.seq)
             .field("epoch", &self.epoch)
@@ -526,7 +524,7 @@ impl State for PersistentState {
     }
 
     fn persisted_up_to(&self) -> Option<ReplicationOffset> {
-        match &self.db.inner().wal_state {
+        match &self.db.inner().shared_state.wal_state {
             WalState::FlushedAndPersisted => None,
         }
     }
@@ -556,7 +554,13 @@ impl State for PersistentState {
             assert!(partial.is_none(), "Bases can't be partial");
         }
         let columns = &index.columns;
-        let existing = self.db.inner().indices.iter().any(|pi| pi.index == index);
+        let existing = self
+            .db
+            .inner()
+            .shared_state
+            .indices
+            .iter()
+            .any(|pi| pi.index == index);
 
         if existing {
             self.db.add_index(index, partial);
@@ -564,7 +568,7 @@ impl State for PersistentState {
         }
 
         let is_unique = check_if_index_is_unique(&self.unique_keys, columns);
-        if self.db.inner().indices.is_empty() {
+        if self.db.inner().shared_state.indices.is_empty() {
             self.add_primary_index(&index.columns, is_unique).unwrap();
             if index.index_type != IndexType::HashMap {
                 // Primary indices can only be HashMaps, so if this is our first index and it's
@@ -699,7 +703,7 @@ impl State for PersistentStateHandle {
     }
 
     fn is_useful(&self) -> bool {
-        !self.inner().indices.is_empty()
+        !self.inner().shared_state.indices.is_empty()
     }
 
     fn is_partial(&self) -> bool {
@@ -732,7 +736,7 @@ impl State for PersistentStateHandle {
 
     fn lookup_range<'a>(&'a self, columns: &[usize], key: &RangeKey) -> RangeLookupResult<'a> {
         let inner = self.inner();
-        if self.replication_offset < inner.replication_offset {
+        if self.replication_offset < inner.shared_state.replication_offset {
             debug!("Consistency miss in PersistentStateHandle");
             // TODO(vlad): The read handle missed on binlog position, but that doesn't mean we want
             // to replay the entire range, all we want is for something to trigger a
@@ -740,7 +744,7 @@ impl State for PersistentStateHandle {
             return RangeLookupResult::Missing(vec![key.as_bound_pair()]);
         }
 
-        let index = inner.index(IndexType::BTreeMap, columns);
+        let index = inner.shared_state.index(IndexType::BTreeMap, columns);
         let is_primary = index.is_primary;
 
         let cf = inner.db.cf_handle(&index.column_family).unwrap();
@@ -1195,7 +1199,7 @@ fn compact_cf(table: &str, db: &DB, index: &PersistentIndex, opts: &CompactOptio
 pub struct AllRecords(PersistentStateHandle);
 
 /// RAII guard providing the ability to stream all the records out of a persistent state
-pub struct AllRecordsGuard<'a>(RwLockReadGuard<'a, SharedState>);
+pub struct AllRecordsGuard<'a>(PersistentStateReadGuard<'a>);
 
 impl AllRecords {
     /// Construct an RAII guard providing the ability to stream all the records out of a persistent
@@ -1214,7 +1218,7 @@ impl<'a> AllRecordsGuard<'a> {
         let cf = self
             .0
             .db
-            .cf_handle(&self.0.indices[0].column_family)
+            .cf_handle(&self.0.shared_state.indices[0].column_family)
             .expect("Column families always exist for all indices");
         self.0
             .db
@@ -1378,12 +1382,11 @@ impl PersistentState {
 
         let replication_offset = meta.replication_offset.map(|ro| ro.into_owned());
         let shared_state = SharedState {
-            db,
             replication_offset: replication_offset.clone(),
             wal_state: WalState::FlushedAndPersisted,
             indices,
         };
-        let read_handle = PersistentStateHandle::new(shared_state, replication_offset);
+        let read_handle = PersistentStateHandle::new(shared_state, db, replication_offset);
 
         let mut state = Self {
             name,
@@ -1415,7 +1418,7 @@ impl PersistentState {
 
     /// Adds a new primary index, assuming there are none present
     fn add_primary_index(&mut self, columns: &[usize], is_unique: bool) -> Result<()> {
-        if self.db.inner().indices.is_empty() {
+        if self.db.inner().shared_state.indices.is_empty() {
             debug!(base = %self.name, index = ?columns, is_unique, "Base creating primary index");
 
             let index_params = IndexParams::new(IndexType::HashMap, columns.len());
@@ -1429,7 +1432,11 @@ impl PersistentState {
                 is_primary: true,
             };
 
-            self.db.inner_mut().indices.push(persistent_index);
+            self.db
+                .inner_mut()
+                .shared_state
+                .indices
+                .push(persistent_index);
             let meta = self.meta();
             self.db.inner().db.save_meta(&meta);
             self.db.inner_mut().db.create_cf(
@@ -1448,7 +1455,7 @@ impl PersistentState {
 
         // We'll store all the values for this index in its own column family:
         let index_params = IndexParams::from(index);
-        let cf_name = self.db.inner().indices.len().to_string();
+        let cf_name = self.db.inner().shared_state.indices.len().to_string();
 
         // add the index to the meta first so even if we fail before we fully reindex we still have
         // the information about the column family
@@ -1459,7 +1466,11 @@ impl PersistentState {
             index: index.clone(),
         };
 
-        self.db.inner_mut().indices.push(persistent_index.clone());
+        self.db
+            .inner_mut()
+            .shared_state
+            .indices
+            .push(persistent_index.clone());
         let meta = self.meta();
         self.db.inner().db.save_meta(&meta);
         self.db
@@ -1544,6 +1555,7 @@ impl PersistentState {
             indices: self
                 .db
                 .inner()
+                .shared_state
                 .indices
                 .iter()
                 .map(|pi| pi.index.clone())
@@ -1559,7 +1571,7 @@ impl PersistentState {
         // It's ok to read and update meta in two steps here since each State can (currently) only
         // be modified by a single thread.
         self.db.replication_offset = Some(offset.clone());
-        self.db.inner_mut().replication_offset = Some(offset);
+        self.db.inner_mut().shared_state.replication_offset = Some(offset);
         batch.save_meta(&self.meta());
     }
 
@@ -1591,12 +1603,15 @@ impl PersistentState {
     fn enable_snapshot_mode(&mut self) {
         self.db.replication_offset = None; // Remove any replication offset first (although it should be None already)
         let meta = self.meta();
-        let mut inner = self.db.inner_mut();
-        let SharedState { db, indices, .. } = &mut *inner;
+        let PersistentStateWriteGuard {
+            mut db,
+            shared_state,
+            ..
+        } = self.db.inner_mut();
         db.save_meta(&meta);
 
         // Clear the data by dropping each column family and creating it anew
-        for index in indices.iter() {
+        for index in shared_state.indices.iter() {
             let cf_name = index.column_family.as_str();
             db.drop_cf(cf_name).unwrap();
 
@@ -1615,7 +1630,7 @@ impl PersistentState {
     }
 
     fn disable_snapshot_mode(&mut self) {
-        for index in self.db.inner().indices.iter().cloned() {
+        for index in self.db.inner().shared_state.indices.iter().cloned() {
             // Perform a manual compaction for each column family
 
             let mut opts = CompactOptions::default();
@@ -1667,6 +1682,7 @@ impl PersistentState {
     fn insert(&mut self, batch: &mut WriteBatch, r: &[DfValue]) -> ReadySetResult<()> {
         let inner = self.db.inner();
         let primary_index = inner
+            .shared_state
             .indices
             .first()
             .ok_or_else(|| internal_err!("Insert on un-indexed state"))?;
@@ -1690,7 +1706,7 @@ impl PersistentState {
         batch.put_cf(primary_cf, &serialized_pk, &serialized_row);
 
         // Then insert the value for all the secondary indices:
-        for index in inner.indices[1..].iter() {
+        for index in inner.shared_state.indices[1..].iter() {
             // Construct a key with the index values, and serialize it with bincode:
             let cf = inner.db.cf_handle(&index.column_family).unwrap();
             let key = build_key(r, &index.index.columns);
@@ -1713,6 +1729,7 @@ impl PersistentState {
         let inner = self.db.inner();
 
         let primary_index = inner
+            .shared_state
             .indices
             .first()
             .ok_or_else(|| internal_err!("Delete on un-indexed state"))?;
@@ -1748,7 +1765,7 @@ impl PersistentState {
         batch.delete_cf(primary_cf, &serialized_pk);
 
         // Then delete the value for all the secondary indices
-        for index in inner.indices[1..].iter() {
+        for index in inner.shared_state.indices[1..].iter() {
             // Construct a key with the index values, and serialize it with bincode:
             let key = build_key(r, &index.index.columns);
             let serialized_key = if index.is_unique && !key.has_null() {
@@ -1812,7 +1829,7 @@ impl PersistentState {
                 // options.sync=true,    will it persist the previous write too?
                 // A: No. After the program crashes, writes with option.disableWAL=true will be
                 // lost, if they are not flushed to SST files.
-                for index in inner.indices.iter() {
+                for index in inner.shared_state.indices.iter() {
                     inner
                         .db
                         .flush_cf(inner.db.cf_handle(&index.column_family).unwrap())
@@ -1973,6 +1990,7 @@ impl SizeOf for PersistentState {
     fn deep_size_of(&self) -> u64 {
         let inner = self.db.inner();
         inner
+            .shared_state
             .indices
             .iter()
             .map(|idx| {
