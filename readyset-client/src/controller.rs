@@ -887,8 +887,12 @@ impl ReadySetHandle {
     );
 
     simple_request!(
-        /// Get a list of all current tables node indexes that are involved in snapshotting.
-        snapshotting_tables() -> Vec<String>
+        /// Gets the minimum replication offset up to which data has been persisted across all the base
+        /// table nodes. If no base tables have unpersisted data, this method returns `None`.
+        ///
+        /// See [the documentation for PersistentState](::readyset_dataflow::state::persistent_state)
+        /// for more information about replication offsets.
+        min_persisted_replication_offset() -> Option<ReplicationOffset>
     );
 
     /// Poll in a loop to wait for all tables to finish compacting
