@@ -5005,6 +5005,7 @@ dependencies = [
  "clap 4.3.2",
  "criterion",
  "database-utils",
+ "dataflow-state",
  "derive_more",
  "diff",
  "enum-kinds",

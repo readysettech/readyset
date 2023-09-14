@@ -1020,3 +1020,12 @@ impl Table {
         .await
     }
 }
+
+/// The point up to which data in a table has been persisted.
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
+pub enum PersistencePoint {
+    /// All of the data in this table has been persisted
+    Persisted,
+    /// The data in this table has been persisted up to this offset
+    UpTo(ReplicationOffset),
+}
