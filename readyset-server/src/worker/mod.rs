@@ -362,30 +362,14 @@ impl Worker {
                     init_state_rx,
                     self.coord.clone(),
                 );
-                // Each domain is single threaded in nature, so we spawn each one in a separate
-                // thread, so we can avoid running blocking operations on the multi
-                // threaded tokio runtime
-                let runtime = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .max_blocking_threads(1)
-                    .build()
-                    .unwrap();
-
-                let jh = runtime.spawn(replica.run());
 
                 let (abort, abort_rx) = oneshot::channel::<()>();
-                // Spawn the actual thread to run the domain
-                std::thread::Builder::new()
-                    .name(format!("Domain {}", replica_addr))
-                    .stack_size(2 * 1024 * 1024) // Use the same value tokio is using
-                    .spawn_wrapper(move || {
-                        // The runtime will run until the abort signal is sent.
-                        // This will happen either if the DomainHandle is dropped (and error is
-                        // received) or an actual signal is sent on the
-                        // channel
-                        let _ = runtime.block_on(abort_rx);
-                        runtime.shutdown_background();
-                    })?;
+                let jh = tokio::task::spawn(async move {
+                    select! {
+                        res = replica.run() => res,
+                        _ = abort_rx => Ok(())
+                    }
+                });
 
                 self.domains
                     .insert(replica_addr, DomainHandle { req_tx, abort });
