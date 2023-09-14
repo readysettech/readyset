@@ -834,6 +834,49 @@ impl DfState {
             .buffer_unordered(CONCURRENT_REQUESTS)
     }
 
+    /// Returns the minimum replication offset up to which data has been persisted across every base
+    /// table. If no unpersisted data exists in any base tables, it returns `None`.
+    ///
+    /// See [the documentation for PersistentState](::readyset_dataflow::state::persistent_state)
+    /// for more information about replication offsets.
+    pub(super) async fn min_persisted_replication_offset(
+        &self,
+    ) -> ReadySetResult<Option<ReplicationOffset>> {
+        let domains = self.domains_with_base_tables().await?;
+        let mut min_persisted_offsets = self.query_domains::<_, ReplicationOffsetState>(
+            domains
+                .into_iter()
+                .map(|domain| (domain, DomainRequest::RequestMinPersistedReplicationOffset)),
+        );
+
+        let mut cur_min = None;
+
+        while let Some((_idx, replicas)) = min_persisted_offsets.try_next().await? {
+            for offset in replicas.into_cells() {
+                let min_persisted_offset_for_domain = match offset {
+                    ReplicationOffsetState::Initialized(persisted_offset) => persisted_offset,
+                    ReplicationOffsetState::Pending => internal!(
+                        "At least one table does not have a replication offset because it is \
+                        not ready yet. The caller should wait for all tables to be ready before \
+                        requesting replication offsets",
+                    ),
+                };
+
+                match (&cur_min, &min_persisted_offset_for_domain) {
+                    (None, _) => cur_min = min_persisted_offset_for_domain,
+                    (Some(_), None) => {}
+                    (Some(min), Some(persisted_offset)) => {
+                        if persisted_offset.try_partial_cmp(min)?.is_lt() {
+                            cur_min = Some(persisted_offset.clone());
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(cur_min)
+    }
+
     /// Returns a struct containing the set of all replication offsets within the system, including
     /// the replication offset for the schema stored in the controller and the replication offsets
     /// of all base tables

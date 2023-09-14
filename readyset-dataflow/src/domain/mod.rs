@@ -2273,6 +2273,9 @@ impl Domain {
                 self.update_state_sizes();
                 Ok(None)
             }
+            DomainRequest::RequestMinPersistedReplicationOffset => Ok(Some(bincode::serialize(
+                &self.min_persisted_replication_offset()?,
+            )?)),
             DomainRequest::RequestReplicationOffsets => {
                 Ok(Some(bincode::serialize(&self.replication_offsets())?))
             }
@@ -4355,6 +4358,33 @@ impl Domain {
             .values()
             .filter_map(|state| state.as_persistent().map(|s| s.deep_size_of()))
             .sum()
+    }
+
+    pub fn min_persisted_replication_offset(&self) -> ReadySetResult<ReplicationOffsetState> {
+        let mut cur_min = None;
+
+        for (idx, n) in self.nodes.iter() {
+            let node = n.borrow();
+            if node.is_base() && !node.is_dropped() {
+                if let Some(state) = self.state.get(idx) {
+                    match (&mut cur_min, state.persisted_up_to()) {
+                        (_, None) => continue,
+                        (None, Some(persisted_up_to)) => {
+                            cur_min = Some(persisted_up_to);
+                        }
+                        (Some(min), Some(persisted_up_to)) => {
+                            if persisted_up_to.try_partial_cmp(min)?.is_lt() {
+                                cur_min = Some(persisted_up_to);
+                            }
+                        }
+                    }
+                } else {
+                    return Ok(ReplicationOffsetState::Pending);
+                }
+            }
+        }
+
+        Ok(ReplicationOffsetState::Initialized(cur_min))
     }
 
     pub fn replication_offsets(&self) -> NodeMap<ReplicationOffsetState> {

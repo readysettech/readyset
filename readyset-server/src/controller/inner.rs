@@ -449,6 +449,13 @@ impl Leader {
                 let ds = self.dataflow_state_handle.read().await;
                 return_serialized!(ds.get_info()?)
             }
+            (&Method::POST, "/min_persisted_replication_offset") => {
+                let res = {
+                    let ds = self.dataflow_state_handle.read().await;
+                    ds.min_persisted_replication_offset().await
+                }?;
+                return_serialized!(res);
+            }
             (&Method::POST, "/replication_offsets") => {
                 let res = {
                     let ds = self.dataflow_state_handle.read().await;
