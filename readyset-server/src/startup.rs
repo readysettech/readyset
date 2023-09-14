@@ -49,6 +49,7 @@
 
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use std::{process, time};
 
 use dataflow::Readers;
@@ -68,7 +69,7 @@ use url::Url;
 use crate::controller::{Controller, ControllerRequest, HandleRequest};
 use crate::handle::Handle;
 use crate::http_router::NoriaServerHttpRouter;
-use crate::worker::{MemoryTracker, Worker, WorkerRequest};
+use crate::worker::{Worker, WorkerRequest};
 use crate::Config;
 
 macro_rules! maybe_abort_on_panic {
@@ -114,27 +115,19 @@ async fn start_worker(
     abort_on_task_failure: bool,
     readers: Readers,
     memory_limit: Option<usize>,
-    memory_check_frequency: Option<time::Duration>,
+    memory_check_frequency: Option<Duration>,
     shutdown_rx: ShutdownReceiver,
 ) -> Result<(), anyhow::Error> {
     set_failpoint!("start-worker");
-    let worker = Worker {
-        election_state: None,
-        // this initial duration doesn't matter; it gets set upon worker registration
-        evict_interval: memory_check_frequency.map(|f| tokio::time::interval(f)),
-        memory_limit,
-        rx: worker_rx,
-        coord: Arc::new(Default::default()),
-        domain_bind: listen_addr,
-        domain_external: external_addr.ip(),
-        state_sizes: Default::default(),
+    let worker = Worker::new(
+        worker_rx,
+        listen_addr,
+        external_addr,
         readers,
-        domains: Default::default(),
-        memory: MemoryTracker::new()?,
-        is_evicting: Default::default(),
-        domain_wait_queue: Default::default(),
+        memory_limit,
+        memory_check_frequency,
         shutdown_rx,
-    };
+    )?;
 
     tokio::spawn(maybe_abort_on_panic!(abort_on_task_failure, worker.run()));
     Ok(())

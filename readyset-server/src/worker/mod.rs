@@ -198,35 +198,63 @@ fn log_domain_result(
 /// A ReadySet worker, responsible for executing some domains.
 pub struct Worker {
     /// The current election state, if it exists (see the `WorkerElectionState` docs).
-    pub(crate) election_state: Option<WorkerElectionState>,
+    election_state: Option<WorkerElectionState>,
     /// A timer for doing evictions.
-    pub(crate) evict_interval: Option<Interval>,
+    evict_interval: Option<Interval>,
     /// A memory limit for state, in bytes.
-    pub(crate) memory_limit: Option<usize>,
+    memory_limit: Option<usize>,
     /// Channel through which worker requests are received.
-    pub(crate) rx: Receiver<WorkerRequest>,
+    rx: Receiver<WorkerRequest>,
     /// Channel coordinator (used by domains to figure out where other domains are).
-    pub(crate) coord: Arc<ChannelCoordinator>,
+    coord: Arc<ChannelCoordinator>,
     /// The IP address to bind on for domain<->domain traffic.
-    pub(crate) domain_bind: IpAddr,
+    domain_bind: IpAddr,
     /// The IP address to expose to other domains for domain<->domain traffic.
-    pub(crate) domain_external: IpAddr,
+    domain_external: IpAddr,
     /// A store of the current state size of each domain, used for eviction purposes.
-    pub(crate) state_sizes: Arc<Mutex<HashMap<ReplicaAddress, Arc<AtomicUsize>>>>,
+    state_sizes: Arc<Mutex<HashMap<ReplicaAddress, Arc<AtomicUsize>>>>,
     /// Read handles.
-    pub(crate) readers: Readers,
+    readers: Readers,
     /// Handles to domains currently being run by this worker.
     ///
     /// These are indexed by (domain index, shard).
-    pub(crate) domains: HashMap<ReplicaAddress, DomainHandle>,
+    domains: HashMap<ReplicaAddress, DomainHandle>,
 
-    pub(crate) memory: MemoryTracker,
-    pub(crate) is_evicting: Arc<AtomicBool>,
-    pub(crate) domain_wait_queue: FuturesUnordered<FinishedDomainFuture>,
-    pub(crate) shutdown_rx: ShutdownReceiver,
+    memory: MemoryTracker,
+    is_evicting: Arc<AtomicBool>,
+    domain_wait_queue: FuturesUnordered<FinishedDomainFuture>,
+    shutdown_rx: ShutdownReceiver,
 }
 
 impl Worker {
+    pub fn new(
+        worker_rx: Receiver<WorkerRequest>,
+        listen_addr: IpAddr,
+        external_addr: SocketAddr,
+        readers: Readers,
+        memory_limit: Option<usize>,
+        memory_check_frequency: Option<Duration>,
+        shutdown_rx: ShutdownReceiver,
+    ) -> anyhow::Result<Self> {
+        Ok(Self {
+            election_state: None,
+            // this initial duration doesn't matter; it gets set upon worker registration
+            evict_interval: memory_check_frequency.map(|f| tokio::time::interval(f)),
+            memory_limit,
+            rx: worker_rx,
+            coord: Arc::new(Default::default()),
+            domain_bind: listen_addr,
+            domain_external: external_addr.ip(),
+            state_sizes: Default::default(),
+            readers,
+            domains: Default::default(),
+            memory: MemoryTracker::new()?,
+            is_evicting: Default::default(),
+            domain_wait_queue: Default::default(),
+            shutdown_rx,
+        })
+    }
+
     fn process_eviction(&mut self) {
         tokio::spawn(do_eviction(
             self.memory_limit,
