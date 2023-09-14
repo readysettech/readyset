@@ -15,8 +15,8 @@ use tracing::trace;
 use crate::keyed_state::KeyedState;
 use crate::single_state::SingleState;
 use crate::{
-    AllRecords, EvictBytesResult, EvictKeysResult, EvictRandomResult, LookupResult, PointKey,
-    RangeKey, RangeLookupResult, RecordResult, Row, Rows, State,
+    AllRecords, EvictBytesResult, EvictKeysResult, EvictRandomResult, LookupResult,
+    PersistencePoint, PointKey, RangeKey, RangeLookupResult, RecordResult, Row, Rows, State,
 };
 
 #[derive(Default)]
@@ -395,6 +395,10 @@ impl State for MemoryState {
 
     fn replication_offset(&self) -> Option<&ReplicationOffset> {
         self.replication_offset.as_ref()
+    }
+
+    fn persisted_up_to(&self) -> PersistencePoint {
+        PersistencePoint::Persisted
     }
 
     fn add_weak_index(&mut self, index: Index) {
