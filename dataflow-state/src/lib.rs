@@ -134,9 +134,16 @@ pub trait State: SizeOf + Send {
 
     /// Returns the current replication offset written to this state.
     ///
-    ///  See [the documentation for PersistentState](::readyset_dataflow::state::persistent_state)
+    /// See [the documentation for PersistentState](::readyset_dataflow::state::persistent_state)
     /// for more information about replication offsets.
     fn replication_offset(&self) -> Option<&ReplicationOffset>;
+
+    /// Returns the replication offset up to which data has been persisted. If this method returns
+    /// `None`, all of the data in this state has been persisted.
+    ///
+    /// See [the documentation for PersistentState](::readyset_dataflow::state::persistent_state)
+    /// for more information about replication offsets.
+    fn persisted_up_to(&self) -> Option<ReplicationOffset>;
 
     /// Mark the given `key` as a *filled hole* in the given partial `tag`, causing all lookups to
     /// that key to return an empty non-miss result, and all writes to that key to not be dropped.
@@ -344,6 +351,14 @@ impl State for MaterializedNodeState {
             MaterializedNodeState::Memory(ms) => ms.replication_offset(),
             MaterializedNodeState::Persistent(ps) => ps.replication_offset(),
             MaterializedNodeState::PersistentReadHandle(rh) => rh.replication_offset(),
+        }
+    }
+
+    fn persisted_up_to(&self) -> Option<ReplicationOffset> {
+        match self {
+            MaterializedNodeState::Memory(ms) => ms.persisted_up_to(),
+            MaterializedNodeState::Persistent(ps) => ps.persisted_up_to(),
+            MaterializedNodeState::PersistentReadHandle(rh) => rh.persisted_up_to(),
         }
     }
 

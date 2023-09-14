@@ -427,6 +427,8 @@ struct SharedState {
     /// The latest replication offset that has been written to the base table backed by this
     /// [`PersistentState`]
     replication_offset: Option<ReplicationOffset>,
+    /// The current state of the WAL as it relates to flushing and persisting data to disk
+    wal_state: WalState,
     /// The lookup indices stored for this table. The first element is always considered the
     /// primary index
     indices: Vec<PersistentIndex>,
@@ -446,6 +448,11 @@ impl SharedState {
                 )
             })
     }
+}
+
+#[derive(Debug, Clone)]
+enum WalState {
+    FlushedAndPersisted,
 }
 
 /// A handle that can cloned and shared between threads to safely read from the [`PersistentState`]
@@ -679,6 +686,12 @@ impl State for PersistentState {
         self.db.replication_offset.as_ref()
     }
 
+    fn persisted_up_to(&self) -> Option<ReplicationOffset> {
+        match &self.db.inner().wal_state {
+            WalState::FlushedAndPersisted => None,
+        }
+    }
+
     fn lookup(&self, columns: &[usize], key: &PointKey) -> LookupResult {
         self.db.lookup(columns, key)
     }
@@ -860,6 +873,10 @@ impl State for PersistentStateHandle {
     }
 
     fn replication_offset(&self) -> Option<&ReplicationOffset> {
+        None
+    }
+
+    fn persisted_up_to(&self) -> Option<ReplicationOffset> {
         None
     }
 
@@ -1524,6 +1541,7 @@ impl PersistentState {
             inner: Arc::new(RwLock::new(SharedState {
                 db,
                 replication_offset: replication_offset.clone(),
+                wal_state: WalState::FlushedAndPersisted,
                 indices,
             })),
             replication_offset,
