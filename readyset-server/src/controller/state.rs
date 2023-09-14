@@ -835,8 +835,9 @@ impl DfState {
             .buffer_unordered(CONCURRENT_REQUESTS)
     }
 
-    /// Returns the minimum replication offset up to which data has been persisted across every base
-    /// table. If no unpersisted data exists in any base tables, it returns `None`.
+    /// Each base table has an offset up to which data has been persisted to disk, and this
+    /// method returns the minimum of those offsets. If no base tables have unpersisted data,
+    /// this method returns `PersistencePoint::Persisted`.
     ///
     /// See [the documentation for PersistentState](::readyset_dataflow::state::persistent_state)
     /// for more information about replication offsets.

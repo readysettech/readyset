@@ -11,7 +11,7 @@ use postgres_native_tls::MakeTlsConnector;
 use postgres_protocol::escape::escape_literal;
 #[cfg(feature = "failure_injection")]
 use readyset_client::failpoints;
-use readyset_client::TableOperation;
+use readyset_client::{PersistencePoint, ReadySetHandle, TableOperation};
 use readyset_errors::{
     invariant, invariant_eq, set_failpoint_return_err, ReadySetError, ReadySetResult,
 };
@@ -59,6 +59,8 @@ pub struct PostgresWalConnector {
     time_last_position_reported: Instant,
     /// Whether we are currently in the middle of processing a transaction
     in_transaction: bool,
+    /// A handle to the controller
+    controller: ReadySetHandle,
 }
 
 /// The decoded response to `IDENTIFY_SYSTEM`
@@ -121,6 +123,7 @@ impl PostgresWalConnector {
         repl_slot_name: &str,
         enable_statement_logging: bool,
         full_resnapshot: bool,
+        controller: ReadySetHandle,
     ) -> ReadySetResult<Self> {
         if !config.disable_setup_ddl_replication {
             setup_ddl_replication(pg_config.clone(), tls_connector.clone()).await?;
@@ -152,6 +155,7 @@ impl PostgresWalConnector {
             // means we know that when we first initiate a replication connection to the upstream
             // database, we'll always start replicating outside of a transaction
             in_transaction: false,
+            controller,
         };
 
         if full_resnapshot || next_position.is_none() {
@@ -401,7 +405,9 @@ impl PostgresWalConnector {
     }
 
     /// Send a status update to the upstream database, reporting our position in
-    /// the WAL as `ack`.
+    /// the WAL as the minimum offset across all the base tables up to which data has been
+    /// persisted. If none of the base tables contain unpersisted data, we report the position
+    /// passed into this method.
     ///
     /// Sending a standby status update to the upstream database involves "ACKing"
     /// the point in the WAL up to which we've successfully persisted data. This lets
@@ -410,12 +416,12 @@ impl PostgresWalConnector {
     ///
     /// The LSNs of events sent to us from Postgres do not monotonically increase
     /// with each event (only the LSNs of COMMITs monotonically increase), so it may seem like a bad
-    /// idea to report our position in the WAL as the LSN of the last event we wrote to a base
-    /// table. However, because Postgres's logical replication stream reorders events such that we
-    /// receive entire transactions at a time, Postgres will know that when we ack a given LSN, it
-    /// just means that we've applied all of the COMMITS up until this point and all of the events
-    /// in the current transaction up until this point.
-    fn send_standby_status_update(&self, ack: Lsn) -> ReadySetResult<()> {
+    /// idea to report our position in the WAL as the LSN of an arbitrary event we persisted to a
+    /// base table. However, because Postgres's logical replication stream reorders events such that
+    /// we receive entire transactions at a time, Postgres will know that when we ack a given LSN,
+    /// it just means that we've applied all of the COMMITS up until this point and all of the
+    /// events in the current transaction up until this point.
+    async fn send_standby_status_update(&mut self, cur_pos: Lsn) -> ReadySetResult<()> {
         use bytes::{BufMut, BytesMut};
 
         // The difference between UNIX and Postgres epoch
@@ -427,14 +433,37 @@ impl PostgresWalConnector {
             .as_micros() as i64
             - J2000_EPOCH_GAP;
 
+        let lsn_to_ack = match self.controller.min_persisted_replication_offset().await? {
+            // If all of the data written to base tables has been persisted, we can just report our
+            // current position upstream
+            PersistencePoint::Persisted => cur_pos,
+            PersistencePoint::UpTo(offset) => Lsn::try_from(&offset)?,
+        };
+
+        debug!(%lsn_to_ack, "sending status update");
+
         // Can reply with StandbyStatusUpdate or HotStandbyFeedback
         let mut b = BytesMut::with_capacity(39);
         b.put_u8(b'd'); // Copy data
         b.put_i32(38); // Message length (including this field)
         b.put_u8(b'r'); // Status update
-        ack.put_into(&mut b); // Acked
-        ack.put_into(&mut b); // Flushed - this tells the server that it can remove prior WAL entries for this slot
-        ack.put_into(&mut b); // Applied
+
+        // LSN of the last event written to disk - we report our current position here because our
+        // current position is associated with the last event we wrote to a base table
+        cur_pos.put_into(&mut b);
+
+        // LSN of the last event *flushed* to disk - this tells the server that it can remove prior
+        // WAL entries for this slot. Each base table has an offset up to which data has been
+        // persisted to disk, and we report the minimum of those, since this is the maximum position
+        // we can report upstream such that Postgres won't purge WAL files with data we haven't yet
+        // persisted
+        lsn_to_ack.put_into(&mut b);
+
+        // LSN of the last event applied. In our case, an event that has been flushed has
+        // necessarily also been applied (since flushing an event happens *after* applying the
+        // event to a base table), so the "flush LSN" and the "apply LSN" will always be the same
+        lsn_to_ack.put_into(&mut b);
+
         b.put_i64(now);
         b.put_u8(0);
         self.client
@@ -550,10 +579,9 @@ impl Connector for PostgresWalConnector {
         // the upstream database to report our position in the WAL as the LSN of the last event we
         // successfully applied to ReadySet
         if self.time_last_position_reported.elapsed() > Self::STATUS_UPDATE_INTERVAL {
-            let lsn: Lsn = last_pos.clone().try_into()?;
-            debug!("Reporting our position in the WAL to the upstream database as {lsn}");
+            let lsn: Lsn = last_pos.try_into()?;
 
-            self.send_standby_status_update(lsn)?;
+            self.send_standby_status_update(lsn).await?;
             self.time_last_position_reported = Instant::now();
         }
 
@@ -767,12 +795,13 @@ impl Connector for PostgresWalConnector {
                         // If the last event we applied to our base tables was a COMMIT and we have
                         // no buffered actions, we can safely report the "end LSN" given to us in
                         // the keepalive request as our current position.
-                        self.send_standby_status_update(end)?;
+                        self.send_standby_status_update(end).await?;
                     } else {
                         // If we have buffered actions, we have to report the position of the *last*
                         // event we applied, since we haven't yet applied the events associated with
                         // `cur_pos`
-                        self.send_standby_status_update(last_pos.clone().try_into()?)?;
+                        self.send_standby_status_update(last_pos.try_into()?)
+                            .await?;
                     }
                     self.time_last_position_reported = Instant::now();
                 }
