@@ -28,6 +28,7 @@ use readyset_util::shutdown::ShutdownReceiver;
 use serde::{Deserialize, Serialize};
 use tikv_jemalloc_ctl::stats::allocated_mib;
 use tikv_jemalloc_ctl::{epoch, epoch_mib, stats};
+use tokio::runtime::{self, Runtime};
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::{oneshot, Mutex};
 use tokio::task::{JoinError, JoinHandle};
@@ -230,6 +231,8 @@ pub struct Worker {
     memory: MemoryTracker,
     is_evicting: Arc<AtomicBool>,
     domain_wait_queue: FuturesUnordered<FinishedDomain>,
+    /// Tokio runtime used to schedule replicas of domains that contain persistent state
+    persistent_state_runtime: Runtime,
     shutdown_rx: ShutdownReceiver,
 }
 
@@ -243,6 +246,11 @@ impl Worker {
         memory_check_frequency: Option<Duration>,
         shutdown_rx: ShutdownReceiver,
     ) -> anyhow::Result<Self> {
+        let persistent_state_runtime = runtime::Builder::new_multi_thread()
+            .enable_all()
+            .thread_name("persistent-state-runtime-worker")
+            .build()?;
+
         Ok(Self {
             election_state: None,
             // this initial duration doesn't matter; it gets set upon worker registration
@@ -258,6 +266,7 @@ impl Worker {
             memory: MemoryTracker::new()?,
             is_evicting: Default::default(),
             domain_wait_queue: Default::default(),
+            persistent_state_runtime,
             shutdown_rx,
         })
     }
@@ -323,6 +332,8 @@ impl Worker {
                 let mut bind_external = bind_actual;
                 bind_external.set_ip(self.domain_external);
 
+                let has_persistent_state = builder.has_persistent_state();
+
                 // this channel is used for async persistent state initialization.
                 // since domains can have at most one base table, there's no need to have a
                 // buffer with a size bigger than one.
@@ -364,12 +375,17 @@ impl Worker {
                 );
 
                 let (abort, abort_rx) = oneshot::channel::<()>();
-                let jh = tokio::task::spawn(async move {
+                let fut = async move {
                     select! {
                         res = replica.run() => res,
                         _ = abort_rx => Ok(())
                     }
-                });
+                };
+                let jh = if has_persistent_state {
+                    self.persistent_state_runtime.spawn(fut)
+                } else {
+                    tokio::spawn(fut)
+                };
 
                 self.domains
                     .insert(replica_addr, DomainHandle { req_tx, abort });

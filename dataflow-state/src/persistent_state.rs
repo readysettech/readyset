@@ -214,6 +214,13 @@ pub enum DurabilityMode {
     Permanent,
 }
 
+impl DurabilityMode {
+    /// Returns true if `self` persists state to disk
+    pub fn persists_to_disk(&self) -> bool {
+        matches!(self, Self::DeleteOnExit | Self::Permanent)
+    }
+}
+
 #[derive(Debug, Error)]
 #[error("Invalid durability mode; expected one of persistent, ephemeral, or memory")]
 pub struct InvalidDurabilityMode;
