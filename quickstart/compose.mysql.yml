@@ -1,7 +1,7 @@
 name: readyset-mysql
 services:
   cache:
-    image: public.ecr.aws/readyset/readyset:beta-latest
+    image: docker.io/readysettech/readyset:latest
     platform: linux/amd64
     expose:
       - 6033  # ReadySet Server Prometheus metrics at http://readyset:6033/metrics
