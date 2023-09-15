@@ -30,11 +30,11 @@ use readyset_util::futures::abort_on_panic;
 use readyset_util::shutdown::ShutdownReceiver;
 use readyset_version::RELEASE_VERSION;
 use replication_offset::ReplicationOffset;
-use replicators::ReplicatorMessage;
+use replicators::{ControllerMessage, ReplicatorMessage};
 use reqwest::Url;
 use slotmap::{DefaultKey, Key, KeyData, SlotMap};
 use tokio::select;
-use tokio::sync::mpsc::{self, UnboundedSender};
+use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{watch, Mutex};
 use tokio::task::JoinHandle;
 use tokio::time::sleep;
@@ -102,6 +102,7 @@ impl Leader {
     pub(super) async fn start(
         &mut self,
         notification_channel: UnboundedSender<ReplicatorMessage>,
+        controller_channel: UnboundedReceiver<ControllerMessage>,
         telemetry_sender: TelemetrySender,
         shutdown_rx: ShutdownReceiver,
     ) {
@@ -126,8 +127,13 @@ impl Leader {
 
         // When the controller becomes the leader, we need to read updates
         // from the binlog.
-        self.start_replication_task(notification_channel, telemetry_sender, shutdown_rx)
-            .await;
+        self.start_replication_task(
+            notification_channel,
+            controller_channel,
+            telemetry_sender,
+            shutdown_rx,
+        )
+        .await;
     }
 
     /// Start replication/binlog synchronization in an infinite loop
@@ -139,6 +145,7 @@ impl Leader {
     async fn start_replication_task(
         &mut self,
         notification_channel: UnboundedSender<ReplicatorMessage>,
+        controller_channel: UnboundedReceiver<ControllerMessage>,
         telemetry_sender: TelemetrySender,
         mut shutdown_rx: ShutdownReceiver,
     ) {
@@ -175,6 +182,7 @@ impl Leader {
                         noria,
                         config.clone(),
                         &notification_channel,
+                        &controller_channel,
                         telemetry_sender.clone(),
                         server_startup,
                         replicator_statement_logging,

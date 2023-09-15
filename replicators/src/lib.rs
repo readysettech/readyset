@@ -14,6 +14,7 @@ pub(crate) mod table_filter;
 
 use std::time::Duration;
 
+use nom_sql::Relation;
 pub use noria_adapter::{cleanup, NoriaAdapter};
 use readyset_errors::ReadySetError;
 pub use replication_offset::mysql::MySqlPosition;
@@ -30,6 +31,12 @@ pub enum ReplicatorMessage {
     /// The replicator encountered an error that caused it to restart, but the error could be
     /// recoverable. The controller is notified so that it can update status for the user.
     RecoverableError(ReadySetError),
+}
+
+/// Event notification sent from the controller to the replicator
+pub enum ControllerMessage {
+    /// Drop the specified table and require a new partial snapshot
+    ResnapshotTable { table: Relation },
 }
 
 /// Provide a simplistic human-readable estimate for how much time remains to complete an operation

@@ -21,7 +21,7 @@ use readyset_telemetry_reporter::{TelemetryEvent, TelemetryInitializer, Telemetr
 use readyset_util::eventually;
 use readyset_util::shutdown::ShutdownSender;
 use replicators::db_util::error_is_slot_not_found;
-use replicators::{NoriaAdapter, ReplicatorMessage};
+use replicators::{ControllerMessage, NoriaAdapter, ReplicatorMessage};
 use test_utils::slow;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::time::sleep;
@@ -140,6 +140,19 @@ impl TestChannel {
             Some(ReplicatorMessage::UnrecoverableError(e)) => Err(e),
             _ => internal!(),
         }
+    }
+}
+
+/// Channel used to send notifications from the controller to replicator.
+struct TestControllChannel(UnboundedSender<ControllerMessage>);
+
+impl TestControllChannel {
+    /// Creates a new `TestReceiver`. Also returns a static reference to the sender so that it can
+    /// be moved into tokio::spawn.
+    pub fn new() -> (&'static mut UnboundedReceiver<ControllerMessage>, Self) {
+        let (controller_sender, controller_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let controller_receiver = Box::leak(Box::new(controller_receiver));
+        (controller_receiver, Self(controller_sender))
     }
 }
 
@@ -352,6 +365,7 @@ impl TestHandle {
 
         let url = self.url.clone().into();
         let (sender, receiver) = TestChannel::new();
+        let (controll_receiver, _controll_sender) = TestControllChannel::new();
         self.notification_channel = Some(receiver);
         runtime.spawn(async move {
             if let Err(error) = NoriaAdapter::start(
@@ -361,6 +375,7 @@ impl TestHandle {
                     ..config.unwrap_or_default()
                 },
                 sender,
+                controll_receiver,
                 telemetry_sender,
                 server_startup,
                 false, // disable statement logging in tests

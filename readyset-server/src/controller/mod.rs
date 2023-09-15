@@ -26,7 +26,7 @@ use readyset_errors::{internal, internal_err, ReadySetError, ReadySetResult};
 use readyset_telemetry_reporter::TelemetrySender;
 use readyset_util::select;
 use readyset_util::shutdown::ShutdownReceiver;
-use replicators::ReplicatorMessage;
+use replicators::{ControllerMessage, ReplicatorMessage};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{self, Receiver, Sender, UnboundedReceiver, UnboundedSender};
@@ -240,6 +240,27 @@ impl ReplicatorChannel {
     }
 }
 
+/// Channel used to notify the replication about controller events.
+/// This is the other way around communication from Replicator Channel
+pub struct ControllerChannel {
+    _sender: UnboundedSender<ControllerMessage>,
+    receiver: Option<UnboundedReceiver<ControllerMessage>>,
+}
+
+impl ControllerChannel {
+    fn new() -> Self {
+        let (_sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+        Self {
+            _sender,
+            receiver: Some(receiver),
+        }
+    }
+
+    fn receiver(&mut self) -> UnboundedReceiver<ControllerMessage> {
+        self.receiver.take().unwrap()
+    }
+}
+
 /// An update on the leader election and failure detection.
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
@@ -372,6 +393,9 @@ pub struct Controller {
     /// Channel used to notify the controller of replicator events.
     replicator_channel: ReplicatorChannel,
 
+    /// Channel used to notify the replicator of controller events.
+    controller_channel: ControllerChannel,
+
     /// Provides the ability to report metrics to Segment
     telemetry_sender: TelemetrySender,
 
@@ -410,6 +434,7 @@ impl Controller {
             config,
             leader_ready: Arc::new(AtomicBool::new(false)),
             replicator_channel: ReplicatorChannel::new(),
+            controller_channel: ControllerChannel::new(),
             telemetry_sender,
             permissive_writes,
             shutdown_rx,
@@ -489,7 +514,7 @@ impl Controller {
         Ok(())
     }
 
-    async fn handle_authority_update(&self, msg: AuthorityUpdate) -> ReadySetResult<()> {
+    async fn handle_authority_update(&mut self, msg: AuthorityUpdate) -> ReadySetResult<()> {
         match msg {
             AuthorityUpdate::LeaderChange(descr) => {
                 gauge!(recorded::CONTROLLER_IS_LEADER, 0f64);
@@ -517,6 +542,7 @@ impl Controller {
                 leader
                     .start(
                         self.replicator_channel.sender(),
+                        self.controller_channel.receiver(),
                         self.telemetry_sender.clone(),
                         self.shutdown_rx.clone(),
                     )
