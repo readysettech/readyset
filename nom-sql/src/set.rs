@@ -255,16 +255,25 @@ impl Variable {
             Some(&self.name)
         }
     }
-}
 
-impl Display for Variable {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if self.scope == VariableScope::User {
-            write!(f, "@")?;
-        } else {
-            write!(f, "@@{}.", self.scope)?;
-        }
-        write!(f, "{}", self.name)
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+        fmt_with(move |f| {
+            match dialect {
+                Dialect::PostgreSQL => {
+                    if self.scope != VariableScope::User {
+                        write!(f, "{}.", self.scope)?;
+                    }
+                }
+                Dialect::MySQL => {
+                    if self.scope == VariableScope::User {
+                        write!(f, "@")?;
+                    } else {
+                        write!(f, "@@{}.", self.scope)?;
+                    }
+                }
+            }
+            write!(f, "{}", self.name)
+        })
     }
 }
 
@@ -276,7 +285,11 @@ impl SetVariables {
                 "{}",
                 self.variables
                     .iter()
-                    .map(|(var, value)| format!("{} = {}", var, value.display(dialect)))
+                    .map(|(var, value)| format!(
+                        "{} = {}",
+                        var.display(dialect),
+                        value.display(dialect)
+                    ))
                     .join(", ")
             )
         })
