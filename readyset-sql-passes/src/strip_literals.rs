@@ -85,9 +85,9 @@ mod test {
             literals,
             vec![
                 Literal::String("literal".to_string()),
-                Literal::UnsignedInteger(1),
-                Literal::UnsignedInteger(2),
-                Literal::UnsignedInteger(3),
+                Literal::Integer(1),
+                Literal::Integer(2),
+                Literal::Integer(3),
                 Literal::Placeholder(ItemPlaceholder::QuestionMark),
                 Literal::Placeholder(ItemPlaceholder::QuestionMark)
             ]
