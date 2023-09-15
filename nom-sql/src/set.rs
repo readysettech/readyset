@@ -445,7 +445,7 @@ mod tests {
                         scope: VariableScope::Local,
                         name: "sql_auto_is_null".into()
                     },
-                    Expr::Literal(0_u32.into())
+                    Expr::Literal(0.into())
                 )),
             })
         );
@@ -463,7 +463,7 @@ mod tests {
                         scope: VariableScope::User,
                         name: "var".into()
                     },
-                    Expr::Literal(123_u32.into())
+                    Expr::Literal(123.into())
                 )),
             })
         );
@@ -567,9 +567,9 @@ mod tests {
                         name: "myvar".into()
                     },
                     Expr::BinaryOp {
-                        lhs: Box::new(Expr::Literal(100_u32.into())),
+                        lhs: Box::new(Expr::Literal(100.into())),
                         op: crate::BinaryOperator::Add,
-                        rhs: Box::new(Expr::Literal(200_u32.into())),
+                        rhs: Box::new(Expr::Literal(200.into())),
                     }
                 )),
             })
@@ -590,9 +590,9 @@ mod tests {
                             name: "myvar".into()
                         },
                         Expr::BinaryOp {
-                            lhs: Box::new(Expr::Literal(100_u32.into())),
+                            lhs: Box::new(Expr::Literal(100.into())),
                             op: crate::BinaryOperator::Add,
-                            rhs: Box::new(Expr::Literal(200_u32.into())),
+                            rhs: Box::new(Expr::Literal(200.into())),
                         }
                     ),
                     (
@@ -706,7 +706,7 @@ mod tests {
                     name: "whatever".into(),
                     value: SetPostgresParameterValue::Value(PostgresParameterValue::List(vec![
                         PostgresParameterValueInner::Literal("x".into()),
-                        PostgresParameterValueInner::Literal(1_u32.into()),
+                        PostgresParameterValueInner::Literal(1.into()),
                         PostgresParameterValueInner::Identifier("hi".into()),
                     ]))
                 })

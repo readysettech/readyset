@@ -135,7 +135,8 @@ pub enum Literal {
     Integer(i64),
     /// Unsigned integer literals
     ///
-    /// When parsing, we default to unsigned integer if the integer value has no sign
+    /// When parsing, we default to signed integer if the integer value has no sign, because mysql
+    /// does that and postgres doesn't have unsigned integers
     UnsignedInteger(u64),
     /// Represents an `f32` floating-point number.
     /// This distinction was introduced to avoid numeric error when transforming
@@ -400,9 +401,13 @@ pub fn integer_literal(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Literal> {
     let (i, sign) = opt(tag("-"))(i)?;
     let (i, num) = map_parser(digit1, nom::character::complete::u64)(i)?;
 
-    // Default to Unsigned unless the value is negative
-    let res = if sign.is_some() {
-        Literal::Integer(-(num as i64))
+    // If it fits in an i64, default to that
+    let res = if let Ok(num) = i64::try_from(num) {
+        if sign.is_some() {
+            Literal::Integer(-(num))
+        } else {
+            Literal::Integer(num)
+        }
     } else {
         Literal::UnsignedInteger(num)
     };
@@ -681,14 +686,14 @@ mod tests {
                     lit
                 )
             }
-            // Positive integers are parsed as Unsigned
-            Literal::Integer(i) if i > 0 => {
+            // Positive integers are parsed as signed if they are in range
+            Literal::UnsignedInteger(i) if i <= i64::MAX as u64 => {
                 let s = lit.display(Dialect::MySQL).to_string();
                 assert_eq!(
                     literal(Dialect::PostgreSQL)(LocatedSpan::new(s.as_bytes()))
                         .unwrap()
                         .1,
-                    Literal::UnsignedInteger(i as u64)
+                    Literal::Integer(i as i64)
                 )
             }
             _ => {

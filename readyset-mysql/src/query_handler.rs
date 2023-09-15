@@ -883,7 +883,7 @@ impl QueryHandler for MySqlQueryHandler {
                     }
                 }) {
                     return SetAutocommit(
-                        matches!(val, Expr::Literal(Literal::UnsignedInteger(i)) if *i == 1),
+                        matches!(val, Expr::Literal(Literal::Integer(i)) if *i == 1),
                     );
                 }
 

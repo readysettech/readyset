@@ -49,8 +49,8 @@ mod test {
         );
         let literals = vec![
             (1, Literal::String("one".into())),
-            (2, Literal::UnsignedInteger(2)),
-            (3, Literal::UnsignedInteger(3)),
+            (2, Literal::Integer(2)),
+            (3, Literal::Integer(3)),
         ]
         .into_iter()
         .collect::<HashMap<_, _>>();

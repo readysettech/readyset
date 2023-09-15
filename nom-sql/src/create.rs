@@ -1309,7 +1309,7 @@ mod tests {
                     expr: Expr::BinaryOp {
                         lhs: Box::new(Expr::Column("x".into())),
                         op: BinaryOperator::Greater,
-                        rhs: Box::new(Expr::Literal(1_u32.into())),
+                        rhs: Box::new(Expr::Literal(1.into())),
                     },
                     enforced: None
                 }
@@ -1328,7 +1328,7 @@ mod tests {
                 expr: Expr::BinaryOp {
                     lhs: Box::new(Expr::Column("x".into())),
                     op: BinaryOperator::Greater,
-                    rhs: Box::new(Expr::Literal(1_u32.into())),
+                    rhs: Box::new(Expr::Literal(1.into())),
                 },
                 enforced: None
             }
@@ -1346,7 +1346,7 @@ mod tests {
                 expr: Expr::BinaryOp {
                     lhs: Box::new(Expr::Column("x".into())),
                     op: BinaryOperator::Greater,
-                    rhs: Box::new(Expr::Literal(1_u32.into())),
+                    rhs: Box::new(Expr::Literal(1.into())),
                 },
                 enforced: Some(false)
             }
@@ -2588,11 +2588,9 @@ PRIMARY KEY (`id`));";
                             ColumnConstraint::NotNull,
                             ColumnConstraint::DefaultValue(Expr::Call(FunctionExpr::Call {
                                 name: "CURRENT_TIMESTAMP".into(),
-                                arguments: vec![Expr::Literal(Literal::UnsignedInteger(6,),),],
+                                arguments: vec![Expr::Literal(Literal::Integer(6,),),],
                             },),),
-                            ColumnConstraint::OnUpdateCurrentTimestamp(Some(
-                                Literal::UnsignedInteger(6)
-                            ),),
+                            ColumnConstraint::OnUpdateCurrentTimestamp(Some(Literal::Integer(6)),),
                         ],
                     ),],
                     keys: None,

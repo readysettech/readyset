@@ -330,16 +330,10 @@ mod tests {
             )
             .unwrap();
         assert_eq!(parsed, &common_insert);
-        assert_eq!(
-            values,
-            vec![UnsignedInteger(1), UnsignedInteger(2), UnsignedInteger(3)]
-        );
+        assert_eq!(values, vec![Integer(1), Integer(2), Integer(3)]);
         let (parsed, values) = session.find_prepared_statement(&parse_query(Dialect::MySQL, "INSERT INTO payment (customer_id, amount, account_name) VALUES (1, 'str', NULL)").unwrap()).unwrap();
         assert_eq!(parsed, &common_insert);
-        assert_eq!(
-            values,
-            vec![UnsignedInteger(1), String("str".to_string()), Null]
-        );
+        assert_eq!(values, vec![Integer(1), String("str".to_string()), Null]);
         let (parsed, values) = session
             .find_prepared_statement(
                 &parse_query(
@@ -350,10 +344,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(parsed, &common_update);
-        assert_eq!(
-            values,
-            vec![String("test".to_string()), UnsignedInteger(123)]
-        );
+        assert_eq!(values, vec![String("test".to_string()), Integer(123)]);
         let (parsed, values) = session
             .find_prepared_statement(
                 &parse_query(
@@ -364,7 +355,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(parsed, &common_delete);
-        assert_eq!(values, vec![UnsignedInteger(9)]);
+        assert_eq!(values, vec![Integer(9)]);
         let (parsed, values) = session.find_prepared_statement(&parse_query(Dialect::MySQL, "SELECT column_name AS column_name, data_type AS data_type, column_type AS full_data_type, character_maximum_length AS character_maximum_length, numeric_precision AS numeric_precision, numeric_scale AS numeric_scale, datetime_precision AS datetime_precision, column_default AS column_default, is_nullable AS is_nullable, extra AS extra, table_name AS table_name FROM information_schema.columns WHERE (table_schema = 'dbtest') ORDER BY ordinal_position ASC").unwrap()).unwrap();
         assert_eq!(parsed, &select_information_schema);
         assert_eq!(values, vec![String("dbtest".to_string())]);
@@ -379,7 +370,7 @@ mod tests {
                 }),
                 Null,
                 String("somebody".to_string()),
-                UnsignedInteger(867)
+                Integer(867)
             ]
         );
     }

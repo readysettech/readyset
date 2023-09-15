@@ -1247,7 +1247,7 @@ mod tests {
                     .unwrap(),
                 vec![MatchedCache {
                     name: "foo".into(),
-                    required_values: HashMap::from_iter([(1, Literal::UnsignedInteger(1))]),
+                    required_values: HashMap::from_iter([(1, Literal::Integer(1))]),
                     key_mapping: HashMap::new(),
                 }]
             );
@@ -1299,17 +1299,17 @@ mod tests {
             let truth = vec![
                 MatchedCache {
                     name: "foo".into(),
-                    required_values: HashMap::from_iter([(1, Literal::UnsignedInteger(1))]),
+                    required_values: HashMap::from_iter([(1, Literal::Integer(1))]),
                     key_mapping: HashMap::from_iter([(1, Literal::String("string".to_string()))]),
                 },
                 MatchedCache {
                     name: "bar".into(),
-                    required_values: HashMap::from_iter([(1, Literal::UnsignedInteger(2))]),
+                    required_values: HashMap::from_iter([(1, Literal::Integer(2))]),
                     key_mapping: HashMap::from_iter([(1, Literal::String("string".to_string()))]),
                 },
                 MatchedCache {
                     name: "baz".into(),
-                    required_values: HashMap::from_iter([(1, Literal::UnsignedInteger(2))]),
+                    required_values: HashMap::from_iter([(1, Literal::Integer(2))]),
                     key_mapping: HashMap::from_iter([
                         (1, Literal::String("string".to_string())),
                         (2, Literal::Null),
@@ -1329,8 +1329,8 @@ mod tests {
                     name: "baz".into(),
                     required_values: HashMap::new(),
                     key_mapping: HashMap::from_iter([
-                        (1, Literal::UnsignedInteger(1)),
-                        (2, Literal::UnsignedInteger(2))
+                        (1, Literal::Integer(1)),
+                        (2, Literal::Integer(2))
                     ])
                 }]
             );
@@ -1369,7 +1369,7 @@ mod tests {
             assert_eq!(
                 entry[0].1,
                 vec![
-                    Literal::UnsignedInteger(1),
+                    Literal::Integer(1),
                     Literal::Placeholder(ItemPlaceholder::QuestionMark)
                 ]
             );

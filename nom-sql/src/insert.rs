@@ -172,10 +172,7 @@ mod tests {
                 InsertStatement {
                     table: Relation::from("users"),
                     fields: None,
-                    data: vec![vec![
-                        Expr::Literal(42_u32.into()),
-                        Expr::Literal("test".into())
-                    ]],
+                    data: vec![vec![Expr::Literal(42.into()), Expr::Literal("test".into())]],
                     on_duplicate: None,
                     ignore: false
                 }
@@ -195,7 +192,7 @@ mod tests {
                     table: Relation::from("users"),
                     fields: None,
                     data: vec![vec![
-                        Expr::Literal(42_u32.into()),
+                        Expr::Literal(42.into()),
                         Expr::Literal("test".into()),
                         Expr::Literal("test".into()),
                         Expr::Call(FunctionExpr::Call {
@@ -219,10 +216,7 @@ mod tests {
                 InsertStatement {
                     table: Relation::from("users"),
                     fields: Some(vec![Column::from("id"), Column::from("name")]),
-                    data: vec![vec![
-                        Expr::Literal(42_u32.into()),
-                        Expr::Literal("test".into())
-                    ]],
+                    data: vec![vec![Expr::Literal(42.into()), Expr::Literal("test".into())]],
                     on_duplicate: None,
                     ignore: false
                 }
@@ -240,10 +234,7 @@ mod tests {
                 InsertStatement {
                     table: Relation::from("users"),
                     fields: Some(vec![Column::from("id"), Column::from("name")]),
-                    data: vec![vec![
-                        Expr::Literal(42_u32.into()),
-                        Expr::Literal("test".into())
-                    ]],
+                    data: vec![vec![Expr::Literal(42.into()), Expr::Literal("test".into())]],
                     on_duplicate: None,
                     ignore: false
                 }
@@ -263,10 +254,7 @@ mod tests {
                         name: "users".into(),
                     },
                     fields: None,
-                    data: vec![vec![
-                        Expr::Literal(42_u32.into()),
-                        Expr::Literal("test".into())
-                    ]],
+                    data: vec![vec![Expr::Literal(42.into()), Expr::Literal("test".into())]],
                     on_duplicate: None,
                     ignore: false,
                 }
@@ -284,8 +272,8 @@ mod tests {
                     table: Relation::from("users"),
                     fields: Some(vec![Column::from("id"), Column::from("name")]),
                     data: vec![
-                        vec![Expr::Literal(42_u32.into()), Expr::Literal("test".into())],
-                        vec![Expr::Literal(21_u32.into()), Expr::Literal("test2".into())],
+                        vec![Expr::Literal(42.into()), Expr::Literal("test".into())],
+                        vec![Expr::Literal(21.into()), Expr::Literal("test2".into())],
                     ],
                     on_duplicate: None,
                     ignore: false,
@@ -313,7 +301,7 @@ mod tests {
                         Expr::BinaryOp {
                             op: BinaryOperator::Add,
                             lhs: Box::new(Expr::Column(Column::from("value"))),
-                            rhs: Box::new(Expr::Literal(1_u32.into()))
+                            rhs: Box::new(Expr::Literal(1.into()))
                         },
                     )]),
                     ignore: false,
@@ -331,10 +319,7 @@ mod tests {
                 InsertStatement {
                     table: Relation::from("users"),
                     fields: Some(vec![Column::from("id"), Column::from("name")]),
-                    data: vec![vec![
-                        Expr::Literal(42_u32.into()),
-                        Expr::Literal("test".into())
-                    ]],
+                    data: vec![vec![Expr::Literal(42.into()), Expr::Literal("test".into())]],
                     on_duplicate: None,
                     ignore: false,
                 }
@@ -367,10 +352,7 @@ mod tests {
                 InsertStatement {
                     table: Relation::from("users"),
                     fields: None,
-                    data: vec![vec![
-                        Expr::Literal(42_u32.into()),
-                        Expr::Literal("test".into())
-                    ]],
+                    data: vec![vec![Expr::Literal(42.into()), Expr::Literal("test".into())]],
                     on_duplicate: None,
                     ignore: false,
                 }
@@ -388,7 +370,7 @@ mod tests {
                     table: Relation::from("users"),
                     fields: None,
                     data: vec![vec![
-                        Expr::Literal(42_u32.into()),
+                        Expr::Literal(42.into()),
                         Expr::Literal("test".into()),
                         Expr::Literal("test".into()),
                         Expr::Call(FunctionExpr::Call {
@@ -412,10 +394,7 @@ mod tests {
                 InsertStatement {
                     table: Relation::from("users"),
                     fields: Some(vec![Column::from("id"), Column::from("name")]),
-                    data: vec![vec![
-                        Expr::Literal(42_u32.into()),
-                        Expr::Literal("test".into())
-                    ]],
+                    data: vec![vec![Expr::Literal(42.into()), Expr::Literal("test".into())]],
                     on_duplicate: None,
                     ignore: false,
                 }
@@ -433,10 +412,7 @@ mod tests {
                 InsertStatement {
                     table: Relation::from("users"),
                     fields: Some(vec![Column::from("id"), Column::from("name")]),
-                    data: vec![vec![
-                        Expr::Literal(42_u32.into()),
-                        Expr::Literal("test".into())
-                    ]],
+                    data: vec![vec![Expr::Literal(42.into()), Expr::Literal("test".into())]],
                     on_duplicate: None,
                     ignore: false,
                 }
@@ -456,10 +432,7 @@ mod tests {
                         name: "users".into(),
                     },
                     fields: None,
-                    data: vec![vec![
-                        Expr::Literal(42_u32.into()),
-                        Expr::Literal("test".into())
-                    ]],
+                    data: vec![vec![Expr::Literal(42.into()), Expr::Literal("test".into())]],
                     on_duplicate: None,
                     ignore: false,
                 }
@@ -477,8 +450,8 @@ mod tests {
                     table: Relation::from("users"),
                     fields: Some(vec![Column::from("id"), Column::from("name")]),
                     data: vec![
-                        vec![Expr::Literal(42_u32.into()), Expr::Literal("test".into())],
-                        vec![Expr::Literal(21_u32.into()), Expr::Literal("test2".into())],
+                        vec![Expr::Literal(42.into()), Expr::Literal("test".into())],
+                        vec![Expr::Literal(21.into()), Expr::Literal("test2".into())],
                     ],
                     ignore: false,
                     on_duplicate: None
@@ -506,7 +479,7 @@ mod tests {
                         Expr::BinaryOp {
                             op: BinaryOperator::Add,
                             lhs: Box::new(Expr::Column(Column::from("value"))),
-                            rhs: Box::new(Expr::Literal(1_u32.into()))
+                            rhs: Box::new(Expr::Literal(1.into()))
                         },
                     ),]),
                     ignore: false
@@ -524,10 +497,7 @@ mod tests {
                 InsertStatement {
                     table: Relation::from("users"),
                     fields: Some(vec![Column::from("id"), Column::from("name")]),
-                    data: vec![vec![
-                        Expr::Literal(42_u32.into()),
-                        Expr::Literal("test".into())
-                    ]],
+                    data: vec![vec![Expr::Literal(42.into()), Expr::Literal("test".into())]],
                     ignore: false,
                     on_duplicate: None
                 }
