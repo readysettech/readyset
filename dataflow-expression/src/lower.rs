@@ -1371,12 +1371,12 @@ pub(crate) mod tests {
                         ty: DfType::Text(Collation::Citext)
                     },
                     Some(Expr::Literal {
-                        val: 1u32.into(),
-                        ty: DfType::UnsignedBigInt
+                        val: 1.into(),
+                        ty: DfType::BigInt
                     }),
                     Some(Expr::Literal {
-                        val: 7u32.into(),
-                        ty: DfType::UnsignedBigInt
+                        val: 7.into(),
+                        ty: DfType::BigInt
                     })
                 )),
                 ty: DfType::Text(Collation::Citext)
@@ -1396,23 +1396,14 @@ pub(crate) mod tests {
                         val: "abcdefghi".into(),
                         ty: DfType::DEFAULT_TEXT
                     },
-                    Some(Expr::Cast {
-                        expr: Box::new(Expr::Literal {
-                            val: 1.into(),
-                            ty: DfType::UnsignedBigInt
-                        }),
-                        ty: DfType::BigInt,
-                        null_on_failure: false
+                    Some(Expr::Literal {
+                        val: 1.into(),
+                        ty: DfType::BigInt
                     }),
-                    Some(Expr::Cast {
-                        expr: Box::new(Expr::Literal {
-                            val: 7.into(),
-                            ty: DfType::UnsignedBigInt
-                        }),
-
-                        ty: DfType::BigInt,
-                        null_on_failure: false
-                    })
+                    Some(Expr::Literal {
+                        val: 7.into(),
+                        ty: DfType::BigInt
+                    }),
                 )),
                 ty: DfType::DEFAULT_TEXT
             }
@@ -1431,23 +1422,14 @@ pub(crate) mod tests {
                         val: "abcdefghi".into(),
                         ty: DfType::DEFAULT_TEXT
                     },
-                    Some(Expr::Cast {
-                        expr: Box::new(Expr::Literal {
-                            val: 1.into(),
-                            ty: DfType::UnsignedBigInt
-                        }),
-                        ty: DfType::BigInt,
-                        null_on_failure: false
+                    Some(Expr::Literal {
+                        val: 1.into(),
+                        ty: DfType::BigInt
                     }),
-                    Some(Expr::Cast {
-                        expr: Box::new(Expr::Literal {
-                            val: 7.into(),
-                            ty: DfType::UnsignedBigInt
-                        }),
-
-                        ty: DfType::BigInt,
-                        null_on_failure: false
-                    })
+                    Some(Expr::Literal {
+                        val: 7.into(),
+                        ty: DfType::BigInt
+                    }),
                 )),
                 ty: DfType::DEFAULT_TEXT
             }
@@ -1653,7 +1635,7 @@ pub(crate) mod tests {
                 elements: vec![
                     Expr::Literal {
                         val: 1u32.into(),
-                        ty: DfType::UnsignedBigInt
+                        ty: DfType::BigInt
                     },
                     Expr::Cast {
                         expr: Box::new(Expr::Literal {
@@ -1665,15 +1647,15 @@ pub(crate) mod tests {
                     },
                     Expr::Literal {
                         val: 3u32.into(),
-                        ty: DfType::UnsignedBigInt
+                        ty: DfType::BigInt
                     },
                     Expr::Literal {
                         val: 4u32.into(),
-                        ty: DfType::UnsignedBigInt
+                        ty: DfType::BigInt
                     }
                 ],
                 shape: vec![2, 2],
-                ty: DfType::Array(Box::new(DfType::Array(Box::new(DfType::UnsignedBigInt))))
+                ty: DfType::Array(Box::new(DfType::Array(Box::new(DfType::BigInt))))
             }
         )
     }
@@ -1688,14 +1670,14 @@ pub(crate) mod tests {
                 op: BinaryOperator::Equal,
                 left: Box::new(Expr::Literal {
                     val: 1u64.into(),
-                    ty: DfType::UnsignedBigInt
+                    ty: DfType::BigInt
                 }),
                 right: Box::new(Expr::Cast {
                     expr: Box::new(Expr::Literal {
                         val: "{1,2}".into(),
                         ty: DfType::Unknown
                     }),
-                    ty: DfType::Array(Box::new(DfType::UnsignedBigInt)),
+                    ty: DfType::Array(Box::new(DfType::BigInt)),
                     null_on_failure: false
                 }),
                 ty: DfType::Bool
@@ -1713,14 +1695,14 @@ pub(crate) mod tests {
                 op: BinaryOperator::Equal,
                 left: Box::new(Expr::Literal {
                     val: 1u64.into(),
-                    ty: DfType::UnsignedBigInt
+                    ty: DfType::BigInt
                 }),
                 right: Box::new(Expr::Cast {
                     expr: Box::new(Expr::Literal {
                         val: "{1,1}".into(),
                         ty: DfType::Unknown
                     }),
-                    ty: DfType::Array(Box::new(DfType::UnsignedBigInt)),
+                    ty: DfType::Array(Box::new(DfType::BigInt)),
                     null_on_failure: false
                 }),
                 ty: DfType::Bool
@@ -1743,10 +1725,10 @@ pub(crate) mod tests {
                     Expr::Array {
                         elements: vec![Expr::Literal {
                             val: 1u64.into(),
-                            ty: DfType::UnsignedBigInt,
+                            ty: DfType::BigInt,
                         }],
                         shape: vec![1],
-                        ty: DfType::Array(Box::new(DfType::UnsignedBigInt))
+                        ty: DfType::Array(Box::new(DfType::BigInt))
                     },
                     Expr::Literal {
                         val: ",".into(),

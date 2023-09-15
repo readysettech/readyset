@@ -679,7 +679,7 @@ mod tests {
             res.unwrap().1,
             SelectStatement {
                 fields: vec![FieldDefinitionExpr::Expr {
-                    expr: Expr::Literal(Literal::UnsignedInteger(1)),
+                    expr: Expr::Literal(Literal::Integer(1)),
                     alias: None
                 }],
                 ..Default::default()
@@ -840,22 +840,22 @@ mod tests {
         assert_eq!(
             res1.limit_clause,
             LimitClause::LimitOffset {
-                limit: Some(10_u32.into()),
+                limit: Some(10.into()),
                 offset: None
             }
         );
         assert_eq!(
             res2.limit_clause,
             LimitClause::LimitOffset {
-                limit: Some(10_u32.into()),
-                offset: Some(10_u32.into())
+                limit: Some(10.into()),
+                offset: Some(10.into())
             }
         );
         assert_eq!(
             res3.limit_clause,
             LimitClause::OffsetCommaLimit {
-                limit: 10_u32.into(),
-                offset: 5_u32.into()
+                limit: 10.into(),
+                offset: 5.into()
             }
         );
         res3_pgsql.unwrap_err();
@@ -1054,7 +1054,7 @@ mod tests {
                 fields: vec![FieldDefinitionExpr::All],
                 where_clause: expected_where_cond,
                 limit_clause: LimitClause::LimitOffset {
-                    limit: Some(10_u32.into()),
+                    limit: Some(10.into()),
                     offset: None
                 },
                 ..Default::default()
@@ -1153,7 +1153,7 @@ mod tests {
         let filter_cond = Expr::BinaryOp {
             lhs: Box::new(Expr::Column(Column::from("vote_id"))),
             op: BinaryOperator::Greater,
-            rhs: Box::new(Expr::Literal(Literal::UnsignedInteger(10))),
+            rhs: Box::new(Expr::Literal(Literal::Integer(10))),
         };
         let agg_expr = FunctionExpr::Count {
             expr: Box::new(Expr::CaseWhen {
@@ -1185,7 +1185,7 @@ mod tests {
         let filter_cond = Expr::BinaryOp {
             lhs: Box::new(Expr::Column(Column::from("sign"))),
             op: BinaryOperator::Equal,
-            rhs: Box::new(Expr::Literal(Literal::UnsignedInteger(1))),
+            rhs: Box::new(Expr::Literal(Literal::Integer(1))),
         };
         let agg_expr = FunctionExpr::Sum {
             expr: Box::new(Expr::CaseWhen {
@@ -1218,7 +1218,7 @@ mod tests {
         let filter_cond = Expr::BinaryOp {
             lhs: Box::new(Expr::Column(Column::from("sign"))),
             op: BinaryOperator::Equal,
-            rhs: Box::new(Expr::Literal(Literal::UnsignedInteger(1))),
+            rhs: Box::new(Expr::Literal(Literal::Integer(1))),
         };
         let agg_expr = FunctionExpr::Sum {
             expr: Box::new(Expr::CaseWhen {
@@ -1226,7 +1226,7 @@ mod tests {
                     condition: filter_cond,
                     body: Expr::Column(Column::from("vote_id")),
                 }],
-                else_expr: Some(Box::new(Expr::Literal(Literal::UnsignedInteger(6)))),
+                else_expr: Some(Box::new(Expr::Literal(Literal::Integer(6)))),
             }),
             distinct: false,
         };
@@ -1259,7 +1259,7 @@ mod tests {
             rhs: Box::new(Expr::BinaryOp {
                 lhs: Box::new(Expr::Column(Column::from("votes.vote"))),
                 op: BinaryOperator::Equal,
-                rhs: Box::new(Expr::Literal(Literal::UnsignedInteger(0))),
+                rhs: Box::new(Expr::Literal(Literal::Integer(0))),
             }),
             op: BinaryOperator::And,
         };
@@ -1365,7 +1365,7 @@ mod tests {
                     )],
                 }),
                 limit_clause: LimitClause::LimitOffset {
-                    limit: Some(50_u32.into()),
+                    limit: Some(50.into()),
                     offset: None
                 },
                 ..Default::default()
@@ -1600,7 +1600,7 @@ mod tests {
                 where_clause: Some(Expr::BinaryOp {
                     lhs: Box::new(Expr::Column("x".into())),
                     op: BinaryOperator::Equal,
-                    rhs: Box::new(Expr::Literal(1u64.into()))
+                    rhs: Box::new(Expr::Literal(1.into()))
                 }),
                 ..Default::default()
             }
@@ -1662,7 +1662,7 @@ mod tests {
                     "o_id".into(),
                 ))))),
                 op: BinaryOperator::Subtract,
-                rhs: Box::new(Expr::Literal(3333_u32.into())),
+                rhs: Box::new(Expr::Literal(3333.into())),
             })],
             ..Default::default()
         };
@@ -1684,7 +1684,7 @@ mod tests {
                         "o_id".into(),
                     ))))),
                     op: BinaryOperator::Multiply,
-                    rhs: Box::new(Expr::Literal(2_u32.into())),
+                    rhs: Box::new(Expr::Literal(2.into())),
                 },
             }],
             ..Default::default()
@@ -1827,7 +1827,7 @@ mod tests {
                     tables: vec![TableExpr::from(Relation::from("users"))],
                     fields: vec![
                         FieldDefinitionExpr::from(Expr::Literal(Literal::Null,)),
-                        FieldDefinitionExpr::from(Expr::Literal(Literal::UnsignedInteger(1),)),
+                        FieldDefinitionExpr::from(Expr::Literal(Literal::Integer(1),)),
                         FieldDefinitionExpr::from(
                             Expr::Literal(Literal::String("foo".to_owned()),)
                         ),
@@ -1854,7 +1854,7 @@ mod tests {
                 lhs: Box::new(Expr::Column(Column::from(
                     "auth_permission.content_type_id",
                 ))),
-                rhs: InValue::List(vec![Expr::Literal(0_u32.into())]),
+                rhs: InValue::List(vec![Expr::Literal(0.into())]),
                 negated: false,
             });
 
@@ -1966,7 +1966,7 @@ mod tests {
                 Some(Expr::BinaryOp {
                     lhs: Box::new(Expr::Call(FunctionExpr::CountStar)),
                     op: BinaryOperator::Greater,
-                    rhs: Box::new(Expr::Literal(1_u32.into()))
+                    rhs: Box::new(Expr::Literal(1.into()))
                 })
             );
             let stringified = res.display(Dialect::MySQL).to_string();
@@ -2055,7 +2055,7 @@ mod tests {
                     tables: vec![TableExpr::from(Relation::from("users"))],
                     fields: vec![
                         FieldDefinitionExpr::from(Expr::Literal(Literal::Null,)),
-                        FieldDefinitionExpr::from(Expr::Literal(Literal::UnsignedInteger(1),)),
+                        FieldDefinitionExpr::from(Expr::Literal(Literal::Integer(1),)),
                         FieldDefinitionExpr::from(
                             Expr::Literal(Literal::String("foo".to_owned()),)
                         ),
@@ -2082,7 +2082,7 @@ mod tests {
                 lhs: Box::new(Expr::Column(Column::from(
                     "auth_permission.content_type_id",
                 ))),
-                rhs: InValue::List(vec![Expr::Literal(0_u32.into())]),
+                rhs: InValue::List(vec![Expr::Literal(0.into())]),
                 negated: false,
             });
 
@@ -2151,7 +2151,7 @@ mod tests {
                 Some(Expr::BinaryOp {
                     lhs: Box::new(Expr::Call(FunctionExpr::CountStar)),
                     op: BinaryOperator::Greater,
-                    rhs: Box::new(Expr::Literal(1_u32.into()))
+                    rhs: Box::new(Expr::Literal(1.into()))
                 })
             );
             let stringified = res.display(Dialect::PostgreSQL).to_string();
@@ -2283,6 +2283,26 @@ mod tests {
             };
 
             let res = test_parse!(selection(Dialect::PostgreSQL), qstr);
+            assert_eq!(res, expected);
+        }
+
+        #[test]
+        fn select_with_decimal_limit_very_large_limit() {
+            let qstr = "SELECT id FROM a LIMIT 3791947566539531989 OFFSET -0.0";
+            let expected = SelectStatement {
+                tables: vec![TableExpr::from(Relation::from("a"))],
+                fields: columns(&["id"]),
+                limit_clause: LimitClause::LimitOffset {
+                    limit: Some(Literal::Integer(3791947566539531989)),
+                    offset: Some(Literal::Double(Double {
+                        value: -0.0,
+                        precision: 1,
+                    })),
+                },
+                ..Default::default()
+            };
+
+            let res = test_parse!(selection(Dialect::PostgreSQL), qstr.as_bytes());
             assert_eq!(res, expected);
         }
     }

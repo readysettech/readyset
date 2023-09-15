@@ -396,7 +396,7 @@ mod tests {
                     ColumnConstraint::NotNull,
                     ColumnConstraint::DefaultValue(Expr::Call(FunctionExpr::Call {
                         name: "CURRENT_TIMESTAMP".into(),
-                        arguments: vec![Expr::Literal(Literal::UnsignedInteger(6))],
+                        arguments: vec![Expr::Literal(Literal::Integer(6))],
                     })),
                     ColumnConstraint::OnUpdateCurrentTimestamp(None),
                 ],
@@ -431,11 +431,9 @@ mod tests {
                         ColumnConstraint::NotNull,
                         ColumnConstraint::DefaultValue(Expr::Call(FunctionExpr::Call {
                             name: "CURRENT_TIMESTAMP".into(),
-                            arguments: vec![Expr::Literal(Literal::UnsignedInteger(6))],
+                            arguments: vec![Expr::Literal(Literal::Integer(6))],
                         })),
-                        ColumnConstraint::OnUpdateCurrentTimestamp(Some(Literal::UnsignedInteger(
-                            6,
-                        ))),
+                        ColumnConstraint::OnUpdateCurrentTimestamp(Some(Literal::Integer(6))),
                     ],
                 };
                 assert_eq!(res, cspec);

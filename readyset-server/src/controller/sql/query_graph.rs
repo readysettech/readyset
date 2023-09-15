@@ -793,7 +793,7 @@ pub(crate) fn extract_limit_offset(
         .offset()
         .as_ref()
         // For now, remove offset if it is a literal 0
-        .filter(|offset| !matches!(offset, Literal::UnsignedInteger(0)))
+        .filter(|offset| !matches!(offset, Literal::Integer(0)))
         .map(|offset| -> ReadySetResult<ViewPlaceholder> {
             match offset {
                 Literal::Placeholder(ItemPlaceholder::DollarNumber(idx)) => {
@@ -1470,7 +1470,7 @@ mod tests {
             vec![Expr::BinaryOp {
                 lhs: Box::new(Expr::Column("t.x".into())),
                 op: BinaryOperator::Greater,
-                rhs: Box::new(Expr::Literal(Literal::UnsignedInteger(2)))
+                rhs: Box::new(Expr::Literal(Literal::Integer(2)))
             }]
         );
         assert_eq!(qg.aggregates, HashMap::new());
@@ -1487,7 +1487,7 @@ mod tests {
                         table: None
                     })),
                     op: BinaryOperator::Greater,
-                    rhs: Box::new(Expr::Literal(Literal::UnsignedInteger(1)))
+                    rhs: Box::new(Expr::Literal(Literal::Integer(1)))
                 },
                 Expr::BinaryOp {
                     lhs: Box::new(Expr::Column(Column {
@@ -1495,7 +1495,7 @@ mod tests {
                         table: None
                     })),
                     op: BinaryOperator::Greater,
-                    rhs: Box::new(Expr::Literal(Literal::UnsignedInteger(3)))
+                    rhs: Box::new(Expr::Literal(Literal::Integer(3)))
                 },
             ]
         );
@@ -1589,7 +1589,7 @@ mod tests {
     #[test]
     fn constant_filter() {
         let qg = make_query_graph("SELECT x FROM t WHERE x = $1 AND 1");
-        assert_eq!(qg.global_predicates, vec![Expr::Literal(1u64.into())])
+        assert_eq!(qg.global_predicates, vec![Expr::Literal(1.into())])
     }
 
     #[test]
@@ -1600,7 +1600,7 @@ mod tests {
             vec![Expr::BinaryOp {
                 lhs: Box::new(Expr::Column("t2.y".into())),
                 op: BinaryOperator::Equal,
-                rhs: Box::new(Expr::Literal(4u64.into()))
+                rhs: Box::new(Expr::Literal(4.into()))
             }]
         )
     }

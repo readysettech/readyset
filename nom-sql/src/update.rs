@@ -96,7 +96,7 @@ mod tests {
             UpdateStatement {
                 table: Relation::from("users"),
                 fields: vec![
-                    (Column::from("id"), Expr::Literal(42_u32.into())),
+                    (Column::from("id"), Expr::Literal(42.into())),
                     (Column::from("name"), Expr::Literal("test".into())),
                 ],
                 where_clause: None
@@ -112,7 +112,7 @@ mod tests {
         let expected_left = Expr::Column(Column::from("id"));
         let expected_where_cond = Some(Expr::BinaryOp {
             lhs: Box::new(expected_left),
-            rhs: Box::new(Expr::Literal(Literal::UnsignedInteger(1))),
+            rhs: Box::new(Expr::Literal(Literal::Integer(1))),
             op: BinaryOperator::Equal,
         });
         assert_eq!(
@@ -120,7 +120,7 @@ mod tests {
             UpdateStatement {
                 table: Relation::from("users"),
                 fields: vec![
-                    (Column::from("id"), Expr::Literal(Literal::from(42_u32)),),
+                    (Column::from("id"), Expr::Literal(Literal::from(42)),),
                     (Column::from("name"), Expr::Literal(Literal::from("test",)),),
                 ],
                 where_clause: expected_where_cond,
@@ -149,7 +149,7 @@ mod tests {
                     Expr::BinaryOp {
                         op: BinaryOperator::Add,
                         lhs: Box::new(Expr::Column(Column::from("karma"))),
-                        rhs: Box::new(Expr::Literal(1_u32.into()))
+                        rhs: Box::new(Expr::Literal(1.into()))
                     },
                 ),],
                 where_clause: expected_where_cond,
@@ -211,7 +211,7 @@ mod tests {
                         Expr::BinaryOp {
                             op: BinaryOperator::Add,
                             lhs: Box::new(Expr::Column(Column::from("karma"))),
-                            rhs: Box::new(Expr::Literal(1_u32.into()))
+                            rhs: Box::new(Expr::Literal(1.into()))
                         },
                     ),],
                     where_clause: None
@@ -310,7 +310,7 @@ mod tests {
                         Expr::BinaryOp {
                             op: BinaryOperator::Add,
                             lhs: Box::new(Expr::Column(Column::from("karma"))),
-                            rhs: Box::new(Expr::Literal(1_u32.into()))
+                            rhs: Box::new(Expr::Literal(1.into()))
                         },
                     ),],
                     where_clause: None

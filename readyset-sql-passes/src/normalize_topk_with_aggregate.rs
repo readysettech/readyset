@@ -187,7 +187,7 @@ mod tests {
                 assert_eq!(
                     stmt.limit_clause,
                     LimitClause::LimitOffset {
-                        limit: Some(4_u32.into()),
+                        limit: Some(4.into()),
                         offset: None
                     }
                 );

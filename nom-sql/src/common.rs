@@ -977,7 +977,7 @@ mod tests {
                 name: "ifnull".into(),
                 arguments: vec![
                     Expr::Column(Column::from("x")),
-                    Expr::Literal(Literal::UnsignedInteger(0))
+                    Expr::Literal(Literal::Integer(0))
                 ]
             }
         );
@@ -1017,8 +1017,8 @@ mod tests {
             res,
             FunctionExpr::Substring {
                 string: Box::new(Expr::Column("a".into())),
-                pos: Some(Box::new(Expr::Literal(1u32.into()))),
-                len: Some(Box::new(Expr::Literal(7u32.into())))
+                pos: Some(Box::new(Expr::Literal(1.into()))),
+                len: Some(Box::new(Expr::Literal(7.into())))
             }
         );
     }
@@ -1030,8 +1030,8 @@ mod tests {
             res,
             FunctionExpr::Substring {
                 string: Box::new(Expr::Column("a".into())),
-                pos: Some(Box::new(Expr::Literal(1u32.into()))),
-                len: Some(Box::new(Expr::Literal(7u32.into())))
+                pos: Some(Box::new(Expr::Literal(1.into()))),
+                len: Some(Box::new(Expr::Literal(7.into())))
             }
         );
     }
@@ -1043,7 +1043,7 @@ mod tests {
             res,
             FunctionExpr::Substring {
                 string: Box::new(Expr::Column("a".into())),
-                pos: Some(Box::new(Expr::Literal(1u32.into()))),
+                pos: Some(Box::new(Expr::Literal(1.into()))),
                 len: None,
             }
         );
@@ -1057,7 +1057,7 @@ mod tests {
             FunctionExpr::Substring {
                 string: Box::new(Expr::Column("a".into())),
                 pos: None,
-                len: Some(Box::new(Expr::Literal(7u32.into()))),
+                len: Some(Box::new(Expr::Literal(7.into()))),
             }
         );
     }
@@ -1071,8 +1071,8 @@ mod tests {
                 name: "substring".into(),
                 arguments: vec![
                     Expr::Column("a".into()),
-                    Expr::Literal(1u32.into()),
-                    Expr::Literal(7u32.into()),
+                    Expr::Literal(1.into()),
+                    Expr::Literal(7.into()),
                 ]
             }
         );
