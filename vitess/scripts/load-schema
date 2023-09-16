@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+
+set -ex
+
+SCRIPTS_DIR=$(dirname $0)
+SCHEMAS_DIR=$SCRIPTS_DIR/schemas
+
+mysql --user root --host 127.0.0.1 --port 15303 commerce < $SCHEMAS_DIR/commerce.sql

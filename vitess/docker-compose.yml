@@ -1,0 +1,23 @@
+version: "3"
+
+services:
+  vttestserver:
+    image: docker.io/kovyrin/vttestserver-arm64v8:mysql-8.0.34-vitess-17.0.1
+    environment:
+      PORT: 15300
+      KEYSPACES: "commerce,sharded"
+      NUM_SHARDS: "1,2"
+      MYSQL_MAX_CONNECTIONS: 10000
+      MYSQL_BIND_HOST: "0.0.0.0"
+    ports:
+      - "15300:15300"
+      - "15301:15301" # grpc
+      - "15302:15302" # mysql
+      - "15303:15303"
+    volumes:
+      - ./scripts:/scripts
+    healthcheck:
+      test: ["CMD", "/scripts/wait-for-mysql"]
+      interval: 5s
+      timeout: 2s
+      retries: 10

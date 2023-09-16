@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+
+set -ex
+
+SCRIPTS_DIR=$(dirname $0)
+VITESS_DIR=$(dirname $SCRIPTS_DIR)
+REPO_DIR=$(dirname $VITESS_DIR)
+
+# If we have podman, use `podman-compose`, otherwise use `docker compose`
+if command -v podman &> /dev/null
+then
+    COMPOSE=podman-compose
+else
+    COMPOSE="docker compose"
+fi
+
+# Stop the test cluster
+$COMPOSE -f $VITESS_DIR/docker-compose.yml down

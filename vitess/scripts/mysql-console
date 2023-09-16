@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+
+exec mysql --user root --host 127.0.0.1 --port 15303 commerce
