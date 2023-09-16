@@ -490,6 +490,20 @@ where
     new_ces
 }
 
+// If the given expr references one and only one relation, return that relation, otherwise return
+// None
+fn unique_referred_rel(expr: &Expr) -> Option<&Relation> {
+    let mut res = None;
+    for col in expr.referred_columns() {
+        if let Some(rel) = &col.table {
+            if Some(*res.get_or_insert(rel)) != Some(rel) {
+                return None;
+            }
+        }
+    }
+    res
+}
+
 // 1. Extract any predicates with placeholder parameters. We push these down to the edge
 //    nodes, since we cannot instantiate the parameters inside the data flow graph (except for
 //    non-materialized nodes).
@@ -611,14 +625,11 @@ fn classify_conditionals(
                             placeholder_idx: idx,
                         });
                     }
-                } else if let Expr::Column(Column {
-                    table: Some(table), ..
-                }) = &**lhs
-                {
+                } else if let Some(table) = unique_referred_rel(ce) {
+                    // Predicates that only mention one table are local to that table
                     local.entry(table.clone()).or_default().push(ce.clone());
                 } else {
-                    // comparisons between computed columns and literals are global
-                    // predicates
+                    // Predicates that mention more than one table are global
                     global.push(ce.clone());
                 }
             } else {
@@ -1612,6 +1623,19 @@ mod tests {
             qg.global_predicates,
             vec![Expr::Column("t2.is_thing".into())]
         )
+    }
+
+    #[test]
+    fn join_key_in_where_clause() {
+        let qg = make_query_graph("select a.id, b.other from a join b where a.b_id = b.id;");
+        assert_eq!(
+            qg.global_predicates,
+            vec![Expr::BinaryOp {
+                lhs: Box::new(Expr::Column("a.b_id".into())),
+                op: BinaryOperator::Equal,
+                rhs: Box::new(Expr::Column("b.id".into()))
+            }]
+        );
     }
 
     mod view_key {
