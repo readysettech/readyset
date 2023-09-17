@@ -2253,19 +2253,7 @@ mod tests {
         use crate::table::Relation;
         use crate::{BinaryOperator, Double, Expr, FunctionExpr, InValue};
 
-        #[proptest]
-        fn limit_clause_format_parse_round_trip(s: LimitClause) {
-            let formatted = s.display(Dialect::PostgreSQL).to_string();
-            let round_trip = limit_offset(Dialect::PostgreSQL)(LocatedSpan::new(formatted.as_bytes()));
-
-            if round_trip.is_err() {
-                println!("{}", formatted);
-                println!("{:?}", &s);
-            }
-            let (_, limit) = round_trip.unwrap();
-            assert_eq!(limit, s);
-        }
-
+        format_parse_round_trip!(rt_order_clause, order_clause, OrderClause, Dialect::PostgreSQL);
         format_parse_round_trip!(rt_limit_clause, limit_offset, LimitClause, Dialect::PostgreSQL);
         format_parse_round_trip!(rt_select, selection, SelectStatement, Dialect::PostgreSQL);
 
@@ -2568,7 +2556,6 @@ mod tests {
         // format_parse_round_trip!(rt_join_clause, join_clause, JoinClause, Dialect::PostgreSQL);
         // format_parse_round_trip!(rt_group_by_clause, group_by_clause, GroupByClause, Dialect::PostgreSQL);
         // format_parse_round_trip!(rt_expr, expression, Expr, Dialect::PostgreSQL);
-        // format_parse_round_trip!(rt_order_clause, order_clause, OrderClause, Dialect::PostgreSQL);
         //
     }
 }

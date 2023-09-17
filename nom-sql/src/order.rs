@@ -8,8 +8,10 @@ use nom::combinator::{map, opt};
 use nom::multi::separated_list1;
 use nom::sequence::preceded;
 use nom_locate::LocatedSpan;
+use proptest::strategy::BoxedStrategy;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
+use proptest::prelude::{Arbitrary, any};
 use test_strategy::Arbitrary;
 
 use crate::common::{field_reference, ws_sep_comma};
@@ -45,9 +47,24 @@ impl fmt::Display for OrderType {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Arbitrary)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct OrderClause {
     pub order_by: Vec<(FieldReference, Option<OrderType>)>,
+}
+
+impl Arbitrary for OrderClause {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::*;
+        prop::collection::vec(
+            (any::<FieldReference>(), any::<Option<OrderType>>()),
+            1..=12, // Ensure it's not empty and limit size
+        )
+        .prop_map(|order_by| OrderClause { order_by })
+        .boxed()
+    }
 }
 
 impl OrderClause {

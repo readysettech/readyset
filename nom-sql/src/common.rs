@@ -334,6 +334,7 @@ pub enum Sign {
 #[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Arbitrary)]
 pub enum FieldReference {
     /// A reference to a field in the `SELECT` list by its (1-based) index.
+    #[weight(0)] // TODO: pipe in dialect and only generate for MySQL
     Numeric(u64),
     /// An expression
     Expr(Expr),

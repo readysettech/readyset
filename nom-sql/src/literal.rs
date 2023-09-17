@@ -216,6 +216,8 @@ impl From<ItemPlaceholder> for Literal {
 }
 
 impl Literal {
+    // TODO: To round trip ambiguous literals like int/numeric, we need to inject the
+    // types
     pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             macro_rules! write_real {
