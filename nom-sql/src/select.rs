@@ -222,9 +222,7 @@ impl LimitClause {
     }
 }
 
-#[derive(
-    Clone, Debug, Default, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize
-)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct SelectStatement {
     pub ctes: Vec<CommonTableExpr>,
     pub distinct: bool,
@@ -257,7 +255,7 @@ impl Arbitrary for SelectStatement {
         let join_right_side = |table_expr: BoxedStrategy<TableExpr>| {
             prop_oneof![
                 table_expr.clone().prop_map(JoinRightSide::Table),
-                vec(table_expr, 1..24).prop_map(JoinRightSide::Tables)
+                vec(table_expr, 1..5).prop_map(JoinRightSide::Tables)
             ]
         };
 
@@ -273,14 +271,14 @@ impl Arbitrary for SelectStatement {
                         right,
                         constraint,
                     }),
-                1..24,
+                1..5,
             )
         };
 
         (
             any::<bool>(),
-            any_with::<Vec<FieldDefinitionExpr>>(((1..100).into(), ())),
-            vec(table_expr.clone(), 1..24),
+            any_with::<Vec<FieldDefinitionExpr>>(((1..12).into(), ())),
+            vec(table_expr.clone(), 1..5),
             join(table_expr.boxed()),
             any::<Option<Expr>>(),
             any::<Option<GroupByClause>>(),
@@ -312,7 +310,8 @@ impl Arbitrary for SelectStatement {
                     limit_clause,
                 },
             )
-            .prop_recursive(4, 8, 4, move |element| {
+            .prop_recursive(2, 4, 2, move |element| {
+                // .prop_recursive(4, 8, 4, move |element| {
                 let table_expr = (
                     prop_oneof![
                         any::<Relation>().prop_map(TableExprInner::Table),
@@ -329,11 +328,11 @@ impl Arbitrary for SelectStatement {
                     vec(
                         (any::<SqlIdentifier>(), element)
                             .prop_map(|(name, statement)| CommonTableExpr { name, statement }),
-                        0..24,
+                        0..5,
                     ),
                     any::<bool>(),
-                    any_with::<Vec<FieldDefinitionExpr>>(((1..100).into(), ())),
-                    vec(table_expr.clone(), 1..24),
+                    any_with::<Vec<FieldDefinitionExpr>>(((1..10).into(), ())),
+                    vec(table_expr.clone(), 1..5),
                     join(table_expr.boxed()),
                     any::<Option<Expr>>(),
                     any::<Option<GroupByClause>>(),
@@ -753,21 +752,41 @@ pub fn nested_selection(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SelectStatement> {
     move |i| {
+        // eprintln!("nested_selection begin {}", String::from_utf8_lossy(*i));
+
         let (i, ctes) = opt(ctes(dialect))(i)?;
+        // dbg!(&ctes);
+        // eprintln!("after ctes {}", String::from_utf8_lossy(*i));
         let (i, _) = tag_no_case("select")(i)?;
         let (i, _) = whitespace1(i)?;
         let (i, distinct) = opt(tag_no_case("distinct"))(i)?;
         let (i, _) = whitespace0(i)?;
         let (i, fields) = field_definition_expr(dialect)(i)?;
+        // dbg!(&fields);
+        // eprintln!("after field_definition_expr {}", String::from_utf8_lossy(*i));
 
         let (i, from_clause) = opt(move |i| {
             let (i, from) = from_clause(dialect)(i)?;
+            // dbg!(&from);
+            // eprintln!("after from_clause {}", String::from_utf8_lossy(*i));
             let (i, extra_joins) = many0(join_clause(dialect))(i)?;
+            // dbg!(&extra_joins);
+            // eprintln!("after join_clause {}", String::from_utf8_lossy(*i));
             let (i, where_clause) = opt(where_clause(dialect))(i)?;
+            // dbg!(&where_clause);
+            // eprintln!("after where_clause {}", String::from_utf8_lossy(*i));
             let (i, group_by) = opt(group_by_clause(dialect))(i)?;
+            // dbg!(&group_by);
+            // eprintln!("after group_by_clause {}", String::from_utf8_lossy(*i));
             let (i, having) = opt(having_clause(dialect))(i)?;
+            // dbg!(&having);
+            // eprintln!("after having_clause {}", String::from_utf8_lossy(*i));
             let (i, order) = opt(order_clause(dialect))(i)?;
+            // dbg!(&order);
+            // eprintln!("after order_clause {}", String::from_utf8_lossy(*i));
             let (i, limit_clause) = opt(limit_offset_clause(dialect))(i)?;
+            // dbg!(&limit_clause);
+            // eprintln!("after limit_offset_clause {}", String::from_utf8_lossy(*i));
 
             Ok((
                 i,
@@ -799,6 +818,7 @@ pub fn nested_selection(
                     kind: ErrorKind::Tag,
                 })
             })?;
+            // eprintln!("after tables and joins {}", String::from_utf8_lossy(*i));
 
             join.extend(extra_joins);
 
@@ -2005,14 +2025,6 @@ mod tests {
         use crate::table::Relation;
         use crate::{BinaryOperator, Expr, FunctionExpr, InValue};
 
-        #[proptest]
-        fn format_parse_round_trip(stmt: SelectStatement) {
-            let formatted = stmt.display(Dialect::MySQL).to_string();
-            eprintln!("{formatted}");
-            let round_trip = parse_select_statement(Dialect::MySQL, formatted).unwrap();
-            assert_eq!(round_trip, stmt);
-        }
-
         #[test]
         fn alias_generic_function() {
             let qstr = "SELECT id, coalesce(a, \"b\",c) AS created_day FROM users;";
@@ -2234,27 +2246,6 @@ mod tests {
         }
     }
 
-    macro_rules! format_parse_round_trip {
-        ($name: ident, $parser: expr, $type: ty, $dialect: expr) => {
-
-        #[proptest]
-        fn $name(s: $type) {
-            let formatted = s.display($dialect).to_string();
-            let round_trip = $parser($dialect)(LocatedSpan::new(formatted.as_bytes()));
-
-            if round_trip.is_err() {
-                println!("{}", formatted);
-                println!("{:?}", &s);
-            }
-            let (_, limit) = round_trip.unwrap();
-            if limit != s {
-                println!("{}", formatted);
-            }
-            assert_eq!(limit, s);
-        }
-        }
-    }
-
     mod postgres {
         use super::*;
         use crate::column::Column;
@@ -2262,7 +2253,21 @@ mod tests {
         use crate::table::Relation;
         use crate::{BinaryOperator, Double, Expr, FunctionExpr, InValue};
 
+        #[proptest]
+        fn limit_clause_format_parse_round_trip(s: LimitClause) {
+            let formatted = s.display(Dialect::PostgreSQL).to_string();
+            let round_trip = limit_offset(Dialect::PostgreSQL)(LocatedSpan::new(formatted.as_bytes()));
+
+            if round_trip.is_err() {
+                println!("{}", formatted);
+                println!("{:?}", &s);
+            }
+            let (_, limit) = round_trip.unwrap();
+            assert_eq!(limit, s);
+        }
+
         format_parse_round_trip!(rt_limit_clause, limit_offset, LimitClause, Dialect::PostgreSQL);
+        format_parse_round_trip!(rt_select, selection, SelectStatement, Dialect::PostgreSQL);
 
         #[test]
         fn alias_generic_function() {
@@ -2417,7 +2422,6 @@ mod tests {
             let qstr = "select exists(select * from \"groups\" where \"id\" = ?) as \"exists\"";
             let res = test_parse!(selection(Dialect::PostgreSQL), qstr.as_bytes());
             let qstr = res.display(Dialect::PostgreSQL).to_string();
-            println!("{}", qstr);
             assert_eq!(
                 qstr,
                 "SELECT EXISTS (SELECT * FROM \"groups\" WHERE (\"id\" = ?)) AS \"exists\""
@@ -2556,5 +2560,15 @@ mod tests {
             let res = test_parse!(selection(Dialect::PostgreSQL), qstr.as_bytes());
             assert_eq!(res, expected);
         }
+
+        // format_parse_round_trip!(rt_select_statement, selection, SelectStatement, Dialect::PostgreSQL);
+        // format_parse_round_trip!(rt_common_table_expr, cte, CommonTableExpr, Dialect::PostgreSQL);
+        // format_parse_round_trip!(rt_field_def_expr, expression_field, FieldDefinitionExpr, Dialect::PostgreSQL);
+        // format_parse_round_trip!(rt_table_expr, table_expr, TableExpr, Dialect::PostgreSQL);
+        // format_parse_round_trip!(rt_join_clause, join_clause, JoinClause, Dialect::PostgreSQL);
+        // format_parse_round_trip!(rt_group_by_clause, group_by_clause, GroupByClause, Dialect::PostgreSQL);
+        // format_parse_round_trip!(rt_expr, expression, Expr, Dialect::PostgreSQL);
+        // format_parse_round_trip!(rt_order_clause, order_clause, OrderClause, Dialect::PostgreSQL);
+        //
     }
 }

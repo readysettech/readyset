@@ -84,7 +84,7 @@ fn cached_queries(
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct ProxiedQueriesOptions {
     pub query_id: Option<String>,
     pub only_supported: bool,

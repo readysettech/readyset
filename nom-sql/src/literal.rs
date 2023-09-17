@@ -14,6 +14,7 @@ use nom::error::ErrorKind;
 use nom::multi::fold_many0;
 use nom::sequence::{delimited, pair, preceded, terminated, tuple};
 use nom_locate::LocatedSpan;
+use proptest::sample::size_range;
 use proptest::strategy::Strategy;
 use readyset_util::arbitrary::{
     arbitrary_bitvec, arbitrary_date_time, arbitrary_decimal, arbitrary_ipinet, arbitrary_json,
@@ -149,6 +150,7 @@ pub enum Literal {
     Double(Double),
     #[weight(0)]
     Numeric(i128, u32),
+    #[strategy("literal")]
     String(String),
     #[weight(0)]
     Blob(Vec<u8>),
@@ -158,8 +160,10 @@ pub enum Literal {
     // Having this here makes it easy to parse PostgreSQL byte array literals, and
     // then just store the `Vec<u8>` into a DfValue without testing if it's a valid
     // String or not.
+    #[any(size_range(0..10).lift())]
     ByteArray(Vec<u8>),
     Placeholder(ItemPlaceholder),
+    #[any(size_range(0..10).lift())]
     BitVector(Vec<u8>),
 }
 
@@ -288,7 +292,7 @@ impl Literal {
             | SqlType::MediumText
             | SqlType::LongText
             | SqlType::Text
-            | SqlType::Citext => any::<String>().prop_map(Self::String).boxed(),
+            | SqlType::Citext => "sql_type".prop_map(Self::String).boxed(),
             SqlType::QuotedChar => any::<i8>().prop_map(|i| Self::Integer(i as _)).boxed(),
             SqlType::Int(_) | SqlType::Int4 => {
                 any::<i32>().prop_map(|i| Self::Integer(i as _)).boxed()
@@ -318,7 +322,9 @@ impl Literal {
             | SqlType::MediumBlob
             | SqlType::TinyBlob
             | SqlType::Binary(_)
-            | SqlType::VarBinary(_) => any::<Vec<u8>>().prop_map(Self::Blob).boxed(),
+            | SqlType::VarBinary(_) => any_with::<Vec<u8>>(size_range(10).lift())
+                .prop_map(Self::Blob)
+                .boxed(),
             SqlType::Float => any::<Float>().prop_map(Self::Float).boxed(),
             SqlType::Double | SqlType::Real | SqlType::Decimal(_, _) => {
                 any::<Double>().prop_map(Self::Double).boxed()

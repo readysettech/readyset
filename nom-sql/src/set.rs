@@ -352,10 +352,12 @@ fn variable(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u
         let (i, scope) = set_variable_scope_prefix
             .or(|i| Ok((i, VariableScope::Local)))
             .parse(i)?;
+        eprintln!("{}", String::from_utf8_lossy(&i));
         let (i, name) = dialect
             .identifier()
             .map(|ident| ident.to_ascii_lowercase().into())
             .parse(i)?;
+        dbg!(&name);
         Ok((i, Variable { scope, name }))
     }
 }

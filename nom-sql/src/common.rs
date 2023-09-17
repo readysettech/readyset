@@ -734,7 +734,7 @@ pub fn field_list(
     move |i| separated_list0(ws_sep_comma, column_identifier_no_alias(dialect))(i)
 }
 
-fn expression_field(
+pub fn expression_field(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], FieldDefinitionExpr> {
     move |i| {

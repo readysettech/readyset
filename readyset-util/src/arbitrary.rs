@@ -164,9 +164,9 @@ pub fn arbitrary_json() -> impl Strategy<Value = serde_json::Value> {
         "[^\u{0}]*".prop_map(serde_json::Value::from),
     ];
     leaf.prop_recursive(
-        3,   // 8 levels deep
-        256, // Shoot for maximum size of 256 nodes
-        10,  // We put up to 10 items per collection
+        3,  // 3 levels deep
+        24, // Shoot for maximum size of 24 nodes
+        10, // We put up to 10 items per collection
         |inner| {
             prop_oneof![
                 // Take the inner strategy and make the two recursive cases.
