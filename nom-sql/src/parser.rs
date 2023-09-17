@@ -256,8 +256,17 @@ mod tests {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
 
+        use test_strategy::proptest;
+
         use super::*;
         use crate::table::Relation;
+
+        #[proptest]
+        fn format_parse_round_trip(query: SqlQuery) {
+            let formatted = query.display(Dialect::MySQL).to_string();
+            let round_trip = parse_query(Dialect::MySQL, formatted).unwrap();
+            assert_eq!(round_trip, query);
+        }
 
         #[test]
         fn trim_query() {

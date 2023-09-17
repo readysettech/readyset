@@ -144,8 +144,10 @@ pub enum Literal {
     /// As an example, if we read an `f32` from a binlog, we would be transforming that
     /// `f32` into an `f64` (thus, potentially introducing numeric error) if this type
     /// didn't exist.
+    #[weight(0)]
     Float(Float),
     Double(Double),
+    #[weight(0)]
     Numeric(i128, u32),
     String(String),
     #[weight(0)]

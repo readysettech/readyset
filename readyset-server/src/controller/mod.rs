@@ -862,6 +862,7 @@ impl AuthorityLeaderElectionState {
                         "Error deserializing controller state, wiping state and starting fresh \
                          (NOTE: this will drop all caches!)"
                     );
+                    std::process::abort();
                     let state = ControllerState::new(self.config.clone(), self.permissive_writes);
                     let new_state = state.clone(); // needs to be in a `let` binding for Send reasons...
                     self.authority.overwrite_controller_state(new_state).await?;
