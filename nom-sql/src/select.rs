@@ -1829,6 +1829,37 @@ mod tests {
         assert_eq!(query.ctes[1].name, "min_val");
     }
 
+    macro_rules! format_parse_round_trip {
+        ($name: ident, $parser: expr, $type: ty, $dialect: expr) => {
+
+        #[proptest]
+        fn $name(s: $type) {
+            let displayed = s.display($dialect).to_string();
+            // Do one extra format->parse trip to deal with things that are ambiguous at the
+            // Display level.
+            // For example, a Numeric(1) could be displayed as `1` and then parsed as an Integer
+            let parsed = $parser($dialect)(LocatedSpan::new(displayed.as_bytes()));
+            if parsed.is_err() {
+                println!("{}", displayed);
+                println!("{:?}", &s);
+            }
+            let (_, parsed) = parsed.unwrap();
+            let displayed = parsed.display($dialect).to_string();
+            let round_trip = $parser($dialect)(LocatedSpan::new(displayed.as_bytes()));
+            if round_trip.is_err() {
+                println!("{}", displayed);
+                println!("{:?}", &s);
+            }
+
+            let (_, round_trip) = round_trip.unwrap();
+            if round_trip != parsed {
+                println!("{}", displayed);
+            }
+            assert_eq!(round_trip, parsed);
+        }
+        }
+    }
+
     mod mysql {
         use super::*;
         use crate::column::Column;
