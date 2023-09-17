@@ -23,3 +23,28 @@ macro_rules! test_parse {
         res
     }};
 }
+
+#[cfg(test)]
+macro_rules! test_format_parse_round_trip {
+    ($($name:ident($parser: expr, $type: ty, $dialect: expr);)+) => {
+        $(test_format_parse_round_trip!(@impl, $name, $parser, $type, $dialect);)+
+    };
+
+    (@impl, $name: ident, $parser: expr, $type: ty, $dialect: expr) => {
+        #[test_strategy::proptest]
+        fn $name(s: $type) {
+            let formatted = s.display($dialect).to_string();
+            let round_trip = $parser($dialect)(LocatedSpan::new(formatted.as_bytes()));
+
+            if round_trip.is_err() {
+                println!("{}", formatted);
+                println!("{:?}", &s);
+            }
+            let (_, limit) = round_trip.unwrap();
+            if limit != s {
+                println!("{}", formatted);
+            }
+            assert_eq!(limit, s);
+        }
+    };
+}
