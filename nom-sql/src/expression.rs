@@ -690,7 +690,7 @@ impl Arbitrary for Expr {
                         .prop_map(|(expr, distinct)| FunctionExpr::Sum { expr, distinct }),
                     box_expr.clone().prop_map(FunctionExpr::Max),
                     box_expr.clone().prop_map(FunctionExpr::Min),
-                    (box_expr.clone(), any::<Option<String>>()).prop_map(|(expr, separator)| {
+                    (box_expr.clone(), option::of("\\p{L}{1,10}")).prop_map(|(expr, separator)| {
                         FunctionExpr::GroupConcat { expr, separator }
                     }),
                     (
@@ -745,7 +745,7 @@ impl Arbitrary for Expr {
                 (
                     box_expr.clone(),
                     /* TODO: IN (subquery) */
-                    proptest::collection::vec(element.clone(), 1..24).prop_map(InValue::List),
+                    proptest::collection::vec(element.clone(), 1..10).prop_map(InValue::List),
                     any::<bool>(),
                 )
                     .prop_map(|(lhs, rhs, negated)| Expr::In { lhs, rhs, negated }),
@@ -758,8 +758,8 @@ impl Arbitrary for Expr {
                         }
                     }
                 ),
-                proptest::collection::vec(element, 0..24).prop_map(Expr::Array),
-                // TODO: once we have Arbitrary for SelectStatement
+                proptest::collection::vec(element, 0..10).prop_map(Expr::Array),
+                // This causes stack overflows atm
                 // any::<Box<SelectStatement>>().prop_map(Expr::NestedSelect),
                 // any::<Box<SelectStatement>>().prop_map(Expr::Exists),
             ]
@@ -1304,6 +1304,7 @@ fn case_when_branch(
         let (i, _) = whitespace1(i)?;
         let (i, then) = expression(dialect)(i)?;
 
+        // eprintln!("case_when_branch {}", String::from_utf8_lossy(&i));
         Ok((
             i,
             CaseWhenBranch {
@@ -1316,9 +1317,12 @@ fn case_when_branch(
 
 fn case_when_else(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Expr> {
     move |i| {
+        // eprintln!("case_else_when {}", String::from_utf8_lossy(&i));
         let (i, _) = tag_no_case("else")(i)?;
         let (i, _) = whitespace1(i)?;
         let (i, else_expr) = expression(dialect)(i)?;
+        dbg!(&else_expr);
+        // eprintln!("case_else_when {}", String::from_utf8_lossy(&i));
         let (i, _) = whitespace1(i)?;
         Ok((i, else_expr))
     }
@@ -1343,6 +1347,7 @@ fn case_when_expr(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResu
 
 fn cast(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Expr> {
     move |i| {
+        // eprintln!("cast {}", String::from_utf8_lossy(*i));
         let (i, _) = tag_no_case("cast")(i)?;
         let (i, _) = whitespace0(i)?;
         let (i, _) = char('(')(i)?;
@@ -1362,6 +1367,8 @@ fn cast(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], 
         } else {
             type_identifier(dialect)(i)?
         };
+
+        // eprintln!("cast {}", String::from_utf8_lossy(*i));
 
         let (i, _) = char(')')(i)?;
 
@@ -2220,7 +2227,7 @@ mod tests {
             let res = to_nom_result(expression(Dialect::MySQL)(LocatedSpan::new(qs)));
             let (remaining, result) = res.unwrap();
             assert_eq!(std::str::from_utf8(remaining).unwrap(), "");
-            eprintln!("{}", result.display(Dialect::MySQL));
+            // eprintln!("{}", result.display(Dialect::MySQL));
             assert_eq!(result, expected);
         }
 

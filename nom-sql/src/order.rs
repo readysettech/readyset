@@ -84,8 +84,10 @@ fn order_field(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], (FieldReference, Option<OrderType>)> {
     move |i| {
+        // eprintln!("order_field {}", String::from_utf8_lossy(*i));
         let (i, field) = field_reference(dialect)(i)?;
         let (i, ord_typ) = opt(preceded(whitespace1, order_type))(i)?;
+        // eprintln!("order_field end {}", String::from_utf8_lossy(*i));
         Ok((i, (field, ord_typ)))
     }
 }

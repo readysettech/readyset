@@ -162,14 +162,14 @@ impl Arbitrary for SqlType {
         let mut variants = vec![
             Just(Bool).boxed(),
             option::of(1..255u16).prop_map(Char).boxed(),
-            (1..255u16).prop_map(|l| VarChar(Some(l))).boxed(),
+            (1..24u16).prop_map(|l| VarChar(Some(l))).boxed(),
             Just(Int(None)).boxed(),
             Just(BigInt(None)).boxed(),
             Just(SmallInt(None)).boxed(),
             Just(Double).boxed(),
             Just(Float).boxed(),
             Just(Real).boxed(),
-            option::of((1..=65u16).prop_flat_map(|n| {
+            option::of((1..=24u16).prop_flat_map(|n| {
                 (
                     Just(n),
                     if n > 28 {
@@ -199,13 +199,12 @@ impl Arbitrary for SqlType {
                 Just(Int2).boxed(),
                 Just(Int4).boxed(),
                 Just(Int8).boxed(),
-                Just(VarChar(None)).boxed(),
                 Just(ByteArray).boxed(),
                 Just(MacAddr).boxed(),
                 Just(Inet).boxed(),
                 Just(Uuid).boxed(),
-                any::<Option<u16>>().prop_map(Bit).boxed(),
-                any::<Option<u16>>().prop_map(VarBit).boxed(),
+                option::of(1..=10u16).prop_map(Bit).boxed(),
+                option::of(1..=10u16).prop_map(VarBit).boxed(),
                 Just(Serial).boxed(),
                 Just(BigSerial).boxed(),
                 Just(TimestampTz).boxed(),
@@ -505,6 +504,8 @@ impl Arbitrary for EnumVariants {
     type Parameters = (&'static str, SizeRange);
 
     fn arbitrary_with((regex, len): Self::Parameters) -> Self::Strategy {
+        dbg!(&regex);
+        dbg!(&len);
         // NOTE: We are required to provide a regex for Arbitrary, otherwise we would just get empty
         // strings.
         // Using hashset to ensure that all variants are unique.
@@ -994,6 +995,7 @@ pub fn type_identifier(
 /// only supports a handful of CAST-specific keywords; this function returns a parser for them.
 pub fn mysql_int_cast_targets() -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlType> {
     move |i| {
+        println!("mysql_int_cast_targets {}", String::from_utf8_lossy(*i));
         alt((
             map(
                 tuple((

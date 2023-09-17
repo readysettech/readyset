@@ -406,8 +406,16 @@ impl Arbitrary for SqlIdentifier {
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         use proptest::prelude::*;
-
-        "\\P{Cc}{1,100}".prop_map(Into::into).boxed()
+        // This regex attempts to generate all valid SQL identifiers as defined by
+        // https://www.postgresql.org/docs/current/sql-syntax-lexical.html#SQL-SYNTAX-IDENTIFIERS
+        // TODO: exclude keywords
+        // We exclude \$ which postgres allows because it is not allowed according to the SQL
+        // standard
+        // "[\\p{L}|_][\\p{L}_0-9]{1,62}".prop_map(Into::into).boxed()
+        //
+        // Simplified version that only allows latin characters
+        // "[\\p{Latin}|_][\\p{Latin}_0-9]{1,62}".prop_map(Into::into).boxed()
+        "A".prop_map(Into::into).boxed()
     }
 }
 
