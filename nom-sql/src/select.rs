@@ -8,6 +8,10 @@ use nom::error::ErrorKind;
 use nom::multi::{many0, separated_list1};
 use nom::sequence::{delimited, preceded, terminated, tuple};
 use nom_locate::LocatedSpan;
+use proptest::collection::vec;
+use proptest::option;
+use proptest::prelude::Arbitrary;
+use proptest::strategy::BoxedStrategy;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
@@ -92,7 +96,7 @@ impl CommonTableExpr {
 }
 
 /// AST representation of the SQL limit and offset clauses.
-#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Arbitrary)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum LimitClause {
     /// The standard limit and offset syntax: `LIMIT <limit> OFFSET <offset>`.
     LimitOffset {
@@ -101,6 +105,45 @@ pub enum LimitClause {
     },
     /// MySQL's alternative limit and offset syntax: `LIMIT <offset>, <limit>`.
     OffsetCommaLimit { offset: Literal, limit: Literal },
+}
+
+/// Options for generating arbitrary [`LimitClause`]s
+#[derive(Default, Debug, Clone, Copy)]
+pub struct LimitClauseArbitraryOptions {
+    /// [`LimitClause`] has differences between mysql and postgres, so this dialect controls which one
+    /// we use to generate arbitrary [`LimitClause`]s
+    pub dialect: Option<Dialect>,
+}
+
+impl Arbitrary for LimitClause {
+    type Parameters = LimitClauseArbitraryOptions;
+
+    type Strategy = BoxedStrategy<LimitClause>;
+
+    fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::*;
+        use LimitClause::*;
+
+        // limit to positive numbers
+        // Don't allow omitted limit (see FIXME above `limit_offset_generic`)
+        let limit_offset_strategy = (
+            (1i64..=i64::MAX).prop_map(|limit| Literal::Integer(limit)),
+            option::of((1i64..=i64::MAX).prop_map(|offset| Literal::Integer(offset)))
+        )
+        .prop_map(|(limit, offset)| LimitOffset { limit: Some(limit), offset });
+
+        if args.dialect == Some(Dialect::MySQL) {
+            let offset_comma_limit_strategy = ((1..i64::MAX), (1..i64::MAX))
+                .prop_map(|(offset, limit)| OffsetCommaLimit {
+                    offset: Literal::Integer(offset),
+                    limit: Literal::Integer(limit),
+                });
+            prop_oneof![limit_offset_strategy, offset_comma_limit_strategy]
+                .boxed()
+        } else {
+            limit_offset_strategy.boxed()
+        }
+    }
 }
 
 impl LimitClause {
@@ -315,6 +358,7 @@ fn offset_clause(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResul
 }
 
 // Parses a generic SQL `{limit} [OFFSET {offset}]`
+// FIXME(#610/REA-3510): This implementation is incomplete
 fn limit_offset_generic(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], LimitClause> {
@@ -2013,12 +2057,35 @@ mod tests {
         }
     }
 
+    macro_rules! format_parse_round_trip {
+        ($name: ident, $parser: expr, $type: ty, $dialect: expr) => {
+
+        #[proptest]
+        fn $name(s: $type) {
+            let formatted = s.display($dialect).to_string();
+            let round_trip = $parser($dialect)(LocatedSpan::new(formatted.as_bytes()));
+
+            if round_trip.is_err() {
+                println!("{}", formatted);
+                println!("{:?}", &s);
+            }
+            let (_, limit) = round_trip.unwrap();
+            if limit != s {
+                println!("{}", formatted);
+            }
+            assert_eq!(limit, s);
+        }
+        }
+    }
+
     mod postgres {
         use super::*;
         use crate::column::Column;
         use crate::common::FieldDefinitionExpr;
         use crate::table::Relation;
         use crate::{BinaryOperator, Double, Expr, FunctionExpr, InValue};
+
+        format_parse_round_trip!(rt_limit_clause, limit_offset, LimitClause, Dialect::PostgreSQL);
 
         #[test]
         fn alias_generic_function() {
