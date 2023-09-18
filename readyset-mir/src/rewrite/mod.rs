@@ -6,6 +6,7 @@ mod add_bogokey;
 mod decorrelate;
 mod filters_to_join_keys;
 mod fuse;
+mod predicate_pushup;
 mod pull_columns;
 mod pull_keys;
 
@@ -16,8 +17,9 @@ impl<'a> MirQuery<'a> {
         pull_keys::pull_view_keys_to_leaf(&mut self)?;
         decorrelate::eliminate_dependent_joins(&mut self)?;
         add_bogokey::add_bogokey_if_necessary(&mut self)?;
-        pull_columns::pull_all_required_columns(&mut self)?;
+        predicate_pushup::push_filters_up(&mut self)?;
         filters_to_join_keys::convert_filters_to_join_keys(&mut self)?;
+        pull_columns::pull_all_required_columns(&mut self)?;
         fuse::fuse_project_nodes(&mut self)?;
         fuse::fuse_filter_nodes(&mut self)?;
         Ok(self)

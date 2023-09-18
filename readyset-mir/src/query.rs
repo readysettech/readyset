@@ -187,7 +187,6 @@ impl<'a> MirQuery<'a> {
     ///
     /// # Invariants
     /// - The node must have only one ancestor.
-    /// - The node must have only one descendant.
     pub fn remove_node(&mut self, node_idx: NodeIndex) -> ReadySetResult<Option<MirNode>> {
         if !self.graph.contains_node(node_idx) {
             return Err(ReadySetError::MirNodeNotFound {
@@ -204,19 +203,17 @@ impl<'a> MirQuery<'a> {
                     node_idx.index()
                 )
             })?;
-        let descendant_edge = self
+
+        let edges = self
             .graph
             .edges_directed(node_idx, Direction::Outgoing)
-            .exactly_one()
-            .map_err(|_| {
-                internal_err!(
-                    "tried to remove node {} that doesn't have exactly one descendant",
-                    node_idx.index()
-                )
-            })?;
-        let descendant = descendant_edge.target();
-        let edge_weight = *descendant_edge.weight();
-        self.graph.add_edge(ancestor, descendant, edge_weight);
+            .map(|e| (e.target(), *e.weight()))
+            .collect::<Vec<_>>();
+
+        for (descendant, edge_weight) in edges {
+            self.graph.add_edge(ancestor, descendant, edge_weight);
+        }
+
         Ok(self.graph.remove_node(node_idx))
     }
 
@@ -244,6 +241,18 @@ impl<'a> MirQuery<'a> {
         self.graph.swap_with_child(node)
     }
 
+    /// Insert the given node between the given parent and child, replacing the edge (which must
+    /// exist) from parent to child.
+    pub fn splice(
+        &mut self,
+        parent: NodeIndex,
+        child: NodeIndex,
+        mut node: MirNode,
+    ) -> ReadySetResult<NodeIndex> {
+        node.add_owner(self.name.clone());
+        self.graph.splice(parent, child, node)
+    }
+
     /// Insert a new node above the given child node index.
     ///
     /// The given node must have only one ancestor.
@@ -254,6 +263,18 @@ impl<'a> MirQuery<'a> {
     ) -> ReadySetResult<NodeIndex> {
         node.add_owner(self.name.clone());
         self.graph.insert_above(child, node)
+    }
+
+    /// Insert a new node below the given parent node index.
+    ///
+    /// The given node must have only one child.
+    pub fn insert_below(
+        &mut self,
+        parent: NodeIndex,
+        mut node: MirNode,
+    ) -> ReadySetResult<NodeIndex> {
+        node.add_owner(self.name.clone());
+        self.graph.insert_below(parent, node)
     }
 
     /// Runs the given function on the [`MirNodeInner`] belonging to the given node,

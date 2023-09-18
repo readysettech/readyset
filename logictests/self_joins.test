@@ -1,0 +1,20 @@
+statement ok
+create table t1 (id int, parent_id int, name text);
+
+statement ok
+insert into t1 (id, parent_id, name)
+values
+(1, null, 'parent a'),
+(2, null, 'parent b'),
+(3, 1, 'child a'),
+(4, 1, 'other child a'),
+(5, 2, 'child b'),
+(6, 2, 'other child b');
+
+query I nosort
+select count(*) from t1 child
+join t1 parent
+on child.parent_id = parent.id
+where substring(parent.name from 8) = 'a'
+----
+2
