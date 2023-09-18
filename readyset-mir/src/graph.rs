@@ -117,6 +117,30 @@ impl MirGraph {
         Ok(())
     }
 
+    /// Insert the given node between the given parent and child, replacing the edge (which must
+    /// exist) from parent to child.
+    pub fn splice(
+        &mut self,
+        parent: NodeIndex,
+        child: NodeIndex,
+        node: MirNode,
+    ) -> ReadySetResult<NodeIndex> {
+        let parent_child_edge = self
+            .graph
+            .find_edge(parent, child)
+            .ok_or_else(|| internal_err!("There is no edge between parent and child"))?;
+        let edge_weight = self
+            .graph
+            .remove_edge(parent_child_edge)
+            .expect("Just checked the edge exists");
+
+        let node_idx = self.graph.add_node(node);
+        self.graph.add_edge(parent, node_idx, 0);
+        self.graph.add_edge(node_idx, child, edge_weight);
+
+        Ok(node_idx)
+    }
+
     /// Insert a new node above the given child node index.
     ///
     /// The given node must have only one ancestor.
@@ -130,17 +154,22 @@ impl MirGraph {
             .map_err(|_| {
                 internal_err!("can't call insert_above with a child that has more than one parent")
             })?;
-        let parent_child_edge = self
+        self.splice(parent, child, node)
+    }
+
+    /// Insert a new node below the given parent node index.
+    ///
+    /// The given node must have only one child.
+    pub fn insert_below(&mut self, parent: NodeIndex, node: MirNode) -> ReadySetResult<NodeIndex> {
+        self.ensure_node_exists(parent)?;
+        let child = self
             .graph
-            .find_edge(parent, child)
-            .ok_or_else(|| internal_err!("There is no edge between parent and child"))?;
-        self.graph.remove_edge(parent_child_edge);
-
-        let node_idx = self.graph.add_node(node);
-        self.graph.add_edge(parent, node_idx, 0);
-        self.graph.add_edge(node_idx, child, 0);
-
-        Ok(node_idx)
+            .neighbors_directed(parent, Direction::Outgoing)
+            .exactly_one()
+            .map_err(|_| {
+                internal_err!("can't call insert_below with a parent that has more than one child")
+            })?;
+        self.splice(parent, child, node)
     }
 
     /// Computes the list of columns *referenced* by this node, ie the columns this node requires
