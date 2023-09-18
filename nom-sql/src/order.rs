@@ -45,7 +45,7 @@ impl fmt::Display for OrderType {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Arbitrary)]
 pub struct OrderClause {
     pub order_by: Vec<(FieldReference, Option<OrderType>)>,
 }

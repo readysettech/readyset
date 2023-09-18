@@ -28,7 +28,7 @@ use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Column, Dialect, Literal, NomSqlResult, SelectStatement, SqlIdentifier, SqlType};
 
 /// Function call expressions
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Hash, Serialize, Deserialize, Arbitrary)]
 pub enum FunctionExpr {
     /// `AVG` aggregation. The boolean argument is `true` if `DISTINCT`
     Avg { expr: Box<Expr>, distinct: bool },
@@ -351,7 +351,9 @@ impl Display for UnaryOperator {
 }
 
 /// Right-hand side of IN
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Serialize, Deserialize, From)]
+#[derive(
+    Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Serialize, Deserialize, From, Arbitrary,
+)]
 pub enum InValue {
     Subquery(Box<SelectStatement>),
     List(Vec<Expr>),
@@ -371,7 +373,9 @@ impl InValue {
 }
 
 /// A single branch of a `CASE WHEN` statement
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Serialize, Deserialize, From)]
+#[derive(
+    Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Serialize, Deserialize, From, Arbitrary,
+)]
 pub struct CaseWhenBranch {
     pub condition: Expr,
     pub body: Expr,

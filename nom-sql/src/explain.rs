@@ -6,6 +6,7 @@ use nom::combinator::{opt, value};
 use nom::sequence::{terminated, tuple};
 use nom_locate::LocatedSpan;
 use serde::{Deserialize, Serialize};
+use test_strategy::Arbitrary;
 
 use crate::common::statement_terminator;
 use crate::whitespace::whitespace1;
@@ -14,7 +15,7 @@ use crate::NomSqlResult;
 /// EXPLAIN statements
 ///
 /// This is a non-standard ReadySet-specific extension to SQL
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum ExplainStatement {
     /// Print a (maybe simplified) graphviz representation of the current query graph to stdout
     Graphviz { simplified: bool },

@@ -6,13 +6,14 @@ use nom::combinator::{map, opt};
 use nom::sequence::tuple;
 use nom_locate::LocatedSpan;
 use serde::{Deserialize, Serialize};
+use test_strategy::Arbitrary;
 
 use crate::common::statement_terminator;
 use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Dialect, NomSqlResult};
 
 // TODO(peter): Handle dialect differences.
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum StartTransactionStatement {
     // TODO(ENG-2992): Implement optional fields for START TRANSACTION
     Start,
@@ -28,7 +29,7 @@ impl fmt::Display for StartTransactionStatement {
     }
 }
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct CommitStatement;
 
 impl fmt::Display for CommitStatement {
@@ -37,7 +38,7 @@ impl fmt::Display for CommitStatement {
     }
 }
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct RollbackStatement;
 
 impl fmt::Display for RollbackStatement {

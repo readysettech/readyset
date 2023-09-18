@@ -10,13 +10,14 @@ use nom::multi::separated_list0;
 use nom::sequence::{separated_pair, tuple};
 use nom_locate::LocatedSpan;
 use serde::{Deserialize, Serialize};
+use test_strategy::Arbitrary;
 
 use crate::common::{ws_sep_comma, ws_sep_equals};
 use crate::literal::integer_literal;
 use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Dialect, Literal, NomSqlResult, SqlIdentifier};
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, Arbitrary)]
 pub enum CharsetName {
     Quoted(SqlIdentifier),
     Unquoted(SqlIdentifier),
@@ -30,7 +31,7 @@ impl fmt::Display for CharsetName {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, Arbitrary)]
 pub enum CollationName {
     Quoted(SqlIdentifier),
     Unquoted(SqlIdentifier),
@@ -44,7 +45,7 @@ impl fmt::Display for CollationName {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, Arbitrary)]
 pub enum CreateTableOption {
     AutoIncrement(u64),
     Engine(Option<String>),

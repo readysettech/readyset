@@ -10,6 +10,7 @@ use nom::sequence::{delimited, preceded, terminated, tuple};
 use nom_locate::LocatedSpan;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
+use test_strategy::Arbitrary;
 
 use crate::common::{
     field_definition_expr, field_list, field_reference_list, terminated_with_statement_terminator,
@@ -26,7 +27,9 @@ use crate::{
     TableExpr,
 };
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Default, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Default, Serialize, Deserialize, Arbitrary,
+)]
 pub struct GroupByClause {
     pub fields: Vec<FieldReference>,
 }
@@ -46,7 +49,7 @@ impl GroupByClause {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Arbitrary)]
 pub struct JoinClause {
     pub operator: JoinOperator,
     pub right: JoinRightSide,
@@ -67,7 +70,9 @@ impl JoinClause {
     }
 }
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, Default, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Arbitrary,
+)]
 pub struct CommonTableExpr {
     pub name: SqlIdentifier,
     pub statement: SelectStatement,
@@ -87,7 +92,7 @@ impl CommonTableExpr {
 }
 
 /// AST representation of the SQL limit and offset clauses.
-#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Arbitrary)]
 pub enum LimitClause {
     /// The standard limit and offset syntax: `LIMIT <limit> OFFSET <offset>`.
     LimitOffset {
@@ -174,7 +179,9 @@ impl LimitClause {
     }
 }
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, Default, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Arbitrary,
+)]
 pub struct SelectStatement {
     pub ctes: Vec<CommonTableExpr>,
     pub distinct: bool,

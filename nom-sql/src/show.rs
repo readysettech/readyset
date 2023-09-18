@@ -5,8 +5,12 @@ use nom::bytes::complete::tag_no_case;
 use nom::combinator::{map, map_res, opt, value};
 use nom::sequence::{preceded, tuple};
 use nom_locate::LocatedSpan;
+use prop::string::string_regex;
+use proptest::option;
+use proptest::prelude::prop;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
+use test_strategy::Arbitrary;
 
 use crate::expression::expression;
 use crate::whitespace::{whitespace0, whitespace1};
@@ -14,7 +18,7 @@ use crate::{Dialect, Expr, NomSqlResult};
 
 pub type QueryID = String;
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum ShowStatement {
     Events,
     Tables(Tables),
@@ -83,8 +87,9 @@ fn cached_queries(
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct ProxiedQueriesOptions {
+    #[strategy(option::of(string_regex("q_{a-z}{16}").unwrap()))]
     pub query_id: Option<String>,
     pub only_supported: bool,
 }
@@ -150,7 +155,7 @@ pub fn show(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct Tables {
     pub full: bool,
     pub from_db: Option<String>,
@@ -202,7 +207,7 @@ fn show_tables(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum FilterPredicate {
     Like(String),
     Where(Expr),

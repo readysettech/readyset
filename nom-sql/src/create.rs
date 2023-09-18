@@ -13,6 +13,7 @@ use nom::sequence::{delimited, preceded, terminated, tuple};
 use nom_locate::LocatedSpan;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
+use test_strategy::Arbitrary;
 
 use crate::column::{column_specification, Column, ColumnSpecification};
 use crate::common::{
@@ -28,7 +29,7 @@ use crate::table::{relation, Relation};
 use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Dialect, NomSqlError, NomSqlResult, SqlIdentifier};
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct CreateTableBody {
     pub fields: Vec<ColumnSpecification>,
     pub keys: Option<Vec<TableKey>>,
@@ -55,7 +56,7 @@ impl CreateTableBody {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct CreateTableStatement {
     pub if_not_exists: bool,
     pub table: Relation,
@@ -135,7 +136,7 @@ impl CreateTableStatement {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 #[allow(clippy::large_enum_variant)] // TODO: maybe this actually matters
 pub enum SelectSpecification {
     Compound(CompoundSelectStatement),
@@ -151,7 +152,7 @@ impl SelectSpecification {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct CreateViewStatement {
     pub name: Relation,
     pub or_replace: bool,
@@ -189,7 +190,7 @@ impl CreateViewStatement {
 }
 
 /// The SelectStatement or query ID referenced in a [`CreateCacheStatement`]
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, From)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, From, Arbitrary)]
 pub enum CacheInner {
     Statement(Box<SelectStatement>),
     Id(SqlIdentifier),
@@ -214,7 +215,7 @@ struct CreateCacheOptions {
 /// `CREATE CACHE [CONCURRENTLY] [ALWAYS] [<name>] FROM ...`
 ///
 /// This is a non-standard ReadySet specific extension to SQL
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct CreateCacheStatement {
     pub name: Option<Relation>,
     /// The result of parsing the inner statement or query ID for the `CREATE CACHE` statement.

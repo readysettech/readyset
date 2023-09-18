@@ -12,7 +12,7 @@ use test_strategy::Arbitrary;
 use crate::column::Column;
 use crate::{Dialect, Expr, NomSqlResult, TableExpr};
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Arbitrary)]
 pub enum JoinRightSide {
     /// A single table expression.
     Table(TableExpr),
@@ -77,7 +77,7 @@ impl fmt::Display for JoinOperator {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Arbitrary)]
 pub enum JoinConstraint {
     On(Expr),
     Using(Vec<Column>),

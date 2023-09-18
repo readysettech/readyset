@@ -7,12 +7,13 @@ use nom::sequence::{delimited, terminated};
 use nom_locate::LocatedSpan;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
+use test_strategy::Arbitrary;
 
 use crate::common::statement_terminator;
 use crate::whitespace::{whitespace0, whitespace1};
 use crate::{literal, Dialect, NomSqlResult, SqlIdentifier};
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum CommentStatement {
     Column {
         column_name: SqlIdentifier,
