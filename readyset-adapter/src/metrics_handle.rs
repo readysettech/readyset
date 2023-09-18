@@ -5,6 +5,8 @@ use metrics_exporter_prometheus::formatting::{sanitize_label_key, sanitize_label
 use metrics_exporter_prometheus::{Distribution, PrometheusHandle};
 use metrics_util::Summary;
 use quanta::Instant;
+// adding an alias to disambiguate vs readyset_client_metrics::recorded
+use readyset_client::metrics::recorded as client_recorded;
 use readyset_client_metrics::recorded::QUERY_LOG_EXECUTION_TIME;
 
 #[derive(Debug, Default, Clone)]
@@ -105,5 +107,30 @@ impl MetricsHandle {
             p90_us: summary.quantile(0.90).unwrap_or_default(),
             p99_us: summary.quantile(0.99).unwrap_or_default(),
         })
+    }
+
+    fn sum_counter(&self, name: &str) -> u64 {
+        let results = self.counters(Some(|x: &str| x.eq(name)));
+        match results.get(name) {
+            Some(res) => {
+                let mut f = 0;
+                for (_, v) in res.iter() {
+                    f += v;
+                }
+                f
+            }
+            None => 0,
+        }
+    }
+
+    /// Gather all the metrics that are relevant to be printed with
+    /// `SHOW READYSET STATUS`
+    pub fn readyset_status(&self) -> Vec<(String, String)> {
+        let mut statuses = Vec::new();
+
+        let val = self.sum_counter(client_recorded::NORIA_STARTUP_TIMESTAMP);
+        statuses.push(("Process start time".to_string(), val.to_string()));
+
+        statuses
     }
 }
