@@ -405,10 +405,14 @@ impl Arbitrary for SqlIdentifier {
     type Strategy = proptest::strategy::BoxedStrategy<SqlIdentifier>;
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        use proptest::arbitrary::any;
         use proptest::prelude::*;
 
-        any::<String>().prop_map(Into::into).boxed()
+        // This is the full set allowed by Postgres sans `$` (which isn't valid per the SQL
+        // standard), with a limited length
+        // "[\\p{L_}][\\p{L}_0-9]{1,62}".prop_map(Into::into).boxed()
+        //
+        // A simplified version
+        "[a-zA-Z_][a-zA-Z_0-9]{1,62}".prop_map(Into::into).boxed()
     }
 }
 
