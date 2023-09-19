@@ -17,8 +17,8 @@ use crate::create::{
 };
 use crate::delete::{deletion, DeleteStatement};
 use crate::drop::{
-    drop_all_caches, drop_cached_query, drop_table, drop_view, DropCacheStatement,
-    DropTableStatement, DropViewStatement,
+    drop_all_caches, drop_cached_query, drop_snapshot_query, drop_table, drop_view,
+    DropCacheStatement, DropSnapshotStatement, DropTableStatement, DropViewStatement,
 };
 use crate::explain::{explain_statement, ExplainStatement};
 use crate::expression::expression;
@@ -45,6 +45,7 @@ pub enum SqlQuery {
     CreateCache(CreateCacheStatement),
     DropCache(DropCacheStatement),
     DropAllCaches(DropAllCachesStatement),
+    DropSnapshot(DropSnapshotStatement),
     AlterTable(AlterTableStatement),
     Insert(InsertStatement),
     CompoundSelect(CompoundSelectStatement),
@@ -74,6 +75,7 @@ impl SqlQuery {
             Self::CreateCache(create) => write!(f, "{}", create.display(dialect)),
             Self::DropCache(drop) => write!(f, "{}", drop.display(dialect)),
             Self::DropAllCaches(drop) => write!(f, "{}", drop),
+            Self::DropSnapshot(drop) => write!(f, "{}", drop.display(dialect)),
             Self::Delete(delete) => write!(f, "{}", delete.display(dialect)),
             Self::DropTable(drop) => write!(f, "{}", drop.display(dialect)),
             Self::DropView(drop) => write!(f, "{}", drop.display(dialect)),
@@ -112,6 +114,7 @@ impl SqlQuery {
             Self::CreateCache(_) => "CREATE CACHE",
             Self::DropCache(_) => "DROP CACHE",
             Self::DropAllCaches(_) => "DROP ALL CACHES",
+            Self::DropSnapshot(_) => "DROP SNAPSHOT",
             Self::Delete(_) => "DELETE",
             Self::DropTable(_) => "DROP TABLE",
             Self::DropView(_) => "DROP VIEW",
@@ -152,28 +155,33 @@ fn sql_query_part1(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlQuery> {
     move |i| {
+        // alt currently supports a maximum of 21 parsers, so we split the parser up to handle more
+        // https://github.com/rust-bakery/nom/issues/1144
         alt((
-            map(create_table(dialect), SqlQuery::CreateTable),
-            map(insertion(dialect), SqlQuery::Insert),
-            map(compound_selection(dialect), SqlQuery::CompoundSelect),
-            map(selection(dialect), SqlQuery::Select),
-            map(deletion(dialect), SqlQuery::Delete),
-            map(drop_table(dialect), SqlQuery::DropTable),
-            map(drop_view(dialect), SqlQuery::DropView),
-            map(updating(dialect), SqlQuery::Update),
-            map(set(dialect), SqlQuery::Set),
-            map(view_creation(dialect), SqlQuery::CreateView),
-            map(create_cached_query(dialect), SqlQuery::CreateCache),
-            map(drop_cached_query(dialect), SqlQuery::DropCache),
-            map(drop_all_caches, SqlQuery::DropAllCaches),
-            map(alter_table_statement(dialect), SqlQuery::AlterTable),
-            map(start_transaction(dialect), SqlQuery::StartTransaction),
-            map(commit(dialect), SqlQuery::Commit),
-            map(rollback(dialect), SqlQuery::Rollback),
-            map(rename_table(dialect), SqlQuery::RenameTable),
-            map(use_statement(dialect), SqlQuery::Use),
-            map(show(dialect), SqlQuery::Show),
-            map(explain_statement, SqlQuery::Explain),
+            alt((
+                map(create_table(dialect), SqlQuery::CreateTable),
+                map(insertion(dialect), SqlQuery::Insert),
+                map(compound_selection(dialect), SqlQuery::CompoundSelect),
+                map(selection(dialect), SqlQuery::Select),
+                map(deletion(dialect), SqlQuery::Delete),
+                map(drop_table(dialect), SqlQuery::DropTable),
+                map(drop_view(dialect), SqlQuery::DropView),
+                map(updating(dialect), SqlQuery::Update),
+                map(set(dialect), SqlQuery::Set),
+                map(view_creation(dialect), SqlQuery::CreateView),
+                map(create_cached_query(dialect), SqlQuery::CreateCache),
+                map(drop_cached_query(dialect), SqlQuery::DropCache),
+                map(drop_all_caches, SqlQuery::DropAllCaches),
+                map(alter_table_statement(dialect), SqlQuery::AlterTable),
+                map(start_transaction(dialect), SqlQuery::StartTransaction),
+                map(commit(dialect), SqlQuery::Commit),
+                map(rollback(dialect), SqlQuery::Rollback),
+                map(rename_table(dialect), SqlQuery::RenameTable),
+                map(use_statement(dialect), SqlQuery::Use),
+                map(show(dialect), SqlQuery::Show),
+                map(explain_statement, SqlQuery::Explain),
+            )),
+            alt((map(drop_snapshot_query(dialect), SqlQuery::DropSnapshot),)),
         ))(i)
     }
 }
@@ -244,6 +252,7 @@ export_parser!(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Relation;
 
     #[test]
     fn drop_all_caches() {
@@ -251,6 +260,26 @@ mod tests {
         assert_eq!(res, SqlQuery::DropAllCaches(DropAllCachesStatement {}));
     }
 
+    #[test]
+    fn drop_snapshot() {
+        let res = parse_query(Dialect::MySQL, "DROP SNAPSHOT FROM test").unwrap();
+        assert_eq!(
+            res,
+            SqlQuery::DropSnapshot(DropSnapshotStatement {
+                name: Relation::from("test")
+            })
+        );
+        let res = parse_query(Dialect::MySQL, "DROP SNAPSHOT FROM db.test").unwrap();
+        assert_eq!(
+            res,
+            SqlQuery::DropSnapshot(DropSnapshotStatement {
+                name: Relation {
+                    name: "test".into(),
+                    schema: Some("db".into())
+                }
+            })
+        );
+    }
     mod mysql {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};

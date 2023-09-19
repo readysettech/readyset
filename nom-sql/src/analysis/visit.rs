@@ -19,12 +19,13 @@ use crate::{
     AlterColumnOperation, AlterTableDefinition, AlterTableStatement, CacheInner, CaseWhenBranch,
     Column, ColumnConstraint, ColumnSpecification, CommentStatement, CommonTableExpr,
     CompoundSelectStatement, CreateCacheStatement, CreateTableStatement, CreateViewStatement,
-    DeleteStatement, DropAllCachesStatement, DropCacheStatement, DropTableStatement,
-    DropViewStatement, ExplainStatement, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr,
-    GroupByClause, InValue, InsertStatement, JoinClause, JoinConstraint, JoinRightSide, Literal,
-    OrderClause, Relation, SelectSpecification, SelectStatement, SetNames, SetPostgresParameter,
-    SetStatement, SetVariables, ShowStatement, SqlIdentifier, SqlQuery, SqlType, TableExpr,
-    TableExprInner, TableKey, UpdateStatement, UseStatement,
+    DeleteStatement, DropAllCachesStatement, DropCacheStatement, DropSnapshotStatement,
+    DropTableStatement, DropViewStatement, ExplainStatement, Expr, FieldDefinitionExpr,
+    FieldReference, FunctionExpr, GroupByClause, InValue, InsertStatement, JoinClause,
+    JoinConstraint, JoinRightSide, Literal, OrderClause, Relation, SelectSpecification,
+    SelectStatement, SetNames, SetPostgresParameter, SetStatement, SetVariables, ShowStatement,
+    SqlIdentifier, SqlQuery, SqlType, TableExpr, TableExprInner, TableKey, UpdateStatement,
+    UseStatement,
 };
 
 /// Each method of the `Visitor` trait is a hook to be potentially overridden when recursively
@@ -368,6 +369,12 @@ pub trait Visitor<'ast>: Sized {
         Ok(())
     }
 
+    fn visit_drop_snapshot_statement(
+        &mut self,
+        drop_snapshot_statement: &'ast DropSnapshotStatement,
+    ) -> Result<(), Self::Error> {
+        walk_relation(self, &drop_snapshot_statement.name)
+    }
     fn visit_drop_view_statement(
         &mut self,
         drop_view_statement: &'ast DropViewStatement,
@@ -1120,6 +1127,7 @@ pub fn walk_sql_query<'a, V: Visitor<'a>>(
         SqlQuery::CreateCache(statement) => visitor.visit_create_cache_statement(statement),
         SqlQuery::DropCache(statement) => visitor.visit_drop_cache_statement(statement),
         SqlQuery::DropAllCaches(statement) => visitor.visit_drop_all_caches_statement(statement),
+        SqlQuery::DropSnapshot(statement) => visitor.visit_drop_snapshot_statement(statement),
         SqlQuery::DropView(statement) => visitor.visit_drop_view_statement(statement),
         SqlQuery::Use(statement) => visitor.visit_use_statement(statement),
         SqlQuery::Show(statement) => visitor.visit_show_statement(statement),

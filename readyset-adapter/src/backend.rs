@@ -81,8 +81,8 @@ use futures::future::{self, OptionFuture};
 use mysql_common::row::convert::{FromRow, FromRowError};
 use nom_sql::{
     CacheInner, CreateCacheStatement, DeleteStatement, Dialect, DropCacheStatement,
-    InsertStatement, Relation, SelectStatement, SetStatement, ShowStatement, SqlIdentifier,
-    SqlQuery, UpdateStatement, UseStatement,
+    DropSnapshotStatement, InsertStatement, Relation, SelectStatement, SetStatement, ShowStatement,
+    SqlIdentifier, SqlQuery, UpdateStatement, UseStatement,
 };
 use readyset_client::consensus::Authority;
 use readyset_client::consistency::Timestamp;
@@ -1707,6 +1707,16 @@ where
         })
     }
 
+    /// Forwards a `DROP SNAPSHOT` request to noria
+    #[instrument(skip(self))]
+    async fn drop_snapshot_query(
+        &mut self,
+        name: &Relation,
+    ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
+        Err(ReadySetError::Unsupported(
+            "DROP SNAPSHOT is not supported".to_string(),
+        ))
+    }
     /// Forwards a `DROP ALL CACHES` request to noria
     #[instrument(skip(self))]
     async fn drop_all_caches(&mut self) -> ReadySetResult<noria_connector::QueryResult<'static>> {
@@ -1955,6 +1965,9 @@ where
             }
             SqlQuery::DropCache(DropCacheStatement { name }) => self.drop_cached_query(name).await,
             SqlQuery::DropAllCaches(_) => self.drop_all_caches().await,
+            SqlQuery::DropSnapshot(DropSnapshotStatement { name }) => {
+                self.drop_snapshot_query(name).await
+            }
             SqlQuery::Show(ShowStatement::CachedQueries(query_id)) => {
                 // Log a telemetry event
                 if let Some(ref telemetry_sender) = self.telemetry_sender {
@@ -2353,6 +2366,7 @@ where
                     SqlQuery::CreateCache(_)
                     | SqlQuery::DropCache(_)
                     | SqlQuery::DropAllCaches(_)
+                    | SqlQuery::DropSnapshot(_)
                     | SqlQuery::Explain(_) => {
                         unreachable!("path returns prior")
                     }

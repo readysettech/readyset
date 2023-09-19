@@ -240,6 +240,10 @@ impl ChangeList {
                                 name: dcs.name,
                                 if_exists: false,
                             }),
+                            SqlQuery::DropSnapshot(dss) => changes.push(Change::Drop {
+                                name: dss.name,
+                                if_exists: false,
+                            }),
                             _ => unsupported!(
                                 "Only DDL statements supported in ChangeList (got {})",
                                 parsed.query_type()
