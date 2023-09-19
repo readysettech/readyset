@@ -325,9 +325,15 @@ pub enum Error {
     Io(#[from] io::Error),
 }
 
+impl From<&Error> for ReadySetError {
+    fn from(err: &Error) -> Self {
+        internal_err!("{err}")
+    }
+}
+
 impl From<Error> for ReadySetError {
     fn from(err: Error) -> Self {
-        internal_err!("{err}")
+        ReadySetError::from(&err)
     }
 }
 
@@ -437,6 +443,8 @@ struct SharedState {
     replication_offset: Option<ReplicationOffset>,
     /// The current state of the RocksDB WAL as it relates to flushing and persisting data to disk
     wal_state: WalState,
+    /// The last error that occurred in the WAL flush thread
+    last_wal_flush_error: Option<Error>,
     /// The lookup indices stored for this table. The first element is always considered the
     /// primary index
     indices: Vec<PersistentIndex>,
@@ -498,9 +506,19 @@ impl WalFlusher {
                 Err(RecvTimeoutError::Timeout) => {
                     let wal_state = self.state_handle.inner().shared_state.wal_state.clone();
 
-                    if let WalState::Unflushed { persisted_up_to } = wal_state {
-                        self.flush_wal(persisted_up_to);
-                        self.sync_wal();
+                    // We don't need to check `last_wal_flush_error` here because we just want to
+                    // keep retrying based on our current state. If there's further action to be
+                    // taken, the controller will orchestrate it
+                    match wal_state {
+                        WalState::Unflushed { persisted_up_to } => {
+                            if self.flush_wal(persisted_up_to) {
+                                self.sync_wal();
+                            }
+                        }
+                        WalState::FlushedAndUnpersisted { .. } => {
+                            self.sync_wal();
+                        }
+                        WalState::FlushedAndPersisted => {}
                     }
                 }
                 Err(RecvTimeoutError::Disconnected) | Ok(()) => return,
@@ -508,7 +526,9 @@ impl WalFlusher {
         }
     }
 
-    fn flush_wal(&self, persisted_up_to: ReplicationOffset) {
+    /// Returns true if the flush succeeds and false otherwise. If the flush fails, the
+    /// corresponding error is stored in `SharedState.last_wal_flush_error`.
+    fn flush_wal(&self, persisted_up_to: ReplicationOffset) -> bool {
         trace!(%self.table, "flushing WAL");
 
         // Writes to persistent state don't require a write lock since they only need immutable
@@ -520,31 +540,60 @@ impl WalFlusher {
         // Flushing the WAL blocks other writes to RocksDB, but this operation should be relatively
         // quick given that we aren't writing any bytes to disk. The bottleneck here is probably
         // the fwrite system call
-        inner.db.flush_wal(false).unwrap();
+        //
+        // If a flush fails, it's possible that the low watermark of our unflushed data has
+        // increased if *some* of the data was flushed. Regardless, we have no way of knowing what
+        // data *was* successfully flushed, so we keep our state as-is
+        if let Err(error) = inner.db.flush_wal(false) {
+            // If we failed to flush, we set the error in `SharedState` so the replicator sees it
+            // and waits till the next iteration of the loop to retry
+            error!(%error, %self.table, "failed to flush WAL");
+            inner.shared_state.last_wal_flush_error = Some(error.into());
 
-        inner.shared_state.wal_state = WalState::FlushedAndUnpersisted { persisted_up_to };
+            false
+        } else {
+            inner.shared_state.wal_state = WalState::FlushedAndUnpersisted { persisted_up_to };
+
+            true
+        }
     }
 
     fn sync_wal(&self) {
         trace!(%self.table, "syncing WAL");
 
-        self.state_handle.db().sync_wal().unwrap();
-        let mut inner = self.state_handle.inner_mut();
+        let res = self.state_handle.db().sync_wal();
 
-        match inner.shared_state.wal_state {
-            // No data has been written to this state since the sync began, so we can change our
-            // WAL state to `FlushedAndPersisted`
-            WalState::FlushedAndUnpersisted { .. } => {
-                inner.shared_state.wal_state = WalState::FlushedAndPersisted;
+        // If a sync fails, it's possible that *some* but not *all* of the flushed but unsynced data
+        // has been synced to disk. Regardless, we have no way of knowing what data *was*
+        // successfully synced, so we keep our state as-is. We'll know we're caught up when a future
+        // sync succeeds
+        if let Err(error) = res {
+            // If we failed to sync, we set the error in `SharedState` so the replicator sees it and
+            // wait till the next iteration of the loop to retry
+            error!(%error, %self.table, "failed to sync WAL");
+
+            self.state_handle
+                .inner_mut()
+                .shared_state
+                .last_wal_flush_error = Some(error.into());
+        } else {
+            let mut inner = self.state_handle.inner_mut();
+
+            match inner.shared_state.wal_state {
+                // No data has been written to this state since the sync began, so we can change our
+                // WAL state to `FlushedAndPersisted`
+                WalState::FlushedAndUnpersisted { .. } => {
+                    inner.shared_state.wal_state = WalState::FlushedAndPersisted;
+                }
+                // If our state changed to `Unflushed` while we were syncing, we don't want to do
+                // anything, because there's new data that needs to be flushed
+                WalState::Unflushed { .. } => {}
+                // If we just synced, our previous state should not have been `FlushedAndPersisted`.
+                // If it is, there's a bug somewhere
+                WalState::FlushedAndPersisted => unreachable!(
+                    "another thread should never transition the WAL state to `FlushedAndPersisted`"
+                ),
             }
-            // If our state changed to `Unflushed` while we were syncing, we don't want to do
-            // anything, because there's new data that needs to be flushed
-            WalState::Unflushed { .. } => {}
-            // If we just synced, our previous state should not have been `FlushedAndPersisted`.
-            // If it is, there's a bug somewhere
-            WalState::FlushedAndPersisted => unreachable!(
-                "another thread should never transition the WAL state to `FlushedAndPersisted`"
-            ),
         }
     }
 }
@@ -619,12 +668,19 @@ impl State for PersistentState {
         self.db.replication_offset.as_ref()
     }
 
-    fn persisted_up_to(&self) -> PersistencePoint {
-        match &self.db.inner().shared_state.wal_state {
-            WalState::FlushedAndPersisted => PersistencePoint::Persisted,
-            WalState::FlushedAndUnpersisted { persisted_up_to }
-            | WalState::Unflushed { persisted_up_to } => {
-                PersistencePoint::UpTo(persisted_up_to.clone())
+    fn persisted_up_to(&self) -> ReadySetResult<PersistencePoint> {
+        let mut inner = self.db.inner_mut();
+
+        // We clear out the error here (if one exists) since we're reporting it upwards
+        if let Some(error) = &inner.shared_state.last_wal_flush_error.take() {
+            Err(error.into())
+        } else {
+            match &inner.shared_state.wal_state {
+                WalState::FlushedAndPersisted => Ok(PersistencePoint::Persisted),
+                WalState::FlushedAndUnpersisted { persisted_up_to }
+                | WalState::Unflushed { persisted_up_to } => {
+                    Ok(PersistencePoint::UpTo(persisted_up_to.clone()))
+                }
             }
         }
     }
@@ -832,8 +888,8 @@ impl State for PersistentStateHandle {
         None
     }
 
-    fn persisted_up_to(&self) -> PersistencePoint {
-        PersistencePoint::Persisted
+    fn persisted_up_to(&self) -> ReadySetResult<PersistencePoint> {
+        Ok(PersistencePoint::Persisted)
     }
 
     fn mark_filled(&mut self, _: KeyComparison, _: Tag) {}
@@ -1502,6 +1558,7 @@ impl PersistentState {
         let shared_state = SharedState {
             replication_offset: replication_offset.clone(),
             wal_state: WalState::FlushedAndPersisted,
+            last_wal_flush_error: None,
             indices,
         };
         let read_handle = PersistentStateHandle::new(shared_state, db, replication_offset);

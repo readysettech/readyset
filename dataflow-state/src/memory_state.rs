@@ -397,8 +397,8 @@ impl State for MemoryState {
         self.replication_offset.as_ref()
     }
 
-    fn persisted_up_to(&self) -> PersistencePoint {
-        PersistencePoint::Persisted
+    fn persisted_up_to(&self) -> ReadySetResult<PersistencePoint> {
+        Ok(PersistencePoint::Persisted)
     }
 
     fn add_weak_index(&mut self, index: Index) {

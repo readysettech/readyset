@@ -152,7 +152,7 @@ pub trait State: SizeOf + Send {
     ///
     /// See [the documentation for PersistentState](::readyset_dataflow::state::persistent_state)
     /// for more information about replication offsets.
-    fn persisted_up_to(&self) -> PersistencePoint;
+    fn persisted_up_to(&self) -> ReadySetResult<PersistencePoint>;
 
     /// Mark the given `key` as a *filled hole* in the given partial `tag`, causing all lookups to
     /// that key to return an empty non-miss result, and all writes to that key to not be dropped.
@@ -363,7 +363,7 @@ impl State for MaterializedNodeState {
         }
     }
 
-    fn persisted_up_to(&self) -> PersistencePoint {
+    fn persisted_up_to(&self) -> ReadySetResult<PersistencePoint> {
         match self {
             MaterializedNodeState::Memory(ms) => ms.persisted_up_to(),
             MaterializedNodeState::Persistent(ps) => ps.persisted_up_to(),
