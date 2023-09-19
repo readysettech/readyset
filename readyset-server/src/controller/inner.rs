@@ -587,10 +587,23 @@ impl Leader {
                 let mut writer = self.dataflow_state_handle.write().await;
                 let result = writer.as_mut().remove_query(&query_name).await?;
                 self.dataflow_state_handle.commit(writer, authority).await?;
+
+                // We can't do this before locking the df state handle because we need to resolve
+                // the query's alias first.
+                if let Some(ref removed_query) = result {
+                    authority
+                        .remove_create_cache_statement(
+                            removed_query.display(RecipeChanges::DIALECT).to_string(),
+                        )
+                        .await?;
+                }
                 return_serialized!(result);
             }
             (&Method::POST, "/remove_all_queries") => {
                 require_leader_ready()?;
+                // Clear out our list of stored queries first--if we crash while removing them,
+                // they will not be re-created on restart.
+                authority.remove_all_create_cache_statements().await?;
                 let mut writer = self.dataflow_state_handle.write().await;
                 writer.as_mut().remove_all_queries().await?;
                 self.dataflow_state_handle.commit(writer, authority).await?;

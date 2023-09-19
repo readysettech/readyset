@@ -955,7 +955,7 @@ async fn caches_go_in_authority_list() {
     let stmts = authority.create_cache_statements().await.unwrap();
     assert_eq!(
         stmts,
-        vec![r#"CREATE CACHE CONCURRENTLY "q" FROM SELECT "x" FROM "t""#]
+        vec![r#"CREATE CACHE CONCURRENTLY "q" FROM SELECT "x" FROM "t""#.to_string()]
     );
 
     shutdown_tx.shutdown().await;

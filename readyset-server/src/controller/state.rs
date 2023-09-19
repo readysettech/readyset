@@ -1495,12 +1495,14 @@ impl DfState {
         }
     }
 
-    /// Return 1 if one or more expressions were removed, else return 0.
-    /// Someday we may want to return # expressions (and aliases?) dropped.
-    pub(super) async fn remove_query(&mut self, query_name: &Relation) -> ReadySetResult<u64> {
-        let name = match self.recipe.resolve_alias(query_name) {
-            None => return Ok(0),
-            Some(name) => name,
+    /// Returns the original name of the query that was removed (if any), else returns None
+    pub(super) async fn remove_query(
+        &mut self,
+        query_alias: &Relation,
+    ) -> ReadySetResult<Option<Relation>> {
+        let name = match self.recipe.resolve_alias(query_alias) {
+            None => return Ok(None),
+            Some(name) => name.clone(),
         };
 
         let changelist = ChangeList::from_change(
@@ -1516,7 +1518,7 @@ impl DfState {
             return Err(error);
         }
 
-        Ok(1)
+        Ok(Some(name))
     }
 
     pub(super) async fn remove_all_queries(&mut self) -> ReadySetResult<RecipeChanges> {
