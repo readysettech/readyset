@@ -388,6 +388,12 @@ impl DomainBuilder {
         }
     }
 
+    /// Returns true if the domain built by this [`DomainBuilder`] will have state persisted to disk
+    pub fn has_persistent_state(&self) -> bool {
+        self.persistence_parameters.mode.persists_to_disk()
+            && self.nodes.values().any(|n| n.borrow().is_base())
+    }
+
     /// Starts up the domain represented by this `DomainBuilder`.
     pub fn build(
         self,
