@@ -17,6 +17,7 @@ pub(crate) struct QueryLogger {
     per_id_metrics: BTreeMap<QueryId, QueryMetrics>,
     per_query_metrics: HashMap<Arc<SqlQuery>, QueryMetrics>,
     parse_error_count: Counter,
+    set_disallowed_count: Counter,
 }
 
 struct QueryMetrics {
@@ -183,6 +184,9 @@ impl QueryLogger {
             parse_error_count: register_counter!(
                 readyset_client_metrics::recorded::QUERY_LOG_PARSE_ERRORS,
             ),
+            set_disallowed_count: register_counter!(
+                readyset_client_metrics::recorded::QUERY_LOG_SET_DISALLOWED,
+            ),
         };
 
         loop {
@@ -209,6 +213,8 @@ impl QueryLogger {
                     if let Some(error) = event.noria_error {
                         if error.caused_by_unparseable_query() {
                             logger.parse_error_count.increment(1);
+                        } else if error.is_set_disallowed() {
+                            logger.set_disallowed_count.increment(1);
                         }
                     };
 

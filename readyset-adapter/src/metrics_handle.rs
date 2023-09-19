@@ -134,6 +134,12 @@ impl MetricsHandle {
         let val = self.sum_counter(readyset_client_metrics::recorded::QUERY_LOG_PARSE_ERRORS);
         statuses.push(("Query parse failures".to_string(), val.to_string()));
 
+        let val = self.sum_counter(readyset_client_metrics::recorded::QUERY_LOG_SET_DISALLOWED);
+        statuses.push((
+            "SET statement disallowed count".to_string(),
+            val.to_string(),
+        ));
+
         statuses
     }
 }
