@@ -397,8 +397,8 @@ impl State for MemoryState {
         self.replication_offset.as_ref()
     }
 
-    fn persisted_up_to(&self) -> Option<ReplicationOffset> {
-        None
+    fn persisted_up_to(&self) -> ReadySetResult<Option<ReplicationOffset>> {
+        Ok(None)
     }
 
     fn add_weak_index(&mut self, index: Index) {
