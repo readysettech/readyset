@@ -62,3 +62,6 @@ pub const ADAPTER_EXTERNAL_REQUESTS: &str = "readyset_noria_client_external_requ
 
 /// Gauge: The number of currently connected SQL clients
 pub const CONNECTED_CLIENTS: &str = "readyset_noria_client_connected_clients";
+
+/// Counter: The number of queries that failed to parse.
+pub const QUERY_LOG_PARSE_ERRORS: &str = "readyset_query_log_parse_errors";

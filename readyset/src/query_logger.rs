@@ -16,6 +16,7 @@ use tracing::{info, info_span};
 pub(crate) struct QueryLogger {
     per_id_metrics: BTreeMap<QueryId, QueryMetrics>,
     per_query_metrics: HashMap<Arc<SqlQuery>, QueryMetrics>,
+    parse_error_count: Counter,
 }
 
 struct QueryMetrics {
@@ -179,6 +180,9 @@ impl QueryLogger {
         let mut logger = QueryLogger {
             per_query_metrics: HashMap::new(),
             per_id_metrics: BTreeMap::new(),
+            parse_error_count: register_counter!(
+                readyset_client_metrics::recorded::QUERY_LOG_PARSE_ERRORS,
+            ),
         };
 
         loop {
@@ -199,6 +203,12 @@ impl QueryLogger {
                         None => {
                             info!("Metrics task shutting down after request handle dropped.");
                             break;
+                        }
+                    };
+
+                    if let Some(error) = event.noria_error {
+                        if error.caused_by_unparseable_query() {
+                            logger.parse_error_count.increment(1);
                         }
                     };
 

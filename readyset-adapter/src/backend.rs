@@ -2421,12 +2421,14 @@ where
             // Parse error, but no fallback exists
             Err(e) if !self.has_fallback() => {
                 error!("{}", e);
+                event.set_noria_error(&e);
                 Err(e.into())
             }
             // Parse error, send to fallback
             Err(e) => {
                 if !matches!(e, ReadySetError::ReaderMissingKey) {
                     warn!(error = %e, "Error received from noria, sending query to fallback");
+                    event.set_noria_error(&e);
                 }
                 let fallback_res =
                     Self::query_fallback(self.upstream.as_mut(), query, &mut event).await;
