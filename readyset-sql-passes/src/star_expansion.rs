@@ -8,7 +8,7 @@ use nom_sql::{
 };
 use readyset_errors::{ReadySetError, ReadySetResult};
 
-use crate::util::{self, outermost_named_tables};
+use crate::{outermost_table_exprs, util};
 
 pub trait StarExpansion: Sized {
     /// Expand all `*` column references in the query given a map from tables to the lists of
@@ -41,7 +41,7 @@ impl<'ast, 'schema> VisitorMut<'ast> for ExpandStarsVisitor<'schema> {
             &select_statement.join,
         );
 
-        let expand_table = |table: Relation| -> ReadySetResult<_> {
+        let expand_table = |table: Relation, alias: Option<SqlIdentifier>| -> ReadySetResult<_> {
             Ok(if table.schema.is_none() {
                 // Can only reference subqueries with tables that don't have a schema
                 subquery_schemas.get(&table.name).cloned()
@@ -69,7 +69,12 @@ impl<'ast, 'schema> VisitorMut<'ast> for ExpandStarsVisitor<'schema> {
             .into_iter()
             .map(move |f| FieldDefinitionExpr::Expr {
                 expr: Expr::Column(Column {
-                    table: Some(table.clone()),
+                    table: Some(
+                        alias
+                            .clone()
+                            .map(Relation::from)
+                            .unwrap_or_else(|| table.clone()),
+                    ),
                     name: f.clone(),
                 }),
                 alias: None,
@@ -79,14 +84,46 @@ impl<'ast, 'schema> VisitorMut<'ast> for ExpandStarsVisitor<'schema> {
         for field in fields {
             match field {
                 FieldDefinitionExpr::All => {
-                    for name in outermost_named_tables(select_statement).collect::<Vec<_>>() {
-                        for field in expand_table(name)? {
-                            select_statement.fields.push(field);
+                    for expr in outermost_table_exprs(select_statement)
+                        .cloned()
+                        .collect::<Vec<_>>()
+                    {
+                        if let Some(tbl) = expr
+                            .inner
+                            .as_table()
+                            .cloned()
+                            .or_else(|| expr.alias.clone().map(Into::into))
+                        {
+                            for field in expand_table(tbl, expr.alias.clone())? {
+                                select_statement.fields.push(field);
+                            }
+                            continue;
                         }
                     }
                 }
                 FieldDefinitionExpr::AllInTable(t) => {
-                    for field in expand_table(t)? {
+                    let alias = if t.schema.is_none() {
+                        Some(t.name.clone())
+                    } else {
+                        None
+                    };
+
+                    let tbl = t
+                        .schema
+                        .is_none()
+                        .then(|| {
+                            outermost_table_exprs(select_statement).find_map(|expr| {
+                                if expr.alias.is_some() && expr.alias == alias {
+                                    expr.inner.as_table().cloned()
+                                } else {
+                                    None
+                                }
+                            })
+                        })
+                        .flatten()
+                        .unwrap_or(t);
+
+                    for field in expand_table(tbl, alias)? {
                         select_statement.fields.push(field);
                     }
                 }
@@ -155,6 +192,24 @@ mod tests {
         expands_stars(
             "SELECT * FROM PaperTag",
             "SELECT PaperTag.paper_id, PaperTag.tag_id FROM PaperTag",
+            HashMap::from([("PaperTag".into(), vec!["paper_id".into(), "tag_id".into()])]),
+        );
+    }
+
+    #[test]
+    fn aliased() {
+        expands_stars(
+            "SELECT * FROM PaperTag AS t",
+            "SELECT t.paper_id, t.tag_id FROM PaperTag AS t",
+            HashMap::from([("PaperTag".into(), vec!["paper_id".into(), "tag_id".into()])]),
+        );
+    }
+
+    #[test]
+    fn referencing_alias() {
+        expands_stars(
+            "SELECT t.* FROM PaperTag AS t",
+            "SELECT t.paper_id, t.tag_id FROM PaperTag AS t",
             HashMap::from([("PaperTag".into(), vec!["paper_id".into(), "tag_id".into()])]),
         );
     }
@@ -234,6 +289,15 @@ mod tests {
                 ( "Users".into(), vec!["uid".into(), "name".into()] ),
                     ])
         );
+    }
+
+    #[test]
+    fn star_with_subquery() {
+        expands_stars(
+            "SELECT * FROM (SELECT t1.x FROM t1) sq",
+            "SELECT sq.x FROM (SELECT t1.x FROM t1) sq",
+            HashMap::from([("t1".into(), vec!["x".into()])]),
+        )
     }
 
     #[test]
