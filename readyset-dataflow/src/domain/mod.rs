@@ -4369,7 +4369,7 @@ impl Domain {
             let node = n.borrow();
             if node.is_base() && !node.is_dropped() {
                 if let Some(state) = self.state.get(idx) {
-                    match (&mut cur_min, state.persisted_up_to()) {
+                    match (&mut cur_min, state.persisted_up_to()?) {
                         (_, PersistencePoint::Persisted) => continue,
                         (PersistencePoint::Persisted, PersistencePoint::UpTo(offset)) => {
                             cur_min = PersistencePoint::UpTo(offset);
