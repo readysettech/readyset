@@ -832,6 +832,11 @@ impl ReadySetError {
         self.any_cause(|e| matches!(e, Self::SerializationFailed(_)))
     }
 
+    /// Returns `true` if the error is [`SetDisallowed`].
+    pub fn is_set_disallowed(&self) -> bool {
+        matches!(self, Self::SetDisallowed { .. })
+    }
+
     /// Returns `true` if the error is [`InvalidQuery`].
     pub fn is_invalid_query(&self) -> bool {
         matches!(self, Self::InvalidQuery(..))

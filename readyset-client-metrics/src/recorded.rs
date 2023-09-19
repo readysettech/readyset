@@ -65,3 +65,6 @@ pub const CONNECTED_CLIENTS: &str = "readyset_noria_client_connected_clients";
 
 /// Counter: The number of queries that failed to parse.
 pub const QUERY_LOG_PARSE_ERRORS: &str = "readyset_query_log_parse_errors";
+
+/// Counter: The number of SET statements that were disallowed.
+pub const QUERY_LOG_SET_DISALLOWED: &str = "readyset_query_log_set_disallowed";
