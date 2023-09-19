@@ -18,6 +18,7 @@ pub(crate) struct QueryLogger {
     per_query_metrics: HashMap<Arc<SqlQuery>, QueryMetrics>,
     parse_error_count: Counter,
     set_disallowed_count: Counter,
+    view_not_found_count: Counter,
 }
 
 struct QueryMetrics {
@@ -187,6 +188,9 @@ impl QueryLogger {
             set_disallowed_count: register_counter!(
                 readyset_client_metrics::recorded::QUERY_LOG_SET_DISALLOWED,
             ),
+            view_not_found_count: register_counter!(
+                readyset_client_metrics::recorded::QUERY_LOG_VIEW_NOT_FOUND,
+            ),
         };
 
         loop {
@@ -215,6 +219,8 @@ impl QueryLogger {
                             logger.parse_error_count.increment(1);
                         } else if error.is_set_disallowed() {
                             logger.set_disallowed_count.increment(1);
+                        } else if error.caused_by_view_not_found() {
+                            logger.view_not_found_count.increment(1);
                         }
                     };
 
