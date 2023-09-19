@@ -217,6 +217,7 @@ struct CreateCacheOptions {
 /// This is a non-standard ReadySet specific extension to SQL
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct CreateCacheStatement {
+    /// The name of the cache. If not provided, a name will be generated based on the statement
     pub name: Option<Relation>,
     /// The result of parsing the inner statement or query ID for the `CREATE CACHE` statement.
     ///
@@ -224,6 +225,9 @@ pub struct CreateCacheStatement {
     /// statement. If it failed to parse, this will be an `Err` with the remainder [`String`]
     /// that could not be parsed.
     pub inner: Result<CacheInner, String>,
+    /// If `always` is true, a cached query executed inside a transaction can be served from
+    /// a readyset cache.
+    /// if false, cached queries within a transaction are proxied to upstream
     pub always: bool,
     /// Whether the CREATE CACHE STATEMENT should block or run concurrently
     pub concurrently: bool,
