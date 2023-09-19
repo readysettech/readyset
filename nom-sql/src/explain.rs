@@ -26,6 +26,8 @@ pub enum ExplainStatement {
     /// List all CREATE CACHE statements that have been executed, for the
     /// purpose of exporting them
     Caches,
+    /// List and give information about all materializations in the graph
+    Materializations,
 }
 
 impl Display for ExplainStatement {
@@ -41,6 +43,7 @@ impl Display for ExplainStatement {
             ExplainStatement::LastStatement => write!(f, "LAST STATEMENT;"),
             ExplainStatement::Domains => write!(f, "DOMAINS;"),
             ExplainStatement::Caches => write!(f, "CACHES;"),
+            ExplainStatement::Materializations => write!(f, "MATERIALIZATIONS;"),
         }
     }
 }
@@ -67,6 +70,10 @@ pub(crate) fn explain_statement(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Ex
         ),
         value(ExplainStatement::Domains, tag_no_case("domains")),
         value(ExplainStatement::Caches, tag_no_case("caches")),
+        value(
+            ExplainStatement::Materializations,
+            tag_no_case("materializations"),
+        ),
     ))(i)?;
     let (i, _) = statement_terminator(i)?;
     Ok((i, stmt))
@@ -110,5 +117,13 @@ mod tests {
             test_parse!(explain_statement, b"explain caches;"),
             ExplainStatement::Caches
         )
+    }
+
+    #[test]
+    fn explain_materializations() {
+        assert_eq!(
+            test_parse!(explain_statement, b"explain   mAtERIaLIZAtIOns"),
+            ExplainStatement::Materializations
+        );
     }
 }

@@ -1917,6 +1917,11 @@ where
                 self.noria.explain_domains().await
             }
             SqlQuery::Explain(nom_sql::ExplainStatement::Caches) => self.explain_caches().await,
+            SqlQuery::Explain(nom_sql::ExplainStatement::Materializations) => {
+                return Some(Err(unsupported_err!(
+                    "EXPLAIN MATERIALIZATIONS not implemented yet"
+                )))
+            }
             SqlQuery::CreateCache(CreateCacheStatement {
                 name,
                 inner,
