@@ -71,3 +71,6 @@ pub const QUERY_LOG_SET_DISALLOWED: &str = "readyset_query_log_set_disallowed";
 
 /// Counter: The number of requests for views that were not found
 pub const QUERY_LOG_VIEW_NOT_FOUND: &str = "readyset_query_log_view_not_found";
+
+/// Counter: The number of errors due to RPC failures.
+pub const QUERY_LOG_RPC_ERRORS: &str = "readyset_query_log_rpc_errors";

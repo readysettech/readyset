@@ -143,6 +143,9 @@ impl MetricsHandle {
         let val = self.sum_counter(readyset_client_metrics::recorded::QUERY_LOG_VIEW_NOT_FOUND);
         statuses.push(("View not found count".to_string(), val.to_string()));
 
+        let val = self.sum_counter(readyset_client_metrics::recorded::QUERY_LOG_RPC_ERRORS);
+        statuses.push(("RPC error count".to_string(), val.to_string()));
+
         statuses
     }
 }

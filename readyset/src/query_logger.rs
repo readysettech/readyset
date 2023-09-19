@@ -19,6 +19,7 @@ pub(crate) struct QueryLogger {
     parse_error_count: Counter,
     set_disallowed_count: Counter,
     view_not_found_count: Counter,
+    rpc_error_count: Counter,
 }
 
 struct QueryMetrics {
@@ -191,6 +192,9 @@ impl QueryLogger {
             view_not_found_count: register_counter!(
                 readyset_client_metrics::recorded::QUERY_LOG_VIEW_NOT_FOUND,
             ),
+            rpc_error_count: register_counter!(
+                readyset_client_metrics::recorded::QUERY_LOG_RPC_ERRORS,
+            ),
         };
 
         loop {
@@ -221,6 +225,8 @@ impl QueryLogger {
                             logger.set_disallowed_count.increment(1);
                         } else if error.caused_by_view_not_found() {
                             logger.view_not_found_count.increment(1);
+                        } else if error.is_networking_related() {
+                            logger.rpc_error_count.increment(1);
                         }
                     };
 
