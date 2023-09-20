@@ -36,15 +36,15 @@ use readyset_client::builders::{
     ReaderHandleBuilder, ReusedReaderHandleBuilder, TableBuilder, ViewBuilder,
 };
 use readyset_client::consensus::{Authority, AuthorityControl};
-use readyset_client::debug::info::GraphInfo;
+use readyset_client::debug::info::{GraphInfo, NodeSize};
 use readyset_client::debug::stats::{DomainStats, GraphStats, NodeStats};
 use readyset_client::internal::{MaterializationStatus, ReplicaAddress};
 use readyset_client::metrics::recorded;
 use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_client::recipe::ExtendRecipeSpec;
 use readyset_client::{
-    NodeSize, SingleKeyEviction, TableReplicationStatus, TableStatus, ViewCreateRequest,
-    ViewFilter, ViewRequest, ViewSchema,
+    SingleKeyEviction, TableReplicationStatus, TableStatus, ViewCreateRequest, ViewFilter,
+    ViewRequest, ViewSchema,
 };
 use readyset_data::{DfValue, Dialect};
 use readyset_errors::{

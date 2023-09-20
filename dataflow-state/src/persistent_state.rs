@@ -79,8 +79,9 @@ use parking_lot::{
     MappedRwLockReadGuard, MappedRwLockWriteGuard, RwLock, RwLockReadGuard, RwLockWriteGuard,
 };
 use readyset_alloc::thread::StdThreadBuildWrapper;
+use readyset_client::debug::info::KeyCount;
 use readyset_client::internal::Index;
-use readyset_client::{KeyComparison, KeyCount, SqlIdentifier};
+use readyset_client::{KeyComparison, SqlIdentifier};
 use readyset_data::DfValue;
 use readyset_errors::{internal_err, invariant, ReadySetError, ReadySetResult};
 use readyset_util::intervals::BoundPair;
