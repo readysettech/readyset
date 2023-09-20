@@ -1107,6 +1107,7 @@ fn base_options(params: &PersistenceParameters) -> rocksdb::Options {
     opts.create_if_missing(true);
     opts.create_missing_column_families(true);
     opts.set_allow_concurrent_memtable_write(false);
+    opts.set_enable_pipelined_write(true);
 
     // If we have a non-zero WAL flush interval, enable manual WAL flush mode
     if params.wal_flush_interval_seconds > 0 {
