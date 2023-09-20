@@ -1753,4 +1753,61 @@ mod multiple_create_and_drop {
 
         shutdown_tx.shutdown().await;
     }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn create_cache_concurrently_always() {
+        use tokio_postgres::{SimpleQueryMessage, SimpleQueryRow};
+        fn extract_single_value(mut rows: Vec<SimpleQueryMessage>) -> SimpleQueryRow {
+            match rows.swap_remove(0) {
+                SimpleQueryMessage::Row(r) => r,
+                _ => panic!(),
+            }
+        }
+
+        readyset_tracing::init_test_logging();
+        let (opts, _handle, shutdown_tx) = setup().await;
+        let conn = connect(opts).await;
+
+        conn.simple_query("CREATE TABLE t (a int)").await.unwrap();
+        let valid_cache = extract_single_value(
+            conn.simple_query("CREATE CACHE CONCURRENTLY ALWAYS FROM SELECT a FROM t")
+                .await
+                .unwrap(),
+        );
+
+        let invalid_cache = extract_single_value(
+            conn.simple_query("CREATE CACHE CONCURRENTLY ALWAYS FROM SELECT b FROM t")
+                .await
+                .unwrap(),
+        );
+
+        eventually!(
+            run_test: {
+                extract_single_value(
+                    conn.simple_query(&format!(
+                        "SHOW READYSET MIGRATION STATUS {}",
+                        valid_cache.get(0).unwrap()
+                    ))
+                    .await
+                    .unwrap()
+                )
+            },
+            then_assert: |completed| assert_eq!(completed.get(0).unwrap(), "Completed")
+        );
+        eventually!(
+            run_test: {
+                extract_single_value(
+                    conn.simple_query(&format!(
+                        "SHOW READYSET MIGRATION STATUS {}",
+                        invalid_cache.get(0).unwrap()
+                    ))
+                    .await
+                    .unwrap(),
+                )
+            },
+            then_assert: |failed| assert_eq!(&failed.get(0).unwrap()[..6], "Failed")
+        );
+
+        shutdown_tx.shutdown().await;
+    }
 }
