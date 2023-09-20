@@ -123,6 +123,16 @@ pub struct UpstreamConfig {
     #[clap(long, env = "IGNORE_ULIMIT_CHECK")]
     #[serde(default)]
     pub ignore_ulimit_check: bool,
+
+    /// Sets the time (in seconds) between status updates sent to the upstream database
+    #[clap(
+        long,
+        default_value = "10",
+        hide = true,
+        env = "STATUS_UPDATE_INTERVAL_SECS"
+    )]
+    #[serde(default = "default_status_update_interval_secs")]
+    pub status_update_interval_secs: u16,
 }
 
 impl UpstreamConfig {
@@ -160,6 +170,10 @@ fn default_snapshot_report_interval_secs() -> u16 {
     UpstreamConfig::default().snapshot_report_interval_secs
 }
 
+fn default_status_update_interval_secs() -> u16 {
+    UpstreamConfig::default().status_update_interval_secs
+}
+
 fn duration_from_seconds(i: &str) -> Result<Duration, ParseIntError> {
     i.parse::<u64>().map(Duration::from_secs)
 }
@@ -178,6 +192,7 @@ impl Default for UpstreamConfig {
             ssl_root_cert: None,
             replication_pool_size: 50,
             ignore_ulimit_check: false,
+            status_update_interval_secs: 10,
         }
     }
 }
