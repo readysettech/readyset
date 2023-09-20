@@ -61,6 +61,8 @@ pub struct PostgresWalConnector {
     in_transaction: bool,
     /// A handle to the controller
     noria: ReadySetHandle,
+    /// The interval on which we should send status updates to the upstream Postgres instance
+    status_update_interval: Duration,
 }
 
 /// The decoded response to `IDENTIFY_SYSTEM`
@@ -106,11 +108,6 @@ impl PostgresWalConnector {
     /// we receive many consecutive events that share the same LSN.
     const MAX_QUEUED_INDEPENDENT_ACTIONS: usize = 100;
 
-    /// The interval at which we will send status updates to the upstream database. This matches the
-    /// default value for Postgres's `wal_receiver_status_interval`, which is the interval between
-    /// status updates given by Postgres's own WAL receiver during replication.
-    const STATUS_UPDATE_INTERVAL: Duration = Duration::from_secs(10);
-
     /// Connects to postgres and if needed creates a new replication slot for itself with an
     /// exported snapshot.
     #[allow(clippy::too_many_arguments)]
@@ -135,6 +132,7 @@ impl PostgresWalConnector {
             .await
             .map_err(|e| ReadySetError::ReplicationFailed(format!("Failed to connect: {e}")))?;
         let connection_handle = tokio::spawn(connection);
+        let status_update_interval = Duration::from_secs(config.status_update_interval_secs as u64);
 
         let mut connector = PostgresWalConnector {
             client,
@@ -145,10 +143,10 @@ impl PostgresWalConnector {
             replication_slot: None,
             enable_statement_logging,
             // We initialize `time_last_position_reported` to be more than
-            // `Self::STATUS_UPDATE_INTERVAL` seconds ago to ensure that we report our position in
+            // `Self.status_update_interval` seconds ago to ensure that we report our position in
             // the logs the next time we have an opportunity to
             time_last_position_reported: Instant::now()
-                - Self::STATUS_UPDATE_INTERVAL
+                - status_update_interval
                 - Duration::from_secs(1),
             // We'll never start replicating in the middle of a transaction, since Postgres's
             // logical replication protocol only streams whole transactions to us at a time. This
@@ -156,6 +154,7 @@ impl PostgresWalConnector {
             // database, we'll always start replicating outside of a transaction
             in_transaction: false,
             noria,
+            status_update_interval,
         };
 
         if full_resnapshot || next_position.is_none() {
@@ -566,7 +565,7 @@ impl Connector for PostgresWalConnector {
         // If it has been longer than the defined status update interval, send a status update to
         // the upstream database to report our position in the WAL as the LSN of the last event we
         // successfully applied to ReadySet
-        if self.time_last_position_reported.elapsed() > Self::STATUS_UPDATE_INTERVAL {
+        if self.time_last_position_reported.elapsed() > self.status_update_interval {
             let lsn: Lsn = last_pos.try_into()?;
 
             self.send_standby_status_update(lsn).await?;
