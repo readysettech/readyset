@@ -124,7 +124,10 @@ pub struct UpstreamConfig {
     #[serde(default)]
     pub ignore_ulimit_check: bool,
 
-    /// Sets the time (in seconds) between status updates sent to the upstream database
+    /// Sets the time (in seconds) between status updates sent to the upstream database. This
+    /// setting also the controls the interval on which each base table will flush and sync the
+    /// RocksDB WAL to disk. If set to 0, the base tables will flush and sync to disk with every
+    /// write, which substantially worsens write latency.
     #[clap(
         long,
         default_value = "10",

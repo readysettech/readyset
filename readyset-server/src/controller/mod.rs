@@ -1725,10 +1725,7 @@ mod tests {
 
         let min_persisted_offset = noria.min_persisted_replication_offset().await.unwrap();
 
-        // TODO(ethan): This will be updated to be the following once we start flushing writes to
-        // disk in the background:
-        // assert_eq!(min_persisted_offset, PersistencePoint::UpTo(offset1));
-        assert_eq!(min_persisted_offset, PersistencePoint::Persisted);
+        assert_eq!(min_persisted_offset, PersistencePoint::UpTo(offset1));
 
         shutdown_tx.shutdown().await;
     }

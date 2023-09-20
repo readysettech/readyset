@@ -75,6 +75,10 @@ impl PersistentStateHandle {
         }
     }
 
+    pub(super) fn db(&self) -> RwLockReadGuard<'_, DB> {
+        self.db.read()
+    }
+
     /// Perform a lookup for multiple equal keys at once. The results are returned in the order
     /// of the original keys.
     pub(super) fn lookup_multi<'a>(

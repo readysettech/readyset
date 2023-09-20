@@ -68,7 +68,8 @@ use std::io::{self, Read};
 use std::ops::Bound;
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::mpsc::RecvTimeoutError;
+use std::sync::{mpsc, Arc};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 use std::{fmt, fs, mem};
@@ -78,6 +79,7 @@ use clap::ValueEnum;
 use common::{IndexType, Record, Records, SizeOf, Tag};
 pub use handle::PersistentStateHandle;
 use handle::{PersistentStateReadGuard, PersistentStateWriteGuard};
+use rand::Rng;
 use readyset_alloc::thread::StdThreadBuildWrapper;
 use readyset_client::debug::info::KeyCount;
 use readyset_client::internal::Index;
@@ -95,7 +97,7 @@ use serde::{Deserialize, Serialize};
 use tempfile::{tempdir, TempDir};
 use test_strategy::Arbitrary;
 use thiserror::Error;
-use tracing::{debug, error, info, info_span, instrument, warn};
+use tracing::{debug, error, info, info_span, instrument, trace, warn};
 
 use crate::{
     EvictKeysResult, EvictRandomResult, LookupResult, PersistencePoint, PointKey, RangeKey,
@@ -244,6 +246,10 @@ pub struct PersistenceParameters {
     /// An optional path to a directory where to store the DB files, if None will be stored in the
     /// current working directory
     pub db_dir: Option<PathBuf>,
+    /// The interval on which the RocksDB WAL will be flushed and synced to disk. If this value is
+    /// set to 0, the WAL will be flushed and synced to disk with every write
+    #[serde(default)]
+    pub wal_flush_interval_seconds: u64,
 }
 
 impl Default for PersistenceParameters {
@@ -253,6 +259,7 @@ impl Default for PersistenceParameters {
             db_filename_prefix: String::from("readyset"),
             persistence_threads: 1,
             db_dir: None,
+            wal_flush_interval_seconds: 0,
         }
     }
 }
@@ -272,6 +279,7 @@ impl PersistenceParameters {
         db_filename_prefix: Option<String>,
         persistence_threads: i32,
         db_dir: Option<PathBuf>,
+        wal_flush_interval_seconds: u64,
     ) -> Self {
         // NOTE(fran): DO NOT impose a particular format on `db_filename_prefix`. If you need to,
         // modify it before use, but do not make assertions on it. The reason being, we use
@@ -285,6 +293,7 @@ impl PersistenceParameters {
             db_filename_prefix,
             persistence_threads,
             db_dir,
+            wal_flush_interval_seconds,
         }
     }
 }
@@ -417,6 +426,7 @@ pub struct PersistentState {
     /// writes will bypass WAL and fsync
     snapshot_mode: SnapshotMode,
     compaction_threads: Vec<CompactionThreadHandle>,
+    wal_flush_thread_handle: Option<(mpsc::Sender<()>, JoinHandle<()>)>,
 }
 
 /// Things that are shared between read handles and the state itself, that can be locked under a
@@ -451,6 +461,92 @@ impl SharedState {
 #[derive(Debug, Clone)]
 enum WalState {
     FlushedAndPersisted,
+    FlushedAndUnpersisted {
+        /// The replication offset up to which this state has been persisted to disk
+        persisted_up_to: ReplicationOffset,
+    },
+    Unflushed {
+        /// The replication offset up to which this state has been persisted to disk
+        persisted_up_to: ReplicationOffset,
+    },
+}
+
+struct WalFlusher {
+    rx: mpsc::Receiver<()>,
+    state_handle: PersistentStateHandle,
+    table: SqlIdentifier,
+    flush_interval: Duration,
+}
+
+impl WalFlusher {
+    fn run(self) {
+        // Sleep for a random number of seconds between 1 and 10 to introduce jitter to
+        // stagger flushes across different base tables
+        let jitter = Duration::from_secs_f64(
+            rand::thread_rng().gen_range(0.0, self.flush_interval.as_secs_f64()),
+        );
+
+        // We use recv_timeout for interruptible sleep. If recv_timeout() returns `Ok`, it means
+        // we've received the shutdown signal; if it returns `Err`, we haven't received a shutdown
+        // signal in the given period, so we allow the background thread to persist
+        if self.rx.recv_timeout(jitter).is_ok() {
+            return;
+        }
+
+        loop {
+            match self.rx.recv_timeout(self.flush_interval) {
+                Err(RecvTimeoutError::Timeout) => {
+                    let wal_state = self.state_handle.inner().shared_state.wal_state.clone();
+
+                    if let WalState::Unflushed { persisted_up_to } = wal_state {
+                        self.flush_wal(persisted_up_to);
+                        self.sync_wal();
+                    }
+                }
+                Err(RecvTimeoutError::Disconnected) | Ok(()) => return,
+            }
+        }
+    }
+
+    fn flush_wal(&self, persisted_up_to: ReplicationOffset) {
+        trace!(%self.table, "flushing WAL");
+
+        // Writes to persistent state don't require a write lock since they only need immutable
+        // access to the DB handle; however, to keep things clean, we acquire a write lock to
+        // prevent another thread from changing the WAL state or writing a new replication offset to
+        // the shared state to ensure that we flush the WAL and update the WAL state atomically.
+        let mut inner = self.state_handle.inner_mut();
+
+        // Flushing the WAL blocks other writes to RocksDB, but this operation should be relatively
+        // quick given that we aren't writing any bytes to disk. The bottleneck here is probably
+        // the fwrite system call
+        inner.db.flush_wal(false).unwrap();
+
+        inner.shared_state.wal_state = WalState::FlushedAndUnpersisted { persisted_up_to };
+    }
+
+    fn sync_wal(&self) {
+        trace!(%self.table, "syncing WAL");
+
+        self.state_handle.db().sync_wal().unwrap();
+        let mut inner = self.state_handle.inner_mut();
+
+        match inner.shared_state.wal_state {
+            // No data has been written to this state since the sync began, so we can change our
+            // WAL state to `FlushedAndPersisted`
+            WalState::FlushedAndUnpersisted { .. } => {
+                inner.shared_state.wal_state = WalState::FlushedAndPersisted;
+            }
+            // If our state changed to `Unflushed` while we were syncing, we don't want to do
+            // anything, because there's new data that needs to be flushed
+            WalState::Unflushed { .. } => {}
+            // If we just synced, our previous state should not have been `FlushedAndPersisted`.
+            // If it is, there's a bug somewhere
+            WalState::FlushedAndPersisted => unreachable!(
+                "another thread should never transition the WAL state to `FlushedAndPersisted`"
+            ),
+        }
+    }
 }
 
 impl fmt::Debug for PersistentState {
@@ -526,6 +622,10 @@ impl State for PersistentState {
     fn persisted_up_to(&self) -> PersistencePoint {
         match &self.db.inner().shared_state.wal_state {
             WalState::FlushedAndPersisted => PersistencePoint::Persisted,
+            WalState::FlushedAndUnpersisted { persisted_up_to }
+            | WalState::Unflushed { persisted_up_to } => {
+                PersistencePoint::UpTo(persisted_up_to.clone())
+            }
         }
     }
 
@@ -654,8 +754,21 @@ impl State for PersistentState {
     }
 
     fn tear_down(mut self) -> ReadySetResult<()> {
+        if let Some((tx, jh)) = self.wal_flush_thread_handle.take() {
+            // Stop the thread that periodically flushes the WAL
+            tx.send(()).unwrap();
+
+            jh.join().map_err(|_| {
+                ReadySetError::Internal(format!(
+                    "could not join WAL flush thread for table {}",
+                    self.name
+                ))
+            })?;
+        }
+
         let temp_dir = self._tmpdir.take();
         let full_path = self.db.inner().db.path().to_path_buf();
+
         // We have to make the drop here so that rocksdb gets closed and frees
         // the file descriptors, so that we can remove the directory.
         // We can't implement this logic by implementing the `Drop` trait, because
@@ -939,6 +1052,11 @@ fn base_options(params: &PersistenceParameters) -> rocksdb::Options {
     opts.create_if_missing(true);
     opts.create_missing_column_families(true);
     opts.set_allow_concurrent_memtable_write(false);
+
+    // If we have a non-zero WAL flush interval, enable manual WAL flush mode
+    if params.wal_flush_interval_seconds > 0 {
+        opts.set_manual_wal_flush(true);
+    }
 
     // Assigns the number of threads for compactions and flushes in RocksDB.
     // Optimally we'd like to use env->SetBackgroundThreads(n, Env::HIGH)
@@ -1388,6 +1506,24 @@ impl PersistentState {
         };
         let read_handle = PersistentStateHandle::new(shared_state, db, replication_offset);
 
+        let wal_flush_thread_handle = if params.wal_flush_interval_seconds == 0 {
+            None
+        } else {
+            let (tx, rx) = mpsc::channel::<()>();
+            let wal_flusher = WalFlusher {
+                rx,
+                state_handle: read_handle.clone(),
+                table: name.clone(),
+                flush_interval: Duration::from_secs(params.wal_flush_interval_seconds),
+            };
+
+            let jh = std::thread::Builder::new()
+                .name("WAL Flusher".to_string())
+                .spawn_wrapper(move || wal_flusher.run())?;
+
+            Some((tx, jh))
+        };
+
         let mut state = Self {
             name,
             default_options,
@@ -1398,6 +1534,7 @@ impl PersistentState {
             _tmpdir: None,
             snapshot_mode: SnapshotMode::SnapshotModeDisabled,
             compaction_threads: vec![],
+            wal_flush_thread_handle,
         };
 
         if let Some(pk) = state.unique_keys.first().cloned() {
@@ -1571,7 +1708,37 @@ impl PersistentState {
         // It's ok to read and update meta in two steps here since each State can (currently) only
         // be modified by a single thread.
         self.db.replication_offset = Some(offset.clone());
-        self.db.inner_mut().shared_state.replication_offset = Some(offset);
+
+        {
+            let mut inner = self.db.inner_mut();
+            // TODO(ethan) do we want to be updating our in-memory replication offsets here before
+            // the write succeeds?
+            inner.shared_state.replication_offset = Some(offset.clone());
+
+            match inner.shared_state.wal_state {
+                // If snapshot mode is enabled, the WAL is disabled, and we don't have to worry
+                // about setting flushed_up_to or persisted_up_to
+                _ if self.snapshot_mode.is_enabled() => {}
+                // All of the data in this state has been persisted and the batch is empty, which
+                // means we are just updating the offset. We don't want to update either of
+                // flushed_up_to or synced_up_to here because we're not adding any new data
+                _ if batch.is_empty() => {}
+                // If our data is flushed and persisted or our data is flushed but unpersisted,
+                // we need to change our state to `WalState::Unflushed` since we're writing new
+                // unflushed data
+                WalState::FlushedAndPersisted | WalState::FlushedAndUnpersisted { .. } => {
+                    inner.shared_state.wal_state = WalState::Unflushed {
+                        // The new offset marks the start of the unpersisted data in this state
+                        persisted_up_to: offset,
+                    };
+                }
+                // If there is already unflushed data, we don't have to transition the WAL state,
+                // since adding new unflushed data doesn't change the low watermark of all of our
+                // unflushed data
+                WalState::Unflushed { .. } => {}
+            }
+        }
+
         batch.save_meta(&self.meta());
     }
 
@@ -1841,7 +2008,10 @@ impl PersistentState {
                     .flush()
                     .map_err(|e| internal_err!("Flush to disk failed: {e}"))?;
             }
-            write_options.set_sync(true);
+
+            if self.wal_flush_thread_handle.is_none() {
+                write_options.set_sync(true);
+            }
         }
 
         if let Some(offset) = replication_offset {
