@@ -330,6 +330,33 @@ impl Clone for ReadySetHandle {
 /// set to. Number of cores, perhaps?
 const CONTROLLER_BUFFER_SIZE: usize = 8;
 
+/// Define a simple RPC request wrapper for the controller, which queries the same RPC endpoint as
+/// the name of the function and takes no arguments.
+///
+/// This is a common enough pattern that it's worth defining a macro for, but anything more complex
+/// than this is worth defining as a regular function
+macro_rules! simple_request {
+    ($(#[$($attrss:tt)*])* $name: ident()) => { simple_request!($name() -> ()); };
+    ($(#[$($attrss:tt)*])* $name: ident() -> $ret: ty) => {
+        $(#[$($attrss)*])*
+        pub fn $name(&mut self) -> impl Future<Output = ReadySetResult<$ret>> + '_ {
+            self.rpc(stringify!($name), (), self.request_timeout)
+        }
+    };
+    ($(#[$($attrss:tt)*])* $name: ident($arg: ident : $ty: ty) -> $ret: ty) => {
+        $(#[$($attrss)*])*
+        pub fn $name(&mut self, $arg : $ty) -> impl Future<Output = ReadySetResult<$ret>> + '_ {
+            self.rpc(stringify!($name), $arg, self.request_timeout)
+        }
+    };
+    ($(#[$($attrss:tt)*])* $name: ident($($arg: ident : $ty: ty,)+) -> $ret: ty) => {
+        $(#[$($attrss)*])*
+        pub fn $name(&mut self, $($arg : $ty,)+) -> impl Future<Output = ReadySetResult<$ret>> + '_ {
+            self.rpc(stringify!($name), ($($arg,)+), self.request_timeout)
+        }
+    };
+}
+
 impl ReadySetHandle {
     pub fn make(
         authority: Arc<Authority>,
@@ -473,20 +500,18 @@ impl ReadySetHandle {
         self.simple_post_request("verbose_views").await
     }
 
-    /// For each of the given list of queries, determine whether that query (or a semantically
-    /// equivalent query) has been created as a `View`.
-    ///
-    /// To save on data, this returns a list of booleans corresponding to the provided list of
-    /// query, where each boolean is `true` if the query at the same position in the argument list
-    /// has been installed as a view.
-    pub async fn view_statuses(
-        &mut self,
-        queries: Vec<ViewCreateRequest>,
-        dialect: dataflow_expression::Dialect,
-    ) -> ReadySetResult<Vec<bool>> {
-        self.rpc("view_statuses", (queries, dialect), self.request_timeout)
-            .await
-    }
+    simple_request!(
+        /// For each of the given list of queries, determine whether that query (or a semantically
+        /// equivalent query) has been created as a `View`.
+        ///
+        /// To save on data, this returns a list of booleans corresponding to the provided list of
+        /// query, where each boolean is `true` if the query at the same position in the argument list
+        /// has been installed as a view.
+        view_statuses(
+            queries: Vec<ViewCreateRequest>,
+            dialect: dataflow_expression::Dialect,
+        ) -> Vec<bool>
+    );
 
     /// Obtain a `View` that allows you to query the given external view.
     ///
@@ -643,19 +668,19 @@ impl ReadySetHandle {
         }
     }
 
-    /// Get statistics about the time spent processing different parts of the graph.
-    ///
-    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub fn statistics(&mut self) -> impl Future<Output = ReadySetResult<stats::GraphStats>> + '_ {
-        self.rpc("get_statistics", (), self.request_timeout)
-    }
+    simple_request!(
+        /// Get statistics about the time spent processing different parts of the graph.
+        ///
+        /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
+        statistics() -> stats::GraphStats
+    );
 
-    /// Flush all partial state, evicting all rows present.
-    ///
-    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub fn flush_partial(&mut self) -> impl Future<Output = ReadySetResult<()>> + '_ {
-        self.rpc("flush_partial", (), self.request_timeout)
-    }
+    simple_request!(
+        /// Flush all partial state, evicting all rows present.
+        ///
+        /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
+        flush_partial()
+    );
 
     /// Performs a dry-run migration with the given set of queries.
     ///
@@ -756,131 +781,116 @@ impl ReadySetHandle {
         self.rpc("extend_recipe", request, self.migration_timeout)
     }
 
-    /// Remove all nodes related to the query with the given name
-    ///
+    simple_request!(
+        /// Remove all nodes related to the query with the given name
+        ///
+        /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
+        remove_query(name: &Relation) -> u64
+    );
+
+    simple_request!(
+        /// Remove all non-base nodes from the graph
+        ///
+        /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
+        remove_all_queries()
+    );
+
+    simple_request!(
+        /// Set the replication offset for the schema, which is stored with the recipe.
+        ///
+        /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
+        set_schema_replication_offset(
+            replication_offset: Option<&ReplicationOffset>,
+        ) -> ()
+    );
+
+    simple_request!(
+        /// Fetch a graphviz description of the dataflow graph.
+        ///
+        /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
+        graphviz() -> String
+    );
+
+    simple_request!(
+        /// Fetch a simplified graphviz description of the dataflow graph.
+        ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub fn remove_query(
-        &mut self,
-        name: &Relation,
-    ) -> impl Future<Output = ReadySetResult<u64>> + '_ {
-        self.rpc("remove_query", name, self.migration_timeout)
-    }
+        simple_graphviz() -> String
+    );
 
-    /// Remove all non-base nodes from the graph
-    ///
-    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub fn remove_all_queries(&mut self) -> impl Future<Output = ReadySetResult<()>> + '_ {
-        self.rpc("remove_all_queries", (), self.migration_timeout)
-    }
+    simple_request!(
+        /// Replicate the readers associated with the list of queries to the given worker.
+        ///
+        /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
+        get_instances() -> Vec<(Url, bool)>
+    );
 
-    /// Set the replication offset for the schema, which is stored with the recipe.
-    ///
-    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub fn set_schema_replication_offset(
-        &mut self,
-        replication_offset: Option<&ReplicationOffset>,
-    ) -> impl Future<Output = ReadySetResult<()>> + '_ {
-        self.rpc(
-            "set_schema_replication_offset",
-            replication_offset,
-            self.request_timeout,
-        )
-    }
+    simple_request!(
+        /// Query the controller for information about the graph.
+        ///
+        /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
+        get_info() -> GraphInfo
+    );
 
-    /// Fetch a graphviz description of the dataflow graph.
-    ///
-    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub fn graphviz(&mut self) -> impl Future<Output = ReadySetResult<String>> + '_ {
-        self.rpc("graphviz", (), self.request_timeout)
-    }
+    simple_request!(
+        /// Remove the given external view from the graph.
+        ///
+        /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
+        remove_node(
+            // TODO: this should likely take a view name, and we should verify that it's a Reader.
+            view: NodeIndex,
+        ) -> ()
+    );
 
-    /// Fetch a simplified graphviz description of the dataflow graph.
-    ///
-    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub fn simple_graphviz(&mut self) -> impl Future<Output = ReadySetResult<String>> + '_ {
-        self.rpc("simple_graphviz", (), self.request_timeout)
-    }
+    simple_request!(
+        /// Fetch a dump of metrics values from the running noria instance
+        ///
+        /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
+        metrics_dump() -> MetricsDump
+    );
 
-    /// Replicate the readers associated with the list of queries to the given worker.
-    ///
-    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub fn get_instances(&mut self) -> impl Future<Output = ReadySetResult<Vec<(Url, bool)>>> + '_ {
-        self.rpc("instances", (), self.request_timeout)
-    }
+    simple_request!(
+        /// Get a list of all registered worker URIs.
+        ///
+        /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
+        workers() -> Vec<Url>
+    );
 
-    /// Query the controller for information about the graph.
-    ///
-    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub fn get_info(&mut self) -> impl Future<Output = ReadySetResult<GraphInfo>> + '_ {
-        self.rpc("get_info", (), self.request_timeout)
-    }
+    simple_request!(
+        /// Get a list of all registered worker URIs that are currently healthy.
+        ///
+        /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
+        healthy_workers() -> Vec<Url>
+    );
 
-    /// Remove the given external view from the graph.
-    ///
-    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub fn remove_node(
-        &mut self,
-        view: NodeIndex,
-    ) -> impl Future<Output = ReadySetResult<()>> + '_ {
-        // TODO: this should likely take a view name, and we should verify that it's a Reader.
-        self.rpc("remove_node", view, self.migration_timeout)
-    }
+    simple_request!(
+        /// Get a map from domain index to a shard->replica mapping of the workers that are running the
+        /// shard replicas of that domain .
+        ///
+        /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
+        domains() -> HashMap<DomainIndex, Vec<Vec<Option<Url>>>>
+    );
 
-    /// Fetch a dump of metrics values from the running noria instance
-    ///
-    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub fn metrics_dump(&mut self) -> impl Future<Output = ReadySetResult<MetricsDump>> + '_ {
-        self.rpc("metrics_dump", (), self.request_timeout)
-    }
+    simple_request!(
+        /// Get the url of the current noria controller.
+        ///
+        /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
+        controller_uri() -> Url
+    );
 
-    /// Get a list of all registered worker URIs.
-    ///
-    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub fn workers(&mut self) -> impl Future<Output = ReadySetResult<Vec<Url>>> + '_ {
-        self.rpc("workers", (), self.request_timeout)
-    }
+    simple_request!(
+        /// Get a set of all replication offsets for the entire system.
+        ///
+        /// See [the documentation for
+        /// PersistentState](::readyset_dataflow::state::persistent_state) for more information
+        /// about replication offsets.
+        replication_offsets() -> ReplicationOffsets
+    );
 
-    /// Get a list of all registered worker URIs that are currently healthy.
-    ///
-    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub fn healthy_workers(&mut self) -> impl Future<Output = ReadySetResult<Vec<Url>>> + '_ {
-        self.rpc("healthy_workers", (), self.request_timeout)
-    }
-
-    /// Get a map from domain index to a shard->replica mapping of the workers that are running the
-    /// shard replicas of that domain .
-    ///
-    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub fn domains(
-        &mut self,
-    ) -> impl Future<Output = ReadySetResult<HashMap<DomainIndex, Vec<Vec<Option<Url>>>>>> + '_
-    {
-        self.rpc("domains", (), self.request_timeout)
-    }
-
-    /// Get the url of the current noria controller.
-    ///
-    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub fn controller_uri(&mut self) -> impl Future<Output = ReadySetResult<Url>> + '_ {
-        self.rpc("controller_uri", (), self.request_timeout)
-    }
-
-    /// Get a set of all replication offsets for the entire system.
-    ///
-    /// See [the documentation for PersistentState](::readyset_dataflow::state::persistent_state)
-    /// for more information about replication offsets.
-    pub fn replication_offsets(
-        &mut self,
-    ) -> impl Future<Output = ReadySetResult<ReplicationOffsets>> + '_ {
-        self.rpc("replication_offsets", (), self.request_timeout)
-    }
-
-    /// Get a list of all current tables node indexes that are involved in snapshotting.
-    pub fn snapshotting_tables(
-        &mut self,
-    ) -> impl Future<Output = ReadySetResult<Vec<String>>> + '_ {
-        self.rpc("snapshotting_tables", (), self.request_timeout)
-    }
+    simple_request!(
+        /// Get a list of all current tables node indexes that are involved in snapshotting.
+        snapshotting_tables() -> Vec<String>
+    );
 
     /// Poll in a loop to wait for all tables to finish compacting
     pub async fn wait_for_all_tables_to_compact(&mut self) -> ReadySetResult<()> {
@@ -895,72 +905,59 @@ impl ReadySetHandle {
         Ok(())
     }
 
-    /// Return a map of node indices to key counts.
-    pub fn node_sizes(
-        &mut self,
-    ) -> impl Future<Output = ReadySetResult<HashMap<NodeIndex, NodeSize>>> + '_ {
-        self.rpc("node_sizes", (), self.request_timeout)
-    }
+    simple_request!(
+        /// Return a map of node indices to key counts.
+        node_sizes() -> HashMap<NodeIndex, NodeSize>
+    );
 
-    /// Return whether the leader is ready or not.
-    pub fn leader_ready(&mut self) -> impl Future<Output = ReadySetResult<bool>> + '_ {
-        self.rpc("leader_ready", (), self.request_timeout)
-    }
+    simple_request!(
+        /// Return whether the leader is ready or not.
+        leader_ready() -> bool
+    );
 
-    /// Returns the ReadySetStatus struct returned by the leader.
-    pub fn status(&mut self) -> impl Future<Output = ReadySetResult<ReadySetStatus>> + '_ {
-        self.rpc("status", (), self.request_timeout)
-    }
+    simple_request!(
+        /// Returns the ReadySetStatus struct returned by the leader.
+        status() -> ReadySetStatus
+    );
 
-    /// Returns true if topk and pagination support are enabled on the server
-    pub fn supports_pagination(&mut self) -> impl Future<Output = ReadySetResult<bool>> + '_ {
-        self.rpc("supports_pagination", (), self.request_timeout)
-    }
+    simple_request!(
+        /// Returns true if topk and pagination support are enabled on the server
+        supports_pagination() -> bool
+    );
 
-    /// Returns the server's release version
-    pub fn version(&mut self) -> impl Future<Output = ReadySetResult<String>> + '_ {
-        self.rpc("version", (), self.request_timeout)
-    }
+    simple_request!(
+        /// Returns the server's release version
+        version() -> String
+    );
 
-    /// Returns the amount of actually allocated memory
-    pub fn allocated_bytes(&mut self) -> impl Future<Output = ReadySetResult<Option<usize>>> + '_ {
-        self.rpc("allocated_bytes", (), self.request_timeout)
-    }
+    simple_request!(
+        /// Returns the amount of actually allocated memory
+        allocated_bytes() -> Option<usize>
+    );
 
-    /// Set memory limit parameters
-    pub fn set_memory_limit(
-        &mut self,
-        period: Option<Duration>,
-        limit: Option<usize>,
-    ) -> impl Future<Output = ReadySetResult<()>> + '_ {
-        self.rpc("set_memory_limit", (period, limit), self.request_timeout)
-    }
+    simple_request!(
+        /// Set memory limit parameters
+        set_memory_limit(
+            period: Option<Duration>,
+            limit: Option<usize>,
+        ) -> ()
+    );
 
-    /// Evict a single key from a partial index. If no `eviction_request` is provided, a random key
-    /// and partial index will be selected. Returns a [`SingleKeyEviction`] if an eviction
-    /// occurred.
-    pub fn evict_single(
-        &mut self,
-        eviction_request: Option<SingleKeyEviction>,
-    ) -> impl Future<Output = ReadySetResult<Option<SingleKeyEviction>>> + '_ {
-        self.rpc("evict_single", eviction_request, self.request_timeout)
-    }
+    simple_request!(
+        /// Evict a single key from a partial index. If no `eviction_request` is provided, a random
+        /// key and partial index will be selected. Returns a [`SingleKeyEviction`] if an eviction
+        /// occurred.
+        evict_single(eviction_request: Option<SingleKeyEviction>) -> Option<SingleKeyEviction>
+    );
 
     #[cfg(feature = "failure_injection")]
-    /// Set a failpoint with provided name and action
-    pub fn failpoint(
-        &mut self,
-        name: String,
-        action: String,
-    ) -> impl Future<Output = ReadySetResult<()>> + '_ {
-        self.rpc("failpoint", (name, action), self.request_timeout)
-    }
+    simple_request!(
+        /// Set a failpoint with provided name and action
+        failpoint(name: String, action: String,) -> ()
+    );
 
-    /// Notify the controller that a running domain replica has died
-    pub fn domain_died(
-        &mut self,
-        replica_address: ReplicaAddress,
-    ) -> impl Future<Output = ReadySetResult<()>> + '_ {
-        self.rpc("domain_died", replica_address, self.request_timeout)
-    }
+    simple_request!(
+        /// Notify the controller that a running domain replica has died
+        domain_died(replica_address: ReplicaAddress) -> ()
+    );
 }
