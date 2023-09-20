@@ -659,6 +659,12 @@ pub struct WorkerOptions {
         hide = true
     )]
     pub background_recovery_interval_seconds: u64,
+
+    /// The interval in seconds on which each base table will flush and sync its WAL to disk. If
+    /// not specified, defaults to the upstream status update interval. If set to 0, the base
+    /// tables will flush and sync to disk with every write.
+    #[clap(long, env = "WAL_FLUSH_INTERVAL_SECONDS", hide = true)]
+    pub wal_flush_interval_seconds: Option<u64>,
 }
 
 use std::pin::Pin;
