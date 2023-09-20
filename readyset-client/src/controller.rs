@@ -24,7 +24,7 @@ use tracing::{debug, trace};
 use url::Url;
 
 use crate::consensus::{Authority, AuthorityControl};
-use crate::debug::info::GraphInfo;
+use crate::debug::info::{GraphInfo, NodeSize};
 use crate::debug::stats;
 use crate::internal::{DomainIndex, ReplicaAddress};
 use crate::metrics::MetricsDump;
@@ -34,8 +34,7 @@ use crate::status::ReadySetStatus;
 use crate::table::{Table, TableBuilder, TableRpc};
 use crate::view::{View, ViewBuilder, ViewRpc};
 use crate::{
-    NodeSize, ReplicationOffset, SingleKeyEviction, TableStatus, ViewCreateRequest, ViewFilter,
-    ViewRequest,
+    ReplicationOffset, SingleKeyEviction, TableStatus, ViewCreateRequest, ViewFilter, ViewRequest,
 };
 
 mod rpc;

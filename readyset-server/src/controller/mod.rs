@@ -1195,8 +1195,9 @@ mod tests {
         parse_create_table, parse_select_statement, Dialect, NonReplicatedRelation,
         NotReplicatedReason, Relation,
     };
+    use readyset_client::debug::info::KeyCount;
     use readyset_client::recipe::changelist::{Change, ChangeList};
-    use readyset_client::{KeyCount, TableReplicationStatus, TableStatus, ViewCreateRequest};
+    use readyset_client::{TableReplicationStatus, TableStatus, ViewCreateRequest};
     use readyset_data::Dialect as DataDialect;
     use readyset_util::eventually;
     use replication_offset::ReplicationOffset;
