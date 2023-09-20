@@ -2639,7 +2639,7 @@ checksum = "348108ab3fba42ec82ff6e9564fc4ca0247bdccdc68dd8af9764bbc79c3c8ffb"
 [[package]]
 name = "librocksdb-sys"
 version = "0.11.0+8.1.1"
-source = "git+https://github.com/readysettech/rust-rocksdb.git#1ad2e56a5c85fb7ac8f89b182163a6c6944143ca"
+source = "git+https://github.com/readysettech/rust-rocksdb.git?branch=add-sync-wal#723d5bddb6e08aad3d405a39f8cc3f838d6cdb69"
 dependencies = [
  "bindgen 0.65.1",
  "bzip2-sys",
@@ -5431,7 +5431,7 @@ dependencies = [
 [[package]]
 name = "rocksdb"
 version = "0.21.0"
-source = "git+https://github.com/readysettech/rust-rocksdb.git#1ad2e56a5c85fb7ac8f89b182163a6c6944143ca"
+source = "git+https://github.com/readysettech/rust-rocksdb.git?branch=add-sync-wal#723d5bddb6e08aad3d405a39f8cc3f838d6cdb69"
 dependencies = [
  "libc",
  "librocksdb-sys",
