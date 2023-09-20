@@ -1323,6 +1323,7 @@ async fn it_recovers_persisted_bases() {
         Some(path.to_string_lossy().into()),
         1,
         None,
+        0,
     );
 
     {
@@ -1403,6 +1404,7 @@ async fn it_recovers_persisted_bases_with_volume_id() {
         Some(path.to_string_lossy().into()),
         1,
         None,
+        0,
     );
 
     {
@@ -1477,6 +1479,7 @@ async fn it_doesnt_recover_persisted_bases_with_wrong_volume_id() {
         Some(path.to_string_lossy().into()),
         1,
         None,
+        0,
     );
 
     {
@@ -1721,6 +1724,7 @@ async fn it_recovers_persisted_bases_w_multiple_nodes() {
         Some(path.to_string_lossy().into()),
         1,
         None,
+        0,
     );
 
     {
@@ -1795,6 +1799,7 @@ async fn it_recovers_persisted_bases_w_multiple_nodes_and_volume_id() {
         Some(path.to_string_lossy().into()),
         1,
         None,
+        0,
     );
 
     {
@@ -8552,6 +8557,7 @@ async fn it_recovers_fully_materialized() {
         Some("it_recovers_fully_materialized".to_string()),
         1,
         Some(dir.path().into()),
+        0,
     );
 
     let start = || {
@@ -8777,6 +8783,7 @@ async fn simple_drop_tables_with_persisted_data() {
         Some("simple_drop_tables_with_persisted_data".to_string()),
         1,
         Some(path.clone()),
+        0,
     ));
     let (mut g, shutdown_tx) = builder.start_local().await.unwrap();
 

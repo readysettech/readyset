@@ -103,6 +103,11 @@ impl Builder {
             Some(deployment.into()),
             opts.persistence_threads,
             Some(deployment_dir),
+            builder
+                .config
+                .replicator_config
+                .status_update_interval_secs
+                .into(),
         );
         builder.set_persistence(persistence_params);
 
