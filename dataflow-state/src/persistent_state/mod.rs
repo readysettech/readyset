@@ -60,6 +60,7 @@
 //! that replication log of the last record that we have successfully applied. To maintain
 //! atomicity, these offsets are stored inside of rocksdb as part of the persisted
 //! [`PersistentMeta`], and updated as part of every write.
+mod handle;
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
@@ -75,9 +76,8 @@ use std::{fmt, fs, mem};
 use bincode::Options;
 use clap::ValueEnum;
 use common::{IndexType, Record, Records, SizeOf, Tag};
-use parking_lot::{
-    MappedRwLockReadGuard, MappedRwLockWriteGuard, RwLock, RwLockReadGuard, RwLockWriteGuard,
-};
+pub use handle::PersistentStateHandle;
+use parking_lot::RwLockReadGuard;
 use readyset_alloc::thread::StdThreadBuildWrapper;
 use readyset_client::debug::info::KeyCount;
 use readyset_client::internal::Index;
@@ -455,167 +455,6 @@ enum WalState {
     FlushedAndPersisted,
 }
 
-/// A handle that can cloned and shared between threads to safely read from the [`PersistentState`]
-/// concurrently.
-#[derive(Clone)]
-pub struct PersistentStateHandle {
-    /// The replication offset used to make sure the read handle received all forward processing
-    /// messages for state, if the replication offset of the read handle is behind that of
-    /// the base table (`inner.replication_offset`), lookups will result in a miss.
-    replication_offset: Option<ReplicationOffset>,
-    inner: Arc<RwLock<SharedState>>,
-}
-
-impl PersistentStateHandle {
-    fn inner(&self) -> RwLockReadGuard<'_, SharedState> {
-        self.inner.read()
-    }
-
-    fn inner_mut(&self) -> RwLockWriteGuard<'_, SharedState> {
-        self.inner.write()
-    }
-
-    fn handle(&self) -> MappedRwLockReadGuard<'_, DB> {
-        RwLockReadGuard::map(self.inner.read(), |i| &i.db)
-    }
-
-    fn handle_mut(&self) -> MappedRwLockWriteGuard<'_, DB> {
-        RwLockWriteGuard::map(self.inner.write(), |i| &mut i.db)
-    }
-
-    /// Perform a lookup for multiple equal keys at once. The results are returned in the order of
-    /// the original keys.
-    pub fn lookup_multi<'a>(
-        &'a self,
-        columns: &[usize],
-        keys: &[PointKey],
-    ) -> Vec<RecordResult<'a>> {
-        if keys.is_empty() {
-            return vec![];
-        }
-        let inner = self.inner();
-        let db = &inner.db;
-
-        let index = inner.index(IndexType::HashMap, columns);
-        let is_primary = index.is_primary;
-
-        let cf = db.cf_handle(&index.column_family).unwrap();
-        // Create an iterator once, reuse it for each key
-        let mut iter = db.raw_iterator_cf(cf);
-        let mut iter_primary = if !is_primary {
-            Some(
-                db.raw_iterator_cf(
-                    db.cf_handle(PK_CF)
-                        .expect("Primary key column family not found"),
-                ),
-            )
-        } else {
-            None
-        };
-
-        keys.iter()
-            .map(|k| {
-                let prefix = PersistentState::serialize_prefix(k);
-                let mut rows = Vec::new();
-
-                let is_unique = index.is_unique && !k.has_null();
-
-                iter.seek(&prefix); // Find the next key
-
-                while iter.key().map(|k| k.starts_with(&prefix)).unwrap_or(false) {
-                    let val = match &mut iter_primary {
-                        Some(iter_primary) => {
-                            // If we have a primary iterator, it means this is a secondary index and
-                            // we need to lookup by the primary key next
-                            iter_primary.seek(iter.value().unwrap());
-                            deserialize_row(iter_primary.value().unwrap())
-                        }
-                        None => deserialize_row(iter.value().unwrap()),
-                    };
-
-                    rows.push(val);
-
-                    if is_unique {
-                        // We know that there is only one row for this index
-                        break;
-                    }
-
-                    iter.next();
-                }
-
-                RecordResult::Owned(rows)
-            })
-            .collect()
-    }
-
-    /// Looks up rows in an index
-    /// If the index is the primary index, the lookup gets the rows from the primary index directly.
-    /// If the index is a secondary index, we will first lookup the primary index keys from that
-    /// secondary index, then perform a lookup into the primary index
-    fn do_lookup(&self, columns: &[usize], key: &PointKey) -> Option<Vec<Vec<DfValue>>> {
-        let inner = self.inner();
-        if self.replication_offset < inner.replication_offset {
-            // We are checking the replication offset under a read lock, and the lock remains in
-            // place until after the read completed, guaranteeing that no write takes place. An
-            // alternative would be to use a transaction that reads the log offset from the meta
-            // with the value.
-            debug!("Consistency miss in PersistentStateHandle");
-            return None;
-        }
-        let index = inner.index(IndexType::HashMap, columns);
-
-        let db = &inner.db;
-        let cf = db.cf_handle(&index.column_family).unwrap();
-        let primary_cf = if !index.is_primary {
-            Some(db.cf_handle(PK_CF).unwrap())
-        } else {
-            None
-        };
-
-        let prefix = PersistentState::serialize_prefix(key);
-
-        if index.is_unique && !key.has_null() {
-            // This is a unique key, so we know there's only one row to retrieve
-            let value = db.get_pinned_cf(cf, &prefix).unwrap();
-            Some(match (value, primary_cf) {
-                (None, _) => vec![],
-                (Some(value), None) => vec![deserialize_row(value)],
-                (Some(pk), Some(primary_cf)) => vec![deserialize_row(
-                    db.get_pinned_cf(primary_cf, pk)
-                        .unwrap()
-                        .expect("Existing primary key"),
-                )],
-            })
-        } else {
-            // This could correspond to more than one value, so we'll use a prefix_iterator,
-            // for each row
-            let mut rows = Vec::new();
-            let mut opts = rocksdb::ReadOptions::default();
-            opts.set_prefix_same_as_start(true);
-
-            let mut iter = db.raw_iterator_cf_opt(cf, opts);
-            let mut iter_primary = primary_cf.map(|pcf| db.raw_iterator_cf(pcf));
-
-            iter.seek(&prefix);
-
-            while let Some(value) = iter.value() {
-                let raw_row = match &mut iter_primary {
-                    Some(iter_primary) => {
-                        iter_primary.seek(value);
-                        iter_primary.value().expect("Existing primary key")
-                    }
-                    None => value,
-                };
-
-                rows.push(deserialize_row(raw_row));
-                iter.next();
-            }
-
-            Some(rows)
-        }
-    }
-}
-
 impl fmt::Debug for PersistentState {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt.debug_struct("PersistentState")
@@ -812,7 +651,7 @@ impl State for PersistentState {
 
     fn tear_down(mut self) -> ReadySetResult<()> {
         let temp_dir = self._tmpdir.take();
-        let full_path = self.db.handle().path().to_path_buf();
+        let full_path = self.db.inner().db.path().to_path_buf();
         // We have to make the drop here so that rocksdb gets closed and frees
         // the file descriptors, so that we can remove the directory.
         // We can't implement this logic by implementing the `Drop` trait, because
@@ -901,14 +740,13 @@ impl State for PersistentStateHandle {
             return RangeLookupResult::Missing(vec![key.as_bound_pair()]);
         }
 
-        let db = &inner.db;
-
         let index = inner.index(IndexType::BTreeMap, columns);
         let is_primary = index.is_primary;
 
-        let cf = db.cf_handle(&index.column_family).unwrap();
+        let cf = inner.db.cf_handle(&index.column_family).unwrap();
 
-        let primary_cf = db
+        let primary_cf = inner
+            .db
             .cf_handle(PK_CF)
             .expect("Primary key column family not found");
 
@@ -928,7 +766,7 @@ impl State for PersistentStateHandle {
             _ => {}
         }
 
-        let mut iterator = db.raw_iterator_cf_opt(cf, opts);
+        let mut iterator = inner.db.raw_iterator_cf_opt(cf, opts);
 
         match lower {
             Bound::Included(k) => iterator.seek(k),
@@ -966,7 +804,7 @@ impl State for PersistentStateHandle {
                 keys.push(value.into());
 
                 if keys.len() == 128 {
-                    let primary_rows = db.batched_multi_get_cf(primary_cf, &keys, false);
+                    let primary_rows = inner.db.batched_multi_get_cf(primary_cf, &keys, false);
                     rows.extend(primary_rows.into_iter().map(|r| {
                         deserialize_row(r.expect("can't error on known primary key").unwrap())
                     }));
@@ -978,7 +816,7 @@ impl State for PersistentStateHandle {
 
         // After the iterator is done, still have to fetch the rows for the inclusive upper bound
         if let Some(end_key) = inclusive_end {
-            iterator = db.raw_iterator_cf(cf);
+            iterator = inner.db.raw_iterator_cf(cf);
             iterator.seek(&end_key);
             while let Some(cur_key) = iterator.key() {
                 if prefix_transform(cur_key) != end_key {
@@ -994,7 +832,7 @@ impl State for PersistentStateHandle {
         }
 
         if !keys.is_empty() {
-            let primary_rows = db.batched_multi_get_cf(primary_cf, &keys, false);
+            let primary_rows = inner.db.batched_multi_get_cf(primary_cf, &keys, false);
             rows.extend(
                 primary_rows.into_iter().map(|r| {
                     deserialize_row(r.expect("can't error on known primary key").unwrap())
@@ -1015,9 +853,11 @@ impl State for PersistentStateHandle {
 
     /// Returns a row count estimate from RocksDB.
     fn row_count(&self) -> usize {
-        let db = &self.handle();
-        let cf = db.cf_handle(PK_CF).unwrap();
-        db.property_int_value_cf(cf, "rocksdb.estimate-num-keys")
+        let inner = &self.inner();
+        let cf = inner.db.cf_handle(PK_CF).unwrap();
+        inner
+            .db
+            .property_int_value_cf(cf, "rocksdb.estimate-num-keys")
             .unwrap()
             .unwrap() as usize
     }
@@ -1537,15 +1377,13 @@ impl PersistentState {
         }
 
         let replication_offset = meta.replication_offset.map(|ro| ro.into_owned());
-        let read_handle = PersistentStateHandle {
-            inner: Arc::new(RwLock::new(SharedState {
-                db,
-                replication_offset: replication_offset.clone(),
-                wal_state: WalState::FlushedAndPersisted,
-                indices,
-            })),
-            replication_offset,
+        let shared_state = SharedState {
+            db,
+            replication_offset: replication_offset.clone(),
+            wal_state: WalState::FlushedAndPersisted,
+            indices,
         };
+        let read_handle = PersistentStateHandle::new(shared_state, replication_offset);
 
         let mut state = Self {
             name,
@@ -1593,8 +1431,8 @@ impl PersistentState {
 
             self.db.inner_mut().indices.push(persistent_index);
             let meta = self.meta();
-            self.db.handle().save_meta(&meta);
-            self.db.handle_mut().create_cf(
+            self.db.inner().db.save_meta(&meta);
+            self.db.inner_mut().db.create_cf(
                 PK_CF,
                 &index_params.make_rocksdb_options(&self.default_options),
             )?;
@@ -1623,7 +1461,7 @@ impl PersistentState {
 
         self.db.inner_mut().indices.push(persistent_index.clone());
         let meta = self.meta();
-        self.db.handle().save_meta(&meta);
+        self.db.inner().db.save_meta(&meta);
         self.db
             .inner_mut()
             .db
@@ -1633,13 +1471,12 @@ impl PersistentState {
             )
             .unwrap();
 
-        let db = self.db.handle();
-        let cf = db.cf_handle(&cf_name).unwrap();
+        let inner = self.db.inner();
+        let cf = inner.db.cf_handle(&cf_name).unwrap();
 
         // Prevent autocompactions while we reindex the table
-        if let Err(err) = self
+        if let Err(err) = inner
             .db
-            .handle()
             .set_options_cf(cf, &[("disable_auto_compactions", "true")])
         {
             error!(%err, "Error setting cf options");
@@ -1649,12 +1486,12 @@ impl PersistentState {
         opts.disable_wal(true);
 
         // We know a primary index exists, which is why unwrap is fine
-        let primary_cf = db.cf_handle(PK_CF).unwrap();
+        let primary_cf = inner.db.cf_handle(PK_CF).unwrap();
         // Because we aren't doing a prefix seek, we must set total order first
         let mut read_opts = rocksdb::ReadOptions::default();
         read_opts.set_total_order_seek(true);
 
-        let mut iter = db.raw_iterator_cf_opt(primary_cf, read_opts);
+        let mut iter = inner.db.raw_iterator_cf_opt(primary_cf, read_opts);
         iter.seek_to_first();
         // We operate in batches to improve performance
         while iter.valid() {
@@ -1681,17 +1518,17 @@ impl PersistentState {
                 iter.next();
             }
 
-            db.write_opt(batch, &opts).unwrap();
+            inner.db.write_opt(batch, &opts).unwrap();
         }
 
         info!("Base compacting secondary index");
 
         // Flush just in case
-        db.flush_cf(cf).unwrap();
+        inner.db.flush_cf(cf).unwrap();
         // Manually compact the newly created column family
         let mut opts = CompactOptions::default();
         opts.set_exclusive_manual_compaction(false);
-        compact_cf(&self.name, &db, &persistent_index, &opts);
+        compact_cf(&self.name, &inner.db, &persistent_index, &opts);
         info!("Base finished compacting secondary index");
     }
 
@@ -1762,6 +1599,7 @@ impl PersistentState {
         for index in indices.iter() {
             let cf_name = index.column_family.as_str();
             db.drop_cf(cf_name).unwrap();
+
             db.create_cf(
                 cf_name,
                 &IndexParams::from(&index.index).make_rocksdb_options(&self.default_options),
@@ -1802,7 +1640,7 @@ impl PersistentState {
                         column_family = %index.column_family
                     );
                     let _guard = span.enter();
-                    compact_cf(&table, &read_handle.handle(), &index, &thread_opts);
+                    compact_cf(&table, &read_handle.inner().db, &index, &thread_opts);
                 })
                 .expect("spawn_wrapper failure");
 
@@ -1828,13 +1666,12 @@ impl PersistentState {
     /// operation and is therefore guaranteed to be atomic.
     fn insert(&mut self, batch: &mut WriteBatch, r: &[DfValue]) -> ReadySetResult<()> {
         let inner = self.db.inner();
-        let db = &inner.db;
         let primary_index = inner
             .indices
             .first()
             .ok_or_else(|| internal_err!("Insert on un-indexed state"))?;
         let primary_key = build_key(r, &primary_index.index.columns);
-        let primary_cf = db.cf_handle(&primary_index.column_family).unwrap();
+        let primary_cf = inner.db.cf_handle(&primary_index.column_family).unwrap();
 
         // Generate a new primary key by extracting the key columns from the provided row
         // using the primary index and serialize it as RocksDB prefix.
@@ -1855,7 +1692,7 @@ impl PersistentState {
         // Then insert the value for all the secondary indices:
         for index in inner.indices[1..].iter() {
             // Construct a key with the index values, and serialize it with bincode:
-            let cf = db.cf_handle(&index.column_family).unwrap();
+            let cf = inner.db.cf_handle(&index.column_family).unwrap();
             let key = build_key(r, &index.index.columns);
 
             if index.is_unique && !key.has_null() {
@@ -1874,14 +1711,13 @@ impl PersistentState {
 
     fn remove(&self, batch: &mut WriteBatch, r: &[DfValue]) -> ReadySetResult<()> {
         let inner = self.db.inner();
-        let db = &inner.db;
 
         let primary_index = inner
             .indices
             .first()
             .ok_or_else(|| internal_err!("Delete on un-indexed state"))?;
         let primary_key = build_key(r, &primary_index.index.columns);
-        let primary_cf = db.cf_handle(&primary_index.column_family).unwrap();
+        let primary_cf = inner.db.cf_handle(&primary_index.column_family).unwrap();
 
         let prefix = Self::serialize_prefix(&primary_key);
 
@@ -1892,7 +1728,7 @@ impl PersistentState {
             // This is key is not unique, therefore we have to iterate over the
             // the values, looking for the first one that matches the full row
             // and then return the (full length) unique primary key associated with it
-            let mut iter = db.raw_iterator_cf(primary_cf);
+            let mut iter = inner.db.raw_iterator_cf(primary_cf);
             iter.seek(&prefix); // Find the first key
 
             loop {
@@ -1922,7 +1758,7 @@ impl PersistentState {
                 // the *exact* same row from each family
                 Self::serialize_secondary(&key, &serialized_pk)
             };
-            let cf = db.cf_handle(&index.column_family).unwrap();
+            let cf = inner.db.cf_handle(&index.column_family).unwrap();
             batch.delete_cf(cf, &serialized_key);
         }
 
@@ -1965,7 +1801,7 @@ impl PersistentState {
         {
             write_options.disable_wal(true);
         } else {
-            let db = &self.db.handle();
+            let inner = &self.db.inner();
             if self.snapshot_mode.is_enabled() && replication_offset.is_some() {
                 // We are setting the replication offset, which is great, but all of our previous
                 // writes are not guaranteed to flush to disk even if the next write is synced. We
@@ -1976,12 +1812,16 @@ impl PersistentState {
                 // options.sync=true,    will it persist the previous write too?
                 // A: No. After the program crashes, writes with option.disableWAL=true will be
                 // lost, if they are not flushed to SST files.
-                for index in self.db.inner().indices.iter() {
-                    db.flush_cf(db.cf_handle(&index.column_family).unwrap())
+                for index in inner.indices.iter() {
+                    inner
+                        .db
+                        .flush_cf(inner.db.cf_handle(&index.column_family).unwrap())
                         .map_err(|e| internal_err!("Flush to disk failed: {e}"))?;
                 }
 
-                db.flush()
+                inner
+                    .db
+                    .flush()
                     .map_err(|e| internal_err!("Flush to disk failed: {e}"))?;
             }
             write_options.set_sync(true);
@@ -1992,7 +1832,8 @@ impl PersistentState {
         }
 
         self.db
-            .handle()
+            .inner()
+            .db
             .write_opt(batch, &write_options)
             .map_err(|e| internal_err!("Write failed: {e}"))?;
 
