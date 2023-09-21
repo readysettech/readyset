@@ -1884,6 +1884,17 @@ where
         ))
     }
 
+    fn readyset_adapter_status(&self) -> ReadySetResult<noria_connector::QueryResult<'static>> {
+        let statuses = match self.metrics_handle.as_ref() {
+            Some(handle) => handle.readyset_status(),
+            None => vec![],
+        };
+
+        Ok(noria_connector::QueryResult::MetaVariables(
+            statuses.into_iter().map(MetaVariable::from).collect(),
+        ))
+    }
+
     async fn query_noria_extensions<'a>(
         &'a mut self,
         query: &'a SqlQuery,
@@ -1969,7 +1980,7 @@ where
             }
             SqlQuery::Show(ShowStatement::ReadySetStatus) => {
                 // Add upstream connectivity status
-                let mut additional_meta = if let Some(upstream) = &mut self.upstream {
+                let additional_meta = if let Some(upstream) = &mut self.upstream {
                     let connection_status = upstream
                         .is_connected()
                         .await
@@ -1980,15 +1991,11 @@ where
                     vec![]
                 };
 
-                if let Some(handle) = self.metrics_handle.as_ref() {
-                    let mut statuses = handle.readyset_status();
-                    additional_meta.append(&mut statuses);
-                }
-
                 self.noria
                     .readyset_status(&self.authority, additional_meta)
                     .await
             }
+            SqlQuery::Show(ShowStatement::ReadySetStatusAdapter) => self.readyset_adapter_status(),
             SqlQuery::Show(ShowStatement::ReadySetMigrationStatus(id)) => {
                 self.noria.migration_status(*id).await
             }
