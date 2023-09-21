@@ -309,7 +309,7 @@
       "targets": [
         {
           "exemplar": false,
-          "expr": "readyset_query_log_execution_time{quantile=~\"0.5\",database_type=\"readyset\",deployment=\"$deployment\",query_id=\"${queryfilter:raw}\",instance=\"cache:6033\"} * 1000",
+          "expr": "readyset_query_log_execution_time{quantile=~\"0.5\",database_type=\"readyset\",deployment=\"$deployment\",query_id=\"${queryfilter:raw}\",instance=\"cache:6034\"} * 1000",
           "format": "time_series",
           "hide": false,
           "instant": false,
@@ -319,7 +319,7 @@
         },
         {
           "exemplar": true,
-          "expr": "readyset_query_log_execution_time{quantile=~\"0.5\",database_type=\"mysql\",deployment=\"$deployment\",query_id=\"${queryfilter:raw}\",instance=\"cache:6033\"} * 1000",
+          "expr": "readyset_query_log_execution_time{quantile=~\"0.5\",database_type=\"mysql\",deployment=\"$deployment\",query_id=\"${queryfilter:raw}\",instance=\"cache:6034\"} * 1000",
           "format": "time_series",
           "hide": false,
           "instant": false,
@@ -428,7 +428,7 @@
       "targets": [
         {
           "exemplar": false,
-          "expr": "readyset_query_log_execution_time{quantile=~\"0.9\",database_type=\"readyset\",deployment=\"$deployment\",query_id=\"${queryfilter:raw}\",instance=\"cache:6033\"} * 1000",
+          "expr": "readyset_query_log_execution_time{quantile=~\"0.9\",database_type=\"readyset\",deployment=\"$deployment\",query_id=\"${queryfilter:raw}\",instance=\"cache:6034\"} * 1000",
           "format": "time_series",
           "hide": false,
           "instant": false,
@@ -438,7 +438,7 @@
         },
         {
           "exemplar": true,
-          "expr": "readyset_query_log_execution_time{quantile=~\"0.9\",database_type=\"mysql\",deployment=\"$deployment\",query_id=\"${queryfilter:raw}\",instance=\"cache:6033\"} * 1000",
+          "expr": "readyset_query_log_execution_time{quantile=~\"0.9\",database_type=\"mysql\",deployment=\"$deployment\",query_id=\"${queryfilter:raw}\",instance=\"cache:6034\"} * 1000",
           "format": "time_series",
           "hide": false,
           "instant": false,
@@ -547,7 +547,7 @@
       "targets": [
         {
           "exemplar": false,
-          "expr": "readyset_query_log_execution_time{quantile=~\"0.99\",database_type=\"readyset\",deployment=\"$deployment\",query_id=\"${queryfilter:raw}\",instance=\"cache:6033\"} * 1000",
+          "expr": "readyset_query_log_execution_time{quantile=~\"0.99\",database_type=\"readyset\",deployment=\"$deployment\",query_id=\"${queryfilter:raw}\",instance=\"cache:6034\"} * 1000",
           "format": "time_series",
           "hide": false,
           "instant": false,
@@ -557,7 +557,7 @@
         },
         {
           "exemplar": true,
-          "expr": "readyset_query_log_execution_time{quantile=~\"0.99\",database_type=\"mysql\",deployment=\"$deployment\",query_id=\"${queryfilter:raw}\",instance=\"cache:6033\"} * 1000",
+          "expr": "readyset_query_log_execution_time{quantile=~\"0.99\",database_type=\"mysql\",deployment=\"$deployment\",query_id=\"${queryfilter:raw}\",instance=\"cache:6034\"} * 1000",
           "format": "time_series",
           "hide": false,
           "instant": false,
@@ -673,7 +673,7 @@
       "targets": [
         {
           "exemplar": false,
-          "expr": "readyset_query_log_execution_time_count{deployment=\"$deployment\", query_id=\"${queryfilter:raw}\",instance=\"cache:6033\",database_type=\"mysql\"}",
+          "expr": "readyset_query_log_execution_time_count{deployment=\"$deployment\", query_id=\"${queryfilter:raw}\",instance=\"cache:6034\",database_type=\"mysql\"}",
           "instant": false,
           "interval": "",
           "legendFormat": "{{upstream_db_type}}",
@@ -681,7 +681,7 @@
         },
         {
           "exemplar": true,
-          "expr": "readyset_query_log_execution_time_count{deployment=\"$deployment\", query_id=\"${queryfilter:raw}\",instance=\"cache:6033\",database_type=\"readyset\"}",
+          "expr": "readyset_query_log_execution_time_count{deployment=\"$deployment\", query_id=\"${queryfilter:raw}\",instance=\"cache:6034\",database_type=\"readyset\"}",
           "hide": false,
           "interval": "",
           "legendFormat": "ReadySet",
@@ -866,14 +866,14 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "rate(readyset_query_log_execution_time_count{deployment=\"$deployment\", query_id=\"${queryfilter:raw}\",instance=\"cache:6033\",database_type=\"mysql\"}[$__rate_interval])",
+          "expr": "rate(readyset_query_log_execution_time_count{deployment=\"$deployment\", query_id=\"${queryfilter:raw}\",instance=\"cache:6034\",database_type=\"mysql\"}[$__rate_interval])",
           "interval": "",
           "legendFormat": "Queries Per Second ({{upstream_db_type}})",
           "refId": "A"
         },
         {
           "exemplar": true,
-          "expr": "rate(readyset_query_log_execution_time_count{deployment=\"$deployment\", query_id=\"${queryfilter:raw}\",instance=\"cache:6033\",database_type=\"readyset\"}[$__rate_interval])",
+          "expr": "rate(readyset_query_log_execution_time_count{deployment=\"$deployment\", query_id=\"${queryfilter:raw}\",instance=\"cache:6034\",database_type=\"readyset\"}[$__rate_interval])",
           "hide": false,
           "interval": "",
           "legendFormat": "Queries Per Second (ReadySet)",

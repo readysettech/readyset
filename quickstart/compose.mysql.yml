@@ -3,12 +3,12 @@ services:
   cache:
     image: docker.io/readysettech/readyset:latest
     platform: linux/amd64
-    expose:
-      - 6033  # ReadySet Server Prometheus metrics at http://readyset:6033/metrics
-      - 6034  # ReadySet Adapter Prometheus metrics at http://readyset:6034/metrics
     ports:
       # The ReadySet Adapter listen port, i.e. what your application / SQL shell connects to
       - "3307:3307"
+      # ReadySet Prometheus metrics available at http://localhost:6034/metrics
+      # e.g. curl -X GET http://localhost:6034/metrics
+      - "6034:6034"
     environment:
       DEPLOYMENT_ENV: quickstart_docker
       DB_DIR: /state
@@ -24,7 +24,7 @@ services:
     volumes:
       - "readyset:/state"
     healthcheck:
-      test: [ "CMD", "curl", "--fail", "127.0.0.1:6033/health" ]
+      test: [ "CMD", "curl", "--fail", "127.0.0.1:6034/health" ]
       interval: 2s
       timeout: 1s
       retries: 5
