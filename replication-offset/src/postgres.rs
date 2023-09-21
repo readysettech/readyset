@@ -36,6 +36,16 @@ impl PostgresPosition {
         }
     }
 
+    /// Constructs a [`PostgresPosition`] from a [`CommitLsn`] that points to the end position in
+    /// the given commit. In other words, this method constructs a [`PostgresPosition`] that points
+    /// to `(commit_lsn, commit_lsn)`.
+    pub fn commit_end(commit_lsn: CommitLsn) -> Self {
+        Self {
+            commit_lsn,
+            lsn: Lsn(commit_lsn.0),
+        }
+    }
+
     /// Consumes `self`, constructing a new [`PostgresPosition`] with `self`'s [`CommitLsn`] and the
     /// given [`Lsn`].
     pub fn with_lsn(self, lsn: impl Into<Lsn>) -> Self {
