@@ -96,6 +96,7 @@ tournament-kway = { path = "../tournament-kway" }
 nom-sql = { path = "../nom-sql" }
 readyset-sql-passes = { path = "../readyset-sql-passes" }
 replication-offset = { path = "../replication-offset" }
+regex = "1.9.5"
 
 [dev-dependencies]
 serial_test = "0.5.1"

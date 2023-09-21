@@ -1569,17 +1569,25 @@ mod tests {
             Vec::<String>::new()
         );
 
-        const STMTS: &[&str] = &["a", "b", "c", "d", "e", "f"];
-        let mut futs = STMTS
+        let mut stmts: Vec<String> = vec![
+            r#"CREATE CACHE CONCURRENTLY ALWAYS "a" FROM SELECT * FROM foo"#,
+            r#"CREATE CACHE CONCURRENTLY "b" FROM SELECT * FROM bar"#,
+            r#"CREATE CACHE CONCURRENTLY "c" FROM SELECT * FROM baz"#,
+            r#"CREATE CACHE CONCURRENTLY "d" FROM SELECT * FROM bat"#,
+            r#"CREATE CACHE CONCURRENTLY "e" FROM SELECT * FROM quux"#,
+            r#"CREATE CACHE CONCURRENTLY "f" FROM SELECT * FROM corge"#,
+        ]
+        .into_iter()
+        .map(|s| s.to_owned())
+        .collect();
+        let mut futs = stmts
             .iter()
             .map(|stmt| {
                 let authority = authority.clone();
-                tokio::spawn(async move {
-                    authority
-                        .add_create_cache_statements([(*stmt).to_owned()])
-                        .await
-                        .unwrap()
-                })
+                let stmt = stmt.clone();
+                tokio::spawn(
+                    async move { authority.add_create_cache_statements([stmt]).await.unwrap() },
+                )
             })
             .collect::<FuturesUnordered<_>>();
 
@@ -1587,8 +1595,89 @@ mod tests {
             res.unwrap();
         }
 
-        let mut stmts = authority.create_cache_statements().await.unwrap();
+        let mut loaded = authority.create_cache_statements().await.unwrap();
         stmts.sort();
-        assert_eq!(stmts, STMTS);
+        loaded.sort();
+        assert_eq!(loaded, stmts);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn remove_cache_statements() {
+        let authority_address = test_authority_address("remove_cache_statement");
+        let authority = Arc::new(ConsulAuthority::new(&authority_address).unwrap());
+        authority.init().await.unwrap();
+        authority.delete_all_keys().await;
+
+        let mut stmts: Vec<String> = vec![
+            r#"CREATE CACHE CONCURRENTLY ALWAYS "a" FROM SELECT * FROM foo"#,
+            r#"CREATE CACHE CONCURRENTLY "b" FROM SELECT * FROM bar"#,
+            r#"CREATE CACHE CONCURRENTLY "c" FROM SELECT * FROM baz"#,
+            r#"CREATE CACHE CONCURRENTLY "d" FROM SELECT * FROM bat"#,
+            r#"CREATE CACHE CONCURRENTLY "e" FROM SELECT * FROM quux"#,
+            r#"CREATE CACHE CONCURRENTLY "f" FROM SELECT * FROM corge"#,
+        ]
+        .into_iter()
+        .map(|s| s.to_owned())
+        .collect();
+
+        let mut cache_names: Vec<String> = ["a", "b", "c", "d", "e", "f"]
+            .into_iter()
+            .map(|s| s.to_owned())
+            .collect();
+
+        authority
+            .add_create_cache_statements(stmts.clone())
+            .await
+            .unwrap();
+        let loaded = authority.create_cache_statements().await.unwrap();
+        assert_eq!(loaded, stmts);
+
+        while !cache_names.is_empty() {
+            authority
+                .remove_create_cache_statement(cache_names[0].clone())
+                .await
+                .unwrap();
+            cache_names.remove(0);
+            stmts.remove(0);
+            let loaded = authority.create_cache_statements().await.unwrap();
+            assert_eq!(loaded, stmts);
+        }
+    }
+
+    #[tokio::test]
+    async fn remove_all_caches() {
+        let authority_address = test_authority_address("remove_cache_statement");
+        let authority = Arc::new(ConsulAuthority::new(&authority_address).unwrap());
+        authority.init().await.unwrap();
+        authority.delete_all_keys().await;
+
+        let mut stmts: Vec<String> = vec![
+            r#"CREATE CACHE CONCURRENTLY ALWAYS "a" FROM SELECT * FROM foo"#,
+            r#"CREATE CACHE CONCURRENTLY "b" FROM SELECT * FROM bar"#,
+            r#"CREATE CACHE CONCURRENTLY "c" FROM SELECT * FROM baz"#,
+            r#"CREATE CACHE CONCURRENTLY "d" FROM SELECT * FROM bat"#,
+            r#"CREATE CACHE CONCURRENTLY "e" FROM SELECT * FROM quux"#,
+            r#"CREATE CACHE CONCURRENTLY "f" FROM SELECT * FROM corge"#,
+        ]
+        .into_iter()
+        .map(|s| s.to_owned())
+        .collect();
+        authority
+            .add_create_cache_statements(stmts.clone())
+            .await
+            .unwrap();
+        let loaded = authority.create_cache_statements().await.unwrap();
+        assert_eq!(loaded, stmts);
+
+        authority
+            .remove_all_create_cache_statements()
+            .await
+            .unwrap();
+        let mut loaded = authority.create_cache_statements().await.unwrap();
+        stmts.sort();
+        loaded.sort();
+
+        assert!(loaded.is_empty());
     }
 }

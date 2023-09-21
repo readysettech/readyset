@@ -2,6 +2,7 @@
 //! which ReadySet worker acts as the controller, which ReadySet workers exist, detecting failed
 //! workers which necessitate changes, and storing cluster wide global state.
 
+use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{self, Display};
 use std::net::SocketAddr;
@@ -12,6 +13,7 @@ use async_trait::async_trait;
 use clap::ValueEnum;
 use enum_dispatch::enum_dispatch;
 use readyset_errors::{ReadySetError, ReadySetResult};
+use regex::Regex;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -242,12 +244,57 @@ pub trait AuthorityControl: Send + Sync {
     ///
     /// These are stored separately from the controller state so that it's always available, using
     /// backwards-compatible serialization, for if the controller state can't be deserialized
+    ///
+    /// `new_stmts` must include the cache name in order for them to be removable.
     async fn add_create_cache_statements<I>(&self, new_stmts: I) -> ReadySetResult<()>
     where
         I: IntoIterator<Item = String> + Clone + Send,
     {
+        debug_assert!({
+            let required_prefix =
+                Regex::new(r#"^CREATE CACHE CONCURRENTLY (ALWAYS )?".*" FROM"#).unwrap();
+            new_stmts
+                .clone()
+                .into_iter()
+                .all(|ref stmt| required_prefix.is_match(stmt))
+        });
+
         modify_create_cache_statements(self, move |stmts| {
             stmts.extend(new_stmts.clone());
+        })
+        .await
+    }
+
+    /// Removes the provided `CREATE CACHE` statement from the list we store. This is called along
+    /// with a `DROP CACHE` operation
+    ///
+    /// We rely on the cache name being included for removal. Doing this in a string pattern match
+    /// allows the stored `create cache` statements to remain backwards compatible even if the
+    /// `CreateCache` struct's serialization format itself changes.
+    async fn remove_create_cache_statement<I>(&self, cache_name: I) -> ReadySetResult<()>
+    where
+        I: std::hash::Hash + Eq + Clone + Send + std::fmt::Display,
+        String: Borrow<I>,
+    {
+        modify_create_cache_statements(self, move |stmts| {
+            stmts.retain(|stmt| {
+                !(stmt.starts_with(&format!(
+                    "CREATE CACHE CONCURRENTLY \"{}\"",
+                    cache_name.borrow()
+                )) || stmt.starts_with(&format!(
+                    "CREATE CACHE CONCURRENTLY ALWAYS \"{}\"",
+                    cache_name.borrow()
+                )))
+            });
+        })
+        .await
+    }
+
+    /// Removes all stored `CREATE CACHE STATEMENTS`
+    /// Called from a `DROP ALL CACHES` operation
+    async fn remove_all_create_cache_statements(&self) -> ReadySetResult<()> {
+        modify_create_cache_statements(self, move |stmts| {
+            stmts.clear();
         })
         .await
     }
