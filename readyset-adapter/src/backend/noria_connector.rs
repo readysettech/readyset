@@ -19,7 +19,7 @@ use readyset_client::{
     ColumnSchema, ReadQuery, ReaderAddress, ReaderHandle, ReadySetHandle, SchemaType, Table,
     TableOperation, View, ViewCreateRequest, ViewQuery,
 };
-use readyset_data::{DfType, DfValue, Dialect};
+use readyset_data::{DfType, DfValue, Dialect, TimestampTz};
 use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
 use readyset_errors::{
     internal, internal_err, invalid_query, invariant_eq, table_err, unsupported, unsupported_err,
@@ -957,9 +957,9 @@ impl NoriaConnector {
             };
 
         // Helper function for formatting
-        fn val_or_null<T: ToString>(val: Option<T>) -> String {
-            if let Some(v) = val {
-                v.to_string()
+        fn time_or_null(time_ms: Option<u64>) -> String {
+            if let Some(t) = time_ms {
+                TimestampTz::from_unix_ms(t).to_string()
             } else {
                 "NULL".to_string()
             }
@@ -968,15 +968,15 @@ impl NoriaConnector {
         if let Ok(Some(stats)) = authority.persistent_stats().await {
             status.push((
                 "Last started Controller".to_string(),
-                val_or_null(stats.last_controller_startup),
+                time_or_null(stats.last_controller_startup),
             ));
             status.push((
                 "Last completed snapshot".to_string(),
-                val_or_null(stats.last_completed_snapshot),
+                time_or_null(stats.last_completed_snapshot),
             ));
             status.push((
                 "Last started replication".to_string(),
-                val_or_null(stats.last_started_replication),
+                time_or_null(stats.last_started_replication),
             ));
             if let Some(err) = stats.last_replicator_error {
                 status.push(("Last replicator error".to_string(), err))

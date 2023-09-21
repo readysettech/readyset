@@ -63,6 +63,16 @@ impl TimestampTz {
     const NEGATIVE_FLAG: u8 = 0b_0000_0010;
     const TOP_OFFSET_BIT: u8 = 0b_0000_0001;
 
+    #[inline(always)]
+    /// Constructs a [`TimestampTz`] when provided with the number of ms since the unix epoch.
+    pub fn from_unix_ms(time_ms: u64) -> Self {
+        let (secs, ns) = (
+            (time_ms / 1000) as i64,
+            ((time_ms % 1000) * 1_000 * 1_000) as u32,
+        );
+        Self::from(NaiveDateTime::from_timestamp(secs, ns))
+    }
+
     /// Returns true if the contained offset should be negated
     #[inline(always)]
     fn has_negative_offset(&self) -> bool {
