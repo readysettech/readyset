@@ -629,7 +629,7 @@ impl Expr {
                 }
                 write!(f, ")")
             }
-            Expr::Variable(var) => write!(f, "{}", var.display(dialect)),
+            Expr::Variable(var) => write!(f, "{}", var),
         })
     }
 }
