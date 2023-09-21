@@ -232,6 +232,7 @@ impl NoriaAdapter {
                     config,
                     notification_channel,
                     resnapshot,
+                    full_snapshot,
                     &telemetry_sender,
                     tls_connector,
                     pool,
@@ -473,6 +474,7 @@ impl NoriaAdapter {
         mut config: UpstreamConfig,
         notification_channel: &UnboundedSender<ReplicatorMessage>,
         resnapshot: bool,
+        full_resnapshot: bool,
         telemetry_sender: &TelemetrySender,
         tls_connector: MakeTlsConnector,
         pool: deadpool_postgres::Pool,
@@ -543,6 +545,7 @@ impl NoriaAdapter {
                 tls_connector.clone(),
                 &repl_slot_name,
                 enable_statement_logging,
+                full_resnapshot,
             )
             .await?,
         );
@@ -552,7 +555,7 @@ impl NoriaAdapter {
         let resnapshot_slot_name = format!("{}_{}", RESNAPSHOT_SLOT, repl_slot_name);
         let replication_slot = if let Some(slot) = &connector.replication_slot {
             Some(slot.clone())
-        } else if resnapshot || pos.is_none() {
+        } else if full_resnapshot || resnapshot || pos.is_none() {
             // This is not an initial connection but we need to resnapshot the latest schema,
             // therefore we create a new replication slot, just so we can get a consistent snapshot
             // with a WAL position attached. This is more robust than locking and allows us to reuse
@@ -603,7 +606,7 @@ impl NoriaAdapter {
                     // need to resnapshot *all* tables, because we just dropped the replication slot
                     // above, which prevents us from replicating any writes to tables we do have a
                     // replication offset for that happened while we weren't running.
-                    /* full_snapshot = */ pos.is_none()
+                    /* full_snapshot = */ pos.is_none() || full_resnapshot
                 ).fuse() =>  {
                     let status = if snapshot_result.is_err() {
                         SnapshotStatusTag::Failed.value()

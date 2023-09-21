@@ -111,6 +111,7 @@ impl PostgresWalConnector {
 
     /// Connects to postgres and if needed creates a new replication slot for itself with an
     /// exported snapshot.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn connect<S: AsRef<str>>(
         mut pg_config: pgsql::Config,
         dbname: S,
@@ -119,6 +120,7 @@ impl PostgresWalConnector {
         tls_connector: MakeTlsConnector,
         repl_slot_name: &str,
         enable_statement_logging: bool,
+        full_resnapshot: bool,
     ) -> ReadySetResult<Self> {
         if !config.disable_setup_ddl_replication {
             setup_ddl_replication(pg_config.clone(), tls_connector.clone()).await?;
@@ -152,9 +154,9 @@ impl PostgresWalConnector {
             in_transaction: false,
         };
 
-        if next_position.is_none() {
-            // If we don't have a consistent replication offset to start replicating from, drop and
-            // recreate our replication slot.
+        if full_resnapshot || next_position.is_none() {
+            // If we don't have a consistent replication offset to start replicating from or if we
+            // need to perform a full resnapshot, drop and recreate our replication slot.
             //
             // Note that later on, this means we'll need to make sure we resnapshot *all* tables!
             connector
