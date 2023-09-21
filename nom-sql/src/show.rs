@@ -25,6 +25,7 @@ pub enum ShowStatement {
     CachedQueries(Option<QueryID>),
     ProxiedQueries(ProxiedQueriesOptions),
     ReadySetStatus,
+    ReadySetStatusAdapter,
     ReadySetMigrationStatus(u64),
     ReadySetVersion,
     ReadySetTables,
@@ -56,6 +57,7 @@ impl ShowStatement {
                     }
                 }
                 Self::ReadySetStatus => write!(f, "READYSET STATUS"),
+                Self::ReadySetStatusAdapter => write!(f, "READYSET STATUS ADAPTER"),
                 Self::ReadySetMigrationStatus(id) => write!(f, "READYSET MIGRATION STATUS {}", id),
                 Self::ReadySetVersion => write!(f, "READYSET VERSION"),
                 Self::ReadySetTables => write!(f, "READYSET TABLES"),
@@ -116,6 +118,26 @@ fn proxied_queries(
     }
 }
 
+/// Parses READYSET STATUS and any READYSET STATUS <COMMAND> statements.
+fn readyset_status() -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ShowStatement> {
+    move |i| {
+        let (i, _) = tag_no_case("readyset")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("status")(i)?;
+
+        // check to see if there's any (optional) command after "status"
+        let (i, statement) = opt(value(
+            ShowStatement::ReadySetStatusAdapter,
+            tuple((whitespace1, tag_no_case("adapter"))),
+        ))(i)?;
+
+        match statement {
+            Some(s) => Ok((i, s)),
+            None => Ok((i, ShowStatement::ReadySetStatus)),
+        }
+    }
+}
+
 /// Parses READYSET MIGRATION STATUS <u64_id>
 pub fn readyset_migration_status(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ShowStatement> {
     let (i, _) = tag_no_case("readyset")(i)?;
@@ -136,10 +158,7 @@ pub fn show(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u
             cached_queries(dialect),
             proxied_queries(dialect),
             readyset_migration_status,
-            value(
-                ShowStatement::ReadySetStatus,
-                tuple((tag_no_case("readyset"), whitespace1, tag_no_case("status"))),
-            ),
+            readyset_status(),
             value(
                 ShowStatement::ReadySetVersion,
                 tuple((tag_no_case("readyset"), whitespace1, tag_no_case("version"))),
