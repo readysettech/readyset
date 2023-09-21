@@ -8,6 +8,7 @@ use quanta::Instant;
 // adding an alias to disambiguate vs readyset_client_metrics::recorded
 use readyset_client::metrics::recorded as client_recorded;
 use readyset_client_metrics::recorded::QUERY_LOG_EXECUTION_TIME;
+use readyset_data::TimestampTz;
 
 #[derive(Debug, Default, Clone)]
 pub struct MetricsSummary {
@@ -110,17 +111,10 @@ impl MetricsHandle {
     }
 
     fn sum_counter(&self, name: &str) -> u64 {
-        let results = self.counters(Some(|x: &str| x.eq(name)));
-        match results.get(name) {
-            Some(res) => {
-                let mut f = 0;
-                for (_, v) in res.iter() {
-                    f += v;
-                }
-                f
-            }
-            None => 0,
-        }
+        self.counters(Some(|x: &str| x.eq(name)))
+            .get(name)
+            .map(|res| res.values().sum())
+            .unwrap_or(0)
     }
 
     /// Gather all the metrics that are relevant to be printed with
@@ -128,8 +122,9 @@ impl MetricsHandle {
     pub fn readyset_status(&self) -> Vec<(String, String)> {
         let mut statuses = Vec::new();
 
-        let val = self.sum_counter(client_recorded::NORIA_STARTUP_TIMESTAMP);
-        statuses.push(("Process start time".to_string(), val.to_string()));
+        let time_ms = self.sum_counter(client_recorded::NORIA_STARTUP_TIMESTAMP);
+        let time = TimestampTz::from_unix_ms(time_ms);
+        statuses.push(("Process start time".to_string(), time.to_string()));
 
         let val = self.sum_counter(readyset_client_metrics::recorded::QUERY_LOG_PARSE_ERRORS);
         statuses.push(("Query parse failures".to_string(), val.to_string()));
