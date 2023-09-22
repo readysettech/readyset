@@ -25,14 +25,36 @@ macro_rules! test_parse {
 }
 
 #[cfg(test)]
+/// Generates a round-trip test that displays and then parses a provided type with a provided
+/// parser.
+///
+/// Optionally, a prop_assume!() can be injected by providing a closure fn over the type that
+/// returns a boolean
+///
+/// For example, to limit the `Variable` generation to only those with SqlIdentifiers that are
+/// parseable (so keywords will be rejected):
+/// ```
+/// rt_variable(variable, Variable, Dialect::PostgreSQL, {
+///     |s: &Variable| {
+///         let name = s.name.to_string();
+///         Dialect::PostgreSQL
+///             .identifier()
+///             .map(|ident| ident.to_ascii_lowercase())
+///             .parse(LocatedSpan::new(name.as_bytes()))
+///             .is_ok()
+///     }
+/// });
+/// ```
 macro_rules! test_format_parse_round_trip {
-    ($($name:ident($parser: expr, $type: ty, $dialect: expr);)+) => {
-        $(test_format_parse_round_trip!(@impl, $name, $parser, $type, $dialect);)+
+    ($($name:ident($parser: expr, $type: ty, $dialect: expr $(, $prop_assume_fn: block)?);)+) => {
+        $(test_format_parse_round_trip!(@impl, $name, $parser, $type, $dialect $(, $prop_assume_fn)?);)+
     };
 
-    (@impl, $name: ident, $parser: expr, $type: ty, $dialect: expr) => {
+    (@impl, $name: ident, $parser: expr, $type: ty, $dialect: expr $(, $prop_assume_fn: block)? ) => {
         #[test_strategy::proptest]
         fn $name(s: $type) {
+            $(proptest::prop_assume!($prop_assume_fn(&s));)?
+
             let displayed = s.display($dialect).to_string();
             // Do one extra format->parse trip to deal with things that are ambiguous at the
             // Display level.
