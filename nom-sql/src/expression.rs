@@ -631,7 +631,7 @@ impl DialectDisplay for Expr {
                 }
                 write!(f, ")")
             }
-            Expr::Variable(var) => write!(f, "{}", var),
+            Expr::Variable(var) => write!(f, "{}", var.display(dialect)),
         })
     }
 }

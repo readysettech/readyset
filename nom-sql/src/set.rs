@@ -255,16 +255,23 @@ impl Variable {
             Some(&self.name)
         }
     }
-}
 
-impl Display for Variable {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if self.scope == VariableScope::User {
-            write!(f, "@")?;
-        } else {
-            write!(f, "@@{}.", self.scope)?;
-        }
-        write!(f, "{}", self.name)
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+        fmt_with(move |f| {
+            match dialect {
+                Dialect::PostgreSQL => {
+                    // Postgres doesn't have variable scope
+                }
+                Dialect::MySQL => {
+                    if self.scope == VariableScope::User {
+                        write!(f, "@")?;
+                    } else {
+                        write!(f, "@@{}.", self.scope)?;
+                    }
+                }
+            }
+            write!(f, "{}", self.name)
+        })
     }
 }
 
@@ -276,7 +283,11 @@ impl DialectDisplay for SetVariables {
                 "{}",
                 self.variables
                     .iter()
-                    .map(|(var, value)| format!("{} = {}", var, value.display(dialect)))
+                    .map(|(var, value)| format!(
+                        "{} = {}",
+                        var.display(dialect),
+                        value.display(dialect)
+                    ))
                     .join(", ")
             )
         })
@@ -620,6 +631,19 @@ mod tests {
     /// https://www.postgresql.org/docs/current/sql-set.html
     mod postgres {
         use super::*;
+
+        test_format_parse_round_trip!(
+            rt_variable(variable, Variable, Dialect::PostgreSQL, {
+                // Only allow Variables with names that aren't keywords
+                |s: &Variable| {
+                    let name = s.name.to_string();
+                    Dialect::PostgreSQL
+                        .identifier()
+                        .map(|ident| ident.to_ascii_lowercase())
+                        .parse(LocatedSpan::new(name.as_bytes())).is_ok()
+                }
+            });
+        );
 
         #[test]
         fn set_client_min_messages() {
