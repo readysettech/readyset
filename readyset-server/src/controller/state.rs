@@ -12,7 +12,6 @@
 //! This module provides the structures to store the state of the ReadySet dataflow graph, and
 //! to manipulate it in a thread-safe way.
 
-use std::borrow::Cow;
 use std::cell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::net::SocketAddr;
@@ -29,7 +28,6 @@ use dataflow::{
 };
 use futures::stream::{self, FuturesUnordered, StreamExt, TryStreamExt};
 use futures::{FutureExt, TryFutureExt, TryStream};
-use lazy_static::lazy_static;
 use metrics::{gauge, histogram};
 use nom_sql::{CreateCacheStatement, NonReplicatedRelation, Relation, SqlIdentifier, SqlQuery};
 use petgraph::visit::Bfs;
@@ -52,7 +50,6 @@ use readyset_data::{DfValue, Dialect};
 use readyset_errors::{
     internal, internal_err, invariant_eq, NodeType, ReadySetError, ReadySetResult,
 };
-use regex::Regex;
 use replication_offset::{ReplicationOffset, ReplicationOffsetState, ReplicationOffsets};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -75,6 +72,10 @@ use crate::controller::{
 use crate::coordination::{DomainDescriptor, RunDomainResponse};
 use crate::internal::LocalNodeIndex;
 use crate::worker::WorkerRequestKind;
+
+mod graphviz;
+
+pub(in crate::controller) use self::graphviz::Graphviz;
 
 /// Number of concurrent requests to make when making multiple simultaneous requests to domains (eg
 /// for replication offsets)
@@ -697,13 +698,14 @@ impl DfState {
         detailed: bool,
         node_sizes: Option<HashMap<NodeIndex, NodeSize>>,
     ) -> String {
-        graphviz(
-            &self.ingredients,
+        Graphviz {
+            graph: &self.ingredients,
             detailed,
             node_sizes,
-            &self.materializations,
-            Some(&self.domain_nodes),
-        )
+            materializations: &self.materializations,
+            domain_nodes: Some(&self.domain_nodes),
+        }
+        .to_string()
     }
 
     /// List data-flow nodes, on a specific worker if `worker` specified.
@@ -1920,109 +1922,3 @@ impl<'handle> AsMut<DfState> for DfStateWriter<'handle> {
 // So, we explicitly tell the compiler that the [`DfStateReader`] is safe to be moved
 // between threads.
 unsafe impl Sync for DfStateReader {}
-
-/// Build a graphviz [dot][] representation of the graph, given information about its
-/// materializations and (optionally) the set of nodes within each domain.
-///
-/// For more information, see <http://docs/debugging.html#graphviz>
-///
-/// [dot]: https://graphviz.org/doc/info/lang.html
-pub(super) fn graphviz(
-    graph: &Graph,
-    detailed: bool,
-    node_sizes: Option<HashMap<NodeIndex, NodeSize>>,
-    materializations: &Materializations,
-    domain_nodes: Option<&HashMap<DomainIndex, NodeMap<NodeIndex>>>,
-) -> String {
-    let mut s = String::new();
-    let indentln = |s: &mut String| s.push_str("    ");
-    let node_sizes = node_sizes.unwrap_or_default();
-
-    #[allow(clippy::unwrap_used)] // regex is hardcoded and valid
-    fn sanitize(s: &str) -> Cow<str> {
-        lazy_static! {
-            static ref SANITIZE_RE: Regex = Regex::new("([<>])").unwrap();
-        };
-        SANITIZE_RE.replace_all(s, "\\$1")
-    }
-
-    // header.
-    s.push_str("digraph {{\n");
-
-    // global formatting.
-    indentln(&mut s);
-    s.push_str("fontsize=10");
-    indentln(&mut s);
-    if detailed {
-        s.push_str("node [shape=record, fontsize=10]\n");
-    } else {
-        s.push_str("graph [ fontsize=24 fontcolor=\"#0C6fA9\", outputorder=edgesfirst ]\n");
-        s.push_str("edge [ color=\"#0C6fA9\", style=bold ]\n");
-        s.push_str("node [ color=\"#0C6fA9\", shape=box, style=\"rounded,bold\" ]\n");
-    }
-
-    let domain_for_node = domain_nodes
-        .iter()
-        .flat_map(|m| m.iter())
-        .flat_map(|(di, nodes)| nodes.iter().map(|(_, ni)| (*ni, *di)))
-        .collect::<HashMap<_, _>>();
-    let mut domains_to_nodes = HashMap::new();
-    for index in graph.node_indices() {
-        let domain = domain_for_node.get(&index).copied();
-        domains_to_nodes
-            .entry(domain)
-            .or_insert_with(Vec::new)
-            .push(index);
-    }
-
-    // node descriptions.
-    for (domain, nodes) in domains_to_nodes {
-        if let Some(domain) = domain {
-            indentln(&mut s);
-            s.push_str(&format!(
-                "subgraph cluster_d{domain} {{\n    \
-                 label = \"Domain {domain}\";\n    \
-                 style=filled;\n    \
-                 color=grey97;\n    "
-            ))
-        }
-        for index in nodes {
-            #[allow(clippy::indexing_slicing)] // just got this out of the graph
-            let node = &graph[index];
-            let materialization_status = materializations.get_status(index, node);
-            indentln(&mut s);
-            s.push_str(&format!("n{}", index.index()));
-            s.push_str(
-                sanitize(&node.describe(index, detailed, &node_sizes, materialization_status))
-                    .as_ref(),
-            );
-        }
-        if domain.is_some() {
-            s.push_str("\n    }\n");
-        }
-    }
-
-    // edges.
-    for (_, edge) in graph.raw_edges().iter().enumerate() {
-        indentln(&mut s);
-        s.push_str(&format!(
-            "n{} -> n{} [ {} ]",
-            edge.source().index(),
-            edge.target().index(),
-            #[allow(clippy::indexing_slicing)] // just got it out of the graph
-            if graph[edge.source()].is_egress() {
-                "color=\"#CCCCCC\""
-            } else if graph[edge.source()].is_source() {
-                "style=invis"
-            } else {
-                ""
-            }
-        ));
-        s.push('\n');
-    }
-
-    // footer.
-    s.push_str("}}");
-
-    s
-}
