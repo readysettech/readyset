@@ -9,13 +9,16 @@ const TINYTEXT_WIDTH: usize = 14;
 
 /// A String especially optimized for inline storage of short strings, and fast cloning of longer
 /// strings
+#[derive(PartialEq, Eq, Clone)]
+pub struct SqlIdentifier(IdentInner);
+
 #[derive(PartialEq, Eq)]
-pub enum SqlIdentifier {
+enum IdentInner {
     Tiny(TinyText),
     Text(Text),
 }
 
-impl Clone for SqlIdentifier {
+impl Clone for IdentInner {
     #[inline]
     fn clone(&self) -> Self {
         match self {
@@ -27,13 +30,13 @@ impl Clone for SqlIdentifier {
     #[inline]
     fn clone_from(&mut self, source: &Self) {
         match (self, source) {
-            (SqlIdentifier::Tiny(t), SqlIdentifier::Tiny(src)) => {
+            (IdentInner::Tiny(t), IdentInner::Tiny(src)) => {
                 t.len = src.len;
                 t.t.clone_from(&src.t);
             }
-            (this @ SqlIdentifier::Tiny(_), SqlIdentifier::Text(_))
-            | (this @ SqlIdentifier::Text(_), SqlIdentifier::Tiny(_)) => *this = source.clone(),
-            (SqlIdentifier::Text(t), SqlIdentifier::Text(src)) => t.clone_from(src),
+            (this @ IdentInner::Tiny(_), IdentInner::Text(_))
+            | (this @ IdentInner::Text(_), IdentInner::Tiny(_)) => *this = source.clone(),
+            (IdentInner::Text(t), IdentInner::Text(src)) => t.clone_from(src),
         }
     }
 }
@@ -193,23 +196,23 @@ impl SqlIdentifier {
     #[inline]
     pub fn as_str(&self) -> &str {
         match self {
-            SqlIdentifier::Tiny(t) => t.as_str(),
-            SqlIdentifier::Text(t) => t.as_str(),
+            SqlIdentifier(IdentInner::Tiny(t)) => t.as_str(),
+            SqlIdentifier(IdentInner::Text(t)) => t.as_str(),
         }
     }
 
     #[inline]
     pub fn as_bytes(&self) -> &[u8] {
         match self {
-            SqlIdentifier::Tiny(t) => t.as_bytes(),
-            SqlIdentifier::Text(t) => t.as_bytes(),
+            SqlIdentifier(IdentInner::Tiny(t)) => t.as_bytes(),
+            SqlIdentifier(IdentInner::Text(t)) => t.as_bytes(),
         }
     }
 }
 
 impl Default for SqlIdentifier {
     fn default() -> Self {
-        SqlIdentifier::Tiny(TinyText::from_slice(&[]).unwrap())
+        SqlIdentifier(IdentInner::Tiny(TinyText::from_slice(&[]).unwrap()))
     }
 }
 
@@ -217,8 +220,8 @@ impl From<&str> for SqlIdentifier {
     #[inline]
     fn from(s: &str) -> Self {
         match TinyText::try_from(s) {
-            Ok(tt) => SqlIdentifier::Tiny(tt),
-            Err(_) => SqlIdentifier::Text(s.into()),
+            Ok(tt) => SqlIdentifier(IdentInner::Tiny(tt)),
+            Err(_) => SqlIdentifier(IdentInner::Text(s.into())),
         }
     }
 }
@@ -354,8 +357,8 @@ impl std::fmt::Display for SqlIdentifier {
 impl std::fmt::Debug for SqlIdentifier {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Tiny(t) => f.debug_tuple("Tiny").field(t).finish(),
-            Self::Text(t) => f.debug_tuple("Text").field(t).finish(),
+            SqlIdentifier(IdentInner::Tiny(t)) => f.debug_tuple("Tiny").field(t).finish(),
+            SqlIdentifier(IdentInner::Text(t)) => f.debug_tuple("Text").field(t).finish(),
         }
     }
 }
@@ -403,8 +406,8 @@ impl<'de: 'a, 'a> serde::Deserialize<'de> for SqlIdentifier {
                 }
 
                 match TinyText::from_slice(&bytes) {
-                    Ok(tt) => Ok(SqlIdentifier::Tiny(tt)),
-                    _ => Ok(SqlIdentifier::Text(Text::from_slice(&bytes))),
+                    Ok(tt) => Ok(SqlIdentifier(IdentInner::Tiny(tt))),
+                    _ => Ok(SqlIdentifier(IdentInner::Text(Text::from_slice(&bytes)))),
                 }
             }
 
@@ -413,8 +416,8 @@ impl<'de: 'a, 'a> serde::Deserialize<'de> for SqlIdentifier {
                 E: serde::de::Error,
             {
                 match TinyText::from_slice(v) {
-                    Ok(tt) => Ok(SqlIdentifier::Tiny(tt)),
-                    _ => Ok(SqlIdentifier::Text(Text::from_slice(v))),
+                    Ok(tt) => Ok(SqlIdentifier(IdentInner::Tiny(tt))),
+                    _ => Ok(SqlIdentifier(IdentInner::Text(Text::from_slice(v)))),
                 }
             }
         }
