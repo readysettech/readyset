@@ -47,8 +47,8 @@ impl Default for KeyCount {
 }
 
 /// Used to wrap the materialized size of a node's state
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct NodeMaterializedSize(usize);
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct NodeMaterializedSize(pub usize);
 
 /// Use to aggregate various node stats that describe its size
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
