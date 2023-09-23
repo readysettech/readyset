@@ -24,7 +24,7 @@ use tracing::{debug, trace};
 use url::Url;
 
 use crate::consensus::{Authority, AuthorityControl};
-use crate::debug::info::{GraphInfo, NodeSize};
+use crate::debug::info::{GraphInfo, MaterializationInfo, NodeSize};
 use crate::debug::stats;
 use crate::internal::{DomainIndex, ReplicaAddress};
 use crate::metrics::MetricsDump;
@@ -891,6 +891,11 @@ impl ReadySetHandle {
         ///
         /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
         domains() -> HashMap<DomainIndex, Vec<Vec<Option<Url>>>>
+    );
+
+    simple_request!(
+        /// Get information about all materializations (stateful nodes) within the graph
+        materialization_info() -> Vec<MaterializationInfo>
     );
 
     simple_request!(

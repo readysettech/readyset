@@ -216,6 +216,21 @@ impl Materializations {
             .unwrap_or_else(|| self.next_tag())
     }
 
+    /// Return a references to the set of indexes for the given node in the graph.
+    ///
+    /// If the node is not materialized, returns None.
+    pub(crate) fn indexes_for(&self, ni: NodeIndex) -> Option<&HashSet<Index>> {
+        self.have.get(&ni)
+    }
+
+    /// Is the given node partially materialized?
+    ///
+    /// Note that this method returns `false` if the node is fully materialized, *or* if it's not
+    /// materialized at all
+    pub(crate) fn is_partial(&self, node_index: NodeIndex) -> bool {
+        self.partial.contains(&node_index)
+    }
+
     /// Extend the current set of materializations with any additional materializations needed to
     /// satisfy indexing obligations in the given set of (new) nodes.
     #[allow(clippy::cognitive_complexity)]
@@ -750,7 +765,14 @@ impl Materializations {
         }
     }
 
-    /// Validate all graph invariants for the materializations in `self` for all nodes in `new` in
+    /// Construct an iterator over the indexes of non-reader nodes that are materialized.
+    pub(in crate::controller) fn materialized_non_reader_nodes(
+        &self,
+    ) -> impl Iterator<Item = NodeIndex> + '_ {
+        self.have.keys().copied()
+    }
+
+    /// validate all graph invariants for the materializations in `self` for all nodes in `new` in
     /// the given `graph`, returning an `Err` if any invariants are violated. This consists of:
     ///
     /// * Checking to make sure no partially materialized nodes exist that are ancestors of fully

@@ -1,7 +1,8 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::{self, Display};
 use std::ops::{AddAssign, Deref};
 
+use nom_sql::Relation;
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -39,17 +40,40 @@ pub enum KeyCount {
     ExternalMaterialization,
 }
 
+impl Default for KeyCount {
+    fn default() -> Self {
+        Self::ExactKeyCount(0)
+    }
+}
+
 /// Used to wrap the materialized size of a node's state
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NodeMaterializedSize(usize);
 
 /// Use to aggregate various node stats that describe its size
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NodeSize {
     /// The number of keys materialized for a node
     pub key_count: KeyCount,
     /// The approximate size of the materialized state in bytes
     pub bytes: NodeMaterializedSize,
+}
+
+/// Information about a single materialization (stateful node) in the graph
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MaterializationInfo {
+    /// The index of the materialized node
+    pub node_index: NodeIndex,
+    /// The node's name
+    pub node_name: Relation,
+    /// A string description of the node
+    pub node_description: String,
+    /// The size of the materialization
+    pub size: NodeSize,
+    /// Is the materialization partial?
+    pub partial: bool,
+    /// Set of ways the materialization is indexed
+    pub indexes: HashSet<Index>,
 }
 
 impl Display for KeyCount {
