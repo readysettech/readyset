@@ -17,7 +17,7 @@ use tracing::{debug, error, info_span, trace};
 
 use crate::controller::keys::{self, RawReplayPath};
 use crate::controller::migrate::DomainMigrationPlan;
-use crate::controller::state::graphviz;
+use crate::controller::state::Graphviz;
 
 mod plan;
 
@@ -876,7 +876,13 @@ impl Materializations {
                                                 // This code should probably just be taken out soon.
                                                 println!(
                                                     "{}",
-                                                    graphviz(graph, true, None, self, None)
+                                                    Graphviz {
+                                                        graph,
+                                                        detailed: true,
+                                                        node_sizes: None,
+                                                        materializations: self,
+                                                        domain_nodes: None
+                                                    }
                                                 );
                                                 error!(
                                                     parent = %node.index(),
@@ -913,7 +919,16 @@ impl Materializations {
             }
             while let Some(ni) = non_purge.pop() {
                 if graph[ni].purge {
-                    println!("{}", graphviz(graph, true, None, self, None));
+                    println!(
+                        "{}",
+                        Graphviz {
+                            graph,
+                            detailed: true,
+                            node_sizes: None,
+                            materializations: self,
+                            domain_nodes: None
+                        }
+                    );
                     internal!("found purge node {} above non-purge node", ni.index())
                 }
                 if self.have.contains_key(&ni) {
@@ -1073,7 +1088,16 @@ impl Materializations {
                             != self.have.get(&child).map(|i| i.len()).unwrap_or(0)
                         {
                             // node was previously materialized!
-                            eprintln!("{}", graphviz(graph, true, None, self, None));
+                            eprintln!(
+                                "{}",
+                                Graphviz {
+                                    graph,
+                                    detailed: true,
+                                    node_sizes: None,
+                                    materializations: self,
+                                    domain_nodes: None
+                                }
+                            );
                             error!(
                                 node = %node.index(),
                                 child = %child.index(),

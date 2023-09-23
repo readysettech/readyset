@@ -19,7 +19,7 @@ use vec1::Vec1;
 
 use crate::controller::keys::{self, IndexRef, RawReplayPath};
 use crate::controller::migrate::DomainMigrationPlan;
-use crate::controller::state::graphviz;
+use crate::controller::state::Graphviz;
 
 /// A struct representing all the information required to construct and maintain the
 /// materializations for a single node within a dataflow graph.
@@ -439,7 +439,16 @@ impl<'a> Plan<'a> {
                 //  a domain may appear multiple times in this list if a path crosses into the same
                 //  domain more than once. currently, that will cause a deadlock.
                 if seen.contains(&domain) {
-                    trace!("{}", graphviz(self.graph, true, None, self.m, None));
+                    trace!(
+                        "{}",
+                        Graphviz {
+                            graph: self.graph,
+                            detailed: true,
+                            node_sizes: None,
+                            materializations: self.m,
+                            domain_nodes: None
+                        }
+                    );
                     internal!("detected A-B-A domain replay path");
                 }
                 seen.insert(domain);
