@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::cmp::Reverse;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
@@ -591,6 +592,60 @@ impl NoriaConnector {
             .collect::<Vec<_>>();
 
         data.sort_by(|r1, r2| r1[1].cmp(&r2[1]));
+
+        Ok(QueryResult::from_owned(schema, vec![Results::new(data)]))
+    }
+
+    pub(crate) async fn explain_materializations(
+        &mut self,
+    ) -> ReadySetResult<QueryResult<'static>> {
+        let mut materializations = self.inner.get_mut()?.noria.materialization_info().await?;
+        materializations.sort_unstable_by_key(|mi| Reverse(mi.size.bytes));
+        let cols = [
+            ("node_index", DfType::Int),
+            ("node_name", DfType::DEFAULT_TEXT),
+            ("node_description", DfType::DEFAULT_TEXT),
+            ("keys", DfType::DEFAULT_TEXT),
+            ("size_bytes", DfType::BigInt),
+            ("partial", DfType::Bool),
+            ("indexes", DfType::Array(Box::new(DfType::DEFAULT_TEXT))),
+        ];
+        let schema = SelectSchema {
+            columns: cols.iter().map(|(n, _)| n.into()).collect(),
+            schema: cols
+                .iter()
+                .map(|(name, column_type)| ColumnSchema {
+                    column: nom_sql::Column {
+                        name: name.into(),
+                        table: None,
+                    },
+                    column_type: column_type.clone(),
+                    base: None,
+                })
+                .collect(),
+        };
+
+        let data = materializations
+            .into_iter()
+            .map(|mi| {
+                vec![
+                    mi.node_index.index().into(),
+                    mi.node_name.display_unquoted().to_string().into(),
+                    mi.node_description.into(),
+                    mi.size.key_count.to_string().into(),
+                    mi.size.bytes.0.into(),
+                    mi.partial.into(),
+                    mi.indexes
+                        .into_iter()
+                        .map(|idx| {
+                            format!("{:?}[{}]", idx.index_type, idx.columns.iter().join(", "))
+                                .into()
+                        })
+                        .collect::<Vec<DfValue>>()
+                        .into(),
+                ]
+            })
+            .collect();
 
         Ok(QueryResult::from_owned(schema, vec![Results::new(data)]))
     }

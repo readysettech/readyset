@@ -1923,9 +1923,7 @@ where
             }
             SqlQuery::Explain(nom_sql::ExplainStatement::Caches) => self.explain_caches().await,
             SqlQuery::Explain(nom_sql::ExplainStatement::Materializations) => {
-                return Some(Err(unsupported_err!(
-                    "EXPLAIN MATERIALIZATIONS not implemented yet"
-                )))
+                self.noria.explain_materializations().await
             }
             SqlQuery::CreateCache(CreateCacheStatement {
                 name,
