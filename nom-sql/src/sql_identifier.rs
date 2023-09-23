@@ -9,10 +9,33 @@ const TINYTEXT_WIDTH: usize = 14;
 
 /// A String especially optimized for inline storage of short strings, and fast cloning of longer
 /// strings
-#[derive(Clone, PartialEq, Eq)]
+#[derive(PartialEq, Eq)]
 pub enum SqlIdentifier {
     Tiny(TinyText),
     Text(Text),
+}
+
+impl Clone for SqlIdentifier {
+    #[inline]
+    fn clone(&self) -> Self {
+        match self {
+            Self::Tiny(t) => Self::Tiny(*t),
+            Self::Text(t) => Self::Text(t.clone()),
+        }
+    }
+
+    #[inline]
+    fn clone_from(&mut self, source: &Self) {
+        match (self, source) {
+            (SqlIdentifier::Tiny(t), SqlIdentifier::Tiny(src)) => {
+                t.len = src.len;
+                t.t.clone_from(&src.t);
+            }
+            (this @ SqlIdentifier::Tiny(_), SqlIdentifier::Text(_))
+            | (this @ SqlIdentifier::Text(_), SqlIdentifier::Tiny(_)) => *this = source.clone(),
+            (SqlIdentifier::Text(t), SqlIdentifier::Text(src)) => t.clone_from(src),
+        }
+    }
 }
 
 /// An optimized storage for very short strings
