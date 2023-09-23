@@ -1645,4 +1645,31 @@ mod tests {
 
         shutdown_tx.shutdown().await;
     }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn materialization_info() {
+        let (mut noria, shutdown_tx) = start_simple("materialization_info").await;
+        noria
+            .extend_recipe(ChangeList::from_change(
+                Change::CreateTable {
+                    statement: parse_create_table(
+                        Dialect::MySQL,
+                        "CREATE TABLE t1 (x int primary key);",
+                    )
+                    .unwrap(),
+                    pg_meta: None,
+                },
+                DataDialect::DEFAULT_MYSQL,
+            ))
+            .await
+            .unwrap();
+
+        let res = noria.materialization_info().await.unwrap();
+        assert_eq!(res.len(), 1);
+        let mat = res.into_iter().next().unwrap();
+        assert!(!mat.partial);
+        assert_eq!(mat.node_description, "B");
+
+        shutdown_tx.shutdown().await;
+    }
 }

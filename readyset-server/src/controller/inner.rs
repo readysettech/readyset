@@ -320,6 +320,10 @@ impl Leader {
                     .collect();
                 return_serialized!(res)
             }
+            (&Method::GET | &Method::POST, "/materialization_info") => {
+                let ds = self.dataflow_state_handle.read().await;
+                return_serialized!(ds.materialization_info().await?);
+            }
             (&Method::GET, "/allocated_bytes") => {
                 let alloc_bytes = tikv_jemalloc_ctl::epoch::mib()
                     .and_then(|m| m.advance())

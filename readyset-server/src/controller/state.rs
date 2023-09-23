@@ -30,14 +30,14 @@ use futures::stream::{self, FuturesUnordered, StreamExt, TryStreamExt};
 use futures::{FutureExt, TryFutureExt, TryStream};
 use metrics::{gauge, histogram};
 use nom_sql::{CreateCacheStatement, NonReplicatedRelation, Relation, SqlIdentifier, SqlQuery};
-use petgraph::visit::Bfs;
+use petgraph::visit::{Bfs, IntoNodeReferences};
 use petgraph::Direction;
 use rand::Rng;
 use readyset_client::builders::{
     ReaderHandleBuilder, ReusedReaderHandleBuilder, TableBuilder, ViewBuilder,
 };
 use readyset_client::consensus::{Authority, AuthorityControl};
-use readyset_client::debug::info::{GraphInfo, NodeSize};
+use readyset_client::debug::info::{GraphInfo, MaterializationInfo, NodeSize};
 use readyset_client::debug::stats::{DomainStats, GraphStats, NodeStats};
 use readyset_client::internal::{MaterializationStatus, ReplicaAddress};
 use readyset_client::metrics::recorded;
@@ -763,6 +763,47 @@ impl DfState {
                 );
                 acc
             })
+    }
+
+    /// Return a list of information about materializations in the graph
+    pub(super) async fn materialization_info(&self) -> ReadySetResult<Vec<MaterializationInfo>> {
+        let sizes = self.node_sizes().await?;
+
+        Ok(self
+            .materializations
+            .materialized_non_reader_nodes()
+            .map(|ni| {
+                (
+                    ni,
+                    self.ingredients[ni].name().clone(),
+                    self.ingredients[ni].description(true),
+                    self.materializations
+                        .indexes_for(ni)
+                        .expect("Node index came from materializations")
+                        .clone(),
+                )
+            })
+            .chain(self.ingredients.node_references().filter_map(|(ni, n)| {
+                n.as_reader().and_then(|r| r.index()).map(|idx| {
+                    (
+                        ni,
+                        n.name().clone(),
+                        n.description(true),
+                        HashSet::from([idx.clone()]),
+                    )
+                })
+            }))
+            .map(
+                |(node_index, node_name, node_description, indexes)| MaterializationInfo {
+                    node_index,
+                    node_name,
+                    node_description,
+                    size: sizes.get(&node_index).cloned().unwrap_or_default(),
+                    partial: self.materializations.is_partial(node_index),
+                    indexes,
+                },
+            )
+            .collect())
     }
 
     /// Issue all of `requests` to their corresponding domains asynchronously, and return a stream
