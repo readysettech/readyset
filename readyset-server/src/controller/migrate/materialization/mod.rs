@@ -1220,6 +1220,7 @@ impl Materializations {
         }
 
         self.added.clear();
+        self.new_readers.clear();
         self.had.extend(self.have.keys().copied());
         Ok(())
     }
