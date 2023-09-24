@@ -18,7 +18,7 @@ use enum_kinds::EnumKind;
 use eui48::{MacAddress, MacAddressFormat};
 use itertools::Itertools;
 use mysql_time::MySqlTime;
-use nom_sql::{Double, Float, Literal, SqlType};
+use nom_sql::{DialectDisplay, Double, Float, Literal, SqlType};
 use postgres_types::Format;
 use readyset_errors::{internal, invalid_query_err, unsupported, ReadySetError, ReadySetResult};
 use readyset_util::arbitrary::{arbitrary_decimal, arbitrary_duration};

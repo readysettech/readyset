@@ -14,7 +14,7 @@ use crate::common::{assignment_expr_list, statement_terminator};
 use crate::select::where_clause;
 use crate::table::{relation, Relation};
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, Expr, NomSqlResult};
+use crate::{Dialect, DialectDisplay, Expr, NomSqlResult};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct UpdateStatement {
@@ -23,8 +23,8 @@ pub struct UpdateStatement {
     pub where_clause: Option<Expr>,
 }
 
-impl UpdateStatement {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+impl DialectDisplay for UpdateStatement {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             write!(f, "UPDATE {} ", self.table.display(dialect))?;
 

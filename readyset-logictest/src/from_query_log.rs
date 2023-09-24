@@ -5,7 +5,9 @@ use anyhow::anyhow;
 use clap::Parser;
 use database_utils::{DatabaseConnection, DatabaseURL, QueryableConnection};
 use itertools::Itertools;
-use nom_sql::{parse_query, Dialect, Expr, FieldDefinitionExpr, FunctionExpr, SqlQuery};
+use nom_sql::{
+    parse_query, Dialect, DialectDisplay, Expr, FieldDefinitionExpr, FunctionExpr, SqlQuery,
+};
 use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncWriteExt, BufReader};
 

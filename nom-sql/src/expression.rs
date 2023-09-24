@@ -25,7 +25,9 @@ use crate::select::nested_selection;
 use crate::set::{variable_scope_prefix, Variable};
 use crate::sql_type::{mysql_int_cast_targets, type_identifier};
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Column, Dialect, Literal, NomSqlResult, SelectStatement, SqlIdentifier, SqlType};
+use crate::{
+    Column, Dialect, DialectDisplay, Literal, NomSqlResult, SelectStatement, SqlIdentifier, SqlType,
+};
 
 /// Function call expressions
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Hash, Serialize, Deserialize, Arbitrary)]
@@ -101,8 +103,8 @@ impl FunctionExpr {
     }
 }
 
-impl FunctionExpr {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+impl DialectDisplay for FunctionExpr {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| match self {
             FunctionExpr::Avg {
                 expr,
@@ -359,8 +361,8 @@ pub enum InValue {
     List(Vec<Expr>),
 }
 
-impl InValue {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+impl DialectDisplay for InValue {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| match self {
             InValue::Subquery(stmt) => write!(f, "{}", stmt.display(dialect)),
             InValue::List(exprs) => write!(
@@ -381,8 +383,8 @@ pub struct CaseWhenBranch {
     pub body: Expr,
 }
 
-impl CaseWhenBranch {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+impl DialectDisplay for CaseWhenBranch {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             write!(
                 f,
@@ -500,8 +502,8 @@ pub enum Expr {
     Variable(Variable),
 }
 
-impl Expr {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+impl DialectDisplay for Expr {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| match self {
             Expr::Call(fe) => write!(f, "{}", fe.display(dialect)),
             Expr::Literal(l) => write!(f, "{}", l.display(dialect)),

@@ -6,9 +6,9 @@ use ::mir::visualize::GraphViz;
 use ::mir::DfNodeIndex;
 use ::serde::{Deserialize, Serialize};
 use nom_sql::{
-    CompoundSelectOperator, CompoundSelectStatement, CreateTableBody, FieldDefinitionExpr,
-    NonReplicatedRelation, NotReplicatedReason, Relation, SelectSpecification, SelectStatement,
-    SqlIdentifier, SqlType, TableExpr,
+    CompoundSelectOperator, CompoundSelectStatement, CreateTableBody, DialectDisplay,
+    FieldDefinitionExpr, NonReplicatedRelation, NotReplicatedReason, Relation, SelectSpecification,
+    SelectStatement, SqlIdentifier, SqlType, TableExpr,
 };
 use petgraph::graph::NodeIndex;
 use readyset_client::recipe::changelist::{AlterTypeChange, Change, PostgresTableMetadata};

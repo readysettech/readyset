@@ -36,7 +36,9 @@ use crate::transaction::{
 use crate::update::{updating, UpdateStatement};
 use crate::use_statement::{use_statement, UseStatement};
 use crate::whitespace::whitespace0;
-use crate::{Dialect, DropAllCachesStatement, Expr, NomSqlResult, SqlType, TableKey};
+use crate::{
+    Dialect, DialectDisplay, DropAllCachesStatement, Expr, NomSqlResult, SqlType, TableKey,
+};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 #[allow(clippy::large_enum_variant)]
@@ -65,8 +67,8 @@ pub enum SqlQuery {
     Comment(CommentStatement),
 }
 
-impl SqlQuery {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+impl DialectDisplay for SqlQuery {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| match self {
             Self::Select(select) => write!(f, "{}", select.display(dialect)),
             Self::Insert(insert) => write!(f, "{}", insert.display(dialect)),

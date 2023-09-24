@@ -9,7 +9,7 @@ use failpoint_macros::set_failpoint;
 use metrics::{counter, histogram};
 use mysql::prelude::Queryable;
 use mysql::{OptsBuilder, PoolConstraints, PoolOpts, SslOpts};
-use nom_sql::{NonReplicatedRelation, NotReplicatedReason, Relation};
+use nom_sql::{DialectDisplay, NonReplicatedRelation, NotReplicatedReason, Relation};
 use postgres_native_tls::MakeTlsConnector;
 use readyset_client::consistency::Timestamp;
 #[cfg(feature = "failure_injection")]

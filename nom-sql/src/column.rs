@@ -15,7 +15,9 @@ use crate::common::{column_identifier_no_alias, parse_comment};
 use crate::expression::expression;
 use crate::sql_type::type_identifier;
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{literal, Dialect, Expr, Literal, NomSqlResult, Relation, SqlIdentifier, SqlType};
+use crate::{
+    literal, Dialect, DialectDisplay, Expr, Literal, NomSqlResult, Relation, SqlIdentifier, SqlType,
+};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct Column {
@@ -59,8 +61,8 @@ impl PartialOrd for Column {
     }
 }
 
-impl Column {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+impl DialectDisplay for Column {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             if let Some(ref table) = self.table {
                 write!(f, "{}.", table.display(dialect))?;
@@ -68,7 +70,9 @@ impl Column {
             write!(f, "{}", dialect.quote_identifier(&self.name))
         })
     }
+}
 
+impl Column {
     /// Like [`display()`](Self::display) except the schema, table, and column name will not be
     /// quoted.
     ///
@@ -98,8 +102,8 @@ pub enum ColumnConstraint {
     OnUpdateCurrentTimestamp(Option<Literal>),
 }
 
-impl ColumnConstraint {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+impl DialectDisplay for ColumnConstraint {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| match self {
             Self::Null => write!(f, "NULL"),
             Self::NotNull => write!(f, "NOT NULL"),
@@ -157,8 +161,10 @@ impl ColumnSpecification {
             _ => None,
         })
     }
+}
 
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+impl DialectDisplay for ColumnSpecification {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             write!(
                 f,

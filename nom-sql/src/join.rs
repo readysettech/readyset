@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
 use crate::column::Column;
-use crate::{Dialect, Expr, NomSqlResult, TableExpr};
+use crate::{Dialect, DialectDisplay, Expr, NomSqlResult, TableExpr};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Arbitrary)]
 pub enum JoinRightSide {
@@ -30,8 +30,8 @@ impl JoinRightSide {
     }
 }
 
-impl JoinRightSide {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+impl DialectDisplay for JoinRightSide {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| match self {
             Self::Table(t) => write!(f, "{}", t.display(dialect)),
             Self::Tables(ts) => write!(f, "({})", ts.iter().map(|t| t.display(dialect)).join(", ")),
@@ -84,8 +84,8 @@ pub enum JoinConstraint {
     Empty,
 }
 
-impl JoinConstraint {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+impl DialectDisplay for JoinConstraint {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| match self {
             Self::On(ce) => write!(f, "ON {}", ce.display(dialect)),
             Self::Using(columns) => write!(

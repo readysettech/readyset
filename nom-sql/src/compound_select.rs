@@ -14,7 +14,7 @@ use crate::common::{opt_delimited, terminated_with_statement_terminator};
 use crate::order::{order_clause, OrderClause};
 use crate::select::{limit_offset_clause, nested_selection, LimitClause, SelectStatement};
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, NomSqlResult};
+use crate::{Dialect, DialectDisplay, NomSqlResult};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Deserialize, Serialize, Arbitrary)]
 pub enum CompoundSelectOperator {
@@ -42,8 +42,8 @@ pub struct CompoundSelectStatement {
     pub limit_clause: LimitClause,
 }
 
-impl CompoundSelectStatement {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+impl DialectDisplay for CompoundSelectStatement {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             for (op, sel) in &self.selects {
                 if let Some(o) = op {

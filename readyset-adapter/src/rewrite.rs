@@ -7,7 +7,8 @@ use std::{iter, mem};
 use itertools::{Either, Itertools};
 use nom_sql::analysis::visit_mut::{self, VisitorMut};
 use nom_sql::{
-    BinaryOperator, Expr, InValue, ItemPlaceholder, LimitClause, Literal, SelectStatement,
+    BinaryOperator, DialectDisplay, Expr, InValue, ItemPlaceholder, LimitClause, Literal,
+    SelectStatement,
 };
 use readyset_data::{DfType, DfValue};
 use readyset_errors::{

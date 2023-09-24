@@ -1,7 +1,7 @@
 use std::mem::replace;
 
 use nom_sql::analysis::visit_mut::{self, VisitorMut};
-use nom_sql::{BinaryOperator, Expr, Literal};
+use nom_sql::{BinaryOperator, DialectDisplay, Expr, Literal};
 use readyset_errors::{internal, invariant_eq, ReadySetResult};
 use tracing::trace;
 

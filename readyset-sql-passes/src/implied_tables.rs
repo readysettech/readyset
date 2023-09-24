@@ -256,7 +256,10 @@ impl ImpliedTableExpansion for SqlQuery {
 mod tests {
     use std::collections::HashMap;
 
-    use nom_sql::{parse_query, Column, Dialect, Expr, FieldDefinitionExpr, SqlQuery, TableExpr};
+    use nom_sql::{
+        parse_query, Column, Dialect, DialectDisplay, Expr, FieldDefinitionExpr, SqlQuery,
+        TableExpr,
+    };
 
     use super::*;
 

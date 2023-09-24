@@ -221,9 +221,9 @@ mod tests {
     use std::convert::TryInto;
 
     use nom_sql::{
-        parse_query, parser, BinaryOperator, Column, Dialect, Expr, FieldDefinitionExpr,
-        ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator, JoinRightSide, Literal,
-        Relation, SelectStatement, SqlQuery, TableExpr, TableExprInner,
+        parse_query, parser, BinaryOperator, Column, Dialect, DialectDisplay, Expr,
+        FieldDefinitionExpr, ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator,
+        JoinRightSide, Literal, Relation, SelectStatement, SqlQuery, TableExpr, TableExprInner,
     };
 
     use super::{AliasRemoval, TableAliasRewrite};
