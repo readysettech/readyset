@@ -1,8 +1,8 @@
 use std::iter;
 
 use nom_sql::{
-    BinaryOperator as SqlBinaryOperator, Column, Expr as AstExpr, FunctionExpr, InValue, Relation,
-    UnaryOperator,
+    BinaryOperator as SqlBinaryOperator, Column, DialectDisplay, Expr as AstExpr, FunctionExpr,
+    InValue, Relation, UnaryOperator,
 };
 use readyset_data::dialect::SqlEngine;
 use readyset_data::{DfType, DfValue};

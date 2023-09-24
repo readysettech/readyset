@@ -10,7 +10,7 @@ use std::time::Instant;
 
 use dataflow_expression::Dialect;
 use metrics::{counter, register_counter, Counter};
-use nom_sql::Literal;
+use nom_sql::{DialectDisplay, Literal};
 use readyset_client::query::{MigrationState, Query};
 use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_client::{PlaceholderIdx, ReadySetHandle, ViewCreateRequest};

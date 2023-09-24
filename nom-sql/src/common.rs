@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
 use crate::column::Column;
-use crate::dialect::Dialect;
+use crate::dialect::{Dialect, DialectDisplay};
 use crate::expression::expression;
 use crate::table::Relation;
 use crate::whitespace::{whitespace0, whitespace1};
@@ -134,8 +134,10 @@ impl TableKey {
             TableKey::FulltextKey { .. } => &None,
         }
     }
+}
 
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+impl DialectDisplay for TableKey {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             if let Some(constraint_name) = self.constraint_name() {
                 write!(
@@ -306,8 +308,8 @@ impl From<Literal> for FieldDefinitionExpr {
     }
 }
 
-impl FieldDefinitionExpr {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+impl DialectDisplay for FieldDefinitionExpr {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| match self {
             Self::All => write!(f, "*"),
             Self::AllInTable(table) => {
@@ -339,8 +341,8 @@ pub enum FieldReference {
     Expr(Expr),
 }
 
-impl FieldReference {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+impl DialectDisplay for FieldReference {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| match self {
             Self::Numeric(n) => write!(f, "{}", n),
             Self::Expr(expr) => write!(f, "{}", expr.display(dialect)),

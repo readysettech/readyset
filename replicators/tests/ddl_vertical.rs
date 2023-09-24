@@ -31,7 +31,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use itertools::Itertools;
-use nom_sql::SqlType;
+use nom_sql::{DialectDisplay, SqlType};
 use proptest::prelude::*;
 use proptest::strategy::{BoxedStrategy, Just, Strategy};
 use proptest::{collection, sample};

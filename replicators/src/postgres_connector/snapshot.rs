@@ -11,8 +11,8 @@ use itertools::Itertools;
 use metrics::register_gauge;
 use nom_sql::{
     parse_key_specification_string, parse_sql_type, Column, ColumnConstraint, ColumnSpecification,
-    CreateTableBody, CreateTableStatement, Dialect, NonReplicatedRelation, NotReplicatedReason,
-    Relation, SqlIdentifier, TableKey,
+    CreateTableBody, CreateTableStatement, Dialect, DialectDisplay, NonReplicatedRelation,
+    NotReplicatedReason, Relation, SqlIdentifier, TableKey,
 };
 use postgres_types::{accepts, FromSql, Kind, Type};
 use readyset_client::metrics::recorded;

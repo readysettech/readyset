@@ -137,6 +137,7 @@
 //! binary MySQL and PostgreSQL protocols, which provides a compatibility layer for applications
 //! that wish to continue to issue ad-hoc MySQL or PostgreSQL queries through existing SQL client
 //! libraries.
+#![allow(incomplete_features)]
 #![feature(
     result_flattening,
     type_alias_impl_trait,
@@ -145,7 +146,8 @@
     bound_as_ref,
     box_into_inner,
     is_sorted,
-    once_cell
+    once_cell,
+    return_position_impl_trait_in_trait
 )]
 #![deny(macro_use_extern_crate)]
 #![deny(unused_extern_crates)]

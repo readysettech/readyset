@@ -12,7 +12,7 @@ use metrics::register_gauge;
 use mysql::prelude::Queryable;
 use mysql::{Transaction, TxOpts};
 use mysql_async as mysql;
-use nom_sql::{NonReplicatedRelation, NotReplicatedReason, Relation};
+use nom_sql::{DialectDisplay, NonReplicatedRelation, NotReplicatedReason, Relation};
 use readyset_client::metrics::recorded;
 use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_data::Dialect;

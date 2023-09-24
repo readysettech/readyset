@@ -74,7 +74,7 @@ pub fn constant_fold_expr(expr: &mut Expr, dialect: Dialect) {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::parse_expr;
+    use nom_sql::{parse_expr, DialectDisplay};
 
     use super::*;
 

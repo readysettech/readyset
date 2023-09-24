@@ -12,7 +12,7 @@ use test_strategy::Arbitrary;
 use crate::common::statement_terminator;
 use crate::table::relation;
 use crate::whitespace::whitespace1;
-use crate::{Dialect, NomSqlResult, Relation};
+use crate::{Dialect, DialectDisplay, NomSqlResult, Relation};
 
 /// EXPLAIN statements
 ///

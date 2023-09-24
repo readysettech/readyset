@@ -15,7 +15,7 @@ use test_strategy::Arbitrary;
 use crate::common::{as_alias, ws_sep_comma};
 use crate::select::nested_selection;
 use crate::whitespace::whitespace0;
-use crate::{Dialect, NomSqlResult, SelectStatement, SqlIdentifier};
+use crate::{Dialect, DialectDisplay, NomSqlResult, SelectStatement, SqlIdentifier};
 
 /// A (potentially schema-qualified) name for a relation
 ///
@@ -72,8 +72,8 @@ impl<'a> From<&'a String> for Relation {
     }
 }
 
-impl Relation {
-    pub fn display(&self, dialect: Dialect) -> impl Display + Copy + '_ {
+impl DialectDisplay for Relation {
+    fn display(&self, dialect: Dialect) -> impl Display + Copy + '_ {
         fmt_with(move |f| {
             if let Some(schema) = &self.schema {
                 write!(f, "{}.", dialect.quote_identifier(schema))?;
@@ -81,7 +81,9 @@ impl Relation {
             write!(f, "{}", dialect.quote_identifier(&self.name))
         })
     }
+}
 
+impl Relation {
     /// Like [`display()`](Self::display) except the schema and table name will not be quoted.
     ///
     /// This should not be used to emit SQL code and instead should mostly be for error messages.
@@ -118,8 +120,10 @@ impl TableExprInner {
             Err(self)
         }
     }
+}
 
-    pub fn display(&self, dialect: Dialect) -> impl Display + Copy + '_ {
+impl DialectDisplay for TableExprInner {
+    fn display(&self, dialect: Dialect) -> impl Display + Copy + '_ {
         fmt_with(move |f| match self {
             TableExprInner::Table(t) => write!(f, "{}", t.display(dialect)),
             TableExprInner::Subquery(sq) => write!(f, "({})", sq.display(dialect)),
@@ -144,8 +148,8 @@ impl From<Relation> for TableExpr {
     }
 }
 
-impl TableExpr {
-    pub fn display(&self, dialect: Dialect) -> impl Display + Copy + '_ {
+impl DialectDisplay for TableExpr {
+    fn display(&self, dialect: Dialect) -> impl Display + Copy + '_ {
         fmt_with(move |f| {
             write!(f, "{}", self.inner.display(dialect))?;
 

@@ -17,7 +17,7 @@ use nom::sequence::delimited;
 use nom_locate::LocatedSpan;
 use nom_sql::parser::{sql_query, SqlQuery};
 use nom_sql::whitespace::whitespace0;
-use nom_sql::{Column, Dialect, Expr, NomSqlResult, Relation};
+use nom_sql::{Column, Dialect, DialectDisplay, Expr, NomSqlResult, Relation};
 use query_generator::{ColumnName, TableName, TableSpec};
 use readyset_data::DfValue;
 use serde::{Deserialize, Serialize};

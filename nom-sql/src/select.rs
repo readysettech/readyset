@@ -19,6 +19,7 @@ use crate::common::{
     field_definition_expr, field_list, field_reference_list, terminated_with_statement_terminator,
     ws_sep_comma, FieldDefinitionExpr,
 };
+use crate::dialect::CommaSeparatedList;
 use crate::expression::expression;
 use crate::join::{join_operator, JoinConstraint, JoinOperator, JoinRightSide};
 use crate::literal::literal;
@@ -26,8 +27,8 @@ use crate::order::{order_clause, OrderClause};
 use crate::table::{table_expr, table_expr_list};
 use crate::whitespace::{whitespace0, whitespace1};
 use crate::{
-    Dialect, Expr, FieldReference, FunctionExpr, Literal, NomSqlError, NomSqlResult, SqlIdentifier,
-    TableExpr,
+    Dialect, DialectDisplay, Expr, FieldReference, FunctionExpr, Literal, NomSqlError,
+    NomSqlResult, SqlIdentifier, TableExpr,
 };
 
 #[derive(
@@ -37,8 +38,8 @@ pub struct GroupByClause {
     pub fields: Vec<FieldReference>,
 }
 
-impl GroupByClause {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+impl DialectDisplay for GroupByClause {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             write!(
                 f,
@@ -59,8 +60,8 @@ pub struct JoinClause {
     pub constraint: JoinConstraint,
 }
 
-impl JoinClause {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+impl DialectDisplay for JoinClause {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             write!(
                 f,
@@ -81,8 +82,8 @@ pub struct CommonTableExpr {
     pub statement: SelectStatement,
 }
 
-impl CommonTableExpr {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+impl DialectDisplay for CommonTableExpr {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             write!(
                 f,
@@ -193,8 +194,8 @@ impl Default for LimitClause {
     }
 }
 
-impl LimitClause {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+impl DialectDisplay for LimitClause {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             match self {
                 LimitClause::LimitOffset { limit, offset } => {
@@ -261,14 +262,14 @@ impl SelectStatement {
     }
 }
 
-impl SelectStatement {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+impl DialectDisplay for SelectStatement {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             if !self.ctes.is_empty() {
                 write!(
                     f,
                     "WITH {} ",
-                    self.ctes.iter().map(|cte| cte.display(dialect)).join(", ")
+                    CommaSeparatedList::from(&self.ctes).display(dialect)
                 )?;
             }
 
@@ -280,10 +281,7 @@ impl SelectStatement {
             write!(
                 f,
                 "{}",
-                self.fields
-                    .iter()
-                    .map(|field| field.display(dialect))
-                    .join(", ")
+                CommaSeparatedList::from(&self.fields).display(dialect)
             )?;
 
             if !self.tables.is_empty() {
@@ -291,10 +289,7 @@ impl SelectStatement {
                 write!(
                     f,
                     "{}",
-                    self.tables
-                        .iter()
-                        .map(|table| table.display(dialect))
-                        .join(", ")
+                    CommaSeparatedList::from(&self.tables).display(dialect)
                 )?;
             }
 

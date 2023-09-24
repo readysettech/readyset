@@ -2,7 +2,7 @@ use std::env;
 
 use mysql_async::prelude::Queryable;
 use mysql_async::{OptsBuilder, Params};
-use nom_sql::{CreateTableStatement, Dialect};
+use nom_sql::{CreateTableStatement, Dialect, DialectDisplay};
 use query_generator::{GeneratorState, QuerySeed};
 use serial_test::serial;
 use test_strategy::proptest;

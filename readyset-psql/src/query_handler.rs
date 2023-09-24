@@ -3,8 +3,8 @@ use std::collections::{HashMap, HashSet};
 
 use lazy_static::lazy_static;
 use nom_sql::{
-    Literal, PostgresParameterValue, PostgresParameterValueInner, SetNames, SetPostgresParameter,
-    SetPostgresParameterValue, SetStatement, SqlQuery,
+    DialectDisplay, Literal, PostgresParameterValue, PostgresParameterValueInner, SetNames,
+    SetPostgresParameter, SetPostgresParameterValue, SetStatement, SqlQuery,
 };
 use readyset_adapter::backend::noria_connector::QueryResult;
 use readyset_adapter::backend::{noria_connector, SelectSchema};

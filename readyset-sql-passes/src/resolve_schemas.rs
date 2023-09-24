@@ -225,7 +225,7 @@ impl ResolveSchemas for CreateTableStatement {
 mod tests {
     use std::fmt::Debug;
 
-    use nom_sql::{parse_create_table, Dialect};
+    use nom_sql::{parse_create_table, Dialect, DialectDisplay};
 
     use super::*;
     use crate::util::parse_select_statement;

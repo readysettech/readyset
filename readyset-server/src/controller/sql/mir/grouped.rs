@@ -6,7 +6,7 @@ use mir::node::ProjectExpr;
 use mir::{Column, NodeIndex};
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::FunctionExpr::*;
-use nom_sql::{self, Expr, FieldDefinitionExpr, Relation, SqlIdentifier};
+use nom_sql::{self, DialectDisplay, Expr, FieldDefinitionExpr, Relation, SqlIdentifier};
 use readyset_errors::{unsupported, ReadySetError, ReadySetResult};
 use readyset_sql_passes::is_aggregate;
 

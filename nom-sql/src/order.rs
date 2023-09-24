@@ -15,7 +15,7 @@ use test_strategy::Arbitrary;
 
 use crate::common::{field_reference, ws_sep_comma};
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, FieldReference, NomSqlResult};
+use crate::{Dialect, DialectDisplay, FieldReference, NomSqlResult};
 
 #[derive(
     Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Arbitrary,
@@ -105,8 +105,8 @@ pub struct OrderClause {
     pub order_by: Vec<OrderBy>,
 }
 
-impl OrderClause {
-    pub fn display(&self, dialect: Dialect) -> impl Display + Copy + '_ {
+impl DialectDisplay for OrderClause {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             write!(
                 f,
