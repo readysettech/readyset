@@ -6,8 +6,8 @@ use std::sync::{atomic, Arc};
 
 use itertools::Itertools;
 use nom_sql::{
-    self, ColumnConstraint, DeleteStatement, Expr, InsertStatement, Relation, SqlIdentifier,
-    SqlQuery, UnaryOperator, UpdateStatement,
+    self, ColumnConstraint, DeleteStatement, DialectDisplay, Expr, InsertStatement, Relation,
+    SqlIdentifier, SqlQuery, UnaryOperator, UpdateStatement,
 };
 use readyset_client::consensus::{Authority, AuthorityControl};
 use readyset_client::consistency::Timestamp;

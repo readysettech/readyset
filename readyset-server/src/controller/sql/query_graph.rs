@@ -10,9 +10,10 @@ use common::{DfValue, IndexType};
 use nom_sql::analysis::visit_mut::{walk_expr, VisitorMut};
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::{
-    BinaryOperator, Column, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, InValue,
-    ItemPlaceholder, JoinConstraint, JoinOperator, JoinRightSide, LimitClause, Literal, OrderBy,
-    OrderType, Relation, SelectStatement, SqlIdentifier, TableExpr, TableExprInner,
+    BinaryOperator, Column, DialectDisplay, Expr, FieldDefinitionExpr, FieldReference,
+    FunctionExpr, InValue, ItemPlaceholder, JoinConstraint, JoinOperator, JoinRightSide,
+    LimitClause, Literal, OrderBy, OrderType, Relation, SelectStatement, SqlIdentifier, TableExpr,
+    TableExprInner,
 };
 use readyset_client::{PlaceholderIdx, ViewPlaceholder};
 use readyset_errors::{

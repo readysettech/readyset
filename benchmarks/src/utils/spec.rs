@@ -15,7 +15,8 @@ use nom::sequence::{preceded, terminated};
 use nom_locate::LocatedSpan;
 use nom_sql::whitespace::whitespace0;
 use nom_sql::{
-    sql_query, CommentStatement, CreateTableOption, Dialect, Expr, SqlQuery, VariableScope,
+    sql_query, CommentStatement, CreateTableOption, Dialect, DialectDisplay, Expr, SqlQuery,
+    VariableScope,
 };
 use query_generator::{TableName, TableSpec};
 

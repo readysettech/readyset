@@ -1,6 +1,6 @@
 #![warn(clippy::panic)]
 
-use nom_sql::{self, ColumnConstraint, Relation};
+use nom_sql::{self, ColumnConstraint, DialectDisplay, Relation};
 use readyset_client::ColumnSchema;
 use readyset_data::DfType;
 use readyset_errors::{unsupported, ReadySetResult};

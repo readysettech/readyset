@@ -27,9 +27,15 @@ pub trait DialectDisplay {
 }
 
 #[derive(Debug)]
-pub struct CommaSeparatedList<T>(pub Vec<T>);
+pub struct CommaSeparatedList<'a, T>(&'a Vec<T>);
 
-impl<T> DialectDisplay for CommaSeparatedList<T>
+impl<'a, T> From<&'a Vec<T>> for CommaSeparatedList<'a, T> {
+    fn from(value: &'a Vec<T>) -> Self {
+        CommaSeparatedList(value)
+    }
+}
+
+impl<'a, T> DialectDisplay for CommaSeparatedList<'a, T>
 where
     T: DialectDisplay,
 {

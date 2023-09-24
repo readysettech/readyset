@@ -31,7 +31,8 @@ use futures::stream::{self, FuturesUnordered, StreamExt, TryStreamExt};
 use futures::{FutureExt, TryFutureExt, TryStream};
 use metrics::{gauge, histogram};
 use nom_sql::{
-    CacheInner, CreateCacheStatement, NonReplicatedRelation, Relation, SqlIdentifier, SqlQuery,
+    CacheInner, CreateCacheStatement, DialectDisplay, NonReplicatedRelation, Relation,
+    SqlIdentifier, SqlQuery,
 };
 use petgraph::visit::{Bfs, IntoNodeReferences};
 use petgraph::Direction;

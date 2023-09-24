@@ -12,7 +12,7 @@ use crate::common::statement_terminator;
 use crate::select::where_clause;
 use crate::table::{relation, Relation};
 use crate::whitespace::whitespace1;
-use crate::{Dialect, Expr, NomSqlResult};
+use crate::{Dialect, DialectDisplay, Expr, NomSqlResult};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct DeleteStatement {
@@ -20,8 +20,8 @@ pub struct DeleteStatement {
     pub where_clause: Option<Expr>,
 }
 
-impl DeleteStatement {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+impl DialectDisplay for DeleteStatement {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             write!(f, "DELETE FROM {}", self.table.display(dialect))?;
 

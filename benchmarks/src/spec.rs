@@ -93,7 +93,7 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use database_utils::{DatabaseConnection, QueryableConnection};
-use nom_sql::SqlQuery;
+use nom_sql::{DialectDisplay, SqlQuery};
 use rand::Rng;
 use rand_distr::{Uniform, WeightedAliasIndex};
 use readyset_data::DfValue;

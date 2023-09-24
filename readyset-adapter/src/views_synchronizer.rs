@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use dataflow_expression::Dialect;
+use nom_sql::DialectDisplay;
 use readyset_client::query::MigrationState;
 use readyset_client::ReadySetHandle;
 use readyset_util::shutdown::ShutdownReceiver;

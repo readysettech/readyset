@@ -27,7 +27,7 @@ use crate::order::{order_type, OrderType};
 use crate::select::{nested_selection, selection, SelectStatement};
 use crate::table::{relation, Relation};
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, NomSqlError, NomSqlResult, SqlIdentifier};
+use crate::{Dialect, DialectDisplay, NomSqlError, NomSqlResult, SqlIdentifier};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct CreateTableBody {
@@ -35,8 +35,8 @@ pub struct CreateTableBody {
     pub keys: Option<Vec<TableKey>>,
 }
 
-impl CreateTableBody {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+impl DialectDisplay for CreateTableBody {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             for (i, field) in self.fields.iter().enumerate() {
                 if i != 0 {
@@ -74,8 +74,8 @@ pub struct CreateTableStatement {
     pub options: Result<Vec<CreateTableOption>, String>,
 }
 
-impl CreateTableStatement {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+impl DialectDisplay for CreateTableStatement {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             write!(f, "CREATE TABLE ")?;
             if self.if_not_exists {
@@ -143,8 +143,8 @@ pub enum SelectSpecification {
     Simple(SelectStatement),
 }
 
-impl SelectSpecification {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+impl DialectDisplay for SelectSpecification {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| match self {
             Self::Compound(csq) => write!(f, "{}", csq.display(dialect)),
             Self::Simple(sq) => write!(f, "{}", sq.display(dialect)),
@@ -165,8 +165,8 @@ pub struct CreateViewStatement {
     pub definition: Result<Box<SelectSpecification>, String>,
 }
 
-impl CreateViewStatement {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+impl DialectDisplay for CreateViewStatement {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             write!(f, "CREATE VIEW {} ", self.name.display(dialect))?;
 
@@ -196,8 +196,8 @@ pub enum CacheInner {
     Id(SqlIdentifier),
 }
 
-impl CacheInner {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+impl DialectDisplay for CacheInner {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| match self {
             Self::Statement(stmt) => write!(f, "{}", stmt.display(dialect)),
             Self::Id(id) => write!(f, "{id}"),
@@ -233,8 +233,8 @@ pub struct CreateCacheStatement {
     pub concurrently: bool,
 }
 
-impl CreateCacheStatement {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+impl DialectDisplay for CreateCacheStatement {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             write!(f, "CREATE CACHE ")?;
             if self.concurrently {

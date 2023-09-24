@@ -11,7 +11,7 @@ use test_strategy::Arbitrary;
 
 use crate::common::statement_terminator;
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{literal, Dialect, NomSqlResult, SqlIdentifier};
+use crate::{literal, Dialect, DialectDisplay, NomSqlResult, SqlIdentifier};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum CommentStatement {
@@ -26,8 +26,8 @@ pub enum CommentStatement {
     },
 }
 
-impl CommentStatement {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+impl DialectDisplay for CommentStatement {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| match self {
             Self::Column {
                 column_name,

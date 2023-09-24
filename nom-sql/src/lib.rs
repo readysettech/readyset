@@ -26,7 +26,7 @@ pub use self::create::{
 };
 pub use self::create_table_options::CreateTableOption;
 pub use self::delete::DeleteStatement;
-pub use self::dialect::Dialect;
+pub use self::dialect::{Dialect, DialectDisplay};
 pub use self::drop::{
     DropAllCachesStatement, DropCacheStatement, DropTableStatement, DropViewStatement,
 };
