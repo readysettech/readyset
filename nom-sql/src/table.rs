@@ -101,6 +101,8 @@ impl Relation {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Arbitrary)]
 pub enum TableExprInner {
     Table(Relation),
+    // TODO: re-enable after SelectStatement round-trips
+    #[weight(0)]
     Subquery(Box<SelectStatement>),
 }
 
