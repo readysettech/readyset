@@ -278,6 +278,8 @@ pub enum FieldDefinitionExpr {
     #[default]
     All,
     AllInTable(Relation),
+    // TODO: re-enable once Expr round trip is stable
+    #[weight(0)]
     Expr {
         expr: Expr,
         alias: Option<SqlIdentifier>,
@@ -1179,6 +1181,10 @@ mod tests {
 
     mod postgres {
         use super::*;
+
+        test_format_parse_round_trip!(
+            rt_field_def_expr(field_definition_expr, Vec<FieldDefinitionExpr>, Dialect::PostgreSQL);
+        );
 
         #[test]
         fn cast() {
