@@ -17,6 +17,7 @@ pub enum JoinRightSide {
     /// A single table expression.
     Table(TableExpr),
     /// A comma-separated (and implicitly joined) sequence of tables.
+    #[strategy(size_range(1..12))]
     Tables(Vec<TableExpr>),
 }
 
