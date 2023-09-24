@@ -2073,6 +2073,8 @@ mod tests {
         test_format_parse_round_trip!(
             rt_limit_clause(limit_offset, LimitClause, Dialect::PostgreSQL);
             rt_join_rhs(join_rhs, JoinRightSide, Dialect::PostgreSQL);
+            rt_join_constraint(join_constraint, JoinConstraint, Dialect::PostgreSQL);
+            rt_join_clause(join_clause, JoinClause, Dialect::PostgreSQL);
         );
 
         #[test]
