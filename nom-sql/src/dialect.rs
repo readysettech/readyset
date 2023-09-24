@@ -53,6 +53,16 @@ where
     }
 }
 
+#[cfg(test)]
+impl<T> DialectDisplay for Vec<T>
+where
+    T: DialectDisplay,
+{
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        self.iter().map(|i| i.display(dialect)).join(", ")
+    }
+}
+
 #[inline]
 pub(crate) fn is_sql_identifier(chr: u8) -> bool {
     is_alphanumeric(chr) || chr == b'_'
