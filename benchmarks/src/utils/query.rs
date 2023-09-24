@@ -18,7 +18,7 @@ use anyhow::{anyhow, Result};
 use clap::Parser;
 use data_generator::{ColumnGenerator, DistributionAnnotation};
 use database_utils::{DatabaseConnection, DatabaseStatement, QueryableConnection};
-use nom_sql::{Dialect, Literal, SqlType};
+use nom_sql::{Dialect, DialectDisplay, Literal, SqlType};
 use readyset_data::DfValue;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 

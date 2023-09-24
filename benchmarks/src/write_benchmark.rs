@@ -12,8 +12,8 @@ use database_utils::{DatabaseConnection, DatabaseError, DatabaseURL, QueryableCo
 use itertools::Itertools;
 use metrics::Unit;
 use nom_sql::{
-    BinaryOperator, CacheInner, CreateCacheStatement, Dialect, Expr, FieldDefinitionExpr,
-    ItemPlaceholder, Literal, SelectStatement, TableExpr, TableExprInner,
+    BinaryOperator, CacheInner, CreateCacheStatement, Dialect, DialectDisplay, Expr,
+    FieldDefinitionExpr, ItemPlaceholder, Literal, SelectStatement, TableExpr, TableExprInner,
 };
 use parking_lot::Mutex;
 use query_generator::{ColumnName, TableSpec};

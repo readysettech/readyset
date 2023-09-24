@@ -2,6 +2,7 @@
 
 use anyhow::bail;
 use clap::Parser;
+use nom_sql::DialectDisplay;
 use query_generator::GenerateOpts;
 
 #[derive(Parser)]

@@ -10,8 +10,8 @@ use console::style;
 use database_utils::{DatabaseConnection, DatabaseURL, QueryableConnection};
 use itertools::Itertools;
 use nom_sql::{
-    parse_query, BinaryOperator, CreateTableStatement, DeleteStatement, Dialect, Expr, SqlQuery,
-    SqlType,
+    parse_query, BinaryOperator, CreateTableStatement, DeleteStatement, Dialect, DialectDisplay,
+    Expr, SqlQuery, SqlType,
 };
 use query_generator::{GeneratorState, ParameterMode, QuerySeed};
 

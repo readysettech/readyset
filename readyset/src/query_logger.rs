@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use metrics::{register_counter, register_histogram, Counter, Histogram, SharedString};
-use nom_sql::SqlQuery;
+use nom_sql::{DialectDisplay, SqlQuery};
 use readyset_client::query::QueryId;
 use readyset_client_metrics::{
     recorded, DatabaseType, EventType, QueryExecutionEvent, QueryLogMode, SqlQueryType,

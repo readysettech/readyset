@@ -15,7 +15,7 @@ use test_strategy::Arbitrary;
 
 use crate::expression::expression;
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{literal, Dialect, Expr, Literal, NomSqlResult};
+use crate::{literal, Dialect, DialectDisplay, Expr, Literal, NomSqlResult};
 
 pub type QueryID = String;
 
@@ -33,8 +33,8 @@ pub enum ShowStatement {
     Connections,
 }
 
-impl ShowStatement {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+impl DialectDisplay for ShowStatement {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             write!(f, "SHOW ")?;
             match self {
@@ -205,8 +205,8 @@ pub struct Tables {
     pub filter: Option<FilterPredicate>,
 }
 
-impl Tables {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+impl DialectDisplay for Tables {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             if self.full {
                 write!(f, "FULL ")?;
@@ -256,8 +256,8 @@ pub enum FilterPredicate {
     Where(Expr),
 }
 
-impl FilterPredicate {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+impl DialectDisplay for FilterPredicate {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| match self {
             Self::Like(like) => write!(f, "LIKE '{}'", like),
             Self::Where(expr) => write!(f, "WHERE {}", expr.display(dialect)),

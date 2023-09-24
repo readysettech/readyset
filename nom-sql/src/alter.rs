@@ -25,7 +25,7 @@ use crate::create::key_specification;
 use crate::literal::literal;
 use crate::table::{relation, Relation};
 use crate::whitespace::whitespace1;
-use crate::{Dialect, Literal, NomSqlResult, SqlIdentifier};
+use crate::{Dialect, DialectDisplay, Literal, NomSqlResult, SqlIdentifier};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum AlterColumnOperation {
@@ -33,8 +33,8 @@ pub enum AlterColumnOperation {
     DropColumnDefault,
 }
 
-impl AlterColumnOperation {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+impl DialectDisplay for AlterColumnOperation {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| match self {
             AlterColumnOperation::SetColumnDefault(val) => {
                 write!(f, "SET DEFAULT {}", val.display(dialect))
@@ -109,8 +109,8 @@ pub enum AlterTableDefinition {
      * DropTableConstraint(..), */
 }
 
-impl AlterTableDefinition {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+impl DialectDisplay for AlterTableDefinition {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| match self {
             Self::AddColumn(col) => {
                 write!(f, "ADD COLUMN {}", col.display(dialect))
@@ -175,8 +175,8 @@ pub struct AlterTableStatement {
     pub only: bool,
 }
 
-impl AlterTableStatement {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+impl DialectDisplay for AlterTableStatement {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             write!(f, "ALTER TABLE {} ", self.table.display(dialect))?;
 

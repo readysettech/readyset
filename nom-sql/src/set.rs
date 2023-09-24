@@ -17,7 +17,7 @@ use crate::common::statement_terminator;
 use crate::expression::expression;
 use crate::literal::literal;
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, Expr, Literal, NomSqlError, NomSqlResult, SqlIdentifier};
+use crate::{Dialect, DialectDisplay, Expr, Literal, NomSqlError, NomSqlResult, SqlIdentifier};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum SetStatement {
@@ -26,8 +26,8 @@ pub enum SetStatement {
     PostgresParameter(SetPostgresParameter),
 }
 
-impl SetStatement {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+impl DialectDisplay for SetStatement {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             write!(f, "SET ")?;
             match self {
@@ -76,8 +76,8 @@ pub enum SetPostgresParameterValue {
     Value(PostgresParameterValue),
 }
 
-impl SetPostgresParameterValue {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+impl DialectDisplay for SetPostgresParameterValue {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| match self {
             SetPostgresParameterValue::Default => write!(f, "DEFAULT"),
             SetPostgresParameterValue::Value(val) => write!(f, "{}", val.display(dialect)),
@@ -103,8 +103,8 @@ pub enum PostgresParameterValueInner {
     Literal(Literal),
 }
 
-impl PostgresParameterValueInner {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+impl DialectDisplay for PostgresParameterValueInner {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| match self {
             PostgresParameterValueInner::Identifier(ident) => write!(f, "{}", ident),
             PostgresParameterValueInner::Literal(lit) => write!(f, "{}", lit.display(dialect)),
@@ -151,8 +151,8 @@ impl PostgresParameterValue {
     }
 }
 
-impl PostgresParameterValue {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+impl DialectDisplay for PostgresParameterValue {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| match self {
             PostgresParameterValue::Single(v) => write!(f, "{}", v.display(dialect)),
             PostgresParameterValue::List(l) => {
@@ -255,8 +255,10 @@ impl Variable {
             Some(&self.name)
         }
     }
+}
 
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+impl DialectDisplay for Variable {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             match dialect {
                 Dialect::PostgreSQL => {
@@ -275,8 +277,8 @@ impl Variable {
     }
 }
 
-impl SetVariables {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+impl DialectDisplay for SetVariables {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             write!(
                 f,
@@ -317,8 +319,8 @@ pub struct SetPostgresParameter {
     pub value: SetPostgresParameterValue,
 }
 
-impl SetPostgresParameter {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+impl DialectDisplay for SetPostgresParameter {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             if let Some(scope) = self.scope {
                 write!(f, "{} ", scope)?;

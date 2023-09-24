@@ -12,15 +12,15 @@ use test_strategy::Arbitrary;
 use crate::common::ws_sep_comma;
 use crate::table::{relation, Relation};
 use crate::whitespace::whitespace1;
-use crate::{Dialect, NomSqlResult};
+use crate::{Dialect, DialectDisplay, NomSqlResult};
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct RenameTableStatement {
     pub ops: Vec<RenameTableOperation>,
 }
 
-impl RenameTableStatement {
-    pub fn display(&self, dialect: Dialect) -> impl Display + Copy + '_ {
+impl DialectDisplay for RenameTableStatement {
+    fn display(&self, dialect: Dialect) -> impl Display + Copy + '_ {
         fmt_with(move |f| {
             write!(
                 f,
@@ -50,8 +50,8 @@ pub struct RenameTableOperation {
     pub to: Relation,
 }
 
-impl RenameTableOperation {
-    pub fn display(&self, dialect: Dialect) -> impl Display + Copy + '_ {
+impl DialectDisplay for RenameTableOperation {
+    fn display(&self, dialect: Dialect) -> impl Display + Copy + '_ {
         fmt_with(move |f| {
             write!(
                 f,

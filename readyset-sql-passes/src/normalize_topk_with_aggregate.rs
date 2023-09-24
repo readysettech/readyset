@@ -1,6 +1,7 @@
 use nom_sql::analysis::contains_aggregate;
 use nom_sql::{
-    Expr, FieldDefinitionExpr, FieldReference, LimitClause, OrderBy, SelectStatement, SqlQuery,
+    DialectDisplay, Expr, FieldDefinitionExpr, FieldReference, LimitClause, OrderBy,
+    SelectStatement, SqlQuery,
 };
 use readyset_errors::{ReadySetError, ReadySetResult};
 

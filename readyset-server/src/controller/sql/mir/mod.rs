@@ -18,8 +18,8 @@ pub use mir::{Column, NodeIndex};
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::{
     BinaryOperator, CaseWhenBranch, ColumnSpecification, CompoundSelectOperator, CreateTableBody,
-    Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, InValue, LimitClause, Literal,
-    NonReplicatedRelation, OrderBy, OrderClause, OrderType, Relation, SelectStatement,
+    DialectDisplay, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, InValue, LimitClause,
+    Literal, NonReplicatedRelation, OrderBy, OrderClause, OrderType, Relation, SelectStatement,
     SqlIdentifier, TableKey, UnaryOperator,
 };
 use petgraph::visit::Reversed;

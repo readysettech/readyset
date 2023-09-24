@@ -24,7 +24,7 @@ use triomphe::ThinArc;
 use crate::common::{ws_sep_comma, Sign};
 use crate::table::relation;
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, NomSqlResult, Relation};
+use crate::{Dialect, DialectDisplay, NomSqlResult, Relation};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum IntervalFields {
@@ -297,8 +297,10 @@ impl SqlType {
         }
         self
     }
+}
 
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+impl DialectDisplay for SqlType {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             let write_with_len = |f: &mut fmt::Formatter, name, len| {
                 write!(f, "{}", name)?;

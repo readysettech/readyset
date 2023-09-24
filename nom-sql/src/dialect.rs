@@ -2,7 +2,6 @@ use std::fmt;
 use std::str::{self, FromStr};
 
 use clap::ValueEnum;
-use itertools::Itertools;
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case, take, take_while1};
 use nom::character::is_alphanumeric;
@@ -12,7 +11,6 @@ use nom::multi::fold_many0;
 use nom::sequence::{delimited, preceded};
 use nom::{InputLength, InputTake};
 use nom_locate::LocatedSpan;
-use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -27,20 +25,21 @@ pub trait DialectDisplay {
 }
 
 #[derive(Debug)]
-pub struct CommaSeparatedList<T>(pub Vec<T>);
+pub struct CommaSeparatedList<'a, T>(&'a Vec<T>);
 
-impl<T> CommaSeparatedList<T> {
-    pub fn iter(&self) -> std::slice::Iter<'_, T> {
-        self.0.iter()
+impl<'a, T> From<&'a Vec<T>> for CommaSeparatedList<'a, T> {
+    fn from(value: &'a Vec<T>) -> Self {
+        CommaSeparatedList(value)
     }
 }
 
-impl<T> DialectDisplay for CommaSeparatedList<T>
+impl<'a, T> CommaSeparatedList<'a, T>
 where
     T: DialectDisplay,
 {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
-        fmt_with(move |f| write!(f, "{}", self.iter().map(|i| i.display(dialect)).join(", ")))
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + 'a {
+        use itertools::Itertools;
+        self.0.iter().map(|i| i.display(dialect)).join(", ")
     }
 }
 

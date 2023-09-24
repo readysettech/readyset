@@ -100,7 +100,7 @@ pub fn normalize_negation(expr: &mut Expr) {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{parse_expr, Dialect};
+    use nom_sql::{parse_expr, Dialect, DialectDisplay};
 
     use super::*;
 

@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
 use crate::dialect::is_sql_identifier;
-use crate::{Dialect, NomSqlResult, SqlType};
+use crate::{Dialect, DialectDisplay, NomSqlResult, SqlType};
 
 #[derive(Clone, Debug, Serialize, Deserialize, Arbitrary)]
 pub struct Float {
@@ -209,8 +209,8 @@ impl From<ItemPlaceholder> for Literal {
     }
 }
 
-impl Literal {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+impl DialectDisplay for Literal {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             macro_rules! write_real {
                 ($real:expr, $prec:expr) => {{

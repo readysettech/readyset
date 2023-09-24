@@ -2,7 +2,7 @@
 //! Contains helpers for determining the schemas and tables of a database for use in replication
 use std::collections::HashMap;
 
-use nom_sql::Dialect;
+use nom_sql::{Dialect, DialectDisplay};
 use readyset_errors::ReadySetError;
 use readyset_sql_passes::anonymize::{Anonymize, Anonymizer};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};

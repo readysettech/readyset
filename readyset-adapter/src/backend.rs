@@ -81,7 +81,7 @@ use futures::future::{self, OptionFuture};
 use lru::LruCache;
 use mysql_common::row::convert::{FromRow, FromRowError};
 use nom_sql::{
-    CacheInner, CreateCacheStatement, DeleteStatement, Dialect, DropCacheStatement,
+    CacheInner, CreateCacheStatement, DeleteStatement, Dialect, DialectDisplay, DropCacheStatement,
     InsertStatement, Relation, SelectStatement, SetStatement, ShowStatement, SqlIdentifier,
     SqlQuery, UpdateStatement, UseStatement,
 };

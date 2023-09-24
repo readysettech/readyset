@@ -16,7 +16,7 @@ use crate::common::{
 };
 use crate::table::{relation, Relation};
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, Expr, NomSqlResult};
+use crate::{Dialect, DialectDisplay, Expr, NomSqlResult};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct InsertStatement {
@@ -27,8 +27,8 @@ pub struct InsertStatement {
     pub on_duplicate: Option<Vec<(Column, Expr)>>,
 }
 
-impl InsertStatement {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+impl DialectDisplay for InsertStatement {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             write!(f, "INSERT INTO {}", self.table.display(dialect))?;
 

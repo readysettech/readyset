@@ -14,7 +14,7 @@ use test_strategy::Arbitrary;
 use crate::common::{statement_terminator, ws_sep_comma};
 use crate::table::{relation, table_list, Relation};
 use crate::whitespace::whitespace1;
-use crate::{Dialect, NomSqlResult};
+use crate::{Dialect, DialectDisplay, NomSqlResult};
 
 fn if_exists(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], bool> {
     map(
@@ -40,8 +40,8 @@ pub struct DropTableStatement {
     pub if_exists: bool,
 }
 
-impl DropTableStatement {
-    pub fn display(&self, dialect: Dialect) -> impl Display + Copy + '_ {
+impl DialectDisplay for DropTableStatement {
+    fn display(&self, dialect: Dialect) -> impl Display + Copy + '_ {
         fmt_with(move |f| {
             write!(f, "DROP TABLE ")?;
 
@@ -83,8 +83,8 @@ pub struct DropCacheStatement {
     pub name: Relation,
 }
 
-impl DropCacheStatement {
-    pub fn display(&self, dialect: Dialect) -> impl Display + Copy + '_ {
+impl DialectDisplay for DropCacheStatement {
+    fn display(&self, dialect: Dialect) -> impl Display + Copy + '_ {
         fmt_with(move |f| write!(f, "DROP CACHE {}", self.name.display(dialect)))
     }
 }
@@ -109,8 +109,8 @@ pub struct DropViewStatement {
     pub if_exists: bool,
 }
 
-impl DropViewStatement {
-    pub fn display(&self, dialect: Dialect) -> impl Display + Copy + '_ {
+impl DialectDisplay for DropViewStatement {
+    fn display(&self, dialect: Dialect) -> impl Display + Copy + '_ {
         fmt_with(move |f| {
             write!(f, "DROP VIEW ")?;
             if self.if_exists {
