@@ -464,6 +464,7 @@ fn join_rhs(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u
                 delimited(tag("("), table_expr_list(dialect), tag(")")),
                 JoinRightSide::Tables,
             ),
+            map(tag("()"), |_| JoinRightSide::Tables(vec![])),
         ))(i)
     }
 }
@@ -2071,6 +2072,7 @@ mod tests {
 
         test_format_parse_round_trip!(
             rt_limit_clause(limit_offset, LimitClause, Dialect::PostgreSQL);
+            rt_join_rhs(join_rhs, JoinRightSide, Dialect::PostgreSQL);
         );
 
         #[test]
