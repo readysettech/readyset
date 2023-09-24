@@ -2,6 +2,7 @@ use std::fmt;
 use std::str::{self, FromStr};
 
 use clap::ValueEnum;
+use itertools::Itertools;
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case, take, take_while1};
 use nom::character::is_alphanumeric;
@@ -11,6 +12,7 @@ use nom::multi::fold_many0;
 use nom::sequence::{delimited, preceded};
 use nom::{InputLength, InputTake};
 use nom_locate::LocatedSpan;
+use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -19,6 +21,28 @@ use crate::literal::{raw_string_literal, QuotingStyle};
 use crate::select::LimitClause;
 use crate::whitespace::whitespace0;
 use crate::{literal, NomSqlError, NomSqlResult, SqlIdentifier};
+
+pub trait DialectDisplay {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_;
+}
+
+#[derive(Debug)]
+pub struct CommaSeparatedList<T>(pub Vec<T>);
+
+impl<T> DialectDisplay for CommaSeparatedList<T>
+where
+    T: DialectDisplay,
+{
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| {
+            write!(
+                f,
+                "{}",
+                self.0.iter().map(|i| i.display(dialect)).join(", ")
+            )
+        })
+    }
+}
 
 #[inline]
 pub(crate) fn is_sql_identifier(chr: u8) -> bool {
