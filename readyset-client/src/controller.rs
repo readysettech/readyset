@@ -286,6 +286,28 @@ impl Service<ControllerRequest> for Controller {
     }
 }
 
+/// Options for generating graphviz [dot][] visualizations of the ReadySet dataflow graph.
+///
+/// Used as the argument to [`ReadySetHandle::graphviz`].
+///
+/// [dot]: https://graphviz.org/doc/info/lang.html
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphvizOptions {
+    /// Limit to only visualizing the graph for a single query by name
+    pub for_query: Option<Relation>,
+    /// Generate a detailed representation of the graph, larger and with more information
+    pub detailed: bool,
+}
+
+impl Default for GraphvizOptions {
+    fn default() -> Self {
+        Self {
+            for_query: None,
+            detailed: true,
+        }
+    }
+}
+
 /// A handle to a ReadySet controller.
 ///
 /// This handle is the primary mechanism for interacting with a running ReadySet instance, and lets
@@ -808,7 +830,7 @@ impl ReadySetHandle {
         /// Fetch a graphviz description of the dataflow graph.
         ///
         /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-        graphviz() -> String
+        graphviz(options: GraphvizOptions) -> String
     );
 
     simple_request!(

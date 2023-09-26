@@ -16,8 +16,8 @@ use readyset_client::internal::LocalNodeIndex;
 use readyset_client::recipe::changelist::{Change, ChangeList, IntoChanges};
 use readyset_client::results::{ResultIterator, Results};
 use readyset_client::{
-    ColumnSchema, ReadQuery, ReaderAddress, ReaderHandle, ReadySetHandle, SchemaType, Table,
-    TableOperation, View, ViewCreateRequest, ViewQuery,
+    ColumnSchema, GraphvizOptions, ReadQuery, ReaderAddress, ReaderHandle, ReadySetHandle,
+    SchemaType, Table, TableOperation, View, ViewCreateRequest, ViewQuery,
 };
 use readyset_data::{DfType, DfValue, Dialect, TimestampTz};
 use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
@@ -524,13 +524,21 @@ impl NoriaConnector {
         &mut self,
         simplified: bool,
     ) -> ReadySetResult<QueryResult<'static>> {
-        let noria = &mut self.inner.get_mut()?.noria;
-
-        let (label, graphviz) = if simplified {
-            ("SIMPLIFIED GRAPHVIZ", noria.simple_graphviz().await?)
+        let label = if simplified {
+            "SIMPLIFIED GRAPHVIZ"
         } else {
-            ("GRAPHVIZ", noria.graphviz().await?)
+            "GRAPHVIZ"
         };
+
+        let graphviz = self
+            .inner
+            .get_mut()?
+            .noria
+            .graphviz(GraphvizOptions {
+                detailed: !simplified,
+                ..Default::default()
+            })
+            .await?;
 
         Ok(QueryResult::Meta(vec![(label, graphviz).into()]))
     }

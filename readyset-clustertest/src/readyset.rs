@@ -254,7 +254,7 @@ async fn replicated_readers() {
     .await
     .unwrap();
 
-    eprintln!("{}", lh.graphviz().await.unwrap());
+    eprintln!("{}", lh.graphviz(Default::default()).await.unwrap());
 
     let mut t = lh.table("t").await.unwrap();
     t.insert_many(vec![
@@ -354,7 +354,7 @@ async fn replicated_readers_with_unions() {
     .await
     .unwrap();
 
-    eprintln!("{}", lh.graphviz().await.unwrap());
+    eprintln!("{}", lh.graphviz(Default::default()).await.unwrap());
 
     let mut t = lh.table("t").await.unwrap();
     t.insert_many(vec![
@@ -428,7 +428,7 @@ async fn no_readers_worker_doesnt_get_readers() {
     .await
     .unwrap();
 
-    eprintln!("{}", lh.graphviz().await.unwrap());
+    eprintln!("{}", lh.graphviz(Default::default()).await.unwrap());
 
     let view_0 = lh.view("q0").await.unwrap().into_reader_handle().unwrap();
     let view_1 = lh.view("q1").await.unwrap().into_reader_handle().unwrap();

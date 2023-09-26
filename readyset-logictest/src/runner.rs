@@ -356,7 +356,7 @@ impl TestScript {
                         if opts.verbose {
                             eprintln!("     > graphviz");
                         }
-                        println!("{}", noria.graphviz().await?);
+                        println!("{}", noria.graphviz(Default::default()).await?);
                     }
                 }
             }

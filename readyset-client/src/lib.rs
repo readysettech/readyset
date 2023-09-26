@@ -351,7 +351,7 @@ impl<T> From<T> for Tagged<T> {
 use url::Url;
 
 pub use crate::consensus::WorkerDescriptor;
-pub use crate::controller::{ControllerDescriptor, ReadySetHandle};
+pub use crate::controller::{ControllerDescriptor, GraphvizOptions, ReadySetHandle};
 pub use crate::table::{
     Modification, Operation, PacketData, PacketPayload, PacketTrace, Table, TableOperation,
     TableReplicationStatus, TableRequest, TableStatus,

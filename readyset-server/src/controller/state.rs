@@ -31,6 +31,7 @@ use futures::{FutureExt, TryFutureExt, TryStream};
 use metrics::{gauge, histogram};
 use nom_sql::{CreateCacheStatement, NonReplicatedRelation, Relation, SqlIdentifier, SqlQuery};
 use petgraph::visit::Bfs;
+use petgraph::Direction;
 use rand::Rng;
 use readyset_client::builders::{
     ReaderHandleBuilder, ReusedReaderHandleBuilder, TableBuilder, ViewBuilder,
@@ -707,6 +708,33 @@ impl DfState {
             reachable_from: None,
         }
         .to_string()
+    }
+
+    pub(super) fn graphviz_for_query(
+        &self,
+        query: &Relation,
+        detailed: bool,
+        node_sizes: Option<HashMap<NodeIndex, NodeSize>>,
+    ) -> ReadySetResult<String> {
+        let ni = self
+            .recipe
+            .node_addr_for(query)
+            .ok()
+            .or_else(|| self.views().get(query).copied())
+            .and_then(|leaf| self.find_reader_for(leaf, query, &Default::default()))
+            .ok_or_else(|| ReadySetError::QueryNotFound {
+                name: query.display_unquoted().to_string(),
+            })?;
+
+        Ok(Graphviz {
+            graph: &self.ingredients,
+            detailed,
+            node_sizes,
+            materializations: &self.materializations,
+            domain_nodes: Some(&self.domain_nodes),
+            reachable_from: Some((ni, Direction::Incoming)),
+        }
+        .to_string())
     }
 
     /// List data-flow nodes, on a specific worker if `worker` specified.
