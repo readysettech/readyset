@@ -887,7 +887,8 @@ impl Materializations {
                                                         detailed: true,
                                                         node_sizes: None,
                                                         materializations: self,
-                                                        domain_nodes: None
+                                                        domain_nodes: None,
+                                                        reachable_from: None,
                                                     }
                                                 );
                                                 error!(
@@ -932,7 +933,8 @@ impl Materializations {
                             detailed: true,
                             node_sizes: None,
                             materializations: self,
-                            domain_nodes: None
+                            domain_nodes: None,
+                            reachable_from: None,
                         }
                     );
                     internal!("found purge node {} above non-purge node", ni.index())
@@ -1101,7 +1103,8 @@ impl Materializations {
                                     detailed: true,
                                     node_sizes: None,
                                     materializations: self,
-                                    domain_nodes: None
+                                    domain_nodes: None,
+                                    reachable_from: None,
                                 }
                             );
                             error!(

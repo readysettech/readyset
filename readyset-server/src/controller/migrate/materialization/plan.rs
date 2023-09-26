@@ -446,7 +446,8 @@ impl<'a> Plan<'a> {
                             detailed: true,
                             node_sizes: None,
                             materializations: self.m,
-                            domain_nodes: None
+                            domain_nodes: None,
+                            reachable_from: None,
                         }
                     );
                     internal!("detected A-B-A domain replay path");

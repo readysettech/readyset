@@ -1,10 +1,11 @@
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::{self, Display};
 
 use dataflow::prelude::{Graph, NodeIndex};
 use dataflow::{DomainIndex, NodeMap};
 use lazy_static::lazy_static;
+use petgraph::Direction;
 use readyset_client::debug::info::NodeSize;
 use regex::Regex;
 
@@ -24,6 +25,7 @@ pub(in crate::controller) struct Graphviz<'a> {
     pub node_sizes: Option<HashMap<NodeIndex, NodeSize>>,
     pub materializations: &'a Materializations,
     pub domain_nodes: Option<&'a HashMap<DomainIndex, NodeMap<NodeIndex>>>,
+    pub reachable_from: Option<(NodeIndex, Direction)>,
 }
 
 /// Builds a graphviz [dot][] representation of the graph
@@ -57,6 +59,24 @@ impl<'a> Display for Graphviz<'a> {
             )?;
         }
 
+        let nodes = if let Some((ni, dir)) = self.reachable_from {
+            let mut nodes = HashSet::new();
+            let mut stack = vec![ni];
+            while let Some(node) = stack.pop() {
+                if nodes.insert(node) {
+                    for next in self.graph.neighbors_directed(node, dir) {
+                        if !nodes.contains(&next) {
+                            stack.push(next);
+                        }
+                    }
+                }
+            }
+
+            nodes
+        } else {
+            self.graph.node_indices().collect()
+        };
+
         let domain_for_node = self
             .domain_nodes
             .iter()
@@ -64,12 +84,12 @@ impl<'a> Display for Graphviz<'a> {
             .flat_map(|(di, nodes)| nodes.iter().map(|(_, ni)| (*ni, *di)))
             .collect::<HashMap<_, _>>();
         let mut domains_to_nodes = HashMap::new();
-        for index in self.graph.node_indices() {
-            let domain = domain_for_node.get(&index).copied();
+        for ni in &nodes {
+            let domain = domain_for_node.get(ni).copied();
             domains_to_nodes
                 .entry(domain)
                 .or_insert_with(Vec::new)
-                .push(index);
+                .push(*ni);
         }
 
         // node descriptions.
@@ -108,7 +128,11 @@ impl<'a> Display for Graphviz<'a> {
         }
 
         // edges.
-        for (_, edge) in self.graph.raw_edges().iter().enumerate() {
+        for edge in self.graph.raw_edges() {
+            if !(nodes.contains(&edge.source()) && nodes.contains(&edge.target())) {
+                continue;
+            }
+
             indentln(f)?;
             write!(
                 f,
