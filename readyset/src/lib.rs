@@ -986,7 +986,7 @@ where
         let parse_dialect = self.parse_dialect;
         while let Some(Ok(s)) = rt.block_on(listener.next()) {
             let connection = info_span!("connection", addr = %s.peer_addr()?);
-            connection.in_scope(|| info!("Accepted new connection"));
+            connection.in_scope(|| debug!("Accepted new connection"));
             s.set_nodelay(true)?;
 
             // bunch of stuff to move into the async block below
