@@ -311,7 +311,7 @@ async fn sharded_shuffle() {
         })
         .await;
 
-    eprintln!("{}", g.graphviz().await.unwrap());
+    eprintln!("{}", g.graphviz(Default::default()).await.unwrap());
 
     let mut base = g.table_by_index(a).await.unwrap();
     let mut view = g.view("base").await.unwrap().into_reader_handle().unwrap();
@@ -403,7 +403,7 @@ async fn broad_recursing_upquery() {
         })
         .await;
 
-    eprintln!("{}", g.graphviz().await.unwrap());
+    eprintln!("{}", g.graphviz(Default::default()).await.unwrap());
 
     let mut base_x = g.table_by_index(x).await.unwrap();
     let mut reader = g
@@ -4280,7 +4280,7 @@ async fn between_parametrized() {
         things.insert(vec![i.into()]).await.unwrap();
     }
 
-    eprintln!("{}", g.graphviz().await.unwrap());
+    eprintln!("{}", g.graphviz(Default::default()).await.unwrap());
 
     let mut q = g.view("q").await.unwrap().into_reader_handle().unwrap();
     assert_eq!(q.key_map(), &[(ViewPlaceholder::Between(1, 2), 0)]);
@@ -4373,7 +4373,7 @@ async fn simple_pagination() {
     .await
     .unwrap();
 
-    eprintln!("{}", g.graphviz().await.unwrap());
+    eprintln!("{}", g.graphviz(Default::default()).await.unwrap());
 
     let mut t = g.table("t").await.unwrap();
 
@@ -7044,7 +7044,7 @@ async fn partial_distinct_multi() {
     .await
     .unwrap();
 
-    eprintln!("{}", g.graphviz().await.unwrap());
+    eprintln!("{}", g.graphviz(Default::default()).await.unwrap());
 
     let mut t = g.table("test").await.unwrap();
     let mut q = g
@@ -7152,7 +7152,7 @@ async fn join_straddled_columns() {
         .into_reader_handle()
         .unwrap();
 
-    eprintln!("{}", g.graphviz().await.unwrap());
+    eprintln!("{}", g.graphviz(Default::default()).await.unwrap());
 
     a.insert_many(vec![
         vec![DfValue::from(1i32), DfValue::from(2i32)],
@@ -7225,7 +7225,7 @@ async fn straddled_join_range_query() {
 
     sleep().await;
 
-    eprintln!("{}", g.graphviz().await.unwrap());
+    eprintln!("{}", g.graphviz(Default::default()).await.unwrap());
 
     let rows = q
         .multi_lookup(
@@ -8198,7 +8198,7 @@ async fn reroutes_recursively() {
     g.extend_recipe(ChangeList::from_str(sql2, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
-    eprintln!("{}", g.graphviz().await.unwrap());
+    eprintln!("{}", g.graphviz(Default::default()).await.unwrap());
     let mut m1 = g.table("t1").await.unwrap();
     m1.insert(vec![1.into(), 2.into()]).await.unwrap();
     let mut m2 = g.table("t2").await.unwrap();
@@ -8241,7 +8241,7 @@ async fn reroutes_two_children_at_once() {
     g.extend_recipe(ChangeList::from_str(sql1, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
-    eprintln!("{}", g.graphviz().await.unwrap());
+    eprintln!("{}", g.graphviz(Default::default()).await.unwrap());
 
     let sql2 = "
         CREATE CACHE q2 FROM SELECT t1.a, t1.b, t2.c, t2.d FROM t1 INNER JOIN t2 ON t1.a = t2.c;
@@ -8250,7 +8250,7 @@ async fn reroutes_two_children_at_once() {
     g.extend_recipe(ChangeList::from_str(sql2, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
-    eprintln!("{}", g.graphviz().await.unwrap());
+    eprintln!("{}", g.graphviz(Default::default()).await.unwrap());
 
     let mut m1 = g.table("t1").await.unwrap();
     let mut m2 = g.table("t2").await.unwrap();
@@ -8308,7 +8308,7 @@ async fn reroutes_same_migration() {
     g.extend_recipe(ChangeList::from_str(sql, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
-    eprintln!("{}", g.graphviz().await.unwrap());
+    eprintln!("{}", g.graphviz(Default::default()).await.unwrap());
 
     let mut m1 = g.table("t1").await.unwrap();
     let mut m2 = g.table("t2").await.unwrap();
@@ -8373,7 +8373,7 @@ async fn reroutes_dependent_children() {
     g.extend_recipe(ChangeList::from_str(sql2, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
-    eprintln!("{}", g.graphviz().await.unwrap());
+    eprintln!("{}", g.graphviz(Default::default()).await.unwrap());
 
     let mut m1 = g.table("t1").await.unwrap();
     let mut m2 = g.table("t2").await.unwrap();
@@ -9260,7 +9260,7 @@ async fn multiple_schemas_explicit() {
         .await
         .unwrap();
 
-    eprintln!("{}", g.graphviz().await.unwrap());
+    eprintln!("{}", g.graphviz(Default::default()).await.unwrap());
 
     sleep().await;
 

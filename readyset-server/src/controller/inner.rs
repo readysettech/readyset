@@ -18,12 +18,13 @@ use failpoint_macros::failpoint;
 use futures::future::Fuse;
 use futures::{Future, FutureExt};
 use hyper::Method;
+use nom_sql::Relation;
 use readyset_client::consensus::{Authority, AuthorityControl};
 use readyset_client::debug::stats::PersistentStats;
 use readyset_client::internal::ReplicaAddress;
 use readyset_client::recipe::{ExtendRecipeResult, ExtendRecipeSpec, MigrationStatus};
 use readyset_client::status::{ReadySetStatus, SnapshotStatus};
-use readyset_client::{SingleKeyEviction, WorkerDescriptor};
+use readyset_client::{GraphvizOptions, SingleKeyEviction, WorkerDescriptor};
 use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
 use readyset_telemetry_reporter::TelemetrySender;
 use readyset_util::futures::abort_on_panic;
@@ -259,19 +260,32 @@ impl Leader {
                 let ds = self.dataflow_state_handle.read().await;
                 Ok(ds.graphviz(false, None).into_bytes())
             }
-            (&Method::POST, "/simple_graphviz") => {
-                let ds = self.dataflow_state_handle.read().await;
-                return_serialized!(ds.graphviz(false, None));
-            }
             (&Method::GET, "/graph") => {
                 let ds = self.dataflow_state_handle.read().await;
                 let node_sizes = ds.node_sizes().await?;
                 Ok(ds.graphviz(true, Some(node_sizes)).into_bytes())
             }
-            (&Method::POST, "/graphviz") => {
+            (&Method::GET, path) if path.starts_with("/graph/") => {
+                #[allow(clippy::unwrap_used)]
+                let query_name = Relation {
+                    schema: None,
+                    name: path.get("/graph/".len()..).unwrap().into(),
+                };
                 let ds = self.dataflow_state_handle.read().await;
                 let node_sizes = ds.node_sizes().await?;
-                return_serialized!(ds.graphviz(true, Some(node_sizes)));
+                Ok(ds
+                    .graphviz_for_query(&query_name, true, Some(node_sizes))?
+                    .into_bytes())
+            }
+            (&Method::POST, "/graphviz") => {
+                let opts: GraphvizOptions = bincode::deserialize(&body)?;
+                let ds = self.dataflow_state_handle.read().await;
+                let node_sizes = ds.node_sizes().await?;
+                return_serialized!(if let Some(query) = &opts.for_query {
+                    ds.graphviz_for_query(query, opts.detailed, Some(node_sizes))?
+                } else {
+                    ds.graphviz(opts.detailed, Some(node_sizes))
+                });
             }
             (&Method::GET | &Method::POST, "/get_statistics") => {
                 let ds = self.dataflow_state_handle.read().await;

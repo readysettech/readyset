@@ -81,6 +81,10 @@ pub enum ReadySetError {
     #[error("No query known by id {id}")]
     NoQueryForId { id: String },
 
+    /// An operation was performed that referenced an unknown query by name
+    #[error("Query named {name} not found")]
+    QueryNotFound { name: String },
+
     /// The adapter will return this error on any set statement that is not
     /// explicitly allowed.
     #[error("Set statement disallowed: {}", Sensitive(statement))]
