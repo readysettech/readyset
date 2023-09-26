@@ -41,6 +41,8 @@ pub mod recorded {
     /// | --- | ----------- |
     /// | from_node | The src node of the packet. |
     /// | to_node |The dst node of the packet. |
+    /// | domain | The index of the domain handling the packet. |
+    /// | shard | The shard the domain handling the packet. |
     pub const DOMAIN_FORWARD_TIME: &str = "readyset_forward_time_us";
 
     /// Counter: The total time the domain spends handling and forwarding
@@ -51,6 +53,8 @@ pub mod recorded {
     /// | --- | ----------- |
     /// | from_node | The src node of the packet. |
     /// | to_node |The dst node of the packet. |
+    /// | domain | The index of the domain handling the packet. |
+    /// | shard | The shard the domain handling the packet. |
     pub const DOMAIN_TOTAL_FORWARD_TIME: &str = "readyset_total_forward_time_us";
 
     /// Histogram: The time in microseconds that a domain spends

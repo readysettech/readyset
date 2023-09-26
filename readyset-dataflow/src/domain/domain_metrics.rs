@@ -257,12 +257,16 @@ impl DomainMetrics {
                 recorded::DOMAIN_TOTAL_FORWARD_TIME,
                 "from_node" => src.to_string(),
                 "to_node" => dst.to_string(),
+                "domain" => self.index.clone(),
+                "shard" => self.shard.clone(),
             );
 
             let histo = register_histogram!(
                 recorded::DOMAIN_FORWARD_TIME,
                 "from_node" => src.to_string(),
                 "to_node" => dst.to_string(),
+                "domain" => self.index.clone(),
+                "shard" => self.shard.clone(),
             );
 
             ctr.increment(time.as_micros() as u64);
