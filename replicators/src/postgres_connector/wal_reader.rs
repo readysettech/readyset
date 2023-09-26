@@ -11,7 +11,7 @@ use replication_offset::postgres::{CommitLsn, Lsn};
 use rust_decimal::prelude::FromStr;
 use rust_decimal::Decimal;
 use tokio_postgres as pgsql;
-use tracing::{debug, error, trace, warn};
+use tracing::{debug, error, trace};
 
 use super::ddl_replication::DdlEvent;
 use super::wal::{self, RelationMapping, WalData, WalError, WalRecord};
@@ -124,7 +124,7 @@ impl WalReader {
                     schema,
                     table,
                 }) => {
-                    warn!(
+                    debug!(
                         type_oid,
                         schema = schema,
                         table = table,
