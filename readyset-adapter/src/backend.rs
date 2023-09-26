@@ -1914,7 +1914,7 @@ where
             SqlQuery::Explain(nom_sql::ExplainStatement::LastStatement) => {
                 self.explain_last_statement()
             }
-            SqlQuery::Explain(nom_sql::ExplainStatement::Graphviz { simplified }) => {
+            SqlQuery::Explain(nom_sql::ExplainStatement::Graphviz { simplified, .. }) => {
                 self.noria.graphviz(*simplified).await
             }
             SqlQuery::Explain(nom_sql::ExplainStatement::Domains) => {
