@@ -88,7 +88,7 @@ impl SqlQuery {
             Self::RenameTable(rename) => write!(f, "{}", rename.display(dialect)),
             Self::Use(use_db) => write!(f, "{}", use_db),
             Self::Show(show) => write!(f, "{}", show.display(dialect)),
-            Self::Explain(explain) => write!(f, "{}", explain),
+            Self::Explain(explain) => write!(f, "{}", explain.display(dialect)),
             Self::Comment(c) => write!(f, "{}", c.display(dialect)),
         })
     }
@@ -174,7 +174,7 @@ fn sql_query_part1(
             map(rename_table(dialect), SqlQuery::RenameTable),
             map(use_statement(dialect), SqlQuery::Use),
             map(show(dialect), SqlQuery::Show),
-            map(explain_statement, SqlQuery::Explain),
+            map(explain_statement(dialect), SqlQuery::Explain),
         ))(i)
     }
 }
