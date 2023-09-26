@@ -704,6 +704,7 @@ impl DfState {
             node_sizes,
             materializations: &self.materializations,
             domain_nodes: Some(&self.domain_nodes),
+            reachable_from: None,
         }
         .to_string()
     }
