@@ -163,7 +163,7 @@ impl NoriaAdapter {
         noria: ReadySetHandle,
         mut config: UpstreamConfig,
         notification_channel: &UnboundedSender<ReplicatorMessage>,
-        controller_channel: &UnboundedReceiver<ControllerMessage>,
+        controller_channel: &mut UnboundedReceiver<ControllerMessage>,
         telemetry_sender: TelemetrySender,
         server_startup: bool,
         enable_statement_logging: bool,
@@ -283,7 +283,7 @@ impl NoriaAdapter {
         mut noria: ReadySetHandle,
         mut config: UpstreamConfig,
         notification_channel: &UnboundedSender<ReplicatorMessage>,
-        controller_channel: &UnboundedReceiver<ControllerMessage>,
+        controller_channel: &mut UnboundedReceiver<ControllerMessage>,
         resnapshot: bool,
         telemetry_sender: &TelemetrySender,
         enable_statement_logging: bool,
@@ -487,7 +487,7 @@ impl NoriaAdapter {
         mut noria: ReadySetHandle,
         mut config: UpstreamConfig,
         notification_channel: &UnboundedSender<ReplicatorMessage>,
-        controller_channel: &UnboundedReceiver<ControllerMessage>,
+        controller_channel: &mut UnboundedReceiver<ControllerMessage>,
         resnapshot: bool,
         full_resnapshot: bool,
         telemetry_sender: &TelemetrySender,
@@ -985,7 +985,7 @@ impl NoriaAdapter {
         position: &mut ReplicationOffset,
         until: Option<ReplicationOffset>,
         notification_channel: &UnboundedSender<ReplicatorMessage>,
-        _controller_channel: &UnboundedReceiver<ControllerMessage>,
+        controller_channel: &mut UnboundedReceiver<ControllerMessage>,
     ) -> ReadySetResult<()> {
         // Notify the controller that we've started replication if we've entered the main (not
         // catchup) replication loop.
@@ -1005,45 +1005,57 @@ impl NoriaAdapter {
                 return Ok(());
             }
 
-            let (action, pos) = match self.connector.next_action(position, until.as_ref()).await {
-                Ok(next_action) => next_action,
-                // In some cases, we may fail to replicate because of unsupported operations, stop
-                // replicating a table if we encounter this type of error.
-                Err(ReadySetError::TableError { table, source }) => {
-                    if source.is_networking_related() {
-                        // Don't deny replication of the error is caused by networking
-                        return Err(ReadySetError::TableError { table, source });
+            select! {
+                controller_message = controller_channel.recv() => match controller_message {
+                    Some(ControllerMessage::ResnapshotTable { table }) => {
+                      self.drop_table_for_resnapshot(table).await?;
+                      return Err(ReadySetError::ResnapshotNeeded);
                     }
-                    self.deny_replication_for_table(table, source).await?;
-                    continue;
-                }
-                Err(e) => return Err(e),
-            };
-            *position = pos.clone();
-            debug!(%position, "Received replication action");
+                    _ => {}
+                },
+                next_action = self.connector.next_action(position, until.as_ref()).fuse() => match next_action {
+                  Ok(next_action) => {
+                      let (action, pos) = next_action;
+                      *position = pos.clone();
+                      debug!(%position, "Received replication action");
 
-            trace!(?action);
+                      trace!(?action);
 
-            if let Err(err) = self.handle_action(action, pos, until.is_some()).await {
-                if matches!(err, ReadySetError::ResnapshotNeeded) {
-                    info!("Change in DDL requires partial resnapshot");
-                } else {
-                    error!(error = %err, "Aborting replication task on error");
-                    counter!(recorded::REPLICATOR_FAILURE, 1u64,);
-                }
-                // In some cases, we may fail to replicate because of unsupported operations, stop
-                // replicating a table if we encounter this type of error.
-                if let ReadySetError::TableError { table, source } = err {
-                    self.deny_replication_for_table(table, source).await?;
-                    continue;
-                }
+                      if let Err(err) = self.handle_action(action, pos, until.is_some()).await {
+                          if matches!(err, ReadySetError::ResnapshotNeeded) {
+                              info!("Change in DDL requires partial resnapshot");
+                          } else {
+                              error!(error = %err, "Aborting replication task on error");
+                              counter!(recorded::REPLICATOR_FAILURE, 1u64,);
+                          }
+                          // In some cases, we may fail to replicate because of unsupported
+                          // operations, stop replicating a table if we
+                          // encounter this type of error.
+                          if let ReadySetError::TableError { table, source } = err {
+                              self.deny_replication_for_table(table, source).await?;
+                              continue;
+                          }
 
-                error!(error = %err, "Aborting replication task on error");
-                counter!(recorded::REPLICATOR_FAILURE, 1u64,);
-                return Err(err);
-            };
-            counter!(recorded::REPLICATOR_SUCCESS, 1u64);
-            debug!(%position, "Successfully applied replication action");
+                          error!(error = %err, "Aborting replication task on error");
+                          counter!(recorded::REPLICATOR_FAILURE, 1u64,);
+                          return Err(err);
+                      };
+                      counter!(recorded::REPLICATOR_SUCCESS, 1u64);
+                      debug!(%position, "Successfully applied replication action");
+                  }
+                  // In some cases, we may fail to replicate because of unsupported operations, stop
+                  // replicating a table if we encounter this type of error.
+                  Err(ReadySetError::TableError { table, source }) => {
+                      if source.is_networking_related() {
+                          // Don't deny replication of the error is caused by networking
+                          return Err(ReadySetError::TableError { table, source });
+                      }
+                      self.deny_replication_for_table(table, source).await?;
+                      continue;
+                  }
+                  Err(e) => return Err(e),
+              }
+            }
         }
     }
 
@@ -1069,6 +1081,20 @@ impl NoriaAdapter {
         }
     }
 
+    /// remove table referenced by the provided schema and table name from our base table and
+    /// remove replication offsets for it. This is intended to be used to re-snapshot the table.
+    async fn drop_table_for_resnapshot(&mut self, table: Relation) -> ReadySetResult<()> {
+        self.replication_offsets.tables.remove(&table);
+        let changelist = ChangeList::from_change(
+            Change::Drop {
+                name: table.clone(),
+                if_exists: true,
+            },
+            self.dialect,
+        );
+        self.noria.extend_recipe(changelist).await?;
+        Ok(())
+    }
     /// Remove the table referenced by the provided schema and table name from our base table and
     /// dataflow state (if any).
     async fn remove_table_from_readyset(&mut self, table: Relation) -> ReadySetResult<()> {
