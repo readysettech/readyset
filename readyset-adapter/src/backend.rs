@@ -1060,7 +1060,7 @@ where
                 } else {
                     PrepareMeta::Proxy
                 };
-                warn!(query = %Sensitive(&query), plan = ?mode, "ReadySet failed to parse query");
+                debug!(query = %Sensitive(&query), plan = ?mode, "ReadySet failed to parse query");
                 mode
             }
         }
