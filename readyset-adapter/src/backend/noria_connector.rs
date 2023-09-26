@@ -523,6 +523,7 @@ impl NoriaConnector {
     pub(crate) async fn graphviz(
         &mut self,
         simplified: bool,
+        for_query: Option<Relation>,
     ) -> ReadySetResult<QueryResult<'static>> {
         let label = if simplified {
             "SIMPLIFIED GRAPHVIZ"
@@ -536,7 +537,7 @@ impl NoriaConnector {
             .noria
             .graphviz(GraphvizOptions {
                 detailed: !simplified,
-                ..Default::default()
+                for_query,
             })
             .await?;
 
