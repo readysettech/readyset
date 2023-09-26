@@ -708,7 +708,8 @@ impl ReadySetError {
         }
     }
 
-    fn any_cause<F>(&self, f: F) -> bool
+    /// Returns true if any of the causes of the error satisfy the given predicate
+    pub fn any_cause<F>(&self, f: F) -> bool
     where
         F: Fn(&Self) -> bool + Clone,
     {
