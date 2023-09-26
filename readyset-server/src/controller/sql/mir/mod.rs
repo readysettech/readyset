@@ -972,19 +972,10 @@ impl SqlToMirConverter {
         right_node: NodeIndex,
         kind: JoinKind,
     ) -> ReadySetResult<NodeIndex> {
-        // TODO(malte): this is where we overproject join columns in order to increase reuse
-        // opportunities. Technically, we need to only project those columns here that the query
-        // actually needs; at a minimum, we could start with just the join columns, relying on the
-        // automatic column pull-down to retrieve the remaining columns required.
-        let projected_cols_left = self.mir_graph.columns(left_node);
-        let projected_cols_right = self.mir_graph.columns(right_node);
-        let mut project = projected_cols_left
-            .into_iter()
-            .chain(projected_cols_right.into_iter())
-            .collect::<Vec<Column>>();
-
-        // join columns need us to generate join group configs for the operator
-        let mut on = Vec::new();
+        // Only project the join columns, relying on the pull_columns rewrite pass to pull the rest
+        // of the columns we need
+        let mut project = vec![];
+        let mut on = Vec::with_capacity(join_predicates.len());
 
         for jp in join_predicates {
             let mut l_col = Column::from(jp.left.clone());
@@ -995,30 +986,25 @@ impl SqlToMirConverter {
                 // aliases to the columns that represent it going forward (viz., the left-side join
                 // column)
                 l_col.add_alias(&r_col);
-                // add the alias to all instances of `l_col` in `fields` (there might be more than
-                // one if `l_col` is explicitly projected multiple times)
-                project = project
-                    .into_iter()
-                    .filter_map(|mut f| {
-                        if f == r_col {
-                            // drop instances of right-side column
-                            None
-                        } else if f == l_col {
-                            // add alias for right-side column to any left-side column
-                            // N.B.: since `l_col` is already aliased, need to check this *after*
-                            // checking for equivalence with `r_col` (by now, `l_col` == `r_col` via
-                            // alias), so `f == l_col` also triggers if `f` is in `l_col.aliases`.
-                            f.add_alias(&r_col);
-                            Some(f)
-                        } else {
-                            // keep unaffected columns
-                            Some(f)
-                        }
-                    })
-                    .collect();
             }
 
+            project.push(l_col.clone());
             on.push((l_col, r_col));
+        }
+
+        // MIR nodes have to have at least one column - in the case of cross joins, we wouldn't have
+        // put anything into `project` yet, so we have to pick a column to project.
+        //
+        // TODO(aspen): This sucks, let's make it so mir nodes can have no columns at some point
+        if project.is_empty() {
+            project.push(
+                self.mir_graph
+                    .columns(left_node)
+                    .first()
+                    .cloned()
+                    .or_else(|| self.mir_graph.columns(right_node).first().cloned())
+                    .ok_or_else(|| internal_err!("MIR node has no columns"))?,
+            )
         }
 
         let inner = match kind {
