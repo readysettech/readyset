@@ -99,7 +99,7 @@ use readyset_util::redacted::Sensitive;
 use readyset_version::READYSET_VERSION;
 use timestamp_service::client::{TimestampClient, WriteId, WriteKey};
 use tokio::sync::mpsc::UnboundedSender;
-use tracing::{error, instrument, trace, warn};
+use tracing::{debug, error, instrument, trace, warn};
 use vec1::Vec1;
 
 use crate::backend::noria_connector::ExecuteSelectContext;
@@ -879,7 +879,7 @@ where
             }
             Some(Err(e)) => {
                 if e.caused_by_view_not_found() {
-                    warn!(error = %e, "View not found during mirror_prepare()");
+                    debug!(error = %e, "View not found during mirror_prepare()");
                     self.state.query_status_cache.view_not_found_for_query(
                         &ViewCreateRequest::new(
                             select_meta.rewritten.clone(),
