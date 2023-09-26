@@ -221,7 +221,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
     }
 
     async fn is_connected(&mut self) -> Result<bool, Self::Error> {
-        Ok(!self.client.is_closed())
+        Ok(!self.client.simple_query("select 1").await?.is_empty())
     }
 
     // Returns the upstream server's version, with ReadySet's info appended, to indicate to clients
