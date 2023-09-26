@@ -1988,6 +1988,7 @@ where
                     let connection_status = upstream
                         .is_connected()
                         .await
+                        .is_ok()
                         .then(|| "Connected".to_string())
                         .unwrap_or_else(|| "Unreachable".to_string());
                     vec![("Database Connection".to_string(), connection_status)]

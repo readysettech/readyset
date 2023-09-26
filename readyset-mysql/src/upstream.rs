@@ -279,8 +279,8 @@ impl UpstreamDatabase for MySqlUpstream {
         Ok(())
     }
 
-    async fn is_connected(&mut self) -> bool {
-        self.conn.ping().await.is_ok()
+    async fn is_connected(&mut self) -> Result<bool, Self::Error> {
+        Ok(self.conn.ping().await.is_ok())
     }
 
     /// Prepares the given query using the mysql connection. Note, queries are prepared on a
