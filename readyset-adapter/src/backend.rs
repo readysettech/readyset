@@ -2438,7 +2438,12 @@ where
             }
             // Parse error, send to fallback
             Err(e) => {
-                if !matches!(e, ReadySetError::ReaderMissingKey) {
+                if !matches!(
+                    e,
+                    ReadySetError::ReaderMissingKey
+                    | ReadySetError::NoCacheForQuery
+                    | ReadySetError::UnparseableQuery { .. }
+                    ) {
                     warn!(error = %e, "Error received from noria, sending query to fallback");
                     event.set_noria_error(&e);
                 }
