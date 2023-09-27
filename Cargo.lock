@@ -4845,6 +4845,7 @@ dependencies = [
  "futures-util",
  "itertools",
  "lazy_static",
+ "metrics",
  "mysql",
  "mysql-srv",
  "mysql_async",
