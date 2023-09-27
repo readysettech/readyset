@@ -18,13 +18,15 @@ use failpoint_macros::failpoint;
 use futures::future::Fuse;
 use futures::{Future, FutureExt};
 use hyper::Method;
+use metrics::gauge;
 use nom_sql::Relation;
 use readyset_client::consensus::{Authority, AuthorityControl};
 use readyset_client::debug::stats::PersistentStats;
 use readyset_client::internal::ReplicaAddress;
+use readyset_client::metrics::recorded;
 use readyset_client::recipe::{ExtendRecipeResult, ExtendRecipeSpec, MigrationStatus};
 use readyset_client::status::{ReadySetStatus, SnapshotStatus};
-use readyset_client::{GraphvizOptions, SingleKeyEviction, WorkerDescriptor};
+use readyset_client::{GraphvizOptions, SingleKeyEviction, ViewCreateRequest, WorkerDescriptor};
 use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
 use readyset_telemetry_reporter::TelemetrySender;
 use readyset_util::futures::abort_on_panic;
@@ -368,7 +370,11 @@ impl Leader {
                 return_serialized!(ds.verbose_views())
             }
             (&Method::POST, "/view_statuses") => {
-                let (queries, dialect) = bincode::deserialize(&body)?;
+                let (queries, dialect): (Vec<ViewCreateRequest>, _) = bincode::deserialize(&body)?;
+                gauge!(
+                    recorded::CONTROLLER_RPC_VIEW_STATUSES_NUM_QUERIES,
+                    queries.len() as f64,
+                );
                 let ds = self.dataflow_state_handle.read().await;
                 return_serialized!(ds.view_statuses(queries, dialect))
             }
