@@ -256,6 +256,7 @@ impl NoriaAdapter {
                     noria,
                     config,
                     notification_channel,
+                    controller_channel,
                     resnapshot,
                     &telemetry_sender,
                     enable_statement_logging,
@@ -735,6 +736,7 @@ impl NoriaAdapter {
         mut noria: ReadySetHandle,
         mut config: UpstreamConfig,
         notification_channel: &UnboundedSender<ReplicatorMessage>,
+        controller_channel: &UnboundedReceiver<ControllerMessage>,
         resnapshot: bool,
         telemetry_sender: &TelemetrySender,
         enable_statement_logging: bool,
@@ -832,7 +834,12 @@ impl NoriaAdapter {
         let mut replication_offset = ReplicationOffset::Vitess(VGtid::default().try_into()?);
 
         adapter
-            .main_loop(&mut replication_offset, None, notification_channel)
+            .main_loop(
+                &mut replication_offset,
+                None,
+                notification_channel,
+                controller_channel,
+            )
             .await?;
 
         unreachable!("`main_loop` will never stop with an Ok status if `until = None`");

@@ -5,7 +5,7 @@ use futures::TryFutureExt;
 use itertools::Itertools;
 use mysql_async::prelude::Queryable;
 use mysql_async::TxOpts;
-use nom_sql::Relation;
+use nom_sql::{NonReplicatedRelation, NotReplicatedReason, Relation};
 use readyset_client::recipe::changelist::Change;
 use readyset_client::recipe::ChangeList;
 use readyset_data::Dialect;
@@ -57,9 +57,12 @@ impl VitessReplicator {
                 non_replicated_tables
                     .into_iter()
                     .map(|(schema, name)| {
-                        Change::AddNonReplicatedRelation(Relation {
-                            schema: Some(schema.into()),
-                            name: name.into(),
+                        Change::AddNonReplicatedRelation(NonReplicatedRelation {
+                            name: Relation {
+                                schema: Some(schema.into()),
+                                name: name.into(),
+                            },
+                            reason: NotReplicatedReason::Configuration,
                         })
                     })
                     .collect::<Vec<_>>(),
@@ -113,9 +116,15 @@ impl VitessReplicator {
 
                     noria
                         .extend_recipe_no_leader_ready(ChangeList::from_change(
-                            Change::AddNonReplicatedRelation(Relation {
-                                schema: Some(db.into()),
-                                name: table.into(),
+                            Change::AddNonReplicatedRelation(NonReplicatedRelation {
+                                name: Relation {
+                                    schema: Some(db.into()),
+                                    name: table.into(),
+                                },
+                                reason: NotReplicatedReason::OtherError(format!(
+                                    "Error extending CREATE TABLE: {}",
+                                    error
+                                )),
                             }),
                             Dialect::DEFAULT_MYSQL,
                         ))
@@ -159,9 +168,15 @@ impl VitessReplicator {
                     warn!(%view, %error, "Error extending CREATE VIEW, view will not be used");
                     noria
                         .extend_recipe_no_leader_ready(ChangeList::from_change(
-                            Change::AddNonReplicatedRelation(Relation {
-                                schema: Some(db.into()),
-                                name: view.into(),
+                            Change::AddNonReplicatedRelation(NonReplicatedRelation {
+                                name: Relation {
+                                    schema: Some(db.into()),
+                                    name: view.into(),
+                                },
+                                reason: NotReplicatedReason::OtherError(format!(
+                                    "Error extending CREATE VIEW: {}",
+                                    error
+                                )),
                             }),
                             Dialect::DEFAULT_MYSQL,
                         ))
