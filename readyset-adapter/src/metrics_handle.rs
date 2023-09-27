@@ -117,6 +117,13 @@ impl MetricsHandle {
             .unwrap_or(0)
     }
 
+    fn sum_gauge(&self, name: &str) -> f64 {
+        self.gauges(Some(|x: &str| x.eq(name)))
+            .get(name)
+            .map(|res| res.values().sum())
+            .unwrap_or(0.0)
+    }
+
     /// Gather all the metrics that are relevant to be printed with
     /// `SHOW READYSET STATUS`
     pub fn readyset_status(&self) -> Vec<(String, String)> {
@@ -125,6 +132,15 @@ impl MetricsHandle {
         let time_ms = self.sum_counter(client_recorded::NORIA_STARTUP_TIMESTAMP);
         let time = TimestampTz::from_unix_ms(time_ms);
         statuses.push(("Process start time".to_string(), time.to_string()));
+
+        let val = self.sum_gauge(readyset_client_metrics::recorded::CONNECTED_CLIENTS);
+        statuses.push(("Connected clients count".to_string(), val.to_string()));
+
+        let val = self.sum_gauge(readyset_client_metrics::recorded::CLIENT_UPSTREAM_CONNECTIONS);
+        statuses.push((
+            "Upstream database connection count".to_string(),
+            val.to_string(),
+        ));
 
         let val = self.sum_counter(readyset_client_metrics::recorded::QUERY_LOG_PARSE_ERRORS);
         statuses.push(("Query parse failures".to_string(), val.to_string()));
