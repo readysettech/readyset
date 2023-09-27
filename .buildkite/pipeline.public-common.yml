@@ -22,6 +22,12 @@ steps:
       - ecr#v2.5.0:
           login: true
           retries: 3
+    retry:
+      automatic:
+        - exit_status: -1  # Agent was lost
+          limit: 2
+        - exit_status: 255 # Forced agent shutdown
+          limit: 2
 
   - label: ':rust: :lock: Check cargo-deny'
     commands:
@@ -41,6 +47,12 @@ steps:
       - ecr#v2.5.0:
           login: true
           retries: 3
+    retry:
+      automatic:
+        - exit_status: -1  # Agent was lost
+          limit: 2
+        - exit_status: 255 # Forced agent shutdown
+          limit: 2
 
   - label: ':clippy: Check clippy'
     key: check-clippy
@@ -63,6 +75,12 @@ steps:
       - ecr#v2.5.0:
           login: true
           retries: 3
+    retry:
+      automatic:
+        - exit_status: -1  # Agent was lost
+          limit: 2
+        - exit_status: 255 # Forced agent shutdown
+          limit: 2
 
   - label: ':rust: Run tests'
     key: rust-tests
@@ -95,6 +113,12 @@ steps:
           retries: 3
     agents:
       queue: c6a-4xlarge
+    retry:
+      automatic:
+        - exit_status: -1  # Agent was lost
+          limit: 2
+        - exit_status: 255 # Forced agent shutdown
+          limit: 2
 
   - label: 'Run logictest'
     key: logictest
@@ -122,6 +146,12 @@ steps:
       - ecr#v2.5.0:
           login: true
           retries: 3
+    retry:
+      automatic:
+        - exit_status: -1  # Agent was lost
+          limit: 2
+        - exit_status: 255 # Forced agent shutdown
+          limit: 2
 
   - label: 'Run clustertests'
     key: readyset-clustertest
@@ -153,6 +183,12 @@ steps:
           mount-buildkite-agent: true
       - ecr#v2.2.0:
           login: true
+    retry:
+      automatic:
+        - exit_status: -1  # Agent was lost
+          limit: 2
+        - exit_status: 255 # Forced agent shutdown
+          limit: 2
 
   - label: 'Test benchmark framework'
     key: test-benchmark
@@ -181,3 +217,9 @@ steps:
       - ecr#v2.5.0:
           login: true
           retries: 3
+    retry:
+      automatic:
+        - exit_status: -1  # Agent was lost
+          limit: 2
+        - exit_status: 255 # Forced agent shutdown
+          limit: 2

@@ -20,6 +20,12 @@ steps:
       ecr#v2.5.0:
         login: true
         retries: 3
+    retry:
+      automatic:
+        - exit_status: -1  # Agent was lost
+          limit: 2
+        - exit_status: 255 # Forced agent shutdown
+          limit: 2
 
   - label: ':docker: Build cargo-deny image'
     key: cargo-deny-image
@@ -31,6 +37,12 @@ steps:
       ecr#v2.5.0:
         login: true
         retries: 3
+    retry:
+      automatic:
+        - exit_status: -1  # Agent was lost
+          limit: 2
+        - exit_status: 255 # Forced agent shutdown
+          limit: 2
 
   - label: ':pipeline: Upload public-common pipeline'
     commands:
