@@ -185,6 +185,8 @@ impl VitessReplicator {
         info!("Schema snapshot complete for {} tables", table_list.len());
 
         // Wait for all connections to finish, not strictly necessary
+        debug!("Closing snapshot connection...");
+        drop(tx);
         self.pool.disconnect().await?;
         debug!("Vitess snapshot connection closed");
 
