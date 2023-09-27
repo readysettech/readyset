@@ -46,6 +46,13 @@ impl VitessConfig {
             self.username, self.password, self.host, self.grpc_port, self.keyspace
         )
     }
+
+    pub fn mysql_url(&self) -> String {
+        format!(
+            "mysql://{}:{}@{}:{}/{}",
+            self.username, self.password, self.host, self.mysql_port, self.keyspace
+        )
+    }
 }
 
 impl Into<mysql_async::Opts> for &VitessConfig {

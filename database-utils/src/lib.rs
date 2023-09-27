@@ -152,6 +152,18 @@ impl UpstreamConfig {
             ..Default::default()
         }
     }
+
+    pub fn mysql_url(&self) -> Option<String> {
+        self.upstream_db_url.as_ref().map(|url| {
+            if url.starts_with("vitess://") {
+                let vitess_config =
+                    VitessConfig::from_str(url).expect("Failed to parse upstream URL");
+                vitess_config.mysql_url()
+            } else {
+                url.to_string()
+            }
+        })
+    }
 }
 
 fn default_replicator_restart_timeout() -> Duration {

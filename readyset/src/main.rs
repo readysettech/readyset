@@ -4,7 +4,6 @@ use clap::Parser;
 use database_utils::DatabaseType;
 use readyset::mysql::MySqlHandler;
 use readyset::psql::PsqlHandler;
-use readyset::vitess::VitessHandler;
 use readyset::{NoriaAdapter, Options};
 
 fn main() -> anyhow::Result<()> {
@@ -37,7 +36,7 @@ fn main() -> anyhow::Result<()> {
         DatabaseType::Vitess => NoriaAdapter {
             description: "Vitess adapter for ReadySet.",
             default_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 3306),
-            connection_handler: VitessHandler {
+            connection_handler: MySqlHandler {
                 enable_statement_logging: options.tracing.statement_logging,
             },
             database_type: DatabaseType::Vitess,

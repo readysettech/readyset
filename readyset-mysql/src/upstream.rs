@@ -182,12 +182,11 @@ impl MySqlUpstream {
         // CLIENT_SESSION_TRACK is required for GTID information to be sent in OK packets on commits
         // GTID information is used for RYW
         let url = upstream_config
-            .upstream_db_url
-            .as_deref()
+            .mysql_url()
             .ok_or(ReadySetError::InvalidUpstreamDatabase)?;
 
         let mut opts =
-            Opts::from_url(url).map_err(|e: UrlError| Error::MySql(mysql_async::Error::Url(e)))?;
+            Opts::from_url(&url).map_err(|e: UrlError| Error::MySql(mysql_async::Error::Url(e)))?;
 
         if let Some(cert_path) = upstream_config.ssl_root_cert.clone() {
             let ssl_opts = SslOpts::default().with_root_cert_path(Some(cert_path));
