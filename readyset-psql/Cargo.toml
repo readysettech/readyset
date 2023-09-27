@@ -14,6 +14,7 @@ readyset-client = { path = "../readyset-client/" }
 readyset-errors = { path = "../readyset-errors/" }
 readyset-data = { path = "../readyset-data/" }
 readyset-adapter = { path = "../readyset-adapter" }
+readyset-client-metrics = { path = "../readyset-client-metrics" }
 readyset-version = { path = "../readyset-version" }
 failpoint-macros = { path = "../failpoint-macros" }
 nom-sql = { path = "../nom-sql" }
@@ -39,6 +40,7 @@ bit-vec = { version = "0.6", features = ["serde"] }
 streaming-iterator = "0.1"
 rand = "0.8"
 cidr = "0.2.1"
+metrics = { workspace = true }
 
 [dev-dependencies]
 chrono = "0.4"

@@ -13,10 +13,11 @@ use postgres_types::Kind;
 use psql_srv::{Column, TransferFormat};
 use readyset_adapter::upstream_database::UpstreamDestination;
 use readyset_adapter::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
+use readyset_client_metrics::recorded;
 use readyset_data::DfValue;
 use readyset_errors::{internal_err, invariant_eq, unsupported, ReadySetError, ReadySetResult};
 use tokio_postgres as pgsql;
-use tracing::{debug, info, info_span};
+use tracing::{debug, info_span};
 use tracing_futures::Instrument;
 
 use crate::Error;
@@ -179,7 +180,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
             host = ?pg_config.get_hosts(),
             port = ?pg_config.get_ports()
         );
-        span.in_scope(|| info!("Establishing connection"));
+        span.in_scope(|| debug!("Establishing connection"));
         let (client, connection) = pg_config.connect(tls).instrument(span.clone()).await?;
         let version = connection.parameter("server_version").ok_or_else(|| {
             ReadySetError::Internal("Upstream database failed to send server version".to_string())
@@ -199,7 +200,8 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         }
         let version = format!("{version} ReadySet");
         let _connection_handle = tokio::spawn(connection);
-        span.in_scope(|| info!("Established connection to upstream"));
+        span.in_scope(|| debug!("Established connection to upstream"));
+        metrics::increment_gauge!(recorded::CLIENT_UPSTREAM_CONNECTIONS, 1.0);
 
         Ok(Self {
             client,
@@ -349,5 +351,11 @@ impl UpstreamDatabase for PostgreSqlUpstream {
                 }
             })
             .collect())
+    }
+}
+
+impl Drop for PostgreSqlUpstream {
+    fn drop(&mut self) {
+        metrics::decrement_gauge!(recorded::CLIENT_UPSTREAM_CONNECTIONS, 1.0);
     }
 }
