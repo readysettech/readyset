@@ -4,6 +4,7 @@
 use std::collections::HashSet;
 use std::hash::Hash;
 use std::str::FromStr;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -15,7 +16,7 @@ use readyset_client::query::*;
 use readyset_client::ViewCreateRequest;
 use readyset_data::DfValue;
 use readyset_util::hash::hash;
-use tracing::error;
+use tracing::{error, warn};
 
 /// A metadata cache for all queries that have been processed by this
 /// adapter. Thread-safe.
@@ -46,6 +47,13 @@ pub struct QueryStatusCache {
     ///
     /// Currently unused.
     enable_experimental_placeholder_inlining: bool,
+
+    /// How many queries to allow in the query status cache before we clear it.
+    /// If None, there is no capacity limit and we won't clear the cache
+    capacity: Option<usize>,
+
+    /// The number of queries we are currently storing
+    size: AtomicUsize,
 }
 
 /// Keys into the queries stored in `QueryStatusCache`
@@ -134,6 +142,21 @@ impl QueryStatusCache {
             pending_inlined_migrations: DashMap::default(),
             style: MigrationStyle::InRequestPath,
             enable_experimental_placeholder_inlining: false,
+            capacity: None,
+            size: AtomicUsize::new(0),
+        }
+    }
+
+    pub fn with_capacity(capacity: Option<usize>) -> QueryStatusCache {
+        QueryStatusCache {
+            statuses: DashMap::default(),
+            failed_parses: DashMap::default(),
+            ids: DashMap::default(),
+            pending_inlined_migrations: DashMap::default(),
+            style: MigrationStyle::InRequestPath,
+            enable_experimental_placeholder_inlining: false,
+            capacity,
+            size: AtomicUsize::new(0),
         }
     }
 
@@ -152,6 +175,37 @@ impl QueryStatusCache {
         self
     }
 
+    /// Clears out all entries in the QueryStatusCache. The clearing is not atomic due to the
+    /// concurrent nature of the different maps.
+    pub fn clear_all(&self) {
+        self.statuses.clear();
+        self.failed_parses.clear();
+        self.ids.clear();
+        self.pending_inlined_migrations.clear();
+        self.size.store(0, Ordering::Relaxed)
+    }
+
+    /// Returns the current size of the QueryStatusCache. May be imprecise due to relaxed ordering
+    pub fn size(&self) -> usize {
+        self.size.load(Ordering::Relaxed)
+    }
+
+    /// Called when adding a query. Adds 1 to our size and if that makes us hit our capacity,
+    /// clears the cache.
+    fn clear_if_at_capacity(&self) {
+        if let Some(capacity) = self.capacity {
+            self.size.fetch_add(1, Ordering::Relaxed);
+            let cur_size = self.size();
+            if cur_size >= capacity {
+                warn!(
+                    capacity = self.capacity,
+                    "QueryStatusCache is at capacity, clearing cache"
+                );
+                self.clear_all();
+            }
+        }
+    }
+
     /// Insert a query into the status cache with an initial status determined by the type of query
     /// that is being inserted. Parsed queries have initial status MigrationState::Pending, while
     /// queries that failed to parse have status MigrationState::Unsupported. Inserts into the
@@ -163,6 +217,8 @@ impl QueryStatusCache {
     where
         Q: Into<Query>,
     {
+        self.clear_if_at_capacity();
+
         let q = q.into();
         let status = QueryStatus::default_for_query(&q);
         let migration_state = status.migration_state.clone();
@@ -1082,5 +1138,18 @@ mod tests {
         cache.update_query_migration_state(&q, MigrationState::Successful);
         cache.clear();
         assert_eq!(cache.query_migration_state(&q).1, MigrationState::Pending);
+    }
+
+    #[test]
+    fn clear_all_when_no_capacity() {
+        readyset_tracing::init_test_logging();
+        let cache = QueryStatusCache::with_capacity(Some(2));
+        let q1 = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
+        let q2 = ViewCreateRequest::new(select_statement("SELECT * FROM t2").unwrap(), vec![]);
+        cache.query_migration_state(&q1);
+        assert_eq!(1, cache.size());
+        cache.query_migration_state(&q2);
+        // This should hit capacity and drop the cache.
+        assert_eq!(0, cache.size());
     }
 }
