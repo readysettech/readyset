@@ -5,7 +5,7 @@ use std::fmt::{self, Display};
 use dataflow::prelude::{Graph, NodeIndex};
 use dataflow::{DomainIndex, NodeMap};
 use lazy_static::lazy_static;
-use readyset_client::NodeSize;
+use readyset_client::debug::info::NodeSize;
 use regex::Regex;
 
 use crate::controller::migrate::materialization::Materializations;
