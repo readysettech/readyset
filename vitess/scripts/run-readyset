@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+
+set -ex
+
+rm -rf vitess-dev
+
+cargo run --bin readyset -- \
+    --standalone \
+    --database-type=vitess \
+    --upstream-db-url=vitess://root:@localhost:15301/commerce\?mysql_port=15303 \
+    --username=root \
+    --password=readyset \
+    --address=0.0.0.0:3307 \
+    --deployment=vitess-dev \
+    --prometheus-metrics \
+    --query-log \
+    --query-log-ad-hoc \
+    --statement-logging \
+    --log-level=trace,h2=info,hyper=info,tower=debug,mio=debug,tokio_util::codec=debug \
+    #--no-upstream-connections
