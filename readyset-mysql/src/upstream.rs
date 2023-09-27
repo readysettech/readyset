@@ -13,10 +13,10 @@ use nom_sql::{SqlIdentifier, StartTransactionStatement};
 use pin_project::pin_project;
 use readyset_adapter::upstream_database::UpstreamDestination;
 use readyset_adapter::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
-use readyset_client_metrics::QueryDestination;
+use readyset_client_metrics::{recorded, QueryDestination};
 use readyset_data::DfValue;
 use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
-use tracing::{error, info, info_span, Instrument};
+use tracing::{debug, error, info_span, Instrument};
 
 use crate::Error;
 
@@ -192,7 +192,7 @@ impl MySqlUpstream {
             port = %opts.tcp_port(),
             user = %opts.user().unwrap_or("<NO USER>"),
         );
-        span.in_scope(|| info!("Establishing connection"));
+        span.in_scope(|| debug!("Establishing connection"));
         let conn = if cfg!(feature = "ryw") {
             Conn::new(
                 OptsBuilder::from_opts(opts).add_capability(CapabilityFlags::CLIENT_SESSION_TRACK),
@@ -215,7 +215,8 @@ impl MySqlUpstream {
             }));
         }
 
-        span.in_scope(|| info!("Established connection to upstream"));
+        span.in_scope(|| debug!("Established connection to upstream"));
+        metrics::increment_gauge!(recorded::CLIENT_UPSTREAM_CONNECTIONS, 1.0);
         let prepared_statements = HashMap::new();
         Ok((conn, prepared_statements))
     }
@@ -366,5 +367,11 @@ impl UpstreamDatabase for MySqlUpstream {
 
     async fn schema_search_path(&mut self) -> Result<Vec<SqlIdentifier>, Self::Error> {
         Ok(self.database().into_iter().map(|s| s.into()).collect())
+    }
+}
+
+impl Drop for MySqlUpstream {
+    fn drop(&mut self) {
+        metrics::decrement_gauge!(recorded::CLIENT_UPSTREAM_CONNECTIONS, 1.0);
     }
 }
