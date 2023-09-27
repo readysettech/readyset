@@ -1,3 +1,12 @@
+# Non-buildkite nodes to re-use:
+common_values:
+  retry: &retry_on_agent_kill
+    automatic: &agent_kill_conditions
+      - exit_status: -1  # Agent was lost
+        limit: 2
+      - exit_status: 255 # Forced agent shutdown
+        limit: 2
+
 steps:
   - label: ':clojure: Run jepsen test with --help'
     key: lein-run-test-help
@@ -11,6 +20,7 @@ steps:
       ecr#v2.5.0:
         login: true
         retries: 3
+    retry: *retry_on_agent_kill
 
   - label: ':clojure: Run clojure tests'
     key: lein-test
@@ -24,6 +34,7 @@ steps:
       ecr#v2.5.0:
         login: true
         retries: 3
+    retry: *retry_on_agent_kill
 
   - label: ':clojure: Run clj-kondo'
     key: lein-clj-kondo
@@ -37,3 +48,4 @@ steps:
       ecr#v2.5.0:
         login: true
         retries: 3
+    retry: *retry_on_agent_kill
