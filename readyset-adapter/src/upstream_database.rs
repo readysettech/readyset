@@ -98,9 +98,6 @@ pub trait UpstreamDatabase: Sized + Send {
     /// Connect will return an error if the upstream database is running an unsupported version.
     async fn connect(upstream_config: UpstreamConfig) -> Result<Self, Self::Error>;
 
-    /// Resets the connection with the upstream database
-    async fn reset(&mut self) -> Result<(), Self::Error>;
-
     /// Test the connection with the upstream database
     async fn is_connected(&mut self) -> Result<bool, Self::Error>;
 
@@ -222,14 +219,6 @@ where
             upstream: None,
             upstream_config,
         })
-    }
-
-    async fn reset(&mut self) -> Result<(), Self::Error> {
-        if let Some(u) = &mut self.upstream {
-            u.reset().await?;
-        }
-
-        Ok(())
     }
 
     async fn is_connected(&mut self) -> Result<bool, Self::Error> {
