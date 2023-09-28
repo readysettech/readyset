@@ -37,8 +37,6 @@ pub struct PostgreSqlUpstream {
     statement_id_counter: u32,
     /// The user used to connect to the upstream, if any
     user: Option<String>,
-    /// Upstream db configuration
-    upstream_config: UpstreamConfig,
 
     /// ReadySet-wrapped Postgresql version string, to return to clients
     version: String,
@@ -209,15 +207,8 @@ impl UpstreamDatabase for PostgreSqlUpstream {
             prepared_statements: Default::default(),
             statement_id_counter: 0,
             user,
-            upstream_config,
             version,
         })
-    }
-
-    async fn reset(&mut self) -> Result<(), Error> {
-        let old_self = std::mem::replace(self, Self::connect(self.upstream_config.clone()).await?);
-        drop(old_self);
-        Ok(())
     }
 
     async fn is_connected(&mut self) -> Result<bool, Self::Error> {

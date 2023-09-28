@@ -93,7 +93,6 @@ impl<'a> From<CachedReadResult> for QueryResult<'a> {
 pub struct MySqlUpstream {
     conn: Conn,
     prepared_statements: HashMap<StatementID, mysql_async::Statement>,
-    upstream_config: UpstreamConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -171,14 +170,7 @@ macro_rules! handle_query_result {
 impl MySqlUpstream {
     async fn connect_inner(
         upstream_config: UpstreamConfig,
-    ) -> Result<
-        (
-            Conn,
-            HashMap<StatementID, mysql_async::Statement>,
-            UpstreamConfig,
-        ),
-        Error,
-    > {
+    ) -> Result<(Conn, HashMap<StatementID, mysql_async::Statement>), Error> {
         // CLIENT_SESSION_TRACK is required for GTID information to be sent in OK packets on commits
         // GTID information is used for RYW
         let url = upstream_config
@@ -225,7 +217,7 @@ impl MySqlUpstream {
 
         span.in_scope(|| info!("Established connection to upstream"));
         let prepared_statements = HashMap::new();
-        Ok((conn, prepared_statements, upstream_config))
+        Ok((conn, prepared_statements))
     }
 }
 
@@ -240,12 +232,10 @@ impl UpstreamDatabase for MySqlUpstream {
     const SQL_DIALECT: nom_sql::Dialect = nom_sql::Dialect::MySQL;
 
     async fn connect(upstream_config: UpstreamConfig) -> Result<Self, Error> {
-        let (conn, prepared_statements, upstream_config) =
-            Self::connect_inner(upstream_config).await?;
+        let (conn, prepared_statements) = Self::connect_inner(upstream_config).await?;
         Ok(Self {
             conn,
             prepared_statements,
-            upstream_config,
         })
     }
 
@@ -260,23 +250,6 @@ impl UpstreamDatabase for MySqlUpstream {
         // string must be null terminated.
         let (major, minor, patch) = self.conn.server_version();
         format!("{major}.{minor}.{patch}-readyset\0")
-    }
-
-    async fn reset(&mut self) -> Result<(), Error> {
-        let opts = self.conn.opts().clone();
-        let conn = Conn::new(opts).await?;
-        let prepared_statements = HashMap::new();
-        let upstream_config = self.upstream_config.clone();
-        let old_self = std::mem::replace(
-            self,
-            Self {
-                conn,
-                prepared_statements,
-                upstream_config,
-            },
-        );
-        let _ = old_self.conn.disconnect().await as Result<(), _>;
-        Ok(())
     }
 
     async fn is_connected(&mut self) -> Result<bool, Self::Error> {
