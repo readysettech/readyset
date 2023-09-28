@@ -17,7 +17,6 @@ use readyset_errors::{
 use replication_offset::ReplicationOffsets;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use tower::buffer::Buffer;
 use tower::ServiceExt;
 use tower_service::Service;
 use tracing::{debug, trace};
@@ -135,6 +134,7 @@ async fn controller_request(
 }
 
 /// A direct handle to a controller instance running at a known URL, without access to an authority
+#[derive(Clone)]
 struct RawController {
     url: Url,
     client: hyper::Client<hyper::client::HttpConnector>,
@@ -176,6 +176,7 @@ impl Service<ControllerRequest> for RawController {
     }
 }
 
+#[derive(Clone)]
 struct Controller {
     authority: Arc<Authority>,
     client: hyper::Client<hyper::client::HttpConnector>,
@@ -323,34 +324,14 @@ impl Default for GraphvizOptions {
 /// none of your operations will ever complete! Furthermore, you *must* use the `Runtime` to
 /// execute any futures returned from `ReadySetHandle` (that is, you cannot just call `.wait()`
 /// on them).
+#[derive(Clone)]
 pub struct ReadySetHandle {
-    handle: Buffer<tower::util::Either<Controller, RawController>, ControllerRequest>,
+    handle: tower::util::Either<Controller, RawController>,
     domains: Arc<Mutex<HashMap<(SocketAddr, usize), TableRpc>>>,
     views: Arc<Mutex<HashMap<(SocketAddr, usize), ViewRpc>>>,
-    tracer: tracing::Dispatch,
     request_timeout: Option<Duration>,
     migration_timeout: Option<Duration>,
 }
-
-impl Clone for ReadySetHandle {
-    fn clone(&self) -> Self {
-        ReadySetHandle {
-            handle: self.handle.clone(),
-            domains: self.domains.clone(),
-            views: self.views.clone(),
-            tracer: self.tracer.clone(),
-            request_timeout: self.request_timeout,
-            migration_timeout: self.migration_timeout,
-        }
-    }
-}
-
-/// The size of the [`Buffer`][0] to use for requests to the [`ReadySetHandle`].
-///
-/// Experimentation has shown that if this is set to 1, requests from a `clone()`d
-/// [`ReadySetHandle`] stall, but besides that we don't know much abbout what this value should be
-/// set to. Number of cores, perhaps?
-const CONTROLLER_BUFFER_SIZE: usize = 8;
 
 /// Define a simple RPC request wrapper for the controller, which queries the same RPC endpoint as
 /// the name of the function and takes no arguments.
@@ -385,20 +366,14 @@ impl ReadySetHandle {
         request_timeout: Option<Duration>,
         migration_timeout: Option<Duration>,
     ) -> Self {
-        // need to use lazy otherwise current executor won't be known
-        let tracer = tracing::dispatcher::get_default(|d| d.clone());
         ReadySetHandle {
             views: Default::default(),
             domains: Default::default(),
-            handle: Buffer::new(
-                tower::util::Either::A(Controller {
-                    authority,
-                    client: make_http_client(request_timeout),
-                    leader_url: Arc::new(RwLock::new(None)),
-                }),
-                CONTROLLER_BUFFER_SIZE,
-            ),
-            tracer,
+            handle: tower::util::Either::A(Controller {
+                authority,
+                client: make_http_client(request_timeout),
+                leader_url: Arc::new(RwLock::new(None)),
+            }),
             request_timeout,
             migration_timeout,
         }
@@ -411,15 +386,10 @@ impl ReadySetHandle {
         request_timeout: Option<Duration>,
         migration_timeout: Option<Duration>,
     ) -> Self {
-        let tracer = tracing::dispatcher::get_default(|d| d.clone());
         ReadySetHandle {
             views: Default::default(),
             domains: Default::default(),
-            handle: Buffer::new(
-                tower::util::Either::B(RawController::new(url, request_timeout)),
-                CONTROLLER_BUFFER_SIZE,
-            ),
-            tracer,
+            handle: tower::util::Either::B(RawController::new(url, request_timeout)),
             request_timeout,
             migration_timeout,
         }
