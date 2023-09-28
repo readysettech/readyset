@@ -28,6 +28,7 @@ use readyset_errors::{
 };
 use readyset_server::worker::readers::{CallResult, ReadRequestHandler};
 use readyset_util::redacted::Sensitive;
+use readyset_util::shared_cache::{self, LocalCache, SharedCache};
 use tokio::sync::RwLock;
 use tracing::{error, info, instrument, trace, warn};
 
@@ -296,87 +297,11 @@ impl<'a> QueryResult<'a> {
     }
 }
 
-#[derive(Clone)]
-/// Global and thread-local cache of view endpoints and prepared statements.
-pub struct ViewCache {
-    /// Global cache of view endpoints and prepared statements.
-    global: Arc<RwLock<HashMap<ViewCreateRequest, Relation>>>,
-    /// Thread-local version of global cache (consulted first).
-    local: HashMap<ViewCreateRequest, Relation>,
-}
-
-impl ViewCache {
-    /// Construct a new ViewCache with a passed in global view cache.
-    pub fn new(global_cache: Arc<RwLock<HashMap<ViewCreateRequest, Relation>>>) -> ViewCache {
-        ViewCache {
-            global: global_cache,
-            local: HashMap::new(),
-        }
-    }
-
-    /// Registers a statement with the provided name into both the local and global view caches.
-    pub async fn register_statement(&mut self, name: &Relation, view_request: ViewCreateRequest) {
-        self.local
-            .entry(view_request.clone())
-            .or_insert_with(|| name.clone());
-        self.global
-            .write()
-            .await
-            .entry(view_request)
-            .or_insert_with(|| name.clone());
-    }
-
-    /// Retrieves the name for the provided statement if it's in the cache. We first check local
-    /// cache, and if it's not there we check global cache. If it's in global but not local, we
-    /// backfill local cache before returning the result.
-    pub async fn statement_name(&mut self, view_request: &ViewCreateRequest) -> Option<Relation> {
-        let maybe_name = if let Some(name) = self.local.get(view_request) {
-            return Some(name.clone());
-        } else {
-            // Didn't find it in local, so let's check global.
-            let gc = self.global.read().await;
-            gc.get(view_request).cloned()
-        };
-
-        maybe_name.map(|n| {
-            // Backfill into local before we return.
-            self.local.insert(view_request.clone(), n.clone());
-            n
-        })
-    }
-
-    /// Removes the statement with the given name from both the global and local caches.
-    pub async fn remove_statement(&mut self, name: &Relation) {
-        self.local.retain(|_, v| v != name);
-        self.global.write().await.retain(|_, v| v != name);
-    }
-
-    /// Clears all statements from all caches
-    async fn clear(&mut self) {
-        self.local.clear();
-        self.global.write().await.clear();
-    }
-
-    /// Returns the original view create request based on a provided name if it exists in either the
-    /// local or global caches.
-    pub async fn view_create_request_from_name(
-        &self,
-        name: &Relation,
-    ) -> Option<ViewCreateRequest> {
-        if let Some((v, _)) = self.local.iter().find(|(_, n)| *n == name) {
-            return Some(v.clone());
-        }
-
-        let gc = self.global.read().await;
-        gc.iter().find(|(_, n)| *n == name).map(|(v, _)| v.clone())
-    }
-}
-
 pub struct NoriaConnector {
     inner: NoriaBackend,
     auto_increments: Arc<RwLock<HashMap<Relation, atomic::AtomicUsize>>>,
     /// Global and thread-local cache of view endpoints and prepared statements.
-    view_cache: ViewCache,
+    view_cache: LocalCache<ViewCreateRequest, Relation>,
 
     prepared_statement_cache: HashMap<StatementID, PreparedStatement>,
 
@@ -470,7 +395,7 @@ impl NoriaConnector {
     pub async fn new(
         ch: ReadySetHandle,
         auto_increments: Arc<RwLock<HashMap<Relation, atomic::AtomicUsize>>>,
-        query_cache: Arc<RwLock<HashMap<ViewCreateRequest, Relation>>>,
+        query_cache: SharedCache<ViewCreateRequest, Relation>,
         read_behavior: ReadBehavior,
         dialect: Dialect,
         parse_dialect: nom_sql::Dialect,
@@ -495,7 +420,7 @@ impl NoriaConnector {
     pub async fn new_with_local_reads(
         ch: ReadySetHandle,
         auto_increments: Arc<RwLock<HashMap<Relation, atomic::AtomicUsize>>>,
-        query_cache: Arc<RwLock<HashMap<ViewCreateRequest, Relation>>>,
+        query_cache: SharedCache<ViewCreateRequest, Relation>,
         read_behavior: ReadBehavior,
         read_request_handler: Option<ReadRequestHandler>,
         dialect: Dialect,
@@ -510,7 +435,7 @@ impl NoriaConnector {
                 inner: Some(backend),
             },
             auto_increments,
-            view_cache: ViewCache::new(query_cache),
+            view_cache: query_cache.into_local(),
             prepared_statement_cache: HashMap::new(),
             failed_views: HashSet::new(),
             read_behavior,
@@ -1179,9 +1104,9 @@ impl NoriaConnector {
             // name for it, as *lookups* only need one of the names for the query, and
             // when we drop it we'll be hitting noria anyway
             self.view_cache
-                .register_statement(
-                    &name,
+                .insert(
                     ViewCreateRequest::new(statement.clone(), schema_search_path),
+                    name.clone(),
                 )
                 .await;
 
@@ -1199,8 +1124,8 @@ impl NoriaConnector {
         let search_path =
             override_schema_search_path.unwrap_or_else(|| self.schema_search_path().to_vec());
         let view_request = ViewCreateRequest::new(q.clone(), search_path.clone());
-        match self.view_cache.statement_name(&view_request).await {
-            None => {
+        self.view_cache
+            .get_mut_or_try_insert_with(&view_request, shared_cache::InsertMode::Shared, async {
                 let qname: Relation = utils::generate_query_name(q, &search_path).into();
 
                 // add the query to ReadySet
@@ -1252,14 +1177,10 @@ impl NoriaConnector {
                         }
                     }
                 }
-                self.view_cache
-                    .register_statement(&qname, view_request)
-                    .await;
-
                 Ok(qname)
-            }
-            Some(name) => Ok(name),
-        }
+            })
+            .await
+            .cloned()
     }
 
     /// Make a request to ReadySet to drop the query with the given name, and remove it from all
@@ -1269,7 +1190,7 @@ impl NoriaConnector {
             self.inner.get_mut()?,
             self.inner.get_mut()?.noria.remove_query(name)
         )?;
-        self.view_cache.remove_statement(name).await;
+        self.view_cache.remove_val(name).await;
         Ok(result)
     }
 
@@ -1287,7 +1208,7 @@ impl NoriaConnector {
         &self,
         name: &Relation,
     ) -> Option<ViewCreateRequest> {
-        self.view_cache.view_create_request_from_name(name).await
+        self.view_cache.key_for_val(name).await
     }
 
     async fn do_insert(
@@ -1878,71 +1799,6 @@ mod tests {
     use nom_sql::Dialect;
 
     use super::*;
-
-    mod view_cache {
-        use nom_sql::{parse_select_statement, Dialect, Relation};
-
-        use super::*;
-
-        #[tokio::test]
-        async fn register_and_remove_statement() {
-            let global = Arc::new(RwLock::new(HashMap::new()));
-            let mut view_cache = ViewCache::new(global);
-
-            let name = Relation::from("test_statement_name");
-            let statement = parse_select_statement(Dialect::MySQL, "SELECT a_col FROM t1").unwrap();
-            let view_request = ViewCreateRequest::new(statement, vec!["s1".into()]);
-
-            view_cache
-                .register_statement(&name, view_request.clone())
-                .await;
-            let retrieved_request = view_cache.view_create_request_from_name(&name).await;
-            assert_eq!(Some(view_request), retrieved_request);
-
-            view_cache.remove_statement(&name).await;
-            let retrieved_request = view_cache.view_create_request_from_name(&name).await;
-            assert_eq!(None, retrieved_request);
-        }
-
-        #[tokio::test]
-        async fn clear() {
-            let global = Arc::new(RwLock::new(HashMap::new()));
-            let mut view_cache = ViewCache::new(global.clone());
-
-            let statement1 = parse_select_statement(Dialect::MySQL, "SELECT a FROM t1").unwrap();
-            let statement2 = parse_select_statement(Dialect::MySQL, "SELECT b FROM t2").unwrap();
-            let create_request_1 = ViewCreateRequest::new(statement1, vec!["schema1".into()]);
-            let create_request_2 = ViewCreateRequest::new(statement2, vec!["schema2".into()]);
-
-            view_cache
-                .register_statement(&"q1".into(), create_request_1.clone())
-                .await;
-            view_cache
-                .register_statement(&"q2".into(), create_request_2.clone())
-                .await;
-
-            assert_eq!(
-                view_cache.view_create_request_from_name(&"q1".into()).await,
-                Some(create_request_1)
-            );
-            assert_eq!(
-                view_cache.view_create_request_from_name(&"q2".into()).await,
-                Some(create_request_2)
-            );
-
-            view_cache.clear().await;
-
-            assert_eq!(
-                view_cache.view_create_request_from_name(&"q1".into()).await,
-                None
-            );
-            assert_eq!(
-                view_cache.view_create_request_from_name(&"q2".into()).await,
-                None
-            );
-            assert!(global.read().await.is_empty());
-        }
-    }
 
     #[test]
     fn placeholder_verification_good() {

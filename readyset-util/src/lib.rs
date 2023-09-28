@@ -18,6 +18,7 @@ pub mod nonmaxusize;
 pub mod progress;
 pub mod properties;
 pub mod redacted;
+pub mod shared_cache;
 pub mod shutdown;
 
 /// Error (returned by [`Indices::indices`] and [`Indices::cloned_indices`]) for an out-of-bounds

@@ -15,8 +15,8 @@ use readyset_adapter::backend::{BackendBuilder, MigrationMode};
 use readyset_adapter::query_status_cache::QueryStatusCache;
 use readyset_adapter::{Backend, QueryHandler, UpstreamConfig, UpstreamDatabase};
 use readyset_client::consensus::{Authority, LocalAuthorityStore};
-use readyset_client::ViewCreateRequest;
 use readyset_server::{Builder, Handle, LocalAuthority, ReadySetHandle};
+use readyset_util::shared_cache::SharedCache;
 use readyset_util::shutdown::ShutdownSender;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::RwLock;
@@ -218,7 +218,7 @@ impl TestBuilder {
         }
 
         let auto_increments: Arc<RwLock<HashMap<Relation, AtomicUsize>>> = Arc::default();
-        let query_cache: Arc<RwLock<HashMap<ViewCreateRequest, Relation>>> = Arc::default();
+        let query_cache = SharedCache::new();
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
 
