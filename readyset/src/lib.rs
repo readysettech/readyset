@@ -613,7 +613,8 @@ where
         info!(%listen_address, "Listening for new connections");
 
         let auto_increments: Arc<RwLock<HashMap<Relation, AtomicUsize>>> = Arc::default();
-        let query_cache = SharedCache::new();
+        let view_name_cache = SharedCache::new();
+        let view_cache = SharedCache::new();
         let connections: Arc<SkipSet<SocketAddr>> = Arc::default();
         let mut health_reporter = AdapterHealthReporter::new();
 
@@ -858,7 +859,9 @@ where
         if let MigrationMode::OutOfBand = migration_mode {
             set_failpoint!("adapter-out-of-band");
             let rh = rh.clone();
-            let (auto_increments, query_cache) = (auto_increments.clone(), query_cache.clone());
+            let auto_increments = auto_increments.clone();
+            let view_name_cache = view_name_cache.clone();
+            let view_cache = view_cache.clone();
             let shutdown_rx = shutdown_rx.clone();
             let loop_interval = options.migration_task_interval;
             let max_retry = options.max_processing_minutes;
@@ -880,8 +883,9 @@ where
                 let noria =
                     NoriaConnector::new(
                         rh.clone(),
-                        auto_increments.clone(),
-                        query_cache.clone(),
+                        auto_increments,
+                        view_name_cache.new_local(),
+                        view_cache.new_local(),
                         noria_read_behavior,
                         expr_dialect,
                         parse_dialect,
@@ -996,7 +1000,9 @@ where
             // bunch of stuff to move into the async block below
             let rh = rh.clone();
             let adapter_authority = adapter_authority.clone();
-            let (auto_increments, query_cache) = (auto_increments.clone(), query_cache.clone());
+            let auto_increments = auto_increments.clone();
+            let view_name_cache = view_name_cache.clone();
+            let view_cache = view_cache.clone();
             let mut connection_handler = self.connection_handler.clone();
             let backend_builder = BackendBuilder::new()
                 .client_addr(client_addr)
@@ -1050,8 +1056,9 @@ where
                             Ok(ssp) => {
                                 let noria = NoriaConnector::new_with_local_reads(
                                     rh.clone(),
-                                    auto_increments.clone(),
-                                    query_cache.clone(),
+                                    auto_increments,
+                                    view_name_cache.new_local(),
+                                    view_cache.new_local(),
                                     noria_read_behavior,
                                     r,
                                     expr_dialect,

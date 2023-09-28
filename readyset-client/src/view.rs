@@ -1101,7 +1101,7 @@ impl fmt::Debug for ReaderHandle {
 ///
 /// A query can reuse a [`ReaderHandle`] for a cached query if the cached query is equivalent for
 /// some set of parameter values passed at execution.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ReusedReaderHandle {
     /// The [`ReaderHandle`] that reuses the reader of another query for this query.
     reader_handle: ReaderHandle,
@@ -1117,7 +1117,7 @@ pub struct ReusedReaderHandle {
 }
 
 /// A wrapper to hold either a [`ReaderHandle`] or collection of [`ReusedReaderHandle`]s.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum View {
     /// A [`ReaderHandle`] for a cached query.
     Single(ReaderHandle),

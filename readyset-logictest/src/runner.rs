@@ -530,7 +530,8 @@ impl TestScript {
         let database_type = run_opts.database_type;
         let replication_url = run_opts.replication_url.clone();
         let auto_increments: Arc<RwLock<HashMap<Relation, AtomicUsize>>> = Arc::default();
-        let query_cache = SharedCache::new();
+        let view_name_cache = SharedCache::new();
+        let view_cache = SharedCache::new();
         let mut retry: usize = 0;
         let listener = loop {
             retry += 1;
@@ -556,7 +557,8 @@ impl TestScript {
             let noria = NoriaConnector::new(
                 rh,
                 auto_increments,
-                query_cache,
+                view_name_cache.new_local(),
+                view_cache.new_local(),
                 ReadBehavior::Blocking,
                 match database_type {
                     DatabaseType::MySQL => readyset_data::Dialect::DEFAULT_MYSQL,
