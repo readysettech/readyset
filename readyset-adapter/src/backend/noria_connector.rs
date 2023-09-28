@@ -26,7 +26,7 @@ use readyset_errors::{
 };
 use readyset_server::worker::readers::{CallResult, ReadRequestHandler};
 use readyset_util::redacted::Sensitive;
-use readyset_util::shared_cache::{self, LocalCache, SharedCache};
+use readyset_util::shared_cache::{self, LocalCache};
 use tokio::sync::RwLock;
 use tracing::{error, info, instrument, trace, warn};
 
@@ -60,7 +60,7 @@ impl NoriaBackend {
 pub struct NoriaBackendInner {
     noria: ReadySetHandle,
     tables: BTreeMap<Relation, Table>,
-    views: BTreeMap<Relation, View>,
+    views: LocalCache<Relation, View>,
     /// The server can handle (non-parameterized) LIMITs and (parameterized) OFFSETs in the
     /// dataflow graph
     server_supports_pagination: bool,
@@ -76,10 +76,14 @@ macro_rules! noria_await {
 }
 
 impl NoriaBackendInner {
-    async fn new(ch: ReadySetHandle, server_supports_pagination: bool) -> Self {
+    async fn new(
+        ch: ReadySetHandle,
+        views: LocalCache<Relation, View>,
+        server_supports_pagination: bool,
+    ) -> Self {
         NoriaBackendInner {
             tables: BTreeMap::new(),
-            views: BTreeMap::new(),
+            views,
             noria: ch,
             server_supports_pagination,
         }
@@ -93,21 +97,21 @@ impl NoriaBackendInner {
         Ok(self.tables.get_mut(table).unwrap())
     }
 
-    /// If `invalidate_cache` is passed, the view cache, `views` will be ignored and a view will be
-    /// retrieved from noria.
+    /// If `invalidate_cache` is passed, `self.views` will be ignored and a view will be retrieved
+    /// from noria.
     async fn get_noria_view<'a>(
         &'a mut self,
         view: &Relation,
         invalidate_cache: bool,
     ) -> ReadySetResult<&'a mut View> {
         if invalidate_cache {
-            self.views.remove(view);
+            self.views.remove(view).await;
         }
-        if !self.views.contains_key(view) {
-            let vh = noria_await!(self, self.noria.view(view.clone()))?;
-            self.views.insert(view.to_owned(), vh);
-        }
-        Ok(self.views.get_mut(view).unwrap())
+        self.views
+            .get_mut_or_try_insert_with(view, shared_cache::InsertMode::Shared, async {
+                noria_await!(self, self.noria.view(view.clone()))
+            })
+            .await
     }
 }
 
@@ -258,7 +262,7 @@ pub struct NoriaConnector {
     inner: NoriaBackend,
     auto_increments: Arc<RwLock<HashMap<Relation, atomic::AtomicUsize>>>,
     /// Global and thread-local cache of view endpoints and prepared statements.
-    view_cache: LocalCache<ViewCreateRequest, Relation>,
+    view_name_cache: LocalCache<ViewCreateRequest, Relation>,
 
     /// Set of views that have failed on previous requests. Separate from the backend
     /// to allow returning references to schemas from views all the way to mysql-srv,
@@ -350,7 +354,8 @@ impl NoriaConnector {
     pub async fn new(
         ch: ReadySetHandle,
         auto_increments: Arc<RwLock<HashMap<Relation, atomic::AtomicUsize>>>,
-        query_cache: SharedCache<ViewCreateRequest, Relation>,
+        view_name_cache: LocalCache<ViewCreateRequest, Relation>,
+        view_cache: LocalCache<Relation, View>,
         read_behavior: ReadBehavior,
         dialect: Dialect,
         parse_dialect: nom_sql::Dialect,
@@ -360,7 +365,8 @@ impl NoriaConnector {
         NoriaConnector::new_with_local_reads(
             ch,
             auto_increments,
-            query_cache,
+            view_name_cache,
+            view_cache,
             read_behavior,
             None,
             dialect,
@@ -375,7 +381,8 @@ impl NoriaConnector {
     pub async fn new_with_local_reads(
         ch: ReadySetHandle,
         auto_increments: Arc<RwLock<HashMap<Relation, atomic::AtomicUsize>>>,
-        query_cache: SharedCache<ViewCreateRequest, Relation>,
+        view_name_cache: LocalCache<ViewCreateRequest, Relation>,
+        view_cache: LocalCache<Relation, View>,
         read_behavior: ReadBehavior,
         read_request_handler: Option<ReadRequestHandler>,
         dialect: Dialect,
@@ -383,14 +390,14 @@ impl NoriaConnector {
         schema_search_path: Vec<SqlIdentifier>,
         server_supports_pagination: bool,
     ) -> Self {
-        let backend = NoriaBackendInner::new(ch, server_supports_pagination).await;
+        let backend = NoriaBackendInner::new(ch, view_cache, server_supports_pagination).await;
 
         NoriaConnector {
             inner: NoriaBackend {
                 inner: Some(backend),
             },
             auto_increments,
-            view_cache: query_cache.into_local(),
+            view_name_cache,
             failed_views: HashSet::new(),
             read_behavior,
             read_request_handler: request_handler::LocalReadHandler::new(read_request_handler),
@@ -1016,7 +1023,7 @@ impl NoriaConnector {
             // If the query is already in there with a different name, we don't need to make a new
             // name for it, as *lookups* only need one of the names for the query, and
             // when we drop it we'll be hitting noria anyway
-            self.view_cache
+            self.view_name_cache
                 .insert(
                     ViewCreateRequest::new(statement.clone(), schema_search_path),
                     name.clone(),
@@ -1027,7 +1034,7 @@ impl NoriaConnector {
         }
     }
 
-    pub(crate) async fn get_view(
+    pub(crate) async fn get_view_name(
         &mut self,
         q: &nom_sql::SelectStatement,
         is_prepared: bool,
@@ -1037,7 +1044,7 @@ impl NoriaConnector {
         let search_path =
             override_schema_search_path.unwrap_or_else(|| self.schema_search_path().to_vec());
         let view_request = ViewCreateRequest::new(q.clone(), search_path.clone());
-        self.view_cache
+        self.view_name_cache
             .get_mut_or_try_insert_with(&view_request, shared_cache::InsertMode::Shared, async {
                 let qname: Relation = utils::generate_query_name(q, &search_path).into();
 
@@ -1083,7 +1090,11 @@ impl NoriaConnector {
                         Ok(view) => {
                             // We should not have an entry, but if we do it's safe to overwrite
                             // since we got this information from the controller.
-                            self.inner.get_mut()?.views.insert(qname.clone(), view);
+                            self.inner
+                                .get_mut()?
+                                .views
+                                .insert(qname.clone(), view)
+                                .await;
                         }
                         Err(e) => {
                             return Err(e);
@@ -1103,7 +1114,7 @@ impl NoriaConnector {
             self.inner.get_mut()?,
             self.inner.get_mut()?.noria.remove_query(name)
         )?;
-        self.view_cache.remove_val(name).await;
+        self.view_name_cache.remove_val(name).await;
         Ok(result)
     }
 
@@ -1113,7 +1124,7 @@ impl NoriaConnector {
             self.inner.get_mut()?,
             self.inner.get_mut()?.noria.remove_all_queries()
         )?;
-        self.view_cache.clear().await;
+        self.view_name_cache.clear().await;
         Ok(())
     }
 
@@ -1121,7 +1132,7 @@ impl NoriaConnector {
         &self,
         name: &Relation,
     ) -> Option<ViewCreateRequest> {
-        self.view_cache.key_for_val(name).await
+        self.view_name_cache.key_for_val(name).await
     }
 
     async fn do_insert(
@@ -1404,7 +1415,7 @@ impl NoriaConnector {
         // check if we already have this query prepared
         trace!("select::access view");
         let qname = self
-            .get_view(
+            .get_view_name(
                 &statement,
                 true,
                 create_if_not_exist,
@@ -1488,7 +1499,7 @@ impl NoriaConnector {
                 let processed_query_params =
                     rewrite::process_query(&mut statement, self.server_supports_pagination())?;
                 let name = self
-                    .get_view(&statement, false, create_if_missing, None)
+                    .get_view_name(&statement, false, create_if_missing, None)
                     .await?;
                 (
                     Cow::Owned(name),
@@ -1554,7 +1565,7 @@ impl NoriaConnector {
         is_prepared: bool,
     ) -> ReadySetResult<()> {
         let qname = self
-            .get_view(
+            .get_view_name(
                 statement,
                 is_prepared,
                 create_if_not_exists,

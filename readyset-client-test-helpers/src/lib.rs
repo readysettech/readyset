@@ -218,7 +218,8 @@ impl TestBuilder {
         }
 
         let auto_increments: Arc<RwLock<HashMap<Relation, AtomicUsize>>> = Arc::default();
-        let query_cache = SharedCache::new();
+        let view_name_cache = SharedCache::new();
+        let view_cache = SharedCache::new();
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
 
@@ -229,7 +230,6 @@ impl TestBuilder {
             let connection_fut = async move {
                 loop {
                     let (s, _) = listener.accept().await.unwrap();
-                    let query_cache = query_cache.clone();
                     let backend_builder = self.backend_builder.clone();
                     let auto_increments = auto_increments.clone();
 
@@ -251,7 +251,8 @@ impl TestBuilder {
                     let noria = NoriaConnector::new(
                         rh,
                         auto_increments,
-                        query_cache,
+                        view_name_cache.new_local(),
+                        view_cache.new_local(),
                         self.read_behavior,
                         A::EXPR_DIALECT,
                         A::DIALECT,

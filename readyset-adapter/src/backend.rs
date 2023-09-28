@@ -1889,7 +1889,7 @@ where
             let mut row = vec![
                 id.to_string().into(),
                 self.noria
-                    .get_view(&view.statement, false, false, None)
+                    .get_view_name(&view.statement, false, false, None)
                     .await?
                     .display_unquoted()
                     .to_string()

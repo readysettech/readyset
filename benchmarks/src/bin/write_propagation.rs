@@ -106,7 +106,8 @@ impl Writer {
         };
 
         let auto_increments: Arc<RwLock<HashMap<Relation, AtomicUsize>>> = Arc::default();
-        let query_cache = SharedCache::new();
+        let view_name_cache = SharedCache::new();
+        let view_cache = SharedCache::new();
         let server_supports_pagination = ch.supports_pagination().await?;
         let (dialect, nom_sql_dialect) = match DatabaseURL::from_str(&self.database_url)? {
             DatabaseURL::MySQL(_) => (Dialect::DEFAULT_MYSQL, nom_sql::Dialect::MySQL),
@@ -117,7 +118,8 @@ impl Writer {
         let noria = NoriaConnector::new(
             ch.clone(),
             auto_increments,
-            query_cache,
+            view_name_cache.new_local(),
+            view_cache.new_local(),
             ReadBehavior::Blocking,
             dialect,
             nom_sql_dialect,
