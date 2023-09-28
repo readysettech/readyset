@@ -41,7 +41,7 @@ use readyset_client::consensus::AuthorityType;
 #[cfg(feature = "failure_injection")]
 use readyset_client::failpoints;
 use readyset_client::metrics::recorded;
-use readyset_client::{ReadySetHandle, ViewCreateRequest};
+use readyset_client::ReadySetHandle;
 use readyset_common::ulimit::maybe_increase_nofile_limit;
 use readyset_dataflow::Readers;
 use readyset_errors::{internal_err, ReadySetError};
@@ -50,6 +50,7 @@ use readyset_server::worker::readers::{retry_misses, Ack, BlockingRead, ReadRequ
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetryInitializer};
 use readyset_util::futures::abort_on_panic;
 use readyset_util::redacted::RedactedString;
+use readyset_util::shared_cache::SharedCache;
 use readyset_util::shutdown;
 use readyset_version::*;
 use tokio::net;
@@ -611,7 +612,7 @@ where
         info!(%listen_address, "Listening for new connections");
 
         let auto_increments: Arc<RwLock<HashMap<Relation, AtomicUsize>>> = Arc::default();
-        let query_cache: Arc<RwLock<HashMap<ViewCreateRequest, Relation>>> = Arc::default();
+        let query_cache = SharedCache::new();
         let mut health_reporter = AdapterHealthReporter::new();
 
         let rs_connect = span!(Level::INFO, "Connecting to RS server");
