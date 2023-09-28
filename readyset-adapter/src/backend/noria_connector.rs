@@ -1570,14 +1570,9 @@ impl NoriaConnector {
 
         // check if we already have this query prepared
         trace!("select::access view");
-        let qname = self
-            .get_view(
-                &statement,
-                true,
-                create_if_not_exist,
-                override_schema_search_path,
-            )
-            .await?;
+        let search_path =
+            override_schema_search_path.unwrap_or_else(|| self.schema_search_path().to_vec());
+        let qname: Relation = utils::generate_query_name(&statement, &search_path).into();
 
         let view_failed = self.failed_views.take(&qname).is_some();
         let getter = self
