@@ -886,12 +886,12 @@ mod types {
             .await
             .unwrap();
 
+        let stmt = client
+            .prepare("SELECT * FROM t WHERE x = $1")
+            .await
+            .unwrap();
         eventually!(
             run_test: {
-                let stmt = client
-                    .prepare("SELECT * FROM t WHERE x = $1")
-                    .await
-                    .unwrap();
                 let res = client.query_one(&stmt, &[&"A"]).await.unwrap();
                 let dest = last_query_info(&client).await.destination;
                 AssertUnwindSafe(move || (res, dest))
