@@ -1,4 +1,5 @@
 use std::convert::{TryFrom, TryInto};
+use std::io;
 
 use async_trait::async_trait;
 use binlog::consts::{BinlogChecksumAlg, EventType};
@@ -160,9 +161,24 @@ impl MySqlBinlogConnector {
     /// Get the next raw binlog event
     async fn next_event(&mut self) -> mysql::Result<binlog::events::Event> {
         let packet = self.connection.read_packet().await?;
-        // TODO: byte 0 of packet should be zero, unless EOF is reached, however we should never get
-        // one without the NON_BLOCKING SQL flag set
-        assert_eq!(packet.first(), Some(&0));
+        if let Some(first_byte) = packet.first() {
+            // We should only see EOF/(254) if the mysql upstream has gone away or the
+            // NON_BLOCKING SQL flag is set,
+            // otherwise the first byte should always be 0
+            if *first_byte != 0 && *first_byte != 254 {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("Received invalid first byte ({first_byte}) from MySQL server"),
+                )
+                .into());
+            } else if *first_byte == 254 {
+                return Err(io::Error::new(
+                    io::ErrorKind::BrokenPipe,
+                    format!("Received EOF ({first_byte}) from MySQL server"),
+                )
+                .into());
+            }
+        }
         let event = self.reader.read(&packet[1..])?;
         assert!(Self::validate_event_checksum(&event)); // TODO: definitely should never fail a CRC check, but what to do if we do?
         Ok(event)
