@@ -90,7 +90,7 @@ impl QueryMetrics {
                     ("query", self.query.clone()),
                     ("event_type", SharedString::from(kind.0)),
                     ("query_type", SharedString::from(kind.1)),
-                    ("database_type", SharedString::from(DatabaseType::MySql)),
+                    ("database_type", SharedString::from(DatabaseType::Upstream)),
                 ];
 
                 if let Some(id) = &self.query_id {

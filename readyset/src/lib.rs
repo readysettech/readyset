@@ -681,13 +681,9 @@ where
         let mut recorders = Vec::new();
         let prometheus_handle = if options.prometheus_metrics {
             let _guard = rt.enter();
-            let database_label = match self.database_type {
-                DatabaseType::MySQL => readyset_client_metrics::DatabaseType::MySql,
-                DatabaseType::PostgreSQL => readyset_client_metrics::DatabaseType::Psql,
-            };
 
             let recorder = PrometheusBuilder::new()
-                .add_global_label("upstream_db_type", database_label)
+                .add_global_label("upstream_db_type", self.database_type.to_string())
                 .add_global_label("deployment", &options.deployment)
                 .build_recorder();
 

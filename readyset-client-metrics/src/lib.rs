@@ -121,16 +121,14 @@ impl From<SqlQueryType> for SharedString {
 /// Identifies the database that this metric corresponds to.
 #[derive(Debug)]
 pub enum DatabaseType {
-    MySql,
-    Psql,
+    Upstream,
     ReadySet,
 }
 
 impl From<DatabaseType> for SharedString {
     fn from(database_type: DatabaseType) -> Self {
         match database_type {
-            DatabaseType::MySql => SharedString::const_str("mysql"),
-            DatabaseType::Psql => SharedString::const_str("psql"),
+            DatabaseType::Upstream => SharedString::const_str("upstream"),
             DatabaseType::ReadySet => SharedString::const_str("readyset"),
         }
     }
