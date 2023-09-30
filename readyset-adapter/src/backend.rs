@@ -1054,18 +1054,22 @@ where
     ) -> ReadySetResult<(nom_sql::SelectStatement, bool)> {
         let mut rewritten = stmt.clone();
         rewrite::process_query(&mut rewritten, self.noria.server_supports_pagination())?;
-        // Attempt ReadySet unless the query is unsupported or dropped
-        let should_do_readyset = !matches!(
+        let (_, migration_state) =
             self.state
                 .query_status_cache
                 .query_migration_state(&ViewCreateRequest::new(
                     rewritten.clone(),
                     self.noria.schema_search_path().to_owned(),
-                ))
-                .1,
-            MigrationState::Unsupported | MigrationState::Dropped
-        );
-        Ok((rewritten, should_do_readyset))
+                ));
+
+        Ok((
+            rewritten,
+            // Attempt ReadySet if the query is known to have been successfully migrated or inlined
+            matches!(
+                migration_state,
+                MigrationState::Successful | MigrationState::Inlined(_)
+            ),
+        ))
     }
 
     /// Provides metadata required to prepare a query
