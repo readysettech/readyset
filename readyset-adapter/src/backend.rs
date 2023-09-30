@@ -1056,20 +1056,19 @@ where
     ) -> ReadySetResult<(nom_sql::SelectStatement, bool)> {
         let mut rewritten = stmt.clone();
         rewrite::process_query(&mut rewritten, self.noria.server_supports_pagination())?;
-        // Attempt ReadySet unless the query is unsupported or dropped
-        let should_do_readyset = !matches!(
+        let (_, migration_state) =
             self.state
                 .query_status_cache
                 .query_migration_state(&ViewCreateRequest::new(
                     rewritten.clone(),
                     self.noria.schema_search_path().to_owned(),
-                ))
-                .1,
-            MigrationState::Unsupported | MigrationState::Dropped
-        );
-        Ok((rewritten, should_do_readyset))
-    }
+                ));
 
+        Ok((
+            rewritten,
+            should_route_to_readyset(self.settings.migration_mode, &migration_state),
+        ))
+    }
     /// Provides metadata required to prepare a query
     async fn plan_prepare(&mut self, query: &str) -> PrepareMeta {
         if self.state.proxy_state == ProxyState::ProxyAlways {
@@ -2160,12 +2159,6 @@ where
 
         // Test several conditions to see if we should proxy
         let upstream_exists = upstream.is_some();
-        let proxy_out_of_band = settings.migration_mode != MigrationMode::InRequestPath
-            && status.migration_state != MigrationState::Successful;
-        let unsupported_or_dropped = matches!(
-            status.migration_state,
-            MigrationState::Unsupported | MigrationState::Dropped
-        );
         let exceeded_network_failure = status
             .execution_info
             .as_mut()
@@ -2174,7 +2167,8 @@ where
 
         if !status.always
             && (upstream_exists
-                && (proxy_out_of_band || unsupported_or_dropped || exceeded_network_failure))
+                && (should_route_to_readyset(settings.migration_mode, &status.migration_state)
+                    || exceeded_network_failure))
         {
             if did_work {
                 #[allow(clippy::unwrap_used)] // Validated by did_work.
@@ -2829,4 +2823,32 @@ fn readyset_version() -> ReadySetResult<noria_connector::QueryResult<'static>> {
             .map(MetaVariable::from)
             .collect(),
     ))
+}
+
+/// How we decide to route a query depends on the current [`MigrationMode`]
+/// For explicit or async migrations, we only route to readyset if we are confident that there is a
+/// cache for the query.
+///
+/// For inrequestpath migration modes, we route everything to readyset unless we are
+/// confident there _isn't_ a cache for the query.
+fn should_route_to_readyset(
+    migration_mode: MigrationMode,
+    migration_state: &MigrationState,
+) -> bool {
+    match migration_mode {
+        MigrationMode::InRequestPath => {
+            // Attempt ReadySet unless the query is known to be uncached
+            !matches!(
+                migration_state,
+                MigrationState::Dropped | MigrationState::Unsupported
+            )
+        }
+        MigrationMode::OutOfBand => {
+            // Attempt ReadySet if the query is known to have been successfully migrated or inlined
+            matches!(
+                migration_state,
+                MigrationState::Successful | MigrationState::Inlined(_)
+            )
+        }
+    }
 }
