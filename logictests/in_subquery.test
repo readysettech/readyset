@@ -112,3 +112,12 @@ insert into t4 (x, y) values (1, 1);
 query I nosort
 select x from t3 where y not in (select y from t4 where t4.x = t3.x);
 ----
+
+query II nosort
+select
+    y in (select y from t4),
+    y not in (select y from t4)
+from t3;
+----
+NULL
+NULL
