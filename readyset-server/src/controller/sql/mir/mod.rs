@@ -1539,7 +1539,7 @@ impl SqlToMirConverter {
                 //
                 //     σ[mark IS NULL](R₁ ⟕[lhs ≡ rhs] π[DISTINCT x AS rhs, 0 AS mark](R₂))
 
-                let (lhs, parent) = match &**lhs {
+                let (lhs, mut parent) = match &**lhs {
                     Expr::Column(col) => (col.clone(), parent),
                     expr => {
                         // The lhs is a non-column expr, so we need to project it first
@@ -1567,6 +1567,24 @@ impl SqlToMirConverter {
                         )
                     }
                 };
+
+                // Remove rows where the lhs expr is NULL, since those would make the overall IN
+                // expr NULL in regular SQL.
+                //
+                // Note that we only need to do this for `NOT IN` since NULLs would never match in
+                // the rhs anyway
+                if *negated {
+                    parent = self.make_filter_node(
+                        query_name,
+                        self.generate_label(&"join_in_where_not_null".into()),
+                        parent,
+                        Expr::BinaryOp {
+                            lhs: Box::new(Expr::Column(lhs.clone())),
+                            op: BinaryOperator::IsNot,
+                            rhs: Box::new(Expr::Literal(Literal::Null)),
+                        },
+                    );
+                }
 
                 let query_graph = to_query_graph((**subquery).clone())?;
                 let subquery_leaf = self.named_query_to_mir(
