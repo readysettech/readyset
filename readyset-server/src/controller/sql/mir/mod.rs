@@ -17,8 +17,8 @@ use mir::DfNodeIndex;
 pub use mir::{Column, NodeIndex};
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::{
-    BinaryOperator, ColumnSpecification, CompoundSelectOperator, CreateTableBody, Expr,
-    FieldDefinitionExpr, FieldReference, FunctionExpr, InValue, LimitClause, Literal,
+    BinaryOperator, CaseWhenBranch, ColumnSpecification, CompoundSelectOperator, CreateTableBody,
+    Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, InValue, LimitClause, Literal,
     NonReplicatedRelation, OrderClause, OrderType, Relation, SelectStatement, SqlIdentifier,
     TableKey, UnaryOperator,
 };
@@ -1178,7 +1178,7 @@ impl SqlToMirConverter {
             query_name,
             self.generate_label(&format!("{name}_join").into()),
             &[JoinPredicate {
-                left: lhs,
+                left: lhs.clone(),
                 right: nom_sql::Column {
                     name: col.name,
                     table: col.table,
@@ -1201,14 +1201,25 @@ impl SqlToMirConverter {
                 .into_iter()
                 .map(ProjectExpr::Column)
                 .chain(iter::once(ProjectExpr::Expr {
-                    expr: Expr::BinaryOp {
-                        lhs: Box::new(Expr::Column(mark_col.into())),
-                        op: if negated {
-                            BinaryOperator::Is
-                        } else {
-                            BinaryOperator::IsNot
-                        },
-                        rhs: Box::new(Expr::Literal(Literal::Null)),
+                    // CASE WHEN lhs IS NULL THEN NULL ELSE mark_col <IS|IS NOT> NULL END
+                    expr: Expr::CaseWhen {
+                        branches: vec![CaseWhenBranch {
+                            condition: Expr::BinaryOp {
+                                lhs: Box::new(Expr::Column(lhs)),
+                                op: BinaryOperator::Is,
+                                rhs: Box::new(Expr::Literal(Literal::Null)),
+                            },
+                            body: Expr::Literal(Literal::Null),
+                        }],
+                        else_expr: Some(Box::new(Expr::BinaryOp {
+                            lhs: Box::new(Expr::Column(mark_col.into())),
+                            op: if negated {
+                                BinaryOperator::Is
+                            } else {
+                                BinaryOperator::IsNot
+                            },
+                            rhs: Box::new(Expr::Literal(Literal::Null)),
+                        })),
                     },
                     alias: name.into(),
                 }))
