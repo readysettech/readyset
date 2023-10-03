@@ -109,9 +109,6 @@ macro_rules! impl_ingredient_fn_ref {
 }
 
 impl Ingredient for NodeOperator {
-    fn take(&mut self) -> NodeOperator {
-        impl_ingredient_fn_mut!(self, take,)
-    }
     fn ancestors(&self) -> Vec<NodeIndex> {
         impl_ingredient_fn_ref!(self, ancestors,)
     }
