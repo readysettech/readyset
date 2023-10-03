@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::fmt::Display;
 use std::future::Future;
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant, SystemTime};
 use std::{fmt, iter};
@@ -24,6 +24,7 @@ use readyset_errors::{
 use replication_offset::ReplicationOffset;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
+use tokio::sync::Mutex;
 use tokio_tower::multiplex;
 use tower::balance::p2c::Balance;
 use tower::buffer::Buffer;
@@ -320,7 +321,10 @@ pub struct TableBuilder {
 }
 
 impl TableBuilder {
-    pub(crate) fn build(self, rpcs: Arc<Mutex<HashMap<(SocketAddr, usize), TableRpc>>>) -> Table {
+    pub(crate) async fn build(
+        self,
+        rpcs: Arc<Mutex<HashMap<(SocketAddr, usize), TableRpc>>>,
+    ) -> Table {
         let mut addrs = Vec::with_capacity(self.txs.len());
         let mut conns = Vec::with_capacity(self.txs.len());
         for (shardi, &addr) in self.txs.iter().enumerate() {
@@ -330,10 +334,7 @@ impl TableBuilder {
 
             // one entry per shard so that we can send sharded requests in parallel even if
             // they happen to be targeting the same machine.
-            #[allow(clippy::unwrap_used)]
-            // This can only fail if the mutex is poisoned, in which case we want to panic
-            // since there's no way to recover.
-            let mut rpcs = rpcs.lock().unwrap();
+            let mut rpcs = rpcs.lock().await;
             #[allow(clippy::significant_drop_in_scrutinee)]
             let s = match rpcs.entry((addr, shardi)) {
                 Entry::Occupied(e) => e.get().clone(),
