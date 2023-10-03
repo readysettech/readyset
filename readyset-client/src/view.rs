@@ -7,7 +7,7 @@ use std::future::Future;
 use std::hash::{Hash, Hasher};
 use std::net::SocketAddr;
 use std::ops::{Bound, Range, RangeBounds};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
@@ -37,6 +37,7 @@ use readyset_tracing::propagation::Instrumented;
 use readyset_util::intervals::{cmp_start_end, BoundPair};
 use readyset_util::redacted::Sensitive;
 use serde::{Deserialize, Serialize};
+use tokio::sync::Mutex;
 use tokio_tower::multiplex;
 use tower::balance::p2c::Balance;
 use tower::buffer::Buffer;
@@ -942,7 +943,7 @@ impl ReaderHandleBuilder {
     ///
     /// If `replica` is specified, this selects the reader replica with that index, returning an
     /// error if the index is out of bounds. Otherwise, a replica is selected at random
-    pub fn build(
+    pub async fn build(
         &self,
         replica: Option<usize>,
         rpcs: Arc<Mutex<HashMap<(SocketAddr, usize), ViewRpc>>>,
@@ -991,9 +992,7 @@ impl ReaderHandleBuilder {
 
             // one entry per shard so that we can send sharded requests in parallel even if
             // they happen to be targeting the same machine.
-            let mut rpcs = rpcs
-                .lock()
-                .map_err(|e| internal_err!("mutex was poisoned: '{}'", e))?;
+            let mut rpcs = rpcs.lock().await;
             #[allow(clippy::significant_drop_in_scrutinee)]
             let s = match rpcs.entry((shard_addr, shardi)) {
                 Entry::Occupied(e) => e.get().clone(),
@@ -1043,29 +1042,29 @@ impl ReaderHandleBuilder {
 
 impl ViewBuilder {
     /// Build a `View` from `ViewBuilder`. Wraps ReaderHandleBuilder::build().
-    pub fn build(
+    pub async fn build(
         &self,
         replica: Option<usize>,
         rpcs: Arc<Mutex<HashMap<(SocketAddr, usize), ViewRpc>>>,
     ) -> ReadySetResult<View> {
         match self {
-            ViewBuilder::Single(builder) => Ok(View::Single(builder.build(replica, rpcs)?)),
+            ViewBuilder::Single(builder) => Ok(View::Single(builder.build(replica, rpcs).await?)),
             ViewBuilder::MultipleReused(builders) => {
-                Ok(View::MultipleReused(builders.try_mapped_ref(
-                    |ReusedReaderHandleBuilder {
-                         builder,
-                         key_remapping,
-                         required_values,
-                     }| {
-                        builder.build(replica, rpcs.clone()).map(|reader_handle| {
-                            ReusedReaderHandle {
-                                reader_handle,
-                                key_remapping: key_remapping.clone(),
-                                required_values: required_values.clone(),
-                            }
-                        })
-                    },
-                )?))
+                let mut handles = Vec::with_capacity(builders.len());
+                for ReusedReaderHandleBuilder {
+                    builder,
+                    key_remapping,
+                    required_values,
+                } in builders
+                {
+                    let reader_handle = builder.build(replica, rpcs.clone()).await?;
+                    handles.push(ReusedReaderHandle {
+                        reader_handle,
+                        key_remapping: key_remapping.clone(),
+                        required_values: required_values.clone(),
+                    })
+                }
+                Ok(View::MultipleReused(handles.try_into().unwrap()))
             }
         }
     }
