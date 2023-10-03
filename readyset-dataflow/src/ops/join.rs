@@ -201,10 +201,6 @@ impl Join {
 }
 
 impl Ingredient for Join {
-    fn take(&mut self) -> NodeOperator {
-        Clone::clone(self).into()
-    }
-
     fn ancestors(&self) -> Vec<NodeIndex> {
         vec![self.left.as_global(), self.right.as_global()]
     }

@@ -34,20 +34,12 @@ impl Project {
 }
 
 impl Ingredient for Project {
-    fn take(&mut self) -> NodeOperator {
-        Clone::clone(self).into()
-    }
-
     fn ancestors(&self) -> Vec<NodeIndex> {
         vec![self.src.as_global()]
     }
 
     fn can_query_through(&self) -> bool {
-        // TODO(aspen): Make query_through just use column provenance (?) or make it pass column
-        // indices at least
-        self.emit
-            .iter()
-            .all(|expr| matches!(expr, Expr::Column { .. }))
+        true
     }
 
     #[allow(clippy::type_complexity)]
@@ -59,19 +51,12 @@ impl Ingredient for Project {
         states: &'a StateMap,
         mode: LookupMode,
     ) -> ReadySetResult<IngredientLookupResult<'a>> {
-        let in_cols = match columns
-            .iter()
-            .map(|&outi| match self.emit.get(outi) {
-                Some(Expr::Column { index, .. }) => Ok(*index),
-                _ => Err(internal_err!(
-                    "query_through should never be queried for generated columns; \
-                         columns: {columns:?}",
-                )),
-            })
-            .collect::<Result<Vec<_>, _>>()
-        {
-            Ok(cols) => cols,
-            Err(e) => return Ok(IngredientLookupResult::err(e)),
+        let in_cols = match self.column_source(columns) {
+            ColumnSource::ExactCopy(ColumnRef { columns, .. }) => columns,
+            src => internal!(
+                "query_through should never be called for non-ExactCopy columns \
+                     (source: {src:?})"
+            ),
         };
 
         let res = self.lookup(*self.src, &in_cols, key, nodes, states, mode)?;

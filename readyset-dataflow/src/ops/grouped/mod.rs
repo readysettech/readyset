@@ -156,10 +156,6 @@ impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T>
 where
     Self: Into<NodeOperator>,
 {
-    fn take(&mut self) -> NodeOperator {
-        Clone::clone(self).into()
-    }
-
     fn ancestors(&self) -> Vec<NodeIndex> {
         vec![self.src.as_global()]
     }
