@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::future::Future;
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
@@ -17,6 +17,7 @@ use readyset_errors::{
 use replication_offset::ReplicationOffsets;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use tokio::sync::Mutex;
 use tower::ServiceExt;
 use tower_service::Service;
 use tracing::{debug, trace};
@@ -596,7 +597,7 @@ impl ReadySetHandle {
                 None
             };
             let view_builder = self.view_builder(view_request).await?;
-            view_builder.build(replica, views)
+            view_builder.build(replica, views).await
         }
     }
 
@@ -652,11 +653,12 @@ impl ReadySetHandle {
                 .await
                 .map_err(rpc_err!("ReadySetHandle::table"))?;
 
-            Ok(
-                bincode::deserialize::<ReadySetResult<Option<TableBuilder>>>(&body)?
-                    .map_err(|e| rpc_err_no_downcast("ReadySetHandle::table", e))?
-                    .map(|tb| tb.build(domains)),
-            )
+            match bincode::deserialize::<ReadySetResult<Option<TableBuilder>>>(&body)?
+                .map_err(|e| rpc_err_no_downcast("ReadySetHandle::table", e))?
+            {
+                Some(tb) => Ok(Some(tb.build(domains).await)),
+                None => Ok(None),
+            }
         }
     }
 
