@@ -27,7 +27,7 @@ impl NodeType {
             NodeType::Reader(ref mut r) => NodeType::Reader(r.take()),
             NodeType::Sharder(ref mut s) => NodeType::Sharder(s.take()),
             NodeType::Ingress => NodeType::Ingress,
-            NodeType::Internal(ref mut i) => NodeType::Internal(i.take()),
+            NodeType::Internal(ref mut i) => NodeType::Internal(i.clone()),
             NodeType::Source => NodeType::Source,
             NodeType::Dropped => NodeType::Dropped,
         }

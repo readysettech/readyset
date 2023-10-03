@@ -30,10 +30,6 @@ impl Filter {
 }
 
 impl Ingredient for Filter {
-    fn take(&mut self) -> NodeOperator {
-        Clone::clone(self).into()
-    }
-
     fn ancestors(&self) -> Vec<NodeIndex> {
         vec![self.src.as_global()]
     }

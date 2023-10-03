@@ -227,10 +227,6 @@ impl TopK {
 }
 
 impl Ingredient for TopK {
-    fn take(&mut self) -> NodeOperator {
-        self.clone().into()
-    }
-
     fn ancestors(&self) -> Vec<NodeIndex> {
         vec![self.src.as_global()]
     }
