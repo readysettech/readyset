@@ -1,28 +1,32 @@
+use std::any::Any;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::task::{Context, Poll};
+use std::task::{ready, Context, Poll};
 use std::time::{Duration, Instant};
 
 use futures_util::future;
 use hyper::client::HttpConnector;
+use lazy_static::lazy_static;
 use nom_sql::{CreateCacheStatement, NonReplicatedRelation, Relation};
 use parking_lot::RwLock;
 use petgraph::graph::NodeIndex;
 use readyset_errors::{
     internal, internal_err, rpc_err, rpc_err_no_downcast, ReadySetError, ReadySetResult,
 };
+use readyset_util::tower::{ChannelService, Request};
 use replication_offset::ReplicationOffsets;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use tokio::sync::Mutex;
+use tokio::sync::{mpsc, Mutex};
 use tower::ServiceExt;
 use tower_service::Service;
 use tracing::{debug, trace};
 use url::Url;
 
+use self::rpc::parse_resp;
 use crate::consensus::{Authority, AuthorityControl};
 use crate::debug::info::{GraphInfo, MaterializationInfo, NodeSize};
 use crate::debug::stats;
@@ -60,6 +64,11 @@ fn make_http_client(timeout: Option<Duration>) -> hyper::Client<hyper::client::H
         // Sets to the keep alive default if request_timeout is not specified.
         .http2_keep_alive_timeout(timeout.unwrap_or(Duration::from_secs(20)))
         .build(http_connector)
+}
+
+enum ControllerResponse {
+    Remote(hyper::body::Bytes),
+    Local(Box<dyn Any + Send>),
 }
 
 /// Errors that can occur when making a request to a controller
@@ -155,7 +164,7 @@ impl RawController {
 }
 
 impl Service<ControllerRequest> for RawController {
-    type Response = hyper::body::Bytes;
+    type Response = ControllerResponse;
     type Error = ReadySetError;
 
     type Future = impl Future<Output = Result<Self::Response, Self::Error>> + Send;
@@ -172,6 +181,7 @@ impl Service<ControllerRequest> for RawController {
         async move {
             controller_request(&url, &client, req, request_timeout)
                 .await
+                .map(ControllerResponse::Remote)
                 .map_err(|e| e.error)
         }
     }
@@ -184,6 +194,7 @@ struct Controller {
     /// The last valid leader URL seen by this service. Used to circumvent requests to Consul in
     /// the happy-path.
     leader_url: Arc<RwLock<Option<Url>>>,
+    this_process: Option<ChannelService<ControllerRequest, Box<dyn Any + Send>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -208,12 +219,21 @@ impl ControllerRequest {
 }
 
 impl Service<ControllerRequest> for Controller {
-    type Response = hyper::body::Bytes;
+    type Response = ControllerResponse;
     type Error = ReadySetError;
 
     type Future = impl Future<Output = Result<Self::Response, Self::Error>> + Send;
 
-    fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        if let Some(leader) = THIS_PROCESS_LEADER.try_read() {
+            if let Some(leader) = &*leader {
+                self.this_process = Some(leader.clone());
+                if let Err(e) = ready!(self.this_process.as_mut().unwrap().poll_ready(cx)) {
+                    return Poll::Ready(Err(internal_err!("Local controller request error: {e}")));
+                }
+            }
+        }
+
         Poll::Ready(Ok(()))
     }
 
@@ -225,12 +245,20 @@ impl Service<ControllerRequest> for Controller {
         let request_timeout = req.timeout.unwrap_or(Duration::MAX);
         let start = Instant::now();
         let mut last_error_desc: Option<String> = None;
+        let this_process = self.this_process.take();
 
         async move {
             let original_url = leader_url.read().clone();
             let mut url = original_url.clone();
 
             loop {
+                if let Some(mut this_process) = this_process {
+                    match this_process.call(req).await {
+                        Ok(res) => return Ok(ControllerResponse::Local(res)),
+                        Err(e) => internal!("Local controller request error: {e}"),
+                    }
+                }
+
                 let elapsed = Instant::now().duration_since(start);
                 if elapsed >= request_timeout {
                     internal!(
@@ -265,7 +293,7 @@ impl Service<ControllerRequest> for Controller {
                         if url != original_url {
                             *leader_url.write() = url;
                         }
-                        return Ok(res);
+                        return Ok(ControllerResponse::Remote(res));
                     }
                     Err(ControllerRequestError {
                         error,
@@ -286,6 +314,19 @@ impl Service<ControllerRequest> for Controller {
             }
         }
     }
+}
+
+lazy_static! {
+    static ref THIS_PROCESS_LEADER: RwLock<Option<ChannelService<ControllerRequest, Box<dyn Any + Send>>>> =
+        RwLock::new(None);
+}
+
+pub const LOCAL_LEADER_BUFFER: usize = 32;
+
+pub fn this_process_is_leader() -> mpsc::Receiver<Request<ControllerRequest, Box<dyn Any + Send>>> {
+    let (svc, rx) = ChannelService::new(LOCAL_LEADER_BUFFER);
+    *THIS_PROCESS_LEADER.write() = Some(svc);
+    rx
 }
 
 /// Options for generating graphviz [dot][] visualizations of the ReadySet dataflow graph.
@@ -374,6 +415,7 @@ impl ReadySetHandle {
                 authority,
                 client: make_http_client(request_timeout),
                 leader_url: Arc::new(RwLock::new(None)),
+                this_process: None,
             }),
             request_timeout,
             migration_timeout,
@@ -434,9 +476,9 @@ impl ReadySetHandle {
     /// Issues a POST request to the given path with no body.
     async fn simple_post_request<R>(&mut self, path: &'static str) -> ReadySetResult<R>
     where
-        R: DeserializeOwned,
+        R: DeserializeOwned + Any,
     {
-        let body: hyper::body::Bytes = self
+        let resp = self
             .handle
             .ready()
             .await
@@ -445,8 +487,7 @@ impl ReadySetHandle {
             .await
             .map_err(rpc_err!(format_args!("ReadySetHandle::{}", path)))?;
 
-        bincode::deserialize(&body)
-            .map_err(ReadySetError::from)
+        parse_resp(resp)
             .map_err(Box::new)
             .map_err(rpc_err!(format_args!("ReadySetHandle::{}", path)))
     }
@@ -556,7 +597,7 @@ impl ReadySetHandle {
     /// This is made public for inspection in integration tests and is not meant to be
     /// used to construct views, instead use `view`, which calls this method.
     pub async fn view_builder(&mut self, view_request: ViewRequest) -> ReadySetResult<ViewBuilder> {
-        let body: hyper::body::Bytes = self
+        let resp = self
             .handle
             .ready()
             .await
@@ -569,7 +610,7 @@ impl ReadySetHandle {
             .await
             .map_err(rpc_err!("ReadySetHandle::view_builder"))?;
 
-        match bincode::deserialize::<ReadySetResult<Option<ViewBuilder>>>(&body)?
+        match parse_resp::<ReadySetResult<Option<ViewBuilder>>>(resp)?
             .map_err(|e| rpc_err_no_downcast("ReadySetHandle::view_builder", e))?
         {
             Some(vb) => Ok(vb),
@@ -644,7 +685,7 @@ impl ReadySetHandle {
     ) -> impl Future<Output = ReadySetResult<Option<Table>>> + '_ {
         let domains = self.domains.clone();
         async move {
-            let body: hyper::body::Bytes = self
+            let resp = self
                 .handle
                 .ready()
                 .await
@@ -653,7 +694,7 @@ impl ReadySetHandle {
                 .await
                 .map_err(rpc_err!("ReadySetHandle::table"))?;
 
-            match bincode::deserialize::<ReadySetResult<Option<TableBuilder>>>(&body)?
+            match parse_resp::<ReadySetResult<Option<TableBuilder>>>(resp)?
                 .map_err(|e| rpc_err_no_downcast("ReadySetHandle::table", e))?
             {
                 Some(tb) => Ok(Some(tb.build(domains).await)),
