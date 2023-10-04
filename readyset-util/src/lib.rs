@@ -1,7 +1,13 @@
 //! This crate provides miscellaneous utilities and extensions to the Rust standard library, for use
 //! in all crates in this workspace.
 #![deny(missing_docs, rustdoc::missing_crate_level_docs)]
-#![feature(step_trait, bound_as_ref, bound_map, rustc_attrs)]
+#![feature(
+    step_trait,
+    bound_as_ref,
+    bound_map,
+    rustc_attrs,
+    type_alias_impl_trait
+)]
 
 use std::borrow::Borrow;
 use std::collections::{BTreeMap, HashMap};
@@ -19,6 +25,7 @@ pub mod progress;
 pub mod properties;
 pub mod redacted;
 pub mod shutdown;
+pub mod tower;
 
 /// Error (returned by [`Indices::indices`] and [`Indices::cloned_indices`]) for an out-of-bounds
 /// index access

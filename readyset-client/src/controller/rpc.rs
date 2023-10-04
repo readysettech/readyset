@@ -1,17 +1,18 @@
 //! This needs to be its own module to work around the way type-alias-impl-trait gets inferred - see
 //! <https://github.com/mit-pdos/noria/issues/189> for more information
 
+use std::any::Any;
 use std::time::Duration;
 
 use futures::Future;
 use futures_util::future::Either;
-use readyset_errors::{rpc_err, rpc_err_no_downcast, ReadySetError, ReadySetResult};
+use readyset_errors::{internal_err, rpc_err, rpc_err_no_downcast, ReadySetError, ReadySetResult};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use tower::ServiceExt;
 use tower_service::Service;
 
-use crate::controller::ControllerRequest;
+use crate::controller::{ControllerRequest, ControllerResponse};
 use crate::ReadySetHandle;
 
 // this alias is needed to work around -> impl Trait capturing _all_ lifetimes by default
@@ -27,7 +28,7 @@ impl ReadySetHandle {
         timeout: Option<Duration>,
     ) -> RpcFuture<'a, R>
     where
-        R: DeserializeOwned + Send + 'static,
+        R: DeserializeOwned + Send + Any + 'static,
         Q: Serialize,
     {
         // Needed b/c of https://github.com/rust-lang/rust/issues/65442
@@ -37,9 +38,9 @@ impl ReadySetHandle {
             path: &'static str,
         ) -> ReadySetResult<R>
         where
-            R: DeserializeOwned,
+            R: DeserializeOwned + Any,
         {
-            let body: hyper::body::Bytes = ch
+            let resp: ControllerResponse = ch
                 .handle
                 .ready()
                 .await
@@ -48,14 +49,32 @@ impl ReadySetHandle {
                 .await
                 .map_err(rpc_err!(path))?;
 
-            bincode::deserialize::<R>(&body)
-                .map_err(ReadySetError::from)
-                .map_err(|e| rpc_err_no_downcast(path, e))
+            parse_resp(resp).map_err(|e| rpc_err_no_downcast(path, e))
         }
 
         match ControllerRequest::new(path, r, timeout) {
             Ok(req) => Either::Left(rpc_inner(self, req, path)),
             Err(e) => Either::Right(std::future::ready(Err(e))),
         }
+    }
+}
+
+pub(super) fn parse_resp<R>(resp: ControllerResponse) -> ReadySetResult<R>
+where
+    R: DeserializeOwned + Any,
+{
+    match resp {
+        ControllerResponse::Remote(body) => {
+            bincode::deserialize::<R>(&body).map_err(ReadySetError::from)
+        }
+        ControllerResponse::Local(resp) => resp
+            .downcast()
+            .map_err(|v| {
+                internal_err!(
+                    "Wrong type {:?} returned from local controller response",
+                    v.type_id()
+                )
+            })
+            .map(|r| *r),
     }
 }

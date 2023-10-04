@@ -12,8 +12,10 @@ backoff = { version = "0.4.0", features = ["tokio"] }
 proptest = "1.0.0"
 chrono = { version = "0.4.0", features = ["serde"] }
 tokio = { workspace = true, features = ["full"] }
+tokio-util = "0.7.0"
 futures = "0.3"
 tracing = { version = "0.1", features = ["release_max_level_debug"] }
+tower-service = "0.3.1"
 rust_decimal = { version = "1.26" }
 eui48 = { workspace = true }
 uuid = { version = "0.8", features = ["v4"] }

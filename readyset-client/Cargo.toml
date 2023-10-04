@@ -17,6 +17,7 @@ clap = { workspace = true, features = ["derive","env"] }
 fail = "0.5.0"
 thiserror = "1.0.26"
 hyper = { version = "0.14.10", features = [ "stream", "client", "http2" ] }
+lazy_static = "1.4"
 nom = "7.1"
 nom_locate = "4.0.0"
 serde = { version = "1.0.8", features = ["rc", "derive"] }

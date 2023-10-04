@@ -4475,6 +4475,7 @@ dependencies = [
  "futures-util",
  "hyper",
  "itertools",
+ "lazy_static",
  "metrics",
  "metrics-exporter-prometheus",
  "metrics-util",
@@ -5133,6 +5134,8 @@ dependencies = [
  "serde_json",
  "test-strategy",
  "tokio",
+ "tokio-util 0.7.2",
+ "tower-service",
  "tracing",
  "uuid 0.8.2",
 ]
