@@ -425,10 +425,9 @@ impl BackendBuilder {
     }
 }
 
-/// A [`CachedPreparedStatement`] stores the data needed for an immediate
-/// execution of a prepared statement on either noria or the upstream
-/// connection.
-struct CachedPreparedStatement<DB>
+/// A [`PreparedStatement`] stores the data needed for an immediate execution of a prepared
+/// statement on either noria or the upstream connection.
+struct PreparedStatement<DB>
 where
     DB: UpstreamDatabase,
 {
@@ -453,7 +452,7 @@ where
     view_request: Option<ViewCreateRequest>,
 }
 
-impl<DB> CachedPreparedStatement<DB>
+impl<DB> PreparedStatement<DB>
 where
     DB: UpstreamDatabase,
 {
@@ -536,7 +535,7 @@ where
     // a cache of all previously parsed queries
     parsed_query_cache: HashMap<String, SqlQuery>,
     // all queries previously prepared on noria or upstream, mapped by their ID.
-    prepared_statements: Vec<CachedPreparedStatement<DB>>,
+    prepared_statements: Vec<PreparedStatement<DB>>,
     /// Current RYW ticket. `None` if RYW is not enabled. This `ticket` will
     /// be updated as the client makes writes so as to be an accurate low watermark timestamp
     /// required to make RYW-consistent reads. On reads, the client will pass in this ticket to be
@@ -1159,7 +1158,7 @@ where
         }
         query_event.query_id = id;
 
-        let cache_entry = CachedPreparedStatement {
+        let cache_entry = PreparedStatement {
             query_id: id,
             prep: res,
             migration_state,
@@ -1311,7 +1310,7 @@ where
     /// If the query is not in the `MigrationState::Pending` or `MigrationState::Inlined` state
     async fn update_noria_prepare(
         noria: &mut NoriaConnector,
-        cached_entry: &mut CachedPreparedStatement<DB>,
+        cached_entry: &mut PreparedStatement<DB>,
         id: u32,
     ) -> ReadySetResult<()> {
         debug_assert!(
@@ -1368,7 +1367,7 @@ where
             .prepared_statements
             .iter_mut()
             .filter_map(
-                |CachedPreparedStatement {
+                |PreparedStatement {
                      prep,
                      migration_state,
                      view_request,
@@ -1717,7 +1716,7 @@ where
         self.noria.drop_all_caches().await?;
         self.state.query_status_cache.clear();
         self.state.prepared_statements.iter_mut().for_each(
-            |CachedPreparedStatement {
+            |PreparedStatement {
                  prep,
                  migration_state,
                  ..
