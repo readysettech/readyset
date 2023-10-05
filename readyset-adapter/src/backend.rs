@@ -93,7 +93,7 @@ use readyset_client::results::Results;
 use readyset_client::{ColumnSchema, PlaceholderIdx, ViewCreateRequest};
 pub use readyset_client_metrics::QueryDestination;
 use readyset_client_metrics::{recorded, EventType, QueryExecutionEvent, SqlQueryType};
-use readyset_data::DfValue;
+use readyset_data::{DfType, DfValue};
 use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
 use readyset_errors::{internal, internal_err, unsupported, unsupported_err, ReadySetResult};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
@@ -2011,6 +2011,7 @@ where
             }
             SqlQuery::Show(ShowStatement::ReadySetVersion) => readyset_version(),
             SqlQuery::Show(ShowStatement::ReadySetTables) => self.noria.table_statuses().await,
+            SqlQuery::Show(ShowStatement::Connections) => self.show_connections(),
             SqlQuery::Show(ShowStatement::ProxiedQueries(proxied_queries_options)) => {
                 // Log a telemetry event
                 if let Some(ref telemetry_sender) = self.telemetry_sender {
@@ -2644,6 +2645,32 @@ where
         } else {
             query
         }
+    }
+
+    fn show_connections(&self) -> Result<noria_connector::QueryResult<'static>, ReadySetError> {
+        let schema = SelectSchema {
+            schema: Cow::Owned(vec![ColumnSchema {
+                column: nom_sql::Column {
+                    name: "remote_addr".into(),
+                    table: None,
+                },
+                column_type: DfType::DEFAULT_TEXT,
+                base: None,
+            }]),
+            columns: Cow::Owned(vec!["remote_addr".into()]),
+        };
+
+        let data = self
+            .connections
+            .iter()
+            .flat_map(|c| c.iter())
+            .map(|conn| vec![conn.to_string().into()])
+            .collect::<Vec<_>>();
+
+        Ok(noria_connector::QueryResult::from_owned(
+            schema,
+            vec![Results::new(data)],
+        ))
     }
 }
 
