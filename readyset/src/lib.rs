@@ -20,6 +20,7 @@ use anyhow::{anyhow, bail};
 use async_trait::async_trait;
 use clap::builder::NonEmptyStringValueParser;
 use clap::{ArgGroup, Parser, ValueEnum};
+use crossbeam_skiplist::SkipSet;
 use database_utils::{DatabaseType, DatabaseURL, UpstreamConfig};
 use failpoint_macros::set_failpoint;
 use futures_util::future::FutureExt;
@@ -613,6 +614,7 @@ where
 
         let auto_increments: Arc<RwLock<HashMap<Relation, AtomicUsize>>> = Arc::default();
         let query_cache = SharedCache::new();
+        let connections: Arc<SkipSet<SocketAddr>> = Arc::default();
         let mut health_reporter = AdapterHealthReporter::new();
 
         let rs_connect = span!(Level::INFO, "Connecting to RS server");
@@ -986,7 +988,8 @@ where
         let expr_dialect = self.expr_dialect;
         let parse_dialect = self.parse_dialect;
         while let Some(Ok(s)) = rt.block_on(listener.next()) {
-            let connection = info_span!("connection", addr = %s.peer_addr()?);
+            let client_addr = s.peer_addr()?;
+            let connection = info_span!("connection", addr = %client_addr);
             connection.in_scope(|| debug!("Accepted new connection"));
             s.set_nodelay(true)?;
 
@@ -996,6 +999,7 @@ where
             let (auto_increments, query_cache) = (auto_increments.clone(), query_cache.clone());
             let mut connection_handler = self.connection_handler.clone();
             let backend_builder = BackendBuilder::new()
+                .client_addr(client_addr)
                 .slowlog(options.log_slow)
                 .users(users.clone())
                 .require_authentication(!options.allow_unauthenticated_connections)
@@ -1011,6 +1015,7 @@ where
                 .telemetry_sender(telemetry_sender.clone())
                 .fallback_recovery_seconds(options.fallback_recovery_seconds)
                 .enable_experimental_placeholder_inlining(options.experimental_placeholder_inlining)
+                .connections(connections.clone())
                 .metrics_handle(prometheus_handle.clone().map(MetricsHandle::new));
             let telemetry_sender = telemetry_sender.clone();
 

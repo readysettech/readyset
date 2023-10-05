@@ -998,6 +998,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "crossbeam-skiplist"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "883a5821d7d079fcf34ac55f27a833ee61678110f6b97637cc74513c0d0b42fc"
+dependencies = [
+ "cfg-if 1.0.0",
+ "crossbeam-epoch",
+ "crossbeam-utils",
+ "scopeguard",
+]
+
+[[package]]
 name = "crossbeam-utils"
 version = "0.8.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4356,6 +4368,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "clap 4.3.2",
+ "crossbeam-skiplist",
  "database-utils",
  "fail",
  "failpoint-macros",
@@ -4404,6 +4417,7 @@ dependencies = [
  "chrono",
  "clap 4.3.2",
  "criterion",
+ "crossbeam-skiplist",
  "dashmap 4.0.2",
  "database-utils",
  "dataflow-expression",
