@@ -74,9 +74,11 @@ use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{self, Debug};
 use std::marker::PhantomData;
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crossbeam_skiplist::SkipSet;
 use futures::future::{self, OptionFuture};
 use mysql_common::row::convert::{FromRow, FromRowError};
 use nom_sql::{
@@ -253,6 +255,7 @@ impl ProxyState {
 #[must_use]
 #[derive(Clone)]
 pub struct BackendBuilder {
+    client_addr: SocketAddr,
     slowlog: bool,
     dialect: Dialect,
     users: HashMap<String, String>,
@@ -268,11 +271,13 @@ pub struct BackendBuilder {
     telemetry_sender: Option<TelemetrySender>,
     enable_experimental_placeholder_inlining: bool,
     metrics_handle: Option<MetricsHandle>,
+    connections: Option<Arc<SkipSet<SocketAddr>>>,
 }
 
 impl Default for BackendBuilder {
     fn default() -> Self {
         BackendBuilder {
+            client_addr: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0)),
             slowlog: false,
             dialect: Dialect::MySQL,
             users: Default::default(),
@@ -288,6 +293,7 @@ impl Default for BackendBuilder {
             telemetry_sender: None,
             enable_experimental_placeholder_inlining: false,
             metrics_handle: None,
+            connections: None,
         }
     }
 }
@@ -312,7 +318,12 @@ impl BackendBuilder {
             ProxyState::Never
         };
 
+        if let Some(connections) = &self.connections {
+            connections.insert(self.client_addr);
+        }
+
         Backend {
+            client_addr: self.client_addr,
             noria,
             upstream,
             users: self.users,
@@ -341,8 +352,14 @@ impl BackendBuilder {
             telemetry_sender: self.telemetry_sender,
             authority,
             metrics_handle: self.metrics_handle,
+            connections: self.connections,
             _query_handler: PhantomData,
         }
+    }
+
+    pub fn client_addr(mut self, client_addr: SocketAddr) -> Self {
+        self.client_addr = client_addr;
+        self
     }
 
     pub fn slowlog(mut self, slowlog: bool) -> Self {
@@ -416,6 +433,11 @@ impl BackendBuilder {
         enable_experimental_placeholder_inlining: bool,
     ) -> Self {
         self.enable_experimental_placeholder_inlining = enable_experimental_placeholder_inlining;
+        self
+    }
+
+    pub fn connections(mut self, connections: Arc<SkipSet<SocketAddr>>) -> Self {
+        self.connections = Some(connections);
         self
     }
 
@@ -493,6 +515,8 @@ pub struct Backend<DB, Handler>
 where
     DB: UpstreamDatabase,
 {
+    /// Remote socket address of a connected client
+    client_addr: SocketAddr,
     /// ReadySet connector used for reads, and writes when no upstream DB is present
     noria: NoriaConnector,
     /// Optional connector to the upstream DB. Used for fallback reads and all writes if it exists
@@ -520,6 +544,9 @@ where
 
     /// Handle to the [`metrics_exporter_prometheus::PrometheusRecorder`] that runs in the adapter.
     metrics_handle: Option<MetricsHandle>,
+
+    /// Set of active connections to this adapter
+    connections: Option<Arc<SkipSet<SocketAddr>>>,
 
     _query_handler: PhantomData<Handler>,
 }
@@ -2625,6 +2652,9 @@ where
     DB: UpstreamDatabase,
 {
     fn drop(&mut self) {
+        if let Some(connections) = &self.connections {
+            connections.remove(&self.client_addr);
+        }
         metrics::decrement_gauge!(recorded::CONNECTED_CLIENTS, 1.0);
     }
 }
