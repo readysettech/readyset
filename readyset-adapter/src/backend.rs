@@ -108,6 +108,7 @@ use crate::backend::noria_connector::ExecuteSelectContext;
 use crate::metrics_handle::{MetricsHandle, MetricsSummary};
 use crate::query_handler::SetBehavior;
 use crate::query_status_cache::QueryStatusCache;
+use crate::rewrite::ProcessedQueryParams;
 pub use crate::upstream_database::UpstreamPrepare;
 use crate::utils::create_dummy_column;
 use crate::{create_dummy_schema, rewrite, QueryHandler, UpstreamDatabase, UpstreamDestination};
@@ -2085,10 +2086,10 @@ where
         settings: &BackendSettings,
         state: &mut BackendState<DB>,
         original_query: &'a str,
-        original_stmt: SelectStatement,
         view_request: &ViewCreateRequest,
         status: Option<QueryStatus>,
         event: &mut QueryExecutionEvent,
+        processed_query_params: ProcessedQueryParams,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         let mut status = status.unwrap_or(QueryStatus {
             migration_state: MigrationState::Unsupported,
@@ -2137,8 +2138,9 @@ where
             event.destination = Some(QueryDestination::Readyset);
             let start = Instant::now();
             let ctx = ExecuteSelectContext::AdHoc {
-                statement: original_stmt,
+                statement: view_request.statement.clone(),
                 create_if_missing: settings.migration_mode == MigrationMode::InRequestPath,
+                processed_query_params,
             };
             let res = noria.execute_select(ctx, state.ticket.clone(), event).await;
             event.readyset_duration = Some(start.elapsed());
@@ -2211,33 +2213,40 @@ where
     /// supplied select statement by rewriting it.
     /// Returns whether noria should try the select, along with the query status if it was obtained
     /// during processing.
-    fn noria_should_try_select(&self, q: &mut ViewCreateRequest) -> (bool, Option<QueryStatus>) {
-        let mut status = None;
-        let should_try =
-            if rewrite::process_query(&mut q.statement, self.noria.server_supports_pagination())
-                .is_ok()
-            {
+    fn noria_should_try_select(
+        &self,
+        q: &mut ViewCreateRequest,
+    ) -> (
+        bool,
+        Option<QueryStatus>,
+        ReadySetResult<ProcessedQueryParams>,
+    ) {
+        match rewrite::process_query(&mut q.statement, self.noria.server_supports_pagination()) {
+            Ok(processed_query_params) => {
                 let s = self.state.query_status_cache.query_status(q);
                 let should_try = if self.state.proxy_state.should_proxy() {
                     s.always
                 } else {
                     true
                 };
-                status = Some(s);
-                should_try
-            } else {
+                (should_try, Some(s), Ok(processed_query_params))
+            }
+            Err(e) => {
                 warn!(
                     // FIXME(REA-2168): Use correct dialect.
                     statement = %Sensitive(&q.statement.display(nom_sql::Dialect::MySQL)),
                     "This statement could not be rewritten by ReadySet"
                 );
-                matches!(
-                    self.state.proxy_state,
-                    ProxyState::Never | ProxyState::Fallback
+                (
+                    matches!(
+                        self.state.proxy_state,
+                        ProxyState::Never | ProxyState::Fallback
+                    ),
+                    None,
+                    Err(e),
                 )
-            };
-
-        (should_try, status)
+            }
+        }
     }
 
     /// Handles a parsed set statement.
@@ -2561,14 +2570,15 @@ where
             }
             Ok(SqlQuery::Select(stmt)) => {
                 let mut view_request = ViewCreateRequest::new(
-                    stmt.clone(),
+                    stmt,
                     self.noria.schema_search_path().to_owned(),
                 );
-                let (noria_should_try, status) = self.noria_should_try_select(&mut view_request);
+                let (noria_should_try, status, processed_query_params) = self.noria_should_try_select(&mut view_request);
+                let processed_query_params = processed_query_params?;
                 if noria_should_try {
                     event.sql_type = SqlQueryType::Read;
                     if self.settings.query_log_ad_hoc_queries {
-                        event.query = Some(Arc::new(SqlQuery::Select(stmt.clone())));
+                        event.query = Some(Arc::new(SqlQuery::Select(view_request.statement.clone())));
                         event.query_id = Some(QueryId::from_view_create_request(&view_request));
                     }
                     Self::query_adhoc_select(
@@ -2577,10 +2587,10 @@ where
                         &self.settings,
                         &mut self.state,
                         query,
-                        stmt,
                         &view_request,
                         status,
                         &mut event,
+                        processed_query_params,
                     )
                     .await
                 } else {
