@@ -184,6 +184,248 @@ impl MySqlBinlogConnector {
         Ok(event)
     }
 
+    /// Process a single binlog ROTATE_EVENT.
+    /// This occurs when someone issues a FLUSH LOGS statement or the current binary
+    /// log file becomes too large. The maximum size is
+    /// determined by max_binlog_size.
+    /// # Arguments
+    ///
+    /// * `rotate_event` - the rotate event to process
+    async fn process_event_rotate(
+        &mut self,
+        rotate_event: mysql_common::binlog::events::RotateEvent<'_>,
+    ) -> mysql::Result<ReplicationAction> {
+        // Written when mysqld switches to a new binary log file.
+        // This occurs when someone issues a FLUSH LOGS statement or the current binary
+        // log file becomes too large. The maximum size is
+        // determined by max_binlog_size.
+        if self.enable_statement_logging {
+            info!(target: "replicator_statement", "{:?}", rotate_event);
+        }
+
+        self.next_position = MySqlPosition::from_file_name_and_position(
+            rotate_event.name().to_string(),
+            rotate_event.position(),
+        )
+        .map_err(|e| {
+            mysql_async::Error::Other(Box::new(internal_err!(
+                "Failed to create MySqlPosition: {e}"
+            )))
+        })?;
+
+        return Ok(ReplicationAction::LogPosition);
+    }
+
+    /// Process a single binlog ROTATE_EVENT.
+    /// This occurs when someone issues a INSERT INTO statement.
+    ///
+    /// # Arguments
+    ///
+    /// * `wr_event` - the write rows event to process
+    async fn process_event_write_rows(
+        &mut self,
+        wr_event: mysql_common::binlog::events::WriteRowsEvent<'_>,
+    ) -> mysql::Result<ReplicationAction> {
+        if self.enable_statement_logging {
+            info!(target: "replicator_statement", "{:?}", wr_event);
+        }
+        // Retrieve the corresponding TABLE_MAP_EVENT
+        let tme = self.reader.get_tme(wr_event.table_id()).ok_or_else(|| {
+            mysql_async::Error::Other(Box::new(internal_err!(
+                "TME not found for WRITE_ROWS_EVENT"
+            )))
+        })?;
+
+        let mut inserted_rows = Vec::new();
+
+        for row in wr_event.rows(tme) {
+            // For each row in the event we produce a vector of ReadySet types that
+            // represent that row
+            inserted_rows.push(readyset_client::TableOperation::Insert(
+                binlog_row_to_noria_row(
+                    &row?.1.ok_or_else(|| {
+                        mysql_async::Error::Other(Box::new(internal_err!(
+                            "Missing data in WRITE_ROWS_EVENT"
+                        )))
+                    })?,
+                    tme,
+                )?,
+            ));
+        }
+
+        return Ok(ReplicationAction::TableAction {
+            table: Relation {
+                schema: Some(tme.database_name().into()),
+                name: tme.table_name().into(),
+            },
+            actions: inserted_rows,
+            txid: self.current_gtid,
+        });
+    }
+
+    /// Process a single binlog UPDATE_ROWS_EVENT.
+    /// This occurs when someone issues a `UPDATE` statement.
+    ///
+    /// # Arguments
+    ///
+    /// * `ur_event` - the update rows event to process
+    async fn process_event_update_rows(
+        &mut self,
+        ur_event: mysql_common::binlog::events::UpdateRowsEvent<'_>,
+    ) -> mysql::Result<ReplicationAction> {
+        // This is the event we get on `UPDATE`
+        if self.enable_statement_logging {
+            info!(target: "replicator_statement", "{:?}", ur_event);
+        }
+        // Retrieve the corresponding TABLE_MAP_EVENT
+        let tme = self.reader.get_tme(ur_event.table_id()).ok_or_else(|| {
+            mysql_async::Error::Other(Box::new(internal_err!(
+                "TME not found for UPDATE_ROWS_EVENT {:?}",
+                ur_event
+            )))
+        })?;
+
+        let mut updated_rows = Vec::new();
+
+        for row in ur_event.rows(tme) {
+            // For each row in the event we produce a pair of ReadySet table operations
+            // to delete the previous entry and insert the new
+            // one
+            let row = &row?;
+            updated_rows.push(readyset_client::TableOperation::DeleteRow {
+                row: binlog_row_to_noria_row(
+                    row.0.as_ref().ok_or_else(|| {
+                        mysql_async::Error::Other(Box::new(internal_err!(
+                            "Missing before rows in UPDATE_ROWS_EVENT {:?}",
+                            row
+                        )))
+                    })?,
+                    tme,
+                )?,
+            });
+
+            updated_rows.push(readyset_client::TableOperation::Insert(
+                binlog_row_to_noria_row(
+                    row.1.as_ref().ok_or_else(|| {
+                        mysql_async::Error::Other(Box::new(internal_err!(
+                            "Missing after rows in UPDATE_ROWS_EVENT {:?}",
+                            row
+                        )))
+                    })?,
+                    tme,
+                )?,
+            ));
+        }
+
+        return Ok(ReplicationAction::TableAction {
+            table: Relation {
+                schema: Some(tme.database_name().into()),
+                name: tme.table_name().into(),
+            },
+            actions: updated_rows,
+            txid: self.current_gtid,
+        });
+    }
+
+    /// Process a single binlog DELETE_ROWS_EVENT.
+    /// This occurs when someone issues a `DELETE` statement.
+    ///
+    /// # Arguments
+    ///
+    /// * `ur_event` - the update rows event to process
+    async fn process_event_delete_rows(
+        &mut self,
+        dr_event: mysql_common::binlog::events::DeleteRowsEvent<'_>,
+    ) -> mysql::Result<ReplicationAction> {
+        if self.enable_statement_logging {
+            info!(target: "replicator_statement", "{:?}", dr_event);
+        }
+        // Retrieve the corresponding TABLE_MAP_EVENT
+        let tme = self.reader.get_tme(dr_event.table_id()).ok_or_else(|| {
+            mysql_async::Error::Other(Box::new(internal_err!(
+                "TME not found for UPDATE_ROWS_EVENT {:?}",
+                dr_event
+            )))
+        })?;
+
+        let mut deleted_rows = Vec::new();
+
+        for row in dr_event.rows(tme) {
+            // For each row in the event we produce a vector of ReadySet types that
+            // represent that row
+            deleted_rows.push(readyset_client::TableOperation::DeleteRow {
+                row: binlog_row_to_noria_row(
+                    &row?.0.ok_or_else(|| {
+                        mysql_async::Error::Other(Box::new(internal_err!(
+                            "Missing data in DELETE_ROWS_EVENT"
+                        )))
+                    })?,
+                    tme,
+                )?,
+            });
+        }
+
+        return Ok(ReplicationAction::TableAction {
+            table: Relation {
+                schema: Some(tme.database_name().into()),
+                name: tme.table_name().into(),
+            },
+            actions: deleted_rows,
+            txid: self.current_gtid,
+        });
+    }
+
+    /// Process a single binlog QUERY_EVENT.
+    /// This occurs when someone issues a DDL statement or Query using binlog_format = STATEMENT.
+    ///
+    /// # Arguments
+    ///
+    /// * `q_event` - the query event to process
+    async fn process_event_query(
+        &mut self,
+        q_event: mysql_common::binlog::events::QueryEvent<'_>,
+    ) -> mysql::Result<ReplicationAction> {
+        // Written when an updating statement is done.
+        if self.enable_statement_logging {
+            info!(target: "replicator_statement", "{:?}", q_event);
+        }
+
+        let schema = match q_event
+            .status_vars()
+            .get_status_var(binlog::consts::StatusVarKey::UpdatedDbNames)
+            .as_ref()
+            .and_then(|v| v.get_value().ok())
+        {
+            Some(StatusVarVal::UpdatedDbNames(names)) if !names.is_empty() => {
+                // IMPORTANT: For some statements there can be more than one update db,
+                // for example `DROP TABLE db1.tbl, db2.table;` Will have `db1` and
+                // `db2` listed, however we only need the schema to filter out
+                // `CREATE TABLE` and `ALTER TABLE` and those always change only one DB.
+                names.first().unwrap().as_str().to_string()
+            }
+            // If the query does not affect the schema, just keep going
+            // TODO: Transactions begin with the `BEGIN` queries, but we do not
+            // currently support those
+            _ => {
+                return Err(mysql_async::Error::Other(Box::new(
+                    ReadySetError::SkipEvent,
+                )))
+            }
+        };
+
+        let changes = match ChangeList::from_str(&q_event.query(), Dialect::DEFAULT_MYSQL) {
+            Ok(changelist) => changelist.changes,
+            Err(error) => {
+                warn!(%error, "Error extending recipe, DDL statement will not be used");
+                counter!(recorded::REPLICATOR_FAILURE, 1u64);
+                return Err(mysql_async::Error::Other(Box::new(
+                    ReadySetError::SkipEvent,
+                )));
+            }
+        };
+
+        return Ok(ReplicationAction::DdlChange { schema, changes });
+    }
     /// Process binlog events until an actionable event occurs.
     ///
     /// # Arguments
@@ -216,67 +458,24 @@ impl MySqlBinlogConnector {
                 )))
             })? {
                 EventType::ROTATE_EVENT => {
-                    // Written when mysqld switches to a new binary log file.
-                    // This occurs when someone issues a FLUSH LOGS statement or the current binary
-                    // log file becomes too large. The maximum size is
-                    // determined by max_binlog_size.
-                    let ev: events::RotateEvent = binlog_event.read_event()?;
-                    if self.enable_statement_logging {
-                        info!(target: "replicator_statement", "{:?}", ev);
-                    }
-
-                    self.next_position = MySqlPosition::from_file_name_and_position(
-                        ev.name().to_string(),
-                        ev.position(),
-                    )
-                    .map_err(|e| {
-                        mysql_async::Error::Other(Box::new(internal_err!(
-                            "Failed to create MySqlPosition: {e}"
-                        )))
-                    })?;
-
-                    return Ok((ReplicationAction::LogPosition, &self.next_position));
+                    return Ok((
+                        self.process_event_rotate(binlog_event.read_event()?)
+                            .await?,
+                        &self.next_position,
+                    ));
                 }
 
                 EventType::QUERY_EVENT => {
-                    // Written when an updating statement is done.
-                    let ev: events::QueryEvent = binlog_event.read_event()?;
-                    if self.enable_statement_logging {
-                        info!(target: "replicator_statement", "{:?}", ev);
-                    }
-
-                    let schema = match ev
-                        .status_vars()
-                        .get_status_var(binlog::consts::StatusVarKey::UpdatedDbNames)
-                        .as_ref()
-                        .and_then(|v| v.get_value().ok())
-                    {
-                        Some(StatusVarVal::UpdatedDbNames(names)) if !names.is_empty() => {
-                            // IMPORTANT: For some statements there can be more than one update db,
-                            // for example `DROP TABLE db1.tbl, db2.table;` Will have `db1` and
-                            // `db2` listed, however we only need the schema to filter out
-                            // `CREATE TABLE` and `ALTER TABLE` and those always change only one DB.
-                            names.first().unwrap().as_str().to_string()
-                        }
-                        // If the query does not affect the schema, just keep going
-                        // TODO: Transactions begin with the `BEGIN` queries, but we do not
-                        // currently support those
-                        _ => continue,
-                    };
-
-                    let changes = match ChangeList::from_str(&ev.query(), Dialect::DEFAULT_MYSQL) {
-                        Ok(changelist) => changelist.changes,
-                        Err(error) => {
-                            warn!(%error, "Error extending recipe, DDL statement will not be used");
-                            counter!(recorded::REPLICATOR_FAILURE, 1u64);
+                    let _ = match self.process_event_query(binlog_event.read_event()?).await {
+                        Ok(action) => Ok((action, &self.next_position, &self.next_position)),
+                        Err(mysql_async::Error::Other(ref err))
+                            if err.downcast_ref::<ReadySetError>()
+                                == Some(&ReadySetError::SkipEvent) =>
+                        {
                             continue;
                         }
+                        Err(err) => Err(err),
                     };
-
-                    return Ok((
-                        ReplicationAction::DdlChange { schema, changes },
-                        &self.next_position,
-                    ));
                 }
 
                 ev @ EventType::TABLE_MAP_EVENT => {
@@ -297,147 +496,25 @@ impl MySqlBinlogConnector {
                 }
 
                 EventType::WRITE_ROWS_EVENT => {
-                    // This is the event we get on `INSERT INTO`
-                    let ev: events::WriteRowsEvent = binlog_event.read_event()?;
-                    if self.enable_statement_logging {
-                        info!(target: "replicator_statement", "{:?}", ev);
-                    }
-                    // Retrieve the corresponding TABLE_MAP_EVENT
-                    let tme = self.reader.get_tme(ev.table_id()).ok_or_else(|| {
-                        mysql_async::Error::Other(Box::new(internal_err!(
-                            "TME not found for WRITE_ROWS_EVENT"
-                        )))
-                    })?;
-
-                    let mut inserted_rows = Vec::new();
-
-                    for row in ev.rows(tme) {
-                        // For each row in the event we produce a vector of ReadySet types that
-                        // represent that row
-                        inserted_rows.push(readyset_client::TableOperation::Insert(
-                            binlog_row_to_noria_row(
-                                &row?.1.ok_or_else(|| {
-                                    mysql_async::Error::Other(Box::new(internal_err!(
-                                        "Missing data in WRITE_ROWS_EVENT"
-                                    )))
-                                })?,
-                                tme,
-                            )?,
-                        ));
-                    }
-
                     return Ok((
-                        ReplicationAction::TableAction {
-                            table: Relation {
-                                schema: Some(tme.database_name().into()),
-                                name: tme.table_name().into(),
-                            },
-                            actions: inserted_rows,
-                            txid: self.current_gtid,
-                        },
+                        self.process_event_write_rows(binlog_event.read_event()?)
+                            .await?,
                         &self.next_position,
                     ));
                 }
 
                 EventType::UPDATE_ROWS_EVENT => {
-                    // This is the event we get on `UPDATE`
-                    let ev: events::UpdateRowsEvent = binlog_event.read_event()?;
-                    if self.enable_statement_logging {
-                        info!(target: "replicator_statement", "{:?}", ev);
-                    }
-                    // Retrieve the corresponding TABLE_MAP_EVENT
-                    let tme = self.reader.get_tme(ev.table_id()).ok_or_else(|| {
-                        mysql_async::Error::Other(Box::new(internal_err!(
-                            "TME not found for UPDATE_ROWS_EVENT {:?}",
-                            ev
-                        )))
-                    })?;
-
-                    let mut updated_rows = Vec::new();
-
-                    for row in ev.rows(tme) {
-                        // For each row in the event we produce a pair of ReadySet table operations
-                        // to delete the previous entry and insert the new
-                        // one
-                        let row = &row?;
-                        updated_rows.push(readyset_client::TableOperation::DeleteRow {
-                            row: binlog_row_to_noria_row(
-                                row.0.as_ref().ok_or_else(|| {
-                                    mysql_async::Error::Other(Box::new(internal_err!(
-                                        "Missing before rows in UPDATE_ROWS_EVENT {:?}",
-                                        row
-                                    )))
-                                })?,
-                                tme,
-                            )?,
-                        });
-
-                        updated_rows.push(readyset_client::TableOperation::Insert(
-                            binlog_row_to_noria_row(
-                                row.1.as_ref().ok_or_else(|| {
-                                    mysql_async::Error::Other(Box::new(internal_err!(
-                                        "Missing after rows in UPDATE_ROWS_EVENT {:?}",
-                                        row
-                                    )))
-                                })?,
-                                tme,
-                            )?,
-                        ));
-                    }
-
                     return Ok((
-                        ReplicationAction::TableAction {
-                            table: Relation {
-                                schema: Some(tme.database_name().into()),
-                                name: tme.table_name().into(),
-                            },
-                            actions: updated_rows,
-                            txid: self.current_gtid,
-                        },
+                        self.process_event_update_rows(binlog_event.read_event()?)
+                            .await?,
                         &self.next_position,
                     ));
                 }
 
                 EventType::DELETE_ROWS_EVENT => {
-                    // This is the event we get on `ALTER TABLE`
-                    let ev: events::DeleteRowsEvent = binlog_event.read_event()?;
-                    if self.enable_statement_logging {
-                        info!(target: "replicator_statement", "{:?}", ev);
-                    }
-                    // Retrieve the corresponding TABLE_MAP_EVENT
-                    let tme = self.reader.get_tme(ev.table_id()).ok_or_else(|| {
-                        mysql_async::Error::Other(Box::new(internal_err!(
-                            "TME not found for UPDATE_ROWS_EVENT {:?}",
-                            ev
-                        )))
-                    })?;
-
-                    let mut deleted_rows = Vec::new();
-
-                    for row in ev.rows(tme) {
-                        // For each row in the event we produce a vector of ReadySet types that
-                        // represent that row
-                        deleted_rows.push(readyset_client::TableOperation::DeleteRow {
-                            row: binlog_row_to_noria_row(
-                                &row?.0.ok_or_else(|| {
-                                    mysql_async::Error::Other(Box::new(internal_err!(
-                                        "Missing data in DELETE_ROWS_EVENT"
-                                    )))
-                                })?,
-                                tme,
-                            )?,
-                        });
-                    }
-
                     return Ok((
-                        ReplicationAction::TableAction {
-                            table: Relation {
-                                schema: Some(tme.database_name().into()),
-                                name: tme.table_name().into(),
-                            },
-                            actions: deleted_rows,
-                            txid: self.current_gtid,
-                        },
+                        self.process_event_delete_rows(binlog_event.read_event()?)
+                            .await?,
                         &self.next_position,
                     ));
                 }
