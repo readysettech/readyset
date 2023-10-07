@@ -101,3 +101,5 @@ See our [instructions](./community-development.md) on how to build ReadySet from
 ## License
 
 ReadySet is licensed under the BSL 1.1 license, converting to the open-source Apache 2.0 license after 4 years. It is free to use on any number of nodes.
+
+DO NOT COMMIT
