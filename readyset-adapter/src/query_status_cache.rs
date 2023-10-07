@@ -588,12 +588,6 @@ impl QueryStatusCache {
             .iter()
             .filter(|r| r.is_pending())
             .map(|r| ((*r.key()).clone().into(), r.value().clone()))
-            .chain(
-                self.failed_parses
-                    .iter()
-                    .filter(|r| r.is_pending())
-                    .map(|r| ((*r.key()).clone().into(), r.value().clone())),
-            )
             .collect::<Vec<(Query, QueryStatus)>>()
             .into()
     }
