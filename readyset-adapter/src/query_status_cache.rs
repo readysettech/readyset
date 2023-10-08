@@ -14,12 +14,12 @@ use dashmap::DashMap;
 use readyset_client::query::*;
 use readyset_client::ViewCreateRequest;
 use readyset_data::DfValue;
+use readyset_server::Authority;
 use readyset_util::hash::hash;
 use tracing::error;
 
 /// A metadata cache for all queries that have been processed by this
 /// adapter. Thread-safe.
-#[derive(Debug)]
 pub struct QueryStatusCache {
     /// A thread-safe hash map that holds the query status of each query that
     /// has been sent to this adapter, keyed by the query's [`QueryId`].
@@ -44,9 +44,11 @@ pub struct QueryStatusCache {
     enable_experimental_placeholder_inlining: bool,
 }
 
-#[derive(Debug, Default)]
 /// A handle to persistent metadata for all queries that have been processed by this adapter.
 pub struct PersistentStatusCacheHandle {
+    /// A handle to the [`Authority`] that will store the statuses persistently.
+    authority: Arc<Authority>,
+
     /// A Thread-safe hash map that holds the full [`Query`] as well as its associated
     /// [`QueryStatus`]. The `QueryStatus` must match the one in
     /// [`QueryStatusCache::id_to_status`].
@@ -60,6 +62,15 @@ pub struct PersistentStatusCacheHandle {
 impl PersistentStatusCacheHandle {
     fn insert_with_status(&self, q: Query, id: QueryId, status: QueryStatus) {
         self.statuses.insert(id, (q, status));
+    }
+
+    /// Creates a new [`PersistentStatusCacheHandle`].
+    fn new(authority: Arc<Authority>) -> PersistentStatusCacheHandle {
+        PersistentStatusCacheHandle {
+            statuses: Default::default(),
+            pending_inlined_migrations: Default::default(),
+            authority,
+        }
     }
 }
 
@@ -152,18 +163,12 @@ impl QueryStatusKey for String {
     }
 }
 
-impl Default for QueryStatusCache {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl QueryStatusCache {
     /// Constructs a new QueryStatusCache with the migration style set to InRequestPath.
-    pub fn new() -> QueryStatusCache {
+    pub fn new(authority: Arc<Authority>) -> QueryStatusCache {
         QueryStatusCache {
             id_to_status: Default::default(),
-            persistent_handle: Default::default(),
+            persistent_handle: PersistentStatusCacheHandle::new(authority),
             style: MigrationStyle::InRequestPath,
             enable_experimental_placeholder_inlining: false,
         }
@@ -759,6 +764,7 @@ impl FromStr for MigrationStyle {
 mod tests {
     use nom_sql::{SelectStatement, SqlQuery};
     use readyset_client::ViewCreateRequest;
+    use readyset_server::LocalAuthority;
     use vec1::Vec1;
 
     use super::*;
@@ -784,7 +790,8 @@ mod tests {
 
     #[test]
     fn select_is_found_after_insert() {
-        let cache = QueryStatusCache::new();
+        let authority = Arc::new(Authority::from(LocalAuthority::new()));
+        let cache = QueryStatusCache::new(authority);
         let q1 = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
         let status = QueryStatus::default_for_query(&q1.clone().into());
         let id = QueryId::new(hash(&q1));
@@ -812,7 +819,8 @@ mod tests {
 
     #[test]
     fn string_is_found_after_insert() {
-        let cache = QueryStatusCache::new();
+        let authority = Arc::new(Authority::from(LocalAuthority::new()));
+        let cache = QueryStatusCache::new(authority);
         let q1 = "SELECT * FROM t1".to_string();
         let status = QueryStatus::default_for_query(&q1.clone().into());
         let id = QueryId::new(hash(&q1));
@@ -840,7 +848,8 @@ mod tests {
 
     #[test]
     fn query_is_referenced_by_hash() {
-        let cache = QueryStatusCache::new();
+        let authority = Arc::new(Authority::from(LocalAuthority::new()));
+        let cache = QueryStatusCache::new(authority);
         let q1 = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
         let q2 = ViewCreateRequest::new(select_statement("SELECT * FROM t2").unwrap(), vec![]);
 
@@ -859,7 +868,8 @@ mod tests {
 
     #[test]
     fn query_is_allowed() {
-        let cache = QueryStatusCache::new();
+        let authority = Arc::new(Authority::from(LocalAuthority::new()));
+        let cache = QueryStatusCache::new(authority);
         let query = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
 
         assert_eq!(
@@ -888,7 +898,8 @@ mod tests {
 
     #[test]
     fn query_is_denied() {
-        let cache = QueryStatusCache::new();
+        let authority = Arc::new(Authority::from(LocalAuthority::new()));
+        let cache = QueryStatusCache::new(authority);
         let query = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
 
         assert_eq!(
@@ -908,7 +919,8 @@ mod tests {
 
     #[test]
     fn query_is_inferred_denied_explicit() {
-        let cache = QueryStatusCache::new().style(MigrationStyle::Explicit);
+        let authority = Arc::new(Authority::from(LocalAuthority::new()));
+        let cache = QueryStatusCache::new(authority);
         let query = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
 
         assert_eq!(
@@ -928,7 +940,8 @@ mod tests {
 
     #[test]
     fn clear() {
-        let cache = QueryStatusCache::new().style(MigrationStyle::Explicit);
+        let authority = Arc::new(Authority::from(LocalAuthority::new()));
+        let cache = QueryStatusCache::new(authority).style(MigrationStyle::Explicit);
 
         cache.update_query_migration_state(
             &ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]),
@@ -949,7 +962,8 @@ mod tests {
 
     #[test]
     fn view_not_found_for_query() {
-        let cache = QueryStatusCache::new().style(MigrationStyle::Explicit);
+        let authority = Arc::new(Authority::from(LocalAuthority::new()));
+        let cache = QueryStatusCache::new(authority).style(MigrationStyle::Explicit);
         let q1 = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
         let q2 = ViewCreateRequest::new(select_statement("SELECT * FROM t2").unwrap(), vec![]);
 
@@ -974,7 +988,8 @@ mod tests {
 
     #[test]
     fn transition_from_unsupported() {
-        let cache = QueryStatusCache::new().style(MigrationStyle::Explicit);
+        let authority = Arc::new(Authority::from(LocalAuthority::new()));
+        let cache = QueryStatusCache::new(authority).style(MigrationStyle::Explicit);
         let q = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
 
         cache.update_query_migration_state(&q, MigrationState::Pending);
@@ -1008,7 +1023,8 @@ mod tests {
 
     #[test]
     fn transition_from_inlined() {
-        let cache = QueryStatusCache::new()
+        let authority = Arc::new(Authority::from(LocalAuthority::new()));
+        let cache = QueryStatusCache::new(authority)
             .style(MigrationStyle::Explicit)
             .enable_experimental_placeholder_inlining(true);
         let q = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
@@ -1032,7 +1048,8 @@ mod tests {
 
     #[test]
     fn inlined_cache_miss() {
-        let cache = QueryStatusCache::new()
+        let authority = Arc::new(Authority::from(LocalAuthority::new()));
+        let cache = QueryStatusCache::new(authority)
             .style(MigrationStyle::Explicit)
             .enable_experimental_placeholder_inlining(true);
         let q = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
@@ -1060,7 +1077,8 @@ mod tests {
 
     #[test]
     fn unsupported_inlined_migration() {
-        let cache = QueryStatusCache::new()
+        let authority = Arc::new(Authority::from(LocalAuthority::new()));
+        let cache = QueryStatusCache::new(authority)
             .style(MigrationStyle::Explicit)
             .enable_experimental_placeholder_inlining(true);
         let q = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
@@ -1086,7 +1104,8 @@ mod tests {
 
     #[test]
     fn created_inlined_query() {
-        let cache = QueryStatusCache::new()
+        let authority = Arc::new(Authority::from(LocalAuthority::new()));
+        let cache = QueryStatusCache::new(authority)
             .style(MigrationStyle::Explicit)
             .enable_experimental_placeholder_inlining(true);
         let q = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
@@ -1130,7 +1149,8 @@ mod tests {
 
     #[test]
     fn pending_inlined_migration() {
-        let cache = QueryStatusCache::new()
+        let authority = Arc::new(Authority::from(LocalAuthority::new()));
+        let cache = QueryStatusCache::new(authority)
             .style(MigrationStyle::Explicit)
             .enable_experimental_placeholder_inlining(true);
         let q = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
@@ -1154,7 +1174,8 @@ mod tests {
 
     #[test]
     fn drop_query() {
-        let cache = QueryStatusCache::new().style(MigrationStyle::Explicit);
+        let authority = Arc::new(Authority::from(LocalAuthority::new()));
+        let cache = QueryStatusCache::new(authority).style(MigrationStyle::Explicit);
         let q = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
 
         // Assert that if we have not seen this query, the query is marked as dropped. This may be

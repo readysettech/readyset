@@ -569,7 +569,8 @@ impl TestScript {
                 server_supports_pagination,
             )
             .await;
-            let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
+            let query_status_cache: &'static _ =
+                Box::leak(Box::new(QueryStatusCache::new(authority.clone())));
 
             macro_rules! make_backend {
                 ($upstream:ty, $handler:ty, $dialect:expr $(,)?) => {{

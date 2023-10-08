@@ -161,10 +161,6 @@ impl TestBuilder {
             readyset_tracing::init_test_logging();
         }
 
-        let query_status_cache = self
-            .query_status_cache
-            .unwrap_or_else(|| Box::leak(Box::new(QueryStatusCache::new())));
-
         let fallback_url_and_db_name = match self.fallback {
             Fallback::None => None,
             Fallback::Url(url) => {
@@ -191,6 +187,10 @@ impl TestBuilder {
         let authority = Arc::new(Authority::from(LocalAuthority::new_with_store(Arc::new(
             LocalAuthorityStore::new(),
         ))));
+
+        let query_status_cache = self
+            .query_status_cache
+            .unwrap_or_else(|| Box::leak(Box::new(QueryStatusCache::new(authority.clone()))));
 
         let mut builder = Builder::for_tests();
         let persistence = readyset_server::PersistenceParameters {

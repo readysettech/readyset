@@ -88,14 +88,16 @@ mod tests {
     use std::sync::Arc;
 
     use readyset_client::query::{Query, QueryStatus};
+    use readyset_server::{Authority, LocalAuthority};
 
     use super::*;
     use crate::query_status_cache::MigrationStyle;
 
     #[tokio::test]
     async fn test_update_migration_state() {
+        let authority = Arc::new(Authority::from(LocalAuthority::new()));
         let query_status_cache = Box::leak(Box::new(
-            QueryStatusCache::new().style(MigrationStyle::Explicit),
+            QueryStatusCache::new(authority).style(MigrationStyle::Explicit),
         ));
         let proxied_queries_reporter = Arc::new(ProxiedQueriesReporter::new(query_status_cache));
 

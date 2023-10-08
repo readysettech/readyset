@@ -22,7 +22,8 @@ impl Backend {
         noria: NoriaConnector,
         authority: Arc<Authority>,
     ) -> anyhow::Result<Self> {
-        let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
+        let query_status_cache: &'static _ =
+            Box::leak(Box::new(QueryStatusCache::new(authority.clone())));
 
         match DatabaseURL::from_str(url)? {
             DatabaseURL::MySQL(_) => {
