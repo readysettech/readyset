@@ -21,10 +21,18 @@ use tracing::error;
 /// adapter. Thread-safe.
 #[derive(Debug)]
 pub struct QueryStatusCache {
+    /// A thread-safe hash map that holds the query status of each query that
+    /// has been sent to this adapter, keyed by the query's [`QueryId`].
+    ///
+    /// This map is used on the hot path to determine whether to route queries to upstream or to
+    /// readyset.
+    id_to_status: DashMap<QueryId, QueryStatus, ahash::RandomState>,
+
     /// A handle to a more detailed, persistent cache of Query information, which holds the full
     /// query strings. This structure is not used on the hot path, but rather for other auxiliary
     /// commands that seek more information about the queries we have processed so far.
     persistent_handle: PersistentStatusCacheHandle,
+
     /// Holds the current style of migration, whether async or explicit, which may change the
     /// behavior of some internal methods.
     style: MigrationStyle,
@@ -75,18 +83,20 @@ impl PersistentStatusCacheHandle {
 pub trait QueryStatusKey: Into<Query> + Hash + Clone {
     fn with_status<F, R>(&self, cache: &QueryStatusCache, f: F) -> R
     where
-        F: FnOnce(Option<&QueryStatus>) -> R;
+        F: Fn(Option<&QueryStatus>) -> R;
 
     fn with_mut_status<F, R>(&self, cache: &QueryStatusCache, f: F) -> R
     where
-        F: FnOnce(Option<&mut QueryStatus>) -> R;
+        F: Fn(Option<&mut QueryStatus>) -> R;
 }
 
 impl QueryStatusKey for Query {
     fn with_status<F, R>(&self, cache: &QueryStatusCache, f: F) -> R
     where
-        F: FnOnce(Option<&QueryStatus>) -> R,
+        F: Fn(Option<&QueryStatus>) -> R,
     {
+        let id = QueryId::new(hash(self));
+        f(cache.id_to_status.get(&id).as_deref());
         match self {
             Query::Parsed(k) => k.with_status(cache, f),
             Query::ParseFailed(k) => k.with_status(cache, f),
@@ -95,7 +105,7 @@ impl QueryStatusKey for Query {
 
     fn with_mut_status<F, R>(&self, cache: &QueryStatusCache, f: F) -> R
     where
-        F: FnOnce(Option<&mut QueryStatus>) -> R,
+        F: Fn(Option<&mut QueryStatus>) -> R,
     {
         match self {
             Query::Parsed(k) => k.with_mut_status(cache, f),
@@ -107,15 +117,21 @@ impl QueryStatusKey for Query {
 impl QueryStatusKey for ViewCreateRequest {
     fn with_status<F, R>(&self, cache: &QueryStatusCache, f: F) -> R
     where
-        F: FnOnce(Option<&QueryStatus>) -> R,
+        F: Fn(Option<&QueryStatus>) -> R,
     {
-        f(cache.persistent_handle.statuses.get(self).as_deref())
+        let id = QueryId::new(hash(self));
+        // Since this isn't mutating anything, we only need to access the in-memory map.
+        f(cache.id_to_status.get(&id).as_deref())
     }
 
     fn with_mut_status<F, R>(&self, cache: &QueryStatusCache, f: F) -> R
     where
-        F: FnOnce(Option<&mut QueryStatus>) -> R,
+        F: Fn(Option<&mut QueryStatus>) -> R,
     {
+        let id = QueryId::new(hash(self));
+        // Since this is potentially mutating, we need to apply F to both the in-memory and the
+        // persistent version of the status.
+        f(cache.id_to_status.get_mut(&id).as_deref_mut());
         f(cache
             .persistent_handle
             .statuses
@@ -127,15 +143,21 @@ impl QueryStatusKey for ViewCreateRequest {
 impl QueryStatusKey for String {
     fn with_status<F, R>(&self, cache: &QueryStatusCache, f: F) -> R
     where
-        F: FnOnce(Option<&QueryStatus>) -> R,
+        F: Fn(Option<&QueryStatus>) -> R,
     {
-        f(cache.persistent_handle.failed_parses.get(self).as_deref())
+        let id = QueryId::new(hash(self));
+        // Since this isn't mutating anything, we only need to access the in-memory map.
+        f(cache.id_to_status.get(&id).as_deref())
     }
 
     fn with_mut_status<F, R>(&self, cache: &QueryStatusCache, f: F) -> R
     where
-        F: FnOnce(Option<&mut QueryStatus>) -> R,
+        F: Fn(Option<&mut QueryStatus>) -> R,
     {
+        let id = QueryId::new(hash(self));
+        // Since this is potentially mutating, we need to apply F to both the in-memory and the
+        // persistent version of the status.
+        f(cache.id_to_status.get_mut(&id).as_deref_mut());
         f(cache
             .persistent_handle
             .failed_parses
@@ -154,6 +176,7 @@ impl QueryStatusCache {
     /// Constructs a new QueryStatusCache with the migration style set to InRequestPath.
     pub fn new() -> QueryStatusCache {
         QueryStatusCache {
+            id_to_status: Default::default(),
             persistent_handle: Default::default(),
             style: MigrationStyle::InRequestPath,
             enable_experimental_placeholder_inlining: false,
@@ -212,17 +235,21 @@ impl QueryStatusCache {
             }
         };
         let id = QueryId::new(hash(&q));
+        self.id_to_status.insert(id, status.clone());
         self.persistent_handle.insert_with_status(q, id, status);
         id
     }
 
     /// This function returns the id and query migration state of a query.
+    ///
+    /// Side Effects: If this is the first time we have seen this query, it also adds it to our
+    /// mapping of queries.
     pub fn query_migration_state<Q>(&self, q: &Q) -> (QueryId, MigrationState)
     where
         Q: QueryStatusKey,
     {
-        let query_state = q.with_status(self, |m| m.map(|m| m.migration_state.clone()));
         let id = QueryId::new(hash(&q));
+        let query_state = self.id_to_status.get(&id);
 
         match query_state {
             Some(s) => {
@@ -236,7 +263,7 @@ impl QueryStatusCache {
                     "mismatch between calculated and cached id/query"
                 );
 
-                (id, s)
+                (id, s.value().migration_state.clone())
             }
             None => self.insert(q.clone()),
         }
@@ -259,7 +286,7 @@ impl QueryStatusCache {
     pub fn update_execution_info(&self, q: &Query, info: ExecutionInfo) {
         q.with_mut_status(self, |s| {
             if let Some(mut s) = s {
-                s.execution_info = Some(info);
+                s.execution_info = Some(info.clone());
             }
         })
     }
@@ -504,14 +531,14 @@ impl QueryStatusCache {
     {
         q.with_mut_status(self, |s| match s {
             Some(mut s) if s.migration_state != MigrationState::Unsupported => {
-                s.migration_state = status.migration_state;
-                s.execution_info = status.execution_info;
+                s.migration_state = status.migration_state.clone();
+                s.execution_info = status.execution_info.clone();
             }
             Some(mut s) => {
-                s.execution_info = status.execution_info;
+                s.execution_info = status.execution_info.clone();
             }
             None => {
-                self.insert_with_status(q.clone(), status);
+                self.insert_with_status(q.clone(), status.clone());
             }
         })
     }
@@ -521,6 +548,13 @@ impl QueryStatusCache {
     /// NOTE: We do not mark cleared queries as dropped, since we are not explicitly deny-listing
     /// cleared queries.
     pub fn clear(&self) {
+        self.id_to_status
+            .iter_mut()
+            .filter(|v| v.is_successful())
+            .for_each(|mut v| {
+                v.migration_state = MigrationState::Pending;
+                v.always = false;
+            });
         self.persistent_handle
             .statuses
             .iter_mut()
