@@ -775,7 +775,7 @@ where
         rs_connect.in_scope(|| info!(?migration_style));
 
         let query_status_cache: &'static _ = Box::leak(Box::new(
-            QueryStatusCache::new()
+            QueryStatusCache::new(adapter_authority.clone())
                 .style(migration_style)
                 .enable_experimental_placeholder_inlining(
                     options.experimental_placeholder_inlining,

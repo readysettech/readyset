@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use mysql_async::prelude::*;
 use mysql_async::{Conn, Result, Row, Statement};
 use readyset_adapter::backend::{MigrationMode, QueryInfo, UnsupportedSetMode};
@@ -6,17 +8,23 @@ use readyset_adapter::BackendBuilder;
 use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::mysql_helpers::{last_query_info, MySQLAdapter};
 use readyset_client_test_helpers::{sleep, TestBuilder};
-use readyset_server::Handle;
+use readyset_server::{Authority, Handle, LocalAuthority};
 use readyset_util::shutdown::ShutdownSender;
 use serial_test::serial;
 
 pub async fn setup(
-    query_status_cache: &'static QueryStatusCache,
     fallback: bool,
     migration_mode: MigrationMode,
     set_mode: UnsupportedSetMode,
-) -> (mysql_async::Opts, Handle, ShutdownSender) {
-    TestBuilder::new(
+) -> (
+    mysql_async::Opts,
+    Handle,
+    ShutdownSender,
+    &'static QueryStatusCache,
+) {
+    let authority = Arc::new(Authority::from(LocalAuthority::new()));
+    let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new(authority)));
+    let (opts, handle, shutdown_tx) = TestBuilder::new(
         BackendBuilder::default()
             .require_authentication(false)
             .unsupported_set_mode(set_mode),
@@ -25,7 +33,8 @@ pub async fn setup(
     .query_status_cache(query_status_cache)
     .migration_mode(migration_mode)
     .build::<MySQLAdapter>()
-    .await
+    .await;
+    (opts, handle, shutdown_tx, query_status_cache)
 }
 
 // With in_request_path migration and fallback, an supported query should execute on ReadySet
@@ -34,9 +43,7 @@ pub async fn setup(
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn in_request_path_query_with_fallback() {
-    let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
-    let (opts, _handle, shutdown_tx) = setup(
-        query_status_cache,
+    let (opts, _handle, shutdown_tx, query_status_cache) = setup(
         true, // fallback enabled
         MigrationMode::InRequestPath,
         UnsupportedSetMode::Error,
@@ -82,9 +89,7 @@ async fn in_request_path_query_with_fallback() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn in_request_path_query_without_fallback() {
-    let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
-    let (opts, _handle, shutdown_tx) = setup(
-        query_status_cache,
+    let (opts, _handle, shutdown_tx, query_status_cache) = setup(
         false, // fallback disabled
         MigrationMode::InRequestPath,
         UnsupportedSetMode::Error,
@@ -115,9 +120,7 @@ async fn in_request_path_query_without_fallback() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn out_of_band_query_with_fallback() {
-    let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
-    let (opts, _handle, shutdown_tx) = setup(
-        query_status_cache,
+    let (opts, _handle, shutdown_tx, query_status_cache) = setup(
         true, // fallback enabled
         MigrationMode::OutOfBand,
         UnsupportedSetMode::Error,
@@ -165,9 +168,7 @@ async fn out_of_band_query_with_fallback() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn autocommit_state_query() {
-    let _query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
-    let (opts, _handle, shutdown_tx) = setup(
-        _query_status_cache,
+    let (opts, _handle, shutdown_tx, _query_status_cache) = setup(
         true, // fallback enabled
         MigrationMode::OutOfBand,
         UnsupportedSetMode::Proxy,
@@ -283,9 +284,7 @@ async fn autocommit_state_query() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn autocommit_prepare_execute() {
-    let _query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
-    let (opts, _handle, shutdown_tx) = setup(
-        _query_status_cache,
+    let (opts, _handle, shutdown_tx, _query_status_cache) = setup(
         true, // fallback enabled
         MigrationMode::OutOfBand,
         UnsupportedSetMode::Proxy,
@@ -370,9 +369,7 @@ async fn autocommit_prepare_execute() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn in_request_path_prep_exec_with_fallback() {
-    let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
-    let (opts, _handle, shutdown_tx) = setup(
-        query_status_cache,
+    let (opts, _handle, shutdown_tx, query_status_cache) = setup(
         true, // fallback enabled
         MigrationMode::InRequestPath,
         UnsupportedSetMode::Error,
@@ -450,9 +447,7 @@ async fn in_request_path_prep_exec_with_fallback() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn in_request_path_prep_without_fallback() {
-    let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
-    let (opts, _handle, shutdown_tx) = setup(
-        query_status_cache,
+    let (opts, _handle, shutdown_tx, query_status_cache) = setup(
         false, // fallback disabled
         MigrationMode::InRequestPath,
         UnsupportedSetMode::Error,
@@ -483,9 +478,7 @@ async fn in_request_path_prep_without_fallback() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn out_of_band_prep_exec_with_fallback() {
-    let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
-    let (opts, _handle, shutdown_tx) = setup(
-        query_status_cache,
+    let (opts, _handle, shutdown_tx, query_status_cache) = setup(
         true, // fallback enabled
         MigrationMode::OutOfBand,
         UnsupportedSetMode::Error,
@@ -581,9 +574,7 @@ async fn out_of_band_prep_exec_with_fallback() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn in_request_path_rewritten_query_without_fallback() {
-    let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
-    let (opts, _handle, shutdown_tx) = setup(
-        query_status_cache,
+    let (opts, _handle, shutdown_tx, query_status_cache) = setup(
         false, // fallback disabled
         MigrationMode::InRequestPath,
         UnsupportedSetMode::Error,
@@ -616,9 +607,7 @@ async fn in_request_path_rewritten_query_without_fallback() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn out_of_band_rewritten_query_without_fallback() {
-    let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
-    let (opts, _handle, shutdown_tx) = setup(
-        query_status_cache,
+    let (opts, _handle, shutdown_tx, query_status_cache) = setup(
         false, // fallback disabled
         MigrationMode::OutOfBand,
         UnsupportedSetMode::Error,
@@ -646,9 +635,7 @@ async fn out_of_band_rewritten_query_without_fallback() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn drop_all_caches() {
-    let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
-    let (opts, _handle, shutdown_tx) = setup(
-        query_status_cache,
+    let (opts, _handle, shutdown_tx, query_status_cache) = setup(
         false, // fallback disabled
         MigrationMode::OutOfBand,
         UnsupportedSetMode::Error,
