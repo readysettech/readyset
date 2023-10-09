@@ -50,6 +50,7 @@ indexmap = { version = "1", default-features = false }
 quanta = { version = "0.11", default-features = false }
 lru = "0.12.0"
 crossbeam-skiplist = "0.1.1"
+slab = "0.4"
 
 readyset-alloc = { path = "../readyset-alloc/" }
 readyset-client = { path = "../readyset-client/" }
