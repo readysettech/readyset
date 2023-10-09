@@ -33,7 +33,7 @@ pub struct PostgreSqlUpstream {
     /// A tokio task that handles the connection, required by `tokio_postgres` to operate
     _connection_handle: tokio::task::JoinHandle<Result<(), pgsql::Error>>,
     /// Map from prepared statement IDs to prepared statements
-    prepared_statements: HashMap<u32, pgsql::Statement>,
+    prepared_statements: Vec<Option<pgsql::Statement>>,
     /// ID for the next prepared statement
     statement_id_counter: u32,
     /// The user used to connect to the upstream, if any

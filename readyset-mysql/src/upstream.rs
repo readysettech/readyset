@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::convert::TryInto;
 use std::sync::Arc;
 
@@ -92,7 +91,7 @@ impl<'a> From<CachedReadResult> for QueryResult<'a> {
 /// A connector to an underlying mysql store. This is really just a wrapper for the mysql crate.
 pub struct MySqlUpstream {
     conn: Conn,
-    prepared_statements: HashMap<StatementID, mysql_async::Statement>,
+    prepared_statements: Vec<Option<mysql_async::Statement>>,
 }
 
 #[derive(Debug, Clone)]
@@ -168,9 +167,7 @@ macro_rules! handle_query_result {
 }
 
 impl MySqlUpstream {
-    async fn connect_inner(
-        upstream_config: UpstreamConfig,
-    ) -> Result<(Conn, HashMap<StatementID, mysql_async::Statement>), Error> {
+    async fn connect_inner(upstream_config: UpstreamConfig) -> Result<Conn, Error> {
         // CLIENT_SESSION_TRACK is required for GTID information to be sent in OK packets on commits
         // GTID information is used for RYW
         let url = upstream_config
@@ -217,8 +214,7 @@ impl MySqlUpstream {
 
         span.in_scope(|| debug!("Established connection to upstream"));
         metrics::increment_gauge!(recorded::CLIENT_UPSTREAM_CONNECTIONS, 1.0);
-        let prepared_statements = HashMap::new();
-        Ok((conn, prepared_statements))
+        Ok(conn)
     }
 }
 
@@ -233,10 +229,10 @@ impl UpstreamDatabase for MySqlUpstream {
     const SQL_DIALECT: nom_sql::Dialect = nom_sql::Dialect::MySQL;
 
     async fn connect(upstream_config: UpstreamConfig) -> Result<Self, Error> {
-        let (conn, prepared_statements) = Self::connect_inner(upstream_config).await?;
+        let conn = Self::connect_inner(upstream_config).await?;
         Ok(Self {
             conn,
-            prepared_statements,
+            prepared_statements: Default::default(),
         })
     }
 
@@ -268,8 +264,19 @@ impl UpstreamDatabase for MySqlUpstream {
         S: AsRef<str> + Send + Sync + 'a,
     {
         let statement = self.conn.prep(query.as_ref()).await?;
-        self.prepared_statements
-            .insert(statement.id(), statement.clone());
+        if let Some(orig_stmt) = self.prepared_statements.get_mut(statement.id() as usize) {
+            if let Some(stmt) = orig_stmt.take() {
+                self.conn.close(stmt).await?;
+            }
+            *orig_stmt = Some(statement.clone());
+        } else {
+            let diff = statement.id() as usize - self.prepared_statements.len();
+            self.prepared_statements.reserve(diff + 1);
+            for _ in 0..diff {
+                self.prepared_statements.push(None);
+            }
+            self.prepared_statements.push(Some(statement.clone()))
+        }
         Ok(UpstreamPrepare {
             statement_id: statement.id(),
             meta: StatementMeta {
