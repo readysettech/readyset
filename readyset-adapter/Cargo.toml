@@ -48,6 +48,7 @@ parking_lot = "0.11.2"
 sqlformat = "0.2.1"
 indexmap = { version = "1", default-features = false }
 quanta = { version = "0.11", default-features = false }
+slab = "0.4"
 
 readyset-alloc = { path = "../readyset-alloc/" }
 readyset-client = { path = "../readyset-client/" }
