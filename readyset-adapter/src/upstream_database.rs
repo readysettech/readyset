@@ -143,6 +143,12 @@ pub trait UpstreamDatabase: Sized + Send {
         exec_meta: Self::ExecMeta<'_>,
     ) -> Result<Self::QueryResult<'a>, Self::Error>;
 
+    /// Remove a prepared statement from the cache, and tell the upstream database to remove it and
+    /// free any resources associated with it.
+    ///
+    /// Returns an error if the statement doesn't exist
+    async fn remove_statement(&mut self, statement_id: u32) -> Result<(), Self::Error>;
+
     /// Execute a raw, un-prepared query
     async fn query<'a>(&'a mut self, query: &'a str) -> Result<Self::QueryResult<'a>, Self::Error>;
 
@@ -263,6 +269,10 @@ where
             .await?
             .execute(statement_id, params, exec_meta)
             .await
+    }
+
+    async fn remove_statement(&mut self, statement_id: u32) -> Result<(), Self::Error> {
+        self.upstream().await?.remove_statement(statement_id).await
     }
 
     async fn query<'a>(&'a mut self, query: &'a str) -> Result<Self::QueryResult<'a>, Self::Error> {
