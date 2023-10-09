@@ -12,6 +12,7 @@
 ///
 /// [`DatabaseType`]: crate::DatabaseType
 pub const QUERY_LOG_EXECUTION_TIME: &str = "readyset_query_log_execution_time";
+pub const QUERY_LOG_EXECUTION_COUNT: &str = "readyset_query_log_execution_count";
 
 /// Histogram: The time in seconds that the database spent executing a
 /// query.
