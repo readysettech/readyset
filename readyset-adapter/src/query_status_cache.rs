@@ -61,6 +61,62 @@ impl PersistentStatusCacheHandle {
     fn insert_with_status(&self, q: Query, id: QueryId, status: QueryStatus) {
         self.statuses.insert(id, (q, status));
     }
+
+    fn allow_list(&self) -> Vec<(QueryId, Arc<ViewCreateRequest>, QueryStatus)> {
+        self.statuses
+            .iter()
+            .filter_map(|entry| {
+                let (query_id, (query, status)) = entry.pair();
+                match query {
+                    Query::Parsed(view) => {
+                        if status.is_successful() {
+                            Some((*query_id, view.clone(), status.clone()))
+                        } else {
+                            None
+                        }
+                    }
+                    Query::ParseFailed(_) => None,
+                }
+            })
+            .collect::<Vec<_>>()
+    }
+
+    fn deny_list(&self, style: MigrationStyle) -> Vec<DeniedQuery> {
+        match style {
+            MigrationStyle::Async | MigrationStyle::InRequestPath => self
+                .statuses
+                .iter()
+                .filter_map(|entry| {
+                    let (query_id, (query, status)) = entry.pair();
+                    if status.is_unsupported() || status.is_dropped() {
+                        Some(DeniedQuery {
+                            id: *query_id,
+                            query: query.clone(),
+                            status: status.clone(),
+                        })
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>(),
+            MigrationStyle::Explicit => self
+                .statuses
+                .iter()
+                .filter_map(|entry| {
+                    let (query_id, (query, status)) = entry.pair();
+                    if status.is_denied() {
+                        Some(DeniedQuery {
+                            id: *query_id,
+                            query: query.clone(),
+                            status: status.clone(),
+                        })
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>(),
+        }
+    }
 }
 
 /// Keys into the queries stored in `QueryStatusCache`
@@ -658,63 +714,12 @@ impl QueryStatusCache {
 
     /// Returns a list of queries that have a state of [`QueryState::Successful`].
     pub fn allow_list(&self) -> Vec<(QueryId, Arc<ViewCreateRequest>, QueryStatus)> {
-        self.persistent_handle
-            .statuses
-            .iter()
-            .filter_map(|entry| {
-                let (query_id, (query, status)) = entry.pair();
-                match query {
-                    Query::Parsed(view) => {
-                        if status.is_successful() {
-                            Some((*query_id, view.clone(), status.clone()))
-                        } else {
-                            None
-                        }
-                    }
-                    Query::ParseFailed(_) => None,
-                }
-            })
-            .collect::<Vec<_>>()
+        self.persistent_handle.allow_list()
     }
 
     /// Returns a list of queries that are in the deny list.
     pub fn deny_list(&self) -> Vec<DeniedQuery> {
-        match self.style {
-            MigrationStyle::Async | MigrationStyle::InRequestPath => self
-                .persistent_handle
-                .statuses
-                .iter()
-                .filter_map(|entry| {
-                    let (query_id, (query, status)) = entry.pair();
-                    if status.is_unsupported() || status.is_dropped() {
-                        Some(DeniedQuery {
-                            id: *query_id,
-                            query: query.clone(),
-                            status: status.clone(),
-                        })
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Vec<_>>(),
-            MigrationStyle::Explicit => self
-                .persistent_handle
-                .statuses
-                .iter()
-                .filter_map(|entry| {
-                    let (query_id, (query, status)) = entry.pair();
-                    if status.is_denied() {
-                        Some(DeniedQuery {
-                            id: *query_id,
-                            query: query.clone(),
-                            status: status.clone(),
-                        })
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Vec<_>>(),
-        }
+        self.persistent_handle.deny_list(self.style)
     }
 
     /// Returns a query given a query hash
