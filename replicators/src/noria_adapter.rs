@@ -77,7 +77,7 @@ pub(crate) trait Connector {
         &mut self,
         last_pos: &ReplicationOffset,
         until: Option<&ReplicationOffset>,
-    ) -> ReadySetResult<(ReplicationAction, ReplicationOffset)>;
+    ) -> ReadySetResult<(Vec<ReplicationAction>, ReplicationOffset)>;
 }
 
 /// Cleans up replication related assets on the upstream database as supplied by the
@@ -906,76 +906,98 @@ impl NoriaAdapter {
         Ok(())
     }
 
-    /// Handle a single BinlogAction by calling the proper ReadySet RPC. If `catchup` is set,
+    /// Handles ReplicationAction by calling the proper ReadySet RPC. If `catchup` is set,
     /// we will not log warnings for skipping entries, as we may iterate over many entries tables
     /// have already seen when catching each table up to the current binlog offset.
     async fn handle_action(
         &mut self,
-        action: ReplicationAction,
+        actions: Vec<ReplicationAction>,
         pos: ReplicationOffset,
         catchup: bool,
     ) -> ReadySetResult<()> {
         set_failpoint_return_err!(failpoints::REPLICATION_HANDLE_ACTION);
         // First check if we should skip this action due to insufficient log position or lack of
         // interest
-        match &action {
-            ReplicationAction::DdlChange { .. } | ReplicationAction::LogPosition => {
-                match &self.replication_offsets.schema {
-                    Some(cur) if pos <= *cur => {
-                        if !catchup {
-                            warn!(%pos, %cur, "Skipping schema update for earlier entry");
+        let mut actionables: Vec<ReplicationAction> = Vec::new();
+        for action in actions {
+            match action {
+                ReplicationAction::DdlChange { .. } | ReplicationAction::LogPosition => {
+                    match &self.replication_offsets.schema {
+                        Some(cur) => {
+                            if pos <= *cur {
+                                if !catchup {
+                                    warn!(%pos, %cur, "Skipping schema update for earlier entry");
+                                }
+                            } else {
+                                actionables.push(action);
+                            }
                         }
-                        return Ok(());
+                        _ => {
+                            actionables.push(action);
+                        }
                     }
-                    _ => {}
                 }
-            }
-            ReplicationAction::TableAction { table, .. } => {
-                match self.replication_offsets.tables.get(table) {
-                    Some(Some(cur)) if pos <= *cur => {
-                        if !catchup {
-                            warn!(
+                ReplicationAction::TableAction {
+                    table,
+                    actions,
+                    txid,
+                } => {
+                    match self.replication_offsets.tables.get(&table) {
+                        Some(Some(cur)) => {
+                            if pos <= *cur {
+                                if !catchup {
+                                    warn!(
+                                        table = %table.display_unquoted(),
+                                        %pos,
+                                        %cur,
+                                        "Skipping table action for earlier entry"
+                                    );
+                                }
+                                continue;
+                            } else {
+                                trace!(table = %table.display_unquoted(), %cur);
+                            }
+                        }
+                        _ => {
+                            trace!(
                                 table = %table.display_unquoted(),
-                                %pos,
-                                %cur,
-                                "Skipping table action for earlier entry"
+                                "no replication offset for table"
                             );
                         }
-                        return Ok(());
                     }
-                    Some(Some(cur)) => {
-                        trace!(table = %table.display_unquoted(), %cur);
+                    if self.table_filter.should_be_processed(
+                        table.schema.as_deref().ok_or_else(|| {
+                            internal_err!("All tables should have a schema in the replicator")
+                        })?,
+                        &table.name,
+                    ) {
+                        actionables.push(ReplicationAction::TableAction {
+                            table,
+                            actions,
+                            txid,
+                        });
                     }
-                    _ => {
-                        trace!(
-                            table = %table.display_unquoted(),
-                            "no replication offset for table"
-                        );
-                    }
-                }
-
-                if !self.table_filter.should_be_processed(
-                    table.schema.as_deref().ok_or_else(|| {
-                        internal_err!("All tables should have a schema in the replicator")
-                    })?,
-                    &table.name,
-                ) {
-                    return Ok(());
                 }
             }
         }
 
-        match action {
-            ReplicationAction::DdlChange { schema, changes } => {
-                self.handle_ddl_change(schema, changes, pos).await
+        for action in actionables {
+            match action {
+                ReplicationAction::DdlChange { schema, changes } => {
+                    self.handle_ddl_change(schema, changes, pos.clone()).await?
+                }
+                ReplicationAction::TableAction {
+                    table,
+                    actions,
+                    txid,
+                } => {
+                    self.handle_table_actions(table.clone(), actions.to_vec(), txid, pos.clone())
+                        .await?
+                }
+                ReplicationAction::LogPosition => self.handle_log_position(pos.clone()).await?,
             }
-            ReplicationAction::TableAction {
-                table,
-                actions,
-                txid,
-            } => self.handle_table_actions(table, actions, txid, pos).await,
-            ReplicationAction::LogPosition => self.handle_log_position(pos).await,
         }
+        Ok(())
     }
 
     /// Loop over the actions. `until` may be passed to set a replication offset to stop
@@ -1005,8 +1027,8 @@ impl NoriaAdapter {
                 return Ok(());
             }
 
-            let (action, pos) = match self.connector.next_action(position, until.as_ref()).await {
-                Ok(next_action) => next_action,
+            let (actions, pos) = match self.connector.next_action(position, until.as_ref()).await {
+                Ok(next_actions) => next_actions,
                 // In some cases, we may fail to replicate because of unsupported operations, stop
                 // replicating a table if we encounter this type of error.
                 Err(ReadySetError::TableError { table, source }) => {
@@ -1022,9 +1044,9 @@ impl NoriaAdapter {
             *position = pos.clone();
             debug!(%position, "Received replication action");
 
-            trace!(?action);
+            trace!(?actions);
 
-            if let Err(err) = self.handle_action(action, pos, until.is_some()).await {
+            if let Err(err) = self.handle_action(actions, pos, until.is_some()).await {
                 if matches!(err, ReadySetError::ResnapshotNeeded) {
                     info!("Change in DDL requires partial resnapshot");
                 } else {
