@@ -19,6 +19,9 @@ pub mod progress;
 pub mod properties;
 pub mod redacted;
 pub mod shutdown;
+pub mod vec_map;
+
+pub use crate::vec_map::VecMap;
 
 /// Error (returned by [`Indices::indices`] and [`Indices::cloned_indices`]) for an out-of-bounds
 /// index access

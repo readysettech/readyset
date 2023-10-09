@@ -4,6 +4,7 @@ use std::ops::{Index, IndexMut};
 use std::{mem, slice};
 
 use readyset_client::internal::LocalNodeIndex;
+use readyset_util::VecMap;
 use serde::{Deserialize, Serialize};
 
 /// A map from [`LocalNodeIndex`] to `T`, implemented as a sparse vector for super-efficient and
@@ -25,30 +26,8 @@ use serde::{Deserialize, Serialize};
 ///
 /// assert_eq!(map.get(node_1), Some(&"node 1".to_owned()));
 /// ```
-#[derive(Serialize, Deserialize, PartialEq, Eq, Clone)]
-pub struct NodeMap<T> {
-    /// The number of items in the Map.
-    ///
-    /// This will always be equivalent to the number of elements in `self.contents` that are
-    /// `Some`.
-    len: usize,
-
-    /// The actual elements in the Map.
-    ///
-    /// Note that this is a *sparse array* for efficient (O(1)) and cache-friendly lookup. The
-    /// indices in this vector are (numeric) [`LocalNodeIndex`]es, and the values are `Some(x)` if
-    /// a value is present, or `None` if there is no value for that node.
-    contents: Vec<Option<T>>,
-}
-
-impl<T> Default for NodeMap<T> {
-    fn default() -> Self {
-        NodeMap {
-            len: 0,
-            contents: Vec::default(),
-        }
-    }
-}
+#[derive(Default, Serialize, Deserialize, PartialEq, Eq, Clone)]
+pub struct NodeMap<T>(VecMap<T>);
 
 /// A view into a single entry in a [`NodeMap`], which may either be vacant or occupied.
 ///
@@ -265,27 +244,11 @@ impl<T> FromIterator<(LocalNodeIndex, T)> for NodeMap<T> {
     where
         I: IntoIterator<Item = (LocalNodeIndex, T)>,
     {
-        use std::collections::BTreeMap;
-
-        // we've got to be a bit careful here, as the nodes may come in any order
-        // we therefore sort them first
-        let sorted: BTreeMap<_, _> = iter.into_iter().map(|(ni, v)| (ni.id(), v)).collect();
-
-        let len = sorted.len();
-        let end = match sorted.keys().last() {
-            Some(k) => k + 1,
-            // no entries -- fine
-            None => return NodeMap::default(),
-        };
-        let mut contents = Vec::with_capacity(end);
-        for (i, v) in sorted {
-            for _ in contents.len()..i {
-                contents.push(None);
-            }
-            contents.push(Some(v));
-        }
-
-        NodeMap { len, contents }
+        Self(
+            iter.into_iter()
+                .map(|(i, v)| (LocalNodeIndex::make(i as _), v))
+                .collect(),
+        )
     }
 }
 
