@@ -1775,7 +1775,7 @@ async fn show_query_metrics() {
     }
 
     // Check `SHOW PROXIED QUERIES`
-    let proxied_result: Vec<(String, String, String, String, String, String, String)> = adapter
+    let proxied_result: Vec<(String, String, String, String)> = adapter
         .as_mysql_conn()
         .unwrap()
         .query(r"SHOW PROXIED QUERIES")
@@ -1784,22 +1784,10 @@ async fn show_query_metrics() {
 
     // Assert that we get a non-zero value for the metrics
     assert!(&proxied_result[0].3 != "0");
-    assert!(&proxied_result[0].4 != "0.0");
-    assert!(&proxied_result[0].5 != "0.0");
-    assert!(&proxied_result[0].6 != "0.0");
 
     // Check `SHOW CACHES`
     #[allow(clippy::type_complexity)]
-    let caches_result: Vec<(
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-    )> = adapter
+    let caches_result: Vec<(String, String, String, String, String)> = adapter
         .as_mysql_conn()
         .unwrap()
         .query(r"SHOW CACHES")
@@ -1808,7 +1796,4 @@ async fn show_query_metrics() {
 
     // Assert that we get a non-zero value for the metrics
     assert!(&caches_result[0].3 != "0");
-    assert!(&caches_result[0].4 != "0.0");
-    assert!(&caches_result[0].5 != "0.0");
-    assert!(&caches_result[0].6 != "0.0");
 }

@@ -1748,17 +1748,9 @@ where
         }
 
         let select_schema = if let Some(handle) = self.metrics_handle.as_mut() {
-            // Must snapshot histograms to get the latest metrics
-            handle.snapshot_histograms();
-            create_dummy_schema!(
-                "query id",
-                "proxied query",
-                "readyset supported",
-                "count",
-                "p50 (ms)",
-                "p90 (ms)",
-                "p99 (ms)"
-            )
+            // Must snapshot to get the latest metrics
+            handle.snapshot_counters(readyset_client_metrics::DatabaseType::MySql);
+            create_dummy_schema!("query id", "proxied query", "readyset supported", "count")
         } else {
             create_dummy_schema!("query id", "proxied query", "readyset supported")
         };
@@ -1785,16 +1777,9 @@ where
 
                 // Append metrics if we have them
                 if let Some(handle) = self.metrics_handle.as_ref() {
-                    let MetricsSummary {
-                        sample_count,
-                        p50_us,
-                        p90_us,
-                        p99_us,
-                    } = handle.metrics_summary(id.to_string()).unwrap_or_default();
+                    let MetricsSummary { sample_count } =
+                        handle.metrics_summary(id.to_string()).unwrap_or_default();
                     row.push(DfValue::from(format!("{sample_count}")));
-                    row.push(DfValue::from(format!("{:.3}", 1000.0 * p50_us)));
-                    row.push(DfValue::from(format!("{:.3}", 1000.0 * p90_us)));
-                    row.push(DfValue::from(format!("{:.3}", 1000.0 * p99_us)));
                 }
 
                 row
@@ -1831,16 +1816,13 @@ where
 
         let select_schema = if let Some(handle) = self.metrics_handle.as_mut() {
             // Must snapshot histograms to get the latest metrics
-            handle.snapshot_histograms();
+            handle.snapshot_counters(readyset_client_metrics::DatabaseType::ReadySet);
             create_dummy_schema!(
                 "query id",
                 "cache name",
                 "query text",
                 "fallback behavior",
-                "count",
-                "p50 (ms)",
-                "p90 (ms)",
-                "p99 (ms)"
+                "count"
             )
         } else {
             create_dummy_schema!("query id", "cache name", "query text", "fallback behavior")
@@ -1867,16 +1849,9 @@ where
 
             // Append metrics if we have them
             if let Some(handle) = self.metrics_handle.as_ref() {
-                let MetricsSummary {
-                    sample_count,
-                    p50_us,
-                    p90_us,
-                    p99_us,
-                } = handle.metrics_summary(id.to_string()).unwrap_or_default();
+                let MetricsSummary { sample_count } =
+                    handle.metrics_summary(id.to_string()).unwrap_or_default();
                 row.push(DfValue::from(format!("{sample_count}")));
-                row.push(DfValue::from(format!("{:.3}", 1000.0 * p50_us)));
-                row.push(DfValue::from(format!("{:.3}", 1000.0 * p90_us)));
-                row.push(DfValue::from(format!("{:.3}", 1000.0 * p99_us)));
             }
 
             results.push(row);
