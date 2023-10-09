@@ -63,6 +63,7 @@ readyset-sql-passes = { path = "../readyset-sql-passes" }
 readyset-version = { path = "../readyset-version" }
 health-reporter = { path = "../health-reporter" }
 database-utils = { path = "../database-utils" }
+lru = "0.12.0"
 
 [dev-dependencies]
 proptest = "1.0.0"
