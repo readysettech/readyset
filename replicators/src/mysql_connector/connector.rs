@@ -426,6 +426,73 @@ impl MySqlBinlogConnector {
 
         return Ok(ReplicationAction::DdlChange { schema, changes });
     }
+
+    /// Process inner events from a single binlog TRANSACTION_PAYLOAD_EVENT.
+    /// This occurs when binlog_transaction_compression is enabled.
+    /// This function returns a vector of all actionable inner events
+    /// # Arguments
+    ///
+    /// * `payload_event` - the payload event to process
+    async fn process_event_transaction_payload(
+        &mut self,
+        payload_event: mysql_common::binlog::events::TransactionPayloadEvent<'_>,
+    ) -> mysql::Result<Vec<ReplicationAction>> {
+        let mut actions: Vec<ReplicationAction> = Vec::new();
+        if self.enable_statement_logging {
+            info!(target: "replicator_statement", "{:?}", payload_event);
+        }
+        let buff = payload_event.decompress_payload();
+        let mut read_pos = 0;
+        while read_pos < buff.len() {
+            let binlog_ev = self.reader.read_decompressed(&buff[read_pos..])?;
+            read_pos += binlog_ev.header().event_size() as usize;
+            match binlog_ev.header().event_type().map_err(|ev| {
+                mysql_async::Error::Other(Box::new(internal_err!(
+                    "Unknown binlog event type {}",
+                    ev
+                )))
+            })? {
+                EventType::QUERY_EVENT => {
+                    let _ = match self.process_event_query(binlog_ev.read_event()?).await {
+                        Ok(action) => actions.push(action),
+                        Err(mysql_async::Error::Other(ref err))
+                            if err.downcast_ref::<ReadySetError>()
+                                == Some(&ReadySetError::SkipEvent) =>
+                        {
+                            continue;
+                        }
+                        Err(err) => return Err(err),
+                    };
+                }
+                EventType::WRITE_ROWS_EVENT => {
+                    actions.push(
+                        self.process_event_write_rows(binlog_ev.read_event()?)
+                            .await?,
+                    );
+                }
+
+                EventType::UPDATE_ROWS_EVENT => {
+                    actions.push(
+                        self.process_event_update_rows(binlog_ev.read_event()?)
+                            .await?,
+                    );
+                }
+
+                EventType::DELETE_ROWS_EVENT => {
+                    actions.push(
+                        self.process_event_delete_rows(binlog_ev.read_event()?)
+                            .await?,
+                    );
+                }
+                ev => {
+                    if self.enable_statement_logging {
+                        info!(target: "replicator_statement", "unhandled event: {:?}", ev);
+                    }
+                }
+            }
+        }
+        Ok(actions)
+    }
     /// Process binlog events until an actionable event occurs.
     ///
     /// # Arguments
@@ -467,6 +534,13 @@ impl MySqlBinlogConnector {
                     ));
                 }
 
+                EventType::TRANSACTION_PAYLOAD_EVENT => {
+                    return Ok((
+                        self.process_event_transaction_payload(binlog_event.read_event()?)
+                            .await?,
+                        &self.next_position,
+                    ));
+                }
                 EventType::QUERY_EVENT => {
                     let _ = match self.process_event_query(binlog_event.read_event()?).await {
                         Ok(action) => return Ok((vec![action], &self.next_position)),
