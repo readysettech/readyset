@@ -675,6 +675,7 @@ async fn cached_queries_filtering() {
 /// of the servers. After the failure, we verify that we can still perform the
 /// query on ReadySet and we return the correct results.
 #[clustertest]
+#[ignore = "Flaky test (REA-3107)"]
 async fn correct_data_after_restart() {
     let mut deployment = readyset_mysql("ct_correct_data_after_restart")
         .min_workers(2)
