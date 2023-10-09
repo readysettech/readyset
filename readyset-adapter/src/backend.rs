@@ -71,7 +71,6 @@
 use std::borrow::Cow;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
-use std::convert::{TryFrom, TryInto};
 use std::fmt::{self, Debug};
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -115,8 +114,31 @@ pub mod noria_connector;
 pub use self::noria_connector::NoriaConnector;
 use self::noria_connector::{MetaVariable, PreparedSelectTypes};
 
-/// Unique identifier for a prepared statement, local to a single [`Backend`].
-pub type StatementId = u32;
+new_key_type! {
+    /// Unique identifier for a prepared statement, local to a single [`Backend`].
+    pub struct StatementId;
+}
+
+impl StatementId {
+    pub fn to_external(self) -> u32 {
+        let id = self.0.as_ffi();
+        let low = (id & 0xffff_ffff) as u32;
+        let high = (id >> 32) as u32;
+
+        u32::from(
+            u16::try_from(low)
+                .expect("Cannot prepare more than u16::MAX statements for a single backend"),
+        ) | (u32::from(u16::try_from(high).expect(
+            "Cannot reuse a single statement more than u16::MAX times for a single backend",
+        )) << 16)
+    }
+
+    pub fn from_external(external: u32) -> Self {
+        let low = (external & 0xffff) as u16;
+        let high = (external >> 16) as u16;
+        Self(KeyData::from_ffi((low as u64) | ((high as u64) << 32)))
+    }
+}
 
 /// Query metadata used to plan query prepare
 #[allow(clippy::large_enum_variant)]
@@ -324,7 +346,7 @@ impl BackendBuilder {
             state: BackendState {
                 proxy_state,
                 parsed_query_cache: HashMap::new(),
-                prepared_statements: Vec::new(),
+                prepared_statements: SlotMap::with_key(),
                 query_status_cache,
                 ticket: self.ticket,
                 timestamp_client: self.timestamp_client,
@@ -538,7 +560,7 @@ where
     // a cache of all previously parsed queries
     parsed_query_cache: HashMap<String, SqlQuery>,
     // all queries previously prepared on noria or upstream, mapped by their ID.
-    prepared_statements: Vec<PreparedStatement<DB>>,
+    prepared_statements: SlotMap<StatementId, PreparedStatement<DB>>,
     /// Current RYW ticket. `None` if RYW is not enabled. This `ticket` will
     /// be updated as the client makes writes so as to be an accurate low watermark timestamp
     /// required to make RYW-consistent reads. On reads, the client will pass in this ticket to be
@@ -685,35 +707,14 @@ pub struct PrepareResult<DB: UpstreamDatabase> {
     inner: PrepareResultInner<DB>,
 }
 
-/// # Constructors
 impl<DB: UpstreamDatabase> PrepareResult<DB> {
-    pub fn noria(statement_id: StatementId, noria_res: noria_connector::PrepareResult) -> Self {
+    pub fn new(statement_id: StatementId, inner: PrepareResultInner<DB>) -> Self {
         Self {
             statement_id,
-            inner: PrepareResultInner::Noria(noria_res),
+            inner,
         }
     }
 
-    pub fn upstream(statement_id: StatementId, upstream_res: UpstreamPrepare<DB>) -> Self {
-        Self {
-            statement_id,
-            inner: PrepareResultInner::Upstream(upstream_res),
-        }
-    }
-
-    pub fn both(
-        statement_id: StatementId,
-        noria_res: noria_connector::PrepareResult,
-        upstream_res: UpstreamPrepare<DB>,
-    ) -> Self {
-        Self {
-            statement_id,
-            inner: PrepareResultInner::Both(noria_res, upstream_res),
-        }
-    }
-}
-
-impl<DB: UpstreamDatabase> PrepareResult<DB> {
     pub fn noria_biased(&self) -> SinglePrepareResult<'_, DB> {
         match &self.inner {
             PrepareResultInner::Noria(res) | PrepareResultInner::Both(res, _) => {
@@ -793,13 +794,6 @@ where
             .unwrap_or_else(|| DB::DEFAULT_DB_VERSION.to_string())
     }
 
-    /// The identifier we can reserve for the next prepared statement
-    pub fn next_prepared_id(&self) -> u32 {
-        (self.state.prepared_statements.len())
-            .try_into()
-            .expect("Too many prepared statements")
-    }
-
     /// Switch the active database for this backend to the given named database.
     ///
     /// Internally, this will set the schema search path to a single-element vector with the
@@ -864,9 +858,7 @@ where
         query: &str,
         data: DB::PrepareData<'_>,
         event: &mut QueryExecutionEvent,
-    ) -> Result<PrepareResult<DB>, DB::Error> {
-        let statement_id = self.next_prepared_id();
-
+    ) -> Result<PrepareResultInner<DB>, DB::Error> {
         let do_noria = select_meta.should_do_noria;
         let do_migrate = select_meta.must_migrate;
 
@@ -938,7 +930,7 @@ where
 
         let prep_result = match (upstream_res, noria_res) {
             (Some(upstream_res), Some(Ok(noria_res))) => {
-                PrepareResult::both(statement_id, noria_res, upstream_res?)
+                PrepareResultInner::Both(noria_res, upstream_res?)
             }
             (None, Some(Ok(noria_res))) => {
                 if matches!(
@@ -954,10 +946,10 @@ where
                         "Cannot create PrepareResult for borrowed cache without an upstream result"
                     );
                 }
-                PrepareResult::noria(statement_id, noria_res)
+                PrepareResultInner::Noria(noria_res)
             }
             (None, Some(Err(noria_err))) => return Err(noria_err.into()),
-            (Some(upstream_res), _) => PrepareResult::upstream(statement_id, upstream_res?),
+            (Some(upstream_res), _) => PrepareResultInner::Upstream(upstream_res?),
             (None, None) => return Err(ReadySetError::Unsupported(query.to_string()).into()),
         };
 
@@ -971,15 +963,14 @@ where
         stmt: &SqlQuery,
         data: DB::PrepareData<'_>,
         event: &mut QueryExecutionEvent,
-    ) -> Result<PrepareResult<DB>, DB::Error> {
-        let statement_id = self.next_prepared_id();
+    ) -> Result<PrepareResultInner<DB>, DB::Error> {
         event.sql_type = SqlQueryType::Write;
         if let Some(ref mut upstream) = self.upstream {
             let _t = event.start_upstream_timer();
             let res = upstream
                 .prepare(query, data)
                 .await
-                .map(|ur| PrepareResult::upstream(statement_id, ur));
+                .map(PrepareResultInner::Upstream);
             self.last_query = Some(QueryInfo {
                 destination: QueryDestination::Upstream,
                 noria_error: String::new(),
@@ -998,7 +989,7 @@ where
                 destination: QueryDestination::Readyset,
                 noria_error: String::new(),
             });
-            Ok(PrepareResult::noria(statement_id, res))
+            Ok(PrepareResultInner::Noria(res))
         }
     }
 
@@ -1107,8 +1098,7 @@ where
         query: &str,
         data: DB::PrepareData<'_>,
         event: &mut QueryExecutionEvent,
-    ) -> Result<PrepareResult<DB>, DB::Error> {
-        let statement_id = self.next_prepared_id();
+    ) -> Result<PrepareResultInner<DB>, DB::Error> {
         match meta {
             PrepareMeta::Proxy
             | PrepareMeta::FailedToParse
@@ -1120,7 +1110,7 @@ where
                 let res = self
                     .prepare_fallback(query, data)
                     .await
-                    .map(|res| PrepareResult::upstream(statement_id, res));
+                    .map(PrepareResultInner::Upstream);
 
                 self.last_query = Some(QueryInfo {
                     destination: QueryDestination::Upstream,
@@ -1154,11 +1144,11 @@ where
         let mut query_event = QueryExecutionEvent::new(EventType::Prepare);
 
         let meta = self.plan_prepare(query).await;
-        let res = self
+        let prep = self
             .do_prepare(&meta, query, data, &mut query_event)
             .await?;
 
-        let (id, parsed_query, migration_state, view_request, always) = match meta {
+        let (query_id, parsed_query, migration_state, view_request, always) = match meta {
             PrepareMeta::Write { stmt } => (
                 None,
                 Some(Arc::new(stmt)),
@@ -1192,21 +1182,25 @@ where
         if let Some(parsed) = &parsed_query {
             query_event.query = Some(parsed.clone());
         }
-        query_event.query_id = id;
+        query_event.query_id = query_id;
 
-        let cache_entry = PreparedStatement {
-            query_id: id,
-            prep: res,
-            migration_state,
-            execution_info: None,
-            parsed_query,
-            view_request,
-            always,
-        };
+        let statement_id = self
+            .state
+            .prepared_statements
+            .insert_with_key(move |statement_id| PreparedStatement {
+                query_id,
+                prep: PrepareResult::new(statement_id, prep),
+                migration_state,
+                execution_info: None,
+                parsed_query,
+                view_request,
+                always,
+            });
 
-        self.state.prepared_statements.push(cache_entry);
-
-        Ok(&self.state.prepared_statements.last().unwrap().prep)
+        Ok(
+            // SAFETY: Just inserted!
+            &unsafe { self.state.prepared_statements.get_unchecked(statement_id) }.prep,
+        )
     }
 
     /// Executes a prepared statement on ReadySet
@@ -1374,8 +1368,10 @@ where
 
         // At this point we got a successful noria prepare, so we want to replace the Upstream
         // result with a Both result
-        cached_entry.prep =
-            PrepareResult::both(cached_entry.prep.statement_id, noria_prep, upstream_prep);
+        cached_entry.prep = PrepareResult::new(
+            cached_entry.prep.statement_id,
+            PrepareResultInner::Both(noria_prep, upstream_prep),
+        );
         // If the query was previously `Pending`, update to `Successful`. If it was inlined, we do
         // not update the migration state.
         if cached_entry.migration_state == MigrationState::Pending {
@@ -1393,12 +1389,15 @@ where
             .prepared_statements
             .iter_mut()
             .filter_map(
-                |PreparedStatement {
-                     prep,
-                     migration_state,
-                     view_request,
-                     ..
-                 }| {
+                |(
+                    _,
+                    PreparedStatement {
+                        prep,
+                        migration_state,
+                        view_request,
+                        ..
+                    },
+                )| {
                     if *migration_state == MigrationState::Successful
                         && view_request.as_ref() == Some(stmt)
                     {
@@ -1429,7 +1428,7 @@ where
         let cached_statement = self
             .state
             .prepared_statements
-            .get_mut(id as usize)
+            .get_mut(StatementId(KeyData::from_ffi(id as _)))
             .ok_or(PreparedStatementMissing { statement_id: id })?;
 
         let mut event = QueryExecutionEvent::new(EventType::Execute);
@@ -1745,11 +1744,14 @@ where
         self.noria.drop_all_caches().await?;
         self.state.query_status_cache.clear();
         self.state.prepared_statements.iter_mut().for_each(
-            |PreparedStatement {
-                 prep,
-                 migration_state,
-                 ..
-             }| {
+            |(
+                _,
+                PreparedStatement {
+                    prep,
+                    migration_state,
+                    ..
+                },
+            )| {
                 if *migration_state == MigrationState::Successful {
                     *migration_state = MigrationState::Pending;
                 }
