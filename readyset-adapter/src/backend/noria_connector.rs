@@ -2,7 +2,6 @@ use std::borrow::Cow;
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
-use std::fmt;
 use std::sync::{atomic, Arc};
 
 use itertools::Itertools;
@@ -21,10 +20,9 @@ use readyset_client::{
     SchemaType, Table, TableOperation, View, ViewCreateRequest, ViewQuery,
 };
 use readyset_data::{DfType, DfValue, Dialect, TimestampTz};
-use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
 use readyset_errors::{
-    internal, internal_err, invalid_query, invariant_eq, table_err, unsupported, unsupported_err,
-    ReadySetResult,
+    internal_err, invalid_query, invariant_eq, table_err, unsupported, unsupported_err,
+    ReadySetError, ReadySetResult,
 };
 use readyset_server::worker::readers::{CallResult, ReadRequestHandler};
 use readyset_util::redacted::Sensitive;
@@ -36,37 +34,10 @@ use crate::backend::SelectSchema;
 use crate::rewrite::{self, ProcessedQueryParams};
 use crate::utils;
 
-type StatementID = u32;
-
-#[derive(Clone)]
-// Due to differences in data type sizes, the large_enum_variant Clippy warning was being emitted
-// for this type, but only when compiling for aarch64 targets.
-#[cfg_attr(target_arch = "aarch64", allow(clippy::large_enum_variant))]
-pub(crate) enum PreparedStatement {
-    Select(PreparedSelectStatement),
-    Insert(nom_sql::InsertStatement),
-    Update(nom_sql::UpdateStatement),
-    Delete(DeleteStatement),
-}
-
-#[derive(Clone)]
-pub(crate) struct PreparedSelectStatement {
+#[derive(Clone, Debug)]
+pub struct PreparedSelectStatement {
     name: Relation,
     processed_query_params: ProcessedQueryParams,
-}
-
-impl fmt::Debug for PreparedStatement {
-    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        // FIXME(REA-2168): Use correct dialect.
-        match self {
-            PreparedStatement::Select(PreparedSelectStatement { name, .. }) => {
-                write!(f, "{}", name.display(nom_sql::Dialect::MySQL),)
-            }
-            PreparedStatement::Insert(s) => write!(f, "{}", s.display(nom_sql::Dialect::MySQL)),
-            PreparedStatement::Update(s) => write!(f, "{}", s.display(nom_sql::Dialect::MySQL)),
-            PreparedStatement::Delete(s) => write!(f, "{}", s.display(nom_sql::Dialect::MySQL)),
-        }
-    }
 }
 
 /// Wrapper around a NoriaBackendInner which may not have been successfully
@@ -142,14 +113,13 @@ impl NoriaBackendInner {
 
 #[derive(Debug, Clone)]
 pub struct SelectPrepareResultInner {
-    pub statement_id: StatementID,
     pub params: Vec<ColumnSchema>,
     pub schema: Vec<ColumnSchema>,
 }
 
-/// Result of preparing a statement against ReadySet
+/// Types for a prepared select statement against ReadySet
 #[derive(Debug, Clone)]
-pub enum SelectPrepareResult {
+pub enum PreparedSelectTypes {
     /// Statement can be executed against ReadySet but we do not know the schema because it does
     /// not exist in dataflow. This variant is not useful without an upstream connection.
     ///
@@ -159,43 +129,30 @@ pub enum SelectPrepareResult {
     /// metadata (since the query itself is not cached in dataflow). Instead, we must form the
     /// prepared statement response by retrieving the correct metadata from the upstream
     /// prepared statement response.
-    NoSchema(StatementID),
+    NoSchema,
     /// The statement is cached in dataflow and we have the schema.
     Schema(SelectPrepareResultInner),
 }
 
 #[derive(Debug, Clone)]
 pub enum PrepareResult {
-    Select(SelectPrepareResult),
+    Select {
+        types: PreparedSelectTypes,
+        statement: PreparedSelectStatement,
+    },
     Insert {
-        statement_id: StatementID,
         params: Vec<ColumnSchema>,
         schema: Vec<ColumnSchema>,
+        statement: InsertStatement,
     },
     Update {
-        statement_id: StatementID,
         params: Vec<ColumnSchema>,
+        statement: UpdateStatement,
     },
     Delete {
-        statement_id: StatementID,
         params: Vec<ColumnSchema>,
+        statement: DeleteStatement,
     },
-}
-
-impl PrepareResult {
-    /// Get the noria statement id for this statement
-    pub fn statement_id(&self) -> StatementID {
-        match self {
-            PrepareResult::Select(SelectPrepareResult::Schema(SelectPrepareResultInner {
-                statement_id,
-                ..
-            }))
-            | PrepareResult::Select(SelectPrepareResult::NoSchema(statement_id))
-            | PrepareResult::Insert { statement_id, .. }
-            | PrepareResult::Delete { statement_id, .. }
-            | PrepareResult::Update { statement_id, .. } => *statement_id,
-        }
-    }
 }
 
 /// A single row in the variable table associated with [`QueryResult::MetaVariables`].
@@ -303,8 +260,6 @@ pub struct NoriaConnector {
     /// Global and thread-local cache of view endpoints and prepared statements.
     view_cache: LocalCache<ViewCreateRequest, Relation>,
 
-    prepared_statement_cache: HashMap<StatementID, PreparedStatement>,
-
     /// Set of views that have failed on previous requests. Separate from the backend
     /// to allow returning references to schemas from views all the way to mysql-srv,
     /// but on subsequent requests, do not use a failed view.
@@ -381,7 +336,7 @@ impl ReadBehavior {
 #[derive(Debug)]
 pub(crate) enum ExecuteSelectContext<'ctx> {
     Prepared {
-        q_id: u32,
+        ps: &'ctx PreparedSelectStatement,
         params: &'ctx [DfValue],
     },
     AdHoc {
@@ -436,7 +391,6 @@ impl NoriaConnector {
             },
             auto_increments,
             view_cache: query_cache.into_local(),
-            prepared_statement_cache: HashMap::new(),
             failed_views: HashSet::new(),
             read_behavior,
             read_request_handler: request_handler::LocalReadHandler::new(read_request_handler),
@@ -651,22 +605,27 @@ impl NoriaConnector {
 
     pub async fn prepare_insert(
         &mut self,
-        mut q: nom_sql::InsertStatement,
-        statement_id: u32,
+        mut statement: nom_sql::InsertStatement,
     ) -> ReadySetResult<PrepareResult> {
-        trace!(table = %q.table.name, "insert::access mutator");
-        let mutator = self.inner.get_mut()?.get_noria_table(&q.table).await?;
+        trace!(table = %statement.table.name, "insert::access mutator");
+        let mutator = self
+            .inner
+            .get_mut()?
+            .get_noria_table(&statement.table)
+            .await?;
         trace!("insert::extract schema");
         let schema = mutator
             .schema()
-            .ok_or_else(|| internal_err!("Could not find schema for table {}", q.table.name))?
+            .ok_or_else(|| {
+                internal_err!("Could not find schema for table {}", statement.table.name)
+            })?
             .fields
             .iter()
-            .map(|cs| ColumnSchema::from_base(cs.clone(), q.table.clone(), self.dialect))
+            .map(|cs| ColumnSchema::from_base(cs.clone(), statement.table.clone(), self.dialect))
             .collect::<Result<Vec<_>, _>>()?;
 
-        if q.fields.is_none() {
-            q.fields = Some(
+        if statement.fields.is_none() {
+            statement.fields = Some(
                 mutator
                     .schema()
                     .as_ref()
@@ -680,7 +639,7 @@ impl NoriaConnector {
 
         let params: Vec<_> = {
             // extract parameter columns -- easy here, since they must all be in the same table
-            let param_cols = utils::insert_statement_parameter_columns(&q);
+            let param_cols = utils::insert_statement_parameter_columns(&statement);
             param_cols
                 .into_iter()
                 .map(|c| {
@@ -698,46 +657,26 @@ impl NoriaConnector {
                 .collect::<ReadySetResult<Vec<_>>>()?
         };
 
-        // nothing more to do for an insert
-        // register a new prepared statement
-        trace!(id = statement_id, "insert::registered");
-        self.prepared_statement_cache
-            .insert(statement_id, PreparedStatement::Insert(q));
         Ok(PrepareResult::Insert {
-            statement_id,
             params,
             schema,
+            statement,
         })
     }
 
     pub(crate) async fn execute_prepared_insert(
         &mut self,
-        q_id: u32,
+        q: &InsertStatement,
         params: &[DfValue],
     ) -> ReadySetResult<QueryResult<'_>> {
-        let prep: PreparedStatement = self
-            .prepared_statement_cache
-            .get(&q_id)
-            .ok_or(PreparedStatementMissing { statement_id: q_id })?
-            .clone();
-        trace!("delegate");
-        match prep {
-            PreparedStatement::Insert(ref q) => {
-                let table = &q.table;
-                let putter = self.inner.get_mut()?.get_noria_table(table).await?;
-                trace!("insert::extract schema");
-                let schema = putter.schema().ok_or_else(|| {
-                    internal_err!("no schema for table {}", table.display_unquoted())
-                })?;
-                let rows = utils::extract_insert(q, params, schema, self.dialect)?;
-                self.do_insert(q, rows).await
-            }
-            _ => {
-                internal!(
-                    "Execute_prepared_insert is being called for a non insert prepared statement."
-                )
-            }
-        }
+        let table = &q.table;
+        let putter = self.inner.get_mut()?.get_noria_table(table).await?;
+        trace!("insert::extract schema");
+        let schema = putter
+            .schema()
+            .ok_or_else(|| internal_err!("no schema for table {}", table.display_unquoted()))?;
+        let rows = utils::extract_insert(q, params, schema, self.dialect)?;
+        self.do_insert(q, rows).await
     }
 
     pub(crate) async fn handle_delete(
@@ -797,19 +736,22 @@ impl NoriaConnector {
 
     pub(crate) async fn prepare_update(
         &mut self,
-        q: nom_sql::UpdateStatement,
-        statement_id: u32,
+        statement: UpdateStatement,
     ) -> ReadySetResult<PrepareResult> {
         // ensure that we have schemas and endpoints for the query
-        trace!(table = %q.table.name, "update::access mutator");
-        let mutator = self.inner.get_mut()?.get_noria_table(&q.table).await?;
+        trace!(table = %statement.table.name, "update::access mutator");
+        let mutator = self
+            .inner
+            .get_mut()?
+            .get_noria_table(&statement.table)
+            .await?;
         trace!("update::extract schema");
-        let table_schema = mutator
-            .schema()
-            .ok_or_else(|| internal_err!("Could not find schema for table {}", q.table.name))?;
+        let table_schema = mutator.schema().ok_or_else(|| {
+            internal_err!("Could not find schema for table {}", statement.table.name)
+        })?;
 
         // extract parameter columns
-        let params = utils::update_statement_parameter_columns(&q)
+        let params = utils::update_statement_parameter_columns(&statement)
             .into_iter()
             .map(|c| {
                 table_schema
@@ -819,54 +761,41 @@ impl NoriaConnector {
                     // and name - just check name here
                     .find(|f| f.column.name == c.name)
                     .cloned()
-                    .map(|cs| ColumnSchema::from_base(cs, q.table.clone(), self.dialect))
+                    .map(|cs| ColumnSchema::from_base(cs, statement.table.clone(), self.dialect))
                     .transpose()?
                     .ok_or_else(|| internal_err!("Unknown column {}", c.display_unquoted()))
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        trace!(id = statement_id, "update::registered");
-        self.prepared_statement_cache
-            .insert(statement_id, PreparedStatement::Update(q));
-        Ok(PrepareResult::Update {
-            statement_id,
-            params,
-        })
+        Ok(PrepareResult::Update { params, statement })
     }
 
     pub(crate) async fn execute_prepared_update(
         &mut self,
-        q_id: u32,
+        q: &UpdateStatement,
         params: &[DfValue],
     ) -> ReadySetResult<QueryResult<'_>> {
-        let prep: PreparedStatement = self
-            .prepared_statement_cache
-            .get(&q_id)
-            .ok_or(PreparedStatementMissing { statement_id: q_id })?
-            .clone();
-
-        trace!("delegate");
-        match prep {
-            PreparedStatement::Update(q) => self.do_update(Cow::Owned(q), Some(params)).await,
-            _ => internal!(),
-        }
+        self.do_update(Cow::Owned(q.clone()), Some(params)).await
     }
 
     pub(crate) async fn prepare_delete(
         &mut self,
-        q: DeleteStatement,
-        statement_id: u32,
+        statement: DeleteStatement,
     ) -> ReadySetResult<PrepareResult> {
         // ensure that we have schemas and endpoints for the query
-        trace!(table = %q.table.name, "delete::access mutator");
-        let mutator = self.inner.get_mut()?.get_noria_table(&q.table).await?;
+        trace!(table = %statement.table.name, "delete::access mutator");
+        let mutator = self
+            .inner
+            .get_mut()?
+            .get_noria_table(&statement.table)
+            .await?;
         trace!("delete::extract schema");
-        let table_schema = mutator
-            .schema()
-            .ok_or_else(|| internal_err!("Could not find schema for table {}", q.table.name))?;
+        let table_schema = mutator.schema().ok_or_else(|| {
+            internal_err!("Could not find schema for table {}", statement.table.name)
+        })?;
 
         // extract parameter columns
-        let params = utils::delete_statement_parameter_columns(&q)
+        let params = utils::delete_statement_parameter_columns(&statement)
             .into_iter()
             .map(|c| {
                 table_schema
@@ -876,37 +805,21 @@ impl NoriaConnector {
                     // and name - just check name here
                     .find(|f| f.column.name == c.name)
                     .cloned()
-                    .map(|cs| ColumnSchema::from_base(cs, q.table.clone(), self.dialect))
+                    .map(|cs| ColumnSchema::from_base(cs, statement.table.clone(), self.dialect))
                     .transpose()?
                     .ok_or_else(|| internal_err!("Unknown column {}", c.display_unquoted()))
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        trace!(id = statement_id, "delete::registered");
-        self.prepared_statement_cache
-            .insert(statement_id, PreparedStatement::Delete(q));
-        Ok(PrepareResult::Delete {
-            statement_id,
-            params,
-        })
+        Ok(PrepareResult::Delete { params, statement })
     }
 
     pub(crate) async fn execute_prepared_delete(
         &mut self,
-        q_id: u32,
+        q: &DeleteStatement,
         params: &[DfValue],
     ) -> ReadySetResult<QueryResult<'_>> {
-        let prep: PreparedStatement = self
-            .prepared_statement_cache
-            .get(&q_id)
-            .ok_or(PreparedStatementMissing { statement_id: q_id })?
-            .clone();
-
-        trace!("delegate");
-        match prep {
-            PreparedStatement::Delete(q) => self.do_delete(Cow::Owned(q), Some(params)).await,
-            _ => internal!(),
-        }
+        self.do_delete(Cow::Owned(q.clone()), Some(params)).await
     }
 
     /// Calls the `extend_recipe` endpoint on ReadySet with the given query.
@@ -1463,7 +1376,6 @@ impl NoriaConnector {
     pub(crate) async fn prepare_select(
         &mut self,
         mut statement: nom_sql::SelectStatement,
-        statement_id: u32,
         create_if_not_exist: bool,
         override_schema_search_path: Option<Vec<SqlIdentifier>>,
     ) -> ReadySetResult<PrepareResult> {
@@ -1519,15 +1431,12 @@ impl NoriaConnector {
             }
         };
 
-        trace!(id = statement_id, "select::registered");
-        let ps = PreparedSelectStatement {
+        let statement = PreparedSelectStatement {
             name: qname.clone(),
             processed_query_params,
         };
-        self.prepared_statement_cache
-            .insert(statement_id, PreparedStatement::Select(ps));
 
-        if let Some(getter_schema) = getter_schema {
+        let types = if let Some(getter_schema) = getter_schema {
             let mut params: Vec<_> = getter_schema
                 .to_cols(&client_param_columns, SchemaType::ProjectedSchema)?
                 .into_iter()
@@ -1539,18 +1448,16 @@ impl NoriaConnector {
                 .collect();
 
             params.extend(limit_columns);
-            Ok(PrepareResult::Select(SelectPrepareResult::Schema(
-                SelectPrepareResultInner {
-                    statement_id,
-                    params,
-                    schema: getter_schema.schema(SchemaType::ReturnedSchema).to_vec(),
-                },
-            )))
+
+            PreparedSelectTypes::Schema(SelectPrepareResultInner {
+                params,
+                schema: getter_schema.schema(SchemaType::ReturnedSchema).to_vec(),
+            })
         } else {
-            Ok(PrepareResult::Select(SelectPrepareResult::NoSchema(
-                statement_id,
-            )))
-        }
+            PreparedSelectTypes::NoSchema
+        };
+
+        Ok(PrepareResult::Select { types, statement })
     }
 
     #[instrument(level = "debug", skip(self, event))]
@@ -1561,23 +1468,18 @@ impl NoriaConnector {
         event: &mut readyset_client_metrics::QueryExecutionEvent,
     ) -> ReadySetResult<QueryResult<'_>> {
         let (qname, processed_query_params, params) = match ctx {
-            ExecuteSelectContext::Prepared { q_id, params } => {
-                let PreparedSelectStatement {
-                    name,
-                    processed_query_params,
-                } = {
-                    match self.prepared_statement_cache.get(&q_id) {
-                        Some(PreparedStatement::Select(ps)) => ps,
-                        Some(_) => internal!(),
-                        None => return Err(PreparedStatementMissing { statement_id: q_id }),
-                    }
-                };
-                (
-                    Cow::Borrowed(name),
-                    Cow::Borrowed(processed_query_params),
-                    params,
-                )
-            }
+            ExecuteSelectContext::Prepared {
+                ps:
+                    PreparedSelectStatement {
+                        name,
+                        processed_query_params,
+                    },
+                params,
+            } => (
+                Cow::Borrowed(name),
+                Cow::Borrowed(processed_query_params),
+                params,
+            ),
             ExecuteSelectContext::AdHoc {
                 mut statement,
                 create_if_missing,

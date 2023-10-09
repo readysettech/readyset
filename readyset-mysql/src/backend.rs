@@ -15,7 +15,7 @@ use mysql_srv::{
     QueryResultWriter, RowWriter, StatementMetaWriter,
 };
 use readyset_adapter::backend::noria_connector::{
-    MetaVariable, SelectPrepareResult, SelectPrepareResultInner,
+    MetaVariable, PreparedSelectTypes, SelectPrepareResultInner,
 };
 use readyset_adapter::backend::{
     noria_connector, QueryResult, SinglePrepareResult, UpstreamPrepare,
@@ -509,46 +509,58 @@ where
         use noria_connector::PrepareResult::*;
 
         trace!("delegate");
-        let prepare_result = self.prepare(query, ()).await.map(|p| p.upstream_biased());
+        let prepare_result = self
+            .prepare(query, ())
+            .await
+            .map(|p| (p.statement_id, p.upstream_biased()));
         let res = match prepare_result {
-            Ok(SinglePrepareResult::Noria(
-                Select(SelectPrepareResult::Schema(SelectPrepareResultInner {
-                    statement_id,
-                    params,
-                    schema,
-                }))
-                | Insert {
-                    statement_id,
-                    params,
-                    schema,
-                },
+            Ok((
+                statement_id,
+                SinglePrepareResult::Noria(
+                    Select {
+                        types:
+                            PreparedSelectTypes::Schema(SelectPrepareResultInner { params, schema }),
+                        ..
+                    }
+                    | Insert { params, schema, .. },
+                ),
             )) => {
-                let statement_id = *statement_id; // Just to break borrow dependency
                 let params = convert_columns!(params, info);
                 let schema = convert_columns!(schema, info);
                 schema_cache.remove(&statement_id);
                 info.reply(statement_id, &params, &schema).await
             }
-            Ok(SinglePrepareResult::Noria(Select(SelectPrepareResult::NoSchema(_)))) => {
+            Ok((
+                _,
+                SinglePrepareResult::Noria(Select {
+                    types: PreparedSelectTypes::NoSchema,
+                    ..
+                }),
+            )) => {
                 info.error(
                     mysql_srv::ErrorKind::ER_UNKNOWN_ERROR,
                     "Unreachable".as_bytes(),
                 )
                 .await
             }
-            Ok(SinglePrepareResult::Noria(Update { params, .. } | Delete { params, .. })) => {
+            Ok((
+                statement_id,
+                SinglePrepareResult::Noria(Update { params, .. } | Delete { params, .. }),
+            )) => {
                 let params = convert_columns!(params, info);
-                info.reply(self.last_prepared_id(), &params, &[]).await
+                info.reply(statement_id, &params, &[]).await
             }
-            Ok(SinglePrepareResult::Upstream(UpstreamPrepare {
-                meta: StatementMeta { params, schema },
-                ..
-            })) => {
+            Ok((
+                statement_id,
+                SinglePrepareResult::Upstream(UpstreamPrepare {
+                    meta: StatementMeta { params, schema },
+                    ..
+                }),
+            )) => {
                 let params = params.iter().map(|c| c.into()).collect::<Vec<_>>();
                 let schema = schema.iter().map(|c| c.into()).collect::<Vec<_>>();
 
-                // TODO(aspen): make statement ID part of prepareresult
-                info.reply(self.last_prepared_id(), &params, &schema).await
+                info.reply(statement_id, &params, &schema).await
             }
 
             Err(Error::MySql(mysql_async::Error::Server(mysql_async::ServerError {
