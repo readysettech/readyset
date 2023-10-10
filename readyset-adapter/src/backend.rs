@@ -738,6 +738,13 @@ impl<DB: UpstreamDatabase> PrepareResult<DB> {
         }
     }
 
+    pub fn into_upstream(self) -> Option<UpstreamPrepare<DB>> {
+        match self.inner {
+            PrepareResultInner::Upstream(ur) | PrepareResultInner::Both(_, ur) => Some(ur),
+            _ => None,
+        }
+    }
+
     /// If this [`PrepareResult`] is a [`PrepareResult::Both`], convert it into only a
     /// [`PrepareResult::Upstream`]
     pub fn make_upstream_only(&mut self) {
@@ -1604,6 +1611,22 @@ where
         log_query(self.query_log_sender.as_ref(), event, self.settings.slowlog);
 
         result
+    }
+
+    pub async fn remove_statement(&mut self, id: u32) -> Result<(), DB::Error> {
+        let statement = self
+            .state
+            .prepared_statements
+            .try_remove(id as usize)
+            .ok_or(PreparedStatementMissing { statement_id: id })?;
+
+        if let Some(ur) = statement.prep.into_upstream() {
+            if let Some(upstream) = &mut self.upstream {
+                upstream.remove_statement(ur.statement_id).await?;
+            }
+        }
+
+        Ok(())
     }
 
     /// Should only be called with a SqlQuery that is of type StartTransaction, Commit, or
