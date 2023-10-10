@@ -892,13 +892,13 @@ mod types {
             .unwrap();
         eventually!(
             run_test: {
-                let res = client.query_one(&stmt, &[&"A"]).await.unwrap();
+                let res = client.query_one(&stmt, &[&"A"]).await;
                 let dest = last_query_info(&client).await.destination;
                 AssertUnwindSafe(move || (res, dest))
             },
             then_assert: |res| {
                 let (res, dest) = res();
-                assert_eq!(res.get::<_, String>(0), "a");
+                assert_eq!(res.unwrap().get::<_, String>(0), "a");
                 assert_eq!(dest, QueryDestination::Readyset);
             }
         );
