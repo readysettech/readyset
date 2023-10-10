@@ -163,7 +163,8 @@ impl ps::PsqlBackend for Backend {
             .try_into()
     }
 
-    async fn on_close(&mut self, _statement_id: u32) -> Result<(), ps::Error> {
+    async fn on_close(&mut self, statement_id: u32) -> Result<(), ps::Error> {
+        self.inner.remove_statement(statement_id).await?;
         Ok(())
     }
 }

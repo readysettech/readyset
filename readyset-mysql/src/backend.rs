@@ -699,7 +699,9 @@ where
         }
     }
 
-    async fn on_close(&mut self, _: u32) {}
+    async fn on_close(&mut self, statement_id: u32) {
+        let _ = self.noria.remove_statement(statement_id).await;
+    }
 
     async fn on_query(&mut self, query: &str, results: QueryResultWriter<'_, W>) -> io::Result<()> {
         if self.enable_statement_logging {
