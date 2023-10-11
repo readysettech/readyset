@@ -690,6 +690,18 @@ impl Protocol {
                     parameter_data_types,
                 } => {
                     self.state = State::Extended;
+
+                    if prepared_statement_name.is_empty() {
+                        if let Some(id) = self
+                            .prepared_statements
+                            .remove(prepared_statement_name.borrow() as &str)
+                            .map(|d| d.prepared_statement_id)
+                        {
+                            backend.on_close(id).await?;
+                            channel.clear_statement_param_types(&prepared_statement_name);
+                        }
+                    }
+
                     let PrepareResponse {
                         prepared_statement_id,
                         param_schema,
