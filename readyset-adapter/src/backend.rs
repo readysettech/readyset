@@ -69,7 +69,6 @@
 //! being too heavy handed.
 
 use std::borrow::Cow;
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
 use std::marker::PhantomData;
@@ -79,6 +78,7 @@ use std::time::{Duration, Instant};
 
 use crossbeam_skiplist::SkipSet;
 use futures::future::{self, OptionFuture};
+use lru::LruCache;
 use mysql_common::row::convert::{FromRow, FromRowError};
 use nom_sql::{
     CacheInner, CreateCacheStatement, DeleteStatement, Dialect, DropCacheStatement,
@@ -334,7 +334,7 @@ impl BackendBuilder {
             last_query: None,
             state: BackendState {
                 proxy_state,
-                parsed_query_cache: HashMap::new(),
+                parsed_query_cache: LruCache::new(10_000.try_into().expect("10000 is not 0")),
                 prepared_statements: Default::default(),
                 query_status_cache,
                 ticket: self.ticket,
@@ -563,7 +563,7 @@ where
     /// A cache of queries that we've seen, and their current state, used for processing
     query_status_cache: &'static QueryStatusCache,
     // a cache of all previously parsed queries
-    parsed_query_cache: HashMap<String, SqlQuery>,
+    parsed_query_cache: LruCache<String, SqlQuery>,
     // all queries previously prepared on noria or upstream, mapped by their ID.
     prepared_statements: Slab<PreparedStatement<DB>>,
     /// Current RYW ticket. `None` if RYW is not enabled. This `ticket` will
@@ -2639,17 +2639,21 @@ where
     }
 
     fn parse_query(&mut self, query: &str) -> ReadySetResult<SqlQuery> {
-        match self.state.parsed_query_cache.entry(query.to_owned()) {
-            Entry::Occupied(entry) => Ok(entry.get().clone()),
-            Entry::Vacant(entry) => {
-                trace!(%query, "Parsing query");
-                match nom_sql::parse_query(self.settings.dialect, query) {
-                    Ok(parsed_query) => Ok(entry.insert(parsed_query).clone()),
-                    Err(_) => Err(ReadySetError::UnparseableQuery {
-                        query: query.to_string(),
-                    }),
-                }
+        if let Some(cached_query) = self.state.parsed_query_cache.get(query) {
+            return Ok(cached_query.clone());
+        }
+
+        trace!(%query, "Parsing query");
+        match nom_sql::parse_query(self.settings.dialect, query) {
+            Ok(parsed_query) => {
+                self.state
+                    .parsed_query_cache
+                    .put(query.to_string(), parsed_query.clone());
+                Ok(parsed_query)
             }
+            Err(_) => Err(ReadySetError::UnparseableQuery {
+                query: query.to_string(),
+            }),
         }
     }
 
