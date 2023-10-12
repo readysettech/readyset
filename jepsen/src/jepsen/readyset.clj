@@ -149,7 +149,7 @@
                (c/exec :rm :-rf
                        "/var/run/readyset-server.pid"
                        "/var/log/readyset-server.log"
-                       rs.auto/db-dir))))
+                       rs.auto/storage-dir))))
           (error node "unknown role")))
 
       db/LogFiles
