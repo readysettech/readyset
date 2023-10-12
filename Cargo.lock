@@ -4441,6 +4441,7 @@ dependencies = [
  "parking_lot 0.11.2",
  "proptest",
  "quanta",
+ "rand 0.8.5",
  "readyset-alloc",
  "readyset-client",
  "readyset-client-metrics",

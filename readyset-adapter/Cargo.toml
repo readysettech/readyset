@@ -71,12 +71,17 @@ database-utils = { path = "../database-utils" }
 proptest = "1.0.0"
 test-strategy = "0.2.0"
 criterion = "0.3"
+rand = "0.8.5"
 
 [lib]
 path = "src/lib.rs"
 
 [[bench]]
 name = "rewrite"
+harness = false
+
+[[bench]]
+name = "parse"
 harness = false
 
 [features]
