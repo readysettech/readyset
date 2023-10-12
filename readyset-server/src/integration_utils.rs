@@ -39,7 +39,7 @@ pub fn get_persistence_params_in_tmp_dir(prefix: &str, tmpdir: &str) -> Persiste
     PersistenceParameters {
         mode: DurabilityMode::Permanent,
         db_filename_prefix: String::from(prefix),
-        db_dir: Some(tmpdir.into()),
+        storage_dir: Some(tmpdir.into()),
         ..Default::default()
     }
 }
