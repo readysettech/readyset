@@ -20,6 +20,7 @@ use anyhow::{anyhow, bail};
 use async_trait::async_trait;
 use clap::builder::NonEmptyStringValueParser;
 use clap::{ArgGroup, Parser, ValueEnum};
+use crossbeam_skiplist::SkipSet;
 use database_utils::{DatabaseType, DatabaseURL, UpstreamConfig};
 use failpoint_macros::set_failpoint;
 use futures_util::future::FutureExt;
@@ -41,7 +42,7 @@ use readyset_client::consensus::AuthorityType;
 #[cfg(feature = "failure_injection")]
 use readyset_client::failpoints;
 use readyset_client::metrics::recorded;
-use readyset_client::{ReadySetHandle, ViewCreateRequest};
+use readyset_client::ReadySetHandle;
 use readyset_common::ulimit::maybe_increase_nofile_limit;
 use readyset_dataflow::Readers;
 use readyset_errors::{internal_err, ReadySetError};
@@ -50,6 +51,7 @@ use readyset_server::worker::readers::{retry_misses, Ack, BlockingRead, ReadRequ
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetryInitializer};
 use readyset_util::futures::abort_on_panic;
 use readyset_util::redacted::RedactedString;
+use readyset_util::shared_cache::SharedCache;
 use readyset_util::shutdown;
 use readyset_version::*;
 use tokio::net;
@@ -611,7 +613,9 @@ where
         info!(%listen_address, "Listening for new connections");
 
         let auto_increments: Arc<RwLock<HashMap<Relation, AtomicUsize>>> = Arc::default();
-        let query_cache: Arc<RwLock<HashMap<ViewCreateRequest, Relation>>> = Arc::default();
+        let view_name_cache = SharedCache::new();
+        let view_cache = SharedCache::new();
+        let connections: Arc<SkipSet<SocketAddr>> = Arc::default();
         let mut health_reporter = AdapterHealthReporter::new();
 
         let rs_connect = span!(Level::INFO, "Connecting to RS server");
@@ -855,7 +859,9 @@ where
         if let MigrationMode::OutOfBand = migration_mode {
             set_failpoint!("adapter-out-of-band");
             let rh = rh.clone();
-            let (auto_increments, query_cache) = (auto_increments.clone(), query_cache.clone());
+            let auto_increments = auto_increments.clone();
+            let view_name_cache = view_name_cache.clone();
+            let view_cache = view_cache.clone();
             let shutdown_rx = shutdown_rx.clone();
             let loop_interval = options.migration_task_interval;
             let max_retry = options.max_processing_minutes;
@@ -877,8 +883,9 @@ where
                 let noria =
                     NoriaConnector::new(
                         rh.clone(),
-                        auto_increments.clone(),
-                        query_cache.clone(),
+                        auto_increments,
+                        view_name_cache.new_local(),
+                        view_cache.new_local(),
                         noria_read_behavior,
                         expr_dialect,
                         parse_dialect,
@@ -985,16 +992,20 @@ where
         let expr_dialect = self.expr_dialect;
         let parse_dialect = self.parse_dialect;
         while let Some(Ok(s)) = rt.block_on(listener.next()) {
-            let connection = info_span!("connection", addr = %s.peer_addr()?);
+            let client_addr = s.peer_addr()?;
+            let connection = info_span!("connection", addr = %client_addr);
             connection.in_scope(|| debug!("Accepted new connection"));
             s.set_nodelay(true)?;
 
             // bunch of stuff to move into the async block below
             let rh = rh.clone();
             let adapter_authority = adapter_authority.clone();
-            let (auto_increments, query_cache) = (auto_increments.clone(), query_cache.clone());
+            let auto_increments = auto_increments.clone();
+            let view_name_cache = view_name_cache.clone();
+            let view_cache = view_cache.clone();
             let mut connection_handler = self.connection_handler.clone();
             let backend_builder = BackendBuilder::new()
+                .client_addr(client_addr)
                 .slowlog(options.log_slow)
                 .users(users.clone())
                 .require_authentication(!options.allow_unauthenticated_connections)
@@ -1010,6 +1021,7 @@ where
                 .telemetry_sender(telemetry_sender.clone())
                 .fallback_recovery_seconds(options.fallback_recovery_seconds)
                 .enable_experimental_placeholder_inlining(options.experimental_placeholder_inlining)
+                .connections(connections.clone())
                 .metrics_handle(prometheus_handle.clone().map(MetricsHandle::new));
             let telemetry_sender = telemetry_sender.clone();
 
@@ -1044,8 +1056,9 @@ where
                             Ok(ssp) => {
                                 let noria = NoriaConnector::new_with_local_reads(
                                     rh.clone(),
-                                    auto_increments.clone(),
-                                    query_cache.clone(),
+                                    auto_increments,
+                                    view_name_cache.new_local(),
+                                    view_cache.new_local(),
                                     noria_read_behavior,
                                     r,
                                     expr_dialect,

@@ -303,21 +303,23 @@ mod types {
             .await
             .unwrap();
 
-        sleep().await;
-
-        let mut project_eq_res = client
-            .query("SELECT x = 'a' FROM t", &[])
-            .await
-            .unwrap()
-            .into_iter()
-            .map(|r| r.get(0))
-            .collect::<Vec<bool>>();
-        project_eq_res.sort();
-        assert_eq!(project_eq_res, vec![false, false, true, true]);
-
-        assert_eq!(
-            last_query_info(&client).await.destination,
-            QueryDestination::Readyset
+        eventually!(
+            run_test: {
+                let mut project_eq_res = client
+                    .query("SELECT x = 'a' FROM t", &[])
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .map(|r| r.get(0))
+                    .collect::<Vec<bool>>();
+                project_eq_res.sort();
+                let dest = last_query_info(&client).await.destination;
+                (project_eq_res, dest)
+            },
+            then_assert: |(project_eq_res, dest)| {
+                assert_eq!(project_eq_res, vec![false, false, true, true]);
+                assert_eq!(dest, QueryDestination::Readyset);
+            }
         );
 
         let where_eq_res: i64 = client
@@ -691,18 +693,23 @@ mod types {
             .await
             .unwrap();
 
-        let post_rename_res = client
-            .query("SELECT x FROM t2", &[])
-            .await
-            .unwrap()
-            .into_iter()
-            .map(|r| r.get(0))
-            .collect::<Vec<Cba2>>();
-        assert_eq!(post_rename_res, vec![Cba2::C]);
+        eventually!(
+            run_test: {
+                let post_rename_res = client
+                    .query("SELECT x FROM t2", &[])
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .map(|r| r.get(0))
+                    .collect::<Vec<Cba2>>();
+                let dest = last_query_info(&client).await.destination;
 
-        assert_eq!(
-            last_query_info(&client).await.destination,
-            QueryDestination::Readyset
+                (post_rename_res, dest)
+            },
+            then_assert: |(post_rename_res, dest)| {
+                assert_eq!(post_rename_res, vec![Cba2::C]);
+                assert_eq!(dest, QueryDestination::Readyset);
+            }
         );
 
         shutdown_tx.shutdown().await;
@@ -892,13 +899,13 @@ mod types {
             .unwrap();
         eventually!(
             run_test: {
-                let res = client.query_one(&stmt, &[&"A"]).await.unwrap();
+                let res = client.query_one(&stmt, &[&"A"]).await;
                 let dest = last_query_info(&client).await.destination;
                 AssertUnwindSafe(move || (res, dest))
             },
             then_assert: |res| {
                 let (res, dest) = res();
-                assert_eq!(res.get::<_, String>(0), "a");
+                assert_eq!(res.unwrap().get::<_, String>(0), "a");
                 assert_eq!(dest, QueryDestination::Readyset);
             }
         );

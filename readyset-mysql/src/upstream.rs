@@ -268,8 +268,12 @@ impl UpstreamDatabase for MySqlUpstream {
         S: AsRef<str> + Send + Sync + 'a,
     {
         let statement = self.conn.prep(query.as_ref()).await?;
-        self.prepared_statements
-            .insert(statement.id(), statement.clone());
+        if let Some(old_stmt) = self
+            .prepared_statements
+            .insert(statement.id(), statement.clone())
+        {
+            self.conn.close(old_stmt).await?;
+        }
         Ok(UpstreamPrepare {
             statement_id: statement.id(),
             meta: StatementMeta {
@@ -296,6 +300,19 @@ impl UpstreamDatabase for MySqlUpstream {
             )
             .await?;
         handle_query_result!(result)
+    }
+
+    async fn remove_statement(&mut self, statement_id: u32) -> Result<(), Self::Error> {
+        let statement = self
+            .prepared_statements
+            .remove(&statement_id)
+            .ok_or(Error::ReadySet(ReadySetError::PreparedStatementMissing {
+                statement_id,
+            }))?;
+
+        self.conn.close(statement).await?;
+
+        Ok(())
     }
 
     async fn query<'a>(&'a mut self, query: &'a str) -> Result<Self::QueryResult<'a>, Error> {

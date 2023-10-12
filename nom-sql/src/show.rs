@@ -29,6 +29,7 @@ pub enum ShowStatement {
     ReadySetMigrationStatus(u64),
     ReadySetVersion,
     ReadySetTables,
+    Connections,
 }
 
 impl ShowStatement {
@@ -61,6 +62,7 @@ impl ShowStatement {
                 Self::ReadySetMigrationStatus(id) => write!(f, "READYSET MIGRATION STATUS {}", id),
                 Self::ReadySetVersion => write!(f, "READYSET VERSION"),
                 Self::ReadySetTables => write!(f, "READYSET TABLES"),
+                Self::Connections => write!(f, "CONNECTIONS"),
             }
         })
     }
@@ -169,6 +171,7 @@ pub fn show(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u
             ),
             map(show_tables(dialect), ShowStatement::Tables),
             value(ShowStatement::Events, tag_no_case("events")),
+            value(ShowStatement::Connections, tag_no_case("connections")),
         ))(i)?;
         Ok((i, statement))
     }
@@ -487,5 +490,13 @@ mod tests {
             b"SHOW\t READYSET\t MIGRATION\t STATUS\t 123456"
         );
         assert_eq!(res, ShowStatement::ReadySetMigrationStatus(123456))
+    }
+
+    #[test]
+    fn show_connections() {
+        assert_eq!(
+            test_parse!(show(Dialect::MySQL), b"SHOW CONNECTIONS"),
+            ShowStatement::Connections
+        );
     }
 }

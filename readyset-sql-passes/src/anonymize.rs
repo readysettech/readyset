@@ -202,7 +202,8 @@ impl<'ast> VisitorMut<'ast> for AnonymizeVisitor<'_> {
             | nom_sql::ShowStatement::ReadySetStatusAdapter
             | nom_sql::ShowStatement::ReadySetMigrationStatus(..)
             | nom_sql::ShowStatement::ReadySetVersion
-            | nom_sql::ShowStatement::ReadySetTables => {}
+            | nom_sql::ShowStatement::ReadySetTables
+            | nom_sql::ShowStatement::Connections => {}
         }
         Ok(())
     }

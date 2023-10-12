@@ -2,7 +2,6 @@ use std::borrow::Cow;
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
-use std::fmt;
 use std::sync::{atomic, Arc};
 
 use itertools::Itertools;
@@ -21,13 +20,13 @@ use readyset_client::{
     SchemaType, Table, TableOperation, View, ViewCreateRequest, ViewQuery,
 };
 use readyset_data::{DfType, DfValue, Dialect, TimestampTz};
-use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
 use readyset_errors::{
-    internal, internal_err, invalid_query, invariant_eq, table_err, unsupported, unsupported_err,
-    ReadySetResult,
+    internal_err, invalid_query, invariant_eq, table_err, unsupported, unsupported_err,
+    ReadySetError, ReadySetResult,
 };
 use readyset_server::worker::readers::{CallResult, ReadRequestHandler};
 use readyset_util::redacted::Sensitive;
+use readyset_util::shared_cache::{self, LocalCache};
 use tokio::sync::RwLock;
 use tracing::{error, info, instrument, trace, warn};
 
@@ -35,37 +34,10 @@ use crate::backend::SelectSchema;
 use crate::rewrite::{self, ProcessedQueryParams};
 use crate::utils;
 
-type StatementID = u32;
-
-#[derive(Clone)]
-// Due to differences in data type sizes, the large_enum_variant Clippy warning was being emitted
-// for this type, but only when compiling for aarch64 targets.
-#[cfg_attr(target_arch = "aarch64", allow(clippy::large_enum_variant))]
-pub(crate) enum PreparedStatement {
-    Select(PreparedSelectStatement),
-    Insert(nom_sql::InsertStatement),
-    Update(nom_sql::UpdateStatement),
-    Delete(DeleteStatement),
-}
-
-#[derive(Clone)]
-pub(crate) struct PreparedSelectStatement {
+#[derive(Clone, Debug)]
+pub struct PreparedSelectStatement {
     name: Relation,
     processed_query_params: ProcessedQueryParams,
-}
-
-impl fmt::Debug for PreparedStatement {
-    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        // FIXME(REA-2168): Use correct dialect.
-        match self {
-            PreparedStatement::Select(PreparedSelectStatement { name, .. }) => {
-                write!(f, "{}", name.display(nom_sql::Dialect::MySQL),)
-            }
-            PreparedStatement::Insert(s) => write!(f, "{}", s.display(nom_sql::Dialect::MySQL)),
-            PreparedStatement::Update(s) => write!(f, "{}", s.display(nom_sql::Dialect::MySQL)),
-            PreparedStatement::Delete(s) => write!(f, "{}", s.display(nom_sql::Dialect::MySQL)),
-        }
-    }
 }
 
 /// Wrapper around a NoriaBackendInner which may not have been successfully
@@ -88,7 +60,7 @@ impl NoriaBackend {
 pub struct NoriaBackendInner {
     noria: ReadySetHandle,
     tables: BTreeMap<Relation, Table>,
-    views: BTreeMap<Relation, View>,
+    views: LocalCache<Relation, View>,
     /// The server can handle (non-parameterized) LIMITs and (parameterized) OFFSETs in the
     /// dataflow graph
     server_supports_pagination: bool,
@@ -104,10 +76,14 @@ macro_rules! noria_await {
 }
 
 impl NoriaBackendInner {
-    async fn new(ch: ReadySetHandle, server_supports_pagination: bool) -> Self {
+    async fn new(
+        ch: ReadySetHandle,
+        views: LocalCache<Relation, View>,
+        server_supports_pagination: bool,
+    ) -> Self {
         NoriaBackendInner {
             tables: BTreeMap::new(),
-            views: BTreeMap::new(),
+            views,
             noria: ch,
             server_supports_pagination,
         }
@@ -121,34 +97,33 @@ impl NoriaBackendInner {
         Ok(self.tables.get_mut(table).unwrap())
     }
 
-    /// If `invalidate_cache` is passed, the view cache, `views` will be ignored and a view will be
-    /// retrieved from noria.
+    /// If `invalidate_cache` is passed, `self.views` will be ignored and a view will be retrieved
+    /// from noria.
     async fn get_noria_view<'a>(
         &'a mut self,
         view: &Relation,
         invalidate_cache: bool,
     ) -> ReadySetResult<&'a mut View> {
         if invalidate_cache {
-            self.views.remove(view);
+            self.views.remove(view).await;
         }
-        if !self.views.contains_key(view) {
-            let vh = noria_await!(self, self.noria.view(view.clone()))?;
-            self.views.insert(view.to_owned(), vh);
-        }
-        Ok(self.views.get_mut(view).unwrap())
+        self.views
+            .get_mut_or_try_insert_with(view, shared_cache::InsertMode::Shared, async {
+                noria_await!(self, self.noria.view(view.clone()))
+            })
+            .await
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct SelectPrepareResultInner {
-    pub statement_id: StatementID,
     pub params: Vec<ColumnSchema>,
     pub schema: Vec<ColumnSchema>,
 }
 
-/// Result of preparing a statement against ReadySet
+/// Types for a prepared select statement against ReadySet
 #[derive(Debug, Clone)]
-pub enum SelectPrepareResult {
+pub enum PreparedSelectTypes {
     /// Statement can be executed against ReadySet but we do not know the schema because it does
     /// not exist in dataflow. This variant is not useful without an upstream connection.
     ///
@@ -158,43 +133,30 @@ pub enum SelectPrepareResult {
     /// metadata (since the query itself is not cached in dataflow). Instead, we must form the
     /// prepared statement response by retrieving the correct metadata from the upstream
     /// prepared statement response.
-    NoSchema(StatementID),
+    NoSchema,
     /// The statement is cached in dataflow and we have the schema.
     Schema(SelectPrepareResultInner),
 }
 
 #[derive(Debug, Clone)]
 pub enum PrepareResult {
-    Select(SelectPrepareResult),
+    Select {
+        types: PreparedSelectTypes,
+        statement: PreparedSelectStatement,
+    },
     Insert {
-        statement_id: StatementID,
         params: Vec<ColumnSchema>,
         schema: Vec<ColumnSchema>,
+        statement: InsertStatement,
     },
     Update {
-        statement_id: StatementID,
         params: Vec<ColumnSchema>,
+        statement: UpdateStatement,
     },
     Delete {
-        statement_id: StatementID,
         params: Vec<ColumnSchema>,
+        statement: DeleteStatement,
     },
-}
-
-impl PrepareResult {
-    /// Get the noria statement id for this statement
-    pub fn statement_id(&self) -> StatementID {
-        match self {
-            PrepareResult::Select(SelectPrepareResult::Schema(SelectPrepareResultInner {
-                statement_id,
-                ..
-            }))
-            | PrepareResult::Select(SelectPrepareResult::NoSchema(statement_id))
-            | PrepareResult::Insert { statement_id, .. }
-            | PrepareResult::Delete { statement_id, .. }
-            | PrepareResult::Update { statement_id, .. } => *statement_id,
-        }
-    }
 }
 
 /// A single row in the variable table associated with [`QueryResult::MetaVariables`].
@@ -296,89 +258,11 @@ impl<'a> QueryResult<'a> {
     }
 }
 
-#[derive(Clone)]
-/// Global and thread-local cache of view endpoints and prepared statements.
-pub struct ViewCache {
-    /// Global cache of view endpoints and prepared statements.
-    global: Arc<RwLock<HashMap<ViewCreateRequest, Relation>>>,
-    /// Thread-local version of global cache (consulted first).
-    local: HashMap<ViewCreateRequest, Relation>,
-}
-
-impl ViewCache {
-    /// Construct a new ViewCache with a passed in global view cache.
-    pub fn new(global_cache: Arc<RwLock<HashMap<ViewCreateRequest, Relation>>>) -> ViewCache {
-        ViewCache {
-            global: global_cache,
-            local: HashMap::new(),
-        }
-    }
-
-    /// Registers a statement with the provided name into both the local and global view caches.
-    pub async fn register_statement(&mut self, name: &Relation, view_request: ViewCreateRequest) {
-        self.local
-            .entry(view_request.clone())
-            .or_insert_with(|| name.clone());
-        self.global
-            .write()
-            .await
-            .entry(view_request)
-            .or_insert_with(|| name.clone());
-    }
-
-    /// Retrieves the name for the provided statement if it's in the cache. We first check local
-    /// cache, and if it's not there we check global cache. If it's in global but not local, we
-    /// backfill local cache before returning the result.
-    pub async fn statement_name(&mut self, view_request: &ViewCreateRequest) -> Option<Relation> {
-        let maybe_name = if let Some(name) = self.local.get(view_request) {
-            return Some(name.clone());
-        } else {
-            // Didn't find it in local, so let's check global.
-            let gc = self.global.read().await;
-            gc.get(view_request).cloned()
-        };
-
-        maybe_name.map(|n| {
-            // Backfill into local before we return.
-            self.local.insert(view_request.clone(), n.clone());
-            n
-        })
-    }
-
-    /// Removes the statement with the given name from both the global and local caches.
-    pub async fn remove_statement(&mut self, name: &Relation) {
-        self.local.retain(|_, v| v != name);
-        self.global.write().await.retain(|_, v| v != name);
-    }
-
-    /// Clears all statements from all caches
-    async fn clear(&mut self) {
-        self.local.clear();
-        self.global.write().await.clear();
-    }
-
-    /// Returns the original view create request based on a provided name if it exists in either the
-    /// local or global caches.
-    pub async fn view_create_request_from_name(
-        &self,
-        name: &Relation,
-    ) -> Option<ViewCreateRequest> {
-        if let Some((v, _)) = self.local.iter().find(|(_, n)| *n == name) {
-            return Some(v.clone());
-        }
-
-        let gc = self.global.read().await;
-        gc.iter().find(|(_, n)| *n == name).map(|(v, _)| v.clone())
-    }
-}
-
 pub struct NoriaConnector {
     inner: NoriaBackend,
     auto_increments: Arc<RwLock<HashMap<Relation, atomic::AtomicUsize>>>,
     /// Global and thread-local cache of view endpoints and prepared statements.
-    view_cache: ViewCache,
-
-    prepared_statement_cache: HashMap<StatementID, PreparedStatement>,
+    view_name_cache: LocalCache<ViewCreateRequest, Relation>,
 
     /// Set of views that have failed on previous requests. Separate from the backend
     /// to allow returning references to schemas from views all the way to mysql-srv,
@@ -456,7 +340,7 @@ impl ReadBehavior {
 #[derive(Debug)]
 pub(crate) enum ExecuteSelectContext<'ctx> {
     Prepared {
-        q_id: u32,
+        ps: &'ctx PreparedSelectStatement,
         params: &'ctx [DfValue],
     },
     AdHoc {
@@ -470,7 +354,8 @@ impl NoriaConnector {
     pub async fn new(
         ch: ReadySetHandle,
         auto_increments: Arc<RwLock<HashMap<Relation, atomic::AtomicUsize>>>,
-        query_cache: Arc<RwLock<HashMap<ViewCreateRequest, Relation>>>,
+        view_name_cache: LocalCache<ViewCreateRequest, Relation>,
+        view_cache: LocalCache<Relation, View>,
         read_behavior: ReadBehavior,
         dialect: Dialect,
         parse_dialect: nom_sql::Dialect,
@@ -480,7 +365,8 @@ impl NoriaConnector {
         NoriaConnector::new_with_local_reads(
             ch,
             auto_increments,
-            query_cache,
+            view_name_cache,
+            view_cache,
             read_behavior,
             None,
             dialect,
@@ -495,7 +381,8 @@ impl NoriaConnector {
     pub async fn new_with_local_reads(
         ch: ReadySetHandle,
         auto_increments: Arc<RwLock<HashMap<Relation, atomic::AtomicUsize>>>,
-        query_cache: Arc<RwLock<HashMap<ViewCreateRequest, Relation>>>,
+        view_name_cache: LocalCache<ViewCreateRequest, Relation>,
+        view_cache: LocalCache<Relation, View>,
         read_behavior: ReadBehavior,
         read_request_handler: Option<ReadRequestHandler>,
         dialect: Dialect,
@@ -503,15 +390,14 @@ impl NoriaConnector {
         schema_search_path: Vec<SqlIdentifier>,
         server_supports_pagination: bool,
     ) -> Self {
-        let backend = NoriaBackendInner::new(ch, server_supports_pagination).await;
+        let backend = NoriaBackendInner::new(ch, view_cache, server_supports_pagination).await;
 
         NoriaConnector {
             inner: NoriaBackend {
                 inner: Some(backend),
             },
             auto_increments,
-            view_cache: ViewCache::new(query_cache),
-            prepared_statement_cache: HashMap::new(),
+            view_name_cache,
             failed_views: HashSet::new(),
             read_behavior,
             read_request_handler: request_handler::LocalReadHandler::new(read_request_handler),
@@ -726,22 +612,27 @@ impl NoriaConnector {
 
     pub async fn prepare_insert(
         &mut self,
-        mut q: nom_sql::InsertStatement,
-        statement_id: u32,
+        mut statement: nom_sql::InsertStatement,
     ) -> ReadySetResult<PrepareResult> {
-        trace!(table = %q.table.name, "insert::access mutator");
-        let mutator = self.inner.get_mut()?.get_noria_table(&q.table).await?;
+        trace!(table = %statement.table.name, "insert::access mutator");
+        let mutator = self
+            .inner
+            .get_mut()?
+            .get_noria_table(&statement.table)
+            .await?;
         trace!("insert::extract schema");
         let schema = mutator
             .schema()
-            .ok_or_else(|| internal_err!("Could not find schema for table {}", q.table.name))?
+            .ok_or_else(|| {
+                internal_err!("Could not find schema for table {}", statement.table.name)
+            })?
             .fields
             .iter()
-            .map(|cs| ColumnSchema::from_base(cs.clone(), q.table.clone(), self.dialect))
+            .map(|cs| ColumnSchema::from_base(cs.clone(), statement.table.clone(), self.dialect))
             .collect::<Result<Vec<_>, _>>()?;
 
-        if q.fields.is_none() {
-            q.fields = Some(
+        if statement.fields.is_none() {
+            statement.fields = Some(
                 mutator
                     .schema()
                     .as_ref()
@@ -755,7 +646,7 @@ impl NoriaConnector {
 
         let params: Vec<_> = {
             // extract parameter columns -- easy here, since they must all be in the same table
-            let param_cols = utils::insert_statement_parameter_columns(&q);
+            let param_cols = utils::insert_statement_parameter_columns(&statement);
             param_cols
                 .into_iter()
                 .map(|c| {
@@ -773,46 +664,26 @@ impl NoriaConnector {
                 .collect::<ReadySetResult<Vec<_>>>()?
         };
 
-        // nothing more to do for an insert
-        // register a new prepared statement
-        trace!(id = statement_id, "insert::registered");
-        self.prepared_statement_cache
-            .insert(statement_id, PreparedStatement::Insert(q));
         Ok(PrepareResult::Insert {
-            statement_id,
             params,
             schema,
+            statement,
         })
     }
 
     pub(crate) async fn execute_prepared_insert(
         &mut self,
-        q_id: u32,
+        q: &InsertStatement,
         params: &[DfValue],
     ) -> ReadySetResult<QueryResult<'_>> {
-        let prep: PreparedStatement = self
-            .prepared_statement_cache
-            .get(&q_id)
-            .ok_or(PreparedStatementMissing { statement_id: q_id })?
-            .clone();
-        trace!("delegate");
-        match prep {
-            PreparedStatement::Insert(ref q) => {
-                let table = &q.table;
-                let putter = self.inner.get_mut()?.get_noria_table(table).await?;
-                trace!("insert::extract schema");
-                let schema = putter.schema().ok_or_else(|| {
-                    internal_err!("no schema for table {}", table.display_unquoted())
-                })?;
-                let rows = utils::extract_insert(q, params, schema, self.dialect)?;
-                self.do_insert(q, rows).await
-            }
-            _ => {
-                internal!(
-                    "Execute_prepared_insert is being called for a non insert prepared statement."
-                )
-            }
-        }
+        let table = &q.table;
+        let putter = self.inner.get_mut()?.get_noria_table(table).await?;
+        trace!("insert::extract schema");
+        let schema = putter
+            .schema()
+            .ok_or_else(|| internal_err!("no schema for table {}", table.display_unquoted()))?;
+        let rows = utils::extract_insert(q, params, schema, self.dialect)?;
+        self.do_insert(q, rows).await
     }
 
     pub(crate) async fn handle_delete(
@@ -872,19 +743,22 @@ impl NoriaConnector {
 
     pub(crate) async fn prepare_update(
         &mut self,
-        q: nom_sql::UpdateStatement,
-        statement_id: u32,
+        statement: UpdateStatement,
     ) -> ReadySetResult<PrepareResult> {
         // ensure that we have schemas and endpoints for the query
-        trace!(table = %q.table.name, "update::access mutator");
-        let mutator = self.inner.get_mut()?.get_noria_table(&q.table).await?;
+        trace!(table = %statement.table.name, "update::access mutator");
+        let mutator = self
+            .inner
+            .get_mut()?
+            .get_noria_table(&statement.table)
+            .await?;
         trace!("update::extract schema");
-        let table_schema = mutator
-            .schema()
-            .ok_or_else(|| internal_err!("Could not find schema for table {}", q.table.name))?;
+        let table_schema = mutator.schema().ok_or_else(|| {
+            internal_err!("Could not find schema for table {}", statement.table.name)
+        })?;
 
         // extract parameter columns
-        let params = utils::update_statement_parameter_columns(&q)
+        let params = utils::update_statement_parameter_columns(&statement)
             .into_iter()
             .map(|c| {
                 table_schema
@@ -894,54 +768,41 @@ impl NoriaConnector {
                     // and name - just check name here
                     .find(|f| f.column.name == c.name)
                     .cloned()
-                    .map(|cs| ColumnSchema::from_base(cs, q.table.clone(), self.dialect))
+                    .map(|cs| ColumnSchema::from_base(cs, statement.table.clone(), self.dialect))
                     .transpose()?
                     .ok_or_else(|| internal_err!("Unknown column {}", c.display_unquoted()))
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        trace!(id = statement_id, "update::registered");
-        self.prepared_statement_cache
-            .insert(statement_id, PreparedStatement::Update(q));
-        Ok(PrepareResult::Update {
-            statement_id,
-            params,
-        })
+        Ok(PrepareResult::Update { params, statement })
     }
 
     pub(crate) async fn execute_prepared_update(
         &mut self,
-        q_id: u32,
+        q: &UpdateStatement,
         params: &[DfValue],
     ) -> ReadySetResult<QueryResult<'_>> {
-        let prep: PreparedStatement = self
-            .prepared_statement_cache
-            .get(&q_id)
-            .ok_or(PreparedStatementMissing { statement_id: q_id })?
-            .clone();
-
-        trace!("delegate");
-        match prep {
-            PreparedStatement::Update(q) => self.do_update(Cow::Owned(q), Some(params)).await,
-            _ => internal!(),
-        }
+        self.do_update(Cow::Owned(q.clone()), Some(params)).await
     }
 
     pub(crate) async fn prepare_delete(
         &mut self,
-        q: DeleteStatement,
-        statement_id: u32,
+        statement: DeleteStatement,
     ) -> ReadySetResult<PrepareResult> {
         // ensure that we have schemas and endpoints for the query
-        trace!(table = %q.table.name, "delete::access mutator");
-        let mutator = self.inner.get_mut()?.get_noria_table(&q.table).await?;
+        trace!(table = %statement.table.name, "delete::access mutator");
+        let mutator = self
+            .inner
+            .get_mut()?
+            .get_noria_table(&statement.table)
+            .await?;
         trace!("delete::extract schema");
-        let table_schema = mutator
-            .schema()
-            .ok_or_else(|| internal_err!("Could not find schema for table {}", q.table.name))?;
+        let table_schema = mutator.schema().ok_or_else(|| {
+            internal_err!("Could not find schema for table {}", statement.table.name)
+        })?;
 
         // extract parameter columns
-        let params = utils::delete_statement_parameter_columns(&q)
+        let params = utils::delete_statement_parameter_columns(&statement)
             .into_iter()
             .map(|c| {
                 table_schema
@@ -951,37 +812,21 @@ impl NoriaConnector {
                     // and name - just check name here
                     .find(|f| f.column.name == c.name)
                     .cloned()
-                    .map(|cs| ColumnSchema::from_base(cs, q.table.clone(), self.dialect))
+                    .map(|cs| ColumnSchema::from_base(cs, statement.table.clone(), self.dialect))
                     .transpose()?
                     .ok_or_else(|| internal_err!("Unknown column {}", c.display_unquoted()))
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        trace!(id = statement_id, "delete::registered");
-        self.prepared_statement_cache
-            .insert(statement_id, PreparedStatement::Delete(q));
-        Ok(PrepareResult::Delete {
-            statement_id,
-            params,
-        })
+        Ok(PrepareResult::Delete { params, statement })
     }
 
     pub(crate) async fn execute_prepared_delete(
         &mut self,
-        q_id: u32,
+        q: &DeleteStatement,
         params: &[DfValue],
     ) -> ReadySetResult<QueryResult<'_>> {
-        let prep: PreparedStatement = self
-            .prepared_statement_cache
-            .get(&q_id)
-            .ok_or(PreparedStatementMissing { statement_id: q_id })?
-            .clone();
-
-        trace!("delegate");
-        match prep {
-            PreparedStatement::Delete(q) => self.do_delete(Cow::Owned(q), Some(params)).await,
-            _ => internal!(),
-        }
+        self.do_delete(Cow::Owned(q.clone()), Some(params)).await
     }
 
     /// Calls the `extend_recipe` endpoint on ReadySet with the given query.
@@ -1178,10 +1023,10 @@ impl NoriaConnector {
             // If the query is already in there with a different name, we don't need to make a new
             // name for it, as *lookups* only need one of the names for the query, and
             // when we drop it we'll be hitting noria anyway
-            self.view_cache
-                .register_statement(
-                    &name,
+            self.view_name_cache
+                .insert(
                     ViewCreateRequest::new(statement.clone(), schema_search_path),
+                    name.clone(),
                 )
                 .await;
 
@@ -1189,7 +1034,7 @@ impl NoriaConnector {
         }
     }
 
-    pub(crate) async fn get_view(
+    pub(crate) async fn get_view_name(
         &mut self,
         q: &nom_sql::SelectStatement,
         is_prepared: bool,
@@ -1199,8 +1044,8 @@ impl NoriaConnector {
         let search_path =
             override_schema_search_path.unwrap_or_else(|| self.schema_search_path().to_vec());
         let view_request = ViewCreateRequest::new(q.clone(), search_path.clone());
-        match self.view_cache.statement_name(&view_request).await {
-            None => {
+        self.view_name_cache
+            .get_mut_or_try_insert_with(&view_request, shared_cache::InsertMode::Shared, async {
                 let qname: Relation = utils::generate_query_name(q, &search_path).into();
 
                 // add the query to ReadySet
@@ -1245,21 +1090,21 @@ impl NoriaConnector {
                         Ok(view) => {
                             // We should not have an entry, but if we do it's safe to overwrite
                             // since we got this information from the controller.
-                            self.inner.get_mut()?.views.insert(qname.clone(), view);
+                            self.inner
+                                .get_mut()?
+                                .views
+                                .insert(qname.clone(), view)
+                                .await;
                         }
                         Err(e) => {
                             return Err(e);
                         }
                     }
                 }
-                self.view_cache
-                    .register_statement(&qname, view_request)
-                    .await;
-
                 Ok(qname)
-            }
-            Some(name) => Ok(name),
-        }
+            })
+            .await
+            .cloned()
     }
 
     /// Make a request to ReadySet to drop the query with the given name, and remove it from all
@@ -1269,7 +1114,7 @@ impl NoriaConnector {
             self.inner.get_mut()?,
             self.inner.get_mut()?.noria.remove_query(name)
         )?;
-        self.view_cache.remove_statement(name).await;
+        self.view_name_cache.remove_val(name).await;
         Ok(result)
     }
 
@@ -1279,7 +1124,7 @@ impl NoriaConnector {
             self.inner.get_mut()?,
             self.inner.get_mut()?.noria.remove_all_queries()
         )?;
-        self.view_cache.clear().await;
+        self.view_name_cache.clear().await;
         Ok(())
     }
 
@@ -1287,7 +1132,7 @@ impl NoriaConnector {
         &self,
         name: &Relation,
     ) -> Option<ViewCreateRequest> {
-        self.view_cache.view_create_request_from_name(name).await
+        self.view_name_cache.key_for_val(name).await
     }
 
     async fn do_insert(
@@ -1542,7 +1387,6 @@ impl NoriaConnector {
     pub(crate) async fn prepare_select(
         &mut self,
         mut statement: nom_sql::SelectStatement,
-        statement_id: u32,
         create_if_not_exist: bool,
         override_schema_search_path: Option<Vec<SqlIdentifier>>,
     ) -> ReadySetResult<PrepareResult> {
@@ -1571,7 +1415,7 @@ impl NoriaConnector {
         // check if we already have this query prepared
         trace!("select::access view");
         let qname = self
-            .get_view(
+            .get_view_name(
                 &statement,
                 true,
                 create_if_not_exist,
@@ -1598,15 +1442,12 @@ impl NoriaConnector {
             }
         };
 
-        trace!(id = statement_id, "select::registered");
-        let ps = PreparedSelectStatement {
+        let statement = PreparedSelectStatement {
             name: qname.clone(),
             processed_query_params,
         };
-        self.prepared_statement_cache
-            .insert(statement_id, PreparedStatement::Select(ps));
 
-        if let Some(getter_schema) = getter_schema {
+        let types = if let Some(getter_schema) = getter_schema {
             let mut params: Vec<_> = getter_schema
                 .to_cols(&client_param_columns, SchemaType::ProjectedSchema)?
                 .into_iter()
@@ -1618,18 +1459,16 @@ impl NoriaConnector {
                 .collect();
 
             params.extend(limit_columns);
-            Ok(PrepareResult::Select(SelectPrepareResult::Schema(
-                SelectPrepareResultInner {
-                    statement_id,
-                    params,
-                    schema: getter_schema.schema(SchemaType::ReturnedSchema).to_vec(),
-                },
-            )))
+
+            PreparedSelectTypes::Schema(SelectPrepareResultInner {
+                params,
+                schema: getter_schema.schema(SchemaType::ReturnedSchema).to_vec(),
+            })
         } else {
-            Ok(PrepareResult::Select(SelectPrepareResult::NoSchema(
-                statement_id,
-            )))
-        }
+            PreparedSelectTypes::NoSchema
+        };
+
+        Ok(PrepareResult::Select { types, statement })
     }
 
     #[instrument(level = "debug", skip(self, event))]
@@ -1640,23 +1479,18 @@ impl NoriaConnector {
         event: &mut readyset_client_metrics::QueryExecutionEvent,
     ) -> ReadySetResult<QueryResult<'_>> {
         let (qname, processed_query_params, params) = match ctx {
-            ExecuteSelectContext::Prepared { q_id, params } => {
-                let PreparedSelectStatement {
-                    name,
-                    processed_query_params,
-                } = {
-                    match self.prepared_statement_cache.get(&q_id) {
-                        Some(PreparedStatement::Select(ps)) => ps,
-                        Some(_) => internal!(),
-                        None => return Err(PreparedStatementMissing { statement_id: q_id }),
-                    }
-                };
-                (
-                    Cow::Borrowed(name),
-                    Cow::Borrowed(processed_query_params),
-                    params,
-                )
-            }
+            ExecuteSelectContext::Prepared {
+                ps:
+                    PreparedSelectStatement {
+                        name,
+                        processed_query_params,
+                    },
+                params,
+            } => (
+                Cow::Borrowed(name),
+                Cow::Borrowed(processed_query_params),
+                params,
+            ),
             ExecuteSelectContext::AdHoc {
                 mut statement,
                 create_if_missing,
@@ -1665,7 +1499,7 @@ impl NoriaConnector {
                 let processed_query_params =
                     rewrite::process_query(&mut statement, self.server_supports_pagination())?;
                 let name = self
-                    .get_view(&statement, false, create_if_missing, None)
+                    .get_view_name(&statement, false, create_if_missing, None)
                     .await?;
                 (
                     Cow::Owned(name),
@@ -1731,7 +1565,7 @@ impl NoriaConnector {
         is_prepared: bool,
     ) -> ReadySetResult<()> {
         let qname = self
-            .get_view(
+            .get_view_name(
                 statement,
                 is_prepared,
                 create_if_not_exists,
@@ -1878,71 +1712,6 @@ mod tests {
     use nom_sql::Dialect;
 
     use super::*;
-
-    mod view_cache {
-        use nom_sql::{parse_select_statement, Dialect, Relation};
-
-        use super::*;
-
-        #[tokio::test]
-        async fn register_and_remove_statement() {
-            let global = Arc::new(RwLock::new(HashMap::new()));
-            let mut view_cache = ViewCache::new(global);
-
-            let name = Relation::from("test_statement_name");
-            let statement = parse_select_statement(Dialect::MySQL, "SELECT a_col FROM t1").unwrap();
-            let view_request = ViewCreateRequest::new(statement, vec!["s1".into()]);
-
-            view_cache
-                .register_statement(&name, view_request.clone())
-                .await;
-            let retrieved_request = view_cache.view_create_request_from_name(&name).await;
-            assert_eq!(Some(view_request), retrieved_request);
-
-            view_cache.remove_statement(&name).await;
-            let retrieved_request = view_cache.view_create_request_from_name(&name).await;
-            assert_eq!(None, retrieved_request);
-        }
-
-        #[tokio::test]
-        async fn clear() {
-            let global = Arc::new(RwLock::new(HashMap::new()));
-            let mut view_cache = ViewCache::new(global.clone());
-
-            let statement1 = parse_select_statement(Dialect::MySQL, "SELECT a FROM t1").unwrap();
-            let statement2 = parse_select_statement(Dialect::MySQL, "SELECT b FROM t2").unwrap();
-            let create_request_1 = ViewCreateRequest::new(statement1, vec!["schema1".into()]);
-            let create_request_2 = ViewCreateRequest::new(statement2, vec!["schema2".into()]);
-
-            view_cache
-                .register_statement(&"q1".into(), create_request_1.clone())
-                .await;
-            view_cache
-                .register_statement(&"q2".into(), create_request_2.clone())
-                .await;
-
-            assert_eq!(
-                view_cache.view_create_request_from_name(&"q1".into()).await,
-                Some(create_request_1)
-            );
-            assert_eq!(
-                view_cache.view_create_request_from_name(&"q2".into()).await,
-                Some(create_request_2)
-            );
-
-            view_cache.clear().await;
-
-            assert_eq!(
-                view_cache.view_create_request_from_name(&"q1".into()).await,
-                None
-            );
-            assert_eq!(
-                view_cache.view_create_request_from_name(&"q2".into()).await,
-                None
-            );
-            assert!(global.read().await.is_empty());
-        }
-    }
 
     #[test]
     fn placeholder_verification_good() {

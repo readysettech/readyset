@@ -21,10 +21,11 @@ use readyset_adapter::query_status_cache::QueryStatusCache;
 use readyset_adapter::upstream_database::LazyUpstream;
 use readyset_adapter::{UpstreamConfig, UpstreamDatabase};
 use readyset_client::consensus::{Authority, LocalAuthorityStore};
-use readyset_client::{ReadySetHandle, ViewCreateRequest};
+use readyset_client::ReadySetHandle;
 use readyset_mysql::{MySqlQueryHandler, MySqlUpstream};
 use readyset_psql::{PostgreSqlQueryHandler, PostgreSqlUpstream};
 use readyset_server::{Builder, LocalAuthority, ReuseConfigType};
+use readyset_util::shared_cache::SharedCache;
 use readyset_util::shutdown::ShutdownSender;
 use tokio::sync::RwLock;
 use tokio::time::sleep;
@@ -529,7 +530,8 @@ impl TestScript {
         let database_type = run_opts.database_type;
         let replication_url = run_opts.replication_url.clone();
         let auto_increments: Arc<RwLock<HashMap<Relation, AtomicUsize>>> = Arc::default();
-        let query_cache: Arc<RwLock<HashMap<ViewCreateRequest, Relation>>> = Arc::default();
+        let view_name_cache = SharedCache::new();
+        let view_cache = SharedCache::new();
         let mut retry: usize = 0;
         let listener = loop {
             retry += 1;
@@ -555,7 +557,8 @@ impl TestScript {
             let noria = NoriaConnector::new(
                 rh,
                 auto_increments,
-                query_cache,
+                view_name_cache.new_local(),
+                view_cache.new_local(),
                 ReadBehavior::Blocking,
                 match database_type {
                     DatabaseType::MySQL => readyset_data::Dialect::DEFAULT_MYSQL,

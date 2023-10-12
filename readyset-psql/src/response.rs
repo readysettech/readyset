@@ -21,23 +21,26 @@ use crate::{upstream, PostgreSqlUpstream};
 pub struct PrepareResponse<'a>(pub &'a cl::PrepareResult<LazyUpstream<PostgreSqlUpstream>>);
 
 impl<'a> PrepareResponse<'a> {
-    pub fn try_into_ps(self, prepared_statement_id: u32) -> Result<ps::PrepareResponse, ps::Error> {
+    pub fn try_into_ps(self) -> Result<ps::PrepareResponse, ps::Error> {
         use readyset_adapter::backend::noria_connector::PrepareResult::*;
         use readyset_adapter::backend::noria_connector::{
-            SelectPrepareResult, SelectPrepareResultInner,
+            PreparedSelectTypes, SelectPrepareResultInner,
         };
 
+        let prepared_statement_id = self.0.statement_id;
         match self.0.upstream_biased() {
-            SinglePrepareResult::Noria(Select(SelectPrepareResult::Schema(
-                SelectPrepareResultInner { params, schema, .. },
-            ))) => Ok(ps::PrepareResponse {
+            SinglePrepareResult::Noria(Select {
+                types: PreparedSelectTypes::Schema(SelectPrepareResultInner { params, schema, .. }),
+                ..
+            }) => Ok(ps::PrepareResponse {
                 prepared_statement_id,
                 param_schema: NoriaSchema(params).try_into()?,
                 row_schema: NoriaSchema(schema).try_into()?,
             }),
-            SinglePrepareResult::Noria(Select(SelectPrepareResult::NoSchema(_))) => {
-                Err(ps::Error::InternalError("Unreachable".into()))
-            }
+            SinglePrepareResult::Noria(Select {
+                types: PreparedSelectTypes::NoSchema,
+                ..
+            }) => Err(ps::Error::InternalError("Unreachable".into())),
             SinglePrepareResult::Noria(Insert { params, schema, .. }) => Ok(ps::PrepareResponse {
                 prepared_statement_id,
                 param_schema: NoriaSchema(params).try_into()?,

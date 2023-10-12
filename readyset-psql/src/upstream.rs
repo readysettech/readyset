@@ -308,6 +308,16 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         }
     }
 
+    async fn remove_statement(&mut self, statement_id: u32) -> Result<(), Self::Error> {
+        self.prepared_statements
+            .remove(&statement_id)
+            .ok_or(Error::ReadySet(ReadySetError::PreparedStatementMissing {
+                statement_id,
+            }))?;
+
+        Ok(())
+    }
+
     /// Handle starting a transaction with the upstream database.
     async fn start_tx<'a>(
         &'a mut self,
