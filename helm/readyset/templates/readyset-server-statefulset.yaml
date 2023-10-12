@@ -126,7 +126,7 @@ spec:
               value: "{{ ( include "readyset.authority_address" . ) }}"
             - name: AUTHORITY
               value: "consul"
-            - name: DB_DIR
+            - name: STORAGE_DIR
               value: "/state"
             - name: LISTEN_ADDRESS
               value: "0.0.0.0"
