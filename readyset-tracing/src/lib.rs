@@ -53,7 +53,7 @@ pub struct Options {
     log_format: LogFormat,
 
     /// Disable colors in all log output
-    #[clap(long, env = "NO_COLOR")]
+    #[clap(long, env = "NO_COLOR", hide = true)]
     no_color: bool,
 
     /// Log level filter for spans and events. The log level filter string is a comma separated
@@ -76,20 +76,25 @@ pub struct Options {
     log_level: String,
 
     /// Host and port to send OTLP traces/spans data, via GRPC OLTP
-    #[clap(long, env = "TRACING_HOST")]
+    #[clap(long, env = "TRACING_HOST", hide = true)]
     tracing_host: Option<String>,
 
     /// Portion of traces that will be sent to the tracing endpoint; [0.0~1.0]
-    #[clap(long, env = "TRACING_SAMPLE_PERCENT", default_value_t = Percent(0.01))]
+    #[clap(long, env = "TRACING_SAMPLE_PERCENT", default_value_t = Percent(0.01), hide = true)]
     tracing_sample_percent: Percent,
 
     /// Whether to log all statements received by ReadySet via the client or replicators
-    #[clap(long, env = "STATEMENT_LOGGING")]
+    #[clap(long, env = "STATEMENT_LOGGING", hide = true)]
     pub statement_logging: bool,
 
     /// Optional filename for storing the statement log. Defaults to
     /// <deployment-name>_statements.log.
-    #[clap(long, env = "STATEMENT_LOG_PATH", requires = "statement_logging")]
+    #[clap(
+        long,
+        env = "STATEMENT_LOG_PATH",
+        requires = "statement_logging",
+        hide = true
+    )]
     pub statement_log_path: Option<String>,
 }
 

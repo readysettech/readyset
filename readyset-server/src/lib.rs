@@ -592,7 +592,7 @@ pub struct WorkerOptions {
     pub enable_packet_filters: bool,
 
     /// Number of workers to wait for before starting (including this one)
-    #[clap(long, default_value = "1", env = "MIN_WORKERS")]
+    #[clap(long, default_value = "1", env = "MIN_WORKERS", hide = true)]
     pub min_workers: usize,
 
     /// Shard the graph this many ways (<= 1 : disable sharding)
@@ -600,7 +600,7 @@ pub struct WorkerOptions {
     pub shards: usize,
 
     /// Volume associated with the server.
-    #[clap(long, env = "VOLUME_ID")]
+    #[clap(long, env = "VOLUME_ID", hide = true)]
     pub volume_id: Option<VolumeId>,
 
     /// Enable experimental support for TopK in dataflow.
