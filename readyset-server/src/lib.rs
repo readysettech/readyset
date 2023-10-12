@@ -632,8 +632,8 @@ pub struct WorkerOptions {
 
     /// Directory in which to store replicated table data. If not specified, defaults to the
     /// current working directory.
-    #[clap(long, env = "DB_DIR")]
-    pub db_dir: Option<PathBuf>,
+    #[clap(long, env = "STORAGE_DIR")]
+    pub storage_dir: Option<PathBuf>,
 
     #[clap(flatten)]
     pub domain_replication_options: ReplicationOptions,

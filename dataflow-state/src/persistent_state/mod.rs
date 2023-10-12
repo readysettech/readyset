@@ -245,7 +245,7 @@ pub struct PersistenceParameters {
     pub persistence_threads: i32,
     /// An optional path to a directory where to store the DB files, if None will be stored in the
     /// current working directory
-    pub db_dir: Option<PathBuf>,
+    pub storage_dir: Option<PathBuf>,
     /// The interval on which the RocksDB WAL will be flushed and synced to disk. If this value is
     /// set to 0, the WAL will be flushed and synced to disk with every write
     #[serde(default)]
@@ -258,7 +258,7 @@ impl Default for PersistenceParameters {
             mode: DurabilityMode::MemoryOnly,
             db_filename_prefix: String::from("readyset"),
             persistence_threads: 1,
-            db_dir: None,
+            storage_dir: None,
             wal_flush_interval_seconds: 0,
         }
     }
@@ -278,7 +278,7 @@ impl PersistenceParameters {
         mode: DurabilityMode,
         db_filename_prefix: Option<String>,
         persistence_threads: i32,
-        db_dir: Option<PathBuf>,
+        storage_dir: Option<PathBuf>,
         wal_flush_interval_seconds: u64,
     ) -> Self {
         // NOTE(fran): DO NOT impose a particular format on `db_filename_prefix`. If you need to,
@@ -292,7 +292,7 @@ impl PersistenceParameters {
             mode,
             db_filename_prefix,
             persistence_threads,
-            db_dir,
+            storage_dir,
             wal_flush_interval_seconds,
         }
     }
@@ -1418,7 +1418,7 @@ impl PersistentState {
 
         let (tmpdir, full_path) = match params.mode {
             DurabilityMode::Permanent => {
-                let mut path = params.db_dir.clone().unwrap_or_else(|| ".".into());
+                let mut path = params.storage_dir.clone().unwrap_or_else(|| ".".into());
                 if !path.is_dir() {
                     fs::create_dir_all(&path)?;
                 }
