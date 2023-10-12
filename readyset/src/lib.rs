@@ -163,7 +163,7 @@ pub struct Options {
     address: Option<SocketAddr>,
 
     /// ReadySet deployment ID. All nodes in a deployment must have the same deployment ID.
-    #[clap(long, env = "DEPLOYMENT", default_value = "tmp-readyset", value_parser = NonEmptyStringValueParser::new())]
+    #[clap(long, env = "DEPLOYMENT", default_value = "tmp-readyset", value_parser = NonEmptyStringValueParser::new(), hide = true)]
     deployment: String,
 
     /// Database engine protocol to emulate. If omitted, will be inferred from the
@@ -178,7 +178,13 @@ pub struct Options {
     pub database_type: Option<DatabaseType>,
 
     /// Run ReadySet in standalone mode, running a readyset-server instance within this adapter.
-    #[clap(long, env = "STANDALONE", conflicts_with = "embedded_readers")]
+    #[clap(
+        long,
+        env = "STANDALONE",
+        conflicts_with = "embedded_readers",
+        default_value = "true",
+        hide = true
+    )]
     standalone: bool,
 
     /// The authority to use
@@ -200,7 +206,8 @@ pub struct Options {
         env = "AUTHORITY_ADDRESS",
         default_value_if("authority", "standalone", Some(".")),
         default_value_if("authority", "consul", Some("127.0.0.1:8500")),
-        required = false
+        required = false,
+        hide = true
     )]
     authority_address: String,
 
@@ -245,12 +252,12 @@ pub struct Options {
 
     /// Allow database connections authenticated as this user. Defaults to the username in
     /// --upstream-db-url if not set. Ignored if --allow-unauthenticated-connections is passed
-    #[clap(long, env = "ALLOWED_USERNAME", short = 'u')]
+    #[clap(long, env = "ALLOWED_USERNAME", short = 'u', hide = true)]
     username: Option<String>,
 
     /// Password to authenticate database connections with. Defaults to the password in
     /// --upstream-db-url if not set. Ignored if --allow-unauthenticated-connections is passed
-    #[clap(long, env = "ALLOWED_PASSWORD", short = 'p')]
+    #[clap(long, env = "ALLOWED_PASSWORD", short = 'p', hide = true)]
     password: Option<RedactedString>,
 
     /// Enable recording and exposing Prometheus metrics
@@ -266,7 +273,8 @@ pub struct Options {
         long,
         env = "QUERY_LOG",
         requires = "metrics",
-        default_value_if("prometheus_metrics", "true", Some("true"))
+        default_value_if("prometheus_metrics", "true", Some("true")),
+        hide = true
     )]
     query_log: bool,
 
@@ -277,14 +285,15 @@ pub struct Options {
         hide = true,
         env = "QUERY_LOG_AD_HOC",
         requires = "query_log",
-        default_value_if("prometheus_metrics", "true", Some("true"))
+        default_value_if("prometheus_metrics", "true", Some("true")),
+        hide = true
     )]
     query_log_ad_hoc: bool,
 
     /// IP address to advertise to other ReadySet instances running in the same deployment.
     ///
     /// If not specified, defaults to the value of `address`
-    #[clap(long, env = "EXTERNAL_ADDRESS", value_parser = resolve_addr)]
+    #[clap(long, env = "EXTERNAL_ADDRESS", value_parser = resolve_addr, hide = true)]
     external_address: Option<IpAddr>,
 
     #[clap(flatten)]
@@ -363,7 +372,12 @@ pub struct Options {
     ///
     /// Should be combined with passing `--no-readers` and `--reader-replicas` with the number of
     /// adapter instances to each server process.
-    #[clap(long, env = "EMBEDDED_READERS", conflicts_with = "standalone")]
+    #[clap(
+        long,
+        env = "EMBEDDED_READERS",
+        conflicts_with = "standalone",
+        hide = true
+    )]
     embedded_readers: bool,
 
     #[clap(flatten)]
@@ -400,7 +414,7 @@ pub struct Options {
 
     /// In standalone or embedded-readers mode, the IP address on which the ReadySet controller
     /// will listen.
-    #[clap(long, env = "CONTROLLER_ADDRESS")]
+    #[clap(long, env = "CONTROLLER_ADDRESS", hide = true)]
     controller_address: Option<IpAddr>,
 }
 
