@@ -5,10 +5,9 @@ use std::convert::{TryFrom, TryInto};
 use std::sync::{atomic, Arc};
 
 use itertools::Itertools;
-use nom_sql::analysis::visit::Visitor;
 use nom_sql::{
-    self, ColumnConstraint, DeleteStatement, Expr, InsertStatement, Literal, Relation,
-    SelectStatement, SqlIdentifier, SqlQuery, UnaryOperator, UpdateStatement,
+    self, ColumnConstraint, DeleteStatement, Expr, InsertStatement, Relation, SqlIdentifier,
+    SqlQuery, UnaryOperator, UpdateStatement,
 };
 use readyset_client::consensus::{Authority, AuthorityControl};
 use readyset_client::consistency::Timestamp;
@@ -21,8 +20,8 @@ use readyset_client::{
 };
 use readyset_data::{DfType, DfValue, Dialect, TimestampTz};
 use readyset_errors::{
-    internal_err, invalid_query, invariant_eq, table_err, unsupported, unsupported_err,
-    ReadySetError, ReadySetResult,
+    internal_err, invariant_eq, table_err, unsupported, unsupported_err, ReadySetError,
+    ReadySetResult,
 };
 use readyset_server::worker::readers::{CallResult, ReadRequestHandler};
 use readyset_util::redacted::Sensitive;
@@ -346,6 +345,7 @@ pub(crate) enum ExecuteSelectContext<'ctx> {
     AdHoc {
         statement: nom_sql::SelectStatement,
         create_if_missing: bool,
+        processed_query_params: ProcessedQueryParams,
     },
 }
 
@@ -1492,12 +1492,10 @@ impl NoriaConnector {
                 params,
             ),
             ExecuteSelectContext::AdHoc {
-                mut statement,
+                statement,
                 create_if_missing,
+                processed_query_params,
             } => {
-                verify_no_placeholders(&statement)?;
-                let processed_query_params =
-                    rewrite::process_query(&mut statement, self.server_supports_pagination())?;
                 let name = self
                     .get_view_name(&statement, false, create_if_missing, None)
                     .await?;
@@ -1578,27 +1576,6 @@ impl NoriaConnector {
         self.inner.get_mut()?.get_noria_view(&qname, true).await?;
         Ok(())
     }
-}
-
-/// Verifies that there are no placeholder parameters in the given SELECT statement (i.e. ? or $N),
-/// returning `Ok(())` if none are found, or an `InvalidQuery` error if there are any placeholders
-/// present in the statement.
-fn verify_no_placeholders(statement: &SelectStatement) -> ReadySetResult<()> {
-    struct PlaceholderFoundVisitor;
-
-    impl<'ast> Visitor<'ast> for PlaceholderFoundVisitor {
-        type Error = ReadySetError;
-
-        fn visit_literal(&mut self, literal: &'ast Literal) -> Result<(), Self::Error> {
-            if matches!(literal, Literal::Placeholder(_)) {
-                invalid_query!("Ad-hoc queries may not contain placeholders")
-            } else {
-                Ok(())
-            }
-        }
-    }
-
-    PlaceholderFoundVisitor.visit_select_statement(statement)
 }
 
 /// Creates keys from processed query params, gets the select statement binops, and calls
@@ -1705,35 +1682,4 @@ async fn do_read<'a>(
         },
         data,
     ))
-}
-
-#[cfg(test)]
-mod tests {
-    use nom_sql::Dialect;
-
-    use super::*;
-
-    #[test]
-    fn placeholder_verification_good() {
-        let query = "SELECT n FROM t WHERE c = 123;";
-        let parsed_query = nom_sql::parse_query(Dialect::MySQL, query).unwrap();
-
-        match parsed_query {
-            SqlQuery::Select(select) => verify_no_placeholders(&select).unwrap(),
-            _ => panic!(),
-        }
-    }
-
-    #[test]
-    fn placeholder_verification_bad() {
-        let query = "SELECT n FROM t WHERE c = ?;";
-        let parsed_query = nom_sql::parse_query(Dialect::MySQL, query).unwrap();
-
-        match parsed_query {
-            SqlQuery::Select(select) => {
-                verify_no_placeholders(&select).unwrap_err();
-            }
-            _ => panic!(),
-        }
-    }
 }
