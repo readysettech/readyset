@@ -281,6 +281,17 @@ pub struct Options {
     )]
     query_log_ad_hoc: bool,
 
+    /// Restricts query logs to only cached queries (prepared statements or ad-hoc).
+    /// Disabled by default (that is, do not restrict to only cached queries).
+    #[clap(
+        long,
+        hide = true,
+        env = "QUERY_LOG_CACHED_ONLY",
+        requires = "query_log",
+        default_value_if("prometheus_metrics", "true", Some("false"))
+    )]
+    query_log_cached_only: bool,
+
     /// IP address to advertise to other ReadySet instances running in the same deployment.
     ///
     /// If not specified, defaults to the value of `address`
@@ -756,7 +767,11 @@ where
                 .name("Query logger".to_string())
                 .stack_size(2 * 1024 * 1024) // Use the same value tokio is using
                 .spawn_wrapper(move || {
-                    runtime.block_on(query_logger::QueryLogger::run(qlog_receiver, shutdown_rx));
+                    runtime.block_on(query_logger::QueryLogger::run(
+                        qlog_receiver,
+                        shutdown_rx,
+                        options.query_log_cached_only,
+                    ));
                     runtime.shutdown_background();
                 })?;
 

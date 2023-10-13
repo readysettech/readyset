@@ -229,6 +229,7 @@ impl QueryLogger {
     pub(crate) async fn run(
         mut receiver: UnboundedReceiver<QueryExecutionEvent>,
         mut shutdown_recv: ShutdownReceiver,
+        query_log_cached_only: bool,
     ) {
         let _span = info_span!("query-logger");
 
@@ -317,7 +318,7 @@ impl QueryLogger {
                         metrics.readyset_counter((event.event, event.sql_type)).increment(1);
                     }
 
-                    if let Some(duration) = event.upstream_duration {
+                    if !query_log_cached_only && let Some(duration) = event.upstream_duration {
                         metrics
                             .upstream_histogram((event.event, event.sql_type))
                             .record(duration);
