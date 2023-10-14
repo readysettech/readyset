@@ -119,7 +119,7 @@ impl Reader {
     #[failpoint("reader-handle-packet")]
     pub(in crate::node) fn process(
         &mut self,
-        m: &mut Option<Box<Packet>>,
+        m: &mut Option<Packet>,
         swap: bool,
         state: &mut backlog::WriteHandle,
     ) {

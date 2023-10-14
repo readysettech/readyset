@@ -6,10 +6,9 @@ use std::time;
 
 use ahash::AHashMap;
 use anyhow::{self, Context as AnyhowContext};
-use async_bincode::AsyncDestination;
 use dataflow::payload::{MaterializedState, SourceChannelIdentifier};
 use dataflow::prelude::Executor;
-use dataflow::{Domain, DomainRequest, Packet};
+use dataflow::{Domain, DomainRequest, DualTcpStream, Packet};
 use futures_util::sink::{Sink, SinkExt};
 use futures_util::stream::StreamExt;
 use futures_util::FutureExt;
@@ -26,15 +25,8 @@ use tracing::{debug, error, info, info_span, instrument, trace, warn, Span};
 
 use super::ChannelCoordinator;
 
-type DualTcpStream = dataflow::DualTcpStream<
-    BufStream<TcpStream>,
-    Box<Packet>,
-    Tagged<PacketData>,
-    AsyncDestination,
->;
-
 type Outputs =
-    AHashMap<ReplicaAddress, Box<dyn Sink<Box<Packet>, Error = bincode::Error> + Send + Unpin>>;
+    AHashMap<ReplicaAddress, Box<dyn Sink<Packet, Error = bincode::Error> + Send + Unpin>>;
 
 /// Generates a monotonically incrementing u64 value to be used as a token for our connections
 fn next_token() -> u64 {
@@ -63,7 +55,7 @@ pub struct Replica {
     incoming: Strawpoll<TcpListener>,
 
     /// A receiver for locally sent messages
-    locals: mpsc::UnboundedReceiver<Box<Packet>>,
+    locals: mpsc::UnboundedReceiver<Packet>,
 
     /// A receiver for domain messages
     requests: mpsc::Receiver<WrappedDomainRequest>,
@@ -78,7 +70,7 @@ impl Replica {
     pub(super) fn new(
         domain: Domain,
         on: TcpListener,
-        locals: mpsc::UnboundedReceiver<Box<Packet>>,
+        locals: mpsc::UnboundedReceiver<Packet>,
         requests: mpsc::Receiver<WrappedDomainRequest>,
         init_state_reqs: mpsc::Receiver<MaterializedState>,
         cc: Arc<ChannelCoordinator>,
@@ -98,7 +90,7 @@ impl Replica {
 
 struct Outboxes {
     /// messages for other domains
-    domains: AHashMap<ReplicaAddress, VecDeque<Box<Packet>>>,
+    domains: AHashMap<ReplicaAddress, VecDeque<Packet>>,
 }
 
 impl Outboxes {
@@ -110,7 +102,7 @@ impl Outboxes {
 }
 
 impl Executor for Outboxes {
-    fn send(&mut self, dest: ReplicaAddress, m: Box<Packet>) {
+    fn send(&mut self, dest: ReplicaAddress, m: Packet) {
         self.domains.entry(dest).or_default().push_back(m);
     }
 }
@@ -120,15 +112,13 @@ fn flatten_request_reader_replay(
     n: readyset_client::internal::LocalNodeIndex,
     c: &[usize],
     unique_keys: &mut HashSet<KeyComparison>,
-    packets: &mut VecDeque<Box<Packet>>,
+    packets: &mut VecDeque<Packet>,
 ) {
     // Sadly no drain filter for VecDeque yet
     let mut i = 0;
     while i < packets.len() {
         match packets.get_mut(i) {
-            Some(box Packet::RequestReaderReplay { node, cols, keys })
-                if *node == n && *cols == c =>
-            {
+            Some(Packet::RequestReaderReplay { node, cols, keys }) if *node == n && *cols == c => {
                 unique_keys.extend(keys.drain(..));
                 packets.remove(i);
             }
@@ -168,16 +158,16 @@ impl Replica {
                 let input: PacketData = v;
                 // Peek at its type.
                 match input.data {
-                    PacketPayload::Input(_) => Box::new(Packet::Input {
+                    PacketPayload::Input(_) => Packet::Input {
                         inner: input,
                         src: SourceChannelIdentifier { token, tag },
-                    }),
-                    PacketPayload::Timestamp(_) => Box::new(Packet::Timestamp {
+                    },
+                    PacketPayload::Timestamp(_) => Packet::Timestamp {
                         // The link values propagated to the base table are not used.
                         link: None,
                         src: SourceChannelIdentifier { token, tag },
                         timestamp: input,
-                    }),
+                    },
                 }
             })
         } else {
@@ -193,9 +183,9 @@ impl Replica {
 
     /// Receive packets from local and remote connections
     async fn receive_packets(
-        locals: &mut mpsc::UnboundedReceiver<Box<Packet>>,
+        locals: &mut mpsc::UnboundedReceiver<Packet>,
         connections: &mut tokio_stream::StreamMap<u64, DualTcpStream>,
-    ) -> ReadySetResult<Option<VecDeque<Box<Packet>>>> {
+    ) -> ReadySetResult<Option<VecDeque<Packet>>> {
         const MAX_PACKETS_PER_CALL: usize = 64;
 
         let mut packets = VecDeque::with_capacity(MAX_PACKETS_PER_CALL);
@@ -246,7 +236,7 @@ impl Replica {
     /// packets being lost
     #[instrument(level = "debug", name = "send_packets", skip_all)]
     async fn send_packets(
-        to_send: Vec<(ReplicaAddress, VecDeque<Box<Packet>>)>,
+        to_send: Vec<(ReplicaAddress, VecDeque<Packet>)>,
         connections: &tokio::sync::Mutex<Outputs>,
         coord: &ChannelCoordinator,
         failed: &Mutex<HashSet<SocketAddr>>,
@@ -439,7 +429,7 @@ impl Replica {
                     },
                     Some(mut packets) => {
                         while let Some(mut packet) = packets.pop_front() {
-                            let ack = match &mut *packet {
+                            let ack = match &mut packet {
                                 Packet::Timestamp { src: SourceChannelIdentifier { token, tag }, .. } |
                                 Packet::Input { src: SourceChannelIdentifier { token, tag }, .. } => {
                                     // After processing we need to ack timestamp and input messages from base

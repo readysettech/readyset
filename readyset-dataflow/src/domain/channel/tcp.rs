@@ -1,25 +1,24 @@
 use std::convert::TryFrom;
 use std::io::{self, Write};
-use std::marker::PhantomData;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use async_bincode::{AsyncBincodeStream, AsyncDestination};
 use bincode::{ErrorKind, Options};
-use bufstream::BufStream;
 use byteorder::{NetworkEndian, WriteBytesExt};
 use futures_util::ready;
 use futures_util::sink::Sink;
 use futures_util::stream::Stream;
 use pin_project::pin_project;
-use readyset_client::Tagged;
+use readyset_client::{PacketData, Tagged};
 use readyset_errors::ReadySetError;
-use serde::de::DeserializeOwned;
-use serde::Serialize;
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use thiserror::Error;
-use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::io::BufStream;
+use tokio::net::TcpStream;
+
+use crate::Packet;
 
 #[derive(Debug, Error)]
 pub enum SendError {
@@ -63,23 +62,20 @@ macro_rules! poisoning_try {
     };
 }
 
-pub struct TcpSender<T> {
-    stream: BufStream<std::net::TcpStream>,
+pub struct TcpSender {
+    stream: bufstream::BufStream<std::net::TcpStream>,
     poisoned: bool,
-
-    phantom: PhantomData<T>,
 }
 
-impl<T: Serialize> TcpSender<T> {
+impl TcpSender {
     pub fn new(stream: std::net::TcpStream) -> Result<Self, io::Error> {
         stream.set_nodelay(true).map(|_| Self {
-            stream: BufStream::new(stream),
+            stream: bufstream::BufStream::new(stream),
             poisoned: false,
-            phantom: PhantomData,
         })
     }
 
-    pub(crate) fn connect_from(sport: Option<u16>, addr: &SocketAddr) -> Result<Self, io::Error> {
+    pub fn connect_from(sport: Option<u16>, addr: &SocketAddr) -> Result<Self, io::Error> {
         let bind_addr = std::net::SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, sport.unwrap_or(0));
         let s = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP))?;
         s.set_reuse_address(true)?;
@@ -93,11 +89,11 @@ impl<T: Serialize> TcpSender<T> {
         Self::connect_from(None, addr)
     }
 
-    pub fn get_mut(&mut self) -> &mut BufStream<std::net::TcpStream> {
+    pub fn get_mut(&mut self) -> &mut bufstream::BufStream<std::net::TcpStream> {
         &mut self.stream
     }
 
-    pub(crate) fn into_inner(self) -> BufStream<std::net::TcpStream> {
+    pub fn into_inner(self) -> bufstream::BufStream<std::net::TcpStream> {
         self.stream
     }
 
@@ -109,13 +105,13 @@ impl<T: Serialize> TcpSender<T> {
         self.stream.get_ref().peer_addr()
     }
 
-    /// Send a message on this channel. Ownership isn't actually required, but is taken anyway to
+    /// Send a packet on this channel. Ownership isn't actually required, but is taken anyway to
     /// conform to the same api as mpsc::Sender.
-    pub fn send(&mut self, t: T) -> Result<(), SendError> {
-        self.send_ref(&t)
+    pub fn send(&mut self, packet: Packet) -> Result<(), SendError> {
+        self.send_ref(&packet)
     }
 
-    pub fn send_ref(&mut self, t: &T) -> Result<(), SendError> {
+    pub fn send_ref(&mut self, packet: &Packet) -> Result<(), SendError> {
         if self.poisoned {
             return Err(SendError::Poisoned);
         }
@@ -127,10 +123,10 @@ impl<T: Serialize> TcpSender<T> {
             .with_limit(u32::max_value() as u64)
             .allow_trailing_bytes();
         let size = c
-            .serialized_size(t)
+            .serialized_size(packet)
             .and_then(|s| u32::try_from(s).map_err(|_| Box::new(ErrorKind::SizeLimit)))?;
         poisoning_try!(self, self.stream.write_u32::<NetworkEndian>(size));
-        poisoning_try!(self, c.serialize_into(&mut self.stream, t));
+        poisoning_try!(self, c.serialize_into(&mut self.stream, packet));
         poisoning_try!(self, self.stream.flush());
         Ok(())
     }
@@ -140,36 +136,39 @@ impl<T: Serialize> TcpSender<T> {
     }
 }
 
-impl<T: Serialize> super::Sender for TcpSender<T> {
-    type Item = T;
-    fn send(&mut self, t: T) -> Result<(), SendError> {
-        self.send_ref(&t)
-    }
-}
-
 #[pin_project(project = DualTcpStreamProj)]
-pub enum DualTcpStream<S, T, T2, D> {
-    Passthrough(#[pin] AsyncBincodeStream<S, T, Tagged<()>, D>),
+pub enum DualTcpStream {
+    Passthrough(
+        #[pin] AsyncBincodeStream<BufStream<TcpStream>, Packet, Tagged<()>, AsyncDestination>,
+    ),
     Upgrade(
-        #[pin] AsyncBincodeStream<S, T2, Tagged<()>, D>,
-        Box<dyn FnMut(T2) -> T + Send + Sync>,
+        #[pin]
+        AsyncBincodeStream<BufStream<TcpStream>, Tagged<PacketData>, Tagged<()>, AsyncDestination>,
+        Box<dyn FnMut(Tagged<PacketData>) -> Packet + Send + Sync>,
     ),
 }
 
-impl<S, T, T2> From<S> for DualTcpStream<S, T, T2, AsyncDestination> {
-    fn from(stream: S) -> Self {
+impl From<BufStream<TcpStream>> for DualTcpStream {
+    fn from(stream: BufStream<TcpStream>) -> Self {
         DualTcpStream::Passthrough(AsyncBincodeStream::from(stream).for_async())
     }
 }
 
-impl<S, T, T2> DualTcpStream<S, T, T2, AsyncDestination> {
-    pub fn upgrade<F: 'static + FnMut(T2) -> T + Send + Sync>(stream: S, f: F) -> Self {
-        let s: AsyncBincodeStream<S, T2, Tagged<()>, AsyncDestination> =
-            AsyncBincodeStream::from(stream).for_async();
+impl DualTcpStream {
+    pub fn upgrade<F: 'static + FnMut(Tagged<PacketData>) -> Packet + Send + Sync>(
+        stream: BufStream<TcpStream>,
+        f: F,
+    ) -> Self {
+        let s: AsyncBincodeStream<
+            BufStream<TcpStream>,
+            Tagged<PacketData>,
+            Tagged<()>,
+            AsyncDestination,
+        > = AsyncBincodeStream::from(stream).for_async();
         DualTcpStream::Upgrade(s, Box::new(f))
     }
 
-    pub fn get_ref(&self) -> &S {
+    pub fn get_ref(&self) -> &BufStream<TcpStream> {
         match *self {
             DualTcpStream::Passthrough(ref abs) => abs.get_ref(),
             DualTcpStream::Upgrade(ref abs, _) => abs.get_ref(),
@@ -177,12 +176,7 @@ impl<S, T, T2> DualTcpStream<S, T, T2, AsyncDestination> {
     }
 }
 
-impl<S, T, T2, D> Sink<Tagged<()>> for DualTcpStream<S, T, T2, D>
-where
-    S: AsyncWrite,
-    AsyncBincodeStream<S, T, Tagged<()>, D>: Sink<Tagged<()>, Error = bincode::Error>,
-    AsyncBincodeStream<S, T2, Tagged<()>, D>: Sink<Tagged<()>, Error = bincode::Error>,
-{
+impl Sink<Tagged<()>> for DualTcpStream {
     type Error = bincode::Error;
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -214,15 +208,8 @@ where
     }
 }
 
-impl<S, T, T2, D> Stream for DualTcpStream<S, T, T2, D>
-where
-    T: DeserializeOwned,
-    T2: DeserializeOwned,
-    S: AsyncRead,
-    AsyncBincodeStream<S, T, Tagged<()>, D>: Stream<Item = Result<T, bincode::Error>>,
-    AsyncBincodeStream<S, T2, Tagged<()>, D>: Stream<Item = Result<T2, bincode::Error>>,
-{
-    type Item = Result<T, bincode::Error>;
+impl Stream for DualTcpStream {
+    type Item = Result<Packet, bincode::Error>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match self.project() {
