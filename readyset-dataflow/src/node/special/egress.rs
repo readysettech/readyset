@@ -119,7 +119,7 @@ impl Egress {
 
     pub fn process(
         &mut self,
-        message: &mut Option<Box<Packet>>,
+        message: &mut Option<Packet>,
         keyed_by: Option<&[usize]>,
         shard: usize,
         replica: usize,
@@ -165,7 +165,7 @@ impl Egress {
             } else {
                 // we know this is a data (not a replay)
                 // because, a replay will force a take
-                message.as_ref().map(|m| Box::new(m.clone_data())).unwrap()
+                message.as_ref().map(|m| m.clone_data()).unwrap()
             };
 
             // src is usually ignored and overwritten by ingress
@@ -176,7 +176,7 @@ impl Egress {
 
             // Take the packet through the filter. The filter will make any necessary modifications
             // to the packet to be sent, and tell us if we should send the packet or drop it.
-            if !packet_filter.process(m.as_mut(), keyed_by, tx.node)? {
+            if !packet_filter.process(&mut m, keyed_by, tx.node)? {
                 tx.inc_dropped();
                 continue;
             }

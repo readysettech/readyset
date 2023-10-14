@@ -2,9 +2,7 @@
 //! inside the data-flow graph. At this point, this is mostly a thin wrapper around
 //! [`async-bincode`](https://docs.rs/async-bincode/), and it might go away in the long run.
 
-use std::borrow::Borrow;
 use std::collections::HashMap;
-use std::hash::Hash;
 use std::io::{self, Write};
 use std::net::SocketAddr;
 use std::pin::Pin;
@@ -18,6 +16,8 @@ use readyset_client::{CONNECTION_FROM_BASE, CONNECTION_FROM_DOMAIN};
 use readyset_errors::{ReadySetError, ReadySetResult};
 use tokio::io::BufWriter;
 use tokio::sync::broadcast;
+
+use crate::prelude::Packet;
 
 pub mod tcp;
 
@@ -34,24 +34,24 @@ pub struct Remote;
 pub struct MaybeLocal;
 
 #[must_use]
-pub struct DomainConnectionBuilder<D, T> {
+pub struct DomainConnectionBuilder<D> {
     sport: Option<u16>,
     addr: SocketAddr,
-    chan: Option<tokio::sync::mpsc::UnboundedSender<T>>,
+    chan: Option<tokio::sync::mpsc::UnboundedSender<Packet>>,
     is_for_base: bool,
     _marker: D,
 }
 
-struct ImplSinkForSender<T>(tokio::sync::mpsc::UnboundedSender<T>);
+struct ImplSinkForSender(tokio::sync::mpsc::UnboundedSender<Packet>);
 
-impl<T> Sink<T> for ImplSinkForSender<T> {
-    type Error = tokio::sync::mpsc::error::SendError<T>;
+impl Sink<Packet> for ImplSinkForSender {
+    type Error = tokio::sync::mpsc::error::SendError<Packet>;
 
     fn poll_ready(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 
-    fn start_send(self: Pin<&mut Self>, item: T) -> Result<(), Self::Error> {
+    fn start_send(self: Pin<&mut Self>, item: Packet) -> Result<(), Self::Error> {
         self.0.send(item)
     }
 
@@ -64,7 +64,7 @@ impl<T> Sink<T> for ImplSinkForSender<T> {
     }
 }
 
-impl<T> DomainConnectionBuilder<Remote, T> {
+impl DomainConnectionBuilder<Remote> {
     pub fn for_base(addr: SocketAddr) -> Self {
         DomainConnectionBuilder {
             sport: None,
@@ -76,28 +76,14 @@ impl<T> DomainConnectionBuilder<Remote, T> {
     }
 }
 
-impl<D, T> DomainConnectionBuilder<D, T> {
-    pub fn maybe_on_port(mut self, sport: Option<u16>) -> Self {
-        self.sport = sport;
-        self
-    }
-
-    pub fn on_port(mut self, sport: u16) -> Self {
-        self.sport = Some(sport);
-        self
-    }
-}
-
-impl<T> DomainConnectionBuilder<Remote, T>
-where
-    T: serde::Serialize,
-{
+impl DomainConnectionBuilder<Remote> {
     /// Establishes a TCP sink for an asynchronous context. The function may block for a long
     /// time while the connection is being established, be careful not to call it on our main Tokio
     /// executer, but only from inside a Domain thread.
     pub fn build_async(
         self,
-    ) -> io::Result<AsyncBincodeWriter<BufWriter<tokio::net::TcpStream>, T, AsyncDestination>> {
+    ) -> io::Result<AsyncBincodeWriter<BufWriter<tokio::net::TcpStream>, Packet, AsyncDestination>>
+    {
         // TODO: async
         // we must currently write and call flush, because the remote end (currently) does a
         // synchronous read upon accepting a connection.
@@ -112,7 +98,7 @@ where
     /// Establishes a TCP sink for a synchronous context. The function may block for a long
     /// time while the connection is being established, be careful not to call it on our main Tokio
     /// executer, but only from inside a Domain thread.
-    pub fn build_sync(self) -> io::Result<TcpSender<T>> {
+    pub fn build_sync(self) -> io::Result<TcpSender> {
         let mut s = TcpSender::connect_from(self.sport, &self.addr)?;
         {
             let s = s.get_mut();
@@ -129,16 +115,12 @@ where
 }
 
 pub trait Sender {
-    type Item;
-
-    fn send(&mut self, t: Self::Item) -> Result<(), tcp::SendError>;
+    fn send(&mut self, packet: Packet) -> Result<(), tcp::SendError>;
 }
 
-impl<T> Sender for tokio::sync::mpsc::UnboundedSender<T> {
-    type Item = T;
-
-    fn send(&mut self, t: Self::Item) -> Result<(), tcp::SendError> {
-        tokio::sync::mpsc::UnboundedSender::send(self, t).map_err(|_| {
+impl Sender for tokio::sync::mpsc::UnboundedSender<Packet> {
+    fn send(&mut self, packet: Packet) -> Result<(), tcp::SendError> {
+        tokio::sync::mpsc::UnboundedSender::send(self, packet).map_err(|_| {
             tcp::SendError::IoError(io::Error::new(
                 io::ErrorKind::BrokenPipe,
                 "local peer went away",
@@ -147,13 +129,16 @@ impl<T> Sender for tokio::sync::mpsc::UnboundedSender<T> {
     }
 }
 
-impl<T> DomainConnectionBuilder<MaybeLocal, T>
-where
-    T: serde::Serialize + 'static + Send,
-{
+impl Sender for TcpSender {
+    fn send(&mut self, packet: Packet) -> Result<(), tcp::SendError> {
+        self.send_ref(&packet)
+    }
+}
+
+impl DomainConnectionBuilder<MaybeLocal> {
     pub fn build_async(
         self,
-    ) -> io::Result<Box<dyn Sink<T, Error = bincode::Error> + Send + Unpin>> {
+    ) -> io::Result<Box<dyn Sink<Packet, Error = bincode::Error> + Send + Unpin>> {
         if let Some(chan) = self.chan {
             Ok(Box::new(
                 ImplSinkForSender(chan)
@@ -172,7 +157,7 @@ where
         }
     }
 
-    pub fn build_sync(self) -> io::Result<Box<dyn Sender<Item = T> + Send>> {
+    pub fn build_sync(self) -> io::Result<Box<dyn Sender + Send>> {
         if let Some(chan) = self.chan {
             Ok(Box::new(chan))
         } else {
@@ -189,26 +174,26 @@ where
     }
 }
 
-struct ChannelCoordinatorInner<K: Eq + Hash + Clone, T> {
+struct ChannelCoordinatorInner {
     /// Map from key to remote address.
-    addrs: HashMap<K, SocketAddr>,
+    addrs: HashMap<ReplicaAddress, SocketAddr>,
     /// Map from key to channel sender for local connections.
-    locals: HashMap<K, tokio::sync::mpsc::UnboundedSender<T>>,
+    locals: HashMap<ReplicaAddress, tokio::sync::mpsc::UnboundedSender<Packet>>,
 }
 
-pub struct ChannelCoordinator<K: Eq + Hash + Clone, T> {
-    inner: RwLock<ChannelCoordinatorInner<K, T>>,
+pub struct ChannelCoordinator {
+    inner: RwLock<ChannelCoordinatorInner>,
     /// Broadcast channel that can be used to be notified when the address for a key changes
-    changes_tx: broadcast::Sender<K>,
+    changes_tx: broadcast::Sender<ReplicaAddress>,
 }
 
-impl<K: Eq + Hash + Clone, T> Default for ChannelCoordinator<K, T> {
+impl Default for ChannelCoordinator {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<K: Eq + Hash + Clone, T> ChannelCoordinator<K, T> {
+impl ChannelCoordinator {
     pub fn new() -> Self {
         Self {
             inner: RwLock::new(ChannelCoordinatorInner {
@@ -221,17 +206,17 @@ impl<K: Eq + Hash + Clone, T> ChannelCoordinator<K, T> {
 
     /// Create a new [`broadcast::Receiver`] which will be notified whenver the *remote* address for
     /// a key is changed (but *not* when a new key is added, or when the local address changes!)
-    pub fn subscribe(&self) -> broadcast::Receiver<K> {
+    pub fn subscribe(&self) -> broadcast::Receiver<ReplicaAddress> {
         self.changes_tx.subscribe()
     }
 
-    pub fn insert_remote(&self, key: K, addr: SocketAddr) {
+    pub fn insert_remote(&self, key: ReplicaAddress, addr: SocketAddr) {
         #[allow(clippy::expect_used)]
         // This can only fail if the mutex is poisoned, in which case we can't recover,
         // so we allow to panic if that happens.
         let changed = {
             let mut guard = self.inner.write().expect("poisoned mutex");
-            let old = guard.addrs.insert(key.clone(), addr);
+            let old = guard.addrs.insert(key, addr);
 
             old.is_some() // Don't publish if we're inserting a *new* address
                 && old != Some(addr)
@@ -242,7 +227,7 @@ impl<K: Eq + Hash + Clone, T> ChannelCoordinator<K, T> {
         }
     }
 
-    pub fn remove(&self, key: K) {
+    pub fn remove(&self, key: ReplicaAddress) {
         #[allow(clippy::expect_used)]
         // This can only fail if the mutex is poisoned, in which case we can't recover,
         // so we allow to panic if that happens.
@@ -257,7 +242,11 @@ impl<K: Eq + Hash + Clone, T> ChannelCoordinator<K, T> {
         }
     }
 
-    pub fn insert_local(&self, key: K, chan: tokio::sync::mpsc::UnboundedSender<T>) {
+    pub fn insert_local(
+        &self,
+        key: ReplicaAddress,
+        chan: tokio::sync::mpsc::UnboundedSender<Packet>,
+    ) {
         #[allow(clippy::expect_used)]
         // This can only fail if the mutex is poisoned, in which case we can't recover,
         // so we allow to panic if that happens.
@@ -267,11 +256,7 @@ impl<K: Eq + Hash + Clone, T> ChannelCoordinator<K, T> {
         }
     }
 
-    pub fn has<Q>(&self, key: &Q) -> bool
-    where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
-    {
+    pub fn has(&self, key: &ReplicaAddress) -> bool {
         #[allow(clippy::expect_used)]
         // This can only fail if the mutex is poisoned, in which case we can't recover,
         // so we allow to panic if that happens.
@@ -279,11 +264,7 @@ impl<K: Eq + Hash + Clone, T> ChannelCoordinator<K, T> {
         guard.addrs.contains_key(key)
     }
 
-    pub fn get_addr<Q>(&self, key: &Q) -> Option<SocketAddr>
-    where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
-    {
+    pub fn get_addr(&self, key: &ReplicaAddress) -> Option<SocketAddr> {
         #[allow(clippy::expect_used)]
         // This can only fail if the mutex is poisoned, in which case we can't recover,
         // so we allow to panic if that happens.
@@ -291,11 +272,7 @@ impl<K: Eq + Hash + Clone, T> ChannelCoordinator<K, T> {
         guard.addrs.get(key).cloned()
     }
 
-    pub fn is_local<Q>(&self, key: &Q) -> Option<bool>
-    where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
-    {
+    pub fn is_local(&self, key: &ReplicaAddress) -> Option<bool> {
         #[allow(clippy::expect_used)]
         // This can only fail if the mutex is poisoned, in which case we can't recover,
         // so we allow to panic if that happens.
@@ -306,10 +283,7 @@ impl<K: Eq + Hash + Clone, T> ChannelCoordinator<K, T> {
     pub fn builder_for(
         &self,
         key: &ReplicaAddress,
-    ) -> ReadySetResult<DomainConnectionBuilder<MaybeLocal, T>>
-    where
-        K: Borrow<ReplicaAddress>,
-    {
+    ) -> ReadySetResult<DomainConnectionBuilder<MaybeLocal>> {
         #[allow(clippy::expect_used)]
         // This can only fail if the mutex is poisoned, in which case we can't recover,
         // so we allow to panic if that happens.
