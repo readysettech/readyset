@@ -10,7 +10,7 @@ use std::task::{ready, Context, Poll};
 use std::time::Duration;
 
 use dataflow::payload::EvictRequest;
-use dataflow::{DomainBuilder, DomainRequest, Packet, Readers};
+use dataflow::{ChannelCoordinator, DomainBuilder, DomainRequest, Packet, Readers};
 use enum_kinds::EnumKind;
 use futures::stream::FuturesUnordered;
 use futures_util::future::TryFutureExt;
@@ -44,8 +44,6 @@ use crate::worker::replica::WrappedDomainRequest;
 /// left-right map associated with a reader node.
 pub mod readers;
 mod replica;
-
-type ChannelCoordinator = dataflow::ChannelCoordinator<ReplicaAddress, Box<Packet>>;
 
 /// Timeout for requests made from the controller to the server
 const CONTROLLER_REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
@@ -647,10 +645,10 @@ async fn do_eviction(
                         })?),
                     };
                     let r = tx
-                        .send(Box::new(Packet::Evict(EvictRequest::Bytes {
+                        .send(Packet::Evict(EvictRequest::Bytes {
                             node: None,
                             num_bytes: evict,
-                        })))
+                        }))
                         .await;
 
                     if let Err(e) = r {

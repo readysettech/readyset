@@ -118,7 +118,7 @@ impl Node {
     #[allow(clippy::unreachable)]
     pub(crate) fn process(
         &mut self,
-        m: &mut Option<Box<Packet>>,
+        m: &mut Option<Packet>,
         keyed_by: Option<&Vec<usize>>,
         replay_path: Option<&crate::domain::ReplayPath>,
         swap_reader: bool,
@@ -138,7 +138,7 @@ impl Node {
             }
             NodeType::Base(ref mut b) => {
                 // NOTE: bases only accept BaseOperations
-                match m.take().map(|p| *p) {
+                match m.take() {
                     Some(Packet::Input { inner, .. }) => {
                         let PacketData { dst, data, trace } = inner;
                         let ops = data
@@ -196,11 +196,11 @@ impl Node {
                             s.set_snapshot_mode(SnapshotMode::SnapshotModeDisabled);
                         }
 
-                        *m = Some(Box::new(Packet::Message {
+                        *m = Some(Packet::Message {
                             link: Link::new(dst, dst),
                             data: rs,
                             trace,
-                        }));
+                        });
                     }
                     Some(ref p) => {
                         // TODO: replays?
@@ -249,7 +249,7 @@ impl Node {
                     let m = m.as_mut().unwrap();
                     let from = m.src();
 
-                    let (data, replay) = match **m {
+                    let (data, replay) = match *m {
                         Packet::ReplayPiece {
                             tag,
                             ref mut data,
@@ -340,7 +340,7 @@ impl Node {
                                         ref mut for_keys, ..
                                     },
                                 ..
-                            } = **m
+                            } = *m
                             {
                                 *for_keys = emitted_keys;
                             } else {
@@ -361,7 +361,7 @@ impl Node {
                         if let Packet::ReplayPiece {
                             context: payload::ReplayPieceContext::Full { ref mut last, .. },
                             ..
-                        } = **m
+                        } = *m
                         {
                             *last = new_last;
                         } else {
@@ -377,7 +377,7 @@ impl Node {
                                 ref mut unishard, ..
                             },
                         ..
-                    } = **m
+                    } = *m
                     {
                         // hello, it's me again.
                         //
@@ -410,7 +410,7 @@ impl Node {
                 }
 
                 let m = m.as_mut().unwrap();
-                let tag = match **m {
+                let tag = match *m {
                     Packet::ReplayPiece {
                         tag,
                         context: payload::ReplayPieceContext::Partial { .. },
@@ -466,14 +466,14 @@ impl Node {
             NodeType::Base(..) => {}
             NodeType::Egress(Some(ref mut e)) => {
                 e.process(
-                    &mut Some(Box::new(Packet::Evict(EvictRequest::Keys {
+                    &mut Some(Packet::Evict(EvictRequest::Keys {
                         link: Link {
                             src: addr,
                             dst: addr,
                         },
                         tag,
                         keys: keys.to_vec(),
-                    }))),
+                    })),
                     None,
                     on_shard.unwrap_or(0),
                     on_replica,
@@ -585,7 +585,7 @@ impl Node {
         on_replica: usize,
         reader_write_handles: &mut NodeMap<backlog::WriteHandle>,
         executor: &mut dyn Executor,
-    ) -> ReadySetResult<Option<Box<Packet>>> {
+    ) -> ReadySetResult<Option<Packet>> {
         // TODO: not error handling compliant!
         let src_node = m.src();
         let addr = self.local_addr();
@@ -654,7 +654,7 @@ impl Node {
 
                 // We leave the link untouched, the domain will be responsible
                 // for updating it.
-                let p = Box::new(Packet::Timestamp {
+                let p = Packet::Timestamp {
                     link,
                     src,
                     timestamp: PacketData {
@@ -662,7 +662,7 @@ impl Node {
                         data: PacketPayload::Timestamp(timestamp),
                         trace: None,
                     },
-                });
+                };
 
                 // Some node types require additional packet handling after aggregating
                 // all parent node timestamps.

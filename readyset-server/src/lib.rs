@@ -667,32 +667,6 @@ pub struct WorkerOptions {
     pub wal_flush_interval_seconds: Option<u64>,
 }
 
-use std::pin::Pin;
-use std::task::{Context, Poll};
-
-use futures_util::sink::Sink;
-struct ImplSinkForSender<T>(tokio::sync::mpsc::UnboundedSender<T>);
-
-impl<T> Sink<T> for ImplSinkForSender<T> {
-    type Error = tokio::sync::mpsc::error::SendError<T>;
-
-    fn poll_ready(self: Pin<&mut Self>, _: &mut Context) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
-    }
-
-    fn start_send(self: Pin<&mut Self>, item: T) -> Result<(), Self::Error> {
-        self.0.send(item)
-    }
-
-    fn poll_flush(self: Pin<&mut Self>, _: &mut Context) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
-    }
-
-    fn poll_close(self: Pin<&mut Self>, _: &mut Context) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
-    }
-}
-
 // TODO(justin): Change VolumeId type when we know this fixed size.
 /// Id associated with the worker server's volume.
 pub type VolumeId = String;
