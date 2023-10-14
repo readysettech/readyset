@@ -44,7 +44,7 @@ pub use crate::EvictionKind;
 
 /// Channel coordinator type specialized for domains
 pub type ChannelCoordinator =
-    readyset_client::channel::ChannelCoordinator<ReplicaAddress, Box<Packet>>;
+    crate::domain::channel::ChannelCoordinator<ReplicaAddress, Box<Packet>>;
 pub trait Executor {
     fn send(&mut self, dest: ReplicaAddress, m: Box<Packet>);
 }

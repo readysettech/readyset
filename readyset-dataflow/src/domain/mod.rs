@@ -1,3 +1,4 @@
+pub(crate) mod channel;
 mod domain_metrics;
 mod replay_paths;
 
@@ -26,8 +27,8 @@ use merging_interval_tree::IntervalTreeSet;
 use petgraph::graph::NodeIndex;
 use readyset_alloc::StdThreadBuildWrapper;
 use readyset_client::debug::info::KeyCount;
-use readyset_client::internal::Index;
-use readyset_client::{channel, internal, KeyComparison, PersistencePoint, ReaderAddress};
+use readyset_client::internal::{self, Index};
+use readyset_client::{KeyComparison, PersistencePoint, ReaderAddress};
 use readyset_errors::{internal, internal_err, ReadySetError, ReadySetResult};
 use readyset_util::futures::abort_on_panic;
 use readyset_util::progress::report_progress_with;

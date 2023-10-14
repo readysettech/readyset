@@ -33,9 +33,8 @@ use tower_service::Service;
 use tracing::{debug_span, error, trace, trace_span, Span};
 use vec_map::VecMap;
 
-use crate::channel::CONNECTION_FROM_BASE;
 use crate::internal::*;
-use crate::{consistency, Tagged, Tagger};
+use crate::{consistency, Tagged, Tagger, CONNECTION_FROM_BASE};
 
 // TODO(justin): Make write propagation sample rate configurable.
 const TRACE_SAMPLE_RATE: Duration = Duration::from_secs(1);
