@@ -237,6 +237,14 @@ pub(crate) const VIEW_POOL_SIZE: usize = 16;
 /// batch less work, which means lower overall efficiency.
 pub(crate) const PENDING_LIMIT: usize = 8192;
 
+/// A tag to be written over a newly-established connection to a domain to indicate that the
+/// connection is originating from a base table domain.
+pub const CONNECTION_FROM_BASE: u8 = 1;
+
+/// A tag to be written over a newly-established connection to a domain to indicate that the
+/// connection is *not* originating from a base table domain.
+pub const CONNECTION_FROM_DOMAIN: u8 = 2;
+
 use nom_sql::Relation;
 use readyset_tracing::propagation::Instrumented;
 use replication_offset::ReplicationOffset;
@@ -256,7 +264,6 @@ use std::convert::TryFrom;
 use std::default::Default;
 pub mod recipe;
 
-pub mod channel;
 #[allow(unreachable_pub)] // https://github.com/rust-lang/rust/issues/57411
 pub mod consensus;
 #[allow(unreachable_pub)] // https://github.com/rust-lang/rust/issues/57411
