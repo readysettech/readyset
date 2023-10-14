@@ -13,14 +13,13 @@ use futures_util::ready;
 use futures_util::sink::Sink;
 use futures_util::stream::Stream;
 use pin_project::pin_project;
+use readyset_client::Tagged;
 use readyset_errors::ReadySetError;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite};
-
-use crate::Tagged;
 
 #[derive(Debug, Error)]
 pub enum SendError {
@@ -146,19 +145,6 @@ impl<T: Serialize> super::Sender for TcpSender<T> {
     fn send(&mut self, t: T) -> Result<(), SendError> {
         self.send_ref(&t)
     }
-}
-
-#[derive(Debug)]
-pub enum TryRecvError {
-    Empty,
-    Disconnected,
-    DeserializationError(bincode::Error),
-}
-
-#[derive(Debug)]
-pub enum RecvError {
-    Disconnected,
-    DeserializationError(bincode::Error),
 }
 
 #[pin_project(project = DualTcpStreamProj)]

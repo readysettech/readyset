@@ -13,9 +13,8 @@ use dataflow::{Domain, DomainRequest, Packet};
 use futures_util::sink::{Sink, SinkExt};
 use futures_util::stream::StreamExt;
 use futures_util::FutureExt;
-use readyset_client::channel::{self, CONNECTION_FROM_BASE};
 use readyset_client::internal::ReplicaAddress;
-use readyset_client::{KeyComparison, PacketData, PacketPayload, Tagged};
+use readyset_client::{KeyComparison, PacketData, PacketPayload, Tagged, CONNECTION_FROM_BASE};
 use readyset_errors::ReadySetResult;
 use strawpoll::Strawpoll;
 use time::Duration;
@@ -27,8 +26,12 @@ use tracing::{debug, error, info, info_span, instrument, trace, warn, Span};
 
 use super::ChannelCoordinator;
 
-type DualTcpStream =
-    channel::DualTcpStream<BufStream<TcpStream>, Box<Packet>, Tagged<PacketData>, AsyncDestination>;
+type DualTcpStream = dataflow::DualTcpStream<
+    BufStream<TcpStream>,
+    Box<Packet>,
+    Tagged<PacketData>,
+    AsyncDestination,
+>;
 
 type Outputs =
     AHashMap<ReplicaAddress, Box<dyn Sink<Box<Packet>, Error = bincode::Error> + Send + Unpin>>;

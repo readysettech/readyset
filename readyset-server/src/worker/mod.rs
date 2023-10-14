@@ -21,7 +21,7 @@ use pin_project::pin_project;
 use readyset_alloc::StdThreadBuildWrapper;
 use readyset_client::internal::ReplicaAddress;
 use readyset_client::metrics::recorded;
-use readyset_client::{channel, ReadySetHandle};
+use readyset_client::ReadySetHandle;
 use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
 use readyset_util::select;
 use readyset_util::shutdown::ShutdownReceiver;
@@ -45,7 +45,7 @@ use crate::worker::replica::WrappedDomainRequest;
 pub mod readers;
 mod replica;
 
-type ChannelCoordinator = channel::ChannelCoordinator<ReplicaAddress, Box<Packet>>;
+type ChannelCoordinator = dataflow::ChannelCoordinator<ReplicaAddress, Box<Packet>>;
 
 /// Timeout for requests made from the controller to the server
 const CONTROLLER_REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
