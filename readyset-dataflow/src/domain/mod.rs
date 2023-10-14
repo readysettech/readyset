@@ -44,6 +44,7 @@ use vec1::Vec1;
 
 pub(crate) use self::replay_paths::ReplayPath;
 use self::replay_paths::{Destination, ReplayPathSpec, ReplayPaths, Target};
+use crate::domain::channel::ChannelCoordinator;
 use crate::node::special::EgressTx;
 use crate::node::{NodeProcessingResult, ProcessEnv};
 use crate::payload::{
@@ -79,7 +80,7 @@ enum DomainMode {
     Forwarding,
     Replaying {
         to: LocalNodeIndex,
-        buffered: VecDeque<Box<Packet>>,
+        buffered: VecDeque<Packet>,
         passes: usize,
     },
 }
@@ -98,7 +99,7 @@ enum TriggerEndpoint {
     Start(Index),
     End {
         source: SourceSelection,
-        options: Vec<Box<dyn channel::Sender<Item = Box<Packet>> + Send>>,
+        options: Vec<Box<dyn channel::Sender + Send>>,
     },
     Local(Index),
 }
@@ -647,7 +648,7 @@ pub struct Domain {
     readers: Readers,
     channel_coordinator: Arc<ChannelCoordinator>,
 
-    delayed_for_self: VecDeque<Box<Packet>>,
+    delayed_for_self: VecDeque<Packet>,
 
     state_size: Arc<AtomicUsize>,
     total_time: Timer<SimpleTracker, RealTime>,
@@ -840,13 +841,13 @@ impl Domain {
 
                 trace!(?tag, keys = ?miss_keys, "sending replay request to self");
                 self.delayed_for_self
-                    .push_back(Box::new(Packet::RequestPartialReplay {
+                    .push_back(Packet::RequestPartialReplay {
                         tag,
                         keys: miss_keys.clone(),
                         unishard: true, // local replays are necessarily single-shard
                         requesting_shard: self.shard(),
                         requesting_replica: self.replica(),
-                    }));
+                    });
                 continue;
             }
 
@@ -1020,13 +1021,13 @@ impl Domain {
 
                 for trigger in options {
                     if trigger
-                        .send(Box::new(Packet::RequestPartialReplay {
+                        .send(Packet::RequestPartialReplay {
                             tag,
                             unishard: false, // ask_all is true, so replay is sharded
                             keys: keys.clone(), // sad to clone here
                             requesting_shard,
                             requesting_replica,
-                        }))
+                        })
                         .is_err()
                     {
                         // we're shutting down -- it's fine.
@@ -1044,13 +1045,13 @@ impl Domain {
             if options.len() == 1 {
                 #[allow(clippy::indexing_slicing)] // we just checked len() is 1
                 if options[0]
-                    .send(Box::new(Packet::RequestPartialReplay {
+                    .send(Packet::RequestPartialReplay {
                         tag,
                         keys,
                         unishard: true, // only one option, so only one path
                         requesting_shard,
                         requesting_replica,
-                    }))
+                    })
                     .is_err()
                 {
                     // we're shutting down -- it's fine.
@@ -1068,13 +1069,13 @@ impl Domain {
                 for (shard, keys) in shards {
                     #[allow(clippy::indexing_slicing)] // we know len(options) is num_shards
                     if options[shard]
-                        .send(Box::new(Packet::RequestPartialReplay {
+                        .send(Packet::RequestPartialReplay {
                             tag,
                             keys,
                             unishard: true, // !ask_all, so only one path
                             requesting_shard,
                             requesting_replica,
-                        }))
+                        })
                         .is_err()
                     {
                         // we're shutting down -- it's fine.
@@ -1139,7 +1140,7 @@ impl Domain {
         }
     }
 
-    fn dispatch(&mut self, m: Box<Packet>, executor: &mut dyn Executor) -> ReadySetResult<()> {
+    fn dispatch(&mut self, m: Packet, executor: &mut dyn Executor) -> ReadySetResult<()> {
         let src = m.src();
         let me = m.dst();
 
@@ -1285,7 +1286,7 @@ impl Domain {
 
         // We checked it's Some above, it's only an Option so we can take()
         #[allow(clippy::unwrap_used)]
-        match &**m.as_ref().unwrap() {
+        match m.as_ref().unwrap() {
             m @ &Packet::Message { .. } if m.is_empty() => {
                 // no need to deal with our children if we're not sending them anything
                 return Ok(());
@@ -1309,7 +1310,7 @@ impl Domain {
             let mut m = if i == nchildren - 1 {
                 m.take().unwrap()
             } else {
-                m.as_ref().map(|m| Box::new(m.clone_data())).unwrap()
+                m.as_ref().map(|m| m.clone_data()).unwrap()
             };
 
             #[allow(clippy::indexing_slicing)] // see NOTE above
@@ -1363,7 +1364,7 @@ impl Domain {
         #[allow(clippy::indexing_slicing)] // Already checked the node exists
         let nchildren = self.nodes[me].borrow().children().len();
         for i in 0..nchildren {
-            let mut p = Box::new(message.as_ref().clone_data());
+            let mut p = message.clone_data();
 
             #[allow(clippy::indexing_slicing)]
             // Already checked the node exists, and we're iterating through nchildren so we know i
@@ -1659,12 +1660,10 @@ impl Domain {
                                 let cols = index.columns.clone();
                                 tokio::spawn(
                                     UnboundedReceiverStream::new(rx)
-                                        .map(move |misses| {
-                                            Box::new(Packet::RequestReaderReplay {
-                                                keys: misses,
-                                                cols: cols.clone(),
-                                                node,
-                                            })
+                                        .map(move |misses| Packet::RequestReaderReplay {
+                                            keys: misses,
+                                            cols: cols.clone(),
+                                            node,
                                         })
                                         .map(Ok)
                                         .forward(sender)
@@ -2035,7 +2034,7 @@ impl Domain {
                             let len = chunk.len();
                             let last = iter.peek().is_none();
                             sent_last = last;
-                            let p = Box::new(Packet::ReplayPiece {
+                            let p = Packet::ReplayPiece {
                                 tag,
                                 link, // to is overwritten by receiver
                                 context: ReplayPieceContext::Full {
@@ -2043,7 +2042,7 @@ impl Domain {
                                     replicas: replicas.clone(),
                                 },
                                 data: chunk,
-                            });
+                            };
 
                             trace!(num = i, len, "sending batch");
                             if let Err(error) = chunked_replay_tx.send(p) {
@@ -2059,17 +2058,15 @@ impl Domain {
                         // tell the target domain we're done
                         if !sent_last {
                             trace!("Sending empty last batch");
-                            if let Err(error) =
-                                chunked_replay_tx.send(Box::new(Packet::ReplayPiece {
-                                    tag,
-                                    link,
-                                    context: ReplayPieceContext::Full {
-                                        last: true,
-                                        replicas: replicas.clone(),
-                                    },
-                                    data: Default::default(),
-                                }))
-                            {
+                            if let Err(error) = chunked_replay_tx.send(Packet::ReplayPiece {
+                                tag,
+                                link,
+                                context: ReplayPieceContext::Full {
+                                    last: true,
+                                    replicas: replicas.clone(),
+                                },
+                                data: Default::default(),
+                            }) {
                                 warn!(%error, "replayer noticed domain shutdown");
                             }
                         }
@@ -2303,7 +2300,7 @@ impl Domain {
                 Ok(Some(bincode::serialize(&res)?))
             }
             DomainRequest::Packet(pkt) => {
-                self.handle_packet(Box::new(pkt), executor)?;
+                self.handle_packet(pkt, executor)?;
                 Ok(None)
             }
             DomainRequest::QueryReplayDone { node } => {
@@ -2357,19 +2354,19 @@ impl Domain {
         //
         // Not doing this leads to complete insanity, as things just don't replay sometimes and
         // you aren't sure why.
-        self.handle_packet(Box::new(Packet::Spin), executor)?;
+        self.handle_packet(Packet::Spin, executor)?;
         ret
     }
 
     #[allow(clippy::cognitive_complexity)]
-    fn handle(&mut self, m: Box<Packet>, executor: &mut dyn Executor) -> Result<(), ReadySetError> {
+    fn handle(&mut self, m: Packet, executor: &mut dyn Executor) -> Result<(), ReadySetError> {
         // TODO(eta): better error handling here.
         // In particular one dodgy packet can kill the whole domain, which is probably not what we
         // want.
 
         self.metrics.inc_packets_sent(&m);
 
-        match *m {
+        match m {
             Packet::Message { .. } | Packet::Input { .. } => {
                 // WO for https://github.com/rust-lang/rfcs/issues/1403
                 let start = time::Instant::now();
@@ -2383,7 +2380,7 @@ impl Domain {
             Packet::ReplayPiece { tag, .. } => {
                 let start = time::Instant::now();
                 self.total_replay_time.start();
-                self.handle_replay(*m, executor)?;
+                self.handle_replay(m, executor)?;
                 self.total_replay_time.stop();
                 self.metrics.rec_replay_time(tag, start.elapsed());
             }
@@ -2396,7 +2393,7 @@ impl Domain {
                 // As the packet is not propagated or mutated before reaching the
                 // domain, we still have a source channel identifier that we can use
                 // to ack the packet.
-                self.handle_timestamp(*m, executor)?;
+                self.handle_timestamp(m, executor)?;
             }
             Packet::RequestReaderReplay {
                 mut keys,
@@ -2945,19 +2942,18 @@ impl Domain {
             }
 
             // forward the current message through all local nodes.
-            let m = Box::new(Packet::ReplayPiece {
+            let mut m = Some(Packet::ReplayPiece {
                 link,
                 tag,
                 data,
                 context,
             });
-            let mut m = Some(m);
 
             macro_rules! replay_context {
                 ($m:ident, $field:ident) => {
                     if let Some(&mut Packet::ReplayPiece {
                         ref mut context, ..
-                    }) = $m.as_deref_mut()
+                    }) = $m.as_mut()
                     {
                         if let ReplayPieceContext::Partial { ref mut $field, .. } = *context {
                             Some($field)
@@ -2975,7 +2971,7 @@ impl Domain {
                     #[allow(clippy::unwrap_used)]
                     // We would have bailed in a previous iteration (break 'outer, below) if
                     // it wasn't Some
-                    if let Packet::ReplayPiece { ref mut tag, .. } = m.as_deref_mut().unwrap() {
+                    if let Packet::ReplayPiece { ref mut tag, .. } = m.as_mut().unwrap() {
                         trace!(
                             %force_tag,
                             original_tag = %tag,
@@ -3208,7 +3204,7 @@ impl Domain {
                             ref mut for_keys, ..
                         },
                     ..
-                } = **m.as_mut().unwrap()
+                } = *m.as_mut().unwrap()
                 {
                     for backfill_keys in &mut backfill_keys {
                         backfill_keys.retain(|k| for_keys.contains(k));
@@ -3234,7 +3230,7 @@ impl Domain {
                                     ..
                                 },
                             ..
-                        } = **m.as_mut().unwrap()
+                        } = *m.as_mut().unwrap()
                         {
                             (unishard, requesting_shard, requesting_replica)
                         } else {
@@ -3465,7 +3461,7 @@ impl Domain {
                     if let Packet::ReplayPiece {
                         context: ReplayPieceContext::Full { last: false, .. },
                         ..
-                    } = m.as_deref().unwrap()
+                    } = m.as_ref().unwrap()
                     {
                         trace!("dropping empty non-terminal full replay packet");
                         // don't continue processing empty updates, *except* if this is the
@@ -3503,7 +3499,7 @@ impl Domain {
                             ref mut for_keys, ..
                         },
                     ..
-                } = m.as_deref_mut().unwrap()
+                } = m.as_mut().unwrap()
                 {
                     *for_keys = backfill_keys.unwrap();
                 }
@@ -3511,7 +3507,7 @@ impl Domain {
 
             #[allow(clippy::unwrap_used)]
             // We would have bailed earlier (break 'outer, above) if m wasn't Some
-            let context = if let Packet::ReplayPiece { context, .. } = *m.unwrap() {
+            let context = if let Packet::ReplayPiece { context, .. } = m.unwrap() {
                 context
             } else {
                 internal!("started as a replay, now not a replay?");
@@ -3682,13 +3678,13 @@ impl Domain {
                     replay_sets.drain()
                 {
                     self.delayed_for_self
-                        .push_back(Box::new(Packet::RequestPartialReplay {
+                        .push_back(Packet::RequestPartialReplay {
                             tag,
                             unishard,
                             keys,
                             requesting_shard,
                             requesting_replica,
-                        }));
+                        });
                 }
 
                 if !waiting.holes.is_empty() {
@@ -3715,8 +3711,7 @@ impl Domain {
                 // but this allows finish_replay to dispatch into the node by
                 // overriding replaying_to.
                 self.not_ready.remove(&dst);
-                self.delayed_for_self
-                    .push_back(Box::new(Packet::Finish(tag, dst)));
+                self.delayed_for_self.push_back(Packet::Finish(tag, dst));
             }
         }
         Ok(())
@@ -3758,7 +3753,7 @@ impl Domain {
                 // completely block the domain data channel, so we only process a few backlogged
                 // updates before yielding to the main loop (which might buffer more things).
 
-                if let Packet::Message { .. } = *m {
+                if let Packet::Message { .. } = m {
                     // NOTE: we specifically need to override the buffering behavior that our
                     // self.replaying_to = Some above would initiate.
                     self.mode = DomainMode::Forwarding;
@@ -3818,8 +3813,7 @@ impl Domain {
             }
         } else {
             // we're not done -- inject a request to continue handling buffered things
-            self.delayed_for_self
-                .push_back(Box::new(Packet::Finish(tag, node)));
+            self.delayed_for_self.push_back(Packet::Finish(tag, node));
             Ok(())
         }
     }
@@ -4428,7 +4422,7 @@ impl Domain {
     #[failpoint("handle-packet")]
     pub fn handle_packet(
         &mut self,
-        packet: Box<Packet>,
+        packet: Packet,
         executor: &mut dyn Executor,
     ) -> ReadySetResult<()> {
         if self.wait_time.is_running() {

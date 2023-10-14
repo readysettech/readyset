@@ -16,7 +16,7 @@ pub struct SharderTx {
 impl SharderTx {
     fn send(
         &self,
-        m: Box<Packet>,
+        m: Packet,
         from_replica: usize,
         output: &mut dyn Executor,
     ) -> ReadySetResult<()> {
@@ -97,7 +97,7 @@ impl SharderTx {
 pub struct Sharder {
     txs: VecMap<SharderTx>,
     #[serde(skip)]
-    sharded: VecMap<Box<Packet>>,
+    sharded: VecMap<Packet>,
     shard_by: usize,
 }
 
@@ -170,7 +170,7 @@ impl Sharder {
 
     pub fn process(
         &mut self,
-        m: &mut Option<Box<Packet>>,
+        m: &mut Option<Packet>,
         index: LocalNodeIndex,
         is_sharded: bool,
         is_last_sharder_for_tag: Option<bool>,
@@ -181,10 +181,7 @@ impl Sharder {
         let mut m = m.take().unwrap();
         for record in m.take_data() {
             let shard = self.to_shard(&record);
-            let p = self
-                .sharded
-                .entry(shard)
-                .or_insert_with(|| Box::new(m.clone_data()));
+            let p = self.sharded.entry(shard).or_insert_with(|| m.clone_data());
             p.mut_data().push(record);
         }
 
@@ -198,7 +195,7 @@ impl Sharder {
         if let Packet::ReplayPiece {
             context: payload::ReplayPieceContext::Full { last: true, .. },
             ..
-        } = *m
+        } = m
         {
             // this is the last replay piece for a full replay
             // we need to make sure it gets to every shard so they know to ready the node
@@ -209,7 +206,7 @@ impl Sharder {
                     requesting_shard, ..
                 },
             ..
-        } = *m
+        } = m
         {
             if let Some(true) = is_last_sharder_for_tag {
                 // we are the last sharder and the replay target is sharded
@@ -232,16 +229,12 @@ impl Sharder {
                 // ensure that every shard gets a packet
                 // note that m has no data, so m.clone_data() is empty
                 for shard in 0..self.txs.len() {
-                    self.sharded
-                        .entry(shard)
-                        .or_insert_with(|| Box::new(m.clone_data()));
+                    self.sharded.entry(shard).or_insert_with(|| m.clone_data());
                 }
             }
             Destination::One(shard) => {
                 // ensure that the target shard gets a packet
-                self.sharded
-                    .entry(shard)
-                    .or_insert_with(|| Box::new(m.clone_data()));
+                self.sharded.entry(shard).or_insert_with(|| m.clone_data());
                 // and that no-one else does
                 self.sharded.retain(|k, _| k == shard);
             }
@@ -289,13 +282,13 @@ impl Sharder {
                 for shard in key.shard_keys(self.txs.len()) {
                     let dst = self.txs[shard].node;
                     let p = self.sharded.entry(shard).or_insert_with(|| {
-                        Box::new(Packet::Evict(EvictRequest::Keys {
+                        Packet::Evict(EvictRequest::Keys {
                             link: Link { src, dst },
                             keys: Vec::new(),
                             tag,
-                        }))
+                        })
                     });
-                    match **p {
+                    match *p {
                         Packet::Evict(EvictRequest::Keys { ref mut keys, .. }) => {
                             keys.push(key.clone())
                         }
@@ -320,11 +313,11 @@ impl Sharder {
             // send to all shards
             for tx in self.txs.values() {
                 tx.send(
-                    Box::new(Packet::Evict(EvictRequest::Keys {
+                    Packet::Evict(EvictRequest::Keys {
                         link: Link { src, dst: tx.node },
                         keys: keys.to_vec(),
                         tag,
-                    })),
+                    }),
                     replica,
                     output,
                 )?;

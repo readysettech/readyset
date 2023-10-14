@@ -40,11 +40,8 @@ pub use readyset_errors::*;
 pub use vec1::vec1;
 
 pub use crate::processing::{ColumnRef, ColumnSource};
-pub use crate::EvictionKind;
+pub use crate::{ChannelCoordinator, EvictionKind};
 
-/// Channel coordinator type specialized for domains
-pub type ChannelCoordinator =
-    crate::domain::channel::ChannelCoordinator<ReplicaAddress, Box<Packet>>;
 pub trait Executor {
-    fn send(&mut self, dest: ReplicaAddress, m: Box<Packet>);
+    fn send(&mut self, dest: ReplicaAddress, m: Packet);
 }
