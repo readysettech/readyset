@@ -63,6 +63,7 @@ pub use dataflow_state::{
     BaseTableState, DurabilityMode, MaterializedNodeState, PersistenceParameters, PersistentState,
 };
 
+pub use crate::domain::channel::{ChannelCoordinator, DualTcpStream};
 pub use crate::domain::{Domain, DomainBuilder, DomainIndex};
 pub use crate::node_map::NodeMap;
 pub use crate::payload::{DomainRequest, Packet, PacketDiscriminants};

@@ -13,17 +13,15 @@ use std::task::{Context, Poll};
 
 use async_bincode::{AsyncBincodeWriter, AsyncDestination};
 use futures_util::sink::{Sink, SinkExt};
+use readyset_client::internal::ReplicaAddress;
+use readyset_client::{CONNECTION_FROM_BASE, CONNECTION_FROM_DOMAIN};
+use readyset_errors::{ReadySetError, ReadySetResult};
 use tokio::io::BufWriter;
 use tokio::sync::broadcast;
 
 pub mod tcp;
 
 pub use self::tcp::{DualTcpStream, TcpSender};
-use crate::internal::ReplicaAddress;
-use crate::{ReadySetError, ReadySetResult};
-
-pub const CONNECTION_FROM_BASE: u8 = 1;
-pub const CONNECTION_FROM_DOMAIN: u8 = 2;
 
 /// Buffer size to use for the broadcast channel to notify replicas about changes to the addresses
 /// of other replicas
