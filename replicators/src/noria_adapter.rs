@@ -884,8 +884,28 @@ impl NoriaAdapter {
 
         let mut current_pos: ReplicationOffset = start_position.into();
 
-        // FIXME: Implement catchup for Vitess
-        // ...
+        // At this point it is possible that we just finished replication, but
+        // our schema and our tables are taken at different position in the binlog.
+        // Until our database has a consistent view of the database at a single point
+        // in time, it is not safe to issue any queries. We therefore advance the binlog
+        // to the position of the most recent table we have, applying changes as needed.
+        // Only once binlog advanced to that point, can we send a ready signal to
+        // ReadySet.
+        match adapter.replication_offsets.max_offset()? {
+            Some(max) if max > &current_pos => {
+                info!(start = %current_pos, end = %max, "Catching up");
+                let max = max.clone();
+                adapter
+                    .main_loop(
+                        &mut current_pos,
+                        Some(max),
+                        notification_channel,
+                        controller_channel,
+                    )
+                    .await?;
+            }
+            _ => {}
+        }
 
         // Let Controller know that the initial snapshotting is complete. Ignores the error, which
         // will not occur unless the Controller dropped the rx half of this channel.
