@@ -49,7 +49,7 @@ impl TryFrom<ReplicationOffset> for MySqlPosition {
             Ok(offset)
         } else {
             Err(internal_err!(
-                "cannot extract MySqlPosition from Postgres ReplicationOffset"
+                "cannot extract MySqlPosition from an unsupported ReplicationOffset"
             ))
         }
     }
@@ -71,13 +71,35 @@ impl TryFrom<ReplicationOffset> for PostgresPosition {
             Ok(offset)
         } else {
             Err(internal_err!(
-                "cannot extract PostgresPosition from MySQL ReplicationOffset"
+                "cannot extract PostgresPosition from an unsupported ReplicationOffset"
             ))
         }
     }
 }
 
 impl TryFrom<&ReplicationOffset> for PostgresPosition {
+    type Error = ReadySetError;
+
+    fn try_from(offset: &ReplicationOffset) -> Result<Self, Self::Error> {
+        offset.clone().try_into()
+    }
+}
+
+impl TryFrom<ReplicationOffset> for VStreamPosition {
+    type Error = ReadySetError;
+
+    fn try_from(offset: ReplicationOffset) -> Result<Self, Self::Error> {
+        if let ReplicationOffset::Vitess(offset) = offset {
+            Ok(offset)
+        } else {
+            Err(internal_err!(
+                "cannot extract VStreamPosition from an unsupported ReplicationOffset"
+            ))
+        }
+    }
+}
+
+impl TryFrom<&ReplicationOffset> for VStreamPosition {
     type Error = ReadySetError;
 
     fn try_from(offset: &ReplicationOffset) -> Result<Self, Self::Error> {

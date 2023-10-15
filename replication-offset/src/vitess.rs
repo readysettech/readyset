@@ -6,6 +6,8 @@ use readyset_vitess_data::GtidSet;
 use serde::{Deserialize, Serialize};
 use vitess_grpc::binlogdata::VGtid;
 
+use crate::ReplicationOffset;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ShardPosition {
     keyspace: String,
@@ -143,5 +145,17 @@ impl Display for VStreamPosition {
         write!(f, "]")?;
 
         Ok(())
+    }
+}
+
+impl From<&VStreamPosition> for ReplicationOffset {
+    fn from(value: &VStreamPosition) -> Self {
+        ReplicationOffset::Vitess(value.to_owned())
+    }
+}
+
+impl From<VStreamPosition> for ReplicationOffset {
+    fn from(value: VStreamPosition) -> Self {
+        ReplicationOffset::Vitess(value)
     }
 }
