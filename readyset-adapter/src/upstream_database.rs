@@ -98,9 +98,6 @@ pub trait UpstreamDatabase: Sized + Send {
     /// Connect will return an error if the upstream database is running an unsupported version.
     async fn connect(upstream_config: UpstreamConfig) -> Result<Self, Self::Error>;
 
-    /// Resets the connection with the upstream database
-    async fn reset(&mut self) -> Result<(), Self::Error>;
-
     /// Test the connection with the upstream database
     async fn is_connected(&mut self) -> Result<bool, Self::Error>;
 
@@ -145,6 +142,12 @@ pub trait UpstreamDatabase: Sized + Send {
         params: &[DfValue],
         exec_meta: Self::ExecMeta<'_>,
     ) -> Result<Self::QueryResult<'a>, Self::Error>;
+
+    /// Remove a prepared statement from the cache, and tell the upstream database to remove it and
+    /// free any resources associated with it.
+    ///
+    /// Returns an error if the statement doesn't exist
+    async fn remove_statement(&mut self, statement_id: u32) -> Result<(), Self::Error>;
 
     /// Execute a raw, un-prepared query
     async fn query<'a>(&'a mut self, query: &'a str) -> Result<Self::QueryResult<'a>, Self::Error>;
@@ -224,14 +227,6 @@ where
         })
     }
 
-    async fn reset(&mut self) -> Result<(), Self::Error> {
-        if let Some(u) = &mut self.upstream {
-            u.reset().await?;
-        }
-
-        Ok(())
-    }
-
     async fn is_connected(&mut self) -> Result<bool, Self::Error> {
         Ok(self.upstream().await?.is_connected().await?)
     }
@@ -274,6 +269,10 @@ where
             .await?
             .execute(statement_id, params, exec_meta)
             .await
+    }
+
+    async fn remove_statement(&mut self, statement_id: u32) -> Result<(), Self::Error> {
+        self.upstream().await?.remove_statement(statement_id).await
     }
 
     async fn query<'a>(&'a mut self, query: &'a str) -> Result<Self::QueryResult<'a>, Self::Error> {

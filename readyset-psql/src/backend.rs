@@ -143,10 +143,9 @@ impl ps::PsqlBackend for Backend {
         query: &str,
         parameter_data_types: &[Type],
     ) -> Result<ps::PrepareResponse, ps::Error> {
-        let statement_id = self.next_prepared_id(); // If prepare succeeds it will get this id
         self.prepare(query, parameter_data_types)
             .await?
-            .try_into_ps(statement_id)
+            .try_into_ps()
     }
 
     async fn on_execute(
@@ -164,7 +163,8 @@ impl ps::PsqlBackend for Backend {
             .try_into()
     }
 
-    async fn on_close(&mut self, _statement_id: u32) -> Result<(), ps::Error> {
+    async fn on_close(&mut self, statement_id: u32) -> Result<(), ps::Error> {
+        self.inner.remove_statement(statement_id).await?;
         Ok(())
     }
 }

@@ -2,6 +2,15 @@
 # steps required by the public build specifically, then includes the pipeline
 # file containing common build steps.
 
+# Non-buildkite nodes to re-use:
+common_values:
+  retry: &retry_on_agent_kill
+    automatic: &agent_kill_conditions
+      - exit_status: -1  # Agent was lost
+        limit: 2
+      - exit_status: 255 # Forced agent shutdown
+        limit: 2
+
 steps:
   # TODO: ronh: decide what kind of linting we want in the OSS pipeline
   # - label: ':git: Lint commits'
@@ -20,12 +29,7 @@ steps:
       ecr#v2.5.0:
         login: true
         retries: 3
-    retry:
-      automatic:
-        - exit_status: -1  # Agent was lost
-          limit: 2
-        - exit_status: 255 # Forced agent shutdown
-          limit: 2
+    retry: *retry_on_agent_kill
 
   - label: ':docker: Build cargo-deny image'
     key: cargo-deny-image
@@ -37,12 +41,7 @@ steps:
       ecr#v2.5.0:
         login: true
         retries: 3
-    retry:
-      automatic:
-        - exit_status: -1  # Agent was lost
-          limit: 2
-        - exit_status: 255 # Forced agent shutdown
-          limit: 2
+    retry: *retry_on_agent_kill
 
   - label: ':pipeline: Upload public-common pipeline'
     commands:

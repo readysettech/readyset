@@ -19,8 +19,8 @@ use crate::{Column, NodeIndex};
 /// - [`Project`], [`Join`], [`LeftJoin`], and dependent left or inner joins *other* than the one
 ///   this filter depends on are all totally commutative with filters, so can be swapped in position
 ///   with those filters with impunity
-/// - Grouped nodes ([`Aggregation`] and [`Extremum`]) require adding any *non* dependent columns
-///   mentioned in the filter to the group-by of the node.
+/// - Grouped nodes ([`Aggregation`], [`Extremum`] and [`Distinct`]) require adding any *non*
+///   dependent columns mentioned in the filter to the group-by of the node.
 /// - All other nodes currently return an [unsupported error][] - it *is* theoretically possible to
 ///   push below any node, but currently we don't have that ability
 ///
@@ -103,7 +103,9 @@ fn push_dependent_filter(
         | MirNodeInner::LeftJoin { .. }
         | MirNodeInner::DependentJoin { .. }
         | MirNodeInner::AliasTable { .. } => true,
-        MirNodeInner::Aggregation { .. } | MirNodeInner::Extremum { .. } => {
+        MirNodeInner::Aggregation { .. }
+        | MirNodeInner::Extremum { .. }
+        | MirNodeInner::Distinct { .. } => {
             for col in dependency.non_dependent_columns() {
                 query.graph.add_column(child_idx, col.clone())?;
             }

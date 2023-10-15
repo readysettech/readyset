@@ -11,31 +11,31 @@ use anyhow::anyhow;
 use clap::ValueEnum;
 use dashmap::mapref::entry::Entry;
 use dashmap::DashMap;
+use lru::LruCache;
+use parking_lot::RwLock;
 use readyset_client::query::*;
 use readyset_client::ViewCreateRequest;
 use readyset_data::DfValue;
 use readyset_util::hash::hash;
 use tracing::error;
 
+const NUM_PERSISTED_QUERIES: usize = 100_000;
+
 /// A metadata cache for all queries that have been processed by this
 /// adapter. Thread-safe.
 #[derive(Debug)]
 pub struct QueryStatusCache {
-    /// A thread-safe hash map that holds the query status of each successfully parsed query that
-    /// has been sent to this adapter.
-    statuses: DashMap<Arc<ViewCreateRequest>, QueryStatus, ahash::RandomState>,
+    /// A thread-safe hash map that holds the query status of each query that
+    /// has been sent to this adapter, keyed by the query's [`QueryId`].
+    ///
+    /// This map is used on the hot path to determine whether to route queries to upstream or to
+    /// readyset.
+    id_to_status: DashMap<QueryId, QueryStatus, ahash::RandomState>,
 
-    // A thread-safe hash map that holds the query status of each query that has failed to parse.
-    failed_parses: DashMap<Arc<String>, QueryStatus, ahash::RandomState>,
-
-    /// A thread-safe hash map that maps a query's id to the query. The id is a string formatted as
-    /// q_<16-digit-query-hash>. The id is stored as a string instead of a u64 to allow for
-    /// different id formats in the future.
-    ids: DashMap<QueryId, Query, ahash::RandomState>,
-
-    /// List of pending inlined migrations. Contains the query to be inlined, and the sets of
-    /// parameters to use for inlining.
-    pending_inlined_migrations: DashMap<ViewCreateRequest, HashSet<Vec<DfValue>>>,
+    /// A handle to a more detailed, persistent cache of Query information, which holds the full
+    /// query strings. This structure is not used on the hot path, but rather for other auxiliary
+    /// commands that seek more information about the queries we have processed so far.
+    persistent_handle: PersistentStatusCacheHandle,
 
     /// Holds the current style of migration, whether async or explicit, which may change the
     /// behavior of some internal methods.
@@ -46,6 +46,89 @@ pub struct QueryStatusCache {
     ///
     /// Currently unused.
     enable_experimental_placeholder_inlining: bool,
+}
+
+#[derive(Debug)]
+/// A handle to persistent metadata for all queries that have been processed by this adapter.
+pub struct PersistentStatusCacheHandle {
+    /// An [`LRUCache`] that holds the full [`Query`] as well as its associated
+    /// [`QueryStatus`] for a fixed number of queries.
+    statuses: RwLock<LruCache<QueryId, (Query, QueryStatus)>>,
+
+    /// List of pending inlined migrations. Contains the query to be inlined, and the sets of
+    /// parameters to use for inlining.
+    pending_inlined_migrations: DashMap<ViewCreateRequest, HashSet<Vec<DfValue>>>,
+}
+
+impl Default for PersistentStatusCacheHandle {
+    fn default() -> Self {
+        Self {
+            statuses: RwLock::new(LruCache::new(
+                NUM_PERSISTED_QUERIES
+                    .try_into()
+                    .expect("num persisted queries is not zero"),
+            )),
+            pending_inlined_migrations: Default::default(),
+        }
+    }
+}
+
+impl PersistentStatusCacheHandle {
+    fn insert_with_status(&self, q: Query, id: QueryId, status: QueryStatus) {
+        let mut statuses = self.statuses.write();
+        statuses.put(id, (q, status));
+    }
+
+    fn allow_list(&self) -> Vec<(QueryId, Arc<ViewCreateRequest>, QueryStatus)> {
+        let statuses = self.statuses.read();
+        statuses
+            .iter()
+            .filter_map(|(query_id, (query, status))| match query {
+                Query::Parsed(view) => {
+                    if status.is_successful() {
+                        Some((*query_id, view.clone(), status.clone()))
+                    } else {
+                        None
+                    }
+                }
+                Query::ParseFailed(_) => None,
+            })
+            .collect::<Vec<_>>()
+    }
+
+    fn deny_list(&self, style: MigrationStyle) -> Vec<DeniedQuery> {
+        let statuses = self.statuses.read();
+        match style {
+            MigrationStyle::Async | MigrationStyle::InRequestPath => statuses
+                .iter()
+                .filter_map(|(query_id, (query, status))| {
+                    if status.is_unsupported() || status.is_dropped() {
+                        Some(DeniedQuery {
+                            id: *query_id,
+                            query: query.clone(),
+                            status: status.clone(),
+                        })
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>(),
+            MigrationStyle::Explicit => statuses
+                .iter()
+                .filter_map(|(query_id, (query, status))| {
+                    if status.is_denied() {
+                        Some(DeniedQuery {
+                            id: *query_id,
+                            query: query.clone(),
+                            status: status.clone(),
+                        })
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>(),
+        }
+    }
 }
 
 /// Keys into the queries stored in `QueryStatusCache`
@@ -61,7 +144,7 @@ pub trait QueryStatusKey: Into<Query> + Hash + Clone {
 
     fn with_mut_status<F, R>(&self, cache: &QueryStatusCache, f: F) -> R
     where
-        F: FnOnce(Option<&mut QueryStatus>) -> R;
+        F: Fn(Option<&mut QueryStatus>) -> R;
 }
 
 impl QueryStatusKey for Query {
@@ -77,7 +160,7 @@ impl QueryStatusKey for Query {
 
     fn with_mut_status<F, R>(&self, cache: &QueryStatusCache, f: F) -> R
     where
-        F: FnOnce(Option<&mut QueryStatus>) -> R,
+        F: Fn(Option<&mut QueryStatus>) -> R,
     {
         match self {
             Query::Parsed(k) => k.with_mut_status(cache, f),
@@ -91,14 +174,22 @@ impl QueryStatusKey for ViewCreateRequest {
     where
         F: FnOnce(Option<&QueryStatus>) -> R,
     {
-        f(cache.statuses.get(self).as_deref())
+        let id = QueryId::new(hash(self));
+        // Since this isn't mutating anything, we only need to access the in-memory map.
+        f(cache.id_to_status.get(&id).as_deref())
     }
 
     fn with_mut_status<F, R>(&self, cache: &QueryStatusCache, f: F) -> R
     where
-        F: FnOnce(Option<&mut QueryStatus>) -> R,
+        F: Fn(Option<&mut QueryStatus>) -> R,
     {
-        f(cache.statuses.get_mut(self).as_deref_mut())
+        let id = QueryId::new(hash(self));
+        // Since this is potentially mutating, we need to apply F to both the in-memory and the
+        // persistent version of the status.
+        f(cache.id_to_status.get_mut(&id).as_deref_mut());
+        let mut statuses = cache.persistent_handle.statuses.write();
+        let transformed_status = statuses.get_mut(&id).map(|(_, status)| status);
+        f(transformed_status)
     }
 }
 
@@ -107,14 +198,23 @@ impl QueryStatusKey for String {
     where
         F: FnOnce(Option<&QueryStatus>) -> R,
     {
-        f(cache.failed_parses.get(self).as_deref())
+        let id = QueryId::new(hash(self));
+        // Since this isn't mutating anything, we only need to access the in-memory map.
+        f(cache.id_to_status.get(&id).as_deref())
     }
 
     fn with_mut_status<F, R>(&self, cache: &QueryStatusCache, f: F) -> R
     where
-        F: FnOnce(Option<&mut QueryStatus>) -> R,
+        F: Fn(Option<&mut QueryStatus>) -> R,
     {
-        f(cache.failed_parses.get_mut(self).as_deref_mut())
+        let id = QueryId::new(hash(self));
+        // Since this is potentially mutating, we need to apply F to both the in-memory and the
+        // persistent version of the status.
+        f(cache.id_to_status.get_mut(&id).as_deref_mut());
+
+        let mut statuses = cache.persistent_handle.statuses.write();
+        let transformed_status = statuses.get_mut(&id).map(|(_, status)| status);
+        f(transformed_status)
     }
 }
 
@@ -128,10 +228,8 @@ impl QueryStatusCache {
     /// Constructs a new QueryStatusCache with the migration style set to InRequestPath.
     pub fn new() -> QueryStatusCache {
         QueryStatusCache {
-            statuses: DashMap::default(),
-            failed_parses: DashMap::default(),
-            ids: DashMap::default(),
-            pending_inlined_migrations: DashMap::default(),
+            id_to_status: Default::default(),
+            persistent_handle: Default::default(),
             style: MigrationStyle::InRequestPath,
             enable_experimental_placeholder_inlining: false,
         }
@@ -189,33 +287,24 @@ impl QueryStatusCache {
             }
         };
         let id = QueryId::new(hash(&q));
-        self.ids.insert(id, q.clone());
-        match q {
-            Query::Parsed(q) => self.statuses.insert(q, status),
-            Query::ParseFailed(q) => self.failed_parses.insert(q, status),
-        };
+        self.id_to_status.insert(id, status.clone());
+        self.persistent_handle.insert_with_status(q, id, status);
         id
     }
 
-    /// This function returns the id and query migration state of a query. If the query does not
-    /// exist within the query status cache, an entry is created and the query is set to
-    /// PendingMigration.
+    /// This function returns the id and query migration state of a query.
+    ///
+    /// Side Effects: If this is the first time we have seen this query, it also adds it to our
+    /// mapping of queries.
     pub fn query_migration_state<Q>(&self, q: &Q) -> (QueryId, MigrationState)
     where
         Q: QueryStatusKey,
     {
-        let query_state = q.with_status(self, |m| m.map(|m| m.migration_state.clone()));
         let id = QueryId::new(hash(&q));
+        let query_state = self.id_to_status.get(&id);
 
         match query_state {
-            Some(s) => {
-                debug_assert!(
-                    *self.ids.get(&id).expect("query not found") == q.clone().into(),
-                    "mismatch between calculated and cached id/query"
-                );
-
-                (id, s)
-            }
+            Some(s) => (id, s.value().migration_state.clone()),
             None => self.insert(q.clone()),
         }
     }
@@ -237,7 +326,7 @@ impl QueryStatusCache {
     pub fn update_execution_info(&self, q: &Query, info: ExecutionInfo) {
         q.with_mut_status(self, |s| {
             if let Some(mut s) = s {
-                s.execution_info = Some(info);
+                s.execution_info = Some(info.clone());
             }
         })
     }
@@ -454,7 +543,7 @@ impl QueryStatusCache {
                 );
             }
         });
-        self.pending_inlined_migrations.remove(q);
+        self.persistent_handle.pending_inlined_migrations.remove(q);
     }
 
     /// Updates the query's always flag, indicating whether the query should be served from
@@ -482,14 +571,14 @@ impl QueryStatusCache {
     {
         q.with_mut_status(self, |s| match s {
             Some(mut s) if s.migration_state != MigrationState::Unsupported => {
-                s.migration_state = status.migration_state;
-                s.execution_info = status.execution_info;
+                s.migration_state = status.migration_state.clone();
+                s.execution_info = status.execution_info.clone();
             }
             Some(mut s) => {
-                s.execution_info = status.execution_info;
+                s.execution_info = status.execution_info.clone();
             }
             None => {
-                self.insert_with_status(q.clone(), status);
+                self.insert_with_status(q.clone(), status.clone());
             }
         })
     }
@@ -499,12 +588,20 @@ impl QueryStatusCache {
     /// NOTE: We do not mark cleared queries as dropped, since we are not explicitly deny-listing
     /// cleared queries.
     pub fn clear(&self) {
-        self.statuses
+        self.id_to_status
             .iter_mut()
             .filter(|v| v.is_successful())
             .for_each(|mut v| {
                 v.migration_state = MigrationState::Pending;
                 v.always = false;
+            });
+        let mut statuses = self.persistent_handle.statuses.write();
+        statuses
+            .iter_mut()
+            .filter(|(_query_id, (_query, status))| status.is_successful())
+            .for_each(|(_query_id, (_query, ref mut status))| {
+                status.migration_state = MigrationState::Pending;
+                status.always = false;
             });
     }
 
@@ -513,7 +610,8 @@ impl QueryStatusCache {
     /// it should be migrated by the MigrationHandler.
     pub fn inlined_cache_miss(&self, query: &ViewCreateRequest, params: Vec<DfValue>) {
         if self.enable_experimental_placeholder_inlining {
-            self.pending_inlined_migrations
+            self.persistent_handle
+                .pending_inlined_migrations
                 .entry(query.clone())
                 .or_default()
                 .insert(params);
@@ -527,7 +625,11 @@ impl QueryStatusCache {
         query: &ViewCreateRequest,
         migrated_literals: Vec<&Vec<DfValue>>,
     ) {
-        if let Entry::Occupied(mut entry) = self.pending_inlined_migrations.entry(query.clone()) {
+        if let Entry::Occupied(mut entry) = self
+            .persistent_handle
+            .pending_inlined_migrations
+            .entry(query.clone())
+        {
             let pending_literals = entry.get_mut();
             for literals in migrated_literals {
                 pending_literals.remove(literals);
@@ -553,7 +655,8 @@ impl QueryStatusCache {
     /// Returns a list of queries that are pending an inlined migration, and a set of all literals
     /// to be used for inlining.
     pub fn pending_inlined_migration(&self) -> Vec<QueryInliningInstructions> {
-        self.pending_inlined_migrations
+        self.persistent_handle
+            .pending_inlined_migrations
             .iter()
             .filter_map(|q| {
                 // Get the placeholders that require inlining
@@ -584,96 +687,35 @@ impl QueryStatusCache {
     ///
     /// Does not include any queries that require inlining.
     pub fn pending_migration(&self) -> QueryList {
-        self.statuses
+        let statuses = self.persistent_handle.statuses.read();
+        statuses
             .iter()
-            .filter(|r| r.is_pending())
-            .map(|r| ((*r.key()).clone().into(), r.value().clone()))
-            .chain(
-                self.failed_parses
-                    .iter()
-                    .filter(|r| r.is_pending())
-                    .map(|r| ((*r.key()).clone().into(), r.value().clone())),
-            )
-            .collect::<Vec<(Query, QueryStatus)>>()
-            .into()
-    }
-
-    pub fn dry_run_succeeded(&self) -> QueryList {
-        self.statuses
-            .iter()
-            .filter(|r| r.is_dry_run_succeeded())
-            .map(|r| ((*r.key()).clone().into(), r.value().clone()))
+            .filter_map(|(_query_id, (query, status))| {
+                if status.is_pending() {
+                    Some((query.clone(), status.clone()))
+                } else {
+                    None
+                }
+            })
             .collect::<Vec<(Query, QueryStatus)>>()
             .into()
     }
 
     /// Returns a list of queries that have a state of [`QueryState::Successful`].
     pub fn allow_list(&self) -> Vec<(QueryId, Arc<ViewCreateRequest>, QueryStatus)> {
-        self.ids
-            .iter()
-            .filter_map(|r| match r.value() {
-                Query::Parsed(view) => view.with_status(self, |s| {
-                    s.and_then(|s| {
-                        if s.is_successful() {
-                            Some((*r.key(), view.clone(), s.clone()))
-                        } else {
-                            None
-                        }
-                    })
-                }),
-                Query::ParseFailed(_) => None,
-            })
-            .collect::<Vec<_>>()
+        self.persistent_handle.allow_list()
     }
 
     /// Returns a list of queries that are in the deny list.
     pub fn deny_list(&self) -> Vec<DeniedQuery> {
-        match self.style {
-            MigrationStyle::Async | MigrationStyle::InRequestPath => self
-                .ids
-                .iter()
-                .filter_map(|r| {
-                    r.value().with_status(self, |s| {
-                        s.and_then(|s| {
-                            if s.is_unsupported() || s.is_dropped() {
-                                Some(DeniedQuery {
-                                    id: *r.key(),
-                                    query: r.value().clone(),
-                                    status: s.clone(),
-                                })
-                            } else {
-                                None
-                            }
-                        })
-                    })
-                })
-                .collect::<Vec<_>>(),
-            MigrationStyle::Explicit => self
-                .ids
-                .iter()
-                .filter_map(|r| {
-                    r.value().with_status(self, |s| {
-                        s.and_then(|s| {
-                            if s.is_denied() {
-                                Some(DeniedQuery {
-                                    id: *r.key(),
-                                    query: r.value().clone(),
-                                    status: s.clone(),
-                                })
-                            } else {
-                                None
-                            }
-                        })
-                    })
-                })
-                .collect::<Vec<_>>(),
-        }
+        self.persistent_handle.deny_list(self.style)
     }
 
     /// Returns a query given a query hash
     pub fn query(&self, id: &str) -> Option<Query> {
         let id = QueryId::new(u64::from_str_radix(id.strip_prefix("q_")?, 16).ok()?);
-        self.ids.get(&id).map(|r| (*r.value()).clone())
+        let statuses = self.persistent_handle.statuses.read();
+        statuses.peek(&id).map(|(query, _status)| query.clone())
     }
 }
 
@@ -735,17 +777,19 @@ mod tests {
         let cache = QueryStatusCache::new();
         let q1 = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
         let status = QueryStatus::default_for_query(&q1.clone().into());
+        let id = QueryId::new(hash(&q1));
+
         cache.insert(q1.clone());
-        assert!(cache
-            .ids
+
+        let mut statuses = cache.persistent_handle.statuses.write();
+        assert!(statuses
             .iter()
-            .map(|r| r.value().clone())
+            .map(|(_, (q, _))| q.clone())
             .any(|q| q == q1.clone().into()));
-        assert!(cache
-            .statuses
-            .insert(q1.clone().into(), status.clone())
-            .is_some());
-        assert_eq!(*cache.statuses.get(&q1).unwrap().value(), status);
+
+        assert!(statuses.put(id, (q1.into(), status.clone())).is_some());
+
+        assert_eq!(statuses.get(&id).unwrap().1, status);
     }
 
     #[test]
@@ -753,17 +797,19 @@ mod tests {
         let cache = QueryStatusCache::new();
         let q1 = "SELECT * FROM t1".to_string();
         let status = QueryStatus::default_for_query(&q1.clone().into());
+        let id = QueryId::new(hash(&q1));
+
         cache.insert(q1.clone());
-        assert!(cache
-            .ids
+
+        let mut statuses = cache.persistent_handle.statuses.write();
+        assert!(statuses
             .iter()
-            .map(|r| r.value().clone())
+            .map(|(_, (q, _))| q.clone())
             .any(|q| q == q1.clone().into()));
-        assert!(cache
-            .failed_parses
-            .insert(q1.clone().into(), status.clone())
-            .is_some());
-        assert_eq!(*cache.failed_parses.get(&q1).unwrap().value(), status);
+
+        assert!(statuses.put(id, (q1.into(), status.clone())).is_some());
+
+        assert_eq!(statuses.get(&id).unwrap().1, status);
     }
 
     #[test]
@@ -772,7 +818,7 @@ mod tests {
         let q1 = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
         let q2 = ViewCreateRequest::new(select_statement("SELECT * FROM t2").unwrap(), vec![]);
 
-        cache.query_migration_state(&q1);
+        cache.update_query_migration_state(&q1, MigrationState::Pending);
         cache.update_query_migration_state(&q2, MigrationState::Successful);
 
         let h1 = QueryId::new(hash(&q1));
@@ -794,10 +840,16 @@ mod tests {
             cache.query_migration_state(&query).0,
             QueryId::new(hash(&Into::<Query>::into(query.clone())))
         );
+
+        // If we haven't explicitly updated it, we default to pending
         assert_eq!(
             cache.query_migration_state(&query).1,
             MigrationState::Pending
         );
+
+        // Explicitly updating it also lets it be returned from pending_migration(), allow_list(),
+        // and deny_list()
+        cache.update_query_migration_state(&query, MigrationState::Pending);
         assert_eq!(cache.pending_migration().len(), 1);
         assert_eq!(cache.allow_list().len(), 0);
         assert_eq!(cache.deny_list().len(), 0);
@@ -817,6 +869,7 @@ mod tests {
             cache.query_migration_state(&query).1,
             MigrationState::Pending
         );
+        cache.update_query_migration_state(&query, MigrationState::Pending);
         assert_eq!(cache.pending_migration().len(), 1);
         assert_eq!(cache.allow_list().len(), 0);
         assert_eq!(cache.deny_list().len(), 0);
@@ -836,6 +889,7 @@ mod tests {
             cache.query_migration_state(&query).1,
             MigrationState::Pending
         );
+        cache.update_query_migration_state(&query, MigrationState::Pending);
         assert_eq!(cache.pending_migration().len(), 1);
         assert_eq!(cache.allow_list().len(), 0);
         assert_eq!(cache.deny_list().len(), 1);
@@ -893,10 +947,11 @@ mod tests {
     }
 
     #[test]
-    fn transition_form_unsupported() {
+    fn transition_from_unsupported() {
         let cache = QueryStatusCache::new().style(MigrationStyle::Explicit);
         let q = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
 
+        cache.update_query_migration_state(&q, MigrationState::Pending);
         cache.update_query_migration_state(&q, MigrationState::Unsupported);
         assert_eq!(
             cache.query_migration_state(&q).1,
@@ -967,6 +1022,7 @@ mod tests {
 
         assert_eq!(
             cache
+                .persistent_handle
                 .pending_inlined_migrations
                 .get(&q)
                 .unwrap()
@@ -992,7 +1048,10 @@ mod tests {
 
         cache.unsupported_inlined_migration(&q);
 
-        assert!(cache.pending_inlined_migrations.is_empty());
+        assert!(cache
+            .persistent_handle
+            .pending_inlined_migrations
+            .is_empty());
         assert_eq!(
             cache.query_migration_state(&q).1,
             MigrationState::Unsupported
@@ -1021,9 +1080,12 @@ mod tests {
             inlined_placeholders: Vec1::try_from(vec![1]).unwrap(),
             epoch: 1,
         });
-        assert_eq!(cache.query_migration_state(&q).1, inlined_state);
+        cache.update_query_migration_state(&q, inlined_state.clone());
+        let state = cache.query_status(&q).migration_state;
+        assert_eq!(state, inlined_state);
         assert_eq!(
             cache
+                .persistent_handle
                 .pending_inlined_migrations
                 .get(&q)
                 .unwrap()
@@ -1032,6 +1094,7 @@ mod tests {
             1
         );
         assert!(cache
+            .persistent_handle
             .pending_inlined_migrations
             .get(&q)
             .unwrap()

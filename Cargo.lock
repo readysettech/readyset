@@ -49,6 +49,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "allocator-api2"
+version = "0.2.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0942ffc6dcaadf03badf6e6a2d0228460359d5e34b57ccdc720b7382dfbd5ec5"
+
+[[package]]
 name = "android_system_properties"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1040,6 +1046,18 @@ checksum = "1f25d8400f4a7a5778f0e4e52384a48cbd9b5c495d110786187fc750075277a2"
 dependencies = [
  "cfg-if 1.0.0",
  "crossbeam-utils",
+]
+
+[[package]]
+name = "crossbeam-skiplist"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "883a5821d7d079fcf34ac55f27a833ee61678110f6b97637cc74513c0d0b42fc"
+dependencies = [
+ "cfg-if 1.0.0",
+ "crossbeam-epoch",
+ "crossbeam-utils",
+ "scopeguard",
 ]
 
 [[package]]
@@ -2127,9 +2145,13 @@ dependencies = [
 
 [[package]]
 name = "hashbrown"
-version = "0.14.0"
+version = "0.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c6201b9ff9fd90a5a3bac2e56a830d0caa509576f0e503818ee82c181b3437a"
+checksum = "7dfda62a12f55daeae5015f81b0baea145391cb4520f86c248fc615d72640d12"
+dependencies = [
+ "ahash 0.8.3",
+ "allocator-api2",
+]
 
 [[package]]
 name = "hdrhistogram"
@@ -2809,6 +2831,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03f1160296536f10c833a82dca22267d5486734230d47bf00bf435885814ba1e"
 dependencies = [
  "hashbrown 0.13.1",
+]
+
+[[package]]
+name = "lru"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1efa59af2ddfad1854ae27d75009d538d0998b4b2fd47083e743ac1a10e46c60"
+dependencies = [
+ "hashbrown 0.14.1",
 ]
 
 [[package]]
@@ -4500,6 +4531,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "clap 4.3.2",
+ "crossbeam-skiplist",
  "database-utils",
  "fail",
  "failpoint-macros",
@@ -4548,6 +4580,7 @@ dependencies = [
  "chrono",
  "clap 4.3.2",
  "criterion",
+ "crossbeam-skiplist",
  "dashmap 4.0.2",
  "database-utils",
  "dataflow-expression",
@@ -4561,6 +4594,7 @@ dependencies = [
  "indexmap 1.9.3",
  "itertools",
  "lazy_static",
+ "lru 0.12.0",
  "metrics",
  "metrics-exporter-prometheus",
  "metrics-util",
@@ -4570,6 +4604,7 @@ dependencies = [
  "parking_lot 0.11.2",
  "proptest",
  "quanta",
+ "rand 0.8.5",
  "readyset-alloc",
  "readyset-client",
  "readyset-client-metrics",
@@ -4585,6 +4620,7 @@ dependencies = [
  "rust_decimal",
  "serde",
  "serde_json",
+ "slab",
  "sqlformat",
  "test-strategy",
  "thiserror",
@@ -5014,6 +5050,7 @@ dependencies = [
  "futures-util",
  "itertools",
  "lazy_static",
+ "metrics",
  "mysql",
  "mysql-srv",
  "mysql_async",
@@ -5062,6 +5099,7 @@ dependencies = [
  "futures",
  "itertools",
  "lazy_static",
+ "metrics",
  "native-tls",
  "nom-sql",
  "postgres-native-tls",
@@ -5071,6 +5109,7 @@ dependencies = [
  "rand 0.8.5",
  "readyset-adapter",
  "readyset-client",
+ "readyset-client-metrics",
  "readyset-client-test-helpers",
  "readyset-data",
  "readyset-errors",
@@ -6095,9 +6134,12 @@ checksum = "68a406c1882ed7f29cd5e248c9848a80e7cb6ae0fea82346d2746f2f941c07e1"
 
 [[package]]
 name = "slab"
-version = "0.4.6"
+version = "0.4.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eb703cfe953bccee95685111adeedb76fabe4e97549a58d16f03ea7b9367bb32"
+checksum = "8f92a496fb766b417c996b9c5e57daf2f7ad3b0bebe1ccfca4856390e3d3bb67"
+dependencies = [
+ "autocfg",
+]
 
 [[package]]
 name = "slotmap"

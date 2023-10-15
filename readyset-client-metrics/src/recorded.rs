@@ -12,6 +12,7 @@
 ///
 /// [`DatabaseType`]: crate::DatabaseType
 pub const QUERY_LOG_EXECUTION_TIME: &str = "readyset_query_log_execution_time";
+pub const QUERY_LOG_EXECUTION_COUNT: &str = "readyset_query_log_execution_count";
 
 /// Histogram: The time in seconds that the database spent executing a
 /// query.
@@ -62,6 +63,10 @@ pub const ADAPTER_EXTERNAL_REQUESTS: &str = "readyset_noria_client_external_requ
 
 /// Gauge: The number of currently connected SQL clients
 pub const CONNECTED_CLIENTS: &str = "readyset_noria_client_connected_clients";
+
+/// Gauge: The number of open connections to the upstream database,
+/// on behalf of client connections.
+pub const CLIENT_UPSTREAM_CONNECTIONS: &str = "readyset_client_upstream_connections";
 
 /// Counter: The number of queries that failed to parse.
 pub const QUERY_LOG_PARSE_ERRORS: &str = "readyset_query_log_parse_errors";

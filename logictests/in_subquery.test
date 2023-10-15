@@ -17,7 +17,6 @@ values
 (1, 1),
 (1, 1);
 
-
 query I nosort
 select count(*) from t1 where x in (select x from t2);
 ----
@@ -68,3 +67,57 @@ from t1
 3
 0
 1
+
+# Correlated
+
+query I nosort
+select x from t1 where y in (select y from t2 where t2.x = t1.x)
+----
+1
+
+query I rowsort
+select x from t1 where y not in (select y from t2 where t2.x = t1.x)
+----
+2
+3
+
+query I nosort
+select y in (select y from t2 where t2.x = t1.x) from t1 order by x asc
+----
+1
+0
+0
+
+query I nosort
+select y not in (select y from t2 where t2.x = t1.x) from t1 order by x asc
+----
+0
+1
+1
+
+# Nulls
+
+statement ok
+create table t3 (x int, y int);
+
+statement ok
+create table t4 (x int, y int);
+
+statement ok
+insert into t3 (x, y) values (1, null);
+
+statement ok
+insert into t4 (x, y) values (1, 1);
+
+query I nosort
+select x from t3 where y not in (select y from t4 where t4.x = t3.x);
+----
+
+query II nosort
+select
+    y in (select y from t4),
+    y not in (select y from t4)
+from t3;
+----
+NULL
+NULL

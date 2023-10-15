@@ -398,10 +398,6 @@ impl Union {
 }
 
 impl Ingredient for Union {
-    fn take(&mut self) -> NodeOperator {
-        Clone::clone(self).into()
-    }
-
     fn ancestors(&self) -> Vec<NodeIndex> {
         match self.emit {
             Emit::AllFrom(p, _) => vec![p.as_global()],

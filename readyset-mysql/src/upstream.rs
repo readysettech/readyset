@@ -13,10 +13,10 @@ use nom_sql::{SqlIdentifier, StartTransactionStatement};
 use pin_project::pin_project;
 use readyset_adapter::upstream_database::UpstreamDestination;
 use readyset_adapter::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
-use readyset_client_metrics::QueryDestination;
+use readyset_client_metrics::{recorded, QueryDestination};
 use readyset_data::DfValue;
 use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
-use tracing::{error, info, info_span, Instrument};
+use tracing::{debug, error, info_span, Instrument};
 
 use crate::Error;
 
@@ -93,7 +93,6 @@ impl<'a> From<CachedReadResult> for QueryResult<'a> {
 pub struct MySqlUpstream {
     conn: Conn,
     prepared_statements: HashMap<StatementID, mysql_async::Statement>,
-    upstream_config: UpstreamConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -171,14 +170,7 @@ macro_rules! handle_query_result {
 impl MySqlUpstream {
     async fn connect_inner(
         upstream_config: UpstreamConfig,
-    ) -> Result<
-        (
-            Conn,
-            HashMap<StatementID, mysql_async::Statement>,
-            UpstreamConfig,
-        ),
-        Error,
-    > {
+    ) -> Result<(Conn, HashMap<StatementID, mysql_async::Statement>), Error> {
         // CLIENT_SESSION_TRACK is required for GTID information to be sent in OK packets on commits
         // GTID information is used for RYW
         let url = upstream_config
@@ -199,7 +191,7 @@ impl MySqlUpstream {
             port = %opts.tcp_port(),
             user = %opts.user().unwrap_or("<NO USER>"),
         );
-        span.in_scope(|| info!("Establishing connection"));
+        span.in_scope(|| debug!("Establishing connection"));
         let conn = if cfg!(feature = "ryw") {
             Conn::new(
                 OptsBuilder::from_opts(opts).add_capability(CapabilityFlags::CLIENT_SESSION_TRACK),
@@ -222,9 +214,10 @@ impl MySqlUpstream {
             }));
         }
 
-        span.in_scope(|| info!("Established connection to upstream"));
+        span.in_scope(|| debug!("Established connection to upstream"));
+        metrics::increment_gauge!(recorded::CLIENT_UPSTREAM_CONNECTIONS, 1.0);
         let prepared_statements = HashMap::new();
-        Ok((conn, prepared_statements, upstream_config))
+        Ok((conn, prepared_statements))
     }
 }
 
@@ -239,12 +232,10 @@ impl UpstreamDatabase for MySqlUpstream {
     const SQL_DIALECT: nom_sql::Dialect = nom_sql::Dialect::MySQL;
 
     async fn connect(upstream_config: UpstreamConfig) -> Result<Self, Error> {
-        let (conn, prepared_statements, upstream_config) =
-            Self::connect_inner(upstream_config).await?;
+        let (conn, prepared_statements) = Self::connect_inner(upstream_config).await?;
         Ok(Self {
             conn,
             prepared_statements,
-            upstream_config,
         })
     }
 
@@ -259,23 +250,6 @@ impl UpstreamDatabase for MySqlUpstream {
         // string must be null terminated.
         let (major, minor, patch) = self.conn.server_version();
         format!("{major}.{minor}.{patch}-readyset\0")
-    }
-
-    async fn reset(&mut self) -> Result<(), Error> {
-        let opts = self.conn.opts().clone();
-        let conn = Conn::new(opts).await?;
-        let prepared_statements = HashMap::new();
-        let upstream_config = self.upstream_config.clone();
-        let old_self = std::mem::replace(
-            self,
-            Self {
-                conn,
-                prepared_statements,
-                upstream_config,
-            },
-        );
-        let _ = old_self.conn.disconnect().await as Result<(), _>;
-        Ok(())
     }
 
     async fn is_connected(&mut self) -> Result<bool, Self::Error> {
@@ -293,8 +267,12 @@ impl UpstreamDatabase for MySqlUpstream {
         S: AsRef<str> + Send + Sync + 'a,
     {
         let statement = self.conn.prep(query.as_ref()).await?;
-        self.prepared_statements
-            .insert(statement.id(), statement.clone());
+        if let Some(old_stmt) = self
+            .prepared_statements
+            .insert(statement.id(), statement.clone())
+        {
+            self.conn.close(old_stmt).await?;
+        }
         Ok(UpstreamPrepare {
             statement_id: statement.id(),
             meta: StatementMeta {
@@ -321,6 +299,19 @@ impl UpstreamDatabase for MySqlUpstream {
             )
             .await?;
         handle_query_result!(result)
+    }
+
+    async fn remove_statement(&mut self, statement_id: u32) -> Result<(), Self::Error> {
+        let statement = self
+            .prepared_statements
+            .remove(&statement_id)
+            .ok_or(Error::ReadySet(ReadySetError::PreparedStatementMissing {
+                statement_id,
+            }))?;
+
+        self.conn.close(statement).await?;
+
+        Ok(())
     }
 
     async fn query<'a>(&'a mut self, query: &'a str) -> Result<Self::QueryResult<'a>, Error> {
@@ -392,5 +383,11 @@ impl UpstreamDatabase for MySqlUpstream {
 
     async fn schema_search_path(&mut self) -> Result<Vec<SqlIdentifier>, Self::Error> {
         Ok(self.database().into_iter().map(|s| s.into()).collect())
+    }
+}
+
+impl Drop for MySqlUpstream {
+    fn drop(&mut self) {
+        metrics::decrement_gauge!(recorded::CLIENT_UPSTREAM_CONNECTIONS, 1.0);
     }
 }

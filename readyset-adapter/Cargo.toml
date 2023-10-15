@@ -48,6 +48,9 @@ parking_lot = "0.11.2"
 sqlformat = "0.2.1"
 indexmap = { version = "1", default-features = false }
 quanta = { version = "0.11", default-features = false }
+lru = "0.12.0"
+crossbeam-skiplist = "0.1.1"
+slab = "0.4"
 
 readyset-alloc = { path = "../readyset-alloc/" }
 readyset-client = { path = "../readyset-client/" }
@@ -68,12 +71,17 @@ database-utils = { path = "../database-utils" }
 proptest = "1.0.0"
 test-strategy = "0.2.0"
 criterion = "0.3"
+rand = "0.8.5"
 
 [lib]
 path = "src/lib.rs"
 
 [[bench]]
 name = "rewrite"
+harness = false
+
+[[bench]]
+name = "parse"
 harness = false
 
 [features]

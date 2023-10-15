@@ -156,10 +156,6 @@ impl Paginate {
 }
 
 impl Ingredient for Paginate {
-    fn take(&mut self) -> NodeOperator {
-        self.clone().into()
-    }
-
     fn ancestors(&self) -> Vec<NodeIndex> {
         vec![self.src.as_global()]
     }

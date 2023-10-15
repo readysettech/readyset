@@ -31,8 +31,9 @@ use database_utils::DatabaseURL;
 use nom_sql::Relation;
 use readyset_adapter::backend::noria_connector::{NoriaConnector, ReadBehavior};
 use readyset_client::consensus::{Authority, AuthorityType};
-use readyset_client::{KeyComparison, ReadySetHandle, View, ViewCreateRequest, ViewQuery};
+use readyset_client::{KeyComparison, ReadySetHandle, View, ViewQuery};
 use readyset_data::{DfValue, Dialect};
+use readyset_util::shared_cache::SharedCache;
 use tokio::sync::RwLock;
 use vec1::Vec1;
 
@@ -105,7 +106,8 @@ impl Writer {
         };
 
         let auto_increments: Arc<RwLock<HashMap<Relation, AtomicUsize>>> = Arc::default();
-        let query_cache: Arc<RwLock<HashMap<ViewCreateRequest, Relation>>> = Arc::default();
+        let view_name_cache = SharedCache::new();
+        let view_cache = SharedCache::new();
         let server_supports_pagination = ch.supports_pagination().await?;
         let (dialect, nom_sql_dialect) = match DatabaseURL::from_str(&self.database_url)? {
             DatabaseURL::MySQL(_) | DatabaseURL::Vitess(_) => {
@@ -118,7 +120,8 @@ impl Writer {
         let noria = NoriaConnector::new(
             ch.clone(),
             auto_increments,
-            query_cache,
+            view_name_cache.new_local(),
+            view_cache.new_local(),
             ReadBehavior::Blocking,
             dialect,
             nom_sql_dialect,

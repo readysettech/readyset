@@ -223,7 +223,6 @@ impl MigrationHandler {
             .noria
             .prepare_select(
                 view_request.statement.clone(),
-                0,
                 true,
                 Some(view_request.schema_search_path.clone()),
             )

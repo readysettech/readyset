@@ -1,28 +1,24 @@
 use std::collections::HashMap;
 
 use indexmap::IndexMap;
+use metrics::SharedString;
 use metrics_exporter_prometheus::formatting::{sanitize_label_key, sanitize_label_value};
 use metrics_exporter_prometheus::{Distribution, PrometheusHandle};
-use metrics_util::Summary;
-use quanta::Instant;
 // adding an alias to disambiguate vs readyset_client_metrics::recorded
 use readyset_client::metrics::recorded as client_recorded;
-use readyset_client_metrics::recorded::QUERY_LOG_EXECUTION_TIME;
+use readyset_client_metrics::recorded::QUERY_LOG_EXECUTION_COUNT;
+use readyset_client_metrics::DatabaseType;
 use readyset_data::TimestampTz;
 
 #[derive(Debug, Default, Clone)]
 pub struct MetricsSummary {
-    // i64 because Postgres doesn't have unsigned ints
-    pub sample_count: i64,
-    pub p50_us: f64,
-    pub p90_us: f64,
-    pub p99_us: f64,
+    pub sample_count: u64,
 }
 
 #[derive(Clone)]
 pub struct MetricsHandle {
     inner: PrometheusHandle,
-    snapshot: Option<HashMap<String, Summary>>,
+    snapshot: Option<HashMap<String, u64>>,
 }
 
 impl MetricsHandle {
@@ -59,54 +55,51 @@ impl MetricsHandle {
         self.inner.distributions(filter)
     }
 
-    /// Clone a snapshot of all QUERY_LOG_EXECUTION_TIME histograms.
-    pub fn snapshot_histograms(&mut self) {
+    /// Clone a snapshot of all QUERY_LOG_EXECUTION_COUNT counters.
+    pub fn snapshot_counters(&mut self, database_type: DatabaseType) {
         fn filter(key: &str) -> bool {
-            key == QUERY_LOG_EXECUTION_TIME
+            key == QUERY_LOG_EXECUTION_COUNT
         }
 
-        let histograms = self
-            .histograms(Some(filter))
-            .get(QUERY_LOG_EXECUTION_TIME)
+        let db_type = SharedString::from(database_type).to_string();
+
+        let counters = self
+            .counters(Some(filter))
+            .get(QUERY_LOG_EXECUTION_COUNT)
             .cloned()
             .map(|h| {
                 h.into_iter()
-                    .filter_map(|(k, dist)| {
-                        k.into_iter()
-                            .find(|k| k.starts_with("query_id"))
-                            .and_then(|k| {
-                                let summary = match dist {
-                                    Distribution::Summary(summary, _, _) => {
-                                        Some(summary.snapshot(Instant::now()))
-                                    }
-                                    _ => None,
-                                };
-                                summary.map(|s| (k, s))
-                            })
+                    .filter_map(|(k, count)| {
+                        let mut query_id_tag = None;
+                        for tag in k {
+                            if tag.starts_with("query_id") {
+                                query_id_tag = Some(tag);
+                            } else if tag.starts_with("database_type") && !tag.contains(&db_type) {
+                                return None;
+                            }
+                        }
+
+                        query_id_tag.map(|k| (k, count))
                     })
                     .collect::<HashMap<_, _>>()
             });
-        self.snapshot = histograms;
+        self.snapshot = counters;
     }
 
-    /// Return the count (number of samples), 0.5, 0.9 and 0.99 quantiles for the query specified by
-    /// `query_id`.
+    /// Returns the execution count query specified by `query_id`.
     ///
-    /// NOTE: Quantiles are queried from the last snapshot obtained by calling
-    /// [`Self::snapshot_histograms`]
+    /// NOTE: Values are queried from the last snapshot obtained by calling
+    /// [`Self::snapshot_counters`]
     pub fn metrics_summary(&self, query_id: String) -> Option<MetricsSummary> {
         let label = format!(
             "{}=\"{}\"",
             sanitize_label_key("query_id"),
             sanitize_label_value(&query_id)
         );
-        let summary = self.snapshot.as_ref()?.get(&label)?;
+        let summary = self.snapshot.as_ref()?.get(&label).or(Some(&0))?;
 
         Some(MetricsSummary {
-            sample_count: summary.count().try_into().unwrap_or_default(),
-            p50_us: summary.quantile(0.5).unwrap_or_default(),
-            p90_us: summary.quantile(0.90).unwrap_or_default(),
-            p99_us: summary.quantile(0.99).unwrap_or_default(),
+            sample_count: *summary,
         })
     }
 
@@ -117,6 +110,13 @@ impl MetricsHandle {
             .unwrap_or(0)
     }
 
+    fn sum_gauge(&self, name: &str) -> f64 {
+        self.gauges(Some(|x: &str| x.eq(name)))
+            .get(name)
+            .map(|res| res.values().sum())
+            .unwrap_or(0.0)
+    }
+
     /// Gather all the metrics that are relevant to be printed with
     /// `SHOW READYSET STATUS`
     pub fn readyset_status(&self) -> Vec<(String, String)> {
@@ -125,6 +125,15 @@ impl MetricsHandle {
         let time_ms = self.sum_counter(client_recorded::NORIA_STARTUP_TIMESTAMP);
         let time = TimestampTz::from_unix_ms(time_ms);
         statuses.push(("Process start time".to_string(), time.to_string()));
+
+        let val = self.sum_gauge(readyset_client_metrics::recorded::CONNECTED_CLIENTS);
+        statuses.push(("Connected clients count".to_string(), val.to_string()));
+
+        let val = self.sum_gauge(readyset_client_metrics::recorded::CLIENT_UPSTREAM_CONNECTIONS);
+        statuses.push((
+            "Upstream database connection count".to_string(),
+            val.to_string(),
+        ));
 
         let val = self.sum_counter(readyset_client_metrics::recorded::QUERY_LOG_PARSE_ERRORS);
         statuses.push(("Query parse failures".to_string(), val.to_string()));

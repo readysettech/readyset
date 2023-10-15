@@ -69,15 +69,16 @@
 //! being too heavy handed.
 
 use std::borrow::Cow;
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
-use std::convert::{TryFrom, TryInto};
 use std::fmt::{self, Debug};
 use std::marker::PhantomData;
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crossbeam_skiplist::SkipSet;
 use futures::future::{self, OptionFuture};
+use lru::LruCache;
 use mysql_common::row::convert::{FromRow, FromRowError};
 use nom_sql::{
     CacheInner, CreateCacheStatement, DeleteStatement, Dialect, DropCacheStatement,
@@ -91,12 +92,13 @@ use readyset_client::results::Results;
 use readyset_client::{ColumnSchema, PlaceholderIdx, ViewCreateRequest};
 pub use readyset_client_metrics::QueryDestination;
 use readyset_client_metrics::{recorded, EventType, QueryExecutionEvent, SqlQueryType};
-use readyset_data::DfValue;
+use readyset_data::{DfType, DfValue};
 use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
 use readyset_errors::{internal, internal_err, unsupported, unsupported_err, ReadySetResult};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
 use readyset_util::redacted::Sensitive;
 use readyset_version::READYSET_VERSION;
+use slab::Slab;
 use timestamp_service::client::{TimestampClient, WriteId, WriteKey};
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::{debug, error, instrument, trace, warn};
@@ -106,6 +108,7 @@ use crate::backend::noria_connector::ExecuteSelectContext;
 use crate::metrics_handle::{MetricsHandle, MetricsSummary};
 use crate::query_handler::SetBehavior;
 use crate::query_status_cache::QueryStatusCache;
+use crate::rewrite::ProcessedQueryParams;
 pub use crate::upstream_database::UpstreamPrepare;
 use crate::utils::create_dummy_column;
 use crate::{create_dummy_schema, rewrite, QueryHandler, UpstreamDatabase, UpstreamDestination};
@@ -113,7 +116,10 @@ use crate::{create_dummy_schema, rewrite, QueryHandler, UpstreamDatabase, Upstre
 pub mod noria_connector;
 
 pub use self::noria_connector::NoriaConnector;
-use self::noria_connector::{MetaVariable, SelectPrepareResult};
+use self::noria_connector::{MetaVariable, PreparedSelectTypes};
+
+/// Unique identifier for a prepared statement, local to a single [`Backend`].
+pub type StatementId = u32;
 
 /// Query metadata used to plan query prepare
 #[allow(clippy::large_enum_variant)]
@@ -253,6 +259,7 @@ impl ProxyState {
 #[must_use]
 #[derive(Clone)]
 pub struct BackendBuilder {
+    client_addr: SocketAddr,
     slowlog: bool,
     dialect: Dialect,
     users: HashMap<String, String>,
@@ -268,11 +275,13 @@ pub struct BackendBuilder {
     telemetry_sender: Option<TelemetrySender>,
     enable_experimental_placeholder_inlining: bool,
     metrics_handle: Option<MetricsHandle>,
+    connections: Option<Arc<SkipSet<SocketAddr>>>,
 }
 
 impl Default for BackendBuilder {
     fn default() -> Self {
         BackendBuilder {
+            client_addr: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0)),
             slowlog: false,
             dialect: Dialect::MySQL,
             users: Default::default(),
@@ -288,6 +297,7 @@ impl Default for BackendBuilder {
             telemetry_sender: None,
             enable_experimental_placeholder_inlining: false,
             metrics_handle: None,
+            connections: None,
         }
     }
 }
@@ -312,7 +322,12 @@ impl BackendBuilder {
             ProxyState::Never
         };
 
+        if let Some(connections) = &self.connections {
+            connections.insert(self.client_addr);
+        }
+
         Backend {
+            client_addr: self.client_addr,
             noria,
             upstream,
             users: self.users,
@@ -320,8 +335,8 @@ impl BackendBuilder {
             last_query: None,
             state: BackendState {
                 proxy_state,
-                parsed_query_cache: HashMap::new(),
-                prepared_statements: Vec::new(),
+                parsed_query_cache: LruCache::new(10_000.try_into().expect("10000 is not 0")),
+                prepared_statements: Default::default(),
                 query_status_cache,
                 ticket: self.ticket,
                 timestamp_client: self.timestamp_client,
@@ -341,8 +356,14 @@ impl BackendBuilder {
             telemetry_sender: self.telemetry_sender,
             authority,
             metrics_handle: self.metrics_handle,
+            connections: self.connections,
             _query_handler: PhantomData,
         }
+    }
+
+    pub fn client_addr(mut self, client_addr: SocketAddr) -> Self {
+        self.client_addr = client_addr;
+        self
     }
 
     pub fn slowlog(mut self, slowlog: bool) -> Self {
@@ -419,16 +440,20 @@ impl BackendBuilder {
         self
     }
 
+    pub fn connections(mut self, connections: Arc<SkipSet<SocketAddr>>) -> Self {
+        self.connections = Some(connections);
+        self
+    }
+
     pub fn metrics_handle(mut self, metrics_handle: Option<MetricsHandle>) -> Self {
         self.metrics_handle = metrics_handle;
         self
     }
 }
 
-/// A [`CachedPreparedStatement`] stores the data needed for an immediate
-/// execution of a prepared statement on either noria or the upstream
-/// connection.
-struct CachedPreparedStatement<DB>
+/// A [`PreparedStatement`] stores the data needed for an immediate execution of a prepared
+/// statement on either noria or the upstream connection.
+struct PreparedStatement<DB>
 where
     DB: UpstreamDatabase,
 {
@@ -453,7 +478,7 @@ where
     view_request: Option<ViewCreateRequest>,
 }
 
-impl<DB> CachedPreparedStatement<DB>
+impl<DB> PreparedStatement<DB>
 where
     DB: UpstreamDatabase,
 {
@@ -494,6 +519,8 @@ pub struct Backend<DB, Handler>
 where
     DB: UpstreamDatabase,
 {
+    /// Remote socket address of a connected client
+    client_addr: SocketAddr,
     /// ReadySet connector used for reads, and writes when no upstream DB is present
     noria: NoriaConnector,
     /// Optional connector to the upstream DB. Used for fallback reads and all writes if it exists
@@ -522,6 +549,9 @@ where
     /// Handle to the [`metrics_exporter_prometheus::PrometheusRecorder`] that runs in the adapter.
     metrics_handle: Option<MetricsHandle>,
 
+    /// Set of active connections to this adapter
+    connections: Option<Arc<SkipSet<SocketAddr>>>,
+
     _query_handler: PhantomData<Handler>,
 }
 
@@ -534,9 +564,9 @@ where
     /// A cache of queries that we've seen, and their current state, used for processing
     query_status_cache: &'static QueryStatusCache,
     // a cache of all previously parsed queries
-    parsed_query_cache: HashMap<String, SqlQuery>,
+    parsed_query_cache: LruCache<String, SqlQuery>,
     // all queries previously prepared on noria or upstream, mapped by their ID.
-    prepared_statements: Vec<CachedPreparedStatement<DB>>,
+    prepared_statements: Slab<PreparedStatement<DB>>,
     /// Current RYW ticket. `None` if RYW is not enabled. This `ticket` will
     /// be updated as the client makes writes so as to be an accurate low watermark timestamp
     /// required to make RYW-consistent reads. On reads, the client will pass in this ticket to be
@@ -648,14 +678,25 @@ pub enum SinglePrepareResult<'a, DB: UpstreamDatabase> {
     Upstream(&'a UpstreamPrepare<DB>),
 }
 
-/// The type returned when a query is prepared by `Backend` through the `prepare` function.
-pub enum PrepareResult<DB: UpstreamDatabase> {
+pub enum PrepareResultInner<DB: UpstreamDatabase> {
     Noria(noria_connector::PrepareResult),
     Upstream(UpstreamPrepare<DB>),
     Both(noria_connector::PrepareResult, UpstreamPrepare<DB>),
 }
 
-impl<DB: UpstreamDatabase> Debug for PrepareResult<DB> {
+// Sadly rustc is very confused when trying to derive Clone for UpstreamPrepare, so have to do it
+// manually
+impl<DB: UpstreamDatabase> Clone for PrepareResultInner<DB> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Noria(n) => Self::Noria(n.clone()),
+            Self::Upstream(u) => Self::Upstream(u.clone()),
+            Self::Both(n, u) => Self::Both(n.clone(), u.clone()),
+        }
+    }
+}
+
+impl<DB: UpstreamDatabase> Debug for PrepareResultInner<DB> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Noria(r) => f.debug_tuple("Noria").field(r).finish(),
@@ -665,40 +706,52 @@ impl<DB: UpstreamDatabase> Debug for PrepareResult<DB> {
     }
 }
 
-// Sadly rustc is very confused when trying to derive Clone for UpstreamPrepare, so have to do it
-// manually
-impl<DB: UpstreamDatabase> Clone for PrepareResult<DB> {
-    fn clone(&self) -> Self {
-        match self {
-            PrepareResult::Noria(n) => PrepareResult::Noria(n.clone()),
-            PrepareResult::Upstream(u) => PrepareResult::Upstream(u.clone()),
-            PrepareResult::Both(n, u) => PrepareResult::Both(n.clone(), u.clone()),
-        }
-    }
+/// The type returned when a query is prepared by `Backend` through the `prepare` function.
+#[derive(Debug)]
+pub struct PrepareResult<DB: UpstreamDatabase> {
+    pub statement_id: StatementId,
+    inner: PrepareResultInner<DB>,
 }
 
 impl<DB: UpstreamDatabase> PrepareResult<DB> {
+    pub fn new(statement_id: StatementId, inner: PrepareResultInner<DB>) -> Self {
+        Self {
+            statement_id,
+            inner,
+        }
+    }
+
     pub fn noria_biased(&self) -> SinglePrepareResult<'_, DB> {
-        match self {
-            Self::Noria(res) | Self::Both(res, _) => SinglePrepareResult::Noria(res),
-            Self::Upstream(res) => SinglePrepareResult::Upstream(res),
+        match &self.inner {
+            PrepareResultInner::Noria(res) | PrepareResultInner::Both(res, _) => {
+                SinglePrepareResult::Noria(res)
+            }
+            PrepareResultInner::Upstream(res) => SinglePrepareResult::Upstream(res),
         }
     }
 
     pub fn upstream_biased(&self) -> SinglePrepareResult<'_, DB> {
-        match self {
-            Self::Upstream(res) | Self::Both(_, res) => SinglePrepareResult::Upstream(res),
-            Self::Noria(res) => SinglePrepareResult::Noria(res),
+        match &self.inner {
+            PrepareResultInner::Upstream(res) | PrepareResultInner::Both(_, res) => {
+                SinglePrepareResult::Upstream(res)
+            }
+            PrepareResultInner::Noria(res) => SinglePrepareResult::Noria(res),
+        }
+    }
+
+    pub fn into_upstream(self) -> Option<UpstreamPrepare<DB>> {
+        match self.inner {
+            PrepareResultInner::Upstream(ur) | PrepareResultInner::Both(_, ur) => Some(ur),
+            _ => None,
         }
     }
 
     /// If this [`PrepareResult`] is a [`PrepareResult::Both`], convert it into only a
     /// [`PrepareResult::Upstream`]
     pub fn make_upstream_only(&mut self) {
-        match self {
-            Self::Noria(_) => {}
-            Self::Upstream(_) => {}
-            Self::Both(_, u) => *self = Self::Upstream(u.clone()),
+        match &mut self.inner {
+            PrepareResultInner::Noria(_) | PrepareResultInner::Upstream(_) => {}
+            PrepareResultInner::Both(_, u) => self.inner = PrepareResultInner::Upstream(u.clone()),
         }
     }
 }
@@ -752,20 +805,6 @@ where
             .as_ref()
             .map(|upstream| upstream.version())
             .unwrap_or_else(|| DB::DEFAULT_DB_VERSION.to_string())
-    }
-
-    /// The identifier of the last prepared statement (which is always the last in the vector)
-    pub fn last_prepared_id(&self) -> u32 {
-        (self.state.prepared_statements.len() - 1)
-            .try_into()
-            .expect("Too many prepared statements")
-    }
-
-    /// The identifier we can reserve for the next prepared statement
-    pub fn next_prepared_id(&self) -> u32 {
-        (self.state.prepared_statements.len())
-            .try_into()
-            .expect("Too many prepared statements")
     }
 
     /// Switch the active database for this backend to the given named database.
@@ -832,9 +871,7 @@ where
         query: &str,
         data: DB::PrepareData<'_>,
         event: &mut QueryExecutionEvent,
-    ) -> Result<PrepareResult<DB>, DB::Error> {
-        let prep_idx = self.next_prepared_id();
-
+    ) -> Result<PrepareResultInner<DB>, DB::Error> {
         let do_noria = select_meta.should_do_noria;
         let do_migrate = select_meta.must_migrate;
 
@@ -844,12 +881,10 @@ where
             .map(|u| u.prepare(query, data))
             .into();
         let noria_prep: OptionFuture<_> = do_noria
-            .then_some(self.noria.prepare_select(
-                select_meta.stmt.clone(),
-                prep_idx,
-                do_migrate,
-                None,
-            ))
+            .then_some(
+                self.noria
+                    .prepare_select(select_meta.stmt.clone(), do_migrate, None),
+            )
             .into();
 
         let (upstream_res, noria_res) = future::join(up_prep, noria_prep).await;
@@ -868,7 +903,7 @@ where
 
         // Update noria migration state for query
         match &noria_res {
-            Some(Ok(noria_connector::PrepareResult::Select(_))) => {
+            Some(Ok(noria_connector::PrepareResult::Select { .. })) => {
                 self.state.query_status_cache.update_query_migration_state(
                     &ViewCreateRequest::new(
                         select_meta.rewritten.clone(),
@@ -908,22 +943,26 @@ where
 
         let prep_result = match (upstream_res, noria_res) {
             (Some(upstream_res), Some(Ok(noria_res))) => {
-                PrepareResult::Both(noria_res, upstream_res?)
+                PrepareResultInner::Both(noria_res, upstream_res?)
             }
             (None, Some(Ok(noria_res))) => {
-                if let noria_connector::PrepareResult::Select(SelectPrepareResult::NoSchema(_)) =
-                    noria_res
-                {
+                if matches!(
+                    noria_res,
+                    noria_connector::PrepareResult::Select {
+                        types: PreparedSelectTypes::NoSchema,
+                        ..
+                    }
+                ) {
                     // We fail when attempting to borrow a cache without an upstream here in case
                     // the connection to the upstream is temporarily down.
                     internal!(
                         "Cannot create PrepareResult for borrowed cache without an upstream result"
                     );
                 }
-                PrepareResult::Noria(noria_res)
+                PrepareResultInner::Noria(noria_res)
             }
             (None, Some(Err(noria_err))) => return Err(noria_err.into()),
-            (Some(upstream_res), _) => PrepareResult::Upstream(upstream_res?),
+            (Some(upstream_res), _) => PrepareResultInner::Upstream(upstream_res?),
             (None, None) => return Err(ReadySetError::Unsupported(query.to_string()).into()),
         };
 
@@ -937,15 +976,14 @@ where
         stmt: &SqlQuery,
         data: DB::PrepareData<'_>,
         event: &mut QueryExecutionEvent,
-    ) -> Result<PrepareResult<DB>, DB::Error> {
-        let prep_idx = self.next_prepared_id();
+    ) -> Result<PrepareResultInner<DB>, DB::Error> {
         event.sql_type = SqlQueryType::Write;
         if let Some(ref mut upstream) = self.upstream {
             let _t = event.start_upstream_timer();
             let res = upstream
                 .prepare(query, data)
                 .await
-                .map(PrepareResult::Upstream);
+                .map(PrepareResultInner::Upstream);
             self.last_query = Some(QueryInfo {
                 destination: QueryDestination::Upstream,
                 noria_error: String::new(),
@@ -954,9 +992,9 @@ where
         } else {
             let _t = event.start_noria_timer();
             let res = match stmt {
-                SqlQuery::Insert(stmt) => self.noria.prepare_insert(stmt.clone(), prep_idx).await?,
-                SqlQuery::Delete(stmt) => self.noria.prepare_delete(stmt.clone(), prep_idx).await?,
-                SqlQuery::Update(stmt) => self.noria.prepare_update(stmt.clone(), prep_idx).await?,
+                SqlQuery::Insert(stmt) => self.noria.prepare_insert(stmt.clone()).await?,
+                SqlQuery::Delete(stmt) => self.noria.prepare_delete(stmt.clone()).await?,
+                SqlQuery::Update(stmt) => self.noria.prepare_update(stmt.clone()).await?,
                 // prepare_write does not support other statements
                 _ => internal!(),
             };
@@ -964,7 +1002,7 @@ where
                 destination: QueryDestination::Readyset,
                 noria_error: String::new(),
             });
-            Ok(PrepareResult::Noria(res))
+            Ok(PrepareResultInner::Noria(res))
         }
     }
 
@@ -1073,7 +1111,7 @@ where
         query: &str,
         data: DB::PrepareData<'_>,
         event: &mut QueryExecutionEvent,
-    ) -> Result<PrepareResult<DB>, DB::Error> {
+    ) -> Result<PrepareResultInner<DB>, DB::Error> {
         match meta {
             PrepareMeta::Proxy
             | PrepareMeta::FailedToParse
@@ -1085,7 +1123,7 @@ where
                 let res = self
                     .prepare_fallback(query, data)
                     .await
-                    .map(PrepareResult::Upstream);
+                    .map(PrepareResultInner::Upstream);
 
                 self.last_query = Some(QueryInfo {
                     destination: QueryDestination::Upstream,
@@ -1119,11 +1157,11 @@ where
         let mut query_event = QueryExecutionEvent::new(EventType::Prepare);
 
         let meta = self.plan_prepare(query).await;
-        let res = self
+        let prep = self
             .do_prepare(&meta, query, data, &mut query_event)
             .await?;
 
-        let (id, parsed_query, migration_state, view_request, always) = match meta {
+        let (query_id, parsed_query, migration_state, view_request, always) = match meta {
             PrepareMeta::Write { stmt } => (
                 None,
                 Some(Arc::new(stmt)),
@@ -1157,21 +1195,31 @@ where
         if let Some(parsed) = &parsed_query {
             query_event.query = Some(parsed.clone());
         }
-        query_event.query_id = id;
+        query_event.query_id = query_id;
 
-        let cache_entry = CachedPreparedStatement {
-            query_id: id,
-            prep: res,
+        let statement_id = self.state.prepared_statements.insert(PreparedStatement {
+            query_id,
+            prep: PrepareResult::new(
+                self.state
+                    .prepared_statements
+                    .vacant_key()
+                    .try_into()
+                    .expect(
+                        "Cannot prepare more than u32::MAX statements with a single connection",
+                    ),
+                prep,
+            ),
             migration_state,
             execution_info: None,
             parsed_query,
             view_request,
             always,
-        };
+        });
 
-        self.state.prepared_statements.push(cache_entry);
-
-        Ok(&self.state.prepared_statements.last().unwrap().prep)
+        Ok(
+            // SAFETY: Just inserted!
+            &unsafe { self.state.prepared_statements.get_unchecked(statement_id) }.prep,
+        )
     }
 
     /// Executes a prepared statement on ReadySet
@@ -1189,22 +1237,16 @@ where
         let start = Instant::now();
 
         let res = match prep {
-            Select(_) => {
+            Select { statement, .. } => {
                 let ctx = ExecuteSelectContext::Prepared {
-                    q_id: prep.statement_id(),
+                    ps: statement,
                     params,
                 };
                 noria.execute_select(ctx, ticket, event).await
             }
-            Insert {
-                statement_id: id, ..
-            } => noria.execute_prepared_insert(*id, params).await,
-            Update {
-                statement_id: id, ..
-            } => noria.execute_prepared_update(*id, params).await,
-            Delete {
-                statement_id: id, ..
-            } => noria.execute_prepared_delete(*id, params).await,
+            Insert { statement, .. } => noria.execute_prepared_insert(statement, params).await,
+            Update { statement, .. } => noria.execute_prepared_update(statement, params).await,
+            Delete { statement, .. } => noria.execute_prepared_delete(statement, params).await,
         }
         .map(Into::into);
 
@@ -1311,18 +1353,14 @@ where
     /// If the query is not in the `MigrationState::Pending` or `MigrationState::Inlined` state
     async fn update_noria_prepare(
         noria: &mut NoriaConnector,
-        cached_entry: &mut CachedPreparedStatement<DB>,
-        id: u32,
+        cached_entry: &mut PreparedStatement<DB>,
     ) -> ReadySetResult<()> {
         debug_assert!(
             cached_entry.migration_state.is_pending() || cached_entry.migration_state.is_inlined()
         );
 
-        let upstream_prep: UpstreamPrepare<DB> = match &cached_entry.prep {
-            PrepareResult::Upstream(UpstreamPrepare { statement_id, meta }) => UpstreamPrepare {
-                statement_id: *statement_id,
-                meta: meta.clone(),
-            },
+        let upstream_prep: UpstreamPrepare<DB> = match &cached_entry.prep.inner {
+            PrepareResultInner::Upstream(prep) => prep.clone(),
             _ => internal!("Update may only be called for Upstream prepares"),
         };
 
@@ -1336,7 +1374,6 @@ where
                 noria
                     .prepare_select(
                         stmt.clone(),
-                        id,
                         false,
                         cached_entry
                             .view_request
@@ -1350,7 +1387,10 @@ where
 
         // At this point we got a successful noria prepare, so we want to replace the Upstream
         // result with a Both result
-        cached_entry.prep = PrepareResult::Both(noria_prep, upstream_prep);
+        cached_entry.prep = PrepareResult::new(
+            cached_entry.prep.statement_id,
+            PrepareResultInner::Both(noria_prep, upstream_prep),
+        );
         // If the query was previously `Pending`, update to `Successful`. If it was inlined, we do
         // not update the migration state.
         if cached_entry.migration_state == MigrationState::Pending {
@@ -1368,12 +1408,15 @@ where
             .prepared_statements
             .iter_mut()
             .filter_map(
-                |CachedPreparedStatement {
-                     prep,
-                     migration_state,
-                     view_request,
-                     ..
-                 }| {
+                |(
+                    _,
+                    PreparedStatement {
+                        prep,
+                        migration_state,
+                        view_request,
+                        ..
+                    },
+                )| {
                     if *migration_state == MigrationState::Successful
                         && view_request.as_ref() == Some(stmt)
                     {
@@ -1404,7 +1447,7 @@ where
         let cached_statement = self
             .state
             .prepared_statements
-            .get_mut(id as usize)
+            .get_mut(id as _)
             .ok_or(PreparedStatementMissing { statement_id: id })?;
 
         let mut event = QueryExecutionEvent::new(EventType::Execute);
@@ -1432,7 +1475,7 @@ where
 
             if new_migration_state == MigrationState::Successful {
                 // Attempt to prepare on ReadySet
-                let _ = Self::update_noria_prepare(noria, cached_statement, id).await;
+                let _ = Self::update_noria_prepare(noria, cached_statement).await;
             } else if let MigrationState::Inlined(new_state) = new_migration_state {
                 if let MigrationState::Inlined(ref old_state) = cached_statement.migration_state {
                     // if the epoch has advanced, then we've made changes to the inlined caches so
@@ -1455,9 +1498,12 @@ where
                         // Update the migration state if we updated the view_cache and, if
                         // necessary, the PrepareResult.
                         if updated_view_cache
-                            && matches!(cached_statement.prep, PrepareResult::Upstream(_))
+                            && matches!(
+                                cached_statement.prep.inner,
+                                PrepareResultInner::Upstream(_)
+                            )
                         {
-                            if Self::update_noria_prepare(noria, cached_statement, id)
+                            if Self::update_noria_prepare(noria, cached_statement)
                                 .await
                                 .is_ok()
                             {
@@ -1497,13 +1543,13 @@ where
             }
         };
 
-        let result = match &cached_statement.prep {
-            PrepareResult::Noria(prep) => {
+        let result = match &cached_statement.prep.inner {
+            PrepareResultInner::Noria(prep) => {
                 Self::execute_noria(noria, prep, params, ticket, &mut event)
                     .await
                     .map_err(Into::into)
             }
-            PrepareResult::Upstream(prep) => {
+            PrepareResultInner::Upstream(prep) => {
                 // No inlined caches for this query exist if we are only prepared on upstream.
                 if cached_statement.migration_state.is_inlined() {
                     self.state
@@ -1512,10 +1558,10 @@ where
                 }
                 Self::execute_upstream(upstream, prep, params, exec_meta, &mut event, false).await
             }
-            PrepareResult::Both(.., uprep) if should_fallback => {
+            PrepareResultInner::Both(.., uprep) if should_fallback => {
                 Self::execute_upstream(upstream, uprep, params, exec_meta, &mut event, false).await
             }
-            PrepareResult::Both(nprep, uprep) => {
+            PrepareResultInner::Both(nprep, uprep) => {
                 if cached_statement.execution_info.is_none() {
                     cached_statement.execution_info = Some(ExecutionInfo {
                         state: ExecutionState::Failed,
@@ -1566,6 +1612,22 @@ where
         log_query(self.query_log_sender.as_ref(), event, self.settings.slowlog);
 
         result
+    }
+
+    pub async fn remove_statement(&mut self, id: u32) -> Result<(), DB::Error> {
+        let statement = self
+            .state
+            .prepared_statements
+            .try_remove(id as usize)
+            .ok_or(PreparedStatementMissing { statement_id: id })?;
+
+        if let Some(ur) = statement.prep.into_upstream() {
+            if let Some(upstream) = &mut self.upstream {
+                upstream.remove_statement(ur.statement_id).await?;
+            }
+        }
+
+        Ok(())
     }
 
     /// Should only be called with a SqlQuery that is of type StartTransaction, Commit, or
@@ -1717,11 +1779,14 @@ where
         self.noria.drop_all_caches().await?;
         self.state.query_status_cache.clear();
         self.state.prepared_statements.iter_mut().for_each(
-            |CachedPreparedStatement {
-                 prep,
-                 migration_state,
-                 ..
-             }| {
+            |(
+                _,
+                PreparedStatement {
+                    prep,
+                    migration_state,
+                    ..
+                },
+            )| {
                 if *migration_state == MigrationState::Successful {
                     *migration_state = MigrationState::Pending;
                 }
@@ -1748,17 +1813,9 @@ where
         }
 
         let select_schema = if let Some(handle) = self.metrics_handle.as_mut() {
-            // Must snapshot histograms to get the latest metrics
-            handle.snapshot_histograms();
-            create_dummy_schema!(
-                "query id",
-                "proxied query",
-                "readyset supported",
-                "count",
-                "p50 (ms)",
-                "p90 (ms)",
-                "p99 (ms)"
-            )
+            // Must snapshot to get the latest metrics
+            handle.snapshot_counters(readyset_client_metrics::DatabaseType::MySql);
+            create_dummy_schema!("query id", "proxied query", "readyset supported", "count")
         } else {
             create_dummy_schema!("query id", "proxied query", "readyset supported")
         };
@@ -1785,16 +1842,9 @@ where
 
                 // Append metrics if we have them
                 if let Some(handle) = self.metrics_handle.as_ref() {
-                    let MetricsSummary {
-                        sample_count,
-                        p50_us,
-                        p90_us,
-                        p99_us,
-                    } = handle.metrics_summary(id.to_string()).unwrap_or_default();
+                    let MetricsSummary { sample_count } =
+                        handle.metrics_summary(id.to_string()).unwrap_or_default();
                     row.push(DfValue::from(format!("{sample_count}")));
-                    row.push(DfValue::from(format!("{:.3}", 1000.0 * p50_us)));
-                    row.push(DfValue::from(format!("{:.3}", 1000.0 * p90_us)));
-                    row.push(DfValue::from(format!("{:.3}", 1000.0 * p99_us)));
                 }
 
                 row
@@ -1831,16 +1881,13 @@ where
 
         let select_schema = if let Some(handle) = self.metrics_handle.as_mut() {
             // Must snapshot histograms to get the latest metrics
-            handle.snapshot_histograms();
+            handle.snapshot_counters(readyset_client_metrics::DatabaseType::ReadySet);
             create_dummy_schema!(
                 "query id",
                 "cache name",
                 "query text",
                 "fallback behavior",
-                "count",
-                "p50 (ms)",
-                "p90 (ms)",
-                "p99 (ms)"
+                "count"
             )
         } else {
             create_dummy_schema!("query id", "cache name", "query text", "fallback behavior")
@@ -1852,7 +1899,7 @@ where
             let mut row = vec![
                 id.to_string().into(),
                 self.noria
-                    .get_view(&view.statement, false, false, None)
+                    .get_view_name(&view.statement, false, false, None)
                     .await?
                     .display_unquoted()
                     .to_string()
@@ -1867,16 +1914,9 @@ where
 
             // Append metrics if we have them
             if let Some(handle) = self.metrics_handle.as_ref() {
-                let MetricsSummary {
-                    sample_count,
-                    p50_us,
-                    p90_us,
-                    p99_us,
-                } = handle.metrics_summary(id.to_string()).unwrap_or_default();
+                let MetricsSummary { sample_count } =
+                    handle.metrics_summary(id.to_string()).unwrap_or_default();
                 row.push(DfValue::from(format!("{sample_count}")));
-                row.push(DfValue::from(format!("{:.3}", 1000.0 * p50_us)));
-                row.push(DfValue::from(format!("{:.3}", 1000.0 * p90_us)));
-                row.push(DfValue::from(format!("{:.3}", 1000.0 * p99_us)));
             }
 
             results.push(row);
@@ -2010,6 +2050,7 @@ where
             }
             SqlQuery::Show(ShowStatement::ReadySetVersion) => readyset_version(),
             SqlQuery::Show(ShowStatement::ReadySetTables) => self.noria.table_statuses().await,
+            SqlQuery::Show(ShowStatement::Connections) => self.show_connections(),
             SqlQuery::Show(ShowStatement::ProxiedQueries(proxied_queries_options)) => {
                 // Log a telemetry event
                 if let Some(ref telemetry_sender) = self.telemetry_sender {
@@ -2045,10 +2086,10 @@ where
         settings: &BackendSettings,
         state: &mut BackendState<DB>,
         original_query: &'a str,
-        original_stmt: SelectStatement,
         view_request: &ViewCreateRequest,
         status: Option<QueryStatus>,
         event: &mut QueryExecutionEvent,
+        processed_query_params: ProcessedQueryParams,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         let mut status = status.unwrap_or(QueryStatus {
             migration_state: MigrationState::Unsupported,
@@ -2097,8 +2138,9 @@ where
             event.destination = Some(QueryDestination::Readyset);
             let start = Instant::now();
             let ctx = ExecuteSelectContext::AdHoc {
-                statement: original_stmt,
+                statement: view_request.statement.clone(),
                 create_if_missing: settings.migration_mode == MigrationMode::InRequestPath,
+                processed_query_params,
             };
             let res = noria.execute_select(ctx, state.ticket.clone(), event).await;
             event.readyset_duration = Some(start.elapsed());
@@ -2171,33 +2213,40 @@ where
     /// supplied select statement by rewriting it.
     /// Returns whether noria should try the select, along with the query status if it was obtained
     /// during processing.
-    fn noria_should_try_select(&self, q: &mut ViewCreateRequest) -> (bool, Option<QueryStatus>) {
-        let mut status = None;
-        let should_try =
-            if rewrite::process_query(&mut q.statement, self.noria.server_supports_pagination())
-                .is_ok()
-            {
+    fn noria_should_try_select(
+        &self,
+        q: &mut ViewCreateRequest,
+    ) -> (
+        bool,
+        Option<QueryStatus>,
+        ReadySetResult<ProcessedQueryParams>,
+    ) {
+        match rewrite::process_query(&mut q.statement, self.noria.server_supports_pagination()) {
+            Ok(processed_query_params) => {
                 let s = self.state.query_status_cache.query_status(q);
                 let should_try = if self.state.proxy_state.should_proxy() {
                     s.always
                 } else {
                     true
                 };
-                status = Some(s);
-                should_try
-            } else {
+                (should_try, Some(s), Ok(processed_query_params))
+            }
+            Err(e) => {
                 warn!(
                     // FIXME(REA-2168): Use correct dialect.
                     statement = %Sensitive(&q.statement.display(nom_sql::Dialect::MySQL)),
                     "This statement could not be rewritten by ReadySet"
                 );
-                matches!(
-                    self.state.proxy_state,
-                    ProxyState::Never | ProxyState::Fallback
+                (
+                    matches!(
+                        self.state.proxy_state,
+                        ProxyState::Never | ProxyState::Fallback
+                    ),
+                    None,
+                    Err(e),
                 )
-            };
-
-        (should_try, status)
+            }
+        }
     }
 
     /// Handles a parsed set statement.
@@ -2398,13 +2447,14 @@ where
                     SqlQuery::Insert(q) => noria.handle_insert(q).await,
                     SqlQuery::Update(q) => noria.handle_update(q).await,
                     SqlQuery::Delete(q) => noria.handle_delete(q).await,
-                    // Return a empty result we are allowing unsupported set statements. Commit
+                    // Return an empty result as we are allowing unsupported set statements. Commit
                     // messages are dropped - we do not support transactions in noria standalone.
                     // We return an empty result set instead of an error to support test
                     // applications.
-                    SqlQuery::Set(_) | SqlQuery::Commit(_) | SqlQuery::Use(_) => {
-                        Ok(noria_connector::QueryResult::Empty)
-                    }
+                    SqlQuery::Set(_)
+                    | SqlQuery::Commit(_)
+                    | SqlQuery::Use(_)
+                    | SqlQuery::Comment(_) => Ok(noria_connector::QueryResult::Empty),
                     _ => {
                         error!("unsupported query");
                         unsupported!("query type unsupported");
@@ -2520,14 +2570,15 @@ where
             }
             Ok(SqlQuery::Select(stmt)) => {
                 let mut view_request = ViewCreateRequest::new(
-                    stmt.clone(),
+                    stmt,
                     self.noria.schema_search_path().to_owned(),
                 );
-                let (noria_should_try, status) = self.noria_should_try_select(&mut view_request);
+                let (noria_should_try, status, processed_query_params) = self.noria_should_try_select(&mut view_request);
+                let processed_query_params = processed_query_params?;
                 if noria_should_try {
                     event.sql_type = SqlQueryType::Read;
                     if self.settings.query_log_ad_hoc_queries {
-                        event.query = Some(Arc::new(SqlQuery::Select(stmt.clone())));
+                        event.query = Some(Arc::new(SqlQuery::Select(view_request.statement.clone())));
                         event.query_id = Some(QueryId::from_view_create_request(&view_request));
                     }
                     Self::query_adhoc_select(
@@ -2536,10 +2587,10 @@ where
                         &self.settings,
                         &mut self.state,
                         query,
-                        stmt,
                         &view_request,
                         status,
                         &mut event,
+                        processed_query_params,
                     )
                     .await
                 } else {
@@ -2598,17 +2649,21 @@ where
     }
 
     fn parse_query(&mut self, query: &str) -> ReadySetResult<SqlQuery> {
-        match self.state.parsed_query_cache.entry(query.to_owned()) {
-            Entry::Occupied(entry) => Ok(entry.get().clone()),
-            Entry::Vacant(entry) => {
-                trace!(%query, "Parsing query");
-                match nom_sql::parse_query(self.settings.dialect, query) {
-                    Ok(parsed_query) => Ok(entry.insert(parsed_query).clone()),
-                    Err(_) => Err(ReadySetError::UnparseableQuery {
-                        query: query.to_string(),
-                    }),
-                }
+        if let Some(cached_query) = self.state.parsed_query_cache.get(query) {
+            return Ok(cached_query.clone());
+        }
+
+        trace!(%query, "Parsing query");
+        match nom_sql::parse_query(self.settings.dialect, query) {
+            Ok(parsed_query) => {
+                self.state
+                    .parsed_query_cache
+                    .put(query.to_string(), parsed_query.clone());
+                Ok(parsed_query)
             }
+            Err(_) => Err(ReadySetError::UnparseableQuery {
+                query: query.to_string(),
+            }),
         }
     }
 
@@ -2643,6 +2698,32 @@ where
             query
         }
     }
+
+    fn show_connections(&self) -> Result<noria_connector::QueryResult<'static>, ReadySetError> {
+        let schema = SelectSchema {
+            schema: Cow::Owned(vec![ColumnSchema {
+                column: nom_sql::Column {
+                    name: "remote_addr".into(),
+                    table: None,
+                },
+                column_type: DfType::DEFAULT_TEXT,
+                base: None,
+            }]),
+            columns: Cow::Owned(vec!["remote_addr".into()]),
+        };
+
+        let data = self
+            .connections
+            .iter()
+            .flat_map(|c| c.iter())
+            .map(|conn| vec![conn.to_string().into()])
+            .collect::<Vec<_>>();
+
+        Ok(noria_connector::QueryResult::from_owned(
+            schema,
+            vec![Results::new(data)],
+        ))
+    }
 }
 
 impl<DB, Handler> Drop for Backend<DB, Handler>
@@ -2650,6 +2731,9 @@ where
     DB: UpstreamDatabase,
 {
     fn drop(&mut self) {
+        if let Some(connections) = &self.connections {
+            connections.remove(&self.client_addr);
+        }
         metrics::decrement_gauge!(recorded::CONNECTED_CLIENTS, 1.0);
     }
 }

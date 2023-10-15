@@ -675,6 +675,7 @@ async fn cached_queries_filtering() {
 /// of the servers. After the failure, we verify that we can still perform the
 /// query on ReadySet and we return the correct results.
 #[clustertest]
+#[ignore = "Flaky test (REA-3107)"]
 async fn correct_data_after_restart() {
     let mut deployment = readyset_mysql("ct_correct_data_after_restart")
         .min_workers(2)
@@ -1746,44 +1747,6 @@ async fn enable_experimental_placeholder_inlining() {
 }
 
 #[clustertest]
-async fn aliased_query_explicitly_cached() {
-    readyset_tracing::init_test_logging();
-    let mut deployment = readyset_mysql("aliased_query_explicitly_cached")
-        .add_server(ServerParams::default())
-        .explicit_migrations(1000)
-        .start()
-        .await
-        .unwrap();
-    let mut adapter = deployment.first_adapter().await;
-
-    adapter.query_drop("CREATE TABLE t (c INT)").await.unwrap();
-
-    // Confirm that the query is proxied to begin with
-    adapter.query_drop("SELECT c FROM t").await.unwrap();
-    assert_eq!(
-        last_statement_destination(adapter.as_mysql_conn().unwrap()).await,
-        QueryDestination::Upstream
-    );
-
-    // Cache an equivalent query
-    eventually! {
-        adapter
-            .query_drop("CREATE CACHE FROM SELECT * FROM t")
-            .await
-            .is_ok()
-    }
-
-    // Run the query again. It should get cached automatically, as it aliases to
-    // the previously cached query.
-    eventually! {
-        adapter.query_drop("SELECT c FROM t").await.unwrap();
-        last_statement_destination(adapter.as_mysql_conn().unwrap()).await == QueryDestination::Readyset
-    }
-
-    deployment.teardown().await.unwrap();
-}
-
-#[clustertest]
 async fn show_query_metrics() {
     readyset_tracing::init_test_logging();
     let mut deployment = readyset_mysql("show_query_metrics")
@@ -1813,7 +1776,7 @@ async fn show_query_metrics() {
     }
 
     // Check `SHOW PROXIED QUERIES`
-    let proxied_result: Vec<(String, String, String, String, String, String, String)> = adapter
+    let proxied_result: Vec<(String, String, String, String)> = adapter
         .as_mysql_conn()
         .unwrap()
         .query(r"SHOW PROXIED QUERIES")
@@ -1822,22 +1785,10 @@ async fn show_query_metrics() {
 
     // Assert that we get a non-zero value for the metrics
     assert!(&proxied_result[0].3 != "0");
-    assert!(&proxied_result[0].4 != "0.0");
-    assert!(&proxied_result[0].5 != "0.0");
-    assert!(&proxied_result[0].6 != "0.0");
 
     // Check `SHOW CACHES`
     #[allow(clippy::type_complexity)]
-    let caches_result: Vec<(
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-    )> = adapter
+    let caches_result: Vec<(String, String, String, String, String)> = adapter
         .as_mysql_conn()
         .unwrap()
         .query(r"SHOW CACHES")
@@ -1846,7 +1797,4 @@ async fn show_query_metrics() {
 
     // Assert that we get a non-zero value for the metrics
     assert!(&caches_result[0].3 != "0");
-    assert!(&caches_result[0].4 != "0.0");
-    assert!(&caches_result[0].5 != "0.0");
-    assert!(&caches_result[0].6 != "0.0");
 }

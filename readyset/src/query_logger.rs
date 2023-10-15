@@ -29,6 +29,7 @@ struct QueryMetrics {
     cache_misses: Counter,
     cache_keys_missed: Counter,
     histograms: BTreeMap<(EventType, SqlQueryType), QueryHistograms>,
+    counters: BTreeMap<(EventType, SqlQueryType), QueryCounters>,
 }
 
 #[derive(Default)]
@@ -36,6 +37,13 @@ struct QueryHistograms {
     parse_time: Option<Histogram>,
     upstream_exe_time: Option<Histogram>,
     readyset_exe_time: Option<Histogram>,
+}
+
+// this counter is for use in Day 1, demo mode
+#[derive(Default)]
+struct QueryCounters {
+    upstream_exe_count: Option<Counter>,
+    readyset_exe_count: Option<Counter>,
 }
 
 impl QueryMetrics {
@@ -100,6 +108,48 @@ impl QueryMetrics {
                 register_histogram!(recorded::QUERY_LOG_EXECUTION_TIME, &labels)
             })
     }
+
+    fn readyset_counter(&mut self, kind: (EventType, SqlQueryType)) -> &mut Counter {
+        self.counters
+            .entry(kind)
+            .or_default()
+            .readyset_exe_count
+            .get_or_insert_with(|| {
+                let mut labels = vec![
+                    ("query", self.query.clone()),
+                    ("event_type", SharedString::from(kind.0)),
+                    ("query_type", SharedString::from(kind.1)),
+                    ("database_type", SharedString::from(DatabaseType::ReadySet)),
+                ];
+
+                if let Some(id) = &self.query_id {
+                    labels.push(("query_id", id.clone()));
+                }
+
+                register_counter!(recorded::QUERY_LOG_EXECUTION_COUNT, &labels)
+            })
+    }
+
+    fn upstream_counter(&mut self, kind: (EventType, SqlQueryType)) -> &mut Counter {
+        self.counters
+            .entry(kind)
+            .or_default()
+            .upstream_exe_count
+            .get_or_insert_with(|| {
+                let mut labels = vec![
+                    ("query", self.query.clone()),
+                    ("event_type", SharedString::from(kind.0)),
+                    ("query_type", SharedString::from(kind.1)),
+                    ("database_type", SharedString::from(DatabaseType::MySql)),
+                ];
+
+                if let Some(id) = &self.query_id {
+                    labels.push(("query_id", id.clone()));
+                }
+
+                register_counter!(recorded::QUERY_LOG_EXECUTION_COUNT, &labels)
+            })
+    }
 }
 
 impl QueryLogger {
@@ -143,6 +193,7 @@ impl QueryLogger {
                 query: query_string,
                 query_id: Some(query_id),
                 histograms: BTreeMap::new(),
+                counters: BTreeMap::new(),
             }
         })
     }
@@ -169,6 +220,7 @@ impl QueryLogger {
                     query: query_string,
                     query_id: None,
                     histograms: BTreeMap::new(),
+                    counters: BTreeMap::new(),
                 }
             })
     }
@@ -262,12 +314,14 @@ impl QueryLogger {
                         metrics
                             .readyset_histogram((event.event, event.sql_type))
                             .record(duration);
+                        metrics.readyset_counter((event.event, event.sql_type)).increment(1);
                     }
 
                     if let Some(duration) = event.upstream_duration {
                         metrics
                             .upstream_histogram((event.event, event.sql_type))
                             .record(duration);
+                        metrics.upstream_counter((event.event, event.sql_type)).increment(1);
                     }
                 }
             }

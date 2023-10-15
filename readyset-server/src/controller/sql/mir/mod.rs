@@ -17,8 +17,8 @@ use mir::DfNodeIndex;
 pub use mir::{Column, NodeIndex};
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::{
-    BinaryOperator, ColumnSpecification, CompoundSelectOperator, CreateTableBody, Expr,
-    FieldDefinitionExpr, FieldReference, FunctionExpr, InValue, LimitClause, Literal,
+    BinaryOperator, CaseWhenBranch, ColumnSpecification, CompoundSelectOperator, CreateTableBody,
+    Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, InValue, LimitClause, Literal,
     NonReplicatedRelation, OrderClause, OrderType, Relation, SelectStatement, SqlIdentifier,
     TableKey, UnaryOperator,
 };
@@ -1138,6 +1138,7 @@ impl SqlToMirConverter {
             }
         };
 
+        let is_correlated = is_correlated(&subquery);
         let query_graph = to_query_graph(subquery)?;
         let subquery_leaf = self.named_query_to_mir(
             query_name,
@@ -1177,7 +1178,7 @@ impl SqlToMirConverter {
             query_name,
             self.generate_label(&format!("{name}_join").into()),
             &[JoinPredicate {
-                left: lhs,
+                left: lhs.clone(),
                 right: nom_sql::Column {
                     name: col.name,
                     table: col.table,
@@ -1185,7 +1186,11 @@ impl SqlToMirConverter {
             }],
             parent,
             right_mark,
-            JoinKind::Left,
+            if is_correlated {
+                JoinKind::DependentLeft
+            } else {
+                JoinKind::Left
+            },
         )?;
 
         Ok(self.make_project_node(
@@ -1196,14 +1201,25 @@ impl SqlToMirConverter {
                 .into_iter()
                 .map(ProjectExpr::Column)
                 .chain(iter::once(ProjectExpr::Expr {
-                    expr: Expr::BinaryOp {
-                        lhs: Box::new(Expr::Column(mark_col.into())),
-                        op: if negated {
-                            BinaryOperator::Is
-                        } else {
-                            BinaryOperator::IsNot
-                        },
-                        rhs: Box::new(Expr::Literal(Literal::Null)),
+                    // CASE WHEN lhs IS NULL THEN NULL ELSE mark_col <IS|IS NOT> NULL END
+                    expr: Expr::CaseWhen {
+                        branches: vec![CaseWhenBranch {
+                            condition: Expr::BinaryOp {
+                                lhs: Box::new(Expr::Column(lhs)),
+                                op: BinaryOperator::Is,
+                                rhs: Box::new(Expr::Literal(Literal::Null)),
+                            },
+                            body: Expr::Literal(Literal::Null),
+                        }],
+                        else_expr: Some(Box::new(Expr::BinaryOp {
+                            lhs: Box::new(Expr::Column(mark_col.into())),
+                            op: if negated {
+                                BinaryOperator::Is
+                            } else {
+                                BinaryOperator::IsNot
+                            },
+                            rhs: Box::new(Expr::Literal(Literal::Null)),
+                        })),
                     },
                     alias: name.into(),
                 }))
@@ -1534,7 +1550,7 @@ impl SqlToMirConverter {
                 //
                 //     σ[mark IS NULL](R₁ ⟕[lhs ≡ rhs] π[DISTINCT x AS rhs, 0 AS mark](R₂))
 
-                let (lhs, parent) = match &**lhs {
+                let (lhs, mut parent) = match &**lhs {
                     Expr::Column(col) => (col.clone(), parent),
                     expr => {
                         // The lhs is a non-column expr, so we need to project it first
@@ -1562,6 +1578,24 @@ impl SqlToMirConverter {
                         )
                     }
                 };
+
+                // Remove rows where the lhs expr is NULL, since those would make the overall IN
+                // expr NULL in regular SQL.
+                //
+                // Note that we only need to do this for `NOT IN` since NULLs would never match in
+                // the rhs anyway
+                if *negated {
+                    parent = self.make_filter_node(
+                        query_name,
+                        self.generate_label(&"join_in_where_not_null".into()),
+                        parent,
+                        Expr::BinaryOp {
+                            lhs: Box::new(Expr::Column(lhs.clone())),
+                            op: BinaryOperator::IsNot,
+                            rhs: Box::new(Expr::Literal(Literal::Null)),
+                        },
+                    );
+                }
 
                 let query_graph = to_query_graph((**subquery).clone())?;
                 let subquery_leaf = self.named_query_to_mir(
