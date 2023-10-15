@@ -10,8 +10,8 @@ use replication_offset::vitess::VStreamPosition;
 use replication_offset::ReplicationOffset;
 use tokio::sync::mpsc;
 use tonic::Streaming;
-use tracing::{error, info, trace, warn};
-use vitess_grpc::binlogdata::{ShardGtid, VEvent, VEventType, VGtid};
+use tracing::{debug, error, info, trace, warn};
+use vitess_grpc::binlogdata::{Filter, Rule, ShardGtid, VEvent, VEventType, VGtid};
 use vitess_grpc::query::Row;
 use vitess_grpc::topodata::TabletType;
 use vitess_grpc::vtgate::{VStreamFlags, VStreamRequest, VStreamResponse};
@@ -47,6 +47,7 @@ pub(crate) struct VitessConnector {
 impl VitessConnector {
     pub(crate) async fn connect(
         vitess_config: database_utils::VitessConfig,
+        table: Option<&Relation>,
         initial_position: Option<&VStreamPosition>,
         enable_statement_logging: bool,
     ) -> ReadySetResult<Self> {
@@ -78,11 +79,30 @@ impl VitessConnector {
         };
         info!("Starting VStream from: {:?}", initial_vgtid);
 
+        // Set up the table filter if needed
+        let table_filter = match table {
+            Some(table) => {
+                let table_name = table.name.to_string();
+                let table_rule = Rule {
+                    r#match: table_name,
+                    ..Default::default()
+                };
+
+                Some(Filter {
+                    rules: vec![table_rule],
+                    ..Default::default()
+                })
+            }
+            None => None,
+        };
+        debug!("Table filter: {:?}", table_filter);
+
         // Make the VStream API request to start streaming changes from the cluster
         let request = VStreamRequest {
             vgtid: Some(initial_vgtid),
             tablet_type: TabletType::Primary.into(),
             flags: Some(vstream_flags),
+            filter: table_filter,
             ..Default::default()
         };
 
@@ -110,13 +130,25 @@ impl VitessConnector {
         Ok(connector)
     }
 
+    pub(crate) fn disconnect(&mut self) {
+        self.vstream_events.close();
+    }
+
     // A separate task that receives VStream events and sends them to a channel
     async fn run_v_stream(
         mut vstream: Streaming<VStreamResponse>,
         tx: mpsc::Sender<VEvent>,
     ) -> Result<(), readyset_errors::ReadySetError> {
-        loop {
-            let response = vstream.message().await.map_err(|err| {
+        while !tx.is_closed() {
+            // Wait for the next message from VStream
+            let response = vstream.message().await;
+
+            // If the channel is closed, we should exit and can ignore the result from the VStream
+            if tx.is_closed() {
+                break;
+            }
+
+            let response = response.map_err(|err| {
                 error!("Could not receive VStream event: {}", err);
                 readyset_errors::ReadySetError::InvalidUpstreamDatabase
             })?;
@@ -124,6 +156,10 @@ impl VitessConnector {
             match response {
                 Some(response) => {
                     for message in response.events {
+                        if tx.is_closed() {
+                            break;
+                        }
+
                         tx.send(message).await.map_err(|err| {
                             error!("Could not send VStream event to channel: {}", err);
                             readyset_errors::ReadySetError::InvalidUpstreamDatabase
@@ -131,19 +167,33 @@ impl VitessConnector {
                     }
                 }
                 None => {
-                    warn!("Vitess stream closed, exiting");
-                    drop(tx);
-                    return Ok(());
+                    debug!("Vitess stream closed, exiting");
+                    break;
                 }
             }
         }
+
+        debug!("Vitess stream or the event consumer closed, exiting the VStream task");
+        return Ok(());
+    }
+
+    pub(crate) fn lookup_table(
+        &self,
+        table_name: &str,
+        keyspace: &str,
+    ) -> ReadySetResult<&readyset_vitess_data::Table> {
+        self.schema_cache.tables.get(table_name).ok_or_else(|| {
+            ReadySetError::ReplicationFailed(format!(
+                "Unknown table '{}' in keyspace '{}'",
+                table_name, keyspace
+            ))
+        })
     }
 
     // Process a VStream ROW event and return a ReplicationAction object to be used by Noria
     fn process_row_event(
         &self,
         event: &VEvent,
-        schema_cache: &SchemaCache,
     ) -> ReadySetResult<(ReplicationAction, ReplicationOffset)> {
         let row_event = event.row_event.as_ref().unwrap();
         let keyspace = &row_event.keyspace;
@@ -158,19 +208,14 @@ impl VitessConnector {
                 ))
             })?;
 
-        if schema_cache.keyspace != *keyspace {
+        if self.schema_cache.keyspace != *keyspace {
             return Err(ReadySetError::ReplicationFailed(format!(
                 "Unexpected keyspace '{}' encountered in a ROW event while following the '{}' keyspace",
-                keyspace, schema_cache.keyspace
+                keyspace, self.schema_cache.keyspace
             )));
         }
 
-        let table = schema_cache.tables.get(table_name).ok_or_else(|| {
-            ReadySetError::ReplicationFailed(format!(
-                "Unknown table '{}' in keyspace '{}'",
-                table_name, row_event.keyspace
-            ))
-        })?;
+        let table = self.lookup_table(table_name, &row_event.keyspace)?;
 
         // Process all row changes for the table
         info!(
@@ -235,7 +280,7 @@ impl VitessConnector {
         Ok((action, pos))
     }
 
-    fn row_change_to_noria_row(
+    pub(crate) fn row_change_to_noria_row(
         &self,
         table: &readyset_vitess_data::Table,
         row_change: &Row,
@@ -246,6 +291,36 @@ impl VitessConnector {
                 e
             ))
         })
+    }
+
+    // Waits for the next actionable VStream event (handles heartbeats, fields, etc internally)
+    pub(crate) async fn next_event(&mut self) -> Option<VEvent> {
+        while let Some(event) = self.vstream_events.recv().await {
+            if self.enable_statement_logging {
+                info!("Received VStream event: {:?}", &event);
+            }
+
+            if event.r#type() == VEventType::Heartbeat {
+                info!("Received VStream heartbeat");
+                continue;
+            }
+
+            // We receive this right before the first time we see a new table within the stream
+            if event.r#type() == VEventType::Field {
+                let field_event = event.field_event.unwrap();
+                info!(
+                    "Received VStream FIELD event for table: {}",
+                    &field_event.table_name
+                );
+                self.schema_cache.process_field_event(&field_event).unwrap();
+                continue;
+            }
+
+            return Some(event);
+        }
+
+        // VStream closed
+        None
     }
 }
 
@@ -259,27 +334,15 @@ impl Connector for VitessConnector {
     ) -> ReadySetResult<(ReplicationAction, ReplicationOffset)> {
         // First, check if we have any buffered events to return
         if let Some(row_event) = self.event_buffer.pop_front() {
-            return self.process_row_event(&row_event, &self.schema_cache);
+            return self.process_row_event(&row_event);
         }
 
         // This loop runs until we have something to return to the caller
-        loop {
-            let event = self.vstream_events.recv().await;
-            if event.is_none() {
-                info!("Vitess stream closed, no more events coming");
-                // TODO: Return the position action?
-                return Err(ReadySetError::ReplicationFailed(
-                    "Vitess stream closed".to_string(),
-                ));
-            }
-
-            let event = event.unwrap();
-            if self.enable_statement_logging {
-                info!("Received VStream event: {:?}", &event);
-            }
-
+        while let Some(event) = self.next_event().await {
             match event.r#type() {
-                VEventType::Heartbeat => info!("Received VStream heartbeat"),
+                VEventType::Heartbeat => unreachable!("Heartbeats are handled by next_event()"),
+                VEventType::Field => unreachable!("Field events are handled by next_event()"),
+
                 VEventType::Vgtid => {
                     info!("Received VStream VGTID");
                     let vgtid = event.vgtid.as_ref().unwrap();
@@ -292,7 +355,7 @@ impl Connector for VitessConnector {
 
                     // Now that we have our new position, we can return any buffered events
                     if let Some(row_event) = self.event_buffer.pop_front() {
-                        return self.process_row_event(&row_event, &self.schema_cache);
+                        return self.process_row_event(&row_event);
                     }
                 }
 
@@ -317,16 +380,6 @@ impl Connector for VitessConnector {
                             ReplicationOffset::Vitess(pos.clone()),
                         ));
                     }
-                }
-
-                // We receive this right before the first time we see a new table within the stream
-                VEventType::Field => {
-                    let field_event = event.field_event.unwrap();
-                    info!(
-                        "Received VStream FIELD event for table: {}",
-                        &field_event.table_name
-                    );
-                    self.schema_cache.process_field_event(&field_event)?
                 }
 
                 VEventType::Row => {
@@ -374,5 +427,11 @@ impl Connector for VitessConnector {
             // TODO: Check until position and potentially return:
             // Ok((ReplicationAction::LogPosition, &self.next_position));
         }
+
+        info!("Vitess stream closed, no more events coming");
+        // TODO: Return the position action?
+        Err(ReadySetError::ReplicationFailed(
+            "Vitess stream closed".to_string(),
+        ))
     }
 }

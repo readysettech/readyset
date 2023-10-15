@@ -16,5 +16,4 @@ cargo run --bin readyset -- \
     --query-log \
     --query-log-ad-hoc \
     --statement-logging \
-    --log-level=trace,h2=info,hyper=info,tower=debug,mio=debug,tokio_util::codec=debug \
-    #--no-upstream-connections
+    --log-level=trace,h2=info,hyper=info,tower=debug,mio=debug,tokio_util::codec=debug
