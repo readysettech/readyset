@@ -121,194 +121,33 @@ impl VitessReplicator {
     ) -> ReadySetResult<()> {
         let span = info_span!("Taking a Vitess snapshot");
 
+        // Get the list of tables to replicate and copy their schema to Noria
         span.in_scope(|| info!("Starting schema snapshot..."));
-        let mut tx = self.pool.start_transaction(tx_opts()).await?;
-
-        let _ = tx
-            .query_drop("SET SESSION MAX_EXECUTION_TIME=0")
-            .await
-            .map_err(log_err);
-
-        span.in_scope(|| debug!("Getting list of tables..."));
-        let all_tables = get_table_list(&mut tx, TableKind::BaseTable).await?;
-        let (replicated_tables, non_replicated_tables) = all_tables
-            .into_iter()
-            .partition::<Vec<_>, _>(|(schema, table)| {
-                self.table_filter
-                    .should_be_processed(schema.as_str(), table.as_str())
-            });
-
-        span.in_scope(|| debug!("Extending recipe with non-replicated tables"));
-        noria
-            .extend_recipe_no_leader_ready(ChangeList::from_changes(
-                non_replicated_tables
-                    .into_iter()
-                    .map(|(schema, name)| {
-                        Change::AddNonReplicatedRelation(NonReplicatedRelation {
-                            name: Relation {
-                                schema: Some(schema.into()),
-                                name: name.into(),
-                            },
-                            reason: NotReplicatedReason::Configuration,
-                        })
-                    })
-                    .collect::<Vec<_>>(),
-                Dialect::DEFAULT_MYSQL,
-            ))
+        let table_list = self
+            .snapshot_schema_to_noria(noria, db_schemas)
+            .instrument(span.clone())
             .await?;
 
-        span.in_scope(|| debug!("Getting list of all tables to lock..."));
-        let all_tables_formatted = replicated_tables
-            .iter()
-            .map(|(db, tbl)| format!("`{db}`.`{tbl}`"))
-            .collect::<Vec<_>>();
-
-        span.in_scope(|| debug!("Locking tables..."));
-        for tables in all_tables_formatted.chunks(20) {
-            // There is a default limit of 61 tables per join, so we chunk into smaller joins just
-            // in case
-            let metalock = format!("SELECT 1 FROM {} LIMIT 0", tables.iter().join(","));
-            tx.query_drop(metalock).await?;
-        }
-
-        span.in_scope(|| debug!("Getting schema from of replicated tables..."));
-        let mut bad_tables = Vec::new();
-        // Process `CREATE TABLE` statements
-        for (db, table) in replicated_tables.iter() {
-            match create_for_table(&mut tx, db, table, TableKind::BaseTable)
-                .map_err(|e| e.into())
-                .and_then(|create_table| {
-                    span.in_scope(|| debug!(%create_table, "Extending recipe"));
-                    db_schemas.extend_create_schema_for_table(
-                        db.to_string(),
-                        table.to_string(),
-                        create_table.clone(),
-                        nom_sql::Dialect::MySQL,
-                    );
-
-                    future::ready(ChangeList::from_str(create_table, Dialect::DEFAULT_MYSQL))
-                })
-                .and_then(|changelist| {
-                    noria.extend_recipe_no_leader_ready(
-                        changelist.with_schema_search_path(vec![db.clone().into()]),
-                    )
-                })
-                .await
-            {
-                Ok(_) => {}
-                Err(error) => {
-                    span.in_scope(
-                        || warn!(%error, "Error extending CREATE TABLE, table will not be used"),
-                    );
-                    // Prevent the table from being snapshotted as well
-                    bad_tables.push((db.clone(), table.clone()));
-
-                    noria
-                        .extend_recipe_no_leader_ready(ChangeList::from_change(
-                            Change::AddNonReplicatedRelation(NonReplicatedRelation {
-                                name: Relation {
-                                    schema: Some(db.into()),
-                                    name: table.into(),
-                                },
-                                reason: NotReplicatedReason::OtherError(format!(
-                                    "Error extending CREATE TABLE: {}",
-                                    error
-                                )),
-                            }),
-                            Dialect::DEFAULT_MYSQL,
-                        ))
-                        .await?;
-                }
-            }
-        }
-
-        debug!("Denying replication for bad tables");
-        bad_tables
-            .into_iter()
-            .for_each(|(db, table)| self.table_filter.deny_replication(&db, &table));
-
-        // We process all views, regardless of their schemas and the table filter, since a view can
-        // exist that only selects from tables in other schemas.
-        let all_views = get_table_list(&mut tx, TableKind::View).await?;
-
-        debug!("Getting schema for views...");
-        // Process `CREATE VIEW` statements
-        for (db, view) in all_views.iter() {
-            match create_for_table(&mut tx, db, view, TableKind::View)
-                .map_err(|e| e.into())
-                .and_then(|create_view| {
-                    db_schemas.extend_create_schema_for_view(
-                        db.to_string(),
-                        view.to_string(),
-                        create_view.clone(),
-                        nom_sql::Dialect::MySQL,
-                    );
-                    future::ready(ChangeList::from_str(create_view, Dialect::DEFAULT_MYSQL))
-                })
-                .and_then(|changelist| {
-                    noria.extend_recipe_no_leader_ready(
-                        changelist.with_schema_search_path(vec![db.clone().into()]),
-                    )
-                })
-                .await
-            {
-                Ok(_) => {}
-                Err(error) => {
-                    span.in_scope(|| warn!(%view, %error, "Error extending CREATE VIEW, view will not be used"));
-                    noria
-                        .extend_recipe_no_leader_ready(ChangeList::from_change(
-                            Change::AddNonReplicatedRelation(NonReplicatedRelation {
-                                name: Relation {
-                                    schema: Some(db.into()),
-                                    name: view.into(),
-                                },
-                                reason: NotReplicatedReason::OtherError(format!(
-                                    "Error extending CREATE VIEW: {}",
-                                    error
-                                )),
-                            }),
-                            Dialect::DEFAULT_MYSQL,
-                        ))
-                        .await?;
-                }
-            }
-        }
-
-        let table_list = replicated_tables
-            .into_iter()
-            // refilter to remove any bad tables that failed to extend recipe
-            .filter(|(schema, table)| {
-                self.table_filter
-                    .should_be_processed(schema.as_str(), table.as_str())
-            })
-            .map(|(schema, name)| Relation {
-                schema: Some(schema.into()),
-                name: name.into(),
-            })
-            .collect::<Vec<_>>();
-        span.in_scope(|| info!("Schema snapshot complete for {} tables", table_list.len()));
-
-        // Now that we have the list of tables to replicate, we can start the data snapshot
+        // Now that we have the list of tables, we can start the data snapshot
         span.in_scope(|| info!("Starting data snapshot..."));
         for table in table_list {
-            span.in_scope(|| info!("Snapshotting table {}", table.name));
             let noria_table = noria.table(table.clone()).instrument(span.clone()).await?;
 
-            self.copy_table_to_noria(&table, noria_table)
+            self.snapshot_table_data_to_noria(&table, noria_table)
                 .instrument(span.clone())
                 .await?;
         }
+        span.in_scope(|| info!("Data snapshot complete"));
 
         // Wait for all connections to finish, not strictly necessary
         span.in_scope(|| debug!("Closing snapshot connection..."));
-        drop(tx);
         self.pool.disconnect().await?;
-        span.in_scope(|| debug!("Vitess snapshot connection closed"));
+        span.in_scope(|| debug!("Vitess MySQL snapshot connection closed"));
 
         Ok(())
     }
 
-    async fn copy_table_to_noria(
+    async fn snapshot_table_data_to_noria(
         &self,
         table: &Relation,
         noria_table: readyset_client::Table,
@@ -391,6 +230,180 @@ impl VitessReplicator {
         Err(ReadySetError::ReplicationFailed(format!(
             "Snapshot stream ended before copy completed"
         )))
+    }
+
+    async fn snapshot_schema_to_noria(
+        &mut self,
+        noria: &mut readyset_client::ReadySetHandle,
+        db_schemas: &mut DatabaseSchemas,
+    ) -> ReadySetResult<Vec<Relation>> {
+        let mut tx = self.pool.start_transaction(tx_opts()).await?;
+
+        let _ = tx
+            .query_drop("SET SESSION MAX_EXECUTION_TIME=0")
+            .await
+            .map_err(log_err);
+
+        debug!("Getting list of tables...");
+        let all_tables = get_table_list(&mut tx, TableKind::BaseTable).await?;
+        let (replicated_tables, non_replicated_tables) = all_tables
+            .into_iter()
+            .partition::<Vec<_>, _>(|(schema, table)| {
+                self.table_filter
+                    .should_be_processed(schema.as_str(), table.as_str())
+            });
+
+        debug!("Extending recipe with non-replicated tables");
+        noria
+            .extend_recipe_no_leader_ready(ChangeList::from_changes(
+                non_replicated_tables
+                    .into_iter()
+                    .map(|(schema, name)| {
+                        Change::AddNonReplicatedRelation(NonReplicatedRelation {
+                            name: Relation {
+                                schema: Some(schema.into()),
+                                name: name.into(),
+                            },
+                            reason: NotReplicatedReason::Configuration,
+                        })
+                    })
+                    .collect::<Vec<_>>(),
+                Dialect::DEFAULT_MYSQL,
+            ))
+            .await?;
+
+        debug!("Getting list of all tables to lock...");
+        let all_tables_formatted = replicated_tables
+            .iter()
+            .map(|(db, tbl)| format!("`{db}`.`{tbl}`"))
+            .collect::<Vec<_>>();
+
+        debug!("Locking tables...");
+        for tables in all_tables_formatted.chunks(20) {
+            // There is a default limit of 61 tables per join, so we chunk into smaller joins just
+            // in case
+            let metalock = format!("SELECT 1 FROM {} LIMIT 0", tables.iter().join(","));
+            tx.query_drop(metalock).await?;
+        }
+
+        debug!("Getting schema from of replicated tables...");
+        let mut bad_tables = Vec::new();
+        // Process `CREATE TABLE` statements
+        for (db, table) in replicated_tables.iter() {
+            match create_for_table(&mut tx, db, table, TableKind::BaseTable)
+                .map_err(|e| e.into())
+                .and_then(|create_table| {
+                    debug!(%create_table, "Extending recipe");
+                    db_schemas.extend_create_schema_for_table(
+                        db.to_string(),
+                        table.to_string(),
+                        create_table.clone(),
+                        nom_sql::Dialect::MySQL,
+                    );
+
+                    future::ready(ChangeList::from_str(create_table, Dialect::DEFAULT_MYSQL))
+                })
+                .and_then(|changelist| {
+                    noria.extend_recipe_no_leader_ready(
+                        changelist.with_schema_search_path(vec![db.clone().into()]),
+                    )
+                })
+                .await
+            {
+                Ok(_) => {}
+                Err(error) => {
+                    warn!(%error, "Error extending CREATE TABLE, table will not be used");
+
+                    // Prevent the table from being snapshotted as well
+                    bad_tables.push((db.clone(), table.clone()));
+
+                    noria
+                        .extend_recipe_no_leader_ready(ChangeList::from_change(
+                            Change::AddNonReplicatedRelation(NonReplicatedRelation {
+                                name: Relation {
+                                    schema: Some(db.into()),
+                                    name: table.into(),
+                                },
+                                reason: NotReplicatedReason::OtherError(format!(
+                                    "Error extending CREATE TABLE: {}",
+                                    error
+                                )),
+                            }),
+                            Dialect::DEFAULT_MYSQL,
+                        ))
+                        .await?;
+                }
+            }
+        }
+
+        debug!("Denying replication for bad tables");
+        bad_tables
+            .into_iter()
+            .for_each(|(db, table)| self.table_filter.deny_replication(&db, &table));
+
+        // We process all views, regardless of their schemas and the table filter, since a view can
+        // exist that only selects from tables in other schemas.
+        let all_views = get_table_list(&mut tx, TableKind::View).await?;
+
+        debug!("Getting schema for views...");
+        // Process `CREATE VIEW` statements
+        for (db, view) in all_views.iter() {
+            match create_for_table(&mut tx, db, view, TableKind::View)
+                .map_err(|e| e.into())
+                .and_then(|create_view| {
+                    db_schemas.extend_create_schema_for_view(
+                        db.to_string(),
+                        view.to_string(),
+                        create_view.clone(),
+                        nom_sql::Dialect::MySQL,
+                    );
+                    future::ready(ChangeList::from_str(create_view, Dialect::DEFAULT_MYSQL))
+                })
+                .and_then(|changelist| {
+                    noria.extend_recipe_no_leader_ready(
+                        changelist.with_schema_search_path(vec![db.clone().into()]),
+                    )
+                })
+                .await
+            {
+                Ok(_) => {}
+                Err(error) => {
+                    warn!(%view, %error, "Error extending CREATE VIEW, view will not be used");
+                    noria
+                        .extend_recipe_no_leader_ready(ChangeList::from_change(
+                            Change::AddNonReplicatedRelation(NonReplicatedRelation {
+                                name: Relation {
+                                    schema: Some(db.into()),
+                                    name: view.into(),
+                                },
+                                reason: NotReplicatedReason::OtherError(format!(
+                                    "Error extending CREATE VIEW: {}",
+                                    error
+                                )),
+                            }),
+                            Dialect::DEFAULT_MYSQL,
+                        ))
+                        .await?;
+                }
+            }
+        }
+        drop(tx);
+
+        let table_list = replicated_tables
+            .into_iter()
+            // refilter to remove any bad tables that failed to extend recipe
+            .filter(|(schema, table)| {
+                self.table_filter
+                    .should_be_processed(schema.as_str(), table.as_str())
+            })
+            .map(|(schema, name)| Relation {
+                schema: Some(schema.into()),
+                name: name.into(),
+            })
+            .collect::<Vec<_>>();
+
+        info!("Schema snapshot complete for {} tables", table_list.len());
+        Ok(table_list)
     }
 }
 
