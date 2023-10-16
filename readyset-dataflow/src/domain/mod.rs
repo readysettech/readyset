@@ -4517,4 +4517,9 @@ impl Domain {
 
         Ok(())
     }
+
+    /// Returns a clone of the metrics handle stored within this domain
+    pub fn metrics(&self) -> domain_metrics::DomainMetrics {
+        self.metrics.clone()
+    }
 }
