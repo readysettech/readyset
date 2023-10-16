@@ -11,14 +11,17 @@ use std::task::{Context, Poll};
 
 use async_bincode::{AsyncBincodeWriter, AsyncDestination};
 use futures_util::sink::{Sink, SinkExt};
+use metrics::{register_gauge, Gauge, SharedString};
 use readyset_client::internal::ReplicaAddress;
+use readyset_client::metrics::recorded;
 use readyset_client::{CONNECTION_FROM_BASE, CONNECTION_FROM_DOMAIN};
 use readyset_errors::{ReadySetError, ReadySetResult};
+use strum::{EnumCount, IntoEnumIterator};
 use tokio::io::BufWriter;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
-use crate::prelude::Packet;
+use crate::{Packet, PacketDiscriminants};
 
 pub mod tcp;
 
@@ -33,10 +36,31 @@ const COORDINATOR_CHANGE_CHANNEL_BUFFER_SIZE: usize = 64;
 
 /// Constructs a [`DomainSender`]/[`DomainReceiver`] channel that can be used to send [`Packet`]s to
 /// a domain who lives in the same process as the sender.
-pub fn channel() -> (DomainSender, DomainReceiver) {
+pub(crate) fn domain_channel(replica_address: ReplicaAddress) -> (DomainSender, DomainReceiver) {
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    let index: SharedString = replica_address.domain_index.index().to_string().into();
+    let shard: SharedString = replica_address.shard.to_string().into();
+    let packets_queued: [Gauge; PacketDiscriminants::COUNT] = PacketDiscriminants::iter()
+        .map(|d| {
+            let name: &'static str = d.into();
+            register_gauge!(recorded::DOMAIN_PACKETS_QUEUED,
+                              "domain" => index.clone(),
+                              "shard" => shard.clone(),
+                              "packet_type" => name,
+            )
+        })
+        .collect::<Vec<Gauge>>()
+        .try_into()
+        .ok()
+        .unwrap();
 
-    (DomainSender { tx }, DomainReceiver { rx })
+    (
+        DomainSender {
+            tx,
+            packets_queued: packets_queued.clone(),
+        },
+        DomainReceiver { rx, packets_queued },
+    )
 }
 
 /// A wrapper around a [`tokio::sync::mpsc::UnboundedSender`] to be used for sending messages to
@@ -44,11 +68,16 @@ pub fn channel() -> (DomainSender, DomainReceiver) {
 #[derive(Clone)]
 pub struct DomainSender {
     tx: UnboundedSender<Packet>,
+    packets_queued: [Gauge; PacketDiscriminants::COUNT],
 }
 
 impl DomainSender {
     pub fn send(&self, packet: Packet) -> Result<(), mpsc::error::SendError<Packet>> {
-        self.tx.send(packet)
+        let discriminant: PacketDiscriminants = (&packet).into();
+
+        self.tx.send(packet).map(|()| {
+            self.packets_queued[discriminant as usize].increment(1.0);
+        })
     }
 }
 
@@ -56,11 +85,16 @@ impl DomainSender {
 /// domains who live in the same process as the sender.
 pub struct DomainReceiver {
     rx: UnboundedReceiver<Packet>,
+    packets_queued: [Gauge; PacketDiscriminants::COUNT],
 }
 
 impl DomainReceiver {
     pub async fn recv(&mut self) -> Option<Packet> {
-        self.rx.recv().await
+        self.rx.recv().await.map(|packet| {
+            let discriminant: PacketDiscriminants = (&packet).into();
+            self.packets_queued[discriminant as usize].decrement(1.0);
+            packet
+        })
     }
 }
 

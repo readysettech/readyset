@@ -336,7 +336,7 @@ impl Worker {
 
                 // this channel is used for in-process domain traffic, to avoid going through the
                 // network stack unnecessarily
-                let (local_tx, local_rx) = dataflow::domain_channel();
+                let (local_tx, local_rx) = domain.channel();
                 // this channel is used for domain requests; it has a buffer size of 1 to prevent
                 // flooding a domain with requests
                 let (req_tx, req_rx) = tokio::sync::mpsc::channel(1);

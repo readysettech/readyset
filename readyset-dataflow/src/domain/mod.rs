@@ -44,7 +44,7 @@ use vec1::Vec1;
 
 pub(crate) use self::replay_paths::ReplayPath;
 use self::replay_paths::{Destination, ReplayPathSpec, ReplayPaths, Target};
-use crate::domain::channel::ChannelCoordinator;
+use crate::domain::channel::{ChannelCoordinator, DomainReceiver, DomainSender};
 use crate::node::special::EgressTx;
 use crate::node::{NodeProcessingResult, ProcessEnv};
 use crate::payload::{
@@ -4504,5 +4504,9 @@ impl Domain {
         }
 
         Ok(())
+    }
+
+    pub fn channel(&self) -> (DomainSender, DomainReceiver) {
+        channel::domain_channel(self.address())
     }
 }
