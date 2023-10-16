@@ -2369,7 +2369,7 @@ impl Domain {
         self.metrics.inc_packets_sent(&m);
 
         match *m {
-            Packet::Message { .. } | Packet::Input { .. } => {
+            Packet::Message { .. } => {
                 // WO for https://github.com/rust-lang/rfcs/issues/1403
                 let start = time::Instant::now();
                 let src = m.src();
@@ -2377,7 +2377,19 @@ impl Domain {
                 self.total_forward_time.start();
                 self.dispatch(m, executor)?;
                 self.total_forward_time.stop();
-                self.metrics.rec_forward_time(src, dst, start.elapsed());
+                self.metrics
+                    .rec_message_forward_time(src, dst, start.elapsed());
+            }
+            Packet::Input { .. } => {
+                // WO for https://github.com/rust-lang/rfcs/issues/1403
+                let start = time::Instant::now();
+                let src = m.src();
+                let dst = m.dst();
+                self.total_forward_time.start();
+                self.dispatch(m, executor)?;
+                self.total_forward_time.stop();
+                self.metrics
+                    .rec_input_forward_time(src, dst, start.elapsed());
             }
             Packet::ReplayPiece { tag, .. } => {
                 let start = time::Instant::now();
