@@ -18,7 +18,8 @@ use tokio::io::BufWriter;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
-use crate::prelude::Packet;
+use super::domain_metrics::DomainMetrics;
+use crate::Packet;
 
 pub mod tcp;
 
@@ -33,10 +34,16 @@ const COORDINATOR_CHANGE_CHANNEL_BUFFER_SIZE: usize = 64;
 
 /// Constructs a [`DomainSender`]/[`DomainReceiver`] channel that can be used to send [`Packet`]s to
 /// a domain who lives in the same process as the sender.
-pub fn channel() -> (DomainSender, DomainReceiver) {
+pub fn channel(metrics: DomainMetrics) -> (DomainSender, DomainReceiver) {
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
 
-    (DomainSender { tx }, DomainReceiver { rx })
+    (
+        DomainSender {
+            tx,
+            metrics: metrics.clone(),
+        },
+        DomainReceiver { rx, metrics },
+    )
 }
 
 /// A wrapper around a [`tokio::sync::mpsc::UnboundedSender`] to be used for sending messages to
@@ -44,11 +51,14 @@ pub fn channel() -> (DomainSender, DomainReceiver) {
 #[derive(Clone)]
 pub struct DomainSender {
     tx: UnboundedSender<Packet>,
+    metrics: DomainMetrics,
 }
 
 impl DomainSender {
     pub fn send(&self, packet: Packet) -> Result<(), mpsc::error::SendError<Packet>> {
-        self.tx.send(packet)
+        self.tx.send(packet.clone()).map(|()| {
+            self.metrics.inc_packets_queued(&packet);
+        })
     }
 }
 
@@ -56,11 +66,15 @@ impl DomainSender {
 /// domains who live in the same process as the sender.
 pub struct DomainReceiver {
     rx: UnboundedReceiver<Packet>,
+    metrics: DomainMetrics,
 }
 
 impl DomainReceiver {
     pub async fn recv(&mut self) -> Option<Packet> {
-        self.rx.recv().await
+        self.rx.recv().await.map(|packet| {
+            self.metrics.dec_packets_queued(&packet);
+            packet
+        })
     }
 }
 

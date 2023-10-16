@@ -22,7 +22,8 @@ use crate::{NodeMap, Packet, PacketDiscriminants};
 /// Whenever possible the handles are generated at init time, others
 /// that require dynamic labels are created on demand and stored in
 /// a BTreeMap or a NodeMap.
-pub(super) struct DomainMetrics {
+#[derive(Clone)]
+pub struct DomainMetrics {
     index: SharedString,
     shard: SharedString,
     eviction_requests: Counter,
@@ -35,6 +36,7 @@ pub(super) struct DomainMetrics {
     total_node_state_size: Gauge,
 
     packets_sent: [Counter; PacketDiscriminants::COUNT],
+    packets_queued: [Gauge; PacketDiscriminants::COUNT],
 
     // using a BTree to look up metrics by tag/node, BTree is faster than HashMap for u32/u64 keys
     chunked_replay_start_time: BTreeMap<Tag, (Counter, Histogram)>,
@@ -71,6 +73,17 @@ impl DomainMetrics {
             })
             .collect();
 
+        let packets_queued: Vec<Gauge> = PacketDiscriminants::iter()
+            .map(|d| {
+                let name: &'static str = d.into();
+                register_gauge!(recorded::DOMAIN_PACKETS_QUEUED,
+                                  "domain" => index.clone(),
+                                  "shard" => shard.clone(),
+                                  "packet_type" => name,
+                )
+            })
+            .collect();
+
         DomainMetrics {
             partial_state_size: register_gauge!(
                 recorded::DOMAIN_PARTIAL_STATE_SIZE_BYTES,
@@ -94,6 +107,7 @@ impl DomainMetrics {
             total_forward_time: Default::default(),
             replay_misses: Default::default(),
             packets_sent: packets_sent.try_into().ok().unwrap(),
+            packets_queued: packets_queued.try_into().ok().unwrap(),
             reader_replay_request_time: Default::default(),
             base_table_lookups: Default::default(),
             node_state_size: Default::default(),
@@ -355,6 +369,16 @@ impl DomainMetrics {
     pub(super) fn inc_packets_sent(&mut self, packet: &Packet) {
         let discriminant: PacketDiscriminants = packet.into();
         self.packets_sent[discriminant as usize].increment(1);
+    }
+
+    pub(super) fn inc_packets_queued(&self, packet: &Packet) {
+        let discriminant: PacketDiscriminants = packet.into();
+        self.packets_queued[discriminant as usize].increment(1.0);
+    }
+
+    pub(super) fn dec_packets_queued(&self, packet: &Packet) {
+        let discriminant: PacketDiscriminants = packet.into();
+        self.packets_queued[discriminant as usize].decrement(1.0);
     }
 
     pub(super) fn inc_base_table_lookups(&mut self, node: LocalNodeIndex) {

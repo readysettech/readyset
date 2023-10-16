@@ -379,6 +379,14 @@ pub mod recorded {
     /// | packet_type | The type of packet |
     pub const DOMAIN_PACKET_SENT: &str = "readyset_domain.packet_sent";
 
+    /// Gauge: The number of dataflow packets queued for each domain.
+    ///
+    /// | Tag | Description |
+    /// | domain | The index of the domain. |
+    /// | shard | The shard of the base table the lookup is requested in. |
+    /// | packet_type | The type of packet |
+    pub const DOMAIN_PACKETS_QUEUED: &str = "readyset_domain.packets_queued";
+
     /// Histogram: The time a snapshot takes to be performed.
     pub const REPLICATOR_SNAPSHOT_DURATION: &str = "readyset_replicator.snapshot_duration_us";
 
