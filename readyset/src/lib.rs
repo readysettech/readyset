@@ -845,6 +845,7 @@ where
             prometheus_handle: prometheus_handle.clone(),
             health_reporter: health_reporter.clone(),
             failpoint_channel: tx,
+            metrics: Default::default(),
         };
 
         let router_shutdown_rx = shutdown_rx.clone();

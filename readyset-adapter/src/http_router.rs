@@ -11,6 +11,7 @@ use health_reporter::{HealthReporter as AdapterHealthReporter, State};
 use hyper::header::CONTENT_TYPE;
 use hyper::service::make_service_fn;
 use hyper::{self, Body, Method, Request, Response};
+use metrics::Gauge;
 use metrics_exporter_prometheus::PrometheusHandle;
 use readyset_alloc::{dump_stats, memory_and_per_thread_stats};
 use readyset_client_metrics::recorded;
@@ -38,6 +39,9 @@ pub struct NoriaAdapterHttpRouter {
     /// Used to retrieve the prometheus scrape's render as a String when servicing
     /// HTTP requests on /metrics.
     pub prometheus_handle: Option<PrometheusHandle>,
+
+    /// Used to record metrics related to http request handling.
+    pub metrics: HttpRouterMetrics,
 }
 
 impl NoriaAdapterHttpRouter {
@@ -204,7 +208,10 @@ impl Service<Request<Body>> for NoriaAdapterHttpRouter {
                 let body = self.prometheus_handle.as_ref().map(|x| x.render());
                 let res = res.header(CONTENT_TYPE, "text/plain");
                 let res = match body {
-                    Some(metrics) => res.body(hyper::Body::from(metrics)),
+                    Some(metrics) => {
+                        self.metrics.rec_metrics_payload_size(metrics.len());
+                        res.body(hyper::Body::from(metrics))
+                    }
                     None => res
                         .status(404)
                         .body(hyper::Body::from("Prometheus metrics were not enabled. To fix this, run the adapter with --prometheus-metrics".to_string())),
@@ -251,5 +258,26 @@ impl Service<Request<Body>> for NoriaAdapterHttpRouter {
                 Ok(res.unwrap())
             }),
         }
+    }
+}
+
+#[derive(Clone)]
+pub struct HttpRouterMetrics {
+    /// The last seen size of the /metrics endpoint payload, in bytes
+    metrics_payload_size: Gauge,
+}
+
+impl Default for HttpRouterMetrics {
+    fn default() -> Self {
+        Self {
+            metrics_payload_size: metrics::register_gauge!(recorded::METRICS_PAYLOAD_SIZE_BYTES),
+        }
+    }
+}
+
+impl HttpRouterMetrics {
+    /// Record the size of the /metrics payload in bytes
+    pub(super) fn rec_metrics_payload_size(&self, payload_size: usize) {
+        self.metrics_payload_size.set(payload_size as f64);
     }
 }
