@@ -16,6 +16,7 @@ use readyset_client::{CONNECTION_FROM_BASE, CONNECTION_FROM_DOMAIN};
 use readyset_errors::{ReadySetError, ReadySetResult};
 use tokio::io::BufWriter;
 use tokio::sync::broadcast;
+use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 use crate::prelude::Packet;
 
@@ -30,6 +31,39 @@ pub use self::tcp::{DualTcpStream, TcpSender};
 /// reading them, the replicas that lag behind will reconnect to all other replicas
 const COORDINATOR_CHANGE_CHANNEL_BUFFER_SIZE: usize = 64;
 
+/// Constructs a [`DomainSender`]/[`DomainReceiver`] channel that can be used to send [`Packet`]s to
+/// a domain who lives in the same process as the sender.
+pub fn channel() -> (DomainSender, DomainReceiver) {
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+
+    (DomainSender { tx }, DomainReceiver { rx })
+}
+
+/// A wrapper around a [`tokio::sync::mpsc::UnboundedSender`] to be used for sending messages to
+/// domains who live in the same process as the sender.
+#[derive(Clone)]
+pub struct DomainSender {
+    tx: UnboundedSender<Packet>,
+}
+
+impl DomainSender {
+    pub fn send(&self, packet: Packet) -> Result<(), mpsc::error::SendError<Packet>> {
+        self.tx.send(packet)
+    }
+}
+
+/// A wrapper around a [`tokio::sync::mpsc::UnboundedReceiver`] to be used for sending messages to
+/// domains who live in the same process as the sender.
+pub struct DomainReceiver {
+    rx: UnboundedReceiver<Packet>,
+}
+
+impl DomainReceiver {
+    pub async fn recv(&mut self) -> Option<Packet> {
+        self.rx.recv().await
+    }
+}
+
 pub struct Remote;
 pub struct MaybeLocal;
 
@@ -37,22 +71,20 @@ pub struct MaybeLocal;
 pub struct DomainConnectionBuilder<D> {
     sport: Option<u16>,
     addr: SocketAddr,
-    chan: Option<tokio::sync::mpsc::UnboundedSender<Packet>>,
+    chan: Option<DomainSender>,
     is_for_base: bool,
     _marker: D,
 }
 
-struct ImplSinkForSender(tokio::sync::mpsc::UnboundedSender<Packet>);
-
-impl Sink<Packet> for ImplSinkForSender {
-    type Error = tokio::sync::mpsc::error::SendError<Packet>;
+impl Sink<Packet> for DomainSender {
+    type Error = mpsc::error::SendError<Packet>;
 
     fn poll_ready(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 
     fn start_send(self: Pin<&mut Self>, item: Packet) -> Result<(), Self::Error> {
-        self.0.send(item)
+        DomainSender::send(&self, item)
     }
 
     fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -118,9 +150,9 @@ pub trait Sender {
     fn send(&mut self, packet: Packet) -> Result<(), tcp::SendError>;
 }
 
-impl Sender for tokio::sync::mpsc::UnboundedSender<Packet> {
+impl Sender for DomainSender {
     fn send(&mut self, packet: Packet) -> Result<(), tcp::SendError> {
-        tokio::sync::mpsc::UnboundedSender::send(self, packet).map_err(|_| {
+        DomainSender::send(self, packet).map_err(|_| {
             tcp::SendError::IoError(io::Error::new(
                 io::ErrorKind::BrokenPipe,
                 "local peer went away",
@@ -140,10 +172,10 @@ impl DomainConnectionBuilder<MaybeLocal> {
         self,
     ) -> io::Result<Box<dyn Sink<Packet, Error = bincode::Error> + Send + Unpin>> {
         if let Some(chan) = self.chan {
-            Ok(Box::new(
-                ImplSinkForSender(chan)
-                    .sink_map_err(|_| serde::de::Error::custom("failed to do local send")),
-            ) as Box<_>)
+            Ok(
+                Box::new(chan.sink_map_err(|_| serde::de::Error::custom("failed to do local send")))
+                    as Box<_>,
+            )
         } else {
             DomainConnectionBuilder {
                 sport: self.sport,
@@ -178,7 +210,7 @@ struct ChannelCoordinatorInner {
     /// Map from key to remote address.
     addrs: HashMap<ReplicaAddress, SocketAddr>,
     /// Map from key to channel sender for local connections.
-    locals: HashMap<ReplicaAddress, tokio::sync::mpsc::UnboundedSender<Packet>>,
+    locals: HashMap<ReplicaAddress, DomainSender>,
 }
 
 pub struct ChannelCoordinator {
@@ -242,11 +274,7 @@ impl ChannelCoordinator {
         }
     }
 
-    pub fn insert_local(
-        &self,
-        key: ReplicaAddress,
-        chan: tokio::sync::mpsc::UnboundedSender<Packet>,
-    ) {
+    pub fn insert_local(&self, key: ReplicaAddress, chan: DomainSender) {
         #[allow(clippy::expect_used)]
         // This can only fail if the mutex is poisoned, in which case we can't recover,
         // so we allow to panic if that happens.
