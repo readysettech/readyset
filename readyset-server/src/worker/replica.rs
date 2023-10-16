@@ -8,7 +8,7 @@ use ahash::AHashMap;
 use anyhow::{self, Context as AnyhowContext};
 use dataflow::payload::{MaterializedState, SourceChannelIdentifier};
 use dataflow::prelude::Executor;
-use dataflow::{Domain, DomainRequest, DualTcpStream, Packet};
+use dataflow::{Domain, DomainReceiver, DomainRequest, DualTcpStream, Packet};
 use futures_util::sink::{Sink, SinkExt};
 use futures_util::stream::StreamExt;
 use futures_util::FutureExt;
@@ -55,7 +55,7 @@ pub struct Replica {
     incoming: Strawpoll<TcpListener>,
 
     /// A receiver for locally sent messages
-    locals: mpsc::UnboundedReceiver<Packet>,
+    locals: DomainReceiver,
 
     /// A receiver for domain messages
     requests: mpsc::Receiver<WrappedDomainRequest>,
@@ -70,7 +70,7 @@ impl Replica {
     pub(super) fn new(
         domain: Domain,
         on: TcpListener,
-        locals: mpsc::UnboundedReceiver<Packet>,
+        locals: DomainReceiver,
         requests: mpsc::Receiver<WrappedDomainRequest>,
         init_state_reqs: mpsc::Receiver<MaterializedState>,
         cc: Arc<ChannelCoordinator>,
@@ -183,7 +183,7 @@ impl Replica {
 
     /// Receive packets from local and remote connections
     async fn receive_packets(
-        locals: &mut mpsc::UnboundedReceiver<Packet>,
+        locals: &mut DomainReceiver,
         connections: &mut tokio_stream::StreamMap<u64, DualTcpStream>,
     ) -> ReadySetResult<Option<VecDeque<Packet>>> {
         const MAX_PACKETS_PER_CALL: usize = 64;
