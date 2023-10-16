@@ -34,8 +34,8 @@ pub mod recorded {
     pub const DOMAIN_REPLAY_MISSES: &str = "readyset_domain.replay_misses";
 
     /// Histogram: The time in microseconds that a domain spends
-    /// handling and forwarding a Message or Input packet. Recorded at
-    /// the domain following handling each Message and Input packet.
+    /// handling and forwarding a Message packet. Recorded at the domain
+    /// following handling each Message packet.
     ///
     /// | Tag | Description |
     /// | --- | ----------- |
@@ -43,11 +43,11 @@ pub mod recorded {
     /// | to_node |The dst node of the packet. |
     /// | domain | The index of the domain handling the packet. |
     /// | shard | The shard the domain handling the packet. |
-    pub const DOMAIN_FORWARD_TIME: &str = "readyset_forward_time_us";
+    pub const DOMAIN_MESSAGE_FORWARD_TIME: &str = "readyset_message_forward_time_us";
 
     /// Counter: The total time the domain spends handling and forwarding
-    /// a Message or Input packet. Recorded at the domain following handling
-    /// each Message and Input packet.
+    /// a Message packet. Recorded at the domain following handling each
+    /// Message packet.
     ///
     /// | Tag | Description |
     /// | --- | ----------- |
@@ -55,7 +55,31 @@ pub mod recorded {
     /// | to_node |The dst node of the packet. |
     /// | domain | The index of the domain handling the packet. |
     /// | shard | The shard the domain handling the packet. |
-    pub const DOMAIN_TOTAL_FORWARD_TIME: &str = "readyset_total_forward_time_us";
+    pub const DOMAIN_TOTAL_MESSAGE_FORWARD_TIME: &str = "readyset_total_message_forward_time_us";
+
+    /// Histogram: The time in microseconds that a domain spends
+    /// handling and forwarding an Input packet. Recorded at the domain
+    /// following handling each Input packet.
+    ///
+    /// | Tag | Description |
+    /// | --- | ----------- |
+    /// | from_node | The src node of the packet. |
+    /// | to_node |The dst node of the packet. |
+    /// | domain | The index of the domain handling the packet. |
+    /// | shard | The shard the domain handling the packet. |
+    pub const DOMAIN_INPUT_FORWARD_TIME: &str = "readyset_input_forward_time_us";
+
+    /// Counter: The total time the domain spends handling and forwarding
+    /// an Input packet. Recorded at the domain following handling each
+    /// Input packet.
+    ///
+    /// | Tag | Description |
+    /// | --- | ----------- |
+    /// | from_node | The src node of the packet. |
+    /// | to_node |The dst node of the packet. |
+    /// | domain | The index of the domain handling the packet. |
+    /// | shard | The shard the domain handling the packet. |
+    pub const DOMAIN_TOTAL_INPUT_FORWARD_TIME: &str = "readyset_total_input_forward_time_us";
 
     /// Histogram: The time in microseconds that a domain spends
     /// handling a ReplayPiece packet. Recorded at the domain following
