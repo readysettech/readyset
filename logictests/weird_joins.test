@@ -79,3 +79,15 @@ ON t1.x = t2.x
 AND t2.y = 2
 ----
 1
+
+query II nosort
+SELECT t1.x, t2.y
+FROM t1
+LEFT OUTER JOIN t2
+ON t2.y = 2
+AND t1.x = t2.x
+----
+1
+2
+2
+NULL
