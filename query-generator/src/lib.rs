@@ -85,7 +85,7 @@ use nom_sql::{
     BinaryOperator, Column, ColumnConstraint, ColumnSpecification, CommonTableExpr,
     CreateTableBody, CreateTableStatement, Dialect as ParseDialect, Expr, FieldDefinitionExpr,
     FieldReference, FunctionExpr, InValue, ItemPlaceholder, JoinClause, JoinConstraint,
-    JoinOperator, JoinRightSide, LimitClause, Literal, OrderClause, OrderType, Relation,
+    JoinOperator, JoinRightSide, LimitClause, Literal, OrderBy, OrderClause, OrderType, Relation,
     SelectStatement, SqlIdentifier, SqlType, SqlTypeArbitraryOptions, TableExpr, TableExprInner,
     TableKey,
 };
@@ -1715,7 +1715,7 @@ impl QueryOperation {
             QueryOperation::Distinct => {
                 query.distinct = true;
                 if let Some(order) = &query.order {
-                    for (field, _) in &order.order_by {
+                    for OrderBy { field, .. } in &order.order_by {
                         let expr = match field {
                             FieldReference::Numeric(_) => {
                                 unreachable!(
@@ -1948,10 +1948,10 @@ impl QueryOperation {
                     ..column_name.into()
                 };
                 query.order = Some(OrderClause {
-                    order_by: vec![(
-                        FieldReference::Expr(Expr::Column(column.clone())),
-                        Some(*order_type),
-                    )],
+                    order_by: vec![OrderBy {
+                        field: FieldReference::Expr(Expr::Column(column.clone())),
+                        order_type: Some(*order_type),
+                    }],
                 });
 
                 query.limit_clause = LimitClause::LimitOffset {
@@ -1985,10 +1985,10 @@ impl QueryOperation {
                     ..column_name.into()
                 };
                 query.order = Some(OrderClause {
-                    order_by: vec![(
-                        FieldReference::Expr(Expr::Column(column.clone())),
-                        Some(*order_type),
-                    )],
+                    order_by: vec![OrderBy {
+                        field: FieldReference::Expr(Expr::Column(column.clone())),
+                        order_type: Some(*order_type),
+                    }],
                 });
 
                 // Since we are setting both fields, check first to see what kind of syntax
@@ -2601,7 +2601,7 @@ impl QuerySeed {
             }
 
             if let Some(order) = &query.order {
-                for (field, _) in &order.order_by {
+                for OrderBy { field, .. } in &order.order_by {
                     let expr = match field {
                         FieldReference::Expr(expr) => expr,
                         FieldReference::Numeric(_) => unreachable!(

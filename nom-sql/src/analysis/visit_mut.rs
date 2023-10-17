@@ -22,9 +22,9 @@ use crate::{
     DeleteStatement, DropAllCachesStatement, DropCacheStatement, DropTableStatement,
     DropViewStatement, ExplainStatement, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr,
     GroupByClause, InValue, InsertStatement, JoinClause, JoinConstraint, JoinRightSide, Literal,
-    OrderClause, Relation, SelectSpecification, SelectStatement, SetNames, SetPostgresParameter,
-    SetStatement, SetVariables, ShowStatement, SqlIdentifier, SqlQuery, SqlType, TableExpr,
-    TableExprInner, TableKey, UpdateStatement, UseStatement,
+    OrderBy, OrderClause, Relation, SelectSpecification, SelectStatement, SetNames,
+    SetPostgresParameter, SetStatement, SetVariables, ShowStatement, SqlIdentifier, SqlQuery,
+    SqlType, TableExpr, TableExprInner, TableKey, UpdateStatement, UseStatement,
 };
 
 /// Each method of the `VisitorMut` trait is a hook to be potentially overridden when recursively
@@ -179,6 +179,10 @@ pub trait VisitorMut<'ast>: Sized {
 
     fn visit_having_clause(&mut self, expr: &'ast mut Expr) -> Result<(), Self::Error> {
         self.visit_expr(expr)
+    }
+
+    fn visit_order_by(&mut self, order_by: &'ast mut OrderBy) -> Result<(), Self::Error> {
+        walk_order_by(self, order_by)
     }
 
     fn visit_order_clause(&mut self, order: &'ast mut OrderClause) -> Result<(), Self::Error> {
@@ -615,12 +619,20 @@ pub fn walk_group_by_clause<'ast, V: VisitorMut<'ast>>(
     Ok(())
 }
 
+pub fn walk_order_by<'ast, V: VisitorMut<'ast>>(
+    visitor: &mut V,
+    order_by: &'ast mut OrderBy,
+) -> Result<(), V::Error> {
+    visitor.visit_field_reference(&mut order_by.field)?;
+    Ok(())
+}
+
 pub fn walk_order_clause<'ast, V: VisitorMut<'ast>>(
     visitor: &mut V,
     order_clause: &'ast mut OrderClause,
 ) -> Result<(), V::Error> {
-    for (field, _) in &mut order_clause.order_by {
-        visitor.visit_field_reference(field)?;
+    for order_by in &mut order_clause.order_by {
+        visitor.visit_order_by(order_by)?;
     }
     Ok(())
 }

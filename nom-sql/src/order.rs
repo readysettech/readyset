@@ -46,8 +46,27 @@ impl fmt::Display for OrderType {
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Arbitrary)]
+pub struct OrderBy {
+    pub field: FieldReference,
+    pub order_type: Option<OrderType>,
+}
+
+impl OrderBy {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+        fmt_with(move |f| {
+            write!(f, "{}", self.field.display(dialect))?;
+            if let Some(ot) = self.order_type {
+                write!(f, " {}", ot)?;
+            }
+
+            Ok(())
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Arbitrary)]
 pub struct OrderClause {
-    pub order_by: Vec<(FieldReference, Option<OrderType>)>,
+    pub order_by: Vec<OrderBy>,
 }
 
 impl OrderClause {
@@ -58,15 +77,7 @@ impl OrderClause {
                 "ORDER BY {}",
                 self.order_by
                     .iter()
-                    .map(|(c, o)| format!(
-                        "{}{}",
-                        c.display(dialect),
-                        if let Some(ot) = o {
-                            format!(" {}", ot)
-                        } else {
-                            "".to_owned()
-                        }
-                    ))
+                    .map(|ob| ob.display(dialect))
                     .join(", ")
             )
         })
@@ -80,13 +91,11 @@ pub fn order_type(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], OrderType> {
     ))(i)
 }
 
-fn order_field(
-    dialect: Dialect,
-) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], (FieldReference, Option<OrderType>)> {
+fn order_by(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], OrderBy> {
     move |i| {
         let (i, field) = field_reference(dialect)(i)?;
-        let (i, ord_typ) = opt(preceded(whitespace1, order_type))(i)?;
-        Ok((i, (field, ord_typ)))
+        let (i, order_type) = opt(preceded(whitespace1, order_type))(i)?;
+        Ok((i, OrderBy { field, order_type }))
     }
 }
 
@@ -100,7 +109,7 @@ pub fn order_clause(
         let (i, _) = whitespace1(i)?;
         let (i, _) = tag_no_case("by")(i)?;
         let (i, _) = whitespace1(i)?;
-        let (i, order_by) = separated_list1(ws_sep_comma, order_field(dialect))(i)?;
+        let (i, order_by) = separated_list1(ws_sep_comma, order_by(dialect))(i)?;
 
         Ok((i, OrderClause { order_by }))
     }
@@ -119,25 +128,28 @@ mod tests {
         let qstring3 = "select * from users order by name\n";
 
         let expected_ord1 = OrderClause {
-            order_by: vec![(
-                FieldReference::Expr(Expr::Column("name".into())),
-                Some(OrderType::OrderDescending),
-            )],
+            order_by: vec![OrderBy {
+                field: FieldReference::Expr(Expr::Column("name".into())),
+                order_type: Some(OrderType::OrderDescending),
+            }],
         };
         let expected_ord2 = OrderClause {
             order_by: vec![
-                (
-                    FieldReference::Expr(Expr::Column("name".into())),
-                    Some(OrderType::OrderAscending),
-                ),
-                (
-                    FieldReference::Expr(Expr::Column("age".into())),
-                    Some(OrderType::OrderDescending),
-                ),
+                OrderBy {
+                    field: FieldReference::Expr(Expr::Column("name".into())),
+                    order_type: Some(OrderType::OrderAscending),
+                },
+                OrderBy {
+                    field: FieldReference::Expr(Expr::Column("age".into())),
+                    order_type: Some(OrderType::OrderDescending),
+                },
             ],
         };
         let expected_ord3 = OrderClause {
-            order_by: vec![(FieldReference::Expr(Expr::Column("name".into())), None)],
+            order_by: vec![OrderBy {
+                field: FieldReference::Expr(Expr::Column("name".into())),
+                order_type: None,
+            }],
         };
 
         let res1 = selection(Dialect::MySQL)(LocatedSpan::new(qstring1.as_bytes()));
@@ -154,10 +166,10 @@ mod tests {
         #[test]
         fn order_prints_column_table() {
             let clause = OrderClause {
-                order_by: vec![(
-                    FieldReference::Expr(Expr::Column("t.n".into())),
-                    Some(OrderType::OrderDescending),
-                )],
+                order_by: vec![OrderBy {
+                    field: FieldReference::Expr(Expr::Column("t.n".into())),
+                    order_type: Some(OrderType::OrderDescending),
+                }],
             };
             assert_eq!(
                 clause.display(Dialect::MySQL).to_string(),
@@ -172,10 +184,10 @@ mod tests {
         #[test]
         fn order_prints_column_table() {
             let clause = OrderClause {
-                order_by: vec![(
-                    FieldReference::Expr(Expr::Column("t.n".into())),
-                    Some(OrderType::OrderDescending),
-                )],
+                order_by: vec![OrderBy {
+                    field: FieldReference::Expr(Expr::Column("t.n".into())),
+                    order_type: Some(OrderType::OrderDescending),
+                }],
             };
             assert_eq!(
                 clause.display(Dialect::PostgreSQL).to_string(),
