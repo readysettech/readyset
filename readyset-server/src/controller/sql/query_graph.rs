@@ -11,8 +11,8 @@ use nom_sql::analysis::visit_mut::{walk_expr, VisitorMut};
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::{
     BinaryOperator, Column, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, InValue,
-    ItemPlaceholder, JoinConstraint, JoinOperator, JoinRightSide, LimitClause, Literal, OrderType,
-    Relation, SelectStatement, SqlIdentifier, TableExpr, TableExprInner,
+    ItemPlaceholder, JoinConstraint, JoinOperator, JoinRightSide, LimitClause, Literal, OrderBy,
+    OrderType, Relation, SelectStatement, SqlIdentifier, TableExpr, TableExprInner,
 };
 use readyset_client::{PlaceholderIdx, ViewPlaceholder};
 use readyset_errors::{
@@ -1239,7 +1239,7 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
         order
             .order_by
             .iter()
-            .for_each(|(ord_expr, _)| match ord_expr {
+            .for_each(|OrderBy { field, .. }| match field {
                 FieldReference::Expr(Expr::Column(Column { table: None, .. })) => {
                     // This is a reference to a projected column, otherwise the table value
                     // would be assigned in the `rewrite_selection` pass
@@ -1292,9 +1292,9 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                 .order_by
                 .iter()
                 .cloned()
-                .map(|(expr, ot)| {
+                .map(|OrderBy { field, order_type }| {
                     Ok((
-                        match expr {
+                        match field {
                             FieldReference::Expr(Expr::Column(col)) => col,
                             FieldReference::Expr(expr) => Column {
                                 // FIXME(REA-2168): Use correct dialect.
@@ -1305,7 +1305,7 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                                 internal!("Numeric field references should have been removed")
                             }
                         },
-                        ot.unwrap_or(OrderType::OrderAscending),
+                        order_type.unwrap_or(OrderType::OrderAscending),
                     ))
                 })
                 .collect::<ReadySetResult<_>>()
@@ -1323,7 +1323,7 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                         o.order_by
                             .iter()
                             .cloned()
-                            .map(|(field, ot)| {
+                            .map(|OrderBy { field, order_type }| {
                                 Ok((
                                     match field {
                                         FieldReference::Numeric(_) => {
@@ -1333,7 +1333,7 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                                         }
                                         FieldReference::Expr(expr) => expr,
                                     },
-                                    ot.unwrap_or(OrderType::OrderAscending),
+                                    order_type.unwrap_or(OrderType::OrderAscending),
                                 ))
                             })
                             .collect::<ReadySetResult<_>>()

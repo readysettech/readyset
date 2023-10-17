@@ -19,8 +19,8 @@ use nom_sql::analysis::ReferredColumns;
 use nom_sql::{
     BinaryOperator, CaseWhenBranch, ColumnSpecification, CompoundSelectOperator, CreateTableBody,
     Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, InValue, LimitClause, Literal,
-    NonReplicatedRelation, OrderClause, OrderType, Relation, SelectStatement, SqlIdentifier,
-    TableKey, UnaryOperator,
+    NonReplicatedRelation, OrderBy, OrderClause, OrderType, Relation, SelectStatement,
+    SqlIdentifier, TableKey, UnaryOperator,
 };
 use petgraph::visit::Reversed;
 use petgraph::Direction;
@@ -286,15 +286,15 @@ impl SqlToMirConverter {
                         .map(|o| {
                             o.order_by
                                 .iter()
-                                .map(|(e, ot)| {
+                                .map(|OrderBy { field, order_type }| {
                                     Ok((
-                                        match e {
+                                        match field {
                                             FieldReference::Numeric(_) => internal!(
                                                 "Numeric field references should have been removed"
                                             ),
                                             FieldReference::Expr(e) => e.clone(),
                                         },
-                                        ot.unwrap_or(OrderType::OrderAscending),
+                                        order_type.unwrap_or(OrderType::OrderAscending),
                                     ))
                                 })
                                 .collect::<ReadySetResult<_>>()

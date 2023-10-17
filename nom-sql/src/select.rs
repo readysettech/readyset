@@ -691,8 +691,8 @@ mod tests {
     use crate::expression::CaseWhenBranch;
     use crate::table::Relation;
     use crate::{
-        to_nom_result, BinaryOperator, Expr, FunctionExpr, InValue, ItemPlaceholder, SqlType,
-        TableExprInner,
+        to_nom_result, BinaryOperator, Expr, FunctionExpr, InValue, ItemPlaceholder, OrderBy,
+        SqlType, TableExprInner,
     };
 
     fn columns(cols: &[&str]) -> Vec<FieldDefinitionExpr> {
@@ -1411,10 +1411,10 @@ mod tests {
                 fields: vec![FieldDefinitionExpr::All],
                 where_clause: expected_where_cond,
                 order: Some(OrderClause {
-                    order_by: vec![(
-                        FieldReference::Expr(Expr::Column("item.i_title".into())),
-                        None
-                    )],
+                    order_by: vec![OrderBy {
+                        field: FieldReference::Expr(Expr::Column("item.i_title".into())),
+                        order_type: None
+                    }],
                 }),
                 limit_clause: LimitClause::LimitOffset {
                     limit: Some(50.into()),
@@ -1465,7 +1465,10 @@ mod tests {
                 }),
             }],
             order: Some(OrderClause {
-                order_by: vec![(FieldReference::Expr(Expr::Column("contactId".into())), None)],
+                order_by: vec![OrderBy {
+                    field: FieldReference::Expr(Expr::Column("contactId".into())),
+                    order_type: None,
+                }],
             }),
             ..Default::default()
         };
@@ -1956,7 +1959,10 @@ mod tests {
             assert_eq!(
                 res.order,
                 Some(OrderClause {
-                    order_by: vec![(FieldReference::Numeric(1), None)]
+                    order_by: vec![OrderBy {
+                        field: FieldReference::Numeric(1),
+                        order_type: None
+                    }]
                 })
             )
         }
