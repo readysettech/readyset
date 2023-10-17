@@ -1298,8 +1298,11 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                          order_type,
                          null_order,
                      }| {
-                        if null_order.is_some() {
-                            unsupported!("NULLS FIRST/LAST is not yet supported");
+                        let order_type = order_type.unwrap_or(OrderType::OrderAscending);
+                        if let Some(null_order) = null_order {
+                            if !null_order.is_default_for(order_type) {
+                                unsupported!("Non-default NULLS FIRST/LAST is not yet supported");
+                            }
                         }
 
                         Ok((
@@ -1314,7 +1317,7 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                                     internal!("Numeric field references should have been removed")
                                 }
                             },
-                            order_type.unwrap_or(OrderType::OrderAscending),
+                            order_type,
                         ))
                     },
                 )
@@ -1339,8 +1342,14 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                                      order_type,
                                      null_order,
                                  }| {
-                                    if null_order.is_some() {
-                                        unsupported!("NULLS FIRST/LAST is not yet supported");
+                                    let order_type =
+                                        order_type.unwrap_or(OrderType::OrderAscending);
+                                    if let Some(null_order) = null_order {
+                                        if !null_order.is_default_for(order_type) {
+                                            unsupported!(
+                                                "Non-default NULLS FIRST/LAST is not yet supported"
+                                            );
+                                        }
                                     }
                                     Ok((
                                         match field {
@@ -1351,7 +1360,7 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                                             }
                                             FieldReference::Expr(expr) => expr,
                                         },
-                                        order_type.unwrap_or(OrderType::OrderAscending),
+                                        order_type,
                                     ))
                                 },
                             )

@@ -292,17 +292,23 @@ impl SqlToMirConverter {
                                          order_type,
                                          null_order,
                                      }| {
-                                        if null_order.is_some() {
-                                            unsupported!("NULLS FIRST/LAST is not yet supported");
+                                        let order_type =
+                                            order_type.unwrap_or(OrderType::OrderAscending);
+                                        if let Some(null_order) = null_order {
+                                            if !null_order.is_default_for(order_type) {
+                                                unsupported!(
+                                                 "Non-default NULLS FIRST/LAST is not yet supported"
+                                             );
+                                            }
                                         }
                                         Ok((
                                             match field {
                                                 FieldReference::Numeric(_) => internal!(
-                                                "Numeric field references should have been removed"
-                                            ),
+                                                 "Numeric field references should have been removed"
+                                             ),
                                                 FieldReference::Expr(e) => e.clone(),
                                             },
-                                            order_type.unwrap_or(OrderType::OrderAscending),
+                                            order_type,
                                         ))
                                     },
                                 )

@@ -54,6 +54,23 @@ pub enum NullOrder {
     NullsLast,
 }
 
+impl NullOrder {
+    /// Returns `true` if this is the default null order for the given order type.
+    ///
+    /// From [the postgres docs][pg-docs]:
+    ///
+    /// > By default, null values sort as if larger than any non-null value; that is, `NULLS FIRST`
+    /// > is the default for `DESC` order, and `NULLS LAST` otherwise.
+    ///
+    /// [pg-docs]: https://www.postgresql.org/docs/current/queries-order.html
+    pub fn is_default_for(self, ot: OrderType) -> bool {
+        self == match ot {
+            OrderType::OrderDescending => Self::NullsFirst,
+            OrderType::OrderAscending => Self::NullsLast,
+        }
+    }
+}
+
 impl Display for NullOrder {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
