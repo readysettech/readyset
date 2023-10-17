@@ -897,6 +897,58 @@ mod types {
             .prepare("SELECT * FROM t WHERE x = $1")
             .await
             .unwrap();
+
+        eventually!(
+            run_test: {
+                let res = client.query_one(&stmt, &[&"A"]).await;
+                let dest = last_query_info(&client).await.destination;
+                AssertUnwindSafe(move || (res, dest))
+            },
+            then_assert: |res| {
+                let (res, dest) = res();
+                assert_eq!(res.unwrap().get::<_, String>(0), "a");
+                assert_eq!(dest, QueryDestination::Readyset);
+            }
+        );
+
+        shutdown_tx.shutdown().await;
+    }
+
+    // Tests that even if a hole is filled in a reader node before we issue any writes, a
+    // subsequent write for the same key still makes it to the reader
+    #[tokio::test(flavor = "multi_thread")]
+    #[serial_test::serial]
+    async fn citext_read_before_write() {
+        readyset_tracing::init_test_logging();
+        let (config, _handle, shutdown_tx) = setup().await;
+        let client = connect(config.clone()).await;
+
+        client
+            .simple_query("CREATE EXTENSION IF NOT EXISTS citext")
+            .await
+            .unwrap();
+
+        client
+            .simple_query("CREATE TABLE t (x citext);")
+            .await
+            .unwrap();
+
+        let stmt = client
+            .prepare("SELECT * FROM t WHERE x = $1")
+            .await
+            .unwrap();
+
+        // Fill the hole in the reader with a value of type `TinyText` with a citext collation
+        let res = client.query(&stmt, &[&"A"]).await.unwrap();
+        assert!(res.is_empty());
+
+        // Insert a value, which causes us to replicate a `TinyText` value that must be coerced
+        // to have the citext collation
+        client
+            .simple_query("INSERT INTO t (x) VALUES ('a');")
+            .await
+            .unwrap();
+
         eventually!(
             run_test: {
                 let res = client.query_one(&stmt, &[&"A"]).await;
