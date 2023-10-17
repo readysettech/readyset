@@ -1413,7 +1413,8 @@ mod tests {
                 order: Some(OrderClause {
                     order_by: vec![OrderBy {
                         field: FieldReference::Expr(Expr::Column("item.i_title".into())),
-                        order_type: None
+                        order_type: None,
+                        null_order: None
                     }],
                 }),
                 limit_clause: LimitClause::LimitOffset {
@@ -1468,6 +1469,7 @@ mod tests {
                 order_by: vec![OrderBy {
                     field: FieldReference::Expr(Expr::Column("contactId".into())),
                     order_type: None,
+                    null_order: None,
                 }],
             }),
             ..Default::default()
@@ -1961,7 +1963,8 @@ mod tests {
                 Some(OrderClause {
                     order_by: vec![OrderBy {
                         field: FieldReference::Numeric(1),
-                        order_type: None
+                        order_type: None,
+                        null_order: None
                     }]
                 })
             )
