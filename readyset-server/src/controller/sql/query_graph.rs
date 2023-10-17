@@ -1292,22 +1292,32 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                 .order_by
                 .iter()
                 .cloned()
-                .map(|OrderBy { field, order_type }| {
-                    Ok((
-                        match field {
-                            FieldReference::Expr(Expr::Column(col)) => col,
-                            FieldReference::Expr(expr) => Column {
-                                // FIXME(REA-2168): Use correct dialect.
-                                name: expr.display(nom_sql::Dialect::MySQL).to_string().into(),
-                                table: None,
+                .map(
+                    |OrderBy {
+                         field,
+                         order_type,
+                         null_order,
+                     }| {
+                        if null_order.is_some() {
+                            unsupported!("NULLS FIRST/LAST is not yet supported");
+                        }
+
+                        Ok((
+                            match field {
+                                FieldReference::Expr(Expr::Column(col)) => col,
+                                FieldReference::Expr(expr) => Column {
+                                    // FIXME(REA-2168): Use correct dialect.
+                                    name: expr.display(nom_sql::Dialect::MySQL).to_string().into(),
+                                    table: None,
+                                },
+                                FieldReference::Numeric(_) => {
+                                    internal!("Numeric field references should have been removed")
+                                }
                             },
-                            FieldReference::Numeric(_) => {
-                                internal!("Numeric field references should have been removed")
-                            }
-                        },
-                        order_type.unwrap_or(OrderType::OrderAscending),
-                    ))
-                })
+                            order_type.unwrap_or(OrderType::OrderAscending),
+                        ))
+                    },
+                )
                 .collect::<ReadySetResult<_>>()
         })
         .transpose()?;
@@ -1323,19 +1333,28 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                         o.order_by
                             .iter()
                             .cloned()
-                            .map(|OrderBy { field, order_type }| {
-                                Ok((
-                                    match field {
-                                        FieldReference::Numeric(_) => {
-                                            internal!(
+                            .map(
+                                |OrderBy {
+                                     field,
+                                     order_type,
+                                     null_order,
+                                 }| {
+                                    if null_order.is_some() {
+                                        unsupported!("NULLS FIRST/LAST is not yet supported");
+                                    }
+                                    Ok((
+                                        match field {
+                                            FieldReference::Numeric(_) => {
+                                                internal!(
                                                 "Numeric field references should have been removed"
                                             )
-                                        }
-                                        FieldReference::Expr(expr) => expr,
-                                    },
-                                    order_type.unwrap_or(OrderType::OrderAscending),
-                                ))
-                            })
+                                            }
+                                            FieldReference::Expr(expr) => expr,
+                                        },
+                                        order_type.unwrap_or(OrderType::OrderAscending),
+                                    ))
+                                },
+                            )
                             .collect::<ReadySetResult<_>>()
                     })
                     .transpose()?,

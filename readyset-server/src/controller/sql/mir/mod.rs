@@ -286,17 +286,26 @@ impl SqlToMirConverter {
                         .map(|o| {
                             o.order_by
                                 .iter()
-                                .map(|OrderBy { field, order_type }| {
-                                    Ok((
-                                        match field {
-                                            FieldReference::Numeric(_) => internal!(
+                                .map(
+                                    |OrderBy {
+                                         field,
+                                         order_type,
+                                         null_order,
+                                     }| {
+                                        if null_order.is_some() {
+                                            unsupported!("NULLS FIRST/LAST is not yet supported");
+                                        }
+                                        Ok((
+                                            match field {
+                                                FieldReference::Numeric(_) => internal!(
                                                 "Numeric field references should have been removed"
                                             ),
-                                            FieldReference::Expr(e) => e.clone(),
-                                        },
-                                        order_type.unwrap_or(OrderType::OrderAscending),
-                                    ))
-                                })
+                                                FieldReference::Expr(e) => e.clone(),
+                                            },
+                                            order_type.unwrap_or(OrderType::OrderAscending),
+                                        ))
+                                    },
+                                )
                                 .collect::<ReadySetResult<_>>()
                         })
                         .transpose()?,

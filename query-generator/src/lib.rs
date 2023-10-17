@@ -1951,6 +1951,7 @@ impl QueryOperation {
                     order_by: vec![OrderBy {
                         field: FieldReference::Expr(Expr::Column(column.clone())),
                         order_type: Some(*order_type),
+                        null_order: None,
                     }],
                 });
 
@@ -1988,6 +1989,7 @@ impl QueryOperation {
                     order_by: vec![OrderBy {
                         field: FieldReference::Expr(Expr::Column(column.clone())),
                         order_type: Some(*order_type),
+                        null_order: None,
                     }],
                 });
 

@@ -184,7 +184,8 @@ mod tests {
                     Some(OrderClause {
                         order_by: vec![OrderBy {
                             field: FieldReference::Expr(Expr::Column("column_3".into())),
-                            order_type: Some(OrderType::OrderAscending)
+                            order_type: Some(OrderType::OrderAscending),
+                            null_order: None
                         }]
                     })
                 );
