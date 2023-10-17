@@ -893,6 +893,16 @@ mod types {
             .await
             .unwrap();
 
+        // Wait until the `CREATE TABLE` has been replicated
+        eventually!(run_test: {
+            let result = client
+                .simple_query("CREATE CACHE FROM SELECT * FROM t WHERE x = $1")
+                .await;
+            AssertUnwindSafe(move || result)
+        }, then_assert: |result| {
+            result().unwrap()
+        });
+
         let stmt = client
             .prepare("SELECT * FROM t WHERE x = $1")
             .await
@@ -932,6 +942,16 @@ mod types {
             .simple_query("CREATE TABLE t (x citext);")
             .await
             .unwrap();
+
+        // Wait until the `CREATE TABLE` has been replicated
+        eventually!(run_test: {
+            let result = client
+                .simple_query("CREATE CACHE FROM SELECT * FROM t WHERE x = $1")
+                .await;
+            AssertUnwindSafe(move || result)
+        }, then_assert: |result| {
+            result().unwrap()
+        });
 
         let stmt = client
             .prepare("SELECT * FROM t WHERE x = $1")
