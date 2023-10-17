@@ -47,9 +47,19 @@ pub(super) fn make_joins(
     for jref in qg.join_order.iter() {
         let (mut join_kind, jps) = match &qg.edges[&(jref.src.clone(), jref.dst.clone())] {
             QueryGraphEdge::Join { on } => (JoinKind::Inner, on),
-            QueryGraphEdge::LeftJoin { on, extra_preds } => {
-                if !extra_preds.is_empty() {
-                    unsupported!("Non-equal predicates not (yet) supported in left joins");
+            QueryGraphEdge::LeftJoin {
+                on,
+                left_local_preds,
+                right_local_preds,
+                global_preds,
+                params,
+            } => {
+                if !(left_local_preds.is_empty()
+                    && right_local_preds.is_empty()
+                    && global_preds.is_empty()
+                    && params.is_empty())
+                {
+                    unsupported!("Non equal-join predicates not (yet) supported in left joins");
                 }
                 (JoinKind::Left, on)
             }
