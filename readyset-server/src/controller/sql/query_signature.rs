@@ -80,13 +80,21 @@ impl Signature for QueryGraph {
                         .flat_map(|p| vec![&p.left, &p.right])
                         .for_each(&mut record_column);
                 }
-                QueryGraphEdge::LeftJoin { on, extra_preds } => {
+                QueryGraphEdge::LeftJoin {
+                    on,
+                    left_local_preds,
+                    right_local_preds,
+                    global_preds,
+                    ..
+                } => {
                     on.iter()
                         .flat_map(|p| vec![&p.left, &p.right])
                         .for_each(&mut record_column);
 
-                    extra_preds
+                    left_local_preds
                         .iter()
+                        .chain(right_local_preds)
+                        .chain(global_preds)
                         .flat_map(|expr| expr.referred_columns())
                         .for_each(&mut record_column);
                 }
