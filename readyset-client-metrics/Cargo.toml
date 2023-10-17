@@ -6,6 +6,7 @@ authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
 [dependencies]
+clap = { workspace = true, features = ["derive","env"] }
 metrics = { workspace = true }
 serde = "1.0.130"
 serde_json = "1.0.67"
