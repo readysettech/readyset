@@ -65,18 +65,16 @@ Then, run the adapter binary. The adapter will communicate with servers that hav
 **MySQL**
 ```
 cargo run --bin readyset --release -- --database-type mysql --upstream-db-url mysql://root:readyset@127.1/readyset  --allow-unauthenticated-connections
-  --address 0.0.0.0:3307 --deployment <deployment name>  --prometheus-metrics --query-log --query-log-ad-hoc
+  --address 0.0.0.0:3307 --deployment <deployment name>  --prometheus-metrics --query-log-mode all-queries
  ```
 
 **Postgres**
 ```
 cargo run --bin readyset --release -- --database-type postgresql --upstream-db-url postgresql://postgres:readyset@127.1/readyset  --allow-unauthenticated-connections
-  --address 0.0.0.0:5433 --deployment <deployment name> --prometheus-metrics --query-log --query-log-ad-hoc
+  --address 0.0.0.0:5433 --deployment <deployment name> --prometheus-metrics --query-log-mode all-queries
 ```
 
 The adapter listens for connections at the address specified in the `address` flag.
-
-The `query-log` and `query-log-ad-hoc` flags ensure that queries are sent to the Prometheus client running in the adapter.
 
 The `prometheus-metrics` flag exposes an HTTP endpoint in the adapter to allow querying of metrics. This can be reached with an HTTP GET request to <adapter-address>:6034/metrics (e.g., `curl -X GET 127.0.0.1:6034/metrics`).
 
