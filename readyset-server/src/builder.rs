@@ -87,6 +87,7 @@ impl Builder {
         builder.set_allow_topk(opts.enable_experimental_topk_support);
         builder.set_allow_paginate(opts.enable_experimental_paginate_support);
         builder.set_allow_mixed_comparisons(opts.enable_experimental_mixed_comparisons);
+        builder.set_allow_straddled_joins(opts.enable_experimental_straddled_joins);
         builder.set_worker_timeout(Duration::from_secs(opts.worker_request_timeout_seconds));
         builder.set_background_recovery_interval(Duration::from_secs(
             opts.background_recovery_interval_seconds,
@@ -210,6 +211,10 @@ impl Builder {
     /// Set the value of [`controller::sql::Config::allow_mixed_comparisons`]
     pub fn set_allow_mixed_comparisons(&mut self, allow_mixed_comparisons: bool) {
         self.config.mir_config.allow_mixed_comparisons = allow_mixed_comparisons;
+    }
+
+    pub fn set_allow_straddled_joins(&mut self, allow_straddled_joins: bool) {
+        self.config.materialization_config.allow_straddled_joins = allow_straddled_joins;
     }
 
     /// Set the value of [`controller::sql::Config::worker_request_timeout`]
