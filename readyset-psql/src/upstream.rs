@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::fmt::Debug;
 use std::pin::Pin;
 use std::str::FromStr;
@@ -33,7 +32,7 @@ pub struct PostgreSqlUpstream {
     /// A tokio task that handles the connection, required by `tokio_postgres` to operate
     _connection_handle: tokio::task::JoinHandle<Result<(), pgsql::Error>>,
     /// Map from prepared statement IDs to prepared statements
-    prepared_statements: HashMap<u32, pgsql::Statement>,
+    prepared_statements: Vec<Option<pgsql::Statement>>,
     /// ID for the next prepared statement
     statement_id_counter: u32,
     /// The user used to connect to the upstream, if any
@@ -255,7 +254,19 @@ impl UpstreamDatabase for PostgreSqlUpstream {
 
         self.statement_id_counter += 1;
         let statement_id = self.statement_id_counter;
-        self.prepared_statements.insert(statement_id, statement);
+        match self.prepared_statements.get_mut(statement_id as usize) {
+            Some(existing) => {
+                *existing = Some(statement);
+            }
+            None => {
+                let diff = (statement_id as usize) - self.prepared_statements.len();
+                self.prepared_statements.reserve(diff + 1);
+                for _ in 0..diff {
+                    self.prepared_statements.push(None);
+                }
+                self.prepared_statements.push(Some(statement));
+            }
+        }
 
         Ok(UpstreamPrepare { statement_id, meta })
     }
@@ -283,7 +294,8 @@ impl UpstreamDatabase for PostgreSqlUpstream {
     ) -> Result<Self::QueryResult<'a>, Error> {
         let statement = self
             .prepared_statements
-            .get(&statement_id)
+            .get(statement_id as usize)
+            .and_then(|s| s.as_ref())
             .ok_or(ReadySetError::PreparedStatementMissing { statement_id })?;
 
         let mut stream = Box::pin(
@@ -309,11 +321,12 @@ impl UpstreamDatabase for PostgreSqlUpstream {
     }
 
     async fn remove_statement(&mut self, statement_id: u32) -> Result<(), Self::Error> {
-        self.prepared_statements
-            .remove(&statement_id)
+        *self
+            .prepared_statements
+            .get_mut(statement_id as usize)
             .ok_or(Error::ReadySet(ReadySetError::PreparedStatementMissing {
                 statement_id,
-            }))?;
+            }))? = None;
 
         Ok(())
     }
