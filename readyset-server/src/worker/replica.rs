@@ -17,6 +17,7 @@ use readyset_client::channel::{self, CONNECTION_FROM_BASE};
 use readyset_client::internal::ReplicaAddress;
 use readyset_client::{KeyComparison, PacketData, PacketPayload, Tagged};
 use readyset_errors::ReadySetResult;
+use readyset_tracing::util::{warn_delay, LogDelayTime};
 use strawpoll::Strawpoll;
 use time::Duration;
 use tokio::io::{AsyncReadExt, BufReader, BufStream, BufWriter};
@@ -44,6 +45,9 @@ pub struct WrappedDomainRequest {
     pub req: DomainRequest,
     pub done_tx: oneshot::Sender<ReadySetResult<Option<Vec<u8>>>>,
 }
+
+/// Interval at which to log warnings if handling a request or a packet takes a long time
+const HANDLE_WARN_INTERVAL: Duration = Duration::from_secs(60 * 5);
 
 /// [`Replica`] is a wrapper for a [`Domain`], handling intra Domain communication and coordination
 pub struct Replica {
@@ -409,8 +413,13 @@ impl Replica {
                 // Handle domain requests
                 domain_req = requests.recv() => match domain_req {
                     Some(req) => {
-                        let _guard = span.enter();
-                        if req.done_tx.send(domain.domain_request(req.req, out)).is_err() {
+                        let delay_warning = warn_delay(
+                            "Domain request has been running for a long time!",
+                            LogDelayTime::Every(HANDLE_WARN_INTERVAL)
+                        );
+                        let res = span.in_scope(|| domain.domain_request(req.req, out));
+                        delay_warning.cancel();
+                        if req.done_tx.send(res).is_err() {
                             span.in_scope(|| warn!("domain request sender hung up"));
                         }
                     },
@@ -453,7 +462,12 @@ impl Replica {
                                 _ => None,
                             };
 
+                            let delay_warning = warn_delay(
+                                "Domain has been handling a packet for a long time!",
+                                LogDelayTime::Every(HANDLE_WARN_INTERVAL)
+                            );
                             span.in_scope(|| domain.handle_packet(packet, out))?;
+                            delay_warning.cancel();
 
                             if let Some((tag, conn)) = ack {
                                 conn.send(Tagged { tag, v: () }).await?;

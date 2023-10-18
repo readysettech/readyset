@@ -31,6 +31,7 @@ use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::{fmt, EnvFilter, Layer};
 
 mod error;
+pub mod util;
 pub use error::Error;
 mod logformat;
 use logformat::LogFormat;
