@@ -100,7 +100,7 @@ impl<'a> Plan<'a> {
     ///
     /// Note that if passed an index for a set of generated columns, this may return paths targeting
     /// a different index than the passed `index`.
-    fn paths(&self, index: &Index) -> Result<Vec<RawReplayPath>, ReadySetError> {
+    fn paths(&self, index: &Index) -> ReadySetResult<Vec<RawReplayPath>> {
         let graph = self.graph;
         let ni = self.node;
         let mut paths = keys::replay_paths_for_opt(
@@ -125,6 +125,17 @@ impl<'a> Plan<'a> {
         )?
         .into_iter()
         .collect::<Vec<_>>();
+
+        if !self.m.config.allow_straddled_joins
+            && paths.iter().any(|p| {
+                // "has extension" is currently a weak-ish proxy for straddled joins, but works
+                // since straddled joins are the only case where we make extended replay paths right
+                // now
+                p.has_extension()
+            })
+        {
+            unsupported!("Straddled joins are not supported");
+        }
 
         // don't include paths that don't end at this node.
         // TODO(aspen): is this necessary anymore? I don't think so
