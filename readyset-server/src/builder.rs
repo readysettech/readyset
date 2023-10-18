@@ -88,6 +88,7 @@ impl Builder {
         builder.set_allow_paginate(opts.enable_experimental_paginate_support);
         builder.set_allow_mixed_comparisons(opts.enable_experimental_mixed_comparisons);
         builder.set_allow_straddled_joins(opts.enable_experimental_straddled_joins);
+        builder.set_allow_post_lookup(opts.enable_experimental_post_lookup);
         builder.set_worker_timeout(Duration::from_secs(opts.worker_request_timeout_seconds));
         builder.set_background_recovery_interval(Duration::from_secs(
             opts.background_recovery_interval_seconds,
@@ -117,6 +118,7 @@ impl Builder {
         let mut builder = Self::default();
         builder.set_abort_on_task_failure(false);
         builder.allow_full_materialization();
+        builder.set_allow_post_lookup(true);
         builder
     }
 
@@ -215,6 +217,10 @@ impl Builder {
 
     pub fn set_allow_straddled_joins(&mut self, allow_straddled_joins: bool) {
         self.config.materialization_config.allow_straddled_joins = allow_straddled_joins;
+    }
+
+    pub fn set_allow_post_lookup(&mut self, allow_post_lookup: bool) {
+        self.config.mir_config.allow_post_lookup = allow_post_lookup;
     }
 
     /// Set the value of [`controller::sql::Config::worker_request_timeout`]

@@ -625,6 +625,11 @@ pub struct WorkerOptions {
     #[clap(long, env = "EXPERIMENTAL_STRADDLED_JOIN_SUPPORT", hide = true)]
     pub enable_experimental_straddled_joins: bool,
 
+    /// Enable experimental support for post-lookup (queries which do extra work after the lookup
+    /// into the reader)
+    #[clap(long, env = "EXPERIMENTAL_POST_LOOKUP_SUPPORT", hide = true)]
+    pub enable_experimental_post_lookup: bool,
+
     /// Directory in which to store replicated table data. If not specified, defaults to the
     /// current working directory.
     #[clap(long, env = "DB_DIR")]
