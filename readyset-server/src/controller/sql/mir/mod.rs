@@ -19,8 +19,8 @@ use nom_sql::analysis::ReferredColumns;
 use nom_sql::{
     BinaryOperator, CaseWhenBranch, ColumnSpecification, CompoundSelectOperator, CreateTableBody,
     Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, InValue, LimitClause, Literal,
-    NonReplicatedRelation, OrderClause, OrderType, Relation, SelectStatement, SqlIdentifier,
-    TableKey, UnaryOperator,
+    NonReplicatedRelation, OrderBy, OrderClause, OrderType, Relation, SelectStatement,
+    SqlIdentifier, TableKey, UnaryOperator,
 };
 use petgraph::visit::Reversed;
 use petgraph::Direction;
@@ -159,6 +159,11 @@ pub(crate) struct Config {
     /// Enable support for mixing equality and range comparisons in a query. Support for mixed
     /// comparisons is currently unfinished, so these queries may return incorrect results.
     pub(crate) allow_mixed_comparisons: bool,
+
+    /// Enable support for post-lookup (queries which do extra work after the lookup into the
+    /// reader)
+    #[serde(default)]
+    pub(crate) allow_post_lookup: bool,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -286,17 +291,32 @@ impl SqlToMirConverter {
                         .map(|o| {
                             o.order_by
                                 .iter()
-                                .map(|(e, ot)| {
-                                    Ok((
-                                        match e {
-                                            FieldReference::Numeric(_) => internal!(
-                                                "Numeric field references should have been removed"
-                                            ),
-                                            FieldReference::Expr(e) => e.clone(),
-                                        },
-                                        ot.unwrap_or(OrderType::OrderAscending),
-                                    ))
-                                })
+                                .map(
+                                    |OrderBy {
+                                         field,
+                                         order_type,
+                                         null_order,
+                                     }| {
+                                        let order_type =
+                                            order_type.unwrap_or(OrderType::OrderAscending);
+                                        if let Some(null_order) = null_order {
+                                            if !null_order.is_default_for(order_type) {
+                                                unsupported!(
+                                                 "Non-default NULLS FIRST/LAST is not yet supported"
+                                             );
+                                            }
+                                        }
+                                        Ok((
+                                            match field {
+                                                FieldReference::Numeric(_) => internal!(
+                                                 "Numeric field references should have been removed"
+                                             ),
+                                                FieldReference::Expr(e) => e.clone(),
+                                            },
+                                            order_type,
+                                        ))
+                                    },
+                                )
                                 .collect::<ReadySetResult<_>>()
                         })
                         .transpose()?,
@@ -2224,7 +2244,20 @@ impl SqlToMirConverter {
                     None
                 };
 
-                let leaf_node = self.add_query_node(
+                let order_by = query_graph
+                    .order
+                    .as_ref()
+                    .map(|order| order.iter().map(|(c, ot)| (Column::from(c), *ot)).collect());
+
+                let limit = query_graph.pagination.as_ref().map(|p| p.limit);
+
+                if !self.config.allow_post_lookup
+                    && (aggregates.is_some() || order_by.is_some() || limit.is_some())
+                {
+                    unsupported!("Queries which perform operations post-lookup are not supported");
+                }
+
+                self.add_query_node(
                     query_name.clone(),
                     MirNode::new(
                         query_name.clone(),
@@ -2236,19 +2269,15 @@ impl SqlToMirConverter {
                                 .collect(),
                             index_type: view_key.index_type,
                             lowered_to_df: false,
-                            order_by: query_graph.order.as_ref().map(|order| {
-                                order.iter().map(|(c, ot)| (Column::from(c), *ot)).collect()
-                            }),
-                            limit: query_graph.pagination.as_ref().map(|p| p.limit),
+                            order_by,
+                            limit,
                             returned_cols: Some(returned_cols),
                             default_row: query_graph.default_row.clone(),
                             aggregates,
                         },
                     ),
                     &[leaf_project_reorder_node],
-                );
-
-                leaf_node
+                )
             } else {
                 trace!("Making view keys for queries instead of leaf node");
 

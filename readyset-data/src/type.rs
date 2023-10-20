@@ -417,6 +417,12 @@ impl DfType {
         matches!(self, DfType::Enum { .. })
     }
 
+    /// Returns `true` if this is a text type with a citext collation.
+    #[inline]
+    pub fn is_citext(&self) -> bool {
+        matches!(self, DfType::Text(Collation::Citext))
+    }
+
     /// Returns `true` if this is the JSON type in MySQL or PostgreSQL.
     #[inline]
     pub fn is_json(&self) -> bool {

@@ -1128,5 +1128,52 @@ mod tests {
                 }
             );
         }
+
+        #[test]
+        fn citext_coercion() {
+            use readyset_data::{Collation, TinyText};
+
+            let mut b = Base::new();
+            let ni = LocalNodeIndex::make(0u32);
+            let mut state = MaterializedNodeState::Persistent(
+                PersistentState::new(
+                    "citext_coercion".into(),
+                    Vec::<Box<[usize]>>::new(),
+                    &PersistenceParameters::default(),
+                )
+                .unwrap(),
+            );
+
+            state.add_index(Index::hash_map(vec![0]), None);
+
+            let mut state_map = NodeMap::new();
+            state_map.insert(ni, state);
+
+            let table = Relation {
+                name: "test".into(),
+                schema: None,
+            };
+
+            let tt_with_utf8_collation = TinyText::try_from("hello").unwrap();
+            let BaseWrite { records, .. } = b
+                .process_ops(
+                    ni,
+                    &[Column::new(
+                        "c".into(),
+                        DfType::Text(Collation::Citext),
+                        None,
+                    )],
+                    // We insert a `TinyText` with a `Utf8` collation
+                    vec![TableOperation::Insert(vec![tt_with_utf8_collation.into()])],
+                    &state_map,
+                    SnapshotMode::SnapshotModeDisabled,
+                    table,
+                )
+                .unwrap();
+
+            // Since the column associated with the record has a collation of `Citext`, the record
+            // should have been coerced into the same collation
+            assert_eq!(records[0].row()[0].collation().unwrap(), Collation::Citext);
+        }
     }
 }

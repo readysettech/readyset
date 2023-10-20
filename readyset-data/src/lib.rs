@@ -582,7 +582,9 @@ impl DfValue {
                 // it does then a value of 0 is generally a safe bet for enum values that don't
                 // trigger the happy path:
                 .unwrap_or(DfValue::Int(0));
-        } else if col_ty.is_array() && col_ty.innermost_array_type().is_enum() {
+        } else if (col_ty.is_array() && col_ty.innermost_array_type().is_enum())
+            || col_ty.is_citext()
+        {
             *self = self.coerce_to(col_ty, &DfType::Unknown)?;
         }
 

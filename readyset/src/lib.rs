@@ -43,6 +43,7 @@ use readyset_client::consensus::AuthorityType;
 use readyset_client::failpoints;
 use readyset_client::metrics::recorded;
 use readyset_client::ReadySetHandle;
+use readyset_client_metrics::QueryLogMode;
 use readyset_common::ulimit::maybe_increase_nofile_limit;
 use readyset_dataflow::Readers;
 use readyset_errors::{internal_err, ReadySetError};
@@ -264,22 +265,12 @@ pub struct Options {
     /// Enabled by default if prometheus-metrics is enabled.
     #[clap(
         long,
-        env = "QUERY_LOG",
+        env = "QUERY_LOG_MODE",
         requires = "metrics",
-        default_value_if("prometheus_metrics", "true", Some("true"))
+        default_value = "all-queries",
+        default_value_if("prometheus_metrics", "true", Some("all-queries"))
     )]
-    query_log: bool,
-
-    /// Enables logging ad-hoc queries in the query log. Useful for testing. Enabled by default if
-    /// prometheus-metrics is enabled.
-    #[clap(
-        long,
-        hide = true,
-        env = "QUERY_LOG_AD_HOC",
-        requires = "query_log",
-        default_value_if("prometheus_metrics", "true", Some("true"))
-    )]
-    query_log_ad_hoc: bool,
+    query_log_mode: QueryLogMode,
 
     /// IP address to advertise to other ReadySet instances running in the same deployment.
     ///
@@ -740,7 +731,7 @@ where
         let (shutdown_tx, shutdown_rx) = shutdown::channel();
 
         // Gate query log code path on the log flag existing.
-        let qlog_sender = if options.query_log {
+        let qlog_sender = if options.query_log_mode.is_enabled() {
             rs_connect.in_scope(|| info!("Query logs are enabled. Spawning query logger"));
             let (qlog_sender, qlog_receiver) = tokio::sync::mpsc::unbounded_channel();
 
@@ -752,11 +743,16 @@ where
 
             let shutdown_rx = shutdown_rx.clone();
             // Spawn the actual thread to run the logger
+            let query_log_mode = options.query_log_mode;
             std::thread::Builder::new()
                 .name("Query logger".to_string())
                 .stack_size(2 * 1024 * 1024) // Use the same value tokio is using
                 .spawn_wrapper(move || {
-                    runtime.block_on(query_logger::QueryLogger::run(qlog_receiver, shutdown_rx));
+                    runtime.block_on(query_logger::QueryLogger::run(
+                        qlog_receiver,
+                        shutdown_rx,
+                        query_log_mode,
+                    ));
                     runtime.shutdown_background();
                 })?;
 
@@ -830,6 +826,7 @@ where
             prometheus_handle: prometheus_handle.clone(),
             health_reporter: health_reporter.clone(),
             failpoint_channel: tx,
+            metrics: Default::default(),
         };
 
         let router_shutdown_rx = shutdown_rx.clone();
@@ -1010,7 +1007,7 @@ where
                 .users(users.clone())
                 .require_authentication(!options.allow_unauthenticated_connections)
                 .dialect(self.parse_dialect)
-                .query_log(qlog_sender.clone(), options.query_log_ad_hoc)
+                .query_log(qlog_sender.clone(), options.query_log_mode)
                 .unsupported_set_mode(if options.allow_unsupported_set {
                     readyset_adapter::backend::UnsupportedSetMode::Allow
                 } else {

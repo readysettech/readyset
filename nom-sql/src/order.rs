@@ -1,10 +1,11 @@
 use std::cmp::Ordering;
+use std::fmt::Display;
 use std::{fmt, str};
 
 use itertools::Itertools;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
-use nom::combinator::{map, opt};
+use nom::combinator::{map, opt, value};
 use nom::multi::separated_list1;
 use nom::sequence::preceded;
 use nom_locate::LocatedSpan;
@@ -36,7 +37,7 @@ impl OrderType {
     }
 }
 
-impl fmt::Display for OrderType {
+impl Display for OrderType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             OrderType::OrderAscending => write!(f, "ASC"),
@@ -45,28 +46,74 @@ impl fmt::Display for OrderType {
     }
 }
 
+#[derive(
+    Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Arbitrary,
+)]
+pub enum NullOrder {
+    NullsFirst,
+    NullsLast,
+}
+
+impl NullOrder {
+    /// Returns `true` if this is the default null order for the given order type.
+    ///
+    /// From [the postgres docs][pg-docs]:
+    ///
+    /// > By default, null values sort as if larger than any non-null value; that is, `NULLS FIRST`
+    /// > is the default for `DESC` order, and `NULLS LAST` otherwise.
+    ///
+    /// [pg-docs]: https://www.postgresql.org/docs/current/queries-order.html
+    pub fn is_default_for(self, ot: OrderType) -> bool {
+        self == match ot {
+            OrderType::OrderDescending => Self::NullsFirst,
+            OrderType::OrderAscending => Self::NullsLast,
+        }
+    }
+}
+
+impl Display for NullOrder {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            NullOrder::NullsFirst => write!(f, "NULLS FIRST"),
+            NullOrder::NullsLast => write!(f, "NULLS LAST"),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Arbitrary)]
+pub struct OrderBy {
+    pub field: FieldReference,
+    pub order_type: Option<OrderType>,
+    pub null_order: Option<NullOrder>,
+}
+
+impl OrderBy {
+    pub fn display(&self, dialect: Dialect) -> impl Display + Copy + '_ {
+        fmt_with(move |f| {
+            write!(f, "{}", self.field.display(dialect))?;
+            if let Some(ot) = self.order_type {
+                write!(f, " {}", ot)?;
+            }
+
+            Ok(())
+        })
+    }
+}
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Arbitrary)]
 pub struct OrderClause {
-    pub order_by: Vec<(FieldReference, Option<OrderType>)>,
+    pub order_by: Vec<OrderBy>,
 }
 
 impl OrderClause {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+    pub fn display(&self, dialect: Dialect) -> impl Display + Copy + '_ {
         fmt_with(move |f| {
             write!(
                 f,
                 "ORDER BY {}",
                 self.order_by
                     .iter()
-                    .map(|(c, o)| format!(
-                        "{}{}",
-                        c.display(dialect),
-                        if let Some(ot) = o {
-                            format!(" {}", ot)
-                        } else {
-                            "".to_owned()
-                        }
-                    ))
+                    .map(|ob| ob.display(dialect))
                     .join(", ")
             )
         })
@@ -80,13 +127,28 @@ pub fn order_type(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], OrderType> {
     ))(i)
 }
 
-fn order_field(
-    dialect: Dialect,
-) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], (FieldReference, Option<OrderType>)> {
+fn null_order(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], NullOrder> {
+    let (i, _) = tag_no_case("nulls")(i)?;
+    let (i, _) = whitespace1(i)?;
+    alt((
+        value(NullOrder::NullsFirst, tag_no_case("first")),
+        value(NullOrder::NullsLast, tag_no_case("last")),
+    ))(i)
+}
+
+fn order_by(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], OrderBy> {
     move |i| {
         let (i, field) = field_reference(dialect)(i)?;
-        let (i, ord_typ) = opt(preceded(whitespace1, order_type))(i)?;
-        Ok((i, (field, ord_typ)))
+        let (i, order_type) = opt(preceded(whitespace1, order_type))(i)?;
+        let (i, null_order) = opt(preceded(whitespace1, null_order))(i)?;
+        Ok((
+            i,
+            OrderBy {
+                field,
+                order_type,
+                null_order,
+            },
+        ))
     }
 }
 
@@ -100,7 +162,7 @@ pub fn order_clause(
         let (i, _) = whitespace1(i)?;
         let (i, _) = tag_no_case("by")(i)?;
         let (i, _) = whitespace1(i)?;
-        let (i, order_by) = separated_list1(ws_sep_comma, order_field(dialect))(i)?;
+        let (i, order_by) = separated_list1(ws_sep_comma, order_by(dialect))(i)?;
 
         Ok((i, OrderClause { order_by }))
     }
@@ -119,25 +181,32 @@ mod tests {
         let qstring3 = "select * from users order by name\n";
 
         let expected_ord1 = OrderClause {
-            order_by: vec![(
-                FieldReference::Expr(Expr::Column("name".into())),
-                Some(OrderType::OrderDescending),
-            )],
+            order_by: vec![OrderBy {
+                field: FieldReference::Expr(Expr::Column("name".into())),
+                order_type: Some(OrderType::OrderDescending),
+                null_order: None,
+            }],
         };
         let expected_ord2 = OrderClause {
             order_by: vec![
-                (
-                    FieldReference::Expr(Expr::Column("name".into())),
-                    Some(OrderType::OrderAscending),
-                ),
-                (
-                    FieldReference::Expr(Expr::Column("age".into())),
-                    Some(OrderType::OrderDescending),
-                ),
+                OrderBy {
+                    field: FieldReference::Expr(Expr::Column("name".into())),
+                    order_type: Some(OrderType::OrderAscending),
+                    null_order: None,
+                },
+                OrderBy {
+                    field: FieldReference::Expr(Expr::Column("age".into())),
+                    order_type: Some(OrderType::OrderDescending),
+                    null_order: None,
+                },
             ],
         };
         let expected_ord3 = OrderClause {
-            order_by: vec![(FieldReference::Expr(Expr::Column("name".into())), None)],
+            order_by: vec![OrderBy {
+                field: FieldReference::Expr(Expr::Column("name".into())),
+                order_type: None,
+                null_order: None,
+            }],
         };
 
         let res1 = selection(Dialect::MySQL)(LocatedSpan::new(qstring1.as_bytes()));
@@ -148,16 +217,34 @@ mod tests {
         assert_eq!(res3.unwrap().1.order, Some(expected_ord3));
     }
 
+    #[test]
+    fn nulls_first() {
+        let res = test_parse!(
+            super::order_clause(Dialect::PostgreSQL),
+            b"ORDER BY t1.x ASC NULLS FIRST"
+        );
+
+        assert_eq!(
+            res.order_by,
+            vec![OrderBy {
+                field: FieldReference::Expr(Expr::Column("t1.x".into())),
+                order_type: Some(OrderType::OrderAscending),
+                null_order: Some(NullOrder::NullsFirst)
+            }]
+        )
+    }
+
     mod mysql {
         use super::*;
 
         #[test]
         fn order_prints_column_table() {
             let clause = OrderClause {
-                order_by: vec![(
-                    FieldReference::Expr(Expr::Column("t.n".into())),
-                    Some(OrderType::OrderDescending),
-                )],
+                order_by: vec![OrderBy {
+                    field: FieldReference::Expr(Expr::Column("t.n".into())),
+                    order_type: Some(OrderType::OrderDescending),
+                    null_order: None,
+                }],
             };
             assert_eq!(
                 clause.display(Dialect::MySQL).to_string(),
@@ -172,10 +259,11 @@ mod tests {
         #[test]
         fn order_prints_column_table() {
             let clause = OrderClause {
-                order_by: vec![(
-                    FieldReference::Expr(Expr::Column("t.n".into())),
-                    Some(OrderType::OrderDescending),
-                )],
+                order_by: vec![OrderBy {
+                    field: FieldReference::Expr(Expr::Column("t.n".into())),
+                    order_type: Some(OrderType::OrderDescending),
+                    null_order: None,
+                }],
             };
             assert_eq!(
                 clause.display(Dialect::PostgreSQL).to_string(),

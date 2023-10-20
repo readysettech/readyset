@@ -3,6 +3,7 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use clap::ValueEnum;
 use metrics::SharedString;
 use nom_sql::SqlQuery;
 use readyset_client::query::QueryId;
@@ -10,6 +11,44 @@ use readyset_errors::ReadySetError;
 use serde::Serialize;
 
 pub mod recorded;
+
+/// Similar to logging levels, this enum allows control over how much data is
+/// recorded about queries for reporting into metrics systems. Each enum value,
+/// starting at `Disabled`, includes all of the preceeding (lower) level's metric
+/// details. This gradation attempts to make a reasonable tradeoff of metrics
+/// payload size vs. verbosity/debugability.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
+pub enum QueryLogMode {
+    /// Do not capture query metrics at all.
+    Disabled,
+    /// Only record query metrics for queries that are cached by ReadySet.
+    #[default]
+    Cached,
+    /// Record query metrics for all queries, including ad-hoc (simple) queries
+    /// as well as prepared statements.
+    AllQueries,
+    /// Expert-mode. Captures the full suite of developer-level query metrics.
+    /// Not advisable for a production environment.
+    All,
+}
+
+impl QueryLogMode {
+    pub fn is_enabled(&self) -> bool {
+        !matches!(self, QueryLogMode::Disabled)
+    }
+
+    pub fn is_verbose(&self) -> bool {
+        matches!(self, QueryLogMode::All)
+    }
+
+    pub fn allow_ad_hoc(&self) -> bool {
+        matches!(self, QueryLogMode::AllQueries | QueryLogMode::All)
+    }
+
+    pub fn allow_proxied_queries(&self) -> bool {
+        matches!(self, QueryLogMode::AllQueries | QueryLogMode::All)
+    }
+}
 
 #[derive(Debug, Serialize, Clone)]
 /// Event logging for the execution of a single query in the adapter. Durations

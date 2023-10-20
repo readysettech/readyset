@@ -45,15 +45,30 @@ pub(super) fn make_joins(
     let mut join_chains = Vec::new();
 
     for jref in qg.join_order.iter() {
-        let (mut join_kind, jps) = match &qg.edges[&(jref.src.clone(), jref.dst.clone())] {
-            QueryGraphEdge::Join { on } => (JoinKind::Inner, on),
-            QueryGraphEdge::LeftJoin { on, extra_preds } => {
-                if !extra_preds.is_empty() {
-                    unsupported!("Non-equal predicates not (yet) supported in left joins");
+        let (mut join_kind, jps, left_preds, right_preds) =
+            match &qg.edges[&(jref.src.clone(), jref.dst.clone())] {
+                QueryGraphEdge::Join { on } => (JoinKind::Inner, on, None, None),
+                QueryGraphEdge::LeftJoin {
+                    on,
+                    left_local_preds,
+                    right_local_preds,
+                    global_preds,
+                    params,
+                } => {
+                    if !global_preds.is_empty() {
+                        unsupported!("Global predicates not yet supported in left joins");
+                    }
+                    if !params.is_empty() {
+                        unsupported!("Parameters not yet supported in left joins");
+                    }
+                    (
+                        JoinKind::Left,
+                        on,
+                        Some(left_local_preds),
+                        Some(right_local_preds),
+                    )
                 }
-                (JoinKind::Left, on)
-            }
-        };
+            };
 
         let (left_chain, right_chain) =
             pick_join_chains(&jref.src, &jref.dst, &mut join_chains, node_for_rel)?;
@@ -70,12 +85,32 @@ pub(super) fn make_joins(
             }
         }
 
+        let mut left_parent = left_chain.last_node;
+        for (i, p) in left_preds.into_iter().flatten().enumerate() {
+            left_parent = mir_converter.make_predicate_nodes(
+                query_name,
+                mir_converter.generate_label(&format!("left_local_{i}").into()),
+                left_parent,
+                p,
+            )?;
+        }
+
+        let mut right_parent = right_chain.last_node;
+        for (i, p) in right_preds.into_iter().flatten().enumerate() {
+            right_parent = mir_converter.make_predicate_nodes(
+                query_name,
+                mir_converter.generate_label(&format!("right_local_{i}").into()),
+                right_parent,
+                p,
+            )?;
+        }
+
         let jn = mir_converter.make_join_node(
             query_name,
             mir_converter.generate_label(&name),
             jps,
-            left_chain.last_node,
-            right_chain.last_node,
+            left_parent,
+            right_parent,
             join_kind,
         )?;
 

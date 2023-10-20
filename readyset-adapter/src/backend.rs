@@ -91,7 +91,9 @@ use readyset_client::query::*;
 use readyset_client::results::Results;
 use readyset_client::{ColumnSchema, PlaceholderIdx, ViewCreateRequest};
 pub use readyset_client_metrics::QueryDestination;
-use readyset_client_metrics::{recorded, EventType, QueryExecutionEvent, SqlQueryType};
+use readyset_client_metrics::{
+    recorded, EventType, QueryExecutionEvent, QueryLogMode, SqlQueryType,
+};
 use readyset_data::{DfType, DfValue};
 use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
 use readyset_errors::{internal, internal_err, unsupported, unsupported_err, ReadySetResult};
@@ -267,7 +269,7 @@ pub struct BackendBuilder {
     ticket: Option<Timestamp>,
     timestamp_client: Option<TimestampClient>,
     query_log_sender: Option<UnboundedSender<QueryExecutionEvent>>,
-    query_log_ad_hoc_queries: bool,
+    query_log_mode: QueryLogMode,
     unsupported_set_mode: UnsupportedSetMode,
     migration_mode: MigrationMode,
     query_max_failure_seconds: u64,
@@ -289,7 +291,7 @@ impl Default for BackendBuilder {
             ticket: None,
             timestamp_client: None,
             query_log_sender: None,
-            query_log_ad_hoc_queries: false,
+            query_log_mode: Default::default(),
             unsupported_set_mode: UnsupportedSetMode::Error,
             migration_mode: MigrationMode::InRequestPath,
             query_max_failure_seconds: (i64::MAX / 1000) as u64,
@@ -348,7 +350,7 @@ impl BackendBuilder {
                 unsupported_set_mode: self.unsupported_set_mode,
                 migration_mode: self.migration_mode,
                 query_max_failure_duration: Duration::new(self.query_max_failure_seconds, 0),
-                query_log_ad_hoc_queries: self.query_log_ad_hoc_queries,
+                query_log_mode: self.query_log_mode,
                 fallback_recovery_duration: Duration::new(self.fallback_recovery_seconds, 0),
                 enable_experimental_placeholder_inlining: self
                     .enable_experimental_placeholder_inlining,
@@ -379,10 +381,10 @@ impl BackendBuilder {
     pub fn query_log(
         mut self,
         query_log_sender: Option<UnboundedSender<QueryExecutionEvent>>,
-        ad_hoc_queries: bool,
+        mode: QueryLogMode,
     ) -> Self {
         self.query_log_sender = query_log_sender;
-        self.query_log_ad_hoc_queries = ad_hoc_queries;
+        self.query_log_mode = mode;
         self
     }
 
@@ -585,7 +587,7 @@ struct BackendSettings {
     slowlog: bool,
     require_authentication: bool,
     /// Whether to log ad-hoc queries by full query text in the query logger.
-    query_log_ad_hoc_queries: bool,
+    query_log_mode: QueryLogMode,
     /// How to behave when receiving unsupported `SET` statements
     unsupported_set_mode: UnsupportedSetMode,
     /// How this backend handles migrations, See MigrationMode.
@@ -2577,7 +2579,7 @@ where
                 let processed_query_params = processed_query_params?;
                 if noria_should_try {
                     event.sql_type = SqlQueryType::Read;
-                    if self.settings.query_log_ad_hoc_queries {
+                    if self.settings.query_log_mode.allow_ad_hoc() {
                         event.query = Some(Arc::new(SqlQuery::Select(view_request.statement.clone())));
                         event.query_id = Some(QueryId::from_view_create_request(&view_request));
                     }

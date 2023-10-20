@@ -79,3 +79,6 @@ pub const QUERY_LOG_VIEW_NOT_FOUND: &str = "readyset_query_log_view_not_found";
 
 /// Counter: The number of errors due to RPC failures.
 pub const QUERY_LOG_RPC_ERRORS: &str = "readyset_query_log_rpc_errors";
+
+/// Gauge: The last seen size in bytes of a /metrics payload.
+pub const METRICS_PAYLOAD_SIZE_BYTES: &str = "readyset_metrics_payload_size_bytes";

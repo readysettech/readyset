@@ -1,4 +1,4 @@
-use nom_sql::{Expr, FieldDefinitionExpr, FieldReference, SelectStatement, SqlQuery};
+use nom_sql::{Expr, FieldDefinitionExpr, FieldReference, OrderBy, SelectStatement, SqlQuery};
 use readyset_errors::{internal, invalid_query_err, ReadySetResult};
 
 pub trait RemoveNumericFieldReferences: Sized {
@@ -40,7 +40,7 @@ impl RemoveNumericFieldReferences for SelectStatement {
         }
 
         if let Some(order) = &mut self.order {
-            for (field, _) in &mut order.order_by {
+            for OrderBy { field, .. } in &mut order.order_by {
                 if let FieldReference::Numeric(n) = field {
                     *field = FieldReference::Expr(lookup_field(*n as _)?);
                 }
@@ -92,10 +92,11 @@ mod tests {
         assert_eq!(
             result.order,
             Some(OrderClause {
-                order_by: vec![(
-                    FieldReference::Expr(Expr::Column("id".into())),
-                    Some(OrderType::OrderAscending)
-                )]
+                order_by: vec![OrderBy {
+                    field: FieldReference::Expr(Expr::Column("id".into())),
+                    order_type: Some(OrderType::OrderAscending),
+                    null_order: None
+                }]
             })
         )
     }

@@ -14,8 +14,7 @@ services:
       DB_DIR: /state
       PROMETHEUS_METRICS: true
       QUERY_CACHING: explicit
-      QUERY_LOG: true
-      QUERY_LOG_AD_HOC: true
+      QUERY_LOG_MODE: all-queries
       STANDALONE: true
       DEPLOYMENT: docker_compose_deployment
       LISTEN_ADDRESS: 0.0.0.0:5433
