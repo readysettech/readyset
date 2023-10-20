@@ -1,5 +1,7 @@
 use nom_sql::analysis::contains_aggregate;
-use nom_sql::{Expr, FieldDefinitionExpr, FieldReference, LimitClause, SelectStatement, SqlQuery};
+use nom_sql::{
+    Expr, FieldDefinitionExpr, FieldReference, LimitClause, OrderBy, SelectStatement, SqlQuery,
+};
 use readyset_errors::{ReadySetError, ReadySetResult};
 
 pub trait NormalizeTopKWithAggregate: Sized {
@@ -32,7 +34,10 @@ impl NormalizeTopKWithAggregate for SelectStatement {
                 match &self.group_by {
                     Some(group_by) => {
                         // Each field in the order clause...
-                        for (order_field, _) in &order.order_by {
+                        for OrderBy {
+                            field: order_field, ..
+                        } in &order.order_by
+                        {
                             // ...must either appear in the group by clause...
                             let in_group_by_clause = group_by
                                 .fields
@@ -177,10 +182,11 @@ mod tests {
                 assert_eq!(
                     stmt.order,
                     Some(OrderClause {
-                        order_by: vec![(
-                            FieldReference::Expr(Expr::Column("column_3".into())),
-                            Some(OrderType::OrderAscending)
-                        )]
+                        order_by: vec![OrderBy {
+                            field: FieldReference::Expr(Expr::Column("column_3".into())),
+                            order_type: Some(OrderType::OrderAscending),
+                            null_order: None
+                        }]
                     })
                 );
 

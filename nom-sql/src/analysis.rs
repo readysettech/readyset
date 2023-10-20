@@ -6,7 +6,7 @@ use std::iter;
 
 use crate::{
     Column, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, InValue, JoinConstraint,
-    Relation, SelectStatement,
+    OrderBy, Relation, SelectStatement,
 };
 
 /// Extension trait providing the `referred_tables` method to various parts of the AST
@@ -319,10 +319,12 @@ impl SelectStatement {
                 })
             }))
             .chain(self.order.iter().flat_map(|oc| {
-                oc.order_by.iter().filter_map(|(f, _)| match f {
-                    FieldReference::Expr(expr) => Some(expr),
-                    _ => None,
-                })
+                oc.order_by
+                    .iter()
+                    .filter_map(|OrderBy { field, .. }| match field {
+                        FieldReference::Expr(expr) => Some(expr),
+                        _ => None,
+                    })
             }))
             .collect();
 

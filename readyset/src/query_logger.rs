@@ -5,7 +5,7 @@ use metrics::{register_counter, register_histogram, Counter, Histogram, SharedSt
 use nom_sql::SqlQuery;
 use readyset_client::query::QueryId;
 use readyset_client_metrics::{
-    recorded, DatabaseType, EventType, QueryExecutionEvent, SqlQueryType,
+    recorded, DatabaseType, EventType, QueryExecutionEvent, QueryLogMode, SqlQueryType,
 };
 use readyset_sql_passes::anonymize::anonymize_literals;
 use readyset_util::shutdown::ShutdownReceiver;
@@ -47,17 +47,24 @@ struct QueryCounters {
 }
 
 impl QueryMetrics {
-    fn parse_histogram(&mut self, kind: (EventType, SqlQueryType)) -> &mut Histogram {
+    fn parse_histogram(
+        &mut self,
+        kind: (EventType, SqlQueryType),
+        mode: &QueryLogMode,
+    ) -> &mut Histogram {
         self.histograms
             .entry(kind)
             .or_default()
             .parse_time
             .get_or_insert_with(|| {
                 let mut labels = vec![
-                    ("query", self.query.clone()),
                     ("event_type", SharedString::from(kind.0)),
                     ("query_type", SharedString::from(kind.1)),
                 ];
+
+                if mode.is_verbose() {
+                    labels.push(("query", self.query.clone()));
+                }
 
                 if let Some(id) = &self.query_id {
                     labels.push(("query_id", id.clone()));
@@ -67,18 +74,25 @@ impl QueryMetrics {
             })
     }
 
-    fn readyset_histogram(&mut self, kind: (EventType, SqlQueryType)) -> &mut Histogram {
+    fn readyset_histogram(
+        &mut self,
+        kind: (EventType, SqlQueryType),
+        mode: &QueryLogMode,
+    ) -> &mut Histogram {
         self.histograms
             .entry(kind)
             .or_default()
             .readyset_exe_time
             .get_or_insert_with(|| {
                 let mut labels = vec![
-                    ("query", self.query.clone()),
                     ("event_type", SharedString::from(kind.0)),
                     ("query_type", SharedString::from(kind.1)),
                     ("database_type", SharedString::from(DatabaseType::ReadySet)),
                 ];
+
+                if mode.is_verbose() {
+                    labels.push(("query", self.query.clone()));
+                }
 
                 if let Some(id) = &self.query_id {
                     labels.push(("query_id", id.clone()));
@@ -88,18 +102,25 @@ impl QueryMetrics {
             })
     }
 
-    fn upstream_histogram(&mut self, kind: (EventType, SqlQueryType)) -> &mut Histogram {
+    fn upstream_histogram(
+        &mut self,
+        kind: (EventType, SqlQueryType),
+        mode: &QueryLogMode,
+    ) -> &mut Histogram {
         self.histograms
             .entry(kind)
             .or_default()
             .upstream_exe_time
             .get_or_insert_with(|| {
                 let mut labels = vec![
-                    ("query", self.query.clone()),
                     ("event_type", SharedString::from(kind.0)),
                     ("query_type", SharedString::from(kind.1)),
                     ("database_type", SharedString::from(DatabaseType::MySql)),
                 ];
+
+                if mode.is_verbose() {
+                    labels.push(("query", self.query.clone()));
+                }
 
                 if let Some(id) = &self.query_id {
                     labels.push(("query_id", id.clone()));
@@ -229,6 +250,7 @@ impl QueryLogger {
     pub(crate) async fn run(
         mut receiver: UnboundedReceiver<QueryExecutionEvent>,
         mut shutdown_recv: ShutdownReceiver,
+        mode: QueryLogMode,
     ) {
         let _span = info_span!("query-logger");
 
@@ -304,22 +326,22 @@ impl QueryLogger {
                         }
                     }
 
-                    if let Some(duration) = event.parse_duration {
+                    if mode.is_verbose() && let Some(duration) = event.parse_duration {
                         metrics
-                            .parse_histogram((event.event, event.sql_type))
+                            .parse_histogram((event.event, event.sql_type), &mode)
                             .record(duration);
                     }
 
                     if let Some(duration) = event.readyset_duration {
                         metrics
-                            .readyset_histogram((event.event, event.sql_type))
+                            .readyset_histogram((event.event, event.sql_type), &mode)
                             .record(duration);
                         metrics.readyset_counter((event.event, event.sql_type)).increment(1);
                     }
 
-                    if let Some(duration) = event.upstream_duration {
+                    if mode.allow_proxied_queries() && let Some(duration) = event.upstream_duration {
                         metrics
-                            .upstream_histogram((event.event, event.sql_type))
+                            .upstream_histogram((event.event, event.sql_type), &mode)
                             .record(duration);
                         metrics.upstream_counter((event.event, event.sql_type)).increment(1);
                     }

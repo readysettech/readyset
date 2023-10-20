@@ -91,7 +91,7 @@ try:
 			print ("ReadySet Queries")
 			print (tabulate(tabulated_readyset_rows, headers=["query text", "count", "p50 (ms)", "p90 (ms)", "p99 (ms)"], tablefmt="psql", floatfmt=".3f", maxcolwidths=70))
 	else:
-		raise ValueError("Oops! There are no query-specific metrics. Have you run a query yet? Did you pass --query-log and --query-log-ad-hoc flags when running ReadySet?")
+		raise ValueError("Oops! There are no query-specific metrics. Have you run a query yet?")
 except ValueError as err:
 	print (str(err.args[0]))
 

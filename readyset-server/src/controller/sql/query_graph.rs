@@ -11,8 +11,8 @@ use nom_sql::analysis::visit_mut::{walk_expr, VisitorMut};
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::{
     BinaryOperator, Column, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, InValue,
-    ItemPlaceholder, JoinConstraint, JoinOperator, JoinRightSide, LimitClause, Literal, OrderType,
-    Relation, SelectStatement, SqlIdentifier, TableExpr, TableExprInner,
+    ItemPlaceholder, JoinConstraint, JoinOperator, JoinRightSide, LimitClause, Literal, OrderBy,
+    OrderType, Relation, SelectStatement, SqlIdentifier, TableExpr, TableExprInner,
 };
 use readyset_client::{PlaceholderIdx, ViewPlaceholder};
 use readyset_errors::{
@@ -219,7 +219,14 @@ pub enum QueryGraphEdge {
     },
     LeftJoin {
         on: Vec<JoinPredicate>,
-        extra_preds: Vec<Expr>,
+        /// Predicates which are local to the left-hand side of the left join.
+        left_local_preds: Vec<Expr>,
+        /// Predicates which are local to the right-hand side of the left join.
+        right_local_preds: Vec<Expr>,
+        /// Global predicates mentioned in the ON clause of the join
+        global_preds: Vec<Expr>,
+        /// Parameters mentioned in the ON clause of the join
+        params: Vec<Parameter>,
     },
 }
 
@@ -1083,7 +1090,32 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
         {
             e.insert(match jc.operator {
                 JoinOperator::LeftJoin | JoinOperator::LeftOuterJoin => {
-                    QueryGraphEdge::LeftJoin { on, extra_preds }
+                    let mut local_preds = HashMap::new();
+                    let mut global_preds = vec![];
+                    let mut params = vec![];
+                    for pred in &extra_preds {
+                        classify_conditionals(
+                            pred,
+                            &mut local_preds,
+                            &mut global_preds,
+                            &mut params,
+                        )?;
+                    }
+
+                    let left_local_preds = local_preds.remove(&left_table).unwrap_or_default();
+                    let right_local_preds = local_preds.remove(&right_table).unwrap_or_default();
+
+                    // Anything that isn't local to the left or the right is actually a global
+                    // predicate in disguise
+                    global_predicates.extend(local_preds.into_values().flatten());
+
+                    QueryGraphEdge::LeftJoin {
+                        on,
+                        left_local_preds,
+                        right_local_preds,
+                        global_preds,
+                        params,
+                    }
                 }
                 JoinOperator::Join | JoinOperator::InnerJoin => {
                     for pred in &extra_preds {
@@ -1239,7 +1271,7 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
         order
             .order_by
             .iter()
-            .for_each(|(ord_expr, _)| match ord_expr {
+            .for_each(|OrderBy { field, .. }| match field {
                 FieldReference::Expr(Expr::Column(Column { table: None, .. })) => {
                     // This is a reference to a projected column, otherwise the table value
                     // would be assigned in the `rewrite_selection` pass
@@ -1292,22 +1324,35 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                 .order_by
                 .iter()
                 .cloned()
-                .map(|(expr, ot)| {
-                    Ok((
-                        match expr {
-                            FieldReference::Expr(Expr::Column(col)) => col,
-                            FieldReference::Expr(expr) => Column {
-                                // FIXME(REA-2168): Use correct dialect.
-                                name: expr.display(nom_sql::Dialect::MySQL).to_string().into(),
-                                table: None,
-                            },
-                            FieldReference::Numeric(_) => {
-                                internal!("Numeric field references should have been removed")
+                .map(
+                    |OrderBy {
+                         field,
+                         order_type,
+                         null_order,
+                     }| {
+                        let order_type = order_type.unwrap_or(OrderType::OrderAscending);
+                        if let Some(null_order) = null_order {
+                            if !null_order.is_default_for(order_type) {
+                                unsupported!("Non-default NULLS FIRST/LAST is not yet supported");
                             }
-                        },
-                        ot.unwrap_or(OrderType::OrderAscending),
-                    ))
-                })
+                        }
+
+                        Ok((
+                            match field {
+                                FieldReference::Expr(Expr::Column(col)) => col,
+                                FieldReference::Expr(expr) => Column {
+                                    // FIXME(REA-2168): Use correct dialect.
+                                    name: expr.display(nom_sql::Dialect::MySQL).to_string().into(),
+                                    table: None,
+                                },
+                                FieldReference::Numeric(_) => {
+                                    internal!("Numeric field references should have been removed")
+                                }
+                            },
+                            order_type,
+                        ))
+                    },
+                )
                 .collect::<ReadySetResult<_>>()
         })
         .transpose()?;
@@ -1323,19 +1368,34 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                         o.order_by
                             .iter()
                             .cloned()
-                            .map(|(field, ot)| {
-                                Ok((
-                                    match field {
-                                        FieldReference::Numeric(_) => {
-                                            internal!(
+                            .map(
+                                |OrderBy {
+                                     field,
+                                     order_type,
+                                     null_order,
+                                 }| {
+                                    let order_type =
+                                        order_type.unwrap_or(OrderType::OrderAscending);
+                                    if let Some(null_order) = null_order {
+                                        if !null_order.is_default_for(order_type) {
+                                            unsupported!(
+                                                "Non-default NULLS FIRST/LAST is not yet supported"
+                                            );
+                                        }
+                                    }
+                                    Ok((
+                                        match field {
+                                            FieldReference::Numeric(_) => {
+                                                internal!(
                                                 "Numeric field references should have been removed"
                                             )
-                                        }
-                                        FieldReference::Expr(expr) => expr,
-                                    },
-                                    ot.unwrap_or(OrderType::OrderAscending),
-                                ))
-                            })
+                                            }
+                                            FieldReference::Expr(expr) => expr,
+                                        },
+                                        order_type,
+                                    ))
+                                },
+                            )
                             .collect::<ReadySetResult<_>>()
                     })
                     .transpose()?,
@@ -1612,6 +1672,52 @@ mod tests {
             qg.global_predicates,
             vec![Expr::Column("t2.is_thing".into())]
         )
+    }
+
+    #[test]
+    fn local_pred_in_left_join() {
+        let qg = make_query_graph(
+            "SELECT t1.x FROM t1 LEFT JOIN t2 ON t2.x = 4 AND t1.y = 7 AND t1.z = t2.z",
+        );
+
+        let join = qg.edges.get(&("t1".into(), "t2".into())).unwrap();
+
+        match join {
+            QueryGraphEdge::LeftJoin {
+                on,
+                left_local_preds,
+                right_local_preds,
+                global_preds,
+                params,
+            } => {
+                assert_eq!(
+                    *on,
+                    vec![JoinPredicate {
+                        left: Column::from("t1.z"),
+                        right: Column::from("t2.z")
+                    }]
+                );
+                assert_eq!(
+                    *left_local_preds,
+                    vec![Expr::BinaryOp {
+                        lhs: Box::new(Expr::Column("t1.y".into())),
+                        op: BinaryOperator::Equal,
+                        rhs: Box::new(Expr::Literal(7.into()))
+                    }]
+                );
+                assert_eq!(
+                    *right_local_preds,
+                    vec![Expr::BinaryOp {
+                        lhs: Box::new(Expr::Column("t2.x".into())),
+                        op: BinaryOperator::Equal,
+                        rhs: Box::new(Expr::Literal(4.into()))
+                    }]
+                );
+                assert_eq!(*global_preds, vec![]);
+                assert_eq!(*params, vec![]);
+            }
+            QueryGraphEdge::Join { .. } => panic!("Expected left join, got {join:?}"),
+        }
     }
 
     mod view_key {

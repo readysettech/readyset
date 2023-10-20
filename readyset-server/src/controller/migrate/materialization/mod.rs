@@ -76,8 +76,18 @@ pub struct Config {
     /// If this is set to false, migrations that add queries that require full materialization will
     /// return [`ReadySetError::Unsupported`].
     ///
-    /// Defaults to true
+    /// Defaults to `false`
     pub allow_full_materialization: bool,
+
+    /// Whether queries that contain straddled joins (joins with partial keys traced to both
+    /// parent) are allowed
+    ///
+    /// If this is set to false, migrations that add queries that include straddled joins will
+    /// return [`ReadySetError::Unsupported`].
+    ///
+    /// Defaults to `false`
+    #[serde(default)]
+    pub allow_straddled_joins: bool,
 
     /// Strategy for determining which (partial) materializations should be placed beyond the
     /// materialization frontier.
@@ -96,6 +106,7 @@ impl Default for Config {
         Self {
             packet_filters_enabled: false,
             allow_full_materialization: false,
+            allow_straddled_joins: false,
             partial_enabled: true,
             frontier_strategy: FrontierStrategy::None,
         }
