@@ -56,6 +56,7 @@ use dataflow::Readers;
 use failpoint_macros::set_failpoint;
 use futures_util::future::{Either, TryFutureExt};
 use health_reporter::{HealthReporter, State as ServerState};
+use readyset_alloc_metrics::report_allocator_metrics;
 use readyset_client::consensus::{Authority, WorkerSchedulingConfig};
 use readyset_client::{ControllerDescriptor, WorkerDescriptor};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
@@ -271,6 +272,9 @@ pub(crate) async fn start_instance_inner(
         abort_on_task_failure,
         ..
     } = config;
+
+    let alloc_shutdown = shutdown_rx.clone();
+    tokio::spawn(report_allocator_metrics(alloc_shutdown));
 
     let (tx, rx) = maybe_create_failpoint_chann(wait_for_failpoint);
     let mut health_reporter = HealthReporter::new();

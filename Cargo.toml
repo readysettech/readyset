@@ -30,6 +30,7 @@ members = [
     "readyset",
     "readyset-adapter",
     "readyset-alloc",
+    "readyset-alloc-metrics",
     "readyset-client",
     "readyset-client-metrics",
     "readyset-client-test-helpers",

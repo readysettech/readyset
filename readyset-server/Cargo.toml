@@ -82,6 +82,7 @@ dataflow = { path = "../readyset-dataflow", package = "readyset-dataflow" }
 mir = { path = "../readyset-mir", package = "readyset-mir" }
 common = { path = "../readyset-common", package = "readyset-common" }
 readyset-alloc = { path = "../readyset-alloc" }
+readyset-alloc-metrics = { path = "../readyset-alloc-metrics" }
 readyset-client = { path = "../readyset-client" }
 failpoint-macros = { path = "../failpoint-macros" }
 readyset-errors = { path = "../readyset-errors" }

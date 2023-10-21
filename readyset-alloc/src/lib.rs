@@ -75,38 +75,38 @@ pub mod trace;
 /// perspective of jemalloc(3)
 pub struct AllocStats {
     /// Total number of bytes allocated by the application.
-    allocated: usize,
+    pub allocated: usize,
     /// Total number of bytes in active pages allocated by the application. This is a multiple of
     /// the page size, and greater than or equal to "stats.allocated". This does not include
     /// (jemalloc(3)) "stats.arenas.<i>.pdirty" and pages entirely devoted to allocator metadata.
-    active: usize,
+    pub active: usize,
     /// Total number of bytes dedicated to metadata, which comprise base allocations used for
     /// bootstrap-sensitive allocator metadata structures (see jemalloc(3) stats.arenas.<i>.base)
     /// and internal allocations (see stats.arenas.<i>.internal). Transparent huge page
     /// (enabled with opt.metadata_thp) usage is not considered.
-    metadata: usize,
+    pub metadata: usize,
     /// Maximum number of bytes in physically resident data pages mapped by the allocator,
     /// comprising all pages dedicated to allocator metadata, pages backing active allocations, and
     /// unused dirty pages. This is a maximum rather than precise because pages may not actually be
     /// physically resident if they correspond to demand-zeroed virtual memory that has not yet
     /// been touched. This is a multiple of the page size, and is larger than stats.active.
-    resident: usize,
+    pub resident: usize,
     /// Total number of bytes in chunks mapped on behalf of the application. This is a multiple of
     /// the chunk size, and is at least as large as "stats.active". This does not include inactive
     /// chunks.
-    mapped: usize,
+    pub mapped: usize,
     /// Total number of bytes in virtual memory mappings that were retained rather than being
     /// returned to the operating system via e.g. munmap(2) or similar. Retained virtual memory is
     /// typically untouched, decommitted, or purged, so it has no strongly associated physical
     /// memory (see extent hooks for details). Retained memory is excluded from mapped memory
     /// statistics, e.g. stats.mapped.
-    retained: usize,
+    pub retained: usize,
     /// Total number of bytes that are resident but not "active" or "metadata". These bytes were
     /// once used by the process but have not been reclaimed by the OS.
-    dirty: usize,
+    pub dirty: usize,
     /// Total number of bytes that are in active pages but are not "allocated" by the
     /// process--meaning they exist as the result of memory fragmentation.
-    fragmentation: usize,
+    pub fragmentation: usize,
 }
 
 #[path = "jemalloc.rs"]

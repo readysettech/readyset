@@ -4381,6 +4381,7 @@ dependencies = [
  "psql-srv",
  "readyset-adapter",
  "readyset-alloc",
+ "readyset-alloc-metrics",
  "readyset-client",
  "readyset-client-metrics",
  "readyset-common",
@@ -4485,6 +4486,18 @@ dependencies = [
  "tikv-jemalloc-sys",
  "tikv-jemallocator",
  "tokio",
+]
+
+[[package]]
+name = "readyset-alloc-metrics"
+version = "0.1.0"
+dependencies = [
+ "metrics",
+ "metrics-exporter-prometheus",
+ "readyset-alloc",
+ "readyset-util",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -5035,6 +5048,7 @@ dependencies = [
  "querystring",
  "rand 0.7.3",
  "readyset-alloc",
+ "readyset-alloc-metrics",
  "readyset-client",
  "readyset-common",
  "readyset-data",

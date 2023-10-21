@@ -38,6 +38,7 @@ use readyset_adapter::query_status_cache::{MigrationStyle, QueryStatusCache};
 use readyset_adapter::views_synchronizer::ViewsSynchronizer;
 use readyset_adapter::{Backend, BackendBuilder, QueryHandler, UpstreamDatabase};
 use readyset_alloc::{StdThreadBuildWrapper, ThreadBuildWrapper};
+use readyset_alloc_metrics::report_allocator_metrics;
 use readyset_client::consensus::AuthorityType;
 #[cfg(feature = "failure_injection")]
 use readyset_client::failpoints;
@@ -729,6 +730,13 @@ where
         );
 
         let (shutdown_tx, shutdown_rx) = shutdown::channel();
+
+        // if we're running in standalone mode, server will already
+        // spawn it's own allocator metrics reporter.
+        if prometheus_handle.is_some() && !options.standalone {
+            let alloc_shutdown = shutdown_rx.clone();
+            rt.handle().spawn(report_allocator_metrics(alloc_shutdown));
+        }
 
         // Gate query log code path on the log flag existing.
         let qlog_sender = if options.query_log_mode.is_enabled() {
