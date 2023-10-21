@@ -2,8 +2,9 @@ use std::collections::VecDeque;
 
 use async_trait::async_trait;
 use nom_sql::Relation;
+use readyset_client::recipe::ChangeList;
 use readyset_client::TableOperation;
-use readyset_data::DfValue;
+use readyset_data::{DfValue, Dialect};
 use readyset_errors::{invariant, ReadySetError, ReadySetResult};
 use readyset_vitess_data::SchemaCache;
 use replication_offset::vitess::VStreamPosition;
@@ -190,6 +191,12 @@ impl VitessConnector {
         })
     }
 
+    fn current_offset(&self) -> Option<ReplicationOffset> {
+        self.current_position
+            .as_ref()
+            .map(|pos| ReplicationOffset::Vitess(pos.clone()))
+    }
+
     // Process a VStream ROW event and return a ReplicationAction object to be used by Noria
     fn process_row_event(
         &self,
@@ -275,7 +282,7 @@ impl VitessConnector {
             "We haven't seen a VGTID event yet trying to process a ROW. No current position information can be found!"
         );
 
-        let pos = ReplicationOffset::Vitess(self.current_position.as_ref().unwrap().clone());
+        let pos = self.current_offset().unwrap();
 
         Ok((action, pos))
     }
@@ -330,28 +337,53 @@ impl Connector for VitessConnector {
     async fn next_action(
         &mut self,
         _last_pos: &ReplicationOffset,
-        _until: Option<&ReplicationOffset>,
+        until: Option<&ReplicationOffset>,
     ) -> ReadySetResult<(ReplicationAction, ReplicationOffset)> {
         // First, check if we have any buffered events to return
         if let Some(row_event) = self.event_buffer.pop_front() {
             return self.process_row_event(&row_event);
         }
 
-        // This loop runs until we have something to return to the caller
-        while let Some(event) = self.next_event().await {
+        // This loop runs until we have something to return to the caller or we reach the until
+        // position (which is used in a catch-up scenario after a snapshot)
+        loop {
+            let event = self.next_event().await;
+            if event.is_none() {
+                info!("Vitess stream closed, no more events coming");
+                return Err(ReadySetError::ReplicationFailed(
+                    "Vitess stream closed".to_string(),
+                ));
+            }
+
+            let event = event.unwrap();
             match event.r#type() {
                 VEventType::Heartbeat => unreachable!("Heartbeats are handled by next_event()"),
                 VEventType::Field => unreachable!("Field events are handled by next_event()"),
 
                 VEventType::Vgtid => {
                     info!("Received VStream VGTID");
-                    let vgtid = event.vgtid.as_ref().unwrap();
-                    self.current_position = Some(vgtid.try_into().map_err(|e| {
-                        ReadySetError::ReplicationFailed(format!(
-                            "Could not convert VGTID to VStream position: {}",
-                            e
-                        ))
-                    })?);
+                    invariant!(
+                        event.vgtid.is_some(),
+                        "Received a VGTID event without a VGTID"
+                    );
+
+                    let vstream_pos: VStreamPosition =
+                        event.vgtid.unwrap().try_into().map_err(|e| {
+                            ReadySetError::ReplicationFailed(format!(
+                                "Could not convert VGTID to VStream position: {}",
+                                e
+                            ))
+                        })?;
+
+                    // Check if we have reached the catch-up position
+                    if let Some(limit) = until {
+                        let current_offset = ReplicationOffset::Vitess(vstream_pos.clone());
+                        if current_offset >= *limit {
+                            return Ok((ReplicationAction::LogPosition, current_offset));
+                        }
+                    }
+
+                    self.current_position = Some(vstream_pos);
 
                     // Now that we have our new position, we can return any buffered events
                     if let Some(row_event) = self.event_buffer.pop_front() {
@@ -389,20 +421,43 @@ impl Connector for VitessConnector {
                     self.event_buffer.push_back(event);
                 }
 
-                // TODO: Maybe handle these?
-                VEventType::Ddl => info!("Received VStream DDL"),
-
-                // TODO: Handle this specially as a part of snapshot implementation
-                VEventType::CopyCompleted => {
-                    info!("Received VStream copy completed");
-
-                    if let Some(pos) = &self.current_position {
-                        info!("Returning VStream position: {}", &pos);
-                        return Ok((
-                            ReplicationAction::LogPosition,
-                            ReplicationOffset::Vitess(pos.clone()),
-                        ));
+                VEventType::Ddl => {
+                    info!("Received VStream DDL");
+                    if event.statement.is_empty() {
+                        warn!("Received an empty DDL statement, skipping");
+                        continue;
                     }
+
+                    let changes = match ChangeList::from_str(
+                        &event.statement,
+                        Dialect::DEFAULT_MYSQL,
+                    ) {
+                        Ok(change_list) => change_list.changes,
+                        Err(error) => {
+                            warn!(%error, "Error extending recipe, DDL statement will not be used");
+                            continue;
+                        }
+                    };
+
+                    invariant!(
+                        self.current_position.is_some(),
+                        "We haven't seen a VGTID event yet trying to process a ROW. No current position information can be found!"
+                    );
+
+                    return Ok((
+                        ReplicationAction::DdlChange {
+                            schema: event.keyspace,
+                            changes,
+                        },
+                        self.current_offset().unwrap(),
+                    ));
+                }
+
+                VEventType::CopyCompleted => {
+                    error!("COPY_COMPLETED received from VStream, but we should not be in a snapshot mode!");
+                    return Err(ReadySetError::ReplicationFailed(
+                        "Unexpected COPY_COMPLETED received from VStream".to_string(),
+                    ));
                 }
 
                 // Probably safe to ignore
@@ -420,18 +475,8 @@ impl Connector for VitessConnector {
                 | VEventType::Gtid
                 | VEventType::Savepoint => {
                     warn!("Received unsupported VStream event: {:?}", &event);
-                    continue;
                 }
             }
-
-            // TODO: Check until position and potentially return:
-            // Ok((ReplicationAction::LogPosition, &self.next_position));
         }
-
-        info!("Vitess stream closed, no more events coming");
-        // TODO: Return the position action?
-        Err(ReadySetError::ReplicationFailed(
-            "Vitess stream closed".to_string(),
-        ))
     }
 }
