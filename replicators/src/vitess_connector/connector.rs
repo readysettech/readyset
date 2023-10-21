@@ -42,7 +42,11 @@ pub(crate) struct VitessConnector {
     // delivered to us in the VGTID event at the very end of the transaction.
     // So, we need to buffer all the ROW events until we receive the VGTID event
     // (or, rather, until COMMIT).
-    event_buffer: VecDeque<VEvent>,
+    //
+    // Note: The buffer can contain rows from multiple tables, so we cannot combine all events into
+    // a single set of table actions. For now we process one event at a time, but we could
+    // potentially process all events for a single table at once.
+    row_buffer: VecDeque<VEvent>,
 }
 
 impl VitessConnector {
@@ -125,7 +129,7 @@ impl VitessConnector {
             current_position,
             schema_cache: SchemaCache::new(vitess_config.keyspace().as_ref()),
             enable_statement_logging,
-            event_buffer: VecDeque::with_capacity(10),
+            row_buffer: VecDeque::with_capacity(10),
         };
 
         Ok(connector)
@@ -339,23 +343,14 @@ impl Connector for VitessConnector {
         _last_pos: &ReplicationOffset,
         until: Option<&ReplicationOffset>,
     ) -> ReadySetResult<(ReplicationAction, ReplicationOffset)> {
-        // First, check if we have any buffered events to return
-        if let Some(row_event) = self.event_buffer.pop_front() {
+        // First, check if we have any buffered events from the previous iteration
+        if let Some(row_event) = self.row_buffer.pop_front() {
             return self.process_row_event(&row_event);
         }
 
         // This loop runs until we have something to return to the caller or we reach the until
         // position (which is used in a catch-up scenario after a snapshot)
-        loop {
-            let event = self.next_event().await;
-            if event.is_none() {
-                info!("Vitess stream closed, no more events coming");
-                return Err(ReadySetError::ReplicationFailed(
-                    "Vitess stream closed".to_string(),
-                ));
-            }
-
-            let event = event.unwrap();
+        while let Some(event) = self.next_event().await {
             match event.r#type() {
                 VEventType::Heartbeat => unreachable!("Heartbeats are handled by next_event()"),
                 VEventType::Field => unreachable!("Field events are handled by next_event()"),
@@ -374,37 +369,37 @@ impl Connector for VitessConnector {
                                 e
                             ))
                         })?;
+                    self.current_position = Some(vstream_pos.clone());
 
-                    // Check if we have reached the catch-up position
+                    // Now that we have our new position, we can return any buffered events
+                    // Tbe first event is returned here, the rest are handled in the next call of
+                    // this function.
+                    if let Some(row_event) = self.row_buffer.pop_front() {
+                        return self.process_row_event(&row_event);
+                    }
+
+                    // Check the row buffer is empty and we have reached the catch-up position
                     if let Some(limit) = until {
-                        let current_offset = ReplicationOffset::Vitess(vstream_pos.clone());
+                        let current_offset = ReplicationOffset::Vitess(vstream_pos);
                         if current_offset >= *limit {
                             return Ok((ReplicationAction::LogPosition, current_offset));
                         }
-                    }
-
-                    self.current_position = Some(vstream_pos);
-
-                    // Now that we have our new position, we can return any buffered events
-                    if let Some(row_event) = self.event_buffer.pop_front() {
-                        return self.process_row_event(&row_event);
                     }
                 }
 
                 VEventType::Begin => {
                     info!("Received VStream begin");
-                    if !self.event_buffer.is_empty() {
+                    if !self.row_buffer.is_empty() {
                         warn!(
                             "There were {} buffered event(s) from the previous transaction! Dropping them.",
-                            self.event_buffer.len()
+                            self.row_buffer.len()
                         );
-                        self.event_buffer.clear();
+                        self.row_buffer.clear();
                     }
                 }
 
                 VEventType::Commit => {
                     info!("Received VStream commit");
-
                     if let Some(pos) = &self.current_position {
                         info!("Returning VStream position: {}", &pos);
                         return Ok((
@@ -418,15 +413,27 @@ impl Connector for VitessConnector {
                     trace!(
                         "Received VStream ROW event, buffering until the end of the transaction"
                     );
-                    self.event_buffer.push_back(event);
+                    self.row_buffer.push_back(event);
                 }
 
                 VEventType::Ddl => {
                     info!("Received VStream DDL");
-                    if event.statement.is_empty() {
-                        warn!("Received an empty DDL statement, skipping");
-                        continue;
-                    }
+                    invariant!(
+                        !event.statement.is_empty(),
+                        "Received a DDL event without a statement"
+                    );
+
+                    // DDLs should automatically commit any open transactions
+                    invariant!(
+                        self.row_buffer.is_empty(),
+                        "Received a DDL event while there are still buffered ROW events"
+                    );
+
+                    // There should be a VGTID event before the DDL
+                    invariant!(
+                        self.current_position.is_some(),
+                        "We haven't seen a VGTID event yet trying to process a ROW. No current position information can be found!"
+                    );
 
                     let changes = match ChangeList::from_str(
                         &event.statement,
@@ -438,11 +445,6 @@ impl Connector for VitessConnector {
                             continue;
                         }
                     };
-
-                    invariant!(
-                        self.current_position.is_some(),
-                        "We haven't seen a VGTID event yet trying to process a ROW. No current position information can be found!"
-                    );
 
                     return Ok((
                         ReplicationAction::DdlChange {
@@ -478,5 +480,11 @@ impl Connector for VitessConnector {
                 }
             }
         }
+
+        info!("Vitess stream closed, no more events coming");
+        // Not sure if there is a better return value here
+        Err(ReadySetError::ReplicationFailed(
+            "Vitess stream closed".to_string(),
+        ))
     }
 }
