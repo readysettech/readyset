@@ -243,7 +243,7 @@ impl DomainMetrics {
         }
     }
 
-    pub(super) fn rec_forward_time(
+    pub(super) fn rec_message_forward_time(
         &mut self,
         src: LocalNodeIndex,
         dst: LocalNodeIndex,
@@ -254,7 +254,7 @@ impl DomainMetrics {
             histo.record(time.as_micros() as f64);
         } else {
             let ctr = register_counter!(
-                recorded::DOMAIN_TOTAL_FORWARD_TIME,
+                recorded::DOMAIN_TOTAL_MESSAGE_FORWARD_TIME,
                 "from_node" => src.to_string(),
                 "to_node" => dst.to_string(),
                 "domain" => self.index.clone(),
@@ -262,7 +262,40 @@ impl DomainMetrics {
             );
 
             let histo = register_histogram!(
-                recorded::DOMAIN_FORWARD_TIME,
+                recorded::DOMAIN_MESSAGE_FORWARD_TIME,
+                "from_node" => src.to_string(),
+                "to_node" => dst.to_string(),
+                "domain" => self.index.clone(),
+                "shard" => self.shard.clone(),
+            );
+
+            ctr.increment(time.as_micros() as u64);
+            histo.record(time.as_micros() as f64);
+
+            self.total_forward_time.insert((src, dst), (ctr, histo));
+        }
+    }
+
+    pub(super) fn rec_input_forward_time(
+        &mut self,
+        src: LocalNodeIndex,
+        dst: LocalNodeIndex,
+        time: Duration,
+    ) {
+        if let Some((ctr, histo)) = self.total_forward_time.get(&(src, dst)) {
+            ctr.increment(time.as_micros() as u64);
+            histo.record(time.as_micros() as f64);
+        } else {
+            let ctr = register_counter!(
+                recorded::DOMAIN_TOTAL_INPUT_FORWARD_TIME,
+                "from_node" => src.to_string(),
+                "to_node" => dst.to_string(),
+                "domain" => self.index.clone(),
+                "shard" => self.shard.clone(),
+            );
+
+            let histo = register_histogram!(
+                recorded::DOMAIN_INPUT_FORWARD_TIME,
                 "from_node" => src.to_string(),
                 "to_node" => dst.to_string(),
                 "domain" => self.index.clone(),
