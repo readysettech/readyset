@@ -56,7 +56,6 @@ impl AllocatorMetricsReporter {
 
         match fetch_stats() {
             Ok(stats) => {
-                info!("NEXT alloc stats: {:?}", stats);
                 self.allocated.set(stats.allocated as f64);
                 self.active.set(stats.active as f64);
                 self.retained.set(stats.retained as f64);
