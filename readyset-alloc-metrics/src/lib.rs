@@ -1,3 +1,5 @@
+pub(crate) mod recorded;
+
 use std::time::Duration;
 
 use metrics::Gauge;
@@ -6,14 +8,9 @@ use readyset_util::shutdown::ShutdownReceiver;
 use tokio::select;
 use tracing::info;
 
-const REPORTING_INTERVAL: Duration = Duration::from_secs(2);
+use crate::recorded::*;
 
-const ALLOCATED_BYTES: &str = "readyset_allocator_allocated_bytes";
-const ACTIVE_BYTES: &str = "readyset_allocator_active_bytes";
-const RETAINED_BYTES: &str = "readyset_allocator_retained_bytes";
-const MAPPED_BYTES: &str = "readyset_allocator_mapped_bytes";
-const DIRTY_BYTES: &str = "readyset_allocator_dirty_bytes";
-const FRAGMENTED_BYTES: &str = "readyset_allocator_fragmented_bytes";
+const REPORTING_INTERVAL: Duration = Duration::from_secs(2);
 
 pub async fn report_allocator_metrics(mut shutdown_rx: ShutdownReceiver) {
     let mut interval = tokio::time::interval(REPORTING_INTERVAL);
@@ -30,8 +27,10 @@ pub async fn report_allocator_metrics(mut shutdown_rx: ShutdownReceiver) {
 struct AllocatorMetricsReporter {
     allocated: Gauge,
     active: Gauge,
-    retained: Gauge,
+    metadata: Gauge,
+    resident: Gauge,
     mapped: Gauge,
+    retained: Gauge,
     dirty: Gauge,
     fragmented: Gauge,
 }
@@ -41,8 +40,10 @@ impl AllocatorMetricsReporter {
         Self {
             allocated: metrics::register_gauge!(ALLOCATED_BYTES),
             active: metrics::register_gauge!(ACTIVE_BYTES),
-            retained: metrics::register_gauge!(RETAINED_BYTES),
+            metadata: metrics::register_gauge!(METADATA_BYTES),
+            resident: metrics::register_gauge!(RESIDENT_BYTES),
             mapped: metrics::register_gauge!(MAPPED_BYTES),
+            retained: metrics::register_gauge!(RETAINED_BYTES),
             dirty: metrics::register_gauge!(DIRTY_BYTES),
             fragmented: metrics::register_gauge!(FRAGMENTED_BYTES),
         }
@@ -58,8 +59,10 @@ impl AllocatorMetricsReporter {
             Ok(stats) => {
                 self.allocated.set(stats.allocated as f64);
                 self.active.set(stats.active as f64);
-                self.retained.set(stats.retained as f64);
+                self.metadata.set(stats.metadata as f64);
+                self.resident.set(stats.resident as f64);
                 self.mapped.set(stats.mapped as f64);
+                self.retained.set(stats.retained as f64);
                 self.dirty.set(stats.dirty as f64);
                 self.fragmented.set(stats.fragmentation as f64);
             }
