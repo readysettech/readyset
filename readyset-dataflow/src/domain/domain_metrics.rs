@@ -48,6 +48,8 @@ pub(super) struct DomainMetrics {
     chunked_replay_time: NodeMap<(Counter, Histogram)>,
     base_table_lookups: NodeMap<Counter>,
     node_state_size: NodeMap<Gauge>,
+    packet_handle_time: [Histogram; PacketDiscriminants::COUNT],
+    total_packet_handle_time: [Counter; PacketDiscriminants::COUNT],
 }
 
 impl DomainMetrics {
@@ -71,6 +73,26 @@ impl DomainMetrics {
             })
             .collect();
 
+        let packet_handle_time: Vec<Histogram> = PacketDiscriminants::iter()
+            .map(|d| {
+                let name: &'static str = d.into();
+                register_histogram!(recorded::DOMAIN_HANDLE_PACKET_TIME,
+                                  "domain" => index.clone(),
+                                  "shard" => shard.clone(),
+                                  "packet_type" => name,
+                )
+            })
+            .collect();
+        let total_packet_handle_time: Vec<Counter> = PacketDiscriminants::iter()
+            .map(|d| {
+                let name: &'static str = d.into();
+                register_counter!(recorded::DOMAIN_TOTAL_HANDLE_PACKET_TIME,
+                                  "domain" => index.clone(),
+                                  "shard" => shard.clone(),
+                                  "packet_type" => name,
+                )
+            })
+            .collect();
         DomainMetrics {
             partial_state_size: register_gauge!(
                 recorded::DOMAIN_PARTIAL_STATE_SIZE_BYTES,
@@ -97,9 +119,16 @@ impl DomainMetrics {
             reader_replay_request_time: Default::default(),
             base_table_lookups: Default::default(),
             node_state_size: Default::default(),
+            packet_handle_time: packet_handle_time.try_into().ok().unwrap(),
+            total_packet_handle_time: total_packet_handle_time.try_into().ok().unwrap(),
             shard,
             index,
         }
+    }
+
+    pub(super) fn rec_packet_handle_time(&self, time: Duration, discriminant: PacketDiscriminants) {
+        self.packet_handle_time[discriminant as usize].record(time.as_micros() as f64);
+        self.total_packet_handle_time[discriminant as usize].increment(time.as_micros() as u64);
     }
 
     pub(super) fn inc_eviction_requests(&self) {

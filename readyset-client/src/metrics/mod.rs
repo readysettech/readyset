@@ -222,6 +222,28 @@ pub mod recorded {
     /// | tag | The client tag of the request that the Finish packet is required for. |
     pub const DOMAIN_TOTAL_SEED_ALL_TIME: &str = "readyset_domain.total_seed_all_time_us";
 
+    /// Histogram: The time in microseconds that the domain spends handling an
+    /// incoming messages (packets). This is aggregate metric per packet's type.
+    /// Recorded at the domain following packet handling.
+    ///
+    /// | Tag | Description |
+    /// | --- | ----------- |
+    /// | domain | The index of the domain the request is recorded in. |
+    /// | shard | The shard the request is recorded in. |
+    /// | packet_type | The packet's type |
+    pub const DOMAIN_HANDLE_PACKET_TIME: &str = "readyset_domain.handle_packet_time_us";
+
+    /// Counter: The total time in microseconds that the domain spends handling
+    /// an incoming messages (packets). This is aggregate metric per packet's type.
+    /// Recorded at the domain following packet handling.
+    ///
+    /// | Tag | Description |
+    /// | --- | ----------- |
+    /// | domain | The index of the domain the request is recorded in. |
+    /// | shard | The shard the request is recorded in. |
+    /// | packet_type | The packet's type |
+    pub const DOMAIN_TOTAL_HANDLE_PACKET_TIME: &str = "readyset_domain.total_handle_packet_time_us";
+
     /// Histogram: The amount of time spent handling an eviction
     /// request.
     pub const EVICTION_TIME: &str = "readyset_eviction_time_us";

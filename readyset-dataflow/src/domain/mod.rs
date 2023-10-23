@@ -451,7 +451,6 @@ impl DomainBuilder {
 
             total_replay_time: Timer::new(),
             total_forward_time: Timer::new(),
-
             aggressively_update_state_sizes: self.config.aggressively_update_state_sizes,
 
             metrics: domain_metrics::DomainMetrics::new(address),
@@ -661,7 +660,6 @@ pub struct Domain {
     total_replay_time: Timer<SimpleTracker, RealTime>,
     /// time spent processing ordinary, forward updates
     total_forward_time: Timer<SimpleTracker, RealTime>,
-
     /// If set to `true`, the metric tracking the in-memory size of materialized state will be
     /// updated after every packet is handled, rather than only when requested by the eviction
     /// worker. This causes a (minor) runtime cost, with the upside being that the materialization
@@ -2363,9 +2361,9 @@ impl Domain {
         // TODO(eta): better error handling here.
         // In particular one dodgy packet can kill the whole domain, which is probably not what we
         // want.
-
         self.metrics.inc_packets_sent(&m);
-
+        let discriminant = (&m).into();
+        let start = time::Instant::now();
         match m {
             Packet::Message { .. } | Packet::Input { .. } => {
                 // WO for https://github.com/rust-lang/rfcs/issues/1403
@@ -2495,7 +2493,8 @@ impl Domain {
                 // spinning as instructed
             }
         }
-
+        self.metrics
+            .rec_packet_handle_time(start.elapsed(), discriminant);
         Ok(())
     }
 
@@ -4502,7 +4501,6 @@ impl Domain {
                 "tried to set state for non-existent node"
             );
         }
-
         Ok(())
     }
 
