@@ -22,6 +22,7 @@ use readyset_data::Dialect;
 use readyset_errors::{internal_err, set_failpoint_return_err, ReadySetError, ReadySetResult};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
 use readyset_util::select;
+use replication_offset::mysql::MySqlPosition;
 use replication_offset::{ReplicationOffset, ReplicationOffsets};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::{debug, error, info, info_span, trace, warn, Instrument};
@@ -34,6 +35,7 @@ use crate::postgres_connector::{
     PostgresWalConnector, PUBLICATION_NAME, REPLICATION_SLOT,
 };
 use crate::table_filter::TableFilter;
+use crate::vitess_connector::{VitessConnector, VitessReplicator};
 use crate::{ControllerMessage, ReplicatorMessage};
 
 /// Time to wait for requests to coalesce between snapshotting. Useful for preventing a series of
@@ -244,6 +246,22 @@ impl NoriaAdapter {
                 )
                 .await
             }
+            DatabaseURL::Vitess(vitess_config) => {
+                let noria = noria.clone();
+                let config = config.clone();
+
+                NoriaAdapter::start_inner_vitess(
+                    vitess_config,
+                    noria,
+                    config,
+                    notification_channel,
+                    controller_channel,
+                    resnapshot,
+                    &telemetry_sender,
+                    enable_statement_logging,
+                )
+                .await
+            }
         } {
             match err {
                 ReadySetError::ResnapshotNeeded => {
@@ -289,8 +307,6 @@ impl NoriaAdapter {
         enable_statement_logging: bool,
         full_snapshot: bool,
     ) -> ReadySetResult<!> {
-        use replication_offset::mysql::MySqlPosition;
-
         if let Some(cert_path) = config.ssl_root_cert.clone() {
             let ssl_opts = SslOpts::default().with_root_cert_path(Some(cert_path));
             mysql_options = OptsBuilder::from_opts(mysql_options)
@@ -713,6 +729,202 @@ impl NoriaAdapter {
         unreachable!("`main_loop` will never stop with an Ok status if `until = None`");
     }
 
+    #[allow(clippy::too_many_arguments)]
+    async fn start_inner_vitess(
+        vitess_config: database_utils::VitessConfig,
+        mut noria: ReadySetHandle,
+        mut config: UpstreamConfig,
+        notification_channel: &UnboundedSender<ReplicatorMessage>,
+        controller_channel: &UnboundedReceiver<ControllerMessage>,
+        resnapshot: bool,
+        telemetry_sender: &TelemetrySender,
+        enable_statement_logging: bool,
+    ) -> Result<!, ReadySetError> {
+        // Attempt to retrieve the latest replication offset from ReadySet-server, if none is
+        // present begin the snapshot process
+        let replication_offsets = noria.replication_offsets().await?;
+        trace!(?replication_offsets, "Loaded replication offsets");
+        let latest_position = replication_offsets.max_offset()?;
+
+        let table_filter = TableFilter::try_new(
+            nom_sql::Dialect::MySQL,
+            config.replication_tables.take(),
+            config.replication_tables_ignore.take(),
+            Some(&vitess_config.keyspace),
+        )?;
+
+        let mut db_schemas = DatabaseSchemas::new();
+
+        let start_position = if resnapshot || latest_position.is_none() {
+            info!("Re-snapshotting Vitess schema");
+
+            let snapshot_start = Instant::now();
+            counter!(
+                recorded::REPLICATOR_SNAPSHOT_STATUS,
+                1u64,
+                "status" => SnapshotStatusTag::Started.value(),
+            );
+
+            // The default min is already 10, so we keep that the same to reduce complexity
+            // overhead of too many flags.
+            // The only way PoolConstraints::new() can panic on unwrap is if min is not less
+            // than or equal to max, so we naively reset min if max is below 10.
+            let constraints = if config.replication_pool_size <= 10 {
+                PoolConstraints::new(config.replication_pool_size, config.replication_pool_size)
+                    .unwrap()
+            } else {
+                PoolConstraints::new(10, config.replication_pool_size).unwrap()
+            };
+            let pool_opts = PoolOpts::default().with_constraints(constraints);
+            let mysql_opts: mysql_async::Opts = (&vitess_config).into();
+            let replicator_opts: mysql_async::Opts = OptsBuilder::from_opts(mysql_opts)
+                .pool_opts(pool_opts)
+                .into();
+            debug!(?replicator_opts, "Connecting to Vitess for snapshotting");
+            let pool = mysql::Pool::new(replicator_opts);
+
+            let mut conn = pool.get_conn().await?;
+            let db_version = conn
+                .query_first("SELECT @@version")
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| "unknown".to_owned());
+            debug!(?db_version, "Retrieved Vitess version");
+            drop(conn);
+
+            let replicator = VitessReplicator {
+                vitess_config: vitess_config.clone(),
+                pool,
+                table_filter: table_filter.clone(),
+                enable_statement_logging,
+            };
+
+            let snapshot_result = replicator
+                .snapshot_to_noria(&mut noria, &mut db_schemas)
+                .await;
+
+            let status = if snapshot_result.is_err() {
+                SnapshotStatusTag::Failed.value()
+            } else {
+                SnapshotStatusTag::Successful.value()
+            };
+
+            counter!(
+                recorded::REPLICATOR_SNAPSHOT_STATUS,
+                1u64,
+                "status" => status
+            );
+
+            snapshot_result?;
+
+            // Get updated offsets, after potential replication happened
+            let replication_offsets = noria.replication_offsets().await?;
+
+            // If we have some offsets in `replication_offsets`, that means some tables were
+            // already snapshot before we started up. But if we're in this block
+            // (`max_offsets()` returned `None`), that means not *all* tables were already
+            // snapshot before we started up. So we've got some tables at an old offset that
+            // need to catch up to the just-snapshotted tables. We discard
+            // replication events for offsets < the replication offset of that table, so we
+            // can do this "catching up" by just starting replication at
+            // the old offset. Note that at the very least we will
+            // always have the schema offset for the minimum.
+            let pos = replication_offsets
+                .min_present_offset()?
+                .expect("Minimal offset must be present after snapshot")
+                .clone()
+                .try_into()?;
+
+            info!("Snapshot finished");
+            histogram!(
+                recorded::REPLICATOR_SNAPSHOT_DURATION,
+                snapshot_start.elapsed().as_micros() as f64
+            );
+
+            // Send snapshot complete and redacted schemas telemetry events
+            let _ = telemetry_sender.send_event_with_payload(
+                TelemetryEvent::SnapshotComplete,
+                TelemetryBuilder::new()
+                    .db_backend("vitess")
+                    .db_version(db_version)
+                    .build(),
+            );
+
+            db_schemas.send_schemas(telemetry_sender).await;
+            pos
+        } else {
+            latest_position
+                .expect("Latest position must be present if not re-snapshotting")
+                .clone()
+                .try_into()?
+        };
+
+        info!("Connecting to Vitess...");
+        let connector = Box::new(
+            VitessConnector::connect(
+                vitess_config.clone(),
+                None, // No table filter for full replication (yet?)
+                Some(&start_position),
+                enable_statement_logging,
+            )
+            .await?,
+        );
+
+        let mut adapter = NoriaAdapter {
+            noria,
+            connector,
+            replication_offsets,
+            mutator_map: HashMap::new(),
+            warned_missing_tables: HashSet::new(),
+            table_filter,
+            supports_resnapshot: false,
+            dialect: Dialect::DEFAULT_MYSQL,
+        };
+
+        let mut current_pos: ReplicationOffset = start_position.into();
+
+        // At this point it is possible that we just finished replication, but
+        // our schema and our tables are taken at different position in the binlog.
+        // Until our database has a consistent view of the database at a single point
+        // in time, it is not safe to issue any queries. We therefore advance the binlog
+        // to the position of the most recent table we have, applying changes as needed.
+        // Only once binlog advanced to that point, can we send a ready signal to
+        // ReadySet.
+        match adapter.replication_offsets.max_offset()? {
+            Some(max) if max > &current_pos => {
+                info!(start = %current_pos, end = %max, "Catching up");
+                let max = max.clone();
+                adapter
+                    .main_loop(
+                        &mut current_pos,
+                        Some(max),
+                        notification_channel,
+                        controller_channel,
+                    )
+                    .await?;
+            }
+            _ => {}
+        }
+
+        // Let Controller know that the initial snapshotting is complete. Ignores the error, which
+        // will not occur unless the Controller dropped the rx half of this channel.
+        let _ = notification_channel.send(ReplicatorMessage::SnapshotDone);
+
+        info!("Streaming replication started");
+
+        adapter
+            .main_loop(
+                &mut current_pos,
+                None,
+                notification_channel,
+                controller_channel,
+            )
+            .await?;
+
+        unreachable!("`main_loop` will never stop with an Ok status if `until = None`");
+    }
+
     /// Apply a DDL string to noria with the current log position
     async fn handle_ddl_change(
         &mut self,
@@ -932,7 +1144,7 @@ impl NoriaAdapter {
             }
             ReplicationAction::TableAction { table, .. } => {
                 match self.replication_offsets.tables.get(table) {
-                    Some(Some(cur)) if pos <= *cur => {
+                    Some(Some(cur)) if pos < *cur => {
                         if !catchup {
                             warn!(
                                 table = %table.display_unquoted(),

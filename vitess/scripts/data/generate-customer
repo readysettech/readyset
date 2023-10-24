@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+
+set -e
+
+# Generate a random set of customer records for the following schema
+# create table if not exists customer(
+#   customer_id bigint not null auto_increment,
+#   email varchar(128),
+#   primary key(customer_id)
+# ) ENGINE=InnoDB;
+
+# Function to generate a random email
+generate_random_email() {
+  local user=$(openssl rand -hex 4 | tr -d '\n')
+  local domain=$(openssl rand -hex 3 | tr -d '\n')
+  local tld="com"
+  echo "${user}@${domain}.${tld}"
+}
+
+# How many records to insert
+num_records=${COUNT:-1}
+
+echo "BEGIN;"
+
+for i in $(seq 1 $num_records); do
+  email=$(generate_random_email)
+  sql="INSERT INTO customer (email) VALUES ('$email');"
+  echo "$sql"
+  mysql --user root --host 127.0.0.1 --port 15303 commerce -e "$sql"
+done
+
+echo "COMMIT;"

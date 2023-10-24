@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+
+exec mysql --user=root --password=readyset --host=127.0.0.1 --port=3307 commerce

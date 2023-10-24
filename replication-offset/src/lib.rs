@@ -2,6 +2,7 @@
 
 pub mod mysql;
 pub mod postgres;
+pub mod vitess;
 
 use std::borrow::Borrow;
 use std::cmp::Ordering;
@@ -14,6 +15,7 @@ use nom_sql::Relation;
 use postgres::PostgresPosition;
 use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
+use vitess::VStreamPosition;
 
 /// A data type representing an offset in a replication log
 ///
@@ -28,6 +30,7 @@ use serde::{Deserialize, Serialize};
 pub enum ReplicationOffset {
     MySql(MySqlPosition),
     Postgres(PostgresPosition),
+    Vitess(VStreamPosition),
 }
 
 impl TryFrom<ReplicationOffset> for MySqlPosition {
@@ -38,7 +41,7 @@ impl TryFrom<ReplicationOffset> for MySqlPosition {
             Ok(offset)
         } else {
             Err(internal_err!(
-                "cannot extract MySqlPosition from Postgres ReplicationOffset"
+                "cannot extract MySqlPosition from an unsupported ReplicationOffset"
             ))
         }
     }
@@ -60,7 +63,7 @@ impl TryFrom<ReplicationOffset> for PostgresPosition {
             Ok(offset)
         } else {
             Err(internal_err!(
-                "cannot extract PostgresPosition from MySQL ReplicationOffset"
+                "cannot extract PostgresPosition from an unsupported ReplicationOffset"
             ))
         }
     }
@@ -74,11 +77,34 @@ impl TryFrom<&ReplicationOffset> for PostgresPosition {
     }
 }
 
+impl TryFrom<ReplicationOffset> for VStreamPosition {
+    type Error = ReadySetError;
+
+    fn try_from(offset: ReplicationOffset) -> Result<Self, Self::Error> {
+        if let ReplicationOffset::Vitess(offset) = offset {
+            Ok(offset)
+        } else {
+            Err(internal_err!(
+                "cannot extract VStreamPosition from an unsupported ReplicationOffset"
+            ))
+        }
+    }
+}
+
+impl TryFrom<&ReplicationOffset> for VStreamPosition {
+    type Error = ReadySetError;
+
+    fn try_from(offset: &ReplicationOffset) -> Result<Self, Self::Error> {
+        offset.clone().try_into()
+    }
+}
+
 impl fmt::Display for ReplicationOffset {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::MySql(pos) => write!(f, "{pos}"),
             Self::Postgres(pos) => write!(f, "{pos}"),
+            Self::Vitess(pos) => write!(f, "{pos}"),
         }
     }
 }
@@ -88,6 +114,7 @@ impl PartialOrd for ReplicationOffset {
         match (self, other) {
             (Self::MySql(pos), Self::MySql(other_pos)) => pos.partial_cmp(other_pos),
             (Self::Postgres(pos), Self::Postgres(other_pos)) => pos.partial_cmp(other_pos),
+            (Self::Vitess(pos), Self::Vitess(other_pos)) => pos.partial_cmp(other_pos),
             _ => None,
         }
     }
@@ -117,8 +144,13 @@ impl ReplicationOffset {
                 offset.try_partial_cmp(other_offset)
             }
             (Self::Postgres(offset), Self::Postgres(other_offset)) => Ok(offset.cmp(other_offset)),
+            (Self::Vitess(offset), Self::Vitess(other_offset)) => {
+                offset.try_partial_cmp(other_offset)
+            }
             _ => Err(internal_err!(
-                "Cannot compare replication offsets from different database backends"
+                "Cannot compare replication offsets from different database backends: {} and {}",
+                self,
+                other
             )),
         }
     }

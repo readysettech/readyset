@@ -691,6 +691,7 @@ impl Fuzz {
         match self.compare_to {
             DatabaseURL::MySQL(_) => nom_sql::Dialect::MySQL,
             DatabaseURL::PostgreSQL(_) => nom_sql::Dialect::PostgreSQL,
+            DatabaseURL::Vitess(_) => nom_sql::Dialect::MySQL,
         }
     }
 }

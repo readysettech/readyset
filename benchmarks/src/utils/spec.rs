@@ -88,7 +88,7 @@ impl From<Dialect> for SchemaKind {
 impl From<DatabaseType> for SchemaKind {
     fn from(dialect: DatabaseType) -> Self {
         match dialect {
-            DatabaseType::MySQL => Self::MySQL {
+            DatabaseType::MySQL | DatabaseType::Vitess => Self::MySQL {
                 user_vars: HashMap::new(),
             },
             DatabaseType::PostgreSQL => Self::PostgreSQL,
@@ -99,7 +99,7 @@ impl From<DatabaseType> for SchemaKind {
 impl From<&DatabaseConnection> for SchemaKind {
     fn from(conn: &DatabaseConnection) -> Self {
         match conn {
-            DatabaseConnection::MySQL(_) => Self::MySQL {
+            DatabaseConnection::MySQL(_) | DatabaseConnection::Vitess(_) => Self::MySQL {
                 user_vars: HashMap::new(),
             },
             DatabaseConnection::PostgreSQL(_, _) => Self::PostgreSQL,

@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+
+while ! mysql --user root --host 127.0.0.1 --port 15303 -e "show tables" commerce > /dev/null; do
+    echo "Waiting for MySQL to be ready..."
+    sleep 1
+done
+
+echo "MySQL is ready!"

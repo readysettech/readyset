@@ -51,6 +51,7 @@ fn readyset_url(database_type: DatabaseType) -> String {
     match database_type {
         DatabaseType::PostgreSQL => format!("postgres://127.0.0.1:{BENCHMARK_PORT}/{DB_NAME}"),
         DatabaseType::MySQL => format!("mysql://127.0.0.1:{BENCHMARK_PORT}/{DB_NAME}"),
+        DatabaseType::Vitess => todo!(),
     }
 }
 

@@ -123,6 +123,7 @@ impl DataGenerator {
                 }
                 Some(old_size)
             }
+            DatabaseConnection::Vitess(_) => None,
         }
     }
 

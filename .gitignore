@@ -17,3 +17,4 @@ docker-compose.override.yml
 *.db
 *.auth
 .readyset-history
+*.log

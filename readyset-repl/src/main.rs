@@ -136,6 +136,7 @@ impl ReplContext {
             match self.options.database_url.database_type() {
                 DatabaseType::MySQL => "mysql",
                 DatabaseType::PostgreSQL => "postgresql",
+                DatabaseType::Vitess => "vitess",
             }
         );
         if let Some(user) = self.options.database_url.user() {
@@ -179,7 +180,7 @@ impl ReplContext {
                 let stmt = match type_oids {
                     None => self.connection.prepare(query).await?,
                     Some(type_oids) => match &self.connection {
-                        DatabaseConnection::MySQL(_) => {
+                        DatabaseConnection::MySQL(_) | DatabaseConnection::Vitess(_) => {
                             bail!("MySQL can't handle prepare with types")
                         }
                         DatabaseConnection::PostgreSQL(client, _) => {

@@ -11,6 +11,7 @@ use mysql::PoolConstraints;
 use mysql_async::prelude::Queryable;
 use nom_sql::{Dialect, SqlType};
 use readyset_errors::ReadySetError;
+use vitess_grpc::vtgateservice::vitess_client::VitessClient;
 use {mysql_async as mysql, tokio_postgres as pgsql};
 
 use crate::error::{ConnectionType, DatabaseError};
@@ -119,6 +120,9 @@ pub enum DatabaseConnection {
         tokio::task::JoinHandle<Result<(), ReadySetError>>,
     ),
     PostgreSQLPool(deadpool_postgres::Client),
+
+    // Vitess connection
+    Vitess(VitessClient<tonic::transport::Channel>),
 }
 
 #[async_trait]
@@ -136,6 +140,9 @@ impl QueryableConnection for DatabaseConnection {
             DatabaseConnection::PostgreSQLPool(client) => {
                 client.simple_query(stmt.as_ref()).await?;
                 Ok(())
+            }
+            DatabaseConnection::Vitess(_client) => {
+                todo!()
             }
         }
     }
@@ -167,6 +174,9 @@ impl QueryableConnection for DatabaseConnection {
                     .try_collect()
                     .await?,
             )),
+            DatabaseConnection::Vitess(_client) => {
+                todo!()
+            }
         }
     }
 
@@ -184,6 +194,9 @@ impl QueryableConnection for DatabaseConnection {
             DatabaseConnection::PostgreSQLPool(client) => Ok(SimpleQueryResults::Postgres(
                 extract_simple_query_rows(client.simple_query(query.as_ref()).await?),
             )),
+            DatabaseConnection::Vitess(_client) => {
+                todo!()
+            }
         }
     }
 
@@ -218,6 +231,9 @@ impl QueryableConnection for DatabaseConnection {
                     .try_collect()
                     .await?,
             )),
+            Self::Vitess(_client) => {
+                todo!()
+            }
         }
     }
 }
@@ -239,6 +255,9 @@ impl DatabaseConnection {
                 client.prepare(query.as_ref()).await?,
                 query.to_string(),
             )),
+            DatabaseConnection::Vitess(_client) => {
+                todo!()
+            }
         }
     }
 
@@ -260,6 +279,9 @@ impl DatabaseConnection {
                 .await
                 .map(Transaction::PostgresPool)
                 .map_err(DatabaseError::PostgreSQL),
+            Self::Vitess(_client) => {
+                todo!()
+            }
         }
     }
 
@@ -268,6 +290,7 @@ impl DatabaseConnection {
         match self {
             Self::PostgreSQL(_, _) | Self::PostgreSQLPool(_) => Dialect::PostgreSQL,
             Self::MySQL(_) => Dialect::MySQL,
+            Self::Vitess(_) => Dialect::MySQL,
         }
     }
 
@@ -291,6 +314,7 @@ impl DatabaseConnection {
         match self {
             DatabaseConnection::MySQL(conn) => Some(conn.opts().stmt_cache_size()),
             DatabaseConnection::PostgreSQL(_, _) | DatabaseConnection::PostgreSQLPool(_) => None,
+            DatabaseConnection::Vitess(_) => None, // TODO: This needs checking for vitess
         }
     }
 }

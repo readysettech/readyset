@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+
+set -ex
+
+SCRIPTS_DIR=$(dirname $0)
+VITESS_DIR=$(dirname $SCRIPTS_DIR)
+REPO_DIR=$(dirname $VITESS_DIR)
+
+# If we have podman, use `podman-compose`, otherwise use `docker compose`
+if command -v podman &> /dev/null
+then
+    COMPOSE=podman-compose
+else
+    COMPOSE="docker compose"
+fi
+
+# Start the test cluster
+$COMPOSE -f $VITESS_DIR/docker-compose.yml up -d
+
+# Wait for the test cluster to be ready
+$SCRIPTS_DIR/wait-for-mysql
+
+# Load the schema
+$SCRIPTS_DIR/load-schema
