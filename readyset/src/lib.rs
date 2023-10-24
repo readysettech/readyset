@@ -867,7 +867,7 @@ where
             let auto_increments = auto_increments.clone();
             let view_name_cache = view_name_cache.clone();
             let view_cache = view_cache.clone();
-            let shutdown_rx = shutdown_rx.clone();
+            let mut shutdown_rx = shutdown_rx.clone();
             let loop_interval = options.migration_task_interval;
             let max_retry = options.max_processing_minutes;
             let dry_run = matches!(migration_style, MigrationStyle::Explicit);
@@ -878,11 +878,18 @@ where
             rs_connect.in_scope(|| info!("Spawning migration handler task"));
             let fut = async move {
                 let connection = span!(Level::INFO, "migration task upstream database connection");
-                let schema_search_path = loop {
-                    if let Ok(ssp) = &*schema_search_path.read().await {
-                        break ssp.clone();
+                let ssp_retry_loop = async {
+                    loop {
+                        if let Ok(ssp) = &*schema_search_path.read().await {
+                            break ssp.clone();
+                        }
+                        sleep(UPSTREAM_CONNECTION_RETRY_INTERVAL).await
                     }
-                    sleep(UPSTREAM_CONNECTION_RETRY_INTERVAL).await
+                };
+
+                let schema_search_path = tokio::select! {
+                    schema_search_path = ssp_retry_loop => schema_search_path,
+                    _ = shutdown_rx.recv() => return Ok(()),
                 };
 
                 let noria =
