@@ -394,6 +394,10 @@ pub enum DomainRequest {
         index: HashSet<Index>,
     },
 
+    /// Each base table has an offset up to which data has been persisted to disk, and this
+    /// request type requests the minimum of those offsets for the base tables in the domain
+    RequestMinPersistedReplicationOffset,
+
     /// Request a map of all replication offsets of the base table nodes in the domain
     RequestReplicationOffsets,
 

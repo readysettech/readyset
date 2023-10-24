@@ -49,6 +49,13 @@ fn fuse_nodes(
             child_ni = %child_ni.index(),
             "Fusing nodes"
         );
+
+        let descendants = query.descendants(parent_ni)?;
+        // Calling remove_node has an invariant that there be only one descendant, so filter out
+        // any that don't satisfy this
+        if descendants.len() > 1 {
+            continue;
+        }
         let parent_node = query.remove_node(parent_ni)?.unwrap();
         let Some(child_node) = query.get_node_mut(child_ni) else {
             continue

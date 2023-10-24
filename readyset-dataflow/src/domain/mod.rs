@@ -14,8 +14,8 @@ use std::{cell, cmp, mem, process, time};
 use ahash::RandomState;
 use backoff::ExponentialBackoffBuilder;
 use dataflow_state::{
-    EvictBytesResult, EvictKeysResult, EvictRandomResult, MaterializedNodeState, PointKey,
-    RangeKey, RangeLookupResult,
+    BaseTableState, EvictBytesResult, EvictKeysResult, EvictRandomResult, MaterializedNodeState,
+    PointKey, RangeKey, RangeLookupResult,
 };
 use failpoint_macros::failpoint;
 use futures_util::future::FutureExt;
@@ -27,13 +27,13 @@ use petgraph::graph::NodeIndex;
 use readyset_alloc::StdThreadBuildWrapper;
 use readyset_client::debug::info::KeyCount;
 use readyset_client::internal::Index;
-use readyset_client::{channel, internal, KeyComparison, ReaderAddress};
+use readyset_client::{channel, internal, KeyComparison, PersistencePoint, ReaderAddress};
 use readyset_errors::{internal, internal_err, ReadySetError, ReadySetResult};
 use readyset_util::futures::abort_on_panic;
 use readyset_util::progress::report_progress_with;
 use readyset_util::redacted::Sensitive;
 use readyset_util::Indices;
-use replication_offset::ReplicationOffsetState;
+use replication_offset::ReplicationOffset;
 use serde::{Deserialize, Serialize};
 use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
 use tokio::sync::mpsc::Sender;
@@ -2273,6 +2273,9 @@ impl Domain {
                 self.update_state_sizes();
                 Ok(None)
             }
+            DomainRequest::RequestMinPersistedReplicationOffset => Ok(Some(bincode::serialize(
+                &self.min_persisted_replication_offset()?,
+            )?)),
             DomainRequest::RequestReplicationOffsets => {
                 Ok(Some(bincode::serialize(&self.replication_offsets())?))
             }
@@ -4357,7 +4360,36 @@ impl Domain {
             .sum()
     }
 
-    pub fn replication_offsets(&self) -> NodeMap<ReplicationOffsetState> {
+    pub fn min_persisted_replication_offset(
+        &self,
+    ) -> ReadySetResult<BaseTableState<PersistencePoint>> {
+        let mut cur_min = PersistencePoint::Persisted;
+
+        for (idx, n) in self.nodes.iter() {
+            let node = n.borrow();
+            if node.is_base() && !node.is_dropped() {
+                if let Some(state) = self.state.get(idx) {
+                    match (&mut cur_min, state.persisted_up_to()?) {
+                        (_, PersistencePoint::Persisted) => continue,
+                        (PersistencePoint::Persisted, PersistencePoint::UpTo(offset)) => {
+                            cur_min = PersistencePoint::UpTo(offset);
+                        }
+                        (PersistencePoint::UpTo(min), PersistencePoint::UpTo(offset)) => {
+                            if offset.try_partial_cmp(min)?.is_lt() {
+                                cur_min = PersistencePoint::UpTo(offset);
+                            }
+                        }
+                    }
+                } else {
+                    return Ok(BaseTableState::Pending);
+                }
+            }
+        }
+
+        Ok(BaseTableState::Initialized(cur_min))
+    }
+
+    pub fn replication_offsets(&self) -> NodeMap<BaseTableState<Option<ReplicationOffset>>> {
         self.nodes
             .iter()
             .filter_map(|(idx, n)| {
@@ -4369,10 +4401,8 @@ impl Domain {
                         idx,
                         self.state
                             .get(idx)
-                            .map(|s| {
-                                ReplicationOffsetState::Initialized(s.replication_offset().cloned())
-                            })
-                            .unwrap_or(ReplicationOffsetState::Pending),
+                            .map(|s| BaseTableState::Initialized(s.replication_offset().cloned()))
+                            .unwrap_or(BaseTableState::Pending),
                     ))
                 }
             })

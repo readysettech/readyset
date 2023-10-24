@@ -60,7 +60,7 @@ pub use dataflow_expression::{
     PostLookupAggregateFunction, PostLookupAggregates, ReaderProcessing,
 };
 pub use dataflow_state::{
-    DurabilityMode, MaterializedNodeState, PersistenceParameters, PersistentState,
+    BaseTableState, DurabilityMode, MaterializedNodeState, PersistenceParameters, PersistentState,
 };
 
 pub use crate::domain::{Domain, DomainBuilder, DomainIndex};

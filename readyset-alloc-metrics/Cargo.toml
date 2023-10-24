@@ -1,0 +1,17 @@
+[package]
+name = "readyset-alloc-metrics"
+version = "0.1.0"
+publish = false
+authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
+edition = "2021"
+
+
+[dependencies]
+metrics = { workspace = true }
+metrics-exporter-prometheus = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+tracing = { version = "0.1", features = ["release_max_level_debug"] }
+
+# Local dependencies
+readyset-alloc = { path = "../readyset-alloc" }
+readyset-util = { path = "../readyset-util" }

@@ -60,6 +60,7 @@
 //! that replication log of the last record that we have successfully applied. To maintain
 //! atomicity, these offsets are stored inside of rocksdb as part of the persisted
 //! [`PersistentMeta`], and updated as part of every write.
+mod handle;
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
@@ -67,7 +68,8 @@ use std::io::{self, Read};
 use std::ops::Bound;
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::mpsc::RecvTimeoutError;
+use std::sync::{mpsc, Arc};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 use std::{fmt, fs, mem};
@@ -75,9 +77,9 @@ use std::{fmt, fs, mem};
 use bincode::Options;
 use clap::ValueEnum;
 use common::{IndexType, Record, Records, SizeOf, Tag};
-use parking_lot::{
-    MappedRwLockReadGuard, MappedRwLockWriteGuard, RwLock, RwLockReadGuard, RwLockWriteGuard,
-};
+pub use handle::PersistentStateHandle;
+use handle::{PersistentStateReadGuard, PersistentStateWriteGuard};
+use rand::Rng;
 use readyset_alloc::thread::StdThreadBuildWrapper;
 use readyset_client::debug::info::KeyCount;
 use readyset_client::internal::Index;
@@ -95,11 +97,11 @@ use serde::{Deserialize, Serialize};
 use tempfile::{tempdir, TempDir};
 use test_strategy::Arbitrary;
 use thiserror::Error;
-use tracing::{debug, error, info, info_span, instrument, warn};
+use tracing::{debug, error, info, info_span, instrument, trace, warn};
 
 use crate::{
-    EvictKeysResult, EvictRandomResult, LookupResult, PointKey, RangeKey, RangeLookupResult,
-    RecordResult, State,
+    EvictKeysResult, EvictRandomResult, LookupResult, PersistencePoint, PointKey, RangeKey,
+    RangeLookupResult, RecordResult, State,
 };
 
 // Incremented on each PersistentState initialization so that IndexSeq
@@ -244,6 +246,10 @@ pub struct PersistenceParameters {
     /// An optional path to a directory where to store the DB files, if None will be stored in the
     /// current working directory
     pub db_dir: Option<PathBuf>,
+    /// The interval on which the RocksDB WAL will be flushed and synced to disk. If this value is
+    /// set to 0, the WAL will be flushed and synced to disk with every write
+    #[serde(default)]
+    pub wal_flush_interval_seconds: u64,
 }
 
 impl Default for PersistenceParameters {
@@ -253,6 +259,7 @@ impl Default for PersistenceParameters {
             db_filename_prefix: String::from("readyset"),
             persistence_threads: 1,
             db_dir: None,
+            wal_flush_interval_seconds: 0,
         }
     }
 }
@@ -272,6 +279,7 @@ impl PersistenceParameters {
         db_filename_prefix: Option<String>,
         persistence_threads: i32,
         db_dir: Option<PathBuf>,
+        wal_flush_interval_seconds: u64,
     ) -> Self {
         // NOTE(fran): DO NOT impose a particular format on `db_filename_prefix`. If you need to,
         // modify it before use, but do not make assertions on it. The reason being, we use
@@ -285,6 +293,7 @@ impl PersistenceParameters {
             db_filename_prefix,
             persistence_threads,
             db_dir,
+            wal_flush_interval_seconds,
         }
     }
 }
@@ -316,9 +325,15 @@ pub enum Error {
     Io(#[from] io::Error),
 }
 
+impl From<&Error> for ReadySetError {
+    fn from(err: &Error) -> Self {
+        internal_err!("{err}")
+    }
+}
+
 impl From<Error> for ReadySetError {
     fn from(err: Error) -> Self {
-        internal_err!("{err}")
+        ReadySetError::from(&err)
     }
 }
 
@@ -417,16 +432,19 @@ pub struct PersistentState {
     /// writes will bypass WAL and fsync
     snapshot_mode: SnapshotMode,
     compaction_threads: Vec<CompactionThreadHandle>,
+    wal_flush_thread_handle: Option<(mpsc::Sender<()>, JoinHandle<()>)>,
 }
 
 /// Things that are shared between read handles and the state itself, that can be locked under a
 /// single lock
 struct SharedState {
-    /// The handle to the RocksDB database we are reading from
-    db: DB,
     /// The latest replication offset that has been written to the base table backed by this
     /// [`PersistentState`]
     replication_offset: Option<ReplicationOffset>,
+    /// The current state of the RocksDB WAL as it relates to flushing and persisting data to disk
+    wal_state: WalState,
+    /// The last error that occurred in the WAL flush thread
+    last_wal_flush_error: Option<Error>,
     /// The lookup indices stored for this table. The first element is always considered the
     /// primary index
     indices: Vec<PersistentIndex>,
@@ -448,163 +466,134 @@ impl SharedState {
     }
 }
 
-/// A handle that can cloned and shared between threads to safely read from the [`PersistentState`]
-/// concurrently.
-#[derive(Clone)]
-pub struct PersistentStateHandle {
-    /// The replication offset used to make sure the read handle received all forward processing
-    /// messages for state, if the replication offset of the read handle is behind that of
-    /// the base table (`inner.replication_offset`), lookups will result in a miss.
-    replication_offset: Option<ReplicationOffset>,
-    inner: Arc<RwLock<SharedState>>,
+#[derive(Debug, Clone)]
+enum WalState {
+    FlushedAndPersisted,
+    FlushedAndUnpersisted {
+        /// The replication offset up to which this state has been persisted to disk
+        persisted_up_to: ReplicationOffset,
+    },
+    Unflushed {
+        /// The replication offset up to which this state has been persisted to disk
+        persisted_up_to: ReplicationOffset,
+    },
 }
 
-impl PersistentStateHandle {
-    fn inner(&self) -> RwLockReadGuard<'_, SharedState> {
-        self.inner.read()
-    }
+struct WalFlusher {
+    rx: mpsc::Receiver<()>,
+    state_handle: PersistentStateHandle,
+    table: SqlIdentifier,
+    flush_interval: Duration,
+}
 
-    fn inner_mut(&self) -> RwLockWriteGuard<'_, SharedState> {
-        self.inner.write()
-    }
+impl WalFlusher {
+    fn run(self) {
+        // Sleep for a random number of seconds between 1 and 10 to introduce jitter to
+        // stagger flushes across different base tables
+        let jitter = Duration::from_secs_f64(
+            rand::thread_rng().gen_range(0.0, self.flush_interval.as_secs_f64()),
+        );
 
-    fn handle(&self) -> MappedRwLockReadGuard<'_, DB> {
-        RwLockReadGuard::map(self.inner.read(), |i| &i.db)
-    }
-
-    fn handle_mut(&self) -> MappedRwLockWriteGuard<'_, DB> {
-        RwLockWriteGuard::map(self.inner.write(), |i| &mut i.db)
-    }
-
-    /// Perform a lookup for multiple equal keys at once. The results are returned in the order of
-    /// the original keys.
-    pub fn lookup_multi<'a>(
-        &'a self,
-        columns: &[usize],
-        keys: &[PointKey],
-    ) -> Vec<RecordResult<'a>> {
-        if keys.is_empty() {
-            return vec![];
+        // We use recv_timeout for interruptible sleep. If recv_timeout() returns `Ok`, it means
+        // we've received the shutdown signal; if it returns `Err`, we haven't received a shutdown
+        // signal in the given period, so we allow the background thread to persist
+        if self.rx.recv_timeout(jitter).is_ok() {
+            return;
         }
-        let inner = self.inner();
-        let db = &inner.db;
 
-        let index = inner.index(IndexType::HashMap, columns);
-        let is_primary = index.is_primary;
+        loop {
+            match self.rx.recv_timeout(self.flush_interval) {
+                Err(RecvTimeoutError::Timeout) => {
+                    let wal_state = self.state_handle.inner().shared_state.wal_state.clone();
 
-        let cf = db.cf_handle(&index.column_family).unwrap();
-        // Create an iterator once, reuse it for each key
-        let mut iter = db.raw_iterator_cf(cf);
-        let mut iter_primary = if !is_primary {
-            Some(
-                db.raw_iterator_cf(
-                    db.cf_handle(PK_CF)
-                        .expect("Primary key column family not found"),
-                ),
-            )
-        } else {
-            None
-        };
-
-        keys.iter()
-            .map(|k| {
-                let prefix = PersistentState::serialize_prefix(k);
-                let mut rows = Vec::new();
-
-                let is_unique = index.is_unique && !k.has_null();
-
-                iter.seek(&prefix); // Find the next key
-
-                while iter.key().map(|k| k.starts_with(&prefix)).unwrap_or(false) {
-                    let val = match &mut iter_primary {
-                        Some(iter_primary) => {
-                            // If we have a primary iterator, it means this is a secondary index and
-                            // we need to lookup by the primary key next
-                            iter_primary.seek(iter.value().unwrap());
-                            deserialize_row(iter_primary.value().unwrap())
+                    // We don't need to check `last_wal_flush_error` here because we just want to
+                    // keep retrying based on our current state. If there's further action to be
+                    // taken, the controller will orchestrate it
+                    match wal_state {
+                        WalState::Unflushed { persisted_up_to } => {
+                            if self.flush_wal(persisted_up_to) {
+                                self.sync_wal();
+                            }
                         }
-                        None => deserialize_row(iter.value().unwrap()),
-                    };
-
-                    rows.push(val);
-
-                    if is_unique {
-                        // We know that there is only one row for this index
-                        break;
+                        WalState::FlushedAndUnpersisted { .. } => {
+                            self.sync_wal();
+                        }
+                        WalState::FlushedAndPersisted => {}
                     }
-
-                    iter.next();
                 }
-
-                RecordResult::Owned(rows)
-            })
-            .collect()
+                Err(RecvTimeoutError::Disconnected) | Ok(()) => return,
+            }
+        }
     }
 
-    /// Looks up rows in an index
-    /// If the index is the primary index, the lookup gets the rows from the primary index directly.
-    /// If the index is a secondary index, we will first lookup the primary index keys from that
-    /// secondary index, then perform a lookup into the primary index
-    fn do_lookup(&self, columns: &[usize], key: &PointKey) -> Option<Vec<Vec<DfValue>>> {
-        let inner = self.inner();
-        if self.replication_offset < inner.replication_offset {
-            // We are checking the replication offset under a read lock, and the lock remains in
-            // place until after the read completed, guaranteeing that no write takes place. An
-            // alternative would be to use a transaction that reads the log offset from the meta
-            // with the value.
-            debug!("Consistency miss in PersistentStateHandle");
-            return None;
+    /// Returns true if the flush succeeds and false otherwise. If the flush fails, the
+    /// corresponding error is stored in `SharedState.last_wal_flush_error`.
+    fn flush_wal(&self, persisted_up_to: ReplicationOffset) -> bool {
+        trace!(%self.table, "flushing WAL");
+
+        // Writes to persistent state don't require a write lock since they only need immutable
+        // access to the DB handle; however, to keep things clean, we acquire a write lock to
+        // prevent another thread from changing the WAL state or writing a new replication offset to
+        // the shared state to ensure that we flush the WAL and update the WAL state atomically.
+        let mut inner = self.state_handle.inner_mut();
+
+        // Flushing the WAL blocks other writes to RocksDB, but this operation should be relatively
+        // quick given that we aren't writing any bytes to disk. The bottleneck here is probably
+        // the fwrite system call
+        //
+        // If a flush fails, it's possible that the low watermark of our unflushed data has
+        // increased if *some* of the data was flushed. Regardless, we have no way of knowing what
+        // data *was* successfully flushed, so we keep our state as-is
+        if let Err(error) = inner.db.flush_wal(false) {
+            // If we failed to flush, we set the error in `SharedState` so the replicator sees it
+            // and waits till the next iteration of the loop to retry
+            error!(%error, %self.table, "failed to flush WAL");
+            inner.shared_state.last_wal_flush_error = Some(error.into());
+
+            false
+        } else {
+            inner.shared_state.wal_state = WalState::FlushedAndUnpersisted { persisted_up_to };
+
+            true
         }
-        let index = inner.index(IndexType::HashMap, columns);
+    }
 
-        let db = &inner.db;
-        let cf = db.cf_handle(&index.column_family).unwrap();
-        let primary_cf = if !index.is_primary {
-            Some(db.cf_handle(PK_CF).unwrap())
+    fn sync_wal(&self) {
+        trace!(%self.table, "syncing WAL");
+
+        let res = self.state_handle.db().sync_wal();
+
+        // If a sync fails, it's possible that *some* but not *all* of the flushed but unsynced data
+        // has been synced to disk. Regardless, we have no way of knowing what data *was*
+        // successfully synced, so we keep our state as-is. We'll know we're caught up when a future
+        // sync succeeds
+        if let Err(error) = res {
+            // If we failed to sync, we set the error in `SharedState` so the replicator sees it and
+            // wait till the next iteration of the loop to retry
+            error!(%error, %self.table, "failed to sync WAL");
+
+            self.state_handle
+                .inner_mut()
+                .shared_state
+                .last_wal_flush_error = Some(error.into());
         } else {
-            None
-        };
+            let mut inner = self.state_handle.inner_mut();
 
-        let prefix = PersistentState::serialize_prefix(key);
-
-        if index.is_unique && !key.has_null() {
-            // This is a unique key, so we know there's only one row to retrieve
-            let value = db.get_pinned_cf(cf, &prefix).unwrap();
-            Some(match (value, primary_cf) {
-                (None, _) => vec![],
-                (Some(value), None) => vec![deserialize_row(value)],
-                (Some(pk), Some(primary_cf)) => vec![deserialize_row(
-                    db.get_pinned_cf(primary_cf, pk)
-                        .unwrap()
-                        .expect("Existing primary key"),
-                )],
-            })
-        } else {
-            // This could correspond to more than one value, so we'll use a prefix_iterator,
-            // for each row
-            let mut rows = Vec::new();
-            let mut opts = rocksdb::ReadOptions::default();
-            opts.set_prefix_same_as_start(true);
-
-            let mut iter = db.raw_iterator_cf_opt(cf, opts);
-            let mut iter_primary = primary_cf.map(|pcf| db.raw_iterator_cf(pcf));
-
-            iter.seek(&prefix);
-
-            while let Some(value) = iter.value() {
-                let raw_row = match &mut iter_primary {
-                    Some(iter_primary) => {
-                        iter_primary.seek(value);
-                        iter_primary.value().expect("Existing primary key")
-                    }
-                    None => value,
-                };
-
-                rows.push(deserialize_row(raw_row));
-                iter.next();
+            match inner.shared_state.wal_state {
+                // No data has been written to this state since the sync began, so we can change our
+                // WAL state to `FlushedAndPersisted`
+                WalState::FlushedAndUnpersisted { .. } => {
+                    inner.shared_state.wal_state = WalState::FlushedAndPersisted;
+                }
+                // If our state changed to `Unflushed` while we were syncing, we don't want to do
+                // anything, because there's new data that needs to be flushed
+                WalState::Unflushed { .. } => {}
+                // If we just synced, our previous state should not have been `FlushedAndPersisted`.
+                // If it is, there's a bug somewhere
+                WalState::FlushedAndPersisted => unreachable!(
+                    "another thread should never transition the WAL state to `FlushedAndPersisted`"
+                ),
             }
-
-            Some(rows)
         }
     }
 }
@@ -613,7 +602,7 @@ impl fmt::Debug for PersistentState {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt.debug_struct("PersistentState")
             .field("name", &self.name)
-            .field("indices", &self.db.inner().indices)
+            .field("indices", &self.db.inner().shared_state.indices)
             .field("unique_keys", &self.unique_keys)
             .field("seq", &self.seq)
             .field("epoch", &self.epoch)
@@ -679,6 +668,23 @@ impl State for PersistentState {
         self.db.replication_offset.as_ref()
     }
 
+    fn persisted_up_to(&self) -> ReadySetResult<PersistencePoint> {
+        let mut inner = self.db.inner_mut();
+
+        // We clear out the error here (if one exists) since we're reporting it upwards
+        if let Some(error) = &inner.shared_state.last_wal_flush_error.take() {
+            Err(error.into())
+        } else {
+            match &inner.shared_state.wal_state {
+                WalState::FlushedAndPersisted => Ok(PersistencePoint::Persisted),
+                WalState::FlushedAndUnpersisted { persisted_up_to }
+                | WalState::Unflushed { persisted_up_to } => {
+                    Ok(PersistencePoint::UpTo(persisted_up_to.clone()))
+                }
+            }
+        }
+    }
+
     fn lookup(&self, columns: &[usize], key: &PointKey) -> LookupResult {
         self.db.lookup(columns, key)
     }
@@ -704,7 +710,13 @@ impl State for PersistentState {
             assert!(partial.is_none(), "Bases can't be partial");
         }
         let columns = &index.columns;
-        let existing = self.db.inner().indices.iter().any(|pi| pi.index == index);
+        let existing = self
+            .db
+            .inner()
+            .shared_state
+            .indices
+            .iter()
+            .any(|pi| pi.index == index);
 
         if existing {
             self.db.add_index(index, partial);
@@ -712,7 +724,7 @@ impl State for PersistentState {
         }
 
         let is_unique = check_if_index_is_unique(&self.unique_keys, columns);
-        if self.db.inner().indices.is_empty() {
+        if self.db.inner().shared_state.indices.is_empty() {
             self.add_primary_index(&index.columns, is_unique).unwrap();
             if index.index_type != IndexType::HashMap {
                 // Primary indices can only be HashMaps, so if this is our first index and it's
@@ -798,8 +810,21 @@ impl State for PersistentState {
     }
 
     fn tear_down(mut self) -> ReadySetResult<()> {
+        if let Some((tx, jh)) = self.wal_flush_thread_handle.take() {
+            // Stop the thread that periodically flushes the WAL
+            tx.send(()).unwrap();
+
+            jh.join().map_err(|_| {
+                ReadySetError::Internal(format!(
+                    "could not join WAL flush thread for table {}",
+                    self.name
+                ))
+            })?;
+        }
+
         let temp_dir = self._tmpdir.take();
-        let full_path = self.db.handle().path().to_path_buf();
+        let full_path = self.db.inner().db.path().to_path_buf();
+
         // We have to make the drop here so that rocksdb gets closed and frees
         // the file descriptors, so that we can remove the directory.
         // We can't implement this logic by implementing the `Drop` trait, because
@@ -847,7 +872,7 @@ impl State for PersistentStateHandle {
     }
 
     fn is_useful(&self) -> bool {
-        !self.inner().indices.is_empty()
+        !self.inner().shared_state.indices.is_empty()
     }
 
     fn is_partial(&self) -> bool {
@@ -863,6 +888,10 @@ impl State for PersistentStateHandle {
         None
     }
 
+    fn persisted_up_to(&self) -> ReadySetResult<PersistencePoint> {
+        Ok(PersistencePoint::Persisted)
+    }
+
     fn mark_filled(&mut self, _: KeyComparison, _: Tag) {}
 
     fn mark_hole(&mut self, _: &KeyComparison, _: Tag) {}
@@ -876,7 +905,7 @@ impl State for PersistentStateHandle {
 
     fn lookup_range<'a>(&'a self, columns: &[usize], key: &RangeKey) -> RangeLookupResult<'a> {
         let inner = self.inner();
-        if self.replication_offset < inner.replication_offset {
+        if self.replication_offset < inner.shared_state.replication_offset {
             debug!("Consistency miss in PersistentStateHandle");
             // TODO(vlad): The read handle missed on binlog position, but that doesn't mean we want
             // to replay the entire range, all we want is for something to trigger a
@@ -884,14 +913,13 @@ impl State for PersistentStateHandle {
             return RangeLookupResult::Missing(vec![key.as_bound_pair()]);
         }
 
-        let db = &inner.db;
-
-        let index = inner.index(IndexType::BTreeMap, columns);
+        let index = inner.shared_state.index(IndexType::BTreeMap, columns);
         let is_primary = index.is_primary;
 
-        let cf = db.cf_handle(&index.column_family).unwrap();
+        let cf = inner.db.cf_handle(&index.column_family).unwrap();
 
-        let primary_cf = db
+        let primary_cf = inner
+            .db
             .cf_handle(PK_CF)
             .expect("Primary key column family not found");
 
@@ -911,7 +939,7 @@ impl State for PersistentStateHandle {
             _ => {}
         }
 
-        let mut iterator = db.raw_iterator_cf_opt(cf, opts);
+        let mut iterator = inner.db.raw_iterator_cf_opt(cf, opts);
 
         match lower {
             Bound::Included(k) => iterator.seek(k),
@@ -949,7 +977,7 @@ impl State for PersistentStateHandle {
                 keys.push(value.into());
 
                 if keys.len() == 128 {
-                    let primary_rows = db.batched_multi_get_cf(primary_cf, &keys, false);
+                    let primary_rows = inner.db.batched_multi_get_cf(primary_cf, &keys, false);
                     rows.extend(primary_rows.into_iter().map(|r| {
                         deserialize_row(r.expect("can't error on known primary key").unwrap())
                     }));
@@ -961,7 +989,7 @@ impl State for PersistentStateHandle {
 
         // After the iterator is done, still have to fetch the rows for the inclusive upper bound
         if let Some(end_key) = inclusive_end {
-            iterator = db.raw_iterator_cf(cf);
+            iterator = inner.db.raw_iterator_cf(cf);
             iterator.seek(&end_key);
             while let Some(cur_key) = iterator.key() {
                 if prefix_transform(cur_key) != end_key {
@@ -977,7 +1005,7 @@ impl State for PersistentStateHandle {
         }
 
         if !keys.is_empty() {
-            let primary_rows = db.batched_multi_get_cf(primary_cf, &keys, false);
+            let primary_rows = inner.db.batched_multi_get_cf(primary_cf, &keys, false);
             rows.extend(
                 primary_rows.into_iter().map(|r| {
                     deserialize_row(r.expect("can't error on known primary key").unwrap())
@@ -998,9 +1026,11 @@ impl State for PersistentStateHandle {
 
     /// Returns a row count estimate from RocksDB.
     fn row_count(&self) -> usize {
-        let db = &self.handle();
-        let cf = db.cf_handle(PK_CF).unwrap();
-        db.property_int_value_cf(cf, "rocksdb.estimate-num-keys")
+        let inner = &self.inner();
+        let cf = inner.db.cf_handle(PK_CF).unwrap();
+        inner
+            .db
+            .property_int_value_cf(cf, "rocksdb.estimate-num-keys")
             .unwrap()
             .unwrap() as usize
     }
@@ -1078,6 +1108,12 @@ fn base_options(params: &PersistenceParameters) -> rocksdb::Options {
     opts.create_if_missing(true);
     opts.create_missing_column_families(true);
     opts.set_allow_concurrent_memtable_write(false);
+    opts.set_enable_pipelined_write(true);
+
+    // If we have a non-zero WAL flush interval, enable manual WAL flush mode
+    if params.wal_flush_interval_seconds > 0 {
+        opts.set_manual_wal_flush(true);
+    }
 
     // Assigns the number of threads for compactions and flushes in RocksDB.
     // Optimally we'd like to use env->SetBackgroundThreads(n, Env::HIGH)
@@ -1338,7 +1374,7 @@ fn compact_cf(table: &str, db: &DB, index: &PersistentIndex, opts: &CompactOptio
 pub struct AllRecords(PersistentStateHandle);
 
 /// RAII guard providing the ability to stream all the records out of a persistent state
-pub struct AllRecordsGuard<'a>(RwLockReadGuard<'a, SharedState>);
+pub struct AllRecordsGuard<'a>(PersistentStateReadGuard<'a>);
 
 impl AllRecords {
     /// Construct an RAII guard providing the ability to stream all the records out of a persistent
@@ -1357,7 +1393,7 @@ impl<'a> AllRecordsGuard<'a> {
         let cf = self
             .0
             .db
-            .cf_handle(&self.0.indices[0].column_family)
+            .cf_handle(&self.0.shared_state.indices[0].column_family)
             .expect("Column families always exist for all indices");
         self.0
             .db
@@ -1520,13 +1556,30 @@ impl PersistentState {
         }
 
         let replication_offset = meta.replication_offset.map(|ro| ro.into_owned());
-        let read_handle = PersistentStateHandle {
-            inner: Arc::new(RwLock::new(SharedState {
-                db,
-                replication_offset: replication_offset.clone(),
-                indices,
-            })),
-            replication_offset,
+        let shared_state = SharedState {
+            replication_offset: replication_offset.clone(),
+            wal_state: WalState::FlushedAndPersisted,
+            last_wal_flush_error: None,
+            indices,
+        };
+        let read_handle = PersistentStateHandle::new(shared_state, db, replication_offset);
+
+        let wal_flush_thread_handle = if params.wal_flush_interval_seconds == 0 {
+            None
+        } else {
+            let (tx, rx) = mpsc::channel::<()>();
+            let wal_flusher = WalFlusher {
+                rx,
+                state_handle: read_handle.clone(),
+                table: name.clone(),
+                flush_interval: Duration::from_secs(params.wal_flush_interval_seconds),
+            };
+
+            let jh = std::thread::Builder::new()
+                .name("WAL Flusher".to_string())
+                .spawn_wrapper(move || wal_flusher.run())?;
+
+            Some((tx, jh))
         };
 
         let mut state = Self {
@@ -1539,6 +1592,7 @@ impl PersistentState {
             _tmpdir: None,
             snapshot_mode: SnapshotMode::SnapshotModeDisabled,
             compaction_threads: vec![],
+            wal_flush_thread_handle,
         };
 
         if let Some(pk) = state.unique_keys.first().cloned() {
@@ -1559,7 +1613,7 @@ impl PersistentState {
 
     /// Adds a new primary index, assuming there are none present
     fn add_primary_index(&mut self, columns: &[usize], is_unique: bool) -> Result<()> {
-        if self.db.inner().indices.is_empty() {
+        if self.db.inner().shared_state.indices.is_empty() {
             debug!(base = %self.name, index = ?columns, is_unique, "Base creating primary index");
 
             let index_params = IndexParams::new(IndexType::HashMap, columns.len());
@@ -1573,10 +1627,14 @@ impl PersistentState {
                 is_primary: true,
             };
 
-            self.db.inner_mut().indices.push(persistent_index);
+            self.db
+                .inner_mut()
+                .shared_state
+                .indices
+                .push(persistent_index);
             let meta = self.meta();
-            self.db.handle().save_meta(&meta);
-            self.db.handle_mut().create_cf(
+            self.db.inner().db.save_meta(&meta);
+            self.db.inner_mut().db.create_cf(
                 PK_CF,
                 &index_params.make_rocksdb_options(&self.default_options),
             )?;
@@ -1592,7 +1650,7 @@ impl PersistentState {
 
         // We'll store all the values for this index in its own column family:
         let index_params = IndexParams::from(index);
-        let cf_name = self.db.inner().indices.len().to_string();
+        let cf_name = self.db.inner().shared_state.indices.len().to_string();
 
         // add the index to the meta first so even if we fail before we fully reindex we still have
         // the information about the column family
@@ -1603,9 +1661,13 @@ impl PersistentState {
             index: index.clone(),
         };
 
-        self.db.inner_mut().indices.push(persistent_index.clone());
+        self.db
+            .inner_mut()
+            .shared_state
+            .indices
+            .push(persistent_index.clone());
         let meta = self.meta();
-        self.db.handle().save_meta(&meta);
+        self.db.inner().db.save_meta(&meta);
         self.db
             .inner_mut()
             .db
@@ -1615,13 +1677,12 @@ impl PersistentState {
             )
             .unwrap();
 
-        let db = self.db.handle();
-        let cf = db.cf_handle(&cf_name).unwrap();
+        let inner = self.db.inner();
+        let cf = inner.db.cf_handle(&cf_name).unwrap();
 
         // Prevent autocompactions while we reindex the table
-        if let Err(err) = self
+        if let Err(err) = inner
             .db
-            .handle()
             .set_options_cf(cf, &[("disable_auto_compactions", "true")])
         {
             error!(%err, "Error setting cf options");
@@ -1631,12 +1692,12 @@ impl PersistentState {
         opts.disable_wal(true);
 
         // We know a primary index exists, which is why unwrap is fine
-        let primary_cf = db.cf_handle(PK_CF).unwrap();
+        let primary_cf = inner.db.cf_handle(PK_CF).unwrap();
         // Because we aren't doing a prefix seek, we must set total order first
         let mut read_opts = rocksdb::ReadOptions::default();
         read_opts.set_total_order_seek(true);
 
-        let mut iter = db.raw_iterator_cf_opt(primary_cf, read_opts);
+        let mut iter = inner.db.raw_iterator_cf_opt(primary_cf, read_opts);
         iter.seek_to_first();
         // We operate in batches to improve performance
         while iter.valid() {
@@ -1663,17 +1724,17 @@ impl PersistentState {
                 iter.next();
             }
 
-            db.write_opt(batch, &opts).unwrap();
+            inner.db.write_opt(batch, &opts).unwrap();
         }
 
         info!("Base compacting secondary index");
 
         // Flush just in case
-        db.flush_cf(cf).unwrap();
+        inner.db.flush_cf(cf).unwrap();
         // Manually compact the newly created column family
         let mut opts = CompactOptions::default();
         opts.set_exclusive_manual_compaction(false);
-        compact_cf(&self.name, &db, &persistent_index, &opts);
+        compact_cf(&self.name, &inner.db, &persistent_index, &opts);
         info!("Base finished compacting secondary index");
     }
 
@@ -1689,6 +1750,7 @@ impl PersistentState {
             indices: self
                 .db
                 .inner()
+                .shared_state
                 .indices
                 .iter()
                 .map(|pi| pi.index.clone())
@@ -1704,7 +1766,37 @@ impl PersistentState {
         // It's ok to read and update meta in two steps here since each State can (currently) only
         // be modified by a single thread.
         self.db.replication_offset = Some(offset.clone());
-        self.db.inner_mut().replication_offset = Some(offset);
+
+        {
+            let mut inner = self.db.inner_mut();
+            // TODO(ethan) do we want to be updating our in-memory replication offsets here before
+            // the write succeeds?
+            inner.shared_state.replication_offset = Some(offset.clone());
+
+            match inner.shared_state.wal_state {
+                // If snapshot mode is enabled, the WAL is disabled, and we don't have to worry
+                // about setting flushed_up_to or persisted_up_to
+                _ if self.snapshot_mode.is_enabled() => {}
+                // All of the data in this state has been persisted and the batch is empty, which
+                // means we are just updating the offset. We don't want to update either of
+                // flushed_up_to or synced_up_to here because we're not adding any new data
+                _ if batch.is_empty() => {}
+                // If our data is flushed and persisted or our data is flushed but unpersisted,
+                // we need to change our state to `WalState::Unflushed` since we're writing new
+                // unflushed data
+                WalState::FlushedAndPersisted | WalState::FlushedAndUnpersisted { .. } => {
+                    inner.shared_state.wal_state = WalState::Unflushed {
+                        // The new offset marks the start of the unpersisted data in this state
+                        persisted_up_to: offset,
+                    };
+                }
+                // If there is already unflushed data, we don't have to transition the WAL state,
+                // since adding new unflushed data doesn't change the low watermark of all of our
+                // unflushed data
+                WalState::Unflushed { .. } => {}
+            }
+        }
+
         batch.save_meta(&self.meta());
     }
 
@@ -1736,14 +1828,18 @@ impl PersistentState {
     fn enable_snapshot_mode(&mut self) {
         self.db.replication_offset = None; // Remove any replication offset first (although it should be None already)
         let meta = self.meta();
-        let mut inner = self.db.inner_mut();
-        let SharedState { db, indices, .. } = &mut *inner;
+        let PersistentStateWriteGuard {
+            mut db,
+            shared_state,
+            ..
+        } = self.db.inner_mut();
         db.save_meta(&meta);
 
         // Clear the data by dropping each column family and creating it anew
-        for index in indices.iter() {
+        for index in shared_state.indices.iter() {
             let cf_name = index.column_family.as_str();
             db.drop_cf(cf_name).unwrap();
+
             db.create_cf(
                 cf_name,
                 &IndexParams::from(&index.index).make_rocksdb_options(&self.default_options),
@@ -1759,7 +1855,7 @@ impl PersistentState {
     }
 
     fn disable_snapshot_mode(&mut self) {
-        for index in self.db.inner().indices.iter().cloned() {
+        for index in self.db.inner().shared_state.indices.iter().cloned() {
             // Perform a manual compaction for each column family
 
             let mut opts = CompactOptions::default();
@@ -1784,7 +1880,7 @@ impl PersistentState {
                         column_family = %index.column_family
                     );
                     let _guard = span.enter();
-                    compact_cf(&table, &read_handle.handle(), &index, &thread_opts);
+                    compact_cf(&table, &read_handle.inner().db, &index, &thread_opts);
                 })
                 .expect("spawn_wrapper failure");
 
@@ -1810,13 +1906,13 @@ impl PersistentState {
     /// operation and is therefore guaranteed to be atomic.
     fn insert(&mut self, batch: &mut WriteBatch, r: &[DfValue]) -> ReadySetResult<()> {
         let inner = self.db.inner();
-        let db = &inner.db;
         let primary_index = inner
+            .shared_state
             .indices
             .first()
             .ok_or_else(|| internal_err!("Insert on un-indexed state"))?;
         let primary_key = build_key(r, &primary_index.index.columns);
-        let primary_cf = db.cf_handle(&primary_index.column_family).unwrap();
+        let primary_cf = inner.db.cf_handle(&primary_index.column_family).unwrap();
 
         // Generate a new primary key by extracting the key columns from the provided row
         // using the primary index and serialize it as RocksDB prefix.
@@ -1835,9 +1931,9 @@ impl PersistentState {
         batch.put_cf(primary_cf, &serialized_pk, &serialized_row);
 
         // Then insert the value for all the secondary indices:
-        for index in inner.indices[1..].iter() {
+        for index in inner.shared_state.indices[1..].iter() {
             // Construct a key with the index values, and serialize it with bincode:
-            let cf = db.cf_handle(&index.column_family).unwrap();
+            let cf = inner.db.cf_handle(&index.column_family).unwrap();
             let key = build_key(r, &index.index.columns);
 
             if index.is_unique && !key.has_null() {
@@ -1856,14 +1952,14 @@ impl PersistentState {
 
     fn remove(&self, batch: &mut WriteBatch, r: &[DfValue]) -> ReadySetResult<()> {
         let inner = self.db.inner();
-        let db = &inner.db;
 
         let primary_index = inner
+            .shared_state
             .indices
             .first()
             .ok_or_else(|| internal_err!("Delete on un-indexed state"))?;
         let primary_key = build_key(r, &primary_index.index.columns);
-        let primary_cf = db.cf_handle(&primary_index.column_family).unwrap();
+        let primary_cf = inner.db.cf_handle(&primary_index.column_family).unwrap();
 
         let prefix = Self::serialize_prefix(&primary_key);
 
@@ -1874,7 +1970,7 @@ impl PersistentState {
             // This is key is not unique, therefore we have to iterate over the
             // the values, looking for the first one that matches the full row
             // and then return the (full length) unique primary key associated with it
-            let mut iter = db.raw_iterator_cf(primary_cf);
+            let mut iter = inner.db.raw_iterator_cf(primary_cf);
             iter.seek(&prefix); // Find the first key
 
             loop {
@@ -1894,7 +1990,7 @@ impl PersistentState {
         batch.delete_cf(primary_cf, &serialized_pk);
 
         // Then delete the value for all the secondary indices
-        for index in inner.indices[1..].iter() {
+        for index in inner.shared_state.indices[1..].iter() {
             // Construct a key with the index values, and serialize it with bincode:
             let key = build_key(r, &index.index.columns);
             let serialized_key = if index.is_unique && !key.has_null() {
@@ -1904,7 +2000,7 @@ impl PersistentState {
                 // the *exact* same row from each family
                 Self::serialize_secondary(&key, &serialized_pk)
             };
-            let cf = db.cf_handle(&index.column_family).unwrap();
+            let cf = inner.db.cf_handle(&index.column_family).unwrap();
             batch.delete_cf(cf, &serialized_key);
         }
 
@@ -1947,7 +2043,7 @@ impl PersistentState {
         {
             write_options.disable_wal(true);
         } else {
-            let db = &self.db.handle();
+            let inner = &self.db.inner();
             if self.snapshot_mode.is_enabled() && replication_offset.is_some() {
                 // We are setting the replication offset, which is great, but all of our previous
                 // writes are not guaranteed to flush to disk even if the next write is synced. We
@@ -1958,15 +2054,22 @@ impl PersistentState {
                 // options.sync=true,    will it persist the previous write too?
                 // A: No. After the program crashes, writes with option.disableWAL=true will be
                 // lost, if they are not flushed to SST files.
-                for index in self.db.inner().indices.iter() {
-                    db.flush_cf(db.cf_handle(&index.column_family).unwrap())
+                for index in inner.shared_state.indices.iter() {
+                    inner
+                        .db
+                        .flush_cf(inner.db.cf_handle(&index.column_family).unwrap())
                         .map_err(|e| internal_err!("Flush to disk failed: {e}"))?;
                 }
 
-                db.flush()
+                inner
+                    .db
+                    .flush()
                     .map_err(|e| internal_err!("Flush to disk failed: {e}"))?;
             }
-            write_options.set_sync(true);
+
+            if self.wal_flush_thread_handle.is_none() {
+                write_options.set_sync(true);
+            }
         }
 
         if let Some(offset) = replication_offset {
@@ -1974,7 +2077,8 @@ impl PersistentState {
         }
 
         self.db
-            .handle()
+            .inner()
+            .db
             .write_opt(batch, &write_options)
             .map_err(|e| internal_err!("Write failed: {e}"))?;
 
@@ -2114,6 +2218,7 @@ impl SizeOf for PersistentState {
     fn deep_size_of(&self) -> u64 {
         let inner = self.db.inner();
         inner
+            .shared_state
             .indices
             .iter()
             .map(|idx| {

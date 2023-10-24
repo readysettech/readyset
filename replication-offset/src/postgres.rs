@@ -87,10 +87,10 @@ impl Add<i64> for Lsn {
     }
 }
 
-impl TryFrom<ReplicationOffset> for Lsn {
+impl TryFrom<&ReplicationOffset> for Lsn {
     type Error = ReadySetError;
 
-    fn try_from(offset: ReplicationOffset) -> Result<Self, Self::Error> {
+    fn try_from(offset: &ReplicationOffset) -> Result<Self, Self::Error> {
         Ok(PostgresPosition::try_from(offset)?.lsn)
     }
 }

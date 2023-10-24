@@ -34,6 +34,7 @@ psql-srv = { path = "../psql-srv" }
 database-utils = { path = "../database-utils" }
 readyset-adapter = { path = "../readyset-adapter" }
 readyset-alloc = { path = "../readyset-alloc" }
+readyset-alloc-metrics = { path = "../readyset-alloc-metrics" }
 readyset-client = { path = "../readyset-client/" }
 readyset-client-metrics = { path = "../readyset-client-metrics" }
 readyset-common = { path = "../readyset-common" }

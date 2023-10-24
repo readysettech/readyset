@@ -22,10 +22,11 @@ use itertools::Either;
 pub use partial_map::PartialMap;
 use readyset_client::debug::info::KeyCount;
 use readyset_client::internal::Index;
-use readyset_client::KeyComparison;
+use readyset_client::{KeyComparison, PersistencePoint};
 use readyset_data::DfValue;
 use readyset_errors::ReadySetResult;
 use replication_offset::ReplicationOffset;
+use serde::{Deserialize, Serialize};
 
 pub use crate::key::{PointKey, RangeKey};
 pub use crate::memory_state::MemoryState;
@@ -70,6 +71,15 @@ pub enum MaterializedNodeState {
     Persistent(PersistentState),
     /// A read handle to a [`PersistentState`] owned by another node.
     PersistentReadHandle(PersistentStateHandle),
+}
+
+/// Enum representing whether a base table node was already initialized (and has a replication
+/// offset assigned), or if it is still pending initialization. This type is used as a container
+/// for responses from base tables that will only return data if the base table is initialized.
+#[derive(Serialize, Deserialize)]
+pub enum BaseTableState<T> {
+    Initialized(T),
+    Pending,
 }
 
 /// The [`State`] trait is the interface to the state of a non-reader node in the graph, containing
@@ -134,9 +144,15 @@ pub trait State: SizeOf + Send {
 
     /// Returns the current replication offset written to this state.
     ///
-    ///  See [the documentation for PersistentState](::readyset_dataflow::state::persistent_state)
+    /// See [the documentation for PersistentState](::readyset_dataflow::state::persistent_state)
     /// for more information about replication offsets.
     fn replication_offset(&self) -> Option<&ReplicationOffset>;
+
+    /// Returns the replication offset up to which data has been persisted.
+    ///
+    /// See [the documentation for PersistentState](::readyset_dataflow::state::persistent_state)
+    /// for more information about replication offsets.
+    fn persisted_up_to(&self) -> ReadySetResult<PersistencePoint>;
 
     /// Mark the given `key` as a *filled hole* in the given partial `tag`, causing all lookups to
     /// that key to return an empty non-miss result, and all writes to that key to not be dropped.
@@ -344,6 +360,14 @@ impl State for MaterializedNodeState {
             MaterializedNodeState::Memory(ms) => ms.replication_offset(),
             MaterializedNodeState::Persistent(ps) => ps.replication_offset(),
             MaterializedNodeState::PersistentReadHandle(rh) => rh.replication_offset(),
+        }
+    }
+
+    fn persisted_up_to(&self) -> ReadySetResult<PersistencePoint> {
+        match self {
+            MaterializedNodeState::Memory(ms) => ms.persisted_up_to(),
+            MaterializedNodeState::Persistent(ps) => ps.persisted_up_to(),
+            MaterializedNodeState::PersistentReadHandle(rh) => rh.persisted_up_to(),
         }
     }
 

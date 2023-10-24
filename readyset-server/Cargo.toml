@@ -79,9 +79,11 @@ strawpoll = "0.2.2"
 
 # local deps
 dataflow = { path = "../readyset-dataflow", package = "readyset-dataflow" }
+dataflow-state = { path = "../dataflow-state" }
 mir = { path = "../readyset-mir", package = "readyset-mir" }
 common = { path = "../readyset-common", package = "readyset-common" }
 readyset-alloc = { path = "../readyset-alloc" }
+readyset-alloc-metrics = { path = "../readyset-alloc-metrics" }
 readyset-client = { path = "../readyset-client" }
 failpoint-macros = { path = "../failpoint-macros" }
 readyset-errors = { path = "../readyset-errors" }

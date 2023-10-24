@@ -353,8 +353,8 @@ use url::Url;
 pub use crate::consensus::WorkerDescriptor;
 pub use crate::controller::{ControllerDescriptor, GraphvizOptions, ReadySetHandle};
 pub use crate::table::{
-    Modification, Operation, PacketData, PacketPayload, PacketTrace, Table, TableOperation,
-    TableReplicationStatus, TableRequest, TableStatus,
+    Modification, Operation, PacketData, PacketPayload, PacketTrace, PersistencePoint, Table,
+    TableOperation, TableReplicationStatus, TableRequest, TableStatus,
 };
 pub use crate::view::{
     KeyComparison, LookupResult, ReadQuery, ReadReply, ReadReplyBatch, ReadReplyStats, SchemaType,

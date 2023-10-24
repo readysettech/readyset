@@ -124,7 +124,7 @@ impl serde::Serialize for ServerReadReplyBatch {
 type Reply = ReadySetResult<Tagged<ReadReply<ServerReadReplyBatch>>>;
 
 /// An Ack to resolve a blocking read.
-pub type Ack = oneshot::Sender<Reply>;
+pub type Ack = Option<oneshot::Sender<Reply>>;
 
 /// Creates a handler that can be used to perform read queries against a set of
 /// Readers.
@@ -244,30 +244,30 @@ impl ReadRequestHandler {
             reader.trigger(keys_to_replay.into_iter().map(|k| k.into_owned()));
         }
 
+        let read = BlockingRead {
+            tag,
+            target,
+            key_comparisons,
+            truth: self.global_readers.clone(),
+            first: time::Instant::now(),
+            warned: false,
+            limit,
+            offset,
+            filter,
+            timestamp,
+            upquery_timeout: self.upquery_timeout,
+            raw_result,
+            receiver,
+            eviction_epoch: reader.eviction_epoch(),
+        };
+
         if !block {
+            let _ = self.wait.send((read, None));
             reply_with_ok!(LookupResult::NonBlockingMiss);
         } else {
             let (tx, rx) = oneshot::channel();
 
-            let r = self.wait.send((
-                BlockingRead {
-                    tag,
-                    target,
-                    key_comparisons,
-                    truth: self.global_readers.clone(),
-                    first: time::Instant::now(),
-                    warned: false,
-                    limit,
-                    offset,
-                    filter,
-                    timestamp,
-                    upquery_timeout: self.upquery_timeout,
-                    raw_result,
-                    receiver,
-                    eviction_epoch: reader.eviction_epoch(),
-                },
-                tx,
-            ));
+            let r = self.wait.send((read, Some(tx)));
 
             if r.is_err() {
                 // we're shutting down
@@ -361,7 +361,9 @@ pub async fn retry_misses(mut rx: UnboundedReceiver<(BlockingRead, Ack)>) {
 
             if let Poll::Ready(res) = pending.check(&mut reader_cache) {
                 upquery_hist.record(pending.first.elapsed().as_micros() as f64);
-                let _ = ack.send(res);
+                if let Some(a) = ack {
+                    let _ = a.send(res);
+                };
                 break;
             }
         }

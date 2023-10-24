@@ -38,6 +38,7 @@ use readyset_adapter::query_status_cache::{MigrationStyle, QueryStatusCache};
 use readyset_adapter::views_synchronizer::ViewsSynchronizer;
 use readyset_adapter::{Backend, BackendBuilder, QueryHandler, UpstreamDatabase};
 use readyset_alloc::{StdThreadBuildWrapper, ThreadBuildWrapper};
+use readyset_alloc_metrics::report_allocator_metrics;
 use readyset_client::consensus::AuthorityType;
 #[cfg(feature = "failure_injection")]
 use readyset_client::failpoints;
@@ -730,6 +731,13 @@ where
 
         let (shutdown_tx, shutdown_rx) = shutdown::channel();
 
+        // if we're running in standalone mode, server will already
+        // spawn it's own allocator metrics reporter.
+        if prometheus_handle.is_some() && !options.standalone {
+            let alloc_shutdown = shutdown_rx.clone();
+            rt.handle().spawn(report_allocator_metrics(alloc_shutdown));
+        }
+
         // Gate query log code path on the log flag existing.
         let qlog_sender = if options.query_log_mode.is_enabled() {
             rs_connect.in_scope(|| info!("Query logs are enabled. Spawning query logger"));
@@ -859,7 +867,7 @@ where
             let auto_increments = auto_increments.clone();
             let view_name_cache = view_name_cache.clone();
             let view_cache = view_cache.clone();
-            let shutdown_rx = shutdown_rx.clone();
+            let mut shutdown_rx = shutdown_rx.clone();
             let loop_interval = options.migration_task_interval;
             let max_retry = options.max_processing_minutes;
             let dry_run = matches!(migration_style, MigrationStyle::Explicit);
@@ -870,11 +878,18 @@ where
             rs_connect.in_scope(|| info!("Spawning migration handler task"));
             let fut = async move {
                 let connection = span!(Level::INFO, "migration task upstream database connection");
-                let schema_search_path = loop {
-                    if let Ok(ssp) = &*schema_search_path.read().await {
-                        break ssp.clone();
+                let ssp_retry_loop = async {
+                    loop {
+                        if let Ok(ssp) = &*schema_search_path.read().await {
+                            break ssp.clone();
+                        }
+                        sleep(UPSTREAM_CONNECTION_RETRY_INTERVAL).await
                     }
-                    sleep(UPSTREAM_CONNECTION_RETRY_INTERVAL).await
+                };
+
+                let schema_search_path = tokio::select! {
+                    schema_search_path = ssp_retry_loop => schema_search_path,
+                    _ = shutdown_rx.recv() => return Ok(()),
                 };
 
                 let noria =

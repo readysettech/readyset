@@ -31,7 +31,7 @@ use crate::metrics::MetricsDump;
 use crate::recipe::changelist::ChangeList;
 use crate::recipe::{ExtendRecipeResult, ExtendRecipeSpec, MigrationStatus};
 use crate::status::ReadySetStatus;
-use crate::table::{Table, TableBuilder, TableRpc};
+use crate::table::{PersistencePoint, Table, TableBuilder, TableRpc};
 use crate::view::{View, ViewBuilder, ViewRpc};
 use crate::{
     ReplicationOffset, SingleKeyEviction, TableStatus, ViewCreateRequest, ViewFilter, ViewRequest,
@@ -887,8 +887,13 @@ impl ReadySetHandle {
     );
 
     simple_request!(
-        /// Get a list of all current tables node indexes that are involved in snapshotting.
-        snapshotting_tables() -> Vec<String>
+        /// Each base table has an offset up to which data has been persisted to disk, and this
+        /// method returns the minimum of those offsets. If no base tables have unpersisted data,
+        /// this method returns `PersistencePoint::Persisted`.
+        ///
+        /// See [the documentation for PersistentState](::readyset_dataflow::state::persistent_state)
+        /// for more information about replication offsets.
+        min_persisted_replication_offset() -> PersistencePoint
     );
 
     /// Poll in a loop to wait for all tables to finish compacting
