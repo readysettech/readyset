@@ -1918,7 +1918,7 @@ async fn start_replication_invalidated_replication_slot() {
 
     // Insert another piece of data to trigger the errors
     client
-        .simple_query(&format!("INSERT INTO cats (id) VALUES (5)"))
+        .simple_query("INSERT INTO cats (id) VALUES (5)")
         .await
         .unwrap();
 
@@ -1939,6 +1939,125 @@ async fn start_replication_invalidated_replication_slot() {
             .collect();
 
         assert_eq!(res, [0, 1, 2, 3, 4, 5]);
+    });
+
+    shutdown_tx.shutdown().await;
+}
+
+// Tests that we create a new replication slot and resnapshot if the slot is deleted while the
+// replicator is down
+#[cfg(feature = "failure_injection")]
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn recreate_replication_slot() {
+    use readyset_errors::ReadySetError;
+
+    readyset_tracing::init_test_logging();
+
+    let (config, mut handle, shutdown_tx) = TestBuilder::default()
+        .migration_mode(MigrationMode::InRequestPath)
+        .fallback(true)
+        .build::<PostgreSQLAdapter>()
+        .await;
+
+    let client = connect(config).await;
+
+    client
+        .simple_query("DROP TABLE IF EXISTS cats")
+        .await
+        .unwrap();
+    client
+        .simple_query("CREATE TABLE cats (id int);")
+        .await
+        .unwrap();
+    client
+        .simple_query("INSERT INTO cats (id) VALUES (1);")
+        .await
+        .unwrap();
+
+    // Add a failpoint that will cause the replicator to fail while starting up until the failpoint
+    // is disabled
+    handle
+        .set_failpoint(
+            readyset_client::failpoints::START_INNER_POSTGRES,
+            &format!(
+                "return({})",
+                serde_json::ser::to_string(&ReadySetError::ReplicationFailed("error".into()))
+                    .expect("failed to serialize error")
+            ),
+        )
+        .await;
+
+    // Add a failpoint to trigger a replicator restart
+    handle
+        .set_failpoint(
+            readyset_client::failpoints::UPSTREAM,
+            &format!(
+                "1*return({})",
+                serde_json::ser::to_string(&ReadySetError::ReplicationFailed("error".into()))
+                    .expect("failed to serialize error")
+            ),
+        )
+        .await;
+
+    // Insert another row to trigger the failpoint
+    client
+        .simple_query("INSERT INTO cats (id) VALUES (2);")
+        .await
+        .unwrap();
+
+    // Wait for the replicator's error loop to start
+    eventually!(run_test: {
+        let res = client
+            .simple_query("SHOW READYSET STATUS")
+            .await;
+        AssertUnwindSafe(|| res)
+    }, then_assert: |result| {
+        let res: Vec<String> = result()
+            .unwrap()
+            .iter()
+            .filter_map(|m| match m {
+                SimpleQueryMessage::Row(r) => Some(r.get(0).unwrap().parse().unwrap()),
+                _ => None,
+            })
+            .collect();
+
+        assert!(res.contains(&"Last replicator error".to_owned()));
+    });
+
+    // Delete the replication slot while the replicator is waiting to restart
+    eventually!(client
+        .simple_query("SELECT pg_drop_replication_slot('readyset')")
+        .await
+        .is_ok());
+
+    // Insert another row while the replicator is waiting to restart
+    client
+        .simple_query("INSERT INTO cats (id) VALUES (3);")
+        .await
+        .unwrap();
+
+    // Start the replicator back up
+    handle
+        .set_failpoint(readyset_client::failpoints::START_INNER_POSTGRES, "off")
+        .await;
+
+    eventually!(run_test: {
+        let res = client
+            .simple_query("SELECT * FROM cats")
+            .await;
+        AssertUnwindSafe(|| res)
+    }, then_assert: |result| {
+        let res: Vec<u32> = result()
+            .unwrap()
+            .iter()
+            .filter_map(|m| match m {
+                SimpleQueryMessage::Row(r) => Some(r.get(0).unwrap().parse().unwrap()),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(res, [1, 2, 3]);
     });
 
     shutdown_tx.shutdown().await;

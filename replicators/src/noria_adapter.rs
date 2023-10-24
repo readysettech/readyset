@@ -6,7 +6,6 @@ use async_trait::async_trait;
 use database_utils::{DatabaseURL, UpstreamConfig};
 use deadpool_postgres::{Manager, ManagerConfig, Pool, RecyclingMethod};
 use failpoint_macros::set_failpoint;
-use futures::FutureExt;
 use metrics::{counter, histogram};
 use mysql::prelude::Queryable;
 use mysql::{OptsBuilder, PoolConstraints, PoolOpts, SslOpts};
@@ -21,7 +20,6 @@ use readyset_client::{ReadySetHandle, Table, TableOperation};
 use readyset_data::Dialect;
 use readyset_errors::{internal_err, set_failpoint_return_err, ReadySetError, ReadySetResult};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
-use readyset_util::select;
 use replication_offset::{ReplicationOffset, ReplicationOffsets};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::{debug, error, info, info_span, trace, warn, Instrument};
@@ -489,24 +487,14 @@ impl NoriaAdapter {
         notification_channel: &UnboundedSender<ReplicatorMessage>,
         controller_channel: &UnboundedReceiver<ControllerMessage>,
         resnapshot: bool,
-        full_resnapshot: bool,
+        mut full_resnapshot: bool,
         telemetry_sender: &TelemetrySender,
         tls_connector: MakeTlsConnector,
         pool: deadpool_postgres::Pool,
         repl_slot_name: String,
         enable_statement_logging: bool,
     ) -> ReadySetResult<!> {
-        macro_rules! handle_joinhandle_result {
-            ($res: expr) => {
-                match $res {
-                    Ok(Ok(_)) => Err(ReadySetError::UpstreamConnectionLost(
-                        "connection closed for unknown reason".to_owned(),
-                    )),
-                    Ok(Err(e)) => Err(ReadySetError::UpstreamConnectionLost(e.to_string())),
-                    Err(e) => Err(ReadySetError::UpstreamConnectionLost(e.to_string())),
-                }
-            };
-        }
+        set_failpoint_return_err!(failpoints::START_INNER_POSTGRES);
 
         let dbname = pgsql_opts.get_dbname().ok_or_else(|| {
             ReadySetError::ReplicationFailed("No database specified for replication".to_string())
@@ -528,27 +516,22 @@ impl NoriaAdapter {
             None,
         )?;
 
+        let (mut client, connection) = pgsql_opts.connect(tls_connector.clone()).await?;
+        let _connection_handle = tokio::spawn(connection);
+
         // For Postgres 13, once we setup ddl replication, the following query can be rejected, so
         // run it ahead of time.
-        // TODO: (luke): We can probably consolidate this query with the db_version string query
-        // below
-        let version_num: u32 = {
-            let (client, connection) = pgsql_opts.connect(tls_connector.clone()).await?;
-            let connection_handle = tokio::spawn(connection);
-
-            select! {
-                result = client.query_one("SHOW server_version_num", &[]) => result
-                    .and_then(|row| row.try_get::<_, String>(0))
-                    .map_err(|e| {
-                        ReadySetError::Internal(format!("Unable to determine postgres version: {}", e))
-                    })?
-                    .parse()
-                    .map_err(|e| {
-                        ReadySetError::Internal(format!("Unable to parse postgres version: {}", e))
-                    })?,
-                c = connection_handle.fuse() => return handle_joinhandle_result!(c),
-            }
-        };
+        let version_num: u32 = client
+            .query_one("SHOW server_version_num", &[])
+            .await
+            .and_then(|row| row.try_get::<_, String>(0))
+            .map_err(|e| {
+                ReadySetError::Internal(format!("Unable to determine postgres version: {}", e))
+            })?
+            .parse()
+            .map_err(|e| {
+                ReadySetError::Internal(format!("Unable to parse postgres version: {}", e))
+            })?;
 
         let mut connector = Box::new(
             PostgresWalConnector::connect(
@@ -570,25 +553,56 @@ impl NoriaAdapter {
         let resnapshot_slot_name = format!("{}_{}", RESNAPSHOT_SLOT, repl_slot_name);
         let replication_slot = if let Some(slot) = &connector.replication_slot {
             Some(slot.clone())
-        } else if full_resnapshot || resnapshot || pos.is_none() {
-            // This is not an initial connection but we need to resnapshot the latest schema,
-            // therefore we create a new replication slot, just so we can get a consistent snapshot
-            // with a WAL position attached. This is more robust than locking and allows us to reuse
-            // the existing snapshotting code.
-            info!(
-                slot = resnapshot_slot_name,
-                "Recreating replication slot to resnapshot with the latest schema"
-            );
-            connector
-                .drop_replication_slot(&resnapshot_slot_name)
-                .await?;
-            Some(
-                connector
-                    .create_replication_slot(&resnapshot_slot_name, true)
-                    .await?,
-            )
         } else {
-            None
+            let readyset_slot_exists = client
+                .query_one(
+                    "SELECT EXISTS(SELECT 1 FROM pg_replication_slots WHERE slot_name='readyset')",
+                    &[],
+                )
+                .await
+                .and_then(|row| row.try_get::<_, bool>(0))
+                .map_err(|e| {
+                    ReadySetError::Internal(format!(
+                        "Unable to read replication slot from upstream database: {}",
+                        e
+                    ))
+                })?;
+
+            if readyset_slot_exists {
+                if full_resnapshot || resnapshot || pos.is_none() {
+                    // This is not an initial connection but we need to resnapshot the latest
+                    // schema, therefore we create a new replication slot, just
+                    // so we can get a consistent snapshot with a WAL position
+                    // attached. This is more robust than locking and allows us to reuse
+                    // the existing snapshotting code.
+                    info!(
+                        slot = resnapshot_slot_name,
+                        "Recreating replication slot to resnapshot with the latest schema"
+                    );
+                    connector
+                        .drop_replication_slot(&resnapshot_slot_name)
+                        .await?;
+                    Some(
+                        connector
+                            .create_replication_slot(&resnapshot_slot_name, true)
+                            .await?,
+                    )
+                } else {
+                    None
+                }
+            } else {
+                // If our primary replication slot doesn't already exist, we need to create one,
+                // which will require us to do a full resnapshot, since we'd have no way of
+                // replaying events between our current max offset and the consistent point of the
+                // new slot.
+                full_resnapshot = true;
+
+                Some(
+                    connector
+                        .create_replication_slot(&repl_slot_name, true)
+                        .await?,
+                )
+            }
         };
 
         let mut create_schema = CreateSchema::new(dbname.to_string(), nom_sql::Dialect::PostgreSQL);
@@ -598,9 +612,6 @@ impl NoriaAdapter {
 
             let snapshot_start = Instant::now();
 
-            let (mut client, connection) = pgsql_opts.connect(tls_connector.clone()).await?;
-
-            let connection_handle = tokio::spawn(connection);
             let db_version = client
                 .query_one("SELECT version()", &[])
                 .await
@@ -611,34 +622,34 @@ impl NoriaAdapter {
                 PostgresReplicator::new(&mut client, pool, &mut noria, table_filter.clone())
                     .await?;
 
-            select! {
-                snapshot_result = replicator.snapshot_to_noria(
+            let snapshot_result = replicator
+                .snapshot_to_noria(
                     &replication_slot,
                     &mut create_schema,
                     snapshot_report_interval_secs,
-                    // If we don't have a consistent replication offset from ReadySet, that might be
-                    // because only *some* tables are missing a replication offset - in that case we
-                    // need to resnapshot *all* tables, because we just dropped the replication slot
-                    // above, which prevents us from replicating any writes to tables we do have a
-                    // replication offset for that happened while we weren't running.
-                    /* full_snapshot = */ pos.is_none() || full_resnapshot
-                ).fuse() =>  {
-                    let status = if snapshot_result.is_err() {
-                        SnapshotStatusTag::Failed.value()
-                    } else {
-                        SnapshotStatusTag::Successful.value()
-                    };
+                    // If we don't have a consistent replication offset from ReadySet, that might
+                    // be because only *some* tables are missing a replication offset - in that
+                    // in that case we need to resnapshot *all* tables, because we just dropped the
+                    // replication slot above, which prevents us from replicating any writes to
+                    //  tables we do have a replication offset for that happened while we weren't
+                    //  running.
+                    pos.is_none() || full_resnapshot,
+                )
+                .await;
 
-                    counter!(
-                        recorded::REPLICATOR_SNAPSHOT_STATUS,
-                        1u64,
-                        "status" => status
-                    );
+            let status = if snapshot_result.is_err() {
+                SnapshotStatusTag::Failed.value()
+            } else {
+                SnapshotStatusTag::Successful.value()
+            };
 
-                    snapshot_result?;
-                },
-                c = connection_handle.fuse() => return handle_joinhandle_result!(c),
-            }
+            counter!(
+                recorded::REPLICATOR_SNAPSHOT_STATUS,
+                1u64,
+                "status" => status
+            );
+
+            snapshot_result?;
 
             info!("Snapshot finished");
             histogram!(
