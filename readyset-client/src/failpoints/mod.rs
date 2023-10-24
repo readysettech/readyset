@@ -22,3 +22,6 @@ pub const POSTGRES_SNAPSHOT_START: &str = "postgres-snapshot-start";
 pub const POSTGRES_START_REPLICATION: &str = "postgres-start-replication";
 /// Imitates a failure when we go to pull the next event from the WAL during Postgres replication
 pub const POSTGRES_NEXT_WAL_EVENT: &str = "postgres-next-wal-event";
+/// Imitates a failure in the `NoriaAdapter::start_inner_postgres()` function that happens before we
+/// interact with the upstream database
+pub const START_INNER_POSTGRES: &str = "start-inner-postgres";
