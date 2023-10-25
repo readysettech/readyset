@@ -31,29 +31,6 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
-  prometheus:
-    image: public.ecr.aws/readyset/readyset-prometheus:latest
-    healthcheck:
-      test: ["CMD", "nc", "-vz", "localhost", "9090"]
-      interval: 5s
-      timeout: 5s
-      retries: 12
-    expose:
-      - 9090
-    volumes:
-      - "prometheus:/prometheus"
-  pushgateway:
-    image: prom/pushgateway
-    expose:
-      - 9091
-  grafana:
-    image: public.ecr.aws/readyset/readyset-grafana:latest
-    ports:
-      - "4000:4000"
-    environment:
-      UPSTREAM_DB_URL: mysql://root:readyset@mysql/testdb
-      RS_PORT: 3307
-      RS_GRAFANA_PORT: 4000
   mysql:
     image: mysql:8
     environment:
@@ -71,5 +48,4 @@ services:
       - mysql:/var/lib/mysql
 volumes:
   mysql: ~
-  prometheus: ~
   readyset: ~
