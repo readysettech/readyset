@@ -1817,7 +1817,22 @@ where
         let select_schema = if let Some(handle) = self.metrics_handle.as_mut() {
             // Must snapshot to get the latest metrics
             handle.snapshot_counters(readyset_client_metrics::DatabaseType::MySql);
-            create_dummy_schema!("query id", "proxied query", "readyset supported", "count")
+            let mut select_schema =
+                create_dummy_schema!("query id", "proxied query", "readyset supported");
+
+            // Add count separately with a different type (UnsignedInt)
+            let count_schema = ColumnSchema {
+                column: nom_sql::Column {
+                    name: "count".into(),
+                    table: None,
+                },
+                column_type: DfType::UnsignedInt,
+                base: None,
+            };
+            select_schema.schema.to_mut().push(count_schema);
+            select_schema.columns.to_mut().push("count".into());
+
+            select_schema
         } else {
             create_dummy_schema!("query id", "proxied query", "readyset supported")
         };
@@ -1846,7 +1861,7 @@ where
                 if let Some(handle) = self.metrics_handle.as_ref() {
                     let MetricsSummary { sample_count } =
                         handle.metrics_summary(id.to_string()).unwrap_or_default();
-                    row.push(DfValue::from(format!("{sample_count}")));
+                    row.push(DfValue::UnsignedInt(sample_count));
                 }
 
                 row
@@ -1856,11 +1871,31 @@ where
         data.sort_by(|a, b| {
             let status_order = |s: &str| match s {
                 "yes" => 0,
-                "pending" => 1,
-                "unsupported" => 2,
+                "unsupported" => 1,
+                "pending" => 2,
                 _ => 3,
             };
-            status_order(&a[2].to_string()).cmp(&status_order(&b[2].to_string()))
+
+            let a_status = status_order(&a[2].to_string());
+            let b_status = status_order(&b[2].to_string());
+
+            // If we don't have counts from metrics, give them all the same count for sorting
+            // purposes
+            let a_count = match a.get(3) {
+                Some(DfValue::UnsignedInt(val)) => *val,
+                _ => 0,
+            };
+
+            let b_count = match b.get(3) {
+                Some(DfValue::UnsignedInt(val)) => *val,
+                _ => 0,
+            };
+
+            // Reverse for descending order
+            match a_status.cmp(&b_status) {
+                std::cmp::Ordering::Equal => b_count.cmp(&a_count),
+                other => other,
+            }
         });
 
         Ok(noria_connector::QueryResult::from_owned(
