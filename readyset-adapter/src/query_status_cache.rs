@@ -19,7 +19,7 @@ use readyset_data::DfValue;
 use readyset_util::hash::hash;
 use tracing::error;
 
-const NUM_PERSISTED_QUERIES: usize = 100_000;
+pub const DEFAULT_QUERY_STATUS_CAPACITY: usize = 100_000;
 
 /// A metadata cache for all queries that have been processed by this
 /// adapter. Thread-safe.
@@ -64,7 +64,7 @@ impl Default for PersistentStatusCacheHandle {
     fn default() -> Self {
         Self {
             statuses: RwLock::new(LruCache::new(
-                NUM_PERSISTED_QUERIES
+                DEFAULT_QUERY_STATUS_CAPACITY
                     .try_into()
                     .expect("num persisted queries is not zero"),
             )),
@@ -74,6 +74,15 @@ impl Default for PersistentStatusCacheHandle {
 }
 
 impl PersistentStatusCacheHandle {
+    fn with_capacity(capacity: usize) -> Self {
+        Self {
+            statuses: RwLock::new(LruCache::new(
+                capacity.try_into().expect("capacity is not zero"),
+            )),
+            pending_inlined_migrations: Default::default(),
+        }
+    }
+
     fn insert_with_status(&self, q: Query, id: QueryId, status: QueryStatus) {
         let mut statuses = self.statuses.write();
         statuses.put(id, (q, status));
@@ -225,11 +234,23 @@ impl Default for QueryStatusCache {
 }
 
 impl QueryStatusCache {
-    /// Constructs a new QueryStatusCache with the migration style set to InRequestPath.
+    /// Constructs a new QueryStatusCache with the migration style set to InRequestPath and a
+    /// default capacity of [`DEFAULT_QUERY_STATUS_CAPACITY`]
     pub fn new() -> QueryStatusCache {
         QueryStatusCache {
             id_to_status: Default::default(),
             persistent_handle: Default::default(),
+            style: MigrationStyle::InRequestPath,
+            enable_experimental_placeholder_inlining: false,
+        }
+    }
+
+    /// Constructs a new QueryStatusCache with the migration style set to InRequestPath and
+    /// provided capacity that must be non-zero.
+    pub fn with_capacity(capacity: usize) -> QueryStatusCache {
+        QueryStatusCache {
+            id_to_status: Default::default(),
+            persistent_handle: PersistentStatusCacheHandle::with_capacity(capacity),
             style: MigrationStyle::InRequestPath,
             enable_experimental_placeholder_inlining: false,
         }

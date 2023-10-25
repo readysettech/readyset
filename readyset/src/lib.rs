@@ -394,6 +394,16 @@ pub struct Options {
     /// will listen.
     #[clap(long, env = "CONTROLLER_ADDRESS")]
     controller_address: Option<IpAddr>,
+
+    /// The number of queries that will be retained and eligible to be returned by `show caches`
+    /// and `show proxied queries`.
+    #[clap(
+        long,
+        env = "QUERY_STATUS_CAPACITY",
+        default_value = "100000",
+        hide = true
+    )]
+    query_status_capacity: usize,
 }
 
 impl Options {
@@ -783,7 +793,7 @@ where
         rs_connect.in_scope(|| info!(?migration_style));
 
         let query_status_cache: &'static _ = Box::leak(Box::new(
-            QueryStatusCache::new()
+            QueryStatusCache::with_capacity(options.query_status_capacity)
                 .style(migration_style)
                 .enable_experimental_placeholder_inlining(
                     options.experimental_placeholder_inlining,
