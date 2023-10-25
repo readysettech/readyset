@@ -3,6 +3,7 @@ use std::fmt;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::{map, map_res, opt, value};
+use nom::error::{ErrorKind, ParseError};
 use nom::sequence::{preceded, tuple};
 use nom_locate::LocatedSpan;
 use prop::string::string_regex;
@@ -14,7 +15,7 @@ use test_strategy::Arbitrary;
 
 use crate::expression::expression;
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, Expr, NomSqlResult};
+use crate::{literal, Dialect, Expr, Literal, NomSqlResult};
 
 pub type QueryID = String;
 
@@ -96,6 +97,23 @@ pub struct ProxiedQueriesOptions {
     #[strategy(option::of(string_regex("q_{a-z}{16}").unwrap()))]
     pub query_id: Option<String>,
     pub only_supported: bool,
+    pub limit: Option<u64>,
+}
+pub fn limit(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], u64> {
+    move |i| {
+        let (i, _) = tag_no_case("limit")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, limit) = literal(dialect)(i)?;
+        let limit = match &limit {
+            Literal::UnsignedInteger(value) => Ok(*value),
+            Literal::Integer(value) => Ok(*value as u64),
+            _ => Err(nom::Err::Error(ParseError::from_error_kind(
+                i,
+                ErrorKind::Fail,
+            ))),
+        }?;
+        Ok((i, limit))
+    }
 }
 
 fn proxied_queries(
@@ -110,11 +128,14 @@ fn proxied_queries(
         let (i, _) = whitespace1(i)?;
         let (i, _) = tag_no_case("queries")(i)?;
         let (i, query_id) = opt(preceded(whitespace1, where_query_id(dialect)))(i)?;
+        let (i, limit) = opt(preceded(whitespace1, limit(dialect)))(i)?;
+
         Ok((
             i,
             ShowStatement::ProxiedQueries(ProxiedQueriesOptions {
                 query_id,
                 only_supported,
+                limit,
             }),
         ))
     }
@@ -375,75 +396,80 @@ mod tests {
 
     #[test]
     fn show_proxied_queries() {
-        let qstring1 = "SHOW PROXIED QUERIES";
-        let res1 = show(Dialect::MySQL)(LocatedSpan::new(qstring1.as_bytes()))
-            .unwrap()
-            .1;
-        let qstring2 = "SHOW\tPROXIED\tQUERIES";
-        let res2 = show(Dialect::MySQL)(LocatedSpan::new(qstring2.as_bytes()))
-            .unwrap()
-            .1;
-        let qstring3 = "SHOW PROXIED SUPPORTED QUERIES";
-        let res3 = show(Dialect::MySQL)(LocatedSpan::new(qstring3.as_bytes()))
-            .unwrap()
-            .1;
-        let qstring4 = "SHOW\tPROXIED\tSUPPORTED\tQUERIES";
-        let res4 = show(Dialect::MySQL)(LocatedSpan::new(qstring4.as_bytes()))
-            .unwrap()
-            .1;
-        assert_eq!(
-            res1,
-            ShowStatement::ProxiedQueries(ProxiedQueriesOptions {
-                query_id: None,
-                only_supported: false
-            })
-        );
-        assert_eq!(
-            res2,
-            ShowStatement::ProxiedQueries(ProxiedQueriesOptions {
-                query_id: None,
-                only_supported: false
-            })
-        );
-        assert_eq!(
-            res3,
-            ShowStatement::ProxiedQueries(ProxiedQueriesOptions {
-                query_id: None,
-                only_supported: true
-            })
-        );
-        assert_eq!(
-            res4,
-            ShowStatement::ProxiedQueries(ProxiedQueriesOptions {
-                query_id: None,
-                only_supported: true
-            })
-        );
+        let proxied_queries_test = |qstring: &str, only_supported: bool, limit: Option<u64>| {
+            let res = show(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()))
+                .unwrap()
+                .1;
+            assert_eq!(
+                res,
+                ShowStatement::ProxiedQueries(ProxiedQueriesOptions {
+                    query_id: None,
+                    only_supported,
+                    limit,
+                })
+            );
+        };
+
+        proxied_queries_test("SHOW PROXIED QUERIES", false, None);
+        proxied_queries_test("SHOW\tPROXIED\tQUERIES", false, None);
+        proxied_queries_test("SHOW PROXIED SUPPORTED QUERIES", true, None);
+        proxied_queries_test("SHOW\tPROXIED\tSUPPORTED\tQUERIES", true, None);
+        proxied_queries_test("SHOW PROXIED QUERIES LIMIT 10", false, Some(10));
+        proxied_queries_test("SHOW\tPROXIED\tSUPPORTED\tQUERIES LIMIT 20", true, Some(20));
     }
 
     #[test]
     fn show_proxied_queries_where() {
-        let qstring1 = "SHOW PROXIED QUERIES where query_id = 'test'";
-        let res1 = show(Dialect::MySQL)(LocatedSpan::new(qstring1.as_bytes()))
-            .unwrap()
-            .1;
-        let qstring2 = "SHOW PROXIED SUPPORTED QUERIES where query_id = 'test'";
-        let res2 = show(Dialect::MySQL)(LocatedSpan::new(qstring2.as_bytes()))
-            .unwrap()
-            .1;
-        assert_eq!(
-            res1,
-            ShowStatement::ProxiedQueries(ProxiedQueriesOptions {
-                query_id: Some("test".to_string()),
-                only_supported: false
-            })
+        let proxied_queries_where_test =
+            |qstring: &str, query_id: Option<&str>, only_supported: bool, limit: Option<u64>| {
+                let res = show(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()))
+                    .unwrap()
+                    .1;
+                assert_eq!(
+                    res,
+                    ShowStatement::ProxiedQueries(ProxiedQueriesOptions {
+                        query_id: query_id.map(String::from),
+                        only_supported,
+                        limit,
+                    })
+                );
+            };
+
+        proxied_queries_where_test(
+            "SHOW PROXIED QUERIES where query_id = 'test'",
+            Some("test"),
+            false,
+            None,
         );
-        assert_eq!(
-            res2,
-            ShowStatement::ProxiedQueries(ProxiedQueriesOptions {
-                query_id: Some("test".to_string()),
-                only_supported: true
-            })
+        proxied_queries_where_test(
+            "SHOW PROXIED SUPPORTED QUERIES where query_id = 'test'",
+            Some("test"),
+            true,
+            None,
+        );
+        proxied_queries_where_test(
+            "SHOW PROXIED QUERIES where query_id = 'other'",
+            Some("other"),
+            false,
+            None,
+        );
+        proxied_queries_where_test(
+            "SHOW PROXIED SUPPORTED QUERIES where query_id = 'other'",
+            Some("other"),
+            true,
+            None,
+        );
+        proxied_queries_where_test(
+            "SHOW PROXIED QUERIES where query_id = 'test' LIMIT 10",
+            Some("test"),
+            false,
+            Some(10),
+        );
+        proxied_queries_where_test(
+            "SHOW PROXIED SUPPORTED QUERIES where query_id = 'test' LIMIT 20",
+            Some("test"),
+            true,
+            Some(20),
         );
     }
 
