@@ -1804,6 +1804,7 @@ where
         &mut self,
         query_id: &Option<String>,
         only_supported: bool,
+        limit: Option<u64>,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         let mut queries = self.state.query_status_cache.deny_list();
         if let Some(q_id) = query_id {
@@ -1897,6 +1898,10 @@ where
                 other => other,
             }
         });
+
+        if let Some(limit) = limit {
+            data.truncate(limit as usize);
+        }
 
         Ok(noria_connector::QueryResult::from_owned(
             select_schema,
@@ -2102,6 +2107,7 @@ where
                 self.show_proxied_queries(
                     &proxied_queries_options.query_id,
                     proxied_queries_options.only_supported,
+                    proxied_queries_options.limit,
                 )
                 .await
             }
