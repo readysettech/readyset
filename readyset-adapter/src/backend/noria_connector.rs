@@ -138,6 +138,9 @@ pub enum PreparedSelectTypes {
 }
 
 #[derive(Debug, Clone)]
+// Due to differences in data type sizes, the large_enum_variant Clippy warning was being emitted
+// for this type, but only when compiling for aarch64 targets.
+#[cfg_attr(target_arch = "aarch64", allow(clippy::large_enum_variant))]
 pub enum PrepareResult {
     Select {
         types: PreparedSelectTypes,
