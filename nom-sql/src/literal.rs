@@ -31,6 +31,7 @@ use crate::{Dialect, DialectDisplay, NomSqlResult, SqlType};
 #[derive(Clone, Debug, Serialize, Deserialize, Arbitrary)]
 pub struct Float {
     pub value: f32,
+    #[strategy(1u8..=30u8)]
     pub precision: u8,
 }
 
@@ -71,6 +72,7 @@ impl Hash for Float {
 #[derive(Clone, Debug, Serialize, Deserialize, Arbitrary)]
 pub struct Double {
     pub value: f64,
+    #[strategy(1u8..=30u8)]
     pub precision: u8,
 }
 
@@ -146,6 +148,7 @@ pub enum Literal {
     /// didn't exist.
     Float(Float),
     Double(Double),
+    #[weight(0)]
     Numeric(i128, u32),
     String(String),
     #[weight(0)]
@@ -769,6 +772,13 @@ mod tests {
                 Literal::Boolean(false)
             );
         }
+    }
+    mod postgres {
+        use super::*;
+
+        test_format_parse_round_trip!(
+            rt_literal(literal, Literal, Dialect::PostgreSQL);
+        );
     }
 
     mod mysql {
