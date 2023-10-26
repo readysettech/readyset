@@ -25,6 +25,7 @@ pub use self::create::{
     SelectSpecification,
 };
 pub use self::create_table_options::CreateTableOption;
+pub use self::deallocate::{DeallocateStatement, StatementIdentifier};
 pub use self::delete::DeleteStatement;
 pub use self::dialect::{Dialect, DialectDisplay};
 pub use self::drop::{
@@ -75,6 +76,7 @@ mod common;
 mod compound_select;
 mod create;
 mod create_table_options;
+mod deallocate;
 mod delete;
 mod dialect;
 mod drop;
