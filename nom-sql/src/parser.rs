@@ -16,6 +16,7 @@ use crate::create::{
     create_cached_query, create_table, key_specification, view_creation, CreateCacheStatement,
     CreateTableStatement, CreateViewStatement,
 };
+use crate::deallocate::{deallocate, DeallocateStatement};
 use crate::delete::{deletion, DeleteStatement};
 use crate::drop::{
     drop_all_caches, drop_all_proxied_queries, drop_cached_query, drop_table, drop_view,
@@ -67,6 +68,7 @@ pub enum SqlQuery {
     Show(ShowStatement),
     Explain(ExplainStatement),
     Comment(CommentStatement),
+    Deallocate(DeallocateStatement),
 }
 
 impl DialectDisplay for SqlQuery {
@@ -95,6 +97,7 @@ impl DialectDisplay for SqlQuery {
             Self::Explain(explain) => write!(f, "{}", explain.display(dialect)),
             Self::Comment(c) => write!(f, "{}", c.display(dialect)),
             Self::DropAllProxiedQueries(drop) => write!(f, "{}", drop.display(dialect)),
+            Self::Deallocate(dealloc) => write!(f, "{}", dealloc.display(dialect)),
         })
     }
 }
@@ -143,6 +146,7 @@ impl SqlQuery {
             Self::Show(_) => "SHOW",
             Self::Explain(_) => "EXPLAIN",
             Self::Comment(_) => "COMMENT",
+            Self::Deallocate(_) => "DEALLOCATE",
         }
     }
 
@@ -176,6 +180,7 @@ impl SqlQuery {
             | SqlQuery::Insert(_)
             | SqlQuery::CompoundSelect(_)
             | SqlQuery::Select(_)
+            | SqlQuery::Deallocate(_)
             | SqlQuery::Delete(_)
             | SqlQuery::DropTable(_)
             | SqlQuery::DropView(_)
@@ -218,6 +223,7 @@ fn sql_query_part1(
             map(commit(dialect), SqlQuery::Commit),
             map(rollback(dialect), SqlQuery::Rollback),
             map(set(dialect), SqlQuery::Set),
+            map(deallocate(dialect), SqlQuery::Deallocate),
             map(create_table(dialect), SqlQuery::CreateTable),
             map(drop_table(dialect), SqlQuery::DropTable),
             map(drop_view(dialect), SqlQuery::DropView),
@@ -230,15 +236,19 @@ fn sql_query_part1(
             map(use_statement(dialect), SqlQuery::Use),
             map(show(dialect), SqlQuery::Show),
             map(explain_statement(dialect), SqlQuery::Explain),
-            // This does a more expensive clone of `i`, so process it last.
-            map(create_cached_query(dialect), SqlQuery::CreateCache),
         ))(i)
     }
 }
 fn sql_query_part2(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlQuery> {
-    move |i| map(comment(dialect), SqlQuery::Comment)(i)
+    move |i| {
+        alt((
+            // This does a more expensive clone of `i`, so process it last.
+            map(create_cached_query(dialect), SqlQuery::CreateCache),
+            map(comment(dialect), SqlQuery::Comment),
+        ))(i)
+    }
 }
 
 macro_rules! export_parser {
