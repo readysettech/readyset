@@ -19,13 +19,13 @@ use crate::{
     AlterColumnOperation, AlterTableDefinition, AlterTableStatement, CacheInner, CaseWhenBranch,
     Column, ColumnConstraint, ColumnSpecification, CommentStatement, CommonTableExpr,
     CompoundSelectStatement, CreateCacheStatement, CreateTableStatement, CreateViewStatement,
-    DeleteStatement, DropAllCachesStatement, DropAllProxiedQueriesStatement, DropCacheStatement,
-    DropTableStatement, DropViewStatement, ExplainStatement, Expr, FieldDefinitionExpr,
-    FieldReference, FunctionExpr, GroupByClause, InValue, InsertStatement, JoinClause,
-    JoinConstraint, JoinRightSide, Literal, OrderBy, OrderClause, Relation, SelectSpecification,
-    SelectStatement, SetNames, SetPostgresParameter, SetStatement, SetVariables, ShowStatement,
-    SqlIdentifier, SqlQuery, SqlType, TableExpr, TableExprInner, TableKey, UpdateStatement,
-    UseStatement,
+    DeallocateStatement, DeleteStatement, DropAllCachesStatement, DropAllProxiedQueriesStatement,
+    DropCacheStatement, DropTableStatement, DropViewStatement, ExplainStatement, Expr,
+    FieldDefinitionExpr, FieldReference, FunctionExpr, GroupByClause, InValue, InsertStatement,
+    JoinClause, JoinConstraint, JoinRightSide, Literal, OrderBy, OrderClause, Relation,
+    SelectSpecification, SelectStatement, SetNames, SetPostgresParameter, SetStatement,
+    SetVariables, ShowStatement, SqlIdentifier, SqlQuery, SqlType, TableExpr, TableExprInner,
+    TableKey, UpdateStatement, UseStatement,
 };
 
 /// Each method of the `VisitorMut` trait is a hook to be potentially overridden when recursively
@@ -428,6 +428,13 @@ pub trait VisitorMut<'ast>: Sized {
         comment_statement: &'ast mut CommentStatement,
     ) -> Result<(), Self::Error> {
         walk_comment_statement(self, comment_statement)
+    }
+
+    fn visit_deallocate_statement(
+        &mut self,
+        _deallocate_statement: &'ast DeallocateStatement,
+    ) -> Result<(), Self::Error> {
+        Ok(())
     }
 
     fn visit_sql_query(&mut self, sql_query: &'ast mut SqlQuery) -> Result<(), Self::Error> {
@@ -1168,6 +1175,7 @@ pub fn walk_sql_query<'a, V: VisitorMut<'a>>(
         SqlQuery::Show(statement) => visitor.visit_show_statement(statement),
         SqlQuery::Explain(statement) => visitor.visit_explain_statement(statement),
         SqlQuery::Comment(statement) => visitor.visit_comment_statement(statement),
+        SqlQuery::Deallocate(statement) => visitor.visit_deallocate_statement(statement),
     }
 }
 

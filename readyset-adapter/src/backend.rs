@@ -2693,6 +2693,8 @@ where
                         upstream.query(raw_query).await.map(QueryResult::Upstream)
                     }
 
+                    SqlQuery::Deallocate(_) => todo!("next patch in CL"),
+
                     SqlQuery::StartTransaction(_) | SqlQuery::Commit(_) | SqlQuery::Rollback(_) => {
                         Self::handle_transaction_boundaries(
                             Some(upstream),

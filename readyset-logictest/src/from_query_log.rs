@@ -102,6 +102,7 @@ fn is_ddl(query: &SqlQuery) -> bool {
         | SqlQuery::Rollback(_)
         | SqlQuery::Show(_)
         | SqlQuery::Explain(_)
+        | SqlQuery::Deallocate(_)
         | SqlQuery::Comment(_) => false,
         SqlQuery::CreateTable(_)
         | SqlQuery::CreateView(_)
