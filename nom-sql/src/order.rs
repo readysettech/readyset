@@ -9,6 +9,7 @@ use nom::combinator::{map, opt, value};
 use nom::multi::separated_list1;
 use nom::sequence::preceded;
 use nom_locate::LocatedSpan;
+use proptest::collection::size_range;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
@@ -255,6 +256,10 @@ mod tests {
 
     mod postgres {
         use super::*;
+
+        test_format_parse_round_trip! {
+            rt_order_clause(order_clause, OrderClause, Dialect::PostgreSQL);
+        }
 
         #[test]
         fn order_prints_column_table() {
