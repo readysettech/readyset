@@ -6,9 +6,9 @@ use ::mir::visualize::GraphViz;
 use ::mir::DfNodeIndex;
 use ::serde::{Deserialize, Serialize};
 use nom_sql::{
-    CompoundSelectOperator, CompoundSelectStatement, CreateTableBody, DialectDisplay,
-    FieldDefinitionExpr, NonReplicatedRelation, NotReplicatedReason, Relation, SelectSpecification,
-    SelectStatement, SqlIdentifier, SqlType, TableExpr,
+    parse_select_statement, CompoundSelectOperator, CompoundSelectStatement, CreateTableBody,
+    DialectDisplay, FieldDefinitionExpr, NonReplicatedRelation, NotReplicatedReason, Relation,
+    SelectSpecification, SelectStatement, SqlIdentifier, SqlType, TableExpr,
 };
 use petgraph::graph::NodeIndex;
 use readyset_client::recipe::changelist::{AlterTypeChange, Change, PostgresTableMetadata};
@@ -368,7 +368,18 @@ impl SqlIncorporator {
                     self.add_view(stmt.name, definition, schema_search_path.clone())?;
                 }
                 Change::CreateCache(cc) => {
+                    // If we see an error for a display/parse round trip, the cache will not
+                    // succeed in automatically being restored from the authority after a
+                    // backwards-incompatible change. We log the query here as a failsafe, so that
+                    // we can fix the round trip parsing before doing the
+                    // upgrade or manually intervene if necessariy.
+                    if !can_round_trip_select(&cc.statement) {
+                        error!(stmt=%cc.statement.display(RecipeChanges::DIALECT), "Parsing round trip failed. Cache will not be automatically re-created after a backwards-incompatible upgrade");
+                    }
+                    // We still add the statement to the authority, because if we fix the issue
+                    // preventing the round-trip, it can still be loaded with an upgrade.
                     res.add_cache_statement(cc.clone());
+
                     self.add_query(cc.name, *cc.statement, cc.always, &schema_search_path, mig)?;
                 }
                 Change::AlterTable(_) => {
@@ -1286,5 +1297,16 @@ impl SqlIncorporator {
     fn register_query(&mut self, query_name: Relation, fields: Vec<SqlIdentifier>) {
         debug!(query_name = %query_name.display_unquoted(), "registering query");
         self.view_schemas.insert(query_name, fields);
+    }
+}
+
+/// Returns true if we can display and re-parse the provided [`SelectStatement`] and they are
+/// equal, otherwise returns false.
+fn can_round_trip_select(statement: &SelectStatement) -> bool {
+    let displayed = statement.display(RecipeChanges::DIALECT).to_string();
+    if let Ok(ref parsed) = parse_select_statement(RecipeChanges::DIALECT, &displayed) {
+        statement == parsed
+    } else {
+        false
     }
 }
