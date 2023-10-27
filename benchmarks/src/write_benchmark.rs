@@ -156,6 +156,7 @@ async fn create_indices(
                 inner: Ok(CacheInner::Statement(Box::new(query))),
                 always: false,
                 concurrently: false,
+                unparsed_create_cache_statement: "unused for benchmark".to_string(),
             };
             conn.query_drop(create_cache.display(conn.dialect()).to_string())
                 .await?;

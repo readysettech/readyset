@@ -62,9 +62,11 @@ impl Recipe {
                 name,
                 statement,
                 always,
+                unparsed_statement,
             } => SqlQuery::CreateCache(CreateCacheStatement {
                 name: Some(name.clone()),
                 inner: Ok(CacheInner::Statement(Box::new(statement.clone()))),
+                unparsed_create_cache_statement: unparsed_statement.clone(),
                 always: *always,
                 concurrently: false, // concurrently not relevant after migrating
             }),

@@ -369,7 +369,15 @@ impl SqlIncorporator {
                 }
                 Change::CreateCache(cc) => {
                     res.add_cache_statement(cc.clone());
-                    self.add_query(cc.name, *cc.statement, cc.always, &schema_search_path, mig)?;
+
+                    self.add_query(
+                        cc.name,
+                        *cc.statement,
+                        cc.unparsed_create_cache_statement,
+                        cc.always,
+                        &schema_search_path,
+                        mig,
+                    )?;
                 }
                 Change::AlterTable(_) => {
                     // The only ALTER TABLE changes that can end up here (currently) are ones that
@@ -611,6 +619,7 @@ impl SqlIncorporator {
         &mut self,
         name: Option<Relation>,
         mut stmt: SelectStatement,
+        unparsed_statement: String,
         always: bool,
         schema_search_path: &[SqlIdentifier],
         mig: &mut Migration<'_>,
@@ -675,6 +684,7 @@ impl SqlIncorporator {
             name: name.clone(),
             statement: stmt,
             always,
+            unparsed_statement,
         })?;
         self.registry
             .insert_invalidating_tables(name.clone(), invalidating_tables)?;

@@ -996,6 +996,7 @@ impl NoriaConnector {
         &mut self,
         name: Option<&Relation>,
         statement: &nom_sql::SelectStatement,
+        unparsed_create_cache_statment: String,
         override_schema_search_path: Option<Vec<SqlIdentifier>>,
         always: bool,
         concurrently: bool,
@@ -1006,7 +1007,12 @@ impl NoriaConnector {
         let schema_search_path =
             override_schema_search_path.unwrap_or_else(|| self.schema_search_path.clone());
         let changelist = ChangeList::from_change(
-            Change::create_cache(name.clone(), statement.clone(), always),
+            Change::create_cache(
+                name.clone(),
+                statement.clone(),
+                unparsed_create_cache_statment,
+                always,
+            ),
             self.dialect,
         )
         .with_schema_search_path(schema_search_path.clone());
@@ -1067,8 +1073,17 @@ impl NoriaConnector {
                         );
                     }
 
+                    // We currently don't fully support async migrations, and piping through the
+                    // full 'create cache' string for _every_ query we see would be overly
+                    // expensive, so we fall back to constructing a 'create cache' statement from a
+                    // displayed version of the the SelectStatement we already parsed in this case
                     let changelist = ChangeList::from_change(
-                        Change::create_cache(qname.clone(), q.clone(), false),
+                        Change::create_cache(
+                            qname.clone(),
+                            q.clone(),
+                            format!("create cache from {}", q.display(self.parse_dialect)),
+                            false,
+                        ),
                         self.dialect,
                     )
                     .with_schema_search_path(search_path);
