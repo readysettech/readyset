@@ -1701,6 +1701,7 @@ where
         &mut self,
         name: Option<&Relation>,
         mut stmt: SelectStatement,
+        unparsed_create_cache_statment: String,
         override_schema_search_path: Option<Vec<SqlIdentifier>>,
         always: bool,
         concurrently: bool,
@@ -1721,7 +1722,7 @@ where
         rewrite::process_query(&mut stmt, self.noria.server_supports_pagination())?;
         let migration_state = match self
             .noria
-            .handle_create_cached_query(name, &stmt, override_schema_search_path, always, concurrently)
+            .handle_create_cached_query(name, &stmt, unparsed_create_cache_statment, override_schema_search_path, always, concurrently)
             .await
         {
             Ok(None) => MigrationState::Successful,
@@ -2012,6 +2013,7 @@ where
                 inner,
                 always,
                 concurrently,
+                unparsed_create_cache_statement,
             }) => {
                 let (stmt, search_path) = match inner {
                     Ok(CacheInner::Statement(st)) => (*st.clone(), None),
@@ -2051,8 +2053,15 @@ where
                     trace!("No telemetry sender. not sending metric for CREATE CACHE");
                 }
 
-                self.create_cached_query(name.as_ref(), stmt, search_path, *always, *concurrently)
-                    .await
+                self.create_cached_query(
+                    name.as_ref(),
+                    stmt,
+                    unparsed_create_cache_statement.clone(),
+                    search_path,
+                    *always,
+                    *concurrently,
+                )
+                .await
             }
             SqlQuery::DropCache(DropCacheStatement { name }) => self.drop_cached_query(name).await,
             SqlQuery::DropAllCaches(_) => self.drop_all_caches().await,

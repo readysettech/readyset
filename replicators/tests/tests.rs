@@ -426,6 +426,7 @@ impl TestHandle {
 
     async fn check_results_inner(&mut self, view_name: &str) -> ReadySetResult<Vec<Vec<DfValue>>> {
         let query_name = format!("q_{view_name}");
+        let select_stmt = format!("SELECT * FROM public.{view_name}");
         self.controller()
             .await
             .extend_recipe(ChangeList::from_changes(
@@ -443,11 +444,11 @@ impl TestHandle {
                             name: query_name.clone().into(),
                         }),
                         statement: Box::new(
-                            parse_select_statement(
-                                nom_sql::Dialect::MySQL,
-                                format!("SELECT * FROM public.{view_name}"),
-                            )
-                            .unwrap(),
+                            parse_select_statement(nom_sql::Dialect::MySQL, select_stmt.clone())
+                                .unwrap(),
+                        ),
+                        unparsed_create_cache_statement: format!(
+                            "create cache {query_name} from {select_stmt}"
                         ),
                         always: false,
                     }),
@@ -1701,6 +1702,7 @@ async fn postgresql_ddl_replicate_drop_view_internal(url: &str) {
             .unwrap(),
         ),
         always: false,
+        unparsed_create_cache_statement: "unused for test".to_string(),
     });
     ctx.noria
         .extend_recipe(ChangeList::from_change(
@@ -1781,7 +1783,8 @@ async fn postgresql_ddl_replicate_create_view_internal(url: &str) {
                     )
                     .unwrap()
                 ),
-                always: true
+                always: true,
+                unparsed_create_cache_statement: "unused for test".to_string(),
             }),
             Dialect::DEFAULT_POSTGRESQL
         ))

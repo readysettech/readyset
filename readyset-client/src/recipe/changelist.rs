@@ -197,6 +197,7 @@ impl ChangeList {
                                 name,
                                 inner,
                                 always,
+                                unparsed_create_cache_statement,
                                 ..
                             }) => {
                                 let statement = match inner {
@@ -219,6 +220,7 @@ impl ChangeList {
                                     name,
                                     statement,
                                     always,
+                                    unparsed_create_cache_statement,
                                 }))
                             }
                             SqlQuery::AlterTable(ats) => changes.push(Change::AlterTable(ats)),
@@ -320,6 +322,9 @@ pub struct CreateCache {
     pub name: Option<Relation>,
     /// The `SELECT` statement for the body of the cache
     pub statement: Box<SelectStatement>,
+    /// A full copy of the original 'create cache' statement that can be used to re-create the
+    /// cache after an upgrade
+    pub unparsed_create_cache_statement: String,
     /// If set to `true`, execution of this cache will bypass transaction handling in the
     /// adapter
     pub always: bool,
@@ -408,9 +413,14 @@ pub enum Change {
 }
 
 impl Change {
-    /// Creates a new [`Change::CreateCache`] from the given `name` and
-    /// [`SelectStatement`].
-    pub fn create_cache<N>(name: N, statement: SelectStatement, always: bool) -> Self
+    /// Creates a new [`Change::CreateCache`] from the given `name`,
+    /// [`SelectStatement`], and unparsed String.
+    pub fn create_cache<N>(
+        name: N,
+        statement: SelectStatement,
+        unparsed_create_cache_statement: String,
+        always: bool,
+    ) -> Self
     where
         N: Into<Relation>,
     {
@@ -418,6 +428,7 @@ impl Change {
             name: Some(name.into()),
             statement: Box::new(statement),
             always,
+            unparsed_create_cache_statement,
         })
     }
 

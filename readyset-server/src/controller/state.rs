@@ -30,10 +30,7 @@ use dataflow::{
 use futures::stream::{self, FuturesUnordered, StreamExt, TryStreamExt};
 use futures::{FutureExt, TryFutureExt, TryStream};
 use metrics::{gauge, histogram};
-use nom_sql::{
-    CacheInner, CreateCacheStatement, DialectDisplay, NonReplicatedRelation, Relation,
-    SqlIdentifier, SqlQuery,
-};
+use nom_sql::{CreateCacheStatement, NonReplicatedRelation, Relation, SqlIdentifier, SqlQuery};
 use petgraph::visit::{Bfs, IntoNodeReferences};
 use petgraph::Direction;
 use rand::Rng;
@@ -89,29 +86,15 @@ const CONCURRENT_REQUESTS: usize = 16;
 /// Set of relevant changes applied to a recipe during a call to `extend_recipe`
 #[derive(Debug, Clone, Default)]
 pub(crate) struct RecipeChanges {
-    /// List of new cache statements which have been added, formatted using
-    /// [`RecipeChanges::DIALECT`].
+    /// List of new cache statements which have been added
     pub(crate) new_cache_statements: Vec<String>,
 }
 
 impl RecipeChanges {
-    /// Dialect used to format and parse statements within the authority
-    pub const DIALECT: nom_sql::Dialect = nom_sql::Dialect::PostgreSQL;
-
-    /// Add a new [`CreateCache`] statement to this set of recipe changes
+    /// Add a new unparsed `create cache` statement to this set of recipe changes
     pub(crate) fn add_cache_statement(&mut self, stmt: CreateCache) {
-        self.new_cache_statements.push(
-            CreateCacheStatement {
-                name: stmt.name,
-                inner: Ok(CacheInner::Statement(stmt.statement)),
-                always: stmt.always,
-                // Since these will be used to restore caches after an upgrade, set this to run
-                // them concurrently regardless of how they were originally cached.
-                concurrently: true,
-            }
-            .display(Self::DIALECT)
-            .to_string(),
-        );
+        self.new_cache_statements
+            .push(stmt.unparsed_create_cache_statement);
     }
 }
 

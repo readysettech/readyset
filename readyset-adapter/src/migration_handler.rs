@@ -15,6 +15,7 @@ use readyset_client::query::{MigrationState, Query};
 use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_client::{PlaceholderIdx, ReadySetHandle, ViewCreateRequest};
 use readyset_client_metrics::recorded;
+use readyset_data::dialect::SqlEngine;
 use readyset_data::DfValue;
 use readyset_errors::{internal_err, ReadySetResult};
 use readyset_sql_passes::InlineLiterals;
@@ -166,15 +167,24 @@ impl MigrationHandler {
 
             // Perform a migration on the original query to update the cache
             // TODO(ENG-2820): Implement retry
+            //
+            // We currently don't fully support inlined migrations, and piping through the
+            // full 'create cache' string for _every_ query we see would be overly
+            // expensive, so we fall back to constructing a 'create cache' statement from a
+            // displayed version of the the SelectStatement we already parsed in this case
             if !successful_migrations.is_empty() {
                 let _ = self
                     .noria
                     .handle_create_cached_query(
                         None,
                         &query.query().statement,
+                        format!(
+                            "create cache from {}",
+                            query.query().statement.display(self.parse_dialect())
+                        ),
                         Some(query.query().schema_search_path.clone()),
-                        false,
-                        false,
+                        /* always */ false,
+                        /* concurrently */ false,
                     )
                     .await;
                 // Inform the query status cache of completed migrations
@@ -294,6 +304,10 @@ impl MigrationHandler {
             .handle_create_cached_query(
                 None,
                 &inlined_query,
+                format!(
+                    "create cache from {}",
+                    inlined_query.display(self.parse_dialect())
+                ),
                 Some(view_request.schema_search_path.clone()),
                 false,
                 false,
@@ -327,8 +341,10 @@ impl MigrationHandler {
         }
         let qname =
             utils::generate_query_name(&view_request.statement, &view_request.schema_search_path);
+
+        // We do not need to provide a real "create cache" String for a dry run migration
         let changelist = ChangeList::from_change(
-            Change::create_cache(qname, view_request.statement.clone(), false),
+            Change::create_cache(qname, view_request.statement.clone(), "".to_string(), false),
             self.dialect,
         )
         .with_schema_search_path(view_request.schema_search_path.clone());
@@ -344,6 +360,13 @@ impl MigrationHandler {
                     .update_query_migration_state(view_request, MigrationState::Unsupported);
             }
             _ => {} // Leave it as pending.
+        }
+    }
+
+    fn parse_dialect(&self) -> nom_sql::Dialect {
+        match self.dialect.engine() {
+            SqlEngine::PostgreSQL => nom_sql::Dialect::PostgreSQL,
+            SqlEngine::MySQL => nom_sql::Dialect::MySQL,
         }
     }
 }

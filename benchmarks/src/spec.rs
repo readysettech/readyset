@@ -269,6 +269,7 @@ impl WorkloadSpec {
                 let create_cache_query = nom_sql::CreateCacheStatement {
                     name: None,
                     inner: Ok(nom_sql::CacheInner::Statement(Box::new(stmt))),
+                    unparsed_create_cache_statement: spec.clone(),
                     always: false,
                     concurrently: false,
                 };
