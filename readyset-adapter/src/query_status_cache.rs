@@ -17,7 +17,7 @@ use readyset_client::query::*;
 use readyset_client::ViewCreateRequest;
 use readyset_data::DfValue;
 use readyset_util::hash::hash;
-use tracing::error;
+use tracing::{error, warn};
 
 pub const DEFAULT_QUERY_STATUS_CAPACITY: usize = 100_000;
 
@@ -84,8 +84,16 @@ impl PersistentStatusCacheHandle {
     }
 
     fn insert_with_status(&self, q: Query, id: QueryId, status: QueryStatus) {
-        let mut statuses = self.statuses.write();
-        statuses.put(id, (q, status));
+        // Deadlock avoidance: If `with_mut_status` is passed a Fn that tries to write the RwLock,
+        // it will result in a deadlock.
+        match self.statuses.try_write_for(Duration::from_millis(10)) {
+            Some(mut status_guard) => {
+                status_guard.put(id, (q, status));
+            }
+            None => {
+                warn!(query_id=%id, "Avoiding deadlock when trying to insert")
+            }
+        }
     }
 
     fn allow_list(&self) -> Vec<(QueryId, Arc<ViewCreateRequest>, QueryStatus)> {
@@ -448,7 +456,7 @@ impl QueryStatusCache {
     where
         Q: QueryStatusKey,
     {
-        q.with_mut_status(self, |s| {
+        let should_insert = q.with_mut_status(self, |s| {
             match s {
                 Some(mut s) => {
                     // We do not support transitions from the `Unsupported` state, as we assume
@@ -462,20 +470,23 @@ impl QueryStatusCache {
                     ) {
                         s.migration_state = MigrationState::Pending
                     }
+                    false
                 }
                 // If the query was not in the cache, make a new entry
-                None => {
-                    self.insert_with_status(
-                        q.clone(),
-                        QueryStatus {
-                            migration_state: MigrationState::Pending,
-                            execution_info: None,
-                            always: false,
-                        },
-                    );
-                }
+                None => true,
             }
         });
+
+        if should_insert {
+            self.insert_with_status(
+                q.clone(),
+                QueryStatus {
+                    migration_state: MigrationState::Pending,
+                    execution_info: None,
+                    always: false,
+                },
+            );
+        }
     }
 
     /// Updates a query's migration state to `m` unless the query's migration state was
@@ -489,7 +500,7 @@ impl QueryStatusCache {
         // Dropped should not be set manually
         debug_assert!(!matches!(m, MigrationState::Dropped));
 
-        q.with_mut_status(self, |s| {
+        let should_insert = q.with_mut_status(self, |s| {
             match s {
                 Some(mut s) => {
                     match s.migration_state {
@@ -506,19 +517,21 @@ impl QueryStatusCache {
                         // All other state transitions are allowed.
                         _ => s.migration_state = m.clone(),
                     }
+                    false
                 }
-                None => {
-                    self.insert_with_status(
-                        q.clone(),
-                        QueryStatus {
-                            migration_state: m.clone(),
-                            execution_info: None,
-                            always: false,
-                        },
-                    );
-                }
+                None => true,
             }
-        })
+        });
+        if should_insert {
+            self.insert_with_status(
+                q.clone(),
+                QueryStatus {
+                    migration_state: m,
+                    execution_info: None,
+                    always: false,
+                },
+            );
+        }
     }
 
     /// Marks a query as dropped by the user.
@@ -529,41 +542,45 @@ impl QueryStatusCache {
     where
         Q: QueryStatusKey,
     {
-        q.with_mut_status(self, |s| match s {
+        let should_insert = q.with_mut_status(self, |s| match s {
             Some(mut s) => {
                 s.migration_state = MigrationState::Dropped;
+                false
             }
-            None => {
-                self.insert_with_status(
-                    q.clone(),
-                    QueryStatus {
-                        migration_state: MigrationState::Dropped,
-                        execution_info: None,
-                        always: false,
-                    },
-                );
-            }
-        })
+            None => true,
+        });
+        if should_insert {
+            self.insert_with_status(
+                q.clone(),
+                QueryStatus {
+                    migration_state: MigrationState::Dropped,
+                    execution_info: None,
+                    always: false,
+                },
+            );
+        }
     }
 
     /// This function is called if we attempted to create an inlined migration but received an
     /// unsupported error. Updates the query status and removes pending inlined migrations.
     pub fn unsupported_inlined_migration(&self, q: &ViewCreateRequest) {
-        q.with_mut_status(self, |s| match s {
+        let should_insert = q.with_mut_status(self, |s| match s {
             Some(mut s) => {
                 s.migration_state = MigrationState::Unsupported;
+                false
             }
-            None => {
-                self.insert_with_status(
-                    q.clone(),
-                    QueryStatus {
-                        migration_state: MigrationState::Unsupported,
-                        execution_info: None,
-                        always: false,
-                    },
-                );
-            }
+            None => true,
         });
+        if should_insert {
+            self.insert_with_status(
+                q.clone(),
+                QueryStatus {
+                    migration_state: MigrationState::Unsupported,
+                    execution_info: None,
+                    always: false,
+                },
+            );
+        }
         self.persistent_handle.pending_inlined_migrations.remove(q);
     }
 
@@ -590,18 +607,21 @@ impl QueryStatusCache {
     where
         Q: QueryStatusKey,
     {
-        q.with_mut_status(self, |s| match s {
+        let should_insert = q.with_mut_status(self, |s| match s {
             Some(mut s) if s.migration_state != MigrationState::Unsupported => {
                 s.migration_state = status.migration_state.clone();
                 s.execution_info = status.execution_info.clone();
+                false
             }
             Some(mut s) => {
                 s.execution_info = status.execution_info.clone();
+                false
             }
-            None => {
-                self.insert_with_status(q.clone(), status.clone());
-            }
-        })
+            None => true,
+        });
+        if should_insert {
+            self.insert_with_status(q.clone(), status);
+        }
     }
 
     /// Clear all queries currently marked as successful from the cache.
@@ -1166,5 +1186,22 @@ mod tests {
         cache.update_query_migration_state(&q, MigrationState::Successful);
         cache.clear();
         assert_eq!(cache.query_migration_state(&q).1, MigrationState::Pending);
+    }
+
+    #[test]
+    fn avoid_insert_deadlock() {
+        readyset_tracing::init_test_logging();
+        let cache = QueryStatusCache::new().style(MigrationStyle::Explicit);
+        let q = Query::ParseFailed(Arc::new("foobar".to_string()));
+
+        q.with_mut_status(&cache, |_| {
+            // Simulate it being removed by lru cache then inserted
+            let query = Query::ParseFailed(Arc::new("foobar".to_string()));
+            let query_id = QueryId::new(0);
+            let query_status = QueryStatus::default_for_query(&query);
+            cache
+                .persistent_handle
+                .insert_with_status(query, query_id, query_status);
+        });
     }
 }
