@@ -139,7 +139,7 @@ pub struct DfState {
     ///     deleted once the `Controller` is dropped. Useful for tests.
     ///  3. `DurabilityMode::MemoryOnly`: no writes to disk, store all writes in memory.
     ///     Useful for baseline numbers.
-    persistence: PersistenceParameters,
+    pub(super) persistence: PersistenceParameters,
     pub(super) materializations: Materializations,
 
     /// Current recipe

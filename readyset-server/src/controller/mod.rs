@@ -868,6 +868,8 @@ impl AuthorityLeaderElectionState {
                                 }
                                 state.dataflow_state.domain_config = self.config.domain_config.clone();
                                 state.dataflow_state.replication_strategy = self.config.replication_strategy;
+                                state.dataflow_state.materializations.set_config(self.config.materialization_config.clone());
+                                state.dataflow_state.persistence = self.config.persistence.clone();
                                 state.config = self.config.clone();
                                 Ok(state)
                             }
