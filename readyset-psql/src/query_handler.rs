@@ -313,6 +313,7 @@ lazy_static! {
     static ref ALLOWED_PARAMETERS_WITH_VALUE: HashMap<&'static str, AllowedParameterValue> =
         HashMap::from([
             ("client_encoding", AllowedParameterValue::one_of([
+                PostgresParameterValue::literal("utf8"),
                 PostgresParameterValue::literal("utf-8"),
                 PostgresParameterValue::literal("UTF8"),
                 PostgresParameterValue::literal("unicode"),
