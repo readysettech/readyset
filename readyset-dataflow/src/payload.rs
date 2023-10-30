@@ -246,7 +246,8 @@ pub enum EvictRequest {
 }
 
 /// A request issued to a domain through the worker RPC interface.
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug, EnumDiscriminants)]
+#[strum_discriminants(derive(EnumIter, EnumCount, IntoStaticStr))]
 #[allow(clippy::large_enum_variant)]
 pub enum DomainRequest {
     /// Request that a domain send usage statistics.

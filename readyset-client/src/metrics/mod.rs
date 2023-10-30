@@ -244,6 +244,29 @@ pub mod recorded {
     /// | packet_type | The packet's type |
     pub const DOMAIN_TOTAL_HANDLE_PACKET_TIME: &str = "readyset_domain.total_handle_packet_time_us";
 
+    /// Histogram: The time in microseconds that the domain spends handling an
+    /// incoming domain request. This is aggregate metric per request's type.
+    /// Recorded at the domain following request handling.
+    ///
+    /// | Tag | Description |
+    /// | --- | ----------- |
+    /// | domain | The index of the domain the request is recorded in. |
+    /// | shard | The shard the request is recorded in. |
+    /// | request_type | The request's type |
+    pub const DOMAIN_HANDLE_REQUEST_TIME: &str = "readyset_domain.handle_request_time_us";
+
+    /// Counter: The total time in microseconds that the domain spends handling
+    /// an incoming domain request. This is aggregate metric per request's type.
+    /// Recorded at the domain following request handling.
+    ///
+    /// | Tag | Description |
+    /// | --- | ----------- |
+    /// | domain | The index of the domain the request is recorded in. |
+    /// | shard | The shard the request is recorded in. |
+    /// | request_type | The packet's type |
+    pub const DOMAIN_TOTAL_HANDLE_REQUEST_TIME: &str =
+        "readyset_domain.total_handle_request_time_us";
+
     /// Histogram: The amount of time spent handling an eviction
     /// request.
     pub const EVICTION_TIME: &str = "readyset_eviction_time_us";

@@ -16,6 +16,7 @@ use readyset_client::metrics::recorded;
 use strum::{EnumCount, IntoEnumIterator};
 
 use crate::domain::{LocalNodeIndex, Tag};
+use crate::payload::DomainRequestDiscriminants;
 use crate::{NodeMap, Packet, PacketDiscriminants};
 
 /// Contains handles to the various metrics collected for a domain.
@@ -50,6 +51,8 @@ pub(super) struct DomainMetrics {
     node_state_size: NodeMap<Gauge>,
     packet_handle_time: [Histogram; PacketDiscriminants::COUNT],
     total_packet_handle_time: [Counter; PacketDiscriminants::COUNT],
+    request_handle_time: [Histogram; DomainRequestDiscriminants::COUNT],
+    total_request_handle_time: [Counter; DomainRequestDiscriminants::COUNT],
 }
 
 impl DomainMetrics {
@@ -93,6 +96,26 @@ impl DomainMetrics {
                 )
             })
             .collect();
+        let request_handle_time: Vec<Histogram> = DomainRequestDiscriminants::iter()
+            .map(|d| {
+                let name: &'static str = d.into();
+                register_histogram!(recorded::DOMAIN_HANDLE_REQUEST_TIME,
+                                  "domain" => index.clone(),
+                                  "shard" => shard.clone(),
+                                  "request_type" => name,
+                )
+            })
+            .collect();
+        let total_request_handle_time: Vec<Counter> = DomainRequestDiscriminants::iter()
+            .map(|d| {
+                let name: &'static str = d.into();
+                register_counter!(recorded::DOMAIN_TOTAL_HANDLE_REQUEST_TIME,
+                                  "domain" => index.clone(),
+                                  "shard" => shard.clone(),
+                                  "request_type" => name,
+                )
+            })
+            .collect();
         DomainMetrics {
             partial_state_size: register_gauge!(
                 recorded::DOMAIN_PARTIAL_STATE_SIZE_BYTES,
@@ -121,9 +144,20 @@ impl DomainMetrics {
             node_state_size: Default::default(),
             packet_handle_time: packet_handle_time.try_into().ok().unwrap(),
             total_packet_handle_time: total_packet_handle_time.try_into().ok().unwrap(),
+            request_handle_time: request_handle_time.try_into().ok().unwrap(),
+            total_request_handle_time: total_request_handle_time.try_into().ok().unwrap(),
             shard,
             index,
         }
+    }
+
+    pub(super) fn rec_request_handle_time(
+        &self,
+        time: Duration,
+        discriminant: DomainRequestDiscriminants,
+    ) {
+        self.request_handle_time[discriminant as usize].record(time.as_micros() as f64);
+        self.total_request_handle_time[discriminant as usize].increment(time.as_micros() as u64);
     }
 
     pub(super) fn rec_packet_handle_time(&self, time: Duration, discriminant: PacketDiscriminants) {

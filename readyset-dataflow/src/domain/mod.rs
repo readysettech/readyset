@@ -48,8 +48,8 @@ use crate::domain::channel::{ChannelCoordinator, DomainReceiver, DomainSender};
 use crate::node::special::EgressTx;
 use crate::node::{NodeProcessingResult, ProcessEnv};
 use crate::payload::{
-    EvictRequest, MaterializedState, PrepareStateKind, PrettyReplayPath, ReplayPieceContext,
-    SourceSelection,
+    DomainRequestDiscriminants, EvictRequest, MaterializedState, PrepareStateKind,
+    PrettyReplayPath, ReplayPieceContext, SourceSelection,
 };
 use crate::prelude::*;
 use crate::processing::ColumnMiss;
@@ -1393,6 +1393,8 @@ impl Domain {
         executor: &mut dyn Executor,
     ) -> ReadySetResult<Option<Vec<u8>>> {
         trace!(?req, "processing domain request");
+        let discriminant: DomainRequestDiscriminants = (&req).into();
+        let start = time::Instant::now();
         let ret = match req {
             DomainRequest::AddNode { node, parents } => {
                 let addr = node.local_addr();
@@ -2347,6 +2349,8 @@ impl Domain {
                 Ok(Some(bincode::serialize(&key)?))
             }
         };
+        self.metrics
+            .rec_request_handle_time(start.elapsed(), discriminant);
         // What we just did might have done things like insert into `self.delayed_for_self`, so
         // run the event loop before returning to make sure that gets processed.
         //
