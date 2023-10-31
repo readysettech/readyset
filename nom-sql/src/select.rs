@@ -2075,6 +2075,7 @@ mod tests {
             rt_join_rhs(join_rhs, JoinRightSide, Dialect::PostgreSQL);
             rt_join_constraint(join_constraint, JoinConstraint, Dialect::PostgreSQL);
             rt_join_clause(join_clause, JoinClause, Dialect::PostgreSQL);
+            rt_group_by_clause(group_by_clause, GroupByClause, Dialect::PostgreSQL);
         );
 
         #[test]
