@@ -15,7 +15,7 @@ services:
       PROMETHEUS_METRICS: true
       QUERY_CACHING: explicit
       QUERY_LOG_MODE: all-queries
-      STANDALONE: true
+      DEPLOYMENT_MODE: 'standalone'
       DEPLOYMENT: docker_compose_deployment
       LISTEN_ADDRESS: 0.0.0.0:5433
       # UPSTREAM_DB_URL:

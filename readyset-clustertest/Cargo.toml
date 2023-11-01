@@ -23,6 +23,7 @@ tracing = { version = "0.1", features = ["release_max_level_debug"] }
 # local deps
 database-utils = { path = "../database-utils" }
 nom-sql = { path = "../nom-sql" }
+readyset-adapter = { path = "../readyset-adapter" }
 readyset-client = { path = "../readyset-client", features = ["failure_injection"] }
 readyset-data = { path = "../readyset-data" }
 readyset-util = { path = "../readyset-util" }
@@ -33,7 +34,6 @@ readyset-errors = { path = "../readyset-errors" }
 serial_test = "0.5.1"
 criterion = { version = "0.3", features=['real_blackbox', 'async_tokio']}
 itertools = "0.10.4"
-readyset-adapter = { path = "../readyset-adapter" }
 readyset-client-metrics = { path = "../readyset-client-metrics" }
 test-utils = { path = "../test-utils" }
 readyset-clustertest-macros = { path = "./macros" }

@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use database_utils::DatabaseType;
+use readyset_adapter::DeploymentMode;
 use tokio::select;
 use tokio::sync::Mutex;
 
@@ -267,8 +268,8 @@ impl AdapterBuilder {
         self.push_arg_kv("--min-workers", &min_workers.to_string())
     }
 
-    pub fn standalone(self) -> Self {
-        self.push_arg("--standalone")
+    pub fn deployment_mode(self, deployment_mode: DeploymentMode) -> Self {
+        self.push_arg_kv("--deployment-mode", deployment_mode.to_string().as_str())
     }
 
     pub fn cleanup(self) -> Self {
@@ -340,10 +341,6 @@ impl AdapterBuilder {
 
     pub fn enable_experimental_placeholder_inlining(self) -> Self {
         self.push_arg("--experimental-placeholder-inlining")
-    }
-
-    pub fn embedded_readers(self) -> Self {
-        self.push_arg("--embedded-readers")
     }
 
     pub fn allow_full_materialization(self) -> Self {
