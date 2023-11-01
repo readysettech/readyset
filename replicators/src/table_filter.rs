@@ -31,7 +31,7 @@ use readyset_util::redacted::RedactedString;
 pub(crate) struct TableFilter {
     /// A mapping between schema to the list of tables to replicate from that schema.
     /// Only the tables included in the map will be replicated.
-    /// This is only populated by the --rplication-tables option
+    /// This is only populated by the --replication-tables option
     explicitly_replicated: BTreeMap<SqlIdentifier, ReplicateTableSpec>,
     /// A mapping between schema to the list of tables to *NOT* replicate from that schema.
     /// Any other valid tables will be replicated, where a valid table is either one of the tables
