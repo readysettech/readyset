@@ -89,7 +89,7 @@
     :--authority-address (authority-address test)
     :--upstream-db-url (upstream-db-url test)
     :--disable-upstream-ssl-verification
-    :--embedded-readers
+    :--deployment-mode "embedded-readers"
     :--reader-replicas (str (nodes/num-adapters test)))))
 
 (defn kill-readyset-adapter!

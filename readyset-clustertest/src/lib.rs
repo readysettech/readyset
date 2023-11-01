@@ -226,6 +226,7 @@ use futures::executor;
 use hyper::Client;
 use mysql_async::prelude::Queryable;
 use rand::Rng;
+use readyset_adapter::DeploymentMode;
 #[cfg(test)]
 use readyset_clustertest_macros::clustertest;
 use readyset_errors::ReadySetResult;
@@ -445,20 +446,18 @@ pub struct DeploymentBuilder {
     wait_for_failpoint: FailpointDestination,
     /// Type of the upstream database (mysql or postgresql)
     database_type: DatabaseType,
-    /// If true, run the adapter in standalone mode, using the default [`ServerStartParams`]
-    standalone: bool,
     /// If true, runs the adapter in cleanup mode, which cleans up deployment related assets for
     /// the given deployment name.
     cleanup: bool,
     /// Whether to automatically create inlined migrations for a query with unsupported
     /// placeholders.
     enable_experimental_placeholder_inlining: bool,
-    /// Whether to enable embedded readers mode in the adapter
-    embedded_readers: bool,
     /// Whether to allow fully materialized nodes or not
     allow_full_materialization: bool,
     /// Whether to allow prometheus metrics
     prometheus_metrics: bool,
+    /// How to execute the adapter and server processes.
+    deployment_mode: DeploymentMode,
 }
 
 pub enum FailpointDestination {
@@ -528,10 +527,9 @@ impl DeploymentBuilder {
             auto_restart: false,
             wait_for_failpoint: FailpointDestination::None,
             database_type,
-            standalone: false,
+            deployment_mode: DeploymentMode::Adapter,
             cleanup: false,
             enable_experimental_placeholder_inlining: false,
-            embedded_readers: false,
             allow_full_materialization: false,
             prometheus_metrics: false,
         }
@@ -583,7 +581,7 @@ impl DeploymentBuilder {
 
     /// Run the adapter(s) in standalone mode with the default ServerStartParams
     pub fn standalone(mut self) -> Self {
-        self.standalone = true;
+        self.deployment_mode = DeploymentMode::Standalone;
         self
     }
 
@@ -699,7 +697,10 @@ impl DeploymentBuilder {
 
     /// Sets whether to enable embedded readers mode in the adapter
     pub fn embedded_readers(mut self, embedded_readers: bool) -> Self {
-        self.embedded_readers = embedded_readers;
+        self.deployment_mode = match embedded_readers {
+            true => DeploymentMode::EmbeddedReaders,
+            false => DeploymentMode::Adapter,
+        };
         self
     }
 
@@ -729,7 +730,7 @@ impl DeploymentBuilder {
             wait_for_failpoint,
             cleanup: self.cleanup,
             enable_experimental_placeholder_inlining: self.enable_experimental_placeholder_inlining,
-            embedded_readers: self.embedded_readers,
+            deployment_mode: self.deployment_mode,
             allow_full_materialization: self.allow_full_materialization,
             prometheus_metrics: self.prometheus_metrics,
         }
@@ -769,7 +770,7 @@ impl DeploymentBuilder {
         Q: AsRef<str> + Send + Sync + 'a,
     {
         readyset_tracing::init_test_logging();
-        if self.standalone {
+        if self.deployment_mode.is_standalone() {
             debug_assert!(
                 self.adapters == 1 && self.servers.is_empty(),
                 "Standalone mode should only have 1 adapter and no servers for any current use case.
@@ -874,7 +875,7 @@ impl DeploymentBuilder {
         let mut adapters = Vec::with_capacity(self.adapters);
         for _ in 0..self.adapters {
             // If we are running in standalone, we need to pass both adapter and server parameters.
-            let standalone_params = match self.standalone {
+            let standalone_params = match self.deployment_mode.is_standalone() {
                 true => Some(StandaloneParams {
                     server_start_params: self.server_start_params().clone(),
                     server_params: ServerParams::default(),
@@ -919,7 +920,7 @@ impl DeploymentBuilder {
             port_allocator,
             adapters,
             database_type: self.database_type,
-            standalone: self.standalone,
+            deployment_mode: self.deployment_mode,
         };
 
         // Skip waiting for workers/backend if we don't have any servers as part of this deployment
@@ -1171,8 +1172,8 @@ pub struct DeploymentHandle {
     port_allocator: PortAllocator,
     /// The type of the upstream (MySQL or PostgresSQL)
     database_type: DatabaseType,
-    /// True if the adapter is running in standalone mode
-    standalone: bool,
+    /// How to execute the adapter and server processes.
+    deployment_mode: DeploymentMode,
 }
 
 impl DeploymentHandle {
@@ -1317,7 +1318,7 @@ impl DeploymentHandle {
         let metrics_port = self.port_allocator.get_available_port();
         let database_type = self.database_type;
         // If we are running in standalone, we need to pass both adapter and server parameters.
-        let standalone_params = match self.standalone {
+        let standalone_params = match self.deployment_mode.is_standalone() {
             true => Some(StandaloneParams {
                 server_start_params: self.server_start_params().clone(),
                 server_params: ServerParams::default(),
@@ -1544,8 +1545,8 @@ pub struct AdapterStartParams {
     /// Whether to automatically create inlined migrations for a query with unsupported
     /// placeholders.
     enable_experimental_placeholder_inlining: bool,
-    /// Whether to enable embedded readers mode
-    embedded_readers: bool,
+    /// How to execute the adapter
+    deployment_mode: DeploymentMode,
     /// Whether or not to allow full materializations
     allow_full_materialization: bool,
     /// Whether to enable prometheus metrics
@@ -1629,14 +1630,13 @@ async fn start_adapter(
     }
 
     // Standalone mode passes in server params as well
+    builder = builder.deployment_mode(params.deployment_mode);
     if let Some(standalone_params) = standalone_params {
         let StandaloneParams {
             server_start_params,
             server_params,
         } = standalone_params;
         builder = builder.min_workers(server_start_params.min_workers);
-
-        builder = builder.standalone();
 
         if let Some(shard) = server_start_params.shards {
             builder = builder.shards(shard);
@@ -1685,10 +1685,6 @@ async fn start_adapter(
 
     if params.enable_experimental_placeholder_inlining {
         builder = builder.enable_experimental_placeholder_inlining();
-    }
-
-    if params.embedded_readers {
-        builder = builder.embedded_readers();
     }
 
     if params.allow_full_materialization {

@@ -36,7 +36,7 @@ use readyset_adapter::migration_handler::MigrationHandler;
 use readyset_adapter::proxied_queries_reporter::ProxiedQueriesReporter;
 use readyset_adapter::query_status_cache::{MigrationStyle, QueryStatusCache};
 use readyset_adapter::views_synchronizer::ViewsSynchronizer;
-use readyset_adapter::{Backend, BackendBuilder, QueryHandler, UpstreamDatabase};
+use readyset_adapter::{Backend, BackendBuilder, DeploymentMode, QueryHandler, UpstreamDatabase};
 use readyset_alloc::{StdThreadBuildWrapper, ThreadBuildWrapper};
 use readyset_alloc_metrics::report_allocator_metrics;
 use readyset_client::consensus::AuthorityType;
@@ -179,16 +179,21 @@ pub struct Options {
     )]
     pub database_type: Option<DatabaseType>,
 
-    /// Run ReadySet in standalone mode, running a readyset-server instance within this adapter.
-    #[clap(long, env = "STANDALONE", conflicts_with = "embedded_readers")]
-    standalone: bool,
+    /// Run ReadySet in standalone mode or adapter mode.
+    #[clap(
+        long,
+        env = "DEPLOYMENT_MODE",
+        default_value = "standalone",
+        hide = true
+    )]
+    deployment_mode: DeploymentMode,
 
     /// The authority to use
-    // NOTE: hidden because the value can be derived from `--standalone`
+    // NOTE: hidden because the value can be derived from `--deployment-mode standalone`
     #[clap(
         long,
         env = "AUTHORITY",
-        default_value_if("standalone", "true", Some("standalone")),
+        default_value_if("deployment_mode", "standalone", Some("standalone")),
         default_value = "consul",
         hide = true
     )]
@@ -352,19 +357,6 @@ pub struct Options {
     #[clap(long, env = "NON_BLOCKING_READS", hide = true)]
     non_blocking_reads: bool,
 
-    /// Run ReadySet in embedded readers mode, running reader replicas (and only reader replicas)
-    /// in the same process as the adapter
-    ///
-    /// Should be combined with passing `--no-readers` and `--reader-replicas` with the number of
-    /// adapter instances to each server process.
-    #[clap(
-        long,
-        env = "EMBEDDED_READERS",
-        conflicts_with = "standalone",
-        hide = true
-    )]
-    embedded_readers: bool,
-
     #[clap(flatten)]
     server_worker_options: readyset_server::WorkerOptions,
 
@@ -397,8 +389,8 @@ pub struct Options {
     #[clap(long)]
     cleanup: bool,
 
-    /// In standalone or embedded-readers mode, the IP address on which the ReadySet controller
-    /// will listen.
+    /// In [`DeploymentMode::Standalone`] or  [`DeploymentMode::EmbeddedReaders`] mode,
+    /// the IP address on which the ReadySet will listen.
     #[clap(long, env = "CONTROLLER_ADDRESS", hide = true)]
     controller_address: Option<IpAddr>,
 
@@ -535,7 +527,7 @@ where
         rt.block_on(async { options.tracing.init("adapter", options.deployment.as_ref()) })?;
         info!(?options, "Starting ReadySet adapter");
 
-        if options.standalone {
+        if options.deployment_mode.is_standalone() {
             maybe_increase_nofile_limit(
                 options
                     .server_worker_options
@@ -750,7 +742,7 @@ where
 
         // if we're running in standalone mode, server will already
         // spawn it's own allocator metrics reporter.
-        if prometheus_handle.is_some() && !options.standalone {
+        if prometheus_handle.is_some() && !options.deployment_mode.is_standalone() {
             let alloc_shutdown = shutdown_rx.clone();
             rt.handle().spawn(report_allocator_metrics(alloc_shutdown));
         }
@@ -970,7 +962,7 @@ where
         let readers: Readers = Arc::new(Mutex::new(Default::default()));
 
         // Run a readyset-server instance within this adapter.
-        let internal_server_handle = if options.standalone || options.embedded_readers {
+        let internal_server_handle = if options.deployment_mode.has_reader_nodes() {
             let authority = options.authority.clone();
             let deployment = options.deployment.clone();
             let mut builder = readyset_server::Builder::from_worker_options(
@@ -980,7 +972,7 @@ where
             );
             let r = readers.clone();
 
-            if options.embedded_readers {
+            if options.deployment_mode.is_embedded_readers() {
                 builder.as_reader_only();
                 builder.cannot_become_leader();
             }
@@ -1055,7 +1047,7 @@ where
             let telemetry_sender = telemetry_sender.clone();
 
             // Initialize the reader layer for the adapter.
-            let r = (options.standalone || options.embedded_readers).then(|| {
+            let r = (options.deployment_mode.has_reader_nodes()).then(|| {
                 // Create a task that repeatedly polls BlockingRead's every `RETRY_TIMEOUT`.
                 // When the `BlockingRead` completes, tell the future to resolve with ack.
                 let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<(BlockingRead, Ack)>();

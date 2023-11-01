@@ -610,7 +610,8 @@ fn start_adapter(upstream_url: &str) -> anyhow::Result<()> {
         "bench", // This is equivalent to the program name in argv, ignored
         "--deployment",
         DB_NAME,
-        "--standalone",
+        "--deployment-mode",
+        "standalone",
         "--allow-unauthenticated-connections",
         "--allow-full-materialization",
         "--upstream-db-url",

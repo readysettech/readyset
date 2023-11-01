@@ -15,7 +15,7 @@ services:
       PROMETHEUS_METRICS: true
       QUERY_LOG_MODE: all-queries
       QUERY_CACHING: explicit
-      STANDALONE: true
+      DEPLOYMENT_MODE: 'standalone'
       DEPLOYMENT: docker_compose_deployment
       LISTEN_ADDRESS: 0.0.0.0:3307
       UPSTREAM_DB_URL: mysql://root:readyset@mysql/testdb
