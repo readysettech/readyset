@@ -371,6 +371,7 @@ impl SqlIncorporator {
                     res.add_cache_statement(
                         cc.unparsed_create_cache_statement.clone(),
                         schema_search_path.clone(),
+                        mig.dialect,
                     )?;
 
                     self.add_query(

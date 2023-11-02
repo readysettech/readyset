@@ -945,7 +945,7 @@ async fn caches_go_in_authority_list() {
         ChangeList::from_str(
             "CREATE TABLE t (x int);
              CREATE CACHE q FROM SELECT x FROM t;",
-            Dialect::DEFAULT_MYSQL,
+            Dialect::DEFAULT_POSTGRESQL,
         )
         .unwrap(),
     )
@@ -955,6 +955,7 @@ async fn caches_go_in_authority_list() {
     let CreateCacheRequest {
         unparsed_stmt,
         schema_search_path,
+        dialect,
     } = serde_json::from_slice(
         authority
             .create_cache_statements()
@@ -966,6 +967,7 @@ async fn caches_go_in_authority_list() {
     )
     .unwrap();
     assert_eq!(unparsed_stmt, "CREATE CACHE q FROM SELECT x FROM t;");
+    assert_eq!(dialect, Dialect::DEFAULT_POSTGRESQL);
     assert!(schema_search_path.is_empty());
 
     shutdown_tx.shutdown().await;
