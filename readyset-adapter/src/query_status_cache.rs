@@ -351,15 +351,6 @@ impl QueryStatusCache {
         }
     }
 
-    /// Updates the execution info for the given query.
-    pub fn update_execution_info(&self, q: &Query, info: ExecutionInfo) {
-        q.with_mut_status(self, |s| {
-            if let Some(mut s) = s {
-                s.execution_info = Some(info.clone());
-            }
-        })
-    }
-
     /// Updates the transition time in the execution info for the given query.
     pub fn update_transition_time<Q>(&self, q: &Q, transition: &std::time::Instant)
     where
