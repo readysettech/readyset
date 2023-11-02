@@ -25,3 +25,5 @@ pub const POSTGRES_NEXT_WAL_EVENT: &str = "postgres-next-wal-event";
 /// Imitates a failure in the `NoriaAdapter::start_inner_postgres()` function that happens before we
 /// interact with the upstream database
 pub const START_INNER_POSTGRES: &str = "start-inner-postgres";
+/// Imitate a backwards incompatible deserialization from controller state
+pub const LOAD_CONTROLLER_STATE: &str = "load-controller-state";

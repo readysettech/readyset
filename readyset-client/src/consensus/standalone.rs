@@ -17,8 +17,12 @@ use std::time::Duration;
 
 use anyhow::Error;
 use async_trait::async_trait;
+#[cfg(feature = "failure_injection")]
+use failpoint_macros::set_failpoint;
 use parking_lot::{Mutex, RwLock};
-use readyset_errors::{internal, internal_err, ReadySetResult};
+#[cfg(feature = "failure_injection")]
+use readyset_errors::ReadySetError;
+use readyset_errors::{internal, internal_err, set_failpoint_return_err, ReadySetResult};
 use rocksdb::DB;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -27,6 +31,8 @@ use super::{
     AuthorityControl, AuthorityWorkerHeartbeatResponse, GetLeaderResult, LeaderPayload,
     WorkerDescriptor, WorkerId,
 };
+#[cfg(feature = "failure_injection")]
+use crate::failpoints;
 
 /// Path to the controller state.
 const STATE_KEY: &str = "state";
@@ -263,6 +269,7 @@ impl AuthorityControl for StandaloneAuthority {
         P: Send + Serialize + DeserializeOwned,
         E: Send,
     {
+        set_failpoint_return_err!(failpoints::LOAD_CONTROLLER_STATE);
         self.read_modify_write(STATE_KEY, f).await
     }
 

@@ -18,7 +18,11 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use async_trait::async_trait;
-use readyset_errors::{internal, internal_err, ReadySetResult};
+#[cfg(feature = "failure_injection")]
+use failpoint_macros::set_failpoint;
+#[cfg(feature = "failure_injection")]
+use readyset_errors::ReadySetError;
+use readyset_errors::{internal, internal_err, set_failpoint_return_err, ReadySetResult};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
@@ -26,6 +30,8 @@ use super::{
     AuthorityControl, AuthorityWorkerHeartbeatResponse, GetLeaderResult, LeaderPayload,
     UpdateInPlace, WorkerDescriptor, WorkerId,
 };
+#[cfg(feature = "failure_injection")]
+use crate::failpoints;
 
 pub const CONTROLLER_KEY: &str = "/controller";
 pub const WORKER_PATH: &str = "/workers";
@@ -333,6 +339,7 @@ impl AuthorityControl for LocalAuthority {
         P: Send + Serialize + DeserializeOwned + Clone,
         E: Send,
     {
+        set_failpoint_return_err!(failpoints::LOAD_CONTROLLER_STATE);
         let mut store_inner = self.store.inner_lock()?;
 
         let r = f(store_inner

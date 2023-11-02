@@ -134,7 +134,7 @@ use futures::future::join_all;
 use futures::stream::FuturesOrdered;
 use futures::TryStreamExt;
 use metrics::gauge;
-use readyset_errors::{internal, internal_err};
+use readyset_errors::{internal, internal_err, set_failpoint_return_err};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tracing::{error, warn};
@@ -810,6 +810,7 @@ impl AuthorityControl for ConsulAuthority {
         P: Send + Serialize + DeserializeOwned,
         E: Send,
     {
+        set_failpoint_return_err!(failpoints::LOAD_CONTROLLER_STATE);
         self.ensure_leader().await?;
 
         loop {
