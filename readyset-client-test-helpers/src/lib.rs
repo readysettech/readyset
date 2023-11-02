@@ -80,6 +80,7 @@ pub struct TestBuilder {
     recreate_database: bool,
     query_status_cache: Option<&'static QueryStatusCache>,
     persistent: bool,
+    authority: Option<Arc<Authority>>,
 }
 
 impl Default for TestBuilder {
@@ -100,6 +101,7 @@ impl TestBuilder {
             recreate_database: true,
             query_status_cache: None,
             persistent: false,
+            authority: None,
         }
     }
 
@@ -152,6 +154,11 @@ impl TestBuilder {
         self
     }
 
+    pub fn authority(mut self, authority: Arc<Authority>) -> Self {
+        self.authority = Some(authority);
+        self
+    }
+
     pub async fn build<A>(self) -> (A::ConnectionOpts, Handle, ShutdownSender)
     where
         A: Adapter + 'static,
@@ -188,9 +195,11 @@ impl TestBuilder {
             }
         }
 
-        let authority = Arc::new(Authority::from(LocalAuthority::new_with_store(Arc::new(
-            LocalAuthorityStore::new(),
-        ))));
+        let authority = self.authority.unwrap_or_else(|| {
+            Arc::new(Authority::from(LocalAuthority::new_with_store(Arc::new(
+                LocalAuthorityStore::new(),
+            ))))
+        });
 
         let mut builder = Builder::for_tests();
         let persistence = readyset_server::PersistenceParameters {
