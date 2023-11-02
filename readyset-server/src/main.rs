@@ -84,7 +84,7 @@ struct Options {
     #[clap(
         long,
         env = "DEPLOYMENT",
-        default_value = "tmp-readyset",
+        default_value = "readyset.db",
         value_parser = NonEmptyStringValueParser::new()
     )]
     deployment: String,

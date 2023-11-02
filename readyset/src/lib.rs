@@ -165,7 +165,7 @@ pub struct Options {
     address: Option<SocketAddr>,
 
     /// ReadySet deployment ID. All nodes in a deployment must have the same deployment ID.
-    #[clap(long, env = "DEPLOYMENT", default_value = "tmp-readyset", value_parser = NonEmptyStringValueParser::new(), hide = true)]
+    #[clap(long, env = "DEPLOYMENT", default_value = "readyset.db", value_parser = NonEmptyStringValueParser::new(), hide = true)]
     deployment: String,
 
     /// Database engine protocol to emulate. If omitted, will be inferred from the
