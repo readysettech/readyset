@@ -4,11 +4,13 @@ use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use anyhow::anyhow;
 use benchmarks::spec::WorkloadSpec;
 use benchmarks::utils::generate::DataGenerator;
 use benchmarks::utils::path::benchmark_path;
@@ -356,6 +358,8 @@ impl Benchmark {
 
         group.finish();
 
+        hdl.kill().unwrap();
+
         // Required for subsequent benchmarks to properly get all cores and not incrimentally fewer
         #[cfg(not(target_os = "macos"))]
         unset_affinity();
@@ -413,9 +417,35 @@ struct AdapterHandle {
     write_hdl: UnixStream,
 }
 
-impl Drop for AdapterHandle {
-    fn drop(&mut self) {
-        drop(self.write_hdl.write(&[1]));
+impl AdapterHandle {
+    /// Kills the process running the adapter and blocks until it exits.
+    fn kill(mut self) -> anyhow::Result<()> {
+        const MAX_NUM_ADAPTER_DEATH_CHECKS: usize = 10;
+
+        self.write_hdl.write_all(&[1])?;
+
+        // This invokes `ps -o stat= -p <pid>` continuously until either:
+        //
+        //   1. The output contains "Z", which indicates the child process has terminated and is
+        //      now a zombie process; or
+        //   2. The command returns an error status code, which means a process with the child's
+        //      pid no longer exists
+        //
+        //  This is done to ensure that the child process has actually shut down before we spawn
+        //  another process in the next benchmark run
+        for _ in 0..MAX_NUM_ADAPTER_DEATH_CHECKS {
+            let output = Command::new("ps")
+                .args(["-o", "stat=", "-p", &format!("{}", self.pid)])
+                .output()?;
+
+            if output.stdout.contains(&b'Z') || !output.status.success() {
+                return Ok(());
+            }
+
+            std::thread::sleep(Duration::from_secs(1));
+        }
+
+        Err(anyhow!("failed to kill adapter child process"))
     }
 }
 
