@@ -426,7 +426,7 @@ impl AdapterHandle {
 
         for _ in 0..MAX_NUM_ADAPTER_DEATH_CHECKS {
             if Command::new("ps")
-                .args(["-p", &format!("{}", self.pid), ">", "/dev/null"])
+                .args(["-p", &format!("{}", self.pid)])
                 .output()?
                 .status
                 .success()
@@ -597,7 +597,7 @@ fn start_adapter(upstream_url: &str) -> anyhow::Result<()> {
     let database_type = DatabaseURL::from_str(upstream_url)?.database_type();
     let database_type_flag = format!("--database-type={}", database_type);
     let temp_dir = temp_dir::TempDir::new().unwrap();
-    let log_level = env::var("LOG_LEVEL").unwrap_or_else(|_| "error".into());
+    let log_level = env::var("LOG_LEVEL").unwrap_or_else(|_| "info,replicators=debug".into());
     let options = vec![
         "bench", // This is equivalent to the program name in argv, ignored
         "--deployment",
