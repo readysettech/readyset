@@ -109,3 +109,25 @@ impl Dialect {
         }
     }
 }
+
+impl From<Dialect> for nom_sql::Dialect {
+    fn from(d: Dialect) -> Self {
+        match d.engine {
+            SqlEngine::PostgreSQL => nom_sql::Dialect::PostgreSQL,
+            SqlEngine::MySQL => nom_sql::Dialect::MySQL,
+        }
+    }
+}
+
+impl From<nom_sql::Dialect> for Dialect {
+    fn from(d: nom_sql::Dialect) -> Self {
+        match d {
+            nom_sql::Dialect::PostgreSQL => Self {
+                engine: SqlEngine::PostgreSQL,
+            },
+            nom_sql::Dialect::MySQL => Self {
+                engine: SqlEngine::MySQL,
+            },
+        }
+    }
+}
