@@ -26,6 +26,10 @@ services:
       - '6379'
   app:
     image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}"
+    ulimits:
+      nofile:
+        soft: "65536"
+        hard: "65536"
     working_dir: /workdir
     volumes:
     - 'target:/workdir/target'
