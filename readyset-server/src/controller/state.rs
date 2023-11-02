@@ -37,12 +37,12 @@ use rand::Rng;
 use readyset_client::builders::{
     ReaderHandleBuilder, ReusedReaderHandleBuilder, TableBuilder, ViewBuilder,
 };
-use readyset_client::consensus::{Authority, AuthorityControl};
+use readyset_client::consensus::{Authority, AuthorityControl, CreateCacheRequest};
 use readyset_client::debug::info::{GraphInfo, MaterializationInfo, NodeSize};
 use readyset_client::debug::stats::{DomainStats, GraphStats, NodeStats};
 use readyset_client::internal::{MaterializationStatus, ReplicaAddress};
 use readyset_client::metrics::recorded;
-use readyset_client::recipe::changelist::{Change, ChangeList, CreateCache};
+use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_client::recipe::ExtendRecipeSpec;
 use readyset_client::{
     PersistencePoint, SingleKeyEviction, TableReplicationStatus, TableStatus, ViewCreateRequest,
@@ -86,15 +86,25 @@ const CONCURRENT_REQUESTS: usize = 16;
 /// Set of relevant changes applied to a recipe during a call to `extend_recipe`
 #[derive(Debug, Clone, Default)]
 pub(crate) struct RecipeChanges {
-    /// List of new cache statements which have been added
+    /// List of new cache statements which have been added, along with the schema search path used
+    /// when they were created, serialized to a String
     pub(crate) new_cache_statements: Vec<String>,
 }
 
 impl RecipeChanges {
     /// Add a new unparsed `create cache` statement to this set of recipe changes
-    pub(crate) fn add_cache_statement(&mut self, stmt: CreateCache) {
+    pub(crate) fn add_cache_statement(
+        &mut self,
+        unparsed_stmt: String,
+        schema_search_path: Vec<SqlIdentifier>,
+    ) -> ReadySetResult<()> {
         self.new_cache_statements
-            .push(stmt.unparsed_create_cache_statement);
+            .push(serde_json::ser::to_string(&CreateCacheRequest {
+                unparsed_stmt,
+                schema_search_path,
+            })?);
+
+        Ok(())
     }
 }
 
