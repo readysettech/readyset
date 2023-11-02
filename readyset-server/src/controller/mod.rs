@@ -14,8 +14,8 @@ use hyper::http::{Method, StatusCode};
 use metrics::{counter, gauge, histogram};
 use nom_sql::Relation;
 use readyset_client::consensus::{
-    Authority, AuthorityControl, AuthorityWorkerHeartbeatResponse, GetLeaderResult,
-    WorkerDescriptor, WorkerId, WorkerSchedulingConfig,
+    Authority, AuthorityControl, AuthorityWorkerHeartbeatResponse, CreateCacheRequest,
+    GetLeaderResult, WorkerDescriptor, WorkerId, WorkerSchedulingConfig,
 };
 #[cfg(feature = "failure_injection")]
 use readyset_client::failpoints;
@@ -261,6 +261,16 @@ impl ControllerChannel {
     }
 }
 
+/// Information that we as the new leader need to act upon
+#[derive(Debug)]
+pub(crate) struct LeaderElectionResults {
+    /// The controller state that we are starting with as the new leader
+    controller_state: ControllerState,
+    /// If we were unable to deserialize the caches from the previous controller state, we need to
+    /// remake the caches for it, which will be contained in this Vec.
+    caches_to_create: Option<Vec<CreateCacheRequest>>,
+}
+
 /// An update on the leader election and failure detection.
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
@@ -270,7 +280,7 @@ pub(crate) enum AuthorityUpdate {
     /// The King is dead; long live the King!
     LeaderChange(ControllerDescriptor),
     /// We are now the new leader.
-    WonLeaderElection(ControllerState),
+    WonLeaderElection(LeaderElectionResults),
     /// New worker detected
     NewWorkers(Vec<WorkerDescriptor>),
     /// Worker failed.
@@ -390,6 +400,9 @@ pub struct Controller {
     /// Whether we are the leader and ready to handle requests.
     leader_ready: Arc<AtomicBool>,
 
+    /// Caches that we need to re-create after a backwards incompatible upgrade, if relevant
+    caches_to_recreate: Option<Vec<CreateCacheRequest>>,
+
     /// Channel used to notify the controller of replicator events.
     replicator_channel: ReplicatorChannel,
 
@@ -438,6 +451,7 @@ impl Controller {
             telemetry_sender,
             permissive_writes,
             shutdown_rx,
+            caches_to_recreate: None,
         }
     }
 
@@ -523,7 +537,10 @@ impl Controller {
                 })
                 .await?;
             }
-            AuthorityUpdate::WonLeaderElection(state) => {
+            AuthorityUpdate::WonLeaderElection(LeaderElectionResults {
+                controller_state: state,
+                caches_to_create,
+            }) => {
                 info!("won leader election, creating Leader");
                 gauge!(recorded::CONTROLLER_IS_LEADER, 1f64);
                 let background_task_failed_tx = self.background_task_failed_tx.clone();
@@ -553,6 +570,8 @@ impl Controller {
                     controller_uri: self.our_descriptor.controller_uri.clone(),
                 })
                 .await?;
+
+                self.caches_to_recreate = caches_to_create;
             }
             AuthorityUpdate::NewWorkers(w) => {
                 let mut guard = self.inner.write().await;
@@ -879,8 +898,8 @@ impl AuthorityLeaderElectionState {
                 )
                 .await;
 
-            let state = match update_res {
-                Ok(Ok(state)) => state,
+            let (state, caches_to_create) = match update_res {
+                Ok(Ok(state)) => (state, None),
                 Ok(Err(_)) => return Ok(()),
                 Err(error) if error.caused_by_serialization_failed() => {
                     warn!(
@@ -889,16 +908,30 @@ impl AuthorityLeaderElectionState {
                          (NOTE: this will drop all caches!)"
                     );
                     let state = ControllerState::new(self.config.clone(), self.permissive_writes);
+                    let create_cache_stmts = self.authority.create_cache_statements().await?;
+                    let create_cache_stmts: Option<Vec<CreateCacheRequest>> = create_cache_stmts
+                        .into_iter()
+                        .filter_map(|v| match serde_json::from_slice(v.as_bytes()) {
+                            Ok(val) => Some(val),
+                            Err(err) => {
+                                error!(%err, "Failed to deserialize CreateCacheRequest. Cache will not be re-created");
+                                None
+                            }
+                        })
+                        .collect();
                     let new_state = state.clone(); // needs to be in a `let` binding for Send reasons...
                     self.authority.overwrite_controller_state(new_state).await?;
-                    state
+                    (state, create_cache_stmts)
                 }
                 Err(e) => return Err(e),
             };
 
             // Notify our worker that we have won the leader election.
             self.event_tx
-                .send(AuthorityUpdate::WonLeaderElection(state))
+                .send(AuthorityUpdate::WonLeaderElection(LeaderElectionResults {
+                    controller_state: state,
+                    caches_to_create,
+                }))
                 .await
                 .map_err(|_| internal_err!("failed to announce who won leader election"))?;
 
