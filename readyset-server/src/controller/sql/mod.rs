@@ -368,7 +368,10 @@ impl SqlIncorporator {
                     self.add_view(stmt.name, definition, schema_search_path.clone())?;
                 }
                 Change::CreateCache(cc) => {
-                    res.add_cache_statement(cc.clone());
+                    res.add_cache_statement(
+                        cc.unparsed_create_cache_statement.clone(),
+                        schema_search_path.clone(),
+                    )?;
 
                     self.add_query(
                         cc.name,

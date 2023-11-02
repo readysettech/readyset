@@ -11,6 +11,7 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use clap::ValueEnum;
 use enum_dispatch::enum_dispatch;
+use nom_sql::SqlIdentifier;
 use readyset_errors::{ReadySetError, ReadySetResult};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -37,6 +38,12 @@ pub type WorkerId = String;
 
 const CREATE_CACHE_STATEMENTS_PATH: &str = "create_cache_statements";
 const PERSISTENT_STATS_PATH: &str = "persistent_stats";
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CreateCacheRequest {
+    pub unparsed_stmt: String,
+    pub schema_search_path: Vec<SqlIdentifier>,
+}
 
 /// A response to a `worker_heartbeat`, to inform the worker of its
 /// status within the system.

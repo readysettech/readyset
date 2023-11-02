@@ -32,7 +32,7 @@ use nom_sql::{
     Relation, SqlQuery,
 };
 use readyset_client::consensus::{
-    Authority, AuthorityControl, LocalAuthority, LocalAuthorityStore,
+    Authority, AuthorityControl, CreateCacheRequest, LocalAuthority, LocalAuthorityStore,
 };
 use readyset_client::consistency::Timestamp;
 use readyset_client::internal::LocalNodeIndex;
@@ -952,8 +952,21 @@ async fn caches_go_in_authority_list() {
     .await
     .unwrap();
 
-    let stmts = authority.create_cache_statements().await.unwrap();
-    assert_eq!(stmts, vec!["CREATE CACHE q FROM SELECT x FROM t;"]);
+    let CreateCacheRequest {
+        unparsed_stmt,
+        schema_search_path,
+    } = serde_json::from_slice(
+        authority
+            .create_cache_statements()
+            .await
+            .unwrap()
+            .get(0)
+            .unwrap()
+            .as_bytes(),
+    )
+    .unwrap();
+    assert_eq!(unparsed_stmt, "CREATE CACHE q FROM SELECT x FROM t;");
+    assert!(schema_search_path.is_empty());
 
     shutdown_tx.shutdown().await;
 }
