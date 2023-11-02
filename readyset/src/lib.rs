@@ -939,7 +939,9 @@ where
             rt.handle().spawn(abort_on_panic(fut));
         }
 
-        if matches!(migration_style, MigrationStyle::Explicit) {
+        // For MigrationStyles other than InRequestPath, we rely on the ViewsSyncronizer to learn
+        // that a query is supported or not
+        if !matches!(migration_style, MigrationStyle::InRequestPath) {
             rs_connect.in_scope(|| info!("Spawning explicit migrations task"));
             let rh = rh.clone();
             let loop_interval = options.views_polling_interval;
