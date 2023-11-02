@@ -97,11 +97,13 @@ impl RecipeChanges {
         &mut self,
         unparsed_stmt: String,
         schema_search_path: Vec<SqlIdentifier>,
+        dialect: Dialect,
     ) -> ReadySetResult<()> {
         self.new_cache_statements
             .push(serde_json::ser::to_string(&CreateCacheRequest {
                 unparsed_stmt,
                 schema_search_path,
+                dialect,
             })?);
 
         Ok(())
