@@ -484,6 +484,89 @@ impl Change {
             | Change::AddNonReplicatedRelation(_) => false,
         }
     }
+
+    /// Parse a `Change` from the given SQL string, using the given [`Dialect`] and schema search
+    /// path for expression evaluation semantics
+    pub fn from_str<S>(s: S, dialect: nom_sql::Dialect) -> ReadySetResult<Self>
+    where
+        S: AsRef<str>,
+    {
+        let query = s.as_ref();
+
+        macro_rules! mk_error {
+            ($str:expr) => {
+                Err(ReadySetError::UnparseableQuery {
+                    query: $str.to_string(),
+                })
+            };
+        }
+        match parse::query_expr_with_dialect(LocatedSpan::new(query.as_bytes()), dialect) {
+            Result::Err(nom::Err::Error(e)) => {
+                mk_error!(std::str::from_utf8(&e.input).unwrap())
+            }
+            Result::Err(nom::Err::Failure(e)) => {
+                mk_error!(std::str::from_utf8(&e.input).unwrap())
+            }
+            Result::Err(_) => mk_error!(query),
+            Result::Ok((remainder, parsed)) => {
+                if !remainder.is_empty() {
+                    return mk_error!(std::str::from_utf8(&remainder).unwrap());
+                }
+                Ok(match parsed {
+                    SqlQuery::CreateTable(statement) => Change::CreateTable {
+                        statement,
+                        pg_meta: None,
+                    },
+                    SqlQuery::CreateView(cvs) => Change::CreateView(cvs),
+                    SqlQuery::CreateCache(CreateCacheStatement {
+                        name,
+                        inner,
+                        always,
+                        unparsed_create_cache_statement,
+                        ..
+                    }) => {
+                        let statement = match inner {
+                            Ok(CacheInner::Statement(stmt)) => stmt,
+                            Ok(CacheInner::Id(id)) => {
+                                error!(
+                                    %id,
+                                    "attempted to issue CREATE CACHE with an id"
+                                );
+                                internal!(
+                                    "CREATE CACHE should've had its ID resolved by \
+                                        the adapter"
+                                );
+                            }
+                            Err(query) => return Err(ReadySetError::UnparseableQuery { query }),
+                        };
+                        Change::CreateCache(CreateCache {
+                            name,
+                            statement,
+                            always,
+                            unparsed_create_cache_statement,
+                        })
+                    }
+                    SqlQuery::AlterTable(ats) => Change::AlterTable(ats),
+                    SqlQuery::DropTable(_) => {
+                        unsupported!("DropTable maps to multiple Changes and can't be contructed with as_str");
+                    }
+                    SqlQuery::DropView(_) => {
+                        unsupported!(
+                            "DropView maps to multiple Changes and can't be contructed with as_str"
+                        );
+                    }
+                    SqlQuery::DropCache(dcs) => Change::Drop {
+                        name: dcs.name,
+                        if_exists: false,
+                    },
+                    _ => unsupported!(
+                        "Only DDL statements supported as Change (got {})",
+                        parsed.query_type()
+                    ),
+                })
+            }
+        }
+    }
 }
 
 mod parse {
@@ -505,6 +588,14 @@ mod parse {
     pub(super) fn query_expr(input: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlQuery> {
         let (input, _) = whitespace0(input)?;
         sql_query(CANONICAL_DIALECT)(input)
+    }
+
+    pub(super) fn query_expr_with_dialect(
+        input: LocatedSpan<&[u8]>,
+        dialect: Dialect,
+    ) -> NomSqlResult<&[u8], SqlQuery> {
+        let (input, _) = whitespace0(input)?;
+        sql_query(dialect)(input)
     }
 
     pub(super) fn separate_queries(
