@@ -1,4 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
+use std::mem::size_of;
+use std::ops::{Bound, RangeBounds};
 use std::rc::Rc;
 
 use common::{IndexType, Record, Records, SizeOf, Tag};
@@ -9,6 +11,7 @@ use readyset_client::internal::Index;
 use readyset_client::KeyComparison;
 use readyset_data::DfValue;
 use readyset_errors::ReadySetResult;
+use readyset_util::intervals::BoundPair;
 use replication_offset::ReplicationOffset;
 use tracing::trace;
 
@@ -18,7 +21,6 @@ use crate::{
     AllRecords, EvictBytesResult, EvictKeysResult, EvictRandomResult, LookupResult,
     PersistencePoint, PointKey, RangeKey, RangeLookupResult, RecordResult, Row, Rows, State,
 };
-
 #[derive(Default)]
 pub struct MemoryState {
     state: Vec<SingleState>,
@@ -34,9 +36,7 @@ pub struct MemoryState {
 
 impl SizeOf for MemoryState {
     fn size_of(&self) -> u64 {
-        use std::mem::size_of;
-
-        size_of::<Self>() as u64
+        std::mem::size_of::<Self>() as u64
     }
 
     fn deep_size_of(&self) -> u64 {
@@ -49,16 +49,33 @@ impl SizeOf for MemoryState {
 }
 
 fn base_row_bytes_from_comparison(keys: &KeyComparison) -> u64 {
-    if let KeyComparison::Equal(keys) = keys {
-        base_row_bytes(keys)
-    } else {
-        // TODO(ENG-726): Properly calculate memory utilized by ranges.
-        0
+    let mut size = size_of::<KeyComparison>() as u64;
+    match keys {
+        KeyComparison::Equal(keys) => {
+            size += base_row_bytes(keys, keys.capacity());
+        }
+        KeyComparison::Range(keys) => {
+            size += std::mem::size_of::<BoundPair<vec1::Vec1<DfValue>>>() as u64;
+            size += 2 * std::mem::size_of::<Bound<vec1::Vec1<DfValue>>>() as u64;
+            let start_range_size = match keys.start_bound() {
+                Bound::Included(key) | Bound::Excluded(key) => key.deep_size_of(),
+                Bound::Unbounded => 0,
+            };
+            let end_range_size = match keys.end_bound() {
+                Bound::Included(key) | Bound::Excluded(key) => key.deep_size_of(),
+                Bound::Unbounded => 0,
+            };
+            size += start_range_size + end_range_size;
+        }
     }
+    size
 }
 
-fn base_row_bytes(keys: &[DfValue]) -> u64 {
-    keys.iter().map(SizeOf::deep_size_of).sum::<u64>() + std::mem::size_of::<Row>() as u64
+fn base_row_bytes(keys: &[DfValue], capacity: usize) -> u64 {
+    let vec_size: u64 = std::mem::size_of::<Vec<DfValue>>() as u64;
+    keys.iter().map(SizeOf::deep_size_of).sum::<u64>()
+        + vec_size
+        + ((capacity - keys.len()) as u64) * (std::mem::size_of::<DfValue>() as u64)
 }
 
 impl State for MemoryState {
@@ -318,13 +335,14 @@ impl State for MemoryState {
 
             if evicted.is_none() {
                 // There are no more keys in this state.
+                // FIXME: should we try another state?
                 break;
             }
 
             let (keys, rows) = evicted?;
             rows.iter()
                 .for_each(|row| bytes_freed += self.handle_evicted_row(row));
-            bytes_freed += base_row_bytes(&keys);
+            bytes_freed += base_row_bytes(&keys, keys.capacity());
             keys_evicted.push(keys);
         }
 
@@ -353,13 +371,15 @@ impl State for MemoryState {
                 .iter()
                 .for_each(|row| bytes_freed += self.handle_evicted_row(row));
 
-            let key_bytes = keys.iter().map(base_row_bytes_from_comparison).sum::<u64>();
-
+            let mut key_bytes = 0u64;
+            if !rows_evicted.is_empty() {
+                key_bytes = keys.iter().map(base_row_bytes_from_comparison).sum::<u64>();
+            }
             self.mem_size = self.mem_size.saturating_sub(bytes_freed + key_bytes);
 
             EvictKeysResult {
                 index: self.state[state_index].index(),
-                bytes_freed,
+                bytes_freed: bytes_freed + key_bytes,
             }
         })
     }
@@ -478,7 +498,6 @@ impl MemoryState {
                     return true;
                 }
             };
-            self.mem_size += r.deep_size_of();
             // SAFETY: row remains inside the same state
             self.state[i].insert_row(unsafe { r.clone() })
         } else {
@@ -487,19 +506,16 @@ impl MemoryState {
                 // SAFETY: row remains inside the same state
                 hit_any |= self.state[i].insert_row(unsafe { r.clone() });
             }
-            if hit_any {
-                self.mem_size += r.deep_size_of();
-            }
             hit_any
         };
 
         if hit {
+            self.mem_size += r.deep_size_of();
             for (key, weak_index) in self.weak_indices.iter_mut() {
                 // SAFETY: row remains inside the same state
                 weak_index.insert(key, unsafe { r.clone() }, false);
             }
         }
-
         hit
     }
 
