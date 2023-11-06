@@ -2052,7 +2052,13 @@ where
                 self.create_cached_query(name.as_ref(), stmt, search_path, *always, *concurrently)
                     .await
             }
-            SqlQuery::DropCache(DropCacheStatement { name }) => self.drop_cached_query(name).await,
+            SqlQuery::DropCache(drop_cache) => {
+                self.authority
+                    .add_cache_ddl_request(&drop_cache.display_unquoted().to_string())
+                    .await?;
+                let DropCacheStatement { name } = drop_cache;
+                self.drop_cached_query(name).await
+            }
             SqlQuery::DropAllCaches(_) => self.drop_all_caches().await,
             SqlQuery::Show(ShowStatement::CachedQueries(query_id)) => {
                 // Log a telemetry event
