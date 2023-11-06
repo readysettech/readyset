@@ -1867,3 +1867,30 @@ async fn drop_caches_go_in_authority_list() {
 
     shutdown_tx.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn drop_all_caches_clears_authority_list() {
+    readyset_tracing::init_test_logging();
+
+    let (config, _handle, authority, shutdown_tx) =
+        setup_standalone_with_authority("drop_all_caches", None, true).await;
+
+    let queries = [
+        "CREATE TABLE t (x int);",
+        "CREATE CACHE q FROM SELECT x FROM t;",
+        "CREATE CACHE q FROM SELECT x FROM t where x = 1;",
+        "DROP ALL CACHES;",
+    ];
+
+    let conn = connect(config).await;
+    for query in queries {
+        let _res = conn.simple_query(query).await.expect("query failed");
+        // give it some time to propagate
+        sleep().await;
+    }
+
+    let res = authority.cache_ddl_requests().await.unwrap();
+    assert!(res.is_empty());
+
+    shutdown_tx.shutdown().await;
+}

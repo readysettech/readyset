@@ -258,6 +258,14 @@ pub trait AuthorityControl: Send + Sync {
         .await
     }
 
+    /// Removes all stored cache ddl requests
+    async fn remove_all_cache_ddl_requests(&self) -> ReadySetResult<()> {
+        modify_cache_ddl_requests(self, move |stmts| {
+            stmts.clear();
+        })
+        .await
+    }
+
     /// Returns stats persisted in the authority. Wrapper around `Self::try_read`.
     async fn persistent_stats(&self) -> ReadySetResult<Option<PersistentStats>> {
         self.try_read(PERSISTENT_STATS_PATH).await
