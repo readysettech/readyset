@@ -9,10 +9,11 @@ use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
-use crate::common::statement_terminator;
+use crate::common::{parse_fallible, statement_terminator, until_statement_terminator};
+use crate::create::cached_query_inner;
 use crate::table::relation;
 use crate::whitespace::whitespace1;
-use crate::{Dialect, DialectDisplay, NomSqlResult, Relation};
+use crate::{CacheInner, Dialect, DialectDisplay, NomSqlResult, Relation};
 
 /// EXPLAIN statements
 ///
@@ -35,6 +36,19 @@ pub enum ExplainStatement {
     Caches,
     /// List and give information about all materializations in the graph
     Materializations,
+    /// For the given query, report whether it is supported by ReadySet, its rewritten form, and
+    /// its ID
+    CreateCache {
+        /// The result of parsing the inner statement or query ID for the `EXPLAIN CREATE CACHE`
+        /// statement.
+        ///
+        /// If parsing succeeded, then this will be an `Ok` result with the definition of the
+        /// statement. If it failed to parse, this will be an `Err` with the remainder [`String`]
+        /// that could not be parsed.
+        inner: Result<CacheInner, String>,
+        /// A full copy of the original 'explain create cache' statement.
+        unparsed_explain_create_cache_statement: String,
+    },
 }
 
 impl ExplainStatement {
@@ -59,6 +73,14 @@ impl ExplainStatement {
                 ExplainStatement::Domains => write!(f, "DOMAINS;"),
                 ExplainStatement::Caches => write!(f, "CACHES;"),
                 ExplainStatement::Materializations => write!(f, "MATERIALIZATIONS;"),
+                ExplainStatement::CreateCache { inner, .. } => {
+                    write!(f, "EXPLAIN CREATE CACHE FROM ")?;
+
+                    match inner {
+                        Ok(inner) => write!(f, "{}", inner.display(dialect)),
+                        Err(unparsed) => write!(f, "{unparsed}"),
+                    }
+                }
             }
         })
     }
@@ -89,6 +111,29 @@ fn explain_graphviz(
     }
 }
 
+fn explain_create_cache(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ExplainStatement> {
+    move |i| {
+        let unparsed_explain_create_cache_statement: String = String::from_utf8_lossy(*i).into();
+        let (i, _) = tag_no_case("create")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("cache")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("from")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, inner) =
+            parse_fallible(cached_query_inner(dialect), until_statement_terminator)(i)?;
+        Ok((
+            i,
+            ExplainStatement::CreateCache {
+                inner,
+                unparsed_explain_create_cache_statement,
+            },
+        ))
+    }
+}
+
 pub(crate) fn explain_statement(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ExplainStatement> {
@@ -107,6 +152,7 @@ pub(crate) fn explain_statement(
                 ExplainStatement::Materializations,
                 tag_no_case("materializations"),
             ),
+            explain_create_cache(dialect),
         ))(i)?;
         let (i, _) = statement_terminator(i)?;
         Ok((i, stmt))
@@ -116,6 +162,7 @@ pub(crate) fn explain_statement(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::TableExpr;
 
     #[test]
     fn explain_graphviz() {
@@ -182,5 +229,40 @@ mod tests {
             ),
             ExplainStatement::Materializations
         );
+    }
+
+    #[test]
+    fn explain_create_cache_statement() {
+        let statement = match test_parse!(
+            explain_statement(Dialect::MySQL),
+            b"EXPLAIN CREATE CACHE FROM SELECT id FROM users WHERE name = ?"
+        ) {
+            ExplainStatement::CreateCache { inner, .. } => match inner.unwrap() {
+                CacheInner::Statement(stmt) => stmt,
+                _ => panic!(),
+            },
+            _ => panic!(),
+        };
+
+        assert_eq!(
+            statement.tables,
+            vec![TableExpr::from(Relation::from("users"))]
+        );
+    }
+
+    #[test]
+    fn explain_create_cache_id() {
+        let id = match test_parse!(
+            explain_statement(Dialect::MySQL),
+            b"EXPLAIN CREATE CACHE FROM q_000000000000"
+        ) {
+            ExplainStatement::CreateCache { inner, .. } => match inner.unwrap() {
+                CacheInner::Id(id) => id,
+                _ => panic!(),
+            },
+            _ => panic!(),
+        };
+
+        assert_eq!(id, "q_000000000000");
     }
 }
