@@ -1778,6 +1778,7 @@ where
     /// Forwards a `DROP ALL CACHES` request to noria
     #[instrument(skip(self))]
     async fn drop_all_caches(&mut self) -> ReadySetResult<noria_connector::QueryResult<'static>> {
+        self.authority.remove_all_cache_ddl_requests().await?;
         self.noria.drop_all_caches().await?;
         self.state.query_status_cache.clear();
         self.state.prepared_statements.iter_mut().for_each(
