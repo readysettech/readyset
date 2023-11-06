@@ -1902,7 +1902,7 @@ async fn it_works_with_multiple_arithmetic_expressions() {
     let (mut g, shutdown_tx) =
         start_simple_unsharded("it_works_with_multiple_arithmetic_expressions").await;
     let sql = "CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
-               CREATE CACHE CarPrice FROM SELECT 10 * 10, 2 * price, 10 * price, FROM Car WHERE id = ?;
+               CREATE CACHE CarPrice FROM SELECT 10 * 10, 2 * price, 10 * price FROM Car WHERE id = ?;
                ";
     g.extend_recipe(ChangeList::from_str(sql, Dialect::DEFAULT_MYSQL).unwrap())
         .await

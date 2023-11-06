@@ -1124,8 +1124,8 @@ mod tests {
         #[test]
         fn literal_in_in_rhs() {
             test_auto_parametrize(
-                "select hashtags.*, from hashtags inner join invites_hashtags on hashtags.id = invites_hashtags.hashtag_id where invites_hashtags.invite_id in (10,20,31)",
-                "select hashtags.*, from hashtags inner join invites_hashtags on hashtags.id = invites_hashtags.hashtag_id where invites_hashtags.invite_id in (?,?,?)",
+                "select hashtags.* from hashtags inner join invites_hashtags on hashtags.id = invites_hashtags.hashtag_id where invites_hashtags.invite_id in (10,20,31)",
+                "select hashtags.* from hashtags inner join invites_hashtags on hashtags.id = invites_hashtags.hashtag_id where invites_hashtags.invite_id in (?,?,?)",
                     vec![(0, 10.into()), (1, 20.into()), (2, 31.into())],
             );
         }
