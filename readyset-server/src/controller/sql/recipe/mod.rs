@@ -16,7 +16,6 @@ use vec1::Vec1;
 use super::registry::{MatchedCache, RecipeExpr};
 use super::BaseSchema;
 use crate::controller::sql::SqlIncorporator;
-use crate::controller::state::RecipeChanges;
 use crate::controller::Migration;
 
 pub(crate) type QueryID = u128;
@@ -62,11 +61,10 @@ impl Recipe {
                 name,
                 statement,
                 always,
-                unparsed_statement,
             } => SqlQuery::CreateCache(CreateCacheStatement {
                 name: Some(name.clone()),
                 inner: Ok(CacheInner::Statement(Box::new(statement.clone()))),
-                unparsed_create_cache_statement: unparsed_statement.clone(),
+                unparsed_create_cache_statement: None, // not relevant after migrating
                 always: *always,
                 concurrently: false, // concurrently not relevant after migrating
             }),
@@ -168,7 +166,7 @@ impl Recipe {
         &mut self,
         mig: &mut Migration<'_>,
         changelist: ChangeList,
-    ) -> ReadySetResult<RecipeChanges> {
+    ) -> ReadySetResult<()> {
         self.inc.apply_changelist(changelist, mig)
     }
 

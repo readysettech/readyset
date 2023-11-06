@@ -1,4 +1,5 @@
 use chrono::{NaiveDate, NaiveDateTime};
+use readyset_client::consensus::AuthorityControl;
 use readyset_client_test_helpers::psql_helpers::PostgreSQLAdapter;
 use readyset_client_test_helpers::{self, sleep, TestBuilder};
 use readyset_server::Handle;
@@ -8,6 +9,8 @@ use tokio_postgres::{CommandCompleteContents, SimpleQueryMessage};
 
 mod common;
 use common::connect;
+
+use crate::common::setup_standalone_with_authority;
 
 async fn setup() -> (tokio_postgres::Config, Handle, ShutdownSender) {
     TestBuilder::default().build::<PostgreSQLAdapter>().await
@@ -1810,4 +1813,30 @@ mod multiple_create_and_drop {
 
         shutdown_tx.shutdown().await;
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn caches_go_in_authority_list() {
+    readyset_tracing::init_test_logging();
+
+    let (config, _handle, authority, shutdown_tx) =
+        setup_standalone_with_authority("caches_go_in_authority_list", None, true).await;
+
+    let queries = [
+        "CREATE TABLE t (x int);",
+        "CREATE CACHE q FROM SELECT x FROM t;",
+    ];
+
+    let conn = connect(config).await;
+    for query in queries {
+        let _res = conn.simple_query(query).await.expect("query failed");
+        // give it some time to propagate
+        sleep().await;
+    }
+
+    let res = authority.create_cache_statements().await.unwrap();
+    let unparsed_stmt = res.get(0).unwrap();
+    assert_eq!(unparsed_stmt, "CREATE CACHE q FROM SELECT x FROM t;");
+
+    shutdown_tx.shutdown().await;
 }

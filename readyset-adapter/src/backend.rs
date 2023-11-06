@@ -85,7 +85,7 @@ use nom_sql::{
     InsertStatement, Relation, SelectStatement, SetStatement, ShowStatement, SqlIdentifier,
     SqlQuery, UpdateStatement, UseStatement,
 };
-use readyset_client::consensus::Authority;
+use readyset_client::consensus::{Authority, AuthorityControl};
 use readyset_client::consistency::Timestamp;
 use readyset_client::query::*;
 use readyset_client::results::Results;
@@ -233,7 +233,7 @@ impl ProxyState {
         }
     }
 
-    /// Sets the autocommit state accordingly. If turning autcommit on, will set ProxyState to
+    /// Sets the autocommit state accordingly. If turning autocommit on, will set ProxyState to
     /// Fallback as long as current state is AutocommitOff.
     ///
     /// If turning autocommit off, will set state to AutocommitOff as long as state is not
@@ -1701,7 +1701,6 @@ where
         &mut self,
         name: Option<&Relation>,
         mut stmt: SelectStatement,
-        unparsed_create_cache_statment: String,
         override_schema_search_path: Option<Vec<SqlIdentifier>>,
         always: bool,
         concurrently: bool,
@@ -1722,7 +1721,7 @@ where
         rewrite::process_query(&mut stmt, self.noria.server_supports_pagination())?;
         let migration_state = match self
             .noria
-            .handle_create_cached_query(name, &stmt, unparsed_create_cache_statment, override_schema_search_path, always, concurrently)
+            .handle_create_cached_query(name, &stmt, override_schema_search_path, always, concurrently)
             .await
         {
             Ok(None) => MigrationState::Successful,
@@ -2044,15 +2043,14 @@ where
                     trace!("No telemetry sender. not sending metric for CREATE CACHE");
                 }
 
-                self.create_cached_query(
-                    name.as_ref(),
-                    stmt,
-                    unparsed_create_cache_statement.clone(),
-                    search_path,
-                    *always,
-                    *concurrently,
-                )
-                .await
+                if let Some(unparsed_create_cache_statement) = unparsed_create_cache_statement {
+                    self.authority
+                        .add_create_cache_statement(unparsed_create_cache_statement)
+                        .await?;
+                }
+
+                self.create_cached_query(name.as_ref(), stmt, search_path, *always, *concurrently)
+                    .await
             }
             SqlQuery::DropCache(DropCacheStatement { name }) => self.drop_cached_query(name).await,
             SqlQuery::DropAllCaches(_) => self.drop_all_caches().await,

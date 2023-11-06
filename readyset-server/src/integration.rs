@@ -31,9 +31,7 @@ use nom_sql::{
     parse_create_table, parse_create_view, parse_query, parse_select_statement, OrderType,
     Relation, SqlQuery,
 };
-use readyset_client::consensus::{
-    Authority, AuthorityControl, CreateCacheRequest, LocalAuthority, LocalAuthorityStore,
-};
+use readyset_client::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use readyset_client::consistency::Timestamp;
 use readyset_client::internal::LocalNodeIndex;
 use readyset_client::recipe::changelist::{Change, ChangeList, CreateCache};
@@ -922,53 +920,6 @@ async fn it_works_with_sql_recipe() {
         .into_vec();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0][0], 2.into());
-
-    shutdown_tx.shutdown().await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn caches_go_in_authority_list() {
-    let authority = Arc::new(Authority::from(LocalAuthority::new_with_store(Arc::new(
-        LocalAuthorityStore::new(),
-    ))));
-    let (mut g, shutdown_tx) = build_custom(
-        "caches_go_in_authority_list",
-        None,
-        true,
-        authority.clone(),
-        false,
-        None,
-    )
-    .await;
-
-    g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE t (x int);
-             CREATE CACHE q FROM SELECT x FROM t;",
-            Dialect::DEFAULT_POSTGRESQL,
-        )
-        .unwrap(),
-    )
-    .await
-    .unwrap();
-
-    let CreateCacheRequest {
-        unparsed_stmt,
-        schema_search_path,
-        dialect,
-    } = serde_json::from_slice(
-        authority
-            .create_cache_statements()
-            .await
-            .unwrap()
-            .get(0)
-            .unwrap()
-            .as_bytes(),
-    )
-    .unwrap();
-    assert_eq!(unparsed_stmt, "CREATE CACHE q FROM SELECT x FROM t;");
-    assert_eq!(dialect, Dialect::DEFAULT_POSTGRESQL);
-    assert!(schema_search_path.is_empty());
 
     shutdown_tx.shutdown().await;
 }
@@ -3852,7 +3803,6 @@ async fn finkelstein1982_queries() {
 
         // Add them one by one
         for q in lines.iter() {
-            let q_string = q.clone();
             let q = parse_query(nom_sql::Dialect::MySQL, q).unwrap();
             match q {
                 SqlQuery::CreateTable(stmt) => {
@@ -3863,8 +3813,7 @@ async fn finkelstein1982_queries() {
                         .unwrap();
                 }
                 SqlQuery::Select(stmt) => {
-                    inc.add_query(None, stmt, q_string, false, &[], mig)
-                        .unwrap();
+                    inc.add_query(None, stmt, false, &[], mig).unwrap();
                 }
                 _ => panic!("unexpected query type"),
             }
@@ -9035,8 +8984,6 @@ async fn multiple_simultaneous_migrations() {
                         .unwrap()
                 ),
                 always: false,
-                unparsed_create_cache_statement:
-                    "create cache q1  from SELECT * FROM t where x = ?".to_string(),
             }),
             Dialect::DEFAULT_MYSQL
         )),
@@ -9048,8 +8995,6 @@ async fn multiple_simultaneous_migrations() {
                         .unwrap()
                 ),
                 always: false,
-                unparsed_create_cache_statement:
-                    "create cache q2  from SELECT * FROM t where y = ?".to_string(),
             }),
             Dialect::DEFAULT_MYSQL
         ))
@@ -9457,7 +9402,6 @@ async fn views_out_of_order() {
         Change::create_cache(
             "q",
             parse_select_statement(nom_sql::Dialect::MySQL, "SELECT x FROM v2").unwrap(),
-            "create cache qfrom SELECT x FROM v2".to_string(),
             false,
         ),
         Dialect::DEFAULT_MYSQL,
@@ -9484,7 +9428,6 @@ async fn evict_single() {
             "q",
             parse_select_statement(nom_sql::Dialect::MySQL, "SELECT x FROM t1 where y = ?")
                 .unwrap(),
-            "create cache from SELECT x FROM t1 where y = ?".to_string(),
             false,
         ),
         Dialect::DEFAULT_MYSQL,
@@ -9545,7 +9488,6 @@ async fn evict_single_intermediate_state() {
             "q",
             parse_select_statement(nom_sql::Dialect::MySQL, "SELECT sum(x) FROM t1 WHERE y = ?")
                 .unwrap(),
-            "create cache q from SELECT sum(x) FROM t1 WHERE y = ?".to_string(),
             false,
         ),
         Dialect::DEFAULT_MYSQL,
