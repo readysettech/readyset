@@ -1834,7 +1834,7 @@ async fn caches_go_in_authority_list() {
         sleep().await;
     }
 
-    let res = authority.create_cache_statements().await.unwrap();
+    let res = authority.cache_ddl_requests().await.unwrap();
     let unparsed_stmt = res.get(0).unwrap();
     assert_eq!(unparsed_stmt, "CREATE CACHE q FROM SELECT x FROM t;");
 

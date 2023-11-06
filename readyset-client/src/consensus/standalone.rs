@@ -454,7 +454,7 @@ mod tests {
         );
 
         assert_eq!(
-            authority.create_cache_statements().await.unwrap(),
+            authority.cache_ddl_requests().await.unwrap(),
             Vec::<String>::new()
         );
 
@@ -463,9 +463,7 @@ mod tests {
             .iter()
             .map(|stmt| {
                 let authority = authority.clone();
-                tokio::spawn(
-                    async move { authority.add_create_cache_statement(stmt).await.unwrap() },
-                )
+                tokio::spawn(async move { authority.add_cache_ddl_request(stmt).await.unwrap() })
             })
             .collect::<FuturesUnordered<_>>();
 
@@ -473,7 +471,7 @@ mod tests {
             res.unwrap();
         }
 
-        let mut stmts = authority.create_cache_statements().await.unwrap();
+        let mut stmts = authority.cache_ddl_requests().await.unwrap();
         stmts.sort();
         assert_eq!(stmts, STMTS);
     }
