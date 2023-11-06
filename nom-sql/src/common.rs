@@ -776,16 +776,13 @@ pub fn field_definition_expr(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<FieldDefinitionExpr>> {
     move |i| {
-        terminated(
-            separated_list0(
-                ws_sep_comma,
-                alt((
-                    map(tag("*"), |_| FieldDefinitionExpr::All),
-                    all_in_table(dialect),
-                    expression_field(dialect),
-                )),
-            ),
-            opt(ws_sep_comma),
+        separated_list0(
+            ws_sep_comma,
+            alt((
+                map(tag("*"), |_| FieldDefinitionExpr::All),
+                all_in_table(dialect),
+                expression_field(dialect),
+            )),
         )(i)
     }
 }
@@ -1097,6 +1094,41 @@ mod tests {
             test_parse!(function_expr(Dialect::MySQL), b"count ( * )"),
             FunctionExpr::CountStar
         );
+    }
+
+    #[test]
+    fn disallow_trailing_comma_in_column_list() {
+        let expected = [
+            FieldDefinitionExpr::Expr {
+                expr: Expr::Column(Column {
+                    name: SqlIdentifier::from("a"),
+                    table: None,
+                }),
+                alias: None,
+            },
+            FieldDefinitionExpr::Expr {
+                expr: Expr::Column(Column {
+                    name: SqlIdentifier::from("b"),
+                    table: None,
+                }),
+                alias: None,
+            },
+            FieldDefinitionExpr::Expr {
+                expr: Expr::Column(Column {
+                    name: SqlIdentifier::from("c"),
+                    table: None,
+                }),
+                alias: None,
+            },
+        ];
+
+        assert_eq!(
+            test_parse!(field_definition_expr(Dialect::MySQL), b"a, b, c"),
+            expected
+        );
+
+        let (rem, _) = field_definition_expr(Dialect::MySQL)("a, b, c,".as_bytes().into()).unwrap();
+        assert!(!rem.is_empty());
     }
 
     mod mysql {
