@@ -965,7 +965,7 @@ async fn setup_for_replication_failure(client: &Client) {
     sleep().await;
     sleep().await;
 
-    assert!(last_statement_matches("readyset", "ok", &client).await);
+    assert!(last_statement_matches("upstream", "ok", &client).await);
     client
         .simple_query("CREATE CACHE FROM SELECT * FROM cats")
         .await

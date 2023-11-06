@@ -137,6 +137,44 @@ impl SqlQuery {
     pub fn is_select(&self) -> bool {
         matches!(self, Self::Select(_))
     }
+
+    /// Returns true if this is a query for a ReadySet extension and not regular SQL.
+    pub fn is_readyset_extension(&self) -> bool {
+        match self {
+            SqlQuery::Explain(_)
+            | SqlQuery::CreateCache(_)
+            | SqlQuery::DropCache(_)
+            | SqlQuery::DropAllCaches(_) => true,
+            SqlQuery::Show(show_stmt) => match show_stmt {
+                ShowStatement::Events | ShowStatement::Tables(_) => false,
+                ShowStatement::CachedQueries(_)
+                | ShowStatement::ProxiedQueries(_)
+                | ShowStatement::ReadySetStatus
+                | ShowStatement::ReadySetStatusAdapter
+                | ShowStatement::ReadySetMigrationStatus(_)
+                | ShowStatement::ReadySetVersion
+                | ShowStatement::ReadySetTables
+                | ShowStatement::Connections => true,
+            },
+            SqlQuery::CreateTable(_)
+            | SqlQuery::CreateView(_)
+            | SqlQuery::AlterTable(_)
+            | SqlQuery::Insert(_)
+            | SqlQuery::CompoundSelect(_)
+            | SqlQuery::Select(_)
+            | SqlQuery::Delete(_)
+            | SqlQuery::DropTable(_)
+            | SqlQuery::DropView(_)
+            | SqlQuery::Update(_)
+            | SqlQuery::Set(_)
+            | SqlQuery::StartTransaction(_)
+            | SqlQuery::Commit(_)
+            | SqlQuery::Rollback(_)
+            | SqlQuery::RenameTable(_)
+            | SqlQuery::Use(_)
+            | SqlQuery::Comment(_) => false,
+        }
+    }
 }
 
 pub fn sql_query(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlQuery> {

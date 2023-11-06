@@ -829,7 +829,7 @@ async fn replication_failure_ignores_table() {
     sleep().await;
     sleep().await;
 
-    assert!(last_statement_matches("readyset", "ok", &mut client).await);
+    assert!(last_statement_matches("upstream", "ok", &mut client).await);
     client
         .query_drop("CREATE CACHE FROM SELECT * FROM cats")
         .await
