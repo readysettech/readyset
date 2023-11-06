@@ -204,7 +204,6 @@ fn sql_query_part1(
             map(updating(dialect), SqlQuery::Update),
             map(set(dialect), SqlQuery::Set),
             map(view_creation(dialect), SqlQuery::CreateView),
-            map(create_cached_query(dialect), SqlQuery::CreateCache),
             map(drop_cached_query(dialect), SqlQuery::DropCache),
             map(drop_all_caches, SqlQuery::DropAllCaches),
             map(alter_table_statement(dialect), SqlQuery::AlterTable),
@@ -215,6 +214,8 @@ fn sql_query_part1(
             map(use_statement(dialect), SqlQuery::Use),
             map(show(dialect), SqlQuery::Show),
             map(explain_statement(dialect), SqlQuery::Explain),
+            // This does a more expensive clone of `i`, so process it last.
+            map(create_cached_query(dialect), SqlQuery::CreateCache),
         ))(i)
     }
 }
