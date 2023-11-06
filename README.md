@@ -80,16 +80,8 @@ For questions or support, join us on the [ReadySet Community Slack](https://join
 
 ---
 
-## Project Status & Roadmap
-ReadySet is currently in beta. Our team is hard at work stabilizing the system with a focus on PostgreSQL. Our MySQL support is considered alpha. You can learn more about how we're approaching this and follow along on our progress below.
-
-| Project | Progress | Notes |
-| ----------- | ----------- | ----------- |
-| General System Testing | [Track](https://github.com/readysettech/readyset/issues/434) | Run ReadySet in a production-like environment and validate its robustness in the presence of faults.|
-| Dataflow Testing | [Track](https://github.com/readysettech/readyset/issues/431) | Expand testing of the ReadySet caching engine. |
-| Benchmarking & Analysis  | [Track](https://github.com/readysettech/readyset/issues/432) | Expand ReadySet's performance benchmarks to a wider array of workloads. |
-| Usability Improvements | [Track](https://github.com/readysettech/readyset/issues/443) | Make it easier to configure, interact with, and debug ReadySet. |
-| High Availability | [Track](https://github.com/readysettech/readyset/issues/433) | Ensure that ReadySet can accept connections, proxy queries, serve warm reads from the cache, and replicate writes from the primary database in the presence of certain failures. |
+## ReadySet Roadmap
+ReadySet is currently in beta. Our team is hard at work stabilizing the system with a focus on PostgreSQL. Our MySQL support is considered alpha. You can learn more about how we're approaching this and follow along on [our roadmap](https://github.com/readysettech/readyset/issues/856).
 
 ### Contribute
 If you're interested in contributing, we gratefully welcome helping hands! We welcome contributions as [GitHub pull requests](https://github.com/readysettech/readyset/pulls), creating [issues](https://github.com/readysettech/readyset/issues), advocacy, and participating in our [community](#join-the-community)!
