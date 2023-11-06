@@ -1982,18 +1982,17 @@ where
         ))
     }
 
-    async fn query_noria_extensions<'a>(
+    async fn query_readyset_extensions<'a>(
         &'a mut self,
         query: &'a SqlQuery,
         event: &mut QueryExecutionEvent,
-    ) -> Option<ReadySetResult<noria_connector::QueryResult<'static>>> {
-        // Those will get cleared if it was not destined to noria
+    ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         event.sql_type = SqlQueryType::Other;
         event.destination = Some(QueryDestination::Readyset);
 
         let _t = event.start_noria_timer();
 
-        let res = match query {
+        match query {
             SqlQuery::Explain(nom_sql::ExplainStatement::LastStatement) => {
                 self.explain_last_statement()
             }
@@ -2016,33 +2015,25 @@ where
                 unparsed_create_cache_statement,
             }) => {
                 let (stmt, search_path) = match inner {
-                    Ok(CacheInner::Statement(st)) => (*st.clone(), None),
+                    Ok(CacheInner::Statement(st)) => Ok((*st.clone(), None)),
                     Ok(CacheInner::Id(id)) => {
                         match self.state.query_status_cache.query(id.as_str()) {
                             Some(q) => match q {
-                                Query::Parsed(view_request) => (
+                                Query::Parsed(view_request) => Ok((
                                     view_request.statement.clone(),
                                     Some(view_request.schema_search_path.clone()),
-                                ),
-                                Query::ParseFailed(q) => {
-                                    return Some(Err(ReadySetError::UnparseableQuery {
-                                        query: (*q).clone(),
-                                    }))
-                                }
+                                )),
+                                Query::ParseFailed(q) => Err(ReadySetError::UnparseableQuery {
+                                    query: (*q).clone(),
+                                }),
                             },
-                            None => {
-                                return Some(Err(ReadySetError::NoQueryForId {
-                                    id: id.to_string(),
-                                }))
-                            }
+                            None => Err(ReadySetError::NoQueryForId { id: id.to_string() }),
                         }
                     }
-                    Err(query) => {
-                        return Some(Err(ReadySetError::UnparseableQuery {
-                            query: query.clone(),
-                        }))
-                    }
-                };
+                    Err(query) => Err(ReadySetError::UnparseableQuery {
+                        query: query.clone(),
+                    }),
+                }?;
 
                 // Log a telemetry event
                 if let Some(ref telemetry_sender) = self.telemetry_sender {
@@ -2120,15 +2111,8 @@ where
                 )
                 .await
             }
-            _ => {
-                drop(_t);
-                // Clear readyset timer, since it was not a readyset request
-                event.readyset_duration.take();
-                return None;
-            }
-        };
-
-        Some(res)
+            _ => Err(internal_err!("Provided query is not a ReadySet extension")),
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -2406,6 +2390,7 @@ where
                     | SqlQuery::Update(UpdateStatement { table: t, .. })
                     | SqlQuery::Delete(DeleteStatement { table: t, .. }) => {
                         event.sql_type = SqlQueryType::Write;
+                        event.destination = Some(QueryDestination::Upstream);
                         let _t = event.start_upstream_timer();
 
                         // Update ticket if RYW enabled
@@ -2547,9 +2532,9 @@ where
                 if !matches!(
                     e,
                     ReadySetError::ReaderMissingKey
-                    | ReadySetError::NoCacheForQuery
-                    | ReadySetError::UnparseableQuery { .. }
-                    ) {
+                        | ReadySetError::NoCacheForQuery
+                        | ReadySetError::UnparseableQuery { .. }
+                ) {
                     warn!(error = %e, "Error received from noria, sending query to fallback");
                     event.set_noria_error(&e);
                 }
@@ -2558,15 +2543,15 @@ where
                 if fallback_res.is_ok() {
                     let (id, _) = self.state.query_status_cache.insert(query);
                     if let Some(ref telemetry_sender) = self.telemetry_sender {
-                        if let Err(e) = telemetry_sender
-                            .send_event_with_payload(
-                                TelemetryEvent::QueryParseFailed,
-                                TelemetryBuilder::new()
-                                    .server_version(option_env!("CARGO_PKG_VERSION").unwrap_or_default())
-                                    .query_id(id.to_string())
-                                    .build(),
-                            )
-                        {
+                        if let Err(e) = telemetry_sender.send_event_with_payload(
+                            TelemetryEvent::QueryParseFailed,
+                            TelemetryBuilder::new()
+                                .server_version(
+                                    option_env!("CARGO_PKG_VERSION").unwrap_or_default(),
+                                )
+                                .query_id(id.to_string())
+                                .build(),
+                        ) {
                             warn!(error = %e, "Failed to send parse failed metric");
                         }
                     } else {
@@ -2589,10 +2574,11 @@ where
                 )
                 .await
             }
-            // ReadySet extensions should never be proxied.
-            Ok(ref parsed_query) if let Some(noria_extension) = self.query_noria_extensions(parsed_query, &mut event).await => {
-                noria_extension.map(Into::into).map_err(Into::into)
-            }
+            Ok(ref parsed_query) if parsed_query.is_readyset_extension() => self
+                .query_readyset_extensions(parsed_query, &mut event)
+                .await
+                .map(Into::into)
+                .map_err(Into::into),
             // SET autocommit=1 needs to be handled explicitly or it will end up getting proxied in
             // most cases.
             Ok(SqlQuery::Set(s))
@@ -2621,16 +2607,16 @@ where
                 }
             }
             Ok(SqlQuery::Select(stmt)) => {
-                let mut view_request = ViewCreateRequest::new(
-                    stmt,
-                    self.noria.schema_search_path().to_owned(),
-                );
-                let (noria_should_try, status, processed_query_params) = self.noria_should_try_select(&mut view_request);
+                let mut view_request =
+                    ViewCreateRequest::new(stmt, self.noria.schema_search_path().to_owned());
+                let (noria_should_try, status, processed_query_params) =
+                    self.noria_should_try_select(&mut view_request);
                 let processed_query_params = processed_query_params?;
                 if noria_should_try {
                     event.sql_type = SqlQueryType::Read;
                     if self.settings.query_log_mode.allow_ad_hoc() {
-                        event.query = Some(Arc::new(SqlQuery::Select(view_request.statement.clone())));
+                        event.query =
+                            Some(Arc::new(SqlQuery::Select(view_request.statement.clone())));
                         event.query_id = Some(QueryId::from_view_create_request(&view_request));
                     }
                     Self::query_adhoc_select(
