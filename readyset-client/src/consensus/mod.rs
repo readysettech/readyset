@@ -37,11 +37,11 @@ type LeaderPayload = ControllerDescriptor;
 pub type VolumeId = String;
 pub type WorkerId = String;
 
-const CREATE_CACHE_STATEMENTS_PATH: &str = "create_cache_statements";
+const CACHE_DDL_REQUESTS_PATH: &str = "cache_ddl_requests";
 const PERSISTENT_STATS_PATH: &str = "persistent_stats";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CreateCacheRequest {
+pub struct CacheDDLRequest {
     pub unparsed_stmt: String,
     pub schema_search_path: Vec<SqlIdentifier>,
     pub dialect: Dialect,
@@ -234,25 +234,25 @@ pub trait AuthorityControl: Send + Sync {
     where
         P: Send + Serialize + 'static;
 
-    /// Return the list of CREATE CACHE statements that have been run against this ReadySet
-    /// deployment.
+    /// Return the list of cache ddl requests (CREATE CACHE or DROP CACHE) statements that have been
+    /// run against this ReadySet deployment.
     ///
     /// This is stored separately from the controller state so that it's always available, using
     /// backwards-compatible serialization, for if the controller state can't be deserialized
-    async fn create_cache_statements(&self) -> ReadySetResult<Vec<String>> {
+    async fn cache_ddl_requests(&self) -> ReadySetResult<Vec<String>> {
         Ok(self
-            .try_read(CREATE_CACHE_STATEMENTS_PATH)
+            .try_read(CACHE_DDL_REQUESTS_PATH)
             .await?
             .unwrap_or_default())
     }
 
-    /// Insert a new list of statements into the list of CREATE CACHE statements that have been run
+    /// Insert a new cache ddl request that has been run
     /// against this ReadySet deployment
     ///
     /// These are stored separately from the controller state so that it's always available, using
     /// backwards-compatible serialization, for if the controller state can't be deserialized
-    async fn add_create_cache_statement(&self, new_stmt: &str) -> ReadySetResult<()> {
-        modify_create_cache_statements(self, move |stmts| {
+    async fn add_cache_ddl_request(&self, new_stmt: &str) -> ReadySetResult<()> {
+        modify_cache_ddl_requests(self, move |stmts| {
             stmts.push(new_stmt.to_owned());
         })
         .await
@@ -274,20 +274,17 @@ pub trait AuthorityControl: Send + Sync {
     }
 }
 
-async fn modify_create_cache_statements<A, F>(authority: &A, mut f: F) -> ReadySetResult<()>
+async fn modify_cache_ddl_requests<A, F>(authority: &A, mut f: F) -> ReadySetResult<()>
 where
     A: AuthorityControl + ?Sized,
     F: FnMut(&mut Vec<String>) + Send,
 {
     authority
-        .read_modify_write::<_, Vec<String>, ReadySetError>(
-            CREATE_CACHE_STATEMENTS_PATH,
-            move |stmts| {
-                let mut stmts = stmts.unwrap_or_default();
-                f(&mut stmts);
-                Ok(stmts)
-            },
-        )
+        .read_modify_write::<_, Vec<String>, ReadySetError>(CACHE_DDL_REQUESTS_PATH, move |stmts| {
+            let mut stmts = stmts.unwrap_or_default();
+            f(&mut stmts);
+            Ok(stmts)
+        })
         .await??;
 
     Ok(())

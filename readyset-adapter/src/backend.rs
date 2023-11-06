@@ -2045,7 +2045,7 @@ where
 
                 if let Some(unparsed_create_cache_statement) = unparsed_create_cache_statement {
                     self.authority
-                        .add_create_cache_statement(unparsed_create_cache_statement)
+                        .add_cache_ddl_request(unparsed_create_cache_statement)
                         .await?;
                 }
 

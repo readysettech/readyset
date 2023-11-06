@@ -14,7 +14,7 @@ use hyper::http::{Method, StatusCode};
 use metrics::{counter, gauge, histogram};
 use nom_sql::Relation;
 use readyset_client::consensus::{
-    Authority, AuthorityControl, AuthorityWorkerHeartbeatResponse, CreateCacheRequest,
+    Authority, AuthorityControl, AuthorityWorkerHeartbeatResponse, CacheDDLRequest,
     GetLeaderResult, WorkerDescriptor, WorkerId, WorkerSchedulingConfig,
 };
 #[cfg(feature = "failure_injection")]
@@ -268,7 +268,7 @@ pub(crate) struct LeaderElectionResults {
     controller_state: ControllerState,
     /// If we were unable to deserialize the caches from the previous controller state, we need to
     /// remake the caches for it, which will be contained in this Vec.
-    caches_to_create: Option<Vec<CreateCacheRequest>>,
+    caches_to_create: Option<Vec<CacheDDLRequest>>,
 }
 
 /// An update on the leader election and failure detection.
@@ -401,7 +401,7 @@ pub struct Controller {
     leader_ready: Arc<AtomicBool>,
 
     /// Caches that we need to re-create after a backwards incompatible upgrade, if relevant
-    caches_to_recreate: Option<Vec<CreateCacheRequest>>,
+    caches_to_recreate: Option<Vec<CacheDDLRequest>>,
 
     /// Channel used to notify the controller of replicator events.
     replicator_channel: ReplicatorChannel,
@@ -908,8 +908,8 @@ impl AuthorityLeaderElectionState {
                          (NOTE: this will drop all caches!)"
                     );
                     let state = ControllerState::new(self.config.clone(), self.permissive_writes);
-                    let create_cache_stmts = self.authority.create_cache_statements().await?;
-                    let create_cache_stmts: Option<Vec<CreateCacheRequest>> = create_cache_stmts
+                    let create_cache_stmts = self.authority.cache_ddl_requests().await?;
+                    let create_cache_stmts: Option<Vec<CacheDDLRequest>> = create_cache_stmts
                         .into_iter()
                         .filter_map(|v| match serde_json::from_slice(v.as_bytes()) {
                             Ok(val) => Some(val),
