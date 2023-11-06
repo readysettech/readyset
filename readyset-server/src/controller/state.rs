@@ -37,7 +37,7 @@ use rand::Rng;
 use readyset_client::builders::{
     ReaderHandleBuilder, ReusedReaderHandleBuilder, TableBuilder, ViewBuilder,
 };
-use readyset_client::consensus::{Authority, AuthorityControl, CreateCacheRequest};
+use readyset_client::consensus::{Authority, AuthorityControl};
 use readyset_client::debug::info::{GraphInfo, MaterializationInfo, NodeSize};
 use readyset_client::debug::stats::{DomainStats, GraphStats, NodeStats};
 use readyset_client::internal::{MaterializationStatus, ReplicaAddress};
@@ -82,33 +82,6 @@ pub(in crate::controller) use self::graphviz::Graphviz;
 /// Number of concurrent requests to make when making multiple simultaneous requests to domains (eg
 /// for replication offsets)
 const CONCURRENT_REQUESTS: usize = 16;
-
-/// Set of relevant changes applied to a recipe during a call to `extend_recipe`
-#[derive(Debug, Clone, Default)]
-pub(crate) struct RecipeChanges {
-    /// List of new cache statements which have been added, along with the schema search path used
-    /// when they were created, serialized to a String
-    pub(crate) new_cache_statements: Vec<String>,
-}
-
-impl RecipeChanges {
-    /// Add a new unparsed `create cache` statement to this set of recipe changes
-    pub(crate) fn add_cache_statement(
-        &mut self,
-        unparsed_stmt: String,
-        schema_search_path: Vec<SqlIdentifier>,
-        dialect: Dialect,
-    ) -> ReadySetResult<()> {
-        self.new_cache_statements
-            .push(serde_json::ser::to_string(&CreateCacheRequest {
-                unparsed_stmt,
-                schema_search_path,
-                dialect,
-            })?);
-
-        Ok(())
-    }
-}
 
 /// This structure holds all the dataflow state.
 /// It's meant to be handled exclusively by the [`DfStateHandle`], which is the structure
@@ -1555,7 +1528,7 @@ impl DfState {
         &mut self,
         changelist: ChangeList,
         dry_run: bool,
-    ) -> Result<RecipeChanges, ReadySetError> {
+    ) -> Result<(), ReadySetError> {
         // I hate this, but there's no way around for now, as migrations
         // are super entangled with the recipe and the graph.
         let mut new = self.recipe.clone();
@@ -1585,7 +1558,7 @@ impl DfState {
         &mut self,
         recipe_spec: ExtendRecipeSpec<'_>,
         dry_run: bool,
-    ) -> Result<RecipeChanges, ReadySetError> {
+    ) -> Result<(), ReadySetError> {
         // Drop recipes from the replicator that we have already processed.
         if let (Some(new), Some(current)) = (
             &recipe_spec.replication_offset,
@@ -1593,7 +1566,7 @@ impl DfState {
         ) {
             if current >= new {
                 // no-op
-                return Ok(Default::default());
+                return Ok(());
             }
         }
 
@@ -1634,7 +1607,7 @@ impl DfState {
         Ok(1)
     }
 
-    pub(super) async fn remove_all_queries(&mut self) -> ReadySetResult<RecipeChanges> {
+    pub(super) async fn remove_all_queries(&mut self) -> ReadySetResult<()> {
         let changes = self
             .recipe
             .cache_names()

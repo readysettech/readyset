@@ -447,9 +447,6 @@ impl TestHandle {
                             parse_select_statement(nom_sql::Dialect::MySQL, select_stmt.clone())
                                 .unwrap(),
                         ),
-                        unparsed_create_cache_statement: format!(
-                            "create cache {query_name} from {select_stmt}"
-                        ),
                         always: false,
                     }),
                 ],
@@ -1702,7 +1699,6 @@ async fn postgresql_ddl_replicate_drop_view_internal(url: &str) {
             .unwrap(),
         ),
         always: false,
-        unparsed_create_cache_statement: "unused for test".to_string(),
     });
     ctx.noria
         .extend_recipe(ChangeList::from_change(
@@ -1784,7 +1780,6 @@ async fn postgresql_ddl_replicate_create_view_internal(url: &str) {
                     .unwrap()
                 ),
                 always: true,
-                unparsed_create_cache_statement: "unused for test".to_string(),
             }),
             Dialect::DEFAULT_POSTGRESQL
         ))

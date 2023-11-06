@@ -37,7 +37,6 @@ pub(crate) enum RecipeExpr {
     Cache {
         name: Relation,
         statement: SelectStatement,
-        unparsed_statement: String,
         always: bool,
     },
 }
@@ -741,7 +740,6 @@ mod tests {
                 statement: parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table;")
                     .unwrap(),
                 always: false,
-                unparsed_statement: "CREATE CACHE test_query FROM SELECT * FROM test_table".into(),
             };
 
             assert_eq!(cached_query.name(), &query_name);
@@ -772,7 +770,6 @@ mod tests {
                 statement: parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table;")
                     .unwrap(),
                 always: false,
-                unparsed_statement: "CREATE CACHE test_query FROM SELECT * FROM test_table".into(),
             };
 
             let cached_query_table_refs = cached_query.table_references();
@@ -817,8 +814,6 @@ mod tests {
                     name: "test_query".into(),
                     statement: statement.clone(),
                     always: false,
-                    unparsed_statement: "CREATE CACHE test_query FROM SELECT * FROM test_table"
-                        .into(),
                 })
                 .unwrap();
             registry
@@ -826,8 +821,6 @@ mod tests {
                     name: "test_query_alias".into(),
                     statement,
                     always: false,
-                    unparsed_statement:
-                        "CREATE CACHE test_query_alias FROM SELECT * FROM test_table".into(),
                 })
                 .unwrap();
 
@@ -838,8 +831,6 @@ mod tests {
                     name: "test_query".into(),
                     statement: statement.clone(),
                     always: false,
-                    unparsed_statement: "CREATE CACHE test_query FROM SELECT * FROM test_table"
-                        .into(),
                 })
                 .unwrap();
             registry
@@ -847,8 +838,6 @@ mod tests {
                     name: "test_query_alias".into(),
                     statement,
                     always: false,
-                    unparsed_statement:
-                        "CREATE CACHE test_query_alias FROM SELECT * FROM test_table".into(),
                 })
                 .unwrap();
 
@@ -885,8 +874,6 @@ mod tests {
                 )
                 .unwrap(),
                 always: false,
-                unparsed_statement:
-                    "CREATE CACHE test_query2 FROM SELECT DISTINCT * FROM test_table".into(),
             };
 
             assert!(registry.add_query(expr.clone()).unwrap());
@@ -904,7 +891,6 @@ mod tests {
                 statement: parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table;")
                     .unwrap(),
                 always: false,
-                unparsed_statement: "CREATE CACHE test_query2 FROM SELECT * FROM test_table".into(),
             };
             assert!(!registry.add_query(expr).unwrap());
 
@@ -916,8 +902,6 @@ mod tests {
                     statement: parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table;")
                         .unwrap(),
                     always: false,
-                    unparsed_statement: "CREATE CACHE test_query FROM SELECT * FROM test_table"
-                        .into(),
                 }
             );
         }
@@ -1057,8 +1041,6 @@ mod tests {
                     statement: parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table")
                         .unwrap(),
                     always: false,
-                    unparsed_statement: "CREATE CACHE test_query FROM SELECT * FROM test_table"
-                        .into(),
                 }
             );
             assert!(registry.get(&"test_query_alias".into()).is_none())
@@ -1104,7 +1086,6 @@ mod tests {
                     name: "test".into(),
                     statement: stmt.clone(),
                     always: false,
-                    unparsed_statement: "CREATE CACHE test FROM SELECT * FROM test_table".into(),
                 })
                 .unwrap();
             assert!(registry.contains(&stmt))
@@ -1135,8 +1116,6 @@ mod tests {
                     statement: parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table")
                         .unwrap(),
                     always: false,
-                    unparsed_statement: "CREATE CACHE test_query2 FROM SELECT * FROM test_table"
-                        .into(),
                 })
                 .unwrap();
 
@@ -1224,8 +1203,6 @@ mod tests {
                     name: "foo".into(),
                     statement: query.clone(),
                     always: false,
-                    unparsed_statement: "CREATE CACHE foo FROM SELECT CAST(x AS public.abc) FROM t"
-                        .into(),
                 })
                 .unwrap());
 
@@ -1381,8 +1358,6 @@ mod tests {
                     name: "test_query".into(),
                     statement: statement.clone(),
                     always: false,
-                    unparsed_statement:
-                        "CREATE CACHE test_query FROM SELECT a FROM t WHERE a = 1 LIMIT ?".into(),
                 })
                 .unwrap();
 
@@ -1405,8 +1380,6 @@ mod tests {
                     name: "alias".into(),
                     statement,
                     always: false,
-                    unparsed_statement:
-                        "CREATE CACHE alias FROM SELECT a FROM t WHERE a = 1 LIMIT ?".into(),
                 })
                 .unwrap();
 
@@ -1440,8 +1413,6 @@ mod tests {
                     name: "query1".into(),
                     statement: statement1.clone(),
                     always: false,
-                    unparsed_statement:
-                        "CREATE CACHE query1 FROM SELECT a FROM t WHERE a = 1 LIMIT ?;".into(),
                 })
                 .unwrap();
 
@@ -1450,7 +1421,6 @@ mod tests {
                     name: "query1_alias".into(),
                     statement: statement1,
                     always: false,
-                    unparsed_statement: "CREATE CACHE query1_alias FROM SELECT a FROM t WHERE a = 1 LIMIT ?;".into(),
                 })
                 .unwrap();
 
@@ -1459,8 +1429,6 @@ mod tests {
                     name: "query2".into(),
                     statement: statement2,
                     always: false,
-                    unparsed_statement:
-                        "CREATE CACHE query2 FROM SELECT a FROM t WHERE a = 2 LIMIT ?;".into(),
                 })
                 .unwrap();
 

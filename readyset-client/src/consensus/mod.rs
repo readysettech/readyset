@@ -251,12 +251,9 @@ pub trait AuthorityControl: Send + Sync {
     ///
     /// These are stored separately from the controller state so that it's always available, using
     /// backwards-compatible serialization, for if the controller state can't be deserialized
-    async fn add_create_cache_statements<I>(&self, new_stmts: I) -> ReadySetResult<()>
-    where
-        I: IntoIterator<Item = String> + Clone + Send,
-    {
+    async fn add_create_cache_statement(&self, new_stmt: &str) -> ReadySetResult<()> {
         modify_create_cache_statements(self, move |stmts| {
-            stmts.extend(new_stmts.clone());
+            stmts.push(new_stmt.to_owned());
         })
         .await
     }

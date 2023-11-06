@@ -1575,12 +1575,9 @@ mod tests {
             .iter()
             .map(|stmt| {
                 let authority = authority.clone();
-                tokio::spawn(async move {
-                    authority
-                        .add_create_cache_statements([(*stmt).to_owned()])
-                        .await
-                        .unwrap()
-                })
+                tokio::spawn(
+                    async move { authority.add_create_cache_statement(stmt).await.unwrap() },
+                )
             })
             .collect::<FuturesUnordered<_>>();
 

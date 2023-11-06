@@ -30,7 +30,6 @@ pub(crate) use self::recipe::{QueryID, Recipe, Schema};
 use self::registry::ExprRegistry;
 use crate::controller::mir_to_flow::{mir_node_to_flow_parts, mir_query_to_flow_parts};
 use crate::controller::sql::registry::RecipeExpr;
-use crate::controller::state::RecipeChanges;
 use crate::controller::Migration;
 use crate::sql::mir::MirRemovalResult;
 use crate::ReuseConfigType;
@@ -211,8 +210,7 @@ impl SqlIncorporator {
         &mut self,
         changelist: ChangeList,
         mig: &mut Migration<'_>,
-    ) -> ReadySetResult<RecipeChanges> {
-        let mut res = RecipeChanges::default();
+    ) -> ReadySetResult<()> {
         debug!(
             num_queries = self.registry.len(),
             named_queries = self.registry.num_aliases(),
@@ -368,20 +366,7 @@ impl SqlIncorporator {
                     self.add_view(stmt.name, definition, schema_search_path.clone())?;
                 }
                 Change::CreateCache(cc) => {
-                    res.add_cache_statement(
-                        cc.unparsed_create_cache_statement.clone(),
-                        schema_search_path.clone(),
-                        mig.dialect,
-                    )?;
-
-                    self.add_query(
-                        cc.name,
-                        *cc.statement,
-                        cc.unparsed_create_cache_statement,
-                        cc.always,
-                        &schema_search_path,
-                        mig,
-                    )?;
+                    self.add_query(cc.name, *cc.statement, cc.always, &schema_search_path, mig)?;
                 }
                 Change::AlterTable(_) => {
                     // The only ALTER TABLE changes that can end up here (currently) are ones that
@@ -553,7 +538,7 @@ impl SqlIncorporator {
             }
         }
 
-        Ok(res)
+        Ok(())
     }
 
     fn invalidate_queries_for_added_relation(
@@ -623,7 +608,6 @@ impl SqlIncorporator {
         &mut self,
         name: Option<Relation>,
         mut stmt: SelectStatement,
-        unparsed_statement: String,
         always: bool,
         schema_search_path: &[SqlIdentifier],
         mig: &mut Migration<'_>,
@@ -688,7 +672,6 @@ impl SqlIncorporator {
             name: name.clone(),
             statement: stmt,
             always,
-            unparsed_statement,
         })?;
         self.registry
             .insert_invalidating_tables(name.clone(), invalidating_tables)?;

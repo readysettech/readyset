@@ -227,7 +227,7 @@ pub struct CreateCacheStatement {
     pub inner: Result<CacheInner, String>,
     /// A full copy of the original 'create cache' statement that can be used to re-create the
     /// cache after an upgrade
-    pub unparsed_create_cache_statement: String,
+    pub unparsed_create_cache_statement: Option<String>,
     /// If `always` is true, a cached query executed inside a transaction can be served from
     /// a readyset cache.
     /// if false, cached queries within a transaction are proxied to upstream
@@ -837,7 +837,7 @@ pub fn create_cached_query(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CreateCacheStatement> {
     move |i| {
-        let unparsed_create_cache_statement: String = String::from_utf8_lossy(*i).into();
+        let unparsed_create_cache_statement = Some(String::from_utf8_lossy(*i).into());
         let (i, _) = tag_no_case("create")(i)?;
         let (i, _) = whitespace1(i)?;
         let (i, _) = tag_no_case("cache")(i)?;
