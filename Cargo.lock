@@ -4663,16 +4663,13 @@ name = "readyset-common"
 version = "0.7.0"
 dependencies = [
  "anyhow",
- "bit-vec",
  "chrono",
- "ndarray",
  "petgraph",
  "proptest",
  "readyset-client",
  "readyset-data",
  "readyset-util",
  "rlimit",
- "rust_decimal",
  "serde",
  "test-strategy",
  "tracing",
