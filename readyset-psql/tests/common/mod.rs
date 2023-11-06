@@ -28,7 +28,6 @@ pub async fn setup_standalone_with_authority(
         ))
     });
     let (config, handle, shutdown_tx) = TestBuilder::default()
-        .fallback(true)
         .persistent(true)
         .recreate_database(recreate)
         .authority(authority.clone())

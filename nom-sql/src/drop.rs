@@ -89,6 +89,12 @@ impl DialectDisplay for DropCacheStatement {
     }
 }
 
+impl DropCacheStatement {
+    pub fn display_unquoted(&self) -> impl Display + Copy + '_ {
+        fmt_with(move |f| write!(f, "DROP CACHE {}", self.name.display_unquoted()))
+    }
+}
+
 pub fn drop_cached_query(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], DropCacheStatement> {
