@@ -2007,6 +2007,9 @@ where
             SqlQuery::Explain(nom_sql::ExplainStatement::Materializations) => {
                 self.noria.explain_materializations().await
             }
+            SqlQuery::Explain(nom_sql::ExplainStatement::CreateCache { .. }) => Err(
+                ReadySetError::Unsupported("EXPLAIN CREATE CACHE is not yet supported".into()),
+            ),
             SqlQuery::CreateCache(CreateCacheStatement {
                 name,
                 inner,
