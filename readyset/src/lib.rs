@@ -168,17 +168,6 @@ pub struct Options {
     #[clap(long, env = "DEPLOYMENT", default_value = "readyset.db", value_parser = NonEmptyStringValueParser::new(), hide = true)]
     deployment: String,
 
-    /// Database engine protocol to emulate. If omitted, will be inferred from the
-    /// `upstream-db-url`
-    #[clap(
-        long,
-        env = "DATABASE_TYPE",
-        value_enum,
-        required_unless_present("upstream_db_url"),
-        hide = true
-    )]
-    pub database_type: Option<DatabaseType>,
-
     /// Run ReadySet in standalone mode or adapter mode.
     #[clap(
         long,
@@ -411,23 +400,9 @@ impl Options {
     pub fn database_type(&self) -> anyhow::Result<DatabaseType> {
         let infer_from_db_url = |db_url: &str| Ok(db_url.parse::<DatabaseURL>()?.database_type());
 
-        match (
-            self.database_type,
-            &self.server_worker_options.replicator_config.upstream_db_url,
-        ) {
-            (None, None) => bail!("One of either --database-type or --upstream-db-url is required"),
-            (None, Some(url)) => infer_from_db_url(url),
-            (Some(dt), None) => Ok(dt),
-            (Some(dt), Some(url)) => {
-                let inferred = infer_from_db_url(url)?;
-                if dt != inferred {
-                    bail!(
-                        "Provided --database-type {dt} does not match database type {inferred} for \
-                         --upstream-db-url"
-                    );
-                }
-                Ok(dt)
-            }
+        match &self.server_worker_options.replicator_config.upstream_db_url {
+            Some(url) => infer_from_db_url(url),
+            None => bail!("--upstream-db-url is required"),
         }
     }
 }
@@ -1202,8 +1177,6 @@ mod tests {
     fn arg_parsing_noria_standalone() {
         let opts = Options::parse_from(vec![
             "readyset",
-            "--database-type",
-            "mysql",
             "--deployment",
             "test",
             "--address",
@@ -1220,8 +1193,6 @@ mod tests {
     fn arg_parsing_with_upstream() {
         let opts = Options::parse_from(vec![
             "readyset",
-            "--database-type",
-            "mysql",
             "--deployment",
             "test",
             "--address",
@@ -1240,8 +1211,6 @@ mod tests {
     fn async_migrations_param_defaults() {
         let opts = Options::parse_from(vec![
             "readyset",
-            "--database-type",
-            "mysql",
             "--deployment",
             "test",
             "--address",
@@ -1290,8 +1259,6 @@ mod tests {
             "0.0.0.0:3306",
             "--upstream-db-url",
             "postgresql://root:password@db/readyset",
-            "--database-type",
-            "postgresql",
         ]);
         assert_eq!(opts.database_type().unwrap(), DatabaseType::PostgreSQL);
 
@@ -1302,9 +1269,7 @@ mod tests {
             "--address",
             "0.0.0.0:3306",
             "--upstream-db-url",
-            "postgresql://root:password@db/readyset",
-            "--database-type",
-            "mysql",
+            "mongodb://root:password@db/readyset",
         ]);
         opts.database_type().unwrap_err();
     }

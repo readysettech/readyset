@@ -29,7 +29,6 @@ kubectl create secret generic readyset-upstream-database \
     --from-literal=username="${READYSET_USER}" \
     --from-literal=password=${READYSET_PASS} \
     --from-literal=database=${DATABASE_NAME} \
-    --from-literal=database_type=${DATABASE_TYPE}
 ```
 
 ## Add the repo

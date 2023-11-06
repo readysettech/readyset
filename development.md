@@ -64,13 +64,13 @@ Then, run the adapter binary. The adapter will communicate with servers that hav
 
 **MySQL**
 ```
-cargo run --bin readyset --release -- --database-type mysql --upstream-db-url mysql://root:readyset@127.1/readyset  --allow-unauthenticated-connections
+cargo run --bin readyset --release -- --upstream-db-url mysql://root:readyset@127.1/readyset  --allow-unauthenticated-connections
   --address 0.0.0.0:3307 --deployment <deployment name>  --prometheus-metrics --query-log-mode all-queries
  ```
 
 **Postgres**
 ```
-cargo run --bin readyset --release -- --database-type postgresql --upstream-db-url postgresql://postgres:readyset@127.1/readyset  --allow-unauthenticated-connections
+cargo run --bin readyset --release -- --upstream-db-url postgresql://postgres:readyset@127.1/readyset  --allow-unauthenticated-connections
   --address 0.0.0.0:5433 --deployment <deployment name> --prometheus-metrics --query-log-mode all-queries
 ```
 

@@ -26,7 +26,6 @@ for num_indices in "${indices[@]}"; do
     echo "=== Benchmarking ${num_indices} indices ==="
     target/release/benchmarks \
         --local \
-        --database-type "${DATABASE_TYPE:-mysql}" \
         --graph \
         --x-axis target-qps \
         --x-values 100,150,200,250,300,350,400,450,500,600,700,800,900,1000,1200,1400,1600,1800,2000,3000,4000,5000,6000,7000,8000,9000,10000 \
