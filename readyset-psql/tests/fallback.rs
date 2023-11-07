@@ -873,7 +873,7 @@ async fn insert_enum_value_appended_after_create_table() {
     //    this doesn't have to be the same table we later insert into)
     //  - Specifically insert the enum value that was added in the ALTER TYPE statement
     //  - Insert using a parameter, not a hardcoded query (hence the use of `query_raw` here)
-    // This turned out to be caused by an interation with a client library that cached types from
+    // This turned out to be caused by an integration with a client library that cached types from
     // upstream queries and didn't update the cached definitions after the type was altered.
     let params: Vec<DfValue> = vec!["b".into()];
     client
@@ -2067,7 +2067,11 @@ async fn recreate_replication_slot() {
 mod failure_injection_tests {
     // TODO: move the above cfg failure_injection tests into this mod
 
+    use std::sync::Arc;
+
+    use readyset_client::consensus::{Authority, AuthorityControl, CacheDDLRequest};
     use readyset_client::failpoints;
+    use readyset_data::Dialect;
     use readyset_errors::ReadySetError;
     use tracing::debug;
 
@@ -2081,7 +2085,12 @@ mod failure_injection_tests {
     async fn setup_reload_controller_state_test(
         prefix: &str,
         queries: &[&str],
-    ) -> (tokio_postgres::Config, Handle, ShutdownSender) {
+    ) -> (
+        tokio_postgres::Config,
+        Handle,
+        Arc<Authority>,
+        ShutdownSender,
+    ) {
         readyset_tracing::init_test_logging();
 
         let (config, handle, authority, shutdown_tx) =
@@ -2090,7 +2099,7 @@ mod failure_injection_tests {
         let conn = connect(config).await;
         for query in queries {
             debug!(%query, "Running Query");
-            let _res = conn.simple_query(query).await.expect("query failed");
+            let _res = conn.simple_query(query).await;
             // give it some time to propagate
             sleep().await;
         }
@@ -2110,10 +2119,12 @@ mod failure_injection_tests {
         // Stop the server and start a new one
         shutdown_tx.shutdown().await;
         drop(handle);
+        sleep().await;
 
-        let (config, handle, _authority, shutdown_tx) =
+        let (config, handle, authority, shutdown_tx) =
             setup_standalone_with_authority(prefix, Some(authority), true, false).await;
-        (config, handle, shutdown_tx)
+        sleep().await;
+        (config, handle, authority, shutdown_tx)
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -2123,7 +2134,7 @@ mod failure_injection_tests {
             "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);",
             "CREATE CACHE test_query FROM SELECT * FROM users;",
         ];
-        let (_config, mut handle, shutdown_tx) =
+        let (_config, mut handle, _authority, shutdown_tx) =
             setup_reload_controller_state_test("caches_recreated", &queries).await;
 
         let queries = handle.views().await.unwrap();
@@ -2141,7 +2152,7 @@ mod failure_injection_tests {
             "CREATE CACHE cached_query FROM SELECT * FROM users where id = 1;",
             "DROP CACHE dropped_query",
         ];
-        let (_config, mut handle, shutdown_tx) =
+        let (_config, mut handle, _authority, shutdown_tx) =
             setup_reload_controller_state_test("caches_not_recreated", &queries).await;
 
         let queries = handle.views().await.unwrap();
@@ -2162,10 +2173,79 @@ mod failure_injection_tests {
             "CREATE CACHE cached_query FROM SELECT * FROM users",
         ];
 
-        let (_config, mut handle, _shutdown_tx) =
+        let (_config, mut handle, _authority, _shutdown_tx) =
             setup_reload_controller_state_test("caches_recreated", &queries).await;
         let queries = handle.views().await.unwrap();
         assert!(!queries.contains_key(&"dropped_query".into()));
         assert!(queries.contains_key(&"cached_query".into()));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[serial]
+    async fn caches_added_if_extend_recipe_times_out() {
+        let queries = [
+            "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);",
+            "CREATE CACHE test_query FROM SELECT * FROM users;",
+        ];
+
+        // This is set to be larger than  EXTEND_RECIPE_MAX_SYNC_TIME, which is 5 seconds
+        // The `create cache` is the 3rd extend_recipe run
+        fail::cfg(failpoints::EXTEND_RECIPE, "2*off->1*sleep(6000)").expect("failed at failing");
+
+        let (_config, mut handle, authority, shutdown_tx) =
+            setup_reload_controller_state_test("extend_recipe_timeout", &queries).await;
+
+        let cache_ddl_requests = authority.cache_ddl_requests().await.unwrap();
+        let expected = CacheDDLRequest {
+            unparsed_stmt: "CREATE CACHE test_query FROM SELECT * FROM users;".to_string(),
+            schema_search_path: vec!["postgres".into(), "public".into()],
+            dialect: Dialect::DEFAULT_POSTGRESQL,
+        };
+        assert_eq!(expected, *cache_ddl_requests.get(0).unwrap());
+
+        let queries = handle.views().await.unwrap();
+        assert!(queries.contains_key(&"test_query".into()));
+
+        shutdown_tx.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[serial]
+    async fn create_cache_not_added_if_extend_recipe_fails() {
+        let queries = [
+            "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);",
+            "CREATE CACHE test_query FROM SELECT * FROM idontexist;",
+        ];
+
+        let (_config, mut handle, authority, shutdown_tx) =
+            setup_reload_controller_state_test("extend_recipe_create_fail", &queries).await;
+
+        let cache_ddl_requests = authority.cache_ddl_requests().await.unwrap();
+        assert!(cache_ddl_requests.is_empty());
+
+        let queries = handle.views().await.unwrap();
+        assert!(queries.is_empty());
+
+        shutdown_tx.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[serial]
+    async fn drop_cache_not_added_if_drop_fails() {
+        let queries = [
+            "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);",
+            "DROP CACHE idontexist;",
+        ];
+
+        let (_config, mut handle, authority, shutdown_tx) =
+            setup_reload_controller_state_test("extend_recipe_drop_fail", &queries).await;
+
+        let cache_ddl_requests = authority.cache_ddl_requests().await.unwrap();
+        assert!(cache_ddl_requests.is_empty());
+
+        let queries = handle.views().await.unwrap();
+        assert!(queries.is_empty());
+
+        shutdown_tx.shutdown().await;
     }
 }

@@ -27,3 +27,5 @@ pub const POSTGRES_NEXT_WAL_EVENT: &str = "postgres-next-wal-event";
 pub const START_INNER_POSTGRES: &str = "start-inner-postgres";
 /// Imitate a backwards incompatible deserialization from controller state
 pub const LOAD_CONTROLLER_STATE: &str = "load-controller-state";
+/// Injects a failpoint at the beginning of DfState::extend_recipe
+pub const EXTEND_RECIPE: &str = "extend-recipe";
