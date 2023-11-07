@@ -5,7 +5,7 @@ use readyset_client_test_helpers::{self, sleep, TestBuilder};
 use readyset_server::Handle;
 use readyset_util::eventually;
 use readyset_util::shutdown::ShutdownSender;
-use tokio_postgres::{CommandCompleteContents, SimpleQueryMessage};
+use tokio_postgres::{Client, CommandCompleteContents, SimpleQueryMessage};
 
 mod common;
 use common::connect;
@@ -1901,6 +1901,71 @@ async fn drop_all_caches_clears_authority_list() {
 
     let res = authority.cache_ddl_requests().await.unwrap();
     assert!(res.is_empty());
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn explain_create_cache() {
+    readyset_tracing::init_test_logging();
+    let (opts, _handle, shutdown_tx) = setup().await;
+    let conn = connect(opts).await;
+
+    conn.simple_query("DROP TABLE IF EXISTS t").await.unwrap();
+    conn.simple_query("CREATE TABLE t (x int, y int)")
+        .await
+        .unwrap();
+
+    #[derive(Debug)]
+    struct ExplainCreateCacheResult {
+        rewritten_query: String,
+        supported: String,
+    }
+
+    async fn explain_create_cache(query: &'static str, conn: &Client) -> ExplainCreateCacheResult {
+        let row = match conn
+            .simple_query(&format!("EXPLAIN CREATE CACHE FROM {query}"))
+            .await
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap()
+        {
+            SimpleQueryMessage::Row(row) => row,
+            _ => panic!(),
+        };
+
+        ExplainCreateCacheResult {
+            rewritten_query: row.get(1).unwrap().into(),
+            supported: row.get(2).unwrap().into(),
+        }
+    }
+
+    // Wait for t to be replicated
+    eventually!(conn
+        .simple_query("CREATE CACHE FROM SELECT * FROM t")
+        .await
+        .is_ok());
+
+    eventually! {
+        let res = explain_create_cache("SELECT * FROM t WHERE x = 5", &conn).await;
+
+        res.supported == "yes" && res.rewritten_query == r#"SELECT * FROM "t" WHERE ("x" = $1)"#
+    }
+
+    eventually! {
+        let res = explain_create_cache("SELECT * FROM t WHERE t.x = RANDOM()", &conn).await;
+
+        res.supported == "no" && res.rewritten_query == r#"SELECT * FROM "t" WHERE ("t"."x" = RANDOM())"#
+    }
+
+    conn.simple_query("CREATE CACHE FROM SELECT * FROM t WHERE x = 5")
+        .await
+        .unwrap();
+
+    let res = explain_create_cache("SELECT * FROM t WHERE x = 1", &conn).await;
+    assert_eq!(res.supported, "cached");
+    assert_eq!(res.rewritten_query, r#"SELECT * FROM "t" WHERE ("x" = $1)"#);
 
     shutdown_tx.shutdown().await;
 }

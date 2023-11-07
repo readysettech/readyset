@@ -987,6 +987,27 @@ impl NoriaConnector {
         }
     }
 
+    /// Runs a dry run migration for the given query.
+    ///
+    /// Returns `Ok(())` if the dry run succeeds and `Err(_)` otherwise.
+    pub async fn handle_dry_run(
+        &mut self,
+        id: QueryId,
+        req: &ViewCreateRequest,
+    ) -> ReadySetResult<()> {
+        let changelist = ChangeList::from_change(
+            Change::create_cache(id.to_string(), req.statement.clone(), false),
+            self.dialect,
+        )
+        .with_schema_search_path(req.schema_search_path.clone());
+
+        noria_await!(
+            self.inner.get_mut()?,
+            self.inner.get_mut()?.noria.dry_run(changelist)
+        )
+        .map(|_| ())
+    }
+
     pub(crate) async fn get_view_name(
         &mut self,
         q: &nom_sql::SelectStatement,
@@ -1536,6 +1557,19 @@ impl NoriaConnector {
 
     pub fn handle(&self) -> Option<ReadySetHandle> {
         self.inner.inner.as_ref().map(|i| i.noria.clone())
+    }
+
+    /// Returns true if a view exists for the given query and false otherwise.
+    pub(crate) async fn get_view_status(
+        &mut self,
+        query: ViewCreateRequest,
+    ) -> ReadySetResult<bool> {
+        self.inner
+            .get_mut()?
+            .noria
+            .view_statuses(vec![query], self.dialect)
+            .await
+            .map(|statuses| statuses[0])
     }
 }
 
