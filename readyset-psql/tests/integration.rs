@@ -9,6 +9,8 @@ use tokio_postgres::{CommandCompleteContents, SimpleQueryMessage};
 
 mod common;
 use common::connect;
+use readyset_client::consensus::CacheDDLRequest;
+use readyset_data::Dialect;
 
 use crate::common::setup_standalone_with_authority;
 
@@ -1557,6 +1559,38 @@ async fn same_query_different_search_path() {
     shutdown_tx.shutdown().await;
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn caches_go_in_authority_list() {
+    readyset_tracing::init_test_logging();
+
+    let (config, _handle, authority, shutdown_tx) =
+        setup_standalone_with_authority("caches_go_in_authority_list", None, false, true).await;
+
+    let queries = [
+        "CREATE TABLE t (x int);",
+        "CREATE CACHE q FROM SELECT x FROM t;",
+    ];
+
+    let conn = connect(config).await;
+    for query in queries {
+        let _res = conn.simple_query(query).await.expect("query failed");
+        // give it some time to propagate
+        sleep().await;
+    }
+
+    let res = authority.cache_ddl_requests().await.unwrap();
+    let CacheDDLRequest {
+        unparsed_stmt,
+        schema_search_path,
+        dialect,
+    } = res.get(0).unwrap();
+    assert_eq!(unparsed_stmt, "CREATE CACHE q FROM SELECT x FROM t;");
+    assert_eq!(*dialect, Dialect::DEFAULT_POSTGRESQL);
+    assert!(schema_search_path.is_empty());
+
+    shutdown_tx.shutdown().await;
+}
+
 mod multiple_create_and_drop {
     use itertools::Itertools;
     use readyset_util::eventually;
@@ -1816,37 +1850,12 @@ mod multiple_create_and_drop {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn caches_go_in_authority_list() {
-    readyset_tracing::init_test_logging();
-
-    let (config, _handle, authority, shutdown_tx) =
-        setup_standalone_with_authority("caches_go_in_authority_list", None, true).await;
-
-    let queries = [
-        "CREATE TABLE t (x int);",
-        "CREATE CACHE q FROM SELECT x FROM t;",
-    ];
-
-    let conn = connect(config).await;
-    for query in queries {
-        let _res = conn.simple_query(query).await.expect("query failed");
-        // give it some time to propagate
-        sleep().await;
-    }
-
-    let res = authority.cache_ddl_requests().await.unwrap();
-    let unparsed_stmt = res.get(0).unwrap();
-    assert_eq!(unparsed_stmt, "CREATE CACHE q FROM SELECT x FROM t;");
-
-    shutdown_tx.shutdown().await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn drop_caches_go_in_authority_list() {
     readyset_tracing::init_test_logging();
 
     let (config, _handle, authority, shutdown_tx) =
-        setup_standalone_with_authority("drop_caches_go_in_authority_list", None, true).await;
+        setup_standalone_with_authority("drop_caches_go_in_authority_list", None, false, true)
+            .await;
 
     let queries = [
         "CREATE TABLE t (x int);",
@@ -1862,7 +1871,7 @@ async fn drop_caches_go_in_authority_list() {
     }
 
     let res = authority.cache_ddl_requests().await.unwrap();
-    let unparsed_stmt = res.get(1).unwrap();
+    let unparsed_stmt = &res.get(1).unwrap().unparsed_stmt;
     assert_eq!(unparsed_stmt, "DROP CACHE q");
 
     shutdown_tx.shutdown().await;
@@ -1873,7 +1882,7 @@ async fn drop_all_caches_clears_authority_list() {
     readyset_tracing::init_test_logging();
 
     let (config, _handle, authority, shutdown_tx) =
-        setup_standalone_with_authority("drop_all_caches", None, true).await;
+        setup_standalone_with_authority("drop_all_caches", None, false, true).await;
 
     let queries = [
         "CREATE TABLE t (x int);",

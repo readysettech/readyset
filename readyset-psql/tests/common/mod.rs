@@ -18,6 +18,7 @@ pub async fn connect(config: Config) -> Client {
 pub async fn setup_standalone_with_authority(
     prefix: &str,
     authority: Option<Arc<Authority>>,
+    upstream: bool,
     recreate: bool,
 ) -> (Config, Handle, Arc<Authority>, ShutdownSender) {
     let dir = tempfile::tempdir().unwrap();
@@ -28,6 +29,7 @@ pub async fn setup_standalone_with_authority(
         ))
     });
     let (config, handle, shutdown_tx) = TestBuilder::default()
+        .fallback(upstream)
         .persistent(true)
         .recreate_database(recreate)
         .authority(authority.clone())
