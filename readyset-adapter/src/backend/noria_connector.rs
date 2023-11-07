@@ -895,10 +895,13 @@ impl NoriaConnector {
             }
         }
 
-        status.append(&mut additional_meta);
+        additional_meta.append(&mut status);
 
         Ok(QueryResult::MetaVariables(
-            status.into_iter().map(MetaVariable::from).collect(),
+            additional_meta
+                .into_iter()
+                .map(MetaVariable::from)
+                .collect(),
         ))
     }
 
