@@ -4,6 +4,8 @@
 
 ---
 [![Build status](https://badge.buildkite.com/76e02771ab1f0706b7840f47c5fed0e315a56c408d86c0de8c.svg?branch=main)](https://buildkite.com/readyset/readyset-public)
+[![Slack](https://img.shields.io/badge/Join%20the%20community-purple?logo=slack&logoColor=white)](https://join.slack.com/t/readysetcommunity/shared_invite/zt-2272gtiz4-0024xeRJUPGWlRETQrGkFw)
+![Rust](https://img.shields.io/badge/Built%20with%20Rust-black?logo=rust&logoColor=white)
 
 ReadySet is a lightweight query cache that sits between your application and database and turns even the most complex SQL reads into lightning-fast lookups.
 
