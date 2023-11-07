@@ -20,6 +20,8 @@ use readyset_client::consensus::{
 #[cfg(feature = "failure_injection")]
 use readyset_client::failpoints;
 use readyset_client::metrics::recorded;
+use readyset_client::recipe::changelist::Change;
+use readyset_client::recipe::ChangeList;
 use readyset_client::ControllerDescriptor;
 use readyset_data::Dialect;
 use readyset_errors::{internal, internal_err, ReadySetError, ReadySetResult};
@@ -31,7 +33,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{self, Receiver, Sender, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
-use tracing::{error, info, info_span, warn};
+use tracing::{debug, error, info, info_span, warn};
 use tracing_futures::Instrument;
 use url::Url;
 
@@ -268,7 +270,7 @@ pub(crate) struct LeaderElectionResults {
     controller_state: ControllerState,
     /// If we were unable to deserialize the caches from the previous controller state, we need to
     /// remake the caches for it, which will be contained in this Vec.
-    caches_to_create: Option<Vec<CacheDDLRequest>>,
+    cache_ddl: Option<Vec<CacheDDLRequest>>,
 }
 
 /// An update on the leader election and failure detection.
@@ -400,8 +402,8 @@ pub struct Controller {
     /// Whether we are the leader and ready to handle requests.
     leader_ready: Arc<AtomicBool>,
 
-    /// Caches that we need to re-create after a backwards incompatible upgrade, if relevant
-    caches_to_recreate: Option<Vec<CacheDDLRequest>>,
+    /// Cache ddl statements to re-run after a backwards incompatible upgrade, if relevant
+    cache_ddl: Option<Vec<CacheDDLRequest>>,
 
     /// Channel used to notify the controller of replicator events.
     replicator_channel: ReplicatorChannel,
@@ -451,7 +453,7 @@ impl Controller {
             telemetry_sender,
             permissive_writes,
             shutdown_rx,
-            caches_to_recreate: None,
+            cache_ddl: None,
         }
     }
 
@@ -539,7 +541,7 @@ impl Controller {
             }
             AuthorityUpdate::WonLeaderElection(LeaderElectionResults {
                 controller_state: state,
-                caches_to_create,
+                cache_ddl,
             }) => {
                 info!("won leader election, creating Leader");
                 gauge!(recorded::CONTROLLER_IS_LEADER, 1f64);
@@ -571,7 +573,7 @@ impl Controller {
                 })
                 .await?;
 
-                self.caches_to_recreate = caches_to_create;
+                self.cache_ddl = cache_ddl;
             }
             AuthorityUpdate::NewWorkers(w) => {
                 let mut guard = self.inner.write().await;
@@ -714,6 +716,7 @@ impl Controller {
                             ReplicatorMessage::SnapshotDone => {
                                 self.leader_ready.store(true, Ordering::Release);
 
+                                self.maybe_recreate_caches().await?;
                                 let now = now();
                                 if let Err(error) = self.authority.update_persistent_stats(|stats| {
                                     let mut stats = stats.unwrap_or_default();
@@ -791,6 +794,137 @@ impl Controller {
         }
         Ok(())
     }
+
+    async fn maybe_recreate_caches(&mut self) -> ReadySetResult<()> {
+        if let Some(ref caches) = self.cache_ddl {
+            if caches.is_empty() {
+                debug!("No caches to create");
+                return Ok(());
+            }
+
+            // We have to re-create in caches that share the same schema search path, but in
+            // practice they will likely all have the same schema search path.
+            // We also have to separate out the changelists into CreateCache ones and Drop ones so
+            // that the Drop ones can properly find the caches to drop.
+            let changelists =
+                separate_changelists_by_schema_search_path_and_change_type(caches.clone());
+
+            for changelist in changelists {
+                let mut guard = self.inner.write().await;
+                if let Some(ref mut inner) = *guard {
+                    let mut writer = inner.dataflow_state_handle.write().await;
+                    let ds = writer.as_mut();
+
+                    let n_caches = changelist.changes.len();
+                    match ds.extend_recipe(changelist.into(), false).await {
+                        Ok(_res) => {
+                            inner
+                                .dataflow_state_handle
+                                .commit(writer, &self.authority)
+                                .await?;
+                            info!("Successfully restored {n_caches} caches");
+                        }
+                        Err(error) => {
+                            error!(n_failed_caches=%n_caches, %error, "Failed to restore caches!");
+                        }
+                    }
+                } else {
+                    return Err(ReadySetError::NotLeader);
+                }
+            }
+
+            self.cache_ddl = None;
+        }
+        Ok(())
+    }
+}
+
+/// Separates a vector of CacheDDLRequest into a vector of ChangeList based on the schema search
+/// path and the type of change (CreateCache or Drop). Each ChangeList will contain either only
+/// CreateCache changes or only Drop changes. For Drop changes, the schema search path is not set.
+fn separate_changelists_by_schema_search_path_and_change_type(
+    ddl_reqs: Vec<CacheDDLRequest>,
+) -> Vec<ChangeList> {
+    debug_assert!(
+        ddl_reqs
+            .iter()
+            .filter(|req| matches!(
+                Change::from_str(&req.unparsed_stmt, req.dialect.into()),
+                Ok(Change::Drop { .. })
+            ))
+            .all(|req| req.dialect == ddl_reqs[0].dialect),
+        "All Drop statements should have the same dialect"
+    );
+
+    debug_assert!(
+        ddl_reqs
+            .iter()
+            .filter(|req| matches!(
+                Change::from_str(&req.unparsed_stmt, req.dialect.into()),
+                Ok(Change::Drop { .. })
+            ))
+            .all(|req| req.schema_search_path.is_empty()),
+        "Drop changes should have an empty schema search path"
+    );
+
+    debug_assert!(
+        ddl_reqs
+            .iter()
+            .filter(|req| matches!(
+                Change::from_str(&req.unparsed_stmt, req.dialect.into()),
+                Ok(Change::CreateCache(_))
+            ))
+            .all(|req| req.dialect == ddl_reqs[0].dialect),
+        "All CreateCache statements should have the same dialect"
+    );
+
+    let mut changelists = vec![];
+    let mut current_changes = vec![];
+    let mut current_dialect = None;
+    let mut current_schema_search_path = None;
+    let mut last_was_drop = false;
+
+    for ddl_req in ddl_reqs {
+        match Change::from_str(&ddl_req.unparsed_stmt, ddl_req.dialect.into()) {
+            Ok(change) => {
+                let is_drop = matches!(change, Change::Drop { .. });
+
+                // When the change type switches, push the current list and start a new one
+                if current_changes.is_empty() || last_was_drop != is_drop {
+                    if !current_changes.is_empty() {
+                        changelists.push(ChangeList {
+                            changes: current_changes,
+                            schema_search_path: current_schema_search_path.unwrap_or_default(),
+                            dialect: ddl_req.dialect,
+                        });
+                        current_changes = Vec::new();
+                    }
+                    current_dialect = Some(ddl_req.dialect);
+                    current_schema_search_path = if is_drop {
+                        None
+                    } else {
+                        Some(ddl_req.schema_search_path.clone())
+                    };
+                }
+
+                current_changes.push(change);
+                last_was_drop = is_drop;
+            }
+            Err(error) => {
+                error!(%error, "Failed to re-parse change");
+            }
+        }
+    }
+
+    if !current_changes.is_empty() {
+        changelists.push(ChangeList {
+            changes: current_changes,
+            schema_search_path: current_schema_search_path.unwrap_or_default(),
+            dialect: current_dialect.expect("Dialect should be set for the last batch"),
+        });
+    }
+
+    changelists
 }
 
 /// Manages this authority's leader election state and sends update
@@ -898,30 +1032,23 @@ impl AuthorityLeaderElectionState {
                 )
                 .await;
 
-            let (state, caches_to_create) = match update_res {
+            let (state, cache_ddl) = match update_res {
                 Ok(Ok(state)) => (state, None),
                 Ok(Err(_)) => return Ok(()),
                 Err(error) if error.caused_by_serialization_failed() => {
                     warn!(
                         %error,
                         "Error deserializing controller state, wiping state and starting fresh \
-                         (NOTE: this will drop all caches!)"
+                         (NOTE: Caches will be re-created once snapshotting finishes)"
                     );
                     let state = ControllerState::new(self.config.clone(), self.permissive_writes);
-                    let create_cache_stmts = self.authority.cache_ddl_requests().await?;
-                    let create_cache_stmts: Option<Vec<CacheDDLRequest>> = create_cache_stmts
-                        .into_iter()
-                        .filter_map(|v| match serde_json::from_slice(v.as_bytes()) {
-                            Ok(val) => Some(val),
-                            Err(err) => {
-                                error!(%err, "Failed to deserialize CreateCacheRequest. Cache will not be re-created");
-                                None
-                            }
-                        })
-                        .collect();
+                    let cache_ddl = match self.authority.cache_ddl_requests().await? {
+                        res if res.is_empty() => None,
+                        res => Some(res),
+                    };
                     let new_state = state.clone(); // needs to be in a `let` binding for Send reasons...
                     self.authority.overwrite_controller_state(new_state).await?;
-                    (state, create_cache_stmts)
+                    (state, cache_ddl)
                 }
                 Err(e) => return Err(e),
             };
@@ -930,7 +1057,7 @@ impl AuthorityLeaderElectionState {
             self.event_tx
                 .send(AuthorityUpdate::WonLeaderElection(LeaderElectionResults {
                     controller_state: state,
-                    caches_to_create,
+                    cache_ddl,
                 }))
                 .await
                 .map_err(|_| internal_err!("failed to announce who won leader election"))?;

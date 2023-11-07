@@ -85,7 +85,7 @@ use nom_sql::{
     InsertStatement, Relation, SelectStatement, SetStatement, ShowStatement, SqlIdentifier,
     SqlQuery, UpdateStatement, UseStatement,
 };
-use readyset_client::consensus::{Authority, AuthorityControl};
+use readyset_client::consensus::{Authority, AuthorityControl, CacheDDLRequest};
 use readyset_client::consistency::Timestamp;
 use readyset_client::query::*;
 use readyset_client::results::Results;
@@ -2048,18 +2048,27 @@ where
                 }
 
                 if let Some(unparsed_create_cache_statement) = unparsed_create_cache_statement {
-                    self.authority
-                        .add_cache_ddl_request(unparsed_create_cache_statement)
-                        .await?;
+                    let ddl_req = CacheDDLRequest {
+                        unparsed_stmt: unparsed_create_cache_statement.clone(),
+                        schema_search_path: self.noria.schema_search_path().to_owned(),
+                        dialect: self.settings.dialect.into(),
+                    };
+
+                    self.authority.add_cache_ddl_request(ddl_req).await?;
                 }
 
                 self.create_cached_query(name.as_ref(), stmt, search_path, *always, *concurrently)
                     .await
             }
             SqlQuery::DropCache(drop_cache) => {
-                self.authority
-                    .add_cache_ddl_request(&drop_cache.display_unquoted().to_string())
-                    .await?;
+                let ddl_req = CacheDDLRequest {
+                    unparsed_stmt: drop_cache.display_unquoted().to_string(),
+                    // drop cache statements explicitly don't use a search path, as the only schema
+                    // we need to resolve is the cache name.
+                    schema_search_path: vec![],
+                    dialect: self.settings.dialect.into(),
+                };
+                self.authority.add_cache_ddl_request(ddl_req).await?;
                 let DropCacheStatement { name } = drop_cache;
                 self.drop_cached_query(name).await
             }

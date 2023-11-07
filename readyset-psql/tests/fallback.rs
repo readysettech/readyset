@@ -2062,3 +2062,110 @@ async fn recreate_replication_slot() {
 
     shutdown_tx.shutdown().await;
 }
+
+#[cfg(feature = "failure_injection")]
+mod failure_injection_tests {
+    // TODO: move the above cfg failure_injection tests into this mod
+
+    use readyset_client::failpoints;
+    use readyset_errors::ReadySetError;
+    use tracing::debug;
+
+    use super::*;
+    use crate::common::setup_standalone_with_authority;
+    use crate::Handle;
+
+    /// Starts readyset, runs extend recipe with a changelist generated from `queries`, then
+    /// injects a leader election that fails to load the controller state and needs to re-create
+    /// it.
+    async fn setup_reload_controller_state_test(
+        prefix: &str,
+        queries: &[&str],
+    ) -> (tokio_postgres::Config, Handle, ShutdownSender) {
+        readyset_tracing::init_test_logging();
+
+        let (config, handle, authority, shutdown_tx) =
+            setup_standalone_with_authority(prefix, None, true, true).await;
+
+        let conn = connect(config).await;
+        for query in queries {
+            debug!(%query, "Running Query");
+            let _res = conn.simple_query(query).await.expect("query failed");
+            // give it some time to propagate
+            sleep().await;
+        }
+
+        let err_to_inject =
+            ReadySetError::SerializationFailed(format!("Backwards Incompatibility Injected"));
+
+        fail::cfg(
+            failpoints::LOAD_CONTROLLER_STATE,
+            &format!(
+                "1*return({})",
+                serde_json::ser::to_string(&err_to_inject).expect("failed to serialize error")
+            ),
+        )
+        .expect("failed to set failpoint");
+
+        // Stop the server and start a new one
+        shutdown_tx.shutdown().await;
+        drop(handle);
+
+        let (config, handle, _authority, shutdown_tx) =
+            setup_standalone_with_authority(prefix, Some(authority), true, false).await;
+        (config, handle, shutdown_tx)
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[serial]
+    async fn caches_recreated_after_backwards_incompatible_upgrade() {
+        let queries = [
+            "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);",
+            "CREATE CACHE test_query FROM SELECT * FROM users;",
+        ];
+        let (_config, mut handle, shutdown_tx) =
+            setup_reload_controller_state_test("caches_recreated", &queries).await;
+
+        let queries = handle.views().await.unwrap();
+        assert!(queries.contains_key(&"test_query".into()));
+
+        shutdown_tx.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[serial]
+    async fn dropped_caches_not_recreated() {
+        let queries = [
+            "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);",
+            "CREATE CACHE dropped_query FROM SELECT * FROM users;",
+            "CREATE CACHE cached_query FROM SELECT * FROM users where id = 1;",
+            "DROP CACHE dropped_query",
+        ];
+        let (_config, mut handle, shutdown_tx) =
+            setup_reload_controller_state_test("caches_not_recreated", &queries).await;
+
+        let queries = handle.views().await.unwrap();
+        assert!(!queries.contains_key(&"dropped_query".into()));
+        assert!(queries.contains_key(&"cached_query".into()));
+        shutdown_tx.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[serial]
+    async fn dropped_then_recreated_cache_recreated() {
+        let queries = [
+            "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);",
+            "CREATE CACHE dropped_query FROM SELECT * FROM users;",
+            "DROP CACHE dropped_query",
+            "CREATE CACHE cached_query FROM SELECT * FROM users;",
+            "DROP CACHE cached_query;",
+            "CREATE CACHE cached_query FROM SELECT * FROM users",
+        ];
+
+        let (_config, mut handle, _shutdown_tx) =
+            setup_reload_controller_state_test("caches_dropped_then_recreated", &queries).await;
+        let queries = handle.views().await.unwrap();
+        assert!(!queries.contains_key(&"dropped_query".into()));
+        assert!(queries.contains_key(&"cached_query".into()));
+    }
+}

@@ -16,6 +16,7 @@ use readyset_data::Dialect;
 use readyset_errors::{ReadySetError, ReadySetResult};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use tracing::error;
 use url::Url;
 
 mod consul;
@@ -40,7 +41,7 @@ pub type WorkerId = String;
 const CACHE_DDL_REQUESTS_PATH: &str = "cache_ddl_requests";
 const PERSISTENT_STATS_PATH: &str = "persistent_stats";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub struct CacheDDLRequest {
     pub unparsed_stmt: String,
     pub schema_search_path: Vec<SqlIdentifier>,
@@ -239,11 +240,18 @@ pub trait AuthorityControl: Send + Sync {
     ///
     /// This is stored separately from the controller state so that it's always available, using
     /// backwards-compatible serialization, for if the controller state can't be deserialized
-    async fn cache_ddl_requests(&self) -> ReadySetResult<Vec<String>> {
-        Ok(self
-            .try_read(CACHE_DDL_REQUESTS_PATH)
+    async fn cache_ddl_requests(&self) -> ReadySetResult<Vec<CacheDDLRequest>> {
+        Ok(self.try_read::<Vec<String>>(CACHE_DDL_REQUESTS_PATH)
             .await?
-            .unwrap_or_default())
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|v| match serde_json::from_slice(v.as_bytes()) {
+                Ok(val) => Some(val),
+                Err(err) => {
+                    error!(%err, "Failed to deserialize CacheDDLRequest. Cache will not be re-created");
+                    None
+                }
+            }).collect())
     }
 
     /// Insert a new cache ddl request that has been run
@@ -251,9 +259,19 @@ pub trait AuthorityControl: Send + Sync {
     ///
     /// These are stored separately from the controller state so that it's always available, using
     /// backwards-compatible serialization, for if the controller state can't be deserialized
-    async fn add_cache_ddl_request(&self, new_stmt: &str) -> ReadySetResult<()> {
+    async fn add_cache_ddl_request(&self, cache_ddl_req: CacheDDLRequest) -> ReadySetResult<()> {
+        let cache_ddl_req = serde_json::ser::to_string(&cache_ddl_req)?;
         modify_cache_ddl_requests(self, move |stmts| {
-            stmts.push(new_stmt.to_owned());
+            stmts.push(cache_ddl_req.clone());
+        })
+        .await
+    }
+
+    /// Removes the provided statement from the store.
+    async fn remove_cache_ddl_request(&self, cache_ddl_req: CacheDDLRequest) -> ReadySetResult<()> {
+        let cache_ddl_req = serde_json::ser::to_string(&cache_ddl_req)?;
+        modify_cache_ddl_requests(self, move |stmts| {
+            stmts.retain(|stmt| *stmt != cache_ddl_req);
         })
         .await
     }
