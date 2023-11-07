@@ -9,76 +9,14 @@ common_values:
 
 steps:
 
-  - label: ':rust: Check rustfmt'
-    key: check-rustfmt
-    commands:
-      - '[ -d public ] && cd public'
-      - "cargo --locked fmt -- --check"
-    depends_on:
-    - build-image
-    plugins:
-      - docker#v3.8.0:
-          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
-          volumes:
-          - 'target:/workdir/target'
-          environment:
-          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
-          - CACHEPOT_REGION=us-east-2
-          - CARGO_INCREMENTAL=0
-          - RUST_BACKTRACE=full
-      - ecr#v2.5.0:
-          login: true
-          retries: 3
-    retry: *retry_on_agent_kill
 
-  - label: ':rust: :lock: Check cargo-deny'
-    commands:
-      - '[ -d public ] && cd public'
-      - export RUST_BACKTRACE=full
-      - cargo --locked deny check
-    depends_on:
-    - cargo-deny-image
-    plugins:
-      - docker#v3.8.0:
-          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/cargo-deny:${BUILDKITE_COMMIT}'
-          environment:
-          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
-          - CACHEPOT_REGION=us-east-2
-          - CARGO_INCREMENTAL=0
-          - RUST_BACKTRACE=full
-      - ecr#v2.5.0:
-          login: true
-          retries: 3
-    retry: *retry_on_agent_kill
-
-  - label: ':clippy: Check clippy'
-    key: check-clippy
-    commands:
-      - '[ -d public ] && cd public'
-      - export RUST_BACKTRACE=full
-      - cargo --locked clippy --workspace --all-targets --features bench -- -W clippy::disallowed_methods -D warnings
-    depends_on:
-    - build-image
-    plugins:
-      - docker#v3.8.0:
-          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
-          volumes:
-          - 'target:/workdir/target'
-          environment:
-          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
-          - CACHEPOT_REGION=us-east-2
-          - CARGO_INCREMENTAL=0
-          - RUST_BACKTRACE=full
-      - ecr#v2.5.0:
-          login: true
-          retries: 3
-    retry: *retry_on_agent_kill
-
-  - label: ':rust: Run tests'
+  - label: ':rust: flaky finder'
     key: rust-tests
     commands:
       - '[ -d public ] && cd public'
-      - '.buildkite/run-tests.sh'
+      - export RUST_BACKTRACE=full
+      - detect_flake -t1 -r50 -i --command "cargo --locked test -p readyset-psql --test types types::enums -- --nocapture --skip integration_serial"
+
     timeout_in_minutes: 60
     depends_on:
     - build-image
@@ -93,6 +31,7 @@ steps:
           - MYSQL_HOST=mysql
           - MYSQL_PWD=noria
           - MYSQL_DB=noria
+          - LOG_LEVEL=info
           volumes:
             - 'target:/workdir/target'
           config:
@@ -107,91 +46,3 @@ steps:
       queue: c6a-4xlarge
     retry: *retry_on_agent_kill
 
-  - label: 'Run logictest'
-    key: logictest
-    command:
-      - 'echo +++ Running readyset-logictest'
-      - '[ -d public ] && cd public'
-      - export RUST_BACKTRACE=full
-      - cargo --locked run --bin readyset-logictest -- verify logictests
-      - cargo --locked run --bin readyset-logictest -- verify logictests/psql --database-type postgresql
-    timeout_in_minutes: 60
-    depends_on:
-    - build-image
-    plugins:
-      - docker-compose#v3.7.0:
-          run: app
-          env:
-          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
-          - CACHEPOT_REGION=us-east-2
-          - CARGO_INCREMENTAL=0
-          - RUST_BACKTRACE=full
-          config:
-            - "${GIT_PUBLIC_ROOT}build/docker-compose.yml"
-            - "${GIT_PUBLIC_ROOT}build/docker-compose.ci-test.yml"
-          pull-retries: 3
-      - ecr#v2.5.0:
-          login: true
-          retries: 3
-    retry: *retry_on_agent_kill
-
-  - label: 'Run clustertests'
-    key: readyset-clustertest
-    command:
-      - '[ -d public ] && cd public'
-      - 'echo +++ Building binaries for clustertest'
-      - cargo --locked build --bin readyset-server --bin readyset --features failure_injection
-      - 'echo +++ Running Clustertests'
-      - cargo --locked test -p readyset-clustertest
-    timeout_in_minutes: 60
-    depends_on:
-    - build-image
-    plugins:
-      - docker-compose#v3.7.0:
-          run: app
-          env:
-          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
-          - CACHEPOT_REGION=us-east-2
-          - CARGO_INCREMENTAL=0
-          - RUST_BACKTRACE=full
-          - DISABLE_TELEMETRY=true
-          - BINARY_PATH=/workdir/${GIT_PUBLIC_ROOT}target/debug/
-          - MYSQL_ROOT_PASSWORD=noria
-          volumes:
-          - 'target:/workdir/target'
-          config:
-            - "${GIT_PUBLIC_ROOT}build/docker-compose.yml"
-            - "${GIT_PUBLIC_ROOT}build/docker-compose.ci-test.yml"
-          mount-buildkite-agent: true
-      - ecr#v2.2.0:
-          login: true
-    retry: *retry_on_agent_kill
-
-  - label: 'Test benchmark framework'
-    key: test-benchmark
-    command:
-      - '[ -d public ] && cd public'
-      - 'echo +++ Running benchmarks'
-      - export RUST_BACKTRACE=full
-      - cargo --locked run --bin benchmarks -- --local --database-type mysql --benchmark benchmarks/src/yaml/benchmarks/test/benchmark_test.yaml
-      - cargo --locked run --bin benchmarks -- --local-with-upstream mysql://root:noria@mysql/noria --database-type mysql --benchmark benchmarks/src/yaml/benchmarks/test/benchmark_test.yaml
-    timeout_in_minutes: 60
-    depends_on:
-    - build-image
-    plugins:
-      - docker-compose#v3.7.0:
-          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
-          run: app
-          environment:
-          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
-          - CACHEPOT_REGION=us-east-2
-          - CARGO_INCREMENTAL=0
-          - RUST_BACKTRACE=full
-          config:
-            - "${GIT_PUBLIC_ROOT}build/docker-compose.yml"
-            - "${GIT_PUBLIC_ROOT}build/docker-compose.ci-test.yml"
-          pull-retries: 3
-      - ecr#v2.5.0:
-          login: true
-          retries: 3
-    retry: *retry_on_agent_kill

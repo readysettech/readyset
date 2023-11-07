@@ -1090,6 +1090,7 @@ impl NoriaConnector {
                         self.dialect,
                     )
                     .with_schema_search_path(search_path);
+                    info!("Changelist: {changelist:?}");
 
                     if let Err(error) = noria_await!(
                         self.inner.get_mut()?,

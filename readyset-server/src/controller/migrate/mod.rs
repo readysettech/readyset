@@ -1014,13 +1014,13 @@ impl<'df> Migration<'df> {
         // changes
         inform_col_changes(&mut dmp, &columns, &dataflow_state.ingredients)?;
 
-        debug!(
+        info!(
             added_nodes = added,
             dropped_nodes = dropped,
             "finalizing migration"
         );
 
-        debug!(
+        info!(
             ms = ?start.elapsed().as_millis(),
             "migration planning completed"
         );

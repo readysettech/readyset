@@ -332,10 +332,12 @@ impl QueryStatusCache {
         let id = QueryId::new(hash(&q));
         let query_state = self.id_to_status.get(&id);
 
-        match query_state {
+        let res = match query_state {
             Some(s) => (id, s.value().migration_state.clone()),
             None => self.insert(q.clone()),
-        }
+        };
+        tracing::info!("query_migration_state res: {res:?})");
+        res
     }
 
     /// This function returns the query status of a query. If the query does not exist
