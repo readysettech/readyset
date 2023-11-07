@@ -963,10 +963,12 @@ mod tests {
     use futures::StreamExt;
     use rand::distributions::Alphanumeric;
     use rand::{thread_rng, Rng};
+    use readyset_data::Dialect;
     use reqwest::Url;
     use serial_test::serial;
 
     use super::*;
+    use crate::consensus::CacheDDLRequest;
 
     fn test_authority_address(deployment: &str) -> String {
         format!(
@@ -1565,17 +1567,19 @@ mod tests {
         authority.init().await.unwrap();
         authority.delete_all_keys().await;
 
-        assert_eq!(
-            authority.cache_ddl_requests().await.unwrap(),
-            Vec::<String>::new()
-        );
+        assert!(authority.cache_ddl_requests().await.unwrap().is_empty());
 
         const STMTS: &[&str] = &["a", "b", "c", "d", "e", "f"];
         let mut futs = STMTS
             .iter()
             .map(|stmt| {
                 let authority = authority.clone();
-                tokio::spawn(async move { authority.add_cache_ddl_request(stmt).await.unwrap() })
+                let ddl_req = CacheDDLRequest {
+                    unparsed_stmt: stmt.to_string(),
+                    schema_search_path: vec![],
+                    dialect: Dialect::DEFAULT_POSTGRESQL,
+                };
+                tokio::spawn(async move { authority.add_cache_ddl_request(ddl_req).await.unwrap() })
             })
             .collect::<FuturesUnordered<_>>();
 
@@ -1583,8 +1587,14 @@ mod tests {
             res.unwrap();
         }
 
-        let mut stmts = authority.cache_ddl_requests().await.unwrap();
+        let mut stmts = authority
+            .cache_ddl_requests()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|ddl_req| ddl_req.unparsed_stmt)
+            .collect::<Vec<_>>();
         stmts.sort();
-        assert_eq!(stmts, STMTS);
+        assert_eq!(&stmts, STMTS);
     }
 }
