@@ -1776,6 +1776,66 @@ where
         Ok(noria_connector::QueryResult::Empty)
     }
 
+    /// Forwards an `EXPLAIN CREATE CACHE` request to ReadySet. Where possible, this method performs
+    /// the dry run in the request path so we can return a result to the client immediately. If we
+    /// encounter an error we think might be transient or if the query is unsupported and we might
+    /// be able to inline some of its parameters (and experimental parameter inlining is enabled),
+    /// we will set the status of the migration to "pending"/"inlined" and allow the migration to
+    /// proceed in the background. In these cases, it is the responsibility of the client to poll
+    /// for the final status of the query.
+    #[instrument(skip(self))]
+    async fn explain_create_cache(
+        &mut self,
+        id: QueryId,
+        mut req: ViewCreateRequest,
+        migration_state: Option<MigrationState>,
+    ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
+        rewrite::process_query(&mut req.statement, self.noria.server_supports_pagination())?;
+
+        let (supported, migration_state) = match migration_state {
+            Some(m @ MigrationState::Unsupported) | Some(m @ MigrationState::Dropped) => ("no", m),
+            // If the migration state is "Inlined", we need to let the migration handler process
+            // the inlined migrations in the background until we can report whether the query is
+            // supported with certainty
+            Some(m @ MigrationState::Inlined(_)) | Some(m @ MigrationState::Pending) => {
+                ("pending", m)
+            }
+            Some(m @ MigrationState::Successful) => ("cached", m),
+            Some(m @ MigrationState::DryRunSucceeded) => ("yes", m),
+            // If we don't already have a migration state for the query, we do a dry run
+            None => {
+                match self.noria.handle_dry_run(id, &req).await {
+                    Ok(_) => ("yes", MigrationState::DryRunSucceeded),
+                    // If the root cause of the error is that the query is unsupported, we can
+                    // just convey that to the client up front
+                    Err(e) if e.caused_by_unsupported() => ("no", MigrationState::Unsupported),
+                    Err(e) => return Err(e),
+                }
+            }
+        };
+
+        let results = vec![
+            MetaVariable {
+                name: "query id".into(),
+                value: id.to_string(),
+            },
+            MetaVariable {
+                name: "query".into(),
+                value: req.statement.display(self.settings.dialect).to_string(),
+            },
+            MetaVariable {
+                name: "readyset supported".into(),
+                value: supported.into(),
+            },
+        ];
+
+        self.state
+            .query_status_cache
+            .update_query_migration_state(&req, migration_state);
+
+        Ok(noria_connector::QueryResult::Meta(results))
+    }
+
     /// Forwards a `DROP CACHE` request to noria
     #[instrument(skip(self))]
     async fn drop_cached_query(
@@ -2029,9 +2089,62 @@ where
             SqlQuery::Explain(nom_sql::ExplainStatement::Materializations) => {
                 self.noria.explain_materializations().await
             }
-            SqlQuery::Explain(nom_sql::ExplainStatement::CreateCache { .. }) => Err(
-                ReadySetError::Unsupported("EXPLAIN CREATE CACHE is not yet supported".into()),
-            ),
+            SqlQuery::Explain(nom_sql::ExplainStatement::CreateCache { inner, .. }) => {
+                match inner {
+                    Ok(inner) => {
+                        let view_request = match inner {
+                            CacheInner::Statement(stmt) => {
+                                let mut stmt = *stmt.clone();
+                                rewrite::process_query(
+                                    &mut stmt,
+                                    self.noria.server_supports_pagination(),
+                                )?;
+
+                                ViewCreateRequest::new(
+                                    stmt.clone(),
+                                    self.noria.schema_search_path().to_owned(),
+                                )
+                            }
+                            CacheInner::Id(id) => {
+                                match self.state.query_status_cache.query(id.as_str()) {
+                                    Some(q) => match q {
+                                        Query::Parsed(view_request) => (*view_request).clone(),
+                                        Query::ParseFailed(q) => {
+                                            return Err(ReadySetError::UnparseableQuery {
+                                                query: (*q).clone(),
+                                            });
+                                        }
+                                    },
+                                    None => {
+                                        return Err(ReadySetError::NoQueryForId {
+                                            id: id.to_string(),
+                                        })
+                                    }
+                                }
+                            }
+                        };
+
+                        let (id, mut migration_state) = self
+                            .state
+                            .query_status_cache
+                            .try_query_migration_state(&view_request);
+
+                        // If the QSC didn't have this query, check with the controller to see if a
+                        // view already exists there
+                        if migration_state.is_none()
+                            && self.noria.get_view_status(view_request.clone()).await?
+                        {
+                            migration_state = Some(MigrationState::Successful);
+                        }
+
+                        self.explain_create_cache(id, view_request, migration_state)
+                            .await
+                    }
+                    Err(query) => Err(ReadySetError::UnparseableQuery {
+                        query: query.clone(),
+                    }),
+                }
+            }
             SqlQuery::CreateCache(CreateCacheStatement {
                 name,
                 inner,

@@ -348,6 +348,19 @@ impl QueryStatusCache {
         }
     }
 
+    /// This function returns the id and query migration state of a query, if it exists. Unlike
+    /// [`QueryStatusCache.query_migration_state`], it does not add the query to our mapping of
+    /// queries if it is not present.
+    pub fn try_query_migration_state<Q>(&self, q: &Q) -> (QueryId, Option<MigrationState>)
+    where
+        Q: QueryStatusKey,
+    {
+        let id = QueryId::new(hash(&q));
+        let query_state = self.id_to_status.get(&id);
+
+        (id, query_state.map(|s| s.value().migration_state.clone()))
+    }
+
     /// This function returns the query status of a query. If the query does not exist
     /// within the query status cache, an entry is created and the query is set to
     /// PendingMigration.
