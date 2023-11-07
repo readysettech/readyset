@@ -571,6 +571,8 @@ impl DfState {
     /// Obtain a TableBuilder that can be used to construct a Table to perform writes and deletes
     /// from the given named base node.
     pub(super) fn table_builder(&self, name: &Relation) -> ReadySetResult<Option<TableBuilder>> {
+        let name_str = name.display_unquoted().to_string();
+        info!("table_builder {name_str}");
         let ni = self
             .recipe
             .node_addr_for(name)
@@ -1183,12 +1185,12 @@ impl DfState {
     where
         F: FnOnce(&mut Migration<'_>) -> ReadySetResult<T>,
     {
-        debug!("starting migration");
+        info!("starting migration");
         gauge!(recorded::CONTROLLER_MIGRATION_IN_PROGRESS, 1.0);
         let mut m = Migration::new(self, dialect);
         let r = f(&mut m)?;
         m.commit(dry_run).await?;
-        debug!("finished migration");
+        info!("finished migration");
         gauge!(recorded::CONTROLLER_MIGRATION_IN_PROGRESS, 0.0);
         Ok(r)
     }

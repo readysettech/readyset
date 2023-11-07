@@ -213,7 +213,7 @@ impl SqlIncorporator {
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<RecipeChanges> {
         let mut res = RecipeChanges::default();
-        debug!(
+        info!(
             num_queries = self.registry.len(),
             named_queries = self.registry.num_aliases(),
         );
@@ -368,6 +368,7 @@ impl SqlIncorporator {
                     self.add_view(stmt.name, definition, schema_search_path.clone())?;
                 }
                 Change::CreateCache(cc) => {
+                    info!("CreateCache: {cc:?}");
                     res.add_cache_statement(
                         cc.unparsed_create_cache_statement.clone(),
                         schema_search_path.clone(),
@@ -629,6 +630,7 @@ impl SqlIncorporator {
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<Relation> {
         let name = name.unwrap_or_else(|| format!("q_{}", self.num_queries).into());
+        info!("add_query: {name:?}");
 
         let mut invalidating_tables = vec![];
         let detect_placeholders_config =
@@ -697,6 +699,7 @@ impl SqlIncorporator {
             return Ok(name);
         }
 
+        info!("not aliased: {name:?}");
         // We don't add a leaf if we're reusing a query
         if let Some(mir_query) = mir_query {
             let leaf = self.mir_to_dataflow(name.clone(), mir_query, mig)?;
@@ -1201,6 +1204,7 @@ impl SqlIncorporator {
         mir_leaf: MirNodeIndex,
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<NodeIndex> {
+        info!("mir_to_dataflow: {query_name:?}");
         let on_err = |e| ReadySetError::SelectQueryCreationFailed {
             qname: query_name.display_unquoted().to_string(),
             source: Box::new(e),
@@ -1209,9 +1213,9 @@ impl SqlIncorporator {
             .mir_converter
             .make_mir_query(query_name.clone(), mir_leaf);
 
-        trace!(pre_opt_mir = %mir_query.to_graphviz());
+        info!(pre_opt_mir = %mir_query.to_graphviz());
         let mut opt_mir = mir_query.rewrite().map_err(on_err)?;
-        trace!(post_opt_mir = %opt_mir.to_graphviz());
+        info!(post_opt_mir = %opt_mir.to_graphviz());
 
         let df_leaf =
             mir_query_to_flow_parts(&mut opt_mir, &self.custom_types, mig).map_err(on_err)?;

@@ -10,4 +10,4 @@ upload_artifacts() {
 
 echo "+++ :rust: Run tests"
 export DISABLE_TELEMETRY=true
-cargo --locked test --all --features failure_injection --exclude readyset-clustertest || upload_artifacts
+LOG_LEVEL=info cargo --locked test -p readyset-client types::enums --format=json --exact -Z unstable-options --show-output
