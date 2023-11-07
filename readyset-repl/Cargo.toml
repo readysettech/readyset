@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0"
-clap = { version = "4.2", features = ["derive", "wrap_help"] }
+clap = { workspace = true, features = ["derive", "wrap_help"] }
 console = "0.15.5"
 rustyline = "11.0"
 rustyline-derive = "0.6.0"
