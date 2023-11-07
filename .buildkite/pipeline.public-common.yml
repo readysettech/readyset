@@ -6,8 +6,6 @@ common_values:
     automatic: &agent_kill_conditions
       - exit_status: -1  # Agent was lost
         limit: 2
-      - exit_status: 255 # Forced agent shutdown
-        limit: 2
 
 steps:
 
