@@ -27,6 +27,7 @@ use dataflow::{
     BaseTableState, DomainBuilder, DomainConfig, DomainRequest, NodeMap, Packet,
     PersistenceParameters, Sharding,
 };
+use failpoint_macros::set_failpoint;
 use futures::stream::{self, FuturesUnordered, StreamExt, TryStreamExt};
 use futures::{FutureExt, TryFutureExt, TryStream};
 use metrics::{gauge, histogram};
@@ -40,6 +41,8 @@ use readyset_client::builders::{
 use readyset_client::consensus::{Authority, AuthorityControl};
 use readyset_client::debug::info::{GraphInfo, MaterializationInfo, NodeSize};
 use readyset_client::debug::stats::{DomainStats, GraphStats, NodeStats};
+#[cfg(feature = "failure_injection")]
+use readyset_client::failpoints;
 use readyset_client::internal::{MaterializationStatus, ReplicaAddress};
 use readyset_client::metrics::recorded;
 use readyset_client::recipe::changelist::{Change, ChangeList};
@@ -1559,6 +1562,7 @@ impl DfState {
         recipe_spec: ExtendRecipeSpec<'_>,
         dry_run: bool,
     ) -> Result<(), ReadySetError> {
+        set_failpoint!(failpoints::EXTEND_RECIPE);
         // Drop recipes from the replicator that we have already processed.
         if let (Some(new), Some(current)) = (
             &recipe_spec.replication_offset,

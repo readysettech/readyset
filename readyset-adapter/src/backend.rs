@@ -112,7 +112,7 @@ use crate::query_handler::SetBehavior;
 use crate::query_status_cache::QueryStatusCache;
 use crate::rewrite::ProcessedQueryParams;
 pub use crate::upstream_database::UpstreamPrepare;
-use crate::utils::create_dummy_column;
+use crate::utils::{create_dummy_column, retry_with_exponential_backoff};
 use crate::{create_dummy_schema, rewrite, QueryHandler, UpstreamDatabase, UpstreamDestination};
 
 pub mod noria_connector;
@@ -2047,18 +2047,47 @@ where
                     trace!("No telemetry sender. not sending metric for CREATE CACHE");
                 }
 
-                if let Some(unparsed_create_cache_statement) = unparsed_create_cache_statement {
+                let ddl_req = if let Some(unparsed_create_cache_statement) =
+                    unparsed_create_cache_statement
+                {
                     let ddl_req = CacheDDLRequest {
                         unparsed_stmt: unparsed_create_cache_statement.clone(),
                         schema_search_path: self.noria.schema_search_path().to_owned(),
                         dialect: self.settings.dialect.into(),
                     };
 
-                    self.authority.add_cache_ddl_request(ddl_req).await?;
-                }
+                    self.authority
+                        .add_cache_ddl_request(ddl_req.clone())
+                        .await?;
+                    Some(ddl_req)
+                } else {
+                    None
+                };
 
-                self.create_cached_query(name.as_ref(), stmt, search_path, *always, *concurrently)
-                    .await
+                let res = self
+                    .create_cached_query(name.as_ref(), stmt, search_path, *always, *concurrently)
+                    .await;
+                // The extend_recipe may have failed, in which case we should remove our intention
+                // to create this cache. Extend recipe waits a bit and then returns an
+                // Ok(ExtendRecipeResult::Pending) if it is still creating a cache in the
+                // background, so we don't remove the ddl request for timeouts.
+                if res.is_err() {
+                    if let Some(ddl_req) = ddl_req {
+                        let remove_res = retry_with_exponential_backoff(
+                            async || {
+                                let ddl_req = ddl_req.clone();
+                                self.authority.remove_cache_ddl_request(ddl_req).await
+                            },
+                            5,
+                            Duration::from_millis(1),
+                        )
+                        .await;
+                        if remove_res.is_err() {
+                            error!("Failed to remove stored 'create cache' request. It will be re-run if there is a backwards incompatible upgrade.");
+                        }
+                    }
+                }
+                res
             }
             SqlQuery::DropCache(drop_cache) => {
                 let ddl_req = CacheDDLRequest {
@@ -2068,9 +2097,34 @@ where
                     schema_search_path: vec![],
                     dialect: self.settings.dialect.into(),
                 };
-                self.authority.add_cache_ddl_request(ddl_req).await?;
+                self.authority
+                    .add_cache_ddl_request(ddl_req.clone())
+                    .await?;
                 let DropCacheStatement { name } = drop_cache;
-                self.drop_cached_query(name).await
+                let res = self.drop_cached_query(name).await;
+                // `drop_cached_query` may return an Err, but if the cache fails to be dropped for
+                // certain reasons, we can also see an Ok(Delete) here with num_rows_deleted set to
+                // 0.
+                if res.is_err()
+                    || matches!(
+                        res,
+                        Ok(noria_connector::QueryResult::Delete { num_rows_deleted }) if num_rows_deleted < 1
+                    )
+                {
+                    let remove_res = retry_with_exponential_backoff(
+                        async || {
+                            let ddl_req = ddl_req.clone();
+                            self.authority.remove_cache_ddl_request(ddl_req).await
+                        },
+                        5,
+                        Duration::from_millis(1),
+                    )
+                    .await;
+                    if remove_res.is_err() {
+                        error!("Failed to remove stored 'drop cache' request. It will be re-run if there is a backwards incompatible upgrade");
+                    }
+                }
+                res
             }
             SqlQuery::DropAllCaches(_) => self.drop_all_caches().await,
             SqlQuery::Show(ShowStatement::CachedQueries(query_id)) => {

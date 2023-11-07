@@ -648,7 +648,6 @@ use tokio::time::{sleep, Duration};
 ///
 /// This function returns a `Result` indicating whether the operation was successful (`Ok(T)`)
 /// or not (`Err(E)`) after the maximum number of retries has been reached.
-#[allow(dead_code)]
 pub(crate) async fn retry_with_exponential_backoff<F, Fut, T, E>(
     mut operation: F,
     max_retries: usize,
