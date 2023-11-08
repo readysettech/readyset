@@ -223,8 +223,7 @@ fn main() -> anyhow::Result<()> {
 
     let deployment_dir = opts
         .worker_options
-        .storage_dir
-        .clone()
+        .storage_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(&opts.deployment);
 

@@ -538,8 +538,7 @@ where
 
         let deployment_dir = options
             .server_worker_options
-            .storage_dir
-            .clone()
+            .storage_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join(&options.deployment);
 
