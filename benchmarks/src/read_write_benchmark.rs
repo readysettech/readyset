@@ -29,48 +29,48 @@ const REPORT_RESULTS_INTERVAL: Duration = Duration::from_secs(2);
 #[derive(Parser, Clone, Serialize, Deserialize)]
 pub struct ReadWriteBenchmark {
     /// Parameters to handle generating parameters for arbitrary queries.
-    #[clap(flatten)]
+    #[command(flatten)]
     read_query: ArbitraryQueryParameters,
 
     /// The target rate to issue queries at if attainable on this
     /// machine with up to `threads`.
-    #[clap(long)]
+    #[arg(long)]
     target_read_qps: u64,
 
     /// The rate at which to issue update queries if attainable.
-    #[clap(long)]
+    #[arg(long)]
     target_update_qps: u64,
 
     /// The number of threads to execute the read benchmark across.
-    #[clap(long, default_value = "1")]
+    #[arg(long, default_value = "1")]
     threads: u64,
 
     /// A path to the query that we are benchmarking.
-    #[clap(long)]
+    #[arg(long)]
     update_query: PathBuf,
 
     /// A annotation spec for each of the parameters in query. See
     /// `DistributionAnnotations` for the format of the file.
-    #[clap(long)]
+    #[arg(long)]
     update_query_spec_file: Option<PathBuf>,
 
     /// An query spec passed in as a comma separated list. See
     /// `DistributionAnnotation` for the format for each parameters annotation.
-    #[clap(long, conflicts_with = "query_spec_file")]
+    #[arg(long, conflicts_with = "query_spec_file")]
     update_query_spec: Option<String>,
 
     // The dialect that should be used to parse the query string.
-    #[clap(long, default_value = "mysql")]
+    #[arg(long, default_value = "mysql")]
     dialect: Dialect,
 
     /// Install and generate from an arbitrary schema.
-    #[clap(flatten)]
+    #[command(flatten)]
     data_generator: DataGenerator,
 
     /// The duration, specified as the number of seconds that the benchmark
     /// should be running. If `None` is provided, the benchmark will run
     /// until it is interrupted.
-    #[clap(long, value_parser = crate::utils::seconds_as_str_to_duration)]
+    #[arg(long, value_parser = crate::utils::seconds_as_str_to_duration)]
     pub run_for: Option<Duration>,
 }
 

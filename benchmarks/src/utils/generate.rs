@@ -34,13 +34,13 @@ const MAX_PARTITION_ROWS: usize = 20000;
 #[derive(Parser, Clone, Default, Serialize, Deserialize)]
 pub struct DataGenerator {
     /// Path to the desired database SQL schema.
-    #[clap(long, value_hint = ValueHint::AnyPath)]
+    #[arg(long, value_hint = ValueHint::AnyPath)]
     schema: PathBuf,
 
     /// Change or assign values to user variables in the provided schema. Note that user variables
     /// are not supported for Postgres.
     /// The format is a json map, for example "{ 'user_rows': '10000', 'article_rows': '100' }"
-    #[clap(long)]
+    #[arg(long)]
     var_overrides: Option<serde_json::Value>,
 }
 

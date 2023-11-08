@@ -49,11 +49,11 @@ pub fn warn_if_debug_build() {
 #[group(id = "logging")]
 pub struct Options {
     /// Format to use when emitting log events.
-    #[clap(long, env = "LOG_FORMAT", default_value = "full", value_enum)]
+    #[arg(long, env = "LOG_FORMAT", default_value = "full", value_enum)]
     log_format: LogFormat,
 
     /// Disable colors in all log output
-    #[clap(long, env = "NO_COLOR", hide = true)]
+    #[arg(long, env = "NO_COLOR", hide = true)]
     no_color: bool,
 
     /// Log level filter for spans and events. The log level filter string is a comma separated
@@ -72,24 +72,24 @@ pub struct Options {
     /// ```bash
     /// LOG_LEVEL=trace,tower=error
     /// ```
-    #[clap(long, env = "LOG_LEVEL", default_value = "info")]
+    #[arg(long, env = "LOG_LEVEL", default_value = "info")]
     log_level: String,
 
     /// Host and port to send OTLP traces/spans data, via GRPC OLTP
-    #[clap(long, env = "TRACING_HOST", hide = true)]
+    #[arg(long, env = "TRACING_HOST", hide = true)]
     tracing_host: Option<String>,
 
     /// Portion of traces that will be sent to the tracing endpoint; [0.0~1.0]
-    #[clap(long, env = "TRACING_SAMPLE_PERCENT", default_value_t = Percent(0.01), hide = true)]
+    #[arg(long, env = "TRACING_SAMPLE_PERCENT", default_value_t = Percent(0.01), hide = true)]
     tracing_sample_percent: Percent,
 
     /// Whether to log all statements received by ReadySet via the client or replicators
-    #[clap(long, env = "STATEMENT_LOGGING", hide = true)]
+    #[arg(long, env = "STATEMENT_LOGGING", hide = true)]
     pub statement_logging: bool,
 
     /// Optional filename for storing the statement log. Defaults to
     /// <deployment-name>_statements.log.
-    #[clap(
+    #[arg(
         long,
         env = "STATEMENT_LOG_PATH",
         requires = "statement_logging",
@@ -259,7 +259,7 @@ impl Options {
     ///
     /// #[derive(Debug, Parser)]
     /// struct Options {
-    ///     #[clap(flatten)]
+    ///     #[command(flatten)]
     ///     tracing: readyset_tracing::Options,
     /// }
     ///

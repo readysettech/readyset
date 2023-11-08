@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use anyhow::bail;
+use clap::builder::ArgPredicate;
 use clap::Parser;
 use serde_json::json;
 
@@ -25,30 +26,30 @@ impl FromStr for CommaSeparatedString {
 pub struct GraphParams {
     /// Run multiple iterations of the benchmark, outputting the results for each of the values of
     /// `--x-axis` provided by `--x-values` into `--graph-results-path`
-    #[clap(long, requires_all = ["x_axis", "x_values", "graph_results_path"])]
+    #[arg(long, requires_ifs = [(ArgPredicate::IsPresent, "x_axis"), (ArgPredicate::IsPresent, "x_values"), (ArgPredicate::IsPresent, "graph_results_path")])]
     pub graph: bool,
 
     /// X-axis to vary for the graph. This should be in the format of a (long) command-line
     /// argument accepted by the individual benchmark command, without the `--`; eg:
     /// `target-qps`
-    #[clap(long, requires_all = ["graph", "x_values", "graph_results_path"])]
+    #[arg(long, requires_ifs = [(ArgPredicate::IsPresent, "graph"), (ArgPredicate::IsPresent, "x_values"), (ArgPredicate::IsPresent, "graph_results_path")])]
     x_axis: Option<String>,
 
     /// List of values to provide to `--x-axis`, represented as a comma-separated string
-    #[clap(
+    #[arg(
         long,
         value_parser = CommaSeparatedString::from_str,
-        requires_all = ["graph", "x_axis", "graph_results_path"]
+        requires_ifs = [(ArgPredicate::IsPresent, "graph"), (ArgPredicate::IsPresent, "x_axis"), (ArgPredicate::IsPresent, "graph_results_path")]
     )]
     x_values: Option<CommaSeparatedString>,
 
     /// Flag to indicate if the `--x-axis` is a data generation variable, rather than a
     /// field in the BenchmarkControl struct.
-    #[clap(long, requires_all = ["graph", "x_axis", "x_values", "graph_results_path"])]
+    #[arg(long, requires_ifs = [(ArgPredicate::IsPresent, "graph"), (ArgPredicate::IsPresent, "x_axis"), (ArgPredicate::IsPresent, "x_values"), (ArgPredicate::IsPresent, "graph_results_path")])]
     pub x_axis_is_datagen_var: bool,
 
     /// File to output graph results to. Currently accepts `.csv` files.
-    #[clap(long, requires_all = ["graph", "x_axis", "x_values"])]
+    #[arg(long, requires_ifs = [(ArgPredicate::IsPresent, "graph"), (ArgPredicate::IsPresent, "x_axis"), (ArgPredicate::IsPresent, "x_values")])]
     graph_results_path: Option<PathBuf>,
 }
 

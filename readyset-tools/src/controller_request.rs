@@ -8,20 +8,20 @@ use readyset_client::consensus::AuthorityType;
 use readyset_client::ReadySetHandle;
 
 #[derive(Parser)]
-#[clap(name = "controller_request")]
+#[command(name = "controller_request")]
 struct ControllerRequest {
-    #[clap(short, long, env("AUTHORITY_ADDRESS"), default_value("127.0.0.1:8500"))]
+    #[arg(short, long, env("AUTHORITY_ADDRESS"), default_value("127.0.0.1:8500"))]
     authority_address: String,
 
-    #[clap(long, env("AUTHORITY"), default_value("consul"), value_parser = ["consul"])]
+    #[arg(long, env("AUTHORITY"), default_value("consul"), value_parser = ["consul"])]
     authority: AuthorityType,
 
-    #[clap(short, long, env("DEPLOYMENT"))]
+    #[arg(short, long, env("DEPLOYMENT"))]
     deployment: String,
 
     /// The name of the endpoint to issue a controller request to.
     /// This currently only supports endpoints without parameters.
-    #[clap(short, long)]
+    #[arg(short, long)]
     endpoint: Request,
 }
 

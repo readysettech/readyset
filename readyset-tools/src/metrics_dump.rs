@@ -9,15 +9,15 @@ use readyset_client::metrics::client::MetricsClient;
 use readyset_client::ReadySetHandle;
 
 #[derive(Parser)]
-#[clap(name = "metrics_dump")]
+#[command(name = "metrics_dump")]
 struct MetricsDump {
-    #[clap(short, long, env("AUTHORITY_ADDRESS"), default_value("127.0.0.1:8500"))]
+    #[arg(short, long, env("AUTHORITY_ADDRESS"), default_value("127.0.0.1:8500"))]
     authority_address: String,
 
-    #[clap(long, env("AUTHORITY"), default_value("consul"), value_parser = ["consul"])]
+    #[arg(long, env("AUTHORITY"), default_value("consul"), value_parser = ["consul"])]
     authority: AuthorityType,
 
-    #[clap(short, long, env("DEPLOYMENT"), value_parser = NonEmptyStringValueParser::new())]
+    #[arg(short, long, env("DEPLOYMENT"), value_parser = NonEmptyStringValueParser::new())]
     deployment: String,
 }
 

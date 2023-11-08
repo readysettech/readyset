@@ -18,10 +18,10 @@ use clap::Parser;
 use hyper::Client;
 
 #[derive(Parser)]
-#[clap(name = "failpoint")]
+#[command(name = "failpoint")]
 struct Failpoint {
     /// The readyset-server's controller address.
-    #[clap(
+    #[arg(
         short,
         long,
         env("AUTHORITY_ADDRESS"),

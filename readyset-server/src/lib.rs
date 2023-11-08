@@ -545,7 +545,7 @@ pub fn resolve_addr(addr: &str) -> anyhow::Result<IpAddr> {
 // Command-line options for running a `readyset-server` worker.
 //
 // This option struct is intended to be embedded inside of a larger option struct using
-// `#[clap(flatten)]`.
+// `#[command(flatten)]`.
 #[derive(Args, Debug)]
 #[group(skip)]
 pub struct WorkerOptions {
@@ -553,21 +553,21 @@ pub struct WorkerOptions {
     /// on disk, but `ephemeral` deletes the data when the ReadySet Server is stopped.
     /// `memory` stores base tables entirely in memory. `ephemeral` and `memory` are
     /// suitable for testing only. Use `persistent` for production deployments.
-    #[clap(long, default_value = "persistent", hide = true)]
+    #[arg(long, default_value = "persistent", hide = true)]
     pub durability: DurabilityMode,
 
     /// Number of background threads used by RocksDB
-    #[clap(long, default_value = "6", hide = true)]
+    #[arg(long, default_value = "6", hide = true)]
     pub persistence_threads: i32,
 
     /// Memory high water mark, in bytes. If process heap memory exceeds this value, we
     /// will perform evictions from partially materialized state. (0 = unlimited)
-    #[clap(long, short = 'm', default_value = "0", env = "READYSET_MEMORY_LIMIT")]
+    #[arg(long, short = 'm', default_value = "0", env = "READYSET_MEMORY_LIMIT")]
     pub memory_limit: usize,
 
     /// Frequency at which to check the process heap allocation against the memory limit (in
     /// seconds)
-    #[clap(
+    #[arg(
         long = "memory-check-every",
         default_value = "1",
         env = "MEMORY_CHECK_EVERY",
@@ -576,73 +576,73 @@ pub struct WorkerOptions {
     pub memory_check_freq: u64,
 
     /// The strategy to use when memory is freed from reader nodes
-    #[clap(long = "eviction-policy", default_value_t = dataflow::EvictionKind::LRU, hide = true)]
+    #[arg(long = "eviction-policy", default_value_t = dataflow::EvictionKind::LRU, hide = true)]
     pub eviction_kind: dataflow::EvictionKind,
 
     /// Disable partial
-    #[clap(long = "nopartial", hide = true)]
+    #[arg(long = "nopartial", hide = true)]
     pub no_partial: bool,
 
     /// Allow the creation of fully materialized nodes.
-    #[clap(long, env = "ALLOW_FULL_MATERIALIZATION", hide = true)]
+    #[arg(long, env = "ALLOW_FULL_MATERIALIZATION", hide = true)]
     pub allow_full_materialization: bool,
 
     /// Enable packet filters in egresses before readers
-    #[clap(long, hide = true)]
+    #[arg(long, hide = true)]
     pub enable_packet_filters: bool,
 
     /// Number of workers to wait for before starting (including this one)
-    #[clap(long, default_value = "1", env = "MIN_WORKERS", hide = true)]
+    #[arg(long, default_value = "1", env = "MIN_WORKERS", hide = true)]
     pub min_workers: usize,
 
     /// Shard the graph this many ways (<= 1 : disable sharding)
-    #[clap(long, default_value = "0", env = "NORIA_SHARDS", hide = true)]
+    #[arg(long, default_value = "0", env = "NORIA_SHARDS", hide = true)]
     pub shards: usize,
 
     /// Volume associated with the server.
-    #[clap(long, env = "VOLUME_ID", hide = true)]
+    #[arg(long, env = "VOLUME_ID", hide = true)]
     pub volume_id: Option<VolumeId>,
 
     /// Enable experimental support for TopK in dataflow.
     ///
     /// NOTE If enabled, this must be set for all ReadySet processes (both servers and adapters).
-    #[clap(long, env = "EXPERIMENTAL_TOPK_SUPPORT", hide = true)]
+    #[arg(long, env = "EXPERIMENTAL_TOPK_SUPPORT", hide = true)]
     pub enable_experimental_topk_support: bool,
 
     /// Enable experimental support for Paginate in dataflow.
     ///
     /// NOTE If enabled, this must be set for all ReadySet processes (both servers and adapters).
-    #[clap(long, env = "EXPERIMENTAL_PAGINATE_SUPPORT", hide = true)]
+    #[arg(long, env = "EXPERIMENTAL_PAGINATE_SUPPORT", hide = true)]
     pub enable_experimental_paginate_support: bool,
 
     /// Enable experimental support for mixing equality and inequality comparisons on query
     /// parameters
-    #[clap(long, env = "EXPERIMENTAL_MIXED_COMPARISONS_SUPPORT", hide = true)]
+    #[arg(long, env = "EXPERIMENTAL_MIXED_COMPARISONS_SUPPORT", hide = true)]
     pub enable_experimental_mixed_comparisons: bool,
 
     /// Enable experimental support for straddled joins (joins with partial keys traced to both
     /// parents)
-    #[clap(long, env = "EXPERIMENTAL_STRADDLED_JOIN_SUPPORT", hide = true)]
+    #[arg(long, env = "EXPERIMENTAL_STRADDLED_JOIN_SUPPORT", hide = true)]
     pub enable_experimental_straddled_joins: bool,
 
     /// Enable experimental support for post-lookup (queries which do extra work after the lookup
     /// into the reader)
-    #[clap(long, env = "EXPERIMENTAL_POST_LOOKUP_SUPPORT", hide = true)]
+    #[arg(long, env = "EXPERIMENTAL_POST_LOOKUP_SUPPORT", hide = true)]
     pub enable_experimental_post_lookup: bool,
 
     /// Directory in which to store replicated table data. If not specified, defaults to the
     /// current working directory.
-    #[clap(long, env = "STORAGE_DIR")]
+    #[arg(long, env = "STORAGE_DIR")]
     pub storage_dir: Option<PathBuf>,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     pub domain_replication_options: ReplicationOptions,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     pub replicator_config: UpstreamConfig,
 
     /// Timeout in seconds for all requests made from the controller to workers
-    #[clap(
+    #[arg(
         long,
         env = "WORKER_REQUEST_TIMEOUT_SECONDS",
         default_value = "1800",
@@ -652,7 +652,7 @@ pub struct WorkerOptions {
 
     /// Interval, in seconds, on which to automatically run recovery as long as there are
     /// unscheduled domains
-    #[clap(
+    #[arg(
         long,
         env = "BACKGROUND_RECOVERY_INTERVAL_SECONDS",
         default_value = "20",

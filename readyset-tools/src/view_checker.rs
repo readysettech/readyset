@@ -6,18 +6,18 @@ use readyset_client::consensus::AuthorityType;
 use readyset_client::ReadySetHandle;
 
 #[derive(Parser)]
-#[clap(name = "view_checker")]
+#[command(name = "view_checker")]
 struct ViewChecker {
-    #[clap(short, long, env("AUTHORITY_ADDRESS"), default_value("127.0.0.1:8500"))]
+    #[arg(short, long, env("AUTHORITY_ADDRESS"), default_value("127.0.0.1:8500"))]
     authority_address: String,
 
-    #[clap(long, env("AUTHORITY"), default_value("consul"), value_parser = ["consul"])]
+    #[arg(long, env("AUTHORITY"), default_value("consul"), value_parser = ["consul"])]
     authority: AuthorityType,
 
-    #[clap(short, long, env("DEPLOYMENT"), value_parser = NonEmptyStringValueParser::new())]
+    #[arg(short, long, env("DEPLOYMENT"), value_parser = NonEmptyStringValueParser::new())]
     deployment: String,
 
-    #[clap(short, long)]
+    #[arg(short, long)]
     query: String,
 }
 

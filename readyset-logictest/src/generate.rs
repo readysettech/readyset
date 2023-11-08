@@ -405,31 +405,31 @@ impl Seed {
 pub struct GenerateOpts {
     /// URL of a reference database to compare to. Currently supports `mysql://` URLs, but may be
     /// expanded in the future
-    #[clap(long)]
+    #[arg(long)]
     pub compare_to: DatabaseURL,
 
     /// Rows of data to generate per table
-    #[clap(long, default_value = "100")]
+    #[arg(long, default_value = "100")]
     pub rows_per_table: usize,
 
     /// Enable verbose output
-    #[clap(long, short = 'v')]
+    #[arg(long, short = 'v')]
     pub verbose: bool,
 
     /// Enable randomly generating column data.
-    #[clap(long)]
+    #[arg(long)]
     pub random: bool,
 
     /// Whether to include row deletes followed by additional queries in the generated test script.
     ///
     /// If used with a seed script, all tables must have a primary key (due to current limitations
     /// in ReadySet).
-    #[clap(long)]
+    #[arg(long)]
     pub include_deletes: bool,
 
     /// How many rows to delete in between queries. Ignored if `--include-deletes` is not
     /// specified. Defaults to half of --rows-per-table, rounded down
-    #[clap(long)]
+    #[arg(long)]
     pub rows_to_delete: Option<usize>,
 }
 
@@ -454,14 +454,14 @@ pub struct Generate {
     /// Test script to use as a seed. Seed scripts should contain DDL and queries, but no data.
     pub from: Option<PathBuf>,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     pub query_options: query_generator::GenerateOpts,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     pub script_options: GenerateOpts,
 
     /// File to write results to (defaults to stdout)
-    #[clap(short = 'o')]
+    #[arg(short = 'o')]
     pub output: Option<PathBuf>,
 }
 

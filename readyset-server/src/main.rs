@@ -50,11 +50,11 @@ pub async fn get_aws_private_ip() -> anyhow::Result<IpAddr> {
 }
 
 #[derive(Parser, Debug)]
-#[clap(version = VERSION_STR_PRETTY)]
+#[command(version = VERSION_STR_PRETTY)]
 #[group(skip)]
 struct Options {
     /// IP address to listen on
-    #[clap(
+    #[arg(
         long,
         short = 'a',
         env = "LISTEN_ADDRESS",
@@ -66,22 +66,22 @@ struct Options {
     /// IP address to advertise to other ReadySet instances running in the same deployment.
     ///
     /// If not specified, defaults to the value of `address`
-    #[clap(long, env = "EXTERNAL_ADDRESS", value_parser = resolve_addr)]
+    #[arg(long, env = "EXTERNAL_ADDRESS", value_parser = resolve_addr)]
     external_address: Option<IpAddr>,
 
     /// Port to advertise to other ReadySet instances running in the same deployment.
-    #[clap(long, short = 'p', default_value = "6033")]
+    #[arg(long, short = 'p', default_value = "6033")]
     external_port: u16,
 
     /// Use the AWS EC2 metadata service to determine the external address of this ReadySet
     /// instance.
     ///
     /// If specified, overrides the value of --external-address
-    #[clap(long)]
+    #[arg(long)]
     use_aws_external_address: bool,
 
     /// ReadySet deployment ID. All nodes in a deployment must have the same deployment ID.
-    #[clap(
+    #[arg(
         long,
         env = "DEPLOYMENT",
         default_value = "readyset.db",
@@ -90,7 +90,7 @@ struct Options {
     deployment: String,
 
     /// The authority to use
-    #[clap(
+    #[arg(
         long,
         env = "AUTHORITY",
         value_enum,
@@ -102,7 +102,7 @@ struct Options {
     /// Authority uri
     // NOTE: `authority_address` should come after `authority` for clap to set default values
     // properly
-    #[clap(
+    #[arg(
         long,
         env = "AUTHORITY_ADDRESS",
         default_value_if("authority", "standalone", Some(".")),
@@ -112,41 +112,41 @@ struct Options {
     authority_address: String,
 
     /// Whether this server should only run reader domains
-    #[clap(long, conflicts_with = "no_readers", env = "READER_ONLY")]
+    #[arg(long, conflicts_with = "no_readers", env = "READER_ONLY")]
     reader_only: bool,
 
     /// If set, this server will never run domains containing reader nodes
     ///
     /// Pass this flag to the server instance when running a ReadySet deployment in embedded
     /// readers mode (eg for high availability)
-    #[clap(long, conflicts_with = "reader_only", env = "NO_READERS")]
+    #[arg(long, conflicts_with = "reader_only", env = "NO_READERS")]
     no_readers: bool,
 
     /// Prevent this instance from ever being elected as the leader
-    #[clap(long)]
+    #[arg(long)]
     cannot_become_leader: bool,
 
     /// Output prometheus metrics
-    #[clap(long, env = "PROMETHEUS_METRICS")]
+    #[arg(long, env = "PROMETHEUS_METRICS")]
     prometheus_metrics: bool,
 
     /// Output noria metrics
-    #[clap(long, hide = true)]
+    #[arg(long, hide = true)]
     pub noria_metrics: bool,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     tracing: readyset_tracing::Options,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     worker_options: WorkerOptions,
 
     /// Whether to disable telemetry reporting. Defaults to false.
-    #[clap(long, env = "DISABLE_TELEMETRY")]
+    #[arg(long, env = "DISABLE_TELEMETRY")]
     disable_telemetry: bool,
 
     /// Whether we should wait for a failpoint request to the servers http router, which may
     /// impact startup.
-    #[clap(long, hide = true)]
+    #[arg(long, hide = true)]
     wait_for_failpoint: bool,
 }
 

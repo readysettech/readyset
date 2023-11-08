@@ -94,7 +94,7 @@ fn hex_bytes(input: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<u8>> {
 /// Currently, Dialect controls the escape characters used for identifiers, and the quotes used to
 /// surround string literals, but may be extended to cover more dialect differences in the future
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize, ValueEnum)]
-#[clap(rename_all = "lower")]
+#[value(rename_all = "lower")]
 pub enum Dialect {
     /// The SQL dialect used by PostgreSQL.
     ///

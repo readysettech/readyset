@@ -29,11 +29,11 @@ const MAX_UPSTREAM_COLUMN_COUNT: usize = 4096;
 #[derive(Parser, Clone, Serialize, Deserialize)]
 pub struct ScaleViews {
     /// The number of views to create in the experiment.
-    #[clap(long, default_value = "1")]
+    #[arg(long, default_value = "1")]
     num_views: usize,
 
     /// The number of parameters in each view.
-    #[clap(long, default_value = "1")]
+    #[arg(long, default_value = "1")]
     param_count: usize,
 }
 

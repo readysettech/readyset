@@ -44,7 +44,7 @@ const REPORT_HANG: Duration = Duration::from_secs(20 * 60);
 
 #[derive(Parser)]
 struct Opts {
-    #[clap(subcommand)]
+    #[command(subcommand)]
     subcommand: Command,
 }
 
@@ -88,7 +88,7 @@ struct InputFileOptions {
     paths: Vec<PathBuf>,
 
     /// Load input files from subdirectories of the given paths recursively
-    #[clap(long, short = 'r')]
+    #[arg(long, short = 'r')]
     recursive: bool,
 }
 
@@ -197,11 +197,11 @@ impl IntoIterator for InputFiles {
 /// Test the parser on one or more sqllogictest files
 #[derive(Parser)]
 struct Parse {
-    #[clap(flatten)]
+    #[command(flatten)]
     input_opts: InputFileOptions,
 
     /// Output the resulting parsed records after parsing
-    #[clap(short, long)]
+    #[arg(short, long)]
     output: bool,
 }
 
@@ -232,74 +232,74 @@ impl Parse {
 /// MySQL database
 #[derive(Parser)]
 struct Verify {
-    #[clap(flatten)]
+    #[command(flatten)]
     input_opts: InputFileOptions,
 
     /// If passed, connect to and run verification against the database with the given URL, which
     /// should start with either postgresql:// or mysql://, rather than using noria.
-    #[clap(long)]
+    #[arg(long)]
     database_url: Option<DatabaseURL>,
 
     /// Shorthand for `--database-url mysql://root:noria@localhost:3306/sqllogictest`
-    #[clap(long, conflicts_with = "database_url")]
+    #[arg(long, conflicts_with = "database_url")]
     mysql: bool,
 
     /// Shorthand for `--database-url postgresql://postgres:noria@localhost:5432/sqllogictest`
-    #[clap(long, conflicts_with = "database_url")]
+    #[arg(long, conflicts_with = "database_url")]
     postgresql: bool,
 
     /// Enable an upstream database backend for the client, with replication to ReadySet.  All
     /// writes will pass through to the given database and be replicated to ReadySet.
     ///
     /// The value should be a database URL starting with either postgresql:// or mysql://
-    #[clap(long)]
+    #[arg(long)]
     replication_url: Option<String>,
 
     /// Type of database to use for the adapter.
     ///
     /// Ignored if --database-url is passed, must match the database type of --replication-url if
     /// both are passed
-    #[clap(long, default_value = "mysql", value_enum)]
+    #[arg(long, default_value = "mysql", value_enum)]
     database_type: DatabaseType,
 
     /// Enable query graph reuse
-    #[clap(long)]
+    #[arg(long)]
     enable_reuse: bool,
 
     /// Number of parallel tasks to use to run tests. Ignored if --binlog-mysql is passed
-    #[clap(long, short = 't', default_value = "32", env = "NORIA_LOGICTEST_TASKS")]
+    #[arg(long, short = 't', default_value = "32", env = "NORIA_LOGICTEST_TASKS")]
     tasks: usize,
 
     /// When tests are encountered that are expected to fail but do not, rename the test file from
     /// .fail.test to .test
-    #[clap(long)]
+    #[arg(long)]
     rename_passing: bool,
 
     /// When tests that are expected to pass fail, rename the test file from .test to .fail.test
-    #[clap(long)]
+    #[arg(long)]
     rename_failing: bool,
 
     /// Collect timing of all named queries
-    #[clap(long)]
+    #[arg(long)]
     time: bool,
 
     /// Enable verbose log output
-    #[clap(long, short = 'v')]
+    #[arg(long, short = 'v')]
     verbose: bool,
 
     /// Logging/tracing options
-    #[clap(flatten)]
+    #[command(flatten)]
     tracing: readyset_tracing::Options,
 
     /// Authority connection string. This parameter is ignored if
     /// authority is "local".
     // TODO(justin): The default address should depend on the authority
     // value.
-    #[clap(long, short = 'z', env = "AUTHORITY_ADDRESS", default_value = "")]
+    #[arg(long, short = 'z', env = "AUTHORITY_ADDRESS", default_value = "")]
     authority_address: String,
 
     /// The authority to use. Possible values: consul, local.
-    #[clap(long, env = "AUTHORITY", default_value = "local", value_enum)]
+    #[arg(long, env = "AUTHORITY", default_value = "local", value_enum)]
     authority: AuthorityType,
 }
 
@@ -573,30 +573,30 @@ pub struct Fuzz {
     ///
     /// Each test case consists of a list of queries that will be run against both ReadySet and the
     /// reference database
-    #[clap(long, short = 'n', default_value = "100")]
+    #[arg(long, short = 'n', default_value = "100")]
     num_tests: u32,
 
     /// Maximum number of iterations to run when shrinking test cases
-    #[clap(long, default_value = "1024")]
+    #[arg(long, default_value = "1024")]
     max_shrink_iters: u32,
 
     /// Hex-encoded seed for the random generator to use when generating test cases. Defaults to a
     /// randomly generated seed.
-    #[clap(long)]
+    #[arg(long)]
     seed: Option<Seed>,
 
     /// URL of a reference database to compare to.
-    #[clap(long)]
+    #[arg(long)]
     compare_to: DatabaseURL,
 
     /// Enable verbose log output
-    #[clap(long, short = 'v')]
+    #[arg(long, short = 'v')]
     verbose: bool,
 
     /// Write generated test scripts to this file.
     ///
     /// If not specified, test scripts will be written to a temporary file
-    #[clap(long, short = 'o')]
+    #[arg(long, short = 'o')]
     output: Option<PathBuf>,
 }
 

@@ -221,7 +221,7 @@ struct DataSet {
 #[derive(Parser, Debug)]
 struct RegressionsArgs {
     /// The type of the database for which we'd like to plot regressions
-    #[clap(long)]
+    #[arg(long)]
     database_type: DatabaseType,
 }
 

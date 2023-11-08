@@ -11,7 +11,7 @@ pub struct ReplicationOptions {
     ///
     /// This flag should be set to the number of adapter instances in the ReadySet deployment when
     /// running in embbedded readers mode (eg for high availability)
-    #[clap(
+    #[arg(
         long,
         conflicts_with = "non_base_replicas",
         env = "READER_REPLICAS",
@@ -20,7 +20,7 @@ pub struct ReplicationOptions {
     reader_replicas: Option<usize>,
 
     /// Number of times to replicate domains that don't contain base nodes
-    #[clap(long, hide = true, conflicts_with = "reader_replicas")]
+    #[arg(long, hide = true, conflicts_with = "reader_replicas")]
     non_base_replicas: Option<usize>,
 }
 

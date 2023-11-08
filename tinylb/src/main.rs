@@ -79,11 +79,11 @@ where
 #[derive(Parser)]
 struct Options {
     /// Address to listen at for new connections
-    #[clap(short = 'a')]
+    #[arg(short = 'a')]
     listen_address: SocketAddr,
 
     /// Upstream address to proxy to. Pass multiple times to configure multiple upstreams
-    #[clap(short = 'u', num_args = 1.., required = true)]
+    #[arg(short = 'u', num_args = 1.., required = true)]
     upstream: Vec<SocketAddr>,
 }
 

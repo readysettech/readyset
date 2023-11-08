@@ -9,6 +9,7 @@ use benchmarks::graph::GraphParams;
 use benchmarks::reporting::ReportMode;
 use benchmarks::utils::readyset_ready;
 use benchmarks::{benchmark_histogram, QUANTILES};
+use clap::builder::ArgPredicate;
 use clap::{Parser, ValueHint};
 use database_utils::DatabaseType;
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
@@ -32,44 +33,44 @@ const PUSH_GATEWAY_PUSH_INTERVAL: Duration = Duration::from_secs(5);
 ///
 /// The usage of this command is documented at <http://docs/benchmarking.html>
 #[derive(Parser)]
-#[clap(name = "benchmark_cmd_runner", subcommand_negates_reqs = true)]
+#[command(name = "benchmark_cmd_runner", subcommand_negates_reqs = true)]
 struct BenchmarkRunner {
     /// Skips the setup step when executing the `benchmark_cmd`.
-    #[clap(long)]
+    #[arg(long)]
     skip_setup: bool,
 
     /// The number of times we should run the benchmark.
-    #[clap(long, default_value = "1")]
+    #[arg(long, default_value = "1")]
     iterations: u32,
 
     /// Instead of running the benchmark_cmd, write the parameters to a benchmark_cmd
     /// specification file, to be run with the from-file subcommand.
-    #[clap(long, value_hint = ValueHint::AnyPath)]
+    #[arg(long, value_hint = ValueHint::AnyPath)]
     only_to_spec: Option<PathBuf>,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     tracing: readyset_tracing::Options,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     deployment_params: DeploymentParameters,
 
     /// Pass in the deployment parameters as a YAML formatted file. This overrides
     /// `--instance-label`, `--prometheus-push-gateway`, `--prometheus-endpoint`,
     /// `--target-conn-str`, and `--setup-conn-str`.
-    #[clap(long, value_hint = ValueHint::AnyPath)]
+    #[arg(long, value_hint = ValueHint::AnyPath)]
     deployment: Option<PathBuf>,
 
-    #[clap(subcommand)]
+    #[command(subcommand)]
     benchmark_cmd: Option<Benchmark>,
 
     /// Pass in the benchmark_cmd parameters as a YAML formatted file. This overwrites
     /// any benchmark_cmd subcommand passed in.
-    #[clap(long, value_hint = ValueHint::AnyPath, required(true))]
+    #[arg(long, value_hint = ValueHint::AnyPath, required(true))]
     benchmark: Option<PathBuf>,
 
     /// A file to append the set of benchmark results to, creates the file if it has not yet been
     /// created.
-    #[clap(long, value_hint = ValueHint::FilePath)]
+    #[arg(long, value_hint = ValueHint::FilePath)]
     results_file: Option<PathBuf>,
 
     /// Runs the benchmarks against a noria adapter and server run in the same process. Note that
@@ -78,7 +79,7 @@ struct BenchmarkRunner {
     /// `--release` will drastically improve results.
     ///
     /// If this argument is passed, the deployment parameter is ignored.
-    #[clap(long)]
+    #[arg(long)]
     local: bool,
 
     /// When running the benchmark in `--local` or `--local_with_upstream` mode, by default, the
@@ -86,7 +87,7 @@ struct BenchmarkRunner {
     /// enable durability in local mode use the `--persistent` option. When `--persistent` is
     /// specified, data is persisted to RocksDB, but it gets automatically deleted when the
     /// benchmark finishes.
-    #[clap(long)]
+    #[arg(long)]
     persistent: bool,
 
     /// Runs the benchmarks against a noria adapter and server run in the same process with the
@@ -94,26 +95,26 @@ struct BenchmarkRunner {
     /// based on compiler optimizations, using `--release` will drastically improve results.
     ///
     /// If this argument is passed, the deployment parameter is ignored.
-    #[clap(long)]
+    #[arg(long)]
     local_with_upstream: Option<String>,
 
     /// Location where benchmark reports are stored, either for validation or storage purposes
-    #[clap(long, env = "REPORT_TARGET", requires_all(&["report_mode", "report_profile"]))]
+    #[arg(long, env = "REPORT_TARGET", requires_ifs([(ArgPredicate::IsPresent, "report_mode"), (ArgPredicate::IsPresent, "report_profile")]))]
     report_target: Option<String>,
 
     /// Enables storage / validation of benchmark results, when combined with report_target
-    #[clap(long, env = "REPORT_MODE", requires_all(&["report_target", "report_profile"]))]
+    #[arg(long, env = "REPORT_MODE", requires_ifs([(ArgPredicate::IsPresent, "report_target"), (ArgPredicate::IsPresent, "report_profile")]))]
     report_mode: Option<ReportMode>,
 
     /// Profile name to save the report under, distinct tests should have unique profiles
-    #[clap(long, requires_all(&["report_target", "report_mode"]))]
+    #[arg(long, requires_ifs([(ArgPredicate::IsPresent, "report_target"), (ArgPredicate::IsPresent, "report_mode")]))]
     report_profile: Option<String>,
 
-    /// Records the commit id to aid potential future analysis
-    #[clap(long, hide(true), env = "BUILDKITE_COMMIT")]
+    /// Records The commit id to aid potential future analysis
+    #[arg(long, hide(true), env = "BUILDKITE_COMMIT")]
     report_commit_id: Option<String>,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     graph_params: GraphParams,
 }
 

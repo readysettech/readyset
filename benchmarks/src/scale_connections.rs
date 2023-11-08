@@ -18,12 +18,12 @@ use crate::{benchmark_counter, benchmark_histogram};
 #[derive(Parser, Clone, Serialize, Deserialize)]
 pub struct ScaleConnections {
     /// The number of views to create in the experiment.
-    #[clap(long, default_value = "1")]
+    #[arg(long, default_value = "1")]
     num_connections: usize,
 
     /// Whether to open all the connections in parallel or serially, closing
     /// each connection before opening the next.
-    #[clap(long)]
+    #[arg(long)]
     parallel: bool,
 }
 

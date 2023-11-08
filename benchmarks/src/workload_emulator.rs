@@ -77,44 +77,44 @@ pub enum LookAsideCacheType {
 
 #[derive(Debug, Parser, Clone, Default, Serialize, Deserialize)]
 pub struct LookAsideCache {
-    #[clap(long, requires = "cache_url")]
+    #[arg(long, requires = "cache_url")]
     cache_type: Option<LookAsideCacheType>,
 
-    #[clap(long)]
+    #[arg(long)]
     cache_url: Option<String>,
 
     /// Time-To-Live, in seconds, for items in the cache.
-    #[clap(long, default_value = "10")]
+    #[arg(long, default_value = "10")]
     ttl_secs: u32,
 }
 
 #[derive(Parser, Clone, Default, Serialize, Deserialize)]
 pub struct WorkloadEmulator {
     /// Path to the workload yaml schema
-    #[clap(long, short)]
+    #[arg(long, short)]
     spec: PathBuf,
 
     /// Install and generate from an arbitrary schema.
-    #[clap(flatten)]
+    #[command(flatten)]
     data_generator: Option<DataGenerator>,
 
     /// The type of benchmark to run.
-    #[clap(long, value_enum)]
+    #[arg(long, value_enum)]
     benchmark_type: BenchmarkType,
 
     /// Parameters to any look-aside cache, if used.
-    #[clap(flatten)]
+    #[command(flatten)]
     look_aside_cache: LookAsideCache,
 
     /// Number of worker connections
-    #[clap(long, short)]
+    #[arg(long, short)]
     workers: u64,
 
     /// Duration of the benchmark in seconds
-    #[clap(long, short, value_parser = crate::utils::seconds_as_str_to_duration)]
+    #[arg(long, short, value_parser = crate::utils::seconds_as_str_to_duration)]
     run_for: Option<Duration>,
 
-    #[clap(skip)]
+    #[arg(skip)]
     #[serde(skip)]
     query_set: Arc<Mutex<Option<Arc<QuerySet>>>>,
 }

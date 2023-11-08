@@ -2,14 +2,14 @@ use benchmarks::utils::generate::DataGenerator as DataGeneratorUtil;
 use clap::Parser;
 
 #[derive(Parser)]
-#[clap(name = "data_generator")]
+#[command(name = "data_generator")]
 struct DataGeneratorTool {
     /// Path to the desired database SQL schema.
-    #[clap(flatten)]
+    #[command(flatten)]
     generator: DataGeneratorUtil,
 
     /// Upstream database connection string.
-    #[clap(long)]
+    #[arg(long)]
     database_url: String,
 }
 

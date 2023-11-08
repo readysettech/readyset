@@ -43,41 +43,41 @@ static REPORTING_INTERVAL: Duration = Duration::from_secs(10);
 struct Writer {
     /// The number of rows already in the articles table. This
     /// is used as the starting article_id.
-    #[clap(long, default_value = "10")]
+    #[arg(long, default_value = "10")]
     article_table_rows: usize,
 
     /// The number of rows in the author table.
-    #[clap(long, default_value = "10")]
+    #[arg(long, default_value = "10")]
     author_table_rows: usize,
 
     /// Upstream database connection string.
-    #[clap(long)]
+    #[arg(long)]
     database_url: String,
 
-    #[clap(short, long, env("AUTHORITY_ADDRESS"), default_value("127.0.0.1:8500"))]
+    #[arg(short, long, env("AUTHORITY_ADDRESS"), default_value("127.0.0.1:8500"))]
     authority_address: String,
 
-    #[clap(long, env("AUTHORITY"), default_value("consul"), value_parser = ["consul"])]
+    #[arg(long, env("AUTHORITY"), default_value("consul"), value_parser = ["consul"])]
     authority: AuthorityType,
 
-    #[clap(short, long, env("DEPLOYMENT"), value_parser = NonEmptyStringValueParser::new())]
+    #[arg(short, long, env("DEPLOYMENT"), value_parser = NonEmptyStringValueParser::new())]
     deployment: String,
 
     /// Path to the news app data model SQL schema.
-    #[clap(long, value_hint = ValueHint::AnyPath)]
+    #[arg(long, value_hint = ValueHint::AnyPath)]
     schema: Option<PathBuf>,
 
     /// The target rate that writes are issued with.
-    #[clap(long)]
+    #[arg(long)]
     target_qps: Option<u64>,
 
     /// Number of threads to issue write queries.
-    #[clap(long, default_value = "1")]
+    #[arg(long, default_value = "1")]
     threads: u64,
 
     /// The number of seconds that the experiment should be running.
     /// If `None` is provided, the experiment will run until it is interrupted.
-    #[clap(long)]
+    #[arg(long)]
     run_for: Option<u32>,
 }
 

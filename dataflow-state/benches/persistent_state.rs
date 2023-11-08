@@ -212,23 +212,23 @@ pub fn rocksdb_range_lookup_large_strings(c: &mut Criterion, state: &PersistentS
 struct PersistentStateBenchArgs {
     /// If specified, only run benches containing this string in their names
     // This argument is the first argument passed by `cargo bench`
-    #[clap(index(1))]
+    #[arg(index(1))]
     benchname: Option<String>,
     /// Names an explicit baseline and enables overwriting the previous results.
-    #[clap(long)]
+    #[arg(long)]
     save_baseline: Option<String>,
     /// Is present when executed with `cargo bench`
-    #[clap(long, hide(true))]
+    #[arg(long, hide(true))]
     bench: bool,
-    #[clap(long, hide(true))]
+    #[arg(long, hide(true))]
     /// Is present when executed with `cargo test`
     test: bool,
     /// Specifies the number of entries that should be included in the database
-    #[clap(long, default_value = "100000")]
+    #[arg(long, default_value = "100000")]
     unique_entries: usize,
     /// If this value is set to "persistent", data from these benchmarks will be persisted in the
     /// current directory instead of in a tmp directory.
-    #[clap(long, default_value = "memory")]
+    #[arg(long, default_value = "memory")]
     durability_mode: DurabilityMode,
     /// If this setting is true, the benchmarks will try to use a database that already exists on
     /// disk instead of creating and seeding a new database. Databases are unique to the value
@@ -245,14 +245,14 @@ struct PersistentStateBenchArgs {
     /// benchmarks finished seeding the database correctly, *including finishing compaction*. If
     /// the data is incomplete or corrupt, the benchmarks may fail to run or may return
     /// inaccurate results.
-    #[clap(long, default_value = "false")]
+    #[arg(long, default_value = "false")]
     reuse_persistence: bool,
     /// If this setting is true, the benchmarks will seed a database with the given number of
     /// unique entries and exit without running the benchmarks.
     ///
     /// It is an error to use this flag with `--durability-mode` set to any value other than
     /// "persistent".
-    #[clap(long, default_value = "false")]
+    #[arg(long, default_value = "false")]
     seed_only: bool,
 }
 

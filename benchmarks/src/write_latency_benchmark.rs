@@ -19,18 +19,18 @@ use crate::utils::query::ArbitraryQueryParameters;
 
 #[derive(Parser, Clone, Serialize, Deserialize)]
 pub struct WriteLatencyBenchmark {
-    #[clap(flatten)]
+    #[command(flatten)]
     data_generator: DataGenerator,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     update_query: ArbitraryQueryParameters,
 
     /// Field to key on for our SELECT and UPDATE queries
-    #[clap(long)]
+    #[arg(long)]
     key_field: ColumnName,
 
     /// Number of updates to issue
-    #[clap(long, default_value = "1000")]
+    #[arg(long, default_value = "1000")]
     updates: u32,
 }
 

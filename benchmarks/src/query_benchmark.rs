@@ -29,26 +29,26 @@ const REPORT_RESULTS_INTERVAL: Duration = Duration::from_secs(2);
 #[derive(Parser, Clone, Default, Serialize, Deserialize)]
 pub struct QueryBenchmark {
     /// Parameters to handle generating parameters for arbitrary queries.
-    #[clap(flatten)]
+    #[command(flatten)]
     query: ArbitraryQueryParameters,
 
     /// The target rate to issue queries at if attainable on this
     /// machine with up to `threads`.
-    #[clap(long)]
+    #[arg(long)]
     target_qps: Option<u64>,
 
     /// The number of threads to execute the read benchmark across.
-    #[clap(long, default_value = "1")]
+    #[arg(long, default_value = "1")]
     threads: u64,
 
     /// Install and generate from an arbitrary schema.
-    #[clap(flatten)]
+    #[command(flatten)]
     data_generator: DataGenerator,
 
     /// The duration, specified as the number of seconds that the benchmark
     /// should be running. If `None` is provided, the benchmark will run
     /// until it is interrupted.
-    #[clap(long, value_parser = crate::utils::seconds_as_str_to_duration)]
+    #[arg(long, value_parser = crate::utils::seconds_as_str_to_duration)]
     pub run_for: Option<Duration>,
 }
 

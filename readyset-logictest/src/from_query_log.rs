@@ -21,26 +21,26 @@ use querylog::{Command, Entry, Session, Stream};
 pub struct FromQueryLog {
     /// URL of a reference database to connect to, execute queries from the log, and record the
     /// results.  Currently supports `mysql://` URLs, but may be expanded in the future.
-    #[clap(long)]
+    #[arg(long)]
     pub database: DatabaseURL,
 
     /// Enable verbose output
-    #[clap(long, short = 'v')]
+    #[arg(long, short = 'v')]
     pub verbose: bool,
 
     /// Generate a separate logictest file for each client session in the querylog
-    #[clap(long)]
+    #[arg(long)]
     pub split_sessions: bool,
 
     /// Exclude DDL statements from the resulting logictest
-    #[clap(long)]
+    #[arg(long)]
     pub skip_ddl: bool,
 
     /// Log unparsable queries to a file
-    #[clap(long)]
+    #[arg(long)]
     pub unparsable_query_log: Option<PathBuf>,
 
-    #[clap(skip)]
+    #[arg(skip)]
     unparsable_query_log_file: Option<File>,
 
     /// Query log to convert

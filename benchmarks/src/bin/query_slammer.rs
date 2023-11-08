@@ -9,11 +9,11 @@ use futures::future::select_all;
 #[derive(Parser, Debug)]
 struct Opts {
     /// SQL endpoint to connect to
-    #[clap(env = "DATABASE_URL")]
+    #[arg(env = "DATABASE_URL")]
     database_url: DatabaseURL,
 
     /// Number of greenthreads to run hitting the database
-    #[clap(long, env = "PARALLELISM", short = 'j', default_value = "16")]
+    #[arg(long, env = "PARALLELISM", short = 'j', default_value = "16")]
     parallelism: usize,
 }
 

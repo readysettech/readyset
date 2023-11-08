@@ -2655,11 +2655,11 @@ pub struct GenerateOpts {
     /// Comma-separated list of query operations to generate top-level queries with
     ///
     /// If not specified, will permute the set of all possible query operations.
-    #[clap(long)]
+    #[arg(long)]
     pub operations: Option<OperationList>,
 
     /// Maximum recursion depth to use when generating subqueries
-    #[clap(long, default_value = "2")]
+    #[arg(long, default_value = "2")]
     pub subquery_depth: usize,
 
     /// Range of operations to be used in a single query, represented as either a single number or
@@ -2667,7 +2667,7 @@ pub struct GenerateOpts {
     ///
     /// If not specified, queries will all contain a number of operations equal to the length of
     /// `operations`.
-    #[clap(long, value_parser = parse_num_operations::<usize>)]
+    #[arg(long, value_parser = parse_num_operations::<usize>)]
     pub num_operations: Option<BoundPair<usize>>,
 }
 

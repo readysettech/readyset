@@ -7,17 +7,17 @@ use query_generator::GenerateOpts;
 
 #[derive(Parser)]
 struct Opts {
-    #[clap(flatten)]
+    #[command(flatten)]
     options: GenerateOpts,
 
     /// SQL dialect to use for displaying queries
-    #[clap(long, value_enum, default_value = "mysql")]
+    #[arg(long, value_enum, default_value = "mysql")]
     pub dialect: nom_sql::Dialect,
 
-    #[clap(long)]
+    #[arg(long)]
     ddl_only: bool,
 
-    #[clap(long)]
+    #[arg(long)]
     queries_only: bool,
 }
 

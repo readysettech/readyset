@@ -34,7 +34,7 @@ pub use error::DatabaseError;
 pub struct UpstreamConfig {
     /// URL for the upstream database to connect to. Should include username and password if
     /// necessary
-    #[clap(long, env = "UPSTREAM_DB_URL")]
+    #[arg(long, env = "UPSTREAM_DB_URL")]
     #[serde(default)]
     pub upstream_db_url: Option<RedactedString>,
 
@@ -47,19 +47,19 @@ pub struct UpstreamConfig {
     /// trusted, any certificate for any site will be trusted for use, including expired
     /// certificates. This introduces significant vulnerabilities, and should only be used as a
     /// last resort.
-    #[clap(long, env = "DISABLE_UPSTREAM_SSL_VERIFICATION", hide = true)]
+    #[arg(long, env = "DISABLE_UPSTREAM_SSL_VERIFICATION", hide = true)]
     #[serde(default)]
     pub disable_upstream_ssl_verification: bool,
 
     /// A path to a pem or der certificate of the root that the upstream connection will trust.
-    #[clap(long, env = "SSL_ROOT_CERT")]
+    #[arg(long, env = "SSL_ROOT_CERT")]
     #[serde(default)]
     pub ssl_root_cert: Option<PathBuf>,
 
     /// Disable running DDL Streaming Replication Setup for PostgreSQL. If this flag is set
     /// the DDL Streaming Replication Setup SQL queries will need to be manually run on the
     /// primary server before streaming replication will start.
-    #[clap(long, env = "DISABLE_SETUP_DDL_REPLICATION", hide = true)]
+    #[arg(long, env = "DISABLE_SETUP_DDL_REPLICATION", hide = true)]
     #[serde(default)]
     pub disable_setup_ddl_replication: bool,
 
@@ -67,12 +67,12 @@ pub struct UpstreamConfig {
     ///
     /// This can be used to differentiate different ReadySet deployments connected to the same
     /// upstream DB.
-    #[clap(long, env = "REPLICATION_SERVER_ID", hide = true)]
+    #[arg(long, env = "REPLICATION_SERVER_ID", hide = true)]
     #[serde(default)]
     pub replication_server_id: Option<u32>,
 
     /// The time to wait before restarting the replicator in seconds.
-    #[clap(long, hide = true, default_value = "1", value_parser = duration_from_seconds)]
+    #[arg(long, hide = true, default_value = "1", value_parser = duration_from_seconds)]
     #[serde(default = "default_replicator_restart_timeout")]
     pub replicator_restart_timeout: Duration,
 
@@ -85,7 +85,7 @@ pub struct UpstreamConfig {
     /// This option accepts a comma-separated list of `<schema>.<table>` (specific table in a
     /// schema) or `<schema>.*` (all tables in a schema) for Postgres and `<database>.<table>`
     /// for MySQL. Only tables specified in the list will be eligible to be used by caches.
-    #[clap(long, env = "REPLICATION_TABLES")]
+    #[arg(long, env = "REPLICATION_TABLES")]
     #[serde(default)]
     pub replication_tables: Option<RedactedString>,
 
@@ -100,18 +100,18 @@ pub struct UpstreamConfig {
     /// for MySQL.
     ///
     /// Tables specified in the list will not be eligible to be used by caches.
-    #[clap(long, env = "REPLICATION_TABLES_IGNORE")]
+    #[arg(long, env = "REPLICATION_TABLES_IGNORE")]
     #[serde(default)]
     pub replication_tables_ignore: Option<RedactedString>,
 
     /// Sets the time (in seconds) between reports of progress snapshotting the database. A value
     /// of 0 disables reporting.
-    #[clap(long, default_value = "30", hide = true)]
+    #[arg(long, default_value = "30", hide = true)]
     #[serde(default = "default_snapshot_report_interval_secs")]
     pub snapshot_report_interval_secs: u16,
 
     /// Sets the connection count for the pool that is used for replication and snapshotting.
-    #[clap(long, default_value = "50", hide = true)]
+    #[arg(long, default_value = "50", hide = true)]
     #[serde(default)]
     pub replication_pool_size: usize,
 
@@ -120,7 +120,7 @@ pub struct UpstreamConfig {
     ///
     /// If set, ReadySet still raises the soft limit to min(our requirement, hard limit). It just
     /// doesn't treat (our requirement > hard limit) as a fatal error.
-    #[clap(long, env = "IGNORE_ULIMIT_CHECK")]
+    #[arg(long, env = "IGNORE_ULIMIT_CHECK")]
     #[serde(default)]
     pub ignore_ulimit_check: bool,
 
@@ -128,7 +128,7 @@ pub struct UpstreamConfig {
     /// setting also the controls the interval on which each base table will flush and sync the
     /// RocksDB WAL to disk. If set to 0, the base tables will flush and sync to disk with every
     /// write, which substantially worsens write latency.
-    #[clap(
+    #[arg(
         long,
         default_value = "10",
         hide = true,

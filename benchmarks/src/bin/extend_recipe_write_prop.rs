@@ -6,18 +6,18 @@ use readyset_client::ReadySetHandle;
 use readyset_data::Dialect;
 
 #[derive(Parser)]
-#[clap(name = "extend_recipe_write_propagation")]
+#[command(name = "extend_recipe_write_propagation")]
 struct ExtendRecipeWritePropagation {
-    #[clap(short, long, env("AUTHORITY_ADDRESS"), default_value("127.0.0.1:8500"))]
+    #[arg(short, long, env("AUTHORITY_ADDRESS"), default_value("127.0.0.1:8500"))]
     authority_address: String,
-    #[clap(
+    #[arg(
         long,
         env("AUTHORITY"),
         default_value("consul"),
         value_parser = ["consul"]
     )]
     authority: AuthorityType,
-    #[clap(short, long, env("DEPLOYMENT"), value_parser = NonEmptyStringValueParser::new())]
+    #[arg(short, long, env("DEPLOYMENT"), value_parser = NonEmptyStringValueParser::new())]
     deployment: String,
 }
 

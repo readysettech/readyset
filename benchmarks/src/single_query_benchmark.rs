@@ -21,19 +21,19 @@ use crate::utils::query::{ArbitraryQueryParameters, PreparedStatement};
 #[derive(Parser, Clone, Serialize, Deserialize)]
 pub struct SingleQueryBenchmark {
     /// Parameters to handle generating parameters for arbitrary queries.
-    #[clap(flatten)]
+    #[command(flatten)]
     query: ArbitraryQueryParameters,
 
     /// Install and generate from an arbitrary schema.
-    #[clap(flatten)]
+    #[command(flatten)]
     data_generator: DataGenerator,
 
     /// The number of times to execute the query.
-    #[clap(long, default_value = "10000")]
+    #[arg(long, default_value = "10000")]
     num_executions: u32,
 
     /// Execute this query via `query` instead of `exec`.
-    #[clap(long)]
+    #[arg(long)]
     ad_hoc: bool,
 }
 

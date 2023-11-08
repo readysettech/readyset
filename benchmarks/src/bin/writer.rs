@@ -21,29 +21,29 @@ use readyset_data::DfValue;
 static REPORTING_INTERVAL: Duration = Duration::from_secs(10);
 
 #[derive(Parser)]
-#[clap(name = "writer")]
+#[command(name = "writer")]
 struct Writer {
     /// The number of users in the system.
-    #[clap(long, default_value = "10")]
+    #[arg(long, default_value = "10")]
     user_table_rows: usize,
 
     /// The number of rows in the articles table.
-    #[clap(long, default_value = "10")]
+    #[arg(long, default_value = "10")]
     article_table_rows: usize,
 
-    #[clap(long, default_value = "10")]
+    #[arg(long, default_value = "10")]
     author_table_rows: usize,
 
     /// Upstream database connection string.
-    #[clap(long)]
+    #[arg(long)]
     database_url: DatabaseURL,
 
     /// Path to the news app data model SQL schema.
-    #[clap(long, value_hint = ValueHint::AnyPath)]
+    #[arg(long, value_hint = ValueHint::AnyPath)]
     schema: Option<PathBuf>,
 
     /// The number of threads to spawn to issue write queries.
-    #[clap(long, default_value = "1")]
+    #[arg(long, default_value = "1")]
     threads: u64,
 }
 

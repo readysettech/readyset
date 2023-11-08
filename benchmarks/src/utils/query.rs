@@ -107,24 +107,24 @@ impl QuerySpec {
 pub struct ArbitraryQueryParameters {
     /// A path to the query that we are benchmarking, or a string containing the query that we are
     /// benchmarking.
-    #[clap(long)]
+    #[arg(long)]
     query: QuerySpec,
 
     // The dialect that should be used to parse the query string.
-    #[clap(long, default_value = "mysql")]
+    #[arg(long, default_value = "mysql")]
     #[serde(default = "default_dialect")]
     dialect: Dialect,
 
     /// A annotation spec for each of the parameters in query. See
     /// `DistributionAnnotations` for the format of the file.
-    #[clap(long)]
+    #[arg(long)]
     query_spec_file: Option<PathBuf>,
 
     /// An query spec passed in as a semicolon-separated list. See `DistributionAnnotation` for the
     /// format for each parameters annotation.
     ///
     /// Query specs give a specification for how parameters are generated for queries
-    #[clap(long, conflicts_with = "query_spec_file")]
+    #[arg(long, conflicts_with = "query_spec_file")]
     query_spec: Option<String>,
 }
 

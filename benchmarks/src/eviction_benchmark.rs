@@ -50,28 +50,28 @@ fn set_scale(scale: f64) {
 #[derive(Parser, Clone, Default, Serialize, Deserialize)]
 pub struct EvictionBenchmark {
     /// Parameters to handle generating parameters for arbitrary queries.
-    #[clap(flatten)]
+    #[command(flatten)]
     query: ArbitraryQueryParameters,
 
     /// The number of threads to execute the "normal" portion of the benchmark.
-    #[clap(long, default_value = "1")]
+    #[arg(long, default_value = "1")]
     threads: usize,
 
     /// Install and generate from an arbitrary schema.
-    #[clap(flatten)]
+    #[command(flatten)]
     data_generator: DataGenerator,
 
     /// The duration, specified as the number of seconds that the benchmark
     /// should be running. If `None` is provided, the benchmark will run
     /// until it is interrupted.
-    #[clap(long, value_parser = crate::utils::seconds_as_str_to_duration)]
+    #[arg(long, value_parser = crate::utils::seconds_as_str_to_duration)]
     run_for: Option<Duration>,
 
     /// Attempt to scale down query range from query_spec in order to hit the desired
     /// hit rate. This will only work if the range would naturally achieve a lower hit
     /// rate for a given eviction policy, since it will scale the range down to get
     /// a higher hit rate. Range 1 - 100 percent.
-    #[clap(long, default_value = "100")]
+    #[arg(long, default_value = "100")]
     target_hit_rate: u8,
 }
 

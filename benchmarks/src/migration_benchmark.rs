@@ -21,15 +21,15 @@ use crate::utils::us_to_ms;
 #[derive(Parser, Clone, Serialize, Deserialize)]
 pub struct MigrationBenchmark {
     /// Parameters to handle generating parameters for arbitrary queries.
-    #[clap(flatten)]
+    #[command(flatten)]
     query: ArbitraryQueryParameters,
 
     /// Install and generate from an arbitrary schema.
-    #[clap(flatten)]
+    #[command(flatten)]
     data_generator: DataGenerator,
 
     /// The number of times to create and drop the query in Noria.
-    #[clap(long, default_value = "10")]
+    #[arg(long, default_value = "10")]
     num_migrations: u32,
 }
 

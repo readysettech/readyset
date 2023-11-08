@@ -12,17 +12,17 @@ use readyset_server::metrics::{
 use readyset_server::NoriaMetricsRecorder;
 
 #[derive(Parser)]
-#[clap(name = "snapshot_time")]
+#[command(name = "snapshot_time")]
 struct SnapshotBenchmark {
     /// Sets the upstream database URL for the snapshot
-    #[clap(short, long, value_hint = ValueHint::Url)]
+    #[arg(short, long, value_hint = ValueHint::Url)]
     replication_url: String,
     /// How many times to repeat the benchmark
-    #[clap(short, long, default_value = "1")]
+    #[arg(short, long, default_value = "1")]
     iterations: usize,
     /// An optional SQL file with queries to install and measure the time required
     /// for this
-    #[clap(short, long)]
+    #[arg(short, long)]
     queries: Option<PathBuf>,
 }
 

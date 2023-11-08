@@ -767,40 +767,40 @@ impl FromStr for MemoryLimit {
 struct SystemBenchArgs {
     /// If specified, only run benches containing this string in their names
     // This argument is the first argument passed by `cargo bench`
-    #[clap(index(1))]
+    #[arg(index(1))]
     benchname: Option<String>,
     /// If specified collect a flamegraph for each workload
-    #[clap(long)]
+    #[arg(long)]
     flamegraph: bool,
     /// If specified will merge flamegraph callstacks from all threads
-    #[clap(long, requires("flamegraph"))]
+    #[arg(long, requires("flamegraph"))]
     merge_threads: bool,
     /// If specified will collect the flamegraph with a line granlarity
-    #[clap(long, requires("flamegraph"))]
+    #[arg(long, requires("flamegraph"))]
     line_granularity: bool,
     /// Repeat each workload again but with the memory limit enabled, multiple memory limits can be
     /// provided, a memory limit is either an absolute value in MiB, or a relative percentage
     /// value, such as 90%, where the benchmark will compute the memory limit based on peak memory
     /// usage.
-    #[clap(long, short)]
+    #[arg(long, short)]
     memory_limit: Vec<MemoryLimit>,
     /// Names an explicit baseline and enables overwriting the previous results.
-    #[clap(long)]
+    #[arg(long)]
     save_baseline: Option<String>,
     /// Compare all benchmark results against the upstream database as well
-    #[clap(long)]
+    #[arg(long)]
     compare_upstream: bool,
     /// The URL associated with the upstream database
-    #[clap(long)]
+    #[arg(long)]
     upstream_url: String,
     /// The name of the test database to be created
-    #[clap(long, default_value = "rs_bench")]
+    #[arg(long, default_value = "rs_bench")]
     database_name: String,
 
-    #[clap(long, hide(true))]
+    #[arg(long, hide(true))]
     /// Is present when executed with `cargo bench`
     bench: bool,
-    #[clap(long, hide(true))]
+    #[arg(long, hide(true))]
     /// Is present when executed with `cargo test`
     test: bool,
 }

@@ -20,19 +20,19 @@ use crate::utils::query::{ArbitraryQueryParameters, CachingQueryGenerator};
 #[derive(Parser, Clone, Serialize, Deserialize)]
 pub struct CacheHitBenchmark {
     /// Parameters to handle generating parameters for arbitrary queries.
-    #[clap(flatten)]
+    #[command(flatten)]
     query: ArbitraryQueryParameters,
 
     /// Install and generate from an arbitrary schema.
-    #[clap(flatten)]
+    #[command(flatten)]
     data_generator: DataGenerator,
 
     /// Number of cache hits to perform
-    #[clap(long, default_value = "1000")]
+    #[arg(long, default_value = "1000")]
     num_cache_hits: u32,
 
     /// Number of cache misses to perform
-    #[clap(long, default_value = "1000")]
+    #[arg(long, default_value = "1000")]
     num_cache_misses: u32,
 }
 

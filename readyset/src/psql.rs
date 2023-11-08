@@ -19,7 +19,7 @@ pub struct Options {
     /// connections as the server.
     ///
     /// ReadySet will not accept TLS connections if there is no identity file specified.
-    #[clap(long, env = "READYSET_IDENTITY_FILE")]
+    #[arg(long, env = "READYSET_IDENTITY_FILE")]
     readyset_identity_file: Option<String>,
 
     /// Password for the pkcs12 identity file used by ReadySet for establishing TLS connections as
@@ -27,11 +27,11 @@ pub struct Options {
     ///
     /// If password is not provided, ReadySet will try using an empty string to unlock the identity
     /// file.
-    #[clap(long, requires = "readyset_identity_file")]
+    #[arg(long, requires = "readyset_identity_file")]
     readyset_identity_file_password: Option<String>,
 
     /// Authentication method to use for PostgreSQL clients
-    #[clap(
+    #[arg(
         long,
         env = "POSTGRES_AUTHENTICATION_METHOD",
         default_value = "scram-sha-256"

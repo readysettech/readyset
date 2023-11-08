@@ -24,7 +24,7 @@ enum Dist {
 
 #[derive(Parser, Clone)]
 struct NoriaClientOpts {
-    #[clap(
+    #[arg(
         short,
         long,
         required_if_eq("database-type", "noria"),
@@ -33,7 +33,7 @@ struct NoriaClientOpts {
     )]
     authority_address: String,
 
-    #[clap(
+    #[arg(
         long,
         env("AUTHORITY"),
         required_if_eq("database-type", "noria"),
@@ -42,7 +42,7 @@ struct NoriaClientOpts {
     )]
     authority: AuthorityType,
 
-    #[clap(
+    #[arg(
         short,
         required_if_eq("database-type", "noria"),
         long,
@@ -53,27 +53,27 @@ struct NoriaClientOpts {
     /// The amount of time to batch a set of requests for in ms. If
     /// `batch_duration_ms` is 0, no batching is performed. Only
     /// valid for some database types.
-    #[clap(long, default_value = "1")]
+    #[arg(long, default_value = "1")]
     batch_duration_ms: u64,
 
     /// The maximum batch size for lookup requests. Only valid
     /// for some database types.
-    #[clap(long, default_value = "10")]
+    #[arg(long, default_value = "10")]
     batch_size: u64,
 }
 
 #[derive(Parser, Clone)]
 struct UpstreamOpts {
     /// Upstream database connection string.
-    #[clap(long, required_if_eq("database-type", "upstream"))]
+    #[arg(long, required_if_eq("database-type", "upstream"))]
     database_url: Option<DatabaseURL>,
 
     /// The path to the parameterized query.
-    #[clap(long, required_if_eq("database-type", "upstream"))]
+    #[arg(long, required_if_eq("database-type", "upstream"))]
     query: Option<PathBuf>,
 
     /// Number of parameters to generate for a parameterized query.
-    #[clap(long, required_if_eq("database-type", "upstream"))]
+    #[arg(long, required_if_eq("database-type", "upstream"))]
     nparams: Option<usize>,
 }
 
@@ -84,23 +84,23 @@ enum DatabaseType {
 }
 
 #[derive(Parser)]
-#[clap(name = "reader")]
+#[command(name = "reader")]
 struct Reader {
     /// The number of users in the system.
-    #[clap(long, default_value = "10")]
+    #[arg(long, default_value = "10")]
     user_table_rows: usize,
 
     /// The index of the first user in the system, keys are generated in the range
     /// [user_offset..user_offset+user_table_rows).
-    #[clap(long, default_value = "0")]
+    #[arg(long, default_value = "0")]
     user_offset: u64,
 
     /// The target rate at the reader issues queries at.
-    #[clap(long)]
+    #[arg(long)]
     target_qps: Option<u64>,
 
     /// The number of threads to spawn to issue reader queries.
-    #[clap(long, default_value = "1")]
+    #[arg(long, default_value = "1")]
     threads: u64,
 
     /// The distribution to use to generate the random user ids
@@ -109,32 +109,32 @@ struct Reader {
     ///
     /// 'zipf' - sample pattern is skewed such that 90% of accesses are for 10% of the ids (Zipf;
     /// α=1.15)
-    #[clap(default_value = "uniform")]
+    #[arg(default_value = "uniform")]
     distribution: Dist,
 
     /// Override the default alpha parameter for the zipf distribution
-    #[clap(long, required_if_eq("distribution", "zipf"), default_value = "1.15")]
+    #[arg(long, required_if_eq("distribution", "zipf"), default_value = "1.15")]
     alpha: f64,
 
     /// The number of seconds that the experiment should be running.
     /// If `None` is provided, the experiment will run until it is interrupted.
-    #[clap(long)]
+    #[arg(long)]
     run_for: Option<u32>,
 
     /// The type of database the client is connecting to. This determines
     /// the set of opts that should be populated. See `noria_opts` and
     /// `upstream_opts`.
-    #[clap(default_value = "noria")]
+    #[arg(default_value = "noria")]
     database_type: DatabaseType,
 
     /// The set of options to be specified by the user to connect via a
     /// noria client.
-    #[clap(flatten)]
+    #[command(flatten)]
     noria_opts: NoriaClientOpts,
 
     /// The set of options to be specified by a user to connect via a
     /// database client.
-    #[clap(flatten)]
+    #[command(flatten)]
     upstream_opts: UpstreamOpts,
 }
 

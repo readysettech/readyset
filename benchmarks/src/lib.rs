@@ -16,10 +16,10 @@
 //!
 //! #[derive(clap::Parser, Clone)]
 //! pub struct MyBenchmark {
-//!     #[clap(long, default_value = "10")]
+//!     #[arg(long, default_value = "10")]
 //!     where_value: u32,
 //!
-//!     #[clap(long, default_value = "1_000_000")]
+//!     #[arg(long, default_value = "1_000_000")]
 //!     row_count: u32,
 //! }
 //!

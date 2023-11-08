@@ -46,15 +46,15 @@ const SMALL_OPERATIONS: &[&str] = &[
 #[derive(Parser, Debug)]
 struct PermutationGenerator {
     /// Only generate scripts with these operations
-    #[clap(long)]
+    #[arg(long)]
     only: Option<String>,
 
     /// Exclude these operations from all generated scripts
-    #[clap(long)]
+    #[arg(long)]
     exclude: Vec<String>,
 
     /// Generate scripts with this many operations
-    #[clap(long, short = 'd')]
+    #[arg(long, short = 'd')]
     depth: usize,
 }
 
@@ -146,26 +146,26 @@ impl PermutationGenerator {
 /// certain depth
 #[derive(Parser, Debug)]
 pub struct Permute {
-    #[clap(flatten)]
+    #[command(flatten)]
     permutation_generator: PermutationGenerator,
 
     /// Directory to write tests to
-    #[clap(long, short = 'o')]
+    #[arg(long, short = 'o')]
     out_dir: PathBuf,
 
     /// Overwrite existing generated tests in the output directory
-    #[clap(long)]
+    #[arg(long)]
     overwrite_tests: bool,
 
     /// Don't actually generate tests, just print tests that would be generated
-    #[clap(long)]
+    #[arg(long)]
     dry_run: bool,
 
     /// Maximum recursion depth to use when generating subqueries
-    #[clap(long, default_value = "2")]
+    #[arg(long, default_value = "2")]
     subquery_depth: usize,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     script_options: GenerateOpts,
 }
 

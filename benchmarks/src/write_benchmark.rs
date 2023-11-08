@@ -34,32 +34,32 @@ use crate::{benchmark_counter, benchmark_histogram};
 pub struct WriteBenchmark {
     /// Path to the desired database SQL schema. Each table must have a primary key to generate
     /// data.
-    #[clap(long, value_hint = ValueHint::AnyPath)]
+    #[arg(long, value_hint = ValueHint::AnyPath)]
     schema: PathBuf,
 
     /// The target rate to issue queries at if attainable on this
     /// machine with up to `threads`.
-    #[clap(long)]
+    #[arg(long)]
     target_qps: Option<u64>,
 
     /// The number of threads to execute the read benchmark across.
-    #[clap(long, default_value = "1")]
+    #[arg(long, default_value = "1")]
     threads: u64,
 
     /// The number of connections to use for the connection pool to the database
-    #[clap(long, default_value = "64")]
+    #[arg(long, default_value = "64")]
     pool_size: usize,
 
     /// The duration, specified as the number of seconds that the benchmark should be running. If
     /// `None` is provided, the benchmark will run until it is interrupted.
-    #[clap(long, value_parser = crate::utils::seconds_as_str_to_duration)]
+    #[arg(long, value_parser = crate::utils::seconds_as_str_to_duration)]
     pub run_for: Option<Duration>,
 
     /// Optionally create this many indices in each of the tables that're being written to.
     ///
     /// If any of the tables do not have enough columns to create this many distinct indices, the
     /// benchmark run will fail
-    #[clap(long)]
+    #[arg(long)]
     indices_per_table: Option<usize>,
 }
 

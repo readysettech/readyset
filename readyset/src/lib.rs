@@ -153,7 +153,7 @@ where
 }
 
 #[derive(Parser, Debug)]
-#[clap(group(
+#[command(group(
     ArgGroup::new("metrics")
         .multiple(true)
         .args(&["prometheus_metrics", "noria_metrics"]),
@@ -161,16 +161,16 @@ where
 #[group(skip)]
 pub struct Options {
     /// IP:PORT to listen on
-    #[clap(long, short = 'a', env = "LISTEN_ADDRESS")]
+    #[arg(long, short = 'a', env = "LISTEN_ADDRESS")]
     address: Option<SocketAddr>,
 
     /// ReadySet deployment ID. All nodes in a deployment must have the same deployment ID.
-    #[clap(long, env = "DEPLOYMENT", default_value = "readyset.db", value_parser = NonEmptyStringValueParser::new(), hide = true)]
+    #[arg(long, env = "DEPLOYMENT", default_value = "readyset.db", value_parser = NonEmptyStringValueParser::new(), hide = true)]
     deployment: String,
 
     /// Database engine protocol to emulate. If omitted, will be inferred from the
     /// `upstream-db-url`
-    #[clap(
+    #[arg(
         long,
         env = "DATABASE_TYPE",
         value_enum,
@@ -180,7 +180,7 @@ pub struct Options {
     pub database_type: Option<DatabaseType>,
 
     /// Run ReadySet in standalone mode or adapter mode.
-    #[clap(
+    #[arg(
         long,
         env = "DEPLOYMENT_MODE",
         default_value = "standalone",
@@ -190,7 +190,7 @@ pub struct Options {
 
     /// The authority to use
     // NOTE: hidden because the value can be derived from `--deployment-mode standalone`
-    #[clap(
+    #[arg(
         long,
         env = "AUTHORITY",
         default_value_if("deployment_mode", "standalone", Some("standalone")),
@@ -202,7 +202,7 @@ pub struct Options {
     /// Authority uri
     // NOTE: `authority_address` should come after `authority` for clap to set default values
     // properly
-    #[clap(
+    #[arg(
         long,
         env = "AUTHORITY_ADDRESS",
         default_value_if("authority", "standalone", Some(".")),
@@ -213,16 +213,16 @@ pub struct Options {
     authority_address: String,
 
     /// Log slow queries (> 5ms)
-    #[clap(long, hide = true)]
+    #[arg(long, hide = true)]
     log_slow: bool,
 
     /// Don't require authentication for any client connections
-    #[clap(long, env = "ALLOW_UNAUTHENTICATED_CONNECTIONS", hide = true)]
+    #[arg(long, env = "ALLOW_UNAUTHENTICATED_CONNECTIONS", hide = true)]
     allow_unauthenticated_connections: bool,
 
     /// Specify the migration mode for ReadySet to use. The default "explicit" mode is the only
     /// non-experimental mode.
-    #[clap(long, env = "QUERY_CACHING", default_value = "explicit", hide = true)]
+    #[arg(long, env = "QUERY_CACHING", default_value = "explicit", hide = true)]
     query_caching: MigrationStyle,
 
     /// Sets the maximum time in minutes that we will retry migrations for in the
@@ -230,7 +230,7 @@ pub struct Options {
     /// sent to the upstream database.
     ///
     /// Defaults to 15 minutes.
-    #[clap(
+    #[arg(
         long,
         env = "MAX_PROCESSING_MINUTES",
         default_value = "15",
@@ -239,7 +239,7 @@ pub struct Options {
     max_processing_minutes: u64,
 
     /// Sets the migration handlers's loop interval in milliseconds.
-    #[clap(
+    #[arg(
         long,
         env = "MIGRATION_TASK_INTERVAL",
         default_value = "20000",
@@ -248,29 +248,29 @@ pub struct Options {
     migration_task_interval: u64,
 
     /// IP:PORT to host endpoint for scraping metrics from the adapter.
-    #[clap(long, env = "METRICS_ADDRESS", default_value = "0.0.0.0:6034")]
+    #[arg(long, env = "METRICS_ADDRESS", default_value = "0.0.0.0:6034")]
     metrics_address: SocketAddr,
 
     /// Allow database connections authenticated as this user. Defaults to the username in
     /// --upstream-db-url if not set. Ignored if --allow-unauthenticated-connections is passed
-    #[clap(long, env = "ALLOWED_USERNAME", short = 'u', hide = true)]
+    #[arg(long, env = "ALLOWED_USERNAME", short = 'u', hide = true)]
     username: Option<String>,
 
     /// Password to authenticate database connections with. Defaults to the password in
     /// --upstream-db-url if not set. Ignored if --allow-unauthenticated-connections is passed
-    #[clap(long, env = "ALLOWED_PASSWORD", short = 'p', hide = true)]
+    #[arg(long, env = "ALLOWED_PASSWORD", short = 'p', hide = true)]
     password: Option<RedactedString>,
 
     /// Enable recording and exposing Prometheus metrics
-    #[clap(long, env = "PROMETHEUS_METRICS")]
+    #[arg(long, env = "PROMETHEUS_METRICS")]
     prometheus_metrics: bool,
 
-    #[clap(long, hide = true)]
+    #[arg(long, hide = true)]
     noria_metrics: bool,
 
     /// Enable logging queries and execution metrics. This creates a histogram per unique query.
     /// Enabled by default if prometheus-metrics is enabled.
-    #[clap(
+    #[arg(
         long,
         env = "QUERY_LOG_MODE",
         requires = "metrics",
@@ -283,20 +283,20 @@ pub struct Options {
     /// IP address to advertise to other ReadySet instances running in the same deployment.
     ///
     /// If not specified, defaults to the value of `address`
-    #[clap(long, env = "EXTERNAL_ADDRESS", value_parser = resolve_addr, hide = true)]
+    #[arg(long, env = "EXTERNAL_ADDRESS", value_parser = resolve_addr, hide = true)]
     external_address: Option<IpAddr>,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     pub tracing: readyset_tracing::Options,
 
     /// readyset-psql-specific options
-    #[clap(flatten)]
+    #[command(flatten)]
     pub psql_options: psql::Options,
 
     /// Allow executing, but ignore, unsupported `SET` statements.
     ///
     /// Takes precedence over any value passed to `--unsupported-set-mode`
-    #[clap(long, hide = true, env = "ALLOW_UNSUPPORTED_SET", hide = true)]
+    #[arg(long, hide = true, env = "ALLOW_UNSUPPORTED_SET", hide = true)]
     allow_unsupported_set: bool,
 
     /// Configure how ReadySet behaves when receiving unsupported SET statements.
@@ -307,7 +307,7 @@ pub struct Options {
     /// * "proxy" - proxy all subsequent statements
     // NOTE: In order to keep `allow_unsupported_set` hidden, we're keeping these two flags separate
     // and *not* marking them as conflicting with each other.
-    #[clap(
+    #[arg(
         long,
         env = "UNSUPPORTED_SET_MODE",
         default_value = "error",
@@ -317,11 +317,11 @@ pub struct Options {
 
     // TODO(DAN): require explicit migrations
     /// Specifies the polling interval in seconds for requesting views from the Leader.
-    #[clap(long, env = "VIEWS_POLLING_INTERVAL", default_value = "5", hide = true)]
+    #[arg(long, env = "VIEWS_POLLING_INTERVAL", default_value = "5", hide = true)]
     views_polling_interval: u64,
 
     /// The time to wait before canceling a migration request. Defaults to 30 minutes.
-    #[clap(
+    #[arg(
         long,
         hide = true,
         env = "MIGRATION_REQUEST_TIMEOUT",
@@ -330,12 +330,12 @@ pub struct Options {
     migration_request_timeout_ms: u64,
 
     /// The time to wait before canceling a controller request. Defaults to 5 seconds.
-    #[clap(long, hide = true, env = "CONTROLLER_TIMEOUT", default_value = "5000")]
+    #[arg(long, hide = true, env = "CONTROLLER_TIMEOUT", default_value = "5000")]
     controller_request_timeout_ms: u64,
 
     /// Specifies the maximum continuous failure time for any given query, in seconds, before
     /// entering into a fallback recovery mode.
-    #[clap(
+    #[arg(
         long,
         hide = true,
         env = "QUERY_MAX_FAILURE_SECONDS",
@@ -345,7 +345,7 @@ pub struct Options {
 
     /// Specifies the recovery period in seconds that we enter if a given query fails for the
     /// period of time designated by the query_max_failure_seconds flag.
-    #[clap(
+    #[arg(
         long,
         hide = true,
         env = "FALLBACK_RECOVERY_SECONDS",
@@ -354,19 +354,19 @@ pub struct Options {
     fallback_recovery_seconds: u64,
 
     /// Whether to use non-blocking or blocking reads against the cache.
-    #[clap(long, env = "NON_BLOCKING_READS", hide = true)]
+    #[arg(long, env = "NON_BLOCKING_READS", hide = true)]
     non_blocking_reads: bool,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     server_worker_options: readyset_server::WorkerOptions,
 
     /// Whether to disable telemetry reporting. Defaults to false.
-    #[clap(long, env = "DISABLE_TELEMETRY")]
+    #[arg(long, env = "DISABLE_TELEMETRY")]
     disable_telemetry: bool,
 
     /// Whether we should wait for a failpoint request to the adapters http router, which may
     /// impact startup.
-    #[clap(long, hide = true)]
+    #[arg(long, hide = true)]
     wait_for_failpoint: bool,
 
     /// Whether to allow ReadySet to automatically create inlined caches when we receive a CREATE
@@ -374,29 +374,29 @@ pub struct Options {
     ///
     /// If set, we will create a cache with literals inlined in the unsupported placeholder
     /// positions every time the statement is executed with a new set of parameters.
-    #[clap(long, env = "EXPERIMENTAL_PLACEHOLDER_INLINING", hide = true)]
+    #[arg(long, env = "EXPERIMENTAL_PLACEHOLDER_INLINING", hide = true)]
     experimental_placeholder_inlining: bool,
 
     /// Don't make connections to the upstream aatabase for new client connections.
     ///
     /// If this flag is set queries will never be proxied upstream - even if they are unsupported,
     /// fail to execute, or are run in a transaction.
-    #[clap(long, env = "NO_UPSTREAM_CONNECTIONS", hide = true)]
+    #[arg(long, env = "NO_UPSTREAM_CONNECTIONS", hide = true)]
     no_upstream_connections: bool,
 
     /// If supplied we will clean up assets for the supplied deployment. If an upstream url is
     /// supplied, we will also clean up various assets related to upstream (replication slot, etc.)
-    #[clap(long)]
+    #[arg(long)]
     cleanup: bool,
 
     /// In [`DeploymentMode::Standalone`] or  [`DeploymentMode::EmbeddedReaders`] mode,
     /// the IP address on which the ReadySet will listen.
-    #[clap(long, env = "CONTROLLER_ADDRESS", hide = true)]
+    #[arg(long, env = "CONTROLLER_ADDRESS", hide = true)]
     controller_address: Option<IpAddr>,
 
     /// The number of queries that will be retained and eligible to be returned by `show caches`
     /// and `show proxied queries`.
-    #[clap(
+    #[arg(
         long,
         env = "QUERY_STATUS_CAPACITY",
         default_value = "100000",
