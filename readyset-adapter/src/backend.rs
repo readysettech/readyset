@@ -112,7 +112,7 @@ use crate::query_handler::SetBehavior;
 use crate::query_status_cache::QueryStatusCache;
 use crate::rewrite::ProcessedQueryParams;
 pub use crate::upstream_database::UpstreamPrepare;
-use crate::utils::create_dummy_column;
+use crate::utils::{create_dummy_column, retry_with_exponential_backoff};
 use crate::{create_dummy_schema, rewrite, QueryHandler, UpstreamDatabase, UpstreamDestination};
 
 pub mod noria_connector;
@@ -2070,7 +2070,18 @@ where
                 // background, so we don't remove the ddl request for timeouts.
                 if res.is_err() {
                     if let Some(ddl_req) = ddl_req {
-                        self.authority.remove_cache_ddl_request(ddl_req).await?;
+                        let remove_res = retry_with_exponential_backoff(
+                            async || {
+                                let ddl_req = ddl_req.clone();
+                                self.authority.remove_cache_ddl_request(ddl_req).await
+                            },
+                            5,
+                            Duration::from_millis(1),
+                        )
+                        .await;
+                        if remove_res.is_err() {
+                            error!("Failed to remove stored 'create cache' request. It will be re-run if there is a backwards incompatible upgrade.");
+                        }
                     }
                 }
                 res
@@ -2097,7 +2108,18 @@ where
                         Ok(noria_connector::QueryResult::Delete { num_rows_deleted }) if num_rows_deleted < 1
                     )
                 {
-                    self.authority.remove_cache_ddl_request(ddl_req).await?;
+                    let remove_res = retry_with_exponential_backoff(
+                        async || {
+                            let ddl_req = ddl_req.clone();
+                            self.authority.remove_cache_ddl_request(ddl_req).await
+                        },
+                        5,
+                        Duration::from_millis(1),
+                    )
+                    .await;
+                    if remove_res.is_err() {
+                        error!("Failed to remove stored 'drop cache' request. It will be re-run if there is a backwards incompatible upgrade");
+                    }
                 }
                 res
             }
