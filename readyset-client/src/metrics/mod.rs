@@ -498,6 +498,15 @@ pub mod recorded {
     /// Gauge: A stub gague used to report the version information for the server.
     /// Labels are used to convey the version information.
     pub const READYSET_SERVER_VERSION: &str = "readyset_server_version";
+
+    /// Gauge: The size of the dash map that holds query status of each query
+    /// that have been processed by readyset adapter.
+    pub const QUERY_STATUS_CACHE_SIZE: &str = "readyset_query_status_cache.id_to_status.size";
+
+    /// Gauge: The size of the LRUCache that holds full query & query status for a fixed number
+    /// of queries that have been processed by readyset adapter.
+    pub const QUERY_STATUS_CACHE_PERSISTENT_CACHE_SIZE: &str =
+        "readyset_query_status_cache.persistent_cache.statuses.size";
 }
 
 /// A dumped metric's kind.
