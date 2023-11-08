@@ -15,9 +15,11 @@ use lru::LruCache;
 use parking_lot::RwLock;
 use readyset_client::query::*;
 use readyset_client::ViewCreateRequest;
+use readyset_client::metrics::recorded;
 use readyset_data::DfValue;
 use readyset_util::hash::hash;
 use tracing::{error, warn};
+use metrics::gauge;
 
 pub const DEFAULT_QUERY_STATUS_CAPACITY: usize = 100_000;
 
@@ -89,6 +91,7 @@ impl PersistentStatusCacheHandle {
         match self.statuses.try_write_for(Duration::from_millis(10)) {
             Some(mut status_guard) => {
                 status_guard.put(id, (q, status));
+                gauge!(recorded::QUERY_STATUS_CACHE_PERSISTENT_CACHE_SIZE, status_guard.len() as f64);
             }
             None => {
                 warn!(query_id=%id, "Avoiding deadlock when trying to insert")
@@ -318,6 +321,7 @@ impl QueryStatusCache {
         let id = QueryId::new(hash(&q));
         self.id_to_status.insert(id, status.clone());
         self.persistent_handle.insert_with_status(q, id, status);
+        gauge!(recorded::QUERY_STATUS_CACHE_SIZE, self.id_to_status.len() as f64);
         id
     }
 
