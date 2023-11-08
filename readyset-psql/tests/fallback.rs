@@ -2248,4 +2248,71 @@ mod failure_injection_tests {
 
         shutdown_tx.shutdown().await;
     }
+
+    // Tests that the replicator successfully checks whether the replication slot exists upon
+    // restarting
+    #[tokio::test(flavor = "multi_thread")]
+    #[serial]
+    async fn replication_slot_exists_check() {
+        use readyset_errors::ReadySetError;
+
+        readyset_tracing::init_test_logging();
+
+        let (config, mut handle, shutdown_tx) = TestBuilder::default()
+            .migration_mode(MigrationMode::InRequestPath)
+            .replication_server_id(123)
+            .fallback(true)
+            .build::<PostgreSQLAdapter>()
+            .await;
+
+        // Add a failpoint to trigger a replicator restart
+        handle
+            .set_failpoint(
+                readyset_client::failpoints::UPSTREAM,
+                &format!(
+                    "1*return({})",
+                    serde_json::ser::to_string(&ReadySetError::ReplicationFailed("error".into()))
+                        .expect("failed to serialize error")
+                ),
+            )
+            .await;
+
+        let client = connect(config).await;
+
+        client
+            .simple_query("DROP TABLE IF EXISTS cats")
+            .await
+            .unwrap();
+        client
+            .simple_query("CREATE TABLE cats (id int);")
+            .await
+            .unwrap();
+
+        client
+            .simple_query("INSERT INTO cats (id) VALUES (1);")
+            .await
+            .unwrap();
+
+        // If we sucessfully replicate the above changes, we know the replicator has successfully
+        // started and thus successfully checked for the existence of the replication offset
+        eventually!(run_test: {
+            let res = client
+                .simple_query("SELECT * FROM cats")
+                .await;
+            AssertUnwindSafe(|| res)
+        }, then_assert: |result| {
+            let res: Vec<u32> = result()
+                .unwrap()
+                .iter()
+                .filter_map(|m| match m {
+                    SimpleQueryMessage::Row(r) => Some(r.get(0).unwrap().parse().unwrap()),
+                    _ => None,
+                })
+                .collect();
+
+            assert_eq!(res, [1]);
+        });
+
+        shutdown_tx.shutdown().await;
+    }
 }
