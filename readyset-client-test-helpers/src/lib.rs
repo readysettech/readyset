@@ -81,6 +81,7 @@ pub struct TestBuilder {
     query_status_cache: Option<&'static QueryStatusCache>,
     persistent: bool,
     authority: Option<Arc<Authority>>,
+    replication_server_id: Option<u32>,
 }
 
 impl Default for TestBuilder {
@@ -102,6 +103,7 @@ impl TestBuilder {
             query_status_cache: None,
             persistent: false,
             authority: None,
+            replication_server_id: None,
         }
     }
 
@@ -156,6 +158,11 @@ impl TestBuilder {
 
     pub fn authority(mut self, authority: Arc<Authority>) -> Self {
         self.authority = Some(authority);
+        self
+    }
+
+    pub fn replication_server_id(mut self, replication_server_id: u32) -> Self {
+        self.replication_server_id = Some(replication_server_id);
         self
     }
 
@@ -221,6 +228,11 @@ impl TestBuilder {
         if let Some((f, _)) = &fallback_url_and_db_name {
             builder.set_replication_url(f.clone());
         }
+
+        if let Some(id) = self.replication_server_id {
+            builder.set_replicator_server_id(id);
+        }
+
         let (mut handle, shutdown_tx) = builder.start(authority.clone()).await.unwrap();
         if self.wait_for_backend {
             handle.backend_ready().await;

@@ -11,6 +11,7 @@ use mysql::prelude::Queryable;
 use mysql::{OptsBuilder, PoolConstraints, PoolOpts, SslOpts};
 use nom_sql::{DialectDisplay, NonReplicatedRelation, NotReplicatedReason, Relation};
 use postgres_native_tls::MakeTlsConnector;
+use postgres_protocol::escape::escape_literal;
 use readyset_client::consistency::Timestamp;
 #[cfg(feature = "failure_injection")]
 use readyset_client::failpoints;
@@ -554,9 +555,10 @@ impl NoriaAdapter {
         let replication_slot = if let Some(slot) = &connector.replication_slot {
             Some(slot.clone())
         } else {
+            let escaped_slot_name = escape_literal(&repl_slot_name);
             let readyset_slot_exists = client
                 .query_one(
-                    "SELECT EXISTS(SELECT 1 FROM pg_replication_slots WHERE slot_name='readyset')",
+                    &format!("SELECT EXISTS(SELECT 1 FROM pg_replication_slots WHERE slot_name={escaped_slot_name})"),
                     &[],
                 )
                 .await
