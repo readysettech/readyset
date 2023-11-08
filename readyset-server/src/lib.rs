@@ -456,6 +456,7 @@ use anyhow::anyhow;
 use clap::Args;
 use dataflow::DomainConfig;
 use serde::{Deserialize, Serialize};
+use tracing::warn;
 
 /// Configuration for a running ReadySet cluster
 // WARNING: if you change this structure or any of the structures used in its fields, make sure to
@@ -632,8 +633,15 @@ pub struct WorkerOptions {
 
     /// Directory in which to store replicated table data. If not specified, defaults to the
     /// current working directory.
-    #[arg(long, env = "STORAGE_DIR")]
-    pub storage_dir: Option<PathBuf>,
+    #[arg(long, env = "STORAGE_DIR", conflicts_with = "db_dir")]
+    storage_dir: Option<PathBuf>,
+
+    /// Directory in which to store replicated table data. If not specified, defaults to the
+    /// current working directory.
+    ///
+    /// DEPRECATED: use `storage_dir` instead.
+    #[arg(long, env = "DB_DIR", conflicts_with = "storage_dir", hide = true)]
+    db_dir: Option<PathBuf>,
 
     #[command(flatten)]
     pub domain_replication_options: ReplicationOptions,
@@ -661,13 +669,38 @@ pub struct WorkerOptions {
     pub background_recovery_interval_seconds: u64,
 }
 
+impl WorkerOptions {
+    pub fn storage_dir(&self) -> Option<PathBuf> {
+        if let Some(s) = &self.storage_dir {
+            return Some(s.to_path_buf());
+        }
+
+        if let Some(s) = &self.db_dir {
+            warn!("Use of db_dir is deprecated, please use storage_dir instead");
+            return Some(s.to_path_buf());
+        }
+
+        None
+    }
+}
+
 // TODO(justin): Change VolumeId type when we know this fixed size.
 /// Id associated with the worker server's volume.
 pub type VolumeId = String;
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
+    use clap::Parser;
+
     use super::*;
+
+    #[derive(Parser, Debug)]
+    struct Wrapper {
+        #[command(flatten)]
+        worker_opts: WorkerOptions,
+    }
 
     #[test]
     fn config_serde_round_trip() {
@@ -676,5 +709,23 @@ mod tests {
         let roundtripped = serde_json::from_str::<Config>(&serialized).unwrap();
 
         assert_eq!(roundtripped, input);
+    }
+
+    /// Test the backward compatibiliy of storage dir (latest) vs db dir (old)
+    #[test]
+    fn storage_and_db_dirs() {
+        // test the unset variant
+        let worker_opts = Wrapper::parse_from(["test"]).worker_opts;
+        assert_eq!(None, worker_opts.storage_dir());
+
+        // the test the --storage-dir cli flag
+        let storage_dir = "/tmp/cli-flag-storage";
+        let worker_opts = Wrapper::parse_from(["test", "--storage-dir", storage_dir]).worker_opts;
+        assert_eq!(Some(PathBuf::from(storage_dir)), worker_opts.storage_dir());
+
+        // the test the --db-dir cli flag
+        let db_dir = "/tmp/cli-flag-db";
+        let worker_opts = Wrapper::parse_from(["test", "--db-dir", db_dir]).worker_opts;
+        assert_eq!(Some(PathBuf::from(db_dir)), worker_opts.storage_dir());
     }
 }
