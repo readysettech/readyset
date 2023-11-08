@@ -589,15 +589,12 @@ impl TableDescription {
                 && last_report_time.elapsed().as_secs() > snapshot_report_interval_secs
             {
                 last_report_time = Instant::now();
-                let estimate = crate::estimate_remaining_time(
+                crate::log_snapshot_progress(
                     start_time.elapsed(),
-                    cnt as f64,
-                    approximate_rows as f64,
+                    cnt as i64,
+                    approximate_rows,
+                    &progress_percentage_metric,
                 );
-                let progress_percent = (cnt as f64 / approximate_rows as f64) * 100.;
-                let progress = format!("{:.2}%", progress_percent);
-                info!(rows_replicated = %cnt, %progress, %estimate, "Snapshotting progress");
-                progress_percentage_metric.set(progress_percent);
             }
         }
 
