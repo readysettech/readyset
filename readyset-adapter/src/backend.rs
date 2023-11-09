@@ -89,6 +89,7 @@ use readyset_client::consensus::{Authority, AuthorityControl, CacheDDLRequest};
 use readyset_client::consistency::Timestamp;
 use readyset_client::query::*;
 use readyset_client::results::Results;
+use readyset_client::utils::retry_with_exponential_backoff;
 use readyset_client::{ColumnSchema, PlaceholderIdx, ViewCreateRequest};
 pub use readyset_client_metrics::QueryDestination;
 use readyset_client_metrics::{
@@ -112,7 +113,7 @@ use crate::query_handler::SetBehavior;
 use crate::query_status_cache::QueryStatusCache;
 use crate::rewrite::ProcessedQueryParams;
 pub use crate::upstream_database::UpstreamPrepare;
-use crate::utils::{create_dummy_column, retry_with_exponential_backoff};
+use crate::utils::create_dummy_column;
 use crate::{create_dummy_schema, rewrite, QueryHandler, UpstreamDatabase, UpstreamDestination};
 
 pub mod noria_connector;

@@ -261,6 +261,7 @@ pub mod metrics;
 pub mod query;
 pub mod status;
 mod table;
+pub mod utils;
 mod view;
 use std::convert::TryFrom;
 use std::default::Default;
