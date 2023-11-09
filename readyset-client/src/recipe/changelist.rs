@@ -26,9 +26,9 @@
 //   example, if we parse: `CREATE TABLE table (id INT); ILLEGAL SQL; SELECT * FROM table`,
 //   the error would be "couldn't parse `ILLEGAL SQL; SELECT * FROM table`", vs "couldn't
 //   parse `ILLEGAL SQL;`".
-//  2. Rethink how we are parsing queries in `parser.rs`:
-//     a. Some queries do not parse the `statement_terminator` at the end, but some do.
-//     b. The `statement_terminator` matches whitespaces, semicolons, line ending and eof. For
+//  2. Rethink how we are parsing queries in `parser.rs`: a. Some queries do not parse the
+//     `statement_terminator` at the end, but some do. b. The `statement_terminator` matches
+//     whitespaces, semicolons, line ending and eof. For
 //    simplicity, it should only match semicolons (or semicolons and eof, at most).
 
 use std::collections::HashMap;
@@ -136,6 +136,7 @@ impl ChangeList {
 
     /// Parse a `ChangeList` from the given SQL string, formatted using the canonical SQL dialect,
     /// but using the given [`Dialect`] for expression evaluation semantics.
+    #[allow(clippy::manual_try_fold)]
     pub fn from_str<S>(s: S, dialect: Dialect) -> ReadySetResult<Self>
     where
         S: AsRef<str>,

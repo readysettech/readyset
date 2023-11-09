@@ -381,7 +381,7 @@
 #![feature(
     bound_as_ref,
     box_patterns,
-    drain_filter,
+    extract_if,
     entry_insert,
     hash_raw_entry,
     let_chains,
@@ -391,7 +391,8 @@
     stmt_expr_attributes,
     try_find,
     type_alias_impl_trait,
-    hash_drain_filter
+    hash_extract_if,
+    impl_trait_in_assoc_type
 )]
 #![deny(unused_extern_crates)]
 #![deny(macro_use_extern_crate)]

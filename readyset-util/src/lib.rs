@@ -2,7 +2,7 @@
 //! in all crates in this workspace.
 #![deny(missing_docs, rustdoc::missing_crate_level_docs)]
 #![feature(step_trait, bound_as_ref, bound_map, rustc_attrs)]
-
+#![allow(internal_features)]
 use std::borrow::Borrow;
 use std::collections::{BTreeMap, HashMap};
 use std::hash::Hash;

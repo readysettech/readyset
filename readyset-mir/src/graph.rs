@@ -422,7 +422,7 @@ impl MirGraph {
                 // see note [edge-ordering]
                 .sorted_ancestors(node)
                 .collect::<Vec<_>>();
-            let parent = ancestors.get(0).copied().ok_or_else(|| {
+            let parent = ancestors.first().copied().ok_or_else(|| {
                 internal_err!(
                     "MIR node {:?} has the wrong number of parents ({})",
                     self.graph[node].inner,

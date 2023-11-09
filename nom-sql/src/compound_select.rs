@@ -43,7 +43,7 @@ pub struct CompoundSelectStatement {
 }
 
 impl DialectDisplay for CompoundSelectStatement {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| {
             for (op, sel) in &self.selects {
                 if let Some(o) = op {

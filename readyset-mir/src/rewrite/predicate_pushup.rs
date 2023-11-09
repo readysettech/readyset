@@ -199,8 +199,8 @@ pub(crate) fn push_filters_up(query: &mut MirQuery<'_>) -> ReadySetResult<()> {
     for filter_idx in query.topo_nodes() {
         let node = query.get_node(filter_idx).unwrap();
         let MirNodeInner::Filter { conditions } = &node.inner else {
-           continue;
-       };
+            continue;
+        };
 
         if let Some((new_parent, new_child, new_conditions)) =
             plan_push_filter(query, filter_idx, conditions.clone())?

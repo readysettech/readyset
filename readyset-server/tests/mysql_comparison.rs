@@ -30,10 +30,10 @@ impl Type {
     pub fn make_dataflow_value(&self, value: &str) -> DfValue {
         match *self {
             Type::Int => i64::from_str(value).unwrap().into(),
-            Type::Text => value.try_into().unwrap(),
+            Type::Text => value.into(),
             Type::Real => f64::from_str(value).unwrap().try_into().unwrap(),
-            Type::Date => value.try_into().unwrap(),
-            Type::Timestamp => value.try_into().unwrap(),
+            Type::Date => value.into(),
+            Type::Timestamp => value.into(),
         }
     }
 }

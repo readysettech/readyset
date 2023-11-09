@@ -106,7 +106,7 @@ pub struct OrderClause {
 }
 
 impl DialectDisplay for OrderClause {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| {
             write!(
                 f,

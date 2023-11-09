@@ -159,7 +159,7 @@ impl WalReader {
             };
 
             let (lsn, record) = match data {
-                WalData::Keepalive { reply, end, .. } if reply == 1 => {
+                WalData::Keepalive { reply: 1, end, .. } => {
                     return Ok(WalEvent::WantsKeepaliveResponse { end });
                 }
                 WalData::XLogData { start, data, .. } => (start, data),
@@ -255,7 +255,7 @@ impl WalReader {
                     if schema == DDL_REPLICATION_LOG_SCHEMA && table == DDL_REPLICATION_LOG_TABLE {
                         // This is a special update message for the DDL replication table, convert
                         // that to the same format as if it were a message record
-                        let ddl_data = match new_tuple.cols.get(0) {
+                        let ddl_data = match new_tuple.cols.first() {
                             Some(TupleEntry::Text(data)) => data,
                             _ => {
                                 error!("Error fetching DDL event from update record");

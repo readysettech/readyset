@@ -655,8 +655,8 @@ impl NoriaConnector {
                 .map(|c| {
                     schema
                         .iter()
-                        .cloned()
                         .find(|mc| c.name == mc.column.name)
+                        .cloned()
                         .ok_or_else(|| {
                             internal_err!(
                                 "column {} missing in mutator schema",
@@ -1222,7 +1222,7 @@ impl NoriaConnector {
         trace!("insert::construct ops");
 
         for (ri, row) in data.iter().enumerate() {
-            if let Some(col) = auto_increment_columns.get(0) {
+            if let Some(col) = auto_increment_columns.first() {
                 let idx = schema
                     .fields
                     .iter()

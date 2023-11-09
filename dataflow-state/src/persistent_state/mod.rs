@@ -272,8 +272,8 @@ impl PersistenceParameters {
     ///  1. `DurabilityMode::Permanent`: all writes to base nodes should be written to disk.
     ///  2. `DurabilityMode::DeleteOnExit`: all writes to base nodes are written to disk, but the
     ///     persistent files are deleted once the `ReadySetHandle` is dropped. Useful for tests.
-    ///  3. `DurabilityMode::MemoryOnly`: no writes to disk, store all writes in memory.
-    ///     Useful for baseline numbers.
+    ///  3. `DurabilityMode::MemoryOnly`: no writes to disk, store all writes in memory. Useful for
+    ///     baseline numbers.
     pub fn new(
         mode: DurabilityMode,
         db_filename_prefix: Option<String>,
@@ -2280,7 +2280,7 @@ mod tests {
         .unwrap()
     }
 
-    pub(self) fn setup_single_key(name: &str) -> PersistentState {
+    fn setup_single_key(name: &str) -> PersistentState {
         let mut state = setup_persistent(name, None);
         state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
         state

@@ -878,6 +878,7 @@ impl Ingredient for Union {
                         )
                     })
                     .fold(BTreeMap::new(), |mut m, (key, r)| {
+                        #[allow(clippy::unwrap_or_default)]
                         m.entry(key).or_insert_with(Records::default).push(r);
                         m
                     });
@@ -1042,9 +1043,7 @@ impl Ingredient for Union {
 
     fn column_source(&self, cols: &[usize]) -> ColumnSource {
         match self.emit {
-            Emit::AllFrom(p, _) => {
-                ColumnSource::exact_copy(p.as_global(), cols.try_into().unwrap())
-            }
+            Emit::AllFrom(p, _) => ColumnSource::exact_copy(p.as_global(), cols.into()),
             Emit::Project { ref emit, .. } => ColumnSource::Union(
                 emit.iter()
                     .map(|(src, emit)| ColumnRef {
@@ -1126,18 +1125,14 @@ mod tests {
         let (mut u, l, r) = setup(DuplicateMode::UnionAll);
 
         // forward from left should emit original record
-        let left = vec![1.into(), "a".try_into().unwrap()];
+        let left = vec![1.into(), "a".into()];
         assert_eq!(u.one_row(l, left.clone(), false), vec![left].into());
 
         // forward from right should emit subset record
-        let right = vec![
-            1.into(),
-            "skipped".try_into().unwrap(),
-            "x".try_into().unwrap(),
-        ];
+        let right = vec![1.into(), "skipped".into(), "x".into()];
         assert_eq!(
             u.one_row(r, right, false),
-            vec![vec![1.into(), "x".try_into().unwrap()]].into()
+            vec![vec![1.into(), "x".into()]].into()
         );
     }
 
@@ -1241,12 +1236,8 @@ mod tests {
                 } => {
                     // we should emit both the originally captured record from the left and the one
                     // from the right
-                    assert!(
-                        rows.contains(&Record::Positive(vec![1.into(), "a".try_into().unwrap()]))
-                    );
-                    assert!(
-                        rows.contains(&Record::Positive(vec![1.into(), "b".try_into().unwrap()]))
-                    );
+                    assert!(rows.contains(&Record::Positive(vec![1.into(), "a".into()])));
+                    assert!(rows.contains(&Record::Positive(vec![1.into(), "b".into()])));
 
                     assert!(captured.is_empty());
                     assert_eq!(keys, HashSet::from([key]));
@@ -1322,17 +1313,11 @@ mod tests {
                 } => {
                     // we should emit both the captured record from the left with the updates
                     // applied, and the records from the right
-                    assert!(
-                        rows.contains(&Record::Positive(vec![1.into(), "a".try_into().unwrap()]))
-                    );
-                    assert!(
-                        rows.contains(&Record::Positive(vec![1.into(), "b".try_into().unwrap()]))
-                    );
+                    assert!(rows.contains(&Record::Positive(vec![1.into(), "a".into()])));
+                    assert!(rows.contains(&Record::Positive(vec![1.into(), "b".into()])));
                     // assert!(!rows.contains(&Record::Positive(vec![1.into(),
-                    // "c".try_into().unwrap()])));
-                    assert!(
-                        rows.contains(&Record::Positive(vec![1.into(), "d".try_into().unwrap()]))
-                    );
+                    // "c".into()])));
+                    assert!(rows.contains(&Record::Positive(vec![1.into(), "d".into()])));
 
                     assert!(captured.is_empty());
                     assert_eq!(keys, HashSet::from([key]));
@@ -1622,12 +1607,8 @@ mod tests {
         fn bag_union_ingredient_returns_correct_results() {
             let (mut u, l, r) = setup(DuplicateMode::BagUnion);
 
-            let left_row = vec![1.into(), "a".try_into().unwrap()];
-            let right_row = vec![
-                1.into(),
-                "skipped".try_into().unwrap(),
-                "a".try_into().unwrap(),
-            ];
+            let left_row = vec![1.into(), "a".into()];
+            let right_row = vec![1.into(), "skipped".into(), "a".into()];
             assert_eq!(
                 u.one_row(l, left_row.clone(), false),
                 vec![left_row.clone()].into()

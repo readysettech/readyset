@@ -23,8 +23,9 @@ fn eval_binary_op(op: BinaryOperator, left: &DfValue, right: &DfValue) -> ReadyS
     use BinaryOperator::*;
 
     let like = |case_sensitivity| -> ReadySetResult<DfValue> {
-        let (Some(left), Some(right)) = (non_null!(left).as_str(), non_null!(right).as_str()) else {
-            return Ok(false.into())
+        let (Some(left), Some(right)) = (non_null!(left).as_str(), non_null!(right).as_str())
+        else {
+            return Ok(false.into());
         };
 
         // NOTE(aspen): At some point, we may want to optimize this to pre-cache
@@ -318,8 +319,6 @@ impl Expr {
 
 #[cfg(test)]
 mod tests {
-    use std::convert::TryInto;
-
     use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
     use nom_sql::parse_expr;
     use nom_sql::Dialect::*;
@@ -366,9 +365,8 @@ mod tests {
     fn eval_column() {
         let expr = make_column(1);
         assert_eq!(
-            expr.eval(&[DfValue::from(1), "two".try_into().unwrap()])
-                .unwrap(),
-            "two".try_into().unwrap()
+            expr.eval(&[DfValue::from(1), "two".into()]).unwrap(),
+            "two".into()
         )
     }
 
@@ -376,8 +374,7 @@ mod tests {
     fn eval_literal() {
         let expr = make_literal(1.into());
         assert_eq!(
-            expr.eval(&[DfValue::from(1), "two".try_into().unwrap()])
-                .unwrap(),
+            expr.eval(&[DfValue::from(1), "two".into()]).unwrap(),
             1.into()
         )
     }
@@ -650,13 +647,10 @@ mod tests {
         };
 
         let test_eval = |left, right| {
-            expr.eval(&[
-                DfValue::try_from(left).unwrap(),
-                DfValue::try_from(right).unwrap(),
-            ])
-            .unwrap()
-            .to_json()
-            .unwrap()
+            expr.eval::<DfValue>(&[From::from(left), From::from(right)])
+                .unwrap()
+                .to_json()
+                .unwrap()
         };
 
         // Test various valid cases
@@ -810,8 +804,8 @@ mod tests {
             NaiveDate::from_ymd(2009, 10, 17),
             NaiveTime::from_hms(12, 0, 0),
         );
-        let text_dt: DfValue = "2009-10-17 12:00:00".try_into().unwrap();
-        let text_less_dt: DfValue = "2009-10-16 12:00:00".try_into().unwrap();
+        let text_dt: DfValue = "2009-10-17 12:00:00".into();
+        let text_less_dt: DfValue = "2009-10-16 12:00:00".into();
 
         macro_rules! assert_op {
             ($binary_op:expr, $value:expr, $expected:expr) => {
@@ -919,8 +913,7 @@ mod tests {
             null_on_failure: false,
         };
         assert_eq!(
-            expr.eval::<DfValue>(&["1".try_into().unwrap(), "2".try_into().unwrap()])
-                .unwrap(),
+            expr.eval::<DfValue>(&["1".into(), "2".into()]).unwrap(),
             1i32.into()
         );
     }
@@ -970,9 +963,9 @@ mod tests {
                     right: Box::new(make_literal(1.into())),
                     ty: DfType::Bool,
                 },
-                body: make_literal("yes".try_into().unwrap()),
+                body: make_literal("yes".into()),
             }],
-            else_expr: Box::new(make_literal("no".try_into().unwrap())),
+            else_expr: Box::new(make_literal("no".into())),
             ty: DfType::Unknown,
         };
 
@@ -995,7 +988,7 @@ mod tests {
                         right: Box::new(make_literal(1.into())),
                         ty: DfType::Bool,
                     },
-                    body: make_literal("one".try_into().unwrap()),
+                    body: make_literal("one".into()),
                 },
                 CaseWhenBranch {
                     condition: Op {
@@ -1004,10 +997,10 @@ mod tests {
                         right: Box::new(make_literal(2.into())),
                         ty: DfType::Bool,
                     },
-                    body: make_literal("two".try_into().unwrap()),
+                    body: make_literal("two".into()),
                 },
             ],
-            else_expr: Box::new(make_literal("other".try_into().unwrap())),
+            else_expr: Box::new(make_literal("other".into())),
             ty: DfType::Unknown,
         };
 

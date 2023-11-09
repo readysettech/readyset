@@ -655,7 +655,11 @@ fn json_number_eq(a: &JsonNumber, b: &JsonNumber) -> bool {
         return true;
     }
 
-    if let Some(a) = a.as_f64() && a == 0.0 && let Some(b) = b.as_f64() && b == 0.0 {
+    if let Some(a) = a.as_f64()
+        && a == 0.0
+        && let Some(b) = b.as_f64()
+        && b == 0.0
+    {
         return true;
     }
 
@@ -663,7 +667,9 @@ fn json_number_eq(a: &JsonNumber, b: &JsonNumber) -> bool {
 }
 
 fn json_number_hash<H: Hasher>(n: &JsonNumber, state: &mut H) {
-    if let Some(n) = n.as_f64() && n == 0.0 {
+    if let Some(n) = n.as_f64()
+        && n == 0.0
+    {
         // When `arbitrary_precision` is disabled, this is how 0.0 is hashed by `serde_json`.
         0.0f64.to_bits().hash(state);
     } else {

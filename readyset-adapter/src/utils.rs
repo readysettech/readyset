@@ -16,22 +16,24 @@ use readyset_errors::{
 };
 use readyset_util::hash::hash;
 
-// Helper for flatten_conditional - returns true if the
-// expression is "valid" (i.e. not something like `a = 1 AND a = 2`.
-// Goes through the condition tree by gradually filling up primary key slots.
-//
-// Example:
-//    (CREATE TABLE A (aid int, uid int, PRIMARY KEY(aid, uid))
-//    `WHERE aid = 1 AND uid = 2` has the following tree:
-//
-//       +--+ AND +--+
-//       |           |
-//       +           +
-//    aid = 1     uid = 2
-//
-//    After processing the left side `flattened` will look something like this: {[(aid, 1)]}
-//    Then we'll check the right side, which will find a "hole" in the first key,
-//    and we'll get {[(aid, 1), (uid, 2)]}.
+/// Helper for flatten_conditional - returns true if the
+/// expression is "valid" (i.e. not something like `a = 1 AND a = 2`.
+/// Goes through the condition tree by gradually filling up primary key slots.
+///
+/// Example:
+///    (CREATE TABLE A (aid int, uid int, PRIMARY KEY(aid, uid))
+///    `WHERE aid = 1 AND uid = 2` has the following tree:
+///
+/// ```plaintext
+///       +--+ AND +--+
+///       |           |
+///       +           +
+///    aid = 1     uid = 2
+/// ```
+///
+///    After processing the left side `flattened` will look something like this: {[(aid, 1)]}
+///    Then we'll check the right side, which will find a "hole" in the first key,
+///    and we'll get {[(aid, 1), (uid, 2)]}.
 fn do_flatten_conditional(
     cond: &Expr,
     pkey: &[&Column],

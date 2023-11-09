@@ -42,6 +42,7 @@ impl PartialEq for Float {
 }
 
 impl PartialOrd for Float {
+    #[allow(clippy::non_canonical_partial_ord_impl)]
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         match self.value.to_bits().partial_cmp(&other.value.to_bits()) {
             Some(Ordering::Equal) => {}
@@ -92,6 +93,7 @@ impl Hash for Double {
 }
 
 impl PartialOrd for Double {
+    #[allow(clippy::non_canonical_partial_ord_impl)]
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         match self.value.to_bits().partial_cmp(&other.value.to_bits()) {
             Some(Ordering::Equal) => {}
@@ -213,7 +215,7 @@ impl From<ItemPlaceholder> for Literal {
 }
 
 impl DialectDisplay for Literal {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| {
             macro_rules! write_real {
                 ($real:expr, $prec:expr) => {{

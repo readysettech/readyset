@@ -177,13 +177,13 @@ mod tests {
     fn it_forwards_constant_expr() {
         let mut g = setup(false, Some(make_literal(DfValue::from(1))));
 
-        let mut left: Vec<DfValue> = vec![1.into(), "a".try_into().unwrap()];
+        let mut left: Vec<DfValue> = vec![1.into(), "a".into()];
         assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
 
-        left = vec![1.into(), "b".try_into().unwrap()];
+        left = vec![1.into(), "b".into()];
         assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
 
-        left = vec![2.into(), "a".try_into().unwrap()];
+        left = vec![2.into(), "a".into()];
         assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
     }
 
@@ -191,13 +191,13 @@ mod tests {
     fn it_forwards() {
         let mut g = setup(false, None);
 
-        let mut left: Vec<DfValue> = vec![1.into(), "a".try_into().unwrap()];
+        let mut left: Vec<DfValue> = vec![1.into(), "a".into()];
         assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
 
-        left = vec![1.into(), "b".try_into().unwrap()];
+        left = vec![1.into(), "b".into()];
         assert!(g.narrow_one_row(left.clone(), false).is_empty());
 
-        left = vec![2.into(), "a".try_into().unwrap()];
+        left = vec![2.into(), "a".into()];
         assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
     }
 
@@ -223,16 +223,16 @@ mod tests {
             }),
         );
 
-        let mut left: Vec<DfValue> = vec![1.into(), "a".try_into().unwrap()];
+        let mut left: Vec<DfValue> = vec![1.into(), "a".into()];
         assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
 
-        left = vec![1.into(), "b".try_into().unwrap()];
+        left = vec![1.into(), "b".into()];
         assert!(g.narrow_one_row(left.clone(), false).is_empty());
 
-        left = vec![2.into(), "a".try_into().unwrap()];
+        left = vec![2.into(), "a".into()];
         assert!(g.narrow_one_row(left.clone(), false).is_empty());
 
-        left = vec![2.into(), "b".try_into().unwrap()];
+        left = vec![2.into(), "b".into()];
         assert!(g.narrow_one_row(left, false).is_empty());
     }
 
@@ -264,7 +264,7 @@ mod tests {
         let mut many = Vec::new();
 
         for i in 0..10 {
-            many.push(vec![i.into(), "a".try_into().unwrap()]);
+            many.push(vec![i.into(), "a".into()]);
         }
 
         assert_eq!(g.narrow_one(many.clone(), false), many.into());
@@ -296,19 +296,19 @@ mod tests {
         );
 
         // both conditions match (2 <= 2, "b" != "a")
-        let mut left: Vec<DfValue> = vec![2.into(), "b".try_into().unwrap()];
+        let mut left: Vec<DfValue> = vec![2.into(), "b".into()];
         assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
 
         // second condition fails ("a" != "a")
-        left = vec![2.into(), "a".try_into().unwrap()];
+        left = vec![2.into(), "a".into()];
         assert!(g.narrow_one_row(left.clone(), false).is_empty());
 
         // first condition fails (3 <= 2)
-        left = vec![3.into(), "b".try_into().unwrap()];
+        left = vec![3.into(), "b".into()];
         assert!(g.narrow_one_row(left.clone(), false).is_empty());
 
         // both conditions match (1 <= 2, "b" != "a")
-        left = vec![1.into(), "b".try_into().unwrap()];
+        left = vec![1.into(), "b".into()];
         assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
     }
 

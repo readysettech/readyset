@@ -153,9 +153,11 @@ impl<K, V, S> Data<K, V, S> {
     {
         match self {
             Self::BTreeMap(map, ..) => {
-                // Returns an iterator, but we don't actually care about the elements (and dropping
-                // the iterator still does all the removal)
-                let _ = map.remove_range(range);
+                // Returns an iterator, but we don't actually care about the elements. Dropping
+                // the iterator does not automatically remove the elements from the BTreeMap (as of
+                // nightly 2023-06-16), so we need to iterate by collect()'ing them
+                // first.
+                let _: Vec<_> = map.remove_range(range).collect();
             }
             Self::HashMap(..) => panic!("remove_range called on a HashMap reader_map"),
         }

@@ -1,7 +1,7 @@
 //! Kinda (s)crappy group_concat() implementation
 
 use std::collections::HashMap;
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 use std::fmt::Write;
 
 use common::DfValue;
@@ -191,7 +191,7 @@ impl GroupedOperation for GroupConcat {
 
     fn description(&self, detailed: bool) -> String {
         if !detailed {
-            return "CONCAT2".try_into().unwrap();
+            return "CONCAT2".into();
         }
 
         format!(
@@ -226,8 +226,6 @@ pub struct GroupConcatState {
 #[cfg(test)]
 #[allow(clippy::unreachable)]
 mod tests {
-    use std::convert::TryInto;
-
     use super::*;
     use crate::{ops, LookupIndex};
 
@@ -262,7 +260,7 @@ mod tests {
         match rs.next().unwrap() {
             Record::Positive(r) => {
                 assert_eq!(r[0], 1.into());
-                assert_eq!(r[1], "1".try_into().unwrap());
+                assert_eq!(r[1], "1".into());
             }
             _ => unreachable!(),
         }
@@ -277,7 +275,7 @@ mod tests {
         match rs.next().unwrap() {
             Record::Positive(r) => {
                 assert_eq!(r[0], 2.into());
-                assert_eq!(r[1], "2".try_into().unwrap());
+                assert_eq!(r[1], "2".into());
             }
             _ => unreachable!(),
         }
@@ -293,14 +291,14 @@ mod tests {
         match rs.next().unwrap() {
             Record::Negative(r) => {
                 assert_eq!(r[0], 1.into());
-                assert_eq!(r[1], "1".try_into().unwrap());
+                assert_eq!(r[1], "1".into());
             }
             _ => unreachable!(),
         }
         match rs.next().unwrap() {
             Record::Positive(r) => {
                 assert_eq!(r[0], 1.into());
-                assert_eq!(r[1], "1#2".try_into().unwrap());
+                assert_eq!(r[1], "1#2".into());
             }
             _ => unreachable!(),
         }
@@ -315,14 +313,14 @@ mod tests {
         match rs.next().unwrap() {
             Record::Negative(r) => {
                 assert_eq!(r[0], 1.into());
-                assert_eq!(r[1], "1#2".try_into().unwrap());
+                assert_eq!(r[1], "1#2".into());
             }
             _ => unreachable!(),
         }
         match rs.next().unwrap() {
             Record::Positive(r) => {
                 assert_eq!(r[0], 1.into());
-                assert_eq!(r[1], "2".try_into().unwrap());
+                assert_eq!(r[1], "2".into());
             }
             _ => unreachable!(),
         }
@@ -348,7 +346,7 @@ mod tests {
                                  // group 1 had [2], now has [1,2]
         assert!(rs.iter().any(|r| if let Record::Negative(ref r) = *r {
             if r[0] == 1.into() {
-                assert_eq!(r[1], "2".try_into().unwrap());
+                assert_eq!(r[1], "2".into());
                 true
             } else {
                 false
@@ -358,7 +356,7 @@ mod tests {
         }));
         assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
             if r[0] == 1.into() {
-                assert_eq!(r[1], "2#1#2".try_into().unwrap());
+                assert_eq!(r[1], "2#1#2".into());
                 true
             } else {
                 false
@@ -369,7 +367,7 @@ mod tests {
         // group 2 was [2], is now [1,2,3]
         assert!(rs.iter().any(|r| if let Record::Negative(ref r) = *r {
             if r[0] == 2.into() {
-                assert_eq!(r[1], "2".try_into().unwrap());
+                assert_eq!(r[1], "2".into());
                 true
             } else {
                 false
@@ -379,7 +377,7 @@ mod tests {
         }));
         assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
             if r[0] == 2.into() {
-                assert_eq!(r[1], "3#2#1".try_into().unwrap());
+                assert_eq!(r[1], "3#2#1".into());
                 true
             } else {
                 false
@@ -390,7 +388,7 @@ mod tests {
         // group 3 was [], is now [3]
         assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
             if r[0] == 3.into() {
-                assert_eq!(r[1], "3".try_into().unwrap());
+                assert_eq!(r[1], "3".into());
                 true
             } else {
                 false

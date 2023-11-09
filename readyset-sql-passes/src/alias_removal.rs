@@ -156,11 +156,10 @@ impl<'ast, 'a> VisitorMut<'ast> for RemoveAliasesVisitor<'a> {
             .cloned()
         {
             table_expr.inner = TableExprInner::Table(table);
-        } else if let TableExprInner::Table(orig_table @ Relation {
-            schema: None,
-            ..
-        }) = &table_expr.inner
-            && let Some(table) = self.col_table_remap.get(&orig_table.name) {
+        } else if let TableExprInner::Table(orig_table @ Relation { schema: None, .. }) =
+            &table_expr.inner
+            && let Some(table) = self.col_table_remap.get(&orig_table.name)
+        {
             // No schema, but table name in `col_table_remap`, means we're referencing an aliased
             // subquery or CTE
             table_expr.inner = TableExprInner::Table(table.clone());
@@ -218,8 +217,6 @@ impl AliasRemoval for SqlQuery {
 
 #[cfg(test)]
 mod tests {
-    use std::convert::TryInto;
-
     use nom_sql::{
         parse_query, parser, BinaryOperator, Column, Dialect, DialectDisplay, Expr,
         FieldDefinitionExpr, ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator,
@@ -315,11 +312,11 @@ mod tests {
         use nom_sql::{BinaryOperator, Expr};
 
         let col_small = Column {
-            name: "count(t.id)".try_into().unwrap(),
+            name: "count(t.id)".into(),
             table: None,
         };
         let col_full = Column {
-            name: "count(t.id)".try_into().unwrap(),
+            name: "count(t.id)".into(),
             table: None,
         };
         let q = SelectStatement {

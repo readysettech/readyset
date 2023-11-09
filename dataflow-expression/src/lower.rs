@@ -33,7 +33,7 @@ pub trait LowerContext: Clone {
 /// [pg-docs]: https://www.postgresql.org/docs/current/typeconv-union-case.html
 fn unify_postgres_types(types: Vec<&DfType>) -> ReadySetResult<DfType> {
     let Some(first_ty) = types.first() else {
-        return Ok(DfType::DEFAULT_TEXT)
+        return Ok(DfType::DEFAULT_TEXT);
     };
 
     // > 1. If all inputs are of the same type, and it is not unknown, resolve as that type.

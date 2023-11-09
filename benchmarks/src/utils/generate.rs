@@ -72,7 +72,7 @@ impl DataGenerator {
 
     pub async fn install(&self, conn_str: &str) -> anyhow::Result<()> {
         let mut conn = DatabaseURL::from_str(conn_str)?.connect(None).await?;
-        let ddl = std::fs::read_to_string(&benchmark_path(&self.schema)?)?;
+        let ddl = std::fs::read_to_string(benchmark_path(&self.schema)?)?;
 
         let parsed = multi_ddl(LocatedSpan::new(ddl.as_bytes()), conn.dialect())
             .map_err(|e| anyhow!("Error parsing DDL {}", e.to_string()))?;
@@ -95,7 +95,7 @@ impl DataGenerator {
                     .ok()?
                     .try_into()
                     .ok()?;
-                let old_size: usize = results.get(0)?.get(0)?.try_into().ok()?;
+                let old_size: usize = results.first()?.first()?.try_into().ok()?;
                 let new_size = std::cmp::min(old_size * 8, 1024 * 1024 * 1024); // We want a buffer of at least 1GiB
 
                 let set_pool_size_q = format!("SET GLOBAL innodb_buffer_pool_size={}", new_size);

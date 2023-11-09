@@ -160,7 +160,7 @@ async fn prepare_typed_insert() {
         let result = conn.query(&stmt, &[&1i64]).await.unwrap();
         AssertUnwindSafe(|| result)
     }, then_assert: |result| {
-        assert_eq!(result().get(0).unwrap().get::<_, i64>(0), 1);
+        assert_eq!(result().first().unwrap().get::<_, i64>(0), 1);
     });
 
     shutdown_tx.shutdown().await;

@@ -419,7 +419,7 @@ impl MySqlReplicator {
                 }
                 Err(err) => {
                     progress_percentage_metric.set(0.0);
-                    return Err(err).map_err(log_err);
+                    return Err(log_err(err));
                 }
             };
 

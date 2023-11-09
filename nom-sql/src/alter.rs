@@ -34,7 +34,7 @@ pub enum AlterColumnOperation {
 }
 
 impl DialectDisplay for AlterColumnOperation {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| match self {
             AlterColumnOperation::SetColumnDefault(val) => {
                 write!(f, "SET DEFAULT {}", val.display(dialect))
@@ -110,7 +110,7 @@ pub enum AlterTableDefinition {
 }
 
 impl DialectDisplay for AlterTableDefinition {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| match self {
             Self::AddColumn(col) => {
                 write!(f, "ADD COLUMN {}", col.display(dialect))
@@ -176,7 +176,7 @@ pub struct AlterTableStatement {
 }
 
 impl DialectDisplay for AlterTableStatement {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| {
             write!(f, "ALTER TABLE {} ", self.table.display(dialect))?;
 

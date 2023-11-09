@@ -116,7 +116,7 @@ impl Hash for Query {
 }
 impl DialectDisplay for Query {
     /// Displays the query using appropriate formatting for the given dialect.
-    fn display(&self, dialect: nom_sql::Dialect) -> impl Display + Copy + '_ {
+    fn display(&self, dialect: nom_sql::Dialect) -> impl Display + '_ {
         fmt_with(move |f| match self {
             Query::Parsed(q) => write!(f, "{}", q.statement.display(dialect)),
             Query::ParseFailed(s) => write!(f, "{s}"),
@@ -565,6 +565,7 @@ impl Serialize for QueryList {
 #[cfg(test)]
 mod tests {
     use proptest::arbitrary::Arbitrary;
+    use proptest::strategy::Strategy;
     use readyset_util::hash_laws;
 
     use super::*;
@@ -575,7 +576,6 @@ mod tests {
 
         fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
             use proptest::arbitrary::any;
-            use proptest::prelude::*;
 
             any::<String>().prop_map(Into::into).boxed()
         }

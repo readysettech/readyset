@@ -1250,7 +1250,7 @@ impl Domain {
                 let mut evictions: HashMap<Tag, HashSet<KeyComparison>> = HashMap::new();
                 for miss in misses {
                     for (tag, cols) in &deps {
-                        evictions.entry(*tag).or_insert_with(HashSet::new).insert(
+                        evictions.entry(*tag).or_default().insert(
                             miss.record
                                 .cloned_indices(cols.iter().copied())
                                 .unwrap()
@@ -2604,36 +2604,42 @@ impl Domain {
         let mut records = Vec::new();
         let mut replay_keys = HashSet::new();
         // Drain misses, and keep the hits
-        keys.drain_filter(|key| match key {
-            KeyComparison::Equal(equal) => match state.lookup(cols, &PointKey::from(equal.clone()))
-            {
-                LookupResult::Some(record) => {
-                    records.push(record);
-                    false
+        let _: Vec<_> = keys
+            .extract_if(|key| match key {
+                KeyComparison::Equal(equal) => {
+                    match state.lookup(cols, &PointKey::from(equal.clone())) {
+                        LookupResult::Some(record) => {
+                            records.push(record);
+                            false
+                        }
+                        LookupResult::Missing => {
+                            replay_keys.insert((key.clone(), key.clone()));
+                            true
+                        }
+                    }
                 }
-                LookupResult::Missing => {
-                    replay_keys.insert((key.clone(), key.clone()));
-                    true
+                KeyComparison::Range(range) => {
+                    match state.lookup_range(cols, &RangeKey::from(range)) {
+                        RangeLookupResult::Some(record) => {
+                            records.push(record);
+                            false
+                        }
+                        RangeLookupResult::Missing(ms) => {
+                            // FIXME(eta): error handling impl here adds overhead
+                            let ms = ms.into_iter().map(|m| {
+                                // This is the only point where the replay_key and miss_key are
+                                // different.
+                                #[allow(clippy::unwrap_used)]
+                                // keys can't be empty coming from misses
+                                (key.clone(), KeyComparison::try_from(m).unwrap())
+                            });
+                            replay_keys.extend(ms);
+                            true
+                        }
+                    }
                 }
-            },
-            KeyComparison::Range(range) => match state.lookup_range(cols, &RangeKey::from(range)) {
-                RangeLookupResult::Some(record) => {
-                    records.push(record);
-                    false
-                }
-                RangeLookupResult::Missing(ms) => {
-                    // FIXME(eta): error handling impl here adds overhead
-                    let ms = ms.into_iter().map(|m| {
-                        // This is the only point where the replay_key and miss_key are different.
-                        #[allow(clippy::unwrap_used)]
-                        // keys can't be empty coming from misses
-                        (key.clone(), KeyComparison::try_from(m).unwrap())
-                    });
-                    replay_keys.extend(ms);
-                    true
-                }
-            },
-        });
+            })
+            .collect();
 
         Ok(StateLookupResult {
             records,
@@ -3188,10 +3194,9 @@ impl Domain {
                 // so let's walk through them
                 //
                 //  1. this applies only to partial backfills
-                //  2. we should only set finished_partial if it hasn't already been set.
-                //     this is important, as misses will cause backfill_keys to be pruned
-                //     over time, which would cause finished_partial to hold the wrong
-                //     value!
+                //  2. we should only set finished_partial if it hasn't already been set. this is
+                //     important, as misses will cause backfill_keys to be pruned over time, which
+                //     would cause finished_partial to hold the wrong value!
                 if let Some(backfill_keys) = &backfill_keys {
                     if finished_partial == 0 && (dst_is_reader || !dst_is_sender) {
                         finished_partial = backfill_keys.len();
@@ -3565,9 +3570,9 @@ impl Domain {
 
         // While the are still misses, we iterate over the array, each time draining it from
         // elements that can be batched into a single call to `on_replay_misses`
-        while let Some(next_replay) = need_replay.get(0).cloned() {
+        while let Some(next_replay) = need_replay.first().cloned() {
             let misses: HashSet<_> = need_replay
-                .drain_filter(|rep| next_replay.can_combine(rep))
+                .extract_if(|rep| next_replay.can_combine(rep))
                 .map(
                     |ReplayDescriptor {
                          lookup_key,

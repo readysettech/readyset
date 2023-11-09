@@ -426,10 +426,10 @@ impl AdapterHandle {
 
         // This invokes `ps -o stat= -p <pid>` continuously until either:
         //
-        //   1. The output contains "Z", which indicates the child process has terminated and is
-        //      now a zombie process; or
-        //   2. The command returns an error status code, which means a process with the child's
-        //      pid no longer exists
+        //   1. The output contains "Z", which indicates the child process has terminated and is now
+        //      a zombie process; or
+        //   2. The command returns an error status code, which means a process with the child's pid
+        //      no longer exists
         //
         //  This is done to ensure that the child process has actually shut down before we spawn
         //  another process in the next benchmark run

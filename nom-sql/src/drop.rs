@@ -41,7 +41,7 @@ pub struct DropTableStatement {
 }
 
 impl DialectDisplay for DropTableStatement {
-    fn display(&self, dialect: Dialect) -> impl Display + Copy + '_ {
+    fn display(&self, dialect: Dialect) -> impl Display + '_ {
         fmt_with(move |f| {
             write!(f, "DROP TABLE ")?;
 
@@ -84,7 +84,7 @@ pub struct DropCacheStatement {
 }
 
 impl DialectDisplay for DropCacheStatement {
-    fn display(&self, dialect: Dialect) -> impl Display + Copy + '_ {
+    fn display(&self, dialect: Dialect) -> impl Display + '_ {
         fmt_with(move |f| write!(f, "DROP CACHE {}", self.name.display(dialect)))
     }
 }
@@ -116,7 +116,7 @@ pub struct DropViewStatement {
 }
 
 impl DialectDisplay for DropViewStatement {
-    fn display(&self, dialect: Dialect) -> impl Display + Copy + '_ {
+    fn display(&self, dialect: Dialect) -> impl Display + '_ {
         fmt_with(move |f| {
             write!(f, "DROP VIEW ")?;
             if self.if_exists {

@@ -573,10 +573,10 @@ mod tests {
     fn memory_state_process_records() {
         let mut state = MemoryState::default();
         let records: Records = vec![
-            (vec![1.into(), "A".try_into().unwrap()], true),
-            (vec![2.into(), "B".try_into().unwrap()], true),
-            (vec![3.into(), "C".try_into().unwrap()], true),
-            (vec![1.into(), "A".try_into().unwrap()], false),
+            (vec![1.into(), "A".into()], true),
+            (vec![2.into(), "B".into()], true),
+            (vec![3.into(), "C".into()], true),
+            (vec![1.into(), "A".into()], false),
         ]
         .into();
 
@@ -608,7 +608,7 @@ mod tests {
     #[test]
     fn memory_state_old_records_new_index() {
         let mut state = MemoryState::default();
-        let row: Vec<DfValue> = vec![10.into(), "Cat".try_into().unwrap()];
+        let row: Vec<DfValue> = vec![10.into(), "Cat".into()];
         state.add_index(Index::hash_map(vec![0]), None);
         insert(&mut state, row.clone());
         state.add_index(Index::hash_map(vec![1]), None);

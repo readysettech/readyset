@@ -68,15 +68,16 @@ pub(super) fn make_expressions_above_grouped(
         .keys()
         .filter(|&f| is_aggregate(f))
         .flat_map(|f| f.arguments())
-        .cloned()
         // We don't need to do any work for bare column expressions
         .filter(|arg| !matches!(arg, Expr::Column(_)))
+        .cloned()
         .map(|expr| {
-            (
+            let x = (
                 // FIXME(ENG-2502): Use correct dialect.
-                SqlIdentifier::from(expr.display(nom_sql::Dialect::MySQL).to_string()),
+                SqlIdentifier::from(expr.clone().display(nom_sql::Dialect::MySQL).to_string()),
                 expr,
-            )
+            );
+            x
         })
         // Also project expressions, and columns in the SELECT list referenced by name, from the
         // GROUP BY clause
@@ -95,7 +96,7 @@ pub(super) fn make_expressions_above_grouped(
                 }
                 expr => Some((
                     // FIXME(ENG-2502): Use correct dialect.
-                    SqlIdentifier::from(expr.display(nom_sql::Dialect::MySQL).to_string()),
+                    SqlIdentifier::from(expr.clone().display(nom_sql::Dialect::MySQL).to_string()),
                     expr.clone(),
                 )),
             }
