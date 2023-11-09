@@ -901,58 +901,42 @@ mod tests {
         let src = "Atlantic/Cape_Verde";
         let target = "Asia/Kathmandu";
         assert_eq!(
-            expr.eval::<DfValue>(&[
-                datetime.into(),
-                src.try_into().unwrap(),
-                target.try_into().unwrap()
-            ])
-            .unwrap(),
+            expr.eval::<DfValue>(&[datetime.into(), src.into(), target.into()])
+                .unwrap(),
             expected.into()
         );
         assert_eq!(
-            expr.eval::<DfValue>(&[
-                datetime.into(),
-                "invalid timezone".try_into().unwrap(),
-                target.try_into().unwrap()
-            ])
-            .unwrap(),
+            expr.eval::<DfValue>(&[datetime.into(), "invalid timezone".into(), target.into()])
+                .unwrap(),
             DfValue::None
         );
         assert_eq!(
-            expr.eval::<DfValue>(&[
-                datetime.into(),
-                src.try_into().unwrap(),
-                "invalid timezone".try_into().unwrap()
-            ])
-            .unwrap(),
+            expr.eval::<DfValue>(&[datetime.into(), src.into(), "invalid timezone".into()])
+                .unwrap(),
             DfValue::None
         );
 
         let string_datetime = datetime.to_string();
         assert_eq!(
-            expr.eval::<DfValue>(&[
-                string_datetime.clone().try_into().unwrap(),
-                src.try_into().unwrap(),
-                target.try_into().unwrap()
-            ])
-            .unwrap(),
+            expr.eval::<DfValue>(&[string_datetime.clone().into(), src.into(), target.into()])
+                .unwrap(),
             expected.into()
         );
 
         assert_eq!(
             expr.eval::<DfValue>(&[
-                string_datetime.clone().try_into().unwrap(),
-                "invalid timezone".try_into().unwrap(),
-                target.try_into().unwrap()
+                string_datetime.clone().into(),
+                "invalid timezone".into(),
+                target.into()
             ])
             .unwrap(),
             DfValue::None
         );
         assert_eq!(
             expr.eval::<DfValue>(&[
-                string_datetime.try_into().unwrap(),
-                src.try_into().unwrap(),
-                "invalid timezone".try_into().unwrap()
+                string_datetime.into(),
+                src.into(),
+                "invalid timezone".into()
             ])
             .unwrap(),
             DfValue::None
@@ -968,8 +952,7 @@ mod tests {
 
         assert_eq!(expr.eval::<DfValue>(&[date.into()]).unwrap(), expected);
         assert_eq!(
-            expr.eval::<DfValue>(&[date.to_string().try_into().unwrap()])
-                .unwrap(),
+            expr.eval::<DfValue>(&[date.to_string().into()]).unwrap(),
             expected
         );
 
@@ -979,7 +962,7 @@ mod tests {
         );
         assert_eq!(expr.eval::<DfValue>(&[datetime.into()]).unwrap(), expected);
         assert_eq!(
-            expr.eval::<DfValue>(&[datetime.to_string().try_into().unwrap()])
+            expr.eval::<DfValue>(&[datetime.to_string().into()])
                 .unwrap(),
             expected
         );
@@ -1021,7 +1004,7 @@ mod tests {
             expected.into()
         );
         assert_eq!(
-            expr.eval::<DfValue>(&[datetime.to_string().try_into().unwrap()])
+            expr.eval::<DfValue>(&[datetime.to_string().into()])
                 .unwrap(),
             expected.into()
         );
@@ -1030,13 +1013,12 @@ mod tests {
             expected.into()
         );
         assert_eq!(
-            expr.eval::<DfValue>(&[datetime.date().to_string().try_into().unwrap()])
+            expr.eval::<DfValue>(&[datetime.date().to_string().into()])
                 .unwrap(),
             expected.into()
         );
         assert_eq!(
-            expr.eval::<DfValue>(&["invalid date".try_into().unwrap()])
-                .unwrap(),
+            expr.eval::<DfValue>(&["invalid date".into()]).unwrap(),
             DfValue::None
         );
     }
@@ -1058,11 +1040,8 @@ mod tests {
             DfValue::Time(MySqlTime::from_hmsus(false, 47, 0, 0, 0))
         );
         assert_eq!(
-            expr.eval::<DfValue>(&[
-                param1.to_string().try_into().unwrap(),
-                param2.to_string().try_into().unwrap()
-            ])
-            .unwrap(),
+            expr.eval::<DfValue>(&[param1.to_string().into(), param2.to_string().into()])
+                .unwrap(),
             DfValue::Time(MySqlTime::from_hmsus(false, 47, 0, 0, 0))
         );
         let param1 = NaiveDateTime::new(
@@ -1079,11 +1058,8 @@ mod tests {
             DfValue::Time(MySqlTime::from_hmsus(true, 49, 0, 0, 0))
         );
         assert_eq!(
-            expr.eval::<DfValue>(&[
-                param1.to_string().try_into().unwrap(),
-                param2.to_string().try_into().unwrap()
-            ])
-            .unwrap(),
+            expr.eval::<DfValue>(&[param1.to_string().into(), param2.to_string().into()])
+                .unwrap(),
             DfValue::Time(MySqlTime::from_hmsus(true, 49, 0, 0, 0))
         );
         let param2 = NaiveTime::from_hms(4, 13, 33);
@@ -1093,11 +1069,8 @@ mod tests {
             DfValue::None
         );
         assert_eq!(
-            expr.eval::<DfValue>(&[
-                param1.to_string().try_into().unwrap(),
-                param2.to_string().try_into().unwrap()
-            ])
-            .unwrap(),
+            expr.eval::<DfValue>(&[param1.to_string().into(), param2.to_string().into()])
+                .unwrap(),
             DfValue::None
         );
         let param1 = NaiveTime::from_hms(5, 13, 33);
@@ -1107,34 +1080,31 @@ mod tests {
             DfValue::Time(MySqlTime::from_hmsus(true, 1, 0, 0, 0))
         );
         assert_eq!(
-            expr.eval::<DfValue>(&[
-                param1.to_string().try_into().unwrap(),
-                param2.to_string().try_into().unwrap()
-            ])
-            .unwrap(),
+            expr.eval::<DfValue>(&[param1.to_string().into(), param2.to_string().into()])
+                .unwrap(),
             DfValue::Time(MySqlTime::from_hmsus(true, 1, 0, 0, 0))
         );
         let param1 = "not a date nor time";
         let param2 = "01:00:00.4";
         assert_eq!(
-            expr.eval::<DfValue>(&[param1.try_into().unwrap(), param2.try_into().unwrap()])
+            expr.eval::<DfValue>(&[param1.into(), param2.into()])
                 .unwrap(),
             DfValue::Time(MySqlTime::from_hmsus(false, 1, 0, 0, 400_000))
         );
         assert_eq!(
-            expr.eval::<DfValue>(&[param2.try_into().unwrap(), param1.try_into().unwrap()])
+            expr.eval::<DfValue>(&[param2.into(), param1.into()])
                 .unwrap(),
             DfValue::Time(MySqlTime::from_hmsus(true, 1, 0, 0, 400_000))
         );
 
         let param2 = "10000.4";
         assert_eq!(
-            expr.eval::<DfValue>(&[param1.try_into().unwrap(), param2.try_into().unwrap()])
+            expr.eval::<DfValue>(&[param1.into(), param2.into()])
                 .unwrap(),
             DfValue::Time(MySqlTime::from_hmsus(false, 1, 0, 0, 400_000))
         );
         assert_eq!(
-            expr.eval::<DfValue>(&[param2.try_into().unwrap(), param1.try_into().unwrap()])
+            expr.eval::<DfValue>(&[param2.into(), param1.into()])
                 .unwrap(),
             DfValue::Time(MySqlTime::from_hmsus(true, 1, 0, 0, 400_000))
         );
@@ -1181,11 +1151,8 @@ mod tests {
             DfValue::None
         );
         assert_eq!(
-            expr.eval::<DfValue>(&[
-                param1.to_string().try_into().unwrap(),
-                param2.to_string().try_into().unwrap()
-            ])
-            .unwrap(),
+            expr.eval::<DfValue>(&[param1.to_string().into(), param2.to_string().into()])
+                .unwrap(),
             DfValue::None
         );
         let param2 = NaiveTime::from_hms(4, 13, 33);
@@ -1201,11 +1168,8 @@ mod tests {
             )
         );
         assert_eq!(
-            expr.eval::<DfValue>(&[
-                param1.to_string().try_into().unwrap(),
-                param2.to_string().try_into().unwrap()
-            ])
-            .unwrap(),
+            expr.eval::<DfValue>(&[param1.to_string().into(), param2.to_string().into()])
+                .unwrap(),
             DfValue::TimestampTz(
                 NaiveDateTime::new(
                     NaiveDate::from_ymd(2003, 10, 12),
@@ -1227,11 +1191,8 @@ mod tests {
             )
         );
         assert_eq!(
-            expr.eval::<DfValue>(&[
-                param1.to_string().try_into().unwrap(),
-                param2.to_string().try_into().unwrap()
-            ])
-            .unwrap(),
+            expr.eval::<DfValue>(&[param1.to_string().into(), param2.to_string().into()])
+                .unwrap(),
             DfValue::TimestampTz(
                 NaiveDateTime::new(
                     NaiveDate::from_ymd(2003, 10, 12),
@@ -1247,45 +1208,39 @@ mod tests {
             DfValue::Time(MySqlTime::from_hmsus(true, 7, 1, 9, 123_000))
         );
         assert_eq!(
-            expr.eval::<DfValue>(&[
-                param2.to_string().try_into().unwrap(),
-                param1.to_string().try_into().unwrap()
-            ])
-            .unwrap(),
+            expr.eval::<DfValue>(&[param2.to_string().into(), param1.to_string().into()])
+                .unwrap(),
             DfValue::Time(MySqlTime::from_hmsus(true, 7, 1, 9, 123_000))
         );
         let param1 = "not a date nor time";
         let param2 = "01:00:00.4";
         assert_eq!(
-            expr.eval::<DfValue>(&[param1.try_into().unwrap(), param2.try_into().unwrap()])
+            expr.eval::<DfValue>(&[param1.into(), param2.into()])
                 .unwrap(),
             DfValue::Time(MySqlTime::from_hmsus(true, 1, 0, 0, 400_000))
         );
         assert_eq!(
-            expr.eval::<DfValue>(&[param2.try_into().unwrap(), param1.try_into().unwrap()])
+            expr.eval::<DfValue>(&[param2.into(), param1.into()])
                 .unwrap(),
             DfValue::Time(MySqlTime::from_hmsus(true, 1, 0, 0, 400_000))
         );
 
         let param2 = "10000.4";
         assert_eq!(
-            expr.eval::<DfValue>(&[param1.try_into().unwrap(), param2.try_into().unwrap()])
+            expr.eval::<DfValue>(&[param1.into(), param2.into()])
                 .unwrap(),
             DfValue::Time(MySqlTime::from_hmsus(true, 1, 0, 0, 400_000))
         );
         assert_eq!(
-            expr.eval::<DfValue>(&[param2.try_into().unwrap(), param1.try_into().unwrap()])
+            expr.eval::<DfValue>(&[param2.into(), param1.into()])
                 .unwrap(),
             DfValue::Time(MySqlTime::from_hmsus(true, 1, 0, 0, 400_000))
         );
 
         let param2: f32 = 3.57;
         assert_eq!(
-            expr.eval::<DfValue>(&[
-                param1.try_into().unwrap(),
-                DfValue::try_from(param2).unwrap()
-            ])
-            .unwrap(),
+            expr.eval::<DfValue>(&[param1.into(), DfValue::try_from(param2).unwrap()])
+                .unwrap(),
             DfValue::Time(MySqlTime::from_microseconds(
                 (param2 * 1_000_000_f32) as i64
             ))
@@ -1293,11 +1248,8 @@ mod tests {
 
         let param2: f64 = 3.57;
         assert_eq!(
-            expr.eval::<DfValue>(&[
-                param1.try_into().unwrap(),
-                DfValue::try_from(param2).unwrap()
-            ])
-            .unwrap(),
+            expr.eval::<DfValue>(&[param1.into(), DfValue::try_from(param2).unwrap()])
+                .unwrap(),
             DfValue::Time(MySqlTime::from_microseconds(
                 (param2 * 1_000_000_f64) as i64
             ))

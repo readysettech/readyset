@@ -27,7 +27,7 @@ pub enum SetStatement {
 }
 
 impl DialectDisplay for SetStatement {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| {
             write!(f, "SET ")?;
             match self {
@@ -77,7 +77,7 @@ pub enum SetPostgresParameterValue {
 }
 
 impl DialectDisplay for SetPostgresParameterValue {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| match self {
             SetPostgresParameterValue::Default => write!(f, "DEFAULT"),
             SetPostgresParameterValue::Value(val) => write!(f, "{}", val.display(dialect)),
@@ -104,7 +104,7 @@ pub enum PostgresParameterValueInner {
 }
 
 impl DialectDisplay for PostgresParameterValueInner {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| match self {
             PostgresParameterValueInner::Identifier(ident) => write!(f, "{}", ident),
             PostgresParameterValueInner::Literal(lit) => write!(f, "{}", lit.display(dialect)),
@@ -152,7 +152,7 @@ impl PostgresParameterValue {
 }
 
 impl DialectDisplay for PostgresParameterValue {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| match self {
             PostgresParameterValue::Single(v) => write!(f, "{}", v.display(dialect)),
             PostgresParameterValue::List(l) => {
@@ -256,7 +256,7 @@ impl Variable {
         }
     }
 
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| {
             match dialect {
                 Dialect::PostgreSQL => {
@@ -276,7 +276,7 @@ impl Variable {
 }
 
 impl DialectDisplay for SetVariables {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| {
             write!(
                 f,
@@ -318,7 +318,7 @@ pub struct SetPostgresParameter {
 }
 
 impl DialectDisplay for SetPostgresParameter {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| {
             if let Some(scope) = self.scope {
                 write!(f, "{} ", scope)?;

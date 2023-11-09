@@ -868,7 +868,7 @@ impl Leader {
             // 1. Remove the domain from our internal state
             let Some(dh) = ds.domains.get_mut(&addr.domain_index) else {
                 warn!(domain = %addr, "Notified about failure of unknown domain");
-                return Ok(())
+                return Ok(());
             };
             dh.remove_assignment(addr.shard, addr.replica);
 

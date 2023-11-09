@@ -2604,7 +2604,7 @@ impl Domain {
         let mut records = Vec::new();
         let mut replay_keys = HashSet::new();
         // Drain misses, and keep the hits
-        keys.drain_filter(|key| match key {
+        keys.extract_if(|key| match key {
             KeyComparison::Equal(equal) => match state.lookup(cols, &PointKey::from(equal.clone()))
             {
                 LookupResult::Some(record) => {
@@ -3188,10 +3188,9 @@ impl Domain {
                 // so let's walk through them
                 //
                 //  1. this applies only to partial backfills
-                //  2. we should only set finished_partial if it hasn't already been set.
-                //     this is important, as misses will cause backfill_keys to be pruned
-                //     over time, which would cause finished_partial to hold the wrong
-                //     value!
+                //  2. we should only set finished_partial if it hasn't already been set. this is
+                //     important, as misses will cause backfill_keys to be pruned over time, which
+                //     would cause finished_partial to hold the wrong value!
                 if let Some(backfill_keys) = &backfill_keys {
                     if finished_partial == 0 && (dst_is_reader || !dst_is_sender) {
                         finished_partial = backfill_keys.len();
@@ -3567,7 +3566,7 @@ impl Domain {
         // elements that can be batched into a single call to `on_replay_misses`
         while let Some(next_replay) = need_replay.get(0).cloned() {
             let misses: HashSet<_> = need_replay
-                .drain_filter(|rep| next_replay.can_combine(rep))
+                .extract_if(|rep| next_replay.can_combine(rep))
                 .map(
                     |ReplayDescriptor {
                          lookup_key,

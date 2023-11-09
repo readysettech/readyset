@@ -300,7 +300,7 @@ impl Protocol {
 
             State::AuthenticatingSasl(SaslState::RequestedAuthentication { ref user }) => {
                 let Authenticate { mut body } = message else {
-                   return Err(Error::UnsupportedMessage(message))
+                    return Err(Error::UnsupportedMessage(message));
                 };
 
                 let password = match backend.credentials_for_user(user) {
@@ -391,7 +391,7 @@ impl Protocol {
                 channel_binding_used,
             }) => {
                 let Authenticate { body } = message else {
-                   return Err(Error::UnsupportedMessage(message))
+                    return Err(Error::UnsupportedMessage(message));
                 };
 
                 let client_final_message = ClientFinalMessage::parse(&body)?;

@@ -52,7 +52,7 @@ pub enum ExplainStatement {
 }
 
 impl ExplainStatement {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| {
             write!(f, "EXPLAIN ")?;
             match self {

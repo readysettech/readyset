@@ -104,10 +104,10 @@ pub struct DfState {
     /// Three modes are available:
     ///
     ///  1. `DurabilityMode::Permanent`: all writes to base nodes should be written to disk.
-    ///  2. `DurabilityMode::DeleteOnExit`: all writes are written to disk, but the log is
-    ///     deleted once the `Controller` is dropped. Useful for tests.
-    ///  3. `DurabilityMode::MemoryOnly`: no writes to disk, store all writes in memory.
-    ///     Useful for baseline numbers.
+    ///  2. `DurabilityMode::DeleteOnExit`: all writes are written to disk, but the log is deleted
+    ///     once the `Controller` is dropped. Useful for tests.
+    ///  3. `DurabilityMode::MemoryOnly`: no writes to disk, store all writes in memory. Useful for
+    ///     baseline numbers.
     persistence: PersistenceParameters,
     pub(super) materializations: Materializations,
 
@@ -1171,10 +1171,10 @@ impl DfState {
     /// Three modes are available:
     ///
     ///  1. `DurabilityMode::Permanent`: all writes to base nodes should be written to disk.
-    ///  2. `DurabilityMode::DeleteOnExit`: all writes are written to disk, but the log is
-    ///     deleted once the `Controller` is dropped. Useful for tests.
-    ///  3. `DurabilityMode::MemoryOnly`: no writes to disk, store all writes in memory.
-    ///     Useful for baseline numbers.
+    ///  2. `DurabilityMode::DeleteOnExit`: all writes are written to disk, but the log is deleted
+    ///     once the `Controller` is dropped. Useful for tests.
+    ///  3. `DurabilityMode::MemoryOnly`: no writes to disk, store all writes in memory. Useful for
+    ///     baseline numbers.
     ///
     /// Must be called before any domains have been created.
     #[allow(unused)]
@@ -1679,7 +1679,7 @@ impl DfState {
         for di in domains {
             let Some(dh) = self.domains.get(&di) else {
                 debug!(domain = %di, "domain not running, not killing");
-                continue
+                continue;
             };
 
             for (addr, wi) in dh.assignments() {
@@ -1934,7 +1934,7 @@ impl DfStateHandle {
                     eprintln!("There's no controller state to update");
                     Err(())
                 }
-                Some(mut state) => {
+                Some(state) => {
                     state.dataflow_state = new_state.clone();
                     state.dataflow_state.touch_up();
                     Ok(())

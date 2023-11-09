@@ -27,7 +27,7 @@ pub enum CommentStatement {
 }
 
 impl DialectDisplay for CommentStatement {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| match self {
             Self::Column {
                 column_name,

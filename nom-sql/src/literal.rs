@@ -47,7 +47,7 @@ impl PartialOrd for Float {
             Some(Ordering::Equal) => {}
             ord => return ord,
         }
-        self.precision.partial_cmp(&other.precision)
+        Some(self.cmp(other))
     }
 }
 
@@ -93,11 +93,7 @@ impl Hash for Double {
 
 impl PartialOrd for Double {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        match self.value.to_bits().partial_cmp(&other.value.to_bits()) {
-            Some(Ordering::Equal) => {}
-            ord => return ord,
-        }
-        self.precision.partial_cmp(&other.precision)
+        Some(self.cmp(other))
     }
 }
 
@@ -213,7 +209,7 @@ impl From<ItemPlaceholder> for Literal {
 }
 
 impl DialectDisplay for Literal {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| {
             macro_rules! write_real {
                 ($real:expr, $prec:expr) => {{

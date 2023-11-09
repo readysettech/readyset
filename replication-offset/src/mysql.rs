@@ -57,7 +57,7 @@ impl MySqlPosition {
     }
 
     /// Returns the raw binlog file name associated with `self`.
-    pub fn binlog_file_name(&self) -> impl fmt::Display + Copy + '_ {
+    pub fn binlog_file_name(&self) -> impl fmt::Display + '_ {
         fmt_with(|f| {
             write!(
                 f,

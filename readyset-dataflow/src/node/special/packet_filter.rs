@@ -54,8 +54,8 @@ impl PacketFilter {
     /// filtering:
     /// 1. If the packet is a replay piece ([`Packet::ReplayPiece`]), then the requested keys are
     ///    stored in the filter, along the column indexes they predicate upon.
-    /// 2. If the packet is an eviction message ([`Packet::Evict`]), the evicted keys are
-    ///    removed from the filter.
+    /// 2. If the packet is an eviction message ([`Packet::Evict`]), the evicted keys are removed
+    ///    from the filter.
     /// 3. If the packet is an update ([`Packet::Message`]), then the packet is stripped down of any
     ///    record that does not comply with the stored keys. If no record survives the filtering,
     ///    then the whole packet should be dropped.

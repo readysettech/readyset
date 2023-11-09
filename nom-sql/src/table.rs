@@ -73,7 +73,7 @@ impl<'a> From<&'a String> for Relation {
 }
 
 impl DialectDisplay for Relation {
-    fn display(&self, dialect: Dialect) -> impl Display + Copy + '_ {
+    fn display(&self, dialect: Dialect) -> impl Display + '_ {
         fmt_with(move |f| {
             if let Some(schema) = &self.schema {
                 write!(f, "{}.", dialect.quote_identifier(schema))?;
@@ -87,7 +87,7 @@ impl Relation {
     /// Like [`display()`](Self::display) except the schema and table name will not be quoted.
     ///
     /// This should not be used to emit SQL code and instead should mostly be for error messages.
-    pub fn display_unquoted(&self) -> impl Display + Copy + '_ {
+    pub fn display_unquoted(&self) -> impl Display + '_ {
         fmt_with(move |f| {
             if let Some(schema) = &self.schema {
                 write!(f, "{schema}.")?;
@@ -125,7 +125,7 @@ impl TableExprInner {
 }
 
 impl DialectDisplay for TableExprInner {
-    fn display(&self, dialect: Dialect) -> impl Display + Copy + '_ {
+    fn display(&self, dialect: Dialect) -> impl Display + '_ {
         fmt_with(move |f| match self {
             TableExprInner::Table(t) => write!(f, "{}", t.display(dialect)),
             TableExprInner::Subquery(sq) => write!(f, "({})", sq.display(dialect)),
@@ -151,7 +151,7 @@ impl From<Relation> for TableExpr {
 }
 
 impl DialectDisplay for TableExpr {
-    fn display(&self, dialect: Dialect) -> impl Display + Copy + '_ {
+    fn display(&self, dialect: Dialect) -> impl Display + '_ {
         fmt_with(move |f| {
             write!(f, "{}", self.inner.display(dialect))?;
 

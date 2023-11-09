@@ -26,7 +26,7 @@ use readyset_util::hash::hash;
 //
 //       +--+ AND +--+
 //       |           |
-//       +           +
+//       + +
 //    aid = 1     uid = 2
 //
 //    After processing the left side `flattened` will look something like this: {[(aid, 1)]}
