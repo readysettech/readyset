@@ -277,8 +277,8 @@ impl ExprSkeletons {
     pub fn remove_expressions(&mut self, exprs: &HashSet<Relation>) {
         // For each entry, remove a set of literals if it is associated with one of the given
         // aliases
-        self.inner.drain_filter(|_, v| {
-            v.drain_filter(|(alias, _)| exprs.contains(alias));
+        let _ = self.inner.extract_if(|_, v| {
+            let _ = v.extract_if(|(alias, _)| exprs.contains(alias));
             // Remove the entire entry if we've removed all associated literals
             v.is_empty()
         });
@@ -485,7 +485,7 @@ impl ExprRegistry {
         // Remove all aliases for this query
         let expr_aliases: HashSet<Relation> = self
             .aliases
-            .drain_filter(|_, v| *v == query_id)
+            .extract_if(|_, v| *v == query_id)
             .map(|(k, _)| k)
             .collect();
         // Remove any queries that reuse this query's cache, or the query itself if we are removing
@@ -495,7 +495,7 @@ impl ExprRegistry {
         // DrainFilter so that we don't accidentally use them later.
         let mut removed_reused_cache = self
             .reused_caches
-            .drain_filter(|k, v| {
+            .extract_if(|k, v| {
                 expr_aliases.contains(k) || {
                     // We are retaining, not removing elements here, so we retain if the element is
                     // not in expr_aliases

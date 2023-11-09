@@ -300,7 +300,7 @@ impl SqlType {
 }
 
 impl DialectDisplay for SqlType {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| {
             let write_with_len = |f: &mut fmt::Formatter, name, len| {
                 write!(f, "{}", name)?;

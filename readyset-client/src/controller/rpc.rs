@@ -16,7 +16,7 @@ use crate::ReadySetHandle;
 
 // this alias is needed to work around -> impl Trait capturing _all_ lifetimes by default
 // the A parameter is needed so it gets captured into the impl Trait
-type RpcFuture<'a, R: 'a> = impl Future<Output = ReadySetResult<R>> + 'a;
+pub type RpcFuture<'a, R: 'a> = impl Future<Output = ReadySetResult<R>> + 'a;
 
 impl ReadySetHandle {
     /// Perform a raw RPC request to the HTTP `path` provided, providing a request body `r`.

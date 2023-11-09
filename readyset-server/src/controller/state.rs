@@ -1934,7 +1934,7 @@ impl DfStateHandle {
                     eprintln!("There's no controller state to update");
                     Err(())
                 }
-                Some(mut state) => {
+                Some(state) => {
                     state.dataflow_state = new_state.clone();
                     state.dataflow_state.touch_up();
                     Ok(())

@@ -200,7 +200,7 @@ impl BenchmarkControl for WorkloadEmulator {
         // only migrate when running readyset benches. we still need the
         // QuerySet we can get from the workload parsing, though.
         if self.benchmark_type != BenchmarkType::ReadySet {
-            for mut query in &mut spec.queries {
+            for query in &mut spec.queries {
                 query.migrate = false;
             }
         }

@@ -224,7 +224,7 @@ fn make_table_discover(addr: SocketAddr, timeout: Duration) -> Discover {
 }
 
 // Unpin + Send bounds are needed due to https://github.com/rust-lang/rust/issues/55997
-type Discover = impl tower::discover::Discover<Key = usize, Service = InnerService, Error = tokio::io::Error>
+pub type Discover = impl tower::discover::Discover<Key = usize, Service = InnerService, Error = tokio::io::Error>
     + Unpin
     + Send;
 

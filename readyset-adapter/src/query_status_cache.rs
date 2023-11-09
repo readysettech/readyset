@@ -389,7 +389,7 @@ impl QueryStatusCache {
     /// Update ExecutionInfo to indicate that a recent execute failed due to a networking problem.
     pub fn execute_network_failure(&self, q: &Query) {
         q.with_mut_status(self, |s| {
-            if let Some(mut s) = s {
+            if let Some(s) = s {
                 match s.execution_info {
                     Some(ref mut info) => info.execute_network_failure(),
                     None => {
@@ -406,7 +406,7 @@ impl QueryStatusCache {
     /// Update ExecutionInfo to indicate that a recent execute succeeded.
     pub fn execute_succeeded(&self, q: &Query) {
         q.with_mut_status(self, |s| {
-            if let Some(mut s) = s {
+            if let Some(s) = s {
                 match s.execution_info {
                     Some(ref mut info) => info.execute_succeeded(),
                     None => {
@@ -423,7 +423,7 @@ impl QueryStatusCache {
     /// Update ExecutionInfo to indicate that a recent execute failed.
     pub fn execute_failed(&self, q: &Query) {
         q.with_mut_status(self, |s| {
-            if let Some(mut s) = s {
+            if let Some(s) = s {
                 match s.execution_info {
                     Some(ref mut info) => info.execute_failed(),
                     None => {
@@ -459,7 +459,7 @@ impl QueryStatusCache {
     {
         let should_insert = q.with_mut_status(self, |s| {
             match s {
-                Some(mut s) => {
+                Some(s) => {
                     // We do not support transitions from the `Unsupported` state, as we assume
                     // any `Unsupported` query will remain `Unsupported` for the duration of
                     // this process.
@@ -503,7 +503,7 @@ impl QueryStatusCache {
 
         let should_insert = q.with_mut_status(self, |s| {
             match s {
-                Some(mut s) => {
+                Some(s) => {
                     match s.migration_state {
                         // We do not support transitions from the `Unsupported` state, as we assume
                         // any `Unsupported` query will remain `Unsupported` for the duration of
@@ -544,7 +544,7 @@ impl QueryStatusCache {
         Q: QueryStatusKey,
     {
         let should_insert = q.with_mut_status(self, |s| match s {
-            Some(mut s) => {
+            Some(s) => {
                 s.migration_state = MigrationState::Dropped;
                 false
             }
@@ -566,7 +566,7 @@ impl QueryStatusCache {
     /// unsupported error. Updates the query status and removes pending inlined migrations.
     pub fn unsupported_inlined_migration(&self, q: &ViewCreateRequest) {
         let should_insert = q.with_mut_status(self, |s| match s {
-            Some(mut s) => {
+            Some(s) => {
                 s.migration_state = MigrationState::Unsupported;
                 false
             }
@@ -594,7 +594,7 @@ impl QueryStatusCache {
         Q: QueryStatusKey,
     {
         q.with_mut_status(self, |s| match s {
-            Some(mut s) if s.migration_state != MigrationState::Unsupported => {
+            Some(s) if s.migration_state != MigrationState::Unsupported => {
                 s.always = always;
             }
             _ => {}
@@ -609,12 +609,12 @@ impl QueryStatusCache {
         Q: QueryStatusKey,
     {
         let should_insert = q.with_mut_status(self, |s| match s {
-            Some(mut s) if s.migration_state != MigrationState::Unsupported => {
+            Some(s) if s.migration_state != MigrationState::Unsupported => {
                 s.migration_state = status.migration_state.clone();
                 s.execution_info = status.execution_info.clone();
                 false
             }
-            Some(mut s) => {
+            Some(s) => {
                 s.execution_info = status.execution_info.clone();
                 false
             }

@@ -213,7 +213,7 @@ impl From<ItemPlaceholder> for Literal {
 }
 
 impl DialectDisplay for Literal {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| {
             macro_rules! write_real {
                 ($real:expr, $prec:expr) => {{

@@ -39,7 +39,7 @@ pub struct GroupByClause {
 }
 
 impl DialectDisplay for GroupByClause {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| {
             write!(
                 f,
@@ -61,7 +61,7 @@ pub struct JoinClause {
 }
 
 impl DialectDisplay for JoinClause {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| {
             write!(
                 f,
@@ -83,7 +83,7 @@ pub struct CommonTableExpr {
 }
 
 impl DialectDisplay for CommonTableExpr {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| {
             write!(
                 f,
@@ -195,7 +195,7 @@ impl Default for LimitClause {
 }
 
 impl DialectDisplay for LimitClause {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| {
             match self {
                 LimitClause::LimitOffset { limit, offset } => {
@@ -263,7 +263,7 @@ impl SelectStatement {
 }
 
 impl DialectDisplay for SelectStatement {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| {
             if !self.ctes.is_empty() {
                 write!(

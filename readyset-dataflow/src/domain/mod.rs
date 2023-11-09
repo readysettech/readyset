@@ -2604,7 +2604,7 @@ impl Domain {
         let mut records = Vec::new();
         let mut replay_keys = HashSet::new();
         // Drain misses, and keep the hits
-        keys.drain_filter(|key| match key {
+        keys.extract_if(|key| match key {
             KeyComparison::Equal(equal) => match state.lookup(cols, &PointKey::from(equal.clone()))
             {
                 LookupResult::Some(record) => {
@@ -3567,7 +3567,7 @@ impl Domain {
         // elements that can be batched into a single call to `on_replay_misses`
         while let Some(next_replay) = need_replay.get(0).cloned() {
             let misses: HashSet<_> = need_replay
-                .drain_filter(|rep| next_replay.can_combine(rep))
+                .extract_if(|rep| next_replay.can_combine(rep))
                 .map(
                     |ReplayDescriptor {
                          lookup_key,

@@ -146,8 +146,7 @@
     bound_as_ref,
     box_into_inner,
     is_sorted,
-    once_cell,
-    return_position_impl_trait_in_trait
+    impl_trait_in_assoc_type
 )]
 #![deny(macro_use_extern_crate)]
 #![deny(unused_extern_crates)]

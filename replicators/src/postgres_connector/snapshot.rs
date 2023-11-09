@@ -907,7 +907,7 @@ impl<'a> PostgresReplicator<'a> {
 
         if !full_snapshot {
             tables
-                .drain_filter(|t| replication_offsets.has_table(&t.name))
+                .extract_if(|t| replication_offsets.has_table(&t.name))
                 .for_each(|t| {
                     debug!(
                         table = %t.name.display(Dialect::PostgreSQL),
