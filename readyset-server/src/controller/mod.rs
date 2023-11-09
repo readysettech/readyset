@@ -22,6 +22,7 @@ use readyset_client::failpoints;
 use readyset_client::metrics::recorded;
 use readyset_client::recipe::changelist::Change;
 use readyset_client::recipe::ChangeList;
+use readyset_client::utils::retry_with_exponential_backoff;
 use readyset_client::ControllerDescriptor;
 use readyset_data::Dialect;
 use readyset_errors::{internal, internal_err, ReadySetError, ReadySetResult};
@@ -812,12 +813,21 @@ impl Controller {
             for changelist in changelists {
                 let mut guard = self.inner.write().await;
                 if let Some(ref mut inner) = *guard {
-                    let mut writer = inner.dataflow_state_handle.write().await;
-                    let ds = writer.as_mut();
-
                     let n_caches = changelist.changes.len();
-                    match ds.extend_recipe(changelist.into(), false).await {
-                        Ok(_res) => {
+                    match retry_with_exponential_backoff(
+                        || async {
+                            let changelist = changelist.clone();
+                            let mut writer = inner.dataflow_state_handle.write().await;
+                            let ds = writer.as_mut();
+                            ds.extend_recipe(changelist.into(), false).await?;
+                            ReadySetResult::Ok(writer)
+                        },
+                        5,
+                        Duration::from_millis(250),
+                    )
+                    .await
+                    {
+                        Ok(writer) => {
                             inner
                                 .dataflow_state_handle
                                 .commit(writer, &self.authority)
