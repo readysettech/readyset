@@ -5293,6 +5293,7 @@ dependencies = [
  "readyset-errors",
  "readyset-util",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
