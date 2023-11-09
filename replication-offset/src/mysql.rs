@@ -110,6 +110,7 @@ impl From<MySqlPosition> for ReplicationOffset {
 #[cfg(test)]
 mod test {
     use super::MySqlPosition;
+    use crate::ReplicationOffset;
 
     #[test]
     fn test_partial_ord() {
@@ -153,5 +154,38 @@ mod test {
 
         // Files with different base names cannot be compared
         assert!(other_file.partial_cmp(&file1_pos1).is_none());
+    }
+
+    // NOTE: This test checks that the current structure of `ReplicationOffset` is backwards
+    // compatible with the last committed structure. If it is failing, the updated structure
+    // needs to be modified to be backwards compatible, or additional serde logic is needed to
+    // convert between the two forms, and new tests should be added that check that we are
+    // incrementally backwards compatible from the original version.
+    #[test]
+    /// Serialized data from the current version of the struct, generated with:
+    /// ```rust
+    /// use crate::mysql::MySqlPosition;
+    /// let offset = ReplicationOffset::MySql(
+    ///     MySqlPosition::from_file_name_and_position("v1.0".to_string(), 42)
+    ///         .expect("failed to create MySqlPosition"),
+    /// );
+    /// eprintln!("{}", serde_json::ser::to_string(&offset).unwrap());
+    /// ```
+    fn test_mysql_v1() {
+        let serialized_data = r#"{"MySql":{"binlog_file_base_name":"v1","binlog_file_suffix":0,"binlog_file_suffix_length":1,"position":42}}"#;
+        let deserialized: Result<ReplicationOffset, _> = serde_json::from_str(serialized_data);
+        assert!(
+            deserialized.is_ok(),
+            "ReplicationOffset is not backwards compatible. See note above test."
+        );
+        assert_eq!(
+            deserialized.unwrap(),
+            ReplicationOffset::MySql(MySqlPosition {
+                binlog_file_base_name: "v1".to_string(),
+                binlog_file_suffix: 0,
+                binlog_file_suffix_length: 1,
+                position: 42,
+            })
+        );
     }
 }

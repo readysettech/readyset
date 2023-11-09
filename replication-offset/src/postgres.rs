@@ -160,6 +160,7 @@ mod tests {
     use std::str::FromStr;
 
     use super::{CommitLsn, Lsn, PostgresPosition};
+    use crate::ReplicationOffset;
 
     // The `PartialOrd` derivation on `PostgresPosition` relies upon the ordering of the members
     // in the struct: `commit_lsn` *must* be listed before `lsn`. This test will fail if
@@ -223,6 +224,37 @@ mod tests {
         assert_eq!(
             Lsn::from_str("16/B374D84").unwrap(),
             Lsn::from_str("16/0B374D84").unwrap()
+        );
+    }
+
+    // NOTE: This test checks that the current structure of `ReplicationOffset` is backwards
+    // compatible with the last committed structure. If it is failing, the updated structure
+    // needs to be modified to be backwards compatible, or additional serde logic is needed to
+    // convert between the two forms, and new tests should be added that check that we are
+    // incrementally backwards compatible from the original version.
+    #[test]
+    /// Serialized data from the current version of the struct, generated with:
+    /// ```rust
+    /// use crate::postgres::PostgresPosition;
+    /// let offset = ReplicationOffset::Postgres(PostgresPosition {
+    ///     commit_lsn: 42.into(),
+    ///     lsn: 9001.into(),
+    /// });
+    /// eprintln!("{}", serde_json::ser::to_string(&offset).unwrap());
+    /// ```
+    fn test_postgres_v1() {
+        let serialized_data = r#"{"Postgres":{"commit_lsn":42,"lsn":9001}}"#;
+        let deserialized: Result<ReplicationOffset, _> = serde_json::from_str(serialized_data);
+        assert!(
+            deserialized.is_ok(),
+            "ReplicationOffset is not backwards compatible. See note above test."
+        );
+        assert_eq!(
+            deserialized.unwrap(),
+            ReplicationOffset::Postgres(PostgresPosition {
+                commit_lsn: CommitLsn(42),
+                lsn: Lsn(9001)
+            })
         );
     }
 }
