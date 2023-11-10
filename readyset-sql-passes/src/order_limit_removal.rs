@@ -221,7 +221,7 @@ mod tests {
         let input_query = parse_query(Dialect::MySQL, input).unwrap();
         let base_schemas = generate_base_schemas();
         let revised_query = input_query
-            .order_limit_removal(&base_schemas.iter().map(|(k, v)| (k, v)).collect())
+            .order_limit_removal(&base_schemas.iter().collect())
             .unwrap();
         match revised_query {
             SqlQuery::Select(stmt) => {
@@ -245,7 +245,7 @@ mod tests {
             input_query,
             input_query
                 .clone()
-                .order_limit_removal(&base_schemas.iter().map(|(k, v)| (k, v)).collect(),)
+                .order_limit_removal(&base_schemas.iter().collect(),)
                 .unwrap()
         );
     }
@@ -338,7 +338,7 @@ mod tests {
             input_query,
             input_query
                 .clone()
-                .order_limit_removal(&base_schema.iter().map(|(k, v)| (k, v)).collect())
+                .order_limit_removal(&base_schema.iter().collect())
                 .unwrap()
         );
         // compound Unique
@@ -353,12 +353,12 @@ mod tests {
             input_query,
             input_query
                 .clone()
-                .order_limit_removal(&base_schema.iter().map(|(k, v)| (k, v)).collect())
+                .order_limit_removal(&base_schema.iter().collect())
                 .unwrap()
         );
         // compound unique but col is separately specified to be unique
         let revised_query = input_query2
-            .order_limit_removal(&base_schema.iter().map(|(k, v)| (k, v)).collect())
+            .order_limit_removal(&base_schema.iter().collect())
             .unwrap();
         match revised_query {
             SqlQuery::Select(stmt) => {

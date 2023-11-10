@@ -310,11 +310,10 @@ async fn delete_other_column() {
         .unwrap();
     sleep().await;
 
-    assert!(matches!(
-        conn.simple_query("DELETE FROM Cats WHERE Cats.id = 1 OR Cats.name = 'Bob'")
-            .await,
-        Err(_)
-    ));
+    assert!(conn
+        .simple_query("DELETE FROM Cats WHERE Cats.id = 1 OR Cats.name = 'Bob'")
+        .await
+        .is_err());
 
     shutdown_tx.shutdown().await;
 }
@@ -328,10 +327,10 @@ async fn delete_no_keys() {
         .unwrap();
     sleep().await;
 
-    assert!(matches!(
-        conn.simple_query("DELETE FROM Cats WHERE 1 = 1").await,
-        Err(_)
-    ));
+    assert!(conn
+        .simple_query("DELETE FROM Cats WHERE 1 = 1")
+        .await
+        .is_err(),);
 
     shutdown_tx.shutdown().await;
 }
@@ -663,7 +662,7 @@ async fn update_no_keys() {
     sleep().await;
 
     let query = "UPDATE Cats SET Cats.name = 'Rusty' WHERE 1 = 1";
-    assert!(matches!(conn.simple_query(query).await, Err(_)));
+    assert!(conn.simple_query(query).await.is_err());
 
     shutdown_tx.shutdown().await;
 }
@@ -678,7 +677,7 @@ async fn update_other_column() {
     sleep().await;
 
     let query = "UPDATE Cats SET Cats.name = 'Rusty' WHERE Cats.name = 'Bob'";
-    assert!(matches!(conn.simple_query(query).await, Err(_)));
+    assert!(conn.simple_query(query).await.is_err());
 
     shutdown_tx.shutdown().await;
 }
@@ -698,7 +697,7 @@ async fn update_bogus() {
     sleep().await;
 
     let query = "UPDATE Cats SET Cats.name = 'Rusty' WHERE Cats.id = 1 AND Cats.id = 2";
-    assert!(matches!(conn.simple_query(query).await, Err(_)));
+    assert!(conn.simple_query(query).await.is_err());
 
     shutdown_tx.shutdown().await;
 }
@@ -1835,7 +1834,7 @@ async fn caches_go_in_authority_list() {
     }
 
     let res = authority.cache_ddl_requests().await.unwrap();
-    let unparsed_stmt = res.get(0).unwrap();
+    let unparsed_stmt = res.first().unwrap();
     assert_eq!(unparsed_stmt, "CREATE CACHE q FROM SELECT x FROM t;");
 
     shutdown_tx.shutdown().await;

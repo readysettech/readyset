@@ -6,7 +6,7 @@
 #![allow(clippy::many_single_char_names)]
 
 use std::collections::HashMap;
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 use std::ops::Bound;
 use std::sync::Arc;
 use std::time::Duration;
@@ -901,12 +901,9 @@ async fn it_works_with_sql_recipe() {
     assert_eq!(*mutator.table_name(), "Car".into());
     assert_eq!(mutator.columns(), &["id", "brand"]);
 
-    let brands = vec!["Volvo", "Volvo", "Volkswagen"];
+    let brands = ["Volvo", "Volvo", "Volkswagen"];
     for (i, &brand) in brands.iter().enumerate() {
-        mutator
-            .insert(vec![i.into(), brand.try_into().unwrap()])
-            .await
-            .unwrap();
+        mutator.insert(vec![i.into(), brand.into()]).await.unwrap();
     }
 
     // Let writes propagate:
@@ -914,7 +911,7 @@ async fn it_works_with_sql_recipe() {
 
     // Retrieve the result of the count query:
     let result = getter
-        .lookup(&["Volvo".try_into().unwrap()], true)
+        .lookup(&["Volvo".into()], true)
         .await
         .unwrap()
         .into_vec();
@@ -953,11 +950,11 @@ async fn it_works_with_vote() {
         .unwrap();
 
     article
-        .insert(vec![0i64.into(), "Article".try_into().unwrap()])
+        .insert(vec![0i64.into(), "Article".into()])
         .await
         .unwrap();
     article
-        .insert(vec![1i64.into(), "Article".try_into().unwrap()])
+        .insert(vec![1i64.into(), "Article".into()])
         .await
         .unwrap();
     vote.insert(vec![0i64.into(), 0.into()]).await.unwrap();
@@ -966,17 +963,11 @@ async fn it_works_with_vote() {
 
     let rs = awvc.lookup(&[0i64.into()], true).await.unwrap().into_vec();
     assert_eq!(rs.len(), 1);
-    assert_eq!(
-        rs[0],
-        vec![0i64.into(), "Article".try_into().unwrap(), 1.into()]
-    );
+    assert_eq!(rs[0], vec![0i64.into(), "Article".into(), 1.into()]);
 
     let empty = awvc.lookup(&[1i64.into()], true).await.unwrap().into_vec();
     assert_eq!(empty.len(), 1);
-    assert_eq!(
-        empty[0],
-        vec![1i64.into(), "Article".try_into().unwrap(), DfValue::None]
-    );
+    assert_eq!(empty[0], vec![1i64.into(), "Article".into(), DfValue::None]);
 
     shutdown_tx.shutdown().await;
 }
@@ -1718,7 +1709,7 @@ async fn it_recovers_persisted_bases_w_multiple_nodes() {
     let path = dir
         .path()
         .join("it_recovers_persisted_bases_w_multiple_nodes");
-    let tables = vec!["A", "B", "C"];
+    let tables = ["A", "B", "C"];
     let persistence_parameters = PersistenceParameters::new(
         DurabilityMode::Permanent,
         Some(path.to_string_lossy().into()),
@@ -1793,7 +1784,7 @@ async fn it_recovers_persisted_bases_w_multiple_nodes_and_volume_id() {
     let path = dir
         .path()
         .join("it_recovers_persisted_bases_w_multiple_nodes_and_volume_id");
-    let tables = vec!["A", "B", "C"];
+    let tables = ["A", "B", "C"];
     let persistence_parameters = PersistenceParameters::new(
         DurabilityMode::Permanent,
         Some(path.to_string_lossy().into()),
@@ -2265,7 +2256,7 @@ async fn simple_migration() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn add_columns() {
-    let id: DfValue = "x".try_into().unwrap();
+    let id: DfValue = "x".into();
 
     // set up graph
     let (mut g, shutdown_tx) = start_simple_unsharded("add_columns").await;
@@ -2284,15 +2275,13 @@ async fn add_columns() {
     let mut muta = g.table_by_index(a).await.unwrap();
 
     // send a value on a
-    muta.insert(vec![id.clone(), "y".try_into().unwrap()])
-        .await
-        .unwrap();
+    muta.insert(vec![id.clone(), "y".into()]).await.unwrap();
     sleep().await;
 
     // check that a got it
     assert_eq!(
         aq.lookup(&[id.clone()], true).await.unwrap().into_vec(),
-        vec![vec![id.clone(), "y".try_into().unwrap()]]
+        vec![vec![id.clone(), "y".into()]]
     );
 
     // add a third column to a
@@ -2303,20 +2292,18 @@ async fn add_columns() {
     sleep().await;
 
     // send another (old) value on a
-    muta.insert(vec![id.clone(), "z".try_into().unwrap()])
-        .await
-        .unwrap();
+    muta.insert(vec![id.clone(), "z".into()]).await.unwrap();
     sleep().await;
 
     // check that a got it, and added the new, third column's default
     let res = aq.lookup(&[id.clone()], true).await.unwrap().into_vec();
     assert_eq!(res.len(), 2);
-    assert!(res.contains(&vec![id.clone(), "y".try_into().unwrap()]));
-    assert!(res.contains(&vec![id.clone(), "z".try_into().unwrap(), 3.into()]));
+    assert!(res.contains(&vec![id.clone(), "y".into()]));
+    assert!(res.contains(&vec![id.clone(), "z".into(), 3.into()]));
 
     // get a new muta and send a new value on it
     let mut muta = g.table_by_index(a).await.unwrap();
-    muta.insert(vec![id.clone(), "a".try_into().unwrap(), 10.into()])
+    muta.insert(vec![id.clone(), "a".into(), 10.into()])
         .await
         .unwrap();
     sleep().await;
@@ -2324,16 +2311,16 @@ async fn add_columns() {
     // check that a got it, and included the third column
     let res = aq.lookup(&[id.clone()], true).await.unwrap().into_vec();
     assert_eq!(res.len(), 3);
-    assert!(res.contains(&vec![id.clone(), "y".try_into().unwrap()]));
-    assert!(res.contains(&vec![id.clone(), "z".try_into().unwrap(), 3.into()]));
-    assert!(res.contains(&vec![id.clone(), "a".try_into().unwrap(), 10.into()]));
+    assert!(res.contains(&vec![id.clone(), "y".into()]));
+    assert!(res.contains(&vec![id.clone(), "z".into(), 3.into()]));
+    assert!(res.contains(&vec![id.clone(), "a".into(), 10.into()]));
 
     shutdown_tx.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn migrate_added_columns() {
-    let id: DfValue = "x".try_into().unwrap();
+    let id: DfValue = "x".into();
 
     // set up graph
     let (mut g, shutdown_tx) = start_simple_unsharded("migrate_added_columns").await;
@@ -2349,9 +2336,7 @@ async fn migrate_added_columns() {
     let mut muta = g.table_by_index(a).await.unwrap();
 
     // send a value on a
-    muta.insert(vec![id.clone(), "y".try_into().unwrap()])
-        .await
-        .unwrap();
+    muta.insert(vec![id.clone(), "y".into()]).await.unwrap();
     sleep().await;
 
     // add a third column to a, and a view that uses it
@@ -2383,12 +2368,10 @@ async fn migrate_added_columns() {
     let mut bq = g.view("x").await.unwrap().into_reader_handle().unwrap();
 
     // send another (old) value on a
-    muta.insert(vec![id.clone(), "z".try_into().unwrap()])
-        .await
-        .unwrap();
+    muta.insert(vec![id.clone(), "z".into()]).await.unwrap();
     // and an entirely new value
     let mut muta = g.table_by_index(a).await.unwrap();
-    muta.insert(vec![id.clone(), "a".try_into().unwrap(), 10.into()])
+    muta.insert(vec![id.clone(), "a".into(), 10.into()])
         .await
         .unwrap();
 
@@ -2413,7 +2396,7 @@ async fn migrate_added_columns() {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn migrate_drop_columns() {
-    let id: DfValue = "x".try_into().unwrap();
+    let id: DfValue = "x".into();
 
     // set up graph
     let (mut g, shutdown_tx) = start_simple_unsharded("migrate_drop_columns").await;
@@ -2432,16 +2415,13 @@ async fn migrate_drop_columns() {
     let mut muta1 = g.table("a").await.unwrap();
 
     // send a value on a
-    muta1
-        .insert(vec![id.clone(), "bx".try_into().unwrap()])
-        .await
-        .unwrap();
+    muta1.insert(vec![id.clone(), "bx".into()]).await.unwrap();
 
     // check that it's there
     sleep().await;
     let res = aq.lookup(&[id.clone()], true).await.unwrap().into_vec();
     assert_eq!(res.len(), 1);
-    assert!(res.contains(&vec![id.clone(), "bx".try_into().unwrap()]));
+    assert!(res.contains(&vec![id.clone(), "bx".into()]));
 
     // drop a column
     g.migrate(move |mig| {
@@ -2459,28 +2439,21 @@ async fn migrate_drop_columns() {
     sleep().await;
     let res = aq.lookup(&[id.clone()], true).await.unwrap().into_vec();
     assert_eq!(res.len(), 2);
-    assert!(res.contains(&vec![id.clone(), "bx".try_into().unwrap()]));
-    assert!(res.contains(&vec![id.clone(), "b".try_into().unwrap()]));
+    assert!(res.contains(&vec![id.clone(), "bx".into()]));
+    assert!(res.contains(&vec![id.clone(), "b".into()]));
 
     // add a new column
     g.migrate(move |mig| {
-        mig.add_column(a, dataflow_column("c"), "c".try_into().unwrap())
-            .unwrap();
+        mig.add_column(a, dataflow_column("c"), "c".into()).unwrap();
     })
     .await;
 
     // new mutator allows putting two values, and injects default for a.b
     let mut muta3 = g.table("a").await.unwrap();
-    muta3
-        .insert(vec![id.clone(), "cy".try_into().unwrap()])
-        .await
-        .unwrap();
+    muta3.insert(vec![id.clone(), "cy".into()]).await.unwrap();
 
     // using an old putter now should add default for c
-    muta1
-        .insert(vec![id.clone(), "bz".try_into().unwrap()])
-        .await
-        .unwrap();
+    muta1.insert(vec![id.clone(), "bz".into()]).await.unwrap();
 
     // using putter that knows of neither b nor c should result in defaults for both
     muta2.insert(vec![id.clone()]).await.unwrap();
@@ -2490,23 +2463,11 @@ async fn migrate_drop_columns() {
     assert_eq!(res.len(), 5);
     // NOTE: if we *hadn't* read bx and b above, they would have also have c because it would have
     // been added when the lookups caused partial backfills.
-    assert!(res.contains(&vec![id.clone(), "bx".try_into().unwrap()]));
-    assert!(res.contains(&vec![id.clone(), "b".try_into().unwrap()]));
-    assert!(res.contains(&vec![
-        id.clone(),
-        "b".try_into().unwrap(),
-        "cy".try_into().unwrap()
-    ]));
-    assert!(res.contains(&vec![
-        id.clone(),
-        "bz".try_into().unwrap(),
-        "c".try_into().unwrap()
-    ]));
-    assert!(res.contains(&vec![
-        id.clone(),
-        "b".try_into().unwrap(),
-        "c".try_into().unwrap()
-    ]));
+    assert!(res.contains(&vec![id.clone(), "bx".into()]));
+    assert!(res.contains(&vec![id.clone(), "b".into()]));
+    assert!(res.contains(&vec![id.clone(), "b".into(), "cy".into()]));
+    assert!(res.contains(&vec![id.clone(), "bz".into(), "c".into()]));
+    assert!(res.contains(&vec![id.clone(), "b".into(), "c".into()]));
 
     shutdown_tx.shutdown().await;
 }
@@ -2639,23 +2600,14 @@ async fn replay_during_replay() {
     muta.insert(vec![3.into()]).await.unwrap();
 
     // us are strings
-    mutu1.insert(vec!["a".try_into().unwrap()]).await.unwrap();
-    mutu1.insert(vec!["b".try_into().unwrap()]).await.unwrap();
-    mutu1.insert(vec!["c".try_into().unwrap()]).await.unwrap();
+    mutu1.insert(vec!["a".into()]).await.unwrap();
+    mutu1.insert(vec!["b".into()]).await.unwrap();
+    mutu1.insert(vec!["c".into()]).await.unwrap();
 
     // we want there to be data for all keys
-    mutu2
-        .insert(vec!["a".try_into().unwrap(), 1.into()])
-        .await
-        .unwrap();
-    mutu2
-        .insert(vec!["b".try_into().unwrap(), 2.into()])
-        .await
-        .unwrap();
-    mutu2
-        .insert(vec!["c".try_into().unwrap(), 3.into()])
-        .await
-        .unwrap();
+    mutu2.insert(vec!["a".into(), 1.into()]).await.unwrap();
+    mutu2.insert(vec!["b".into(), 2.into()]).await.unwrap();
+    mutu2.insert(vec!["c".into(), 3.into()]).await.unwrap();
 
     sleep().await;
 
@@ -2665,7 +2617,7 @@ async fn replay_during_replay() {
 
     assert_eq!(
         r.lookup(&[1.into()], true).await.unwrap().into_vec(),
-        vec![vec![1.into(), "a".try_into().unwrap()]]
+        vec![vec![1.into(), "a".into()]]
     );
 
     // we now know that u has key a=1 in its index
@@ -2680,12 +2632,8 @@ async fn replay_during_replay() {
     // second is partial and empty, so any read should trigger a replay.
     // though that shouldn't interact with target in any way.
     assert_eq!(
-        second
-            .lookup(&["a".try_into().unwrap()], true)
-            .await
-            .unwrap()
-            .into_vec(),
-        vec![vec!["a".try_into().unwrap(), 1.into()]]
+        second.lookup(&["a".into()], true).await.unwrap().into_vec(),
+        vec![vec!["a".into(), 1.into()]]
     );
 
     // now we get to the funky part.
@@ -2694,29 +2642,19 @@ async fn replay_during_replay() {
     // "a" value for which u has a hole. that record is then going to be forwarded to *both*
     // children, and it'll be interesting to see what the join then does.
     assert_eq!(
-        second
-            .lookup(&["b".try_into().unwrap()], true)
-            .await
-            .unwrap()
-            .into_vec(),
-        vec![vec!["b".try_into().unwrap(), 2.into()]]
+        second.lookup(&["b".into()], true).await.unwrap().into_vec(),
+        vec![vec!["b".into(), 2.into()]]
     );
 
     // u has a hole for a=2, but not for u=b, and so should forward this to both children
-    mutu2
-        .insert(vec!["b".try_into().unwrap(), 2.into()])
-        .await
-        .unwrap();
+    mutu2.insert(vec!["b".into(), 2.into()]).await.unwrap();
 
     sleep().await;
 
     // what happens if we now query for 2?
     assert_eq!(
         r.lookup(&[2.into()], true).await.unwrap().into_vec(),
-        vec![
-            vec![2.into(), "b".try_into().unwrap()],
-            vec![2.into(), "b".try_into().unwrap()]
-        ]
+        vec![vec![2.into(), "b".into()], vec![2.into(), "b".into()]]
     );
 
     shutdown_tx.shutdown().await;
@@ -2776,51 +2714,30 @@ async fn cascading_replays_with_sharding() {
     let mut mutv = g.table("v").await.unwrap();
 
     //                f1           f2
-    mutf.insert(vec!["u1".try_into().unwrap(), "u3".try_into().unwrap()])
-        .await
-        .unwrap();
-    mutf.insert(vec!["u2".try_into().unwrap(), "u3".try_into().unwrap()])
-        .await
-        .unwrap();
-    mutf.insert(vec!["u3".try_into().unwrap(), "u1".try_into().unwrap()])
-        .await
-        .unwrap();
+    mutf.insert(vec!["u1".into(), "u3".into()]).await.unwrap();
+    mutf.insert(vec!["u2".into(), "u3".into()]).await.unwrap();
+    mutf.insert(vec!["u3".into(), "u1".into()]).await.unwrap();
 
     //                u
-    mutv.insert(vec!["u1".try_into().unwrap(), 1.into()])
-        .await
-        .unwrap();
-    mutv.insert(vec!["u2".try_into().unwrap(), 1.into()])
-        .await
-        .unwrap();
-    mutv.insert(vec!["u3".try_into().unwrap(), 1.into()])
-        .await
-        .unwrap();
+    mutv.insert(vec!["u1".into(), 1.into()]).await.unwrap();
+    mutv.insert(vec!["u2".into(), 1.into()]).await.unwrap();
+    mutv.insert(vec!["u3".into(), 1.into()]).await.unwrap();
 
     sleep().await;
 
     let mut e = g.view("end").await.unwrap().into_reader_handle().unwrap();
 
     assert_eq!(
-        e.lookup(&["u1".try_into().unwrap()], true)
-            .await
-            .unwrap()
-            .into_vec(),
-        vec![vec!["u1".try_into().unwrap(), 1.into()]]
+        e.lookup(&["u1".into()], true).await.unwrap().into_vec(),
+        vec![vec!["u1".into(), 1.into()]]
     );
     assert_eq!(
-        e.lookup(&["u2".try_into().unwrap()], true)
-            .await
-            .unwrap()
-            .into_vec(),
+        e.lookup(&["u2".into()], true).await.unwrap().into_vec(),
         Vec::<Vec<DfValue>>::new()
     );
     assert_eq!(
-        e.lookup(&["u3".try_into().unwrap()], true)
-            .await
-            .unwrap()
-            .into_vec(),
-        vec![vec!["u3".try_into().unwrap(), 2.into()]]
+        e.lookup(&["u3".into()], true).await.unwrap().into_vec(),
+        vec![vec!["u3".into(), 2.into()]]
     );
 
     sleep().await;
@@ -2995,7 +2912,7 @@ async fn pkey_then_full_table_with_bogokey() {
         .unwrap();
 
     let rows: Vec<Vec<DfValue>> = (0..10)
-        .map(|n| vec![n.into(), format!("post {}", n).try_into().unwrap()])
+        .map(|n| vec![n.into(), format!("post {}", n).into()])
         .collect();
     posts.insert_many(rows.clone()).await.unwrap();
 
@@ -3072,27 +2989,17 @@ async fn materialization_frontier() {
     let mut r = g.view("awvc").await.unwrap().into_reader_handle().unwrap();
 
     // seed votes
-    v.insert(vec!["a".try_into().unwrap(), 1.into()])
-        .await
-        .unwrap();
-    v.insert(vec!["a".try_into().unwrap(), 2.into()])
-        .await
-        .unwrap();
-    v.insert(vec!["b".try_into().unwrap(), 1.into()])
-        .await
-        .unwrap();
-    v.insert(vec!["c".try_into().unwrap(), 2.into()])
-        .await
-        .unwrap();
-    v.insert(vec!["d".try_into().unwrap(), 2.into()])
-        .await
-        .unwrap();
+    v.insert(vec!["a".into(), 1.into()]).await.unwrap();
+    v.insert(vec!["a".into(), 2.into()]).await.unwrap();
+    v.insert(vec!["b".into(), 1.into()]).await.unwrap();
+    v.insert(vec!["c".into(), 2.into()]).await.unwrap();
+    v.insert(vec!["d".into(), 2.into()]).await.unwrap();
 
     // seed articles
-    a.insert(vec![1.into(), "Hello world #1".try_into().unwrap()])
+    a.insert(vec![1.into(), "Hello world #1".into()])
         .await
         .unwrap();
-    a.insert(vec![2.into(), "Hello world #2".try_into().unwrap()])
+    a.insert(vec![2.into(), "Hello world #2".into()])
         .await
         .unwrap();
     sleep().await;
@@ -3103,19 +3010,11 @@ async fn materialization_frontier() {
     let two = 2.into();
     assert_eq!(
         r.lookup(&[one], true).await.unwrap().into_vec(),
-        vec![vec![
-            1.into(),
-            "Hello world #1".try_into().unwrap(),
-            2.into()
-        ]]
+        vec![vec![1.into(), "Hello world #1".into(), 2.into()]]
     );
     assert_eq!(
         r.lookup(&[two], true).await.unwrap().into_vec(),
-        vec![vec![
-            2.into(),
-            "Hello world #2".try_into().unwrap(),
-            3.into()
-        ]]
+        vec![vec![2.into(), "Hello world #2".into(), 3.into()]]
     );
 
     for _ in 0..1_000 {
@@ -3123,24 +3022,10 @@ async fn materialization_frontier() {
             let r = r.lookup(&[id.into()], true).await.unwrap().into_vec();
             match id {
                 1 => {
-                    assert_eq!(
-                        r,
-                        vec![vec![
-                            1.into(),
-                            "Hello world #1".try_into().unwrap(),
-                            2.into()
-                        ]]
-                    );
+                    assert_eq!(r, vec![vec![1.into(), "Hello world #1".into(), 2.into()]]);
                 }
                 2 => {
-                    assert_eq!(
-                        r,
-                        vec![vec![
-                            2.into(),
-                            "Hello world #2".try_into().unwrap(),
-                            3.into()
-                        ]]
-                    );
+                    assert_eq!(r, vec![vec![2.into(), "Hello world #2".into(), 3.into()]]);
                 }
                 _ => unreachable!(),
             }
@@ -3396,7 +3281,7 @@ async fn do_full_vote_migration(sharded: bool, old_puts_after: bool) {
     let mut mutv = g.table_by_index(vote).await.unwrap();
 
     let n = 250i64;
-    let title: DfValue = "foo".try_into().unwrap();
+    let title: DfValue = "foo".into();
     let raten: DfValue = 5.into();
 
     for i in 0..n {
@@ -3652,21 +3537,11 @@ async fn state_replay_migration_query() {
     let mut mutb = g.table_by_index(b).await.unwrap();
 
     // make a couple of records
-    muta.insert(vec![1.into(), "a".try_into().unwrap()])
-        .await
-        .unwrap();
-    muta.insert(vec![1.into(), "b".try_into().unwrap()])
-        .await
-        .unwrap();
-    muta.insert(vec![2.into(), "c".try_into().unwrap()])
-        .await
-        .unwrap();
-    mutb.insert(vec![1.into(), "n".try_into().unwrap()])
-        .await
-        .unwrap();
-    mutb.insert(vec![2.into(), "o".try_into().unwrap()])
-        .await
-        .unwrap();
+    muta.insert(vec![1.into(), "a".into()]).await.unwrap();
+    muta.insert(vec![1.into(), "b".into()]).await.unwrap();
+    muta.insert(vec![2.into(), "c".into()]).await.unwrap();
+    mutb.insert(vec![1.into(), "n".into()]).await.unwrap();
+    mutb.insert(vec![2.into(), "o".into()]).await.unwrap();
 
     let _ = g
         .migrate(move |mig| {
@@ -3692,25 +3567,13 @@ async fn state_replay_migration_query() {
     // there are (/should be) two records in a with x == 1
     // they may appear in any order
     let res = out.lookup(&[1.into()], true).await.unwrap().into_vec();
-    assert!(res.contains(&vec![
-        1.into(),
-        "a".try_into().unwrap(),
-        "n".try_into().unwrap()
-    ]));
-    assert!(res.contains(&vec![
-        1.into(),
-        "b".try_into().unwrap(),
-        "n".try_into().unwrap()
-    ]));
+    assert!(res.contains(&vec![1.into(), "a".into(), "n".into()]));
+    assert!(res.contains(&vec![1.into(), "b".into(), "n".into()]));
 
     // there are (/should be) one record in a with x == 2
     assert_eq!(
         out.lookup(&[2.into()], true).await.unwrap().into_vec(),
-        vec![vec![
-            2.into(),
-            "c".try_into().unwrap(),
-            "o".try_into().unwrap()
-        ]]
+        vec![vec![2.into(), "c".into(), "o".into()]]
     );
 
     // there are (/should be) no records with x == 3
@@ -3921,20 +3784,12 @@ async fn remove_query() {
     let mut qa = g.view("qa").await.unwrap().into_reader_handle().unwrap();
     let mut qb = g.view("qb").await.unwrap().into_reader_handle().unwrap();
 
-    mutb.insert(vec![
-        42.into(),
-        "2".try_into().unwrap(),
-        "3".try_into().unwrap(),
-    ])
-    .await
-    .unwrap();
-    mutb.insert(vec![
-        1.into(),
-        "4".try_into().unwrap(),
-        "5".try_into().unwrap(),
-    ])
-    .await
-    .unwrap();
+    mutb.insert(vec![42.into(), "2".into(), "3".into()])
+        .await
+        .unwrap();
+    mutb.insert(vec![1.into(), "4".into(), "5".into()])
+        .await
+        .unwrap();
     sleep().await;
 
     assert_eq!(
@@ -3954,13 +3809,9 @@ async fn remove_query() {
     assert_eq!(g.views().await.unwrap().len(), 1);
     g.view("qb").await.unwrap_err();
 
-    mutb.insert(vec![
-        42.into(),
-        "6".try_into().unwrap(),
-        "7".try_into().unwrap(),
-    ])
-    .await
-    .unwrap();
+    mutb.insert(vec![42.into(), "6".into(), "7".into()])
+        .await
+        .unwrap();
     sleep().await;
 
     match qb.lookup(&[0.into()], true).await.unwrap_err() {
@@ -3978,20 +3829,20 @@ macro_rules! get {
         // also, there's currently a bug where MIR doesn't guarantee the order of parameters, so we
         // try both O:)
         let mut v = $private
-            .lookup(&[$uid.into(), $aid.try_into().unwrap()], true)
+            .lookup(&[$uid.into(), $aid.into()], true)
             .await
             .unwrap()
             .into_vec();
         v.append(
             &mut $private
-                .lookup(&[$aid.try_into().unwrap(), $uid.into()], true)
+                .lookup(&[$aid.into(), $uid.into()], true)
                 .await
                 .unwrap()
                 .into_vec(),
         );
         v.append(
             &mut $public
-                .lookup(&[$aid.try_into().unwrap()], true)
+                .lookup(&[$aid.into()], true)
                 .await
                 .unwrap()
                 .into_vec(),
@@ -4051,19 +3902,19 @@ SELECT photo.p_id FROM photo JOIN album ON (photo.album = album.a_id) WHERE albu
         .unwrap();
     albums
         .perform_all(vec![
-            vec!["x".try_into().unwrap(), 1.into(), 0.into()],
-            vec!["y".try_into().unwrap(), 2.into(), 0.into()],
-            vec!["z".try_into().unwrap(), 3.into(), 1.into()],
-            vec!["q".try_into().unwrap(), 4.into(), 0.into()],
+            vec!["x".into(), 1.into(), 0.into()],
+            vec!["y".into(), 2.into(), 0.into()],
+            vec!["z".into(), 3.into(), 1.into()],
+            vec!["q".into(), 4.into(), 0.into()],
         ])
         .await
         .unwrap();
     photos
         .perform_all(vec![
-            vec!["a".try_into().unwrap(), "x".try_into().unwrap()],
-            vec!["b".try_into().unwrap(), "y".try_into().unwrap()],
-            vec!["c".try_into().unwrap(), "z".try_into().unwrap()],
-            vec!["d".try_into().unwrap(), "q".try_into().unwrap()],
+            vec!["a".into(), "x".into()],
+            vec!["b".into(), "y".into()],
+            vec!["c".into(), "z".into()],
+            vec!["d".into(), "q".into()],
         ])
         .await
         .unwrap();
@@ -4484,9 +4335,9 @@ async fn correct_nested_view_schema() {
     let q = g.view("swvc").await.unwrap().into_reader_handle().unwrap();
 
     let expected_schema = vec![
-        ("swvc.id".try_into().unwrap(), DfType::Int),
-        ("swvc.content".try_into().unwrap(), DfType::DEFAULT_TEXT),
-        ("swvc.vc".try_into().unwrap(), DfType::BigInt),
+        ("swvc.id".into(), DfType::Int),
+        ("swvc.content".into(), DfType::DEFAULT_TEXT),
+        ("swvc.vc".into(), DfType::BigInt),
     ];
     assert_eq!(
         q.schema()
@@ -6563,7 +6414,7 @@ async fn simple_enum() {
     let mut getter = g.view("c1").await.unwrap().into_reader_handle().unwrap();
 
     let color_idxs = HashMap::from([("red", 1), ("yellow", 2), ("green", 3)]);
-    let rows = vec!["green", "red", "purple"];
+    let rows = ["green", "red", "purple"];
     for (i, &color) in rows.iter().enumerate() {
         mutator
             .insert(vec![
@@ -8939,10 +8790,11 @@ async fn simple_dry_run_unsupported() {
     assert!(matches!(
         res,
         Err(RpcFailed {
-            source: box SelectQueryCreationFailed {
-                source: box ReadySetError::Unsupported(_),
-                ..
-            },
+            source:
+                box SelectQueryCreationFailed {
+                    source: box ReadySetError::Unsupported(_),
+                    ..
+                },
             ..
         })
     ));

@@ -104,7 +104,7 @@ impl<T> Values<T> {
     /// This is mostly intended for use when you are working with no more than one value per key.
     /// If there are multiple values stored for this key, the smallest one is returned
     pub fn first(&self) -> Option<&T> {
-        self.values.0.get(0)
+        self.values.0.first()
     }
 
     /// Get the eviction metadata associated with that value set

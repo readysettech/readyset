@@ -63,6 +63,8 @@ pub(super) fn make_expressions_above_grouped(
     qg: &QueryGraph,
     prev_node: &mut NodeIndex,
 ) -> HashMap<Expr, SqlIdentifier> {
+    // TODO(jasobrown) revisit this
+    #[allow(clippy::iter_overeager_cloned)]
     let exprs: Vec<_> = qg
         .aggregates
         .keys()

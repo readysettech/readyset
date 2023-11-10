@@ -975,7 +975,7 @@ impl<'a> QueryState<'a> {
             );
             self.unique_parameters
                 .entry(table_name.clone())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push((column_name.clone(), val.clone()));
             self.value_counter += 1;
             ret.push(val);

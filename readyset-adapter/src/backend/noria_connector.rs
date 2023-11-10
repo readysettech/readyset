@@ -647,6 +647,8 @@ impl NoriaConnector {
             );
         }
 
+        // TODO(jasobrown) revisit this
+        #[allow(clippy::iter_overeager_cloned)]
         let params: Vec<_> = {
             // extract parameter columns -- easy here, since they must all be in the same table
             let param_cols = utils::insert_statement_parameter_columns(&statement);
@@ -1222,7 +1224,7 @@ impl NoriaConnector {
         trace!("insert::construct ops");
 
         for (ri, row) in data.iter().enumerate() {
-            if let Some(col) = auto_increment_columns.get(0) {
+            if let Some(col) = auto_increment_columns.first() {
                 let idx = schema
                     .fields
                     .iter()

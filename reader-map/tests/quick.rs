@@ -1,5 +1,5 @@
 #![cfg(not(miri))]
-#![feature(btree_drain_filter)]
+#![feature(btree_extract_if)]
 
 extern crate reader_map;
 
@@ -126,10 +126,7 @@ fn do_ops<K, V, S>(
         match *op {
             Add(ref k, ref v) => {
                 reader_map.insert(k.clone(), v.clone());
-                write_ref
-                    .entry(k.clone())
-                    .or_insert_with(Vec::new)
-                    .push(v.clone());
+                write_ref.entry(k.clone()).or_default().push(v.clone());
             }
             Remove(ref k) => {
                 reader_map.remove_entry(k.clone());
@@ -146,7 +143,7 @@ fn do_ops<K, V, S>(
             }
             RemoveRange(ref range) => {
                 reader_map.remove_range(range.clone());
-                write_ref.drain_filter(|k, _| range.contains(k));
+                let _ = write_ref.extract_if(|k, _| range.contains(k));
             }
             Refresh => {
                 reader_map.publish();

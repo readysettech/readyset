@@ -484,7 +484,7 @@ impl MultithreadBenchmark for WorkloadEmulator {
     ) -> anyhow::Result<()> {
         let mut hist = hdrhistogram::Histogram::<u64>::new(3).unwrap();
 
-        let mut per_query_hist = match results.get(0) {
+        let mut per_query_hist = match results.first() {
             Some(r) => std::iter::repeat(hdrhistogram::Histogram::<u64>::new(3).unwrap())
                 .take(r.n)
                 .collect::<Vec<_>>(),

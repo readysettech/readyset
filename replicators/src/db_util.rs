@@ -230,7 +230,7 @@ mod tests {
             "CREATE VIEW `foobar` FROM SELECT * FROM `Posts` WHERE `1` = `1`".to_string();
         create_schema.add_view_create("foobar".to_string(), view_create);
 
-        let should_be_scrubbed = vec![
+        let should_be_scrubbed = [
             "`foobar`",
             "`Users`",
             "`UserId`",

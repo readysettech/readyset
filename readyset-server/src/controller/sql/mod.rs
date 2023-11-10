@@ -714,7 +714,9 @@ impl SqlIncorporator {
     ) -> ReadySetResult<(&DfType, Option<Relation>)> {
         let old_name = if !self.custom_types.contains_key(name) {
             let Some(old_name) = self.custom_types_by_oid.remove(&oid) else {
-                return Err(invalid_query_err!("Could not find custom type with oid {oid}"));
+                return Err(invalid_query_err!(
+                    "Could not find custom type with oid {oid}"
+                ));
             };
             self.custom_types_by_oid.insert(oid, name.clone());
             let ty = self

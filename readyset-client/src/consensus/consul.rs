@@ -28,9 +28,9 @@
 //! of the dataflow state).
 //!
 //! # Atomic updates to dataflow state
-//! 1. Read the current version of the controller state from /controller/state.
-//!    The chunks associated with this controller state are stored at
-//!    /controller/state/<version>/<chunk number>.
+//! 1. Read the current version of the controller state from /controller/state. The chunks
+//!    associated with this controller state are stored at /controller/state/<version>/<chunk
+//!    number>.
 //! 2. Read all the chunks associated with this state.
 //! 3. Stitch the bytes back together, decompress, deserialize and update the dataflow state.
 //! 4. Split the compressed + serialized dataflow state into chunks of size 512 KB.
@@ -430,7 +430,7 @@ impl ConsulAuthority {
                         .map_err(|e| internal_err!("Failure during decompress: {e}"))?;
                     Some(rmp_serde::from_slice(&data)?)
                 }
-                Err(ClientError::APIError { code, .. }) if code == 404 => {
+                Err(ClientError::APIError { code: 404, .. }) => {
                     warn!("No controller state version in Consul");
                     None
                 }
@@ -446,7 +446,7 @@ impl ConsulAuthority {
     ///  As we only relinquish leadership based on consul's failure detection, we are safe
     ///  to update the state key.
     async fn write_controller_state_value(&self, input: StateValue) -> ReadySetResult<()> {
-        let my_session = Some(self.get_session()?);
+        let my_session = self.get_session()?;
         if let Ok(r) = kv::read(
             &self.consul,
             &self.prefix_with_deployment(CONTROLLER_KEY),
@@ -454,8 +454,9 @@ impl ConsulAuthority {
         )
         .await
         {
-            if get_kv_pair(r)?.session != my_session {
-                internal!("An authority that has lost leadership attempted to issue a write")
+            match get_kv_pair(r)?.session {
+                Some(s) if s == my_session => {}
+                _ => internal!("An authority that has lost leadership attempted to issue a write"),
             }
         }
 
@@ -466,7 +467,7 @@ impl ConsulAuthority {
             &self.consul,
             &self.prefix_with_deployment(STATE_KEY),
             &compressed,
-            Some(kv_requests::SetKeyRequestBuilder::default().acquire(my_session.unwrap())),
+            Some(kv_requests::SetKeyRequestBuilder::default().acquire(my_session)),
         )
         .await?;
 
@@ -921,7 +922,7 @@ impl AuthorityControl for ConsulAuthority {
                     })
                     .collect(),
                 // Consul returns a 404 error if the key does not exist.
-                Err(ClientError::APIError { code, .. }) if code == 404 => HashSet::new(),
+                Err(ClientError::APIError { code: 404, .. }) => HashSet::new(),
                 Err(e) => return Err(e.into()),
             },
         )

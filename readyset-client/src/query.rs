@@ -565,6 +565,7 @@ impl Serialize for QueryList {
 #[cfg(test)]
 mod tests {
     use proptest::arbitrary::Arbitrary;
+    use proptest::strategy::Strategy;
     use readyset_util::hash_laws;
 
     use super::*;
@@ -575,7 +576,6 @@ mod tests {
 
         fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
             use proptest::arbitrary::any;
-            use proptest::prelude::*;
 
             any::<String>().prop_map(Into::into).boxed()
         }

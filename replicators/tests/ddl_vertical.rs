@@ -510,15 +510,12 @@ impl ModelState for DDLModelState {
             let create_simple_view_strat =
                 gen_create_simple_view(self.tables.keys().cloned().collect()).boxed();
 
-            possible_ops.extend(
-                [
-                    drop_strategy,
-                    write_strategy,
-                    add_col_strat,
-                    create_simple_view_strat,
-                ]
-                .into_iter(),
-            );
+            possible_ops.extend([
+                drop_strategy,
+                write_strategy,
+                add_col_strat,
+                create_simple_view_strat,
+            ]);
         }
 
         // If we have at least two tables, we can create a join view:
@@ -660,7 +657,7 @@ impl ModelState for DDLModelState {
                 new_name,
             } => {
                 let col_specs = self.tables.get_mut(table).unwrap();
-                let mut spec = col_specs
+                let spec = col_specs
                     .iter_mut()
                     .find(|cs| cs.name == *col_name)
                     .unwrap();

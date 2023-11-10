@@ -1,3 +1,6 @@
+// TODO(jasobrown) double check this
+#![allow(clippy::diverging_sub_expression)]
+
 use std::sync::Arc;
 use std::vec;
 

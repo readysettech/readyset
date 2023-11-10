@@ -429,7 +429,7 @@ fn make_union_node(
     let mut emit_column_id: HashMap<NodeIndex, Vec<usize>> = HashMap::new();
 
     let mut cols = Vec::with_capacity(
-        emit.get(0)
+        emit.first()
             .ok_or_else(|| internal_err!("No emit columns"))?
             .len(),
     );

@@ -1,3 +1,6 @@
+// TODO(jasobrown) revisit this
+#![allow(clippy::diverging_sub_expression)]
+
 use std::fmt::Debug;
 use std::pin::Pin;
 use std::str::FromStr;

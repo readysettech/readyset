@@ -984,8 +984,8 @@ impl ReaderHandleBuilder {
             let Some(shard_addr) = *shard_addr else {
                 return Err(ReadySetError::ReaderReplicaNotRunning {
                     replica: replica.unwrap_or(0),
-                    node
-                })
+                    node,
+                });
             };
 
             addrs.push(shard_addr);
@@ -1269,7 +1269,7 @@ impl Service<ViewQuery> for ReaderHandle {
             self.shards
                 .iter_mut()
                 .enumerate()
-                .zip(shard_queries.into_iter())
+                .zip(shard_queries)
                 .filter_map(|((shardi, shard), shard_queries)| {
                     if shard_queries.is_empty() {
                         // poll_ready reserves a sender slot which we have to release

@@ -74,14 +74,13 @@ pub(crate) fn convert_filters_to_join_keys(query: &mut MirQuery<'_>) -> ReadySet
                 MirNodeInner::AliasTable { .. } => {
                     let alias_table_parent = *query
                         .ancestors(ancestor_idx)?
-                        .get(0)
+                        .first()
                         .ok_or_else(|| internal_err!("AliasTable must have a parent"))?;
                     let parent_cols = query.graph.columns(alias_table_parent);
                     let (Ok(new_c1_idx), Ok(new_c2_idx)) = (
                         query.graph.column_id_for_column(ancestor_idx, &c1),
-                        query.graph.column_id_for_column(ancestor_idx, &c2)
+                        query.graph.column_id_for_column(ancestor_idx, &c2),
                     ) else {
-
                         trace!(
                             ancestor_idx = %ancestor_idx.index(),
                             "Filter columns no longer resolve in ancestor, giving up on filter"
@@ -111,7 +110,7 @@ pub(crate) fn convert_filters_to_join_keys(query: &mut MirQuery<'_>) -> ReadySet
                 MirNodeInner::Join { .. } => {
                     let join_parents = query.ancestors(ancestor_idx)?;
                     let left_parent = *join_parents
-                        .get(0)
+                        .first()
                         .ok_or_else(|| internal_err!("Joins must have at least two ancestors"))?;
                     let right_parent = *join_parents
                         .get(1)

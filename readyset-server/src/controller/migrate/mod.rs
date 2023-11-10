@@ -1125,6 +1125,7 @@ fn plan_add_nodes(
             .filter(|&&&ni| !dataflow_state.ingredients[ni].is_dropped())
             .map(|&&ni| (dataflow_state.ingredients[ni].domain(), ni))
             .fold(HashMap::new(), |mut dns, (d, ni)| {
+                #[allow(clippy::unwrap_or_default)]
                 dns.entry(d).or_insert_with(Vec::new).push(ni);
                 dns
             });
@@ -1166,7 +1167,7 @@ fn plan_add_nodes(
                 dataflow_state
                     .domain_node_index_pairs
                     .entry(*domain)
-                    .or_insert_with(HashMap::new)
+                    .or_default()
                     .entry(ni)
                     .or_insert_with(|| {
                         // Only make a new local index for the node if it doesn't already have one,
@@ -1443,7 +1444,7 @@ fn remove_nodes(
         debug!(node = %ni.index(), "Removed node");
         domain_removals
             .entry(node.domain())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(node.local_addr())
     }
 

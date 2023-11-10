@@ -563,7 +563,7 @@ fn binlog_val_to_noria_val(
             }
             let time = chrono::naive::NaiveDateTime::from_timestamp(epoch, 0);
             // Can unwrap because we know it maps directly to [`DfValue`]
-            Ok(time.try_into().unwrap())
+            Ok(time.into())
         }
         (ColumnType::MYSQL_TYPE_TIMESTAMP2, _) => {
             // When meta is anything else, `mysql_common` encodes this value as number of
@@ -574,7 +574,7 @@ fn binlog_val_to_noria_val(
             let usecs = usecs.parse::<u32>().unwrap();
             let time = chrono::naive::NaiveDateTime::from_timestamp(secs, usecs * 32);
             // Can wrap because we know this maps directly to [`DfValue`]
-            Ok(time.try_into().unwrap())
+            Ok(time.into())
         }
         _ => Ok(val.try_into().map_err(|e| {
             mysql_async::Error::Other(Box::new(internal_err!("Unable to coerce value {}", e)))

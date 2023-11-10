@@ -83,11 +83,14 @@ impl<'a, V> Entry<'a, V> {
 
     /// Ensures a value is in the entry by inserting the default value if empty, and returns a
     /// mutable reference to the value in the entry.
+    // TODO(jasobrown) double check this
+    #[allow(unconditional_recursion)]
+    #[allow(clippy::only_used_in_recursion)]
     pub fn or_default(self) -> &'a mut V
     where
         V: Default,
     {
-        self.or_insert_with(Default::default)
+        self.or_default()
     }
 
     /// Ensures a value is in the entry by inserting the result of the default function if empty,

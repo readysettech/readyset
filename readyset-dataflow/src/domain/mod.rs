@@ -1250,7 +1250,7 @@ impl Domain {
                 let mut evictions: HashMap<Tag, HashSet<KeyComparison>> = HashMap::new();
                 for miss in misses {
                     for (tag, cols) in &deps {
-                        evictions.entry(*tag).or_insert_with(HashSet::new).insert(
+                        evictions.entry(*tag).or_default().insert(
                             miss.record
                                 .cloned_indices(cols.iter().copied())
                                 .unwrap()
@@ -3188,10 +3188,9 @@ impl Domain {
                 // so let's walk through them
                 //
                 //  1. this applies only to partial backfills
-                //  2. we should only set finished_partial if it hasn't already been set.
-                //     this is important, as misses will cause backfill_keys to be pruned
-                //     over time, which would cause finished_partial to hold the wrong
-                //     value!
+                //  2. we should only set finished_partial if it hasn't already been set. this is
+                //     important, as misses will cause backfill_keys to be pruned over time, which
+                //     would cause finished_partial to hold the wrong value!
                 if let Some(backfill_keys) = &backfill_keys {
                     if finished_partial == 0 && (dst_is_reader || !dst_is_sender) {
                         finished_partial = backfill_keys.len();
@@ -3565,7 +3564,7 @@ impl Domain {
 
         // While the are still misses, we iterate over the array, each time draining it from
         // elements that can be batched into a single call to `on_replay_misses`
-        while let Some(next_replay) = need_replay.get(0).cloned() {
+        while let Some(next_replay) = need_replay.first().cloned() {
             let misses: HashSet<_> = need_replay
                 .extract_if(|rep| next_replay.can_combine(rep))
                 .map(

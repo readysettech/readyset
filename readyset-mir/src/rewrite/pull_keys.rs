@@ -13,7 +13,7 @@ fn push_view_key(query: &mut MirQuery<'_>, node_idx: NodeIndex) -> ReadySetResul
         // TODO: unions; multi-aggregates
         unsupported!("Don't know how to push view key below multi-child node");
     }
-    let child_idx = *children.get(0).unwrap();
+    let child_idx = *children.first().unwrap();
 
     // If we're lifting past an AliasTable node, rewrite all columns referenced by the filter
     // condition that should resolve in that AliasTable node to use the correct table name

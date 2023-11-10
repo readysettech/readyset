@@ -1,3 +1,5 @@
+// TODO(jasobrown) revisit this
+#![allow(clippy::non_canonical_partial_ord_impl)]
 use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
@@ -498,8 +500,8 @@ where
     new_ces
 }
 
-// 1. Extract any predicates with placeholder parameters. We push these down to the edge
-//    nodes, since we cannot instantiate the parameters inside the data flow graph (except for
+// 1. Extract any predicates with placeholder parameters. We push these down to the edge nodes,
+//    since we cannot instantiate the parameters inside the data flow graph (except for
 //    non-materialized nodes).
 // 2. Extract local predicates
 // 3. Collect remaining predicates as global predicates
@@ -746,7 +748,9 @@ fn extract_having_aggregates(
                     table: None,
                 });
                 let agg_expr = mem::replace(expr, col_expr);
-                let Expr::Call(fun) = agg_expr else { unreachable!("Checked matches above") };
+                let Expr::Call(fun) = agg_expr else {
+                    unreachable!("Checked matches above")
+                };
                 self.result.push((fun, name));
                 Ok(())
             } else {

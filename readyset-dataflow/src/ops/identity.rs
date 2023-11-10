@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::convert::TryInto;
 
 use readyset_errors::ReadySetResult;
 use serde::{Deserialize, Serialize};
@@ -54,7 +53,7 @@ impl Ingredient for Identity {
     }
 
     fn column_source(&self, cols: &[usize]) -> ColumnSource {
-        ColumnSource::exact_copy(self.src.as_global(), cols.try_into().unwrap())
+        ColumnSource::exact_copy(self.src.as_global(), cols.into())
     }
 
     fn description(&self, _: bool) -> String {
@@ -83,7 +82,7 @@ mod tests {
     fn it_forwards() {
         let mut g = setup(false);
 
-        let left: Vec<DfValue> = vec![1.into(), "a".try_into().unwrap()];
+        let left: Vec<DfValue> = vec![1.into(), "a".into()];
         assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
     }
 

@@ -1049,6 +1049,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::single_range_in_vec_init)]
     fn insert_interval() {
         let mut tree: IntervalTreeSet<usize> = Default::default();
 
@@ -1123,6 +1124,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::single_range_in_vec_init)]
     fn remove_interval() {
         let mut tree: IntervalTreeSet<usize> = Default::default();
 
@@ -1214,6 +1216,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::single_range_in_vec_init)]
     fn remove_range_from_unbounded() {
         let mut tree: IntervalTreeSet<usize> = Default::default();
 

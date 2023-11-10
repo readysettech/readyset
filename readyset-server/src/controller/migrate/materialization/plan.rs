@@ -333,6 +333,7 @@ impl<'a> Plan<'a> {
                 )
             })
             .fold(BTreeMap::new(), |mut map, (key, pi)| {
+                #[allow(clippy::unwrap_or_default)]
                 map.entry(key).or_insert_with(Vec::new).push(pi);
                 map
             });
@@ -530,7 +531,7 @@ impl<'a> Plan<'a> {
                     .num_replicas(domain)
                     .expect("Domain should exist at this point");
                 let source_replicas = segments
-                    .get(0)
+                    .first()
                     .and_then(|(source_domain, _)| self.dmp.num_replicas(*source_domain).ok());
                 let replica_fanout = match source_replicas {
                     Some(source_replicas) if source_replicas == our_replicas => {

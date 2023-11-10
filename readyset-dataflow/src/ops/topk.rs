@@ -444,7 +444,7 @@ impl Ingredient for TopK {
     }
 
     fn column_source(&self, cols: &[usize]) -> ColumnSource {
-        ColumnSource::exact_copy(self.src.as_global(), cols.try_into().unwrap())
+        ColumnSource::exact_copy(self.src.as_global(), cols.into())
     }
 
     fn description(&self, detailed: bool) -> String {
@@ -494,13 +494,13 @@ mod tests {
         let (mut g, _) = setup(false);
         let ni = g.node().local_addr();
 
-        let r12: Vec<DfValue> = vec![1.into(), "z".try_into().unwrap(), 12.into()];
-        let r10: Vec<DfValue> = vec![2.into(), "z".try_into().unwrap(), 10.into()];
-        let r11: Vec<DfValue> = vec![3.into(), "z".try_into().unwrap(), 11.into()];
-        let r5: Vec<DfValue> = vec![4.into(), "z".try_into().unwrap(), 5.into()];
-        let r15: Vec<DfValue> = vec![5.into(), "z".try_into().unwrap(), 15.into()];
-        let r10b: Vec<DfValue> = vec![6.into(), "z".try_into().unwrap(), 10.into()];
-        let r10c: Vec<DfValue> = vec![7.into(), "z".try_into().unwrap(), 10.into()];
+        let r12: Vec<DfValue> = vec![1.into(), "z".into(), 12.into()];
+        let r10: Vec<DfValue> = vec![2.into(), "z".into(), 10.into()];
+        let r11: Vec<DfValue> = vec![3.into(), "z".into(), 11.into()];
+        let r5: Vec<DfValue> = vec![4.into(), "z".into(), 5.into()];
+        let r15: Vec<DfValue> = vec![5.into(), "z".into(), 15.into()];
+        let r10b: Vec<DfValue> = vec![6.into(), "z".into(), 10.into()];
+        let r10c: Vec<DfValue> = vec![7.into(), "z".into(), 10.into()];
 
         g.narrow_one_row(r12, true);
         g.narrow_one_row(r11, true);
@@ -518,11 +518,11 @@ mod tests {
     fn it_forwards() {
         let (mut g, _) = setup(false);
 
-        let r12: Vec<DfValue> = vec![1.into(), "z".try_into().unwrap(), 12.into()];
-        let r10: Vec<DfValue> = vec![2.into(), "z".try_into().unwrap(), 10.into()];
-        let r11: Vec<DfValue> = vec![3.into(), "z".try_into().unwrap(), 11.into()];
-        let r5: Vec<DfValue> = vec![4.into(), "z".try_into().unwrap(), 5.into()];
-        let r15: Vec<DfValue> = vec![5.into(), "z".try_into().unwrap(), 15.into()];
+        let r12: Vec<DfValue> = vec![1.into(), "z".into(), 12.into()];
+        let r10: Vec<DfValue> = vec![2.into(), "z".into(), 10.into()];
+        let r11: Vec<DfValue> = vec![3.into(), "z".into(), 11.into()];
+        let r5: Vec<DfValue> = vec![4.into(), "z".into(), 5.into()];
+        let r15: Vec<DfValue> = vec![5.into(), "z".into(), 15.into()];
 
         let a = g.narrow_one_row(r12.clone(), true);
         assert_eq!(a, vec![r12].into());
@@ -546,11 +546,11 @@ mod tests {
     fn it_queries_parent_on_deletes() {
         let (mut g, s) = setup(false);
 
-        let r12: Vec<DfValue> = vec![1.into(), "z".try_into().unwrap(), 12.into()];
-        let r10: Vec<DfValue> = vec![2.into(), "z".try_into().unwrap(), 10.into()];
-        let r11: Vec<DfValue> = vec![3.into(), "z".try_into().unwrap(), 11.into()];
-        let r5: Vec<DfValue> = vec![4.into(), "z".try_into().unwrap(), 5.into()];
-        let r15: Vec<DfValue> = vec![5.into(), "z".try_into().unwrap(), 15.into()];
+        let r12: Vec<DfValue> = vec![1.into(), "z".into(), 12.into()];
+        let r10: Vec<DfValue> = vec![2.into(), "z".into(), 10.into()];
+        let r11: Vec<DfValue> = vec![3.into(), "z".into(), 11.into()];
+        let r5: Vec<DfValue> = vec![4.into(), "z".into(), 5.into()];
+        let r15: Vec<DfValue> = vec![5.into(), "z".into(), 15.into()];
 
         // fill the parent (but not with 15 since we'll delete it)
         g.seed(s, r12.clone());
@@ -585,11 +585,11 @@ mod tests {
     fn it_queries_parent_on_deletes_reversed() {
         let (mut g, s) = setup(true);
 
-        let r12: Vec<DfValue> = vec![1.into(), "z".try_into().unwrap(), 12.into()];
-        let r10: Vec<DfValue> = vec![2.into(), "z".try_into().unwrap(), 10.into()];
-        let r11: Vec<DfValue> = vec![3.into(), "z".try_into().unwrap(), 11.into()];
-        let r5: Vec<DfValue> = vec![4.into(), "z".try_into().unwrap(), 5.into()];
-        let r15: Vec<DfValue> = vec![5.into(), "z".try_into().unwrap(), 15.into()];
+        let r12: Vec<DfValue> = vec![1.into(), "z".into(), 12.into()];
+        let r10: Vec<DfValue> = vec![2.into(), "z".into(), 10.into()];
+        let r11: Vec<DfValue> = vec![3.into(), "z".into(), 11.into()];
+        let r5: Vec<DfValue> = vec![4.into(), "z".into(), 5.into()];
+        let r15: Vec<DfValue> = vec![5.into(), "z".into(), 15.into()];
 
         // fill the parent (but not with 5 since we'll delete it)
         g.seed(s, r12.clone());
@@ -626,31 +626,11 @@ mod tests {
 
         let (mut g, _) = setup(true);
 
-        let r12: Vec<DfValue> = vec![
-            1.into(),
-            "z".try_into().unwrap(),
-            DfValue::try_from(-12.123).unwrap(),
-        ];
-        let r10: Vec<DfValue> = vec![
-            2.into(),
-            "z".try_into().unwrap(),
-            DfValue::try_from(0.0431).unwrap(),
-        ];
-        let r11: Vec<DfValue> = vec![
-            3.into(),
-            "z".try_into().unwrap(),
-            DfValue::try_from(-0.082).unwrap(),
-        ];
-        let r5: Vec<DfValue> = vec![
-            4.into(),
-            "z".try_into().unwrap(),
-            DfValue::try_from(5.601).unwrap(),
-        ];
-        let r15: Vec<DfValue> = vec![
-            5.into(),
-            "z".try_into().unwrap(),
-            DfValue::try_from(-15.9).unwrap(),
-        ];
+        let r12: Vec<DfValue> = vec![1.into(), "z".into(), DfValue::try_from(-12.123).unwrap()];
+        let r10: Vec<DfValue> = vec![2.into(), "z".into(), DfValue::try_from(0.0431).unwrap()];
+        let r11: Vec<DfValue> = vec![3.into(), "z".into(), DfValue::try_from(-0.082).unwrap()];
+        let r5: Vec<DfValue> = vec![4.into(), "z".into(), DfValue::try_from(5.601).unwrap()];
+        let r15: Vec<DfValue> = vec![5.into(), "z".into(), DfValue::try_from(-15.9).unwrap()];
 
         let a = g.narrow_one_row(r12.clone(), true);
         assert_eq!(a, vec![r12].into());
@@ -726,12 +706,12 @@ mod tests {
         let (mut g, _) = setup(false);
         let ni = g.node().local_addr();
 
-        let r1: Vec<DfValue> = vec![1.into(), "z".try_into().unwrap(), 10.into()];
-        let r2: Vec<DfValue> = vec![2.into(), "z".try_into().unwrap(), 10.into()];
-        let r3: Vec<DfValue> = vec![3.into(), "z".try_into().unwrap(), 10.into()];
-        let r4: Vec<DfValue> = vec![4.into(), "z".try_into().unwrap(), 5.into()];
-        let r4a: Vec<DfValue> = vec![4.into(), "z".try_into().unwrap(), 10.into()];
-        let r4b: Vec<DfValue> = vec![4.into(), "z".try_into().unwrap(), 11.into()];
+        let r1: Vec<DfValue> = vec![1.into(), "z".into(), 10.into()];
+        let r2: Vec<DfValue> = vec![2.into(), "z".into(), 10.into()];
+        let r3: Vec<DfValue> = vec![3.into(), "z".into(), 10.into()];
+        let r4: Vec<DfValue> = vec![4.into(), "z".into(), 5.into()];
+        let r4a: Vec<DfValue> = vec![4.into(), "z".into(), 10.into()];
+        let r4b: Vec<DfValue> = vec![4.into(), "z".into(), 11.into()];
 
         g.narrow_one_row(r1, true);
         g.narrow_one_row(r2, true);
@@ -770,17 +750,17 @@ mod tests {
         let (mut g, _) = setup(true);
         let ni = g.node().local_addr();
 
-        let ra1: Vec<DfValue> = vec![1.into(), "a".try_into().unwrap(), 1.into()];
-        let ra2: Vec<DfValue> = vec![2.into(), "a".try_into().unwrap(), 2.into()];
-        let ra3: Vec<DfValue> = vec![3.into(), "a".try_into().unwrap(), 3.into()];
-        let ra4: Vec<DfValue> = vec![4.into(), "a".try_into().unwrap(), 4.into()];
-        let ra5: Vec<DfValue> = vec![5.into(), "a".try_into().unwrap(), 5.into()];
+        let ra1: Vec<DfValue> = vec![1.into(), "a".into(), 1.into()];
+        let ra2: Vec<DfValue> = vec![2.into(), "a".into(), 2.into()];
+        let ra3: Vec<DfValue> = vec![3.into(), "a".into(), 3.into()];
+        let ra4: Vec<DfValue> = vec![4.into(), "a".into(), 4.into()];
+        let ra5: Vec<DfValue> = vec![5.into(), "a".into(), 5.into()];
 
-        let rb1: Vec<DfValue> = vec![1.into(), "b".try_into().unwrap(), 1.into()];
-        let rb2: Vec<DfValue> = vec![2.into(), "b".try_into().unwrap(), 2.into()];
-        let rb3: Vec<DfValue> = vec![3.into(), "b".try_into().unwrap(), 3.into()];
-        let rb4: Vec<DfValue> = vec![4.into(), "b".try_into().unwrap(), 4.into()];
-        let rb5: Vec<DfValue> = vec![5.into(), "b".try_into().unwrap(), 5.into()];
+        let rb1: Vec<DfValue> = vec![1.into(), "b".into(), 1.into()];
+        let rb2: Vec<DfValue> = vec![2.into(), "b".into(), 2.into()];
+        let rb3: Vec<DfValue> = vec![3.into(), "b".into(), 3.into()];
+        let rb4: Vec<DfValue> = vec![4.into(), "b".into(), 4.into()];
+        let rb5: Vec<DfValue> = vec![5.into(), "b".into(), 5.into()];
 
         g.narrow_one_row(ra3, true);
         g.narrow_one_row(ra4.clone(), true);
@@ -822,10 +802,10 @@ mod tests {
     #[test]
     fn update_shifting_out() {
         let (mut g, s) = setup(false);
-        let ra1: Vec<DfValue> = vec![1.into(), "a".try_into().unwrap(), 1.into()];
-        let ra2: Vec<DfValue> = vec![2.into(), "a".try_into().unwrap(), 2.into()];
-        let ra3: Vec<DfValue> = vec![3.into(), "a".try_into().unwrap(), 3.into()];
-        let ra4: Vec<DfValue> = vec![4.into(), "a".try_into().unwrap(), 4.into()];
+        let ra1: Vec<DfValue> = vec![1.into(), "a".into(), 1.into()];
+        let ra2: Vec<DfValue> = vec![2.into(), "a".into(), 2.into()];
+        let ra3: Vec<DfValue> = vec![3.into(), "a".into(), 3.into()];
+        let ra4: Vec<DfValue> = vec![4.into(), "a".into(), 4.into()];
 
         g.seed(s, ra1.clone());
         g.seed(s, ra2.clone());
@@ -836,7 +816,7 @@ mod tests {
         g.narrow_one_row(ra3.clone(), true);
         g.narrow_one_row(ra4, true);
 
-        let ra0: Vec<DfValue> = vec![3.into(), "a".try_into().unwrap(), 0.into()];
+        let ra0: Vec<DfValue> = vec![3.into(), "a".into(), 0.into()];
 
         let emit = g.narrow_one(vec![(ra3.clone(), false), (ra0, true)], true);
         assert_eq!(emit, vec![(ra3, false), (ra1, true)].into());

@@ -1,3 +1,6 @@
+// TODO(jasobornw) revisit this
+#![allow(clippy::diverging_sub_expression)]
+
 //! [`StandaloneAuthority`] is intended to be used within a single (standalone) process, and state
 //! can't be shared between different processes, but within a single process it acts as any other
 //! authority. As such each process has a singleton "Store" that keeps handles for all deployments

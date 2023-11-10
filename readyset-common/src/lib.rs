@@ -111,8 +111,6 @@ impl IndexRef {
 
 #[cfg(test)]
 mod tests {
-    use std::convert::TryInto;
-
     use super::*;
 
     #[test]
@@ -126,11 +124,7 @@ mod tests {
         let shrt = DfValue::Int(5);
         let time = DfValue::TimestampTz(NaiveDateTime::from_timestamp(0, 42_000_000).into());
 
-        let rec = vec![
-            DfValue::Int(5),
-            "asdfasdfasdfasdf".try_into().unwrap(),
-            "asdf".try_into().unwrap(),
-        ];
+        let rec = vec![DfValue::Int(5), "asdfasdfasdfasdf".into(), "asdf".into()];
 
         // DfValue should always use 16 bytes itself
         assert_eq!(size_of::<DfValue>(), 16);

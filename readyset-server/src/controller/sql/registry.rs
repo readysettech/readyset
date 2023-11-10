@@ -425,7 +425,7 @@ impl ExprRegistry {
             let Some(table_id) = self.aliases.get(&table_reference) else {
                 // Queries can reference tables that don't exist in the schema, eg with CTEs or
                 // aliased subqueries
-                continue
+                continue;
             };
             // Add the dependency.
             self.dependencies

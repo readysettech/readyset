@@ -1,3 +1,6 @@
+// TODO(jasobrown) double check this
+#![allow(clippy::non_canonical_partial_ord_impl)]
+
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::convert::TryFrom;

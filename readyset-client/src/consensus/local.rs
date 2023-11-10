@@ -1,3 +1,6 @@
+// TODO(jasobornw) revisit this
+#![allow(clippy::diverging_sub_expression)]
+
 //! LocalAuthority is replicating the abstraction over the different authority
 //! systems (Consul, etcd) but for a single process and in memory
 //! instead of requiring a server.

@@ -1000,7 +1000,7 @@ impl SqlToMirConverter {
         let projected_cols_right = self.mir_graph.columns(right_node);
         let mut project = projected_cols_left
             .into_iter()
-            .chain(projected_cols_right.into_iter())
+            .chain(projected_cols_right)
             .collect::<Vec<Column>>();
 
         // join columns need us to generate join group configs for the operator
@@ -1963,8 +1963,8 @@ impl SqlToMirConverter {
                 }
             }
 
-            // 6. Determine literals and expressions that global predicates depend
-            //    on and add them here; remembering that we've already added them-
+            // 6. Determine literals and expressions that global predicates depend on and add them
+            //    here; remembering that we've already added them-
             if let Some(projected) =
                 self.make_value_project_node(query_name, query_graph, prev_node)?
             {
@@ -2262,11 +2262,7 @@ impl SqlToMirConverter {
                     MirNode::new(
                         query_name.clone(),
                         MirNodeInner::Leaf {
-                            keys: view_key
-                                .columns
-                                .into_iter()
-                                .map(|(col, placeholder)| (col, placeholder))
-                                .collect(),
+                            keys: view_key.columns.into_iter().collect(),
                             index_type: view_key.index_type,
                             lowered_to_df: false,
                             order_by,

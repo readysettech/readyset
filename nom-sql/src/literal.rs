@@ -1,3 +1,6 @@
+// TODO(jasobrown) double check this
+#![allow(clippy::non_canonical_partial_ord_impl)]
+
 use core::cmp::Ordering;
 use std::hash::{Hash, Hasher};
 use std::str::FromStr;

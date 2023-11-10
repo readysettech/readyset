@@ -103,7 +103,7 @@ mod types {
                     .query("SELECT x FROM t WHERE x = $1", &[v])
                     .await
                     .unwrap()
-                    .get(0)
+                    .first()
                     .expect("Should have at least one value equal to {v:?}")
                     .get::<_, V>(0);
                 assert_eq!(fallback_result, *v);

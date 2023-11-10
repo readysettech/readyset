@@ -26,7 +26,6 @@ async fn main() -> anyhow::Result<()> {
     for _i in 0..opts.parallelism {
         let mut conn = opts.database_url.connect(None).await?;
         let statement = conn.prepare("SELECT * FROM t").await?;
-        let counter = counter;
         let handle = tokio::task::spawn(async move {
             let mut i = 600000;
             loop {

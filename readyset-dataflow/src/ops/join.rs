@@ -747,19 +747,19 @@ mod tests {
     #[test]
     fn it_works() {
         let (mut j, l, r) = setup();
-        let l_a1 = vec![1.into(), "a".try_into().unwrap()];
-        let l_b2 = vec![2.into(), "b".try_into().unwrap()];
-        let l_c3 = vec![3.into(), "c".try_into().unwrap()];
+        let l_a1 = vec![1.into(), "a".into()];
+        let l_b2 = vec![2.into(), "b".into()];
+        let l_c3 = vec![3.into(), "c".into()];
 
-        let r_x1 = vec![1.into(), "x".try_into().unwrap()];
-        let r_y1 = vec![1.into(), "y".try_into().unwrap()];
-        let r_z2 = vec![2.into(), "z".try_into().unwrap()];
-        let r_w3 = vec![3.into(), "w".try_into().unwrap()];
-        let r_v4 = vec![4.into(), "w".try_into().unwrap()];
+        let r_x1 = vec![1.into(), "x".into()];
+        let r_y1 = vec![1.into(), "y".into()];
+        let r_z2 = vec![2.into(), "z".into()];
+        let r_w3 = vec![3.into(), "w".into()];
+        let r_v4 = vec![4.into(), "w".into()];
 
         let r_nop: Vec<Record> = vec![
-            (vec![3.into(), "w".try_into().unwrap()], false).into(),
-            (vec![3.into(), "w".try_into().unwrap()], true).into(),
+            (vec![3.into(), "w".into()], false).into(),
+            (vec![3.into(), "w".into()], true).into(),
         ];
 
         j.seed(r, r_x1.clone());
@@ -771,7 +771,7 @@ mod tests {
         j.one_row(r, r_z2, false);
 
         // forward c3 from left; should produce [c3 + None] since no records in right are 3
-        let null = vec![(vec![3.into(), "c".try_into().unwrap(), DfValue::None], true)].into();
+        let null = vec![(vec![3.into(), "c".into(), DfValue::None], true)].into();
         j.seed(l, l_c3.clone());
         let rs = j.one_row(l, l_c3.clone(), false);
         assert_eq!(rs, null);
@@ -787,22 +787,10 @@ mod tests {
         assert_eq!(
             rs,
             vec![
-                (
-                    vec![3.into(), "c".try_into().unwrap(), "w".try_into().unwrap()],
-                    true
-                ),
-                (
-                    vec![3.into(), "c".try_into().unwrap(), "w".try_into().unwrap()],
-                    true
-                ),
-                (
-                    vec![3.into(), "c".try_into().unwrap(), DfValue::None],
-                    false
-                ),
-                (
-                    vec![3.into(), "c".try_into().unwrap(), DfValue::None],
-                    false
-                ),
+                (vec![3.into(), "c".into(), "w".into()], true),
+                (vec![3.into(), "c".into(), "w".into()], true),
+                (vec![3.into(), "c".into(), DfValue::None], false),
+                (vec![3.into(), "c".into(), DfValue::None], false),
             ]
             .into()
         );
@@ -813,22 +801,10 @@ mod tests {
         assert_eq!(
             rs,
             vec![
-                (
-                    vec![3.into(), "c".try_into().unwrap(), "w".try_into().unwrap()],
-                    false
-                ),
-                (
-                    vec![3.into(), "c".try_into().unwrap(), "w".try_into().unwrap()],
-                    false
-                ),
-                (
-                    vec![3.into(), "c".try_into().unwrap(), "w".try_into().unwrap()],
-                    true
-                ),
-                (
-                    vec![3.into(), "c".try_into().unwrap(), "w".try_into().unwrap()],
-                    true
-                ),
+                (vec![3.into(), "c".into(), "w".into()], false),
+                (vec![3.into(), "c".into(), "w".into()], false),
+                (vec![3.into(), "c".into(), "w".into()], true),
+                (vec![3.into(), "c".into(), "w".into()], true),
             ]
             .into()
         );
@@ -838,19 +814,15 @@ mod tests {
         let rs = j.one_row(l, l_b2, false);
         assert_eq!(
             rs,
-            vec![(
-                vec![2.into(), "b".try_into().unwrap(), "z".try_into().unwrap()],
-                true
-            )]
-            .into()
+            vec![(vec![2.into(), "b".into(), "z".into()], true)].into()
         );
 
         // forward from left with two matching records on right
         j.seed(l, l_a1.clone());
         let rs = j.one_row(l, l_a1, false);
         assert_eq!(rs.len(), 2);
-        assert!(rs.has_positive(&[1.into(), "a".try_into().unwrap(), "x".try_into().unwrap()][..]));
-        assert!(rs.has_positive(&[1.into(), "a".try_into().unwrap(), "y".try_into().unwrap()][..]));
+        assert!(rs.has_positive(&[1.into(), "a".into(), "x".into()][..]));
+        assert!(rs.has_positive(&[1.into(), "a".into(), "y".into()][..]));
 
         // forward from right with two matching records on left (and one more on right)
         j.seed(r, r_w3.clone());
@@ -858,14 +830,8 @@ mod tests {
         assert_eq!(
             rs,
             vec![
-                (
-                    vec![3.into(), "c".try_into().unwrap(), "w".try_into().unwrap()],
-                    true
-                ),
-                (
-                    vec![3.into(), "c".try_into().unwrap(), "w".try_into().unwrap()],
-                    true
-                ),
+                (vec![3.into(), "c".into(), "w".into()], true),
+                (vec![3.into(), "c".into(), "w".into()], true),
             ]
             .into()
         );
@@ -880,25 +846,21 @@ mod tests {
     fn nulls_from_left() {
         let (mut j, l, r) = setup();
 
-        let r_1x = vec![1.into(), "x".try_into().unwrap()];
+        let r_1x = vec![1.into(), "x".into()];
         j.seed(r, r_1x.clone());
         j.one_row(r, r_1x, false);
 
-        let r_nullx = vec![DfValue::None, "y".try_into().unwrap()];
+        let r_nullx = vec![DfValue::None, "y".into()];
         j.seed(r, r_nullx.clone());
         j.one_row(r, r_nullx, false);
 
-        let l_nulla = vec![DfValue::None, "a".try_into().unwrap()];
+        let l_nulla = vec![DfValue::None, "a".into()];
 
         j.seed(l, l_nulla.clone());
         let rs = j.one_row(l, l_nulla, false);
         assert_eq!(
             rs,
-            vec![(
-                vec![DfValue::None, "a".try_into().unwrap(), DfValue::None],
-                true
-            )]
-            .into()
+            vec![(vec![DfValue::None, "a".into(), DfValue::None], true)].into()
         );
     }
 
@@ -906,11 +868,11 @@ mod tests {
     fn nulls_from_right() {
         let (mut j, l, r) = setup();
 
-        let l_nulla = vec![DfValue::None, "a".try_into().unwrap()];
+        let l_nulla = vec![DfValue::None, "a".into()];
         j.seed(l, l_nulla.clone());
         j.one_row(l, l_nulla, false);
 
-        let r_nullx = vec![DfValue::None, "y".try_into().unwrap()];
+        let r_nullx = vec![DfValue::None, "y".into()];
         j.seed(r, r_nullx.clone());
         let rs = j.one_row(r, r_nullx, false);
         assert_eq!(rs, Records::default());
@@ -1127,42 +1089,27 @@ mod tests {
             let (mut j, l, r) = setup();
 
             // forward row from left; should produce [row + None] since no records in right match
-            j.seed(l, vec![3.into(), 4.into(), "c".try_into().unwrap()]);
-            let rs = j.one_row(l, vec![3.into(), 4.into(), "c".try_into().unwrap()], false);
+            j.seed(l, vec![3.into(), 4.into(), "c".into()]);
+            let rs = j.one_row(l, vec![3.into(), 4.into(), "c".into()], false);
             assert_eq!(
                 rs,
-                vec![(
-                    vec![3.into(), 4.into(), "c".try_into().unwrap(), DfValue::None],
-                    true
-                )]
-                .into()
+                vec![(vec![3.into(), 4.into(), "c".into(), DfValue::None], true)].into()
             );
 
             // Both of the keys have to match to give us a match
-            j.seed(r, vec![3.into(), 3.into(), "w".try_into().unwrap()]);
+            j.seed(r, vec![3.into(), 3.into(), "w".into()]);
             assert!(j
-                .one_row(r, vec![3.into(), 3.into(), "w".try_into().unwrap()], false)
+                .one_row(r, vec![3.into(), 3.into(), "w".into()], false)
                 .is_empty());
 
             // Once we get a match, we should revoke the nulls and replace it with a full row
-            j.seed(r, vec![3.into(), 4.into(), "w".try_into().unwrap()]);
-            let rs = j.one_row(r, vec![3.into(), 4.into(), "w".try_into().unwrap()], false);
+            j.seed(r, vec![3.into(), 4.into(), "w".into()]);
+            let rs = j.one_row(r, vec![3.into(), 4.into(), "w".into()], false);
             assert_eq!(
                 rs,
                 vec![
-                    (
-                        vec![
-                            3.into(),
-                            4.into(),
-                            "c".try_into().unwrap(),
-                            "w".try_into().unwrap()
-                        ],
-                        true
-                    ),
-                    (
-                        vec![3.into(), 4.into(), "c".try_into().unwrap(), DfValue::None],
-                        false
-                    )
+                    (vec![3.into(), 4.into(), "c".into(), "w".into()], true),
+                    (vec![3.into(), 4.into(), "c".into(), DfValue::None], false)
                 ]
                 .into()
             );
@@ -1172,54 +1119,33 @@ mod tests {
         fn lookup_matching() {
             let (mut j, l, r) = setup();
 
-            j.seed(r, vec![1.into(), 2.into(), "x".try_into().unwrap()]);
-            j.seed(r, vec![2.into(), 2.into(), "y".try_into().unwrap()]);
-            j.seed(r, vec![2.into(), 2.into(), "z".try_into().unwrap()]);
+            j.seed(r, vec![1.into(), 2.into(), "x".into()]);
+            j.seed(r, vec![2.into(), 2.into(), "y".into()]);
+            j.seed(r, vec![2.into(), 2.into(), "z".into()]);
 
-            j.one_row(r, vec![1.into(), 2.into(), "x".try_into().unwrap()], false);
-            j.one_row(r, vec![2.into(), 2.into(), "y".try_into().unwrap()], false);
-            j.one_row(r, vec![2.into(), 2.into(), "z".try_into().unwrap()], false);
+            j.one_row(r, vec![1.into(), 2.into(), "x".into()], false);
+            j.one_row(r, vec![2.into(), 2.into(), "y".into()], false);
+            j.one_row(r, vec![2.into(), 2.into(), "z".into()], false);
 
             // forward from left with single matching record on right
-            j.seed(l, vec![1.into(), 2.into(), "a".try_into().unwrap()]);
-            let rs = j.one_row(l, vec![1.into(), 2.into(), "a".try_into().unwrap()], false);
+            j.seed(l, vec![1.into(), 2.into(), "a".into()]);
+            let rs = j.one_row(l, vec![1.into(), 2.into(), "a".into()], false);
             assert_eq!(
                 rs,
-                vec![(
-                    vec![
-                        1.into(),
-                        2.into(),
-                        "a".try_into().unwrap(),
-                        "x".try_into().unwrap()
-                    ],
-                    true
-                )]
-                .into()
+                vec![(vec![1.into(), 2.into(), "a".into(), "x".into()], true)].into()
             );
 
             // forward from left with two matching records on right
-            j.seed(l, vec![2.into(), 2.into(), "b".try_into().unwrap()]);
+            j.seed(l, vec![2.into(), 2.into(), "b".into()]);
             let mut rs: Vec<_> = j
-                .one_row(l, vec![2.into(), 2.into(), "b".try_into().unwrap()], false)
+                .one_row(l, vec![2.into(), 2.into(), "b".into()], false)
                 .into();
             rs.sort();
             assert_eq!(
                 rs,
                 vec![
-                    vec![
-                        2.into(),
-                        2.into(),
-                        "b".try_into().unwrap(),
-                        "y".try_into().unwrap()
-                    ]
-                    .into(),
-                    vec![
-                        2.into(),
-                        2.into(),
-                        "b".try_into().unwrap(),
-                        "z".try_into().unwrap()
-                    ]
-                    .into()
+                    vec![2.into(), 2.into(), "b".into(), "y".into()].into(),
+                    vec![2.into(), 2.into(), "b".into(), "z".into()].into()
                 ]
             );
         }

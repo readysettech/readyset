@@ -390,17 +390,16 @@ mod tests {
         let out = c.narrow_one_row(vec![key.into(), 1.into()], true);
         assert_positive_record(key, 1, out);
 
-        use std::convert::TryInto;
         let float_value = 1.2;
         let out = c.narrow_one_row(vec![key.into(), float_value.try_into().unwrap()], true);
         assert_record_change(key, 1.into(), float_value.try_into().unwrap(), out);
 
         let string_value = "yes";
-        let out = c.narrow_one_row(vec![key.into(), string_value.try_into().unwrap()], true);
+        let out = c.narrow_one_row(vec![key.into(), string_value.into()], true);
         assert_record_change(
             key,
             float_value.try_into().unwrap(),
-            string_value.try_into().unwrap(),
+            string_value.into(),
             out,
         );
     }
