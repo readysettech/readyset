@@ -52,3 +52,15 @@ replicators = { path = "../replicators" }
 
 [features]
 failure_injection = ["fail/failpoints", "readyset-client/failure_injection", "readyset-server/failure_injection"]
+
+[package.metadata.deb]
+maintainer = "ReadySet Technology <info@readyset.io>"
+copyright = "2023, ReadySet Technology, Inc."
+extended-description = """\
+A real-time SQL caching engine for Postgres and MySQL."""
+depends = "$auto"
+section = "Databases"
+priority = "optional"
+assets = [
+    ["target/release/readyset", "usr/bin/", "755"]
+]
