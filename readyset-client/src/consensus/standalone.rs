@@ -23,6 +23,7 @@ use parking_lot::{Mutex, RwLock};
 #[cfg(feature = "failure_injection")]
 use readyset_errors::ReadySetError;
 use readyset_errors::{internal, internal_err, set_failpoint_return_err, ReadySetResult};
+use replication_offset::ReplicationOffset;
 use rocksdb::DB;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -36,6 +37,8 @@ use crate::failpoints;
 
 /// Path to the controller state.
 const STATE_KEY: &str = "state";
+/// Path to the schema replication offset
+const SCHEMA_REPLICATION_OFFSET_KEY: &str = "state";
 
 /// How often to check if a leader was elected
 const LEADER_UPDATE_PERIOD: Duration = Duration::from_secs(1);
@@ -279,6 +282,15 @@ impl AuthorityControl for StandaloneAuthority {
     {
         let db = self.state.db.write();
         db.put(STATE_KEY, rmp_serde::to_vec(&state)?)
+            .map_err(|e| internal_err!("RocksDB error: {e}"))
+    }
+
+    async fn set_schema_replication_offset<R>(
+        &self,
+        offset: Option<ReplicationOffset>,
+    ) -> ReadySetResult<()> {
+        let db = self.state.db.write();
+        db.put(SCHEMA_REPLICATION_OFFSET_KEY, rmp_serde::to_vec(&offset)?)
             .map_err(|e| internal_err!("RocksDB error: {e}"))
     }
 }

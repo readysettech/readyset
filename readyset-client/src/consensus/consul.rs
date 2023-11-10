@@ -135,13 +135,14 @@ use futures::stream::FuturesOrdered;
 use futures::TryStreamExt;
 use metrics::gauge;
 use readyset_errors::{internal, internal_err, set_failpoint_return_err};
+use replication_offset::ReplicationOffset;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tracing::{error, warn};
 
 use super::{
     AuthorityControl, AuthorityWorkerHeartbeatResponse, GetLeaderResult, LeaderPayload,
-    WorkerDescriptor, WorkerId,
+    WorkerDescriptor, WorkerId, SCHEMA_REPLICATION_OFFSET_PATH,
 };
 #[cfg(feature = "failure_injection")]
 use crate::failpoints;
@@ -949,6 +950,38 @@ impl AuthorityControl for ConsulAuthority {
         }
 
         Ok(worker_descriptors)
+    }
+
+    async fn set_schema_replication_offset<R>(
+        &self,
+        offset: Option<ReplicationOffset>,
+    ) -> ReadySetResult<()> {
+        let my_session = Some(self.get_session()?);
+
+        let r = kv::read(
+            &self.consul,
+            &self.prefix_with_deployment(CONTROLLER_KEY),
+            None,
+        )
+        .await?;
+
+        if get_kv_pair(r)?.session != my_session {
+            internal!("An authority that has lost leadership attempted to issue a write")
+        }
+
+        let r = kv::set(
+            &self.consul,
+            &self.prefix_with_deployment(SCHEMA_REPLICATION_OFFSET_PATH),
+            &serde_json::to_vec(&offset)?,
+            Some(SetKeyRequestBuilder::default().acquire(my_session.unwrap())),
+        )
+        .await?;
+
+        if !r.response {
+            internal!("An authority that has lost leadership attempted to issue a write")
+        }
+
+        Ok(())
     }
 }
 
