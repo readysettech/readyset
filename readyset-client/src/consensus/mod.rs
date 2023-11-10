@@ -14,6 +14,7 @@ use enum_dispatch::enum_dispatch;
 use nom_sql::SqlIdentifier;
 use readyset_data::Dialect;
 use readyset_errors::{ReadySetError, ReadySetResult};
+use replication_offset::ReplicationOffset;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tracing::error;
@@ -40,6 +41,7 @@ pub type WorkerId = String;
 
 const CACHE_DDL_REQUESTS_PATH: &str = "cache_ddl_requests";
 const PERSISTENT_STATS_PATH: &str = "persistent_stats";
+const SCHEMA_REPLICATION_OFFSET_PATH: &str = "schema_replication_offset";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub struct CacheDDLRequest {
@@ -297,6 +299,11 @@ pub trait AuthorityControl: Send + Sync {
         self.read_modify_write(PERSISTENT_STATS_PATH, f)
             .await
             .flatten()
+    }
+
+    /// Returns the stored schema [`ReplicationOffset`], if present. Wrapper around Self::try_read
+    async fn schema_replication_offset(&self) -> ReadySetResult<Option<ReplicationOffset>> {
+        self.try_read(SCHEMA_REPLICATION_OFFSET_PATH).await
     }
 }
 

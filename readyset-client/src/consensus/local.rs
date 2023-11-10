@@ -23,6 +23,7 @@ use failpoint_macros::set_failpoint;
 #[cfg(feature = "failure_injection")]
 use readyset_errors::ReadySetError;
 use readyset_errors::{internal, internal_err, set_failpoint_return_err, ReadySetResult};
+use replication_offset::ReplicationOffset;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
@@ -434,6 +435,11 @@ impl AuthorityControl for LocalAuthority {
                     .map(|data| (id, serde_json::from_slice(data).unwrap()))
             })
             .collect())
+    }
+
+    async fn schema_replication_offset(&self) -> ReadySetResult<Option<ReplicationOffset>> {
+        // Unused for LocalAuthority
+        Ok(None)
     }
 }
 
