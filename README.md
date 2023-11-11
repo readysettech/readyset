@@ -31,42 +31,8 @@ ReadySet is wire-compatible with Postgres and MySQL.
 Curious to see how ReadySet works? Run through our [demo](https://docs.readyset.io/quickstart) to kick the tires and cache queries in under five minutes.
 
 ---
-### Install with Docker
-Getting up and running with ReadySet requires that you do three things: download ReadySet, connect it to a database, and create a cache.
-
-#### 1. Download
-The easiest way to install ReadySet is via Docker. First, download our Docker Compose file:
-
-```
-curl -L -o compose.yml "https://readyset.io/quickstart/compose.yml"
-```
-
-#### 2. Point to a database
-
-Make sure your database is [configured to run with ReadySet](https://docs.readyset.io/get-started/configure-your-database) and then modify the downloaded Docker Compose file to include your database connection string:
-
-```
-name: readyset
-services:
-  cache:
-    ...
-    environment:
-      # UPSTREAM_DB_URL: <your DB connection string>
-  ...
-  grafana:
-    ...
-    environment:
-      # UPSTREAM_DB_URL: <your DB connection string>
-```
-
-#### 3. Run ReadySet
-```
-docker compose up -d
-```
-
-#### 4. Configure caching
-
-Once ReadySet is up and running, you'll need to [create caches](https://docs.readyset.io/get-started/cache) for the queries you want to speed up.
+### Install ReadySet
+Getting up and running with ReadySet requires that you do three things: download ReadySet, connect it to a database, and create a cache. See our [Getting Started](https://docs.readyset.io/get-started) guide for more information.
 
 ---
 
