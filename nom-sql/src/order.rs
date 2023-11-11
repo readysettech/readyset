@@ -88,7 +88,7 @@ pub struct OrderBy {
 }
 
 impl OrderBy {
-    pub fn display(&self, dialect: Dialect) -> impl Display + Copy + '_ {
+    pub fn display(&self, dialect: Dialect) -> impl Display + '_ {
         fmt_with(move |f| {
             write!(f, "{}", self.field.display(dialect))?;
             if let Some(ot) = self.order_type {
@@ -106,7 +106,7 @@ pub struct OrderClause {
 }
 
 impl DialectDisplay for OrderClause {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| {
             write!(
                 f,

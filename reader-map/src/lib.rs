@@ -223,7 +223,7 @@
     rustdoc::broken_intra_doc_links
 )]
 #![allow(clippy::type_complexity)]
-#![feature(btree_drain_filter)]
+#![feature(btree_extract_if)]
 
 use std::collections::hash_map::RandomState;
 use std::fmt;

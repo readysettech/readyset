@@ -24,7 +24,7 @@ pub struct UpdateStatement {
 }
 
 impl DialectDisplay for UpdateStatement {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| {
             write!(f, "UPDATE {} ", self.table.display(dialect))?;
 

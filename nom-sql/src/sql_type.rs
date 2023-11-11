@@ -152,8 +152,6 @@ impl Default for SqlTypeArbitraryOptions {
 
 impl Arbitrary for SqlType {
     type Parameters = SqlTypeArbitraryOptions;
-    type Strategy = BoxedStrategy<Self>;
-
     fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
         use proptest::option;
         use proptest::prelude::*;
@@ -254,6 +252,8 @@ impl Arbitrary for SqlType {
             .prop_flat_map(|strat| strat)
             .boxed()
     }
+
+    type Strategy = BoxedStrategy<Self>;
 }
 
 impl SqlType {
@@ -300,7 +300,7 @@ impl SqlType {
 }
 
 impl DialectDisplay for SqlType {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| {
             let write_with_len = |f: &mut fmt::Formatter, name, len| {
                 write!(f, "{}", name)?;
@@ -428,7 +428,7 @@ impl FromStr for SqlType {
     }
 }
 
-/// [`SqlType::Enum`](crate::SqlType::Enum) abstraction over an array of [`String`].
+/// [`SqlType::Enum`](SqlType::Enum) abstraction over an array of [`String`].
 ///
 /// Clones are O(1) and this is always 1 pointer wide for efficient storage in `SqlType`.
 #[derive(Clone, Eq, Hash, PartialEq)]
@@ -470,7 +470,7 @@ impl fmt::Debug for EnumVariants {
 impl PartialOrd for EnumVariants {
     #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        <[String]>::partial_cmp(self, other)
+        Some(self.cmp(other))
     }
 }
 

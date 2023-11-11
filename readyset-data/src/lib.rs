@@ -2708,8 +2708,8 @@ mod tests {
 
     #[test]
     fn data_type_display() {
-        let tiny_text: DfValue = "hi".try_into().unwrap();
-        let text: DfValue = "this is a very long text indeed".try_into().unwrap();
+        let tiny_text: DfValue = "hi".into();
+        let text: DfValue = "this is a very long text indeed".into();
         let float_from_real: DfValue = DfValue::try_from(-8.99_f32).unwrap();
         let float = DfValue::Float(-8.99);
         let double_from_real: DfValue = DfValue::try_from(-8.99_f64).unwrap();
@@ -2745,11 +2745,11 @@ mod tests {
     where
         T: PartialEq + fmt::Debug,
     {
-        let txt1: DfValue = "hi".try_into().unwrap();
-        let txt12: DfValue = "no".try_into().unwrap();
+        let txt1: DfValue = "hi".into();
+        let txt12: DfValue = "no".into();
         let txt2: DfValue = DfValue::Text("hi".into());
-        let text: DfValue = "this is a very long text indeed".try_into().unwrap();
-        let text2: DfValue = "this is another long text".try_into().unwrap();
+        let text: DfValue = "this is a very long text indeed".into();
+        let text2: DfValue = "this is another long text".into();
         let float = DfValue::Float(-8.99);
         let float2 = DfValue::Float(-8.98);
         let float_from_real: DfValue = DfValue::try_from(-8.99_f32).unwrap();
@@ -3158,11 +3158,11 @@ mod tests {
 
         use std::convert::TryFrom;
 
-        let txt1: DfValue = "hi".try_into().unwrap();
-        let txt12: DfValue = "no".try_into().unwrap();
+        let txt1: DfValue = "hi".into();
+        let txt12: DfValue = "no".into();
         let txt2: DfValue = DfValue::Text("hi".into());
-        let text: DfValue = "this is a very long text indeed".try_into().unwrap();
-        let text2: DfValue = "this is another long text".try_into().unwrap();
+        let text: DfValue = "this is a very long text indeed".into();
+        let text2: DfValue = "this is another long text".into();
         let float = DfValue::Float(-8.99);
         let float2 = DfValue::Float(-8.98);
         let float_from_real: DfValue = DfValue::try_from(-8.99_f32).unwrap();

@@ -58,7 +58,7 @@ fn fuse_nodes(
         }
         let parent_node = query.remove_node(parent_ni)?.unwrap();
         let Some(child_node) = query.get_node_mut(child_ni) else {
-            continue
+            continue;
         };
 
         fuse_into(child_node, parent_node)?;

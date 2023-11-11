@@ -127,7 +127,7 @@ impl FromStr for Dialect {
 
 impl Dialect {
     /// All SQL dialects.
-    pub const ALL: &[Self] = &[Self::MySQL, Self::PostgreSQL];
+    pub const ALL: &'static [Self] = &[Self::MySQL, Self::PostgreSQL];
 
     /// Parse a SQL identifier using this Dialect
     pub fn identifier(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlIdentifier> {

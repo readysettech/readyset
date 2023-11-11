@@ -28,7 +28,7 @@ pub struct InsertStatement {
 }
 
 impl DialectDisplay for InsertStatement {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| {
             write!(f, "INSERT INTO {}", self.table.display(dialect))?;
 

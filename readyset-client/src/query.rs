@@ -116,7 +116,7 @@ impl Hash for Query {
 }
 impl DialectDisplay for Query {
     /// Displays the query using appropriate formatting for the given dialect.
-    fn display(&self, dialect: nom_sql::Dialect) -> impl Display + Copy + '_ {
+    fn display(&self, dialect: nom_sql::Dialect) -> impl Display + '_ {
         fmt_with(move |f| match self {
             Query::Parsed(q) => write!(f, "{}", q.statement.display(dialect)),
             Query::ParseFailed(s) => write!(f, "{s}"),

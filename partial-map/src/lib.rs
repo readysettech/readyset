@@ -1,4 +1,4 @@
-#![feature(btree_drain_filter, bound_map)]
+#![feature(btree_extract_if, bound_map)]
 
 use std::borrow::Borrow;
 pub use std::collections::btree_map::{Iter, Keys, Range, Values, ValuesMut};
@@ -345,8 +345,7 @@ where
         // NOTE: it is deeply unfortunate that rust's BTreeMap doesn't have a drain(range) function
         // the way Vec does. This is forcing us into an O(n) operation where we could have an
         // O(log(n)) one.
-        self.map
-            .drain_filter(move |k, _| range.contains(k.borrow()))
+        self.map.extract_if(move |k, _| range.contains(k.borrow()))
     }
 
     /// Clone the interval tree from the given partial map into our interval tree/

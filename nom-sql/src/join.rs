@@ -32,7 +32,7 @@ impl JoinRightSide {
 }
 
 impl DialectDisplay for JoinRightSide {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| match self {
             Self::Table(t) => write!(f, "{}", t.display(dialect)),
             Self::Tables(ts) => write!(f, "({})", ts.iter().map(|t| t.display(dialect)).join(", ")),
@@ -86,7 +86,7 @@ pub enum JoinConstraint {
 }
 
 impl DialectDisplay for JoinConstraint {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| match self {
             Self::On(ce) => write!(f, "ON {}", ce.display(dialect)),
             Self::Using(columns) => write!(

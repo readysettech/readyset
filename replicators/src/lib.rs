@@ -1,7 +1,7 @@
 #![feature(
     never_type,
     hash_raw_entry,
-    drain_filter,
+    extract_if,
     string_remove_matches,
     iter_intersperse,
     let_chains

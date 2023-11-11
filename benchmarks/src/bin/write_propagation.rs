@@ -3,10 +3,8 @@
 //! This client writes new articles to the system and
 //! measures the propagation time for the article
 //! to reach the viewer. This is done by:
-//!   1. Issuing a write for a article with a specific
-//!      article_id.
-//!   2. Attempting to read from a view with that article_id
-//!      as the key.
+//!   1. Issuing a write for a article with a specific article_id.
+//!   2. Attempting to read from a view with that article_id as the key.
 //!
 //!   We measure the duration from the time the write is
 //!   issued, to the time that the view returns the result as

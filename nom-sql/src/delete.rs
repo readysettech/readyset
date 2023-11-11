@@ -21,7 +21,7 @@ pub struct DeleteStatement {
 }
 
 impl DialectDisplay for DeleteStatement {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| {
             write!(f, "DELETE FROM {}", self.table.display(dialect))?;
 

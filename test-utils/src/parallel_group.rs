@@ -198,9 +198,9 @@ mod tests {
                         let _permit = GROUP.acquire();
                         {
                             let Ok(mut val) = val.lock() else {
-                            tx.send(Err("lock failed".into())).unwrap();
-                            return;
-                        };
+                                tx.send(Err("lock failed".into())).unwrap();
+                                return;
+                            };
                             *val += 1;
                             if *val > MAX_CONCURRENCY {
                                 tx.send(Err(format!("Went over max concurrency (val: {val})!")))

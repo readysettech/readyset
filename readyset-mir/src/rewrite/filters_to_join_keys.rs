@@ -79,9 +79,8 @@ pub(crate) fn convert_filters_to_join_keys(query: &mut MirQuery<'_>) -> ReadySet
                     let parent_cols = query.graph.columns(alias_table_parent);
                     let (Ok(new_c1_idx), Ok(new_c2_idx)) = (
                         query.graph.column_id_for_column(ancestor_idx, &c1),
-                        query.graph.column_id_for_column(ancestor_idx, &c2)
+                        query.graph.column_id_for_column(ancestor_idx, &c2),
                     ) else {
-
                         trace!(
                             ancestor_idx = %ancestor_idx.index(),
                             "Filter columns no longer resolve in ancestor, giving up on filter"

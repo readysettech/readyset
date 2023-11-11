@@ -6,14 +6,13 @@
 )]
 #![feature(
     iter_order_by,
-    binary_heap_retain,
     trait_alias,
-    btree_drain_filter,
+    btree_extract_if,
     bound_as_ref,
     bound_map,
     stmt_expr_attributes,
-    drain_filter,
-    hash_drain_filter,
+    extract_if,
+    hash_extract_if,
     option_get_or_insert_default,
     box_patterns
 )]

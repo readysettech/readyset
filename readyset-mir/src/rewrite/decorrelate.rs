@@ -140,12 +140,12 @@ fn push_dependent_filter(
 /// As long as we have dependent joins in the query:
 /// 1. Pick the uppermost dependent join in the query, topologically (ideally a dependent join that
 ///    has no other dependent joins as ancestors)
-/// 2. Find a filter in the ancestors of the right hand side of that join that references columns
-///    on the left hand side of that join
+/// 2. Find a filter in the ancestors of the right hand side of that join that references columns on
+///    the left hand side of that join
 ///    - If we don't find one, then the join no longer needs to be dependent, so convert it to a
 ///      regular inner join
-/// 3. Attempt to push that filter down the graph, using an algebraic rewrite rule (this is done
-///    in [`push_dependent_filter`])
+/// 3. Attempt to push that filter down the graph, using an algebraic rewrite rule (this is done in
+///    [`push_dependent_filter`])
 ///
 /// [dependent inner join]: MirNodeInner::DependentJoin
 /// [dependent left join]: MirNodeInner::DependentLeftJoin

@@ -28,9 +28,9 @@
 //! of the dataflow state).
 //!
 //! # Atomic updates to dataflow state
-//! 1. Read the current version of the controller state from /controller/state.
-//!    The chunks associated with this controller state are stored at
-//!    /controller/state/<version>/<chunk number>.
+//! 1. Read the current version of the controller state from /controller/state. The chunks
+//!    associated with this controller state are stored at /controller/state/<version>/<chunk
+//!    number>.
 //! 2. Read all the chunks associated with this state.
 //! 3. Stitch the bytes back together, decompress, deserialize and update the dataflow state.
 //! 4. Split the compressed + serialized dataflow state into chunks of size 512 KB.

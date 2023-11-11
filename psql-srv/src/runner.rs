@@ -55,7 +55,9 @@ impl<B: PsqlBackend> Runner<B, tokio::net::TcpStream> {
         // Connection has closed or is waiting for tls handshake
         let loop_status = runner.main_loop().await;
 
-        if matches!(loop_status, MainLoopStatus::RestartWithTls) && let Some(acceptor) = tls_acceptor {
+        if matches!(loop_status, MainLoopStatus::RestartWithTls)
+            && let Some(acceptor) = tls_acceptor
+        {
             let backend = runner.backend;
             let stream = runner.channel.into_inner();
             let mut protocol = runner.protocol;
@@ -69,7 +71,7 @@ impl<B: PsqlBackend> Runner<B, tokio::net::TcpStream> {
                         stream
                             .get_ref()
                             .tls_server_end_point()
-                            .expect("Nothing we can do if getting the TLS server endpoint fails")
+                            .expect("Nothing we can do if getting the TLS server endpoint fails"),
                     );
                     let mut runner = Runner {
                         backend,
@@ -79,7 +81,11 @@ impl<B: PsqlBackend> Runner<B, tokio::net::TcpStream> {
                     };
                     // Run loop again. Warn client if we get an unexpected RestartWithTls status.
                     if matches!(runner.main_loop().await, MainLoopStatus::RestartWithTls) {
-                        let _ = runner.handle_error(Error::UnexpectedMessage("Received second SSLRequest".to_string())).await;
+                        let _ = runner
+                            .handle_error(Error::UnexpectedMessage(
+                                "Received second SSLRequest".to_string(),
+                            ))
+                            .await;
                     }
                 }
                 Err(error) => {
@@ -89,7 +95,11 @@ impl<B: PsqlBackend> Runner<B, tokio::net::TcpStream> {
             }
         } else if matches!(loop_status, MainLoopStatus::RestartWithTls) && tls_acceptor.is_none() {
             // Nothing to do, but warn client that ReadySet experienced an internal error.
-            let _ = runner.handle_error(Error::InternalError("Attempted to complete TLS handshake with no TlsAcceptor".to_string())).await;
+            let _ = runner
+                .handle_error(Error::InternalError(
+                    "Attempted to complete TLS handshake with no TlsAcceptor".to_string(),
+                ))
+                .await;
         }
     }
 }

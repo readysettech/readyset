@@ -1721,18 +1721,34 @@ where
         rewrite::process_query(&mut stmt, self.noria.server_supports_pagination())?;
         let migration_state = match self
             .noria
-            .handle_create_cached_query(name, &stmt, override_schema_search_path, always, concurrently)
+            .handle_create_cached_query(
+                name,
+                &stmt,
+                override_schema_search_path,
+                always,
+                concurrently,
+            )
             .await
         {
             Ok(None) => MigrationState::Successful,
-            Ok(Some(id)) => return Ok(noria_connector::QueryResult::Meta(
-                vec![("Migration Id".to_string(), id.to_string()).into()]
-            )),
+            Ok(Some(id)) => {
+                return Ok(noria_connector::QueryResult::Meta(vec![(
+                    "Migration Id".to_string(),
+                    id.to_string(),
+                )
+                    .into()]))
+            }
             // If the query fails because it contains unsupported placeholders, then mark it as an
             // inlined query in the query status cache.
             Err(e) if let Some(placeholders) = e.unsupported_placeholders_cause() => {
                 #[allow(clippy::unwrap_used)] // converting from Vec1 back to Vec1
-                let placeholders = Vec1::try_from(placeholders.into_iter().map(|p| p as PlaceholderIdx).collect::<Vec<_>>()).unwrap();
+                let placeholders = Vec1::try_from(
+                    placeholders
+                        .into_iter()
+                        .map(|p| p as PlaceholderIdx)
+                        .collect::<Vec<_>>(),
+                )
+                .unwrap();
                 if self.settings.enable_experimental_placeholder_inlining {
                     MigrationState::Inlined(InlinedState::from_placeholders(placeholders))
                 } else {

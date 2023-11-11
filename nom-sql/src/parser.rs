@@ -68,7 +68,7 @@ pub enum SqlQuery {
 }
 
 impl DialectDisplay for SqlQuery {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| match self {
             Self::Select(select) => write!(f, "{}", select.display(dialect)),
             Self::Insert(insert) => write!(f, "{}", insert.display(dialect)),

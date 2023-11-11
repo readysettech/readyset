@@ -1963,8 +1963,8 @@ impl SqlToMirConverter {
                 }
             }
 
-            // 6. Determine literals and expressions that global predicates depend
-            //    on and add them here; remembering that we've already added them-
+            // 6. Determine literals and expressions that global predicates depend on and add them
+            //    here; remembering that we've already added them-
             if let Some(projected) =
                 self.make_value_project_node(query_name, query_graph, prev_node)?
             {

@@ -176,17 +176,14 @@
 //! The [`DeploymentHandle`] allows clustertests writers to programmatically
 //! modify the deployment and check controller / metrics properties. It
 //! primarily facilitates four operations:
-//!   1. Adding servers to the deployment. Clustertest can create any number
-//!      of server processes during the test via
-//!      [`DeploymentHandle::start_server`].
-//!   2. Killing server in the deployment.
-//!      [`DeploymentHandle::kill_server`] may be called to
-//!      remove a server from the deployment, this is done by sending the kill
-//!      command to the process running the server.
+//!   1. Adding servers to the deployment. Clustertest can create any number of server processes
+//!      during the test via [`DeploymentHandle::start_server`].
+//!   2. Killing server in the deployment. [`DeploymentHandle::kill_server`] may be called to remove
+//!      a server from the deployment, this is done by sending the kill command to the process
+//!      running the server.
 //!   3. Sending controller RPCs via the [`ReadySetHandle`] returned by
 //!      [`DeploymentHandle::leader_handle`].
-//!   4. Querying metrics via the [`MetricsClient`] returned by
-//!      [`DeploymentHandle::metrics`].
+//!   4. Querying metrics via the [`MetricsClient`] returned by [`DeploymentHandle::metrics`].
 //!
 //! It also provides helper functions to create connections to a ReadySet adapter
 //! and an upstream database, if present. See [`DeploymentHandle::adapter`] and

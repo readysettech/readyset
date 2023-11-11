@@ -137,7 +137,7 @@ impl TableKey {
 }
 
 impl DialectDisplay for TableKey {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| {
             if let Some(constraint_name) = self.constraint_name() {
                 write!(
@@ -311,7 +311,7 @@ impl From<Literal> for FieldDefinitionExpr {
 }
 
 impl DialectDisplay for FieldDefinitionExpr {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| match self {
             Self::All => write!(f, "*"),
             Self::AllInTable(table) => {
@@ -344,7 +344,7 @@ pub enum FieldReference {
 }
 
 impl DialectDisplay for FieldReference {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| match self {
             Self::Numeric(n) => write!(f, "{}", n),
             Self::Expr(expr) => write!(f, "{}", expr.display(dialect)),

@@ -2,21 +2,18 @@
 //!
 //! The domain scheduling algorithm, which is currently quite simplistic, works as follows:
 //!
-//! 1. We filter the set of workers in the cluster by two criteria:
-//!    a. The worker must be healhty, and
-//!    b. The worker can be [configured to only run reader nodes][reader_only], in which case only
-//!       domains that contain a reader node can run on that worker
-//! 2. Migrations can optionally [be restricted to a single worker][worker] - if so, all
-//!    replicas of all shards of all domains within the migration will be scheduled to that worker,
-//!    *if* it's valid
+//! 1. We filter the set of workers in the cluster by two criteria: a. The worker must be healhty,
+//!    and b. The worker can be [configured to only run reader nodes][reader_only], in which case
+//!    only domains that contain a reader node can run on that worker
+//! 2. Migrations can optionally [be restricted to a single worker][worker] - if so, all replicas of
+//!    all shards of all domains within the migration will be scheduled to that worker, *if* it's
+//!    valid
 //! 3. Otherwise, for each replica of each shard in the domain, we first filter the set of workers
 //!    down to only workers that aren't running a different replica of the same domain shard, then
-//!    either:
-//!    a. Run the domain shard on the worker matching its [placement restrictions][], if it has any,
-//!       or
-//!    b. If the domain contains base tables, run it on the worker running the smallest number of
-//!       other base tables, or otherwise
-//!    c. Run it on the worker that has the smallest number of domain shards scheduled onto it
+//!    either: a. Run the domain shard on the worker matching its [placement restrictions][], if it
+//!    has any, or b. If the domain contains base tables, run it on the worker running the smallest
+//!    number of other base tables, or otherwise c. Run it on the worker that has the smallest
+//!    number of domain shards scheduled onto it
 //!
 //! [reader_only]: Worker::reader_only
 //! [worker]: Migration::worker

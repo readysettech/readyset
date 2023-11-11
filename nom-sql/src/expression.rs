@@ -104,7 +104,7 @@ impl FunctionExpr {
 }
 
 impl DialectDisplay for FunctionExpr {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| match self {
             FunctionExpr::Avg {
                 expr,
@@ -362,7 +362,7 @@ pub enum InValue {
 }
 
 impl DialectDisplay for InValue {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| match self {
             InValue::Subquery(stmt) => write!(f, "{}", stmt.display(dialect)),
             InValue::List(exprs) => write!(
@@ -384,7 +384,7 @@ pub struct CaseWhenBranch {
 }
 
 impl DialectDisplay for CaseWhenBranch {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| {
             write!(
                 f,
@@ -503,7 +503,7 @@ pub enum Expr {
 }
 
 impl DialectDisplay for Expr {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| match self {
             Expr::Call(fe) => write!(f, "{}", fe.display(dialect)),
             Expr::Literal(l) => write!(f, "{}", l.display(dialect)),

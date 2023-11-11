@@ -224,11 +224,11 @@ fn make_table_discover(addr: SocketAddr, timeout: Duration) -> Discover {
 }
 
 // Unpin + Send bounds are needed due to https://github.com/rust-lang/rust/issues/55997
-type Discover = impl tower::discover::Discover<Key = usize, Service = InnerService, Error = tokio::io::Error>
+pub type Discover = impl tower::discover::Discover<Key = usize, Service = InnerService, Error = tokio::io::Error>
     + Unpin
     + Send;
 
-pub(crate) type TableRpc =
+pub type TableRpc =
     Buffer<ConcurrencyLimit<Balance<Discover, Tagged<PacketData>>>, Tagged<PacketData>>;
 
 /// Information used to uniquely identify: a packet, and the time a packet entered the
