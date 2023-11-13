@@ -2141,7 +2141,7 @@ where
             }
             SqlQuery::Show(ShowStatement::ReadySetStatus) => {
                 // Add upstream connectivity status
-                let additional_meta = if let Some(upstream) = &mut self.upstream {
+                let mut additional_meta = if let Some(upstream) = &mut self.upstream {
                     let connection_status = upstream
                         .is_connected()
                         .await
@@ -2152,6 +2152,11 @@ where
                 } else {
                     vec![]
                 };
+                let conn_count = match &self.connections {
+                    Some(s) => s.len(),
+                    None => 0,
+                };
+                additional_meta.push(("Connection Count".to_string(), conn_count.to_string()));
 
                 self.noria
                     .readyset_status(&self.authority, additional_meta)

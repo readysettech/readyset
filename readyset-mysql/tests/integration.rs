@@ -1822,7 +1822,10 @@ async fn show_caches_with_always() {
 async fn show_readyset_status() {
     let (opts, _handle, shutdown_tx) = setup().await;
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();
-    let ret: Vec<mysql::Row> = conn.query("SHOW READYSET STATUS;").await.unwrap();
+    let mut ret: Vec<mysql::Row> = conn.query("SHOW READYSET STATUS;").await.unwrap();
+    let row = ret.remove(0);
+    assert_eq!(row.get::<String, _>(0).unwrap(), "Connection Count");
+    assert_eq!(row.get::<String, _>(1).unwrap(), "0");
     assert_eq!(
         ret.first().unwrap().get::<String, _>(0).unwrap(),
         "Snapshot Status"
