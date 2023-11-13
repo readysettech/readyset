@@ -1263,9 +1263,9 @@ impl SqlIncorporator {
         // Look for and remove ingress, egress and reader nodes, which are not present in MIR.
         let next_for = |ni: DfNodeIndex| {
             mig.dataflow_state
-                .ingredients
+                .ingredients()
                 .neighbors_directed(ni.address(), petgraph::EdgeDirection::Outgoing)
-                .filter(|ni| !mig.dataflow_state.ingredients[*ni].is_dropped())
+                .filter(|ni| !mig.dataflow_state.ingredients()[*ni].is_dropped())
                 .map(|ni| DfNodeIndex::new(ni))
         };
         let mut removed = Vec::new();

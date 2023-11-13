@@ -107,7 +107,10 @@ impl Debug for ControllerState {
                 "schema_replication_offset",
                 &self.dataflow_state.schema_replication_offset(),
             )
-            .field("node_restrictions", &self.dataflow_state.node_restrictions)
+            .field(
+                "node_restrictions",
+                &self.dataflow_state.node_restrictions(),
+            )
             .finish()
     }
 }
@@ -1019,8 +1022,8 @@ impl AuthorityLeaderElectionState {
                                     "Config in authority different than our config, changing to our config"
                                 );
                                 }
-                                state.dataflow_state.domain_config = self.config.domain_config.clone();
-                                state.dataflow_state.replication_strategy = self.config.replication_strategy;
+                                state.dataflow_state.set_domain_config(self.config.domain_config.clone());
+                                state.dataflow_state.set_replication_strategy(self.config.replication_strategy);
                                 state.config = self.config.clone();
                                 Ok(state)
                             }

@@ -63,7 +63,7 @@ pub fn assign(dataflow_state: &mut DfState, new_nodes: &[NodeIndex]) -> ReadySet
     //
     //  - the child of a Sharder is always in a different domain from the sharder
     //  - shard merge nodes are never in the same domain as their sharded ancestors
-    let mut ndomains = dataflow_state.ndomains;
+    let mut ndomains = *dataflow_state.ndomains();
 
     let mut next_domain = || -> ReadySetResult<usize> {
         ndomains += 1;
@@ -73,8 +73,8 @@ pub fn assign(dataflow_state: &mut DfState, new_nodes: &[NodeIndex]) -> ReadySet
     for &node in new_nodes {
         #[allow(clippy::cognitive_complexity)]
         let assignment = (|| {
-            let graph = &dataflow_state.ingredients;
-            let node_restrictions = &dataflow_state.node_restrictions;
+            let graph = dataflow_state.ingredients();
+            let node_restrictions = dataflow_state.node_restrictions();
             let n = &graph[node];
 
             // TODO: the code below is probably _too_ good at keeping things in one domain.
@@ -315,12 +315,12 @@ pub fn assign(dataflow_state: &mut DfState, new_nodes: &[NodeIndex]) -> ReadySet
 
         debug!(
             node = node.index(),
-            node_type = ?dataflow_state.ingredients[node],
+            node_type = ?dataflow_state.ingredients()[node],
             domain = ?assignment,
             "node added to domain"
         );
-        dataflow_state.ingredients[node].add_to(assignment.into());
+        dataflow_state.ingredients_mut()[node].add_to(assignment.into());
     }
-    dataflow_state.ndomains = ndomains;
+    *dataflow_state.ndomains_mut() = ndomains;
     Ok(())
 }

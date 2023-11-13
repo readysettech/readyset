@@ -85,9 +85,9 @@ impl<'state> Scheduler<'state> {
             HashMap::new();
 
         for (di, dh) in &dataflow_state.domains {
-            let is_base_table_domain = dataflow_state.domain_nodes[di]
+            let is_base_table_domain = dataflow_state.domain_nodes()[di]
                 .values()
-                .any(|ni| dataflow_state.ingredients[*ni].is_base());
+                .any(|ni| dataflow_state.ingredients()[*ni].is_base());
             for (shard, replicas) in dh.shards().enumerate() {
                 for wi in replicas.iter().flatten(/* some replicas might not be scheduled yet */) {
                     let stats = worker_stats.entry(wi).or_default();
@@ -127,21 +127,21 @@ impl<'state> Scheduler<'state> {
         domain_index: DomainIndex,
         nodes: &[NodeIndex],
     ) -> ReadySetResult<Array2<Option<WorkerIdentifier>>> {
-        let num_shards = self.dataflow_state.ingredients[nodes[0]]
+        let num_shards = self.dataflow_state.ingredients()[nodes[0]]
             .sharded_by()
             .shards()
             .unwrap_or(1);
         let num_replicas = self
             .dataflow_state
-            .replication_strategy
-            .replicate_domain(&self.dataflow_state.ingredients, nodes);
+            .replication_strategy()
+            .replicate_domain(self.dataflow_state.ingredients(), nodes);
 
         let is_reader_domain = nodes
             .iter()
-            .any(|n| self.dataflow_state.ingredients[*n].is_reader());
+            .any(|n| self.dataflow_state.ingredients()[*n].is_reader());
         let is_base_table_domain = nodes
             .iter()
-            .any(|n| self.dataflow_state.ingredients[*n].is_base());
+            .any(|n| self.dataflow_state.ingredients()[*n].is_base());
         trace!(is_reader_domain, is_base_table_domain);
 
         if is_base_table_domain {
@@ -189,9 +189,9 @@ impl<'state> Scheduler<'state> {
                 let dataflow_node_restrictions = nodes
                     .iter()
                     .filter_map(|n| {
-                        let node_name = self.dataflow_state.ingredients[*n].name();
+                        let node_name = self.dataflow_state.ingredients()[*n].name();
                         self.dataflow_state
-                            .node_restrictions
+                            .node_restrictions()
                             .get(&NodeRestrictionKey {
                                 node_name: node_name.clone(),
                                 shard,

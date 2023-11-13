@@ -408,7 +408,7 @@ impl Leader {
                     .into_iter()
                     .filter_map(|ni| {
                         #[allow(clippy::indexing_slicing)]
-                        let n = &ds.ingredients[ni];
+                        let n = &ds.ingredients()[ni];
                         if n.is_internal() {
                             Some((ni, n.name(), n.description(true)))
                         } else if n.is_base() {
@@ -528,7 +528,7 @@ impl Leader {
             (&Method::GET | &Method::POST, "/supports_pagination") => {
                 let ds = self.dataflow_state_handle.read().await;
                 let supports =
-                    ds.recipe.mir_config().allow_paginate && ds.recipe.mir_config().allow_topk;
+                    ds.recipe().mir_config().allow_paginate && ds.recipe().mir_config().allow_topk;
                 return_serialized!(supports)
             }
             (&Method::POST, "/evict_single") => {
@@ -890,7 +890,7 @@ impl Leader {
             #[allow(clippy::indexing_slicing)] // Internal data structure invariant
             let domain_nodes: HashMap<_, HashSet<_>> = domains_to_recover
                 .into_iter()
-                .map(|d| (d, ds.domain_nodes[&d].values().copied().collect()))
+                .map(|d| (d, ds.domain_nodes()[&d].values().copied().collect()))
                 .collect();
             info!(num_domains = %domain_nodes.len(), "Recovering domains");
             let dmp = ds.plan_recovery(&domain_nodes).await?;

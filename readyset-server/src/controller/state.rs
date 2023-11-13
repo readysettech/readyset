@@ -91,7 +91,140 @@ const CONCURRENT_REQUESTS: usize = 16;
 /// that guarantees thread-safe access to it.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct DfState {
-    pub(super) ingredients: Graph,
+    /// The persisted structure of DfState
+    inner: DfStateInner,
+    /// Latest replication position for the schema if from replica or binlog
+    schema_replication_offset: Option<ReplicationOffset>,
+
+    // The fields below with #[serde(skip)] are all ephemeral
+    #[serde(skip)]
+    pub(super) domains: HashMap<DomainIndex, DomainHandle>,
+
+    #[serde(skip)]
+    pub(super) channel_coordinator: Arc<ChannelCoordinator>,
+
+    /// Map from worker URI to the address the worker is listening on for reads.
+    #[serde(skip)]
+    pub(super) read_addrs: HashMap<WorkerIdentifier, SocketAddr>,
+    #[serde(skip)]
+    pub(super) workers: HashMap<WorkerIdentifier, Worker>,
+}
+
+impl DfState {
+    pub(crate) fn domain_node_index_pairs(
+        &self,
+    ) -> &HashMap<DomainIndex, HashMap<NodeIndex, IndexPair>> {
+        &self.inner.domain_node_index_pairs
+    }
+
+    pub(crate) fn domain_node_index_pairs_mut(
+        &mut self,
+    ) -> &mut HashMap<DomainIndex, HashMap<NodeIndex, IndexPair>> {
+        &mut self.inner.domain_node_index_pairs
+    }
+
+    pub(crate) fn domain_nodes(&self) -> &HashMap<DomainIndex, NodeMap<NodeIndex>> {
+        &self.inner.domain_nodes
+    }
+
+    pub(crate) fn source(&self) -> &NodeIndex {
+        &self.inner.source
+    }
+
+    pub(in crate::controller) fn materializations(&self) -> &Materializations {
+        self.inner.materializations()
+    }
+
+    pub(in crate::controller) fn materializations_mut(&mut self) -> &mut Materializations {
+        self.inner.materializations_mut()
+    }
+
+    pub(crate) fn sharding(&self) -> &Option<usize> {
+        &self.inner.sharding
+    }
+
+    pub(super) fn node_restrictions(
+        &self,
+    ) -> &HashMap<NodeRestrictionKey, DomainPlacementRestriction> {
+        &self.inner.node_restrictions
+    }
+
+    pub(super) fn ingredients(&self) -> &Graph {
+        self.inner.ingredients()
+    }
+
+    pub(super) fn ingredients_mut(&mut self) -> &mut Graph {
+        self.inner.ingredients_mut()
+    }
+
+    pub(super) fn recipe(&self) -> &Recipe {
+        &self.inner.recipe
+    }
+
+    pub(super) fn set_replication_strategy(&mut self, replication_strategy: ReplicationStrategy) {
+        self.inner.replication_strategy = replication_strategy;
+    }
+    pub(super) fn set_domain_config(&mut self, domain_config: DomainConfig) {
+        self.inner.domain_config = domain_config;
+    }
+
+    pub(crate) fn set_domain_nodes(
+        &mut self,
+        domain_nodes: HashMap<DomainIndex, NodeMap<NodeIndex>>,
+    ) {
+        self.inner.domain_nodes = domain_nodes;
+    }
+
+    pub(crate) fn ndomains(&self) -> &usize {
+        &self.inner.ndomains
+    }
+
+    pub(crate) fn ndomains_mut(&mut self) -> &mut usize {
+        &mut self.inner.ndomains
+    }
+
+    pub(crate) fn replication_strategy(&self) -> &ReplicationStrategy {
+        &self.inner.replication_strategy
+    }
+
+    /// Increments nnodes if we inserted a new address
+    pub(crate) fn add_address_for_new_node(
+        &mut self,
+        domain: &DomainIndex,
+        ni: NodeIndex,
+        nnodes: &mut usize,
+    ) {
+        let inserted = &mut false;
+        let ip = self
+            .domain_node_index_pairs_mut()
+            .entry(*domain)
+            .or_insert_with(HashMap::new)
+            .entry(ni)
+            .or_insert_with(|| {
+                *inserted = true;
+                // Only make a new local index for the node if it doesn't already have one,
+                // which can happen if we've added an existing node to `new_nodes` due to
+                // remapping (see [remap-nodes], below)
+                let mut ip: IndexPair = ni.into();
+                ip.set_local(LocalNodeIndex::make(*nnodes as u32));
+                *nnodes += 1;
+                ip
+            });
+        if *inserted {
+            let ip = *ip;
+            #[allow(clippy::indexing_slicing)] // Ingredients must contain NodeIndex
+            self.ingredients_mut()[ni].set_finalized_addr(ip);
+        }
+    }
+}
+
+/// DfStateInner contains the `DfState` fields that get persisted to disk, apart from the schema
+/// replication offsets, which we serialize separately to be able to guarantee we can deserialize it
+/// even in the face of a backwards-incompatible change to the serialization format of
+/// `DfStateInner`
+#[derive(Clone, Serialize, Deserialize)]
+struct DfStateInner {
+    pub(super) df_graph: DfGraph,
 
     /// ID for the root node in the graph. This is used to retrieve a list of base tables.
     pub(super) source: NodeIndex,
@@ -112,12 +245,9 @@ pub struct DfState {
     ///  3. `DurabilityMode::MemoryOnly`: no writes to disk, store all writes in memory.
     ///     Useful for baseline numbers.
     persistence: PersistenceParameters,
-    pub(super) materializations: Materializations,
 
     /// Current recipe
     pub(super) recipe: Recipe,
-    /// Latest replication position for the schema if from replica or binlog
-    schema_replication_offset: Option<ReplicationOffset>,
     /// Placement restrictions for nodes and the domains they are placed into.
     #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
     pub(super) node_restrictions: HashMap<NodeRestrictionKey, DomainPlacementRestriction>,
@@ -125,21 +255,48 @@ pub struct DfState {
     #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
     /// Map from local to global node index for each domain
     pub(super) domain_nodes: HashMap<DomainIndex, NodeMap<NodeIndex>>,
+
     /// Map from global node index to index pair for each domain
     #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
     pub(super) domain_node_index_pairs: HashMap<DomainIndex, HashMap<NodeIndex, IndexPair>>,
+}
 
-    #[serde(skip)]
-    pub(super) domains: HashMap<DomainIndex, DomainHandle>,
+impl DfStateInner {
+    pub(crate) fn ingredients(&self) -> &Graph {
+        &self.df_graph.ingredients
+    }
 
-    #[serde(skip)]
-    pub(super) channel_coordinator: Arc<ChannelCoordinator>,
+    pub(crate) fn ingredients_mut(&mut self) -> &mut Graph {
+        &mut self.df_graph.ingredients
+    }
 
-    /// Map from worker URI to the address the worker is listening on for reads.
-    #[serde(skip)]
-    pub(super) read_addrs: HashMap<WorkerIdentifier, SocketAddr>,
-    #[serde(skip)]
-    pub(super) workers: HashMap<WorkerIdentifier, Worker>,
+    pub(crate) fn materializations(&self) -> &Materializations {
+        &self.df_graph.materializations
+    }
+
+    pub(crate) fn materializations_mut(&mut self) -> &mut Materializations {
+        &mut self.df_graph.materializations
+    }
+
+    pub(crate) fn extend_materializations(
+        &mut self,
+        new: &HashSet<NodeIndex>,
+        dmp: &DomainMigrationPlan,
+    ) -> ReadySetResult<()> {
+        self.df_graph.extend_materializations(new, dmp)
+    }
+
+    pub(crate) fn commit_materializations(
+        &mut self,
+        new: &HashSet<NodeIndex>,
+        dmp: &mut DomainMigrationPlan,
+    ) -> ReadySetResult<()> {
+        self.df_graph.commit_materializations(new, dmp)
+    }
+
+    pub(crate) fn set_materializations(&mut self, materializations: Materializations) {
+        self.df_graph.set_materializations(materializations);
+    }
 }
 
 impl DfState {
@@ -159,23 +316,27 @@ impl DfState {
         replication_strategy: ReplicationStrategy,
     ) -> Self {
         Self {
-            ingredients,
-            source,
-            ndomains,
-            sharding,
-            domain_config,
-            persistence,
-            materializations,
-            recipe,
-            schema_replication_offset,
-            node_restrictions,
+            inner: DfStateInner {
+                df_graph: DfGraph {
+                    ingredients,
+                    materializations,
+                },
+                source,
+                ndomains,
+                sharding,
+                domain_config,
+                persistence,
+                recipe,
+                node_restrictions,
+                domain_nodes: Default::default(),
+                domain_node_index_pairs: Default::default(),
+                replication_strategy,
+            },
             domains: Default::default(),
-            domain_nodes: Default::default(),
             channel_coordinator,
             read_addrs: Default::default(),
             workers: Default::default(),
-            domain_node_index_pairs: Default::default(),
-            replication_strategy,
+            schema_replication_offset,
         }
     }
 
@@ -201,7 +362,8 @@ impl DfState {
                         })
                         .or_insert_with(Vec::new)
                         .extend(
-                            self.domain_nodes
+                            self.inner
+                                .domain_nodes
                                 .get(di)
                                 .ok_or_else(|| {
                                     internal_err!("{:?} in domains but not in domain_nodes", di)
@@ -219,11 +381,11 @@ impl DfState {
     /// Get a map of all known base table nodes, mapping the name of the node to that node's
     /// [index](NodeIndex)
     pub(super) fn tables(&self) -> BTreeMap<Relation, NodeIndex> {
-        self.ingredients
-            .neighbors_directed(self.source, petgraph::EdgeDirection::Outgoing)
+        self.ingredients()
+            .neighbors_directed(self.inner.source, petgraph::EdgeDirection::Outgoing)
             .filter_map(|n| {
                 #[allow(clippy::indexing_slicing)] // just came from self.ingredients
-                let base = &self.ingredients[n];
+                let base = &self.ingredients()[n];
 
                 if base.is_dropped() {
                     None
@@ -238,21 +400,21 @@ impl DfState {
     /// Return a list of all relations (tables or views) which are known to exist in the upstream
     /// database that we are replicating from, but are not being replicated to ReadySet (which are
     /// recorded via [`Change::AddNonReplicatedRelation`]).
-    ///
-    /// [`Change::AddNonReplicatedRelation`]: readyset_client::recipe::changelist::Change::AddNonReplicatedRelation
+    /// /// [`Change::AddNonReplicatedRelation`]:
+    /// readyset_client::recipe::changelist::Change::AddNonReplicatedRelation
     pub(super) fn non_replicated_relations(&self) -> &HashSet<NonReplicatedRelation> {
-        self.recipe.sql_inc().non_replicated_relations()
+        self.inner.recipe.sql_inc().non_replicated_relations()
     }
 
     /// Get a map of all known views, mapping the name of the view to that node's [index](NodeIndex)
     pub(super) fn views(&self) -> BTreeMap<Relation, NodeIndex> {
-        self.ingredients
+        self.ingredients()
             .externals(petgraph::EdgeDirection::Outgoing)
             .filter_map(|n| {
                 #[allow(clippy::indexing_slicing)] // just came from self.ingredients
-                let name = self.ingredients[n].name().clone();
+                let name = self.ingredients()[n].name().clone();
                 #[allow(clippy::indexing_slicing)] // just came from self.ingredients
-                self.ingredients[n].as_reader().map(|r| {
+                self.ingredients()[n].as_reader().map(|r| {
                     // we want to give the the node address that is being materialized not that of
                     // the reader node itself.
                     (name, r.is_for())
@@ -265,19 +427,19 @@ impl DfState {
     /// view to a tuple of (`SelectStatement`, always) where always is a bool that indicates whether
     /// the `CREATE CACHE` statement was created with the optional `ALWAYS` argument.
     pub(super) fn verbose_views(&self) -> Vec<CreateCacheStatement> {
-        self.ingredients
+        self.ingredients()
             .externals(petgraph::EdgeDirection::Outgoing)
             .filter_map(|n| {
                 #[allow(clippy::indexing_slicing)] // just came from self.ingredients
-                if self.ingredients[n].is_reader() {
+                if self.ingredients()[n].is_reader() {
                     #[allow(clippy::indexing_slicing)] // just came from self.ingredients
-                    let name = self.ingredients[n].name().clone();
+                    let name = self.ingredients()[n].name().clone();
 
                     // Alias should always resolve to an id and id should always resolve to an
                     // expression. However, this mapping will not catch bugs that break this
                     // assumption
-                    let name = self.recipe.resolve_alias(&name)?;
-                    let query = self.recipe.expression_by_alias(name)?;
+                    let name = self.inner.recipe.resolve_alias(&name)?;
+                    let query = self.inner.recipe.expression_by_alias(name)?;
 
                     // Only return ingredients created from "CREATE CACHE"
                     match query {
@@ -299,7 +461,7 @@ impl DfState {
     ) -> Vec<bool> {
         queries
             .into_iter()
-            .map(|query| self.recipe.contains(query, dialect).unwrap_or(false))
+            .map(|query| self.inner.recipe.contains(query, dialect).unwrap_or(false))
             .collect()
     }
 
@@ -314,16 +476,17 @@ impl DfState {
         // *unrelated* reader node. to account for this, readers keep track of what node they are
         // "for", and we simply search for the appropriate reader by that metric. since we know
         // that the reader must be relatively close, a BFS search is the way to go.
-        let mut bfs = Bfs::new(&self.ingredients, node);
-        while let Some(child) = bfs.next(&self.ingredients) {
+        let mut bfs = Bfs::new(&self.ingredients(), node);
+        while let Some(child) = bfs.next(&self.ingredients()) {
             #[allow(clippy::indexing_slicing)] // just came from self.ingredients
-            if self.ingredients[child].is_reader_for(node) && self.ingredients[child].name() == name
+            if self.ingredients()[child].is_reader_for(node)
+                && self.ingredients()[child].name() == name
             {
                 // Check for any filter requirements we can satisfy when
                 // traversing the data flow graph, `filter`.
                 if let Some(ViewFilter::Workers(w)) = filter {
                     #[allow(clippy::indexing_slicing)] // just came from self.ingredients
-                    let domain = self.ingredients[child].domain();
+                    let domain = self.ingredients()[child].domain();
                     for worker in w {
                         if self
                             .domains
@@ -352,7 +515,7 @@ impl DfState {
     ) -> ReadySetResult<Option<ReaderHandleBuilder>> {
         // This function is provided a name if the view is for a reused cache.
         let name = name.unwrap_or(&view_req.name);
-        let name = self.recipe.resolve_alias(name).unwrap_or(name);
+        let name = self.inner.recipe.resolve_alias(name).unwrap_or(name);
 
         let reader_node = if let Some(r) = self.find_reader_for(node, name, &view_req.filter) {
             r
@@ -361,11 +524,11 @@ impl DfState {
         };
 
         #[allow(clippy::indexing_slicing)] // `find_reader_for` returns valid indices
-        let domain_index = self.ingredients[reader_node].domain();
+        let domain_index = self.ingredients()[reader_node].domain();
         #[allow(clippy::indexing_slicing)] // `find_reader_for` returns valid indices
-        let reader = self.ingredients[reader_node].as_reader().ok_or_else(|| {
+        let reader = self.ingredients()[reader_node].as_reader().ok_or_else(|| {
             ReadySetError::InvalidNodeType {
-                node_index: self.ingredients[reader_node].local_addr().id(),
+                node_index: self.ingredients()[reader_node].local_addr().id(),
                 expected_type: NodeType::Reader,
             }
         })?;
@@ -375,9 +538,9 @@ impl DfState {
             .post_processing
             .returned_cols
             .clone()
-            .unwrap_or_else(|| (0..self.ingredients[reader_node].columns().len()).collect());
+            .unwrap_or_else(|| (0..self.ingredients()[reader_node].columns().len()).collect());
         #[allow(clippy::indexing_slicing)] // just came from self
-        let columns = self.ingredients[reader_node].columns();
+        let columns = self.ingredients()[reader_node].columns();
         let columns = returned_cols
             .iter()
             .map(|idx| columns.get(*idx).map(|c| c.name().into()))
@@ -421,7 +584,7 @@ impl DfState {
             schema,
             replica_shard_addrs: Array2::from_rows(replicas),
             key_mapping,
-            view_request_timeout: self.domain_config.view_request_timeout,
+            view_request_timeout: self.inner.domain_config.view_request_timeout,
         }))
     }
 
@@ -434,7 +597,7 @@ impl DfState {
         let get_index_or_traverse = |name: &Relation| {
             // first try to resolve the node via the recipe, which handles aliasing between
             // identical queries.
-            match self.recipe.node_addr_for(name) {
+            match self.inner.recipe.node_addr_for(name) {
                 Ok(ni) => Some(ni),
                 // if the recipe doesn't know about this query, traverse the graph.
                 // we need this do deal with manually constructed graphs (e.g., in tests).
@@ -449,7 +612,7 @@ impl DfState {
                 .map(|opt| opt.map(|vb| ViewBuilder::Single(vb))),
             None => {
                 // Does this query reuse another cache?
-                match self.recipe.reused_caches(&view_req.name) {
+                match self.inner.recipe.reused_caches(&view_req.name) {
                     Some(reused_caches) => {
                         let mut view_builders = Vec::new();
                         for cache in reused_caches {
@@ -506,7 +669,7 @@ impl DfState {
         view_ni: NodeIndex,
     ) -> Result<Option<ViewSchema>, ReadySetError> {
         let n =
-            self.ingredients
+            self.ingredients()
                 .node_weight(view_ni)
                 .ok_or_else(|| ReadySetError::NodeNotFound {
                     index: view_ni.index(),
@@ -525,14 +688,14 @@ impl DfState {
             .unwrap_or_else(|| (0..n.columns().len()).collect());
 
         let projected_schema = (0..n.columns().len())
-            .map(|i| schema::column_schema(&self.ingredients, view_ni, &self.recipe, i))
+            .map(|i| schema::column_schema(self.ingredients(), view_ni, &self.inner.recipe, i))
             .collect::<Result<Vec<_>, ReadySetError>>()?
             .into_iter()
             .collect::<Option<Vec<_>>>();
 
         let returned_schema = returned_cols
             .iter()
-            .map(|idx| schema::column_schema(&self.ingredients, view_ni, &self.recipe, *idx))
+            .map(|idx| schema::column_schema(self.ingredients(), view_ni, &self.inner.recipe, *idx))
             .collect::<Result<Vec<_>, ReadySetError>>()?
             .into_iter()
             .collect::<Option<Vec<_>>>();
@@ -547,13 +710,14 @@ impl DfState {
     /// Obtain a TableBuilder that can be used to construct a Table to perform writes and deletes
     /// from the given named base node.
     pub(super) fn table_builder(&self, name: &Relation) -> ReadySetResult<Option<TableBuilder>> {
-        let ni = self
-            .recipe
-            .node_addr_for(name)
-            .map_err(|_| ReadySetError::TableNotFound {
-                name: name.name.clone().into(),
-                schema: name.schema.clone().map(Into::into),
-            })?;
+        let ni =
+            self.inner
+                .recipe
+                .node_addr_for(name)
+                .map_err(|_| ReadySetError::TableNotFound {
+                    name: name.name.clone().into(),
+                    schema: name.schema.clone().map(Into::into),
+                })?;
         self.table_builder_by_index(ni)
     }
 
@@ -562,7 +726,7 @@ impl DfState {
         ni: NodeIndex,
     ) -> ReadySetResult<Option<TableBuilder>> {
         let node = self
-            .ingredients
+            .ingredients()
             .node_weight(ni)
             .ok_or_else(|| ReadySetError::NodeNotFound { index: ni.index() })?;
         let base = node.name();
@@ -636,6 +800,7 @@ impl DfState {
             node.columns().len() - base_operator.get_dropped().len()
         );
         let schema = self
+            .inner
             .recipe
             .schema_for(base)
             .map(|s| -> ReadySetResult<_> {
@@ -660,7 +825,7 @@ impl DfState {
             table_name: node.name().clone(),
             columns,
             schema,
-            table_request_timeout: self.domain_config.table_request_timeout,
+            table_request_timeout: self.inner.domain_config.table_request_timeout,
         }))
     }
 
@@ -704,11 +869,11 @@ impl DfState {
         node_sizes: Option<HashMap<NodeIndex, NodeSize>>,
     ) -> String {
         Graphviz {
-            graph: &self.ingredients,
+            graph: self.ingredients(),
             detailed,
             node_sizes,
-            materializations: &self.materializations,
-            domain_nodes: Some(&self.domain_nodes),
+            materializations: self.materializations(),
+            domain_nodes: Some(&self.inner.domain_nodes),
             reachable_from: None,
         }
         .to_string()
@@ -721,6 +886,7 @@ impl DfState {
         node_sizes: Option<HashMap<NodeIndex, NodeSize>>,
     ) -> ReadySetResult<String> {
         let ni = self
+            .inner
             .recipe
             .node_addr_for(query)
             .ok()
@@ -731,11 +897,11 @@ impl DfState {
             })?;
 
         Ok(Graphviz {
-            graph: &self.ingredients,
+            graph: self.ingredients(),
             detailed,
             node_sizes,
-            materializations: &self.materializations,
-            domain_nodes: Some(&self.domain_nodes),
+            materializations: self.materializations(),
+            domain_nodes: Some(&self.inner.domain_nodes),
             reachable_from: Some((ni, Direction::Incoming)),
         }
         .to_string())
@@ -759,7 +925,8 @@ impl DfState {
             // Accumulate nodes by domain index.
             .fold(HashMap::new(), |mut acc, dh| {
                 acc.entry(dh.index()).or_default().extend(
-                    self.domain_nodes
+                    self.inner
+                        .domain_nodes
                         .get(&dh.index())
                         .map(|nm| nm.values())
                         .into_iter()
@@ -774,20 +941,20 @@ impl DfState {
         let sizes = self.node_sizes().await?;
 
         Ok(self
-            .materializations
+            .materializations()
             .materialized_non_reader_nodes()
             .map(|ni| {
                 (
                     ni,
-                    self.ingredients[ni].name().clone(),
-                    self.ingredients[ni].description(true),
-                    self.materializations
+                    self.ingredients()[ni].name().clone(),
+                    self.ingredients()[ni].description(true),
+                    self.materializations()
                         .indexes_for(ni)
                         .expect("Node index came from materializations")
                         .clone(),
                 )
             })
-            .chain(self.ingredients.node_references().filter_map(|(ni, n)| {
+            .chain(self.ingredients().node_references().filter_map(|(ni, n)| {
                 n.as_reader().and_then(|r| r.index()).map(|idx| {
                     (
                         ni,
@@ -803,7 +970,7 @@ impl DfState {
                     node_name,
                     node_description,
                     size: sizes.get(&node_index).cloned().unwrap_or_default(),
-                    partial: self.materializations.is_partial(node_index),
+                    partial: self.materializations().is_partial(node_index),
                     indexes,
                 },
             )
@@ -901,7 +1068,7 @@ impl DfState {
                 for replica in domain_offs.into_cells() {
                     for (lni, offset) in replica {
                         #[allow(clippy::indexing_slicing)] // came from self.domains
-                        let ni = self.domain_nodes[&domain].get(lni).ok_or_else(|| {
+                        let ni = self.inner.domain_nodes[&domain].get(lni).ok_or_else(|| {
                             internal_err!(
                                 "Domain {} returned nonexistent local node {}",
                                 domain,
@@ -909,12 +1076,12 @@ impl DfState {
                             )
                         })?;
 
-                        if !self.ingredients[*ni].is_base() {
+                        if !self.ingredients()[*ni].is_base() {
                             continue;
                         }
 
                         #[allow(clippy::indexing_slicing)] // internal invariant
-                        let table_name = self.ingredients[*ni].name();
+                        let table_name = self.ingredients()[*ni].name();
                         match offset {
                             BaseTableState::Initialized(offset) => {
                                 // TODO min of all shards
@@ -959,7 +1126,7 @@ impl DfState {
         let domains = self
             .tables()
             .values()
-            .map(|ni| self.ingredients[*ni].domain())
+            .map(|ni| self.ingredients()[*ni].domain())
             .collect::<HashSet<_>>();
 
         for di in domains.iter() {
@@ -1000,7 +1167,7 @@ impl DfState {
 
     /// Have all domain replicas been placed onto workers in the cluster?
     pub(super) fn all_replicas_placed(&self) -> bool {
-        self.domain_nodes.keys().all(|d| {
+        self.inner.domain_nodes.keys().all(|d| {
             self.domains
                 .get(d)
                 .map_or(false, |h| h.all_replicas_placed())
@@ -1009,7 +1176,8 @@ impl DfState {
 
     /// Returns a map of nodes for domains which have not yet been placed onto a worker
     pub(super) fn unplaced_domain_nodes(&self) -> HashMap<DomainIndex, HashSet<NodeIndex>> {
-        self.domain_nodes
+        self.inner
+            .domain_nodes
             .iter()
             .filter(|(d, _)| {
                 self.domains
@@ -1074,11 +1242,11 @@ impl DfState {
             .iter()
             .map(|(di, lni)| -> ReadySetResult<Relation> {
                 #[allow(clippy::indexing_slicing)] // just came from self.domains
-                let li = *self.domain_nodes[di].get(*lni).ok_or_else(|| {
+                let li = *self.inner.domain_nodes[di].get(*lni).ok_or_else(|| {
                     internal_err!("Domain {} returned nonexistent node {}", di, lni)
                 })?;
                 #[allow(clippy::indexing_slicing)] // internal invariant
-                let node = &self.ingredients[li];
+                let node = &self.ingredients()[li];
                 debug_assert!(node.is_base());
                 Ok(node.name().clone())
             })
@@ -1182,8 +1350,8 @@ impl DfState {
     /// Must be called before any domains have been created.
     #[allow(unused)]
     pub(super) fn with_persistence_options(&mut self, params: PersistenceParameters) {
-        assert_eq!(self.ndomains, 0);
-        self.persistence = params;
+        assert_eq!(self.inner.ndomains, 0);
+        self.inner.persistence = params;
     }
 
     pub(in crate::controller) async fn place_domain(
@@ -1199,7 +1367,7 @@ impl DfState {
 
         // check all nodes actually exist
         for n in &nodes {
-            if self.ingredients.node_weight(*n).is_none() {
+            if self.ingredients().node_weight(*n).is_none() {
                 return Err(ReadySetError::NodeNotFound { index: n.index() });
             }
         }
@@ -1209,12 +1377,12 @@ impl DfState {
             .map(|ni| {
                 #[allow(clippy::unwrap_used)] // checked above
                 let node = self
-                    .ingredients
+                    .ingredients_mut()
                     .node_weight_mut(*ni)
                     .unwrap()
                     .clone()
                     .take();
-                node.finalize(&self.ingredients)
+                node.finalize(self.ingredients())
             })
             .map(|nd| (nd.local_addr(), cell::RefCell::new(nd)))
             .collect();
@@ -1245,9 +1413,9 @@ impl DfState {
                     shard: if num_shards > 1 { Some(shard) } else { None },
                     replica,
                     nshards: num_shards,
-                    config: self.domain_config.clone(),
+                    config: self.inner.domain_config.clone(),
                     nodes: domain_nodes.clone(),
-                    persistence_parameters: self.persistence.clone(),
+                    persistence_parameters: self.inner.persistence.clone(),
                 };
 
                 let w = self.workers.get(worker_id).ok_or_else(|| {
@@ -1276,7 +1444,7 @@ impl DfState {
                 // domain if necessary.
                 for n in &nodes {
                     #[allow(clippy::indexing_slicing)] // checked above
-                    let node = &self.ingredients[*n];
+                    let node = &self.ingredients()[*n];
 
                     if node.is_base() && w.domain_scheduling_config.volume_id.is_some() {
                         new_domain_restrictions.push((
@@ -1348,7 +1516,7 @@ impl DfState {
         let mut domain_removals: HashMap<DomainIndex, Vec<LocalNodeIndex>> = HashMap::default();
         for ni in removals {
             let node = self
-                .ingredients
+                .ingredients_mut()
                 .node_weight_mut(*ni)
                 .ok_or_else(|| ReadySetError::NodeNotFound { index: ni.index() })?;
             node.remove();
@@ -1392,7 +1560,8 @@ impl DfState {
         shard: usize,
         node_restriction: DomainPlacementRestriction,
     ) {
-        self.node_restrictions
+        self.inner
+            .node_restrictions
             .insert(NodeRestrictionKey { node_name, shard }, node_restriction);
     }
 
@@ -1431,7 +1600,7 @@ impl DfState {
         for (di, nodes) in to_evict {
             for (ni, bytes) in nodes {
                 let na = self
-                    .ingredients
+                    .ingredients()
                     .node_weight(ni)
                     .ok_or_else(|| ReadySetError::NodeNotFound { index: ni.index() })?
                     .local_addr();
@@ -1473,7 +1642,7 @@ impl DfState {
                 key,
             }) => (domain_idx, Tag::new(tag), Some(key)),
             None => {
-                let tags = self.materializations.partial_tags();
+                let tags = self.materializations().partial_tags();
                 if tags.is_empty() {
                     trace!("Attempted to evict but found no tags for any partial materialization");
                     return Ok(None);
@@ -1520,7 +1689,8 @@ impl DfState {
     /// Note: This is not a fast way to find which Domain owns a Node. If using this function in a
     /// hot path, consider adding additional information to Materializations for efficient indexing.
     fn domain_for_node(&self, node: &NodeIndex) -> Option<DomainIndex> {
-        self.domain_nodes
+        self.inner
+            .domain_nodes
             .iter()
             .flat_map(|(d, nodes)| nodes.into_iter().map(|(_, ni)| (*d, ni)))
             .find(|(_, ni)| *ni == node)
@@ -1534,7 +1704,7 @@ impl DfState {
     ) -> Result<(), ReadySetError> {
         // I hate this, but there's no way around for now, as migrations
         // are super entangled with the recipe and the graph.
-        let mut new = self.recipe.clone();
+        let mut new = self.inner.recipe.clone();
 
         let r = self
             .migrate(dry_run, changelist.dialect, |mig| {
@@ -1544,7 +1714,7 @@ impl DfState {
 
         match r {
             Ok(res) => {
-                self.recipe = new;
+                self.inner.recipe = new;
                 Ok(res)
             }
             Err(e) => {
@@ -1590,7 +1760,7 @@ impl DfState {
     /// Return 1 if one or more expressions were removed, else return 0.
     /// Someday we may want to return # expressions (and aliases?) dropped.
     pub(super) async fn remove_query(&mut self, query_name: &Relation) -> ReadySetResult<u64> {
-        let name = match self.recipe.resolve_alias(query_name) {
+        let name = match self.inner.recipe.resolve_alias(query_name) {
             None => return Ok(0),
             Some(name) => name,
         };
@@ -1613,6 +1783,7 @@ impl DfState {
 
     pub(super) async fn remove_all_queries(&mut self) -> ReadySetResult<()> {
         let changes = self
+            .inner
             .recipe
             .cache_names()
             .map(|n| Change::Drop {
@@ -1655,15 +1826,16 @@ impl DfState {
     ) -> ReadySetResult<HashSet<DomainIndex>> {
         let mut res = HashSet::new();
         for (_, ni) in
-            self.domain_nodes
+            self.inner
+                .domain_nodes
                 .get(&domain)
                 .ok_or_else(|| ReadySetError::UnknownDomain {
                     domain_index: domain.index(),
                 })?
         {
-            let mut bfs = petgraph::visit::Bfs::new(&self.ingredients, *ni);
-            while let Some(ni) = bfs.next(&self.ingredients) {
-                let downstream_domain = self.ingredients[ni].domain();
+            let mut bfs = Bfs::new(self.ingredients(), *ni);
+            while let Some(ni) = bfs.next(self.ingredients()) {
+                let downstream_domain = self.ingredients()[ni].domain();
                 if downstream_domain != domain {
                     res.insert(downstream_domain);
                 }
@@ -1779,13 +1951,10 @@ impl DfState {
             }
         }
 
-        routing::connect(&self.ingredients, &mut dmp, &new)?;
+        routing::connect(self.ingredients(), &mut dmp, &new)?;
 
-        self.materializations
-            .extend(&mut self.ingredients, &new, &dmp)?;
-
-        self.materializations
-            .commit(&mut self.ingredients, &new, &mut dmp)?;
+        self.extend_materializations(&new, &dmp)?;
+        self.commit_materializations(&new, &mut dmp)?;
 
         Ok(dmp)
     }
@@ -1805,12 +1974,63 @@ impl DfState {
         self.workers = Default::default();
 
         let mut new_materializations = Materializations::new();
-        new_materializations.paths = self.materializations.paths.clone();
-        new_materializations.redundant_partial = self.materializations.redundant_partial.clone();
-        new_materializations.tag_generator = self.materializations.tag_generator;
-        new_materializations.config = self.materializations.config.clone();
+        new_materializations.paths = self.materializations().paths.clone();
+        new_materializations.redundant_partial = self.materializations().redundant_partial.clone();
+        new_materializations.tag_generator = self.materializations().tag_generator;
+        new_materializations.config = self.materializations().config.clone();
 
-        self.materializations = new_materializations;
+        self.set_materializations(new_materializations);
+    }
+
+    fn set_materializations(&mut self, materializations: Materializations) {
+        self.inner.set_materializations(materializations);
+    }
+    pub(crate) fn commit_materializations(
+        &mut self,
+        new: &HashSet<NodeIndex>,
+        dmp: &mut DomainMigrationPlan,
+    ) -> ReadySetResult<()> {
+        self.inner.commit_materializations(new, dmp)
+    }
+
+    pub(crate) fn extend_materializations(
+        &mut self,
+        new: &HashSet<NodeIndex>,
+        dmp: &DomainMigrationPlan,
+    ) -> ReadySetResult<()> {
+        self.inner.extend_materializations(new, dmp)
+    }
+}
+
+/// The Dataflow Graph is a [`petgraph::Graph`] and a separate `Materializations` struct containing
+/// information about which nodes in the graph are materialized
+#[derive(Clone, Serialize, Deserialize)]
+struct DfGraph {
+    ingredients: Graph,
+    materializations: Materializations,
+}
+
+impl DfGraph {
+    pub(crate) fn set_materializations(&mut self, materializations: Materializations) {
+        self.materializations = materializations;
+    }
+
+    pub(crate) fn extend_materializations(
+        &mut self,
+        new: &HashSet<NodeIndex>,
+        dmp: &DomainMigrationPlan,
+    ) -> ReadySetResult<()> {
+        self.materializations
+            .extend(&mut self.ingredients, new, dmp)
+    }
+
+    pub(crate) fn commit_materializations(
+        &mut self,
+        new: &HashSet<NodeIndex>,
+        dmp: &mut DomainMigrationPlan,
+    ) -> ReadySetResult<()> {
+        self.materializations
+            .commit(&mut self.ingredients, new, dmp)
     }
 }
 
