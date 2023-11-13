@@ -505,11 +505,13 @@ async fn dry_run_evaluates_support() {
         query_id.clone(),
         "SELECT * FROM `t1` WHERE (`uid` = $1)".to_string(),
         "pending".to_string(),
+        "1".to_string(),
     )]);
     results.write(&[(
         query_id,
         "SELECT * FROM `t1` WHERE (`uid` = $1)".to_string(),
         "yes".to_string(),
+        "1".to_string(),
     )]);
 
     // Verify that the query eventually reaches the "yes" state in the
@@ -584,11 +586,13 @@ async fn proxied_queries_filtering() {
         query_id.clone(),
         "SELECT * FROM `t1` WHERE (`uid` = $1)".to_string(),
         "pending".to_string(),
+        "1".to_string(),
     )]);
     results.write(&[(
         query_id.clone(),
         "SELECT * FROM `t1` WHERE (`uid` = $1)".to_string(),
         "yes".to_string(),
+        "1".to_string(),
     )]);
 
     // Verify that the query eventually reaches the "yes" state in the
@@ -607,7 +611,7 @@ async fn proxied_queries_filtering() {
     let proxied_queries = adapter
         .as_mysql_conn()
         .unwrap()
-        .query::<(String, String, String), _>(query)
+        .query::<(String, String, String, String), _>(query)
         .await
         .unwrap();
 
@@ -647,17 +651,17 @@ async fn cached_queries_filtering() {
     let query_ids = adapter
         .as_mysql_conn()
         .unwrap()
-        .query::<(String, String, String, String), _>("SHOW CACHES")
+        .query::<(String, String, String, String, String), _>("SHOW CACHES")
         .await
         .unwrap();
     assert_eq!(query_ids.len(), 2);
 
     // Filter on one of the IDs
-    let (query_id, _, _, _) = query_ids.first().unwrap();
+    let (query_id, _, _, _, _) = query_ids.first().unwrap();
     let cached_queries = adapter
         .as_mysql_conn()
         .unwrap()
-        .query::<(String, String, String, String), _>(&format!(
+        .query::<(String, String, String, String, String), _>(&format!(
             "SHOW CACHES WHERE query_id = '{}'",
             query_id
         ))
