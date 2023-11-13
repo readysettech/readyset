@@ -284,7 +284,7 @@ pub struct Options {
     password: Option<RedactedString>,
 
     /// Enable recording and exposing Prometheus metrics
-    #[arg(long, env = "PROMETHEUS_METRICS")]
+    #[arg(long, env = "PROMETHEUS_METRICS", default_value = "true", hide = true)]
     prometheus_metrics: bool,
 
     #[arg(long, hide = true)]

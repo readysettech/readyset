@@ -531,7 +531,7 @@ impl DeploymentBuilder {
             cleanup: false,
             enable_experimental_placeholder_inlining: false,
             allow_full_materialization: false,
-            prometheus_metrics: false,
+            prometheus_metrics: true,
         }
     }
     /// The number of shards in the graph, `shards` <= 1 disables sharding.
