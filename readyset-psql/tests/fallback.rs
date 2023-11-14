@@ -2069,7 +2069,7 @@ mod failure_injection_tests {
 
     use std::sync::Arc;
 
-    use readyset_client::consensus::{Authority, AuthorityControl, CacheDDLRequest};
+    use readyset_client::consensus::{Authority, CacheDDLRequest, CacheDDLStore};
     use readyset_client::failpoints;
     use readyset_data::Dialect;
     use readyset_errors::ReadySetError;

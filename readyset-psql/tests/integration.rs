@@ -1,5 +1,4 @@
 use chrono::{NaiveDate, NaiveDateTime};
-use readyset_client::consensus::AuthorityControl;
 use readyset_client_test_helpers::psql_helpers::PostgreSQLAdapter;
 use readyset_client_test_helpers::{self, sleep, TestBuilder};
 use readyset_server::Handle;
@@ -9,7 +8,7 @@ use tokio_postgres::{CommandCompleteContents, SimpleQueryMessage};
 
 mod common;
 use common::connect;
-use readyset_client::consensus::CacheDDLRequest;
+use readyset_client::consensus::{CacheDDLRequest, CacheDDLStore};
 use readyset_data::Dialect;
 
 use crate::common::setup_standalone_with_authority;

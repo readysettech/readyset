@@ -29,8 +29,8 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 use super::{
-    AuthorityControl, AuthorityWorkerHeartbeatResponse, GetLeaderResult, LeaderPayload,
-    WorkerDescriptor, WorkerId,
+    AuthorityControl, AuthorityReader, AuthorityWorkerHeartbeatResponse, CacheDDLStore,
+    GetLeaderResult, KVStore, LeaderPayload, WorkerDescriptor, WorkerId,
 };
 #[cfg(feature = "failure_injection")]
 use crate::failpoints;
@@ -114,11 +114,65 @@ impl Drop for StandaloneAuthority {
 }
 
 #[async_trait]
-impl AuthorityControl for StandaloneAuthority {
+impl KVStore for StandaloneAuthority {
     async fn init(&self) -> ReadySetResult<()> {
         Ok(())
     }
+    /// Do a non-blocking read at the indicated key.
+    async fn try_read<P>(&self, path: &str) -> ReadySetResult<Option<P>>
+    where
+        P: DeserializeOwned,
+    {
+        Ok(self
+            .try_read_raw(path)
+            .await?
+            .map(|v| rmp_serde::from_slice(&v))
+            .transpose()?)
+    }
 
+    async fn try_read_raw(&self, path: &str) -> ReadySetResult<Option<Vec<u8>>> {
+        Ok(self
+            .state
+            .db
+            .read()
+            .get_pinned(path)
+            .map_err(|e| internal_err!("RocksDB error: {e}"))?
+            .map(|v| v.to_vec()))
+    }
+
+    async fn read_modify_write<F, P, E>(&self, path: &str, mut f: F) -> ReadySetResult<Result<P, E>>
+    where
+        F: Send + FnMut(Option<P>) -> Result<P, E>,
+        P: Send + Serialize + DeserializeOwned,
+        E: Send,
+    {
+        let db = self.state.db.write();
+        let current_val = db
+            .get_pinned(path)
+            .map_err(|e| internal_err!("RocksDB error: {e}"))?
+            .map(|v| rmp_serde::from_slice(&v))
+            .transpose()?;
+
+        let res = f(current_val);
+
+        if let Ok(updated_val) = &res {
+            let new_val = rmp_serde::to_vec(&updated_val)?;
+            db.put(path, new_val)
+                .map_err(|e| internal_err!("RocksDB error: {e}"))?;
+        }
+
+        Ok(res)
+    }
+}
+
+#[async_trait]
+impl CacheDDLStore for StandaloneAuthority {}
+
+#[async_trait]
+impl AuthorityReader for StandaloneAuthority {}
+
+#[async_trait]
+impl AuthorityControl for StandaloneAuthority {
     async fn become_leader(&self, payload: LeaderPayload) -> ReadySetResult<Option<LeaderPayload>> {
         // Leadership info is not persisted outside the process, it is kept in a shared state
         match &mut *self.state.leader.write() {
@@ -167,52 +221,6 @@ impl AuthorityControl for StandaloneAuthority {
 
     async fn watch_workers(&self) -> ReadySetResult<()> {
         internal!("StandaloneAuthority does not support `watch_workers`.");
-    }
-
-    /// Do a non-blocking read at the indicated key.
-    async fn try_read<P>(&self, path: &str) -> ReadySetResult<Option<P>>
-    where
-        P: DeserializeOwned,
-    {
-        Ok(self
-            .try_read_raw(path)
-            .await?
-            .map(|v| rmp_serde::from_slice(&v))
-            .transpose()?)
-    }
-
-    async fn try_read_raw(&self, path: &str) -> ReadySetResult<Option<Vec<u8>>> {
-        Ok(self
-            .state
-            .db
-            .read()
-            .get_pinned(path)
-            .map_err(|e| internal_err!("RocksDB error: {e}"))?
-            .map(|v| v.to_vec()))
-    }
-
-    async fn read_modify_write<F, P, E>(&self, path: &str, mut f: F) -> ReadySetResult<Result<P, E>>
-    where
-        F: Send + FnMut(Option<P>) -> Result<P, E>,
-        P: Send + Serialize + DeserializeOwned,
-        E: Send,
-    {
-        let db = self.state.db.write();
-        let current_val = db
-            .get_pinned(path)
-            .map_err(|e| internal_err!("RocksDB error: {e}"))?
-            .map(|v| rmp_serde::from_slice(&v))
-            .transpose()?;
-
-        let res = f(current_val);
-
-        if let Ok(updated_val) = &res {
-            let new_val = rmp_serde::to_vec(&updated_val)?;
-            db.put(path, new_val)
-                .map_err(|e| internal_err!("RocksDB error: {e}"))?;
-        }
-
-        Ok(res)
     }
 
     /// Register a worker with their descriptor. Returns a unique identifier that represents this
@@ -301,7 +309,7 @@ mod tests {
     use std::sync::Arc;
 
     use futures::stream::FuturesUnordered;
-    use futures::StreamExt;
+    use futures_util::StreamExt;
     use readyset_data::Dialect;
     use reqwest::Url;
     use tempfile::tempdir;

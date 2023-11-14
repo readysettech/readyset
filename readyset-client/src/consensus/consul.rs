@@ -141,8 +141,9 @@ use serde::{Deserialize, Serialize};
 use tracing::{error, warn};
 
 use super::{
-    AuthorityControl, AuthorityWorkerHeartbeatResponse, GetLeaderResult, LeaderPayload,
-    WorkerDescriptor, WorkerId, SCHEMA_REPLICATION_OFFSET_PATH,
+    AuthorityControl, AuthorityReader, AuthorityWorkerHeartbeatResponse, CacheDDLStore,
+    GetLeaderResult, KVStore, LeaderPayload, WorkerDescriptor, WorkerId,
+    SCHEMA_REPLICATION_OFFSET_PATH,
 };
 #[cfg(feature = "failure_injection")]
 use crate::failpoints;
@@ -604,11 +605,95 @@ fn is_new_index(current_index: Option<u64>, kv_pair: &KVPair) -> bool {
 }
 
 #[async_trait]
-impl AuthorityControl for ConsulAuthority {
+impl CacheDDLStore for ConsulAuthority {}
+
+#[async_trait]
+impl AuthorityReader for ConsulAuthority {}
+
+#[async_trait]
+impl KVStore for ConsulAuthority {
     async fn init(&self) -> ReadySetResult<()> {
         self.create_session().await
     }
 
+    async fn try_read<P: DeserializeOwned>(&self, path: &str) -> ReadySetResult<Option<P>> {
+        Ok(
+            match kv::read(&self.consul, &self.prefix_with_deployment(path), None).await {
+                Ok(r) if !r.response.is_empty() => {
+                    let bytes: Vec<u8> = get_value_as_bytes(r)?;
+                    Some(serde_json::from_slice(&bytes)?)
+                }
+                Ok(_) => None,
+                // The API currently throws an error that it cannot parse the json
+                // if the key does not exist.
+                Err(e) => {
+                    warn!("try_read consul error: {}", e.to_string());
+                    None
+                }
+            },
+        )
+    }
+
+    async fn read_modify_write<F, P, E>(&self, path: &str, mut f: F) -> ReadySetResult<Result<P, E>>
+    where
+        F: Send + FnMut(Option<P>) -> Result<P, E>,
+        P: Send + Serialize + DeserializeOwned,
+        E: Send,
+    {
+        loop {
+            let (modify_index, current_val) =
+                match kv::read(&self.consul, &self.prefix_with_deployment(path), None).await {
+                    Ok(resp) => {
+                        if let Some(pair) = resp.response.into_iter().next() {
+                            (
+                                pair.modify_index,
+                                pair.value
+                                    .map(|bytes| -> ReadySetResult<_> {
+                                        let bytes: Vec<u8> = bytes
+                                            .try_into()
+                                            .map_err(|e| internal_err!("Consul error: {e}"))?;
+                                        Ok(serde_json::from_slice(&bytes)?)
+                                    })
+                                    .transpose()?,
+                            )
+                        } else {
+                            (0, None)
+                        }
+                    }
+                    _ => (0, None),
+                };
+
+            if let Ok(modified) = f(current_val) {
+                let bytes = serde_json::to_vec(&modified)?;
+                let r = kv::set(
+                    &self.consul,
+                    &self.prefix_with_deployment(path),
+                    &bytes,
+                    Some(SetKeyRequestBuilder::default().cas(modify_index)),
+                )
+                .await?;
+
+                if r.response {
+                    return Ok(Ok(modified));
+                }
+            }
+        }
+    }
+
+    async fn try_read_raw(&self, path: &str) -> ReadySetResult<Option<Vec<u8>>> {
+        let mut r = kv::read(&self.consul, &self.prefix_with_deployment(path), None).await?;
+        // If it has a value, deserialize it and return it, otherwise return None.
+        if let Some(value) = r.response.pop().and_then(|v| v.value) {
+            let bytes: Vec<u8> = value.try_into()?;
+            Ok(Some(serde_json::from_slice::<Vec<u8>>(&bytes)?))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+#[async_trait]
+impl AuthorityControl for ConsulAuthority {
     async fn become_leader(&self, payload: LeaderPayload) -> ReadySetResult<Option<LeaderPayload>> {
         let session = self.get_session()?;
         let key = self.prefix_with_deployment(CONTROLLER_KEY);
@@ -733,70 +818,6 @@ impl AuthorityControl for ConsulAuthority {
         Ok(())
     }
 
-    async fn try_read<P: DeserializeOwned>(&self, path: &str) -> ReadySetResult<Option<P>> {
-        Ok(
-            match kv::read(&self.consul, &self.prefix_with_deployment(path), None).await {
-                Ok(r) if !r.response.is_empty() => {
-                    let bytes: Vec<u8> = get_value_as_bytes(r)?;
-                    Some(serde_json::from_slice(&bytes)?)
-                }
-                Ok(_) => None,
-                // The API currently throws an error that it cannot parse the json
-                // if the key does not exist.
-                Err(e) => {
-                    warn!("try_read consul error: {}", e.to_string());
-                    None
-                }
-            },
-        )
-    }
-
-    async fn read_modify_write<F, P, E>(&self, path: &str, mut f: F) -> ReadySetResult<Result<P, E>>
-    where
-        F: Send + FnMut(Option<P>) -> Result<P, E>,
-        P: Send + Serialize + DeserializeOwned,
-        E: Send,
-    {
-        loop {
-            let (modify_index, current_val) =
-                match kv::read(&self.consul, &self.prefix_with_deployment(path), None).await {
-                    Ok(resp) => {
-                        if let Some(pair) = resp.response.into_iter().next() {
-                            (
-                                pair.modify_index,
-                                pair.value
-                                    .map(|bytes| -> ReadySetResult<_> {
-                                        let bytes: Vec<u8> = bytes
-                                            .try_into()
-                                            .map_err(|e| internal_err!("Consul error: {e}"))?;
-                                        Ok(serde_json::from_slice(&bytes)?)
-                                    })
-                                    .transpose()?,
-                            )
-                        } else {
-                            (0, None)
-                        }
-                    }
-                    _ => (0, None),
-                };
-
-            if let Ok(modified) = f(current_val) {
-                let bytes = serde_json::to_vec(&modified)?;
-                let r = kv::set(
-                    &self.consul,
-                    &self.prefix_with_deployment(path),
-                    &bytes,
-                    Some(SetKeyRequestBuilder::default().cas(modify_index)),
-                )
-                .await?;
-
-                if r.response {
-                    return Ok(Ok(modified));
-                }
-            }
-        }
-    }
-
     /// Updates the controller state only if we are the leader. This is guaranteed by holding a
     /// session that locks both the leader key and the state key. If the leader session dies
     /// both locks will be released.
@@ -840,17 +861,6 @@ impl AuthorityControl for ConsulAuthority {
         let (new_value, _) = self.write_controller_state(current_value, state).await?;
         self.write_controller_state_value(new_value).await?;
         Ok(())
-    }
-
-    async fn try_read_raw(&self, path: &str) -> ReadySetResult<Option<Vec<u8>>> {
-        let mut r = kv::read(&self.consul, &self.prefix_with_deployment(path), None).await?;
-        // If it has a value, deserialize it and return it, otherwise return None.
-        if let Some(value) = r.response.pop().and_then(|v| v.value) {
-            let bytes: Vec<u8> = value.try_into()?;
-            Ok(Some(serde_json::from_slice::<Vec<u8>>(&bytes)?))
-        } else {
-            Ok(None)
-        }
     }
 
     async fn register_worker(&self, payload: WorkerDescriptor) -> ReadySetResult<Option<WorkerId>>

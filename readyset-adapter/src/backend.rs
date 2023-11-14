@@ -85,7 +85,7 @@ use nom_sql::{
     InsertStatement, Relation, SelectStatement, SetStatement, ShowStatement, SqlIdentifier,
     SqlQuery, UpdateStatement, UseStatement,
 };
-use readyset_client::consensus::{Authority, AuthorityControl, CacheDDLRequest};
+use readyset_client::consensus::{Authority, CacheDDLRequest, CacheDDLStore};
 use readyset_client::consistency::Timestamp;
 use readyset_client::query::*;
 use readyset_client::results::Results;

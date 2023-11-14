@@ -9,7 +9,7 @@ use nom_sql::{
     self, ColumnConstraint, DeleteStatement, DialectDisplay, Expr, InsertStatement, Relation,
     SqlIdentifier, SqlQuery, UnaryOperator, UpdateStatement,
 };
-use readyset_client::consensus::{Authority, AuthorityControl};
+use readyset_client::consensus::{Authority, AuthorityReader};
 use readyset_client::consistency::Timestamp;
 use readyset_client::internal::LocalNodeIndex;
 use readyset_client::recipe::changelist::{Change, ChangeList, IntoChanges};

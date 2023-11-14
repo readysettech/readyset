@@ -125,24 +125,7 @@ where
 
 #[async_trait]
 #[enum_dispatch]
-pub trait AuthorityControl: Send + Sync {
-    /// If this [`AuthorityControl`] also implements the optimized [`UpdateInPlace`] trait, returns
-    /// self as [`UpdateInPlace`], so caller can use optimized method instead.
-    fn as_local<E, F, P>(&self) -> Option<&dyn UpdateInPlace<E, F, P>>
-    where
-        P: 'static,
-        F: FnMut(Option<&mut P>) -> Result<(), E>,
-    {
-        None
-    }
-
-    /// Initializes the authority. This performs any initialization that the authority client
-    /// needs to perform with the backend. This should be performed before any other
-    /// calls are made to AuthorityControl functions.
-    /// TODO(justin): Existing authorities should guarantee authority usage adheres to calling
-    /// init() before other functionality.
-    async fn init(&self) -> ReadySetResult<()>;
-
+pub trait AuthorityControl: Send + Sync + KVStore {
     /// Attempt to become leader with a specific payload. The payload should be something that can
     /// be deserialized to get the information on how to connect to the leader. If it is successful
     /// the this will return Some(payload), otherwise None and another instance has become leader.
@@ -171,25 +154,22 @@ pub trait AuthorityControl: Send + Sync {
     /// be called if `can_watch` returns True.
     async fn watch_workers(&self) -> ReadySetResult<()>;
 
-    /// Do a non-blocking read at the indicated key.
-    async fn try_read<P>(&self, path: &str) -> ReadySetResult<Option<P>>
+    /// Update the stats persisted in the authority. Wrapper around `read_modify_write`.
+    async fn update_persistent_stats<F>(&self, f: F) -> ReadySetResult<PersistentStats>
     where
-        P: DeserializeOwned;
+        F: Send + FnMut(Option<PersistentStats>) -> ReadySetResult<PersistentStats>,
+    {
+        self.read_modify_write(PERSISTENT_STATS_PATH, f)
+            .await
+            .flatten()
+    }
 
-    // Temporarily here to support arbitrary introspection into the authority. Will replace with
-    // better functions later.
-    async fn try_read_raw(&self, path: &str) -> ReadySetResult<Option<Vec<u8>>>;
-
-    /// Repeatedly attempts to do a read modify write operation. Each attempt consists of a read of
-    /// the indicated node, a call to `f` with the data read (or None if the node did not exist),
-    /// and finally a write back to the node if it hasn't changed from when it was originally
-    /// written. The process aborts when a write succeeds or a call to `f` returns `Err`. In either
-    /// case, returns the last value produced by `f`.
-    async fn read_modify_write<F, P, E>(&self, path: &str, f: F) -> ReadySetResult<Result<P, E>>
-    where
-        F: Send + FnMut(Option<P>) -> Result<P, E>,
-        P: Send + Serialize + DeserializeOwned,
-        E: Send;
+    /// Update the schema_replication_offset to the given value, without regard for what was stored
+    /// there before.
+    async fn set_schema_replication_offset<R>(
+        &self,
+        offset: Option<ReplicationOffset>,
+    ) -> ReadySetResult<()>;
 
     /// Register a worker with their descriptor. Returns a unique identifier that represents this
     /// worker if successful.
@@ -236,7 +216,52 @@ pub trait AuthorityControl: Send + Sync {
     async fn overwrite_controller_state<P>(&self, state: P) -> ReadySetResult<()>
     where
         P: Send + Serialize + 'static;
+}
 
+#[async_trait]
+#[enum_dispatch]
+pub trait KVStore: Send + Sync {
+    /// If this [`KVStore`] also implements the optimized [`UpdateInPlace`] trait, returns
+    /// self as [`UpdateInPlace`], so caller can use optimized method instead.
+    fn as_local<E, F, P>(&self) -> Option<&dyn UpdateInPlace<E, F, P>>
+    where
+        P: 'static,
+        F: FnMut(Option<&mut P>) -> Result<(), E>,
+    {
+        None
+    }
+
+    /// Initializes the KV Store. This performs any initialization that the kv client
+    /// needs to perform with the backend. This should be performed before any other
+    /// calls are made to AuthorityControl functions.
+    /// TODO(justin): Existing authorities should guarantee authority usage adheres to calling
+    /// init() before other functionality.
+    async fn init(&self) -> ReadySetResult<()>;
+
+    /// Do a non-blocking read at the indicated key.
+    async fn try_read<P>(&self, path: &str) -> ReadySetResult<Option<P>>
+    where
+        P: DeserializeOwned;
+
+    // Temporarily here to support arbitrary introspection into the authority. Will replace with
+    // better functions later.
+    async fn try_read_raw(&self, path: &str) -> ReadySetResult<Option<Vec<u8>>>;
+
+    /// Repeatedly attempts to do a read modify write operation. Each attempt consists of a read of
+    /// the indicated node, a call to `f` with the data read (or None if the node did not exist),
+    /// and finally a write back to the node if it hasn't changed from when it was originally
+    /// written. The process aborts when a write succeeds or a call to `f` returns `Err`. In either
+    /// case, returns the last value produced by `f`.
+    async fn read_modify_write<F, P, E>(&self, path: &str, f: F) -> ReadySetResult<Result<P, E>>
+    where
+        F: Send + FnMut(Option<P>) -> Result<P, E>,
+        P: Send + Serialize + DeserializeOwned,
+        E: Send;
+}
+
+#[async_trait]
+#[enum_dispatch]
+pub trait CacheDDLStore: Send + Sync + KVStore {
     /// Return the list of cache ddl requests (CREATE CACHE or DROP CACHE) statements that have been
     /// run against this ReadySet deployment.
     ///
@@ -285,38 +310,25 @@ pub trait AuthorityControl: Send + Sync {
         })
         .await
     }
+}
 
-    /// Returns stats persisted in the authority. Wrapper around `Self::try_read`.
-    async fn persistent_stats(&self) -> ReadySetResult<Option<PersistentStats>> {
-        self.try_read(PERSISTENT_STATS_PATH).await
-    }
-
-    /// Update the stats persisted in the authority. Wrapper around `read_modify_write`.
-    async fn update_persistent_stats<F>(&self, f: F) -> ReadySetResult<PersistentStats>
-    where
-        F: Send + FnMut(Option<PersistentStats>) -> ReadySetResult<PersistentStats>,
-    {
-        self.read_modify_write(PERSISTENT_STATS_PATH, f)
-            .await
-            .flatten()
-    }
-
+#[async_trait]
+#[enum_dispatch]
+pub trait AuthorityReader: Send + Sync + KVStore {
     /// Returns the stored schema [`ReplicationOffset`], if present. Wrapper around Self::try_read.
     async fn schema_replication_offset(&self) -> ReadySetResult<Option<ReplicationOffset>> {
         self.try_read(SCHEMA_REPLICATION_OFFSET_PATH).await
     }
 
-    /// Update the schema_replication_offset to the given value, without regard for what was stored
-    /// there before.
-    async fn set_schema_replication_offset<R>(
-        &self,
-        offset: Option<ReplicationOffset>,
-    ) -> ReadySetResult<()>;
+    /// Returns stats persisted in the authority. Wrapper around `Self::try_read`.
+    async fn persistent_stats(&self) -> ReadySetResult<Option<PersistentStats>> {
+        self.try_read(PERSISTENT_STATS_PATH).await
+    }
 }
 
 async fn modify_cache_ddl_requests<A, F>(authority: &A, mut f: F) -> ReadySetResult<()>
 where
-    A: AuthorityControl + ?Sized,
+    A: CacheDDLStore + ?Sized,
     F: FnMut(&mut Vec<String>) + Send,
 {
     authority
@@ -333,7 +345,7 @@ where
 /// Enum that dispatches calls to the `AuthorityControl` trait to
 /// the respective variant.
 #[allow(clippy::large_enum_variant)]
-#[enum_dispatch(AuthorityControl)]
+#[enum_dispatch(AuthorityControl, AuthorityReader, KVStore, CacheDDLStore)]
 pub enum Authority {
     ConsulAuthority,
     LocalAuthority,

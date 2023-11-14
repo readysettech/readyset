@@ -14,8 +14,8 @@ use hyper::http::{Method, StatusCode};
 use metrics::{counter, gauge, histogram};
 use nom_sql::Relation;
 use readyset_client::consensus::{
-    Authority, AuthorityControl, AuthorityWorkerHeartbeatResponse, CacheDDLRequest,
-    GetLeaderResult, WorkerDescriptor, WorkerId, WorkerSchedulingConfig,
+    Authority, AuthorityControl, AuthorityWorkerHeartbeatResponse, CacheDDLRequest, CacheDDLStore,
+    GetLeaderResult, KVStore, WorkerDescriptor, WorkerId, WorkerSchedulingConfig,
 };
 #[cfg(feature = "failure_injection")]
 use readyset_client::failpoints;

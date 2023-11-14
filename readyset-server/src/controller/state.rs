@@ -38,7 +38,7 @@ use rand::Rng;
 use readyset_client::builders::{
     ReaderHandleBuilder, ReusedReaderHandleBuilder, TableBuilder, ViewBuilder,
 };
-use readyset_client::consensus::{Authority, AuthorityControl};
+use readyset_client::consensus::{Authority, AuthorityControl, KVStore};
 use readyset_client::debug::info::{GraphInfo, MaterializationInfo, NodeSize};
 use readyset_client::debug::stats::{DomainStats, GraphStats, NodeStats};
 #[cfg(feature = "failure_injection")]
