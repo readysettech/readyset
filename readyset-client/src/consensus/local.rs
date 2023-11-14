@@ -28,8 +28,8 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 use super::{
-    AuthorityControl, AuthorityWorkerHeartbeatResponse, GetLeaderResult, LeaderPayload,
-    UpdateInPlace, WorkerDescriptor, WorkerId,
+    AuthorityControl, AuthorityReader, AuthorityWorkerHeartbeatResponse, CacheDDLStore,
+    GetLeaderResult, KVStore, LeaderPayload, UpdateInPlace, WorkerDescriptor, WorkerId,
 };
 #[cfg(feature = "failure_injection")]
 use crate::failpoints;
@@ -213,7 +213,10 @@ impl LocalAuthority {
 }
 
 #[async_trait]
-impl AuthorityControl for LocalAuthority {
+impl CacheDDLStore for LocalAuthority {}
+
+#[async_trait]
+impl KVStore for LocalAuthority {
     fn as_local<E, F, P>(&self) -> Option<&dyn UpdateInPlace<E, F, P>>
     where
         P: 'static,
@@ -226,6 +229,45 @@ impl AuthorityControl for LocalAuthority {
         Ok(())
     }
 
+    async fn try_read<P>(&self, path: &str) -> ReadySetResult<Option<P>>
+    where
+        P: DeserializeOwned,
+    {
+        let store_inner = self.store.inner_lock()?;
+        Ok(store_inner
+            .keys
+            .get(path)
+            .and_then(|data| serde_json::from_slice(data).ok()))
+    }
+
+    async fn try_read_raw(&self, path: &str) -> ReadySetResult<Option<Vec<u8>>> {
+        let store_inner = self.store.inner_lock()?;
+        Ok(store_inner.keys.get(path).cloned())
+    }
+
+    async fn read_modify_write<F, P, E>(&self, path: &str, mut f: F) -> ReadySetResult<Result<P, E>>
+    where
+        F: Send + FnMut(Option<P>) -> Result<P, E>,
+        P: Send + Serialize + DeserializeOwned,
+        E: Send,
+    {
+        let mut store_inner = self.store.inner_lock()?;
+
+        let r = f(store_inner
+            .keys
+            .get(path)
+            .and_then(|data| serde_json::from_slice(data).ok()));
+        if let Ok(ref p) = r {
+            store_inner
+                .keys
+                .insert(path.to_owned(), serde_json::to_vec(&p)?);
+        }
+        Ok(r)
+    }
+}
+
+#[async_trait]
+impl AuthorityControl for LocalAuthority {
     async fn become_leader(&self, payload: LeaderPayload) -> ReadySetResult<Option<LeaderPayload>> {
         let mut store_inner = self.store.inner_lock()?;
 
@@ -315,42 +357,6 @@ impl AuthorityControl for LocalAuthority {
 
     async fn watch_workers(&self) -> ReadySetResult<()> {
         unreachable!("LocalAuthority does not support `watch_workers`.");
-    }
-
-    async fn try_read<P>(&self, path: &str) -> ReadySetResult<Option<P>>
-    where
-        P: DeserializeOwned,
-    {
-        let store_inner = self.store.inner_lock()?;
-        Ok(store_inner
-            .keys
-            .get(path)
-            .and_then(|data| serde_json::from_slice(data).ok()))
-    }
-
-    async fn try_read_raw(&self, path: &str) -> ReadySetResult<Option<Vec<u8>>> {
-        let store_inner = self.store.inner_lock()?;
-        Ok(store_inner.keys.get(path).cloned())
-    }
-
-    async fn read_modify_write<F, P, E>(&self, path: &str, mut f: F) -> ReadySetResult<Result<P, E>>
-    where
-        F: Send + FnMut(Option<P>) -> Result<P, E>,
-        P: Send + Serialize + DeserializeOwned,
-        E: Send,
-    {
-        let mut store_inner = self.store.inner_lock()?;
-
-        let r = f(store_inner
-            .keys
-            .get(path)
-            .and_then(|data| serde_json::from_slice(data).ok()));
-        if let Ok(ref p) = r {
-            store_inner
-                .keys
-                .insert(path.to_owned(), serde_json::to_vec(&p)?);
-        }
-        Ok(r)
     }
 
     async fn register_worker(&self, payload: WorkerDescriptor) -> ReadySetResult<Option<WorkerId>>
@@ -456,10 +462,6 @@ impl AuthorityControl for LocalAuthority {
         Ok(())
     }
 
-    async fn schema_replication_offset(&self) -> ReadySetResult<Option<ReplicationOffset>> {
-        let schema_replication_offset = self.schema_replication_offset.read().unwrap();
-        Ok(schema_replication_offset.clone())
-    }
     async fn set_schema_replication_offset<R>(
         &self,
         offset: Option<ReplicationOffset>,
@@ -467,6 +469,14 @@ impl AuthorityControl for LocalAuthority {
         let mut schema_replication_offset = self.schema_replication_offset.write().unwrap();
         *schema_replication_offset = offset;
         Ok(())
+    }
+}
+
+#[async_trait]
+impl AuthorityReader for LocalAuthority {
+    async fn schema_replication_offset(&self) -> ReadySetResult<Option<ReplicationOffset>> {
+        let schema_replication_offset = self.schema_replication_offset.read().unwrap();
+        Ok(schema_replication_offset.clone())
     }
 }
 
