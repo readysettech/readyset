@@ -35,19 +35,19 @@ pub(super) fn inform(
             }
 
             let node = dataflow_state
-                .ingredients
+                .ingredients_mut()
                 .node_weight_mut(ni)
                 .unwrap()
                 .clone()
                 .take();
-            let node = node.finalize(&dataflow_state.ingredients);
+            let node = node.finalize(dataflow_state.ingredients());
             // new parents already have the right child list
             let old_parents = dataflow_state
-                .ingredients
+                .ingredients()
                 .neighbors_directed(ni, petgraph::EdgeDirection::Incoming)
-                .filter(|&ni| ni != dataflow_state.source)
+                .filter(|&ni| ni != *dataflow_state.source())
                 .filter(|ni| !new_nodes.contains(ni))
-                .map(|ni| &dataflow_state.ingredients[ni])
+                .map(|ni| &dataflow_state.ingredients()[ni])
                 .filter(|n| n.domain() == domain)
                 .map(|n| n.local_addr())
                 .collect();

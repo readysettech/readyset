@@ -453,7 +453,7 @@ fn make_union_node(
 
         // Union takes columns of first ancestor
         if i == 0 {
-            let parent_cols = mig.dataflow_state.ingredients[ni.address()].columns();
+            let parent_cols = mig.dataflow_state.ingredients_mut()[ni.address()].columns();
             cols = emit_cols
                 .iter()
                 .map(|i| {
@@ -492,7 +492,7 @@ fn make_filter_node(
             mir_node_index: parent.index(),
         }
     })?;
-    let mut parent_cols = mig.dataflow_state.ingredients[parent_na.address()]
+    let mut parent_cols = mig.dataflow_state.ingredients_mut()[parent_na.address()]
         .columns()
         .to_vec();
     let filter_conditions = lower_expression(
@@ -536,7 +536,7 @@ fn make_grouped_node(
         .collect::<ReadySetResult<Vec<_>>>()?;
 
     // Grouped projects the group_by columns followed by computed column
-    let parent_cols = mig.dataflow_state.ingredients[parent_na.address()].columns();
+    let parent_cols = mig.dataflow_state.ingredients()[parent_na.address()].columns();
 
     // group by columns
     let mut cols = group_col_indx
@@ -613,7 +613,7 @@ fn make_identity_node(
         }
     })?;
     // Identity mirrors the parent nodes exactly
-    let mut parent_cols = mig.dataflow_state.ingredients[parent_na.address()]
+    let mut parent_cols = mig.dataflow_state.ingredients_mut()[parent_na.address()]
         .columns()
         .to_vec();
     set_names(&column_names(columns), &mut parent_cols)?;
@@ -653,8 +653,8 @@ fn make_join_node(
         }
     })?;
 
-    let left_cols = mig.dataflow_state.ingredients[left_na.address()].columns();
-    let right_cols = mig.dataflow_state.ingredients[right_na.address()].columns();
+    let left_cols = mig.dataflow_state.ingredients()[left_na.address()].columns();
+    let right_cols = mig.dataflow_state.ingredients()[right_na.address()].columns();
 
     let mut on_idxs = on
         .iter()
@@ -766,8 +766,8 @@ fn make_join_aggregates_node(
             mir_node_index: right.index(),
         }
     })?;
-    let left_cols = mig.dataflow_state.ingredients[left_na.address()].columns();
-    let right_cols = mig.dataflow_state.ingredients[right_na.address()].columns();
+    let left_cols = mig.dataflow_state.ingredients()[left_na.address()].columns();
+    let right_cols = mig.dataflow_state.ingredients()[right_na.address()].columns();
 
     let mut on = vec![];
     // We gather up all of the columns from each respective parent. If a column is in both parents,
@@ -903,7 +903,7 @@ fn make_project_node(
             mir_node_index: parent.index(),
         }
     })?;
-    let parent_cols = mig.dataflow_state.ingredients[parent_na.address()].columns();
+    let parent_cols = mig.dataflow_state.ingredients()[parent_na.address()].columns();
 
     let mut cols = Vec::with_capacity(emit.len());
     let mut exprs = Vec::with_capacity(emit.len());
@@ -962,7 +962,7 @@ fn make_distinct_node(
             mir_node_index: parent.index(),
         }
     })?;
-    let parent_cols = mig.dataflow_state.ingredients[parent_na.address()]
+    let parent_cols = mig.dataflow_state.ingredients()[parent_na.address()]
         .columns()
         .to_vec();
 
@@ -1042,7 +1042,7 @@ fn make_paginate_or_topk_node(
             mir_node_index: parent.index(),
         }
     })?;
-    let mut parent_cols = mig.dataflow_state.ingredients[parent_na.address()]
+    let mut parent_cols = mig.dataflow_state.ingredients_mut()[parent_na.address()]
         .columns()
         .to_vec();
 

@@ -54,9 +54,9 @@ pub fn add(
     //
     // we do this in a couple of passes, as described below.
     for &node in topo_list {
-        let domain = dataflow_state.ingredients[node].domain();
+        let domain = dataflow_state.ingredients()[node].domain();
         let parents: Vec<_> = dataflow_state
-            .ingredients
+            .ingredients()
             .neighbors_directed(node, petgraph::EdgeDirection::Incoming)
             .collect(); // collect so we can mutate graph
 
@@ -69,27 +69,27 @@ pub fn add(
         // domain of the current node. if there aren't any, we make one. if there are, we only need
         // to redirect the node's parent edge to the ingress.
         for parent in parents {
-            if dataflow_state.ingredients[parent].is_source()
-                || dataflow_state.ingredients[parent].domain() == domain
+            if dataflow_state.ingredients()[parent].is_source()
+                || dataflow_state.ingredients()[parent].domain() == domain
             {
                 continue;
             }
 
             // parent is in other domain! does it already have an egress?
             let mut ingress: Option<ReadySetResult<NodeIndex>> = None;
-            if parent != dataflow_state.source {
+            if parent != *dataflow_state.source() {
                 'search: for pchild in dataflow_state
-                    .ingredients
+                    .ingredients()
                     .neighbors_directed(parent, petgraph::EdgeDirection::Outgoing)
                 {
-                    if dataflow_state.ingredients[pchild].is_egress() {
+                    if dataflow_state.ingredients()[pchild].is_egress() {
                         // it does! does `domain` have an ingress already listed there?
                         for i in dataflow_state
-                            .ingredients
+                            .ingredients()
                             .neighbors_directed(pchild, petgraph::EdgeDirection::Outgoing)
                         {
-                            invariant!(dataflow_state.ingredients[i].is_ingress());
-                            if dataflow_state.ingredients[i].domain() == domain {
+                            invariant!(dataflow_state.ingredients()[i].is_ingress());
+                            if dataflow_state.ingredients()[i].domain() == domain {
                                 // it does! we can just reuse that ingress :D
                                 ingress = Some(Ok(i));
                                 // FIXME(malte): this is buggy! it will re-use ingress nodes even if
@@ -110,39 +110,41 @@ pub fn add(
 
             let ingress = ingress.unwrap_or_else(|| {
                 // we need to make a new ingress
-                let mut i = dataflow_state.ingredients[parent].mirror(node::special::Ingress);
+                let mut i = dataflow_state.ingredients()[parent].mirror(node::special::Ingress);
 
                 // it belongs to this domain, not that of the parent
                 i.add_to(domain);
 
                 // the ingress is sharded the same way as its target, but with remappings of parent
                 // columns applied
-                let sharding = if let Some(s) = dataflow_state.ingredients[parent].as_sharder() {
+                let sharding = if let Some(s) = dataflow_state.ingredients()[parent].as_sharder() {
                     let parent_out_sharding = s.sharded_by();
                     // TODO(malte): below is ugly, but the only way to get the sharding width at
                     // this point; the sharder parent does not currently have the information.
                     // Change this once we support per-subgraph sharding widths and
                     // the sharder knows how many children it is supposed to have.
                     if let Sharding::ByColumn(_, width) =
-                        dataflow_state.ingredients[node].sharded_by()
+                        dataflow_state.ingredients()[node].sharded_by()
                     {
                         Sharding::ByColumn(parent_out_sharding, width)
                     } else {
                         internal!()
                     }
                 } else {
-                    dataflow_state.ingredients[parent].sharded_by()
+                    dataflow_state.ingredients()[parent].sharded_by()
                 };
                 i.shard_by(sharding);
 
                 // insert the new ingress node
-                let ingress = dataflow_state.ingredients.add_node(i);
-                dataflow_state.ingredients.add_edge(parent, ingress, ());
+                let ingress = dataflow_state.ingredients_mut().add_node(i);
+                dataflow_state
+                    .ingredients_mut()
+                    .add_edge(parent, ingress, ());
 
                 // we also now need to deal with this ingress node
                 new.insert(ingress);
 
-                if parent == dataflow_state.source {
+                if parent == *dataflow_state.source() {
                     trace!(
                         base = node.index(),
                         ingress = ingress.index(),
@@ -164,10 +166,13 @@ pub fn add(
             #[allow(clippy::unit_arg)]
             #[allow(clippy::let_unit_value)]
             {
-                let old = dataflow_state.ingredients.find_edge(parent, node).unwrap();
-                let was_materialized = dataflow_state.ingredients.remove_edge(old).unwrap();
+                let old = dataflow_state
+                    .ingredients()
+                    .find_edge(parent, node)
+                    .unwrap();
+                let was_materialized = dataflow_state.ingredients_mut().remove_edge(old).unwrap();
                 dataflow_state
-                    .ingredients
+                    .ingredients_mut()
                     .add_edge(ingress, node, was_materialized);
             }
 
@@ -180,17 +185,17 @@ pub fn add(
         // Note that we need to re-load the list of parents, because it might have changed as a
         // result of adding ingress nodes.
         let parents: Vec<_> = dataflow_state
-            .ingredients
+            .ingredients()
             .neighbors_directed(node, petgraph::EdgeDirection::Incoming)
             .collect(); // collect so we can mutate graph
         for ingress in parents {
-            if !dataflow_state.ingredients[ingress].is_ingress() {
+            if !dataflow_state.ingredients()[ingress].is_ingress() {
                 continue;
             }
 
             let sender = {
                 let mut senders = dataflow_state
-                    .ingredients
+                    .ingredients()
                     .neighbors_directed(ingress, petgraph::EdgeDirection::Incoming);
                 let sender = senders
                     .next()
@@ -201,14 +206,14 @@ pub fn add(
                 sender
             };
 
-            if sender == dataflow_state.source {
+            if sender == *dataflow_state.source() {
                 // no need for egress from source
                 continue;
             }
 
-            if dataflow_state.ingredients[sender].is_sender() {
+            if dataflow_state.ingredients()[sender].is_sender() {
                 // all good -- we're already hooked up with an egress or sharder!
-                if dataflow_state.ingredients[sender].is_egress() {
+                if dataflow_state.ingredients()[sender].is_egress() {
                     trace!(
                         node = node.index(),
                         egress = sender.index(),
@@ -222,9 +227,9 @@ pub fn add(
             // next, check if source node already has an egress
             let egress = {
                 let mut es = dataflow_state
-                    .ingredients
+                    .ingredients()
                     .neighbors_directed(sender, petgraph::EdgeDirection::Outgoing)
-                    .filter(|&ni| dataflow_state.ingredients[ni].is_egress());
+                    .filter(|&ni| dataflow_state.ingredients()[ni].is_egress());
                 let egress = es.next();
                 if es.count() != 0 {
                     internal!("node has more than one egress")
@@ -245,11 +250,13 @@ pub fn add(
 
                 // NOTE: technically, this doesn't need to mirror its parent, but meh
                 let mut egress =
-                    dataflow_state.ingredients[sender].mirror(node::special::Egress::default());
-                egress.add_to(dataflow_state.ingredients[sender].domain());
-                egress.shard_by(dataflow_state.ingredients[sender].sharded_by());
-                let egress = dataflow_state.ingredients.add_node(egress);
-                dataflow_state.ingredients.add_edge(sender, egress, ());
+                    dataflow_state.ingredients()[sender].mirror(node::special::Egress::default());
+                egress.add_to(dataflow_state.ingredients()[sender].domain());
+                egress.shard_by(dataflow_state.ingredients()[sender].sharded_by());
+                let egress = dataflow_state.ingredients_mut().add_node(egress);
+                dataflow_state
+                    .ingredients_mut()
+                    .add_edge(sender, egress, ());
 
                 // we also now need to deal with this egress node
                 new.insert(egress);
@@ -268,12 +275,12 @@ pub fn add(
             #[allow(clippy::let_unit_value)]
             {
                 let old = dataflow_state
-                    .ingredients
+                    .ingredients_mut()
                     .find_edge(sender, ingress)
                     .unwrap();
-                let was_materialized = dataflow_state.ingredients.remove_edge(old).unwrap();
+                let was_materialized = dataflow_state.ingredients_mut().remove_edge(old).unwrap();
                 dataflow_state
-                    .ingredients
+                    .ingredients_mut()
                     .add_edge(egress, ingress, was_materialized);
             }
 

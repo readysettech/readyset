@@ -589,13 +589,13 @@ impl DomainMigrationPlan {
 
 fn topo_order(dataflow_state: &DfState, nodes: &HashSet<NodeIndex>) -> Vec<NodeIndex> {
     let mut topo_list = Vec::with_capacity(nodes.len());
-    let mut topo = petgraph::visit::Topo::new(&dataflow_state.ingredients);
-    while let Some(node) = topo.next(&dataflow_state.ingredients) {
-        if node == dataflow_state.source {
+    let mut topo = petgraph::visit::Topo::new(&dataflow_state.ingredients());
+    while let Some(node) = topo.next(&dataflow_state.ingredients()) {
+        if node == *dataflow_state.source() {
             continue;
         }
         #[allow(clippy::indexing_slicing)] // node must be in dataflow_state.ingredients
-        if dataflow_state.ingredients[node].is_dropped() || !nodes.contains(&node) {
+        if dataflow_state.ingredients()[node].is_dropped() || !nodes.contains(&node) {
             continue;
         }
         topo_list.push(node);
@@ -705,20 +705,20 @@ impl<'df> Migration<'df> {
         I: Into<NodeOperator>,
     {
         let mut i = node::Node::new::<N, S2, CS, _>(name, columns, i.into());
-        i.on_connected(&self.dataflow_state.ingredients);
+        i.on_connected(self.dataflow_state.ingredients());
         // ancestors() will not return an error since i is an internal node
         #[allow(clippy::unwrap_used)]
         let parents = i.ancestors().unwrap();
         assert!(!parents.is_empty());
 
         // add to the graph
-        let ni = self.dataflow_state.ingredients.add_node(i);
+        let ni = self.dataflow_state.ingredients_mut().add_node(i);
 
         #[allow(clippy::indexing_slicing)] // ni was just added to ingredients
         {
             debug!(
                 node = ni.index(),
-                node_type = ?self.dataflow_state.ingredients[ni],
+                node_type = ?self.dataflow_state.ingredients()[ni],
                 "adding new node"
             );
         }
@@ -727,7 +727,9 @@ impl<'df> Migration<'df> {
         self.changes.add_node(ni);
         // insert it into the graph
         for parent in parents {
-            self.dataflow_state.ingredients.add_edge(parent, ni, ());
+            self.dataflow_state
+                .ingredients_mut()
+                .add_edge(parent, ni, ());
         }
         // and tell the caller its id
         ni
@@ -745,16 +747,17 @@ impl<'df> Migration<'df> {
         // add to the graph
         let ni = self
             .dataflow_state
-            .ingredients
+            .ingredients_mut()
             .add_node(node::Node::new(name, columns, b));
         debug!(node = ni.index(), "adding new base");
 
         // keep track of the fact that it's new
         self.changes.add_node(ni);
         // insert it into the graph
+        let source = *self.dataflow_state.source();
         self.dataflow_state
-            .ingredients
-            .add_edge(self.dataflow_state.source, ni, ());
+            .ingredients_mut()
+            .add_edge(source, ni, ());
         // and tell the caller its id
         ni
     }
@@ -776,7 +779,7 @@ impl<'df> Migration<'df> {
         );
         #[allow(clippy::unwrap_used)] // ni must belong to the graph
         self.dataflow_state
-            .ingredients
+            .ingredients_mut()
             .node_weight_mut(ni)
             .unwrap()
             .purge = true;
@@ -800,7 +803,7 @@ impl<'df> Migration<'df> {
         invariant!(!self.changes.contains_new(&node));
 
         #[allow(clippy::indexing_slicing)] // NodeIndex must exist in ingredients
-        let base = &mut self.dataflow_state.ingredients[node];
+        let base = &mut self.dataflow_state.ingredients_mut()[node];
         invariant!(base.is_base());
 
         // we need to tell the base about its new column and its default, so that old writes that
@@ -826,7 +829,7 @@ impl<'df> Migration<'df> {
         invariant!(!self.changes.contains_new(&node));
 
         #[allow(clippy::indexing_slicing)] // NodeIndex must exist in ingredients
-        let base = &mut self.dataflow_state.ingredients[node];
+        let base = &mut self.dataflow_state.ingredients_mut()[node];
         invariant!(base.is_base());
 
         // we need to tell the base about the dropped column, so that old writes that contain that
@@ -849,7 +852,7 @@ impl<'df> Migration<'df> {
         new_type: DfType,
     ) -> ReadySetResult<()> {
         self.dataflow_state
-            .ingredients
+            .ingredients_mut()
             .node_weight_mut(node_index)
             .ok_or_else(|| ReadySetError::NoSuchNode(node_index.index()))?
             .set_column_type(column, new_type.clone())?;
@@ -875,15 +878,15 @@ impl<'df> Migration<'df> {
 
                 #[allow(clippy::indexing_slicing)] // NodeIndex must exist in ingredients
                 let mut r = if let Some(name) = name {
-                    self.dataflow_state.ingredients[n].named_mirror(r, name)
+                    self.dataflow_state.ingredients_mut()[n].named_mirror(r, name)
                 } else {
-                    self.dataflow_state.ingredients[n].mirror(r)
+                    self.dataflow_state.ingredients_mut()[n].mirror(r)
                 };
                 if r.name().name.starts_with("SHALLOW_") {
                     r.purge = true;
                 }
-                let r = self.dataflow_state.ingredients.add_node(r);
-                self.dataflow_state.ingredients.add_edge(n, r, ());
+                let r = self.dataflow_state.ingredients_mut().add_node(r);
+                self.dataflow_state.ingredients_mut().add_edge(n, r, ());
                 self.changes.add_node(r);
                 *e.insert(r)
             }
@@ -898,7 +901,7 @@ impl<'df> Migration<'df> {
 
         // we know it's a reader - we just made it!
         #[allow(clippy::indexing_slicing, clippy::unwrap_used)]
-        self.dataflow_state.ingredients[ri]
+        self.dataflow_state.ingredients_mut()[ri]
             .as_mut_reader()
             .unwrap()
             .set_index(index);
@@ -920,7 +923,7 @@ impl<'df> Migration<'df> {
 
         // we know it's a reader - we just made it!
         #[allow(clippy::indexing_slicing, clippy::unwrap_used)]
-        self.dataflow_state.ingredients[ri]
+        self.dataflow_state.ingredients_mut()[ri]
             .as_mut_reader()
             .unwrap()
             .set_index(index);
@@ -943,7 +946,9 @@ impl<'df> Migration<'df> {
 
         // we know it's a reader - we just made it!
         #[allow(clippy::indexing_slicing, clippy::unwrap_used)]
-        let r = self.dataflow_state.ingredients[ri].as_mut_reader().unwrap();
+        let r = self.dataflow_state.ingredients_mut()[ri]
+            .as_mut_reader()
+            .unwrap();
 
         r.set_index(index);
         r.set_mapping(placeholder_map);
@@ -1012,7 +1017,7 @@ impl<'df> Migration<'df> {
 
         // We have successfully made a valid graph! Now we can inform the dmp of all the
         // changes
-        inform_col_changes(&mut dmp, &columns, &dataflow_state.ingredients)?;
+        inform_col_changes(&mut dmp, &columns, dataflow_state.ingredients())?;
 
         debug!(
             added_nodes = added,
@@ -1043,10 +1048,11 @@ fn plan_add_nodes(
     // planning stage.
     let mut local_redundant_partial: HashMap<NodeIndex, NodeIndex> = Default::default();
 
-    // Shard the graph as desired
-    let mut swapped0 = if let Some(shards) = dataflow_state.sharding {
+    // Shard the graph as desired*self.dataflow_state.source()
+    let sharding = *dataflow_state.sharding();
+    let mut swapped0 = if let Some(shards) = sharding {
         let (t, swapped) = sharding::shard(
-            &mut dataflow_state.ingredients,
+            dataflow_state.ingredients_mut(),
             &mut new_nodes,
             &topo,
             shards,
@@ -1079,7 +1085,11 @@ fn plan_add_nodes(
                     // collision by looking at which translation currently has an adge from
                     // `src`, and then picking the *other*, since that must then be node
                     // below.
-                    if dataflow_state.ingredients.find_edge(src, instead).is_some() {
+                    if dataflow_state
+                        .ingredients()
+                        .find_edge(src, instead)
+                        .is_some()
+                    {
                         // src -> instead -> instead0 -> [children]
                         // from [children]'s perspective, we should use instead0 for from, so
                         // we can just ignore the `instead` swap.
@@ -1114,16 +1124,16 @@ fn plan_add_nodes(
         #[allow(clippy::indexing_slicing)] // Ingredients must contain NodeIndex
         let changed_domains: HashSet<DomainIndex> = sorted_new
             .iter()
-            .filter(|&&&ni| !dataflow_state.ingredients[ni].is_dropped())
-            .map(|&&ni| dataflow_state.ingredients[ni].domain())
+            .filter(|&&&ni| !dataflow_state.ingredients()[ni].is_dropped())
+            .map(|&&ni| dataflow_state.ingredients()[ni].domain())
             .collect();
 
         #[allow(clippy::indexing_slicing)] // Ingredients must contain NodeIndex
         let mut domain_new_nodes = sorted_new
             .iter()
-            .filter(|&&&ni| ni != dataflow_state.source)
-            .filter(|&&&ni| !dataflow_state.ingredients[ni].is_dropped())
-            .map(|&&ni| (dataflow_state.ingredients[ni].domain(), ni))
+            .filter(|&&&ni| ni != *dataflow_state.source())
+            .filter(|&&&ni| !dataflow_state.ingredients()[ni].is_dropped())
+            .map(|&&ni| (dataflow_state.ingredients()[ni].domain(), ni))
             .fold(HashMap::new(), |mut dns, (d, ni)| {
                 dns.entry(d).or_insert_with(Vec::new).push(ni);
                 dns
@@ -1133,7 +1143,7 @@ fn plan_add_nodes(
         for (domain, nodes) in &mut domain_new_nodes {
             // Number of pre-existing nodes
             let mut nnodes = dataflow_state
-                .domain_node_index_pairs
+                .domain_node_index_pairs()
                 .get(domain)
                 .map(HashMap::len)
                 .unwrap_or(0);
@@ -1151,7 +1161,7 @@ fn plan_add_nodes(
                 #[allow(clippy::indexing_slicing)] // Ingredients must contain NodeIndex
                 {
                     debug!(
-                        node_type = ?dataflow_state.ingredients[ni],
+                        node_type = ?dataflow_state.ingredients()[ni],
                         node = ni.index(),
                         local = nnodes,
                         "assigning local index"
@@ -1159,28 +1169,11 @@ fn plan_add_nodes(
                     counter!(
                         recorded::NODE_ADDED,
                         1,
-                        "ntype" => dataflow_state.ingredients[ni].node_type_string(),
+                        "ntype" => dataflow_state.ingredients()[ni].node_type_string(),
                         "node" => nnodes.to_string()
                     );
                 }
-                dataflow_state
-                    .domain_node_index_pairs
-                    .entry(*domain)
-                    .or_insert_with(HashMap::new)
-                    .entry(ni)
-                    .or_insert_with(|| {
-                        // Only make a new local index for the node if it doesn't already have one,
-                        // which can happen if we've added an existing node to `new_nodes` due to
-                        // remapping (see [remap-nodes], below)
-                        let mut ip: IndexPair = ni.into();
-                        ip.set_local(LocalNodeIndex::make(nnodes as u32));
-
-                        #[allow(clippy::indexing_slicing)] // Ingredients must contain NodeIndex
-                        dataflow_state.ingredients[ni].set_finalized_addr(ip);
-
-                        nnodes += 1;
-                        ip
-                    });
+                dataflow_state.add_address_for_new_node(domain, ni, &mut nnodes);
             }
 
             // Initialize each new node
@@ -1188,13 +1181,13 @@ fn plan_add_nodes(
                 // - Ingredients must contain NodeIndex
                 // - domain already exists in dataflow_state
                 #[allow(clippy::indexing_slicing, clippy::unwrap_used)]
-                if dataflow_state.ingredients[ni].is_internal() {
+                if dataflow_state.ingredients()[ni].is_internal() {
                     // Figure out all the remappings that have happened
                     // NOTE: this has to be *per node*, since a shared parent may be remapped
                     // differently to different children (due to sharding for example). we just
                     // allocate it once though.
                     let mut node_index_mappings =
-                        dataflow_state.domain_node_index_pairs[domain].clone();
+                        dataflow_state.domain_node_index_pairs()[domain].clone();
 
                     // Parents in other domains have been swapped for ingress nodes.
                     // Those ingress nodes' indices are now local.
@@ -1206,13 +1199,13 @@ fn plan_add_nodes(
 
                         node_index_mappings.insert(
                             src,
-                            dataflow_state.domain_node_index_pairs[domain][&instead],
+                            dataflow_state.domain_node_index_pairs()[domain][&instead],
                         );
                     }
 
                     trace!(node = ni.index(), "initializing new node");
                     dataflow_state
-                        .ingredients
+                        .ingredients_mut()
                         .node_weight_mut(ni)
                         .unwrap()
                         .on_commit(&node_index_mappings);
@@ -1222,8 +1215,8 @@ fn plan_add_nodes(
 
         topo = topo_order(dataflow_state, &new_nodes);
 
-        if let Some(shards) = dataflow_state.sharding {
-            sharding::validate(&dataflow_state.ingredients, &topo, shards)?
+        if let Some(shards) = dataflow_state.sharding() {
+            sharding::validate(dataflow_state.ingredients(), &topo, *shards)?
         };
 
         // at this point, we've hooked up the graph such that, for any given domain, the graph
@@ -1244,20 +1237,20 @@ fn plan_add_nodes(
         //     :  | \         :   o
         //
         // etc.
-        // println!("{}", dataflow_state.ingredients);
+        // println!("{}", dataflow_state.ingredients());
 
         // Since we are looping, we need to keep the dataflow_state.domain_nodes as it was
         // before the loop.
         // This is not ideal, as we need to clone this each time.
         // TODO(fran): Can we remove the loop and make the modifications in-place?
         //   Even if we don't care about performance, this loop is very hard to reason about.
-        let mut domain_nodes = dataflow_state.domain_nodes.clone();
+        let mut domain_nodes = dataflow_state.domain_nodes().clone();
 
         for &ni in &new_nodes {
             #[allow(clippy::indexing_slicing)]
             // Ingredients must contain NodeIndex
-            let n = &dataflow_state.ingredients[ni];
-            if ni != dataflow_state.source && !n.is_dropped() {
+            let n = &dataflow_state.ingredients()[ni];
+            if ni != *dataflow_state.source() && !n.is_dropped() {
                 let di = n.domain();
                 domain_nodes
                     .entry(di)
@@ -1319,17 +1312,13 @@ fn plan_add_nodes(
         // And now, the last piece of the puzzle -- set up materializations
         debug!("initializing new materializations");
 
-        dataflow_state.materializations.extend(
-            &mut dataflow_state.ingredients,
-            &new_nodes,
-            &dmp,
-        )?;
+        dataflow_state.extend_materializations(&new_nodes, &dmp)?;
 
         // Check to see if we've just tried to add a fully materialized node below an existing
         // partially materialized node
         if let Some(InvalidEdge { parent, child }) = dataflow_state
-            .materializations
-            .validate(&dataflow_state.ingredients, &new_nodes)?
+            .materializations()
+            .validate(dataflow_state.ingredients(), &new_nodes)?
         {
             debug!(
                 ?child,
@@ -1340,7 +1329,7 @@ fn plan_add_nodes(
             // Try to find an existing fully materialized equivalent of that partially materialized
             // parent
             let (duplicate_index, is_new) = if let Some(idx) =
-                dataflow_state.materializations.get_redundant(&parent)
+                dataflow_state.materializations().get_redundant(&parent)
             {
                 (*idx, false)
             } else if let Some(idx) = local_redundant_partial.get(&parent) {
@@ -1351,28 +1340,30 @@ fn plan_add_nodes(
 
                 // we just found the parent in Materializations::validate()
                 #[allow(clippy::indexing_slicing)]
-                let duplicate_node = dataflow_state.ingredients[parent].duplicate();
+                let duplicate_node = dataflow_state.ingredients_mut()[parent].duplicate();
                 // add to graph
-                let idx = dataflow_state.ingredients.add_node(duplicate_node);
+                let idx = dataflow_state.ingredients_mut().add_node(duplicate_node);
                 local_redundant_partial.insert(parent, idx);
                 // Add the child node to `new_nodes`, so that on the next iteration of the loop we
                 // make sure that any lookup obligations into the duplicated parent are satisfied
                 new_nodes.insert(child);
-                dataflow_state.ingredients[child].replace_sibling(parent, idx);
+                dataflow_state.ingredients_mut()[child].replace_sibling(parent, idx);
                 (idx, true)
             };
 
             dataflow_state
-                .ingredients
+                .ingredients_mut()
                 .add_edge(duplicate_index, child, ());
             if is_new {
                 // Recreate edges coming into parent on duplicate
                 let incoming: Vec<_> = dataflow_state
-                    .ingredients
+                    .ingredients()
                     .neighbors_directed(parent, petgraph::EdgeDirection::Incoming)
                     .collect();
                 for ni in incoming {
-                    dataflow_state.ingredients.add_edge(ni, duplicate_index, ());
+                    dataflow_state
+                        .ingredients_mut()
+                        .add_edge(ni, duplicate_index, ());
                 }
                 // Add to new nodes for processing in next loop iteration
                 new_nodes.insert(duplicate_index);
@@ -1383,10 +1374,13 @@ fn plan_add_nodes(
             // remove old edge
             #[allow(clippy::unwrap_used)]
             // we just found this edge in Materializations::validate()
-            let old_edge = dataflow_state.ingredients.find_edge(parent, child).unwrap();
-            dataflow_state.ingredients.remove_edge(old_edge);
+            let old_edge = dataflow_state
+                .ingredients()
+                .find_edge(parent, child)
+                .unwrap();
+            dataflow_state.ingredients_mut().remove_edge(old_edge);
         } else {
-            dataflow_state.domain_nodes = domain_nodes;
+            dataflow_state.set_domain_nodes(domain_nodes);
 
             // Add any new nodes to existing domains (they'll also ignore all updates for now)
             debug!("mutating existing domains");
@@ -1399,16 +1393,12 @@ fn plan_add_nodes(
 
             // Set up inter-domain connections
             debug!("bringing up inter-domain connections");
-            routing::connect(&dataflow_state.ingredients, &mut dmp, &new_nodes)?;
+            routing::connect(dataflow_state.ingredients(), &mut dmp, &new_nodes)?;
 
-            dataflow_state.materializations.commit(
-                &mut dataflow_state.ingredients,
-                &new_nodes,
-                &mut dmp,
-            )?;
+            dataflow_state.commit_materializations(&new_nodes, &mut dmp)?;
 
             dataflow_state
-                .materializations
+                .materializations_mut()
                 .extend_redundant_partial(local_redundant_partial);
             return Ok(dmp);
         }
@@ -1436,7 +1426,7 @@ fn remove_nodes(
     let mut domain_removals: HashMap<DomainIndex, Vec<LocalNodeIndex>> = HashMap::default();
     for ni in removals {
         let node = dataflow_state
-            .ingredients
+            .ingredients_mut()
             .node_weight_mut(*ni)
             .ok_or_else(|| ReadySetError::NodeNotFound { index: ni.index() })?;
         node.remove();
