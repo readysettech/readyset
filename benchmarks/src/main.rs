@@ -20,7 +20,7 @@ use readyset_adapter::BackendBuilder;
 use readyset_client_test_helpers::mysql_helpers::MySQLAdapter;
 use readyset_client_test_helpers::psql_helpers::PostgreSQLAdapter;
 use readyset_client_test_helpers::TestBuilder;
-use readyset_server::Handle;
+use readyset_server::{DurabilityMode, Handle};
 use readyset_util::shutdown::ShutdownSender;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
@@ -84,11 +84,11 @@ struct BenchmarkRunner {
 
     /// When running the benchmark in `--local` or `--local_with_upstream` mode, by default, the
     /// data is not persisted to the underlying RocksDB storage (durability = MEMORY_ONLY). To
-    /// enable durability in local mode use the `--persistent` option. When `--persistent` is
-    /// specified, data is persisted to RocksDB, but it gets automatically deleted when the
-    /// benchmark finishes.
+    /// enable durability in local mode use the `--store-ephemerally` option. When
+    /// `--store-ephemerally` is specified, data is persisted to RocksDB, but it gets
+    /// automatically deleted when the benchmark finishes.
     #[arg(long)]
-    persistent: bool,
+    store_ephemerally: bool,
 
     /// Runs the benchmarks against a noria adapter and server run in the same process with the
     /// provided external upstream database. When using `--local` benchmark results may vary
@@ -204,6 +204,11 @@ impl BenchmarkRunner {
         &self,
         upstream_addr: Option<String>,
     ) -> anyhow::Result<(DeploymentParameters, Handle, ShutdownSender)> {
+        let durability_mode = if self.store_ephemerally {
+            DurabilityMode::DeleteOnExit
+        } else {
+            DurabilityMode::MemoryOnly
+        };
         let mut test_builder = TestBuilder::new(
             BackendBuilder::default()
                 .unsupported_set_mode(UnsupportedSetMode::Allow)
@@ -212,7 +217,7 @@ impl BenchmarkRunner {
         .recreate_database(false)
         .migration_mode(MigrationMode::OutOfBand)
         .read_behavior(ReadBehavior::Blocking)
-        .persistent(self.persistent);
+        .durability_mode(durability_mode);
 
         if let Some(addr) = &upstream_addr {
             test_builder = test_builder.fallback_url(addr.clone());
