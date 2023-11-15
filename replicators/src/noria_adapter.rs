@@ -1051,8 +1051,6 @@ impl NoriaAdapter {
                     continue;
                 }
 
-                error!(error = %err, "Aborting replication task on error");
-                counter!(recorded::REPLICATOR_FAILURE, 1u64,);
                 return Err(err);
             };
             counter!(recorded::REPLICATOR_SUCCESS, 1u64);
