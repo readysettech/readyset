@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 clap = { workspace = true, features = ["derive","env"] }
-async-trait = "0.1.51"
+async-trait = "0.1"
 fail = "0.5.0"
 metrics = { workspace = true }
 mysql-srv = { path = "../mysql-srv" }

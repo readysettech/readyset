@@ -6,7 +6,7 @@ authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
 [dependencies]
-async-trait = "0.1.49"
+async-trait = "0.1"
 tokio = { workspace = true, features = ["full"] }
 chrono = "0.4"
 mysql_async = { workspace = true, optional = true }
