@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::env;
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
@@ -15,7 +16,7 @@ use readyset_adapter::backend::{BackendBuilder, MigrationMode};
 use readyset_adapter::query_status_cache::QueryStatusCache;
 use readyset_adapter::{Backend, QueryHandler, UpstreamConfig, UpstreamDatabase};
 use readyset_client::consensus::{Authority, LocalAuthorityStore};
-use readyset_server::{Builder, Handle, LocalAuthority, ReadySetHandle};
+use readyset_server::{Builder, DurabilityMode, Handle, LocalAuthority, ReadySetHandle};
 use readyset_util::shared_cache::SharedCache;
 use readyset_util::shutdown::ShutdownSender;
 use tokio::net::{TcpListener, TcpStream};
@@ -79,7 +80,8 @@ pub struct TestBuilder {
     migration_mode: MigrationMode,
     recreate_database: bool,
     query_status_cache: Option<&'static QueryStatusCache>,
-    persistent: bool,
+    durability_mode: DurabilityMode,
+    storage_dir_path: Option<PathBuf>,
     authority: Option<Arc<Authority>>,
     replication_server_id: Option<u32>,
 }
@@ -101,7 +103,8 @@ impl TestBuilder {
             migration_mode: MigrationMode::InRequestPath,
             recreate_database: true,
             query_status_cache: None,
-            persistent: false,
+            durability_mode: DurabilityMode::MemoryOnly,
+            storage_dir_path: None,
             authority: None,
             replication_server_id: None,
         }
@@ -131,8 +134,13 @@ impl TestBuilder {
         self
     }
 
-    pub fn persistent(mut self, persistent: bool) -> Self {
-        self.persistent = persistent;
+    pub fn durability_mode(mut self, mode: DurabilityMode) -> Self {
+        self.durability_mode = mode;
+        self
+    }
+
+    pub fn storage_dir_path(mut self, path: PathBuf) -> Self {
+        self.storage_dir_path = Some(path);
         self
     }
 
@@ -210,11 +218,8 @@ impl TestBuilder {
 
         let mut builder = Builder::for_tests();
         let persistence = readyset_server::PersistenceParameters {
-            mode: if self.persistent {
-                readyset_server::DurabilityMode::DeleteOnExit
-            } else {
-                readyset_server::DurabilityMode::MemoryOnly
-            },
+            mode: self.durability_mode,
+            storage_dir: self.storage_dir_path,
             ..Default::default()
         };
         builder.set_persistence(persistence);

@@ -571,6 +571,7 @@ impl NoriaAdapter {
                 })?;
 
             if readyset_slot_exists {
+                info!(%full_resnapshot, %resnapshot, pos=?pos, "readyset_slot_exists");
                 if full_resnapshot || resnapshot || pos.is_none() {
                     // This is not an initial connection but we need to resnapshot the latest
                     // schema, therefore we create a new replication slot, just

@@ -2129,8 +2129,8 @@ mod failure_injection_tests {
     ) {
         readyset_tracing::init_test_logging();
 
-        let (config, handle, authority, shutdown_tx) =
-            setup_standalone_with_authority(prefix, None, true, true).await;
+        let (config, handle, authority, storage_dir, shutdown_tx) =
+            setup_standalone_with_authority(prefix, None, None, true, true).await;
 
         let conn = connect(config).await;
         for query in queries {
@@ -2157,8 +2157,14 @@ mod failure_injection_tests {
         drop(handle);
         sleep().await;
 
-        let (config, handle, authority, shutdown_tx) =
-            setup_standalone_with_authority(prefix, Some(authority), true, false).await;
+        let (config, handle, authority, _, shutdown_tx) = setup_standalone_with_authority(
+            prefix,
+            Some(authority),
+            Some(storage_dir),
+            true,
+            false,
+        )
+        .await;
         sleep().await;
         (config, handle, authority, shutdown_tx)
     }
