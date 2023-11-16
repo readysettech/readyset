@@ -2220,6 +2220,7 @@ where
         event: &mut QueryExecutionEvent,
         processed_query_params: ProcessedQueryParams,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
+        tracing::info!("query_adhoc_select {original_query}");
         let mut status = status.unwrap_or(QueryStatus {
             migration_state: MigrationState::Unsupported,
             execution_info: None,

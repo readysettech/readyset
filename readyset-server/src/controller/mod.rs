@@ -334,6 +334,12 @@ pub enum HandleRequest {
         action: String,
         done_tx: tokio::sync::oneshot::Sender<()>,
     },
+    FlushPartial {
+        done_tx: tokio::sync::oneshot::Sender<()>,
+    },
+    Graphviz {
+        done_tx: tokio::sync::oneshot::Sender<String>,
+    },
 }
 
 /// A structure to hold and manage access to the [`Leader`].
@@ -513,6 +519,37 @@ impl Controller {
                     }
                 } else {
                     return Err(ReadySetError::NotLeader);
+                }
+            }
+            HandleRequest::FlushPartial { done_tx } => {
+                let mut guard = self.inner.write().await;
+                let res = if let Some(ref mut inner) = *guard {
+                    let mut writer = inner.dataflow_state_handle.write().await;
+                    let ds = writer.as_mut();
+                    let res = ds.evict_partial().await;
+                    if res.is_ok() {
+                        inner
+                            .dataflow_state_handle
+                            .commit(writer, &self.authority)
+                            .await?;
+                    }
+                } else {
+                    return Err(ReadySetError::NotLeader);
+                };
+                if done_tx.send(res).is_err() {
+                    warn!("handle-based migration sender hung up!");
+                }
+            }
+            HandleRequest::Graphviz { done_tx } => {
+                let mut guard = self.inner.write().await;
+                let res = if let Some(ref mut inner) = *guard {
+                    let ds = inner.dataflow_state_handle.read().await;
+                    ds.graphviz(true, None)
+                } else {
+                    return Err(ReadySetError::NotLeader);
+                };
+                if done_tx.send(res).is_err() {
+                    warn!("handle-based migration sender hung up!");
                 }
             }
             #[cfg(feature = "failure_injection")]

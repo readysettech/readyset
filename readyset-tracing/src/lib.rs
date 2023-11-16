@@ -306,5 +306,11 @@ pub fn init_test_logging() {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_env("LOG_LEVEL"))
         .with_test_writer()
+        .with_file(true) // Include file name
+        .with_line_number(true) // Include line number
+        .without_time()
+        .with_thread_names(true)
+        .with_target(false)
+        .compact()
         .try_init();
 }

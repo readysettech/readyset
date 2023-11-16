@@ -109,6 +109,29 @@ impl Handle {
         ret_rx.await.unwrap()
     }
 
+    /// Send a request to evict all partial state
+    pub async fn flush_partial(&mut self) {
+        let (done_tx, done_rx) = tokio::sync::oneshot::channel();
+        self.event_tx
+            .as_mut()
+            .unwrap()
+            .send(HandleRequest::FlushPartial { done_tx })
+            .await
+            .expect("Controller dropped, failed, or panicked");
+        done_rx.await.unwrap();
+    }
+
+    pub async fn graphviz(&mut self) -> String {
+        let (done_tx, done_rx) = tokio::sync::oneshot::channel();
+        self.event_tx
+            .as_mut()
+            .unwrap()
+            .send(HandleRequest::Graphviz { done_tx })
+            .await
+            .expect("Controller dropped, failed, or panicked");
+        done_rx.await.unwrap()
+    }
+
     #[cfg(feature = "failure_injection")]
     /// Injects a failpoint with the provided name/action
     pub async fn set_failpoint<S: std::fmt::Display>(&mut self, name: S, action: S) {

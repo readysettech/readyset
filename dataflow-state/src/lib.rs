@@ -372,6 +372,7 @@ impl State for MaterializedNodeState {
     }
 
     fn mark_filled(&mut self, key: KeyComparison, tag: Tag) {
+        tracing::info!(?key, ?tag, "mark_filled");
         match self {
             MaterializedNodeState::Memory(ms) => ms.mark_filled(key, tag),
             MaterializedNodeState::Persistent(ps) => ps.mark_filled(key, tag),
@@ -380,6 +381,7 @@ impl State for MaterializedNodeState {
     }
 
     fn mark_hole(&mut self, key: &KeyComparison, tag: Tag) {
+        tracing::info!(?key, ?tag, "mark_hole");
         match self {
             MaterializedNodeState::Memory(ms) => ms.mark_hole(key, tag),
             MaterializedNodeState::Persistent(ps) => ps.mark_hole(key, tag),

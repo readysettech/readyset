@@ -1516,6 +1516,7 @@ impl NoriaConnector {
                 )
             }
         };
+        info!(query_name = %qname.display_unquoted(), "view name");
 
         let view_failed = self.failed_views.take(qname.as_ref()).is_some();
         let getter = self
@@ -1625,6 +1626,7 @@ async fn do_read<'a>(
     event: &mut readyset_client_metrics::QueryExecutionEvent,
     dialect: Dialect,
 ) -> ReadySetResult<QueryResult<'a>> {
+    info!(view = ?getter, ?params, ?processed_query_params, "do_read");
     let (reader_handle, vq) = match build_view_query(
         getter,
         processed_query_params,
@@ -1640,6 +1642,7 @@ async fn do_read<'a>(
     event.num_keys = Some(vq.key_comparisons.len() as _);
 
     let data = if let Some(rh) = read_request_handler {
+        info!("do_read local read");
         let request = readyset_client::Tagged::from(ReadQuery::Normal {
             target: ReaderAddress {
                 node: *reader_handle.node(),
@@ -1653,6 +1656,7 @@ async fn do_read<'a>(
         // View API.
         let tag = request.tag;
         if let ReadQuery::Normal { target, query } = request.v {
+            info!("do_read ReadQuery::Normal");
             // Issue a normal read query returning the raw unserialized results.
             let result = match rh.handle_normal_read_query(tag, target, query, true) {
                 CallResult::Immediate(result) => result?,

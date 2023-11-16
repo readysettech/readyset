@@ -172,6 +172,7 @@ impl ReadRequestHandler {
         query: ViewQuery,
         raw_result: bool,
     ) -> CallResult<impl Future<Output = Reply>> {
+        tracing::info!(?query, %raw_result, "handle_normal_read_query");
         let ViewQuery {
             key_comparisons,
             block,
@@ -218,6 +219,7 @@ impl ReadRequestHandler {
             // but no keys needs triggering.
             Ok(_) if consistency_miss => (vec![], None),
             Ok(hit) => {
+                tracing::info!(?hit, "handle_normal_read_query hit");
                 // We hit on all keys, and there is no consistency miss, can return results
                 // immediately
                 self.hit_ctr.increment(1);
@@ -236,6 +238,7 @@ impl ReadRequestHandler {
                 ));
             }
         };
+        tracing::info!(?receiver, "handle_normal_read_query miss");
 
         self.miss_ctr.increment(1);
 

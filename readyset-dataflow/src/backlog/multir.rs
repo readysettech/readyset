@@ -114,11 +114,13 @@ impl Handle {
         keys: &'a [KeyComparison],
         miss_meta: F,
     ) -> Result<SharedResults, LookupError<'a, T>> {
+        tracing::info!(?keys, "get_multi_single_handle");
         let mut prev_keys = HashSet::new();
         let mut hits = SharedResults::with_capacity(keys.len());
         let mut misses = Vec::new();
         let map = handle.enter()?;
         for key in keys {
+            tracing::info!(?key, ?map, "get_multi_single_handle");
             // Skip if this value is in our set of lookups. 'WHERE foo IN (1,2,1)' is equivalent to
             // 'WHERE foo IN (1,2)'
             if !prev_keys.insert(key) {
@@ -168,6 +170,7 @@ impl Handle {
         keys: &'a [KeyComparison],
         miss_meta: F,
     ) -> Result<SharedResults, LookupError<'a, T>> {
+        tracing::info!(?keys, "get_multi_many_handle");
         let mut prev_keys = HashSet::new();
         let mut hits = SharedResults::with_capacity(keys.len());
         let mut misses = Vec::new();

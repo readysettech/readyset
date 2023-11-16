@@ -127,16 +127,18 @@ impl Node {
         let addr = self.local_addr();
         let gaddr = self.global_addr();
 
-        let span = debug_span!("node:process", local = %addr, global = %gaddr.index());
+        let span = tracing::info_span!("node:process", local = %addr, global = %gaddr.index());
         let _guard = span.enter();
 
         match self.inner {
             NodeType::Ingress => {
                 let m = m.as_mut().unwrap();
                 let tag = m.tag();
+                tracing::info!(?tag, "ingress node");
                 materialize(m.mut_data(), None, tag, env.state.get_mut(addr))?;
             }
             NodeType::Base(ref mut b) => {
+                tracing::info!("base node");
                 // NOTE: bases only accept BaseOperations
                 match m.take() {
                     Some(Packet::Input { inner, .. }) => {
@@ -215,12 +217,14 @@ impl Node {
                 }
             }
             NodeType::Reader(ref mut r) => {
+                tracing::info!("reader node");
                 if let Some(state) = env.reader_write_handles.get_mut(addr) {
                     r.process(m, swap_reader, state);
                 }
             }
             NodeType::Egress(None) => internal!("tried to process through taken egress"),
             NodeType::Egress(Some(ref mut e)) => {
+                tracing::info!("egress node");
                 e.process(
                     m,
                     keyed_by.map(Vec::as_slice),
@@ -240,6 +244,7 @@ impl Node {
                 )?;
             }
             NodeType::Internal(ref mut i) => {
+                tracing::info!("internal node");
                 let mut captured_full = false;
                 let mut captured = HashSet::new();
                 let mut misses = Vec::new();

@@ -790,6 +790,7 @@ impl Domain {
         dst: Destination,
         target: Target,
     ) -> Result<(), ReadySetError> {
+        tracing::info!(?miss_keys, "find_tags_and_replay");
         let miss_index = Index::new(IndexType::best_for_keys(&miss_keys), miss_columns.to_vec());
         // the cloned is a bit sad; self.request_partial_replay doesn't use
         // self.replay_paths_by_dst.
@@ -1631,6 +1632,7 @@ impl Domain {
                         trigger_domain,
                         num_shards,
                     } => {
+                        tracing::info!(?node_index, %num_columns, ?index, %trigger_domain, "Making PartialReader");
                         if !self
                             .nodes
                             .get(node)
@@ -1660,10 +1662,16 @@ impl Domain {
                                 let cols = index.columns.clone();
                                 tokio::spawn(
                                     UnboundedReceiverStream::new(rx)
-                                        .map(move |misses| Packet::RequestReaderReplay {
-                                            keys: misses,
-                                            cols: cols.clone(),
-                                            node,
+                                        .map(move |misses| {
+                                            tracing::info!(
+                                                ?misses,
+                                                "Sending Packet::RequestReaderReplay for misses"
+                                            );
+                                            Packet::RequestReaderReplay {
+                                                keys: misses,
+                                                cols: cols.clone(),
+                                                node,
+                                            }
                                         })
                                         .map(Ok)
                                         .forward(sender)
@@ -1688,6 +1696,7 @@ impl Domain {
                             num_columns,
                             index,
                             move |misses: &mut dyn Iterator<Item = KeyComparison>| {
+                                tracing::info!("Executing trigger for misses");
                                 if num_shards == 1 {
                                     let misses = misses.collect::<Vec<_>>();
                                     if misses.is_empty() {
@@ -2370,6 +2379,7 @@ impl Domain {
         let start = time::Instant::now();
         match m {
             Packet::Message { .. } | Packet::Input { .. } => {
+                info!("message or input packet");
                 // WO for https://github.com/rust-lang/rfcs/issues/1403
                 let start = time::Instant::now();
                 let src = m.src();
@@ -2380,6 +2390,7 @@ impl Domain {
                 self.metrics.rec_forward_time(src, dst, start.elapsed());
             }
             Packet::ReplayPiece { tag, .. } => {
+                info!("replay piece packet");
                 let start = time::Instant::now();
                 self.total_replay_time.start();
                 self.handle_replay(m, executor)?;
@@ -2402,6 +2413,7 @@ impl Domain {
                 cols,
                 node,
             } => {
+                tracing::info!(?keys, ?cols, ?node, "Processing RequestReaderReplay packet");
                 let start = time::Instant::now();
                 self.total_replay_time.start();
 
@@ -2431,6 +2443,8 @@ impl Domain {
                 w.swap();
 
                 // don't request keys that have been filled since the request was sent
+
+                tracing::info!(?keys, "keys before filtering out ones that have been filled since the request was sent");
                 let mut keys = keys
                     .drain(..)
                     .filter_map(|k| match k {
@@ -2440,6 +2454,7 @@ impl Domain {
                     })
                     .flatten()
                     .collect();
+                tracing::info!(?keys, "keys after filtering");
 
                 let reader_index_type = r.index_type().ok_or_else(|| {
                     internal_err!("reader replay requested for non-indexed reader")
@@ -2472,7 +2487,7 @@ impl Domain {
                 requesting_shard,
                 requesting_replica,
             } => {
-                trace!(%tag, ?keys, "got replay request");
+                info!(%tag, ?keys, "got partial replay request");
                 let start = time::Instant::now();
                 self.total_replay_time.start();
                 self.seed_all(
@@ -2786,6 +2801,7 @@ impl Domain {
 
     #[allow(clippy::cognitive_complexity)]
     fn handle_replay(&mut self, m: Packet, ex: &mut dyn Executor) -> ReadySetResult<()> {
+        info!(?m, "handle_replay");
         let tag = m
             .tag()
             .ok_or_else(|| internal_err!("handle_replay called on an invalid message"))?;
@@ -2851,14 +2867,14 @@ impl Domain {
             };
 
             if let ReplayPieceContext::Partial { ref for_keys, .. } = context {
-                trace!(
+                info!(
                     num = data.len(),
                     %tag,
                     keys = ?for_keys,
                     "replaying batch"
                 );
             } else {
-                debug!(num = data.len(), "replaying batch");
+                info!(num = data.len(), "replaying batch");
             }
 
             // let's collect some information about the destination of this replay
@@ -2886,6 +2902,7 @@ impl Domain {
             let target_segment = path.iter().find(|n| n.is_target);
 
             if let Some(target_segment) = target_segment {
+                info!("Target of replay path is inside this domain");
                 // If this replay path is bound for us, prune keys and data for keys we're
                 // not waiting for
                 if let ReplayPieceContext::Partial {
@@ -3028,7 +3045,7 @@ impl Domain {
                         // triggered this replay initially.
                         if let Some(state) = self.state.get_mut(segment.node) {
                             for key in backfill_keys.iter() {
-                                trace!(?key, ?tag, local = %segment.node, "Marking filled");
+                                info!(?key, ?tag, local = %segment.node, "Marking filled");
                                 state.mark_filled(key.clone(), tag);
                             }
                         } else {
@@ -3037,7 +3054,7 @@ impl Domain {
                             // filled, even if that hole is empty!
                             if let Some(wh) = self.reader_write_handles.get_mut(segment.node) {
                                 for key in backfill_keys.iter() {
-                                    trace!(?key, local = %segment.node, "Marking filled in reader");
+                                    info!(?key, local = %segment.node, "Marking filled in reader");
                                     wh.mark_filled(key.clone())?;
                                 }
                             }

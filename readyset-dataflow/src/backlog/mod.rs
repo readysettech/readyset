@@ -204,6 +204,7 @@ impl<'a> MutWriteHandleEntry<'a> {
 
 impl<'a> MutWriteHandleEntry<'a> {
     pub(crate) fn mark_filled(self) -> ReadySetResult<()> {
+        tracing::info!("marking write handle filled");
         if self
             .handle
             .handle
@@ -217,16 +218,20 @@ impl<'a> MutWriteHandleEntry<'a> {
             // TODO(ENG-726): Trying to introspect how much memory these data structures
             // are using for storing key value pairs can provide a poor estimate. Handling
             // memory tracking closer to where the data is stored will be beneficial.
+            tracing::info!(size=%self.key_value_size(&self.key), "adding to mem_size while marking filled");
             self.handle.mem_size += self.key_value_size(&self.key);
+            tracing::info!("calling clear on key value bag");
             self.handle.handle.clear(self.key);
             Ok(())
         } else {
+            tracing::info!("key was already filled");
             Err(ReadySetError::KeyAlreadyFilled)
         }
     }
 
     /// Clear this entry and return the number of bytes freed
     pub(crate) fn mark_hole(self) -> u64 {
+        tracing::info!("marking write handle hole");
         // Do not account for the key if we miss on the lookup
         let size = self
             .handle
@@ -387,6 +392,7 @@ impl WriteHandle {
     }
 
     pub(crate) fn mark_filled(&mut self, key: KeyComparison) -> ReadySetResult<()> {
+        tracing::info!(?key, "mark_filled to reader");
         if let Some(len) = key.len() {
             invariant_eq!(len, self.index.len());
         }
@@ -503,6 +509,7 @@ impl SingleReadHandle {
     where
         I: Iterator<Item = KeyComparison>,
     {
+        tracing::info!("triggering replay for keys");
         assert!(
             self.trigger.is_some(),
             "tried to trigger a replay for a fully materialized view"
@@ -543,10 +550,11 @@ impl SingleReadHandle {
         &self,
         keys: &'a [KeyComparison],
     ) -> Result<SharedResults, LookupError<'a, ReaderUpdatedNotifier>> {
-        match self
-            .handle
-            .get_multi_and_map_error(keys, || self.receiver.resubscribe())
-        {
+        tracing::info!(?keys, "get_multi_with_notifier");
+        match self.handle.get_multi_and_map_error(keys, || {
+            tracing::info!("resubscribing to receiver");
+            self.receiver.resubscribe()
+        }) {
             Err(e) if e.is_miss() && self.trigger.is_none() => Ok(SharedResults::default()),
             r => r,
         }

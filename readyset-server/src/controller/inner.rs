@@ -541,7 +541,7 @@ impl Leader {
             (&Method::GET, "/flush_partial") => {
                 let ret = {
                     let mut writer = self.dataflow_state_handle.write().await;
-                    let r = writer.as_mut().flush_partial().await?;
+                    let r = writer.as_mut().evict_partial().await?;
                     self.dataflow_state_handle.commit(writer, authority).await?;
                     r
                 };

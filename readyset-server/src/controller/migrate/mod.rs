@@ -243,6 +243,7 @@ impl StoredDomainRequest {
                 targeting_domain,
                 ..
             } => {
+                info!(?targeting_domain, "DomainRequest::StartReplay");
                 let target_domain = just_placed_shard_replicas
                     .get(&targeting_domain)
                     .ok_or_else(|| ReadySetError::UnknownDomain {

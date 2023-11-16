@@ -1,3 +1,4 @@
+use std::ops::DerefMut;
 use std::panic::AssertUnwindSafe;
 
 use chrono::NaiveDate;
@@ -15,7 +16,9 @@ use serial_test::serial;
 mod common;
 use common::connect;
 use postgres_types::{accepts, to_sql_checked, FromSql, IsNull, ToSql, Type};
+use psql_srv::QueryResponse::SimpleQuery;
 use tokio_postgres::{Client, CommandCompleteContents, SimpleQueryMessage};
+use tracing::warn;
 
 async fn setup() -> (tokio_postgres::Config, Handle, ShutdownSender) {
     TestBuilder::default()
@@ -2059,6 +2062,87 @@ async fn recreate_replication_slot() {
 
         assert_eq!(res, [1, 2, 3]);
     });
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn debugging() {
+    readyset_tracing::init_test_logging();
+    let (config, mut handle, shutdown_tx) = TestBuilder::default()
+        .migration_mode(MigrationMode::OutOfBand)
+        .fallback(true)
+        .build::<PostgreSQLAdapter>()
+        .await;
+
+    let client = connect(config).await;
+
+    client
+        .simple_query("DROP TABLE IF EXISTS cats")
+        .await
+        .unwrap();
+    client
+        .simple_query("DROP TABLE IF EXISTS dogs")
+        .await
+        .unwrap();
+    client
+        .simple_query("CREATE TABLE cats (id int);")
+        .await
+        .unwrap();
+    client
+        .simple_query("CREATE TABLE dogs (id int);")
+        .await
+        .unwrap();
+    sleep().await;
+    client
+        .simple_query("CREATE CACHE FROM SELECT * FROM cats JOIN dogs on cats.id = dogs.id where cats.id = 1;")
+        .await
+        .unwrap();
+    sleep().await;
+    tracing::info!("{}", handle.graphviz().await);
+    tracing::info!("first query: will miss");
+    let r1 = client
+        .simple_query("SELECT * FROM cats JOIN dogs on cats.id = dogs.id where cats.id = 1;")
+        .await
+        .unwrap();
+    assert!(matches!(
+        r1.first().unwrap(),
+        SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 0, .. })
+    ));
+    tracing::info!("second query: will hit");
+    let r2 = client
+        .simple_query("SELECT * FROM cats JOIN dogs on cats.id = dogs.id where cats.id = 1;")
+        .await
+        .unwrap();
+    assert!(matches!(
+        r2.first().unwrap(),
+        SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 0, .. })
+    ));
+
+    tracing::info!("evicting all the things");
+    handle.flush_partial().await;
+
+    tracing::info!("writing to the keys");
+    client
+        .simple_query("insert into cats values(1);")
+        .await
+        .unwrap();
+    client
+        .simple_query("insert into dogs values(1);")
+        .await
+        .unwrap();
+
+    tracing::info!("third query: same as the first");
+    let r3 = client
+        .simple_query("SELECT * FROM cats JOIN dogs on cats.id = dogs.id where cats.id = 1;")
+        .await
+        .unwrap();
+
+    assert!(matches!(
+        r3.get(1).unwrap(),
+        SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 1, .. })
+    ));
 
     shutdown_tx.shutdown().await;
 }

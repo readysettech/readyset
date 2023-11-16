@@ -220,6 +220,7 @@ impl SingleState {
     /// Marks the given key `filled` and returns the amount of memory bytes used to store
     /// the state.
     pub(super) fn mark_filled(&mut self, key: KeyComparison) {
+        tracing::info!(?key, "Marking filled");
         match key {
             KeyComparison::Equal(k) => self.mark_point_filled(k),
             KeyComparison::Range(range) => self.mark_range_filled(range),
@@ -233,6 +234,7 @@ impl SingleState {
     /// * Panics if the `key` is a range, but the underlying KeyedState is backed by a HashMap
     /// * Panics if the underlying index has no columns
     pub(super) fn mark_hole(&mut self, key: &KeyComparison) -> u64 {
+        tracing::info!(?key, "Marking hole");
         let removed: Box<dyn Iterator<Item = (Row, usize)>> = match key {
             KeyComparison::Equal(key) => match self.state {
                 KeyedState::AllRows(_) => panic!("Empty-column index cannot be partial"),

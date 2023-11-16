@@ -1400,7 +1400,8 @@ impl DfState {
         self.schema_replication_offset = offset;
     }
 
-    pub(super) async fn flush_partial(&mut self) -> ReadySetResult<u64> {
+    pub(super) async fn evict_partial(&mut self) -> ReadySetResult<u64> {
+        info!(workers=%self.workers.len(), domains=%self.domains.len(), "flushing partial state");
         // get statistics for current domain sizes
         // and evict all state from partial nodes
         let workers = &self.workers;
@@ -1435,6 +1436,7 @@ impl DfState {
                     .node_weight(ni)
                     .ok_or_else(|| ReadySetError::NodeNotFound { index: ni.index() })?
                     .local_addr();
+                info!(?di, ?ni, ?na, %bytes, "request to evict");
                 #[allow(clippy::unwrap_used)] // literally got the `di` from iterating `domains`
                 self.domains
                     .get(&di)
@@ -1448,10 +1450,11 @@ impl DfState {
                     )
                     .await?;
                 total_evicted += bytes;
+                info!(%total_evicted);
             }
         }
 
-        warn!(total_evicted, "flushed partial domain state");
+        info!(total_evicted, "flushed partial domain state");
 
         Ok(total_evicted)
     }
