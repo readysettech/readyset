@@ -68,7 +68,11 @@ impl ViewsSynchronizer {
             .query_status_cache
             .pending_migration()
             .into_iter()
-            .filter_map(|(q, _)| q.into_parsed().map(Arc::unwrap_or_clone))
+            .filter_map(|(q, _)| {
+                q.into_parsed()
+                    // once arc_unwrap_or_clone is stabilized, we can use that cleaner syntax
+                    .map(|p| Arc::try_unwrap(p).unwrap_or_else(|arc| (*arc).clone()))
+            })
             .collect::<Vec<_>>();
 
         match self
