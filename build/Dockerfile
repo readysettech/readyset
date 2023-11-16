@@ -28,13 +28,12 @@ RUN curl -L https://github.com/docker/compose/releases/download/v2.6.0/docker-co
     chmod a+x /usr/local/bin/docker-compose
 
 RUN set -eux; \
-    cargo install cargo-cache --version 0.6.3; \
-    cargo install --git https://github.com/paritytech/cachepot --rev 2c4b14f4164ae954a1e6241e14c13feada0f1758; \
     cargo install detect_flake; \
-    cargo install critcmp; \
-    cargo cache --remove-dir all,git-db; \
-    mkdir -p ~/.config/cachepot; touch ~/.config/cachepot/config # To clean up cachepot logs
+    cargo install critcmp;
+
+RUN cargo install sccache --locked
+ENV RUSTC_WRAPPER=sccache
 
 # CARGO_HOME is set by the nightly container to be /usr/local/cargo.
 # This is where it reads configs from for cargo and where cargo installs binaries.
-RUN printf '[build]\nrustc-wrapper="/usr/local/cargo/bin/cachepot"\nrustflags = ["-C", "link-arg=-fuse-ld=lld"]' > ${CARGO_HOME}/config
+RUN printf '[build]\nrustflags = ["-C", "link-arg=-fuse-ld=lld"]' > ${CARGO_HOME}/config
