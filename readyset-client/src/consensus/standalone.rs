@@ -23,13 +23,13 @@ use parking_lot::{Mutex, RwLock};
 #[cfg(feature = "failure_injection")]
 use readyset_errors::ReadySetError;
 use readyset_errors::{internal, internal_err, set_failpoint_return_err, ReadySetResult};
-use rocksdb::DB;
+use rocksdb::{WriteBatchWithTransaction, DB};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 use super::{
     AuthorityControl, AuthorityWorkerHeartbeatResponse, GetLeaderResult, LeaderPayload,
-    WorkerDescriptor, WorkerId,
+    WorkerDescriptor, WorkerId, SCHEMA_REPLICATION_OFFSET_PATH,
 };
 #[cfg(feature = "failure_injection")]
 use crate::failpoints;
@@ -258,19 +258,45 @@ impl AuthorityControl for StandaloneAuthority {
             .collect())
     }
 
-    async fn update_controller_state<F, U, P: 'static, E>(
+    async fn update_controller_state<F, S, U, P: 'static, R, E>(
         &self,
-        f: F,
+        mut f: F,
+        mut s: S,
         _u: U,
     ) -> ReadySetResult<Result<P, E>>
     where
         F: Send + FnMut(Option<P>) -> Result<P, E>,
+        S: Send + FnMut(&P) -> Option<R>,
         U: Send,
         P: Send + Serialize + DeserializeOwned,
+        R: Send + Serialize + DeserializeOwned,
         E: Send,
     {
         set_failpoint_return_err!(failpoints::LOAD_CONTROLLER_STATE);
-        self.read_modify_write(STATE_KEY, f).await
+        let db = self.state.db.write();
+        let current_val = db
+            .get_pinned(STATE_KEY)
+            .map_err(|e| internal_err!("RocksDB error: {e}"))?
+            .map(|v| rmp_serde::from_slice(&v))
+            .transpose()?;
+
+        let res = f(current_val);
+
+        if let Ok(updated_val) = &res {
+            let schema_replication_offset = s(updated_val);
+            let new_val = rmp_serde::to_vec(&updated_val)?;
+            let mut batch = WriteBatchWithTransaction::<false>::default();
+            batch.put(STATE_KEY, new_val);
+            if schema_replication_offset.is_some() {
+                let schema_replication_offset = rmp_serde::to_vec(&schema_replication_offset)?;
+                batch.put(SCHEMA_REPLICATION_OFFSET_PATH, schema_replication_offset);
+            }
+
+            db.write(batch)
+                .map_err(|e| internal_err!("RocksDB error: {e}"))?;
+        }
+
+        Ok(res)
     }
 
     async fn overwrite_controller_state<S>(&self, state: S) -> ReadySetResult<()>
@@ -292,6 +318,7 @@ mod tests {
     use futures::StreamExt;
     use readyset_data::Dialect;
     use reqwest::Url;
+    use serde::Deserialize;
     use tempfile::tempdir;
 
     use super::*;
@@ -432,6 +459,7 @@ mod tests {
                             }),
                         }
                     },
+                    |_| Option::<u32>::None,
                     |_| {},
                 )
                 .await
@@ -445,6 +473,73 @@ mod tests {
 
         authority.overwrite_controller_state(1).await.unwrap();
         assert_eq!(incr_state(&authority).await, 2);
+    }
+
+    #[tokio::test]
+    async fn update_controller_state_replication_offsets() {
+        let dir = tempdir().unwrap();
+        let authority = StandaloneAuthority::new(
+            dir.path().to_str().unwrap(),
+            "update_controller_state_replication_offsets",
+        )
+        .unwrap();
+        #[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq)]
+        struct MockControllerState {
+            pub state: u32,
+            pub replication_offset: Option<u32>,
+        }
+
+        let state = MockControllerState {
+            state: 42,
+            replication_offset: Some(42),
+        };
+
+        authority
+            .become_leader(LeaderPayload {
+                controller_uri: url::Url::parse("http://127.0.0.1:8500").unwrap(),
+                nonce: 1,
+            })
+            .await
+            .unwrap();
+
+        assert!(authority
+            .try_read::<u32>(SCHEMA_REPLICATION_OFFSET_PATH)
+            .await
+            .unwrap()
+            .is_none());
+        assert!(authority
+            .try_read::<MockControllerState>(STATE_KEY)
+            .await
+            .unwrap()
+            .is_none());
+        authority
+            .update_controller_state(
+                |_s: Option<MockControllerState>| -> Result<MockControllerState, ()> {
+                    Ok(state.clone())
+                },
+                |s: &MockControllerState| s.replication_offset,
+                |_| {},
+            )
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            42,
+            authority
+                .try_read::<u32>(SCHEMA_REPLICATION_OFFSET_PATH)
+                .await
+                .unwrap()
+                .unwrap()
+        );
+        assert_eq!(
+            state,
+            authority
+                .try_read::<MockControllerState>(STATE_KEY)
+                .await
+                .unwrap()
+                .unwrap()
+        );
     }
 
     #[tokio::test]

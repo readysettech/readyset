@@ -220,15 +220,20 @@ pub trait AuthorityControl: Send + Sync {
     /// case, returns the last value produced by `f`.
     /// In addition some implementors of the trait may apply the method `u` to the stored copy of
     /// the value only.
-    async fn update_controller_state<F, U, P: 'static, E>(
+    /// `s` provides a mapping of the controller state to its schema replication offset--opaque at
+    /// this level due to there being a cyclic dependency.
+    async fn update_controller_state<F, S, U, P: 'static, R, E>(
         &self,
         f: F,
+        s: S,
         u: U,
     ) -> ReadySetResult<Result<P, E>>
     where
-        F: Send + FnMut(Option<P>) -> Result<P, E>,
-        U: Send + FnMut(&mut P),
-        P: Send + Serialize + DeserializeOwned + Clone,
+        F: Send + FnMut(Option<P>) -> Result<P, E>, // How to change the ControllerState
+        S: Send + Fn(&P) -> Option<R>,              // Extract ReplicationOffset
+        U: Send + FnMut(&mut P),                    // Apply to the copy of ControllerState only
+        P: Send + Serialize + DeserializeOwned + Clone, // opaque ControllerState
+        R: Send + Serialize + DeserializeOwned + Clone, // opaque ReplicationOffset
         E: Send;
 
     /// Overwrite the controller state with the given value, without regard for what was stored

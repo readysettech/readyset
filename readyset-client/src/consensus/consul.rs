@@ -141,7 +141,7 @@ use tracing::{error, warn};
 
 use super::{
     AuthorityControl, AuthorityWorkerHeartbeatResponse, GetLeaderResult, LeaderPayload,
-    WorkerDescriptor, WorkerId,
+    WorkerDescriptor, WorkerId, SCHEMA_REPLICATION_OFFSET_PATH,
 };
 #[cfg(feature = "failure_injection")]
 use crate::failpoints;
@@ -153,6 +153,7 @@ pub const WORKER_PREFIX: &str = "workers/";
 pub const CONTROLLER_KEY: &str = "controller";
 /// Path to the controller state.
 pub const STATE_KEY: &str = "state";
+
 /// The delay before another client can claim a lock.
 const SESSION_LOCK_DELAY: &str = "0";
 /// When the authority releases a session, release the locks held
@@ -478,6 +479,29 @@ impl ConsulAuthority {
         Ok(())
     }
 
+    async fn write_schema_replication_offset<R>(
+        &self,
+        new_schema_replication_offset: Option<R>,
+    ) -> ReadySetResult<()>
+    where
+        R: DeserializeOwned + Send + Serialize,
+    {
+        let session = self.get_session()?;
+        let bytes = serde_json::to_vec(&new_schema_replication_offset)?;
+        let r = kv::set(
+            &self.consul,
+            &self.prefix_with_deployment(SCHEMA_REPLICATION_OFFSET_PATH),
+            &bytes,
+            Some(SetKeyRequestBuilder::default().acquire(session)),
+        )
+        .await?;
+        if r.response {
+            Ok(())
+        } else {
+            internal!("An authority that has lost leadership attempted to issue a write")
+        }
+    }
+
     /// Retrieves the value of the controller state key from Consul.
     ///
     /// If the StateValue holds [`StateValue::Version`] this retrieves the controller state from
@@ -800,15 +824,18 @@ impl AuthorityControl for ConsulAuthority {
     /// Updates the controller state only if we are the leader. This is guaranteed by holding a
     /// session that locks both the leader key and the state key. If the leader session dies
     /// both locks will be released.
-    async fn update_controller_state<F, U, P, E>(
+    async fn update_controller_state<F, S, U, P, R, E>(
         &self,
         mut f: F,
+        s: S,
         _: U,
     ) -> ReadySetResult<Result<P, E>>
     where
         F: Send + FnMut(Option<P>) -> Result<P, E>,
+        S: Send + Fn(&P) -> Option<R>,
         U: Send,
         P: Send + Serialize + DeserializeOwned,
+        R: Send + Serialize + DeserializeOwned,
         E: Send,
     {
         set_failpoint_return_err!(failpoints::LOAD_CONTROLLER_STATE);
@@ -822,6 +849,9 @@ impl AuthorityControl for ConsulAuthority {
             };
 
             if let Ok(r) = f(current_state) {
+                let schema_replication_offset = s(&r);
+                self.write_schema_replication_offset(schema_replication_offset)
+                    .await?;
                 let (new_value, r) = self.write_controller_state(current_value, r).await?;
                 self.write_controller_state_value(new_value).await?;
 
@@ -1061,6 +1091,7 @@ mod tests {
                             }),
                         }
                     },
+                    |_| Option::<u32>::None,
                     |_| {},
                 )
                 .await
@@ -1256,6 +1287,7 @@ mod tests {
                             }),
                         }
                     },
+                    |_| Option::<u32>::None,
                     |_| {}
                 )
                 .await
@@ -1277,6 +1309,7 @@ mod tests {
                         }),
                     }
                 },
+                |_| Option::<u32>::None,
                 |_| (),
             )
             .await
@@ -1307,7 +1340,8 @@ mod tests {
                             }),
                         }
                     },
-                    |_| ()
+                    |_| Option::<u32>::None,
+                    |_| (),
                 )
                 .await
                 .unwrap()
@@ -1551,6 +1585,7 @@ mod tests {
                                 .take(length)
                                 .collect())
                         },
+                        |_| Option::<u32>::None,
                         |_| {},
                     )
                     .await
@@ -1597,5 +1632,59 @@ mod tests {
             .collect::<Vec<_>>();
         stmts.sort();
         assert_eq!(&stmts, STMTS);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn update_controller_state_replication_offsets() {
+        let authority_address = test_authority_address("create_cache_statements");
+        let authority = Arc::new(ConsulAuthority::new(&authority_address).unwrap());
+        authority.init().await.unwrap();
+        authority.delete_all_keys().await;
+
+        #[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq)]
+        struct MockControllerState {
+            pub state: u32,
+            pub replication_offset: Option<u32>,
+        }
+
+        let state = MockControllerState {
+            state: 42,
+            replication_offset: Some(42),
+        };
+
+        authority
+            .become_leader(LeaderPayload {
+                controller_uri: url::Url::parse("http://127.0.0.1:8500").unwrap(),
+                nonce: 1,
+            })
+            .await
+            .unwrap();
+
+        assert!(authority
+            .try_read::<u32>(SCHEMA_REPLICATION_OFFSET_PATH)
+            .await
+            .unwrap()
+            .is_none());
+        authority
+            .update_controller_state(
+                |_s: Option<MockControllerState>| -> Result<MockControllerState, ()> {
+                    Ok(state.clone())
+                },
+                |s: &MockControllerState| s.replication_offset,
+                |_| {},
+            )
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            42,
+            authority
+                .try_read::<u32>(SCHEMA_REPLICATION_OFFSET_PATH)
+                .await
+                .unwrap()
+                .unwrap()
+        );
     }
 }
