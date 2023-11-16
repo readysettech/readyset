@@ -247,11 +247,13 @@ impl NoriaAdapter {
         } {
             match err {
                 ReadySetError::ResnapshotNeeded => {
+                    set_failpoint!(failpoints::POSTGRES_PARTIAL_RESNAPSHOT);
                     tokio::time::sleep(WAIT_BEFORE_RESNAPSHOT).await;
                     resnapshot = true;
                     full_snapshot = false;
                 }
                 ReadySetError::FullResnapshotNeeded => {
+                    set_failpoint!(failpoints::POSTGRES_FULL_RESNAPSHOT);
                     tokio::time::sleep(WAIT_BEFORE_RESNAPSHOT).await;
                     resnapshot = true;
                     full_snapshot = true;

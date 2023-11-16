@@ -18,6 +18,12 @@ pub const REPLICATION_HANDLE_ACTION: &str = "replication-handle-action";
 pub const POSTGRES_REPLICATION_NEXT_ACTION: &str = "postgres-replication-next-action";
 /// Imitates a failure right before we begin snapshotting against a Postgres upstream
 pub const POSTGRES_SNAPSHOT_START: &str = "postgres-snapshot-start";
+/// Imitates a failure encountered while performing a full resnapshot
+pub const POSTGRES_FULL_RESNAPSHOT: &str = "postgres-full-resnapshot";
+/// Imitates a failure encountered while performing a partial resnapshot
+pub const POSTGRES_PARTIAL_RESNAPSHOT: &str = "postgres-partial-resnapshot";
+/// Imitates a failure encountered while snapshotting a table
+pub const POSTGRES_SNAPSHOT_TABLE: &str = "postgres-snapshot-table";
 /// Imitates a failure right before we invoke `START_REPLICATION` during Postgres replication
 pub const POSTGRES_START_REPLICATION: &str = "postgres-start-replication";
 /// Imitates a failure when we go to pull the next event from the WAL during Postgres replication
