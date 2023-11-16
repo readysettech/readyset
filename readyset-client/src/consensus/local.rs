@@ -329,15 +329,18 @@ impl AuthorityControl for LocalAuthority {
         Some(self)
     }
 
-    async fn update_controller_state<F, U, P: 'static, E>(
+    async fn update_controller_state<F, S, U, P: 'static, R, E>(
         &self,
         mut f: F,
+        _s: S,
         mut u: U,
     ) -> ReadySetResult<Result<P, E>>
     where
-        F: Send + FnMut(Option<P>) -> Result<P, E>,
-        U: Send + FnMut(&mut P),
-        P: Send + Serialize + DeserializeOwned + Clone,
+        F: Send + FnMut(Option<P>) -> Result<P, E>, // How to change the ControllerState
+        S: Send + Fn(&P) -> Option<R>,              // Extract ReplicationOffset
+        U: Send + FnMut(&mut P),                    // Apply to the copy of ControllerState only
+        P: Send + Serialize + DeserializeOwned + Clone, // opaque ControllerState
+        R: Send + Serialize + DeserializeOwned + Clone, // opaque ReplicationOffset
         E: Send,
     {
         set_failpoint_return_err!(failpoints::LOAD_CONTROLLER_STATE);

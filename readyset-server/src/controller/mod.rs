@@ -1036,6 +1036,9 @@ impl AuthorityLeaderElectionState {
                             }
                         }
                     },
+                    |state: &ControllerState| {
+                        state.dataflow_state.schema_replication_offset().clone()
+                    },
                     |state: &mut ControllerState| {
                         state.dataflow_state.touch_up();
                     }
