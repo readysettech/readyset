@@ -5,6 +5,7 @@ use std::fmt::{self, Display};
 use std::future;
 use std::time::Instant;
 
+use failpoint_macros::set_failpoint;
 use futures::stream::FuturesUnordered;
 use futures::{pin_mut, StreamExt, TryFutureExt};
 use itertools::Itertools;
@@ -15,6 +16,8 @@ use nom_sql::{
     NotReplicatedReason, Relation, SqlIdentifier, TableKey,
 };
 use postgres_types::{accepts, FromSql, Kind, Type};
+#[cfg(feature = "failure_injection")]
+use readyset_client::failpoints;
 use readyset_client::metrics::recorded;
 use readyset_client::recipe::changelist::{Change, ChangeList, PostgresTableMetadata};
 use readyset_client::TableOperation;
@@ -926,6 +929,7 @@ impl<'a> PostgresReplicator<'a> {
         // Finally copy each table into noria
         let mut snapshotting_tables = FuturesUnordered::new();
         for table in &tables {
+            set_failpoint!(failpoints::POSTGRES_SNAPSHOT_TABLE);
             let span =
                 info_span!("Snapshotting table", table = %table.name.display(Dialect::PostgreSQL));
             span.in_scope(|| info!("Snapshotting table"));
