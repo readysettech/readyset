@@ -2067,8 +2067,10 @@ async fn recreate_replication_slot() {
 mod failure_injection_tests {
     // TODO: move the above cfg failure_injection tests into this mod
 
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
 
+    use lazy_static::lazy_static;
     use readyset_client::consensus::{Authority, AuthorityControl, CacheDDLRequest};
     use readyset_client::failpoints;
     use readyset_data::Dialect;
@@ -2319,6 +2321,56 @@ mod failure_injection_tests {
             assert_eq!(res, [1]);
         });
 
+        shutdown_tx.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[serial]
+    async fn backwards_incompatible_upgrade_doesnt_resnapshot() {
+        // If we make a backwards-incompatible change to the serialization of the controller state,
+        // we shouldn't have to resnapshot the actual data in the base tables (assuming the schema
+        // hasn't changed since we stopped running)
+        lazy_static! {
+            pub static ref SAW_RESNAPSHOT: AtomicBool = AtomicBool::new(false);
+        }
+
+        // The test should not hit "Snapshotting table", because we create the table after the
+        // initial snapshot finishes.
+        fail::cfg_callback(failpoints::POSTGRES_SNAPSHOT_TABLE, move || {
+            SAW_RESNAPSHOT.store(true, Ordering::SeqCst);
+        })
+        .expect("failed to configure failpoint");
+        // We expect to see neither a partial nor a full re-snapshot
+        fail::cfg_callback(failpoints::POSTGRES_PARTIAL_RESNAPSHOT, move || {
+            SAW_RESNAPSHOT.store(true, Ordering::SeqCst);
+        })
+        .expect("failed to configure failpoint");
+        fail::cfg_callback(failpoints::POSTGRES_FULL_RESNAPSHOT, move || {
+            SAW_RESNAPSHOT.store(true, Ordering::SeqCst);
+        })
+        .expect("failed to configure failpoint");
+        let queries = [
+            "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);",
+            "CREATE CACHE test_query FROM SELECT * FROM users;",
+        ];
+
+        let (_config, mut handle, _authority, shutdown_tx) =
+            setup_reload_controller_state_test("caches_recreated", &queries).await;
+
+        // Add some sleep time because the replicator is a background task and we want to make sure
+        // it has had a chance to hit the resnapshot error if it is going to.
+        sleep().await;
+
+        // FIXME: At this point we will have re-created the tables with the `resnapshot_slot` and
+        // will be stuck in the 'catching up'
+
+        assert!(
+            !SAW_RESNAPSHOT.load(Ordering::SeqCst),
+            "We should not have re-snapshotted"
+        );
+
+        let queries = handle.views().await.unwrap();
+        assert!(queries.contains_key(&"test_query".into()));
         shutdown_tx.shutdown().await;
     }
 }

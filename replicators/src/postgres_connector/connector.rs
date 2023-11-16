@@ -795,6 +795,18 @@ impl Connector for PostgresWalConnector {
                         // no buffered actions, we can safely report the "end LSN" given to us in
                         // the keepalive request as our current position.
                         self.send_standby_status_update(end).await?;
+                        // Furthermore, we know we can update our own `cur_pos` since the upstream
+                        // has confirmed it will not be sending us any lsns between `last_pos` and
+                        // `end`.
+
+                        // There seems to be a possibility on resnapshot that `until` will be > end
+                        // perpetually if there is no traffic on the replication slot, so we set
+                        // `cur_pos` to the max of either of these
+                        if let Some(until) = until {
+                            cur_pos = PostgresPosition::try_from(until.clone())?;
+                        } else {
+                            cur_pos = cur_pos.with_lsn(end);
+                        }
                     } else {
                         // If we have buffered actions, we have to report the position of the *last*
                         // event we applied, since we haven't yet applied the events associated with
