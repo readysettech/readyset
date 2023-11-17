@@ -1215,6 +1215,7 @@ dependencies = [
  "rust_decimal",
  "serial_test",
  "test-strategy",
+ "test-utils",
  "tokio",
  "uuid 0.8.2",
  "zipf",
