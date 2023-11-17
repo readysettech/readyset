@@ -14,7 +14,6 @@ async fn setup() -> (tokio_postgres::Config, Handle, ShutdownSender) {
         .await
 }
 
-#[cfg(test)]
 mod types {
     use std::fmt::Display;
     use std::panic::{AssertUnwindSafe, RefUnwindSafe};

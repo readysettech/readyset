@@ -26,3 +26,4 @@ proptest = "1.0.0"
 mysql_async = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 serial_test = "0.5"
+test-utils = { path = "../test-utils" }

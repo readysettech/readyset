@@ -529,13 +529,15 @@ async fn replication_test_multiple(url: &str) -> ReadySetResult<()> {
     Ok(())
 }
 
-async fn replication_test_inner(url: &str) -> ReadySetResult<()> {
+async fn replication_test_inner(url: &str) {
     readyset_tracing::init_test_logging();
-    let mut client = DbConnection::connect(url).await?;
-    client.query(CREATE_SCHEMA).await?;
-    client.query(POPULATE_SCHEMA).await?;
+    let mut client = DbConnection::connect(url).await.unwrap();
+    client.query(CREATE_SCHEMA).await.unwrap();
+    client.query(POPULATE_SCHEMA).await.unwrap();
 
-    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None).await?;
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
+        .await
+        .unwrap();
     ctx.notification_channel
         .as_mut()
         .unwrap()
@@ -544,34 +546,37 @@ async fn replication_test_inner(url: &str) -> ReadySetResult<()> {
         .unwrap();
 
     ctx.check_results("noria_view", "Snapshot", SNAPSHOT_RESULT)
-        .await?;
+        .await
+        .unwrap();
 
     for (test_name, test_query, test_results) in TESTS {
-        client.query(test_query).await?;
+        client.query(test_query).await.unwrap();
         ctx.check_results("noria_view", test_name, test_results)
-            .await?;
+            .await
+            .unwrap();
     }
 
     // Stop the replication task, issue some queries then check they are picked up after reconnect
     ctx.stop_repl().await;
-    client.query(DISCONNECT_QUERY).await?;
+    client.query(DISCONNECT_QUERY).await.unwrap();
 
     // Make sure no replication takes place for real
     ctx.check_results("noria_view", "Disconnected", TESTS[TESTS.len() - 1].2)
-        .await?;
+        .await
+        .unwrap();
 
     // Resume replication
     ctx.start_repl(None, TelemetrySender::new_no_op(), false)
-        .await?;
+        .await
+        .unwrap();
     ctx.check_results("noria_view", "Reconnect", RECONNECT_RESULT)
-        .await?;
+        .await
+        .unwrap();
 
     client.stop().await;
     ctx.stop().await;
 
     shutdown_tx.shutdown().await;
-
-    Ok(())
 }
 
 fn pgsql_url() -> String {
@@ -600,7 +605,8 @@ fn mysql_url() -> String {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
-async fn pgsql_replication() -> ReadySetResult<()> {
+#[slow]
+async fn pgsql_replication() {
     replication_test_inner(&pgsql_url()).await
 }
 
@@ -608,20 +614,23 @@ async fn pgsql_replication() -> ReadySetResult<()> {
 /// readyset instances can replicate off the same upstream.
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
+#[slow]
 #[ignore = "Flaky test (REA-3061)"]
-async fn pgsql_replication_multiple() -> ReadySetResult<()> {
-    replication_test_multiple(&pgsql_url()).await
+async fn pgsql_replication_multiple() {
+    replication_test_multiple(&pgsql_url()).await.unwrap()
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
-async fn mysql_replication_multiple() -> ReadySetResult<()> {
-    replication_test_multiple(&mysql_url()).await
+#[slow]
+async fn mysql_replication_multiple() {
+    replication_test_multiple(&mysql_url()).await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
-async fn mysql_replication() -> ReadySetResult<()> {
+#[slow]
+async fn mysql_replication() {
     replication_test_inner(&mysql_url()).await
 }
 
@@ -669,102 +678,123 @@ async fn mysql_replication_big_tables() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
-async fn mysql_datetime_replication() -> ReadySetResult<()> {
-    mysql_datetime_replication_inner().await
+#[slow]
+async fn mysql_datetime_replication() {
+    mysql_datetime_replication_inner().await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
-async fn pgsql_skip_unparsable() -> ReadySetResult<()> {
-    replication_skip_unparsable_inner(&pgsql_url()).await
+#[slow]
+async fn pgsql_skip_unparsable() {
+    replication_skip_unparsable_inner(&pgsql_url())
+        .await
+        .unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
-async fn mysql_skip_unparsable() -> ReadySetResult<()> {
-    replication_skip_unparsable_inner(&mysql_url()).await
+#[slow]
+async fn mysql_skip_unparsable() {
+    replication_skip_unparsable_inner(&mysql_url())
+        .await
+        .unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
-async fn pgsql_replication_filter() -> ReadySetResult<()> {
-    replication_filter_inner(&pgsql_url()).await
+#[slow]
+async fn pgsql_replication_filter() {
+    replication_filter_inner(&pgsql_url()).await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
-async fn mysql_replication_filter() -> ReadySetResult<()> {
-    replication_filter_inner(&mysql_url()).await
+#[slow]
+async fn mysql_replication_filter() {
+    replication_filter_inner(&mysql_url()).await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
-async fn pgsql_replication_all_schemas() -> ReadySetResult<()> {
-    replication_all_schemas_inner(&pgsql_url()).await
+#[slow]
+async fn pgsql_replication_all_schemas() {
+    replication_all_schemas_inner(&pgsql_url()).await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
-async fn mysql_replication_all_schemas() -> ReadySetResult<()> {
-    replication_all_schemas_inner(&mysql_url()).await
+#[slow]
+async fn mysql_replication_all_schemas() {
+    replication_all_schemas_inner(&mysql_url()).await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
-async fn pgsql_replication_resnapshot() -> ReadySetResult<()> {
-    resnapshot_inner(&pgsql_url()).await
+#[slow]
+async fn pgsql_replication_resnapshot() {
+    resnapshot_inner(&pgsql_url()).await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
-async fn mysql_replication_resnapshot() -> ReadySetResult<()> {
-    resnapshot_inner(&mysql_url()).await
+#[slow]
+async fn mysql_replication_resnapshot() {
+    resnapshot_inner(&mysql_url()).await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
+#[slow]
 async fn psql14_ddl_replicate_drop_table() {
     postgresql_ddl_replicate_drop_table_internal(&pgsql_url()).await
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
+#[slow]
 async fn psql13_ddl_replicate_drop_table() {
     postgresql_ddl_replicate_drop_table_internal(&pgsql13_url()).await
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
+#[slow]
 async fn psql14_ddl_replicate_create_table() {
     postgresql_ddl_replicate_create_table_internal(&pgsql_url()).await
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
+#[slow]
 async fn psql13_ddl_replicate_create_table() {
     postgresql_ddl_replicate_create_table_internal(&pgsql13_url()).await
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
+#[slow]
 async fn psql14_ddl_replicate_drop_view() {
     postgresql_ddl_replicate_drop_view_internal(&pgsql_url()).await
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
+#[slow]
 async fn psql13_ddl_replicate_drop_view() {
     postgresql_ddl_replicate_drop_view_internal(&pgsql13_url()).await
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
+#[slow]
 async fn psql14_ddl_replicate_create_view() {
     postgresql_ddl_replicate_create_view_internal(&pgsql_url()).await
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
+#[slow]
 async fn psql13_ddl_replicate_create_view() {
     postgresql_ddl_replicate_create_view_internal(&pgsql13_url()).await
 }
@@ -1500,10 +1530,11 @@ async fn resnapshot_inner(url: &str) -> ReadySetResult<()> {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
-async fn mysql_enum_replication() -> ReadySetResult<()> {
+#[slow]
+async fn mysql_enum_replication() {
     readyset_tracing::init_test_logging();
     let url = &mysql_url();
-    let mut client = DbConnection::connect(url).await?;
+    let mut client = DbConnection::connect(url).await.unwrap();
     client
         .query(
             "
@@ -1515,10 +1546,11 @@ async fn mysql_enum_replication() -> ReadySetResult<()> {
             );
             CREATE VIEW enum_test_view AS SELECT * FROM `enum_test` ORDER BY id ASC",
         )
-        .await?;
+        .await
+        .unwrap();
 
     // Allow invalid values for enums
-    client.query("SET @@sql_mode := ''").await?;
+    client.query("SET @@sql_mode := ''").await.unwrap();
     client
         .query(
             "
@@ -1527,9 +1559,12 @@ async fn mysql_enum_replication() -> ReadySetResult<()> {
                 (1, 'yellow'),
                 (2, 'purple')",
         )
-        .await?;
+        .await
+        .unwrap();
 
-    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None).await?;
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
+        .await
+        .unwrap();
     ctx.notification_channel
         .as_mut()
         .unwrap()
@@ -1546,7 +1581,8 @@ async fn mysql_enum_replication() -> ReadySetResult<()> {
             &[DfValue::Int(2), DfValue::Int(0)],
         ],
     )
-    .await?;
+    .await
+    .unwrap();
 
     // Repeat, but this time using binlog replication
     client
@@ -1556,7 +1592,8 @@ async fn mysql_enum_replication() -> ReadySetResult<()> {
                 (3, 'red'),
                 (4, 'yellow')",
         )
-        .await?;
+        .await
+        .unwrap();
 
     ctx.check_results(
         "enum_test_view",
@@ -1569,13 +1606,12 @@ async fn mysql_enum_replication() -> ReadySetResult<()> {
             &[DfValue::Int(4), DfValue::Int(2)],
         ],
     )
-    .await?;
+    .await
+    .unwrap();
 
     client.stop().await;
     ctx.stop().await;
     shutdown_tx.shutdown().await;
-
-    Ok(())
 }
 
 async fn postgresql_ddl_replicate_drop_table_internal(url: &str) {
@@ -1791,27 +1827,31 @@ async fn postgresql_ddl_replicate_create_view_internal(url: &str) {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
-async fn snapshot_telemetry_mysql() -> ReadySetResult<()> {
+#[slow]
+async fn snapshot_telemetry_mysql() {
     snapshot_telemetry_inner(&mysql_url()).await
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
-async fn snapshot_telemetry_postgresql() -> ReadySetResult<()> {
+#[slow]
+async fn snapshot_telemetry_postgresql() {
     snapshot_telemetry_inner(&pgsql_url()).await
 }
 
-async fn snapshot_telemetry_inner(url: &String) -> ReadySetResult<()> {
+async fn snapshot_telemetry_inner(url: &String) {
     readyset_tracing::init_test_logging();
-    let mut client = DbConnection::connect(url).await?;
-    client.query(CREATE_SCHEMA).await?;
-    client.query(POPULATE_SCHEMA).await?;
+    let mut client = DbConnection::connect(url).await.unwrap();
+    client.query(CREATE_SCHEMA).await.unwrap();
+    client.query(POPULATE_SCHEMA).await.unwrap();
 
     let (sender, mut reporter) = TelemetryInitializer::test_init();
     let mut builder = Builder::for_tests();
     builder.set_telemetry_sender(sender);
     let (mut ctx, shutdown_tx) =
-        TestHandle::start_noria_with_builder(url.to_string(), None, builder).await?;
+        TestHandle::start_noria_with_builder(url.to_string(), None, builder)
+            .await
+            .unwrap();
     ctx.notification_channel
         .as_mut()
         .unwrap()
@@ -1820,7 +1860,8 @@ async fn snapshot_telemetry_inner(url: &String) -> ReadySetResult<()> {
         .unwrap();
 
     ctx.check_results("noria_view", "Snapshot", SNAPSHOT_RESULT)
-        .await?;
+        .await
+        .unwrap();
 
     reporter.run_timeout(Duration::from_millis(20)).await;
 
@@ -1847,18 +1888,18 @@ async fn snapshot_telemetry_inner(url: &String) -> ReadySetResult<()> {
     assert!(schema_str.contains("CREATE VIEW"));
 
     shutdown_tx.shutdown().await;
-
-    Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
+#[slow]
 async fn replication_tables_updates_mysql() {
     applies_replication_table_updates_on_restart(&mysql_url()).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
+#[slow]
 async fn replication_tables_updates_postgresql() {
     applies_replication_table_updates_on_restart(&pgsql_url()).await;
 }
@@ -1948,6 +1989,7 @@ async fn applies_replication_table_updates_on_restart(url: &str) {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
+#[slow]
 async fn postgresql_replicate_copy_from() {
     // Replication of data inserted via COPY is tricky due to it triggering the creation of
     // multiple replication events with the same LSN. This test was written to reproduce the
@@ -2014,6 +2056,7 @@ async fn postgresql_replicate_copy_from() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
+#[slow]
 async fn postgresql_non_base_offsets() {
     // This test reproduces the panic described in ENG-2204.
     // It is not clear to my why a JOIN is necessary to reproduce the problem, but a view that
@@ -2054,6 +2097,7 @@ async fn postgresql_non_base_offsets() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
+#[slow]
 async fn postgresql_orphaned_nodes() {
     // This test checks for the error described in ENG-2190.
     // The bug would be triggered when a view would fail to be added due to certain types of
@@ -2099,6 +2143,7 @@ async fn postgresql_orphaned_nodes() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
+#[slow]
 async fn postgresql_replicate_citext() {
     readyset_tracing::init_test_logging();
     let url = pgsql_url();
@@ -2143,6 +2188,7 @@ async fn postgresql_replicate_citext() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
+#[slow]
 async fn postgresql_replicate_citext_array() {
     readyset_tracing::init_test_logging();
     let url = pgsql_url();
@@ -2193,6 +2239,7 @@ async fn postgresql_replicate_citext_array() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
+#[slow]
 async fn postgresql_replicate_custom_type() {
     let url = pgsql_url();
     let mut client = DbConnection::connect(&url).await.unwrap();
@@ -2244,6 +2291,7 @@ async fn postgresql_replicate_custom_type() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
+#[slow]
 async fn postgresql_replicate_truncate() {
     let url = pgsql_url();
     let mut client = DbConnection::connect(&url).await.unwrap();
@@ -2307,13 +2355,15 @@ async fn postgresql_replicate_truncate() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
-async fn postgresql_drop_nonexistent_replication_slot() -> ReadySetResult<()> {
+#[slow]
+async fn postgresql_drop_nonexistent_replication_slot() {
     let connector = native_tls::TlsConnector::builder()
         .danger_accept_invalid_certs(true)
         .build()
         .unwrap();
     let tls_connector = postgres_native_tls::MakeTlsConnector::new(connector);
-    let (client, conn) = tokio_postgres::Config::from_str(&pgsql_url())?
+    let (client, conn) = tokio_postgres::Config::from_str(&pgsql_url())
+        .unwrap()
         .set_replication_database()
         .connect(tls_connector)
         .await
@@ -2338,8 +2388,6 @@ async fn postgresql_drop_nonexistent_replication_slot() -> ReadySetResult<()> {
         &res.unwrap_err().into(),
         slot_name
     ));
-
-    Ok(())
 }
 
 /// Given a table, check that it has an associated TOAST table
@@ -2361,6 +2409,7 @@ async fn postgresql_is_toasty(client: &tokio_postgres::client::Client, table: &s
 /// Case 1: The table is unkeyed.
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
+#[slow]
 async fn postgresql_toast_update_unkeyed() {
     readyset_tracing::init_test_logging();
 
@@ -2436,6 +2485,7 @@ async fn postgresql_toast_update_unkeyed() {
 /// Case 2: The table is keyed, and one or more key columns is modified.
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
+#[slow]
 async fn postgresql_toast_update_key() {
     readyset_tracing::init_test_logging();
 
@@ -2508,6 +2558,7 @@ async fn postgresql_toast_update_key() {
 /// Case 3: The table is keyed, but no key columns are modified.
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
+#[slow]
 async fn postgresql_toast_update_not_key() {
     readyset_tracing::init_test_logging();
 
@@ -2578,6 +2629,7 @@ async fn postgresql_toast_update_not_key() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
+#[slow]
 async fn pgsql_unsupported() {
     readyset_tracing::init_test_logging();
     let url = pgsql_url();
@@ -2628,6 +2680,7 @@ async fn pgsql_unsupported() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
+#[slow]
 async fn pgsql_delete_from_table_without_pk() {
     readyset_tracing::init_test_logging();
     let url = pgsql_url();

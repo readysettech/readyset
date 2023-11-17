@@ -8,6 +8,7 @@ use proptest::prop_assume;
 use rand::rngs::mock::StepRng;
 use serial_test::serial;
 use test_strategy::proptest;
+use test_utils::slow;
 
 async fn mysql_connection() -> mysql_async::Conn {
     mysql_async::Conn::new(
@@ -29,6 +30,7 @@ async fn mysql_connection() -> mysql_async::Conn {
 
 #[proptest]
 #[serial]
+#[slow]
 fn value_of_type_always_valid(
     #[any(generate_arrays = false, dialect = Some(Dialect::MySQL))] ty: SqlType,
 ) {
@@ -56,6 +58,7 @@ fn value_of_type_always_valid(
 
 #[proptest]
 #[serial]
+#[slow]
 fn unique_value_of_type_always_valid(
     #[any(generate_arrays = false, dialect = Some(Dialect::MySQL))] ty: SqlType,
     #[strategy(0..=255u32)] idx: u32,
@@ -86,6 +89,7 @@ fn unique_value_of_type_always_valid(
 
 #[proptest]
 #[serial]
+#[slow]
 fn random_value_of_type_always_valid(
     #[any(generate_arrays = false, dialect = Some(Dialect::MySQL))] ty: SqlType,
     initial: u64,
