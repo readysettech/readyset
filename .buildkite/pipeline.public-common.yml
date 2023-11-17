@@ -135,38 +135,6 @@ steps:
           retries: 3
     retry: *retry_on_agent_kill
 
-  - label: 'Run clustertests'
-    key: readyset-clustertest
-    command:
-      - '[ -d public ] && cd public'
-      - 'echo +++ Building binaries for clustertest'
-      - cargo --locked build --bin readyset-server --bin readyset --features failure_injection
-      - 'echo +++ Running Clustertests'
-      - cargo --locked test -p readyset-clustertest
-    timeout_in_minutes: 60
-    depends_on:
-    - build-image
-    plugins:
-      - docker-compose#v3.7.0:
-          run: app
-          env:
-          - SCCACHE_BUCKET=readysettech-build-sccache-us-east-2
-          - SCCACHE_REGION=us-east-2
-          - CARGO_INCREMENTAL=0
-          - RUST_BACKTRACE=full
-          - DISABLE_TELEMETRY=true
-          - BINARY_PATH=/workdir/${GIT_PUBLIC_ROOT}target/debug/
-          - MYSQL_ROOT_PASSWORD=noria
-          volumes:
-          - 'target:/workdir/target'
-          config:
-            - "${GIT_PUBLIC_ROOT}build/docker-compose.yml"
-            - "${GIT_PUBLIC_ROOT}build/docker-compose.ci-test.yml"
-          mount-buildkite-agent: true
-      - ecr#v2.2.0:
-          login: true
-    retry: *retry_on_agent_kill
-
   - label: 'Test benchmark framework'
     key: test-benchmark
     command:
