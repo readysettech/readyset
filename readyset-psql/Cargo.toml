@@ -53,6 +53,7 @@ readyset-util = { path = "../readyset-util" }
 readyset-client-test-helpers = { path = "../readyset-client-test-helpers", features = ["postgres"] }
 criterion = { version = "0.3.5", features = ["async_tokio"] }
 readyset-tracing = { path = "../readyset-tracing" }
+test-utils = { path = "../test-utils" }
 
 [[bench]]
 name = "proxy"

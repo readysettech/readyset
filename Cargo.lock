@@ -4973,6 +4973,7 @@ dependencies = [
  "streaming-iterator",
  "tempfile",
  "test-strategy",
+ "test-utils",
  "thiserror",
  "tikv-jemallocator",
  "tokio",
