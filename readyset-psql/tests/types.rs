@@ -14,6 +14,7 @@ async fn setup() -> (tokio_postgres::Config, Handle, ShutdownSender) {
         .await
 }
 
+#[cfg(test)]
 mod types {
     use std::fmt::Display;
     use std::panic::{AssertUnwindSafe, RefUnwindSafe};
@@ -129,6 +130,7 @@ mod types {
                 max_shrink_iters: 200, // May need many shrink iters for large vecs
                 ..ProptestConfig::default()
             })]
+            #[test_utils::slow]
             #[serial_test::serial]
             $(#[$meta])*
             fn $test_name(#[strategy(vec($strategy, 1..20))] vals: Vec<$rust_type>) {
