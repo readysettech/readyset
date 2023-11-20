@@ -913,6 +913,12 @@ impl<'a> PostgresReplicator<'a> {
                 });
         }
 
+        // Emit a no-op replication message: If there isn't any traffic since we started
+        // snapshotting, we may be stuck 'catching up' because the lsn of a re-snapshot slot can be
+        // higher than the main slot.
+        let query = "SELECT pg_logical_emit_message(true, 'readyset_snapshot_done', '')";
+        get_transaction!(self).query(query, &[]).await?;
+
         // Commit the transaction we were using to snapshot the schema. This is important since that
         // transaction holds onto locks for tables which we now need to load data from.
         self.transaction.take().unwrap().commit().await?;
