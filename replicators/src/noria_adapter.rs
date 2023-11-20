@@ -17,6 +17,7 @@ use readyset_client::consistency::Timestamp;
 use readyset_client::failpoints;
 use readyset_client::metrics::recorded::{self, SnapshotStatusTag};
 use readyset_client::recipe::changelist::{Change, ChangeList};
+use readyset_client::utils::retry_with_exponential_backoff;
 use readyset_client::{ReadySetHandle, Table, TableOperation};
 use readyset_data::Dialect;
 use readyset_errors::{internal_err, set_failpoint_return_err, ReadySetError, ReadySetResult};
@@ -298,7 +299,17 @@ impl NoriaAdapter {
         }
 
         // Load the replication offset for all tables and the schema from ReadySet
-        let mut replication_offsets = noria.replication_offsets().await?;
+        // Retry a few times to give domains a chance to spin up--if we fail at all attempts, we
+        // will start the loop over and there will be an error logged
+        let mut replication_offsets = retry_with_exponential_backoff(
+            || async {
+                let mut noria = noria.clone();
+                noria.replication_offsets().await
+            },
+            5,
+            Duration::from_millis(250),
+        )
+        .await?;
 
         let table_filter = TableFilter::try_new(
             nom_sql::Dialect::MySQL,
@@ -503,7 +514,18 @@ impl NoriaAdapter {
 
         // Attempt to retrieve the latest replication offset from ReadySet-server, if none is
         // present begin the snapshot process
-        let replication_offsets = noria.replication_offsets().await?;
+        // Retry a few times to give domains a chance to spin up--if we fail at all attempts, we
+        // will start the loop over and there will be an error logged
+        let replication_offsets = retry_with_exponential_backoff(
+            || async {
+                let mut noria = noria.clone();
+                noria.replication_offsets().await
+            },
+            5,
+            Duration::from_millis(250),
+        )
+        .await?;
+
         let pos = replication_offsets
             .max_offset()?
             .map(TryInto::try_into)
