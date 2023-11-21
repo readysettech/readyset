@@ -14,6 +14,7 @@ pub mod proxied_queries_reporter;
 mod query_handler;
 pub mod query_status_cache;
 pub mod rewrite;
+mod status_reporter;
 pub mod upstream_database;
 mod utils;
 pub mod views_synchronizer;

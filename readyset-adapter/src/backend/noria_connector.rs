@@ -9,16 +9,16 @@ use nom_sql::{
     self, ColumnConstraint, DeleteStatement, DialectDisplay, Expr, InsertStatement, Relation,
     SqlIdentifier, SqlQuery, UnaryOperator, UpdateStatement,
 };
-use readyset_client::consensus::{Authority, AuthorityControl};
 use readyset_client::consistency::Timestamp;
 use readyset_client::internal::LocalNodeIndex;
 use readyset_client::recipe::changelist::{Change, ChangeList, IntoChanges};
 use readyset_client::results::{ResultIterator, Results};
+use readyset_client::status::ReadySetControllerStatus;
 use readyset_client::{
     ColumnSchema, GraphvizOptions, ReadQuery, ReaderAddress, ReaderHandle, ReadySetHandle,
     SchemaType, Table, TableOperation, View, ViewCreateRequest, ViewQuery,
 };
-use readyset_data::{DfType, DfValue, Dialect, TimestampTz};
+use readyset_data::{DfType, DfValue, Dialect};
 use readyset_errors::{
     internal_err, invariant_eq, table_err, unsupported, unsupported_err, ReadySetError,
     ReadySetResult,
@@ -854,55 +854,8 @@ impl NoriaConnector {
 
     /// Returns status provided by the Controller and persisted in the Authority. Also appends
     /// additional_meta provided by the caller to the status.
-    pub(crate) async fn readyset_status(
-        &mut self,
-        authority: &Authority,
-        mut additional_meta: Vec<(String, String)>,
-    ) -> ReadySetResult<QueryResult<'static>> {
-        let mut status =
-            match noria_await!(self.inner.get_mut()?, self.inner.get_mut()?.noria.status()) {
-                Ok(s) => <Vec<(String, String)>>::from(s),
-                Err(_) => vec![(
-                    "ReadySet Controller Status".to_string(),
-                    "Unavailable".to_string(),
-                )],
-            };
-
-        // Helper function for formatting
-        fn time_or_null(time_ms: Option<u64>) -> String {
-            if let Some(t) = time_ms {
-                TimestampTz::from_unix_ms(t).to_string()
-            } else {
-                "NULL".to_string()
-            }
-        }
-
-        if let Ok(Some(stats)) = authority.persistent_stats().await {
-            status.push((
-                "Last started Controller".to_string(),
-                time_or_null(stats.last_controller_startup),
-            ));
-            status.push((
-                "Last completed snapshot".to_string(),
-                time_or_null(stats.last_completed_snapshot),
-            ));
-            status.push((
-                "Last started replication".to_string(),
-                time_or_null(stats.last_started_replication),
-            ));
-            if let Some(err) = stats.last_replicator_error {
-                status.push(("Last replicator error".to_string(), err))
-            }
-        }
-
-        additional_meta.append(&mut status);
-
-        Ok(QueryResult::MetaVariables(
-            additional_meta
-                .into_iter()
-                .map(MetaVariable::from)
-                .collect(),
-        ))
+    pub(crate) async fn readyset_status(&mut self) -> ReadySetResult<ReadySetControllerStatus> {
+        noria_await!(self.inner.get_mut()?, self.inner.get_mut()?.noria.status())
     }
 
     /// Query the status of a pending migration identified by the given `migration_id`. Once the
