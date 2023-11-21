@@ -112,6 +112,7 @@ use crate::metrics_handle::{MetricsHandle, MetricsSummary};
 use crate::query_handler::SetBehavior;
 use crate::query_status_cache::QueryStatusCache;
 use crate::rewrite::ProcessedQueryParams;
+use crate::status_reporter::ReadySetStatusReporter;
 pub use crate::upstream_database::UpstreamPrepare;
 use crate::utils::create_dummy_column;
 use crate::{create_dummy_schema, rewrite, QueryHandler, UpstreamDatabase, UpstreamDestination};
@@ -2157,27 +2158,13 @@ where
                 self.show_caches(query_id).await
             }
             SqlQuery::Show(ShowStatement::ReadySetStatus) => {
-                // Add upstream connectivity status
-                let mut additional_meta = if let Some(upstream) = &mut self.upstream {
-                    let connection_status = upstream
-                        .is_connected()
-                        .await
-                        .is_ok()
-                        .then(|| "Connected".to_string())
-                        .unwrap_or_else(|| "Unreachable".to_string());
-                    vec![("Database Connection".to_string(), connection_status)]
-                } else {
-                    vec![]
+                let reporter = ReadySetStatusReporter {
+                    upstream: &mut self.upstream,
+                    connector: &mut self.noria,
+                    connections: &self.connections,
+                    authority: &self.authority,
                 };
-                let conn_count = match &self.connections {
-                    Some(s) => s.len(),
-                    None => 0,
-                };
-                additional_meta.push(("Connection Count".to_string(), conn_count.to_string()));
-
-                self.noria
-                    .readyset_status(&self.authority, additional_meta)
-                    .await
+                Ok(reporter.report_status().await.into_query_result())
             }
             SqlQuery::Show(ShowStatement::ReadySetStatusAdapter) => self.readyset_adapter_status(),
             SqlQuery::Show(ShowStatement::ReadySetMigrationStatus(id)) => {

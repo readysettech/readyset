@@ -1834,7 +1834,10 @@ async fn show_readyset_status() {
 
     // NOTE: If this readyset extension has changed, verify the new behavior is correct then update
     // the expected values below
-    assert_eq!(ret.len(), 5);
+    assert_eq!(ret.len(), 6);
+    let row = ret.remove(0);
+    assert_eq!(row.get::<String, _>(0).unwrap(), "Database Connection");
+    assert_eq!(row.get::<String, _>(1).unwrap(), "Unreachable");
     let row = ret.remove(0);
     assert_eq!(row.get::<String, _>(0).unwrap(), "Connection Count");
     assert_eq!(row.get::<String, _>(1).unwrap(), "0");

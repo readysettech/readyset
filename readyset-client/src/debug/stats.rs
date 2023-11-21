@@ -45,7 +45,7 @@ pub struct NodeStats {
 }
 
 /// Status that we persist in the Authority to make it available across restarts.
-#[derive(Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PersistentStats {
     /// Time in millis when the controller last started up.
     pub last_controller_startup: Option<u64>,
