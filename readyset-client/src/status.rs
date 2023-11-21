@@ -1,11 +1,11 @@
 //! System status information that can sent to a noria-client.
 //!
-//! When introducing new fields to the [`ReadySetStatus`] type, be sure to
+//! When introducing new fields to the [`ReadySetControllerStatus`] type, be sure to
 //! update support for converting the object to strings:
-//!   * `ReadySetStatus::try_from(_: Vec<(String, String)>)`
-//!   * `Vec<(String, String)>::from(_: ReadySetStatus)`
+//!   * `ReadySetControllerStatus::try_from(_: Vec<(String, String)>)`
+//!   * `Vec<(String, String)>::from(_: ReadySetControllerStatus)`
 //!
-//! These two conversions are used to convert the [`ReadySetStatus`] structs to a format
+//! These two conversions are used to convert the [`ReadySetControllerStatus`] structs to a format
 //! that can be passed to various SQL clients.
 use std::fmt::{self, Display};
 
@@ -18,12 +18,14 @@ const SNAPSHOT_STATUS_VARIABLE: &str = "Snapshot Status";
 const MAX_REPLICATION_OFFSET: &str = "Maximum Replication Offset";
 const MIN_REPLICATION_OFFSET: &str = "Minimum Replication Offset";
 
-/// ReadySetStatus holds information regarding the status of ReadySet, similar to
+/// ReadySetControllerStatus holds information regarding the controller status of ReadySet, similar
+/// to
+///
 /// [`SHOW STATUS`](https://dev.mysql.com/doc/refman/8.0/en/show-status.html) in MySQL.
 ///
 /// Returned via the /status RPC and SHOW READYSET STATUS.
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
-pub struct ReadySetStatus {
+pub struct ReadySetControllerStatus {
     /// The snapshot status of the current leader.
     pub snapshot_status: SnapshotStatus,
     /// The current maximum replication offset known by the leader.
@@ -32,8 +34,8 @@ pub struct ReadySetStatus {
     pub min_replication_offset: Option<ReplicationOffset>,
 }
 
-impl From<ReadySetStatus> for Vec<(String, String)> {
-    fn from(status: ReadySetStatus) -> Vec<(String, String)> {
+impl From<ReadySetControllerStatus> for Vec<(String, String)> {
+    fn from(status: ReadySetControllerStatus) -> Vec<(String, String)> {
         let mut res = vec![(
             SNAPSHOT_STATUS_VARIABLE.to_string(),
             status.snapshot_status.to_string(),

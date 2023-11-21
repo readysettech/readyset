@@ -30,7 +30,7 @@ use crate::internal::{DomainIndex, ReplicaAddress};
 use crate::metrics::MetricsDump;
 use crate::recipe::changelist::ChangeList;
 use crate::recipe::{ExtendRecipeResult, ExtendRecipeSpec, MigrationStatus};
-use crate::status::ReadySetStatus;
+use crate::status::ReadySetControllerStatus;
 use crate::table::{PersistencePoint, Table, TableBuilder, TableRpc};
 use crate::view::{View, ViewBuilder, ViewRpc};
 use crate::{
@@ -920,8 +920,8 @@ impl ReadySetHandle {
     );
 
     simple_request!(
-        /// Returns the ReadySetStatus struct returned by the leader.
-        status() -> ReadySetStatus
+        /// Returns the ReadySetControllerStatus struct returned by the leader.
+        status() -> ReadySetControllerStatus
     );
 
     simple_request!(
