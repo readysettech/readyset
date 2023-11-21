@@ -12,7 +12,7 @@
 
 use crate::create_table_options::CreateTableOption;
 use crate::rename::{RenameTableOperation, RenameTableStatement};
-use crate::select::LimitClause;
+use crate::select::{LimitClause, LimitValue};
 use crate::set::Variable;
 use crate::transaction::{CommitStatement, RollbackStatement, StartTransactionStatement};
 use crate::{
@@ -196,7 +196,7 @@ pub trait VisitorMut<'ast>: Sized {
         walk_limit_clause(self, limit_clause)
     }
 
-    fn visit_limit(&mut self, limit: &'ast mut Literal) -> Result<(), Self::Error> {
+    fn visit_limit(&mut self, limit: &'ast mut LimitValue) -> Result<(), Self::Error> {
         walk_limit(self, limit)
     }
 
@@ -654,9 +654,12 @@ pub fn walk_limit_clause<'ast, V: VisitorMut<'ast>>(
 
 pub fn walk_limit<'ast, V: VisitorMut<'ast>>(
     visitor: &mut V,
-    limit: &'ast mut Literal,
+    limit: &'ast mut LimitValue,
 ) -> Result<(), V::Error> {
-    visitor.visit_literal(limit)?;
+    match limit {
+        LimitValue::Literal(literal) => visitor.visit_literal(literal)?,
+        LimitValue::All => (),
+    };
     Ok(())
 }
 
@@ -1268,7 +1271,7 @@ mod tests {
             walk_limit_clause(self, limit_clause)
         }
 
-        fn visit_limit(&mut self, limit: &'ast mut Literal) -> Result<(), Self::Error> {
+        fn visit_limit(&mut self, limit: &'ast mut LimitValue) -> Result<(), Self::Error> {
             self.0 += 1;
             walk_limit(self, limit)
         }
