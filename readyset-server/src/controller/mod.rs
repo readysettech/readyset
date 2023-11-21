@@ -1054,7 +1054,19 @@ impl AuthorityLeaderElectionState {
                         "Error deserializing controller state, wiping state and starting fresh \
                          (NOTE: Caches will be re-created once snapshotting finishes)"
                     );
-                    let state = ControllerState::new(self.config.clone(), self.permissive_writes);
+                    // If we are unsuccessful loading the schema replication offset from the
+                    // authority, we leave it as None which will mean performing a resnapshot. We
+                    // can still recover the caches.
+                    let schema_replication_offset = self
+                        .authority
+                        .schema_replication_offset()
+                        .await
+                        .unwrap_or_default();
+                    let mut state =
+                        ControllerState::new(self.config.clone(), self.permissive_writes);
+                    state
+                        .dataflow_state
+                        .set_schema_replication_offset(schema_replication_offset);
                     let cache_ddl = match self.authority.cache_ddl_requests().await? {
                         res if res.is_empty() => None,
                         res => Some(res),
