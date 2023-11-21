@@ -1823,17 +1823,33 @@ async fn show_readyset_status() {
     let (opts, _handle, shutdown_tx) = setup().await;
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();
     let mut ret: Vec<mysql::Row> = conn.query("SHOW READYSET STATUS;").await.unwrap();
+
+    let valid_timestamp = |s: String| {
+        if s == "NULL" {
+            true
+        } else {
+            NaiveDateTime::parse_from_str(&s, "%Y-%m-%d %H:%M:%S").is_ok()
+        }
+    };
+
+    // NOTE: If this readyset extension has changed, verify the new behavior is correct then update
+    // the expected values below
+    assert_eq!(ret.len(), 5);
     let row = ret.remove(0);
     assert_eq!(row.get::<String, _>(0).unwrap(), "Connection Count");
     assert_eq!(row.get::<String, _>(1).unwrap(), "0");
-    assert_eq!(
-        ret.first().unwrap().get::<String, _>(0).unwrap(),
-        "Snapshot Status"
-    );
-    assert_eq!(
-        ret.first().unwrap().get::<String, _>(1).unwrap(),
-        "Completed"
-    );
+    let row = ret.remove(0);
+    assert_eq!(row.get::<String, _>(0).unwrap(), "Snapshot Status");
+    assert_eq!(row.get::<String, _>(1).unwrap(), "Completed");
+    let row = ret.remove(0);
+    assert_eq!(row.get::<String, _>(0).unwrap(), "Last started Controller");
+    assert!(valid_timestamp(row.get::<String, _>(1).unwrap()));
+    let row = ret.remove(0);
+    assert_eq!(row.get::<String, _>(0).unwrap(), "Last completed snapshot");
+    assert!(valid_timestamp(row.get::<String, _>(1).unwrap()));
+    let row = ret.remove(0);
+    assert_eq!(row.get::<String, _>(0).unwrap(), "Last started replication");
+    assert!(valid_timestamp(row.get::<String, _>(1).unwrap()));
 
     shutdown_tx.shutdown().await;
 }
