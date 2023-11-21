@@ -1,3 +1,4 @@
+use std::fmt::Display;
 use std::{fmt, str};
 
 use itertools::Itertools;
@@ -22,7 +23,6 @@ use crate::common::{
 use crate::dialect::CommaSeparatedList;
 use crate::expression::expression;
 use crate::join::{join_operator, JoinConstraint, JoinOperator, JoinRightSide};
-use crate::literal::literal;
 use crate::order::{order_clause, OrderClause};
 use crate::table::{table_expr, table_expr_list};
 use crate::whitespace::{whitespace0, whitespace1};
@@ -95,16 +95,35 @@ impl DialectDisplay for CommonTableExpr {
     }
 }
 
+/// AST representation of the values that can be in LIMIT clause.
+#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum LimitValue {
+    /// A explicitly provided non-negative integer
+    // TODO: Make this enforce non-negative
+    Literal(Literal),
+    /// Explicitly provided ALL value (Postgres only)
+    All,
+}
+
+impl DialectDisplay for LimitValue {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| match self {
+            Self::Literal(literal) => literal.display(dialect).fmt(f),
+            Self::All => write!(f, "ALL"),
+        })
+    }
+}
+
 /// AST representation of the SQL limit and offset clauses.
 #[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum LimitClause {
     /// The standard limit and offset syntax: `LIMIT <limit> OFFSET <offset>`.
     LimitOffset {
-        limit: Option<Literal>,
+        limit: Option<LimitValue>,
         offset: Option<Literal>,
     },
     /// MySQL's alternative limit and offset syntax: `LIMIT <offset>, <limit>`.
-    OffsetCommaLimit { offset: Literal, limit: Literal },
+    OffsetCommaLimit { offset: Literal, limit: LimitValue },
 }
 
 /// Options for generating arbitrary [`LimitClause`]s
@@ -124,26 +143,51 @@ impl Arbitrary for LimitClause {
         use proptest::prelude::*;
         use LimitClause::*;
 
-        // limit to positive numbers
-        // Don't allow omitted limit (see FIXME above `limit_offset_generic`)
-        let limit_offset_strategy = (
-            (1i64..=i64::MAX).prop_map(Literal::Integer),
-            option::of((1i64..=i64::MAX).prop_map(Literal::Integer)),
-        )
-            .prop_map(|(limit, offset)| LimitOffset {
-                limit: Some(limit),
-                offset,
-            });
+        match args.dialect {
+            Some(Dialect::PostgreSQL) => {
+                let offset_value = prop_oneof![
+                    (0i64..=i64::MAX).prop_map(Literal::Integer),
+                    Just(Literal::Null),
+                ];
+                let limit_value = prop_oneof![
+                    (0i64..=i64::MAX).prop_map(|v| LimitValue::Literal(Literal::Integer(v))),
+                    Just(LimitValue::Literal(Literal::Null)),
+                    Just(LimitValue::All),
+                ];
+                (option::of(limit_value), option::of(offset_value))
+                    .prop_map(|(limit, offset)| LimitOffset { limit, offset })
+                    .boxed()
+            }
+            Some(Dialect::MySQL) => {
+                let limit_literal = (0i64..=i64::MAX).prop_map(Literal::Integer);
 
-        if args.dialect == Some(Dialect::MySQL) {
-            let offset_comma_limit_strategy =
-                ((1..i64::MAX), (1..i64::MAX)).prop_map(|(offset, limit)| OffsetCommaLimit {
-                    offset: Literal::Integer(offset),
-                    limit: Literal::Integer(limit),
-                });
-            prop_oneof![limit_offset_strategy, offset_comma_limit_strategy].boxed()
-        } else {
-            limit_offset_strategy.boxed()
+                prop_oneof![
+                    (limit_literal.clone(), option::of(limit_literal.clone())).prop_map(
+                        |(limit, offset)| {
+                            LimitOffset {
+                                limit: Some(LimitValue::Literal(limit)),
+                                offset,
+                            }
+                        }
+                    ),
+                    (limit_literal.clone(), limit_literal).prop_map(|(limit, offset)| {
+                        OffsetCommaLimit {
+                            limit: LimitValue::Literal(limit),
+                            offset,
+                        }
+                    })
+                ]
+                .boxed()
+            }
+            None => {
+                let limit_literal = (0i64..=i64::MAX).prop_map(Literal::Integer);
+                (limit_literal.clone(), option::of(limit_literal))
+                    .prop_map(|(limit, offset)| LimitOffset {
+                        limit: Some(LimitValue::Literal(limit)),
+                        offset,
+                    })
+                    .boxed()
+            }
         }
     }
 }
@@ -152,9 +196,14 @@ impl LimitClause {
     /// Returns an [`Option`] with the [`Literal`] value corresponding to the `limit` clause.
     /// Returns [`None`] if there's no `limit`.
     pub fn limit(&self) -> Option<&Literal> {
-        match self {
+        let limit = match self {
             LimitClause::LimitOffset { limit, .. } => limit.as_ref(),
             LimitClause::OffsetCommaLimit { limit, .. } => Some(limit),
+        };
+        match limit {
+            Some(LimitValue::Literal(limit)) => Some(limit),
+            Some(LimitValue::All) => None,
+            None => None,
         }
     }
 
@@ -169,7 +218,7 @@ impl LimitClause {
 
     /// Returns two [`Option`]s, both with mutable [`Literal`] values corresponding to the `limit`
     /// and `offset` clauses respectively.
-    pub fn limit_and_offset_mut(&mut self) -> (Option<&mut Literal>, Option<&mut Literal>) {
+    pub fn limit_and_offset_mut(&mut self) -> (Option<&mut LimitValue>, Option<&mut Literal>) {
         match self {
             LimitClause::LimitOffset { limit, offset } => (limit.as_mut(), offset.as_mut()),
             LimitClause::OffsetCommaLimit { offset, limit } => (Some(limit), Some(offset)),
@@ -179,7 +228,7 @@ impl LimitClause {
     /// Whether this [`LimitClause`] is empty (has no `limit` and no `offset`) or not.
     pub fn is_empty(&self) -> bool {
         match self {
-            LimitClause::LimitOffset { limit, offset } => limit.is_none() && offset.is_none(),
+            LimitClause::LimitOffset { limit, offset } => limit.is_some() || offset.is_some(),
             LimitClause::OffsetCommaLimit { .. } => false,
         }
     }
@@ -344,60 +393,11 @@ pub fn group_by_clause(
     }
 }
 
-fn offset_clause(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Literal> {
-    move |i| {
-        let (i, _) = whitespace0(i)?;
-        let (i, _) = tag_no_case("offset")(i)?;
-        let (i, _) = whitespace1(i)?;
-        literal(dialect)(i)
-    }
-}
-
-// Parses a generic SQL `{limit} [OFFSET {offset}]`
-// FIXME(#610/REA-3510): This implementation is incomplete
-fn limit_offset_generic(
-    dialect: Dialect,
-) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], LimitClause> {
-    move |i| {
-        let (i, limit) = literal(dialect)(i)?;
-        let (i, offset) = opt(offset_clause(dialect))(i)?;
-        Ok((
-            i,
-            LimitClause::LimitOffset {
-                limit: Some(limit),
-                offset,
-            },
-        ))
-    }
-}
-
-// Parse LIMIT [OFFSET] clause
-fn limit_offset(
-    dialect: Dialect,
-) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], LimitClause> {
-    move |i| {
-        let (i, _) = whitespace0(i)?;
-        let (i, _) = tag_no_case("limit")(i)?;
-        let (i, _) = whitespace1(i)?;
-        let (i, limit_offset) = alt((dialect.offset_limit(), limit_offset_generic(dialect)))(i)?;
-
-        Ok((i, limit_offset))
-    }
-}
-
 // Parse LIMIT [OFFSET] clause or a bare OFFSET clause
 pub(crate) fn limit_offset_clause(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], LimitClause> {
-    move |i| {
-        alt((
-            limit_offset(dialect),
-            map(offset_clause(dialect), |offset| LimitClause::LimitOffset {
-                limit: None,
-                offset: Some(offset),
-            }),
-        ))(i)
-    }
+    dialect.limit_offset()
 }
 
 fn join_constraint(
@@ -691,6 +691,18 @@ mod tests {
         SqlType, TableExprInner,
     };
 
+    impl From<i64> for LimitValue {
+        fn from(other: i64) -> LimitValue {
+            LimitValue::Literal(other.into())
+        }
+    }
+
+    impl From<Literal> for LimitValue {
+        fn from(literal: Literal) -> LimitValue {
+            LimitValue::Literal(literal)
+        }
+    }
+
     fn columns(cols: &[&str]) -> Vec<FieldDefinitionExpr> {
         cols.iter()
             .map(|c| FieldDefinitionExpr::from(Column::from(*c)))
@@ -879,11 +891,22 @@ mod tests {
         let qstring1 = "select * from users limit 10\n";
         let qstring2 = "select * from users limit 10 offset 10\n";
         let qstring3 = "select * from users limit 5, 10\n";
+        let qstring4 = "select * from users limit all\n";
+        let qstring5 = "select * from users limit all offset 10\n";
+        let qstring6 = "select * from users offset 10\n";
 
         let res1 = test_parse!(selection(Dialect::MySQL), qstring1.as_bytes());
         let res2 = test_parse!(selection(Dialect::MySQL), qstring2.as_bytes());
         let res3 = test_parse!(selection(Dialect::MySQL), qstring3.as_bytes());
         let res3_pgsql = selection(Dialect::PostgreSQL)(LocatedSpan::new(qstring3.as_bytes()));
+        // MySQL doesn't support the ALL syntax
+        let res4 = selection(Dialect::MySQL)(LocatedSpan::new(qstring4.as_bytes()));
+        let res4_pgsql = test_parse!(selection(Dialect::PostgreSQL), qstring4.as_bytes());
+        let res5 = selection(Dialect::MySQL)(LocatedSpan::new(qstring5.as_bytes()));
+        let res5_pgsql = test_parse!(selection(Dialect::PostgreSQL), qstring5.as_bytes());
+        // MySQL doesn't allow OFFSET without LIMIT
+        let res6 = selection(Dialect::MySQL)(LocatedSpan::new(qstring6.as_bytes()));
+        let res6_pgsql = test_parse!(selection(Dialect::PostgreSQL), qstring6.as_bytes());
 
         assert_eq!(
             res1.limit_clause,
@@ -907,6 +930,30 @@ mod tests {
             }
         );
         res3_pgsql.unwrap_err();
+        res4.unwrap_err();
+        assert_eq!(
+            res4_pgsql.limit_clause,
+            LimitClause::LimitOffset {
+                limit: Some(LimitValue::All),
+                offset: None
+            }
+        );
+        res5.unwrap_err();
+        assert_eq!(
+            res5_pgsql.limit_clause,
+            LimitClause::LimitOffset {
+                limit: Some(LimitValue::All),
+                offset: Some(10.into())
+            },
+        );
+        res6.unwrap_err();
+        assert_eq!(
+            res6_pgsql.limit_clause,
+            LimitClause::LimitOffset {
+                limit: None,
+                offset: Some(10.into())
+            },
+        );
     }
 
     #[test]
@@ -1116,7 +1163,7 @@ mod tests {
         assert_eq!(
             res.limit_clause,
             LimitClause::LimitOffset {
-                limit: Some(Literal::Placeholder(ItemPlaceholder::QuestionMark)),
+                limit: Some(Literal::Placeholder(ItemPlaceholder::QuestionMark).into()),
                 offset: None
             }
         )
@@ -2071,7 +2118,7 @@ mod tests {
         use crate::{BinaryOperator, Double, Expr, FunctionExpr, InValue};
 
         test_format_parse_round_trip!(
-            rt_limit_clause(limit_offset, LimitClause, Dialect::PostgreSQL);
+            rt_limit_clause(limit_offset_clause, LimitClause, Dialect::PostgreSQL);
             rt_join_rhs(join_rhs, JoinRightSide, Dialect::PostgreSQL);
         );
 
@@ -2252,16 +2299,35 @@ mod tests {
         }
 
         #[test]
+        fn select_with_offset_and_no_limit() {
+            let qstr = br#"SELECT id FROM a OFFSET 5"#;
+            let expected = SelectStatement {
+                tables: vec![TableExpr::from(Relation::from("a"))],
+                fields: columns(&["id"]),
+                limit_clause: LimitClause::LimitOffset {
+                    limit: None,
+                    offset: Some(5.into()),
+                },
+                ..Default::default()
+            };
+            let res = test_parse!(selection(Dialect::PostgreSQL), qstr);
+            assert_eq!(res, expected);
+        }
+
+        #[test]
         fn select_with_decimal_limit() {
             let qstr = br#"SELECT id FROM a LIMIT 0.0"#;
             let expected = SelectStatement {
                 tables: vec![TableExpr::from(Relation::from("a"))],
                 fields: columns(&["id"]),
                 limit_clause: LimitClause::LimitOffset {
-                    limit: Some(Literal::Double(Double {
-                        value: 0.0,
-                        precision: 1,
-                    })),
+                    limit: Some(
+                        Literal::Double(Double {
+                            value: 0.0,
+                            precision: 1,
+                        })
+                        .into(),
+                    ),
                     offset: None,
                 },
                 ..Default::default()
@@ -2277,10 +2343,13 @@ mod tests {
                 tables: vec![TableExpr::from(Relation::from("a"))],
                 fields: columns(&["id"]),
                 limit_clause: LimitClause::LimitOffset {
-                    limit: Some(Literal::Double(Double {
-                        value: 0.0,
-                        precision: 0,
-                    })),
+                    limit: Some(
+                        Literal::Double(Double {
+                            value: 0.0,
+                            precision: 0,
+                        })
+                        .into(),
+                    ),
                     offset: None,
                 },
                 ..Default::default()
@@ -2296,10 +2365,13 @@ mod tests {
                 tables: vec![TableExpr::from(Relation::from("a"))],
                 fields: columns(&["id"]),
                 limit_clause: LimitClause::LimitOffset {
-                    limit: Some(Literal::Double(Double {
-                        value: 1.1,
-                        precision: 1,
-                    })),
+                    limit: Some(
+                        Literal::Double(Double {
+                            value: 1.1,
+                            precision: 1,
+                        })
+                        .into(),
+                    ),
                     offset: None,
                 },
                 ..Default::default()
@@ -2315,10 +2387,13 @@ mod tests {
                 tables: vec![TableExpr::from(Relation::from("a"))],
                 fields: columns(&["id"]),
                 limit_clause: LimitClause::LimitOffset {
-                    limit: Some(Literal::Double(Double {
-                        value: 1.0,
-                        precision: 0,
-                    })),
+                    limit: Some(
+                        Literal::Double(Double {
+                            value: 1.0,
+                            precision: 0,
+                        })
+                        .into(),
+                    ),
                     offset: None,
                 },
                 ..Default::default()
@@ -2335,10 +2410,13 @@ mod tests {
                 tables: vec![TableExpr::from(Relation::from("a"))],
                 fields: columns(&["id"]),
                 limit_clause: LimitClause::LimitOffset {
-                    limit: Some(Literal::Double(Double {
-                        value: -0.0,
-                        precision: 1,
-                    })),
+                    limit: Some(
+                        Literal::Double(Double {
+                            value: -0.0,
+                            precision: 1,
+                        })
+                        .into(),
+                    ),
                     offset: None,
                 },
                 ..Default::default()
@@ -2355,7 +2433,7 @@ mod tests {
                 tables: vec![TableExpr::from(Relation::from("a"))],
                 fields: columns(&["id"]),
                 limit_clause: LimitClause::LimitOffset {
-                    limit: Some(Literal::Integer(3791947566539531989)),
+                    limit: Some(Literal::Integer(3791947566539531989).into()),
                     offset: Some(Literal::Double(Double {
                         value: -0.0,
                         precision: 1,

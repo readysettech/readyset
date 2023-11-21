@@ -106,7 +106,7 @@ impl NormalizeTopKWithAggregate for SqlQuery {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{parse_query, Dialect, Expr, OrderClause, OrderType};
+    use nom_sql::{parse_query, Dialect, Expr, LimitValue, OrderClause, OrderType};
 
     use super::*;
 
@@ -194,7 +194,7 @@ mod tests {
                 assert_eq!(
                     stmt.limit_clause,
                     LimitClause::LimitOffset {
-                        limit: Some(4.into()),
+                        limit: Some(LimitValue::Literal(4.into())),
                         offset: None
                     }
                 );

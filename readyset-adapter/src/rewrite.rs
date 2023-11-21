@@ -143,16 +143,16 @@ impl ProcessedQueryParams {
         } = &self.pagination_parameters;
 
         let (limit, offset) = match limit_clause {
-            LimitClause::LimitOffset { limit, offset } => {
+            LimitClause::LimitOffset { offset, .. } => {
                 let offset = offset.as_ref().map(&mut get_param).transpose()?;
-                let limit = limit.as_ref().map(&mut get_param).transpose()?;
+                let limit = limit_clause.limit().map(&mut get_param).transpose()?;
                 (limit, offset)
             }
-            LimitClause::OffsetCommaLimit { offset, limit } => {
+            LimitClause::OffsetCommaLimit { offset, .. } => {
                 // Get the limit first, since with this syntax, it's the last param.
-                let limit = get_param(limit)?;
+                let limit = limit_clause.limit().map(&mut get_param).transpose()?;
                 let offset = get_param(offset)?;
-                (Some(limit), Some(offset))
+                (limit, Some(offset))
             }
         };
 
@@ -726,8 +726,20 @@ mod tests {
 
     use super::*;
 
-    fn parse_select_statement(q: &str) -> SelectStatement {
-        nom_sql::parse_select_statement(Dialect::MySQL, q).unwrap()
+    fn try_parse_select_statement(q: &str, dialect: Dialect) -> Result<SelectStatement, String> {
+        nom_sql::parse_select_statement(dialect, q)
+    }
+
+    fn parse_select_statement(q: &str, dialect: Dialect) -> SelectStatement {
+        try_parse_select_statement(q, dialect).unwrap()
+    }
+
+    fn parse_select_statement_mysql(q: &str) -> SelectStatement {
+        parse_select_statement(q, Dialect::MySQL)
+    }
+
+    fn parse_select_statement_postgres(q: &str) -> SelectStatement {
+        parse_select_statement(q, Dialect::PostgreSQL)
     }
 
     mod collapse_where {
@@ -735,29 +747,7 @@ mod tests {
 
         #[test]
         fn collapsed_where_placeholders() {
-            let mut q = parse_select_statement("SELECT * FROM x WHERE x.y IN (?, ?, ?)");
-            let rewritten = collapse_where_in(&mut q).unwrap();
-            assert_eq!(
-                rewritten,
-                vec![RewrittenIn {
-                    first_param_index: 0,
-                    literals: vec![ItemPlaceholder::QuestionMark; 3]
-                }]
-            );
-            assert_eq!(q, parse_select_statement("SELECT * FROM x WHERE x.y = ?"));
-
-            let mut q = parse_select_statement("SELECT * FROM x WHERE y IN (?, ?, ?)");
-            let rewritten = collapse_where_in(&mut q).unwrap();
-            assert_eq!(
-                rewritten,
-                vec![RewrittenIn {
-                    first_param_index: 0,
-                    literals: vec![ItemPlaceholder::QuestionMark; 3]
-                }]
-            );
-            assert_eq!(q, parse_select_statement("SELECT * FROM x WHERE y = ?"));
-
-            let mut q = parse_select_statement("SELECT * FROM x WHERE AVG(y) IN (?, ?, ?)");
+            let mut q = parse_select_statement_mysql("SELECT * FROM x WHERE x.y IN (?, ?, ?)");
             let rewritten = collapse_where_in(&mut q).unwrap();
             assert_eq!(
                 rewritten,
@@ -768,11 +758,40 @@ mod tests {
             );
             assert_eq!(
                 q,
-                parse_select_statement("SELECT * FROM x WHERE AVG(y) = ?")
+                parse_select_statement_mysql("SELECT * FROM x WHERE x.y = ?")
             );
 
-            let mut q =
-                parse_select_statement("SELECT * FROM t WHERE x = ? AND y IN (?, ?, ?) OR z = ?");
+            let mut q = parse_select_statement_mysql("SELECT * FROM x WHERE y IN (?, ?, ?)");
+            let rewritten = collapse_where_in(&mut q).unwrap();
+            assert_eq!(
+                rewritten,
+                vec![RewrittenIn {
+                    first_param_index: 0,
+                    literals: vec![ItemPlaceholder::QuestionMark; 3]
+                }]
+            );
+            assert_eq!(
+                q,
+                parse_select_statement_mysql("SELECT * FROM x WHERE y = ?")
+            );
+
+            let mut q = parse_select_statement_mysql("SELECT * FROM x WHERE AVG(y) IN (?, ?, ?)");
+            let rewritten = collapse_where_in(&mut q).unwrap();
+            assert_eq!(
+                rewritten,
+                vec![RewrittenIn {
+                    first_param_index: 0,
+                    literals: vec![ItemPlaceholder::QuestionMark; 3]
+                }]
+            );
+            assert_eq!(
+                q,
+                parse_select_statement_mysql("SELECT * FROM x WHERE AVG(y) = ?")
+            );
+
+            let mut q = parse_select_statement_mysql(
+                "SELECT * FROM t WHERE x = ? AND y IN (?, ?, ?) OR z = ?",
+            );
             let rewritten = collapse_where_in(&mut q).unwrap();
             assert_eq!(
                 rewritten,
@@ -783,10 +802,10 @@ mod tests {
             );
             assert_eq!(
                 q,
-                parse_select_statement("SELECT * FROM t WHERE x = ? AND y = ? OR z = ?")
+                parse_select_statement_mysql("SELECT * FROM t WHERE x = ? AND y = ? OR z = ?")
             );
 
-            let mut q = parse_select_statement(
+            let mut q = parse_select_statement_mysql(
                 "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE a = ?) AND y IN (?, ?) OR z = ?",
             );
             let rewritten = collapse_where_in(&mut q).unwrap();
@@ -799,12 +818,12 @@ mod tests {
             );
             assert_eq!(
                 q,
-                parse_select_statement(
+                parse_select_statement_mysql(
                     "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE a = ?) AND y = ? OR z = ?"
                 )
             );
 
-            let mut q = parse_select_statement(
+            let mut q = parse_select_statement_mysql(
                 "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE b = ? AND a IN (?, ?)) OR z = ?",
             );
             let rewritten = collapse_where_in(&mut q).unwrap();
@@ -817,7 +836,7 @@ mod tests {
             );
             assert_eq!(
                 q,
-                parse_select_statement(
+                parse_select_statement_mysql(
                     "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE b = ? AND a = ?) OR z = ?",
                 )
             );
@@ -825,47 +844,17 @@ mod tests {
 
         #[test]
         fn collapsed_where_literals() {
-            let mut q = parse_select_statement("SELECT * FROM x WHERE x.y IN (1, 2, 3)");
+            let mut q = parse_select_statement_mysql("SELECT * FROM x WHERE x.y IN (1, 2, 3)");
             assert_eq!(collapse_where_in(&mut q).unwrap(), vec![]);
             assert_eq!(
                 q,
-                parse_select_statement("SELECT * FROM x WHERE x.y IN (1, 2, 3)")
+                parse_select_statement_mysql("SELECT * FROM x WHERE x.y IN (1, 2, 3)")
             );
         }
 
         #[test]
         fn collapsed_where_dollarsign_placeholders() {
-            let mut q = parse_select_statement("SELECT * FROM x WHERE x.y IN ($1, $2, $3)");
-            let rewritten = collapse_where_in(&mut q).unwrap();
-            assert_eq!(
-                rewritten,
-                vec![RewrittenIn {
-                    first_param_index: 0,
-                    literals: vec![
-                        ItemPlaceholder::DollarNumber(1),
-                        ItemPlaceholder::DollarNumber(2),
-                        ItemPlaceholder::DollarNumber(3),
-                    ]
-                }]
-            );
-            assert_eq!(q, parse_select_statement("SELECT * FROM x WHERE x.y = ?"));
-
-            let mut q = parse_select_statement("SELECT * FROM x WHERE y IN ($1, $2, $3)");
-            let rewritten = collapse_where_in(&mut q).unwrap();
-            assert_eq!(
-                rewritten,
-                vec![RewrittenIn {
-                    first_param_index: 0,
-                    literals: vec![
-                        ItemPlaceholder::DollarNumber(1),
-                        ItemPlaceholder::DollarNumber(2),
-                        ItemPlaceholder::DollarNumber(3),
-                    ]
-                }]
-            );
-            assert_eq!(q, parse_select_statement("SELECT * FROM x WHERE y = ?"));
-
-            let mut q = parse_select_statement("SELECT * FROM x WHERE AVG(y) IN ($1, $2, $3)");
+            let mut q = parse_select_statement_mysql("SELECT * FROM x WHERE x.y IN ($1, $2, $3)");
             let rewritten = collapse_where_in(&mut q).unwrap();
             assert_eq!(
                 rewritten,
@@ -880,10 +869,47 @@ mod tests {
             );
             assert_eq!(
                 q,
-                parse_select_statement("SELECT * FROM x WHERE AVG(y) = ?")
+                parse_select_statement_mysql("SELECT * FROM x WHERE x.y = ?")
             );
 
-            let mut q = parse_select_statement(
+            let mut q = parse_select_statement_postgres("SELECT * FROM x WHERE y IN ($1, $2, $3)");
+            let rewritten = collapse_where_in(&mut q).unwrap();
+            assert_eq!(
+                rewritten,
+                vec![RewrittenIn {
+                    first_param_index: 0,
+                    literals: vec![
+                        ItemPlaceholder::DollarNumber(1),
+                        ItemPlaceholder::DollarNumber(2),
+                        ItemPlaceholder::DollarNumber(3),
+                    ]
+                }]
+            );
+            assert_eq!(
+                q,
+                parse_select_statement_mysql("SELECT * FROM x WHERE y = ?")
+            );
+
+            let mut q =
+                parse_select_statement_postgres("SELECT * FROM x WHERE AVG(y) IN ($1, $2, $3)");
+            let rewritten = collapse_where_in(&mut q).unwrap();
+            assert_eq!(
+                rewritten,
+                vec![RewrittenIn {
+                    first_param_index: 0,
+                    literals: vec![
+                        ItemPlaceholder::DollarNumber(1),
+                        ItemPlaceholder::DollarNumber(2),
+                        ItemPlaceholder::DollarNumber(3),
+                    ]
+                }]
+            );
+            assert_eq!(
+                q,
+                parse_select_statement_mysql("SELECT * FROM x WHERE AVG(y) = ?")
+            );
+
+            let mut q = parse_select_statement_postgres(
                 "SELECT * FROM t WHERE x = $1 AND y IN ($2, $3, $4) OR z = $5",
             );
             let rewritten = collapse_where_in(&mut q).unwrap();
@@ -898,12 +924,13 @@ mod tests {
                     ]
                 }]
             );
+            panic!("Should this be allowed to mix mysql and postgres placeholders?");
             assert_eq!(
                 q,
-                parse_select_statement("SELECT * FROM t WHERE x = $1 AND y = ? OR z = $5")
+                parse_select_statement_postgres("SELECT * FROM t WHERE x = $1 AND y = ? OR z = $5")
             );
 
-            let mut q = parse_select_statement(
+            let mut q = parse_select_statement_postgres(
             "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE a = $1) AND y IN ($2, $3) OR z = $4",
         );
             let rewritten = collapse_where_in(&mut q).unwrap();
@@ -917,14 +944,15 @@ mod tests {
                     ]
                 }]
             );
+            panic!("Should this be allowed to mix mysql and postgres placeholders?");
             assert_eq!(
                 q,
-                parse_select_statement(
-                    "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE a = $1) AND y = ? OR z = $4"
+                parse_select_statement_postgres(
+                    "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE a = $1) AND y = ? OR z = $4",
                 )
             );
 
-            let mut q = parse_select_statement(
+            let mut q = parse_select_statement_postgres(
             "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE b = $1 AND a IN ($2, $3)) OR z = $4",
         );
             let rewritten = collapse_where_in(&mut q).unwrap();
@@ -938,9 +966,10 @@ mod tests {
                     ]
                 }]
             );
+            panic!("Should this be allowed to mix mysql and postgres placeholders?");
             assert_eq!(
                 q,
-                parse_select_statement(
+                parse_select_statement_postgres(
                     "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE b = $1 AND a = ?) OR z = $4",
                 )
             );
@@ -948,7 +977,8 @@ mod tests {
 
         #[test]
         fn collapse_multiple_where_in() {
-            let mut q = parse_select_statement("SELECT * FROM t WHERE x IN (?,?) AND y IN (?,?)");
+            let mut q =
+                parse_select_statement_mysql("SELECT * FROM t WHERE x IN (?,?) AND y IN (?,?)");
             let rewritten = collapse_where_in(&mut q).unwrap();
             assert_eq!(
                 rewritten,
@@ -965,7 +995,7 @@ mod tests {
             );
             assert_eq!(
                 q,
-                parse_select_statement("SELECT * FROM t WHERE x = ? AND y = ?")
+                parse_select_statement_mysql("SELECT * FROM t WHERE x = ? AND y = ?")
             );
         }
     }
@@ -1030,28 +1060,56 @@ mod tests {
             query: &str,
             expected_query: &str,
             expected_parameters: Vec<(usize, Literal)>,
+            dialect: nom_sql::Dialect,
         ) {
-            let mut query = parse_select_statement(query);
-            let expected = parse_select_statement(expected_query);
+            let mut query = parse_select_statement(query, dialect);
+            let expected = parse_select_statement(expected_query, dialect);
             let res = auto_parametrize_query(&mut query);
             assert_eq!(
                 query,
                 expected,
                 "\n  left: {}\n right: {}",
-                query.display(nom_sql::Dialect::MySQL),
-                expected.display(nom_sql::Dialect::MySQL)
+                query.display(dialect),
+                expected.display(dialect),
             );
             assert_eq!(res, expected_parameters);
         }
 
+        fn test_auto_parametrize_mysql(
+            query: &str,
+            expected_query: &str,
+            expected_parameters: Vec<(usize, Literal)>,
+        ) {
+            test_auto_parametrize(
+                query,
+                expected_query,
+                expected_parameters,
+                nom_sql::Dialect::MySQL,
+            )
+        }
+
+        fn test_auto_parametrize_postgres(
+            query: &str,
+            expected_query: &str,
+            expected_parameters: Vec<(usize, Literal)>,
+        ) {
+            test_auto_parametrize(
+                query,
+                expected_query,
+                expected_parameters,
+                nom_sql::Dialect::PostgreSQL,
+            )
+        }
+
         #[test]
         fn no_literals() {
-            test_auto_parametrize("SELECT * FROM users", "SELECT * FROM users", vec![]);
+            test_auto_parametrize_mysql("SELECT * FROM users", "SELECT * FROM users", vec![]);
+            test_auto_parametrize_postgres("SELECT * FROM users", "SELECT * FROM users", vec![]);
         }
 
         #[test]
         fn simple_parameter() {
-            test_auto_parametrize(
+            test_auto_parametrize_mysql(
                 "SELECT id FROM users WHERE id = 1",
                 "SELECT id FROM users WHERE id = ?",
                 vec![(0, 1.into())],
@@ -1060,7 +1118,7 @@ mod tests {
 
         #[test]
         fn and_parameters() {
-            test_auto_parametrize(
+            test_auto_parametrize_mysql(
                 "SELECT id FROM users WHERE id = 1 AND name = \"bob\"",
                 "SELECT id FROM users WHERE id = ? AND name = ?",
                 vec![(0, 1.into()), (1, "bob".into())],
@@ -1069,7 +1127,7 @@ mod tests {
 
         #[test]
         fn existing_param_before() {
-            test_auto_parametrize(
+            test_auto_parametrize_mysql(
                 "SELECT id FROM users WHERE x = ? AND id = 1 AND name = \"bob\"",
                 "SELECT id FROM users WHERE x = ? AND id = ? AND name = ?",
                 vec![(1, 1.into()), (2, "bob".into())],
@@ -1078,7 +1136,7 @@ mod tests {
 
         #[test]
         fn existing_param_after() {
-            test_auto_parametrize(
+            test_auto_parametrize_mysql(
                 "SELECT id FROM users WHERE id = 1 AND name = \"bob\" AND x = ?",
                 "SELECT id FROM users WHERE id = ? AND name = ? AND x = ?",
                 vec![(0, 1.into()), (1, "bob".into())],
@@ -1087,7 +1145,7 @@ mod tests {
 
         #[test]
         fn existing_param_between() {
-            test_auto_parametrize(
+            test_auto_parametrize_mysql(
                 "SELECT id FROM users WHERE id = 1 AND x = ? AND name = \"bob\"",
                 "SELECT id FROM users WHERE id = ? AND x = ? AND name = ?",
                 vec![(0, 1.into()), (2, "bob".into())],
@@ -1096,7 +1154,7 @@ mod tests {
 
         #[test]
         fn literal_in_or() {
-            test_auto_parametrize(
+            test_auto_parametrize_mysql(
                 "SELECT id FROM users WHERE (id = 1 OR id = 2) AND name = \"bob\"",
                 "SELECT id FROM users WHERE (id = 1 OR id = 2) AND name = ?",
                 vec![(0, "bob".into())],
@@ -1105,7 +1163,7 @@ mod tests {
 
         #[test]
         fn literal_in_subquery_where() {
-            test_auto_parametrize(
+            test_auto_parametrize_mysql(
                 "SELECT id FROM users JOIN (SELECT id FROM users WHERE id = 1) s ON users.id = s.id WHERE id = 1",
                 "SELECT id FROM users JOIN (SELECT id FROM users WHERE id = 1) s ON users.id = s.id WHERE id = ?",
                 vec![(0, 1.into())],
@@ -1114,7 +1172,7 @@ mod tests {
 
         #[test]
         fn literal_in_field() {
-            test_auto_parametrize(
+            test_auto_parametrize_mysql(
                 "SELECT id + 1 FROM users WHERE id = 1",
                 "SELECT id + 1 FROM users WHERE id = ?",
                 vec![(0, 1.into())],
@@ -1123,7 +1181,7 @@ mod tests {
 
         #[test]
         fn literal_in_in_rhs() {
-            test_auto_parametrize(
+            test_auto_parametrize_mysql(
                 "select hashtags.* from hashtags inner join invites_hashtags on hashtags.id = invites_hashtags.hashtag_id where invites_hashtags.invite_id in (10,20,31)",
                 "select hashtags.* from hashtags inner join invites_hashtags on hashtags.id = invites_hashtags.hashtag_id where invites_hashtags.invite_id in (?,?,?)",
                     vec![(0, 10.into()), (1, 20.into()), (2, 31.into())],
@@ -1132,7 +1190,7 @@ mod tests {
 
         #[test]
         fn mixed_in_with_equality() {
-            test_auto_parametrize(
+            test_auto_parametrize_mysql(
                 "SELECT id FROM users WHERE id in (1, 2) AND name = 'bob'",
                 "SELECT id FROM users WHERE id in (?, ?) AND name = ?",
                 vec![(0, 1.into()), (1, 2.into()), (2, "bob".into())],
@@ -1141,7 +1199,7 @@ mod tests {
 
         #[test]
         fn equal_in_equal() {
-            test_auto_parametrize(
+            test_auto_parametrize_mysql(
                 "SELECT id FROM users WHERE x = 'foo' AND id in (1, 2) AND name = 'bob'",
                 "SELECT id FROM users WHERE x = ? AND id in (?, ?) AND name = ?",
                 vec![
@@ -1155,7 +1213,7 @@ mod tests {
 
         #[test]
         fn in_with_aggregates() {
-            test_auto_parametrize(
+            test_auto_parametrize_mysql(
                 "SELECT count(*) FROM users WHERE id = 1 AND x IN (1, 2)",
                 "SELECT count(*) FROM users WHERE id = ? AND x IN (1, 2)",
                 vec![(0, 1.into())],
@@ -1164,7 +1222,7 @@ mod tests {
 
         #[test]
         fn literal_equals_column() {
-            test_auto_parametrize(
+            test_auto_parametrize_mysql(
                 "SELECT * FROM users WHERE 1 = id",
                 "SELECT * FROM users WHERE id = ?",
                 vec![(0, 1.into())],
@@ -1173,7 +1231,7 @@ mod tests {
 
         #[test]
         fn existing_range_param() {
-            test_auto_parametrize(
+            test_auto_parametrize_mysql(
                 "SELECT * FROM posts WHERE id = 1 AND score > ?",
                 "SELECT * FROM posts WHERE id = 1 AND score > ?",
                 vec![],
@@ -1182,7 +1240,7 @@ mod tests {
 
         #[test]
         fn offset() {
-            test_auto_parametrize(
+            test_auto_parametrize_mysql(
                 "SELECT * FROM posts WHERE id = 1 ORDER BY SCORE ASC LIMIT 3 OFFSET 6",
                 "SELECT * FROM posts WHERE id = ? ORDER BY SCORE ASC LIMIT 3 OFFSET ?",
                 vec![(0, 1.into()), (1, 6.into())],
@@ -1191,7 +1249,7 @@ mod tests {
 
         #[test]
         fn constant_filter_with_param_betwen() {
-            test_auto_parametrize(
+            test_auto_parametrize_mysql(
                 "SELECT * FROM posts WHERE id = 1 AND created_at BETWEEN ? and ?",
                 "SELECT * FROM posts WHERE id = 1 AND created_at BETWEEN ? and ?",
                 vec![],
@@ -1259,8 +1317,9 @@ mod tests {
         fn process_and_make_keys(
             query: &str,
             params: Vec<DfValue>,
+            dialect: nom_sql::Dialect,
         ) -> (Vec<Vec<DfValue>>, SelectStatement) {
-            let mut query = parse_select_statement(query);
+            let mut query = parse_select_statement(query, dialect);
             let processed = process_query(&mut query, false).unwrap();
             (
                 processed
@@ -1272,47 +1331,86 @@ mod tests {
                 query,
             )
         }
+
+        fn process_and_make_keys_postgres(
+            query: &str,
+            params: Vec<DfValue>,
+        ) -> (Vec<Vec<DfValue>>, SelectStatement) {
+            process_and_make_keys(query, params, nom_sql::Dialect::PostgreSQL)
+        }
+
+        fn process_and_make_keys_mysql(
+            query: &str,
+            params: Vec<DfValue>,
+        ) -> (Vec<Vec<DfValue>>, SelectStatement) {
+            process_and_make_keys(query, params, nom_sql::Dialect::MySQL)
+        }
+
+        fn get_lim_off(
+            query: &str,
+            params: &[DfValue],
+            dialect: nom_sql::Dialect,
+        ) -> (Option<usize>, Option<usize>) {
+            let proc =
+                process_query(&mut parse_select_statement(query, dialect), false).unwrap();
+            proc.limit_offset_params(params).unwrap()
+        }
+
+        fn get_lim_off_postgres(query: &str, params: &[DfValue]) -> (Option<usize>, Option<usize>) {
+            get_lim_off(query, params, nom_sql::Dialect::PostgreSQL)
+        }
+
+        fn get_lim_off_mysql(query: &str, params: &[DfValue]) -> (Option<usize>, Option<usize>) {
+            get_lim_off(query, params, nom_sql::Dialect::MySQL)
+        }
+
         #[test]
         fn rewrite_literals() {
-            let mut query = parse_select_statement(
-                "SELECT id FROM users WHERE credit_card_number = \"look at this PII\" AND id = 3",
+            let mut query = parse_select_statement_postgres(
+                "SELECT id FROM users WHERE credit_card_number = 'look at this PII' AND id = 3",
             );
-            let expected = parse_select_statement(
+            let expected = parse_select_statement_postgres(
                 "SELECT id FROM users WHERE credit_card_number = $1 AND id = $2",
             );
 
             process_query(&mut query, false).expect("Should be able to rewrite query");
             assert_eq!(
-                query.display(nom_sql::Dialect::MySQL).to_string(),
-                expected.display(nom_sql::Dialect::MySQL).to_string()
+                query.display(nom_sql::Dialect::PostgreSQL).to_string(),
+                expected.display(nom_sql::Dialect::PostgreSQL).to_string()
             );
         }
 
         #[test]
         fn single_literal() {
-            let mut query = parse_select_statement(
-                "SELECT id + 3 FROM users WHERE credit_card_number = \"look at this PII\"",
+            let mut query = parse_select_statement_postgres(
+                "SELECT id + 3 FROM users WHERE credit_card_number = 'look at this PII'",
             );
-            let expected =
-                parse_select_statement("SELECT id + 3 FROM users WHERE credit_card_number = $1");
+            let expected = parse_select_statement_postgres(
+                "SELECT id + 3 FROM users WHERE credit_card_number = $1",
+            );
             process_query(&mut query, false).expect("Should be able to rewrite query");
             assert_eq!(query, expected);
         }
 
         #[test]
         fn no_keys() {
-            let (keys, query) = process_and_make_keys("SELECT * FROM test", vec![]);
-            assert_eq!(query, parse_select_statement("SELECT * FROM test"));
+            let (keys, query) = process_and_make_keys_postgres("SELECT * FROM test", vec![]);
+            assert_eq!(query, parse_select_statement_postgres("SELECT * FROM test"));
+            assert!(keys.is_empty(), "keys = {:?}", keys);
+
+            let (keys, query) = process_and_make_keys_mysql("SELECT * FROM test", vec![]);
+            assert_eq!(query, parse_select_statement_mysql("SELECT * FROM test"));
             assert!(keys.is_empty(), "keys = {:?}", keys);
         }
 
         #[test]
         fn numbered_auto_params() {
-            let (keys, query) = process_and_make_keys("SELECT x, y FROM test WHERE x = 4", vec![]);
+            let (keys, query) =
+                process_and_make_keys_postgres("SELECT x, y FROM test WHERE x = 4", vec![]);
 
             assert_eq!(
                 query,
-                parse_select_statement("SELECT x, y FROM test WHERE x = $1")
+                parse_select_statement_postgres("SELECT x, y FROM test WHERE x = $1")
             );
 
             assert_eq!(keys, vec![vec![4.into()]]);
@@ -1320,14 +1418,16 @@ mod tests {
 
         #[test]
         fn number_autoparam_number() {
-            let (keys, query) = process_and_make_keys(
+            let (keys, query) = process_and_make_keys_postgres(
                 "SELECT x, y FROM test WHERE x = $1 AND y = 2 AND z = $2",
                 vec![1.into(), 3.into()],
             );
 
             assert_eq!(
                 query,
-                parse_select_statement("SELECT x, y FROM test WHERE x = $1 AND y = $2 AND z = $3")
+                parse_select_statement_postgres(
+                    "SELECT x, y FROM test WHERE x = $1 AND y = $2 AND z = $3"
+                )
             );
 
             assert_eq!(keys, vec![vec![1.into(), 2.into(), 3.into()]]);
@@ -1335,14 +1435,14 @@ mod tests {
 
         #[test]
         fn numbered_where_in_with_auto_params() {
-            let (keys, query) = process_and_make_keys(
+            let (keys, query) = process_and_make_keys_mysql(
                 "SELECT * FROM users WHERE x = ? AND y in (?, ?, ?) AND z = 4 AND w = 5 AND q = ?",
                 vec![0.into(), 1.into(), 2.into(), 3.into(), 6.into()],
             );
 
             assert_eq!(
                 query,
-                parse_select_statement(
+                parse_select_statement_postgres(
                     "SELECT * FROM users WHERE x = $1 AND y = $2 AND z = $3 AND w = $4 AND q = $5",
                 )
             );
@@ -1355,18 +1455,22 @@ mod tests {
                     vec![0.into(), 3.into(), 4.into(), 5.into(), 6.into()],
                 ]
             );
+
+            panic!("Should this be allowed to mix mysql and postgres placeholders?");
         }
 
         #[test]
         fn numbered_auto_parameterized_in() {
-            let (keys, query) = process_and_make_keys(
+            let (keys, query) = process_and_make_keys_mysql(
                 "SELECT * FROM users WHERE x = 1 AND y IN (1, 2, 3) AND z = ?",
                 vec![1.into()],
             );
 
             assert_eq!(
                 query,
-                parse_select_statement("SELECT * FROM users WHERE x = $1 AND y = $2 AND z = $3")
+                parse_select_statement_postgres(
+                    "SELECT * FROM users WHERE x = $1 AND y = $2 AND z = $3"
+                )
             );
 
             assert_eq!(
@@ -1377,18 +1481,19 @@ mod tests {
                     vec![1.into(), 3.into(), 1.into()],
                 ]
             );
+            panic!("Should this be allowed to mix mysql and postgres placeholders?");
         }
 
         #[test]
         fn numbered_where_in_with_equal() {
-            let (keys, query) = process_and_make_keys(
+            let (keys, query) = process_and_make_keys_postgres(
                 "SELECT Cats.name FROM Cats WHERE Cats.name = $1 AND Cats.id IN ($2, $3)",
                 vec!["Bob".into(), 1.into(), 2.into()],
             );
 
             assert_eq!(
                 query,
-                parse_select_statement(
+                parse_select_statement_postgres(
                     "SELECT Cats.name FROM Cats WHERE Cats.name = $1 AND Cats.id = $2"
                 )
             );
@@ -1401,14 +1506,14 @@ mod tests {
 
         #[test]
         fn numbered_point_following_where_in() {
-            let (keys, query) = process_and_make_keys(
+            let (keys, query) = process_and_make_keys_postgres(
                 "SELECT a FROM t WHERE b IN ($1, $2) AND c = $3",
                 vec![1.into(), 2.into(), 3.into()],
             );
 
             assert_eq!(
                 query,
-                parse_select_statement("SELECT a FROM t WHERE b = $1 AND c = $2")
+                parse_select_statement_postgres("SELECT a FROM t WHERE b = $1 AND c = $2")
             );
 
             assert_eq!(
@@ -1419,14 +1524,14 @@ mod tests {
 
         #[test]
         fn numbered_point_following_where_in_unordered() {
-            let (keys, query) = process_and_make_keys(
+            let (keys, query) = process_and_make_keys_postgres(
                 "SELECT a FROM t WHERE b IN ($3, $1) AND c = $2",
                 vec![2.into(), 3.into(), 1.into()],
             );
 
             assert_eq!(
                 query,
-                parse_select_statement("SELECT a FROM t WHERE b = $1 AND c = $2")
+                parse_select_statement_postgres("SELECT a FROM t WHERE b = $1 AND c = $2")
             );
 
             assert_eq!(
@@ -1437,14 +1542,16 @@ mod tests {
 
         #[test]
         fn numbered_point_following_two_where_in() {
-            let (keys, query) = process_and_make_keys(
+            let (keys, query) = process_and_make_keys_postgres(
                 "SELECT a FROM t WHERE b IN ($1, $2) AND c IN ($3, $4) AND d = $5",
                 vec![1.into(), 2.into(), 3.into(), 4.into(), 5.into()],
             );
 
             assert_eq!(
                 query,
-                parse_select_statement("SELECT a FROM t WHERE b = $1 AND c = $2 AND d = $3")
+                parse_select_statement_postgres(
+                    "SELECT a FROM t WHERE b = $1 AND c = $2 AND d = $3"
+                )
             );
 
             assert_eq!(
@@ -1460,16 +1567,18 @@ mod tests {
 
         #[test]
         fn numbered_not_in_order_auto_param() {
-            let (keys, query) = process_and_make_keys(
+            let (keys, query) = process_and_make_keys_postgres(
                 "SELECT * FROM t WHERE x = $2 AND y = $1 AND z = 'z'",
                 vec!["y".into(), "x".into()],
             );
 
             assert_eq!(
                 query,
-                parse_select_statement("SELECT * FROM t WHERE x = $1 AND y = $2 AND z = $3"),
+                parse_select_statement_postgres(
+                    "SELECT * FROM t WHERE x = $1 AND y = $2 AND z = $3"
+                ),
                 "{}",
-                query.display(nom_sql::Dialect::MySQL)
+                query.display(nom_sql::Dialect::PostgreSQL)
             );
 
             assert_eq!(keys, vec![vec!["x".into(), "y".into(), "z".into()]]);
@@ -1477,16 +1586,18 @@ mod tests {
 
         #[test]
         fn numbered_not_in_order() {
-            let (keys, query) = process_and_make_keys(
+            let (keys, query) = process_and_make_keys_postgres(
                 "SELECT * FROM t WHERE x = $3 AND y = $1 AND z = $2",
                 vec!["y".into(), "z".into(), "x".into()],
             );
 
             assert_eq!(
                 query,
-                parse_select_statement("SELECT * FROM t WHERE x = $1 AND y = $2 AND z = $3"),
+                parse_select_statement_postgres(
+                    "SELECT * FROM t WHERE x = $1 AND y = $2 AND z = $3"
+                ),
                 "{}",
-                query.display(nom_sql::Dialect::MySQL)
+                query.display(nom_sql::Dialect::PostgreSQL)
             );
 
             assert_eq!(keys, vec![vec!["x".into(), "y".into(), "z".into()]]);
@@ -1494,16 +1605,18 @@ mod tests {
 
         #[test]
         fn numbered_not_in_order_starts_in_order() {
-            let (keys, query) = process_and_make_keys(
+            let (keys, query) = process_and_make_keys_postgres(
                 "SELECT * FROM t WHERE x = $1 AND y = $3 AND z = $2",
                 vec!["x".into(), "z".into(), "y".into()],
             );
 
             assert_eq!(
                 query,
-                parse_select_statement("SELECT * FROM t WHERE x = $1 AND y = $2 AND z = $3"),
+                parse_select_statement_postgres(
+                    "SELECT * FROM t WHERE x = $1 AND y = $2 AND z = $3"
+                ),
                 "{}",
-                query.display(nom_sql::Dialect::MySQL)
+                query.display(nom_sql::Dialect::PostgreSQL)
             );
 
             assert_eq!(keys, vec![vec!["x".into(), "y".into(), "z".into()]]);
@@ -1511,155 +1624,293 @@ mod tests {
 
         #[test]
         fn bare_offset_zero() {
-            let (keys, query) = process_and_make_keys(
+            let (keys, query) = process_and_make_keys_postgres(
                 "SELECT * FROM t WHERE x = $2 OFFSET $1",
                 vec![0.into(), 1.into()],
             );
 
             assert_eq!(
                 query,
-                parse_select_statement("SELECT * FROM t WHERE x = $1"),
+                parse_select_statement_postgres("SELECT * FROM t WHERE x = $1"),
                 "{}",
-                query.display(nom_sql::Dialect::MySQL)
+                query.display(nom_sql::Dialect::PostgreSQL)
             );
             assert_eq!(keys, vec![vec![1.into()]]);
         }
 
         #[test]
         fn bare_offset_nonzero() {
-            let (keys, query) = process_and_make_keys(
+            let (keys, query) = process_and_make_keys_postgres(
                 "SELECT * FROM t WHERE x = $2 OFFSET $1",
                 vec![15.into(), 1.into()],
             );
 
             assert_eq!(
                 query,
-                parse_select_statement("SELECT * FROM t WHERE x = $1"),
+                parse_select_statement_postgres("SELECT * FROM t WHERE x = $1"),
                 "{}",
-                query.display(nom_sql::Dialect::MySQL)
+                query.display(nom_sql::Dialect::PostgreSQL)
             );
             assert_eq!(keys, vec![vec![1.into()]]);
         }
 
         #[test]
-        fn correct_offset_limit() {
-            let get_lim_off = |q: &str, p: &[DfValue]| -> (Option<usize>, Option<usize>) {
-                let proc = process_query(&mut parse_select_statement(q), false).unwrap();
-                proc.limit_offset_params(p).unwrap()
-            };
-
+        fn limit_offset_full_form() {
             assert_eq!(
-                get_lim_off(
+                get_lim_off_postgres(
                     "SELECT * FROM t WHERE x = $2 LIMIT $3 OFFSET $1",
-                    &[1.into(), 2.into(), 3.into()]
+                    &[1.into(), 2.into(), 3.into()],
                 ),
                 (Some(3), Some(1))
             );
 
             assert_eq!(
-                get_lim_off(
+                get_lim_off_mysql(
                     "SELECT * FROM t WHERE x = ? LIMIT ? OFFSET ?",
-                    &[1.into(), 2.into(), 3.into()]
+                    &[1.into(), 2.into(), 3.into()],
                 ),
                 (Some(2), Some(3))
             );
 
             assert_eq!(
+                get_lim_off_postgres(
+                    "SELECT * FROM t WHERE x = $2 LIMIT 5 OFFSET $1",
+                    &[1.into(), 2.into(), 3.into()],
+                ),
+                (Some(5), Some(1))
+            );
+
+            assert_eq!(
+                get_lim_off_mysql(
+                    "SELECT * FROM t WHERE x = ? LIMIT ? OFFSET 4",
+                    &[1.into(), 2.into()],
+                ),
+                (Some(2), Some(4))
+            );
+
+            assert_eq!(
+                get_lim_off_mysql(
+                    "SELECT * FROM t WHERE x = ? LIMIT 4 OFFSET ?",
+                    &[1.into(), 2.into()],
+                ),
+                (Some(4), Some(2))
+            );
+
+            // Test non-integer values
+            assert_eq!(
+                get_lim_off_postgres(
+                    "SELECT * FROM t WHERE x = $2 LIMIT ALL OFFSET $1",
+                    &[1.into(), 2.into()],
+                ),
+                (None, Some(1))
+            );
+
+            // Postgres rounds up to the nearest int
+            assert_eq!(
+                get_lim_off_postgres(
+                    "SELECT * FROM t WHERE x = $2 LIMIT 2.5 OFFSET $1",
+                    &[1.into(), 3.into()],
+                ),
+                (Some(3), Some(1))
+            );
+
+            try_parse_select_statement(
+                "SELECT * FROM t WHERE x = ? LIMIT 1 OFFSET ALL",
+                nom_sql::Dialect::MySQL,
+            )
+            .unwrap_err();
+
+            try_parse_select_statement(
+                "SELECT * FROM t WHERE x = ? LIMIT 1.5 OFFSET 3",
+                nom_sql::Dialect::MySQL,
+            )
+            .unwrap_err();
+
+            try_parse_select_statement(
+                "SELECT * FROM t WHERE x = ? LIMIT 2 OFFSET 3.5",
+                nom_sql::Dialect::MySQL,
+            )
+            .unwrap_err();
+        }
+
+        #[test]
+        fn limit_offset_limit_only() {
+            // Test only limit for both dialects
+            assert_eq!(
+                get_lim_off_postgres(
+                    "SELECT * FROM t WHERE x = $1 LIMIT $2",
+                    &[1.into(), 2.into()],
+                ),
+                (Some(2), None)
+            );
+            assert_eq!(
+                get_lim_off_postgres(
+                    "SELECT * FROM t WHERE x = $1 LIMIT ALL",
+                    &[1.into(), 2.into()],
+                ),
+                (None, None)
+            );
+            assert_eq!(
+                get_lim_off_postgres(
+                    "SELECT * FROM t WHERE x = $1 LIMIT 10.5",
+                    &[1.into(), 2.into()],
+                ),
+                (Some(11), None)
+            );
+
+            assert_eq!(
+                get_lim_off_mysql("SELECT * FROM t WHERE x = ? LIMIT ?", &[1.into(), 2.into()],),
+                (Some(2), None)
+            );
+
+            try_parse_select_statement(
+                "SELECT * FROM t WHERE x = ? LIMIT ALL",
+                nom_sql::Dialect::MySQL,
+            )
+            .unwrap_err();
+
+            try_parse_select_statement(
+                "SELECT * FROM t WHERE x = ? LIMIT 1.5",
+                nom_sql::Dialect::MySQL,
+            )
+            .unwrap_err();
+        }
+
+        #[test]
+        fn limit_offset_offset_only() {
+            assert_eq!(
+                get_lim_off_postgres(
+                    "SELECT * FROM t WHERE x = $1 OFFSET $2",
+                    &[1.into(), 2.into()],
+                ),
+                (None, Some(2))
+            );
+            assert_eq!(
+                get_lim_off_postgres(
+                    "SELECT * FROM t WHERE x = $1 OFFSET 10.5",
+                    &[1.into(), 2.into()],
+                ),
+                (None, Some(11))
+            );
+
+            // MySQL doesn't allow offset without limit
+            try_parse_select_statement(
+                "SELECT * FROM t WHERE x = ? OFFSET ?",
+                nom_sql::Dialect::MySQL,
+            )
+            .unwrap_err();
+
+            // ALL keyword only works for LIMT not offset
+            try_parse_select_statement(
+                "SELECT * FROM t WHERE x = $1 OFFSET ALL",
+                nom_sql::Dialect::PostgreSQL,
+            )
+            .unwrap_err();
+            try_parse_select_statement(
+                "SELECT * FROM t WHERE x = $1 OFFSET ALL",
+                nom_sql::Dialect::MySQL,
+            )
+            .unwrap_err();
+        }
+
+        #[test]
+        fn limit_offset_mysql_special() {
+            assert_eq!(
                 get_lim_off(
                     "SELECT * FROM t WHERE x = ? LIMIT ?, ?",
-                    &[1.into(), 2.into(), 3.into()]
+                    &[1.into(), 2.into(), 3.into()],
+                    nom_sql::Dialect::MySQL,
                 ),
                 (Some(3), Some(2))
             );
 
             assert_eq!(
-                get_lim_off("SELECT * FROM t WHERE x = ? LIMIT ?", &[1.into(), 2.into()]),
-                (Some(2), None)
-            );
-
-            assert_eq!(
-                get_lim_off(
-                    "SELECT * FROM t WHERE x = ? OFFSET ?",
-                    &[1.into(), 2.into()]
-                ),
-                (None, Some(2))
-            );
-
-            assert_eq!(
-                get_lim_off(
-                    "SELECT * FROM t WHERE x = ? LIMIT ? OFFSET 4",
-                    &[1.into(), 2.into()]
-                ),
-                (Some(2), Some(4))
-            );
-
-            assert_eq!(
                 get_lim_off(
                     "SELECT * FROM t WHERE x = ? LIMIT 4, ?",
-                    &[1.into(), 2.into()]
+                    &[1.into(), 2.into()],
+                    nom_sql::Dialect::MySQL,
                 ),
                 (Some(2), Some(4))
-            );
-
-            assert_eq!(
-                get_lim_off(
-                    "SELECT * FROM t WHERE x = ? LIMIT 4 OFFSET ?",
-                    &[1.into(), 2.into()]
-                ),
-                (Some(4), Some(2))
             );
 
             assert_eq!(
                 get_lim_off(
                     "SELECT * FROM t WHERE x = ? LIMIT ?, 4",
-                    &[1.into(), 2.into()]
+                    &[1.into(), 2.into()],
+                    nom_sql::Dialect::MySQL,
                 ),
                 (Some(4), Some(2))
             );
+
+            // PostgreSQL doesn't accept this form at all
+            try_parse_select_statement(
+                "SELECT * FROM t WHERE x = $3 LIMIT $2, $1",
+                nom_sql::Dialect::PostgreSQL,
+            )
+            .unwrap_err();
+            try_parse_select_statement(
+                "SELECT * FROM t WHERE x = $3 LIMIT 1, $1",
+                nom_sql::Dialect::PostgreSQL,
+            )
+            .unwrap_err();
+            try_parse_select_statement(
+                "SELECT * FROM t WHERE x = $3 LIMIT $1, 2",
+                nom_sql::Dialect::PostgreSQL,
+            )
+            .unwrap_err();
+            try_parse_select_statement(
+                "SELECT * FROM t WHERE x = $3 LIMIT 1, 2",
+                nom_sql::Dialect::PostgreSQL,
+            )
+            .unwrap_err();
         }
 
         #[test]
         fn reuses_params_basic() {
-            let (keys, query) =
-                process_and_make_keys("SELECT * FROM t WHERE x = $1 AND y = $1", vec![0.into()]);
+            let (keys, query) = process_and_make_keys_postgres(
+                "SELECT * FROM t WHERE x = $1 AND y = $1",
+                vec![0.into()],
+            );
 
             assert_eq!(
                 query,
-                parse_select_statement("SELECT * FROM t WHERE x = $1 AND y = $2"),
+                parse_select_statement_postgres("SELECT * FROM t WHERE x = $1 AND y = $2"),
                 "{}",
-                query.display(nom_sql::Dialect::MySQL)
+                query.display(nom_sql::Dialect::PostgreSQL)
             );
             assert_eq!(keys, vec![vec![0.into(), 0.into()]]);
         }
 
         #[test]
         fn reuses_params_with_auto_param() {
-            let (keys, query) = process_and_make_keys(
+            let (keys, query) = process_and_make_keys_postgres(
                 "SELECT * FROM t WHERE x = $1 AND y = 0 AND z = $1",
                 vec![1.into()],
             );
 
             assert_eq!(
                 query,
-                parse_select_statement("SELECT * FROM t WHERE x = $1 AND y = $2 AND z = $3"),
+                parse_select_statement_postgres(
+                    "SELECT * FROM t WHERE x = $1 AND y = $2 AND z = $3"
+                ),
                 "{}",
-                query.display(nom_sql::Dialect::MySQL)
+                query.display(nom_sql::Dialect::PostgreSQL)
             );
             assert_eq!(keys, vec![vec![1.into(), 0.into(), 1.into()]]);
         }
 
         #[test]
         fn reuses_params_with_where_in() {
-            let (keys, query) = process_and_make_keys(
+            let (keys, query) = process_and_make_keys_postgres(
                 "SELECT * FROM t WHERE x = $1 AND y IN ($1, $2)",
                 vec![1.into(), 2.into()],
             );
 
             assert_eq!(
                 query,
-                parse_select_statement("SELECT * FROM t WHERE x = $1 AND y = $2"),
+                parse_select_statement_postgres("SELECT * FROM t WHERE x = $1 AND y = $2"),
                 "{}",
-                query.display(nom_sql::Dialect::MySQL)
+                query.display(nom_sql::Dialect::PostgreSQL)
             );
             assert_eq!(
                 keys,

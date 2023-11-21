@@ -42,7 +42,9 @@ pub use self::literal::{
 };
 pub use self::order::{OrderBy, OrderClause, OrderType};
 pub use self::parser::*;
-pub use self::select::{CommonTableExpr, GroupByClause, JoinClause, LimitClause, SelectStatement};
+pub use self::select::{
+    CommonTableExpr, GroupByClause, JoinClause, LimitClause, LimitValue, SelectStatement,
+};
 pub use self::set::{
     PostgresParameterScope, PostgresParameterValue, PostgresParameterValueInner, SetNames,
     SetPostgresParameter, SetPostgresParameterValue, SetStatement, SetVariables, Variable,

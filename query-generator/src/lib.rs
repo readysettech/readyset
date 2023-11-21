@@ -85,9 +85,9 @@ use nom_sql::{
     BinaryOperator, Column, ColumnConstraint, ColumnSpecification, CommonTableExpr,
     CreateTableBody, CreateTableStatement, Dialect as ParseDialect, Expr, FieldDefinitionExpr,
     FieldReference, FunctionExpr, InValue, ItemPlaceholder, JoinClause, JoinConstraint,
-    JoinOperator, JoinRightSide, LimitClause, Literal, OrderBy, OrderClause, OrderType, Relation,
-    SelectStatement, SqlIdentifier, SqlType, SqlTypeArbitraryOptions, TableExpr, TableExprInner,
-    TableKey,
+    JoinOperator, JoinRightSide, LimitClause, LimitValue, Literal, OrderBy, OrderClause, OrderType,
+    Relation, SelectStatement, SqlIdentifier, SqlType, SqlTypeArbitraryOptions, TableExpr,
+    TableExprInner, TableKey,
 };
 use parking_lot::Mutex;
 use proptest::arbitrary::{any, any_with, Arbitrary};
@@ -1956,7 +1956,7 @@ impl QueryOperation {
                 });
 
                 query.limit_clause = LimitClause::LimitOffset {
-                    limit: Some(Literal::Integer(*limit as _)),
+                    limit: Some(LimitValue::Literal(Literal::Integer(*limit as _))),
                     offset: None,
                 };
 
@@ -1997,12 +1997,12 @@ impl QueryOperation {
                 // we were using.
                 if matches!(query.limit_clause, LimitClause::OffsetCommaLimit { .. }) {
                     query.limit_clause = LimitClause::OffsetCommaLimit {
-                        limit: Literal::Integer(*limit as _),
+                        limit: LimitValue::Literal(Literal::Integer(*limit as _)),
                         offset: Literal::Integer((*limit * *page_number) as _),
                     }
                 } else {
                     query.limit_clause = LimitClause::LimitOffset {
-                        limit: Some(Literal::Integer(*limit as _)),
+                        limit: Some(LimitValue::Literal(Literal::Integer(*limit as _))),
                         offset: Some(Literal::Integer((*limit * *page_number) as _)),
                     };
                 }
