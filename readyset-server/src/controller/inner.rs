@@ -25,7 +25,7 @@ use readyset_client::debug::stats::PersistentStats;
 use readyset_client::internal::ReplicaAddress;
 use readyset_client::metrics::recorded;
 use readyset_client::recipe::{ExtendRecipeResult, ExtendRecipeSpec, MigrationStatus};
-use readyset_client::status::{ReadySetStatus, SnapshotStatus};
+use readyset_client::status::{ReadySetControllerStatus, SnapshotStatus};
 use readyset_client::{GraphvizOptions, SingleKeyEviction, ViewCreateRequest, WorkerDescriptor};
 use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
 use readyset_telemetry_reporter::TelemetrySender;
@@ -495,7 +495,7 @@ impl Leader {
                     None
                 };
 
-                let status = ReadySetStatus {
+                let status = ReadySetControllerStatus {
                     // Use whether the leader is ready or not as a proxy for if we have
                     // completed snapshotting.
                     snapshot_status: if leader_ready {
