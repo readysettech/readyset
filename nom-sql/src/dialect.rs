@@ -6,7 +6,7 @@ use itertools::Itertools;
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case, take, take_while1};
 use nom::character::is_alphanumeric;
-use nom::combinator::{map_res, not, opt, peek};
+use nom::combinator::{map, map_res, not, opt, peek};
 use nom::error::ErrorKind;
 use nom::multi::fold_many0;
 use nom::sequence::{delimited, preceded};
@@ -18,9 +18,9 @@ use thiserror::Error;
 
 use crate::keywords::{sql_keyword, sql_keyword_or_builtin_function, POSTGRES_NOT_RESERVED};
 use crate::literal::{raw_string_literal, QuotingStyle};
-use crate::select::LimitClause;
+use crate::select::{LimitClause, LimitValue};
 use crate::whitespace::whitespace0;
-use crate::{literal, NomSqlError, NomSqlResult, SqlIdentifier};
+use crate::{literal, Literal, NomSqlError, NomSqlResult, SqlIdentifier};
 
 pub trait DialectDisplay {
     fn display(&self, dialect: Dialect) -> impl fmt::Display + '_;
@@ -268,24 +268,136 @@ impl Dialect {
         }
     }
 
-    /// Parses the MySQL specific `{offset}, {limit}` part in a `LIMIT` clause
-    pub fn offset_limit(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], LimitClause> {
+    pub fn limit_offset_literal(
+        self,
+    ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Literal> {
         move |i| {
-            if self == Dialect::PostgreSQL {
-                return Err(nom::Err::Error(NomSqlError {
-                    input: i,
-                    kind: ErrorKind::Fail,
-                }));
+            let (i, literal) = literal(self)(i)?;
+            let literal = match &literal {
+                Literal::Placeholder(_) => literal,
+                Literal::UnsignedInteger(_) => literal,
+                Literal::Integer(int) => {
+                    if *int >= 0 {
+                        literal
+                    } else {
+                        return Err(nom::Err::Error(NomSqlError {
+                            input: i,
+                            kind: ErrorKind::Fail,
+                        }));
+                    }
+                }
+                Literal::Null => match self {
+                    Dialect::PostgreSQL => literal,
+                    Dialect::MySQL => {
+                        return Err(nom::Err::Error(NomSqlError {
+                            input: i,
+                            kind: ErrorKind::Fail,
+                        }));
+                    }
+                },
+                Literal::Numeric(..) | Literal::Float(_) | Literal::Double(_) => match self {
+                    Dialect::PostgreSQL => literal,
+                    Dialect::MySQL => {
+                        return Err(nom::Err::Error(NomSqlError {
+                            input: i,
+                            kind: ErrorKind::Fail,
+                        }));
+                    }
+                },
+                _ => {
+                    return Err(nom::Err::Error(NomSqlError {
+                        input: i,
+                        kind: ErrorKind::Fail,
+                    }));
+                }
+            };
+
+            Ok((i, literal))
+        }
+    }
+
+    /// Parse only the `OFFSET <value>` case
+    pub fn offset_only(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Literal> {
+        move |i| {
+            let (i, _) = whitespace0(i)?;
+            let (i, _) = tag_no_case("offset")(i)?;
+            let (i, _) = whitespace0(i)?;
+            let (i, offset) = self.limit_offset_literal()(i)?;
+            Ok((i, offset))
+        }
+    }
+
+    /// Parse only the `LIMIT <value>` clause ignoring OFFSET
+    pub fn limit_only(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], LimitValue> {
+        move |i| {
+            let (i, _) = whitespace0(i)?;
+            let (i, _) = tag_no_case("limit")(i)?;
+            let (i, _) = whitespace0(i)?;
+            match self {
+                Dialect::PostgreSQL => alt((
+                    map(self.limit_offset_literal(), LimitValue::Literal),
+                    map(tag_no_case("all"), |_| LimitValue::All),
+                ))(i),
+                Dialect::MySQL => map(self.limit_offset_literal(), LimitValue::Literal)(i),
             }
+        }
+    }
 
+    /// Posgres and MySQL parses LIMIT and OFFSET quite differently:
+    /// - Postgres' spec for LIMIT/OFFSET is `[ LIMIT { number | ALL } ] [ OFFSET number ]`
+    /// - MySQL's spec is: `[LIMIT {[offset,] row_count | row_count OFFSET offset}]`
+    ///
+    /// In addition to this spec postgres seems to allow `LIMIT NULL` and `OFFSET NULL` as well
+    /// as non-integer values none of which are accepted by MySQL. This difference is handled by
+    /// `Self::limit_offset_literal`.
+    ///
+    /// So with the NULL, ALL and differing datatype cases covered by other dialect functions we
+    /// have the remaining differences:
+    ///  - Postgres allows `OFFSET` without `LIMIT`
+    ///  - MySQL allows for `LIMIT <offset>, <limit>`
+    pub fn limit_offset(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], LimitClause> {
+        move |i| {
             let (i, _) = whitespace0(i)?;
-            let (i, offset) = literal(self)(i)?;
-            let (i, _) = whitespace0(i)?;
-            let (i, _) = tag_no_case(",")(i)?;
-            let (i, _) = whitespace0(i)?;
-            let (i, limit) = literal(self)(i)?;
+            match self {
+                Dialect::PostgreSQL => {
+                    let (i, limit) = opt(self.limit_only())(i)?;
+                    let (i, offset) = opt(self.offset_only())(i)?;
 
-            Ok((i, LimitClause::OffsetCommaLimit { offset, limit }))
+                    Ok((i, LimitClause::LimitOffset { limit, offset }))
+                }
+                Dialect::MySQL => alt((
+                    move |i| {
+                        let (i, _) = whitespace0(i)?;
+                        let (i, _) = tag_no_case("limit")(i)?;
+                        let (i, _) = whitespace0(i)?;
+                        let (i, offset) = self.limit_offset_literal()(i)?;
+                        let (i, _) = whitespace0(i)?;
+                        let (i, _) = tag_no_case(",")(i)?;
+                        let (i, _) = whitespace0(i)?;
+                        let (i, limit) = self.limit_offset_literal()(i)?;
+
+                        Ok((
+                            i,
+                            LimitClause::OffsetCommaLimit {
+                                offset,
+                                limit: LimitValue::Literal(limit),
+                            },
+                        ))
+                    },
+                    move |i| {
+                        let (i, limit) = self.limit_only()(i)?;
+                        let (i, offset) = opt(self.offset_only())(i)?;
+
+                        Ok((
+                            i,
+                            LimitClause::LimitOffset {
+                                limit: Some(limit),
+                                offset,
+                            },
+                        ))
+                    },
+                ))(i),
+            }
         }
     }
 }

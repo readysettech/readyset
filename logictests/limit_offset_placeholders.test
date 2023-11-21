@@ -59,11 +59,3 @@ select * from t where b = 2 LIMIT ? OFFSET ?
 ? = 1
 ? = 1
 ----
-
-query nosort
-select * from t where b = 2 OFFSET ?
-? = 0
-----
-1
-2
-3
