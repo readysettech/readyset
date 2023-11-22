@@ -15,10 +15,12 @@ fi
 docker volume create target || true
 docker volume create cargo-registry || true
 
-## Setup for framework testing
-mkdir -pv .buildkite/gen .buildkite/image
-buildkite-agent artifact download '.buildkite/gen/*' ./ || true
-buildkite-agent artifact download '.buildkite/image/**/*.tar.gz' ./ || true
-find .buildkite/image -type f | while read -r tarball; do
-	docker load < "$tarball"
-done
+if [ -n "${BUILDKITE_GROUP_LABEL+x}" ] && [ "$BUILDKITE_GROUP_LABEL" == "Framework Tests" ]; then
+    ## Setup for framework testing
+    mkdir -pv .buildkite/gen .buildkite/image
+    buildkite-agent artifact download '.buildkite/gen/*' ./ || true
+    buildkite-agent artifact download '.buildkite/image/**/*.tar.gz' ./ || true
+    find .buildkite/image -type f | while read -r tarball; do
+        docker load < "$tarball"
+    done
+fi
