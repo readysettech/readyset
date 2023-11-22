@@ -1,0 +1,15 @@
+[Unit]
+Description=ReadySet standalone daemon
+AssertPathExists=/usr/bin/readyset
+After=network.target
+
+[Install]
+WantedBy=multi-user.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/readyset/readyset.conf
+ExecStart=/usr/bin/readyset
+KillMode=process
+Restart=on-failure
+RestartSec=30
