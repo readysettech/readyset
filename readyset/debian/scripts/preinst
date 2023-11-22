@@ -1,0 +1,20 @@
+#!/bin/sh
+
+set -e
+
+READYSET_DIR=/var/lib/readyset
+
+# Create readyset:readyset user/group and set homedir to /var/lib/readyset
+if [ "$1" = "install" ]; then
+    if ! getent group readyset >/dev/null; then
+        addgroup --system readyset >/dev/null
+    fi
+    if ! getent passwd readyset >/dev/null; then
+        adduser --ingroup readyset \
+            --system \
+            --disabled-login \
+            --home ${READYSET_DIR} \
+            --shell /bin/false \
+            --gecos "ReadySet Service" readyset >/dev/null
+    fi
+fi
