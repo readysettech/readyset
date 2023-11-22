@@ -21,11 +21,16 @@ use tokio::sync::mpsc::Sender;
 use tokio_stream::wrappers::TcpListenerStream;
 use tower::Service;
 
+use crate::status_reporter::ReadySetStatusReporter;
+use crate::UpstreamDatabase;
+
 /// Routes requests from an HTTP server to expose metrics data from the adapter.
 /// To see the supported http requests and their respective routing, see
 /// impl Service<Request<Body>> for NoriaAdapterHttpRouter.
-#[derive(Clone)]
-pub struct NoriaAdapterHttpRouter {
+pub struct NoriaAdapterHttpRouter<U>
+where
+    U: UpstreamDatabase,
+{
     /// The address to attempt to listen on.
     pub listen_addr: SocketAddr,
     /// Used to retrieve the current health of the adapter.
@@ -42,9 +47,31 @@ pub struct NoriaAdapterHttpRouter {
 
     /// Used to record metrics related to http request handling.
     pub metrics: HttpRouterMetrics,
+
+    pub status_reporter: ReadySetStatusReporter<U>,
 }
 
-impl NoriaAdapterHttpRouter {
+// For some reason, the default implementation, which should match this, isn't compiling.
+impl<U> Clone for NoriaAdapterHttpRouter<U>
+where
+    U: UpstreamDatabase,
+{
+    fn clone(&self) -> Self {
+        Self {
+            listen_addr: self.listen_addr,
+            health_reporter: self.health_reporter.clone(),
+            failpoint_channel: self.failpoint_channel.clone(),
+            prometheus_handle: self.prometheus_handle.clone(),
+            metrics: self.metrics.clone(),
+            status_reporter: self.status_reporter.clone(),
+        }
+    }
+}
+
+impl<U> NoriaAdapterHttpRouter<U>
+where
+    U: UpstreamDatabase + 'static,
+{
     /// Creates a listener object to be used to route requests.
     pub async fn create_listener(&self) -> anyhow::Result<TcpListener> {
         let http_listener = TcpListener::bind(self.listen_addr).await?;
@@ -55,7 +82,7 @@ impl NoriaAdapterHttpRouter {
     /// the service layer of the NoriaAdapterHttpRouter, see
     /// Impl Service<_> for NoriaAdapterHttpRouter.
     pub async fn route_requests(
-        router: NoriaAdapterHttpRouter,
+        router: NoriaAdapterHttpRouter<U>,
         http_listener: TcpListener,
         shutdown_rx: ShutdownReceiver,
     ) -> anyhow::Result<()> {
@@ -74,7 +101,10 @@ impl NoriaAdapterHttpRouter {
 /// Tower service definition to route http requests `Request<Body>` to their
 /// responses.
 #[allow(clippy::type_complexity)] // No valid re-use to make this into custom type definitions.
-impl Service<Request<Body>> for NoriaAdapterHttpRouter {
+impl<U> Service<Request<Body>> for NoriaAdapterHttpRouter<U>
+where
+    U: UpstreamDatabase + 'static,
+{
     type Response = Response<Body>;
     type Error = hyper::Error;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
@@ -217,6 +247,19 @@ impl Service<Request<Body>> for NoriaAdapterHttpRouter {
                         .body(hyper::Body::from("Prometheus metrics were not enabled. To fix this, run the adapter with --prometheus-metrics".to_string())),
                 };
                 Box::pin(async move { Ok(res.unwrap()) })
+            }
+            (&Method::GET, "/readyset_status") => {
+                let status_reporter = self.status_reporter.clone();
+                Box::pin(async move {
+                    let body = status_reporter.report_status().await.into_json().into();
+
+                    let res = res
+                        .status(200)
+                        .header(CONTENT_TYPE, "text/plain")
+                        .body(body);
+
+                    Ok(res.unwrap())
+                })
             }
             // Returns a summary of memory usage for the entire process and per-thread memory usage
             (&Method::POST, "/memory_stats") => {

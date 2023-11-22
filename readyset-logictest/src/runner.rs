@@ -19,7 +19,7 @@ use readyset_adapter::backend::noria_connector::ReadBehavior;
 use readyset_adapter::backend::{BackendBuilder, NoriaConnector};
 use readyset_adapter::query_status_cache::QueryStatusCache;
 use readyset_adapter::upstream_database::LazyUpstream;
-use readyset_adapter::{UpstreamConfig, UpstreamDatabase};
+use readyset_adapter::{ReadySetStatusReporter, UpstreamConfig, UpstreamDatabase};
 use readyset_client::consensus::{Authority, LocalAuthorityStore};
 use readyset_client::ReadySetHandle;
 use readyset_mysql::{MySqlQueryHandler, MySqlUpstream};
@@ -557,7 +557,7 @@ impl TestScript {
             let (s, _) = listener.accept().await.unwrap();
 
             let noria = NoriaConnector::new(
-                rh,
+                rh.clone(),
                 auto_increments,
                 view_name_cache.new_local(),
                 view_cache.new_local(),
@@ -591,10 +591,24 @@ impl TestScript {
                         None => None,
                     };
 
+                    let status_reporter = ReadySetStatusReporter::new(
+                        replication_url
+                            .map(UpstreamConfig::from_url)
+                            .unwrap_or_default(),
+                        Some(rh),
+                        Default::default(),
+                        authority.clone(),
+                    );
                     BackendBuilder::new()
                         .require_authentication(false)
                         .dialect($dialect)
-                        .build::<_, $handler>(noria, upstream, query_status_cache, authority)
+                        .build::<_, $handler>(
+                            noria,
+                            upstream,
+                            query_status_cache,
+                            authority,
+                            status_reporter,
+                        )
                 }};
             }
 

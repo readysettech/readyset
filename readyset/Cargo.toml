@@ -49,6 +49,12 @@ readyset-telemetry-reporter = { path = "../readyset-telemetry-reporter" }
 readyset-tracing = { path = "../readyset-tracing" }
 readyset-version = { path = "../readyset-version" }
 replicators = { path = "../replicators" }
+serde_json = "1.0.89"
+
+
+[dev-dependencies]
+serial_test = "0.5"
+temp-dir = "0.1"
 
 [features]
 failure_injection = ["fail/failpoints", "readyset-client/failure_injection", "readyset-server/failure_injection"]

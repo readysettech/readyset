@@ -187,6 +187,15 @@ pub struct LazyUpstream<U> {
     upstream_config: UpstreamConfig,
 }
 
+impl<U> From<UpstreamConfig> for LazyUpstream<U> {
+    fn from(upstream_config: UpstreamConfig) -> Self {
+        Self {
+            upstream: None,
+            upstream_config,
+        }
+    }
+}
+
 impl<U> LazyUpstream<U>
 where
     U: UpstreamDatabase,

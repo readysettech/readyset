@@ -13,7 +13,6 @@ use readyset_client::consistency::Timestamp;
 use readyset_client::internal::LocalNodeIndex;
 use readyset_client::recipe::changelist::{Change, ChangeList, IntoChanges};
 use readyset_client::results::{ResultIterator, Results};
-use readyset_client::status::ReadySetControllerStatus;
 use readyset_client::{
     ColumnSchema, GraphvizOptions, ReadQuery, ReaderAddress, ReaderHandle, ReadySetHandle,
     SchemaType, Table, TableOperation, View, ViewCreateRequest, ViewQuery,
@@ -852,12 +851,6 @@ impl NoriaConnector {
         Ok(QueryResult::Empty)
     }
 
-    /// Returns status provided by the Controller and persisted in the Authority. Also appends
-    /// additional_meta provided by the caller to the status.
-    pub(crate) async fn readyset_status(&mut self) -> ReadySetResult<ReadySetControllerStatus> {
-        noria_await!(self.inner.get_mut()?, self.inner.get_mut()?.noria.status())
-    }
-
     /// Query the status of a pending migration identified by the given `migration_id`. Once the
     /// function returns a result (completed or an error), calling again with the same id will lead
     /// to undefined behavior.
@@ -1538,6 +1531,10 @@ impl NoriaConnector {
         self.failed_views.remove(&qname);
         self.inner.get_mut()?.get_noria_view(&qname, true).await?;
         Ok(())
+    }
+
+    pub fn handle(&self) -> Option<ReadySetHandle> {
+        self.inner.inner.as_ref().map(|i| i.noria.clone())
     }
 }
 

@@ -6,6 +6,7 @@ authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
 [dependencies]
+crossbeam-skiplist = "0.1.1"
 tokio = { workspace = true, features = ["full"] }
 anyhow = "1.0.38"
 csv = "1.2"

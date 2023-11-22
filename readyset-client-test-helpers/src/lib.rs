@@ -14,7 +14,9 @@ use nom_sql::Relation;
 use readyset_adapter::backend::noria_connector::{NoriaConnector, ReadBehavior};
 use readyset_adapter::backend::{BackendBuilder, MigrationMode};
 use readyset_adapter::query_status_cache::QueryStatusCache;
-use readyset_adapter::{Backend, QueryHandler, UpstreamConfig, UpstreamDatabase};
+use readyset_adapter::{
+    Backend, QueryHandler, ReadySetStatusReporter, UpstreamConfig, UpstreamDatabase,
+};
 use readyset_client::consensus::{Authority, LocalAuthorityStore};
 use readyset_server::{Builder, DurabilityMode, Handle, LocalAuthority, ReadySetHandle};
 use readyset_util::shared_cache::SharedCache;
@@ -260,7 +262,9 @@ impl TestBuilder {
                     let auto_increments = auto_increments.clone();
 
                     // backend either has upstream or noria writer
+                    let mut upstream_config = UpstreamConfig::default();
                     let mut upstream = if let Some(f) = &fallback_url {
+                        upstream_config = UpstreamConfig::from_url(f);
                         Some(A::make_upstream(f.clone()).await)
                     } else {
                         None
@@ -275,7 +279,7 @@ impl TestBuilder {
                     let mut rh = ReadySetHandle::new(authority.clone()).await;
                     let server_supports_pagination = rh.supports_pagination().await.unwrap();
                     let noria = NoriaConnector::new(
-                        rh,
+                        rh.clone(),
                         auto_increments,
                         view_name_cache.new_local(),
                         view_cache.new_local(),
@@ -287,10 +291,22 @@ impl TestBuilder {
                     )
                     .await;
 
+                    let status_reporter = ReadySetStatusReporter::new(
+                        upstream_config,
+                        Some(rh),
+                        Default::default(),
+                        authority.clone(),
+                    );
                     let backend = backend_builder
                         .dialect(A::DIALECT)
                         .migration_mode(self.migration_mode)
-                        .build(noria, upstream, query_status_cache, authority.clone());
+                        .build(
+                            noria,
+                            upstream,
+                            query_status_cache,
+                            authority.clone(),
+                            status_reporter,
+                        );
 
                     let mut backend_shutdown_rx_clone = backend_shutdown_rx_connection.clone();
                     tokio::spawn(async move {

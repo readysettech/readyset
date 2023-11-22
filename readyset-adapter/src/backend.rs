@@ -317,6 +317,7 @@ impl BackendBuilder {
         upstream: Option<DB>,
         query_status_cache: &'static QueryStatusCache,
         authority: Arc<Authority>,
+        status_reporter: ReadySetStatusReporter<DB>,
     ) -> Backend<DB, Handler> {
         metrics::increment_gauge!(recorded::CONNECTED_CLIENTS, 1.0);
 
@@ -361,6 +362,7 @@ impl BackendBuilder {
             authority,
             metrics_handle: self.metrics_handle,
             connections: self.connections,
+            status_reporter,
             _query_handler: PhantomData,
         }
     }
@@ -555,6 +557,8 @@ where
 
     /// Set of active connections to this adapter
     connections: Option<Arc<SkipSet<SocketAddr>>>,
+
+    status_reporter: ReadySetStatusReporter<DB>,
 
     _query_handler: PhantomData<Handler>,
 }
@@ -2157,15 +2161,11 @@ where
 
                 self.show_caches(query_id).await
             }
-            SqlQuery::Show(ShowStatement::ReadySetStatus) => {
-                let reporter = ReadySetStatusReporter {
-                    upstream: &mut self.upstream,
-                    connector: &mut self.noria,
-                    connections: &self.connections,
-                    authority: &self.authority,
-                };
-                Ok(reporter.report_status().await.into_query_result())
-            }
+            SqlQuery::Show(ShowStatement::ReadySetStatus) => Ok(self
+                .status_reporter
+                .report_status()
+                .await
+                .into_query_result()),
             SqlQuery::Show(ShowStatement::ReadySetStatusAdapter) => self.readyset_adapter_status(),
             SqlQuery::Show(ShowStatement::ReadySetMigrationStatus(id)) => {
                 self.noria.migration_status(*id).await
