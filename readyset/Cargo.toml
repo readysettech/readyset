@@ -1,6 +1,6 @@
 [package]
 name = "readyset"
-version = "0.1.0"
+version = "1.0.0"
 publish = false
 authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
@@ -58,3 +58,20 @@ temp-dir = "0.1"
 
 [features]
 failure_injection = ["fail/failpoints", "readyset-client/failure_injection", "readyset-server/failure_injection"]
+
+[package.metadata.deb]
+maintainer = "ReadySet Technology <info@readyset.io>"
+copyright = "2023, ReadySet Technology, Inc."
+license-file = ["../LICENSE", "1"]
+extended-description = """\
+A real-time SQL caching engine for Postgres and MySQL."""
+depends = "$auto"
+section = "Databases"
+priority = "optional"
+assets = [
+    ["target/release/readyset", "usr/bin/", "755"],
+    ["debian/readyset.conf", "/etc/readyset/readyset.conf", "644"],
+    ["debian/systemd/readyset.service", "/lib/systemd/system/readyset.service", "644"],
+]
+maintainer-scripts = "debian/scripts"
+conf-files = ["/etc/readyset/readyset.conf"]

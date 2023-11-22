@@ -82,3 +82,9 @@ metrics-util = { git = "https://github.com/readysettech/metrics.git" }
 
 [profile.release]
 debug=true
+
+[profile.release-dist]
+# configs for distro release packages (i.e. deb, rpm, etc.)
+inherits = "release"
+debug = false
+strip = "debuginfo"
