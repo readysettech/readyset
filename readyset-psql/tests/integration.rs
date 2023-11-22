@@ -15,6 +15,7 @@ use readyset_data::Dialect;
 use crate::common::setup_standalone_with_authority;
 
 async fn setup() -> (tokio_postgres::Config, Handle, ShutdownSender) {
+    readyset_tracing::init_test_logging();
     TestBuilder::default().build::<PostgreSQLAdapter>().await
 }
 
@@ -1907,4 +1908,21 @@ async fn drop_all_caches_clears_authority_list() {
     assert!(res.is_empty());
 
     shutdown_tx.shutdown().await;
+}
+
+mod http_tests {
+    use super::*;
+    #[tokio::test(flavor = "multi_thread")]
+    async fn readyset_status() {
+        let (opts, _handle, shutdown_tx) = setup().await;
+        let conn = connect(opts).await;
+        conn.simple_query("CREATE TABLE public.t (a int)")
+            .await
+            .unwrap();
+        conn.simple_query("SELECT public.t.a from public.t")
+            .await
+            .unwrap();
+
+        shutdown_tx.shutdown().await;
+    }
 }

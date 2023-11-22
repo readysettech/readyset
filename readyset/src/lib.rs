@@ -4,7 +4,6 @@
 pub mod mysql;
 pub mod psql;
 mod query_logger;
-
 use std::collections::HashMap;
 use std::fs::remove_dir_all;
 use std::io;
@@ -36,7 +35,9 @@ use readyset_adapter::migration_handler::MigrationHandler;
 use readyset_adapter::proxied_queries_reporter::ProxiedQueriesReporter;
 use readyset_adapter::query_status_cache::{MigrationStyle, QueryStatusCache};
 use readyset_adapter::views_synchronizer::ViewsSynchronizer;
-use readyset_adapter::{Backend, BackendBuilder, DeploymentMode, QueryHandler, UpstreamDatabase};
+use readyset_adapter::{
+    Backend, BackendBuilder, DeploymentMode, QueryHandler, ReadySetStatusReporter, UpstreamDatabase,
+};
 use readyset_alloc::{StdThreadBuildWrapper, ThreadBuildWrapper};
 use readyset_alloc_metrics::report_allocator_metrics;
 use readyset_client::consensus::AuthorityType;
@@ -399,7 +400,7 @@ pub struct Options {
     #[arg(long, env = "EXPERIMENTAL_PLACEHOLDER_INLINING", hide = true)]
     experimental_placeholder_inlining: bool,
 
-    /// Don't make connections to the upstream aatabase for new client connections.
+    /// Don't make connections to the upstream database for new client connections.
     ///
     /// If this flag is set queries will never be proxied upstream - even if they are unsupported,
     /// fail to execute, or are run in a transaction.
@@ -700,6 +701,12 @@ where
 
         rs_connect.in_scope(|| info!("ReadySetHandle created"));
 
+        let status_reporter = ReadySetStatusReporter::new(
+            upstream_config.clone(),
+            Some(rh.clone()),
+            connections.clone(),
+            adapter_authority.clone(),
+        );
         let ctrlc = tokio::signal::ctrl_c();
         let mut sigterm = {
             let _guard = rt.enter();
@@ -885,6 +892,7 @@ where
             health_reporter: health_reporter.clone(),
             failpoint_channel: tx,
             metrics: Default::default(),
+            status_reporter: status_reporter.clone(),
         };
 
         let router_shutdown_rx = shutdown_rx.clone();
@@ -1098,6 +1106,7 @@ where
 
             let upstream_config = upstream_config.clone();
             let schema_search_path = Arc::clone(&schema_search_path);
+            let status_reporter_clone = status_reporter.clone();
             let fut = async move {
                 let upstream_res = connect_upstream::<H::UpstreamDatabase>(
                     upstream_config,
@@ -1136,13 +1145,14 @@ where
                                     upstream,
                                     query_status_cache,
                                     adapter_authority.clone(),
+                                    status_reporter_clone,
                                 );
                                 connection_handler.process_connection(s, backend).await;
                             }
                             Err(error) => {
                                 error!(
                                     %error,
-                                    "Error loading initial schema search path from upstream"
+                                    "Error loading initial schema search path from ~"
                                 );
                                 connection_handler
                                     .immediate_error(

@@ -27,6 +27,7 @@ use clap::ValueEnum;
 
 pub use crate::backend::{Backend, BackendBuilder};
 pub use crate::query_handler::{QueryHandler, SetBehavior};
+pub use crate::status_reporter::{ReadySetStatus, ReadySetStatusReporter};
 pub use crate::upstream_database::{
     UpstreamConfig, UpstreamDatabase, UpstreamDestination, UpstreamPrepare,
 };

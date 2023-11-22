@@ -360,7 +360,7 @@ impl Benchmark {
 
         hdl.kill().unwrap();
 
-        // Required for subsequent benchmarks to properly get all cores and not incrimentally fewer
+        // Required for subsequent benchmarks to properly get all cores and not incrementally fewer
         #[cfg(not(target_os = "macos"))]
         unset_affinity();
         Ok(())
