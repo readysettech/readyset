@@ -425,6 +425,13 @@ pub struct Options {
         hide = true
     )]
     query_status_capacity: usize,
+
+    /// Do not perform a disk space check on startup. ReadySet requires a minimum of 10GiB of
+    /// available disk space to prevent potential failures during database snapshot operations.
+    /// By default, the program will terminate if there's insufficient space. Enable this
+    /// option to bypass the disk space check at startup.
+    #[arg(long)]
+    pub no_disk_space_check: bool,
 }
 
 impl Options {

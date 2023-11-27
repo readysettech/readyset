@@ -5,10 +5,13 @@ use database_utils::DatabaseType;
 use readyset::mysql::MySqlHandler;
 use readyset::psql::PsqlHandler;
 use readyset::{NoriaAdapter, Options};
+use readyset_server::check_disk_space;
 
 fn main() -> anyhow::Result<()> {
     let options = Options::parse();
-
+    if !options.no_disk_space_check {
+        check_disk_space()?;
+    }
     match options.database_type()? {
         DatabaseType::MySQL => NoriaAdapter {
             description: "MySQL adapter for ReadySet.",

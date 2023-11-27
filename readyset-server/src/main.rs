@@ -15,7 +15,9 @@ use readyset_server::consensus::AuthorityType;
 use readyset_server::metrics::{
     install_global_recorder, CompositeMetricsRecorder, MetricsRecorder,
 };
-use readyset_server::{resolve_addr, Builder, NoriaMetricsRecorder, WorkerOptions};
+use readyset_server::{
+    check_disk_space, resolve_addr, Builder, NoriaMetricsRecorder, WorkerOptions,
+};
 use readyset_telemetry_reporter::{TelemetryEvent, TelemetryInitializer};
 use readyset_version::*;
 use tracing::{error, info};
@@ -25,7 +27,6 @@ extern crate readyset_alloc;
 
 const AWS_PRIVATE_IP_ENDPOINT: &str = "http://169.254.169.254/latest/meta-data/local-ipv4";
 const AWS_METADATA_TOKEN_ENDPOINT: &str = "http://169.254.169.254/latest/api/token";
-
 /// Obtain the private ipv4 address of the AWS instance that the current program is running on using
 /// the AWS metadata service
 pub async fn get_aws_private_ip() -> anyhow::Result<IpAddr> {
@@ -148,10 +149,20 @@ struct Options {
     /// impact startup.
     #[arg(long, hide = true)]
     wait_for_failpoint: bool,
+
+    /// Do not perform a disk space check on startup. ReadySet requires a minimum of 10GiB of
+    /// available disk space to prevent potential failures during database snapshot operations.
+    /// By default, the program will terminate if there's insufficient space. Enable this
+    /// option to bypass the disk space check at startup.
+    #[arg(long)]
+    no_disk_space_check: bool,
 }
 
 fn main() -> anyhow::Result<()> {
     let opts: Options = Options::parse();
+    if !opts.no_disk_space_check {
+        check_disk_space()?;
+    }
     let rt = tokio::runtime::Builder::new_multi_thread()
         .with_sys_hooks()
         .enable_all()

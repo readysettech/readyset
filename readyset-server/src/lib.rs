@@ -449,6 +449,7 @@ pub mod manual {
     pub use crate::controller::migrate::Migration;
 }
 
+use std::io::{ErrorKind, Result};
 use std::net::{IpAddr, ToSocketAddrs};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -457,7 +458,10 @@ use anyhow::anyhow;
 use clap::Args;
 use dataflow::DomainConfig;
 use serde::{Deserialize, Serialize};
-use tracing::warn;
+use sys_info::disk_info;
+use tracing::{error, warn};
+
+const MINIMUM_DISK_SPACE: u64 = 10 * 1024 * 1024 * 1024;
 
 /// Configuration for a running ReadySet cluster
 // WARNING: if you change this structure or any of the structures used in its fields, make sure to
@@ -496,6 +500,25 @@ pub struct Config {
     /// Interval on which to automatically run recovery as long as there are unscheduled domains
     #[serde(default = "default_background_recovery_interval")]
     pub(crate) background_recovery_interval: Duration,
+}
+
+pub fn check_disk_space() -> Result<()> {
+    let result = disk_info();
+
+    match result {
+        Ok(disk_info) => {
+            if disk_info.free < MINIMUM_DISK_SPACE {
+                error!(
+                    "Insufficient disk space: {} bytes available (minimum {} is required). \
+                    Run the server with '--no-disk-space-check' to bypass this check.",
+                    disk_info.free, MINIMUM_DISK_SPACE
+                );
+                std::process::exit(1);
+            }
+            Ok(())
+        }
+        Err(error) => Err(std::io::Error::new(ErrorKind::Other, error.to_string())),
+    }
 }
 
 fn default_background_recovery_interval() -> Duration {
