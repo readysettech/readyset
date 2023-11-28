@@ -13,6 +13,8 @@ services:
       - MYSQL_DATABASE=noria
   postgres:
     image: postgres:14
+    ports:
+      - '5432:5432'
     environment:
       - POSTGRES_PASSWORD=noria
       - POSTGRES_DB=noria
