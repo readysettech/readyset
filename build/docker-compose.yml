@@ -6,11 +6,21 @@ services:
     volumes:
       - ./docker/consul/server.json:/consul/config/server.json:ro
     command: 'agent -bootstrap-expect=1'
+    healthcheck:
+      test: ["CMD", "consul", "members"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
   mysql:
     image: mysql:8.0
     environment:
       - MYSQL_ROOT_PASSWORD=noria
       - MYSQL_DATABASE=noria
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 10s
+      retries: 3
   postgres:
     image: postgres:14
     environment:
@@ -20,6 +30,11 @@ services:
       - "postgres"
       - "-c"
       - "wal_level=logical"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
   postgres13:
     image: postgres:13
     environment:
@@ -31,3 +46,8 @@ services:
       - "wal_level=logical"
       - "-p"
       - "5433"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -p 5433"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
