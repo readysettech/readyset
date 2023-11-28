@@ -75,7 +75,6 @@ impl PsqlBackend for TestBackend {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[cfg(not(target_os = "macos"))]
 async fn connect() {
     // Load the identity file as bytes (using relative path)
     let identity_file = include_bytes!("tls_certs/keyStore.p12");
