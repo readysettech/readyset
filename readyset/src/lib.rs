@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::fs::remove_dir_all;
 use std::io;
 use std::marker::Send;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4, SocketAddrV6, ToSocketAddrs};
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::atomic::AtomicUsize;
@@ -651,9 +651,30 @@ where
         }
 
         let listen_address = options.address.unwrap_or(self.default_address);
-        let listener = rt.block_on(tokio::net::TcpListener::bind(&listen_address))?;
+        let ipv4 = SocketAddr::V4(SocketAddrV4::new(
+            match listen_address.ip() {
+                IpAddr::V4(ipv4) => ipv4,
+                IpAddr::V6(ipv6) => ipv6.to_ipv4().expect("couldn't convert ipv6 to ipv4"),
+            },
+            listen_address.port(),
+        ));
+        let ipv6 = SocketAddr::V6(SocketAddrV6::new(
+            match ipv4 {
+                SocketAddr::V4(ipv4) => ipv4.ip().to_ipv6_mapped(),
+                _ => unreachable!(), // ipv4 is always a v4 address
+            },
+            listen_address.port(),
+            0,
+            0,
+        ));
 
-        info!(%listen_address, "Listening for new connections");
+        let ipv4_listener = rt.block_on(tokio::net::TcpListener::bind(ipv4))?;
+        let ipv6_listener = rt.block_on(tokio::net::TcpListener::bind(ipv6))?;
+        info!(
+            "Listening for new connections on {} and {}",
+            ipv4_listener.local_addr().unwrap().to_string(),
+            ipv6_listener.local_addr().unwrap().to_string()
+        );
 
         let auto_increments: Arc<RwLock<HashMap<Relation, AtomicUsize>>> = Arc::default();
         let view_name_cache = SharedCache::new();
@@ -713,7 +734,10 @@ where
             tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).unwrap()
         };
         let mut listener = Box::pin(futures_util::stream::select(
-            TcpListenerStream::new(listener),
+            futures_util::stream::select(
+                TcpListenerStream::new(ipv4_listener),
+                TcpListenerStream::new(ipv6_listener),
+            ),
             futures_util::stream::select(
                 ctrlc
                     .map(|r| {
