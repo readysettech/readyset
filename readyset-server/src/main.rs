@@ -154,7 +154,7 @@ struct Options {
     /// available disk space to prevent potential failures during database snapshot operations.
     /// By default, the program will terminate if there's insufficient space. Enable this
     /// option to bypass the disk space check at startup.
-    #[arg(long)]
+    #[arg(long, hide = true, env = "NO_DISK_SPACE_CHECK")]
     no_disk_space_check: bool,
 }
 
