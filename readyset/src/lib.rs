@@ -431,7 +431,8 @@ pub struct Options {
     /// available disk space to prevent potential failures during database snapshot operations.
     /// By default, the program will terminate if there's insufficient space. Enable this
     /// option to bypass the disk space check at startup.
-    #[arg(long)]
+    // FIXME: REA-3587 temporarily revert - set 'no_disk_space_check' to true by default
+    #[arg(long, default_value = "true", hide = true)]
     pub no_disk_space_check: bool,
 }
 
