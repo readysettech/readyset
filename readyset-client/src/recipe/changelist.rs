@@ -38,8 +38,8 @@ use dataflow_expression::Dialect;
 use nom_locate::LocatedSpan;
 use nom_sql::{
     AlterTableStatement, CacheInner, CreateCacheStatement, CreateTableStatement,
-    CreateViewStatement, DropTableStatement, DropViewStatement, NonReplicatedRelation, Relation,
-    SelectStatement, SqlIdentifier, SqlQuery,
+    CreateViewStatement, DropCacheStatement, DropTableStatement, DropViewStatement,
+    NonReplicatedRelation, Relation, SelectStatement, SqlIdentifier, SqlQuery,
 };
 use readyset_data::DfType;
 use readyset_errors::{internal, unsupported, ReadySetError, ReadySetResult};
@@ -240,10 +240,27 @@ impl ChangeList {
                                     if_exists: dvs.if_exists,
                                 }))
                             }
-                            SqlQuery::DropCache(dcs) => changes.push(Change::Drop {
-                                name: dcs.name,
-                                if_exists: false,
-                            }),
+                            SqlQuery::DropCache(DropCacheStatement { inner, .. }) => {
+                                let name = match inner {
+                                    Ok(CacheInner::Statement(_)) => {
+                                        error!(
+                                            "attempted to issue DROP CACHE with a statement string"
+                                        );
+                                        internal!(
+                                            "DROP CACHE should've had its statement resolved to \
+                                             an ID by the adapter"
+                                        );
+                                    }
+                                    Ok(CacheInner::Id(id)) => id,
+                                    Err(query) => {
+                                        return Err(ReadySetError::UnparseableQuery { query })
+                                    }
+                                };
+                                changes.push(Change::Drop {
+                                    name: name.into(),
+                                    if_exists: false,
+                                })
+                            }
                             _ => unsupported!(
                                 "Only DDL statements supported in ChangeList (got {})",
                                 parsed.query_type()
@@ -540,10 +557,23 @@ impl Change {
                             always,
                         })
                     }
-                    SqlQuery::DropCache(dcs) => Change::Drop {
-                        name: dcs.name,
-                        if_exists: false,
-                    },
+                    SqlQuery::DropCache(DropCacheStatement { inner, .. }) => {
+                        let name = match inner {
+                            Ok(CacheInner::Statement(_)) => {
+                                error!("attempted to issue DROP CACHE with a statement string");
+                                internal!(
+                                    "DROP CACHE should've had its statement resolved to \
+                                     an ID by the adapter"
+                                );
+                            }
+                            Ok(CacheInner::Id(id)) => id,
+                            Err(query) => return Err(ReadySetError::UnparseableQuery { query }),
+                        };
+                        Change::Drop {
+                            name: name.into(),
+                            if_exists: false,
+                        }
+                    }
                     _ => unsupported!(
                         "CacheDDLRequests can only contain `CREATE CACHE` or `DROP CACHE` statements (got {})",
                         parsed.query_type()

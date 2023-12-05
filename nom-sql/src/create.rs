@@ -1,7 +1,6 @@
 use std::str::FromStr;
 use std::{fmt, str};
 
-use derive_more::From;
 use itertools::Itertools;
 use nom::branch::alt;
 use nom::bytes::complete::{is_not, tag, tag_no_case};
@@ -17,14 +16,15 @@ use test_strategy::Arbitrary;
 
 use crate::column::{column_specification, Column, ColumnSpecification};
 use crate::common::{
-    column_identifier_no_alias, debug_print, if_not_exists, parse_fallible, statement_terminator,
-    until_statement_terminator, ws_sep_comma, IndexType, ReferentialAction, TableKey,
+    cached_query_inner, column_identifier_no_alias, debug_print, if_not_exists, parse_fallible,
+    statement_terminator, until_statement_terminator, ws_sep_comma, CacheInner, IndexType,
+    ReferentialAction, TableKey,
 };
 use crate::compound_select::{nested_compound_selection, CompoundSelectStatement};
 use crate::create_table_options::{table_options, CreateTableOption};
 use crate::expression::expression;
 use crate::order::{order_type, OrderType};
-use crate::select::{nested_selection, selection, SelectStatement};
+use crate::select::{nested_selection, SelectStatement};
 use crate::table::{relation, Relation};
 use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Dialect, DialectDisplay, NomSqlError, NomSqlResult, SqlIdentifier};
@@ -185,22 +185,6 @@ impl DialectDisplay for CreateViewStatement {
                 Ok(def) => write!(f, "{}", def.display(dialect)),
                 Err(unparsed) => write!(f, "{unparsed}"),
             }
-        })
-    }
-}
-
-/// The SelectStatement or query ID referenced in a [`CreateCacheStatement`]
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, From, Arbitrary)]
-pub enum CacheInner {
-    Statement(Box<SelectStatement>),
-    Id(SqlIdentifier),
-}
-
-impl DialectDisplay for CacheInner {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
-        fmt_with(move |f| match self {
-            Self::Statement(stmt) => write!(f, "{}", stmt.display(dialect)),
-            Self::Id(id) => write!(f, "{id}"),
         })
     }
 }
@@ -817,19 +801,6 @@ fn cached_query_options(mut i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Create
         i = remaining;
     }
     Ok((i, opts))
-}
-
-/// Extract the [`SelectStatement`] or Query ID from a CREATE CACHE statement. Query ID is
-/// parsed as a SqlIdentifier
-pub fn cached_query_inner(
-    dialect: Dialect,
-) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CacheInner> {
-    move |i| {
-        alt((
-            map(map(selection(dialect), Box::new), CacheInner::from),
-            map(dialect.identifier(), CacheInner::from),
-        ))(i)
-    }
 }
 
 /// Parse a [`CreateCacheStatement`]

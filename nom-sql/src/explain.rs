@@ -9,8 +9,9 @@ use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
-use crate::common::{parse_fallible, statement_terminator, until_statement_terminator};
-use crate::create::cached_query_inner;
+use crate::common::{
+    cached_query_inner, parse_fallible, statement_terminator, until_statement_terminator,
+};
 use crate::table::relation;
 use crate::whitespace::whitespace1;
 use crate::{CacheInner, Dialect, DialectDisplay, NomSqlResult, Relation};

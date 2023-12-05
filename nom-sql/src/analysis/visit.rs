@@ -362,7 +362,7 @@ pub trait Visitor<'ast>: Sized {
         &mut self,
         drop_cache_statement: &'ast DropCacheStatement,
     ) -> Result<(), Self::Error> {
-        walk_relation(self, &drop_cache_statement.name)
+        walk_drop_cache_statement(self, drop_cache_statement)
     }
 
     fn visit_drop_all_caches_statement(
@@ -1090,7 +1090,20 @@ pub fn walk_create_cache_statement<'a, V: Visitor<'a>>(
 ) -> Result<(), V::Error> {
     match &create_cache_statement.inner {
         Ok(CacheInner::Statement(stmt)) => visitor.visit_select_statement(stmt)?,
-        Ok(CacheInner::Id(_)) => {}
+        Ok(CacheInner::Id(id)) => visitor.visit_sql_identifier(id)?,
+        Err(_) => {}
+    }
+
+    Ok(())
+}
+
+pub fn walk_drop_cache_statement<'a, V: Visitor<'a>>(
+    visitor: &mut V,
+    drop_cache_statement: &'a DropCacheStatement,
+) -> Result<(), V::Error> {
+    match &drop_cache_statement.inner {
+        Ok(CacheInner::Statement(stmt)) => visitor.visit_select_statement(stmt)?,
+        Ok(CacheInner::Id(id)) => visitor.visit_sql_identifier(id)?,
         Err(_) => {}
     }
 

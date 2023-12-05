@@ -2111,19 +2111,40 @@ where
                 }
                 res
             }
-            SqlQuery::DropCache(drop_cache) => {
+            SqlQuery::DropCache(DropCacheStatement {
+                inner,
+                unparsed_drop_cache_statement,
+            }) => {
                 let ddl_req = CacheDDLRequest {
-                    unparsed_stmt: drop_cache.display_unquoted().to_string(),
-                    // drop cache statements explicitly don't use a search path, as the only schema
-                    // we need to resolve is the cache name.
-                    schema_search_path: vec![],
+                    unparsed_stmt: unparsed_drop_cache_statement.clone(),
+                    schema_search_path: self.noria.schema_search_path().to_owned(),
                     dialect: self.settings.dialect.into(),
                 };
+
                 self.authority
                     .add_cache_ddl_request(ddl_req.clone())
                     .await?;
-                let DropCacheStatement { name } = drop_cache;
-                let res = self.drop_cached_query(name).await;
+
+                let name = match inner {
+                    Ok(CacheInner::Statement(st)) => {
+                        let mut rewritten = st.clone();
+                        adapter_rewrites::process_query(
+                            &mut rewritten,
+                            self.noria.server_supports_pagination(),
+                        )?;
+                        let id = crate::utils::generate_query_name(
+                            &rewritten,
+                            self.noria.schema_search_path(),
+                        );
+                        Ok(Relation::from(id))
+                    }
+                    Ok(CacheInner::Id(id)) => Ok(Relation::from(id)),
+                    Err(query) => Err(ReadySetError::UnparseableQuery {
+                        query: query.clone(),
+                    }),
+                }?;
+                let res = self.drop_cached_query(&name).await;
+
                 // `drop_cached_query` may return an Err, but if the cache fails to be dropped for
                 // certain reasons, we can also see an Ok(Delete) here with num_rows_deleted set to
                 // 0.

@@ -11,7 +11,10 @@ use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
-use crate::common::{statement_terminator, ws_sep_comma};
+use crate::common::{
+    cached_query_inner, parse_fallible, statement_terminator, until_statement_terminator,
+    ws_sep_comma, CacheInner,
+};
 use crate::table::{relation, table_list, Relation};
 use crate::whitespace::whitespace1;
 use crate::{Dialect, DialectDisplay, NomSqlResult};
@@ -80,18 +83,25 @@ pub fn drop_table(
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct DropCacheStatement {
-    pub name: Relation,
+    /// The result of parsing the inner statement or query ID for the `DROP CACHE` statement.
+    ///
+    /// If parsing succeeded, then this will be an `Ok` result with the definition of the
+    /// statement. If it failed to parse, this will be an `Err` with the remainder [`String`]
+    /// that could not be parsed.
+    pub inner: Result<CacheInner, String>,
+    /// A full copy of the original 'drop cache' statement
+    pub unparsed_drop_cache_statement: String,
 }
 
 impl DialectDisplay for DropCacheStatement {
     fn display(&self, dialect: Dialect) -> impl Display + '_ {
-        fmt_with(move |f| write!(f, "DROP CACHE {}", self.name.display(dialect)))
-    }
-}
-
-impl DropCacheStatement {
-    pub fn display_unquoted(&self) -> impl Display + Copy + '_ {
-        fmt_with(move |f| write!(f, "DROP CACHE {}", self.name.display_unquoted()))
+        fmt_with(move |f| {
+            write!(f, "DROP CACHE ")?;
+            match &self.inner {
+                Ok(inner) => write!(f, "{}", inner.display(dialect)),
+                Err(unparsed) => write!(f, "{unparsed}"),
+            }
+        })
     }
 }
 
@@ -99,13 +109,20 @@ pub fn drop_cached_query(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], DropCacheStatement> {
     move |i| {
+        let unparsed_drop_cache_statement = String::from_utf8_lossy(*i).into();
         let (i, _) = tag_no_case("drop")(i)?;
         let (i, _) = whitespace1(i)?;
         let (i, _) = tag_no_case("cache")(i)?;
         let (i, _) = whitespace1(i)?;
-        let (i, name) = relation(dialect)(i)?;
-        let (i, _) = statement_terminator(i)?;
-        Ok((i, DropCacheStatement { name }))
+        let (i, inner) =
+            parse_fallible(cached_query_inner(dialect), until_statement_terminator)(i)?;
+        Ok((
+            i,
+            DropCacheStatement {
+                inner,
+                unparsed_drop_cache_statement,
+            },
+        ))
     }
 }
 
@@ -172,6 +189,7 @@ pub fn drop_all_caches(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], DropAllCach
 mod tests {
     use super::*;
     use crate::table::Relation;
+    use crate::TableExpr;
 
     #[test]
     fn simple_drop_table() {
@@ -210,13 +228,30 @@ mod tests {
     #[test]
     fn parse_drop_cached_query() {
         let res = test_parse!(drop_cached_query(Dialect::MySQL), b"DROP CACHE test");
-        assert_eq!(res.name, "test".into());
+        assert_eq!(res.inner.unwrap(), CacheInner::Id("test".into()));
+    }
+
+    #[test]
+    fn drop_cached_query_by_statement() {
+        let res = test_parse!(
+            drop_cached_query(Dialect::MySQL),
+            b"DROP CACHE SELECT id FROM users WHERE name = ?"
+        );
+        let statement = match res.inner {
+            Ok(CacheInner::Statement(s)) => s,
+            _ => panic!(),
+        };
+        assert_eq!(
+            statement.tables,
+            vec![TableExpr::from(Relation::from("users"))]
+        );
     }
 
     #[test]
     fn format_drop_cached_query() {
         let res = DropCacheStatement {
-            name: "test".into(),
+            inner: Ok(CacheInner::Id("test".into())),
+            unparsed_drop_cache_statement: "DROP CACHE test".into(),
         }
         .display(Dialect::MySQL)
         .to_string();
