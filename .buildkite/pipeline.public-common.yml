@@ -4,9 +4,11 @@
 common_values:
   retry: &retry_on_agent_kill
     automatic: &agent_kill_conditions
-      - exit_status: -1  # Agent was lost
-        limit: 2
-
+      - signal_reason: agent_stop  # spot instance killed by AWS
+        limit: 3
+      - exit_status: -1            # agent timed out
+        signal_reason: none
+        limit: 3
 steps:
 
   - label: ':rust: Check rustfmt'
