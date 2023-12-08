@@ -28,7 +28,7 @@ steps:
           - SCCACHE_REGION=us-east-2
           - CARGO_INCREMENTAL=0
           - RUST_BACKTRACE=full
-      - ecr#v2.5.0:
+      - ecr#v2.7.0:
           login: true
           retries: 3
     retry: *retry_on_agent_kill
@@ -48,7 +48,7 @@ steps:
           - SCCACHE_REGION=us-east-2
           - CARGO_INCREMENTAL=0
           - RUST_BACKTRACE=full
-      - ecr#v2.5.0:
+      - ecr#v2.7.0:
           login: true
           retries: 3
     retry: *retry_on_agent_kill
@@ -71,7 +71,7 @@ steps:
           - SCCACHE_REGION=us-east-2
           - CARGO_INCREMENTAL=0
           - RUST_BACKTRACE=full
-      - ecr#v2.5.0:
+      - ecr#v2.7.0:
           login: true
           retries: 3
     retry: *retry_on_agent_kill
@@ -102,7 +102,7 @@ steps:
             - "${GIT_PUBLIC_ROOT}build/docker-compose.ci-test.yml"
           mount-buildkite-agent: true
           pull-retries: 3
-      - ecr#v2.5.0:
+      - ecr#v2.7.0:
           login: true
           retries: 3
     agents:
@@ -132,7 +132,7 @@ steps:
             - "${GIT_PUBLIC_ROOT}build/docker-compose.yml"
             - "${GIT_PUBLIC_ROOT}build/docker-compose.ci-test.yml"
           pull-retries: 3
-      - ecr#v2.5.0:
+      - ecr#v2.7.0:
           login: true
           retries: 3
     retry: *retry_on_agent_kill
@@ -161,7 +161,7 @@ steps:
             - "${GIT_PUBLIC_ROOT}build/docker-compose.yml"
             - "${GIT_PUBLIC_ROOT}build/docker-compose.ci-test.yml"
           pull-retries: 3
-      - ecr#v2.5.0:
+      - ecr#v2.7.0:
           login: true
           retries: 3
     retry: *retry_on_agent_kill

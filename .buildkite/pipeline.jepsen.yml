@@ -18,7 +18,7 @@ steps:
     plugins:
       docker#v3.8.0:
         image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/ecr-public/docker/library/clojure:temurin-20-lein-2.10.0-jammy
-      ecr#v2.5.0:
+      ecr#v2.7.0:
         login: true
         retries: 3
     retry: *retry_on_agent_kill
@@ -32,7 +32,7 @@ steps:
     plugins:
       docker#v3.8.0:
         image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/ecr-public/docker/library/clojure:temurin-20-lein-2.10.0-jammy
-      ecr#v2.5.0:
+      ecr#v2.7.0:
         login: true
         retries: 3
     retry: *retry_on_agent_kill
@@ -46,7 +46,7 @@ steps:
     plugins:
       docker#v3.8.0:
         image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/ecr-public/docker/library/clojure:temurin-20-lein-2.10.0-jammy
-      ecr#v2.5.0:
+      ecr#v2.7.0:
         login: true
         retries: 3
     retry: *retry_on_agent_kill
