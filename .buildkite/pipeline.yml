@@ -13,15 +13,6 @@ common_values:
         limit: 3
 
 steps:
-  # TODO: ronh: decide what kind of linting we want in the OSS pipeline
-  # - label: ':git: Lint commits'
-  #   key: lint-commits
-  #   branches: '!refs/heads/main'
-  #   commands:
-  #     - ./scripts/commit_lint.sh
-  #   agents:
-  #     queue: t3a-small
-
   - label: ':docker: Build build image'
     key: build-image
     commands:
@@ -32,20 +23,32 @@ steps:
         retries: 3
     retry: *retry_on_agent_kill
 
-  - label: ':docker: Build cargo-deny image'
-    key: cargo-deny-image
-    commands:
-      - '.buildkite/build-image.sh build/Dockerfile.cargo-deny cargo-deny .'
-    env:
-      VERSION: "${BUILDKITE_COMMIT}"
+  - label: 'Run Postgres generated logictests %n'
+    parallelism: 6
+    key: logictest-generated-psql
+    command:
+    - 'echo +++ Running readyset-logictest'
+    - ./run-psql-logictests.sh
+    timeout_in_minutes: 1080
+    depends_on:
+    - build-image
     plugins:
-      ecr#v2.5.0:
-        login: true
-        retries: 3
-    retry: *retry_on_agent_kill
-
-  - label: ':pipeline: Upload public-common pipeline'
-    commands:
-      - buildkite-agent pipeline upload .buildkite/pipeline.public-common.yml
+      - docker-compose#v3.7.0:
+          run: app
+          env:
+          - AUTHORITY=local
+          - SCCACHE_BUCKET=readysettech-build-sccache-us-east-2
+          - SCCACHE_REGION=us-east-2
+          - CARGO_INCREMENTAL=0
+          - RUST_BACKTRACE=full
+          - LOG_LEVEL=error
+          config:
+            - public/build/docker-compose.yml
+            - public/build/docker-compose.ci-test.yml
+          pull-retries: 3
+      - ecr#v2.5.0:
+          login: true
+          retries: 3
     agents:
-      queue: t3a-small
+      queue: r6a-4xlarge
+    retry: *retry_on_agent_kill
