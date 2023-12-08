@@ -1,4 +1,4 @@
-FROM grafana/grafana:8.0.6
+FROM grafana/grafana:10.2.2
 COPY dashboards /var/lib/grafana/dashboards/
 COPY provisioning /etc/grafana/provisioning/
 COPY --chmod=666 provisioning/datasources/default.yml /etc/grafana/provisioning/datasources/
