@@ -224,7 +224,7 @@ SHOW CACHES;
 \echo 'Press enter to re-run query.'
 \prompt c
 \! echo '${BLUE}Cache Miss Results:'
-SELECT count(*) FROM title_ratingsdt
+SELECT count(*) FROM title_ratings
 JOIN title_basics ON title_ratings.tconst = title_basics.tconst
 WHERE title_basics.startyear = 2000
 AND title_ratings.averagerating > 5;
