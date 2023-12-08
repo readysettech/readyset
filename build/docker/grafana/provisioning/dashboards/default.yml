@@ -12,3 +12,15 @@ providers:
     options:
       allowUiUpdates: true
       path: /var/lib/grafana/dashboards/query_specific.json
+
+  - name: Adapter Metrics
+    type: file
+    options:
+      allowUiUpdates: true
+      path: /var/lib/grafana/dashboards/adapter_metrics.json
+
+  - name: Perf Debugging
+    type: file
+    options:
+      allowUiUpdates: true
+      path: /var/lib/grafana/dashboards/perf_debugging.json
