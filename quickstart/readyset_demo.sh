@@ -157,8 +157,7 @@ UPDATE title_ratings
    SET averagerating = 2.5
  WHERE tconst = 'tt0185183';
 -- Also drop the cache so that the uncached->miss->hit latencies work.
--- TODO: Broken until REA-3724 is fixed
--- DROP CACHE q_bccd97aea07c545f;
+DROP CACHE q_bccd97aea07c545f;
 \o
 \timing
 \! echo "${BLUE}Let's cache a query with ReadySet!${NOCOLOR}"
@@ -229,6 +228,19 @@ JOIN title_basics ON title_ratings.tconst = title_basics.tconst
 WHERE title_basics.startyear = 2000
 AND title_ratings.averagerating > 5;
 \! echo "${NOCOLOR}"
+\set QUIET 1
+\timing
+\o /dev/null
+-- Here we run it twice because if we dropped the cache as part of the flow,
+-- the first query will be proxied, the 2nd one will be an upquery/cache miss,
+-- and the 3rd one and thereafter will be a cache hit.
+SELECT count(*) FROM title_ratings
+JOIN title_basics ON title_ratings.tconst = title_basics.tconst
+WHERE title_basics.startyear = 2000
+AND title_ratings.averagerating > 5;
+\o
+\timing
+\unset QUIET
 \! echo "Press enter to re-run the query again."
 \prompt c
 \! echo '${GREEN}Cache Hit Results:'

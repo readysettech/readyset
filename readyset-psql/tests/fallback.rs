@@ -2415,3 +2415,55 @@ mod failure_injection_tests {
         shutdown_tx.shutdown().await;
     }
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn drop_and_recreate_demo_cache() {
+    // This tests dropping and recreating the cached used by the readyset demo script.
+    // There was an error returned at one point in doing this, so this test is an attempt to block
+    // a breaking change to the demo script at CI time.
+    readyset_tracing::init_test_logging();
+    let (opts, _handle, shutdown_tx) = setup().await;
+    let conn = connect(opts).await;
+
+    let queries = [
+        "CREATE TABLE public.title_basics (
+            tconst text NOT NULL,
+            titletype text,
+            primarytitle text,
+            originaltitle text,
+            isadult boolean,
+            startyear integer,
+            endyear integer,
+            runtimeminutes integer,
+            genres text
+        );",
+        "CREATE TABLE public.title_ratings (
+            tconst text NOT NULL,
+            averagerating numeric,
+            numvotes integer
+        );",
+        "CREATE CACHE FROM
+           SELECT count(*)
+             FROM title_ratings
+             JOIN title_basics
+               ON title_ratings.tconst = title_basics.tconst
+            WHERE title_basics.startyear = 2000
+              AND title_ratings.averagerating > 5;",
+        "DROP CACHE q_bccd97aea07c545f;",
+        "CREATE CACHE FROM
+           SELECT count(*)
+             FROM title_ratings
+             JOIN title_basics
+               ON title_ratings.tconst = title_basics.tconst
+            WHERE title_basics.startyear = 2000
+              AND title_ratings.averagerating > 5;",
+    ];
+
+    for query in queries {
+        let _res = conn.simple_query(query).await.expect("query failed");
+        // give it some time to propagate
+        sleep().await;
+    }
+
+    shutdown_tx.shutdown().await;
+}
