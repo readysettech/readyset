@@ -11,7 +11,7 @@ datasources:
 
   - name: ReadySet_DB
     type: postgres
-    url: cache:${RS_PORT:?}
+    url: ${RS_HOST}:${RS_PORT:?}
     database: ${RS_DB_NAME:?}
     user: ${RS_USER:?}
     secureJsonData:

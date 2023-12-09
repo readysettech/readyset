@@ -12,7 +12,7 @@ datasources:
   - name: ReadySet_DB
     type: mysql
     access: proxy
-    url: cache:${RS_PORT:?}
+    url: ${RS_HOST}:${RS_PORT:?}
     user: ${RS_USER:?}
     jsonData:
       tlsAuth: true
