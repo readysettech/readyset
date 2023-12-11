@@ -33,66 +33,63 @@ run_script() {
 
         set timeout 8
         send_user -- \"--- Testing colorful terminal prompt \n\"
-        expect -re \"Do you like colorful terminal output.*:\" {
+        expect \"Do you like colorful terminal output? (y/n, default y): \" {
           send \"$1\r\"
         }
         if {\"$1\" == \"y\"} {
-          expect -re \"Good choice!\"
+          expect \"Good choice!\"
         } else {
-          expect -re \"Very well.\"
+          expect \"Very well.\"
         }
 
         send_user -- \"--- Testing Sample data detection \n\"
-        expect -re \".*Downloading the ReadySet Docker Compose file.*\" {}
-        expect -re \".*Running the ReadySet Docker Compose setup.*\" {}
-        expect -re \".*ReadySet Docker Compose setup complete.*\" {}
-        expect -re \".*Checking if sample data is already loaded.*\" {}
+        set timeout 60
+        expect \"Checking if sample data is already loaded\"
 
-        set timeout 30
         expect {
-          -re \".*Sample data detected!.*\" {}
-          -re \".*No Sample data detected.*\" {}
+            \"No Sample data detected\" {
+            send_user -- \"--- Testing import of sample data \n\"
+            expect -re \".*Import sample data.*\" {
+              send \"$2\r\"
+            }
+            set timeout 500
+            if {\"$2\" == \"y\"} {
+              expect -re \".*Sample data imported successfully.*\" {}
+              set timeout 8
+              send_user -- \"--- Testing Explore sample data prompt \n\"
+              expect -re \".*Explore sample data in psql.*\" {
+                send \"$3\r\"
+              }
+            }
+
+            set timeout 8
+            if {\"$3\" == \"y\"} {
+              send_user -- \"--- Testing interactive psql section \n\"
+              for {set i 0} {\$i < $N_ENTERS} {incr i} {
+                expect {
+                  -re \".*Press enter.*\" {
+                      send \"\r\"
+                  }
+                  -re \".*error:,*\" {
+                    send_user -- psql error encountered
+                    exit 1
+                  }
+                }
+              }
+            }
+          }
           timeout {
             send_user -- \"FAIL: Timed out waiting for sample data check.\n\"
             exit 1
           }
         }
 
-        send_user -- \"--- Testing import of sample data \n\"
-        expect -re \".*Import sample data.*\" {
-          send \"$2\r\"
-          if {\"$2\" == \"y\"} {
-            # Sample data takes a while to load.
-            set timeout 500
-            expect -re \".*Sample data imported successfully.*\" {}
-            set timeout 8
-          }
-        }
-
-        send_user -- \"--- Testing Explore sample data prompt \n\"
-        if {\"$2\" == \"y\"} {
-          expect -re \".*Explore sample data in psql.*\" {
-            send \"$2\r\"
-          }
-        }
-
-        send_user -- \"--- Testing interactive psql section \n\"
-        set timeout 8
-        if {\"$3\" == \"y\"} {
-            for {set i 0} {\$i < $N_ENTERS} {incr i} {
-                expect {
-                  -re \".*Press enter.*\" {
-                      send \"\r\"
-                    }
-                  -re \".*error:,*\" {
-                    send_user -- psql error encountered
-                    exit 1
-                  }
-                }
-            }
-        }
-
         send_user -- \"--- Testing conclusion \n\"
+
+        expect \"Press enter to conclude and connect to readyset via psql.\" {
+          send \"\r\"
+        }
+
         expect -re \".*testdb\" {
           send \"exit\r\n\"
         }
@@ -108,15 +105,14 @@ run_script() {
 
 test_combination() {
     combo=$1;
-    section=$2
 
     echo -e "Testing combination (colorful input?, import sample data? explore?) ${combo}"
     read -ra answers <<< "$combo"
     if ! run_script "${answers[0]}" "${answers[1]}" "${answers[2]}"; then
-        echo "Test failed for combination: $combo $section"
+        echo "Test failed for combination: $combo"
         exit 1
     else
-        echo "Test passed for combination: $combo $section"
+        echo "Test passed for combination: $combo"
     fi
 }
 
@@ -145,7 +141,7 @@ test_all_combinations() {
     local combinations=("n n n" "y y y")
 
     for combo in "${combinations[@]}"; do
-      test_combination "${combo}" "before sample data loaded"
+      test_combination "${combo}"
     done
 }
 
