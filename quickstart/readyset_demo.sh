@@ -67,17 +67,24 @@ check_dependencies() {
   fi
 }
 
-download_compose_file() {
+download_demo_compose_file() {
   echo -e "${BLUE}${WHALE}Downloading the ReadySet Docker Compose file... ${NOCOLOR}"
   curl -Ls -o readyset.compose.yml "https://readyset.io/quickstart/compose.postgres.yml"
 }
 
 run_docker_compose() {
   echo -e "${BLUE}${WHALE}Running the ReadySet Docker Compose setup... ${NOCOLOR}"
-  docker compose -f readyset.compose.yml pull > /dev/null 2>&1
-  docker compose -f readyset.compose.yml up -d > /dev/null 2>&1
+  if ! docker compose -f readyset.compose.yml pull --quiet; then
+    echo -e "${RED}${ROTATING_LIGHT}Unable to pull ReadySet images.${NOCOLOR}"
+    exit 1
+  fi
+  if ! docker compose -f readyset.compose.yml up -d --wait-timeout 60; then
+    echo -e "${RED}${ROTATING_LIGHT}Docker-compose setup failed.${NOCOLOR}"
+    exit 1
+  fi
+
   echo -e "${GREEN}${GREEN_CHECK}ReadySet Docker Compose setup complete! ${NOCOLOR}"
-  echo -e "${INFO}To clean up, run \`docker-compose down\`"
+  echo -e "${INFO}To clean up, run \`docker-compose -f readyset.compose.yml down\`"
 }
 
 check_sample_data() {
@@ -129,7 +136,8 @@ import_data() {
     if command -v pv &>/dev/null; then
       pv imdb-postgres.sql | psql $CONNECTION_STRING >/dev/null 2>&1
     else
-      psql $CONNECTION_STRING <imdb-postgres.sql >/dev/null 2>&1
+      echo -e "This may take a few minutes. Install \`pv\` if you would like to see a progress bar for this step."
+      psql $CONNECTION_STRING < imdb-postgres.sql >/dev/null 2>&1
     fi
 
     echo -e "${GREEN}${GREEN_CHECK}Sample data imported successfully!${NOCOLOR}"
@@ -139,7 +147,7 @@ import_data() {
 display_arm_warning() {
   if [[ $(uname -m) == "arm64" ]]; then
     echo -e "${YELLOW}${WARNING}You are running on an ARM-based Machine, but ReadySet is currently built for x86_64."
-    echo -e "Query performance will be slower due to virtualization overhead.${NOCOLOR}"
+    echo -e "   Query performance will be slower due to virtualization overhead.${NOCOLOR}"
   fi
 }
 
@@ -359,7 +367,6 @@ free_form_connect() {
   psql $CONNECTION_STRING
 }
 
-
 print_exit_message() {
   echo ""
   echo -e "${BLUE}See ${NOCOLOR}https://docs.readyset.io/demo${BLUE} for more fun things to try.${NOCOLOR}"
@@ -368,17 +375,116 @@ print_exit_message() {
   echo "https://join.slack.com/t/readysetcommunity/shared_invite/zt-2272gtiz4-0024xeRJUPGWlRETQrGkFw"
 }
 
+switch_on_mode() {
+  read -rp "Would you like to run the demo or connect to your own postgres db? (demo(d)/postgres(p), default: d): " mode
+  if [[ $mode == "p" ]]; then
+    run_byo_postgres
+  else
+    run_demo
+  fi
+}
+
+postgres_docker_compose_setup() {
+  echo -e "${BLUE}${WHALE}Downloading the ReadySet Docker Compose file... ${NOCOLOR}"
+  curl -Ls -o /tmp/readyset.compose.yml "https://readyset.io/quickstart/compose.yml"
+  sed "s|# UPSTREAM_DB_URL:|UPSTREAM_DB_URL: $USER_CONNECTION_STRING|g" /tmp/readyset.compose.yml > readyset.compose.yml
+  run_docker_compose
+}
+
+wait_for_snapshot() {
+  echo -e "${BLUE}ReadySet will now snapshot the connected database.${NOCOLOR}"
+  echo -e "${BLUE}This may take a while if the data set is large.${NOCOLOR}"
+  echo -e "${WHALE} Watching logs for 'Streaming replication started'${NOCOLOR}"
+  echo "   with \`docker logs -f readyset-cache-1\`"
+
+  dots=""
+  error_count=0
+
+  while true; do
+    if docker logs readyset-cache-1 2> /dev/null | grep -q "Streaming replication started"; then
+      echo -e "\n${GREEN}${GREEN_CHECK} Replication started successfully.${NOCOLOR}"
+      break
+    elif docker logs readyset-cache-1 2> /dev/null | grep -q "ERROR"; then
+      # Allow for a few errors to occur before failing, in case the issue is transient.
+      error_count=$((error_count+1))
+      if [ $error_count -ge 5 ]; then
+        echo "${RED}Error detected in replication:${NOCOLOR}"
+        docker logs readyset-cache-1 | grep "ERROR" | tail -n 1
+        echo "See https://docs.readyset.io/get-started for troubleshooting, or reach out on slack."
+
+        exit 1
+      fi
+    fi
+    dots+="."
+    echo -ne "$dots"
+    sleep 5
+  done
+}
+
+explore_connection() {
+  echo -e "${BLUE}Welcome to ReadySet!${NOCOLOR}"
+  echo -e "${BLUE}Give these custom ReadySet SQL commands a try!${NOCOLOR}"
+  echo -e " ${BLUE}Show status info. about ReadySet.${NOCOLOR}"
+  echo -e "    SHOW READYSET STATUS;"
+  echo -e " ${BLUE}Show version info.${NOCOLOR}"
+  echo -e "    SHOW READYSET VERSION;"
+  echo -e " ${BLUE}Cache a query.${NOCOLOR}"
+  echo -e "    CREATE CACHE FROM <query, e.g. SELECT * from foo where bar = 1>;"
+  echo -e " ${BLUE}List information about current caches${NOCOLOR}"
+  echo -e "    SHOW CACHES;"
+  echo -e " ${BLUE}List tables that ReadySet has snapshotted${NOCOLOR}"
+  echo -e "    SHOW READYSET TABLES;"
+  echo -e " ${BLUE}Show queries that havent been cached and if they are supported or not.${NOCOLOR}"
+  echo -e "    SHOW PROXIED QUERIES;"
+  echo -e " ${BLUE}Drop an existing cache.${NOCOLOR}"
+  echo -e "    DROP CACHE [query_id];"
+}
+
+run_byo_postgres() {
+  echo -e "${BLUE}Enter your postgres connection string.${NOCOLOR}";
+  echo -e "Example: postgresql://postgres:readyset@127.0.0.1:5432/testdb"
+  read -rp "Connection String: " USER_CONNECTION_STRING
+  while ! docker run --rm postgres:14.1 psql "$USER_CONNECTION_STRING" -c ';'; do
+    echo -e "${RED}Unable to connect. Please double check connection string and try again.${NOCOLOR}"
+    # If it's a variation of localhost, give a hint about docker networking.
+    if  [[ $USER_CONNECTION_STRING == *"localhost"* ]] || [[ $USER_CONNECTION_STRING == *"127.0.0.1"* ]]; then
+      echo -e "${YELLOW}Hint: If you are connecting to a local postgres instance, you may need to use the docker host name or ip${NOCOLOR}"
+      echo -e "${YELLOW}(e.g. host.docker.internal for Macs, or 172.17.0.1 for linux. ${NOCOLOR})"
+    fi
+    echo -e "(The command used to check is \`docker run --rm postgres psql \$USER_CONNECTION_STRING -c ';'\`)"
+    read -rp "Connection String: " USER_CONNECTION_STRING
+  done
+  echo -e "${GREEN}${GREEN_CHECK}Connection String verified.${NOCOLOR}"
+
+  postgres_docker_compose_setup
+  # Transform the user's connection string into a readyset one:
+  echo "$USER_CONNECTION_STRING" | sed -E 's/@[^:/]+:[0-9]+/@127.0.0.1:5433/' > CONNECTION_STRING
+
+  display_arm_warning
+  wait_for_snapshot
+  explore_connection
+  free_form_connect
+  print_exit_message
+  echo -e "${BLUE}To reconnect to ReadySet, run:${NOCOLOR}"
+  echo -e "   psql $CONNECTION_STRING"
+}
+
+run_demo() {
+  download_demo_compose_file
+  run_docker_compose
+  check_sample_data
+  prompt_for_import
+  import_data
+  display_arm_warning
+  explore_data
+  free_form_connect
+  print_exit_message
+}
+
 # Main
 setup_colors
 print_banner
 check_docker_dependencies
 check_dependencies
-download_compose_file
-run_docker_compose
-check_sample_data
-prompt_for_import
-import_data
-display_arm_warning
-explore_data
-free_form_connect
-print_exit_message
+# run either demo or bring-your-own mode
+switch_on_mode
