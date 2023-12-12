@@ -13,18 +13,22 @@ DEMO_SCRIPT="./quickstart/readyset_demo.sh"
 
 DEMO_SCRIPT_TMP=$(mktemp)
 
-# rename localhost to work inside a docker container
-# If running locally on a mac, use this line to switch 127.0.0.1 with host.docker.internal.
-# sed 's/HOST="127.0.0.1"/HOST=host.docker.internal/' "$DEMO_SCRIPT" > "$DEMO_SCRIPT_TMP"
-# Use 172.17.0.1 for docker-in-docker on linux
-sed 's/HOST="127.0.0.1"/HOST=172.17.0.1/' "$DEMO_SCRIPT" > "$DEMO_SCRIPT_TMP"
+# Mac
+# LOCAL_IP=host.docker.internal
+# CI (Linux)
+LOCAL_IP=172.17.0.1
+
+# Rename localhost instances to work inside a docker container
+sed "s|HOST=127.0.0.1|HOST=$LOCAL_IP|" "$DEMO_SCRIPT"        \
+  | sed "s|mysql -h \"127.0.0.1\"|mysql -h \"$LOCAL_IP\"|"    \
+  | sed "s|127.0.0.1:3307|${LOCAL_IP}|g" > "$DEMO_SCRIPT_TMP"
+
 
 # Figure out how many times we need to press enter to run through the entire psql
 # interactive section of the demo.
 N_ENTERS=$(grep -c "Press enter" "$DEMO_SCRIPT_TMP")
 
 # Function to run the readyset demo automatically
-# Importing the sample data can take a few minutes, so there is a pretty long timeout.
 run_script() {
     # Annoyingly, expect exits with 0 if it sees a syntax error in the script, so let's
     # use return code 42 to signal success and manually translate that to 0 afterwards.
@@ -42,7 +46,7 @@ run_script() {
         }
 
         expect {
-          -re \"Would you like to run the demo or connect to your own postgres db.*\" {
+          -re \"Would you like to run the demo or connect to your own db.*\" {
             send \"$2\r\"
           }
         }
@@ -55,6 +59,9 @@ run_script() {
               expect -re \".*Import sample data.*\" {
                 send \"$3\r\"
               }
+
+              # Importing the sample data can take a few minutes
+              # so there is a pretty long timeout.
               set timeout 500
               if {\"$3\" == \"y\"} {
                 expect -re \".*Explore sample data in psql.*\" {
@@ -86,11 +93,24 @@ run_script() {
           expect -re \"Connection String:\" {
             send \"$3\r\"
           }
+
+          set timeout 60
+          expect -re \"Replication started successfully\" {}
+          set timeout 8
         }
 
-        expect -re \".*testdb=>\" {
-          send \"exit\r\n\"
+        if {\"$2\" == \"d\" || \"$2\" == \"p\"} {
+          # Postgres prompt
+          expect -re \".*testdb=>\" {
+            send \"exit\r\n\"
+          }
+        } else {
+          # MySQL prompt
+          expect -re \"MySQL\" {
+            send \"exit\r\n\"
         }
+      }
+
 
         expect {
           -re \"Join us on slack:\" {
@@ -193,20 +213,27 @@ test_all_combinations() {
     reset_deployment_state
 
     # Mac
-    # local connection_string="postgresql://postgres:readyset@host.docker.internal:5434/testdb"
+    # local psql_connection_string="postgresql://postgres:readyset@host.docker.internal:5434/testdb"
+    # local mysql_connection_string="mysql://root:readyset@host.docker.internal:3306/testdb"
     # Linux
-    local connection_string="postgresql://postgres:readyset@172.17.0.1:5434/testdb"
+    local psql_connection_string="postgresql://postgres:readyset@172.17.0.1:5434/testdb"
+    local mysql_connection_string="mysql://root:readyset@172.17.0.1:3306/testdb"
 
-    local combinations=("n d n n" "y d y y" "y p $connection_string")
+    local combinations=("n d n n" "y d y y" "y p $psql_connection_string" "y m $mysql_connection_string")
 
     for combo in "${combinations[@]}"; do
       if [[ "$combo" == *"m"* ]]; then
         reset_deployment_state
         run_mysql_docker
+        # Give the containers some extra time to start up and stabilize.
+        sleep 30
       elif [[ "$combo" == *"p"* ]]; then
         reset_deployment_state
         run_postgres_docker
+        # Give the containers some extra time to start up and stabilize.
+        sleep 30
       fi
+
 
       # Allow for a few retries for each step.
       max_retries=3

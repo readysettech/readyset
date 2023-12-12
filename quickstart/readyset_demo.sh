@@ -1,6 +1,6 @@
 #!/bin/bash -e
 
-HOST="127.0.0.1"
+HOST=127.0.0.1
 CONNECTION_STRING="postgresql://postgres:readyset@${HOST}:5433/testdb"
 
 setup_colors() {
@@ -56,11 +56,6 @@ check_docker_dependencies() {
 }
 
 check_dependencies() {
-  if ! command -v psql &>/dev/null; then
-    echo -e "${RED}psql (PostgreSQL client) is not installed. Please install psql to continue.${NOCOLOR}"
-    exit 1
-  fi
-
   if ! command -v curl &>/dev/null; then
     echo -e "${RED}curl is not installed. How did you even get this script?! Please install curl to continue.${NOCOLOR}"
     exit 1
@@ -96,7 +91,7 @@ check_sample_data() {
   dots=""
 
   while :; do
-    tables_exist=$(psql $CONNECTION_STRING -tAc "SELECT EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename IN ('title_basics', 'title_ratings'));" 2>/dev/null | head -n 1 | tr -d '[:space:]')
+    tables_exist=$(timeout 2 psql $CONNECTION_STRING -tAc "SELECT EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename IN ('title_basics', 'title_ratings'));" 2>/dev/null | head -n 1 | tr -d '[:space:]')
 
     if [[ $tables_exist == "t" ]] || [[ $retry_count -eq $max_retries ]]; then
       break
@@ -117,7 +112,7 @@ check_sample_data() {
 }
 
 prompt_for_import() {
-  if [[ $tables_exist == "f" ]]; then
+  if [[ $tables_exist != "t" ]]; then
     read -rp "Import sample data? (y/n, default: y): " import_choice
     import_choice=${import_choice:-y}
   fi
@@ -363,8 +358,14 @@ EOF
 
 free_form_connect() {
   echo -e "${BLUE}Connecting to ReadySet...${NOCOLOR}"
-  echo -e "${BLUE}Type \q to exit.${NOCOLOR}"
-  psql $CONNECTION_STRING
+  if [[ $1 == "psql" ]]; then
+    echo -e "${BLUE}Type \q to exit.${NOCOLOR}"
+    psql $CONNECTION_STRING
+  else
+    echo -e "${BLUE}Type 'exit' to exit.${NOCOLOR}"
+    parse_mysql_connection_string
+    mysql -h "127.0.0.1" -P "3307" -u $username -p$password
+  fi
 }
 
 print_exit_message() {
@@ -373,14 +374,37 @@ print_exit_message() {
   echo ""
   echo -e "${BLUE}Join us on slack:${NOCOLOR}"
   echo "https://join.slack.com/t/readysetcommunity/shared_invite/zt-2272gtiz4-0024xeRJUPGWlRETQrGkFw"
+
+  if [[ $1 == "psql" ]]; then
+    echo -e "${BLUE}To connect to ReadySet again, run:${NOCOLOR}"
+    echo -e "    psql $CONNECTION_STRING"
+  elif [[ $1 == "mysql" ]]; then
+    echo -e "${BLUE}To connect to ReadySet again, run:${NOCOLOR}"
+    echo -e "mysql -h 127.0.0.1 -P 3307 -u $username -p$password"
+  fi
 }
 
 switch_on_mode() {
-  read -rp "Would you like to run the demo or connect to your own postgres db? (demo(d)/postgres(p), default: d): " mode
+  echo -e "${BLUE}Would you like to run the demo or connect to your own db?${NOCOLOR}"
+  read -rp "demo(d)/postgres(p)/mysql(m), default: d: " mode
   if [[ $mode == "p" ]]; then
+    if ! command -v psql &>/dev/null; then
+      echo -e "${RED}psql (PostgreSQL client) is not installed. Please install psql to continue.${NOCOLOR}"
+      exit 1
+    fi
+
     run_byo_postgres
-  else
+  elif [[ $mode == "m" ]]; then
+    if ! command -v mysql &>/dev/null; then
+      echo -e "${RED}mysql (MySQL client) is not installed. Please install mysql to continue.${NOCOLOR}"
+      exit 1
+    fi
+    run_byo_mysql
+  elif [[ $mode == "d" ]]; then
     run_demo
+  else
+    echo -e "${RED}Invalid option. Please try again.${NOCOLOR}"
+    switch_on_mode
   fi
 }
 
@@ -391,17 +415,31 @@ postgres_docker_compose_setup() {
   run_docker_compose
 }
 
+mysql_docker_compose_setup() {
+  # We use the same compose file and still inject the connection string, but also replace port 5433 with 3307 for mysql
+  echo -e "${BLUE}${WHALE}Downloading the ReadySet Docker Compose file... ${NOCOLOR}"
+  curl -Ls -o /tmp/readyset.compose.yml "https://readyset.io/quickstart/compose.yml"
+  sed "s|# UPSTREAM_DB_URL:|UPSTREAM_DB_URL: $USER_CONNECTION_STRING|g" /tmp/readyset.compose.yml | sed "s|5433|3307|g" > readyset.compose.yml
+  run_docker_compose
+}
+
 wait_for_snapshot() {
+  if [[ $1 == "psql" ]]; then
+    expected_log="Streaming replication started"
+  elif [[ $1 == "mysql" ]]; then
+    expected_log="Starting binlog replication"
+  fi
+
   echo -e "${BLUE}ReadySet will now snapshot the connected database.${NOCOLOR}"
   echo -e "${BLUE}This may take a while if the data set is large.${NOCOLOR}"
-  echo -e "${WHALE} Watching logs for 'Streaming replication started'${NOCOLOR}"
+  echo -e "${WHALE} Watching logs for \"$expected_log\" ${NOCOLOR}"
   echo "   with \`docker logs -f readyset-cache-1\`"
 
   dots=""
   error_count=0
 
   while true; do
-    if docker logs readyset-cache-1 2> /dev/null | grep -q "Streaming replication started"; then
+    if docker logs readyset-cache-1 2> /dev/null | grep -q "$expected_log"; then
       echo -e "\n${GREEN}${GREEN_CHECK} Replication started successfully.${NOCOLOR}"
       break
     elif docker logs readyset-cache-1 2> /dev/null | grep -q "ERROR"; then
@@ -446,11 +484,7 @@ run_byo_postgres() {
   read -rp "Connection String: " USER_CONNECTION_STRING
   while ! docker run --rm postgres:14.1 psql "$USER_CONNECTION_STRING" -c ';'; do
     echo -e "${RED}Unable to connect. Please double check connection string and try again.${NOCOLOR}"
-    # If it's a variation of localhost, give a hint about docker networking.
-    if  [[ $USER_CONNECTION_STRING == *"localhost"* ]] || [[ $USER_CONNECTION_STRING == *"127.0.0.1"* ]]; then
-      echo -e "${YELLOW}Hint: If you are connecting to a local postgres instance, you may need to use the docker host name or ip${NOCOLOR}"
-      echo -e "${YELLOW}(e.g. host.docker.internal for Macs, or 172.17.0.1 for linux. ${NOCOLOR})"
-    fi
+    print_localhost_hint
     echo -e "(The command used to check is \`docker run --rm postgres psql \$USER_CONNECTION_STRING -c ';'\`)"
     read -rp "Connection String: " USER_CONNECTION_STRING
   done
@@ -460,13 +494,49 @@ run_byo_postgres() {
   # Transform the user's connection string into a readyset one:
   echo "$USER_CONNECTION_STRING" | sed -E 's/@[^:/]+:[0-9]+/@127.0.0.1:5433/' > CONNECTION_STRING
 
+  run_after_connection "psql"
+}
+
+run_after_connection() {
   display_arm_warning
-  wait_for_snapshot
+  wait_for_snapshot $1
   explore_connection
-  free_form_connect
-  print_exit_message
-  echo -e "${BLUE}To reconnect to ReadySet, run:${NOCOLOR}"
-  echo -e "   psql $CONNECTION_STRING"
+  free_form_connect $1
+  print_exit_message $1
+}
+
+print_localhost_hint() {
+  # If it's a variation of localhost, give a hint about docker networking.
+  if  [[ $USER_CONNECTION_STRING == *"localhost"* ]] || [[ $USER_CONNECTION_STRING == *"127.0.0.1"* ]]; then
+    echo -e "${YELLOW}Hint: If you are connecting locally via docker, you may need to use the docker host name or ip${NOCOLOR}"
+    echo -e "${YELLOW}(e.g. host.docker.internal for Macs, or 172.17.0.1 for linux.) ${NOCOLOR}"
+  fi
+}
+
+parse_mysql_connection_string() {
+  username=$(echo "$USER_CONNECTION_STRING" | sed -E 's|mysql://([^:]+):.*|\1|')
+  password=$(echo "$USER_CONNECTION_STRING" | sed -E 's|mysql://[^:]+:(.*)@.*|\1|')
+  host=$(echo "$USER_CONNECTION_STRING" | sed -E 's|mysql://[^:]+:[^@]+@([^:/]+).*|\1|')
+  port=$(echo "$USER_CONNECTION_STRING" | sed -E 's|mysql://[^:]+:[^@]+@[^:]+:([0-9]+).*|\1|')
+}
+
+run_byo_mysql() {
+  echo -e "${BLUE}Enter your mysql connection string.${NOCOLOR}";
+  echo -e "Example: mysql://root:readyset@127.0.0.1:3306/testdb"
+  read -rp "Connection String: " USER_CONNECTION_STRING
+  parse_mysql_connection_string
+  while ! docker run --rm  mysql mysql -h $host -P $port -u $username -p$password -e ';' > /dev/null 2>&1; do
+    echo -e "${RED}Unable to connect. Please double check connection string and try again.${NOCOLOR}"
+    print_localhost_hint
+    echo -e "(The command used to check is \`docker run --rm mysql mysql -h $host -P $port -u $username -p$password -e ';'\`)"
+    read -rp "Connection String: " USER_CONNECTION_STRING
+    parse_mysql_connection_string
+  done
+  echo -e "${GREEN}${GREEN_CHECK}Connection String verified.${NOCOLOR}"
+
+  mysql_docker_compose_setup
+  echo "$USER_CONNECTION_STRING" | sed -E 's/@[^:/]+:[0-9]+/@127.0.0.1:3307/' > CONNECTION_STRING
+  run_after_connection "mysql"
 }
 
 run_demo() {
@@ -477,8 +547,8 @@ run_demo() {
   import_data
   display_arm_warning
   explore_data
-  free_form_connect
-  print_exit_message
+  free_form_connect "psql"
+  print_exit_message "psql"
 }
 
 # Main
