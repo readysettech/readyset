@@ -14,7 +14,7 @@ services:
       DB_DIR: /state
       PROMETHEUS_METRICS: true
       QUERY_CACHING: explicit
-      QUERY_LOG_MODE: all-queries
+      QUERY_LOG_MODE: all
       STANDALONE: true
       DEPLOYMENT: docker_compose_deployment
       LISTEN_ADDRESS: 0.0.0.0:5433
@@ -31,6 +31,26 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+  prometheus:
+    image: public.ecr.aws/readyset/readyset-prometheus:latest
+    healthcheck:
+      test: ["CMD", "nc", "-vz", "localhost", "9090"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    expose:
+      - 9090
+    volumes:
+      - "prometheus:/prometheus"
+  grafana:
+    image: public.ecr.aws/readyset/readyset-grafana:latest
+    ports:
+      - "4000:4000"
+    environment:
+      UPSTREAM_DB_URL: postgresql://postgres:readyset@postgres/testdb
+      RS_HOST: cache
+      RS_PORT: 5433
+      RS_GRAFANA_PORT: 4000
   postgres:
     image: postgres:14
     environment:
@@ -51,4 +71,5 @@ services:
       - postgres:/var/lib/postgresql/data
 volumes:
   postgres: ~
+  prometheus: ~
   readyset: ~

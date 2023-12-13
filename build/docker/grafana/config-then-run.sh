@@ -8,7 +8,6 @@ RE='(.+):\/\/(.+):(.+)@([^:\/]+)(:[0-9]+)?(\/(.+))?'
 RS_DB_TYPE=${BASH_REMATCH[1]}
 RS_USER=${BASH_REMATCH[2]}
 RS_PASS=${BASH_REMATCH[3]}
-RS_HOST=${BASH_REMATCH[4]}
 RS_DB_NAME=${BASH_REMATCH[7]}
 
 if [[ $RS_DB_TYPE = "mysql" ]]; then
