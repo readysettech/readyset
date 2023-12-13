@@ -15,9 +15,7 @@ use readyset_server::consensus::AuthorityType;
 use readyset_server::metrics::{
     install_global_recorder, CompositeMetricsRecorder, MetricsRecorder,
 };
-use readyset_server::{
-    check_disk_space, resolve_addr, Builder, NoriaMetricsRecorder, WorkerOptions,
-};
+use readyset_server::{resolve_addr, Builder, NoriaMetricsRecorder, WorkerOptions};
 use readyset_telemetry_reporter::{TelemetryEvent, TelemetryInitializer};
 use readyset_version::*;
 use tracing::{error, info};
@@ -149,21 +147,10 @@ struct Options {
     /// impact startup.
     #[arg(long, hide = true)]
     wait_for_failpoint: bool,
-
-    /// Do not perform a disk space check on startup. ReadySet requires a minimum of 10GiB of
-    /// available disk space to prevent potential failures during database snapshot operations.
-    /// By default, the program will terminate if there's insufficient space. Enable this
-    /// option to bypass the disk space check at startup.
-    // FIXME: REA-3587 temporarily revert - set 'no_disk_space_check' to true by default
-    #[arg(long, default_value = "true", hide = true)]
-    no_disk_space_check: bool,
 }
 
 fn main() -> anyhow::Result<()> {
     let opts: Options = Options::parse();
-    if !opts.no_disk_space_check {
-        check_disk_space()?;
-    }
     let rt = tokio::runtime::Builder::new_multi_thread()
         .with_sys_hooks()
         .enable_all()

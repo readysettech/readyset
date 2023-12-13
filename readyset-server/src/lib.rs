@@ -457,10 +457,7 @@ use anyhow::anyhow;
 use clap::Args;
 use dataflow::DomainConfig;
 use serde::{Deserialize, Serialize};
-use sys_info::disk_info;
 use tracing::warn;
-
-const MINIMUM_DISK_SPACE: u64 = 10 * 1024 * 1024 * 1024;
 
 /// Configuration for a running ReadySet cluster
 // WARNING: if you change this structure or any of the structures used in its fields, make sure to
@@ -499,21 +496,6 @@ pub struct Config {
     /// Interval on which to automatically run recovery as long as there are unscheduled domains
     #[serde(default = "default_background_recovery_interval")]
     pub(crate) background_recovery_interval: Duration,
-}
-
-pub fn check_disk_space() -> anyhow::Result<()> {
-    let disk_info = disk_info()?;
-
-    if disk_info.free < MINIMUM_DISK_SPACE {
-        anyhow::bail!(
-            "Insufficient disk space: {} bytes available (minimum {} is required). \
-                    Run the server with '--no-disk-space-check' to bypass this check.",
-            disk_info.free,
-            MINIMUM_DISK_SPACE
-        );
-    }
-
-    Ok(())
 }
 
 fn default_background_recovery_interval() -> Duration {
