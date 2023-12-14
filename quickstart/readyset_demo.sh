@@ -129,7 +129,7 @@ import_data() {
 
     echo -e "${BLUE}${ELEPHANT}Importing sample data...${NOCOLOR}"
     if command -v pv &>/dev/null; then
-      pv imdb-postgres.sql | psql $CONNECTION_STRING >/dev/null 2>&1
+      pv -w 80 imdb-postgres.sql | psql $CONNECTION_STRING >/dev/null 2>&1
     else
       echo -e "This may take a few minutes. Install \`pv\` if you would like to see a progress bar for this step."
       psql $CONNECTION_STRING < imdb-postgres.sql >/dev/null 2>&1
