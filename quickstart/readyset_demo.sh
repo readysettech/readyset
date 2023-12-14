@@ -67,6 +67,11 @@ download_demo_compose_file() {
   curl -Ls -o readyset.compose.yml "https://readyset.io/quickstart/compose.postgres.yml"
 }
 
+download_byo_compose_file() {
+  echo -e "${BLUE}${WHALE}Downloading the ReadySet Docker Compose file... ${NOCOLOR}"
+  curl -Ls -o /tmp/readyset.compose.yml "https://readyset.io/quickstart/compose.yml"
+}
+
 run_docker_compose() {
   echo -e "${BLUE}${WHALE}Running the ReadySet Docker Compose setup... ${NOCOLOR}"
   if ! docker compose -f readyset.compose.yml pull --quiet; then
@@ -409,16 +414,14 @@ switch_on_mode() {
 }
 
 postgres_docker_compose_setup() {
-  echo -e "${BLUE}${WHALE}Downloading the ReadySet Docker Compose file... ${NOCOLOR}"
-  curl -Ls -o /tmp/readyset.compose.yml "https://readyset.io/quickstart/compose.yml"
+  download_byo_compose_file
   sed "s|# UPSTREAM_DB_URL:|UPSTREAM_DB_URL: $USER_CONNECTION_STRING|g" /tmp/readyset.compose.yml > readyset.compose.yml
   run_docker_compose
 }
 
 mysql_docker_compose_setup() {
+  download_byo_compose_file
   # We use the same compose file and still inject the connection string, but also replace port 5433 with 3307 for mysql
-  echo -e "${BLUE}${WHALE}Downloading the ReadySet Docker Compose file... ${NOCOLOR}"
-  curl -Ls -o /tmp/readyset.compose.yml "https://readyset.io/quickstart/compose.yml"
   sed "s|# UPSTREAM_DB_URL:|UPSTREAM_DB_URL: $USER_CONNECTION_STRING|g" /tmp/readyset.compose.yml | sed "s|5433|3307|g" > readyset.compose.yml
   run_docker_compose
 }
