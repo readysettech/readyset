@@ -13,15 +13,18 @@ DEMO_SCRIPT="./quickstart/readyset_demo.sh"
 
 DEMO_SCRIPT_TMP=$(mktemp)
 
-# Mac
-# LOCAL_IP=host.docker.internal
-# CI (Linux)
-LOCAL_IP=172.17.0.1
+# If on a Mac, override the docker host address to be the host.docker.internal
+if [ -z "$DOCKER_HOST_ADDR" ]; then
+    # This will likely be 172.17.0.1 if on Linux
+    DOCKER_HOST_ADDR=$(docker network inspect bridge --format='{{(index .IPAM.Config 0).Gateway}}')
+fi
+
+echo "DOCKER HOST ADDR IS $DOCKER_HOST_ADDR"
 
 # Rename localhost instances to work inside a docker container
-sed "s|HOST=127.0.0.1|HOST=$LOCAL_IP|" "$DEMO_SCRIPT"        \
-  | sed "s|mysql -h \"127.0.0.1\"|mysql -h \"$LOCAL_IP\"|"    \
-  | sed "s|127.0.0.1:3307|${LOCAL_IP}|g" > "$DEMO_SCRIPT_TMP"
+sed "s|HOST=127.0.0.1|HOST=$DOCKER_HOST_ADDR|" "$DEMO_SCRIPT"        \
+  | sed "s|mysql -h \"127.0.0.1\"|mysql -h \"$DOCKER_HOST_ADDR\"|"    \
+  | sed "s|127.0.0.1:3307|${DOCKER_HOST_ADDR}|g" > "$DEMO_SCRIPT_TMP"
 
 
 # Figure out how many times we need to press enter to run through the entire psql
@@ -212,12 +215,8 @@ run_postgres_docker() {
 test_all_combinations() {
     reset_deployment_state
 
-    # Mac
-    # local psql_connection_string="postgresql://postgres:readyset@host.docker.internal:5434/testdb"
-    # local mysql_connection_string="mysql://root:readyset@host.docker.internal:3306/testdb"
-    # Linux
-    local psql_connection_string="postgresql://postgres:readyset@172.17.0.1:5434/testdb"
-    local mysql_connection_string="mysql://root:readyset@172.17.0.1:3306/testdb"
+    local psql_connection_string="postgresql://postgres:readyset@$DOCKER_HOST_ADDR:5434/testdb"
+    local mysql_connection_string="mysql://root:readyset@$DOCKER_HOST_ADDR:3306/testdb"
 
     local combinations=("n d n n" "y d y y" "y p $psql_connection_string" "y m $mysql_connection_string")
 
