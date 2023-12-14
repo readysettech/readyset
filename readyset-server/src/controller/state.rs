@@ -31,7 +31,7 @@ use failpoint_macros::set_failpoint;
 use futures::stream::{self, FuturesUnordered, StreamExt, TryStreamExt};
 use futures::{FutureExt, TryFutureExt, TryStream};
 use metrics::{gauge, histogram};
-use nom_sql::{CreateCacheStatement, NonReplicatedRelation, Relation, SqlIdentifier, SqlQuery};
+use nom_sql::{NonReplicatedRelation, Relation, SqlIdentifier};
 use petgraph::visit::{Bfs, IntoNodeReferences};
 use petgraph::Direction;
 use rand::Rng;
@@ -46,7 +46,7 @@ use readyset_client::failpoints;
 use readyset_client::internal::{MaterializationStatus, ReplicaAddress};
 use readyset_client::metrics::recorded;
 use readyset_client::recipe::changelist::{Change, ChangeList};
-use readyset_client::recipe::ExtendRecipeSpec;
+use readyset_client::recipe::{CreateCache, ExtendRecipeSpec};
 use readyset_client::{
     PersistencePoint, SingleKeyEviction, TableReplicationStatus, TableStatus, ViewCreateRequest,
     ViewFilter, ViewRequest, ViewSchema,
@@ -69,7 +69,7 @@ use crate::controller::domain_handle::DomainHandle;
 use crate::controller::migrate::materialization::Materializations;
 use crate::controller::migrate::scheduling::Scheduler;
 use crate::controller::migrate::{routing, DomainMigrationMode, DomainMigrationPlan, Migration};
-use crate::controller::sql::Schema;
+use crate::controller::sql::{RecipeExpr, Schema};
 use crate::controller::{
     schema, ControllerState, DomainPlacementRestriction, NodeRestrictionKey, Worker,
     WorkerIdentifier,
@@ -264,7 +264,7 @@ impl DfState {
     /// Get a map of all known views created from `CREATE CACHE` statements, mapping the name of the
     /// view to a tuple of (`SelectStatement`, always) where always is a bool that indicates whether
     /// the `CREATE CACHE` statement was created with the optional `ALWAYS` argument.
-    pub(super) fn verbose_views(&self) -> Vec<CreateCacheStatement> {
+    pub(super) fn verbose_views(&self) -> Vec<CreateCache> {
         self.ingredients
             .externals(petgraph::EdgeDirection::Outgoing)
             .filter_map(|n| {
@@ -282,7 +282,7 @@ impl DfState {
                     // Only return ingredients created from "CREATE CACHE"
                     match query {
                         // CacheInner::ID should have been expanded to CacheInner::Statement
-                        SqlQuery::CreateCache(stmt) if stmt.inner.is_ok() => Some(stmt),
+                        RecipeExpr::Cache(inner) => Some(inner),
                         _ => None,
                     }
                 } else {

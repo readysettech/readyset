@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use futures_util::future;
 use hyper::client::HttpConnector;
-use nom_sql::{CreateCacheStatement, NonReplicatedRelation, Relation};
+use nom_sql::{NonReplicatedRelation, Relation};
 use parking_lot::RwLock;
 use petgraph::graph::NodeIndex;
 use readyset_errors::{
@@ -29,7 +29,7 @@ use crate::debug::stats;
 use crate::internal::{DomainIndex, ReplicaAddress};
 use crate::metrics::MetricsDump;
 use crate::recipe::changelist::ChangeList;
-use crate::recipe::{ExtendRecipeResult, ExtendRecipeSpec, MigrationStatus};
+use crate::recipe::{CreateCache, ExtendRecipeResult, ExtendRecipeSpec, MigrationStatus};
 use crate::status::ReadySetControllerStatus;
 use crate::table::{PersistencePoint, Table, TableBuilder, TableRpc};
 use crate::view::{View, ViewBuilder, ViewRpc};
@@ -489,7 +489,7 @@ impl ReadySetHandle {
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call
     /// this method.
-    pub async fn verbose_views(&mut self) -> ReadySetResult<Vec<CreateCacheStatement>> {
+    pub async fn verbose_views(&mut self) -> ReadySetResult<Vec<CreateCache>> {
         self.simple_post_request("verbose_views").await
     }
 

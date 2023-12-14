@@ -6,7 +6,7 @@ use itertools::Itertools;
 use nom_sql::analysis::visit::{self, Visitor};
 use nom_sql::{
     BinaryOperator, Column, ColumnConstraint, CreateTableBody, DeleteStatement, Expr,
-    InsertStatement, Literal, SelectStatement, SqlIdentifier, SqlQuery, TableKey, UpdateStatement,
+    InsertStatement, Literal, SelectStatement, SqlQuery, TableKey, UpdateStatement,
 };
 use readyset_client::{ColumnSchema, Modification, Operation};
 use readyset_data::{DfType, DfValue, Dialect};
@@ -14,7 +14,6 @@ use readyset_errors::{
     bad_request_err, invalid_query, invalid_query_err, invariant, invariant_eq, unsupported,
     unsupported_err, ReadySetResult,
 };
-use readyset_util::hash::hash;
 
 /// Helper for flatten_conditional - returns true if the
 /// expression is "valid" (i.e. not something like `a = 1 AND a = 2`.
@@ -589,13 +588,6 @@ pub(crate) fn coerce_params(
     } else {
         Ok(None)
     }
-}
-
-pub(crate) fn generate_query_name(
-    statement: &nom_sql::SelectStatement,
-    schema_search_path: &[SqlIdentifier],
-) -> String {
-    format!("q_{:x}", hash(&(statement, schema_search_path)))
 }
 
 pub(crate) fn create_dummy_column(name: &str) -> ColumnSchema {

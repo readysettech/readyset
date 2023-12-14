@@ -12,7 +12,7 @@ use nom_sql::{
 };
 use petgraph::graph::NodeIndex;
 use readyset_client::recipe::changelist::{AlterTypeChange, Change, PostgresTableMetadata};
-use readyset_client::recipe::ChangeList;
+use readyset_client::recipe::{ChangeList, CreateCache, CreateTable, CreateView};
 use readyset_data::{DfType, Dialect, PgEnumMetadata};
 use readyset_errors::{
     internal, internal_err, invalid_query_err, invariant, unsupported, ReadySetError,
@@ -29,7 +29,7 @@ use self::query_graph::to_query_graph;
 pub(crate) use self::recipe::{QueryID, Recipe, Schema};
 use self::registry::ExprRegistry;
 use crate::controller::mir_to_flow::{mir_node_to_flow_parts, mir_query_to_flow_parts};
-use crate::controller::sql::registry::RecipeExpr;
+pub(crate) use crate::controller::sql::registry::RecipeExpr;
 use crate::controller::Migration;
 use crate::sql::mir::MirRemovalResult;
 use crate::ReuseConfigType;
@@ -246,9 +246,9 @@ impl SqlIncorporator {
                         });
                     }
                     match self.registry.get(&cts.table) {
-                        Some(RecipeExpr::Table {
+                        Some(RecipeExpr::Table(CreateTable {
                             body: current_body, ..
-                        }) => {
+                        })) => {
                             // Table already exists, so check if it has been changed.
                             if current_body != &body {
                                 // Table has changed. Drop and recreate.
@@ -269,7 +269,7 @@ impl SqlIncorporator {
                                 "table exists, but hasn't changed. Ignoring..."
                             );
                         }
-                        Some(RecipeExpr::View { .. }) => {
+                        Some(RecipeExpr::View(_)) => {
                             return Err(ReadySetError::ViewAlreadyExists(
                                 cts.table.name.clone().into(),
                             ))
@@ -277,11 +277,11 @@ impl SqlIncorporator {
                         _ => {
                             self.invalidate_queries_for_added_relation(&cts.table, mig)?;
                             self.add_table(cts.table.clone(), body.clone(), pg_meta.clone(), mig)?;
-                            self.registry.add_query(RecipeExpr::Table {
+                            self.registry.add_query(RecipeExpr::Table(CreateTable {
                                 name: cts.table,
                                 body,
                                 pg_meta,
-                            })?;
+                            }))?;
                         }
                     }
                 }
@@ -417,14 +417,15 @@ impl SqlIncorporator {
                             .collect::<Vec<_>>()
                         {
                             match expr {
-                                RecipeExpr::Table {
+                                RecipeExpr::Table(CreateTable {
                                     name,
                                     body,
                                     pg_meta,
-                                } => {
+                                }) => {
                                     self.drop_and_recreate_table(&name, body, pg_meta, mig)?;
                                 }
-                                RecipeExpr::View { name, .. } | RecipeExpr::Cache { name, .. } => {
+                                RecipeExpr::View(CreateView { name, .. })
+                                | RecipeExpr::Cache(CreateCache { name, .. }) => {
                                     self.remove_expression(&name, mig)?;
                                 }
                             }
@@ -457,9 +458,9 @@ impl SqlIncorporator {
                                 // before removing tables and views referencing those custom types -
                                 // but we might as well be more
                                 // permissive here
-                                RecipeExpr::Table { name, .. }
-                                | RecipeExpr::View { name, .. }
-                                | RecipeExpr::Cache { name, .. } => {
+                                RecipeExpr::Table(CreateTable { name, .. })
+                                | RecipeExpr::View(CreateView { name, .. })
+                                | RecipeExpr::Cache(CreateCache { name, .. }) => {
                                     self.remove_expression(&name, mig)?;
                                 }
                             }
@@ -502,11 +503,11 @@ impl SqlIncorporator {
                         .collect::<Vec<_>>()
                     {
                         match expr {
-                            RecipeExpr::Table {
+                            RecipeExpr::Table(CreateTable {
                                 name: table_name,
                                 body,
                                 pg_meta: _,
-                            } => {
+                            }) => {
                                 for field in body.fields.iter() {
                                     if matches!(&field.sql_type, SqlType::Other(t) if t == &name) {
                                         self.set_base_column_type(
@@ -521,7 +522,8 @@ impl SqlIncorporator {
                                 table_names.push(table_name);
                             }
 
-                            RecipeExpr::View { name, .. } | RecipeExpr::Cache { name, .. } => {
+                            RecipeExpr::View(CreateView { name, .. })
+                            | RecipeExpr::Cache(CreateCache { name, .. }) => {
                                 queries_to_remove.push(name.clone());
                             }
                         }
@@ -613,6 +615,7 @@ impl SqlIncorporator {
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<Relation> {
         let name = name.unwrap_or_else(|| format!("q_{}", self.num_queries).into());
+        let id = readyset_client::query::generate_id(&stmt, schema_search_path);
 
         let mut invalidating_tables = vec![];
         let detect_placeholders_config =
@@ -668,11 +671,12 @@ impl SqlIncorporator {
             Err(err) => Err(err),
         }?;
 
-        let aliased = !self.registry.add_query(RecipeExpr::Cache {
+        let aliased = !self.registry.add_query(RecipeExpr::Cache(CreateCache {
             name: name.clone(),
             statement: stmt,
             always,
-        })?;
+            id,
+        }))?;
         self.registry
             .insert_invalidating_tables(name.clone(), invalidating_tables)?;
 
@@ -897,11 +901,11 @@ impl SqlIncorporator {
             });
         };
         self.add_table(table.clone(), body.clone(), pg_meta.clone(), mig)?;
-        self.registry.add_query(RecipeExpr::Table {
+        self.registry.add_query(RecipeExpr::Table(CreateTable {
             name: table.clone(),
             body,
             pg_meta,
-        })?;
+        }))?;
         Ok(())
     }
 
@@ -1166,10 +1170,10 @@ impl SqlIncorporator {
             )?,
         };
 
-        if !self.registry.add_query(RecipeExpr::View {
+        if !self.registry.add_query(RecipeExpr::View(CreateView {
             name: name.clone(),
             definition,
-        })? {
+        }))? {
             // The expression is already present, and we successfully added
             // a new alias for it.
             return Ok(());

@@ -25,7 +25,6 @@ use tracing::{debug, error, info, instrument};
 
 use crate::backend::NoriaConnector;
 use crate::query_status_cache::QueryStatusCache;
-use crate::utils;
 
 pub struct MigrationHandler {
     /// Connection used to issue prepare requests to ReadySet.
@@ -331,8 +330,10 @@ impl MigrationHandler {
                 .update_query_migration_state(view_request, MigrationState::Unsupported);
             return;
         }
-        let qname =
-            utils::generate_query_name(&view_request.statement, &view_request.schema_search_path);
+        let qname = readyset_client::query::generate_id(
+            &view_request.statement,
+            &view_request.schema_search_path,
+        );
 
         // We do not need to provide a real "create cache" String for a dry run migration
         let changelist = ChangeList::from_change(

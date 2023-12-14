@@ -1910,6 +1910,84 @@ async fn drop_all_caches_clears_authority_list() {
     shutdown_tx.shutdown().await;
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn show_caches_persist_after_restart() {
+    readyset_tracing::init_test_logging();
+
+    async fn validate_show_caches(conn: &tokio_postgres::Client) {
+        let rows: Vec<Vec<String>> = conn
+            .simple_query("SHOW CACHES")
+            .await
+            .unwrap()
+            .iter()
+            .filter_map(|m| match m {
+                SimpleQueryMessage::Row(r) => {
+                    Some((0..4).map(|i| r.get(i).unwrap().to_string()).collect())
+                }
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(rows.len(), 2);
+
+        let row = rows.first().unwrap();
+        assert_eq!(row[0], "q_f6f660a1a96013de");
+        assert_eq!(row[1], "q1");
+        assert_eq!(
+            row[2],
+            "SELECT\n  \"public\".\"t\".\"x\"\nFROM\n  \"public\".\"t\""
+        );
+        assert_eq!(row[3], "fallback allowed");
+
+        let row = rows.get(1).unwrap();
+        assert_eq!(row[0], "q_68036f610508d572");
+        assert_eq!(row[1], "q2");
+        assert_eq!(row[2], "SELECT\n  \"public\".\"t\".\"x\"\nFROM\n  \"public\".\"t\"\nWHERE\n  (\"public\".\"t\".\"x\" = $1)");
+        assert_eq!(row[3], "no fallback");
+    }
+
+    let (config, handle, authority, storage_dir, shutdown_tx) =
+        setup_standalone_with_authority("show_caches_persistence", None, None, true, true).await;
+
+    let queries = [
+        "CREATE TABLE t (x int);",
+        "CREATE CACHE q1 FROM SELECT x FROM t;",
+        "CREATE CACHE ALWAYS q2 FROM SELECT x FROM t where x = 1;",
+    ];
+
+    let conn = connect(config).await;
+    for query in queries {
+        eventually!(conn.simple_query(query).await.is_ok());
+    }
+
+    eventually! {
+        validate_show_caches(&conn).await;
+        true
+    }
+
+    // Stop the server and start a new one
+    shutdown_tx.shutdown().await;
+    drop(handle);
+    sleep().await;
+
+    let (config, _handle, _, _, shutdown_tx) = setup_standalone_with_authority(
+        "show_caches_persistence",
+        Some(authority),
+        Some(storage_dir),
+        true,
+        false,
+    )
+    .await;
+
+    let conn = connect(config).await;
+    eventually! {
+        validate_show_caches(&conn).await;
+        true
+    }
+
+    shutdown_tx.shutdown().await;
+}
+
 mod http_tests {
     use super::*;
     #[tokio::test(flavor = "multi_thread")]

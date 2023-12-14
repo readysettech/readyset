@@ -3,10 +3,10 @@ use std::collections::{HashMap, HashSet};
 
 use nom_sql::analysis::visit::{self, Visitor};
 use nom_sql::{
-    CreateTableBody, CreateTableStatement, CreateViewStatement, ItemPlaceholder, Literal, Relation,
+    CreateTableStatement, CreateViewStatement, ItemPlaceholder, Literal, Relation,
     SelectSpecification, SelectStatement, SqlType,
 };
-use readyset_client::recipe::changelist::PostgresTableMetadata;
+use readyset_client::recipe::{CreateCache, CreateTable, CreateView};
 use readyset_client::PlaceholderIdx;
 use readyset_errors::{internal_err, unsupported_err, ReadySetError, ReadySetResult};
 use readyset_sql_passes::SelectStatementSkeleton;
@@ -23,31 +23,20 @@ use super::QueryID;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum RecipeExpr {
     /// Expression that represents a `CREATE TABLE` statement.
-    Table {
-        name: Relation,
-        body: CreateTableBody,
-        pg_meta: Option<PostgresTableMetadata>,
-    },
+    Table(CreateTable),
     /// Expression that represents a `CREATE VIEW` statement.
-    View {
-        name: Relation,
-        definition: SelectSpecification,
-    },
+    View(CreateView),
     /// Expression that represents a `CREATE CACHE` statement.
-    Cache {
-        name: Relation,
-        statement: SelectStatement,
-        always: bool,
-    },
+    Cache(CreateCache),
 }
 
 impl RecipeExpr {
     /// Returns the name associated with the [`RecipeExpr`].
     pub(crate) fn name(&self) -> &Relation {
         match self {
-            RecipeExpr::Table { name, .. }
-            | RecipeExpr::View { name, .. }
-            | RecipeExpr::Cache { name, .. } => name,
+            RecipeExpr::Table(CreateTable { name, .. })
+            | RecipeExpr::View(CreateView { name, .. })
+            | RecipeExpr::Cache(CreateCache { name, .. }) => name,
         }
     }
 
@@ -56,8 +45,8 @@ impl RecipeExpr {
     /// If the [`RecipeExpr`] is a [`RecipeExpr::Table`], then the set will be empty.
     pub(super) fn table_references(&self) -> HashSet<Relation> {
         match self {
-            RecipeExpr::Table { .. } => HashSet::new(),
-            RecipeExpr::View { definition, .. } => {
+            RecipeExpr::Table(_) => HashSet::new(),
+            RecipeExpr::View(CreateView { definition, .. }) => {
                 let mut references = HashSet::new();
                 match definition {
                     SelectSpecification::Compound(compound_select) => {
@@ -81,7 +70,7 @@ impl RecipeExpr {
                 }
                 references
             }
-            RecipeExpr::Cache { statement, .. } => {
+            RecipeExpr::Cache(CreateCache { statement, .. }) => {
                 let mut references = HashSet::with_capacity(statement.tables.len());
                 references.extend(
                     statement
@@ -97,7 +86,7 @@ impl RecipeExpr {
     /// Returns a list of names of custom types referenced by this [`RecipeExpr`]
     pub(super) fn custom_type_references(&self) -> Vec<&Relation> {
         match self {
-            RecipeExpr::Table { body, .. } => body
+            RecipeExpr::Table(CreateTable { body, .. }) => body
                 .fields
                 .iter()
                 .filter_map(|field| match field.sql_type.innermost_array_type() {
@@ -105,11 +94,11 @@ impl RecipeExpr {
                     _ => None,
                 })
                 .collect(),
-            RecipeExpr::View {
+            RecipeExpr::View(CreateView {
                 definition: SelectSpecification::Simple(statement),
                 ..
-            }
-            | RecipeExpr::Cache { statement, .. } => {
+            })
+            | RecipeExpr::Cache(CreateCache { statement, .. }) => {
                 #[derive(Default)]
                 struct CollectCustomTypesVisitor<'a>(Vec<&'a Relation>);
 
@@ -139,20 +128,22 @@ impl RecipeExpr {
         use sha1::{Digest, Sha1};
         let mut hasher = Sha1::new();
         match self {
-            RecipeExpr::Table {
+            RecipeExpr::Table(CreateTable {
                 name,
                 body,
                 pg_meta,
-            } => {
+            }) => {
                 hasher.update(hash(name).to_le_bytes());
                 hasher.update(hash(body).to_le_bytes());
                 hasher.update(hash(pg_meta).to_le_bytes());
             }
-            RecipeExpr::View { name, definition } => {
+            RecipeExpr::View(CreateView { name, definition }) => {
                 hasher.update(hash(name).to_le_bytes());
                 hasher.update(hash(definition).to_le_bytes());
             }
-            RecipeExpr::Cache { statement, .. } => hasher.update(hash(statement).to_le_bytes()),
+            RecipeExpr::Cache(CreateCache { statement, .. }) => {
+                hasher.update(hash(statement).to_le_bytes())
+            }
         };
         // Sha1 digest is 20 byte long, so it is safe to consume only 16 bytes
         u128::from_le_bytes(hasher.finalize()[..16].try_into().unwrap())
@@ -414,11 +405,11 @@ impl ExprRegistry {
         }
 
         // If we're adding a cache, then add the statement to Self::skeletons
-        if let RecipeExpr::Cache {
+        if let RecipeExpr::Cache(CreateCache {
             ref name,
             ref statement,
             ..
-        } = expression
+        }) = expression
         {
             self.skeletons.insert(statement.clone(), name.clone());
         }
@@ -475,7 +466,7 @@ impl ExprRegistry {
     /// aliases)
     pub(super) fn cache_names(&self) -> impl Iterator<Item = &Relation> + '_ {
         self.expressions.values().filter_map(|expr| match expr {
-            RecipeExpr::Cache { name, .. } => Some(name),
+            RecipeExpr::Cache(CreateCache { name, .. }) => Some(name),
             _ => None,
         })
     }
@@ -512,7 +503,7 @@ impl ExprRegistry {
         // Remove the entry for this query's skeleton.
         self.skeletons.remove_expressions(&expr_aliases);
         let expression = self.expressions.remove(&query_id)?;
-        if !matches!(expression, RecipeExpr::Table { .. }) {
+        if !matches!(expression, RecipeExpr::Table(CreateTable { .. })) {
             self.dependencies.iter_mut().for_each(|(_, deps)| {
                 deps.remove(&query_id);
             });
@@ -666,7 +657,7 @@ impl TryFrom<CreateTableStatement> for RecipeExpr {
     type Error = ReadySetError;
 
     fn try_from(stmt: CreateTableStatement) -> Result<Self, Self::Error> {
-        Ok(RecipeExpr::Table {
+        Ok(RecipeExpr::Table(CreateTable {
             name: stmt.table,
             body: stmt.body.map_err(|unparsed| {
                 unsupported_err!(
@@ -675,7 +666,7 @@ impl TryFrom<CreateTableStatement> for RecipeExpr {
                 )
             })?,
             pg_meta: None,
-        })
+        }))
     }
 }
 
@@ -683,7 +674,7 @@ impl TryFrom<CreateViewStatement> for RecipeExpr {
     type Error = ReadySetError;
 
     fn try_from(stmt: CreateViewStatement) -> Result<Self, Self::Error> {
-        Ok(RecipeExpr::View {
+        Ok(RecipeExpr::View(CreateView {
             name: stmt.name,
             definition: *stmt.definition.map_err(|unparsed| {
                 unsupported_err!(
@@ -691,7 +682,7 @@ impl TryFrom<CreateViewStatement> for RecipeExpr {
                     Sensitive(&unparsed)
                 )
             })?,
-        })
+        }))
     }
 }
 
@@ -738,22 +729,23 @@ mod tests {
             assert_eq!(create_table.name(), &table_name);
 
             let query_name: Relation = "test_query".into();
-            let cached_query = RecipeExpr::Cache {
+            let cached_query = RecipeExpr::Cache(CreateCache {
                 name: query_name.clone(),
                 statement: parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table;")
                     .unwrap(),
                 always: false,
-            };
+                id: "q_000000000000".into(),
+            });
 
             assert_eq!(cached_query.name(), &query_name);
 
             let view_name: Relation = "test_view".into();
-            let view = RecipeExpr::View {
+            let view = RecipeExpr::View(CreateView {
                 name: view_name.clone(),
                 definition: SelectSpecification::Simple(
                     parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table;").unwrap(),
                 ),
-            };
+            });
 
             assert_eq!(view.name(), &view_name);
         }
@@ -768,23 +760,24 @@ mod tests {
 
             assert!(create_table.table_references().is_empty());
 
-            let cached_query = RecipeExpr::Cache {
+            let cached_query = RecipeExpr::Cache(CreateCache {
                 name: "test_query".into(),
                 statement: parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table;")
                     .unwrap(),
                 always: false,
-            };
+                id: "q_000000000000".into(),
+            });
 
             let cached_query_table_refs = cached_query.table_references();
             assert_eq!(cached_query_table_refs.len(), 1);
             assert_eq!(cached_query_table_refs.iter().next().unwrap(), &table_name);
 
-            let view = RecipeExpr::View {
+            let view = RecipeExpr::View(CreateView {
                 name: "test_view".into(),
                 definition: SelectSpecification::Simple(
                     parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table;").unwrap(),
                 ),
-            };
+            });
 
             let view_table_refs = view.table_references();
             assert_eq!(view_table_refs.len(), 1);
@@ -813,35 +806,39 @@ mod tests {
             let statement =
                 parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table;").unwrap();
             registry
-                .add_query(RecipeExpr::Cache {
+                .add_query(RecipeExpr::Cache(CreateCache {
                     name: "test_query".into(),
                     statement: statement.clone(),
                     always: false,
-                })
+                    id: "q_000000000000".into(),
+                }))
                 .unwrap();
             registry
-                .add_query(RecipeExpr::Cache {
+                .add_query(RecipeExpr::Cache(CreateCache {
                     name: "test_query_alias".into(),
                     statement,
                     always: false,
-                })
+                    id: "q_000000000000".into(),
+                }))
                 .unwrap();
 
             let statement =
                 parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table").unwrap();
             registry
-                .add_query(RecipeExpr::Cache {
+                .add_query(RecipeExpr::Cache(CreateCache {
                     name: "test_query".into(),
                     statement: statement.clone(),
                     always: false,
-                })
+                    id: "q_000000000000".into(),
+                }))
                 .unwrap();
             registry
-                .add_query(RecipeExpr::Cache {
+                .add_query(RecipeExpr::Cache(CreateCache {
                     name: "test_query_alias".into(),
                     statement,
                     always: false,
-                })
+                    id: "q_000000000000".into(),
+                }))
                 .unwrap();
 
             let view = SelectSpecification::Simple(
@@ -849,17 +846,17 @@ mod tests {
                     .unwrap(),
             );
             registry
-                .add_query(RecipeExpr::View {
+                .add_query(RecipeExpr::View(CreateView {
                     name: "test_view".into(),
                     definition: view.clone(),
-                })
+                }))
                 .unwrap();
 
             registry
-                .add_query(RecipeExpr::View {
+                .add_query(RecipeExpr::View(CreateView {
                     name: "test_view_alias".into(),
                     definition: view,
-                })
+                }))
                 .unwrap();
 
             registry
@@ -869,7 +866,7 @@ mod tests {
         fn add_cached_query() {
             let mut registry = setup();
 
-            let expr = RecipeExpr::Cache {
+            let expr = RecipeExpr::Cache(CreateCache {
                 name: "test_query2".into(),
                 statement: parse_select_statement(
                     Dialect::MySQL,
@@ -877,7 +874,8 @@ mod tests {
                 )
                 .unwrap(),
                 always: false,
-            };
+                id: "q_000000000000".into(),
+            });
 
             assert!(registry.add_query(expr.clone()).unwrap());
 
@@ -889,23 +887,25 @@ mod tests {
         fn add_existing_cached_query() {
             let mut registry = setup();
 
-            let expr = RecipeExpr::Cache {
+            let expr = RecipeExpr::Cache(CreateCache {
                 name: "test_query2".into(),
                 statement: parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table;")
                     .unwrap(),
                 always: false,
-            };
+                id: "q_000000000000".into(),
+            });
             assert!(!registry.add_query(expr).unwrap());
 
             let result = registry.get(&"test_query2".into()).unwrap();
             assert_eq!(
                 *result,
-                RecipeExpr::Cache {
+                RecipeExpr::Cache(CreateCache {
                     name: "test_query".into(),
                     statement: parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table;")
                         .unwrap(),
                     always: false,
-                }
+                    id: "q_000000000000".into(),
+                })
             );
         }
 
@@ -913,13 +913,13 @@ mod tests {
         fn add_view() {
             let mut registry = setup();
             let view_name: Relation = "test_view2".into();
-            let view = RecipeExpr::View {
+            let view = RecipeExpr::View(CreateView {
                 name: view_name.clone(),
                 definition: SelectSpecification::Simple(
                     parse_select_statement(Dialect::MySQL, "SELECT DISTINCT * FROM test_table;")
                         .unwrap(),
                 ),
-            };
+            });
             let num_expressions = registry.expressions.len();
             let num_dependencies = registry.dependencies.len();
             let num_aliases = registry.aliases.len();
@@ -949,10 +949,10 @@ mod tests {
             let select =
                 parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table;").unwrap();
             let view_name: Relation = "test_view2".into();
-            let view = RecipeExpr::View {
+            let view = RecipeExpr::View(CreateView {
                 name: view_name.clone(),
                 definition: SelectSpecification::Simple(select.clone()),
-            };
+            });
             let num_expressions = registry.expressions.len();
             let num_dependencies = registry.dependencies.len();
             let num_aliases = registry.aliases.len();
@@ -962,7 +962,7 @@ mod tests {
             assert_eq!(registry.aliases.len(), num_aliases + 1);
             let view_qid = registry.aliases.get(&view_name).unwrap();
             let stored_expression = registry.expressions.get(view_qid).unwrap();
-            if let RecipeExpr::View { name, definition } = stored_expression {
+            if let RecipeExpr::View(CreateView { name, definition }) = stored_expression {
                 assert_ne!(name, &view_name);
                 if let SelectSpecification::Simple(stored_select) = definition {
                     assert_eq!(stored_select.clone(), select);
@@ -1039,12 +1039,13 @@ mod tests {
             let expr = registry.remove_expression(&"test_query".into()).unwrap();
             assert_eq!(
                 expr,
-                RecipeExpr::Cache {
+                RecipeExpr::Cache(CreateCache {
                     name: "test_query".into(),
                     statement: parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table")
                         .unwrap(),
                     always: false,
-                }
+                    id: "q_000000000000".into(),
+                })
             );
             assert!(registry.get(&"test_query_alias".into()).is_none())
         }
@@ -1085,11 +1086,12 @@ mod tests {
             let mut registry = setup();
             let stmt = parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table").unwrap();
             registry
-                .add_query(RecipeExpr::Cache {
+                .add_query(RecipeExpr::Cache(CreateCache {
                     name: "test".into(),
                     statement: stmt.clone(),
                     always: false,
-                })
+                    id: "q_000000000000".into(),
+                }))
                 .unwrap();
             assert!(registry.contains(&stmt))
         }
@@ -1114,12 +1116,13 @@ mod tests {
                 .unwrap();
 
             registry
-                .add_query(RecipeExpr::Cache {
+                .add_query(RecipeExpr::Cache(CreateCache {
                     name: "test_query2".into(),
                     statement: parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table")
                         .unwrap(),
                     always: false,
-                })
+                    id: "q_000000000000".into(),
+                }))
                 .unwrap();
 
             registry
@@ -1180,7 +1183,7 @@ mod tests {
                 registry
                     .expressions_referencing_custom_type(&ty)
                     .map(|expr| match expr {
-                        RecipeExpr::Table { body, .. } => body,
+                        RecipeExpr::Table(CreateTable { body, .. }) => body,
                         _ => panic!(),
                     })
                     .collect::<Vec<_>>(),
@@ -1202,20 +1205,21 @@ mod tests {
                 parse_select_statement(Dialect::PostgreSQL, "SELECT CAST(x AS public.abc) FROM t")
                     .unwrap();
             assert!(registry
-                .add_query(RecipeExpr::Cache {
+                .add_query(RecipeExpr::Cache(CreateCache {
                     name: "foo".into(),
                     statement: query.clone(),
                     always: false,
-                })
+                    id: "q_000000000000".into(),
+                }))
                 .unwrap());
 
             assert_eq!(
                 registry
                     .expressions_referencing_custom_type(&ty)
                     .map(|expr| match expr {
-                        RecipeExpr::Cache {
+                        RecipeExpr::Cache(CreateCache {
                             name, statement, ..
-                        } => (name, statement),
+                        }) => (name, statement),
                         _ => panic!(),
                     })
                     .collect::<Vec<_>>(),
@@ -1230,6 +1234,7 @@ mod tests {
         use nom_sql::{
             parse_create_table, parse_select_statement, Dialect, ItemPlaceholder, Literal,
         };
+        use readyset_client::recipe::CreateCache;
 
         use super::{ExprRegistry, ExprSkeletons, MatchedCache, RecipeExpr};
 
@@ -1357,11 +1362,12 @@ mod tests {
                     .unwrap();
 
             registry
-                .add_query(RecipeExpr::Cache {
+                .add_query(RecipeExpr::Cache(CreateCache {
                     name: "test_query".into(),
                     statement: statement.clone(),
                     always: false,
-                })
+                    id: "q_000000000000".into(),
+                }))
                 .unwrap();
 
             // Assert that entry was added
@@ -1379,11 +1385,12 @@ mod tests {
 
             // Assert that aliases don't affect this cache
             registry
-                .add_query(RecipeExpr::Cache {
+                .add_query(RecipeExpr::Cache(CreateCache {
                     name: "alias".into(),
                     statement,
                     always: false,
-                })
+                    id: "q_000000000000".into(),
+                }))
                 .unwrap();
 
             assert_eq!(registry.skeletons.inner.len(), 1);
@@ -1412,27 +1419,30 @@ mod tests {
                     .unwrap();
 
             registry
-                .add_query(RecipeExpr::Cache {
+                .add_query(RecipeExpr::Cache(CreateCache {
                     name: "query1".into(),
                     statement: statement1.clone(),
                     always: false,
-                })
+                    id: "q_000000000000".into(),
+                }))
                 .unwrap();
 
             registry
-                .add_query(RecipeExpr::Cache {
+                .add_query(RecipeExpr::Cache(CreateCache {
                     name: "query1_alias".into(),
                     statement: statement1,
                     always: false,
-                })
+                    id: "q_000000000000".into(),
+                }))
                 .unwrap();
 
             registry
-                .add_query(RecipeExpr::Cache {
+                .add_query(RecipeExpr::Cache(CreateCache {
                     name: "query2".into(),
                     statement: statement2,
                     always: false,
-                })
+                    id: "q_000000000000".into(),
+                }))
                 .unwrap();
 
             assert_eq!(registry.skeletons.inner.len(), 1);

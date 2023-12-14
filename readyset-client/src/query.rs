@@ -11,7 +11,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use nom_sql::DialectDisplay;
+use nom_sql::{DialectDisplay, QueryID, SelectStatement, SqlIdentifier};
 use readyset_data::DfValue;
 use readyset_sql_passes::anonymize::{Anonymize, Anonymizer};
 use readyset_util::fmt::fmt_with;
@@ -43,6 +43,14 @@ impl Display for QueryId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "q_{:x}", self.0)
     }
+}
+
+/// Generates the ID for a given [`SelectStatement`] and schema search path.
+///
+/// NOTE: The given statement should have already undergone the rewrites via
+/// `readyset_adapter::rewrites::process_query`.
+pub fn generate_id(stmt: &SelectStatement, schema_search_path: &[SqlIdentifier]) -> QueryID {
+    format!("q_{:x}", hash(&(stmt, schema_search_path)))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq)]
