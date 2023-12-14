@@ -19,13 +19,30 @@ if [ -z "$DOCKER_HOST_ADDR" ]; then
     DOCKER_HOST_ADDR=$(docker network inspect bridge --format='{{(index .IPAM.Config 0).Gateway}}')
 fi
 
-echo "DOCKER HOST ADDR IS $DOCKER_HOST_ADDR"
+# Allows setting this manually if testing locally
+if [ -z "$READYSET_DOCKER_IMG" ]; then
+  # Use the latest image that hasn't been pushed to docker hub yet (if any) to test it before releasing it
+  READYSET_DOCKER_IMG="public.ecr.aws/z3o1l5n4/readyset:latest"
+fi
+
+# Because the demo pulls compose files from static github paths (which in turn pull a docker image from docker hub),
+# We need to do some modifications to the demo script and docker compose files so that we are testing the pre-released version
+# of those artifacts.
+# First, modify the compose files to pull the readyset image from the build rather than docker hub
+for file in ./quickstart/compose*.yml; do
+    sed -i '' "s|docker.io/readysettech/readyset:latest|$READYSET_DOCKER_IMG|g" "$file"
+
+done
 
 # Rename localhost instances to work inside a docker container
-sed "s|HOST=127.0.0.1|HOST=$DOCKER_HOST_ADDR|" "$DEMO_SCRIPT"        \
-  | sed "s|mysql -h \"127.0.0.1\"|mysql -h \"$DOCKER_HOST_ADDR\"|"    \
-  | sed "s|127.0.0.1:3307|${DOCKER_HOST_ADDR}|g" > "$DEMO_SCRIPT_TMP"
-
+# Next, modify the demo script to copy those files over from the local clone instead of curling from github.
+# Note: This puts the compose file in /tmp because the demo script will expect it there and do some modifications itself before writing it to .
+sed -e "s|HOST=127.0.0.1|HOST=$DOCKER_HOST_ADDR|" \
+  -e "s|mysql -h \"127.0.0.1\"|mysql -h \"$DOCKER_HOST_ADDR\"|" \
+  -e "s|127.0.0.1:3307|${DOCKER_HOST_ADDR}|g" \
+  -e "s|curl.*compose\.postgres\.yml\"|cp ./quickstart/compose.postgres.yml readyset.compose.yml|" \
+  -e "s|curl.*quickstart/compose\.yml\"|cp ./quickstart/compose.yml /tmp/readyset.compose.yml|" \
+  "$DEMO_SCRIPT" > "$DEMO_SCRIPT_TMP"
 
 # Figure out how many times we need to press enter to run through the entire psql
 # interactive section of the demo.
