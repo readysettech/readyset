@@ -2114,7 +2114,9 @@ mod failure_injection_tests {
     use tracing::debug;
 
     use super::*;
-    use crate::common::setup_standalone_with_authority;
+    use crate::common::{
+        setup_standalone_with_authority, setup_standalone_with_authority_out_of_band,
+    };
     use crate::Handle;
 
     /// Starts readyset, runs extend recipe with a changelist generated from `queries`, then
@@ -2175,15 +2177,82 @@ mod failure_injection_tests {
     #[serial]
     #[slow]
     async fn caches_recreated_after_backwards_incompatible_upgrade() {
+        readyset_tracing::init_test_logging();
+
+        async fn execute_query(
+            conn: &tokio_postgres::Client,
+            query: &'static str,
+        ) -> Vec<Vec<String>> {
+            conn.simple_query(query)
+                .await
+                .unwrap()
+                .into_iter()
+                .filter_map(|row| match row {
+                    SimpleQueryMessage::Row(r) => {
+                        Some((0..r.len()).map(|i| r.get(i).unwrap().to_owned()).collect())
+                    }
+                    _ => None,
+                })
+                .collect()
+        }
+
+        let (config, handle, authority, storage_dir, shutdown_tx) =
+            setup_standalone_with_authority_out_of_band("caches_recreated", None, None, true, true)
+                .await;
+
         let queries = [
             "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);",
-            "CREATE CACHE test_query FROM SELECT * FROM users;",
+            "CREATE CACHE test_query FROM SELECT * FROM users WHERE name = 'ethan';",
         ];
-        let (_config, mut handle, _authority, shutdown_tx) =
-            setup_reload_controller_state_test("caches_recreated", &queries).await;
+
+        let conn = connect(config).await;
+        for query in queries {
+            debug!(%query, "Running Query");
+            let _res = conn.simple_query(query).await;
+            // give it some time to propagate
+            sleep().await;
+        }
+
+        let rows = execute_query(&conn, "EXPLAIN LAST STATEMENT").await;
+        assert_eq!(rows[0], ["readyset", "ok"]);
+
+        let err_to_inject =
+            ReadySetError::SerializationFailed("Backwards Incompatibility Injected".into());
+
+        fail::cfg(
+            failpoints::LOAD_CONTROLLER_STATE,
+            &format!(
+                "1*return({})",
+                serde_json::ser::to_string(&err_to_inject).expect("failed to serialize error")
+            ),
+        )
+        .expect("failed to set failpoint");
+
+        // Stop the server and start a new one
+        shutdown_tx.shutdown().await;
+        drop(handle);
+        sleep().await;
+
+        let (config, mut handle, _, _, shutdown_tx) = setup_standalone_with_authority_out_of_band(
+            "caches_recreated",
+            Some(authority),
+            Some(storage_dir),
+            true,
+            false,
+        )
+        .await;
+        sleep().await;
+        let conn = connect(config).await;
 
         let queries = handle.views().await.unwrap();
         assert!(queries.contains_key(&"test_query".into()));
+
+        conn.simple_query("SELECT * FROM users WHERE name = 'ethan'")
+            .await
+            .unwrap();
+
+        let rows = execute_query(&conn, "EXPLAIN LAST STATEMENT").await;
+        assert_eq!(rows[0], ["readyset", "ok"]);
 
         shutdown_tx.shutdown().await;
     }
