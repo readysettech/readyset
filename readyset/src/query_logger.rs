@@ -7,6 +7,7 @@ use readyset_client::query::QueryId;
 use readyset_client_metrics::{
     recorded, DatabaseType, EventType, QueryExecutionEvent, QueryLogMode, SqlQueryType,
 };
+use readyset_sql_passes::adapter_rewrites;
 use readyset_sql_passes::anonymize::anonymize_literals;
 use readyset_util::shutdown::ShutdownReceiver;
 use tokio::select;
@@ -178,7 +179,7 @@ impl QueryLogger {
         SharedString::from(match query {
             SqlQuery::Select(stmt) => {
                 let mut stmt = stmt.clone();
-                if readyset_adapter::rewrite::process_query(&mut stmt, true).is_ok() {
+                if adapter_rewrites::process_query(&mut stmt, true).is_ok() {
                     anonymize_literals(&mut stmt);
                     // FIXME(REA-2168): Use correct dialect.
                     stmt.display(nom_sql::Dialect::MySQL).to_string()

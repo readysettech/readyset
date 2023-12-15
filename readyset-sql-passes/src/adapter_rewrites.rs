@@ -96,7 +96,7 @@ pub fn process_query(
 impl ProcessedQueryParams {
     /// If the query has values for OFFSET or LIMIT, get their values, returning a tuple of `limit,
     /// offset`
-    pub(crate) fn limit_offset_params(
+    pub fn limit_offset_params(
         &self,
         params: &[DfValue],
     ) -> ReadySetResult<(Option<usize>, Option<usize>)> {
@@ -163,10 +163,7 @@ impl ProcessedQueryParams {
         }
     }
 
-    pub(crate) fn make_keys<'param, T>(
-        &self,
-        params: &'param [T],
-    ) -> ReadySetResult<Vec<Cow<'param, [T]>>>
+    pub fn make_keys<'param, T>(&self, params: &'param [T]) -> ReadySetResult<Vec<Cow<'param, [T]>>>
     where
         T: Clone + TryFrom<Literal, Error = ReadySetError> + Debug + Default + PartialEq,
     {

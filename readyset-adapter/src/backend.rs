@@ -98,6 +98,7 @@ use readyset_client_metrics::{
 use readyset_data::{DfType, DfValue};
 use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
 use readyset_errors::{internal, internal_err, unsupported, unsupported_err, ReadySetResult};
+use readyset_sql_passes::adapter_rewrites::{self, ProcessedQueryParams};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
 use readyset_util::redacted::Sensitive;
 use readyset_version::READYSET_VERSION;
@@ -111,11 +112,10 @@ use crate::backend::noria_connector::ExecuteSelectContext;
 use crate::metrics_handle::{MetricsHandle, MetricsSummary};
 use crate::query_handler::SetBehavior;
 use crate::query_status_cache::QueryStatusCache;
-use crate::rewrite::ProcessedQueryParams;
 use crate::status_reporter::ReadySetStatusReporter;
 pub use crate::upstream_database::UpstreamPrepare;
 use crate::utils::create_dummy_column;
-use crate::{create_dummy_schema, rewrite, QueryHandler, UpstreamDatabase, UpstreamDestination};
+use crate::{create_dummy_schema, QueryHandler, UpstreamDatabase, UpstreamDestination};
 
 pub mod noria_connector;
 
@@ -1061,7 +1061,7 @@ where
         stmt: &nom_sql::SelectStatement,
     ) -> ReadySetResult<(nom_sql::SelectStatement, bool)> {
         let mut rewritten = stmt.clone();
-        rewrite::process_query(&mut rewritten, self.noria.server_supports_pagination())?;
+        adapter_rewrites::process_query(&mut rewritten, self.noria.server_supports_pagination())?;
         // Attempt ReadySet unless the query is unsupported or dropped
         let should_do_readyset = !matches!(
             self.state
@@ -1724,7 +1724,7 @@ where
             }
         }
         // Now migrate the new query
-        rewrite::process_query(&mut stmt, self.noria.server_supports_pagination())?;
+        adapter_rewrites::process_query(&mut stmt, self.noria.server_supports_pagination())?;
         let migration_state = match self
             .noria
             .handle_create_cached_query(
@@ -2337,7 +2337,10 @@ where
         Option<QueryStatus>,
         ReadySetResult<ProcessedQueryParams>,
     ) {
-        match rewrite::process_query(&mut q.statement, self.noria.server_supports_pagination()) {
+        match adapter_rewrites::process_query(
+            &mut q.statement,
+            self.noria.server_supports_pagination(),
+        ) {
             Ok(processed_query_params) => {
                 let s = self.state.query_status_cache.query_status(q);
                 let should_try = if self.state.proxy_state.should_proxy() {
