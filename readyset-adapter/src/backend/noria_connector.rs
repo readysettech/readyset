@@ -23,13 +23,13 @@ use readyset_errors::{
     ReadySetResult,
 };
 use readyset_server::worker::readers::{CallResult, ReadRequestHandler};
+use readyset_sql_passes::adapter_rewrites::{self, ProcessedQueryParams};
 use readyset_util::redacted::Sensitive;
 use readyset_util::shared_cache::{self, LocalCache};
 use tokio::sync::RwLock;
 use tracing::{error, info, instrument, trace, warn};
 
 use crate::backend::SelectSchema;
-use crate::rewrite::{self, ProcessedQueryParams};
 use crate::utils;
 
 #[derive(Clone, Debug)]
@@ -1366,7 +1366,7 @@ impl NoriaConnector {
 
         trace!("select::collapse where-in clauses");
         let processed_query_params =
-            rewrite::process_query(&mut statement, self.server_supports_pagination())?;
+            adapter_rewrites::process_query(&mut statement, self.server_supports_pagination())?;
 
         // check if we already have this query prepared
         trace!("select::access view");

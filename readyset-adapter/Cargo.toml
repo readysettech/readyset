@@ -77,10 +77,6 @@ rand = "0.8.5"
 path = "src/lib.rs"
 
 [[bench]]
-name = "rewrite"
-harness = false
-
-[[bench]]
 name = "parse"
 harness = false
 

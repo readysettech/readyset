@@ -3,7 +3,6 @@
 #![feature(async_closure)]
 #![feature(never_type)]
 #![feature(exhaustive_patterns)]
-#![feature(is_sorted)]
 #![feature(if_let_guard)]
 #![deny(unreachable_pub)]
 pub mod backend;
@@ -13,7 +12,6 @@ pub mod migration_handler;
 pub mod proxied_queries_reporter;
 mod query_handler;
 pub mod query_status_cache;
-pub mod rewrite;
 mod status_reporter;
 pub mod upstream_database;
 mod utils;

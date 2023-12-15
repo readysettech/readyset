@@ -16,3 +16,11 @@ nom-sql = { path = "../nom-sql" }
 readyset-errors = { path = "../readyset-errors" }
 readyset-data = { path = "../readyset-data" }
 dataflow-expression = { path = "../dataflow-expression" }
+
+[dev-dependencies]
+criterion = "0.3"
+
+[[bench]]
+name = "adapter_rewrites"
+harness = false
+

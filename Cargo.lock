@@ -5109,6 +5109,7 @@ dependencies = [
 name = "readyset-sql-passes"
 version = "0.0.1"
 dependencies = [
+ "criterion",
  "dataflow-expression",
  "itertools",
  "nom-sql",

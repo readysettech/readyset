@@ -4,9 +4,11 @@
     never_type,
     exhaustive_patterns,
     try_find,
-    let_chains
+    let_chains,
+    is_sorted
 )]
 
+pub mod adapter_rewrites;
 pub mod alias_removal;
 pub mod anonymize;
 mod create_table_columns;
