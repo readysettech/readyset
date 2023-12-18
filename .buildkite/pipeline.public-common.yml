@@ -95,6 +95,7 @@ steps:
           - MYSQL_HOST=mysql
           - MYSQL_PWD=noria
           - MYSQL_DB=noria
+          - RUN_SLOW_TESTS=1
           volumes:
             - 'target:/workdir/target'
           config:
@@ -107,6 +108,39 @@ steps:
           retries: 3
     agents:
       queue: c6a-4xlarge
+    retry: *retry_on_agent_kill
+
+  - label: 'Run test flakiness check w/ slow tests'
+    key: flaky-finder
+    command:
+    - 'echo +++ Running detect_flake'
+    - cd public
+    - export DISABLE_TELEMETRY=true
+    - export RUST_BACKTRACE=full
+    - export RUN_SLOW_TESTS=1
+      - '[ -d public ] && cd public'
+    - detect_flake -t1 -r5 -i --command ".buildkite/run-tests.sh"
+    timeout_in_minutes: 300
+    depends_on:
+    - build-image
+    plugins:
+      - docker-compose#v3.7.0:
+          run: app
+          env:
+          - SCCACHE_BUCKET=readysettech-build-sccache-us-east-2
+          - SCCACHE_REGION=us-east-2
+          - CARGO_INCREMENTAL=0
+          - RUST_BACKTRACE=full
+          - RUN_SLOW_TESTS=1
+          - FLAKY_FINDER=1
+          config:
+            - public/build/docker-compose.yml
+            - public/build/docker-compose.ci-test.yml
+          pull-retries: 3
+      - ecr#v2.7.0:
+          login: true
+    agents:
+      queue: c6a-8xlarge
     retry: *retry_on_agent_kill
 
   - label: 'Run logictest'
