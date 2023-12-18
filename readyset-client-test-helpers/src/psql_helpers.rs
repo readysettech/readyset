@@ -1,4 +1,5 @@
 use std::env;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use readyset_adapter::backend::{QueryDestination, QueryInfo};
@@ -66,18 +67,25 @@ impl Adapter for PostgreSQLAdapter {
 
         let (client, connection) = config.dbname("postgres").connect(NoTls).await.unwrap();
         tokio::spawn(connection);
-        while let Err(error) = client
-            .simple_query(&format!("DROP DATABASE IF EXISTS {db_name}"))
-            .await
-        {
-            error!(%error, "Error dropping database");
-            sleep().await
-        }
 
-        client
-            .simple_query(&format!("CREATE DATABASE {db_name}"))
-            .await
-            .unwrap();
+        tokio::time::timeout(Duration::from_secs(60), async move {
+            while client
+                .simple_query(&format!("CREATE DATABASE {db_name}"))
+                .await
+                .is_err()
+            {
+                while let Err(error) = client
+                    .simple_query(&format!("DROP DATABASE IF EXISTS {db_name}"))
+                    .await
+                {
+                    error!(%error, "Error dropping database");
+                    sleep().await
+                }
+                sleep().await;
+            }
+        })
+        .await
+        .expect("Failed to cleanly drop and recreate database after");
     }
 
     async fn run_backend(backend: Backend<Self::Upstream, Self::Handler>, s: TcpStream) {
