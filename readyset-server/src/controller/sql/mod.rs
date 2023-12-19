@@ -30,7 +30,7 @@ use self::query_graph::to_query_graph;
 pub(crate) use self::recipe::{ExprId, Recipe, Schema};
 use self::registry::ExprRegistry;
 use crate::controller::mir_to_flow::{mir_node_to_flow_parts, mir_query_to_flow_parts};
-use crate::controller::sql::registry::RecipeExpr;
+pub(crate) use crate::controller::sql::registry::RecipeExpr;
 use crate::controller::Migration;
 use crate::sql::mir::MirRemovalResult;
 use crate::ReuseConfigType;

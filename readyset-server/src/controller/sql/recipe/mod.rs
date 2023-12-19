@@ -1,9 +1,6 @@
 use std::{fmt, str};
 
-use nom_sql::{
-    CacheInner, CreateCacheStatement, CreateTableStatement, CreateViewStatement, Relation,
-    SelectStatement, SqlIdentifier, SqlQuery,
-};
+use nom_sql::{Relation, SelectStatement, SqlIdentifier};
 use petgraph::graph::NodeIndex;
 use readyset_client::recipe::changelist::ChangeList;
 use readyset_client::ViewCreateRequest;
@@ -91,34 +88,9 @@ pub(crate) enum Schema<'a> {
 }
 
 impl Recipe {
-    /// Get the id associated with an alias
-    pub(crate) fn expression_by_alias(&self, alias: &Relation) -> Option<SqlQuery> {
-        let expr = self.inc.registry.get(alias).map(|e| match e {
-            RecipeExpr::Table { name, body, .. } => SqlQuery::CreateTable(CreateTableStatement {
-                if_not_exists: false,
-                table: name.clone(),
-                body: Ok(body.clone()),
-                options: Ok(vec![]),
-            }),
-            RecipeExpr::View { name, definition } => SqlQuery::CreateView(CreateViewStatement {
-                name: name.clone(),
-                or_replace: false,
-                fields: vec![],
-                definition: Ok(Box::new(definition.clone())),
-            }),
-            RecipeExpr::Cache {
-                name,
-                statement,
-                always,
-                ..
-            } => SqlQuery::CreateCache(CreateCacheStatement {
-                name: Some(name.clone()),
-                inner: Ok(CacheInner::Statement(Box::new(statement.clone()))),
-                unparsed_create_cache_statement: None, // not relevant after migrating
-                always: *always,
-                concurrently: false, // concurrently not relevant after migrating
-            }),
-        });
+    /// Get the [`RecipeExpr`] associated with an alias
+    pub(crate) fn expression_by_alias(&self, alias: &Relation) -> Option<RecipeExpr> {
+        let expr = self.inc.registry.get(alias).cloned();
         if expr.is_none() {
             warn!(alias = %alias.display_unquoted(), "Query not found in expression registry");
         }
