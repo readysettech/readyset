@@ -2217,7 +2217,6 @@ mod failure_injection_tests {
     #[tokio::test(flavor = "multi_thread")]
     #[serial]
     #[slow]
-    #[ignore = "REA-3894 Caches being recreated with pre-rewrite query string"]
     async fn caches_recreated_after_backwards_incompatible_upgrade() {
         let queries = [
             "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);",
@@ -2238,7 +2237,28 @@ mod failure_injection_tests {
     #[tokio::test(flavor = "multi_thread")]
     #[serial]
     #[slow]
-    #[ignore = "REA-3894 Caches being recreated with pre-rewrite query string"]
+    async fn caches_recreated_using_rewritten_query() {
+        let queries = [
+            "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);",
+            "CREATE CACHE test_query FROM SELECT * FROM users WHERE id = 1;",
+        ];
+        let (config, mut handle, _authority, shutdown_tx) =
+            setup_reload_controller_state_test("caches_recreated", &queries).await;
+
+        eventually!(matches!(handle.leader_ready().await, Ok(true)));
+
+        let queries = handle.views().await.unwrap();
+        assert!(queries.contains_key(&"test_query".into()));
+
+        let client = connect(config).await;
+        assert_query_hits_readyset(&client, "SELECT * FROM users WHERE id = 2").await;
+
+        shutdown_tx.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[serial]
+    #[slow]
     async fn dropped_caches_not_recreated() {
         let queries = [
             "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);",
@@ -2262,7 +2282,6 @@ mod failure_injection_tests {
     #[tokio::test(flavor = "multi_thread")]
     #[serial]
     #[slow]
-    #[ignore = "REA-3894 Caches being recreated with pre-rewrite query string"]
     async fn dropped_then_recreated_cache_recreated() {
         let queries = [
             "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);",
@@ -2289,7 +2308,6 @@ mod failure_injection_tests {
     #[tokio::test(flavor = "multi_thread")]
     #[serial]
     #[slow]
-    #[ignore = "REA-3894 Caches being recreated with pre-rewrite query string"]
     async fn caches_added_if_extend_recipe_times_out() {
         let queries = [
             "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);",

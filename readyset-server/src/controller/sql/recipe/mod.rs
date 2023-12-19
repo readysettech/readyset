@@ -194,4 +194,9 @@ impl Recipe {
     pub fn reused_caches(&self, name: &Relation) -> Option<&Vec1<MatchedCache>> {
         self.inc.registry.reused_caches(name)
     }
+
+    /// Returns true only if this recipe supports pagination.
+    pub(crate) fn supports_pagination(&self) -> bool {
+        self.mir_config().allow_paginate && self.mir_config().allow_topk
+    }
 }

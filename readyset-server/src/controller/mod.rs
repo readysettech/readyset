@@ -807,8 +807,9 @@ impl Controller {
             // practice they will likely all have the same schema search path.
             // We also have to separate out the changelists into CreateCache ones and Drop ones so
             // that the Drop ones can properly find the caches to drop.
-            let changelists =
-                separate_changelists_by_schema_search_path_and_change_type(caches.clone());
+            let changelists = self
+                .separate_changelists_by_schema_search_path_and_change_type(caches.clone())
+                .await?;
 
             for changelist in changelists {
                 let mut guard = self.inner.write().await;
@@ -847,94 +848,103 @@ impl Controller {
         }
         Ok(())
     }
-}
 
-/// Separates a vector of CacheDDLRequest into a vector of ChangeList based on the schema search
-/// path and the type of change (CreateCache or Drop). Each ChangeList will contain either only
-/// CreateCache changes or only Drop changes. For Drop changes, the schema search path is not set.
-fn separate_changelists_by_schema_search_path_and_change_type(
-    ddl_reqs: Vec<CacheDDLRequest>,
-) -> Vec<ChangeList> {
-    debug_assert!(
-        ddl_reqs
-            .iter()
-            .filter(|req| matches!(
-                Change::from_str(&req.unparsed_stmt, req.dialect.into()),
-                Ok(Change::Drop { .. })
-            ))
-            .all(|req| req.dialect == ddl_reqs[0].dialect),
-        "All Drop statements should have the same dialect"
-    );
+    /// Separates a vector of CacheDDLRequest into a vector of ChangeList based on the schema search
+    /// path and the type of change (CreateCache or Drop). Each ChangeList will contain either only
+    /// CreateCache changes or only Drop changes. For Drop changes, the schema search path is not
+    /// set.
+    async fn separate_changelists_by_schema_search_path_and_change_type(
+        &self,
+        ddl_reqs: Vec<CacheDDLRequest>,
+    ) -> ReadySetResult<Vec<ChangeList>> {
+        let server_supports_pagination = if let Some(ref inner) = *self.inner.read().await {
+            let ds = inner.dataflow_state_handle.read().await;
+            ds.recipe.supports_pagination()
+        } else {
+            return Err(ReadySetError::NotLeader);
+        };
 
-    debug_assert!(
-        ddl_reqs
-            .iter()
-            .filter(|req| matches!(
-                Change::from_str(&req.unparsed_stmt, req.dialect.into()),
-                Ok(Change::Drop { .. })
-            ))
-            .all(|req| req.schema_search_path.is_empty()),
-        "Drop changes should have an empty schema search path"
-    );
+        debug_assert!(
+            ddl_reqs
+                .iter()
+                .filter(|req| matches!(
+                    Change::from_cache_ddl_request(req, server_supports_pagination),
+                    Ok(Change::Drop { .. })
+                ))
+                .all(|req| req.dialect == ddl_reqs[0].dialect),
+            "All Drop statements should have the same dialect"
+        );
 
-    debug_assert!(
-        ddl_reqs
-            .iter()
-            .filter(|req| matches!(
-                Change::from_str(&req.unparsed_stmt, req.dialect.into()),
-                Ok(Change::CreateCache(_))
-            ))
-            .all(|req| req.dialect == ddl_reqs[0].dialect),
-        "All CreateCache statements should have the same dialect"
-    );
+        debug_assert!(
+            ddl_reqs
+                .iter()
+                .filter(|req| matches!(
+                    Change::from_cache_ddl_request(req, server_supports_pagination),
+                    Ok(Change::Drop { .. })
+                ))
+                .all(|req| req.schema_search_path.is_empty()),
+            "Drop changes should have an empty schema search path"
+        );
 
-    let mut changelists = vec![];
-    let mut current_changes = vec![];
-    let mut current_dialect = None;
-    let mut current_schema_search_path = None;
-    let mut last_was_drop = false;
+        debug_assert!(
+            ddl_reqs
+                .iter()
+                .filter(|req| matches!(
+                    Change::from_cache_ddl_request(req, server_supports_pagination),
+                    Ok(Change::CreateCache(_))
+                ))
+                .all(|req| req.dialect == ddl_reqs[0].dialect),
+            "All CreateCache statements should have the same dialect"
+        );
 
-    for ddl_req in ddl_reqs {
-        match Change::from_str(&ddl_req.unparsed_stmt, ddl_req.dialect.into()) {
-            Ok(change) => {
-                let is_drop = matches!(change, Change::Drop { .. });
+        let mut changelists = vec![];
+        let mut current_changes = vec![];
+        let mut current_dialect = None;
+        let mut current_schema_search_path = None;
+        let mut last_was_drop = false;
 
-                // When the change type switches, push the current list and start a new one
-                if current_changes.is_empty() || last_was_drop != is_drop {
-                    if !current_changes.is_empty() {
-                        changelists.push(ChangeList {
-                            changes: current_changes,
-                            schema_search_path: current_schema_search_path.unwrap_or_default(),
-                            dialect: ddl_req.dialect,
-                        });
-                        current_changes = Vec::new();
+        for ddl_req in ddl_reqs {
+            match Change::from_cache_ddl_request(&ddl_req, server_supports_pagination) {
+                Ok(change) => {
+                    let is_drop = matches!(change, Change::Drop { .. });
+
+                    // When the change type switches, push the current list and start a new one
+                    if current_changes.is_empty() || last_was_drop != is_drop {
+                        if !current_changes.is_empty() {
+                            changelists.push(ChangeList {
+                                changes: current_changes,
+                                schema_search_path: current_schema_search_path.unwrap_or_default(),
+                                dialect: ddl_req.dialect,
+                            });
+                            current_changes = Vec::new();
+                        }
+                        current_dialect = Some(ddl_req.dialect);
+                        current_schema_search_path = if is_drop {
+                            None
+                        } else {
+                            Some(ddl_req.schema_search_path.clone())
+                        };
                     }
-                    current_dialect = Some(ddl_req.dialect);
-                    current_schema_search_path = if is_drop {
-                        None
-                    } else {
-                        Some(ddl_req.schema_search_path.clone())
-                    };
-                }
 
-                current_changes.push(change);
-                last_was_drop = is_drop;
-            }
-            Err(error) => {
-                error!(%error, "Failed to re-parse change");
+                    current_changes.push(change);
+                    last_was_drop = is_drop;
+                }
+                Err(error) => {
+                    error!(%error, "Failed to re-parse change");
+                }
             }
         }
-    }
 
-    if !current_changes.is_empty() {
-        changelists.push(ChangeList {
-            changes: current_changes,
-            schema_search_path: current_schema_search_path.unwrap_or_default(),
-            dialect: current_dialect.expect("Dialect should be set for the last batch"),
-        });
-    }
+        if !current_changes.is_empty() {
+            changelists.push(ChangeList {
+                changes: current_changes,
+                schema_search_path: current_schema_search_path.unwrap_or_default(),
+                dialect: current_dialect.expect("Dialect should be set for the last batch"),
+            });
+        }
 
-    changelists
+        Ok(changelists)
+    }
 }
 
 /// Manages this authority's leader election state and sends update

@@ -2227,7 +2227,7 @@ where
         let proxy_out_of_band = settings.migration_mode != MigrationMode::InRequestPath
             && status.migration_state != MigrationState::Successful;
         let unsupported_or_dropped = matches!(
-            status.migration_state,
+            &status.migration_state,
             MigrationState::Unsupported | MigrationState::Dropped
         );
         let exceeded_network_failure = status

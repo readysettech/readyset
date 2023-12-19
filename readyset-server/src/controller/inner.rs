@@ -527,8 +527,7 @@ impl Leader {
             }
             (&Method::GET | &Method::POST, "/supports_pagination") => {
                 let ds = self.dataflow_state_handle.read().await;
-                let supports =
-                    ds.recipe.mir_config().allow_paginate && ds.recipe.mir_config().allow_topk;
+                let supports = ds.recipe.supports_pagination();
                 return_serialized!(supports)
             }
             (&Method::POST, "/evict_single") => {
