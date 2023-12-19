@@ -64,12 +64,12 @@ check_dependencies() {
 
 download_demo_compose_file() {
   echo -e "${BLUE}${WHALE}Downloading the ReadySet Docker Compose file... ${NOCOLOR}"
-  curl -Ls -o readyset.compose.yml "https://readyset.io/quickstart/compose.postgres.yml"
+  curl -Ls -o readyset.compose.yml "https://raw.githubusercontent.com/readysettech/readyset/main/quickstart/compose.postgres.yml"
 }
 
 download_byo_compose_file() {
   echo -e "${BLUE}${WHALE}Downloading the ReadySet Docker Compose file... ${NOCOLOR}"
-  curl -Ls -o /tmp/readyset.compose.yml "https://readyset.io/quickstart/compose.yml"
+  curl -Ls -o /tmp/readyset.compose.yml "https://raw.githubusercontent.com/readysettech/readyset/main/quickstart/compose.yml"
 }
 
 run_docker_compose() {
@@ -78,7 +78,7 @@ run_docker_compose() {
     echo -e "${RED}${ROTATING_LIGHT}Unable to pull ReadySet images.${NOCOLOR}"
     exit 1
   fi
-  if ! docker compose -f readyset.compose.yml up -d --wait-timeout 60; then
+  if ! docker compose -f readyset.compose.yml up -d --wait; then
     echo -e "${RED}${ROTATING_LIGHT}Docker-compose setup failed.${NOCOLOR}"
     exit 1
   fi
@@ -258,6 +258,7 @@ WHERE title_basics.startyear = 2000
 AND title_ratings.averagerating > 5;
 \! echo "${NOCOLOR}"
 \! echo "${GREEN}${TADA}Yay, it's faster!${NOCOLOR}"
+\! echo "To see the difference in our our ${BLUE}Grafana dashboard${NOCOLOR}, open up http://127.0.0.1:4000"
 \! echo "Press enter to continue."
 \prompt c
 \! echo "${BLUE}Next, let's see how ReadySet updates the cache automatically when we change it.${NOCOLOR}"
@@ -365,9 +366,11 @@ free_form_connect() {
   echo -e "${BLUE}Connecting to ReadySet...${NOCOLOR}"
   if [[ $1 == "psql" ]]; then
     echo -e "${BLUE}Type \q to exit.${NOCOLOR}"
+    print_dashboard_link
     psql $CONNECTION_STRING
   else
     echo -e "${BLUE}Type 'exit' to exit.${NOCOLOR}"
+    print_dashboard_link
     parse_mysql_connection_string
     mysql -h "127.0.0.1" -P "3307" -u $username -p$password
   fi
@@ -379,6 +382,7 @@ print_exit_message() {
   echo ""
   echo -e "${BLUE}Join us on slack:${NOCOLOR}"
   echo "https://join.slack.com/t/readysetcommunity/shared_invite/zt-2272gtiz4-0024xeRJUPGWlRETQrGkFw"
+  print_dashboard_link
 
   if [[ $1 == "psql" ]]; then
     echo -e "${BLUE}To connect to ReadySet again, run:${NOCOLOR}"
@@ -462,6 +466,10 @@ wait_for_snapshot() {
   done
 }
 
+print_dashboard_link() {
+  echo -e "${BLUE}Grafana Dashboard running at:${NOCOLOR} http://127.0.0.1:4000"
+}
+
 explore_connection() {
   echo -e "${BLUE}Welcome to ReadySet!${NOCOLOR}"
   echo -e "${BLUE}Give these custom ReadySet SQL commands a try!${NOCOLOR}"
@@ -479,6 +487,8 @@ explore_connection() {
   echo -e "    SHOW PROXIED QUERIES;"
   echo -e " ${BLUE}Drop an existing cache.${NOCOLOR}"
   echo -e "    DROP CACHE [query_id];"
+
+  print_dashboard_link
 }
 
 run_byo_postgres() {
