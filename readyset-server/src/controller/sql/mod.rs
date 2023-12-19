@@ -11,6 +11,7 @@ use nom_sql::{
     SelectStatement, SqlIdentifier, SqlType, TableExpr,
 };
 use petgraph::graph::NodeIndex;
+use readyset_client::query::QueryId;
 use readyset_client::recipe::changelist::{AlterTypeChange, Change, PostgresTableMetadata};
 use readyset_client::recipe::ChangeList;
 use readyset_data::{DfType, Dialect, PgEnumMetadata};
@@ -613,6 +614,7 @@ impl SqlIncorporator {
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<Relation> {
         let name = name.unwrap_or_else(|| format!("q_{}", self.num_queries).into());
+        let query_id = QueryId::from_select(&stmt, schema_search_path);
 
         let mut invalidating_tables = vec![];
         let detect_placeholders_config =
@@ -672,6 +674,7 @@ impl SqlIncorporator {
             name: name.clone(),
             statement: stmt,
             always,
+            query_id,
         })?;
         self.registry
             .insert_invalidating_tables(name.clone(), invalidating_tables)?;
