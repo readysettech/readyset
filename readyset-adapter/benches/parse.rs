@@ -3,7 +3,6 @@ use lru::LruCache;
 use rand::distributions::Alphanumeric;
 use rand::Rng;
 use readyset_client::query::QueryId;
-use readyset_util::hash::hash;
 
 fn random_string(len: usize) -> String {
     rand::thread_rng()
@@ -41,7 +40,7 @@ fn lru_benchmarks(c: &mut Criterion) {
             |b, &_| {
                 b.iter(|| {
                     for q in queries.iter() {
-                        let id = QueryId::new(hash(&q));
+                        let id = QueryId::from_unparsed_select(q);
                         lru_cache_hash.put(black_box(id), black_box(q.clone()));
                     }
                 });

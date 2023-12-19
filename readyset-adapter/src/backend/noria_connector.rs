@@ -11,6 +11,7 @@ use nom_sql::{
 };
 use readyset_client::consistency::Timestamp;
 use readyset_client::internal::LocalNodeIndex;
+use readyset_client::query::QueryId;
 use readyset_client::recipe::changelist::{Change, ChangeList, IntoChanges};
 use readyset_client::results::{ResultIterator, Results};
 use readyset_client::{
@@ -949,9 +950,9 @@ impl NoriaConnector {
         always: bool,
         concurrently: bool,
     ) -> ReadySetResult<Option<u64>> {
-        let name = name.cloned().unwrap_or_else(|| {
-            utils::generate_query_name(statement, self.schema_search_path()).into()
-        });
+        let name = name
+            .cloned()
+            .unwrap_or_else(|| QueryId::from_select(statement, self.schema_search_path()).into());
         let schema_search_path =
             override_schema_search_path.unwrap_or_else(|| self.schema_search_path.clone());
         let changelist = ChangeList::from_change(
@@ -998,7 +999,7 @@ impl NoriaConnector {
         let view_request = ViewCreateRequest::new(q.clone(), search_path.clone());
         self.view_name_cache
             .get_mut_or_try_insert_with(&view_request, shared_cache::InsertMode::Shared, async {
-                let qname: Relation = utils::generate_query_name(q, &search_path).into();
+                let qname: Relation = QueryId::from_select(q, search_path.as_slice()).into();
 
                 // add the query to ReadySet
                 if create_if_not_exist {

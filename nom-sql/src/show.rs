@@ -17,13 +17,11 @@ use crate::expression::expression;
 use crate::whitespace::{whitespace0, whitespace1};
 use crate::{literal, Dialect, DialectDisplay, Expr, Literal, NomSqlResult};
 
-pub type QueryID = String;
-
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum ShowStatement {
     Events,
     Tables(Tables),
-    CachedQueries(Option<QueryID>),
+    CachedQueries(Option<String>),
     ProxiedQueries(ProxiedQueriesOptions),
     ReadySetStatus,
     ReadySetStatusAdapter,

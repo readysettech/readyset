@@ -2700,7 +2700,7 @@ where
                     if self.settings.query_log_mode.allow_ad_hoc() {
                         event.query =
                             Some(Arc::new(SqlQuery::Select(view_request.statement.clone())));
-                        event.query_id = Some(QueryId::from_view_create_request(&view_request));
+                        event.query_id = Some(QueryId::from(&view_request));
                     }
                     Self::query_adhoc_select(
                         &mut self.noria,

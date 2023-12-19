@@ -11,7 +11,7 @@ use std::time::Instant;
 use dataflow_expression::Dialect;
 use metrics::{counter, register_counter, Counter};
 use nom_sql::{DialectDisplay, Literal};
-use readyset_client::query::{MigrationState, Query};
+use readyset_client::query::{MigrationState, Query, QueryId};
 use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_client::{PlaceholderIdx, ReadySetHandle, ViewCreateRequest};
 use readyset_client_metrics::recorded;
@@ -25,7 +25,6 @@ use tracing::{debug, error, info, instrument};
 
 use crate::backend::NoriaConnector;
 use crate::query_status_cache::QueryStatusCache;
-use crate::utils;
 
 pub struct MigrationHandler {
     /// Connection used to issue prepare requests to ReadySet.
@@ -331,8 +330,10 @@ impl MigrationHandler {
                 .update_query_migration_state(view_request, MigrationState::Unsupported);
             return;
         }
-        let qname =
-            utils::generate_query_name(&view_request.statement, &view_request.schema_search_path);
+        let qname = QueryId::from_select(
+            &view_request.statement,
+            view_request.schema_search_path.as_slice(),
+        );
 
         // We do not need to provide a real "create cache" String for a dry run migration
         let changelist = ChangeList::from_change(

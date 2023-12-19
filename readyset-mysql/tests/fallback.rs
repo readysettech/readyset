@@ -6,7 +6,6 @@ use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::mysql_helpers::{last_query_info, MySQLAdapter};
 use readyset_client_test_helpers::{self, sleep, TestBuilder};
 use readyset_server::Handle;
-use readyset_util::hash::hash;
 use readyset_util::shutdown::ShutdownSender;
 use serial_test::serial;
 use test_utils::{skip_flaky_finder, slow};
@@ -747,7 +746,7 @@ async fn valid_sql_parsing_failed_shows_proxied() {
         .query::<(String, String, String), _>("SHOW PROXIED QUERIES;")
         .await
         .unwrap();
-    let id = QueryId::new(hash(&q));
+    let id = QueryId::from_unparsed_select(&q);
 
     assert!(
         proxied_queries.contains(&(id.to_string(), q, "unsupported".to_owned())),

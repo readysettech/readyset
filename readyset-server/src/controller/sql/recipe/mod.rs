@@ -1,15 +1,17 @@
-use std::str;
+use std::{fmt, str};
 
 use nom_sql::{
     CacheInner, CreateCacheStatement, CreateTableStatement, CreateViewStatement, Relation,
-    SqlIdentifier, SqlQuery,
+    SelectStatement, SqlIdentifier, SqlQuery,
 };
 use petgraph::graph::NodeIndex;
 use readyset_client::recipe::changelist::ChangeList;
 use readyset_client::ViewCreateRequest;
 use readyset_data::Dialect;
 use readyset_errors::ReadySetResult;
+use readyset_util::hash::hash;
 use serde::{Deserialize, Serialize};
+use sha1::{Digest, Sha1};
 use tracing::warn;
 use vec1::Vec1;
 
@@ -18,7 +20,54 @@ use super::BaseSchema;
 use crate::controller::sql::SqlIncorporator;
 use crate::controller::Migration;
 
-pub(crate) type QueryID = u128;
+/// Uniquely identifies an expression in the expression registry.
+#[derive(Clone, Copy, Default, Debug, Deserialize, Hash, Serialize, PartialEq, Eq)]
+#[repr(transparent)]
+pub(crate) struct ExprId(u128);
+
+impl From<&RecipeExpr> for ExprId {
+    /// Calculates a SHA-1 hash of the [`RecipeExpr`], to identify it based on its contents.
+    fn from(value: &RecipeExpr) -> Self {
+        let mut hasher = Sha1::new();
+        match value {
+            RecipeExpr::Table {
+                name,
+                body,
+                pg_meta,
+            } => {
+                hasher.update(hash(name).to_le_bytes());
+                hasher.update(hash(body).to_le_bytes());
+                hasher.update(hash(pg_meta).to_le_bytes());
+            }
+            RecipeExpr::View { name, definition } => {
+                hasher.update(hash(name).to_le_bytes());
+                hasher.update(hash(definition).to_le_bytes());
+            }
+            RecipeExpr::Cache { statement, .. } => hasher.update(hash(statement).to_le_bytes()),
+        };
+        // Sha1 digest is 20 byte long, so it is safe to consume only 16 bytes
+        Self(u128::from_le_bytes(
+            hasher.finalize()[..16].try_into().unwrap(),
+        ))
+    }
+}
+
+impl From<&SelectStatement> for ExprId {
+    fn from(value: &SelectStatement) -> ExprId {
+        let mut hasher = Sha1::new();
+        hasher.update(hash(value).to_le_bytes());
+        // Sha1 digest is 20 byte long, so it is safe to consume only 16 bytes
+        Self(u128::from_le_bytes(
+            hasher.finalize()[..16].try_into().unwrap(),
+        ))
+    }
+}
+
+impl fmt::Display for ExprId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "q_{:x}", self.0)
+    }
+}
 
 /// Represents a Soup recipe.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -61,6 +110,7 @@ impl Recipe {
                 name,
                 statement,
                 always,
+                ..
             } => SqlQuery::CreateCache(CreateCacheStatement {
                 name: Some(name.clone()),
                 inner: Ok(CacheInner::Statement(Box::new(statement.clone()))),

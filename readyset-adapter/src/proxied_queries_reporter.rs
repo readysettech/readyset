@@ -99,7 +99,7 @@ mod tests {
         ));
         let proxied_queries_reporter = Arc::new(ProxiedQueriesReporter::new(query_status_cache));
 
-        let query_id = QueryId::new(42);
+        let query_id = QueryId::from_unparsed_select("test");
         let mut init_q = DeniedQuery {
             id: query_id,
             query: Query::ParseFailed(Arc::new(
