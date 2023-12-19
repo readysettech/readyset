@@ -6,7 +6,6 @@ use mysql_async::prelude::Queryable;
 use readyset_adapter::backend::QueryInfo;
 use readyset_client_metrics::QueryDestination;
 use readyset_util::eventually;
-use readyset_util::hash::hash;
 use serial_test::serial;
 use test_utils::slow;
 use tokio::time::{sleep, timeout};
@@ -495,10 +494,10 @@ async fn dry_run_evaluates_support() {
         nom_sql::SqlQuery::Select(s) => s,
         _ => unreachable!(),
     };
-    let query_id = QueryId::new(hash(&ViewCreateRequest::new(
+    let query_id = QueryId::from(&ViewCreateRequest::new(
         select_query,
         vec![deployment.name().into()],
-    )))
+    ))
     .to_string();
     let mut results = EventuallyConsistentResults::new();
     results.write(&[(
@@ -576,10 +575,10 @@ async fn proxied_queries_filtering() {
         nom_sql::SqlQuery::Select(s) => s,
         _ => unreachable!(),
     };
-    let query_id = QueryId::new(hash(&ViewCreateRequest::new(
+    let query_id = QueryId::from(&ViewCreateRequest::new(
         select_query,
         vec![deployment.name().into()],
-    )))
+    ))
     .to_string();
     let mut results = EventuallyConsistentResults::new();
     results.write(&[(

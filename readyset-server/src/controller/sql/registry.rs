@@ -10,13 +10,12 @@ use readyset_client::recipe::changelist::PostgresTableMetadata;
 use readyset_client::PlaceholderIdx;
 use readyset_errors::{internal_err, unsupported_err, ReadySetError, ReadySetResult};
 use readyset_sql_passes::SelectStatementSkeleton;
-use readyset_util::hash::hash;
 use readyset_util::redacted::Sensitive;
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 use vec1::Vec1;
 
-use super::QueryID;
+use super::ExprId;
 
 /// A single SQL expression stored in a Recipe.
 #[allow(clippy::large_enum_variant)]
@@ -131,31 +130,6 @@ impl RecipeExpr {
             }
             _ => vec![], // TODO: compound select statements,
         }
-    }
-
-    /// Calculates a SHA-1 hash of the [`RecipeExpr`], to identify it based on its contents.
-    pub(super) fn calculate_hash(&self) -> QueryID {
-        // NOTE: this has to be the same as `<SelectStatement as RegistryExpr>::query_id`
-        use sha1::{Digest, Sha1};
-        let mut hasher = Sha1::new();
-        match self {
-            RecipeExpr::Table {
-                name,
-                body,
-                pg_meta,
-            } => {
-                hasher.update(hash(name).to_le_bytes());
-                hasher.update(hash(body).to_le_bytes());
-                hasher.update(hash(pg_meta).to_le_bytes());
-            }
-            RecipeExpr::View { name, definition } => {
-                hasher.update(hash(name).to_le_bytes());
-                hasher.update(hash(definition).to_le_bytes());
-            }
-            RecipeExpr::Cache { statement, .. } => hasher.update(hash(statement).to_le_bytes()),
-        };
-        // Sha1 digest is 20 byte long, so it is safe to consume only 16 bytes
-        u128::from_le_bytes(hasher.finalize()[..16].try_into().unwrap())
     }
 }
 
@@ -346,9 +320,9 @@ impl ExprSkeletons {
 /// The set of all [`RecipeExpr`]s installed in a ReadySet server cluster.
 #[derive(Clone, Default, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub(super) struct ExprRegistry {
-    /// A map from [`QueryID`] to the [`RecipeExpr`] associated with it.
+    /// A map from [`ExprId`] to the [`RecipeExpr`] associated with it.
     #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
-    expressions: HashMap<QueryID, RecipeExpr>,
+    expressions: HashMap<ExprId, RecipeExpr>,
 
     /// A map from a hash of a stripped SelectStatement to all sets of stripped literals for each
     /// cached version of the stripped SelectStatement.
@@ -361,12 +335,12 @@ pub(super) struct ExprRegistry {
     ///
     /// # Invariants
     ///
-    /// - The keys here *must* be valid [`QueryID`]s (aka, present in `expressions`), and their
+    /// - The keys here *must* be valid [`ExprId`]s (aka, present in `expressions`), and their
     ///   associated expression should be of [`RecipeExpr::Table`] variant: Tables don't depend on
     ///   anything, but queries depend on tables.
-    /// - The values *must* be valid [`QueryID`]s (aka, present in `expressions`), and their
+    /// - The values *must* be valid [`ExprId`]s (aka, present in `expressions`), and their
     ///   associated expression should be of [`RecipeExpr::Cache`] or [`RecipeExpr::View`] variant.
-    dependencies: HashMap<QueryID, HashSet<QueryID>>,
+    dependencies: HashMap<ExprId, HashSet<ExprId>>,
 
     /// Map from names of custom types to the set of Query IDs for tables that have columns with
     /// those types.
@@ -374,9 +348,9 @@ pub(super) struct ExprRegistry {
     /// # Invariants
     ///
     /// - The keys *must* be valid custom types (aka, present in `self.inc.custom_types`),
-    /// - The values *must* be valid [`QueryID`]s (aka, present in `expressions`), and their
+    /// - The values *must* be valid [`ExprId`]s (aka, present in `expressions`), and their
     ///   associated expression should be of [`RecipeExpr::Table`]
-    custom_type_dependencies: HashMap<Relation, HashSet<QueryID>>,
+    custom_type_dependencies: HashMap<Relation, HashSet<ExprId>>,
 
     /// Map from names of *nonexistent* tables, to a set of names for queries which should be
     /// invalidated if those tables are ever created
@@ -385,11 +359,11 @@ pub(super) struct ExprRegistry {
     /// Aliases assigned to each [`RecipeExpr`] stored.
     ///
     /// # Invariants
-    /// - Each `QueryID` present here *must* exist as key in the `expressions` map.
-    aliases: HashMap<Relation, QueryID>,
+    /// - Each `ExprId` present here *must* exist as key in the `expressions` map.
+    aliases: HashMap<Relation, ExprId>,
 
     /// Queries that can reuse the view for a different [`RecipeExpr::Cache`], specified by
-    /// [`QueryID`]
+    /// [`ExprId`]
     reused_caches: HashMap<Relation, Vec1<MatchedCache>>,
 }
 
@@ -404,12 +378,12 @@ impl ExprRegistry {
     ///   references a table that is not present in the registry.
     /// - The [`RecipeExpr`] has a name that is already being used by a different [`RecipeExpr`].
     pub(super) fn add_query(&mut self, expression: RecipeExpr) -> ReadySetResult<bool> {
-        let query_id = expression.calculate_hash();
-        debug!(?expression, %query_id, "Adding expression to the registry");
+        let expr_id = (&expression).into();
+        debug!(?expression, %expr_id, "Adding expression to the registry");
         // We always try adding the alias first, in case there's another table/query
         // with the same name already.
-        self.assign_alias(expression.name().clone(), query_id)?;
-        if self.expressions.contains_key(&query_id) {
+        self.assign_alias(expression.name().clone(), expr_id)?;
+        if self.expressions.contains_key(&expr_id) {
             return Ok(false);
         }
 
@@ -434,16 +408,16 @@ impl ExprRegistry {
             self.dependencies
                 .entry(*table_id)
                 .or_insert_with(|| HashSet::new())
-                .insert(query_id);
+                .insert(expr_id);
         }
 
         for ty in expression.custom_type_references() {
             if let Some(deps) = self.custom_type_dependencies.get_mut(ty) {
-                deps.insert(query_id);
+                deps.insert(expr_id);
             }
         }
 
-        self.expressions.insert(query_id, expression);
+        self.expressions.insert(expr_id, expression);
         Ok(true)
     }
 
@@ -455,11 +429,11 @@ impl ExprRegistry {
     }
 
     /// Returns true if the given expression exists in `self`
-    pub(super) fn contains<E>(&self, expression: &E) -> bool
+    pub(super) fn contains<E>(&self, expression: E) -> bool
     where
-        E: RegistryExpr,
+        E: Into<ExprId>,
     {
-        self.expressions.contains_key(&expression.query_id())
+        self.expressions.contains_key(&expression.into())
     }
 
     /// Retrieves the original name for the query with the given `alias` (which might already be the
@@ -629,19 +603,19 @@ impl ExprRegistry {
         self.reused_caches.get(name)
     }
 
-    fn assign_alias(&mut self, alias: Relation, query_id: QueryID) -> ReadySetResult<()> {
+    fn assign_alias(&mut self, alias: Relation, expr_id: ExprId) -> ReadySetResult<()> {
         match self.aliases.entry(alias.clone()) {
             Entry::Occupied(e) => {
-                if *e.get() != query_id {
+                if *e.get() != expr_id {
                     return Err(ReadySetError::RecipeInvariantViolated(format!(
-                        "Query name exists but existing query is different: {}",
+                        "Expression name exists but existing expression is different: {}",
                         alias.display_unquoted()
                     )));
                 }
             }
             Entry::Vacant(e) => {
-                debug!(alias = %e.key().display_unquoted(), %query_id, "Aliasing existing query");
-                e.insert(query_id);
+                debug!(alias = %e.key().display_unquoted(), %expr_id, "Aliasing existing expression");
+                e.insert(expr_id);
             }
         }
         Ok(())
@@ -692,29 +666,6 @@ impl TryFrom<CreateViewStatement> for RecipeExpr {
                 )
             })?,
         })
-    }
-}
-
-/// Trait to overload different types of expressions that might exist in the [`ExprRegistry`]
-pub trait RegistryExpr {
-    /// Return a unique ID for this expression
-    fn query_id(&self) -> QueryID;
-}
-
-impl RegistryExpr for RecipeExpr {
-    fn query_id(&self) -> QueryID {
-        self.calculate_hash()
-    }
-}
-
-impl RegistryExpr for SelectStatement {
-    fn query_id(&self) -> QueryID {
-        // NOTE: this has to be the same as `RecipeExpr::calculate_hash`
-        use sha1::{Digest, Sha1};
-        let mut hasher = Sha1::new();
-        hasher.update(hash(self).to_le_bytes());
-        // Sha1 digest is 20 byte long, so it is safe to consume only 16 bytes
-        u128::from_le_bytes(hasher.finalize()[..16].try_into().unwrap())
     }
 }
 

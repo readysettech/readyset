@@ -76,6 +76,10 @@ pub enum ReadySetError {
     #[error("The provided query is invalid: {0}")]
     InvalidQuery(String),
 
+    /// The query ID is invalid
+    #[error("The provided query ID is invalid: {0}")]
+    InvalidQueryId(String),
+
     /// The adapter received a query id in CREATE CACHE that does not correspond to a known
     /// query
     #[error("No query known by id {id}")]

@@ -8,11 +8,13 @@
 use std::borrow::Borrow;
 use std::fmt::{self, Display};
 use std::hash::{Hash, Hasher};
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use nom_sql::DialectDisplay;
+use nom_sql::{DialectDisplay, Relation, SelectStatement, SqlIdentifier};
 use readyset_data::DfValue;
+use readyset_errors::ReadySetError;
 use readyset_sql_passes::anonymize::{Anonymize, Anonymizer};
 use readyset_util::fmt::fmt_with;
 use readyset_util::hash::hash;
@@ -22,26 +24,64 @@ use vec1::Vec1;
 
 use crate::{PlaceholderIdx, ViewCreateRequest};
 
-/// A QueryId is a string with the prefix `q_` and the suffix of the hash of the query
-#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
+/// Uniquely identifies a SELECT statement that is in a particular form. In other words,
+/// `s1_query_id == s2_query_id` **only if** `s1 == s2`. This means that the unparsed,
+/// pre-adapter-rewrite version of a SELECT statement will not have the same `QueryId` as the
+/// parsed, rewritten version of the same SELECT statement.
+///
+/// `QueryId`s can be created from any type that implements [`Hash`] via
+/// [`QueryId::new`](struct.QueryId.html#method.new).
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[repr(transparent)]
 pub struct QueryId(u64);
 
 impl QueryId {
-    /// Wrap a u64 in a [`QueryId`]
-    pub fn new(id: u64) -> Self {
-        QueryId(id)
+    pub fn from_select(stmt: &SelectStatement, schema_search_path: &[SqlIdentifier]) -> Self {
+        QueryId(hash(&(stmt, schema_search_path)))
     }
 
-    /// Constructs a new [`QueryId`] from a hash of the given [`ViewCreateRequest`]
-    pub fn from_view_create_request(q: &ViewCreateRequest) -> Self {
-        QueryId::new(hash(q))
+    pub fn from_unparsed_select<T>(unparsed_select: T) -> Self
+    where
+        T: AsRef<str>,
+    {
+        QueryId(hash(&unparsed_select.as_ref()))
+    }
+}
+
+impl From<&ViewCreateRequest> for QueryId {
+    fn from(value: &ViewCreateRequest) -> Self {
+        QueryId(hash(value))
+    }
+}
+
+impl From<&Query> for QueryId {
+    fn from(value: &Query) -> Self {
+        QueryId(hash(value))
+    }
+}
+
+impl FromStr for QueryId {
+    type Err = ReadySetError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mk_err = || ReadySetError::InvalidQueryId(s.into());
+
+        Ok(QueryId(
+            u64::from_str_radix(s.strip_prefix("q_").ok_or_else(mk_err)?, 16)
+                .map_err(|_| mk_err())?,
+        ))
     }
 }
 
 impl Display for QueryId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "q_{:x}", self.0)
+    }
+}
+
+impl From<QueryId> for Relation {
+    fn from(value: QueryId) -> Self {
+        value.to_string().into()
     }
 }
 

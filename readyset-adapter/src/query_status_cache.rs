@@ -18,7 +18,6 @@ use readyset_client::metrics::recorded;
 use readyset_client::query::*;
 use readyset_client::ViewCreateRequest;
 use readyset_data::DfValue;
-use readyset_util::hash::hash;
 use tracing::{error, warn};
 
 pub const DEFAULT_QUERY_STATUS_CAPACITY: usize = 100_000;
@@ -168,6 +167,8 @@ pub trait QueryStatusKey: Into<Query> + Hash + Clone {
     fn with_mut_status<F, R>(&self, cache: &QueryStatusCache, f: F) -> R
     where
         F: Fn(Option<&mut QueryStatus>) -> R;
+
+    fn query_id(&self) -> QueryId;
 }
 
 impl QueryStatusKey for Query {
@@ -190,6 +191,10 @@ impl QueryStatusKey for Query {
             Query::ParseFailed(k) => k.with_mut_status(cache, f),
         }
     }
+
+    fn query_id(&self) -> QueryId {
+        self.into()
+    }
 }
 
 impl QueryStatusKey for ViewCreateRequest {
@@ -197,7 +202,7 @@ impl QueryStatusKey for ViewCreateRequest {
     where
         F: FnOnce(Option<&QueryStatus>) -> R,
     {
-        let id = QueryId::new(hash(self));
+        let id = QueryId::from(self);
         // Since this isn't mutating anything, we only need to access the in-memory map.
         f(cache.id_to_status.get(&id).as_deref())
     }
@@ -206,13 +211,17 @@ impl QueryStatusKey for ViewCreateRequest {
     where
         F: Fn(Option<&mut QueryStatus>) -> R,
     {
-        let id = QueryId::new(hash(self));
+        let id = QueryId::from(self);
         // Since this is potentially mutating, we need to apply F to both the in-memory and the
         // persistent version of the status.
         f(cache.id_to_status.get_mut(&id).as_deref_mut());
         let mut statuses = cache.persistent_handle.statuses.write();
         let transformed_status = statuses.get_mut(&id).map(|(_, status)| status);
         f(transformed_status)
+    }
+
+    fn query_id(&self) -> QueryId {
+        self.into()
     }
 }
 
@@ -221,7 +230,7 @@ impl QueryStatusKey for String {
     where
         F: FnOnce(Option<&QueryStatus>) -> R,
     {
-        let id = QueryId::new(hash(self));
+        let id = QueryId::from_unparsed_select(self);
         // Since this isn't mutating anything, we only need to access the in-memory map.
         f(cache.id_to_status.get(&id).as_deref())
     }
@@ -230,14 +239,17 @@ impl QueryStatusKey for String {
     where
         F: Fn(Option<&mut QueryStatus>) -> R,
     {
-        let id = QueryId::new(hash(self));
+        let id = QueryId::from_unparsed_select(self);
         // Since this is potentially mutating, we need to apply F to both the in-memory and the
         // persistent version of the status.
         f(cache.id_to_status.get_mut(&id).as_deref_mut());
-
         let mut statuses = cache.persistent_handle.statuses.write();
         let transformed_status = statuses.get_mut(&id).map(|(_, status)| status);
         f(transformed_status)
+    }
+
+    fn query_id(&self) -> QueryId {
+        QueryId::from_unparsed_select(self)
     }
 }
 
@@ -321,7 +333,7 @@ impl QueryStatusCache {
                 status
             }
         };
-        let id = QueryId::new(hash(&q));
+        let id = QueryId::from(&q);
         self.id_to_status.insert(id, status.clone());
         self.persistent_handle.insert_with_status(q, id, status);
         gauge!(
@@ -339,7 +351,7 @@ impl QueryStatusCache {
     where
         Q: QueryStatusKey,
     {
-        let id = QueryId::new(hash(&q));
+        let id: QueryId = q.query_id();
         let query_state = self.id_to_status.get(&id);
 
         match query_state {
@@ -755,7 +767,7 @@ impl QueryStatusCache {
 
     /// Returns a query given a query hash
     pub fn query(&self, id: &str) -> Option<Query> {
-        let id = QueryId::new(u64::from_str_radix(id.strip_prefix("q_")?, 16).ok()?);
+        let id = id.parse::<QueryId>().ok()?;
         let statuses = self.persistent_handle.statuses.read();
         statuses.peek(&id).map(|(query, _status)| query.clone())
     }
@@ -791,6 +803,7 @@ impl FromStr for MigrationStyle {
 mod tests {
     use nom_sql::{SelectStatement, SqlQuery};
     use readyset_client::ViewCreateRequest;
+    use readyset_util::hash::hash;
     use vec1::Vec1;
 
     use super::*;
@@ -810,8 +823,14 @@ mod tests {
         let string = "SELECT * FROM t1".to_string();
         let q_select: Query = select.clone().into();
         let q_string: Query = string.clone().into();
-        assert_eq!(hash(&select), hash(&q_select));
-        assert_eq!(hash(&string), hash(&q_string));
+        assert_eq!(
+            hash(&QueryId::from(&select)),
+            hash(&QueryId::from(&q_select))
+        );
+        assert_eq!(
+            hash(&QueryId::from_unparsed_select(string.as_str())),
+            hash(&QueryId::from(&q_string))
+        );
     }
 
     #[test]
@@ -819,7 +838,7 @@ mod tests {
         let cache = QueryStatusCache::new();
         let q1 = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
         let status = QueryStatus::default_for_query(&q1.clone().into());
-        let id = QueryId::new(hash(&q1));
+        let id = QueryId::from(&q1);
 
         cache.insert(q1.clone());
 
@@ -839,7 +858,7 @@ mod tests {
         let cache = QueryStatusCache::new();
         let q1 = "SELECT * FROM t1".to_string();
         let status = QueryStatus::default_for_query(&q1.clone().into());
-        let id = QueryId::new(hash(&q1));
+        let id = QueryId::from_unparsed_select(&q1);
 
         cache.insert(q1.clone());
 
@@ -855,7 +874,7 @@ mod tests {
     }
 
     #[test]
-    fn query_is_referenced_by_hash() {
+    fn query_is_referenced_by_query_id() {
         let cache = QueryStatusCache::new();
         let q1 = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
         let q2 = ViewCreateRequest::new(select_statement("SELECT * FROM t2").unwrap(), vec![]);
@@ -863,8 +882,8 @@ mod tests {
         cache.update_query_migration_state(&q1, MigrationState::Pending);
         cache.update_query_migration_state(&q2, MigrationState::Successful);
 
-        let h1 = QueryId::new(hash(&q1));
-        let h2 = QueryId::new(hash(&q2));
+        let h1 = QueryId::from(&q1);
+        let h2 = QueryId::from(&q2);
 
         let r1 = cache.query(&h1.to_string()).unwrap();
         let r2 = cache.query(&h2.to_string()).unwrap();
@@ -880,7 +899,7 @@ mod tests {
 
         assert_eq!(
             cache.query_migration_state(&query).0,
-            QueryId::new(hash(&Into::<Query>::into(query.clone())))
+            QueryId::from(&Into::<Query>::into(query.clone()))
         );
 
         // If we haven't explicitly updated it, we default to pending
@@ -1198,7 +1217,7 @@ mod tests {
         q.with_mut_status(&cache, |_| {
             // Simulate it being removed by lru cache then inserted
             let query = Query::ParseFailed(Arc::new("foobar".to_string()));
-            let query_id = QueryId::new(0);
+            let query_id = QueryId::from_unparsed_select("foobar");
             let query_status = QueryStatus::default_for_query(&query);
             cache
                 .persistent_handle
