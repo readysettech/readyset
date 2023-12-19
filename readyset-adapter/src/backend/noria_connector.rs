@@ -13,6 +13,7 @@ use readyset_client::consistency::Timestamp;
 use readyset_client::internal::LocalNodeIndex;
 use readyset_client::query::QueryId;
 use readyset_client::recipe::changelist::{Change, ChangeList, IntoChanges};
+use readyset_client::recipe::CacheExpr;
 use readyset_client::results::{ResultIterator, Results};
 use readyset_client::{
     ColumnSchema, GraphvizOptions, ReadQuery, ReaderAddress, ReaderHandle, ReadySetHandle,
@@ -539,9 +540,12 @@ impl NoriaConnector {
         Ok(QueryResult::from_owned(schema, vec![Results::new(data)]))
     }
 
+    pub(crate) async fn verbose_views(&mut self) -> ReadySetResult<Vec<CacheExpr>> {
+        self.inner.get_mut()?.noria.verbose_views().await
+    }
+
     pub(crate) async fn list_create_cache_stmts(&mut self) -> ReadySetResult<Vec<String>> {
-        let noria = &mut self.inner.get_mut()?.noria;
-        Ok(noria
+        Ok(self
             .verbose_views()
             .await?
             .into_iter()

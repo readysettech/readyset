@@ -1993,13 +1993,14 @@ where
     /// Responds to a `SHOW CACHES` query
     async fn show_caches(
         &mut self,
-        query_id: &Option<String>,
+        query_id: Option<&str>,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
-        let mut queries = self.state.query_status_cache.allow_list();
+        let mut views = self.noria.verbose_views().await?;
 
         // Filter on query ID
-        if let Some(q_id) = query_id {
-            queries.retain(|(id, _, _)| id.to_string() == *q_id);
+        if let Some(unparsed_query_id) = query_id {
+            let query_id = unparsed_query_id.parse()?;
+            views.retain(|view| view.query_id == query_id);
         }
 
         let select_schema = if let Some(handle) = self.metrics_handle.as_mut() {
@@ -2018,17 +2019,12 @@ where
 
         // Get the cache name for each query from the view cache
         let mut results: Vec<Vec<DfValue>> = vec![];
-        for (id, view, status) in queries {
-            let mut row = vec![
-                id.to_string().into(),
-                self.noria
-                    .get_view_name(&view.statement, false, false, None)
-                    .await?
-                    .display_unquoted()
-                    .to_string()
-                    .into(),
-                Self::format_query_text(view.statement.display(DB::SQL_DIALECT).to_string()).into(),
-                if status.always {
+        for view in views {
+            let mut row: Vec<DfValue> = vec![
+                view.query_id.to_string().into(),
+                view.name.display_unquoted().to_string().into(),
+                Self::format_query_text(view.display(DB::SQL_DIALECT).to_string()).into(),
+                if view.always {
                     "no fallback".into()
                 } else {
                     "fallback allowed".into()
@@ -2037,8 +2033,9 @@ where
 
             // Append metrics if we have them
             if let Some(handle) = self.metrics_handle.as_ref() {
-                let MetricsSummary { sample_count } =
-                    handle.metrics_summary(id.to_string()).unwrap_or_default();
+                let MetricsSummary { sample_count } = handle
+                    .metrics_summary(view.query_id.to_string())
+                    .unwrap_or_default();
                 row.push(DfValue::from(format!("{sample_count}")));
             }
 
@@ -2270,7 +2267,7 @@ where
                     trace!("No telemetry sender. not sending metric for SHOW CACHES");
                 }
 
-                self.show_caches(query_id).await
+                self.show_caches(query_id.as_deref()).await
             }
             SqlQuery::Show(ShowStatement::ReadySetStatus) => Ok(self
                 .status_reporter

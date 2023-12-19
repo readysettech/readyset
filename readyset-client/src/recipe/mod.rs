@@ -5,9 +5,12 @@ pub mod changelist;
 use std::borrow::Cow;
 use std::fmt::Display;
 
+use nom_sql::{CacheInner, CreateCacheStatement, DialectDisplay, Relation, SelectStatement};
 use readyset_errors::ReadySetError;
+use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 
+use crate::query::QueryId;
 pub use crate::recipe::changelist::ChangeList;
 use crate::ReplicationOffset;
 
@@ -88,5 +91,40 @@ impl MigrationStatus {
     #[must_use]
     pub fn is_pending(&self) -> bool {
         matches!(self, Self::Pending)
+    }
+}
+
+/// The representation of a cache as it exists in the expression registry.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CacheExpr {
+    pub name: Relation,
+    pub statement: SelectStatement,
+    pub always: bool,
+    pub query_id: QueryId,
+}
+
+impl From<CacheExpr> for CreateCacheStatement {
+    fn from(value: CacheExpr) -> Self {
+        CreateCacheStatement {
+            name: Some(value.name),
+            inner: Ok(CacheInner::Statement(Box::new(value.statement))),
+            always: value.always,
+            // CacheExpr represents a migrated query, and the below fields are not relevant for an
+            // already-migrated query
+            concurrently: false,
+            unparsed_create_cache_statement: None,
+        }
+    }
+}
+
+impl DialectDisplay for CacheExpr {
+    fn display(&self, dialect: nom_sql::Dialect) -> impl std::fmt::Display + '_ {
+        fmt_with(move |f| {
+            write!(
+                f,
+                "{}",
+                CreateCacheStatement::from(self.clone()).display(dialect)
+            )
+        })
     }
 }
