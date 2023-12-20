@@ -1563,9 +1563,9 @@ async fn same_query_different_search_path() {
 async fn caches_go_in_authority_list() {
     readyset_tracing::init_test_logging();
 
-    let (config, _handle, authority, _, shutdown_tx) =
-        setup_standalone_with_authority("caches_go_in_authority_list", None, None, false, true)
-            .await;
+    let (builder, authority, _) =
+        setup_standalone_with_authority("caches_go_in_authority_list", None);
+    let (config, _handle, shutdown_tx) = builder.build::<PostgreSQLAdapter>().await;
 
     let queries = [
         "CREATE TABLE t (x int);",
@@ -1854,14 +1854,9 @@ mod multiple_create_and_drop {
 async fn drop_caches_go_in_authority_list() {
     readyset_tracing::init_test_logging();
 
-    let (config, _handle, authority, _, shutdown_tx) = setup_standalone_with_authority(
-        "drop_caches_go_in_authority_list",
-        None,
-        None,
-        false,
-        true,
-    )
-    .await;
+    let (builder, authority, _) =
+        setup_standalone_with_authority("drop_caches_go_in_authority_list", None);
+    let (config, _handle, shutdown_tx) = builder.build::<PostgreSQLAdapter>().await;
 
     let queries = [
         "CREATE TABLE t (x int);",
@@ -1887,8 +1882,8 @@ async fn drop_caches_go_in_authority_list() {
 async fn drop_all_caches_clears_authority_list() {
     readyset_tracing::init_test_logging();
 
-    let (config, _handle, authority, _, shutdown_tx) =
-        setup_standalone_with_authority("drop_all_caches", None, None, false, true).await;
+    let (builder, authority, _) = setup_standalone_with_authority("drop_all_caches", None);
+    let (config, _handle, shutdown_tx) = builder.build::<PostgreSQLAdapter>().await;
 
     let queries = [
         "CREATE TABLE t (x int);",

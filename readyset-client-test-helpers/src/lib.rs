@@ -13,11 +13,13 @@ use database_utils::DatabaseURL;
 use nom_sql::Relation;
 use readyset_adapter::backend::noria_connector::{NoriaConnector, ReadBehavior};
 use readyset_adapter::backend::{BackendBuilder, MigrationMode};
-use readyset_adapter::query_status_cache::QueryStatusCache;
+use readyset_adapter::query_status_cache::{MigrationStyle, QueryStatusCache};
 use readyset_adapter::{
     Backend, QueryHandler, ReadySetStatusReporter, UpstreamConfig, UpstreamDatabase,
+    ViewsSynchronizer,
 };
 use readyset_client::consensus::{Authority, LocalAuthorityStore};
+use readyset_data::Dialect;
 use readyset_server::{Builder, DurabilityMode, Handle, LocalAuthority, ReadySetHandle};
 use readyset_util::shared_cache::SharedCache;
 use readyset_util::shutdown::ShutdownSender;
@@ -80,6 +82,7 @@ pub struct TestBuilder {
     wait_for_backend: bool,
     read_behavior: ReadBehavior,
     migration_mode: MigrationMode,
+    migration_style: MigrationStyle,
     recreate_database: bool,
     query_status_cache: Option<&'static QueryStatusCache>,
     durability_mode: DurabilityMode,
@@ -103,6 +106,7 @@ impl TestBuilder {
             wait_for_backend: true,
             read_behavior: ReadBehavior::Blocking,
             migration_mode: MigrationMode::InRequestPath,
+            migration_style: MigrationStyle::InRequestPath,
             recreate_database: true,
             query_status_cache: None,
             durability_mode: DurabilityMode::MemoryOnly,
@@ -156,6 +160,11 @@ impl TestBuilder {
         self
     }
 
+    pub fn migration_style(mut self, migration_style: MigrationStyle) -> Self {
+        self.migration_style = migration_style;
+        self
+    }
+
     pub fn recreate_database(mut self, recreate_database: bool) -> Self {
         self.recreate_database = recreate_database;
         self
@@ -184,10 +193,6 @@ impl TestBuilder {
         if env::var("VERBOSE").is_ok() {
             readyset_tracing::init_test_logging();
         }
-
-        let query_status_cache = self
-            .query_status_cache
-            .unwrap_or_else(|| Box::leak(Box::new(QueryStatusCache::new())));
 
         let fallback_url_and_db_name = match self.fallback {
             Fallback::None => None,
@@ -251,6 +256,27 @@ impl TestBuilder {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
 
+        let query_status_cache = self.query_status_cache.unwrap_or_else(|| {
+            Box::leak(Box::new(
+                QueryStatusCache::new().style(self.migration_style),
+            ))
+        });
+
+        if matches!(self.migration_style, MigrationStyle::Explicit) {
+            let rh = handle.clone();
+            let expr_dialect = Dialect::DEFAULT_POSTGRESQL;
+            let shutdown_rx = shutdown_tx.subscribe();
+            tokio::spawn(async move {
+                let mut views_synchronizer = ViewsSynchronizer::new(
+                    rh,
+                    query_status_cache,
+                    std::time::Duration::from_secs(1),
+                    expr_dialect,
+                );
+                views_synchronizer.run(shutdown_rx).await
+            });
+        }
+
         let mut backend_shutdown_rx = shutdown_tx.subscribe();
         let fallback_url = fallback_url_and_db_name.as_ref().map(|(f, _)| f.clone());
         tokio::spawn(async move {
@@ -311,16 +337,18 @@ impl TestBuilder {
                     let mut backend_shutdown_rx_clone = backend_shutdown_rx_connection.clone();
                     tokio::spawn(async move {
                         tokio::select! {
-                            _ = A::run_backend(backend, s) => {},
+                            biased;
                             _ = backend_shutdown_rx_clone.recv() => {},
+                            _ = A::run_backend(backend, s) => {},
                         }
                     });
                 }
             };
 
             tokio::select! {
-                _ = connection_fut => {},
+                biased;
                 _ = backend_shutdown_rx.recv() => {},
+                _ = connection_fut => {},
             }
         });
 
