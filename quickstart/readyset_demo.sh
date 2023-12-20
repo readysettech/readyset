@@ -395,7 +395,7 @@ print_exit_message() {
 
 switch_on_mode() {
   echo -e "${BLUE}Would you like to run the demo or connect to your own db?${NOCOLOR}"
-  read -rp "demo(d)/postgres(p)/mysql(m), default: d: " mode
+  read -rp "demo(d)/postgres(p)/mysql(m): " mode
   if [[ $mode == "p" ]]; then
     if ! command -v psql &>/dev/null; then
       echo -e "${RED}psql (PostgreSQL client) is not installed. Please install psql to continue.${NOCOLOR}"
