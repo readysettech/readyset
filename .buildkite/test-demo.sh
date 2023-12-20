@@ -149,29 +149,19 @@ run_script() {
       # If we are going to fail, dump some debug information that may be useful to look at
       show_docker_info
       docker logs readyset-cache-1
-      return $ret
+      # The return code could have been 0, so exit with 1 explicitly
+      exit 1
     fi
 }
 
 test_combination() {
     combo=$1;
-    retries=$2
 
     echo -e "--- Testing combination (colorful input?, import sample data? explore?) ${combo}"
     read -ra answers <<< "$combo"
-    if ! run_script "${answers[0]}" "${answers[1]}" "${answers[2]}" "${answers[3]}"; then
-        echo "Test failed for combination $combo with code $?"
-        if [[ $retries -gt 0 ]]; then
-          echo "Retrying..."
-          retries=$((retries-1))
-          test_combination "${combo}" $retries
-        else
-          echo "All retries failed for combo: $combo"
-          exit 1
-        fi
-    else
-        echo "Test passed for combination: $combo"
-    fi
+    run_script "${answers[0]}" "${answers[1]}" "${answers[2]}" "${answers[3]}"
+    echo "Test passed for combination: $combo"
+    rm -f readyset.compose.yml
 }
 
 show_docker_info() {
