@@ -74,7 +74,7 @@ download_byo_compose_file() {
 
 run_docker_compose() {
   echo -e "${BLUE}${WHALE}Running the ReadySet Docker Compose setup... ${NOCOLOR}"
-  if ! docker compose -f readyset.compose.yml pull --quiet; then
+  if ! docker compose -f readyset.compose.yml pull; then
     echo -e "${RED}${ROTATING_LIGHT}Unable to pull ReadySet images.${NOCOLOR}"
     exit 1
   fi
