@@ -52,6 +52,7 @@ services:
       - "4000:4000"
     environment:
       UPSTREAM_DB_URL: mysql://root:readyset@mysql/testdb
+      RS_HOST: cache
       RS_PORT: 3307
       RS_GRAFANA_PORT: 4000
   mysql:
