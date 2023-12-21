@@ -992,9 +992,8 @@ where
                     query_status_cache,
                     std::time::Duration::from_secs(loop_interval),
                     expr_dialect,
-                    shutdown_rx,
                 );
-                views_synchronizer.run().await
+                views_synchronizer.run(shutdown_rx).await
             };
             rt.handle().spawn(abort_on_panic(fut));
         }
