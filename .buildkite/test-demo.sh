@@ -222,8 +222,11 @@ run_postgres_docker() {
 test_all_combinations() {
     reset_deployment_state
 
-    local psql_connection_string="postgresql://postgres:readyset@$DOCKER_HOST_ADDR:5434/testdb"
-    local mysql_connection_string="mysql://root:readyset@$DOCKER_HOST_ADDR:3306/testdb"
+    # Note: This intentionally uses 127.0.0.1 instead of $DOCKER_HOST_ADDR to test the functionality
+    # that we auto fixup 127.0.0.1 if we need to for docker
+
+    local psql_connection_string="postgresql://postgres:readyset@127.0.0.1:5434/testdb"
+    local mysql_connection_string="mysql://root:readyset@127.0.0.1:3306/testdb"
 
     local combinations=("n d n n" "y d y y" "y p $psql_connection_string" "y m $mysql_connection_string")
 

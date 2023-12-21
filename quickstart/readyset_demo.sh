@@ -366,11 +366,9 @@ free_form_connect() {
   echo -e "${BLUE}Connecting to ReadySet...${NOCOLOR}"
   if [[ $1 == "psql" ]]; then
     echo -e "${BLUE}Type \q to exit.${NOCOLOR}"
-    print_dashboard_link
     psql $CONNECTION_STRING
   else
     echo -e "${BLUE}Type 'exit' to exit.${NOCOLOR}"
-    print_dashboard_link
     parse_mysql_connection_string
     mysql -h "127.0.0.1" -P "3307" -u $username -p$password
   fi
@@ -495,10 +493,15 @@ run_byo_postgres() {
   echo -e "${BLUE}Enter your postgres connection string.${NOCOLOR}";
   echo -e "Example: postgresql://postgres:readyset@127.0.0.1:5432/testdb"
   read -rp "Connection String: " USER_CONNECTION_STRING
-  while ! docker run --rm postgres:14.1 psql "$USER_CONNECTION_STRING" -c ';'; do
+
+
+  while ! docker run --rm postgres:14.1 psql "$USER_CONNECTION_STRING" -c ';' > /dev/null 2>&1; do
+    if check_localhost_alternatives "psql"; then
+      break
+    fi
+
     echo -e "${RED}Unable to connect. Please double check connection string and try again.${NOCOLOR}"
-    print_localhost_hint
-    echo -e "(The command used to check is \`docker run --rm postgres psql \$USER_CONNECTION_STRING -c ';'\`)"
+    echo -e "(The command used to check is \`docker run --rm postgres psql ${USER_CONNECTION_STRING} -c ';'\`)"
     read -rp "Connection String: " USER_CONNECTION_STRING
   done
   echo -e "${GREEN}${GREEN_CHECK}Connection String verified.${NOCOLOR}"
@@ -510,20 +513,56 @@ run_byo_postgres() {
   run_after_connection "psql"
 }
 
-run_after_connection() {
-  display_arm_warning
-  wait_for_snapshot $1
-  explore_connection
-  free_form_connect $1
-  print_exit_message $1
+check_localhost_alternatives() {
+  db_type=$1
+  USER_CONNECTION_STRING_ORIG=$USER_CONNECTION_STRING
+
+  try_connection() {
+    local modified_connection_string=$1
+
+    if [ "$db_type" == "psql" ]; then
+      if docker run --rm postgres:14.1 psql "$modified_connection_string" -c ';' > /dev/null 2>&1; then
+        return 0
+      fi
+    elif [ "$db_type" == "mysql" ]; then
+      parse_mysql_connection_string
+      if docker run --rm  mysql mysql -h "$host" -P "$port" -u "$username" -p"$password" -e ';' > /dev/null 2>&1; then
+        return 0
+      fi
+    fi
+
+    echo "$USER_CONNECTION_STRING_ORIG failed. Checking $modified_connection_string"
+    return 1
+  }
+
+  # Try with host.docker.internal
+  USER_CONNECTION_STRING=$(echo "$USER_CONNECTION_STRING" | sed -e 's/localhost/host.docker.internal/' \
+                                                                -e 's/127.0.0.1/host.docker.internal/' \
+                                                                -e 's/\[::1\]/host.docker.internal/')
+  if try_connection "$USER_CONNECTION_STRING"; then
+    return 0
+  fi
+
+  # Try with BRIDGE_IP
+  BRIDGE_IP=$(docker network inspect bridge --format='{{(index .IPAM.Config 0).Gateway}}')
+  USER_CONNECTION_STRING=$(echo "$USER_CONNECTION_STRING_ORIG" | sed -e "s/localhost/${BRIDGE_IP}/g" \
+                                                                    -e "s/127.0.0.1/${BRIDGE_IP}/g" \
+                                                                    -e "s/\[::1\]/${BRIDGE_IP}/g")
+  if try_connection "$USER_CONNECTION_STRING"; then
+    return 0
+  fi
+
+  USER_CONNECTION_STRING=$USER_CONNECTION_STRING_ORIG
+  return 1
 }
 
-print_localhost_hint() {
-  # If it's a variation of localhost, give a hint about docker networking.
-  if  [[ $USER_CONNECTION_STRING == *"localhost"* ]] || [[ $USER_CONNECTION_STRING == *"127.0.0.1"* ]]; then
-    echo -e "${YELLOW}Hint: If you are connecting locally via docker, you may need to use the docker host name or ip${NOCOLOR}"
-    echo -e "${YELLOW}(e.g. host.docker.internal for Macs, or 172.17.0.1 for linux.) ${NOCOLOR}"
-  fi
+
+run_after_connection() {
+  display_arm_warning
+  wait_for_snapshot "$1"
+  explore_connection
+  free_form_connect "$1"
+  print_exit_message "$1"
 }
 
 parse_mysql_connection_string() {
@@ -538,9 +577,11 @@ run_byo_mysql() {
   echo -e "Example: mysql://root:readyset@127.0.0.1:3306/testdb"
   read -rp "Connection String: " USER_CONNECTION_STRING
   parse_mysql_connection_string
-  while ! docker run --rm  mysql mysql -h $host -P $port -u $username -p$password -e ';' > /dev/null 2>&1; do
+  while ! docker run --rm  mysql mysql -h "$host" -P "$port" -u "$username" -p"$password" -e ';' > /dev/null 2>&1; do
+    if check_localhost_alternatives "mysql"; then
+      break
+    fi
     echo -e "${RED}Unable to connect. Please double check connection string and try again.${NOCOLOR}"
-    print_localhost_hint
     echo -e "(The command used to check is \`docker run --rm mysql mysql -h $host -P $port -u $username -p$password -e ';'\`)"
     read -rp "Connection String: " USER_CONNECTION_STRING
     parse_mysql_connection_string
