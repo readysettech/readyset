@@ -2243,7 +2243,7 @@ mod failure_injection_tests {
             "CREATE CACHE test_query FROM SELECT * FROM users WHERE id = 1;",
         ];
         let (config, mut handle, _authority, shutdown_tx) =
-            setup_reload_controller_state_test("caches_recreated", &queries).await;
+            setup_reload_controller_state_test("caches_recreated_rewritten", &queries).await;
 
         eventually!(matches!(handle.leader_ready().await, Ok(true)));
 
@@ -2480,7 +2480,7 @@ mod failure_injection_tests {
         ];
 
         let (_config, mut handle, _authority, shutdown_tx) =
-            setup_reload_controller_state_test("caches_recreated", &queries).await;
+            setup_reload_controller_state_test("caches_recreated_no_resnapshot", &queries).await;
 
         // Add some sleep time because the replicator is a background task and we want to make sure
         // it has had a chance to hit the resnapshot error if it is going to.
