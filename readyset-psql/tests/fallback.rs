@@ -2107,41 +2107,15 @@ mod failure_injection_tests {
     use std::sync::Arc;
 
     use lazy_static::lazy_static;
-    use readyset_adapter::query_status_cache::MigrationStyle;
     use readyset_client::consensus::{Authority, AuthorityControl, CacheDDLRequest};
     use readyset_client::failpoints;
     use readyset_data::Dialect;
     use readyset_errors::ReadySetError;
-    use tokio_postgres::Client;
     use tracing::debug;
 
     use super::*;
     use crate::common::setup_standalone_with_authority;
     use crate::Handle;
-
-    async fn assert_query_hits_readyset(conn: &Client, query: &'static str) {
-        eventually! {
-            run_test: {
-                conn.simple_query(query).await.unwrap();
-                let row: Vec<String> = match conn
-                    .simple_query("EXPLAIN LAST STATEMENT")
-                    .await
-                    .unwrap()
-                    .first()
-                    .unwrap()
-                {
-                    SimpleQueryMessage::Row(r) => {
-                        (0..r.len()).map(|i| r.get(i).unwrap().to_owned()).collect()
-                    }
-                    _ => panic!(),
-                };
-                AssertUnwindSafe(|| row)
-            },
-            then_assert: |result| {
-                assert_eq!(result(), ["readyset", "ok"]);
-            }
-        }
-    }
 
     /// Starts readyset, runs extend recipe with a changelist generated from `queries`, then
     /// injects a leader election that fails to load the controller state and needs to re-create
@@ -2157,80 +2131,59 @@ mod failure_injection_tests {
     ) {
         readyset_tracing::init_test_logging();
 
-        let storage_dir = {
-            let (builder, authority, storage_dir) = setup_standalone_with_authority(prefix, None);
-            let (config, handle, shutdown_tx) = builder
-                .fallback(true)
-                .migration_style(MigrationStyle::Explicit)
-                .build::<PostgreSQLAdapter>()
-                .await;
+        let (config, handle, authority, storage_dir, shutdown_tx) =
+            setup_standalone_with_authority(prefix, None, None, true, true).await;
 
-            let conn = connect(config).await;
-            for query in queries {
-                debug!(%query, "Running Query");
-                let _res = conn.simple_query(query).await;
-                // give it some time to propagate
-                sleep().await;
-            }
-
-            let err_to_inject =
-                ReadySetError::SerializationFailed("Backwards Incompatibility Injected".into());
-
-            fail::cfg(
-                failpoints::LOAD_CONTROLLER_STATE,
-                &format!(
-                    "1*return({})",
-                    serde_json::ser::to_string(&err_to_inject).expect("failed to serialize error")
-                ),
-            )
-            .expect("failed to set failpoint");
-
-            shutdown_tx.shutdown().await;
+        let conn = connect(config).await;
+        for query in queries {
+            debug!(%query, "Running Query");
+            let _res = conn.simple_query(query).await;
+            // give it some time to propagate
             sleep().await;
-            drop(handle);
+        }
 
-            // Workers are cleared from the authority only when `Authority::drop` is called, so we
-            // need to wait for all the other `Arc<Authority>`s to be dropped. Without this, the
-            // next server we start up could end up registering the worker from the old server in
-            // addition to the new one, which would cause connection issues, since the old worker
-            // is no longer running.
-            while Arc::strong_count(&authority) > 1 {
-                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-            }
+        let err_to_inject =
+            ReadySetError::SerializationFailed(format!("Backwards Incompatibility Injected"));
 
-            storage_dir
-        };
+        fail::cfg(
+            failpoints::LOAD_CONTROLLER_STATE,
+            &format!(
+                "1*return({})",
+                serde_json::ser::to_string(&err_to_inject).expect("failed to serialize error")
+            ),
+        )
+        .expect("failed to set failpoint");
 
-        let (builder, authority, _tempdir) =
-            setup_standalone_with_authority(prefix, Some(storage_dir));
+        // Stop the server and start a new one
+        shutdown_tx.shutdown().await;
+        drop(handle);
+        sleep().await;
 
-        let (config, handle, shutdown_tx) = builder
-            .fallback(true)
-            .recreate_database(false)
-            .migration_style(MigrationStyle::Explicit)
-            .build::<PostgreSQLAdapter>()
-            .await;
-
+        let (config, handle, authority, _, shutdown_tx) = setup_standalone_with_authority(
+            prefix,
+            Some(authority),
+            Some(storage_dir),
+            true,
+            false,
+        )
+        .await;
+        sleep().await;
         (config, handle, authority, shutdown_tx)
     }
 
     #[tokio::test(flavor = "multi_thread")]
     #[serial]
     #[slow]
-    #[ignore = "REA-3894 Caches being recreated with pre-rewrite query string"]
     async fn caches_recreated_after_backwards_incompatible_upgrade() {
         let queries = [
             "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);",
             "CREATE CACHE test_query FROM SELECT * FROM users;",
         ];
-        let (config, mut handle, _authority, shutdown_tx) =
+        let (_config, mut handle, _authority, shutdown_tx) =
             setup_reload_controller_state_test("caches_recreated", &queries).await;
 
         let queries = handle.views().await.unwrap();
         assert!(queries.contains_key(&"test_query".into()));
-
-        let client = connect(config).await;
-        assert_query_hits_readyset(&client, "SELECT * FROM users").await;
 
         shutdown_tx.shutdown().await;
     }
@@ -2238,7 +2191,6 @@ mod failure_injection_tests {
     #[tokio::test(flavor = "multi_thread")]
     #[serial]
     #[slow]
-    #[ignore = "REA-3894 Caches being recreated with pre-rewrite query string"]
     async fn dropped_caches_not_recreated() {
         let queries = [
             "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);",
@@ -2246,23 +2198,18 @@ mod failure_injection_tests {
             "CREATE CACHE cached_query FROM SELECT * FROM users where id = 1;",
             "DROP CACHE dropped_query",
         ];
-        let (config, mut handle, _authority, shutdown_tx) =
+        let (_config, mut handle, _authority, shutdown_tx) =
             setup_reload_controller_state_test("caches_not_recreated", &queries).await;
 
         let queries = handle.views().await.unwrap();
         assert!(!queries.contains_key(&"dropped_query".into()));
         assert!(queries.contains_key(&"cached_query".into()));
-
-        let client = connect(config).await;
-        assert_query_hits_readyset(&client, "SELECT * FROM users WHERE id = 2").await;
-
         shutdown_tx.shutdown().await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
     #[serial]
     #[slow]
-    #[ignore = "REA-3894 Caches being recreated with pre-rewrite query string"]
     async fn dropped_then_recreated_cache_recreated() {
         let queries = [
             "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);",
@@ -2273,23 +2220,16 @@ mod failure_injection_tests {
             "CREATE CACHE cached_query FROM SELECT * FROM users",
         ];
 
-        let (config, mut handle, _authority, shutdown_tx) =
+        let (_config, mut handle, _authority, _shutdown_tx) =
             setup_reload_controller_state_test("caches_dropped_then_recreated", &queries).await;
-
         let queries = handle.views().await.unwrap();
         assert!(!queries.contains_key(&"dropped_query".into()));
         assert!(queries.contains_key(&"cached_query".into()));
-
-        let client = connect(config).await;
-        assert_query_hits_readyset(&client, "SELECT * FROM users").await;
-
-        shutdown_tx.shutdown().await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
     #[serial]
     #[slow]
-    #[ignore = "REA-3894 Caches being recreated with pre-rewrite query string"]
     async fn caches_added_if_extend_recipe_times_out() {
         let queries = [
             "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);",
@@ -2300,7 +2240,7 @@ mod failure_injection_tests {
         // The `create cache` is the 3rd extend_recipe run
         fail::cfg(failpoints::EXTEND_RECIPE, "2*off->1*sleep(6000)").expect("failed at failing");
 
-        let (config, mut handle, authority, shutdown_tx) =
+        let (_config, mut handle, authority, shutdown_tx) =
             setup_reload_controller_state_test("extend_recipe_timeout", &queries).await;
 
         let cache_ddl_requests = authority.cache_ddl_requests().await.unwrap();
@@ -2309,13 +2249,10 @@ mod failure_injection_tests {
             schema_search_path: vec!["postgres".into(), "public".into()],
             dialect: Dialect::DEFAULT_POSTGRESQL,
         };
-        assert_eq!(expected, *cache_ddl_requests.first().unwrap());
+        assert_eq!(expected, *cache_ddl_requests.get(0).unwrap());
 
         let queries = handle.views().await.unwrap();
         assert!(queries.contains_key(&"test_query".into()));
-
-        let client = connect(config).await;
-        assert_query_hits_readyset(&client, "SELECT * FROM users").await;
 
         shutdown_tx.shutdown().await;
     }
