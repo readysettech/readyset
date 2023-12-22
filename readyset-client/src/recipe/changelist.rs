@@ -43,12 +43,9 @@ use nom_sql::{
 };
 use readyset_data::DfType;
 use readyset_errors::{internal, unsupported, ReadySetError, ReadySetResult};
-use readyset_sql_passes::adapter_rewrites;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 use tracing::error;
-
-use crate::consensus::CacheDDLRequest;
 
 /// The specification for a list of changes that must be made
 /// to the MIR and dataflow graphs.
@@ -478,13 +475,14 @@ impl Change {
         }
     }
 
-    /// Parse a `Change` from the given [`CacheDDLRequest`], using the encapsulated [`Dialect`] and
-    /// schema search path for expression evaluation semantics. This function performs the adapter
-    /// rewrites on the parsed query string before passing it to the server via `/extend_recipe`.
-    pub fn from_cache_ddl_request(
-        ddl_req: &CacheDDLRequest,
-        server_supports_pagination: bool,
-    ) -> ReadySetResult<Self> {
+    /// Parse a `Change` from the given SQL string, using the given [`Dialect`] and schema search
+    /// path for expression evaluation semantics
+    pub fn from_str<S>(s: S, dialect: nom_sql::Dialect) -> ReadySetResult<Self>
+    where
+        S: AsRef<str>,
+    {
+        let query = s.as_ref();
+
         macro_rules! mk_error {
             ($str:expr) => {
                 Err(ReadySetError::UnparseableQuery {
@@ -492,29 +490,31 @@ impl Change {
                 })
             };
         }
-        match parse::query_expr_with_dialect(
-            LocatedSpan::new(ddl_req.unparsed_stmt.as_bytes()),
-            ddl_req.dialect.into(),
-        ) {
+        match parse::query_expr_with_dialect(LocatedSpan::new(query.as_bytes()), dialect) {
             Result::Err(nom::Err::Error(e)) => {
                 mk_error!(std::str::from_utf8(&e.input).unwrap())
             }
             Result::Err(nom::Err::Failure(e)) => {
                 mk_error!(std::str::from_utf8(&e.input).unwrap())
             }
-            Result::Err(_) => mk_error!(ddl_req.unparsed_stmt),
+            Result::Err(_) => mk_error!(query),
             Result::Ok((remainder, parsed)) => {
                 if !remainder.is_empty() {
                     return mk_error!(std::str::from_utf8(&remainder).unwrap());
                 }
                 Ok(match parsed {
+                    SqlQuery::CreateTable(statement) => Change::CreateTable {
+                        statement,
+                        pg_meta: None,
+                    },
+                    SqlQuery::CreateView(cvs) => Change::CreateView(cvs),
                     SqlQuery::CreateCache(CreateCacheStatement {
                         name,
                         inner,
                         always,
                         ..
                     }) => {
-                        let mut statement = match inner {
+                        let statement = match inner {
                             Ok(CacheInner::Statement(stmt)) => stmt,
                             Ok(CacheInner::Id(id)) => {
                                 error!(
@@ -528,24 +528,27 @@ impl Change {
                             }
                             Err(query) => return Err(ReadySetError::UnparseableQuery { query }),
                         };
-
-                        adapter_rewrites::process_query(
-                            &mut statement,
-                            server_supports_pagination,
-                        )?;
-
                         Change::CreateCache(CreateCache {
                             name,
                             statement,
                             always,
                         })
                     }
+                    SqlQuery::AlterTable(ats) => Change::AlterTable(ats),
+                    SqlQuery::DropTable(_) => {
+                        unsupported!("DropTable maps to multiple Changes and can't be contructed with as_str");
+                    }
+                    SqlQuery::DropView(_) => {
+                        unsupported!(
+                            "DropView maps to multiple Changes and can't be contructed with as_str"
+                        );
+                    }
                     SqlQuery::DropCache(dcs) => Change::Drop {
                         name: dcs.name,
                         if_exists: false,
                     },
                     _ => unsupported!(
-                        "CacheDDLRequests can only contain `CREATE CACHE` or `DROP CACHE` statements (got {})",
+                        "Only DDL statements supported as Change (got {})",
                         parsed.query_type()
                     ),
                 })
