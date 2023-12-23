@@ -4,6 +4,7 @@ use std::ops::{Range, RangeFrom, RangeTo};
 use std::str;
 use std::str::FromStr;
 
+use derive_more::From;
 use itertools::Itertools;
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case, take_until};
@@ -21,9 +22,10 @@ use test_strategy::Arbitrary;
 use crate::column::Column;
 use crate::dialect::{Dialect, DialectDisplay};
 use crate::expression::expression;
+use crate::select::selection;
 use crate::table::Relation;
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Expr, FunctionExpr, Literal, NomSqlResult, SqlIdentifier};
+use crate::{Expr, FunctionExpr, Literal, NomSqlResult, SelectStatement, SqlIdentifier};
 
 #[cfg(feature = "debug")]
 pub fn debug_print(tag: &str, i: &[u8]) {
@@ -849,6 +851,37 @@ pub fn field_reference_list(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<FieldReference>> {
     move |i| separated_list0(ws_sep_comma, field_reference(dialect))(i)
+}
+
+/// The SelectStatement or query ID referenced in a
+/// [`CreateCacheStatement`](`nom_sql::create::CreateCacheStatement`) or
+/// [`DropCacheStatement`](`nom_sql::drop::DropCacheStatement`)
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, From, Arbitrary)]
+pub enum CacheInner {
+    Statement(Box<SelectStatement>),
+    Id(SqlIdentifier),
+}
+
+impl DialectDisplay for CacheInner {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| match self {
+            Self::Statement(stmt) => write!(f, "{}", stmt.display(dialect)),
+            Self::Id(id) => write!(f, "{}", dialect.quote_identifier(id)),
+        })
+    }
+}
+
+/// Extract the [`SelectStatement`] or Query ID from a CREATE CACHE or DROP CACHE statement. Query
+/// ID is parsed as a SqlIdentifier
+pub fn cached_query_inner(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CacheInner> {
+    move |i| {
+        alt((
+            map(map(selection(dialect), Box::new), CacheInner::from),
+            map(dialect.identifier(), CacheInner::from),
+        ))(i)
+    }
 }
 
 #[cfg(test)]

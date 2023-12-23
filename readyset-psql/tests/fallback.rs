@@ -2282,6 +2282,25 @@ mod failure_injection_tests {
     #[tokio::test(flavor = "multi_thread")]
     #[serial]
     #[slow]
+    async fn dropped_caches_not_recreated_when_dropping_by_query_string() {
+        let queries = [
+            "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);",
+            "CREATE CACHE dropped_query FROM SELECT * FROM users;",
+            "CREATE CACHE cached_query FROM SELECT * FROM users where id = 1;",
+            "DROP CACHE SELECT * FROM users",
+        ];
+        let (_config, mut handle, _authority, shutdown_tx) =
+            setup_reload_controller_state_test("caches_not_recreated_query_string", &queries).await;
+
+        let queries = handle.views().await.unwrap();
+        assert!(!queries.contains_key(&"dropped_query".into()));
+        assert!(queries.contains_key(&"cached_query".into()));
+        shutdown_tx.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[serial]
+    #[slow]
     async fn dropped_then_recreated_cache_recreated() {
         let queries = [
             "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);",

@@ -1873,7 +1873,7 @@ async fn drop_caches_go_in_authority_list() {
 
     let res = authority.cache_ddl_requests().await.unwrap();
     let unparsed_stmt = &res.get(1).unwrap().unparsed_stmt;
-    assert_eq!(unparsed_stmt, "DROP CACHE q");
+    assert_eq!(unparsed_stmt, "DROP CACHE q;");
 
     shutdown_tx.shutdown().await;
 }
@@ -1901,6 +1901,55 @@ async fn drop_all_caches_clears_authority_list() {
 
     let res = authority.cache_ddl_requests().await.unwrap();
     assert!(res.is_empty());
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn drop_cache_by_statement() {
+    readyset_tracing::init_test_logging();
+    let (opts, _handle, shutdown_tx) = setup().await;
+
+    let conn = connect(opts).await;
+
+    conn.simple_query("CREATE TABLE t (x int)").await.unwrap();
+
+    // Create a cache
+    eventually!(conn
+        .simple_query("CREATE CACHE FROM SELECT x FROM t WHERE x = 1")
+        .await
+        .is_ok());
+
+    // Assert that the cache is present in both SHOW CACHES and EXPLAIN CACHES
+    let res = conn.simple_query("SHOW CACHES").await.unwrap();
+    assert!(matches!(
+        res[1],
+        SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 1, .. })
+    ));
+
+    let res = conn.simple_query("EXPLAIN CACHES").await.unwrap();
+    assert!(matches!(
+        res[1],
+        SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 1, .. })
+    ));
+
+    // Drop the cache with a query string
+    conn.simple_query("DROP CACHE SELECT x FROM t WHERE x = 1")
+        .await
+        .unwrap();
+
+    // Assert that the output of both SHOW CACHES and EXPLAIN CACHES is empty
+    let res = conn.simple_query("SHOW CACHES").await.unwrap();
+    assert!(matches!(
+        res[0],
+        SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 0, .. })
+    ));
+
+    let res = conn.simple_query("EXPLAIN CACHES").await.unwrap();
+    assert!(matches!(
+        res[0],
+        SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 0, .. })
+    ));
 
     shutdown_tx.shutdown().await;
 }
