@@ -3,7 +3,7 @@ use std::{fmt, str};
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::{map, opt};
-use nom::multi::many1;
+use nom::multi::many0;
 use nom::sequence::{delimited, preceded, tuple};
 use nom_locate::LocatedSpan;
 use readyset_util::fmt::fmt_with;
@@ -14,7 +14,7 @@ use crate::common::{opt_delimited, terminated_with_statement_terminator};
 use crate::order::{order_clause, OrderClause};
 use crate::select::{limit_offset_clause, nested_selection, LimitClause, SelectStatement};
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, DialectDisplay, NomSqlResult};
+use crate::{Dialect, DialectDisplay, NomSqlResult, SelectSpecification};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Deserialize, Serialize, Arbitrary)]
 pub enum CompoundSelectOperator {
@@ -118,36 +118,40 @@ fn other_selects(
     }
 }
 
-pub fn compound_selection(
+pub fn simple_or_compound_selection(
     dialect: Dialect,
-) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CompoundSelectStatement> {
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SelectSpecification> {
     move |i| terminated_with_statement_terminator(nested_compound_selection(dialect))(i)
 }
 
 // Parse compound selection
 pub fn nested_compound_selection(
     dialect: Dialect,
-) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CompoundSelectStatement> {
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SelectSpecification> {
     move |i| {
         let (remaining_input, (first_select, other_selects, _, order, limit_clause)) =
             tuple((
                 opt_delimited(tag("("), nested_selection(dialect), tag(")")),
-                many1(other_selects(dialect)),
+                many0(other_selects(dialect)),
                 whitespace0,
                 opt(order_clause(dialect)),
                 opt(limit_offset_clause(dialect)),
             ))(i)?;
+
+        if other_selects.is_empty() {
+            return Ok((remaining_input, SelectSpecification::Simple(first_select)));
+        }
 
         let mut selects = vec![(None, first_select)];
         selects.extend(other_selects);
 
         Ok((
             remaining_input,
-            CompoundSelectStatement {
+            SelectSpecification::Compound(CompoundSelectStatement {
                 selects,
                 order,
                 limit_clause: limit_clause.unwrap_or_default(),
-            },
+            }),
         ))
     }
 }
@@ -197,8 +201,11 @@ mod tests {
             },
         };
 
-        assert_eq!(res.unwrap().1, expected);
-        assert_eq!(res2.unwrap().1, expected);
+        assert_eq!(
+            res.unwrap().1,
+            SelectSpecification::Compound(expected.clone())
+        );
+        assert_eq!(res2.unwrap().1, SelectSpecification::Compound(expected));
     }
 
     #[test]
@@ -206,22 +213,22 @@ mod tests {
         let qstr = "SELECT id, 1 FROM Vote);";
         let qstr2 = "(SELECT id, 1 FROM Vote;";
         let qstr3 = "SELECT id, 1 FROM Vote) UNION (SELECT id, stars from Rating;";
-        let res = to_nom_result(nested_compound_selection(Dialect::MySQL)(LocatedSpan::new(
-            qstr.as_bytes(),
-        )));
-        let res2 = to_nom_result(nested_compound_selection(Dialect::MySQL)(LocatedSpan::new(
-            qstr2.as_bytes(),
-        )));
-        let res3 = to_nom_result(nested_compound_selection(Dialect::MySQL)(LocatedSpan::new(
-            qstr3.as_bytes(),
-        )));
+        let res = to_nom_result(simple_or_compound_selection(Dialect::MySQL)(
+            LocatedSpan::new(qstr.as_bytes()),
+        ));
+        let res2 = to_nom_result(simple_or_compound_selection(Dialect::MySQL)(
+            LocatedSpan::new(qstr2.as_bytes()),
+        ));
+        let res3 = to_nom_result(simple_or_compound_selection(Dialect::MySQL)(
+            LocatedSpan::new(qstr3.as_bytes()),
+        ));
 
         assert!(&res.is_err());
         assert_eq!(
             res.unwrap_err(),
             nom::Err::Error(Error {
                 input: ");".as_bytes(),
-                code: nom::error::ErrorKind::Tag
+                code: nom::error::ErrorKind::Eof
             })
         );
         assert!(&res2.is_err());
@@ -237,7 +244,7 @@ mod tests {
             res3.unwrap_err(),
             nom::Err::Error(Error {
                 input: ") UNION (SELECT id, stars from Rating;".as_bytes(),
-                code: nom::error::ErrorKind::Tag
+                code: nom::error::ErrorKind::Eof
             })
         );
     }
@@ -284,7 +291,7 @@ mod tests {
             limit_clause: LimitClause::default(),
         };
 
-        assert_eq!(res.unwrap().1, expected);
+        assert_eq!(res.unwrap().1, SelectSpecification::Compound(expected));
     }
 
     #[test]
@@ -317,14 +324,14 @@ mod tests {
             limit_clause: LimitClause::default(),
         };
 
-        assert_eq!(res.unwrap().1, expected);
+        assert_eq!(res.unwrap().1, SelectSpecification::Compound(expected));
     }
 
     #[test]
     #[ignore]
     fn union_flarum_1() {
         let qstring = b"(select `discussions`.* from `discussions` where (`discussions`.`id` not in (select `discussion_id` from `discussion_tag` where `tag_id` not in (select `tags`.`id` from `tags` where (`tags`.`id` in (select `perm_tags`.`id` from `tags` as `perm_tags` where (`perm_tags`.`is_restricted` = ? and 0 = 1) or `perm_tags`.`is_restricted` = ?) and (`tags`.`parent_id` in (select `perm_tags`.`id` from `tags` as `perm_tags` where (`perm_tags`.`is_restricted` = ? and 0 = 1) or `perm_tags`.`is_restricted` = ?) or `tags`.`parent_id` is null))))) and (`discussions`.`is_private` = ? or (((`discussions`.`is_approved` = ? and (`discussions`.`user_id` = ? or ((`discussions`.`id` not in (select `discussion_id` from `discussion_tag` where `tag_id` not in (select `tags`.`id` from `tags` where (`tags`.`id` in (select `perm_tags`.`id` from `tags` as `perm_tags` where (`perm_tags`.`is_restricted` = ? and 0 = 1)) and (`tags`.`parent_id` in (select `perm_tags`.`id` from `tags` as `perm_tags` where (`perm_tags`.`is_restricted` = ? and 0 = 1)) or `tags`.`parent_id` is null))))) and exists (select * from `tags` inner join `discussion_tag` on `tags`.`id` = `discussion_tag`.`tag_id` where `discussions`.`id` = `discussion_tag`.`discussion_id`))))))) and (`discussions`.`hidden_at` is null or `discussions`.`user_id` = ? or ((`discussions`.`id` not in (select `discussion_id` from `discussion_tag` where `tag_id` not in (select `tags`.`id` from `tags` where (`tags`.`id` in (select `perm_tags`.`id` from `tags` as `perm_tags` where (`perm_tags`.`is_restricted` = ? and 0 = 1)) and (`tags`.`parent_id` in (select `perm_tags`.`id` from `tags` as `perm_tags` where (`perm_tags`.`is_restricted` = ? and 0 = 1)) or `tags`.`parent_id` is null))))) and exists (select * from `tags` inner join `discussion_tag` on `tags`.`id` = `discussion_tag`.`tag_id` where `discussions`.`id` = `discussion_tag`.`discussion_id`))) and (`discussions`.`comment_count` > ? or `discussions`.`user_id` = ? or ((`discussions`.`id` not in (select `discussion_id` from `discussion_tag` where `tag_id` not in (select `tags`.`id` from `tags` where (`tags`.`id` in (select `perm_tags`.`id` from `tags` as `perm_tags` where (`perm_tags`.`is_restricted` = ? and 0 = 1)) and (`tags`.`parent_id` in (select `perm_tags`.`id` from `tags` as `perm_tags` where (`perm_tags`.`is_restricted` = ? and 0 = 1)) or `tags`.`parent_id` is null))))) and exists (select * from `tags` inner join `discussion_tag` on `tags`.`id` = `discussion_tag`.`tag_id` where `discussions`.`id` = `discussion_tag`.`discussion_id`))) and not exists (select 1 from `discussion_user` where `discussions`.`id` = `discussion_id` and `user_id` = ? and `subscription` = ?) and `discussions`.`id` not in (select `discussion_id` from `discussion_tag` where 0 = 1) order by `last_posted_at` desc limit 21) union (select `discussions`.* from `discussions` where (`discussions`.`id` not in (select `discussion_id` from `discussion_tag` where `tag_id` not in (select `tags`.`id` from `tags` where (`tags`.`id` in (select `perm_tags`.`id` from `tags` as `perm_tags` where (`perm_tags`.`is_restricted` = ? and 0 = 1) or `perm_tags`.`is_restricted` = ?) and (`tags`.`parent_id` in (select `perm_tags`.`id` from `tags` as `perm_tags` where (`perm_tags`.`is_restricted` = ? and 0 = 1) or `perm_tags`.`is_restricted` = ?) or `tags`.`parent_id` is null))))) and (`discussions`.`is_private` = ? or (((`discussions`.`is_approved` = ? and (`discussions`.`user_id` = ? or ((`discussions`.`id` not in (select `discussion_id` from `discussion_tag` where `tag_id` not in (select `tags`.`id` from `tags` where (`tags`.`id` in (select `perm_tags`.`id` from `tags` as `perm_tags` where (`perm_tags`.`is_restricted` = ? and 0 = 1)) and (`tags`.`parent_id` in (select `perm_tags`.`id` from `tags` as `perm_tags` where (`perm_tags`.`is_restricted` = ? and 0 = 1)) or `tags`.`parent_id` is null))))) and exists (select * from `tags` inner join `discussion_tag` on `tags`.`id` = `discussion_tag`.`tag_id` where `discussions`.`id` = `discussion_tag`.`discussion_id`))))))) and (`discussions`.`hidden_at` is null or `discussions`.`user_id` = ? or ((`discussions`.`id` not in (select `discussion_id` from `discussion_tag` where `tag_id` not in (select `tags`.`id` from `tags` where (`tags`.`id` in (select `perm_tags`.`id` from `tags` as `perm_tags` where (`perm_tags`.`is_restricted` = ? and 0 = 1)) and (`tags`.`parent_id` in (select `perm_tags`.`id` from `tags` as `perm_tags` where (`perm_tags`.`is_restricted` = ? and 0 = 1)) or `tags`.`parent_id` is null))))) and exists (select * from `tags` inner join `discussion_tag` on `tags`.`id` = `discussion_tag`.`tag_id` where `discussions`.`id` = `discussion_tag`.`discussion_id`))) and (`discussions`.`comment_count` > ? or `discussions`.`user_id` = ? or ((`discussions`.`id` not in (select `discussion_id` from `discussion_tag` where `tag_id` not in (select `tags`.`id` from `tags` where (`tags`.`id` in (select `perm_tags`.`id` from `tags` as `perm_tags` where (`perm_tags`.`is_restricted` = ? and 0 = 1)) and (`tags`.`parent_id` in (select `perm_tags`.`id` from `tags` as `perm_tags` where (`perm_tags`.`is_restricted` = ? and 0 = 1)) or `tags`.`parent_id` is null))))) and exists (select * from `tags` inner join `discussion_tag` on `tags`.`id` = `discussion_tag`.`tag_id` where `discussions`.`id` = `discussion_tag`.`discussion_id`))) and `is_sticky` = ? limit 21) order by is_sticky and not exists (select 1 from `discussion_user` as `sticky` where `sticky`.`discussion_id` = `id` and `sticky`.`user_id` = ? and `sticky`.`last_read_post_number` >= `last_post_number`) and last_posted_at > ? desc, `last_posted_at` desc limit 21";
-        let _res = test_parse!(compound_selection(Dialect::MySQL), qstring);
+        let _res = test_parse!(simple_or_compound_selection(Dialect::MySQL), qstring);
         // TODO:  assert_eq!(res, ...)
         // TODO:  assert_eq!(res.display(Dialect::MySQL).to_string(), ...)
     }

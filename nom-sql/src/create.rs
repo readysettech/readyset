@@ -24,7 +24,7 @@ use crate::compound_select::{nested_compound_selection, CompoundSelectStatement}
 use crate::create_table_options::{table_options, CreateTableOption};
 use crate::expression::expression;
 use crate::order::{order_type, OrderType};
-use crate::select::{nested_selection, selection, SelectStatement};
+use crate::select::{selection, SelectStatement};
 use crate::table::{relation, Relation};
 use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Dialect, DialectDisplay, NomSqlError, NomSqlResult, SqlIdentifier};
@@ -749,16 +749,7 @@ pub fn view_creation(
         let (i, _) = tag_no_case("as")(i)?;
         let (i, _) = whitespace1(i)?;
         let (i, definition) = parse_fallible(
-            map(
-                alt((
-                    map(
-                        nested_compound_selection(dialect),
-                        SelectSpecification::Compound,
-                    ),
-                    map(nested_selection(dialect), SelectSpecification::Simple),
-                )),
-                Box::new,
-            ),
+            map(nested_compound_selection(dialect), Box::new),
             until_statement_terminator,
         )(i)?;
         let (i, _) = statement_terminator(i)?;

@@ -11,7 +11,7 @@ use test_strategy::Arbitrary;
 use crate::alter::{alter_table_statement, AlterTableStatement};
 use crate::comment::{comment, CommentStatement};
 use crate::common::statement_terminator;
-use crate::compound_select::{compound_selection, CompoundSelectStatement};
+use crate::compound_select::{simple_or_compound_selection, CompoundSelectStatement};
 use crate::create::{
     create_cached_query, create_table, key_specification, view_creation, CreateCacheStatement,
     CreateTableStatement, CreateViewStatement,
@@ -37,7 +37,8 @@ use crate::update::{updating, UpdateStatement};
 use crate::use_statement::{use_statement, UseStatement};
 use crate::whitespace::whitespace0;
 use crate::{
-    Dialect, DialectDisplay, DropAllCachesStatement, Expr, NomSqlResult, SqlType, TableKey,
+    Dialect, DialectDisplay, DropAllCachesStatement, Expr, NomSqlResult, SelectSpecification,
+    SqlType, TableKey,
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
@@ -101,6 +102,15 @@ impl str::FromStr for SqlQuery {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         parse_query(Dialect::MySQL, s)
+    }
+}
+
+impl From<SelectSpecification> for SqlQuery {
+    fn from(s: SelectSpecification) -> Self {
+        match s {
+            SelectSpecification::Simple(s) => SqlQuery::Select(s),
+            SelectSpecification::Compound(c) => SqlQuery::CompoundSelect(c),
+        }
     }
 }
 
@@ -196,8 +206,7 @@ fn sql_query_part1(
         alt((
             // ordered with the most-performance sensitive at the top (that is,
             // put the stuff we'll see on the hot path up front).
-            map(compound_selection(dialect), SqlQuery::CompoundSelect),
-            map(selection(dialect), SqlQuery::Select),
+            map(simple_or_compound_selection(dialect), SqlQuery::from),
             map(insertion(dialect), SqlQuery::Insert),
             map(updating(dialect), SqlQuery::Update),
             map(deletion(dialect), SqlQuery::Delete),
