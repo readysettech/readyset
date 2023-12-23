@@ -46,6 +46,10 @@ criterion = { version = "0.3", features = ["html_reports"] }
 name = "analysis"
 harness = false
 
+[[bench]]
+name = "parse"
+harness = false
+
 [features]
 debug = []
 failure_injection = ["fail/failpoints"]
