@@ -70,7 +70,7 @@ database-utils = { path = "../database-utils" }
 [dev-dependencies]
 proptest = "1.0.0"
 test-strategy = "0.2.0"
-criterion = "0.3"
+criterion = { workspace = true } 
 rand = "0.8.5"
 
 [lib]
