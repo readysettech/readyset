@@ -66,6 +66,7 @@ resolver = "2"
 [workspace.dependencies]
 clap = "4.3"
 consulrs = { git = "https://github.com/readysettech/consulrs.git", branch = "allow-disabling-rustls-tls-2" }
+criterion = "0.5"
 eui48 = { git = "https://github.com/readysettech/eui48.git", branch = "master", default-features = false }
 mysql_async = { git = "https://github.com/readysettech/mysql_async" }
 nperf-core = { git = "https://github.com/readysettech/not-perf.git" }

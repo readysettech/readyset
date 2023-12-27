@@ -27,7 +27,7 @@ readyset-psql = { path = "../readyset-psql" }
 readyset = { path = "../readyset" }
 
 core_affinity = "0.5"
-criterion = { version = "0.3", features = ["async_tokio"] }
+criterion = { workspace = true, features = ["async_tokio"] }
 fork = "0.1"
 futures = "0.3"
 num_cpus = "1.13"

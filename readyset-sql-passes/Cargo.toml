@@ -18,7 +18,7 @@ readyset-data = { path = "../readyset-data" }
 dataflow-expression = { path = "../dataflow-expression" }
 
 [dev-dependencies]
-criterion = "0.3"
+criterion = { workspace = true }
 
 [[bench]]
 name = "adapter_rewrites"

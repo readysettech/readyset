@@ -32,7 +32,7 @@ readyset-errors = { path = "../readyset-errors" }
 
 [dev-dependencies]
 serial_test = "0.5.1"
-criterion = { version = "0.3", features=['real_blackbox', 'async_tokio']}
+criterion = { workspace = true, features=['real_blackbox', 'async_tokio']}
 itertools = "0.10.4"
 readyset-client-metrics = { path = "../readyset-client-metrics" }
 test-utils = { path = "../test-utils" }
