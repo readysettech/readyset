@@ -50,7 +50,7 @@ pub use self::set::{
     SetPostgresParameter, SetPostgresParameterValue, SetStatement, SetVariables, Variable,
     VariableScope,
 };
-pub use self::show::ShowStatement;
+pub use self::show::{QueryID, ShowStatement};
 pub use self::sql_identifier::SqlIdentifier;
 pub use self::sql_type::{EnumVariants, SqlType, SqlTypeArbitraryOptions};
 pub use self::table::{

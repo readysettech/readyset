@@ -5,11 +5,12 @@ pub mod changelist;
 use std::borrow::Cow;
 use std::fmt::Display;
 
+use nom_sql::{CreateTableBody, SelectSpecification, SelectStatement};
 use readyset_errors::ReadySetError;
 use serde::{Deserialize, Serialize};
 
-pub use crate::recipe::changelist::ChangeList;
-use crate::ReplicationOffset;
+pub use crate::recipe::changelist::{ChangeList, PostgresTableMetadata};
+use crate::{Relation, ReplicationOffset};
 
 /// Represents a request to extend a recipe
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -89,4 +90,25 @@ impl MigrationStatus {
     pub fn is_pending(&self) -> bool {
         matches!(self, Self::Pending)
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreateCache {
+    pub name: Relation,
+    pub statement: SelectStatement,
+    pub always: bool,
+    pub id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreateTable {
+    pub name: Relation,
+    pub body: CreateTableBody,
+    pub pg_meta: Option<PostgresTableMetadata>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreateView {
+    pub name: Relation,
+    pub definition: SelectSpecification,
 }
