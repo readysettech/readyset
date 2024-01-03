@@ -123,7 +123,6 @@ impl Handle {
                 done_tx: tx,
             })
             .await
-            .ok()
             .expect("Controller dropped, failed, or panicked");
         rx.await.expect("failed to get failpoint ack");
     }
