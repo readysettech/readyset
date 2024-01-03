@@ -26,28 +26,30 @@ criterion::criterion_main!(benches);
 
 #[cfg(feature = "slow_bench")]
 mod slow_bench {
-    use std::cell::RefCell;
     use std::sync::Arc;
 
     use criterion::Criterion;
+    use database_utils::DatabaseType;
     use readyset_clustertest::{DeploymentBuilder, ServerParams};
+    use tokio::sync::RwLock;
 
     pub fn leader_failover(c: &mut Criterion) {
         let rt = tokio::runtime::Runtime::new().unwrap();
 
-        let deployment = Arc::new(RefCell::new(rt.block_on(async {
-            DeploymentBuilder::new("ct_bench_leader_failover")
+        let deployment = Arc::new(RwLock::new(rt.block_on(async {
+            DeploymentBuilder::new(DatabaseType::PostgreSQL, "ct_bench_leader_failover")
                 .add_server(ServerParams::default())
                 .start()
                 .await
                 .unwrap()
         })));
-        c.bench_function("leader_failover", |b| {
-            let leader = &deployment.borrow().server_addrs()[0];
 
+        let leader = rt.block_on(async { deployment.read().await.server_addrs()[0].clone() });
+        c.bench_function("leader_failover", |b| {
             rt.block_on(async {
                 deployment
-                    .borrow_mut()
+                    .write()
+                    .await
                     .start_server(ServerParams::default(), true)
                     .await
                     .unwrap();
@@ -55,7 +57,8 @@ mod slow_bench {
 
             b.to_async(&rt).iter(|| async {
                 deployment
-                    .borrow_mut()
+                    .write()
+                    .await
                     .kill_server(&leader, true)
                     .await
                     .unwrap();
@@ -63,15 +66,15 @@ mod slow_bench {
         });
 
         rt.block_on(async {
-            deployment.borrow_mut().teardown().await.unwrap();
+            deployment.write().await.teardown().await.unwrap();
         });
     }
 
     pub fn worker_failover(c: &mut Criterion) {
         let rt = tokio::runtime::Runtime::new().unwrap();
 
-        let deployment = Arc::new(RefCell::new(rt.block_on(async {
-            DeploymentBuilder::new("ct_bench_worker_failover")
+        let deployment = Arc::new(RwLock::new(rt.block_on(async {
+            DeploymentBuilder::new(DatabaseType::PostgreSQL, "ct_bench_worker_failover")
                 .add_server(ServerParams::default())
                 .start()
                 .await
@@ -80,7 +83,8 @@ mod slow_bench {
         c.bench_function("worker_failover", |b| {
             let worker = rt.block_on(async {
                 deployment
-                    .borrow_mut()
+                    .write()
+                    .await
                     .start_server(ServerParams::default(), true)
                     .await
                     .unwrap()
@@ -88,7 +92,8 @@ mod slow_bench {
 
             b.to_async(&rt).iter(|| async {
                 deployment
-                    .borrow_mut()
+                    .write()
+                    .await
                     .kill_server(&worker, true)
                     .await
                     .unwrap();
@@ -96,15 +101,15 @@ mod slow_bench {
         });
 
         rt.block_on(async {
-            deployment.borrow_mut().teardown().await.unwrap();
+            deployment.write().await.teardown().await.unwrap();
         });
     }
 
     pub fn add_worker(c: &mut Criterion) {
         let rt = tokio::runtime::Runtime::new().unwrap();
 
-        let deployment = Arc::new(RefCell::new(rt.block_on(async {
-            DeploymentBuilder::new("ct_bench_add_worker")
+        let deployment = Arc::new(RwLock::new(rt.block_on(async {
+            DeploymentBuilder::new(DatabaseType::PostgreSQL, "ct_bench_add_worker")
                 .add_server(ServerParams::default())
                 .start()
                 .await
@@ -113,7 +118,8 @@ mod slow_bench {
         c.bench_function("add_worker", |b| {
             b.to_async(&rt).iter(|| async {
                 deployment
-                    .borrow_mut()
+                    .write()
+                    .await
                     .start_server(ServerParams::default(), true)
                     .await
                     .unwrap()
@@ -121,7 +127,7 @@ mod slow_bench {
         });
 
         rt.block_on(async {
-            deployment.borrow_mut().teardown().await.unwrap();
+            deployment.write().await.teardown().await.unwrap();
         });
     }
 }

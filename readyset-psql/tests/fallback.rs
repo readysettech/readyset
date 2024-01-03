@@ -985,7 +985,7 @@ async fn setup_for_replication_failure(client: &Client) {
     sleep().await;
     sleep().await;
 
-    assert!(last_statement_matches("upstream", "ok", &client).await);
+    assert!(last_statement_matches("upstream", "ok", client).await);
     client
         .simple_query("CREATE CACHE FROM SELECT * FROM cats")
         .await
@@ -1022,7 +1022,7 @@ async fn assert_table_ignored(client: &Client) {
             .simple_query(&format!("SELECT * FROM {source}"))
             .await
             .unwrap();
-        let c1 = match result.get(0).expect("should have 2 rows") {
+        let c1 = match result.first().expect("should have 2 rows") {
             SimpleQueryMessage::Row(r) => r.get(0).expect("should have 1 col"),
             _ => panic!("should be a row"),
         };
@@ -1034,7 +1034,7 @@ async fn assert_table_ignored(client: &Client) {
         let mut results = vec![c1, c2];
         results.sort();
         assert_eq!(results, vec!["1", "2"]);
-        assert!(last_statement_matches("readyset_then_upstream", "view destroyed", &client).await);
+        assert!(last_statement_matches("readyset_then_upstream", "view destroyed", client).await);
     }
 }
 
@@ -1457,11 +1457,8 @@ async fn insert_delete_a_record_in_the_same_transaction() {
         // Begin transaction
         transaction.batch_execute("BEGIN").await.unwrap();
 
-        // Value to be inserted
-        let val = 1;
-
         transaction
-            .execute("INSERT INTO t VALUES($1)", &[&val])
+            .execute("INSERT INTO t VALUES($1)", &[&1i32])
             .await
             .unwrap();
         transaction.execute("delete from t", &[]).await.unwrap();
