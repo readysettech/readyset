@@ -367,7 +367,7 @@ impl QueryStatusCache {
     where
         Q: QueryStatusKey,
     {
-        let id = QueryId::new(hash(&q));
+        let id = q.query_id();
         let query_state = self.id_to_status.get(&id);
 
         (id, query_state.map(|s| s.value().migration_state.clone()))

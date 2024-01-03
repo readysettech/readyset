@@ -1787,11 +1787,9 @@ where
     async fn explain_create_cache(
         &mut self,
         id: QueryId,
-        mut req: ViewCreateRequest,
+        req: ViewCreateRequest,
         migration_state: Option<MigrationState>,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
-        rewrite::process_query(&mut req.statement, self.noria.server_supports_pagination())?;
-
         let (supported, migration_state) = match migration_state {
             Some(m @ MigrationState::Unsupported) | Some(m @ MigrationState::Dropped) => ("no", m),
             // If the migration state is "Inlined", we need to let the migration handler process
@@ -2095,7 +2093,7 @@ where
                         let view_request = match inner {
                             CacheInner::Statement(stmt) => {
                                 let mut stmt = *stmt.clone();
-                                rewrite::process_query(
+                                adapter_rewrites::process_query(
                                     &mut stmt,
                                     self.noria.server_supports_pagination(),
                                 )?;
