@@ -7,6 +7,8 @@ After=network.target
 WantedBy=multi-user.target
 
 [Service]
+User=readyset
+Group=readyset
 Type=simple
 EnvironmentFile=/etc/readyset/readyset.conf
 ExecStart=/usr/bin/readyset

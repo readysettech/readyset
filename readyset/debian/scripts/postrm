@@ -1,13 +1,22 @@
 #!/bin/sh
 
-# In case this system is running systemd, we make systemd reload the unit files
-# to pick up changes.
-if [ -d /run/systemd/system ] ; then
-	systemctl --system daemon-reload >/dev/null || true
+READYSET_DIR=/var/lib/readyset
+
+systemctl --system daemon-reload >/dev/null || true
+
+if [ "$1" = "remove" ] || [ "$1" = "purge" ]; then
+    if [ -x "/usr/bin/deb-systemd-helper" ]; then
+        deb-systemd-helper mask readyset.service >/dev/null
+    fi
 fi
 
-if [ "$1" = "remove" ]; then
-	if [ -x "/usr/bin/deb-systemd-helper" ]; then
-		deb-systemd-helper mask readyset.service >/dev/null
-	fi
+if [ "$1" = "purge" ] || [ "$1" = "abort-install" ]; then
+    if getent passwd readyset >/dev/null;
+    then
+        userdel readyset
+    fi
+    if [ -d ${READYSET_DIR} ] || [ -L ${READYSET_DIR} ];
+    then
+        rm -rf ${READYSET_DIR}
+    fi
 fi
