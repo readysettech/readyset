@@ -21,31 +21,7 @@ steps:
   #     - ./scripts/commit_lint.sh
   #   agents:
   #     queue: t3a-small
-
-  - label: ':docker: Build build image'
-    key: build-image
+  - label: 'Depends on first'
+    depends_on: first
     commands:
-      - '.buildkite/build-image.sh build/Dockerfile readyset-build .'
-    plugins:
-      ecr#v2.7.0:
-        login: true
-        retries: 3
-    retry: *retry_on_agent_kill
-
-  - label: ':docker: Build cargo-deny image'
-    key: cargo-deny-image
-    commands:
-      - '.buildkite/build-image.sh build/Dockerfile.cargo-deny cargo-deny .'
-    env:
-      VERSION: "${BUILDKITE_COMMIT}"
-    plugins:
-      ecr#v2.7.0:
-        login: true
-        retries: 3
-    retry: *retry_on_agent_kill
-
-  - label: ':pipeline: Upload public-common pipeline'
-    commands:
-      - buildkite-agent pipeline upload .buildkite/pipeline.public-common.yml
-    agents:
-      queue: t3a-small
+      - echo 'second'
