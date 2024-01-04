@@ -19,6 +19,8 @@ use crate::{literal, Dialect, DialectDisplay, Expr, Literal, NomSqlResult};
 
 pub type QueryID = String;
 
+// Testing a change here to trigger monorepo diff
+//
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum ShowStatement {
     Events,
