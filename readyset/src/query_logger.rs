@@ -85,11 +85,8 @@ impl QueryMetrics {
             .or_default()
             .readyset_exe_time
             .get_or_insert_with(|| {
-                let mut labels = vec![
-                    ("event_type", SharedString::from(kind.0)),
-                    ("query_type", SharedString::from(kind.1)),
-                    ("database_type", SharedString::from(DatabaseType::ReadySet)),
-                ];
+                let mut labels =
+                    vec![("database_type", SharedString::from(DatabaseType::ReadySet))];
 
                 if mode.is_verbose() {
                     labels.push(("query", self.query.clone()));
@@ -113,11 +110,7 @@ impl QueryMetrics {
             .or_default()
             .upstream_exe_time
             .get_or_insert_with(|| {
-                let mut labels = vec![
-                    ("event_type", SharedString::from(kind.0)),
-                    ("query_type", SharedString::from(kind.1)),
-                    ("database_type", SharedString::from(DatabaseType::MySql)),
-                ];
+                let mut labels = vec![("database_type", SharedString::from(DatabaseType::MySql))];
 
                 if mode.is_verbose() {
                     labels.push(("query", self.query.clone()));
@@ -139,8 +132,6 @@ impl QueryMetrics {
             .get_or_insert_with(|| {
                 let mut labels = vec![
                     ("query", self.query.clone()),
-                    ("event_type", SharedString::from(kind.0)),
-                    ("query_type", SharedString::from(kind.1)),
                     ("database_type", SharedString::from(DatabaseType::ReadySet)),
                 ];
 
@@ -160,8 +151,6 @@ impl QueryMetrics {
             .get_or_insert_with(|| {
                 let mut labels = vec![
                     ("query", self.query.clone()),
-                    ("event_type", SharedString::from(kind.0)),
-                    ("query_type", SharedString::from(kind.1)),
                     ("database_type", SharedString::from(DatabaseType::MySql)),
                 ];
 

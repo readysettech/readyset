@@ -187,7 +187,7 @@
             "targets": [
                 {
                     "exemplar": true,
-                    "expr": "(readyset_query_log_execution_time_count{deployment=\"$deployment\", database_type=\"readyset\", query_id=\"${queryfilter:raw}\", event_type=~\"query|execute\"})",
+                    "expr": "(readyset_query_log_execution_time_count{deployment=\"$deployment\", database_type=\"readyset\", query_id=\"${queryfilter:raw}\"})",
                     "format": "table",
                     "hide": false,
                     "instant": true,
@@ -197,7 +197,7 @@
                 },
                 {
                     "exemplar": true,
-                    "expr": "(readyset_query_log_execution_time_count{deployment=\"$deployment\", database_type=\"mysql\", query_id=\"${queryFilter:raw}\", event_type=~\"query|execute\"})",
+                    "expr": "(readyset_query_log_execution_time_count{deployment=\"$deployment\", database_type=\"mysql\", query_id=\"${queryFilter:raw}\"})",
                     "format": "table",
                     "hide": false,
                     "instant": true,

@@ -7,8 +7,6 @@
 /// | --- | ----------- |
 /// | query | The query text being executed. |
 /// | database_type | The database type being executed. Must be a [`DatabaseType`] |
-/// | query_type | SqlQueryType, whether the query was a read or write. |
-/// | event_type | EventType, whether the query was a prepare, execute, or query.  |
 ///
 /// [`DatabaseType`]: crate::DatabaseType
 pub const QUERY_LOG_EXECUTION_TIME: &str = "readyset_query_log_execution_time";

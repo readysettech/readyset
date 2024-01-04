@@ -265,7 +265,7 @@
               "uid": "PBFE396EC0B189D67"
             },
             "exemplar": true,
-            "expr": "sum by (query_id)\n(rate(readyset_query_log_execution_time_count{deployment=\"$deployment\",database_type=\"readyset\", event_type=~\"query|execute\"}[$__range]))",
+            "expr": "sum by (query_id)\n(rate(readyset_query_log_execution_time_count{deployment=\"$deployment\",database_type=\"readyset\"}[$__range]))",
             "format": "table",
             "hide": false,
             "instant": true,
@@ -279,7 +279,7 @@
               "uid": "PBFE396EC0B189D67"
             },
             "exemplar": true,
-            "expr": "sum by (query_id)\n(readyset_query_log_execution_time_sum{deployment=\"$deployment\",database_type=\"readyset\", event_type=~\"query|execute\"}) *1000",
+            "expr": "sum by (query_id)\n(readyset_query_log_execution_time_sum{deployment=\"$deployment\",database_type=\"readyset\"}) *1000",
             "format": "table",
             "hide": false,
             "instant": true,
@@ -293,7 +293,7 @@
               "uid": "PBFE396EC0B189D67"
             },
             "exemplar": true,
-            "expr": "avg by (query_id) ((readyset_query_log_execution_time{deployment=\"$deployment\",database_type=\"readyset\", quantile=\"0.5\", event_type=~\"query|execute\"} > 0) * 1000)[$__range:]",
+            "expr": "avg by (query_id) ((readyset_query_log_execution_time{deployment=\"$deployment\",database_type=\"readyset\", quantile=\"0.5\"} > 0) * 1000)[$__range:]",
             "format": "table",
             "hide": false,
             "instant": true,
@@ -307,7 +307,7 @@
               "uid": "PBFE396EC0B189D67"
             },
             "exemplar": true,
-            "expr": "avg by (query_id) ((readyset_query_log_execution_time{deployment=\"$deployment\",database_type=\"readyset\", quantile=\"0.9\", event_type=~\"query|execute\"} > 0) * 1000)[$__range:]",
+            "expr": "avg by (query_id) ((readyset_query_log_execution_time{deployment=\"$deployment\",database_type=\"readyset\", quantile=\"0.9\"} > 0) * 1000)[$__range:]",
             "format": "table",
             "hide": false,
             "instant": true,
@@ -321,7 +321,7 @@
               "uid": "PBFE396EC0B189D67"
             },
             "exemplar": true,
-            "expr": "avg by (query_id) ((readyset_query_log_execution_time{deployment=\"$deployment\",database_type=\"readyset\", quantile=\"0.99\", event_type=~\"query|execute\"} > 0) * 1000)[$__range:]",
+            "expr": "avg by (query_id) ((readyset_query_log_execution_time{deployment=\"$deployment\",database_type=\"readyset\", quantile=\"0.99\"} > 0) * 1000)[$__range:]",
             "format": "table",
             "hide": false,
             "instant": true,
@@ -335,7 +335,7 @@
               "uid": "PBFE396EC0B189D67"
             },
             "exemplar": false,
-            "expr": "avg by (query_id) (readyset_query_log_execution_time_count{deployment=\"$deployment\",database_type=\"readyset\", event_type=~\"query|execute\"})",
+            "expr": "avg by (query_id) (readyset_query_log_execution_time_count{deployment=\"$deployment\",database_type=\"readyset\"})",
             "format": "table",
             "hide": false,
             "instant": true,
@@ -705,7 +705,7 @@
               "uid": "PBFE396EC0B189D67"
             },
             "exemplar": true,
-            "expr": "sum by (query_id)\n(readyset_query_log_execution_time_sum{deployment=\"$deployment\",database_type=\"mysql\", event_type=~\"query|execute\"}) *1000",
+            "expr": "sum by (query_id)\n(readyset_query_log_execution_time_sum{deployment=\"$deployment\",database_type=\"mysql\"}) *1000",
             "format": "table",
             "hide": false,
             "instant": true,
@@ -719,7 +719,7 @@
               "uid": "PBFE396EC0B189D67"
             },
             "exemplar": true,
-            "expr": "sum by (query_id)\n(readyset_query_log_execution_time_count{deployment=\"$deployment\",database_type=\"mysql\", event_type=~\"query|execute\"})",
+            "expr": "sum by (query_id)\n(readyset_query_log_execution_time_count{deployment=\"$deployment\",database_type=\"mysql\"})",
             "format": "table",
             "hide": false,
             "instant": true,
@@ -733,7 +733,7 @@
               "uid": "PBFE396EC0B189D67"
             },
             "exemplar": true,
-            "expr": "avg by (query_id) ((readyset_query_log_execution_time{deployment=\"$deployment\",database_type=\"mysql\", quantile=\"0.5\", event_type=~\"query|execute\"} > 0) * 1000)[$__range:]",
+            "expr": "avg by (query_id) ((readyset_query_log_execution_time{deployment=\"$deployment\",database_type=\"mysql\", quantile=\"0.5\"} > 0) * 1000)[$__range:]",
             "format": "table",
             "hide": false,
             "instant": true,
@@ -747,7 +747,7 @@
               "uid": "PBFE396EC0B189D67"
             },
             "exemplar": true,
-            "expr": "avg by (query_id) ((readyset_query_log_execution_time{deployment=\"$deployment\",database_type=\"mysql\", quantile=\"0.9\", event_type=~\"query|execute\"} > 0) * 1000)[$__range:]",
+            "expr": "avg by (query_id) ((readyset_query_log_execution_time{deployment=\"$deployment\",database_type=\"mysql\", quantile=\"0.9\"} > 0) * 1000)[$__range:]",
             "format": "table",
             "hide": false,
             "instant": true,
@@ -761,7 +761,7 @@
               "uid": "PBFE396EC0B189D67"
             },
             "exemplar": true,
-            "expr": "avg by (query_id) ((readyset_query_log_execution_time{deployment=\"$deployment\",database_type=\"mysql\", quantile=\"0.99\", event_type=~\"query|execute\"} > 0) * 1000)[$__range:]",
+            "expr": "avg by (query_id) ((readyset_query_log_execution_time{deployment=\"$deployment\",database_type=\"mysql\", quantile=\"0.99\"} > 0) * 1000)[$__range:]",
             "format": "table",
             "hide": false,
             "instant": true,
