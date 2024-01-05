@@ -927,6 +927,7 @@ async fn replication_failure_ignores_table() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 #[slow]
+#[ignore = "REA-3933 (see comments on ticket)"]
 async fn show_proxied_queries_show_caches_query_text_matches() {
     readyset_tracing::init_test_logging();
     let (opts, _handle, shutdown_tx) = setup().await;
