@@ -1970,6 +1970,39 @@ async fn explain_create_cache() {
     shutdown_tx.shutdown().await;
 }
 
+// Tests that the `SHOW CACHES` command displays the `SELECT` statement associated with the cache
+// and not the entire `CREATE CACHE` statement
+#[tokio::test(flavor = "multi_thread")]
+async fn show_caches_contains_select_statement() {
+    readyset_tracing::init_test_logging();
+    let (opts, _handle, shutdown_tx) = setup().await;
+    let conn = connect(opts).await;
+
+    conn.simple_query("DROP TABLE IF EXISTS t").await.unwrap();
+    conn.simple_query("CREATE TABLE t (x int)").await.unwrap();
+
+    eventually!(conn
+        .simple_query("CREATE CACHE FROM SELECT * FROM t")
+        .await
+        .is_ok());
+
+    let query_text = match conn
+        .simple_query("SHOW CACHES")
+        .await
+        .unwrap()
+        .into_iter()
+        .next()
+        .unwrap()
+    {
+        SimpleQueryMessage::Row(row) => row.get(2).unwrap().to_owned(),
+        _ => panic!(),
+    };
+
+    assert_eq!(query_text, r#"SELECT "t"."x" FROM "t""#);
+
+    shutdown_tx.shutdown().await;
+}
+
 mod http_tests {
     use super::*;
     #[tokio::test(flavor = "multi_thread")]
