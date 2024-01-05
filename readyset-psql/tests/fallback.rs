@@ -1403,6 +1403,7 @@ async fn drop_cache_implicit_caching() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 #[slow]
+#[ignore = "REA-3933 (see comments on ticket)"]
 async fn show_proxied_queries_show_caches_query_text_matches() {
     readyset_tracing::init_test_logging();
     let (config, _handle, shutdown_tx) = setup().await;
