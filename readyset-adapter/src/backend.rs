@@ -2023,7 +2023,7 @@ where
             let mut row: Vec<DfValue> = vec![
                 view.query_id.to_string().into(),
                 view.name.display_unquoted().to_string().into(),
-                Self::format_query_text(view.display(DB::SQL_DIALECT).to_string()).into(),
+                Self::format_query_text(view.statement.display(DB::SQL_DIALECT).to_string()).into(),
                 if view.always {
                     "no fallback".into()
                 } else {
