@@ -198,16 +198,24 @@ run_mysql_docker() {
     --health-retries=3 \
     mysql:8.2
 }
+
 run_postgres_docker() {
+  # Use POSTGRES_HOST_AUTH_METHOD=trust to allow testing connection strings without passwords.
   docker run --name readyset-byo-psql --rm -d \
     -p 5434:5432 \
     -e POSTGRES_PASSWORD=readyset \
     -e POSTGRES_DB=testdb \
+    -e POSTGRES_HOST_AUTH_METHOD=trust \
     --health-cmd='pg_isready -U postgres -d testdb' \
-    --health-interval=10s \
+    --health-interval=2s \
     --health-timeout=5s \
     --health-retries=3 \
     postgres:14.1 -c 'wal_level=logical'
+
+  # Wait for PostgreSQL to start
+  sleep 10
+
+  docker exec readyset-byo-psql psql -U postgres -c "CREATE DATABASE \"testdbnopw\";"
 }
 
 ################################################################################
@@ -226,9 +234,18 @@ test_all_combinations() {
     # that we auto fixup 127.0.0.1 if we need to for docker
 
     local psql_connection_string="postgresql://postgres:readyset@127.0.0.1:5434/testdb"
+    local psql_connection_string_no_pw="postgresql://postgres@127.0.0.1:5434/testdbnopw"
+    local psql_connection_string_empty_pw="postgresql://postgres:@127.0.0.1:5434/testdbnopw"
     local mysql_connection_string="mysql://root:readyset@127.0.0.1:3306/testdb"
 
-    local combinations=("n d n n" "y d y y" "y p $psql_connection_string" "y m $mysql_connection_string")
+    local combinations=(
+      "n d n n"
+      "y d y y"
+      "y p $psql_connection_string"
+      "y p $psql_connection_string_empty_pw"
+      "y p $psql_connection_string_no_pw"
+      "y m $mysql_connection_string"
+    )
 
     for combo in "${combinations[@]}"; do
       if [[ "$combo" == *"m"* ]]; then
