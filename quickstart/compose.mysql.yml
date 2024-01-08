@@ -18,6 +18,9 @@ services:
       STANDALONE: true
       DEPLOYMENT: docker_compose_deployment
       LISTEN_ADDRESS: 0.0.0.0:3307
+      # We don't have control over whether users are using a password or not for the
+      # demo/quickstart, so use the more permissive mode.
+      ALLOW_UNAUTHENTICATED_CONNECTIONS: true
       UPSTREAM_DB_URL: mysql://root:readyset@mysql/testdb
       CONTROLLER_ADDRESS: 0.0.0.0
     volumes:
