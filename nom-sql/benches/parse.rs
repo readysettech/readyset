@@ -1,5 +1,6 @@
 use criterion::{black_box, criterion_group, criterion_main, Bencher, Criterion};
 use nom_sql::Dialect;
+use pprof::criterion::{Output, PProfProfiler};
 
 fn selects_nom_sql_by_db(c: &mut Criterion, dialect: Dialect) {
     let run_benchmark = |b: &mut Bencher, query: &str| {
@@ -95,9 +96,18 @@ fn transactions_sqlparser(c: &mut Criterion) {
     transactions_sqlparser_by_db(c, sqlparser::dialect::PostgreSqlDialect {});
 }
 
+// Instead of running with the Standard Criterion timer profile, plug-in the
+// flamegraph output of the pprof-rs profiler.[0]
+//
+// [0] https://bheisler.github.io/criterion.rs/book/user_guide/profiling.html
+fn flamegraphs_profiler() -> Criterion {
+    return Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
+}
+
 criterion_group!(
-    benches,
-    selects_nom_sql,
+    name = benches;
+    config = flamegraphs_profiler();
+    targets = selects_nom_sql,
     selects_sqlparser,
     transactions_nom_sql,
     transactions_sqlparser,
