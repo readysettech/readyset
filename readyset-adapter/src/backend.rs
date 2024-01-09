@@ -320,6 +320,7 @@ impl BackendBuilder {
         status_reporter: ReadySetStatusReporter<DB>,
     ) -> Backend<DB, Handler> {
         metrics::increment_gauge!(recorded::CONNECTED_CLIENTS, 1.0);
+        metrics::increment_counter!(recorded::CLIENT_CONNECTIONS_OPENED);
 
         let proxy_state = if upstream.is_some() {
             ProxyState::Fallback
@@ -2964,6 +2965,7 @@ where
             connections.remove(&self.client_addr);
         }
         metrics::decrement_gauge!(recorded::CONNECTED_CLIENTS, 1.0);
+        metrics::increment_counter!(recorded::CLIENT_CONNECTIONS_CLOSED);
     }
 }
 
