@@ -15,7 +15,7 @@ datasources:
     database: ${RS_DB_NAME:?}
     user: ${RS_USER:?}
     secureJsonData:
-      password: ${RS_PASS:?}
+      password: ${RS_PASS:-""}
     jsonData:
       sslmode: 'disable'
       postgresVersion: 903
