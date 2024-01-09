@@ -21,6 +21,11 @@ pub(crate) struct QueryLogger {
     set_disallowed_count: Counter,
     view_not_found_count: Counter,
     rpc_error_count: Counter,
+
+    // simple counts of the EventType received
+    query_count: Counter,
+    prepare_count: Counter,
+    execute_count: Counter,
 }
 
 struct QueryMetrics {
@@ -259,6 +264,10 @@ impl QueryLogger {
             rpc_error_count: register_counter!(
                 readyset_client_metrics::recorded::QUERY_LOG_RPC_ERRORS,
             ),
+
+            query_count: register_counter!(recorded::QUERY_LOG_EVENT_TYPE, "type" => "query"),
+            prepare_count: register_counter!(recorded::QUERY_LOG_EVENT_TYPE, "type" => "prepare"),
+            execute_count: register_counter!(recorded::QUERY_LOG_EVENT_TYPE, "type" => "execute"),
         };
 
         loop {
@@ -293,6 +302,12 @@ impl QueryLogger {
                             logger.rpc_error_count.increment(1);
                         }
                     };
+
+                    match event.event {
+                        EventType::Query => logger.query_count.increment(1),
+                        EventType::Prepare => logger.prepare_count.increment(1),
+                        EventType::Execute => logger.execute_count.increment(1),
+                    }
 
                     let query = match event.query {
                         Some(query) => query,

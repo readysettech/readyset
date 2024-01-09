@@ -72,6 +72,9 @@ pub const CLIENT_CONNECTIONS_CLOSED: &str = "readyset_noria_client_conns_closed"
 /// on behalf of client connections.
 pub const CLIENT_UPSTREAM_CONNECTIONS: &str = "readyset_client_upstream_connections";
 
+/// Counter: The number of `EventType` operations received (query / prepare / execute).
+pub const QUERY_LOG_EVENT_TYPE: &str = "readyset_query_log_event_type";
+
 /// Counter: The number of queries that failed to parse.
 pub const QUERY_LOG_PARSE_ERRORS: &str = "readyset_query_log_parse_errors";
 
