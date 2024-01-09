@@ -7,4 +7,6 @@ pub enum Error {
     Trace(#[from] TraceError),
     #[error("failed to parse filter: {0}")]
     Parse(#[from] ParseError),
+    #[error("invalid rotation cadence: {0}")]
+    InvalidRotationCadence(String),
 }

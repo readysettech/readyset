@@ -1,9 +1,6 @@
 [patch.crates-io]
 tokio-postgres = {  git = "https://github.com/readysettech/rust-postgres.git"}
 eui48 = { git = "https://github.com/readysettech/eui48.git", branch = "master" }
-opentelemetry = { git = "https://github.com/open-telemetry/opentelemetry-rust" }
-opentelemetry-otlp = { git = "https://github.com/open-telemetry/opentelemetry-rust" }
-opentelemetry-semantic-conventions = { git = "https://github.com/open-telemetry/opentelemetry-rust" }
 
 [workspace]
 members = [

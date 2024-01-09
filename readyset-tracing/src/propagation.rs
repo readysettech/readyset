@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 use opentelemetry::propagation::text_map_propagator::TextMapPropagator;
 use opentelemetry::propagation::{Extractor, Injector};
-use opentelemetry::sdk::propagation::TraceContextPropagator;
+use opentelemetry_sdk::propagation::TraceContextPropagator;
 use serde::{Deserialize, Serialize};
 use tracing::Span;
 use tracing_opentelemetry::OpenTelemetrySpanExt;

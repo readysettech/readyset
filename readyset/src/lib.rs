@@ -559,7 +559,8 @@ where
             .thread_name("Adapter Runtime")
             .build()?;
 
-        rt.block_on(async { options.tracing.init("adapter", options.deployment.as_ref()) })?;
+        let _guard =
+            rt.block_on(async { options.tracing.init("adapter", options.deployment.as_ref()) })?;
         info!(?options, "Starting ReadySet adapter");
 
         let deployment_mode = options.deployment_mode();

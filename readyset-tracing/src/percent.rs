@@ -2,7 +2,7 @@ use std::fmt;
 use std::str::FromStr;
 
 #[derive(Debug, Clone)]
-pub(crate) struct Percent(pub f64);
+pub struct Percent(pub f64);
 
 impl fmt::Display for Percent {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
