@@ -1225,6 +1225,10 @@ where
             always,
         });
 
+        let query_log_sender = self.query_log_sender.clone();
+        let slowlog = self.settings.slowlog;
+        log_query(query_log_sender.as_ref(), query_event, slowlog);
+
         Ok(
             // SAFETY: Just inserted!
             &unsafe { self.state.prepared_statements.get_unchecked(statement_id) }.prep,
