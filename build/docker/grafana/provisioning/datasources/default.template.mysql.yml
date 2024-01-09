@@ -17,5 +17,5 @@ datasources:
     jsonData:
       tlsAuth: true
     secureJsonData:
-      password: ${RS_PASS:?}
+      password: ${RS_PASS:-""}
     editable: true
