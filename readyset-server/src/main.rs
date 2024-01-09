@@ -157,10 +157,13 @@ fn main() -> anyhow::Result<()> {
         .thread_name("Worker Runtime")
         .build()?;
 
-    rt.block_on(async {
-        if let Err(error) = opts.tracing.init("readyset", opts.deployment.as_ref()) {
-            error!(%error, "Error initializing tracing");
-            process::exit(1)
+    let _guard = rt.block_on(async {
+        match opts.tracing.init("readyset", opts.deployment.as_ref()) {
+            Ok(guard) => guard,
+            Err(error) => {
+                error!(%error, "Error initializing tracing");
+                process::exit(1);
+            }
         }
     });
     info!(?opts, "Starting ReadySet server");
