@@ -1078,12 +1078,17 @@ where
     }
 
     /// Provides metadata required to prepare a query
-    async fn plan_prepare(&mut self, query: &str) -> PrepareMeta {
+    async fn plan_prepare(&mut self, query: &str, event: &mut QueryExecutionEvent) -> PrepareMeta {
         if self.state.proxy_state == ProxyState::ProxyAlways {
             return PrepareMeta::Proxy;
         }
 
-        match self.parse_query(query) {
+        let parse_result = {
+            let _t = event.start_parse_timer();
+            self.parse_query(query)
+        };
+
+        match parse_result {
             Ok(SqlQuery::Select(stmt)) => self.plan_prepare_select(stmt),
             Ok(
                 query @ SqlQuery::Insert(_)
@@ -1165,7 +1170,7 @@ where
         self.last_query = None;
         let mut query_event = QueryExecutionEvent::new(EventType::Prepare);
 
-        let meta = self.plan_prepare(query).await;
+        let meta = self.plan_prepare(query, &mut query_event).await;
         let prep = self
             .do_prepare(&meta, query, data, &mut query_event)
             .await?;
