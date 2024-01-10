@@ -23,7 +23,7 @@ use crossbeam_skiplist::SkipSet;
 use database_utils::{DatabaseType, DatabaseURL, UpstreamConfig};
 use failpoint_macros::set_failpoint;
 use futures_util::future::FutureExt;
-use futures_util::stream::StreamExt;
+use futures_util::stream::{SelectAll, StreamExt};
 use health_reporter::{HealthReporter as AdapterHealthReporter, State as AdapterState};
 use metrics_exporter_prometheus::PrometheusBuilder;
 use nom_sql::{Relation, SqlIdentifier};
@@ -426,6 +426,12 @@ pub struct Options {
         hide = true
     )]
     query_status_capacity: usize,
+
+    /// Which address to listen on and also allow cache DDL statements to be executed from.
+    /// If not set, cache ddl statements can be executed from any address
+    /// If set, `address` will reject cache ddl statements.
+    #[arg(long, env = "CACHE_DDL_ADDRESS", hide = true)]
+    cache_ddl_address: Option<SocketAddr>,
 }
 
 impl Options {
@@ -646,6 +652,14 @@ where
 
         let listen_address = options.address.unwrap_or(self.default_address);
         let listener = rt.block_on(tokio::net::TcpListener::bind(&listen_address))?;
+        let mut all_listeners = SelectAll::new();
+        all_listeners.push(TcpListenerStream::new(listener));
+
+        if let Some(ref ddl_addr) = options.cache_ddl_address {
+            info!(%ddl_addr, "Listening for cache ddl connections");
+            let cache_ddl_listener = rt.block_on(tokio::net::TcpListener::bind(ddl_addr))?;
+            all_listeners.push(TcpListenerStream::new(cache_ddl_listener));
+        }
 
         info!(%listen_address, "Listening for new connections");
 
@@ -707,7 +721,7 @@ where
             tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).unwrap()
         };
         let mut listener = Box::pin(futures_util::stream::select(
-            TcpListenerStream::new(listener),
+            all_listeners,
             futures_util::stream::select(
                 ctrlc
                     .map(|r| {
@@ -1067,10 +1081,18 @@ where
             let view_name_cache = view_name_cache.clone();
             let view_cache = view_cache.clone();
             let mut connection_handler = self.connection_handler.clone();
+            // If cache_ddl_address is not set, allow cache ddl from all addresses.
+            let local_addr = s.local_addr()?;
+            let allow_cache_ddl = options
+                .cache_ddl_address
+                .as_ref()
+                .map(|cache_ddl_addr| local_addr == *cache_ddl_addr)
+                .unwrap_or(true);
             let backend_builder = BackendBuilder::new()
                 .client_addr(client_addr)
                 .slowlog(options.log_slow)
                 .users(users.clone())
+                .allow_cache_ddl(allow_cache_ddl)
                 .require_authentication(!options.allow_unauthenticated_connections)
                 .dialect(self.parse_dialect)
                 .query_log(qlog_sender.clone(), options.query_log_mode)
