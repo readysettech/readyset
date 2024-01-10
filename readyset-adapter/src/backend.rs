@@ -122,6 +122,8 @@ pub mod noria_connector;
 pub use self::noria_connector::NoriaConnector;
 use self::noria_connector::{MetaVariable, PreparedSelectTypes};
 
+const UNSUPPORTED_CACHE_DDL_MSG: &str = "This instance has been provisioned through ReadySet Cloud. Please use the ReadySet Cloud UI to manage caches. You may continue to use the SQL interface to run other 'read' commands.";
+
 /// Unique identifier for a prepared statement, local to a single [`Backend`].
 pub type StatementId = u32;
 
@@ -280,6 +282,7 @@ pub struct BackendBuilder {
     enable_experimental_placeholder_inlining: bool,
     metrics_handle: Option<MetricsHandle>,
     connections: Option<Arc<SkipSet<SocketAddr>>>,
+    allow_cache_ddl: bool,
 }
 
 impl Default for BackendBuilder {
@@ -302,6 +305,7 @@ impl Default for BackendBuilder {
             enable_experimental_placeholder_inlining: false,
             metrics_handle: None,
             connections: None,
+            allow_cache_ddl: true,
         }
     }
 }
@@ -364,6 +368,7 @@ impl BackendBuilder {
             metrics_handle: self.metrics_handle,
             connections: self.connections,
             status_reporter,
+            allow_cache_ddl: self.allow_cache_ddl,
             _query_handler: PhantomData,
         }
     }
@@ -400,6 +405,14 @@ impl BackendBuilder {
 
     pub fn require_authentication(mut self, require_authentication: bool) -> Self {
         self.require_authentication = require_authentication;
+        self
+    }
+
+    /// Whether or not to allow cache ddl statements to be executed. If false, cache ddl statements
+    /// received will instead return an error prompting the user to use ReadySet cloud to manage
+    /// their caches.
+    pub fn allow_cache_ddl(mut self, allow_cache_ddl: bool) -> Self {
+        self.allow_cache_ddl = allow_cache_ddl;
         self
     }
 
@@ -560,6 +573,11 @@ where
     connections: Option<Arc<SkipSet<SocketAddr>>>,
 
     status_reporter: ReadySetStatusReporter<DB>,
+
+    /// Whether or not to allow cache ddl statements to be executed. If false, cache ddl statements
+    /// received will instead return an error prompting the user to use ReadySet cloud to manage
+    /// their caches.
+    allow_cache_ddl: bool,
 
     _query_handler: PhantomData<Handler>,
 }
@@ -2157,6 +2175,9 @@ where
                 concurrently,
                 unparsed_create_cache_statement,
             }) => {
+                if !self.allow_cache_ddl {
+                    unsupported!("{}", UNSUPPORTED_CACHE_DDL_MSG);
+                }
                 let (stmt, search_path) = match inner {
                     Ok(CacheInner::Statement(st)) => Ok((*st.clone(), None)),
                     Ok(CacheInner::Id(id)) => {
@@ -2230,6 +2251,9 @@ where
                 res
             }
             SqlQuery::DropCache(drop_cache) => {
+                if !self.allow_cache_ddl {
+                    unsupported!("{}", UNSUPPORTED_CACHE_DDL_MSG)
+                }
                 let ddl_req = CacheDDLRequest {
                     unparsed_stmt: drop_cache.display_unquoted().to_string(),
                     // drop cache statements explicitly don't use a search path, as the only schema
@@ -2266,7 +2290,12 @@ where
                 }
                 res
             }
-            SqlQuery::DropAllCaches(_) => self.drop_all_caches().await,
+            SqlQuery::DropAllCaches(_) => {
+                if !self.allow_cache_ddl {
+                    unsupported!("{}", UNSUPPORTED_CACHE_DDL_MSG);
+                }
+                self.drop_all_caches().await
+            }
             SqlQuery::Show(ShowStatement::CachedQueries(query_id)) => {
                 // Log a telemetry event
                 if let Some(ref telemetry_sender) = self.telemetry_sender {
