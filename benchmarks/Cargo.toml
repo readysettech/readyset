@@ -39,7 +39,7 @@ lazy_static = "1.4.0"
 thiserror = "1.0.30"
 async-stream = "0.3.2"
 parking_lot = "0.11.2"
-indicatif = "0.17"
+indicatif = "0.17.7"
 prometheus-parse = "0.2.2"
 walkdir = "2.3"
 tokio-postgres = { workspace = true }

@@ -8,14 +8,15 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0"
 clap = { workspace = true, features = ["derive", "wrap_help"] }
-console = "0.15.5"
-rustyline = "11.0"
-rustyline-derive = "0.6.0"
+console = "0.15.8"
+rustyline = "13.0"
+rustyline-derive = "0.10.0"
 tokio = { workspace = true, features = ["full"] }
 prettytable = "0.10.0"
 postgres-types = { workspace = true }
-textwrap = "0.14"
+textwrap = "0.16"
 nom = "7.1.1"
+hermit-abi = "0.3.3"
 
 database-utils = { path = "../database-utils" }
 readyset-data = { path = "../readyset-data" }
