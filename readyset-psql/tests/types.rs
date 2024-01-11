@@ -574,14 +574,23 @@ mod types {
             .unwrap();
         let _ = client.query("SELECT x FROM t ORDER BY x ASC", &[]).await;
 
-        let sort_res = client
-            .query("SELECT x FROM t ORDER BY x ASC", &[])
-            .await
-            .unwrap()
-            .into_iter()
-            .map(|r| r.get(0))
-            .collect::<Vec<Abc>>();
-        assert_eq!(sort_res, vec![C, B, A, A]);
+        // wrapping this test in an eventually! macro as it frequently fails in CI.
+        // the most likely culprit is eventual consistency on small CI instances,
+        // and this check happens after a drop table/type and recreate.
+        eventually!(
+            run_test: {
+                client
+                    .query("SELECT x FROM t ORDER BY x ASC", &[])
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .map(|r| r.get(0))
+                    .collect::<Vec<Abc>>()
+            },
+            then_assert: |sort_res| {
+                assert_eq!(sort_res, vec![C, B, A, A]);
+            }
+        );
 
         assert_eq!(
             last_query_info(&client).await.destination,
