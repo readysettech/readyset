@@ -18,8 +18,8 @@ use crate::create::{
 };
 use crate::delete::{deletion, DeleteStatement};
 use crate::drop::{
-    drop_all_caches, drop_cached_query, drop_table, drop_view, DropCacheStatement,
-    DropTableStatement, DropViewStatement,
+    drop_all_caches, drop_all_proxied_queries, drop_cached_query, drop_table, drop_view,
+    DropAllProxiedQueriesStatement, DropCacheStatement, DropTableStatement, DropViewStatement,
 };
 use crate::explain::{explain_statement, ExplainStatement};
 use crate::expression::expression;
@@ -49,6 +49,7 @@ pub enum SqlQuery {
     CreateCache(CreateCacheStatement),
     DropCache(DropCacheStatement),
     DropAllCaches(DropAllCachesStatement),
+    DropAllProxiedQueries(DropAllProxiedQueriesStatement),
     AlterTable(AlterTableStatement),
     Insert(InsertStatement),
     CompoundSelect(CompoundSelectStatement),
@@ -93,6 +94,7 @@ impl DialectDisplay for SqlQuery {
             Self::Show(show) => write!(f, "{}", show.display(dialect)),
             Self::Explain(explain) => write!(f, "{}", explain.display(dialect)),
             Self::Comment(c) => write!(f, "{}", c.display(dialect)),
+            Self::DropAllProxiedQueries(drop) => write!(f, "{}", drop.display(dialect)),
         })
     }
 }
@@ -125,6 +127,7 @@ impl SqlQuery {
             Self::CreateCache(_) => "CREATE CACHE",
             Self::DropCache(_) => "DROP CACHE",
             Self::DropAllCaches(_) => "DROP ALL CACHES",
+            Self::DropAllProxiedQueries(_) => "DROP ALL PROXIED QUERIES",
             Self::Delete(_) => "DELETE",
             Self::DropTable(_) => "DROP TABLE",
             Self::DropView(_) => "DROP VIEW",
@@ -154,7 +157,8 @@ impl SqlQuery {
             SqlQuery::Explain(_)
             | SqlQuery::CreateCache(_)
             | SqlQuery::DropCache(_)
-            | SqlQuery::DropAllCaches(_) => true,
+            | SqlQuery::DropAllCaches(_)
+            | SqlQuery::DropAllProxiedQueries(_) => true,
             SqlQuery::Show(show_stmt) => match show_stmt {
                 ShowStatement::Events | ShowStatement::Tables(_) => false,
                 ShowStatement::CachedQueries(_)
@@ -220,6 +224,7 @@ fn sql_query_part1(
             map(view_creation(dialect), SqlQuery::CreateView),
             map(drop_cached_query(dialect), SqlQuery::DropCache),
             map(drop_all_caches, SqlQuery::DropAllCaches),
+            map(drop_all_proxied_queries(), SqlQuery::DropAllProxiedQueries),
             map(alter_table_statement(dialect), SqlQuery::AlterTable),
             map(rename_table(dialect), SqlQuery::RenameTable),
             map(use_statement(dialect), SqlQuery::Use),

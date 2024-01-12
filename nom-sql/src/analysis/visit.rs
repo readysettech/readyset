@@ -19,12 +19,13 @@ use crate::{
     AlterColumnOperation, AlterTableDefinition, AlterTableStatement, CacheInner, CaseWhenBranch,
     Column, ColumnConstraint, ColumnSpecification, CommentStatement, CommonTableExpr,
     CompoundSelectStatement, CreateCacheStatement, CreateTableStatement, CreateViewStatement,
-    DeleteStatement, DropAllCachesStatement, DropCacheStatement, DropTableStatement,
-    DropViewStatement, ExplainStatement, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr,
-    GroupByClause, InValue, InsertStatement, JoinClause, JoinConstraint, JoinRightSide, Literal,
-    OrderBy, OrderClause, Relation, SelectSpecification, SelectStatement, SetNames,
-    SetPostgresParameter, SetStatement, SetVariables, ShowStatement, SqlIdentifier, SqlQuery,
-    SqlType, TableExpr, TableExprInner, TableKey, UpdateStatement, UseStatement,
+    DeleteStatement, DropAllCachesStatement, DropAllProxiedQueriesStatement, DropCacheStatement,
+    DropTableStatement, DropViewStatement, ExplainStatement, Expr, FieldDefinitionExpr,
+    FieldReference, FunctionExpr, GroupByClause, InValue, InsertStatement, JoinClause,
+    JoinConstraint, JoinRightSide, Literal, OrderBy, OrderClause, Relation, SelectSpecification,
+    SelectStatement, SetNames, SetPostgresParameter, SetStatement, SetVariables, ShowStatement,
+    SqlIdentifier, SqlQuery, SqlType, TableExpr, TableExprInner, TableKey, UpdateStatement,
+    UseStatement,
 };
 
 /// Each method of the `Visitor` trait is a hook to be potentially overridden when recursively
@@ -368,6 +369,13 @@ pub trait Visitor<'ast>: Sized {
     fn visit_drop_all_caches_statement(
         &mut self,
         _drop_all_caches_statement: &'ast DropAllCachesStatement,
+    ) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    fn visit_drop_all_proxied_queries_statement(
+        &mut self,
+        _drop_all_proxied_queries_statement: &'ast DropAllProxiedQueriesStatement,
     ) -> Result<(), Self::Error> {
         Ok(())
     }
@@ -1132,6 +1140,9 @@ pub fn walk_sql_query<'a, V: Visitor<'a>>(
         SqlQuery::CreateCache(statement) => visitor.visit_create_cache_statement(statement),
         SqlQuery::DropCache(statement) => visitor.visit_drop_cache_statement(statement),
         SqlQuery::DropAllCaches(statement) => visitor.visit_drop_all_caches_statement(statement),
+        SqlQuery::DropAllProxiedQueries(statement) => {
+            visitor.visit_drop_all_proxied_queries_statement(statement)
+        }
         SqlQuery::DropView(statement) => visitor.visit_drop_view_statement(statement),
         SqlQuery::Use(statement) => visitor.visit_use_statement(statement),
         SqlQuery::Show(statement) => visitor.visit_show_statement(statement),

@@ -672,6 +672,23 @@ impl QueryStatusCache {
             });
     }
 
+    /// Clear all queries not marked as successful from the cache.
+    pub fn clear_proxied_queries(&self) {
+        self.id_to_status
+            .retain(|_query_id, status| status.is_successful());
+
+        let mut statuses = self.persistent_handle.statuses.write();
+        let keys_to_remove: Vec<QueryId> = statuses
+            .iter()
+            .filter(|(_, (_, status))| !status.is_successful())
+            .map(|(query_id, _)| *query_id)
+            .collect();
+
+        for key in keys_to_remove {
+            statuses.pop(&key);
+        }
+    }
+
     /// This method is called when a query is executed with the given params, but no inlined cache
     /// exists for the params. Adding the query to `Self::pending_inlined_migrations` indicates that
     /// it should be migrated by the MigrationHandler.
@@ -1236,5 +1253,39 @@ mod tests {
                 .persistent_handle
                 .insert_with_status(query, query_id, query_status);
         });
+    }
+
+    #[test]
+    fn clear_proxied_queries() {
+        let cache = QueryStatusCache::new().style(MigrationStyle::Explicit);
+
+        cache.update_query_migration_state(
+            &ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]),
+            MigrationState::Successful,
+        );
+        cache.update_query_migration_state(
+            &ViewCreateRequest::new(
+                select_statement("SELECT * FROM t1 WHERE id = ?").unwrap(),
+                vec![],
+            ),
+            MigrationState::Successful,
+        );
+        cache.update_query_migration_state(
+            &ViewCreateRequest::new(
+                select_statement("SELECT * FROM t1 WHERE id > ?").unwrap(),
+                vec![],
+            ),
+            MigrationState::Pending,
+        );
+        cache.update_query_migration_state(
+            &ViewCreateRequest::new(select_statement("SELECT y FROM t2").unwrap(), vec![]),
+            MigrationState::Unsupported,
+        );
+        assert_eq!(cache.allow_list().len(), 2);
+        assert_eq!(cache.deny_list().len(), 2);
+
+        cache.clear_proxied_queries();
+        assert_eq!(cache.allow_list().len(), 2);
+        assert_eq!(cache.deny_list().len(), 0);
     }
 }
