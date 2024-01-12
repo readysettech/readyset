@@ -112,6 +112,7 @@ fn is_ddl(query: &SqlQuery) -> bool {
         | SqlQuery::Use(_)
         | SqlQuery::CreateCache(_)
         | SqlQuery::DropCache(_)
+        | SqlQuery::DropAllProxiedQueries(_)
         | SqlQuery::DropAllCaches(_) => true,
     }
 }

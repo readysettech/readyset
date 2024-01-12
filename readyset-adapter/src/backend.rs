@@ -1907,6 +1907,15 @@ where
         Ok(noria_connector::QueryResult::Empty)
     }
 
+    /// Handles a `DROP ALL PROXIED QUERIES` request
+    #[instrument(skip(self))]
+    async fn drop_all_proxied_queries(
+        &mut self,
+    ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
+        self.state.query_status_cache.clear_proxied_queries();
+        Ok(noria_connector::QueryResult::Empty)
+    }
+
     /// Responds to a `SHOW PROXIED QUERIES` query
     #[instrument(skip(self))]
     async fn show_proxied_queries(
@@ -2296,6 +2305,7 @@ where
                 }
                 self.drop_all_caches().await
             }
+            SqlQuery::DropAllProxiedQueries(_) => self.drop_all_proxied_queries().await,
             SqlQuery::Show(ShowStatement::CachedQueries(query_id)) => {
                 // Log a telemetry event
                 if let Some(ref telemetry_sender) = self.telemetry_sender {
@@ -2690,6 +2700,7 @@ where
                     SqlQuery::CreateCache(_)
                     | SqlQuery::DropCache(_)
                     | SqlQuery::DropAllCaches(_)
+                    | SqlQuery::DropAllProxiedQueries(_)
                     | SqlQuery::Explain(_) => {
                         unreachable!("path returns prior")
                     }

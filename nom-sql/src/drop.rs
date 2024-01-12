@@ -78,6 +78,30 @@ pub fn drop_table(
     }
 }
 
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
+pub struct DropAllProxiedQueriesStatement;
+
+impl DialectDisplay for DropAllProxiedQueriesStatement {
+    fn display(&self, _dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| write!(f, "DROP ALL PROXIED QUERIES"))
+    }
+}
+
+pub fn drop_all_proxied_queries(
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], DropAllProxiedQueriesStatement> {
+    move |i| {
+        let (i, _) = tag_no_case("drop")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("all")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("proxied")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("queries")(i)?;
+
+        Ok((i, DropAllProxiedQueriesStatement))
+    }
+}
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct DropCacheStatement {
     pub name: Relation,
@@ -249,6 +273,14 @@ mod tests {
             ]
         );
         assert!(!res.if_exists);
+    }
+
+    #[test]
+    fn parse_drop_all_proxied_queries() {
+        test_parse!(
+            drop_all_proxied_queries(),
+            b"DroP    aLl       PrOXied      querIES"
+        );
     }
 
     mod mysql {

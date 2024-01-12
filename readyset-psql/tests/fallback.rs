@@ -3,6 +3,7 @@ use std::panic::AssertUnwindSafe;
 use chrono::NaiveDate;
 use postgres_types::private::BytesMut;
 use readyset_adapter::backend::{MigrationMode, UnsupportedSetMode};
+use readyset_adapter::query_status_cache::MigrationStyle;
 use readyset_adapter::BackendBuilder;
 use readyset_client_test_helpers::psql_helpers::{upstream_config, PostgreSQLAdapter};
 use readyset_client_test_helpers::{sleep, Adapter, TestBuilder};
@@ -2543,6 +2544,63 @@ async fn drop_and_recreate_demo_cache() {
         // give it some time to propagate
         sleep().await;
     }
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn drop_all_proxied_queries() {
+    readyset_tracing::init_test_logging();
+    let (opts, _handle, shutdown_tx) = TestBuilder::default()
+        .recreate_database(false)
+        .fallback_url(PostgreSQLAdapter::upstream_url("noria"))
+        .migration_mode(MigrationMode::OutOfBand)
+        .migration_style(MigrationStyle::Explicit)
+        .build::<PostgreSQLAdapter>()
+        .await;
+    let conn = connect(opts).await;
+
+    conn.simple_query("DROP TABLE IF EXISTS t").await.unwrap();
+    conn.simple_query("CREATE TABLE t (x int, y int)")
+        .await
+        .unwrap();
+
+    // Wait for the DDL to propagate to ReadySet
+    eventually!(conn
+        .simple_query("CREATE CACHE FROM SELECT * FROM t")
+        .await
+        .is_ok());
+
+    conn.simple_query("SELECT * FROM t WHERE x = 1")
+        .await
+        .unwrap();
+
+    // Make sure the query we just proxied is present in SHOW PROXIED QUERIES
+    let command = conn
+        .simple_query("SHOW PROXIED QUERIES")
+        .await
+        .unwrap()
+        .into_iter()
+        .last()
+        .unwrap();
+    assert!(matches!(
+        command,
+        SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 1, .. })
+    ));
+
+    conn.simple_query("DROP ALL PROXIED QUERIES").await.unwrap();
+
+    let command = conn
+        .simple_query("SHOW PROXIED QUERIES")
+        .await
+        .unwrap()
+        .into_iter()
+        .last()
+        .unwrap();
+    assert!(matches!(
+        command,
+        SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 0, .. })
+    ));
 
     shutdown_tx.shutdown().await;
 }
