@@ -391,23 +391,31 @@ print_exit_message() {
   fi
 }
 
+check_psql_exists() {
+  if ! command -v psql &>/dev/null; then
+    echo -e "${RED}psql (PostgreSQL client) is not installed. Please install psql to continue.${NOCOLOR}"
+    exit 1
+  fi
+}
+
+check_mysql_exists() {
+  if ! command -v mysql &>/dev/null; then
+    echo -e "${RED}mysql (MySQL client) is not installed. Please install mysql to continue.${NOCOLOR}"
+    exit 1
+  fi
+}
+
 switch_on_mode() {
   echo -e "${BLUE}Would you like to run the demo or connect to your own db?${NOCOLOR}"
   read -rp "demo(d)/postgres(p)/mysql(m): " mode
   if [[ $mode == "p" ]]; then
-    if ! command -v psql &>/dev/null; then
-      echo -e "${RED}psql (PostgreSQL client) is not installed. Please install psql to continue.${NOCOLOR}"
-      exit 1
-    fi
-
+    check_psql_exists
     run_byo_postgres
   elif [[ $mode == "m" ]]; then
-    if ! command -v mysql &>/dev/null; then
-      echo -e "${RED}mysql (MySQL client) is not installed. Please install mysql to continue.${NOCOLOR}"
-      exit 1
-    fi
+    check_mysql_exists
     run_byo_mysql
   elif [[ $mode == "d" ]]; then
+    check_psql_exists
     run_demo
   else
     echo -e "${RED}Invalid option. Please try again.${NOCOLOR}"
