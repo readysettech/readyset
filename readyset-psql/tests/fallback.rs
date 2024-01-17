@@ -2549,6 +2549,8 @@ async fn drop_and_recreate_demo_cache() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[serial]
+#[slow]
 async fn drop_all_proxied_queries() {
     readyset_tracing::init_test_logging();
     let (opts, _handle, shutdown_tx) = TestBuilder::default()
