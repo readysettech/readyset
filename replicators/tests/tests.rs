@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use database_utils::UpstreamConfig as Config;
+use database_utils::{ReplicationServerId, UpstreamConfig as Config};
 use itertools::Itertools;
 use mysql_async::prelude::Queryable;
 use mysql_time::MySqlTime;
@@ -499,11 +499,11 @@ async fn replication_test_multiple(url: &str) -> ReadySetResult<()> {
     client.query(POPULATE_SCHEMA).await?;
 
     let config_one = Config {
-        replication_server_id: Some(1),
+        replication_server_id: Some(ReplicationServerId("1".into())),
         ..Default::default()
     };
     let config_two = Config {
-        replication_server_id: Some(2),
+        replication_server_id: Some(ReplicationServerId("2".into())),
         ..Default::default()
     };
     let (mut ctx_one, shutdown_tx_one) =

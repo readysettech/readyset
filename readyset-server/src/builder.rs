@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{self, Duration};
 
-use database_utils::UpstreamConfig;
+use database_utils::{ReplicationServerId, UpstreamConfig};
 use dataflow::PersistenceParameters;
 use readyset_client::consensus::{
     Authority, LocalAuthority, LocalAuthorityStore, NodeTypeSchedulingRestriction,
@@ -257,7 +257,7 @@ impl Builder {
     }
 
     /// Set the server ID for replication
-    pub fn set_replicator_server_id(&mut self, server_id: u32) {
+    pub fn set_replicator_server_id(&mut self, server_id: ReplicationServerId) {
         self.config.replicator_config.replication_server_id = Some(server_id);
     }
 

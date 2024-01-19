@@ -2391,7 +2391,7 @@ mod failure_injection_tests {
 
         let (config, mut handle, shutdown_tx) = TestBuilder::default()
             .migration_mode(MigrationMode::InRequestPath)
-            .replication_server_id(123)
+            .replication_server_id("readyset_123".into())
             .fallback(true)
             .build::<PostgreSQLAdapter>()
             .await;
