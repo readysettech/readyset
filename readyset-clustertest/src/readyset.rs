@@ -494,16 +494,18 @@ async fn server_auto_restarts() {
 /// Performs a simple create table, insert, and query to verify that the deployment is healthy.
 async fn assert_deployment_health(mut dh: DeploymentHandle) {
     let mut adapter = dh.first_adapter().await;
-    adapter
+
+    eventually!(adapter
         .query_drop(format!(
             r"CREATE TABLE {}.t1 (
-                uid INT NOT NULL,
-                value INT NOT NULL
-            );",
+                  uid INT NOT NULL,
+                  value INT NOT NULL
+                );",
             dh.name()
         ))
         .await
-        .unwrap();
+        .is_ok());
+
     adapter
         .query_drop(format!(r"INSERT INTO {}.t1 VALUES (1, 4);", dh.name()))
         .await
