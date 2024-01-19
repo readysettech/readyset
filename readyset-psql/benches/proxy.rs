@@ -255,6 +255,10 @@ impl PsqlBackend for Backend {
     async fn on_close(&mut self, _statement_id: u32) -> Result<(), psql_srv::Error> {
         Ok(())
     }
+
+    fn in_transaction(&self) -> bool {
+        false
+    }
 }
 
 async fn psql_srv_proxy<A>(listen: A, streaming: bool) -> io::Result<JoinHandle<()>>

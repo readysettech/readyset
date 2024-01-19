@@ -693,7 +693,7 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
-    use crate::message::{FieldDescription, SqlState};
+    use crate::message::{FieldDescription, SqlState, TransactionState};
 
     #[test]
     fn test_encode_ssl_response() {
@@ -1086,7 +1086,10 @@ mod tests {
         let mut codec = Codec::new();
         let mut buf = BytesMut::new();
         codec
-            .encode(BackendMessage::ready_for_query_idle(), &mut buf)
+            .encode(
+                BackendMessage::ready_for_query(TransactionState::NotInTransaction),
+                &mut buf,
+            )
             .unwrap();
         let mut exp = BytesMut::new();
         exp.put_u8(b'Z'); // message id

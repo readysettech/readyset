@@ -129,7 +129,8 @@ impl<B: PsqlBackend, C: AsyncRead + AsyncWrite + Unpin> Runner<B, C> {
     }
 
     async fn handle_error(&mut self, error: Error) -> Result<(), Error> {
-        let response = self.protocol.on_error::<B>(error).await?;
+        let in_transaction = self.backend.in_transaction();
+        let response = self.protocol.on_error::<B>(error, in_transaction).await?;
         self.channel.send(response).await?;
         self.channel.flush().await?;
         Ok(())

@@ -17,7 +17,7 @@ use crate::message::BackendMessage::{self, *};
 use crate::message::FrontendMessage::{self, *};
 use crate::message::StatementName::*;
 use crate::message::TransferFormat::{self, *};
-use crate::message::{CommandCompleteTag, FieldDescription, SaslInitialResponse};
+use crate::message::{CommandCompleteTag, FieldDescription, SaslInitialResponse, TransactionState};
 use crate::response::Response;
 use crate::scram::{
     ClientChannelBindingSupport, ClientFinalMessage, ClientFirstMessage, ServerFirstMessage,
@@ -222,7 +222,7 @@ impl Protocol {
                     parameter_name: "server_version".to_owned(),
                     parameter_value: version,
                 },
-                BackendMessage::ready_for_query_idle(),
+                BackendMessage::ready_for_query(TransactionState::NotInTransaction),
             ]
         };
         match self.state {
@@ -419,7 +419,9 @@ impl Protocol {
             State::Error => match message {
                 Sync => {
                     self.state = State::Ready;
-                    Ok(Response::Message(BackendMessage::ready_for_query_idle()))
+                    Ok(Response::Message(BackendMessage::ready_for_query(
+                        self.transaction_state(backend),
+                    )))
                 }
                 _ => Ok(Response::Empty),
             },
@@ -620,7 +622,9 @@ impl Protocol {
                             header: Some(RowDescription { field_descriptions }),
                             resultset,
                             result_transfer_formats: None,
-                            trailer: Some(BackendMessage::ready_for_query_idle()),
+                            trailer: Some(BackendMessage::ready_for_query(
+                                self.transaction_state(backend),
+                            )),
                         })
                     } else if let SimpleQuery(resp) = response {
                         let mut messages = smallvec![];
@@ -660,7 +664,9 @@ impl Protocol {
                                 }
                             }
                         }
-                        messages.push(BackendMessage::ready_for_query_idle());
+                        messages.push(BackendMessage::ready_for_query(
+                            self.transaction_state(backend),
+                        ));
                         Ok(Response::Messages(messages))
                     } else {
                         let tag = match response {
@@ -678,7 +684,7 @@ impl Protocol {
                         };
                         Ok(Response::Messages(smallvec![
                             CommandComplete { tag },
-                            BackendMessage::ready_for_query_idle(),
+                            BackendMessage::ready_for_query(self.transaction_state(backend)),
                         ]))
                     }
                 }
@@ -726,7 +732,9 @@ impl Protocol {
                 // sequence, or after an error has occurred.
                 Sync => {
                     self.state = State::Ready;
-                    Ok(Response::Message(BackendMessage::ready_for_query_idle()))
+                    Ok(Response::Message(BackendMessage::ready_for_query(
+                        self.transaction_state(backend),
+                    )))
                 }
 
                 Flush => Ok(Response::Empty),
@@ -743,20 +751,30 @@ impl Protocol {
     ///
     /// * `error` - an `Error` that has occurred while communicating with the frontend or handling
     ///   one of the frontend's requests.
+    /// * `in_transaction` - if the operation is within an open transaction.
     /// * returns - A `Response` containing an `ErrorResponse` message to send to the frontend.
     pub async fn on_error<B: PsqlBackend>(
         &mut self,
         error: Error,
+        in_transaction: bool,
     ) -> Result<Response<B::Resultset>, Error> {
         match self.state {
             State::StartingUp | State::Extended => {
                 self.state = State::Error;
                 Ok(Response::Message(error.into()))
             }
-            _ => Ok(Response::Messages(smallvec![
-                error.into(),
-                BackendMessage::ready_for_query_idle(),
-            ])),
+            _ => {
+                let status = if in_transaction {
+                    TransactionState::InTransactionError
+                } else {
+                    TransactionState::NotInTransaction
+                };
+
+                Ok(Response::Messages(smallvec![
+                    error.into(),
+                    BackendMessage::ready_for_query(status),
+                ]))
+            }
         }
     }
 
@@ -771,6 +789,14 @@ impl Protocol {
     pub fn completed_ssl_handshake(&mut self, server_end_point: Option<Vec<u8>>) {
         self.state = State::StartingUp;
         self.tls_server_end_point = server_end_point;
+    }
+
+    fn transaction_state<B: PsqlBackend>(&self, backend: &B) -> TransactionState {
+        if backend.in_transaction() {
+            TransactionState::InTransactionOk
+        } else {
+            TransactionState::NotInTransaction
+        }
     }
 }
 
@@ -948,7 +974,7 @@ mod tests {
 
     use super::*;
     use crate::bytes::BytesStr;
-    use crate::message::{ErrorSeverity, PsqlSrvRow};
+    use crate::message::{ErrorSeverity, PsqlSrvRow, READY_FOR_QUERY_IDLE, READY_FOR_QUERY_TX};
     use crate::value::PsqlValue;
     use crate::{Credentials, CredentialsNeeded, PrepareResponse, QueryResponse};
 
@@ -965,7 +991,7 @@ mod tests {
         is_query_read: bool,
 
         is_prepare_err: bool,
-
+        in_transaction: bool,
         database: Option<String>,
         last_query: Option<String>,
         last_prepare: Option<String>,
@@ -982,6 +1008,7 @@ mod tests {
                 is_query_err: false,
                 is_query_read: true,
                 is_prepare_err: false,
+                in_transaction: false,
                 database: None,
                 last_query: None,
                 last_prepare: None,
@@ -1115,6 +1142,16 @@ mod tests {
             self.last_close = Some(statement_id);
             Ok(())
         }
+
+        fn in_transaction(&self) -> bool {
+            self.in_transaction
+        }
+    }
+
+    impl Backend {
+        fn set_in_transaction(&mut self, in_tx: bool) {
+            self.in_transaction = in_tx;
+        }
     }
 
     // A dummy `AsyncRead + AsyncWrite` that does not read or write any data.
@@ -1230,7 +1267,9 @@ mod tests {
                     BackendMessage::ParameterStatus { .. },
                     BackendMessage::ParameterStatus { .. },
                     BackendMessage::ParameterStatus { .. },
-                    BackendMessage::ReadyForQuery { .. }
+                    BackendMessage::ReadyForQuery {
+                        status: READY_FOR_QUERY_IDLE
+                    }
                 ]
             )),
             _ => panic!(),
@@ -1344,7 +1383,12 @@ mod tests {
         // A Sync message is accepted (after connection start up completes).
         let request = FrontendMessage::Sync;
         match block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap() {
-            Response::Message(m) => assert!(matches!(m, BackendMessage::ReadyForQuery { .. })),
+            Response::Message(m) => assert!(matches!(
+                m,
+                BackendMessage::ReadyForQuery {
+                    status: READY_FOR_QUERY_IDLE
+                }
+            )),
             _ => panic!(),
         }
     }
@@ -1428,7 +1472,9 @@ mod tests {
                 assert_eq!(result_transfer_formats, None);
                 assert!(matches!(
                     trailer,
-                    Some(BackendMessage::ReadyForQuery { .. })
+                    Some(BackendMessage::ReadyForQuery {
+                        status: READY_FOR_QUERY_IDLE
+                    })
                 ));
                 let results = resultset.try_collect::<Vec<_>>().await.unwrap();
                 match &results[..] {
@@ -1466,14 +1512,25 @@ mod tests {
     }
 
     #[test]
-    fn query_write() {
+    fn query_write_non_tx() {
+        query_write(false);
+    }
+
+    #[test]
+    fn query_write_in_tx() {
+        query_write(true);
+    }
+
+    fn query_write(in_transaction: bool) {
         let mut protocol = Protocol::new();
         let mut backend = Backend::new();
+        backend.set_in_transaction(in_transaction);
         backend.is_query_read = false;
         let mut channel = Channel::<NullBytestream>::new(NullBytestream);
 
         let startup_request = FrontendMessage::StartupMessage {
             protocol_version: 12345,
+
             user: Some(bytes_str("user_name")),
             database: Some(bytes_str("database_name")),
         };
@@ -1483,6 +1540,11 @@ mod tests {
         let request = FrontendMessage::Query {
             query: bytes_str("DELETE * FROM test;"),
         };
+        let ready_for_query_status = if in_transaction {
+            READY_FOR_QUERY_TX
+        } else {
+            READY_FOR_QUERY_IDLE
+        };
         match block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap() {
             Response::Messages(ms) => assert!(matches!(
                 ms.as_ref(),
@@ -1490,8 +1552,8 @@ mod tests {
                     CommandComplete {
                         tag
                     },
-                    BackendMessage::ReadyForQuery { .. }
-                ] if *tag == CommandCompleteTag::Delete(5)
+                    BackendMessage::ReadyForQuery { status }
+                ] if *tag == CommandCompleteTag::Delete(5) && *status == ready_for_query_status
             )),
             _ => panic!(),
         }
@@ -2248,7 +2310,7 @@ mod tests {
         let mut protocol = Protocol::new();
         assert!(matches!(
             block_on(
-                protocol.on_error::<Backend>(Error::InternalError("error requested".to_string()))
+                protocol.on_error::<Backend>(Error::InternalError("error requested".to_string()), false)
             )
             .unwrap(),
             Response::Message(ErrorResponse {
@@ -2265,7 +2327,8 @@ mod tests {
         let mut protocol = Protocol::new();
         protocol.state = State::Ready;
         match block_on(
-            protocol.on_error::<Backend>(Error::InternalError("error requested".to_string())),
+            protocol
+                .on_error::<Backend>(Error::InternalError("error requested".to_string()), false),
         )
         .unwrap()
         {
@@ -2289,7 +2352,9 @@ mod tests {
                         line: None,
                         routine: None,
                     },
-                    BackendMessage::ReadyForQuery { .. }
+                    BackendMessage::ReadyForQuery {
+                        status: READY_FOR_QUERY_IDLE,
+                    }
                 ]
             )),
             _ => panic!(),
@@ -2302,7 +2367,7 @@ mod tests {
         protocol.state = State::Extended;
         assert!(matches!(
             block_on(
-                protocol.on_error::<Backend>(Error::InternalError("error requested".to_string()))
+                protocol.on_error::<Backend>(Error::InternalError("error requested".to_string()), false)
             )
             .unwrap(),
             Response::Message(ErrorResponse {

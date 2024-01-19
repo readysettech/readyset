@@ -99,6 +99,10 @@ impl PsqlBackend for ErrorBackend {
     fn version(&self) -> String {
         "13.4 ReadySet".to_string()
     }
+
+    fn in_transaction(&self) -> bool {
+        false
+    }
 }
 
 async fn error_test<F, R>(error_pos: ErrorPosition, inner: F)
