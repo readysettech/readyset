@@ -71,7 +71,7 @@ pub struct Options {
     pub log_format: LogFormat,
 
     /// Disable colors in all log output
-    #[arg(long, env = "NO_COLOR", hide = true)]
+    #[arg(long, env = "NO_COLOR")]
     pub no_color: bool,
 
     /// Log level filter for spans and events. The log level filter string is a comma separated
