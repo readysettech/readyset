@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use database_utils::DatabaseURL;
+use database_utils::{DatabaseURL, ReplicationServerId};
 use nom_sql::Relation;
 use readyset_adapter::backend::noria_connector::{NoriaConnector, ReadBehavior};
 use readyset_adapter::backend::{BackendBuilder, MigrationMode};
@@ -88,7 +88,7 @@ pub struct TestBuilder {
     durability_mode: DurabilityMode,
     storage_dir_path: Option<PathBuf>,
     authority: Option<Arc<Authority>>,
-    replication_server_id: Option<u32>,
+    replication_server_id: Option<ReplicationServerId>,
 }
 
 impl Default for TestBuilder {
@@ -180,8 +180,8 @@ impl TestBuilder {
         self
     }
 
-    pub fn replication_server_id(mut self, replication_server_id: u32) -> Self {
-        self.replication_server_id = Some(replication_server_id);
+    pub fn replication_server_id(mut self, replication_server_id: String) -> Self {
+        self.replication_server_id = Some(ReplicationServerId(replication_server_id));
         self
     }
 

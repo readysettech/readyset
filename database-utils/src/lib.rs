@@ -67,9 +67,14 @@ pub struct UpstreamConfig {
     ///
     /// This can be used to differentiate different ReadySet deployments connected to the same
     /// upstream DB.
-    #[arg(long, env = "REPLICATION_SERVER_ID", hide = true)]
+    ///
+    /// This ends up being a suffix of the replication slot or resnapshot replication slot, which
+    /// have prefixes of 'readyset_' and 'readyset_resnapshot_', respectively. Since a replication
+    /// slot is limited by postgres to a length of 63 bytes, that means this server id must be 43
+    /// bytes or fewer.
+    #[arg(long, env = "REPLICATION_SERVER_ID", hide = true, value_parser = parse_repl_server_id)]
     #[serde(default)]
-    pub replication_server_id: Option<u32>,
+    pub replication_server_id: Option<ReplicationServerId>,
 
     /// The time to wait before restarting the replicator in seconds.
     #[arg(long, hide = true, default_value = "1", value_parser = duration_from_seconds)]
@@ -163,6 +168,42 @@ impl UpstreamConfig {
             ..Default::default()
         }
     }
+}
+
+#[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
+pub struct ReplicationServerId(pub String);
+
+impl Display for ReplicationServerId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0[..])
+    }
+}
+
+impl From<&std::ffi::OsStr> for ReplicationServerId {
+    fn from(os_s: &std::ffi::OsStr) -> Self {
+        let mut s = os_s.to_string_lossy().to_string();
+        s.truncate(43);
+        Self(s)
+    }
+}
+
+fn parse_repl_server_id(s: &str) -> Result<ReplicationServerId, String> {
+    let s = s.trim();
+    // Postgres restricts identifiers to 63 bytes or fewer, and we add a prefix of at most 20 bytes
+    // ("readyset_resnapshot_")
+    if s.len() > 43 {
+        return Err("Replication server id must be 43 characters or fewer".to_string());
+    }
+
+    // Replication slot names may only contain lower case letters, numbers, and the underscore
+    // character.
+    if s.chars()
+        .any(|c| !(c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'))
+    {
+        return Err("Replication server id may only contain lower case letters, numbers, and the underscore character".to_string());
+    }
+
+    Ok(ReplicationServerId(s.to_string()))
 }
 
 fn default_replicator_restart_timeout() -> Duration {
