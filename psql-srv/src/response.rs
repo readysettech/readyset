@@ -103,6 +103,7 @@ mod tests {
     use tokio_test::block_on;
 
     use super::*;
+    use crate::message::TransactionState;
     use crate::value::PsqlValue;
 
     type TestResponse = Response<stream::Iter<vec::IntoIter<Result<PsqlSrvRow, Error>>>>;
@@ -199,7 +200,9 @@ mod tests {
                 TransferFormat::Text,
                 TransferFormat::Binary,
             ])),
-            trailer: Some(BackendMessage::ready_for_query_idle()),
+            trailer: Some(BackendMessage::ready_for_query(
+                TransactionState::InTransactionOk,
+            )),
         };
         let validating_sink = sink::unfold(0, |i, m: BackendMessage| {
             async move {
@@ -242,7 +245,10 @@ mod tests {
                             tag
                         } if tag == CommandCompleteTag::Select(2)
                     )),
-                    4 => match (m, BackendMessage::ready_for_query_idle()) {
+                    4 => match (
+                        m,
+                        BackendMessage::ready_for_query(TransactionState::InTransactionOk),
+                    ) {
                         (
                             BackendMessage::ReadyForQuery { status },
                             BackendMessage::ReadyForQuery {

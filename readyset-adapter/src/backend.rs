@@ -237,6 +237,10 @@ impl ProxyState {
         }
     }
 
+    fn in_transaction(&self) -> bool {
+        *self == ProxyState::InTransaction
+    }
+
     /// Sets the autocommit state accordingly. If turning autocommit on, will set ProxyState to
     /// Fallback as long as current state is AutocommitOff.
     ///
@@ -3002,6 +3006,10 @@ where
             schema,
             vec![Results::new(data)],
         ))
+    }
+
+    pub fn in_transaction(&self) -> bool {
+        self.state.proxy_state.in_transaction()
     }
 }
 

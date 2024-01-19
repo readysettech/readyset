@@ -72,6 +72,10 @@ impl PsqlBackend for TestBackend {
     fn version(&self) -> String {
         "ReadySet".to_string()
     }
+
+    fn in_transaction(&self) -> bool {
+        false
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]

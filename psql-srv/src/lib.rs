@@ -119,6 +119,9 @@ pub trait PsqlBackend {
     ///
     /// * `statement_id` - The identifier of the prepared statement to close.
     async fn on_close(&mut self, statement_id: u32) -> Result<(), Error>;
+
+    /// Determine if the connection is in an open transaction.
+    fn in_transaction(&self) -> bool;
 }
 
 /// A description of a column, either in the parameters to a query or in a resultset
@@ -195,7 +198,7 @@ where
     B: PsqlBackend,
     C: AsyncRead + AsyncWrite + Unpin,
 {
-    let packet = Protocol::new().on_error::<B>(error).await?;
+    let packet = Protocol::new().on_error::<B>(error, false).await?;
     channel::Channel::new(channel).send(packet).await?;
     Ok(())
 }

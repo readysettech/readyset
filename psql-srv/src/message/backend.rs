@@ -11,7 +11,13 @@ use tokio_postgres::OwnedField;
 use crate::message::TransferFormat;
 use crate::value::PsqlValue;
 
-const READY_FOR_QUERY_IDLE: u8 = b'I';
+/// Idle (not in a transaction block)
+pub(crate) const READY_FOR_QUERY_IDLE: u8 = b'I';
+/// In a transaction block
+pub(crate) const READY_FOR_QUERY_TX: u8 = b'T';
+/// In a failed transaction block (queries will be rejected until block is ended)
+pub(crate) const READY_FOR_QUERY_FAILED_TX: u8 = b'E';
+
 const SSL_RESPONSE_UNWILLING: u8 = b'N';
 const SSL_RESPONSE_WILLING: u8 = b'S';
 
@@ -89,11 +95,25 @@ pub enum BackendMessage {
     },
 }
 
+/// The state of connection wrt a transaction, as will be reported in the
+/// ReadyForQuery backend message [0].
+///
+/// [0] https://www.postgresql.org/docs/current/protocol-message-formats.html
+pub(crate) enum TransactionState {
+    NotInTransaction,
+    InTransactionOk,
+    InTransactionError,
+}
+
 impl BackendMessage {
-    pub fn ready_for_query_idle() -> BackendMessage {
-        BackendMessage::ReadyForQuery {
-            status: READY_FOR_QUERY_IDLE,
-        }
+    pub fn ready_for_query(state: TransactionState) -> BackendMessage {
+        let status = match state {
+            TransactionState::NotInTransaction => READY_FOR_QUERY_IDLE,
+            TransactionState::InTransactionOk => READY_FOR_QUERY_TX,
+            TransactionState::InTransactionError => READY_FOR_QUERY_FAILED_TX,
+        };
+
+        BackendMessage::ReadyForQuery { status }
     }
 
     pub fn ssl_response_unwilling() -> BackendMessage {

@@ -167,6 +167,10 @@ impl ps::PsqlBackend for Backend {
         self.inner.remove_statement(statement_id).await?;
         Ok(())
     }
+
+    fn in_transaction(&self) -> bool {
+        self.inner.in_transaction()
+    }
 }
 
 /// A simple wrapper around a request parameter `psql_srv::PsqlValue` reference, facilitiating
