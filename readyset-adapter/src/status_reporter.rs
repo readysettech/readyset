@@ -172,7 +172,10 @@ where
 // Helper function for formatting
 fn time_or_null(time_ms: Option<u64>) -> String {
     if let Some(t) = time_ms {
-        TimestampTz::from_unix_ms(t).to_string()
+        // TimestampTz treats unix ms as not having a timezone, but since we lose the knowledge
+        // that this timestamp came from a unix epoch, adding it back in explicitly helps provide
+        // the timezone context.
+        format!("{} UTC", TimestampTz::from_unix_ms(t))
     } else {
         "NULL".to_string()
     }
