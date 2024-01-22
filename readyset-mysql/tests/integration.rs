@@ -1828,7 +1828,7 @@ async fn show_readyset_status() {
         if s == "NULL" {
             true
         } else {
-            NaiveDateTime::parse_from_str(&s, "%Y-%m-%d %H:%M:%S").is_ok()
+            NaiveDateTime::parse_from_str(&s, "%Y-%m-%d %H:%M:%S UTC").is_ok()
         }
     };
 
