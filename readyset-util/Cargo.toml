@@ -11,6 +11,7 @@ anyhow = "1.0"
 backoff = { version = "0.4.0", features = ["tokio"] }
 proptest = "1.0.0"
 chrono = { version = "0.4.0", features = ["serde"] }
+chrono-tz = "0.5"
 tokio = { workspace = true, features = ["full"] }
 futures = "0.3"
 tracing = { version = "0.1", features = ["release_max_level_debug"] }

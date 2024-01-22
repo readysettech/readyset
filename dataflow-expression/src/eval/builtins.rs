@@ -846,11 +846,14 @@ impl BuiltinFunction {
 #[cfg(test)]
 mod tests {
     use chrono::{NaiveTime, Timelike};
+    use chrono_tz::{Asia, Atlantic};
     use lazy_static::lazy_static;
     use nom_sql::parse_expr;
     use nom_sql::Dialect::*;
     use readyset_errors::{internal, internal_err};
-    use readyset_util::arbitrary::arbitrary_timestamp_naive_date_time;
+    use readyset_util::arbitrary::{
+        arbitrary_timestamp_naive_date_time, arbitrary_timestamp_naive_date_time_for_timezone,
+    };
     use test_strategy::proptest;
 
     use super::*;
@@ -1415,24 +1418,45 @@ mod tests {
         );
     }
 
+    #[test]
+    /// Tests that if the given [`NaiveDateTime`] does not represent a valid time in the src
+    /// timezone, [`super::convert_tz`] fails with an error.
+    fn convert_tz_invalid_datetime_for_timezone() {
+        let datetime = NaiveDate::from_ymd_opt(1975, 11, 25)
+            .unwrap()
+            .and_hms_opt(2, 0, 0)
+            .unwrap();
+
+        super::convert_tz(
+            &datetime,
+            &Atlantic::Cape_Verde.to_string(),
+            &Asia::Kathmandu.to_string(),
+        )
+        .unwrap_err();
+    }
+
     // NOTE(Fran): We have to be careful when testing timezones, as the time difference
     //   between two timezones might differ depending on the date (due to daylight savings
     //   or by historical changes).
     #[proptest]
-    fn convert_tz(#[strategy(arbitrary_timestamp_naive_date_time())] datetime: NaiveDateTime) {
-        let src = "Atlantic/Cape_Verde";
-        let target = "Asia/Kathmandu";
-        let src_tz: Tz = src.parse().unwrap();
-        let target_tz: Tz = target.parse().unwrap();
+    fn convert_tz(
+        #[strategy(arbitrary_timestamp_naive_date_time_for_timezone(Atlantic::Cape_Verde))]
+        datetime: NaiveDateTime,
+    ) {
+        let src_tz = Atlantic::Cape_Verde;
+        let target_tz = Asia::Kathmandu;
         let expected = src_tz
             .yo_opt(datetime.year(), datetime.ordinal())
             .and_hms_opt(datetime.hour(), datetime.minute(), datetime.second())
             .unwrap()
             .with_timezone(&target_tz)
             .naive_local();
-        assert_eq!(super::convert_tz(&datetime, src, target).unwrap(), expected);
-        super::convert_tz(&datetime, "invalid timezone", target).unwrap_err();
-        super::convert_tz(&datetime, src, "invalid timezone").unwrap_err();
+        assert_eq!(
+            super::convert_tz(&datetime, &src_tz.to_string(), &target_tz.to_string()).unwrap(),
+            expected
+        );
+        super::convert_tz(&datetime, "invalid timezone", &target_tz.to_string()).unwrap_err();
+        super::convert_tz(&datetime, &src_tz.to_string(), "invalid timezone").unwrap_err();
     }
 
     #[proptest]
