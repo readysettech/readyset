@@ -5,7 +5,10 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 use std::time::{Duration as StdDuration, SystemTime, UNIX_EPOCH};
 
 use bit_vec::BitVec;
-use chrono::{Date, DateTime, Duration, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime};
+use chrono::{
+    Date, DateTime, Duration, FixedOffset, LocalResult, NaiveDate, NaiveDateTime, NaiveTime,
+};
+use chrono_tz::Tz;
 use cidr::IpInet;
 use eui48::MacAddress;
 use proptest::prelude::*;
@@ -104,6 +107,19 @@ pub fn arbitrary_systemtime() -> impl Strategy<Value = SystemTime> {
             UNIX_EPOCH - StdDuration::new((-(s as i64)) as u64, us * 1000)
         }
     })
+}
+
+/// Strategy to generate an arbitrary [`NaiveDateTime`] that represents a valid time in the given
+/// timezone.
+pub fn arbitrary_timestamp_naive_date_time_for_timezone(
+    tz: Tz,
+) -> impl Strategy<Value = NaiveDateTime> {
+    arbitrary_timestamp_naive_date_time().prop_filter(
+        "timestamp must represent valid times in both the given timezones",
+        move |timestamp: &NaiveDateTime| {
+            matches!(timestamp.and_local_timezone(tz), LocalResult::Single(_))
+        },
+    )
 }
 
 /// Strategy to generate an arbitrary [`MacAddress`].
