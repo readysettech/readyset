@@ -488,6 +488,16 @@ where
     match result {
         Ok(QueryResult::Noria(result)) => handle_readyset_result(result, writer).await,
         Ok(QueryResult::Upstream(result)) => handle_upstream_result(result, writer).await,
+        Ok(QueryResult::Deallocate(_)) => {
+            // Note: MySQL's DEALLOCATE PREPARE, a SQL statement, can only close statements
+            // that were prepared via a PREPARE statement (not via the wire protocol).
+            // As ReadySet does not support preparing statments via a PREPARE statement,
+            // we don't support closing statements via a DEALLOCATE PREPARE statement.
+            let err = Error::ReadySet(ReadySetError::Unsupported(
+                "DEALLOCATE PREPARE is not supported in ReadySet.".to_string(),
+            ));
+            handle_error!(err, writer)
+        }
         Err(error) => handle_error!(error, writer),
     }
 }

@@ -220,6 +220,7 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
             }
             Upstream(upstream::QueryResult::Command) => Ok(Command),
             Upstream(upstream::QueryResult::SimpleQuery(resp)) => Ok(SimpleQuery(resp)),
+            cl::QueryResult::Deallocate(_) => todo!("upcoming CL"),
         }
     }
 }
