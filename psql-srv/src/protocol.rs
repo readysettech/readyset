@@ -488,6 +488,8 @@ impl Protocol {
                                 channel.clear_statement_param_types(name.borrow() as &str);
                                 self.prepared_statements.remove(name.borrow() as &str);
                                 // TODO Remove all portals referencing this prepared statement.
+                            } else {
+                                return Err(Error::DeallocateError(name.to_string()));
                             }
                         }
                     };
@@ -697,6 +699,8 @@ impl Protocol {
                                         self.prepared_statements.remove(&name);
                                         // TODO Remove all portals referencing this prepared
                                         // statement.
+                                    } else {
+                                        return Err(Error::DeallocateError(name));
                                     }
                                     CommandCompleteTag::Deallocate(false)
                                 } else {
@@ -1915,8 +1919,8 @@ mod tests {
             name: PreparedStatement(bytes_str("prepared1")),
         };
         assert!(matches!(
-            block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap(),
-            Response::Message(CloseComplete)
+            block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap_err(),
+            Error::DeallocateError(_)
         ));
     }
 

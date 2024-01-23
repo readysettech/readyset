@@ -16,6 +16,9 @@ pub enum Error {
     #[error("no user specified in connection")]
     NoUserSpecified,
 
+    #[error("prepared statement \"{0}\" does not exist")]
+    DeallocateError(String),
+
     #[error("decode error: {0}")]
     DecodeError(#[from] DecodeError),
 
@@ -73,6 +76,7 @@ impl From<Error> for BackendMessage {
         let sqlstate = match error {
             Error::AuthenticationFailure { .. } => SqlState::INVALID_PASSWORD,
             Error::NoUserSpecified => SqlState::INVALID_PASSWORD,
+            Error::DeallocateError(_) => SqlState::UNDEFINED_PSTATEMENT,
             Error::DecodeError(_) => SqlState::IO_ERROR,
             Error::EncodeError(_) => SqlState::IO_ERROR,
             Error::IncorrectFormatCount(_) => SqlState::IO_ERROR,
