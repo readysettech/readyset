@@ -1143,6 +1143,10 @@ mod tests {
             Ok(())
         }
 
+        async fn on_close_all(&mut self) -> Result<(), Error> {
+            Ok(())
+        }
+
         fn in_transaction(&self) -> bool {
             self.in_transaction
         }

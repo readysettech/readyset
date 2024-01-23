@@ -76,6 +76,10 @@ impl PsqlBackend for ScramSha256Backend {
         Ok(())
     }
 
+    async fn on_close_all(&mut self) -> Result<(), Error> {
+        Ok(())
+    }
+
     fn in_transaction(&self) -> bool {
         false
     }

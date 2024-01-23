@@ -96,6 +96,10 @@ impl PsqlBackend for ErrorBackend {
         Ok(())
     }
 
+    async fn on_close_all(&mut self) -> Result<(), Error> {
+        Ok(())
+    }
+
     fn version(&self) -> String {
         "13.4 ReadySet".to_string()
     }

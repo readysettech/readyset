@@ -120,6 +120,9 @@ pub trait PsqlBackend {
     /// * `statement_id` - The identifier of the prepared statement to close.
     async fn on_close(&mut self, statement_id: u32) -> Result<(), Error>;
 
+    /// Closes (deallocates) all prepared statements on this connection.
+    async fn on_close_all(&mut self) -> Result<(), Error>;
+
     /// Determine if the connection is in an open transaction.
     fn in_transaction(&self) -> bool;
 }

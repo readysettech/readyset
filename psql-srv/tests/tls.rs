@@ -69,6 +69,10 @@ impl PsqlBackend for TestBackend {
         Ok(())
     }
 
+    async fn on_close_all(&mut self) -> Result<(), Error> {
+        Ok(())
+    }
+
     fn version(&self) -> String {
         "ReadySet".to_string()
     }

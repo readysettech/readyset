@@ -168,6 +168,11 @@ impl ps::PsqlBackend for Backend {
         Ok(())
     }
 
+    async fn on_close_all(&mut self) -> Result<(), ps::Error> {
+        self.inner.remove_all_statements().await?;
+        Ok(())
+    }
+
     fn in_transaction(&self) -> bool {
         self.inner.in_transaction()
     }

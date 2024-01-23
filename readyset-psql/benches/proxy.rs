@@ -256,6 +256,10 @@ impl PsqlBackend for Backend {
         Ok(())
     }
 
+    async fn on_close_all(&mut self) -> Result<(), psql_srv::Error> {
+        Ok(())
+    }
+
     fn in_transaction(&self) -> bool {
         false
     }
