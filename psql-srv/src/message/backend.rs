@@ -136,6 +136,8 @@ pub enum CommandCompleteTag {
     Insert(u64),
     Select(u64),
     Update(u64),
+    /// The bool field indicates if all prepared statements were deallocated.
+    Deallocate(bool),
 }
 
 #[allow(dead_code)]

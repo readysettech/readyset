@@ -598,6 +598,9 @@ impl Protocol {
                                     "Received SimpleQuery response for Execute".to_string(),
                                 ));
                             }
+                            Deallocate(..) => {
+                                todo!("DEALLOCATE cannot be executed as a prepared statement.")
+                            }
                         };
                         Ok(Response::Message(CommandComplete { tag }))
                     };
@@ -680,6 +683,28 @@ impl Protocol {
                             }
                             SimpleQuery(_) => {
                                 unreachable!("SimpleQuery is handled as a special case above.")
+                            }
+                            Deallocate(name) => {
+                                if name.is_some() {
+                                    let name = name.unwrap();
+                                    if let Some(id) = self
+                                        .prepared_statements
+                                        .get(&name)
+                                        .map(|d| d.prepared_statement_id)
+                                    {
+                                        backend.on_close(id).await?;
+                                        channel.clear_statement_param_types(&name);
+                                        self.prepared_statements.remove(&name);
+                                        // TODO Remove all portals referencing this prepared
+                                        // statement.
+                                    }
+                                    CommandCompleteTag::Deallocate(false)
+                                } else {
+                                    backend.on_close_all().await?;
+                                    channel.clear_all_statement_param_types();
+                                    self.prepared_statements.clear();
+                                    CommandCompleteTag::Deallocate(true)
+                                }
                             }
                         };
                         Ok(Response::Messages(smallvec![
@@ -1886,7 +1911,6 @@ mod tests {
         };
         block_on(protocol.on_request(startup_request, &mut backend, &mut channel)).unwrap();
 
-        // An attempt to close a missing prepared statement triggers a normal response (no error).
         let request = FrontendMessage::Close {
             name: PreparedStatement(bytes_str("prepared1")),
         };

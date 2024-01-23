@@ -176,6 +176,7 @@ pub enum QueryResponse<R> {
     /// commands (e.g., SELECT, INSERT, DELETE, etc.). The SimpleQuery protocol is distinct from
     /// the prepare/execute protocol.
     SimpleQuery(Vec<SimpleQueryMessage>),
+    Deallocate(Option<String>),
 }
 
 /// Run a `Backend` on the provided bytestream until the bytestream is remotely closed.

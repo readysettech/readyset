@@ -38,6 +38,8 @@ const COMMAND_COMPLETE_INSERT_TAG: &str = "INSERT";
 const COMMAND_COMPLETE_INSERT_LEGACY_OID: &str = "0";
 const COMMAND_COMPLETE_SELECT_TAG: &str = "SELECT";
 const COMMAND_COMPLETE_UPDATE_TAG: &str = "UPDATE";
+const COMMAND_COMPLETE_DEALLOCATE_TAG: &str = "DEALLOCATE";
+const COMMAND_COMPLETE_DEALLOCATE_ALL_TAG: &str = "ALL";
 const COMMAND_COMPLETE_TAG_BUF_LEN: usize = 32;
 
 // https://www.postgresql.org/docs/current/protocol-error-fields.html
@@ -169,6 +171,18 @@ fn encode(message: BackendMessage, dst: &mut BytesMut) -> Result<(), Error> {
                 )?,
                 Select(n) => write!(&mut tag_buf[..], "{} {}", COMMAND_COMPLETE_SELECT_TAG, n)?,
                 Update(n) => write!(&mut tag_buf[..], "{} {}", COMMAND_COMPLETE_UPDATE_TAG, n)?,
+                Deallocate(b) => {
+                    if b {
+                        write!(
+                            &mut tag_buf[..],
+                            "{} {}",
+                            COMMAND_COMPLETE_DEALLOCATE_TAG,
+                            COMMAND_COMPLETE_DEALLOCATE_ALL_TAG
+                        )?;
+                    } else {
+                        write!(&mut tag_buf[..], "{}", COMMAND_COMPLETE_DEALLOCATE_TAG)?;
+                    }
+                }
             };
             let tag_str = std::str::from_utf8(&tag_buf)?;
             let tag_data_len = tag_str.find(NUL_CHAR).ok_or_else(|| {
@@ -825,6 +839,44 @@ mod tests {
         exp.put_u8(b'C'); // message id
         exp.put_i32(4 + 9); // message length
         exp.extend_from_slice(b"UPDATE 3\0");
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
+    fn test_encode_command_complete_deallocate() {
+        let mut codec = Codec::new();
+        let mut buf = BytesMut::new();
+        codec
+            .encode(
+                CommandComplete {
+                    tag: Deallocate(false),
+                },
+                &mut buf,
+            )
+            .unwrap();
+        let mut exp = BytesMut::new();
+        exp.put_u8(b'C'); // message id
+        exp.put_i32(4 + 11); // message length
+        exp.extend_from_slice(b"DEALLOCATE\0");
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
+    fn test_encode_command_complete_deallocate_all() {
+        let mut codec = Codec::new();
+        let mut buf = BytesMut::new();
+        codec
+            .encode(
+                CommandComplete {
+                    tag: Deallocate(true),
+                },
+                &mut buf,
+            )
+            .unwrap();
+        let mut exp = BytesMut::new();
+        exp.put_u8(b'C'); // message id
+        exp.put_i32(4 + 15); // message length
+        exp.extend_from_slice(b"DEALLOCATE ALL\0");
         assert_eq!(buf, exp);
     }
 
