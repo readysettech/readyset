@@ -1672,6 +1672,19 @@ where
         Ok(())
     }
 
+    pub async fn remove_all_statements(&mut self) -> Result<(), DB::Error> {
+        // check if the upstream even supports deallocating all statements before we
+        // drop from from local (readyset) memory. Correctly behaving clients won't
+        // get into this problem, but a malicious application might.
+        if let Some(upstream) = &mut self.upstream {
+            upstream.remove_all_statements().await?;
+        }
+
+        self.state.prepared_statements.clear();
+
+        Ok(())
+    }
+
     /// Should only be called with a SqlQuery that is of type StartTransaction, Commit, or
     /// Rollback. Used to handle transaction boundary queries.
     async fn handle_transaction_boundaries<'a>(

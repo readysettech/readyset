@@ -321,6 +321,8 @@ impl UpstreamDatabase for PostgreSqlUpstream {
     }
 
     async fn remove_statement(&mut self, statement_id: u32) -> Result<(), Self::Error> {
+        // Note: we don't need to explictly send a close/deallocate message to the upstream
+        // as that is handled by the Drop impl on the Statement object.
         *self
             .prepared_statements
             .get_mut(statement_id as usize)
@@ -328,6 +330,16 @@ impl UpstreamDatabase for PostgreSqlUpstream {
                 statement_id,
             }))? = None;
 
+        Ok(())
+    }
+
+    async fn remove_all_statements(&mut self) -> Result<(), Self::Error> {
+        // Note: we don't need to explictly send a close/deallocate message to the upstream
+        // as that is handled by the Drop impl on the Statement object.
+        // Of course, that will require a round-trip DEALLOCATE message for each
+        // Statement object in the map, sent seriaally. It is assumed this API is
+        // invoked _very_ infrequently.
+        self.prepared_statements.clear();
         Ok(())
     }
 

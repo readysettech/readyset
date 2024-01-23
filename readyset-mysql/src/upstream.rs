@@ -15,7 +15,7 @@ use readyset_adapter::upstream_database::UpstreamDestination;
 use readyset_adapter::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
 use readyset_client_metrics::{recorded, QueryDestination};
 use readyset_data::DfValue;
-use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
+use readyset_errors::{internal_err, unsupported, ReadySetError, ReadySetResult};
 use tracing::{debug, error, info_span, Instrument};
 
 use crate::Error;
@@ -313,6 +313,10 @@ impl UpstreamDatabase for MySqlUpstream {
         self.conn.close(statement).await?;
 
         Ok(())
+    }
+
+    async fn remove_all_statements(&mut self) -> Result<(), Self::Error> {
+        unsupported!("MySQL does not support a DEALLOCATE ALL behavior");
     }
 
     async fn query<'a>(&'a mut self, query: &'a str) -> Result<Self::QueryResult<'a>, Error> {
