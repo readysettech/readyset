@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://user-images.githubusercontent.com/38481289/172237414-023c0b04-c597-44b7-8b14-b5b0c382dc07.png" width='40%'>
+  <img src="https://readyset.io/images/Brand_Logo_Dark.svg" width='80%'>
 </p>
 
 ReadySet is a transparent database cache for Postgres & MySQL that gives you the performance and scalability of an in-memory key-value store without requiring that you rewrite your app or manually handle cache invalidation. ReadySet sits between your application and database and turns even the most complex SQL reads into lightning-fast lookups. Unlike other caching solutions, it keeps cached query results in sync with your database automatically by utilizing your database’s replication stream. It is wire-compatible with Postgres and MySQL and can be used along with your current ORM or database client. 
@@ -19,7 +19,17 @@ ReadySet is a transparent database cache for Postgres & MySQL that gives you the
 :star: If you find ReadySet useful, please consider giving us a star on GitHub! Your support helps us continue to innovate and deliver exciting new features.
 
 ## Quickstart
-See **[here](https://docs.readyset.io/get-started)**. 
+
+To get started in five minutes or less, run:
+
+```
+bash -c "$(curl -sSL https://launch.readyset.io)"
+```
+
+You can also install via a [Docker image](https://docs.readyset.io/get-started/install-rs/docker) or with a [Linux binary](https://docs.readyset.io/get-started/install-rs/binaries). See our [getting started guide](https://docs.readyset.io/get-started) for more details! 
+
+ReadySet Cloud is a managed service that scales your database with ease. If you're interested in trying out ReadySet Cloud, [sign up for early access](https://readyset.io/early-access)! 
+
 
 ## Useful Links 
 * **[Interactive demo](https://docs.readyset.io/demo)**: interactive walk through of ReadySet’s features. 
