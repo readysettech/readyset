@@ -1105,9 +1105,20 @@ where
             return PrepareMeta::Proxy;
         }
 
-        let parse_result = {
-            let _t = event.start_parse_timer();
-            self.parse_query(query)
+        let parse_result = match self.state.parsed_query_cache.get(query) {
+            Some(cached_query) => Ok(cached_query.clone()),
+            None => {
+                let res = {
+                    let _t = event.start_parse_timer();
+                    self.parse_query(query)
+                };
+                if res.is_ok() {
+                    self.state
+                        .parsed_query_cache
+                        .put(query.to_string(), res.clone().unwrap());
+                }
+                res
+            }
         };
 
         match parse_result {
@@ -2932,18 +2943,9 @@ where
     }
 
     fn parse_query(&mut self, query: &str) -> ReadySetResult<SqlQuery> {
-        if let Some(cached_query) = self.state.parsed_query_cache.get(query) {
-            return Ok(cached_query.clone());
-        }
-
         trace!(%query, "Parsing query");
         match nom_sql::parse_query(self.settings.dialect, query) {
-            Ok(parsed_query) => {
-                self.state
-                    .parsed_query_cache
-                    .put(query.to_string(), parsed_query.clone());
-                Ok(parsed_query)
-            }
+            Ok(parsed_query) => Ok(parsed_query),
             Err(_) => Err(ReadySetError::UnparseableQuery {
                 query: query.to_string(),
             }),
