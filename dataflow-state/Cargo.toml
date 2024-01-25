@@ -41,7 +41,7 @@ replication-offset = { path = "../replication-offset" }
 [dev-dependencies]
 proptest-stateful = { path = "../proptest-stateful" }
 async-trait = "0.1"
-pretty_assertions = "0.7.2"
+pretty_assertions = "1.4.0"
 lazy_static = "1.0.0"
 criterion = { workspace = true, features=['real_blackbox', 'async_tokio'] }
 rust_decimal = { version = "1.26", features = ["db-tokio-postgres", "serde-str"] }

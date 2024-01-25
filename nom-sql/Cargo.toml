@@ -38,7 +38,7 @@ failpoint-macros = { path = "../failpoint-macros" }
 
 [dev-dependencies]
 assert_approx_eq = "1.1.0"
-pretty_assertions = "0.7.2"
+pretty_assertions = "1.4.0"
 bincode = "1.3"
 criterion = { workspace = true, features = ["html_reports"] }
 
