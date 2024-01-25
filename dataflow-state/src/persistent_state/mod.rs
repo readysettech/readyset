@@ -1231,13 +1231,15 @@ fn compaction_progress_watcher(table_name: &str, db: &DB) -> anyhow::Result<impl
     use std::fs::File;
     use std::io::{Seek, SeekFrom};
 
-    use notify::{raw_watcher, RecursiveMode, Watcher};
+    use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
 
     // We open the LOG file, skip to the end, and begin watching for change events
     // on it in order to get the latest log entries as they come
     let log_path = db.path().join("LOG");
     let (tx, rx) = std::sync::mpsc::channel();
-    let mut log_watcher = raw_watcher(tx)?;
+
+    // note: the Config is ignored in `RecommendedWatcher` :meh:
+    let mut log_watcher = RecommendedWatcher::new(tx, Config::default())?;
     let table = table_name.to_owned();
     // Row count, but without a lock
     let pk_cf = db.cf_handle(PK_CF).unwrap();
@@ -1248,7 +1250,7 @@ fn compaction_progress_watcher(table_name: &str, db: &DB) -> anyhow::Result<impl
     let mut log_file = File::options().read(true).open(&log_path)?;
     log_file.seek(SeekFrom::End(0))?;
 
-    log_watcher.watch(log_path, RecursiveMode::NonRecursive)?;
+    log_watcher.watch(log_path.as_ref(), RecursiveMode::NonRecursive)?;
 
     let mut monitor = move || -> anyhow::Result<()> {
         const REPORT_INTERVAL: Duration = Duration::from_secs(120);
