@@ -79,7 +79,7 @@ async fn http_tests() {
 
     let status: ReadySetStatus = serde_json::from_str(&payload).unwrap();
     assert_eq!(status.connection_count, 0);
-    assert_eq!(status.connected, Some(true));
+    assert_eq!(status.upstream_reachable, Some(true));
     assert!(status.persistent_stats.is_some());
     assert!(status.controller_status.is_some());
 }

@@ -19,7 +19,7 @@ use crate::UpstreamDatabase;
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ReadySetStatus {
     pub controller_status: Option<ReadySetControllerStatus>,
-    pub connected: Option<bool>,
+    pub upstream_reachable: Option<bool>,
     pub connection_count: usize,
     pub persistent_stats: Option<PersistentStats>,
 }
@@ -35,7 +35,7 @@ impl ReadySetStatus {
         let mut status = Vec::new();
         status.push((
             "Database Connection".to_string(),
-            match self.connected {
+            match self.upstream_reachable {
                 Some(true) => "Connected".to_string(),
                 None | Some(false) => "Unreachable".to_string(),
             },
@@ -153,18 +153,26 @@ where
 
         ReadySetStatus {
             controller_status,
-            connected: self.upstream_connected().await,
+            upstream_reachable: self.upstream_reachable().await,
             connection_count: self.connections.len(),
             persistent_stats,
         }
     }
 
-    async fn upstream_connected(&mut self) -> Option<bool> {
+    async fn upstream_reachable(&mut self) -> Option<bool> {
+        // Check current connection status
         if let Ok(is_connected) = self.upstream.is_connected().await {
-            Some(is_connected)
-        } else {
-            warn!("Unable to determine Upstream connection status");
-            None
+            return Some(is_connected);
+        }
+
+        // Our connection may have been broken.
+        // Attempt to reconnect once to confirm reachability.
+        match self.upstream.connect().await {
+            Ok(_) => Some(true),
+            Err(e) => {
+                warn!("Unable to re-establish connection to Upstream: {}", e);
+                None
+            }
         }
     }
 }

@@ -1837,7 +1837,7 @@ async fn show_readyset_status() {
     assert_eq!(ret.len(), 6);
     let row = ret.remove(0);
     assert_eq!(row.get::<String, _>(0).unwrap(), "Database Connection");
-    assert_eq!(row.get::<String, _>(1).unwrap(), "Unreachable");
+    assert_eq!(row.get::<String, _>(1).unwrap(), "Connected");
     let row = ret.remove(0);
     assert_eq!(row.get::<String, _>(0).unwrap(), "Connection Count");
     assert_eq!(row.get::<String, _>(1).unwrap(), "0");
