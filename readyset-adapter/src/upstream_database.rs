@@ -200,7 +200,7 @@ impl<U> LazyUpstream<U>
 where
     U: UpstreamDatabase,
 {
-    async fn connect(&mut self) -> Result<(), U::Error> {
+    pub async fn connect(&mut self) -> Result<(), U::Error> {
         debug!("LazyUpstream connecting to upstream");
         self.upstream = Some(U::connect(self.upstream_config.clone()).await?);
         Ok(())
