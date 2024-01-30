@@ -2320,7 +2320,12 @@ where
                 }
                 self.drop_all_caches().await
             }
-            SqlQuery::DropAllProxiedQueries(_) => self.drop_all_proxied_queries().await,
+            SqlQuery::DropAllProxiedQueries(_) => {
+                if !self.allow_cache_ddl {
+                    unsupported!("{}", UNSUPPORTED_CACHE_DDL_MSG);
+                }
+                self.drop_all_proxied_queries().await
+            }
             SqlQuery::Show(ShowStatement::CachedQueries(query_id)) => {
                 // Log a telemetry event
                 if let Some(ref telemetry_sender) = self.telemetry_sender {
