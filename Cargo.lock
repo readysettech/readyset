@@ -19,9 +19,9 @@ checksum = "f26201604c87b1e01bd3d98f8d5d9a8fcbb815e8cedb41ffccbeb4bf593a35fe"
 
 [[package]]
 name = "ahash"
-version = "0.7.6"
+version = "0.7.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fcb51a0695d8f838b1ee009b3fbf66bda078cd64590202a864a8f3e8c4315c47"
+checksum = "5a824f2aa7e75a0c98c5a504fceb80649e9c35265d44525b5f94de4771a395cd"
 dependencies = [
  "getrandom 0.2.9",
  "once_cell",
@@ -30,14 +30,15 @@ dependencies = [
 
 [[package]]
 name = "ahash"
-version = "0.8.3"
+version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c99f64d1e06488f620f932677e24bc6e2897582980441ae90a671415bd7ec2f"
+checksum = "77c3a9648d43b9cd48db467b3f87fdd6e146bcc88ab0180006cef2179fe11d01"
 dependencies = [
  "cfg-if",
  "getrandom 0.2.9",
  "once_cell",
  "version_check",
+ "zerocopy",
 ]
 
 [[package]]
@@ -1275,7 +1276,7 @@ dependencies = [
 name = "dataflow-state"
 version = "0.0.1"
 dependencies = [
- "ahash 0.7.6",
+ "ahash 0.7.7",
  "anyhow",
  "async-trait",
  "bincode",
@@ -2062,7 +2063,7 @@ version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a9ee70c43aaf417c914396645a0fa852624801b24ebb7ae78fe8272889ac888"
 dependencies = [
- "ahash 0.7.6",
+ "ahash 0.7.7",
 ]
 
 [[package]]
@@ -2071,7 +2072,7 @@ version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "33ff8ae62cd3a9102e5637afc8452c55acf3844001bd5374e0b0bd7b6616c038"
 dependencies = [
- "ahash 0.8.3",
+ "ahash 0.8.7",
 ]
 
 [[package]]
@@ -2080,7 +2081,7 @@ version = "0.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7dfda62a12f55daeae5015f81b0baea145391cb4520f86c248fc615d72640d12"
 dependencies = [
- "ahash 0.8.3",
+ "ahash 0.8.7",
  "allocator-api2",
 ]
 
@@ -2358,7 +2359,7 @@ version = "0.11.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "321f0f839cd44a4686e9504b0a62b4d69a50b62072144c71c68f5873c167b8d9"
 dependencies = [
- "ahash 0.8.3",
+ "ahash 0.8.7",
  "indexmap 2.1.0",
  "is-terminal",
  "itoa",
@@ -2889,7 +2890,7 @@ name = "metrics"
 version = "0.21.1"
 source = "git+https://github.com/readysettech/metrics.git#9834afdd26f6dea20cd6bc1003fa15bf350cc0f5"
 dependencies = [
- "ahash 0.8.3",
+ "ahash 0.8.7",
  "metrics-macros",
  "portable-atomic 1.3.1",
 ]
@@ -3393,9 +3394,9 @@ dependencies = [
 
 [[package]]
 name = "once_cell"
-version = "1.17.1"
+version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b7e5500299e16ebb147ae15a00a942af264cf3688f47923b8fc2cd5858f23ad3"
+checksum = "3fdb12b2476b595f9358c5161aa467c2438859caa136dec86c26fdd2efe17b92"
 
 [[package]]
 name = "oorandom"
@@ -4408,7 +4409,7 @@ dependencies = [
 name = "readyset-adapter"
 version = "0.1.0"
 dependencies = [
- "ahash 0.7.6",
+ "ahash 0.7.7",
  "anyhow",
  "async-trait",
  "bincode",
@@ -4502,7 +4503,7 @@ dependencies = [
 name = "readyset-client"
 version = "0.7.0"
 dependencies = [
- "ahash 0.7.6",
+ "ahash 0.7.7",
  "anyhow",
  "array2",
  "async-bincode",
@@ -4726,7 +4727,7 @@ dependencies = [
 name = "readyset-dataflow"
 version = "0.7.0"
 dependencies = [
- "ahash 0.7.6",
+ "ahash 0.7.7",
  "anyhow",
  "async-bincode",
  "backoff",
@@ -5005,7 +5006,7 @@ dependencies = [
 name = "readyset-server"
 version = "0.7.0"
 dependencies = [
- "ahash 0.7.6",
+ "ahash 0.7.7",
  "anyhow",
  "array2",
  "assert_approx_eq",
@@ -7533,6 +7534,26 @@ name = "yansi"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "09041cd90cf85f7f8b2df60c646f853b7f535ce68f85244eb6731cf89fa498ec"
+
+[[package]]
+name = "zerocopy"
+version = "0.7.32"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "74d4d3961e53fa4c9a25a8637fc2bfaf2595b3d3ae34875568a5cf64787716be"
+dependencies = [
+ "zerocopy-derive",
+]
+
+[[package]]
+name = "zerocopy-derive"
+version = "0.7.32"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9ce1b18ccd8e73a9321186f97e46f9f04b778851177567b1975109d26a08d2a6"
+dependencies = [
+ "proc-macro2 1.0.69",
+ "quote 1.0.33",
+ "syn 2.0.39",
+]
 
 [[package]]
 name = "zipf"
