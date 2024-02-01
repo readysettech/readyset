@@ -2256,7 +2256,7 @@ where
                 // to create this cache. Extend recipe waits a bit and then returns an
                 // Ok(ExtendRecipeResult::Pending) if it is still creating a cache in the
                 // background, so we don't remove the ddl request for timeouts.
-                if res.is_err() {
+                if let Err(e) = &res {
                     if let Some(ddl_req) = ddl_req {
                         let remove_res = retry_with_exponential_backoff(
                             async || {
@@ -2271,6 +2271,8 @@ where
                             error!("Failed to remove stored 'create cache' request. It will be re-run if there is a backwards incompatible upgrade.");
                         }
                     }
+
+                    error!("Failed to create cache: {}", Sensitive(e));
                 }
                 res
             }
