@@ -28,7 +28,7 @@ bash -c "$(curl -sSL https://launch.readyset.io)"
 
 You can also install via a [Docker image](https://docs.readyset.io/get-started/install-rs/docker) or with a [Linux binary](https://docs.readyset.io/get-started/install-rs/binaries). See our [getting started guide](https://docs.readyset.io/get-started) for more details! 
 
-ReadySet Cloud is a managed service that scales your database with ease. If you're interested in trying out ReadySet Cloud, [sign up for early access](https://readyset.io/early-access)! 
+ReadySet Cloud is a managed service that scales your database with ease. If you're interested in trying out ReadySet Cloud, [try it today](https://readyset.cloud/)! 
 
 
 ## Useful Links 
@@ -44,9 +44,6 @@ For general help using ReadySet, see our **[official docs](https://docs.readyset
 * **[Slack](https://join.slack.com/t/readysetcommunity/shared_invite/zt-2272gtiz4-0024xeRJUPGWlRETQrGkFw)**: Discussions with the community and the team.
 * **[GitHub](https://github.com/readysettech/readyset/issues/new/choose)**: For bug reports and feature requests.
 * **[𝕏 (Twitter)](https://twitter.com/readysetio)**: For product updates and other news. 
-
-## Roadmap
-Check out our [roadmap](https://github.com/readysettech/readyset/issues/856) to learn more about what's coming next for ReadySet.
 
 ## Contributing
 We welcome contributions! Here are a few helpful links to get you started: 
