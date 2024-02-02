@@ -198,30 +198,6 @@ pub mod recorded {
     /// | tag | The client tag of the request that the Finish packet is required for. |
     pub const DOMAIN_TOTAL_FINISH_REPLAY_TIME: &str = "readyset_domain.total_finish_replay_time_us";
 
-    /// Histogram: The time in microseconds that the domain spends handling
-    /// a buffered replay request. Recorded at the domain following packet
-    /// handling.
-    ///
-    /// | Tag | Description |
-    /// | --- | ----------- |
-    /// | domain | The index of the domain the replay request is recorded in. |
-    /// | shard | The shard the replay request is recorded in. |
-    /// | requesting_shard | The shard that is requesting to be seeded. |
-    /// | tag | The client tag of the request that the Finish packet is required for. |
-    pub const DOMAIN_SEED_ALL_TIME: &str = "readyset_domain.seed_all_time_us";
-
-    /// Counter: The total time in microseconds that the domain spends handling
-    /// a buffered replay request. Recorded at the domain following packet
-    /// handling.
-    ///
-    /// | Tag | Description |
-    /// | --- | ----------- |
-    /// | domain | The index of the domain the replay request is recorded in. |
-    /// | shard | The shard the replay request is recorded in. |
-    /// | requesting_shard | The shard that is requesting to be seeded. |
-    /// | tag | The client tag of the request that the Finish packet is required for. |
-    pub const DOMAIN_TOTAL_SEED_ALL_TIME: &str = "readyset_domain.total_seed_all_time_us";
-
     /// Histogram: The time in microseconds that the domain spends handling an
     /// incoming messages (packets). This is aggregate metric per packet's type.
     /// Recorded at the domain following packet handling.
@@ -243,18 +219,6 @@ pub mod recorded {
     /// | shard | The shard the request is recorded in. |
     /// | packet_type | The packet's type |
     pub const DOMAIN_TOTAL_HANDLE_PACKET_TIME: &str = "readyset_domain.total_handle_packet_time_us";
-
-    /// Counter: The total time in microseconds that the domain spends handling
-    /// an incoming domain request. This is aggregate metric per request's type.
-    /// Recorded at the domain following request handling.
-    ///
-    /// | Tag | Description |
-    /// | --- | ----------- |
-    /// | domain | The index of the domain the request is recorded in. |
-    /// | shard | The shard the request is recorded in. |
-    /// | request_type | The packet's type |
-    pub const DOMAIN_TOTAL_HANDLE_REQUEST_TIME: &str =
-        "readyset_domain.total_handle_request_time_us";
 
     /// Histogram: The amount of time spent handling an eviction
     /// request.
