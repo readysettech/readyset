@@ -1,5 +1,6 @@
 #![feature(never_type)]
 
+use std::cmp::max;
 use std::fmt::{self, Display};
 use std::num::ParseIntError;
 use std::path::PathBuf;
@@ -115,6 +116,11 @@ pub struct UpstreamConfig {
     #[serde(default = "default_snapshot_report_interval_secs")]
     pub snapshot_report_interval_secs: u16,
 
+    /// The maximum number of relations that will be snapshotted in parallel from the upstream
+    #[arg(long, hide = true)]
+    #[serde(default = "default_max_parallel_snapshot_tables")]
+    pub max_parallel_snapshot_tables: Option<usize>,
+
     /// Sets the connection count for the pool that is used for replication and snapshotting.
     #[arg(long, default_value = "50", hide = true)]
     #[serde(default)]
@@ -168,6 +174,11 @@ impl UpstreamConfig {
             ..Default::default()
         }
     }
+
+    pub fn max_parallel_snapshot_tables(&self) -> usize {
+        self.max_parallel_snapshot_tables
+            .unwrap_or_else(|| default_max_parallel_snapshot_tables().expect("always Some"))
+    }
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
@@ -214,6 +225,11 @@ fn default_snapshot_report_interval_secs() -> u16 {
     UpstreamConfig::default().snapshot_report_interval_secs
 }
 
+fn default_max_parallel_snapshot_tables() -> Option<usize> {
+    // Default to leaving one logical core free for background tasks, proxying, etc.
+    Some(max(1, num_cpus::get() - 1))
+}
+
 fn default_status_update_interval_secs() -> u16 {
     UpstreamConfig::default().status_update_interval_secs
 }
@@ -237,6 +253,7 @@ impl Default for UpstreamConfig {
             replication_pool_size: 50,
             ignore_ulimit_check: false,
             status_update_interval_secs: 10,
+            max_parallel_snapshot_tables: default_max_parallel_snapshot_tables(),
         }
     }
 }

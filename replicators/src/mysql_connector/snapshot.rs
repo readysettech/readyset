@@ -465,6 +465,7 @@ impl MySqlReplicator {
         db_schemas: &mut DatabaseSchemas,
         snapshot_report_interval_secs: u16,
         full_snapshot: bool,
+        _max_parallel_snapshot_tables: usize, // TODO: limit parallelism for MySQL
     ) -> ReadySetResult<()> {
         let result = self
             .replicate_to_noria_with_table_locks(
