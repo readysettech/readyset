@@ -1235,6 +1235,7 @@ dependencies = [
  "mysql_async",
  "native-tls",
  "nom-sql",
+ "num_cpus",
  "postgres-native-tls",
  "readyset-client",
  "readyset-errors",

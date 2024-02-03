@@ -371,6 +371,7 @@ impl NoriaAdapter {
                         &mut db_schemas,
                         config.snapshot_report_interval_secs,
                         full_snapshot,
+                        config.max_parallel_snapshot_tables(),
                     )
                     .instrument(span.clone())
                     .await;
@@ -570,6 +571,7 @@ impl NoriaAdapter {
                 ReadySetError::Internal(format!("Unable to parse postgres version: {}", e))
             })?;
 
+        let max_parallel_snapshot_tables = config.max_parallel_snapshot_tables();
         let mut connector = Box::new(
             PostgresWalConnector::connect(
                 pgsql_opts.clone(),
@@ -673,6 +675,7 @@ impl NoriaAdapter {
                     //  tables we do have a replication offset for that happened while we weren't
                     //  running.
                     pos.is_none() || full_resnapshot,
+                    max_parallel_snapshot_tables,
                 )
                 .await;
 

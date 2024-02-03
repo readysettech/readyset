@@ -692,6 +692,7 @@ impl<'a> PostgresReplicator<'a> {
         create_schema: &mut CreateSchema,
         snapshot_report_interval_secs: u16,
         full_snapshot: bool,
+        max_parallel_snapshot_tables: usize,
     ) -> ReadySetResult<()> {
         let wal_position = PostgresPosition::commit_end(replication_slot.consistent_point).into();
         self.set_snapshot(&replication_slot.snapshot_name).await?;
@@ -927,6 +928,7 @@ impl<'a> PostgresReplicator<'a> {
         self.transaction.take().unwrap().commit().await?;
 
         // Finally copy each table into noria
+        info!(tables=%tables.len(), %max_parallel_snapshot_tables, "Snapshotting tables");
         let mut snapshotting_tables = FuturesUnordered::new();
         for table in &tables {
             set_failpoint!(failpoints::POSTGRES_SNAPSHOT_TABLE);
@@ -946,6 +948,9 @@ impl<'a> PostgresReplicator<'a> {
 
             let snapshot_name = replication_slot.snapshot_name.clone();
             let table = table.clone();
+            if snapshotting_tables.len() >= max_parallel_snapshot_tables {
+                snapshotting_tables.next().await;
+            }
             snapshotting_tables.push(Self::snapshot_table(
                 pool,
                 span,
