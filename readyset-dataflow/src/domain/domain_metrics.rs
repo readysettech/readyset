@@ -307,7 +307,7 @@ impl DomainMetrics {
             ctr.increment(n as u64);
         } else {
             let ctr = register_counter!(
-                recorded::DOMAIN_TOTAL_CHUNKED_REPLAY_START_TIME,
+                recorded::DOMAIN_REPLAY_MISSES,
                 "domain" => self.index.clone(),
                 "shard" => self.shard.clone(),
                 "miss_in" => miss_in.id().to_string(),
