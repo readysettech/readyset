@@ -1,3 +1,4 @@
+use std::cmp::max;
 use std::future::Future;
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
@@ -12,6 +13,7 @@ use readyset_client::consensus::{
 };
 use readyset_telemetry_reporter::TelemetrySender;
 use readyset_util::shutdown::{self, ShutdownSender};
+use tracing::info;
 
 use crate::controller::replication::ReplicationStrategy;
 use crate::handle::Handle;
@@ -104,7 +106,24 @@ impl Builder {
         let persistence_params = PersistenceParameters::new(
             opts.durability,
             Some(deployment.into()),
-            opts.persistence_threads,
+            opts.persistence_threads.unwrap_or_else(|| {
+                // RocksDB optimizes for 8 threads, so we use that as the default if we have more
+                // than 8 logical cpu cores. But since compaction can be cpu-heavy, leave a logical
+                // core free to handle other things.
+                let n_cpus = num_cpus::get();
+                let n_threads = if n_cpus > 8 {
+                    8
+                } else {
+                    max(
+                        1,
+                        (n_cpus - 1)
+                            .try_into()
+                            .expect("n_cpus >= 0 and <= i32::max"),
+                    )
+                };
+                info!("Using {n_threads} persistence threads");
+                n_threads
+            }),
             Some(deployment_dir),
             builder
                 .config
