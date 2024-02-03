@@ -559,8 +559,10 @@ pub struct WorkerOptions {
     pub durability: DurabilityMode,
 
     /// Number of background threads used by RocksDB
-    #[arg(long, default_value = "6", hide = true)]
-    pub persistence_threads: i32,
+    /// If not specified, readyset will automatically set this at startup based on the number of
+    /// cpu cores available.
+    #[arg(long, hide = true)]
+    pub persistence_threads: Option<i32>,
 
     /// Memory high water mark, in bytes. If process heap memory exceeds this value, we
     /// will perform evictions from partially materialized state. (0 = unlimited)
