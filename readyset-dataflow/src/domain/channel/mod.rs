@@ -11,7 +11,7 @@ use std::task::{Context, Poll};
 
 use async_bincode::{AsyncBincodeWriter, AsyncDestination};
 use futures_util::sink::{Sink, SinkExt};
-use metrics::{register_gauge, Gauge, SharedString};
+use metrics::{register_gauge, Gauge};
 use readyset_client::internal::ReplicaAddress;
 use readyset_client::metrics::recorded;
 use readyset_client::{CONNECTION_FROM_BASE, CONNECTION_FROM_DOMAIN};
@@ -36,18 +36,12 @@ const COORDINATOR_CHANGE_CHANNEL_BUFFER_SIZE: usize = 64;
 
 /// Constructs a [`DomainSender`]/[`DomainReceiver`] channel that can be used to send [`Packet`]s to
 /// a domain who lives in the same process as the sender.
-pub(crate) fn domain_channel(replica_address: ReplicaAddress) -> (DomainSender, DomainReceiver) {
+pub(crate) fn domain_channel() -> (DomainSender, DomainReceiver) {
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-    let index: SharedString = replica_address.domain_index.index().to_string().into();
-    let shard: SharedString = replica_address.shard.to_string().into();
     let packets_queued: [Gauge; PacketDiscriminants::COUNT] = PacketDiscriminants::iter()
         .map(|d| {
             let name: &'static str = d.into();
-            register_gauge!(recorded::DOMAIN_PACKETS_QUEUED,
-                              "domain" => index.clone(),
-                              "shard" => shard.clone(),
-                              "packet_type" => name,
-            )
+            register_gauge!(recorded::DOMAIN_PACKETS_QUEUED, "packet_type" => name)
         })
         .collect::<Vec<Gauge>>()
         .try_into()

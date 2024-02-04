@@ -1161,7 +1161,6 @@ fn plan_add_nodes(
                         recorded::NODE_ADDED,
                         1,
                         "ntype" => dataflow_state.ingredients[ni].node_type_string(),
-                        "node" => nnodes.to_string()
                     );
                 }
                 dataflow_state
