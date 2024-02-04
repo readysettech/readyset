@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use crossbeam_skiplist::SkipSet;
 use database_utils::{DatabaseURL, UpstreamConfig};
@@ -23,6 +24,7 @@ impl Backend {
         url: &str,
         noria: NoriaConnector,
         authority: Arc<Authority>,
+        adapter_start_time: SystemTime,
     ) -> anyhow::Result<Self> {
         let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
         let upstream_config = UpstreamConfig::from_url(url);
@@ -49,6 +51,7 @@ impl Backend {
                             query_status_cache,
                             authority,
                             status_reporter,
+                            adapter_start_time,
                         ),
                 ))
             }
@@ -72,6 +75,7 @@ impl Backend {
                             query_status_cache,
                             authority,
                             status_reporter,
+                            adapter_start_time,
                         ),
                 ))
             }
