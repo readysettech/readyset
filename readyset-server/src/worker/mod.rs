@@ -627,11 +627,7 @@ async fn do_eviction(
                         )
                     });
 
-                    counter!(
-                        recorded::EVICTION_WORKER_EVICTIONS_REQUESTED,
-                        1,
-                        "domain" => target.domain_index.index().to_string(),
-                    );
+                    counter!(recorded::EVICTION_WORKER_EVICTIONS_REQUESTED, 1);
 
                     let tx = match domain_senders.entry(target) {
                         Occupied(entry) => entry.into_mut(),

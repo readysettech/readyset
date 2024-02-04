@@ -24,11 +24,13 @@ use futures_util::stream::StreamExt;
 use futures_util::TryFutureExt;
 pub use internal::{DomainIndex, ReplicaAddress};
 use merging_interval_tree::IntervalTreeSet;
+use metrics::{counter, histogram};
 use nom_sql::Relation;
 use petgraph::graph::NodeIndex;
 use readyset_alloc::StdThreadBuildWrapper;
 use readyset_client::debug::info::KeyCount;
 use readyset_client::internal::{self, Index};
+use readyset_client::metrics::recorded;
 use readyset_client::{KeyComparison, PersistencePoint, ReaderAddress};
 use readyset_errors::{internal, internal_err, ReadySetError, ReadySetResult};
 use readyset_util::futures::abort_on_panic;
@@ -410,7 +412,6 @@ impl DomainBuilder {
             .map(|n| n.borrow().local_addr())
             .collect();
 
-        let address = self.address();
         Domain {
             index: self.index,
             shard: self.shard,
@@ -458,7 +459,7 @@ impl DomainBuilder {
 
             aggressively_update_state_sizes: self.config.aggressively_update_state_sizes,
 
-            metrics: domain_metrics::DomainMetrics::new(address),
+            metrics: domain_metrics::DomainMetrics::new(),
 
             eviction_kind: self.config.eviction_kind,
             remapped_keys: Default::default(),
@@ -882,7 +883,7 @@ impl Domain {
         let mut w = self.waiting.remove(miss_in).unwrap_or_default();
 
         self.metrics
-            .inc_replay_misses(miss_in, needed_for, &cache_name, missed_keys.len());
+            .inc_replay_misses(&cache_name, missed_keys.len());
 
         let is_generated = self
             .replay_paths
@@ -2024,10 +2025,6 @@ impl Domain {
 
                 let replay_tx_desc = self.channel_coordinator.builder_for(&self.address())?;
 
-                // Have to get metrics here so we can move them to the thread
-                let (replay_time_counter, replay_time_histogram) =
-                    self.metrics.recorders_for_chunked_replay(link.dst);
-
                 let address = self.address();
                 thread::Builder::new()
                     .name(format!("replay{}.{}", self.index(), link.src))
@@ -2108,14 +2105,20 @@ impl Domain {
                            "state chunker finished"
                         );
 
-                        replay_time_counter.increment(start.elapsed().as_micros() as u64);
-                        replay_time_histogram.record(start.elapsed().as_micros() as f64);
+                        let time = start.elapsed();
+                        counter!(
+                            recorded::DOMAIN_TOTAL_CHUNKED_REPLAY_TIME,
+                            time.as_micros() as u64
+                        );
+                        histogram!(
+                            recorded::DOMAIN_CHUNKED_REPLAY_TIME,
+                            time.as_micros() as f64
+                        );
                     })?;
                 self.handle_replay(*p, executor)?;
 
                 self.total_replay_time.stop();
-                self.metrics
-                    .rec_chunked_replay_start_time(tag, start.elapsed());
+                self.metrics.rec_chunked_replay_start_time(start.elapsed());
                 Ok(None)
             }
             DomainRequest::Ready {
@@ -2398,26 +2401,18 @@ impl Domain {
             Packet::Message { .. } | Packet::Input { .. } => {
                 // WO for https://github.com/rust-lang/rfcs/issues/1403
                 let start = time::Instant::now();
-                let src = m.src();
-                let dst = m.dst();
                 self.total_forward_time.start();
                 self.dispatch(m, executor)?;
                 self.total_forward_time.stop();
-                self.metrics.rec_forward_time(src, dst, start.elapsed());
+                self.metrics.rec_forward_time(start.elapsed());
             }
-            Packet::ReplayPiece {
-                ref tag,
-                ref cache_name,
-                ..
-            } => {
+            Packet::ReplayPiece { ref cache_name, .. } => {
                 let start = time::Instant::now();
                 let cache_name = cache_name.clone();
-                let tag = *tag;
                 self.total_replay_time.start();
                 self.handle_replay(m, executor)?;
                 self.total_replay_time.stop();
-                self.metrics
-                    .rec_replay_time(tag, &cache_name, start.elapsed());
+                self.metrics.rec_replay_time(&cache_name, start.elapsed());
             }
             Packet::Evict(req) => {
                 self.handle_eviction(req, executor)?;
@@ -2499,7 +2494,7 @@ impl Domain {
 
                 self.total_replay_time.stop();
                 self.metrics
-                    .rec_reader_replay_time(node, &cache_name, start.elapsed());
+                    .rec_reader_replay_time(&cache_name, start.elapsed());
             }
             Packet::RequestPartialReplay {
                 tag,
@@ -2514,7 +2509,7 @@ impl Domain {
                 self.seed_all(m, executor)?;
                 self.total_replay_time.stop();
                 self.metrics
-                    .rec_seed_replay_time(tag, &cache_name, start.elapsed());
+                    .rec_seed_replay_time(&cache_name, start.elapsed());
             }
             Packet::Finish {
                 tag,
@@ -2526,7 +2521,7 @@ impl Domain {
                 self.finish_replay(tag, node, &cache_name, executor)?;
                 self.total_replay_time.stop();
                 self.metrics
-                    .rec_finish_replay_time(tag, &cache_name, start.elapsed());
+                    .rec_finish_replay_time(&cache_name, start.elapsed());
             }
             Packet::Spin => {
                 // spinning as instructed
@@ -2762,7 +2757,7 @@ impl Domain {
         if let Some(node) = self.nodes.get(*source) {
             if node.borrow().is_base() {
                 self.metrics
-                    .inc_base_table_lookups(*source, &cache_name.clone());
+                    .inc_base_table_lookups(&cache_name, node.borrow().name());
             }
         }
 
@@ -4581,6 +4576,6 @@ impl Domain {
     }
 
     pub fn channel(&self) -> (DomainSender, DomainReceiver) {
-        channel::domain_channel(self.address())
+        channel::domain_channel()
     }
 }
