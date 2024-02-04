@@ -346,9 +346,6 @@ pub enum DomainRequest {
         state: PrepareStateKind,
     },
 
-    /// Ask domain to log its state size
-    UpdateStateSize,
-
     /// Inform domain about a new replay path.
     SetupReplayPath {
         tag: Tag,

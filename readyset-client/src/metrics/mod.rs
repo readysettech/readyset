@@ -238,38 +238,21 @@ pub mod recorded {
     /// decision and sending packets.
     pub const EVICTION_WORKER_EVICTION_TIME: &str = "readyset_eviction_worker.eviction_time_us";
 
-    /// Gauge: The amount of bytes required to store a dataflow node's state./
-    ///
-    /// | Tag | Description |
-    /// | --- | ----------- |
-    /// | node | The LocalNodeIndex of the dataflow node. |
-    pub const NODE_STATE_SIZE_BYTES: &str = "readyset_node_state_size_bytes";
-
-    /// Gauge: The sum of the amount of bytes used to store the dataflow node's
-    /// partial state within a domain.
-    ///
-    /// | Tag | Description |
-    /// | --- | ----------- |
-    /// | domain | The index of the domain. |
-    /// | shard | The shard identifier of the domain. |
-    pub const DOMAIN_PARTIAL_STATE_SIZE_BYTES: &str = "readyset_domain.partial_state_size_bytes";
-
     /// Gauge: The sum of the amount of bytes used to store a node's reader state
     /// within a domain.
+    ///
+    /// | Tag | Description |
+    /// | --- | ----------- |
+    /// | name | The name of the reader node |
     pub const READER_STATE_SIZE_BYTES: &str = "readyset_reader_state_size_bytes";
 
     /// Gauge: The sum of the amount of bytes used to store a node's base tables
     /// on disk.
-    pub const ESTIMATED_BASE_TABLE_SIZE_BYTES: &str = "readyset_base_tables_estimated_size_bytes";
-
-    /// Gauge: The sum of a domain's total node state and reader state bytes.
     ///
     /// | Tag | Description |
     /// | --- | ----------- |
-    /// | domain | The index of the domain. |
-    /// | shard | The shard identifier of the domain. |
-    pub const DOMAIN_TOTAL_NODE_STATE_SIZE_BYTES: &str =
-        "readyset_domain.total_node_state_size_bytes";
+    /// | table_name | The name of the base table. |
+    pub const ESTIMATED_BASE_TABLE_SIZE_BYTES: &str = "readyset_base_tables_estimated_size_bytes";
 
     /// Counter: The number of HTTP requests received at the readyset-server, for either the
     /// controller or worker.

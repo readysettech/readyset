@@ -7,10 +7,7 @@ use std::collections::BTreeMap;
 use std::convert::TryInto;
 use std::time::Duration;
 
-use metrics::{
-    register_counter, register_gauge, register_histogram, Counter, Gauge, Histogram, Label,
-    SharedString,
-};
+use metrics::{gauge, register_counter, register_histogram, Counter, Histogram, SharedString};
 use nom_sql::Relation;
 use readyset_client::metrics::recorded;
 use strum::{EnumCount, IntoEnumIterator};
@@ -29,11 +26,6 @@ pub(super) struct DomainMetrics {
     eviction_time: Histogram,
     eviction_size: Histogram,
 
-    partial_state_size: Gauge,
-    reader_state_size: Gauge,
-    base_table_size: Gauge,
-    total_node_state_size: Gauge,
-
     packets_sent: [Counter; PacketDiscriminants::COUNT],
 
     // using a BTree to look up metrics by tag/node, BTree is faster than HashMap for u32/u64 keys
@@ -47,18 +39,12 @@ pub(super) struct DomainMetrics {
     reader_replay_request_time: NodeMap<(Counter, Histogram)>,
     chunked_replay_time: NodeMap<(Counter, Histogram)>,
     base_table_lookups: NodeMap<Counter>,
-    node_state_size: NodeMap<Gauge>,
 }
 
 impl DomainMetrics {
     pub(super) fn new(replica_address: ReplicaAddress) -> Self {
         let index: SharedString = replica_address.domain_index.index().to_string().into();
         let shard: SharedString = replica_address.shard.to_string().into();
-
-        let labels_with_domain_and_shard = vec![
-            Label::new("domain", index.clone()),
-            Label::new("shard", shard.clone()),
-        ];
 
         let packets_sent: Vec<Counter> = PacketDiscriminants::iter()
             .map(|d| {
@@ -72,17 +58,6 @@ impl DomainMetrics {
             .collect();
 
         DomainMetrics {
-            partial_state_size: register_gauge!(
-                recorded::DOMAIN_PARTIAL_STATE_SIZE_BYTES,
-                labels_with_domain_and_shard.clone()
-            ),
-            reader_state_size: register_gauge!(recorded::READER_STATE_SIZE_BYTES, vec![]),
-            base_table_size: register_gauge!(recorded::ESTIMATED_BASE_TABLE_SIZE_BYTES, vec![]),
-            total_node_state_size: register_gauge!(
-                recorded::DOMAIN_TOTAL_NODE_STATE_SIZE_BYTES,
-                labels_with_domain_and_shard
-            ),
-
             eviction_requests: register_counter!(recorded::EVICTION_REQUESTS, vec![],),
             eviction_time: register_histogram!(recorded::EVICTION_TIME, vec![]),
             eviction_size: register_histogram!(recorded::EVICTION_FREED_MEMORY, vec![],),
@@ -96,7 +71,6 @@ impl DomainMetrics {
             packets_sent: packets_sent.try_into().ok().unwrap(),
             reader_replay_request_time: Default::default(),
             base_table_lookups: Default::default(),
-            node_state_size: Default::default(),
             shard,
             index,
         }
@@ -365,24 +339,20 @@ impl DomainMetrics {
         }
     }
 
-    pub(super) fn set_state_sizes(&self, partial: u64, reader: u64, base: u64, node: u64) {
-        self.partial_state_size.set(partial as f64);
-        self.reader_state_size.set(reader as f64);
-        self.base_table_size.set(base as f64);
-        self.total_node_state_size.set(node as f64);
+    pub(super) fn set_reader_state_size(&self, name: &Relation, size: u64) {
+        gauge!(
+            recorded::READER_STATE_SIZE_BYTES,
+            size as f64,
+            "name" => cache_name_to_string(name),
+        );
     }
 
-    pub(super) fn set_node_state_size(&mut self, node: LocalNodeIndex, size: u64) {
-        if let Some(gauge) = self.node_state_size.get(node) {
-            gauge.set(size as f64);
-        } else {
-            let gauge = register_gauge!(
-                recorded::NODE_STATE_SIZE_BYTES,
-                "node" => node.to_string(),
-            );
-            gauge.set(size as f64);
-            self.node_state_size.insert(node, gauge);
-        }
+    pub(super) fn set_base_table_size(&self, name: &Relation, size: u64) {
+        gauge!(
+            recorded::ESTIMATED_BASE_TABLE_SIZE_BYTES,
+            size as f64,
+            "table_name" => cache_name_to_string(name),
+        );
     }
 }
 

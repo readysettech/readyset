@@ -1444,7 +1444,6 @@ impl Domain {
                     };
                     self.auxiliary_node_states.remove(node);
                     self.reader_write_handles.remove(node);
-                    self.metrics.set_node_state_size(node, 0);
                     trace!(local = node.id(), "node removed");
                 }
 
@@ -2298,10 +2297,6 @@ impl Domain {
 
                 let ret = (domain_stats, node_stats);
                 Ok(Some(bincode::serialize(&ret)?))
-            }
-            DomainRequest::UpdateStateSize => {
-                self.update_state_sizes();
-                Ok(None)
             }
             DomainRequest::RequestMinPersistedReplicationOffset => Ok(Some(bincode::serialize(
                 &self.min_persisted_replication_offset()?,
@@ -4399,6 +4394,9 @@ impl Domain {
                             reader_size += size;
                         }
                     }
+
+                    self.metrics.set_reader_state_size(n.name(), size);
+
                     size
                 } else {
                     // Not a reader, state is with domain
@@ -4411,31 +4409,23 @@ impl Domain {
             })
             .sum();
 
-        let Domain { state, metrics, .. } = self; // Help borrowchk
-        let total_node_state: u64 = state
-            .iter()
-            .map(|(ni, state)| {
-                let ret = state.deep_size_of();
-                metrics.set_node_state_size(ni, ret);
-                ret
-            })
-            .sum();
-
-        self.metrics.set_state_sizes(
-            total,
-            reader_size,
-            self.estimated_base_tables_size(),
-            total_node_state + reader_size,
-        );
-
         self.state_size.store(total as usize, Ordering::Release);
         // no response sent, as worker will read the atomic
     }
 
     pub fn estimated_base_tables_size(&self) -> u64 {
         self.state
-            .values()
-            .filter_map(|state| state.as_persistent().map(|s| s.deep_size_of()))
+            .iter()
+            .filter_map(|(ni, state)| {
+                state.as_persistent().map(|s| {
+                    let n = &*self.nodes.get(ni).unwrap().borrow();
+                    let size = s.deep_size_of();
+
+                    self.metrics.set_base_table_size(n.name(), size);
+
+                    size
+                })
+            })
             .sum()
     }
 
