@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
 use database_utils::{DatabaseURL, ReplicationServerId};
@@ -277,6 +277,8 @@ impl TestBuilder {
             });
         }
 
+        let adapter_start_time = SystemTime::now();
+
         let mut backend_shutdown_rx = shutdown_tx.subscribe();
         let fallback_url = fallback_url_and_db_name.as_ref().map(|(f, _)| f.clone());
         tokio::spawn(async move {
@@ -332,6 +334,7 @@ impl TestBuilder {
                             query_status_cache,
                             authority.clone(),
                             status_reporter,
+                            adapter_start_time,
                         );
 
                     let mut backend_shutdown_rx_clone = backend_shutdown_rx_connection.clone();

@@ -6,7 +6,7 @@ use std::iter::FromIterator;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 use std::{io, mem};
 
 use anyhow::{anyhow, bail, Context};
@@ -552,6 +552,7 @@ impl TestScript {
         let mut rh = ReadySetHandle::new(authority.clone()).await;
 
         let server_supports_pagination = rh.supports_pagination().await.unwrap();
+        let adapter_start_time = SystemTime::now();
 
         let task = tokio::spawn(async move {
             let (s, _) = listener.accept().await.unwrap();
@@ -608,6 +609,7 @@ impl TestScript {
                             query_status_cache,
                             authority,
                             status_reporter,
+                            adapter_start_time,
                         )
                 }};
             }

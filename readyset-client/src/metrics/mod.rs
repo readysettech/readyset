@@ -14,12 +14,13 @@ pub mod client;
 /// Documents the set of metrics that are currently being recorded within
 /// a ReadySet instance.
 pub mod recorded {
-    /// Counter: Set at startup of a ReadySet service to the current unix
-    /// timestamp in milliseconds, this metric can be used to detect service
-    /// restarts. When available, prefer the metrics scraped by whatever
-    /// manages orchestration (such as kube-state-metrics's
-    /// kube_pod_container_status_restarts metric)
-    pub const NORIA_STARTUP_TIMESTAMP: &str = "readyset_startup_timestamp";
+    /// Counter: The number of times the adapter has started up. In standalone mode, this metric
+    /// can be used to count the number of system startups.
+    pub const READYSET_ADAPTER_STARTUPS: &str = "readyset_adapter_startups";
+
+    /// Counter: The number of times the server has started up. In standalone mode, this metric
+    /// should track [`READYSET_ADAPTER_STARTUPS`] exactly.
+    pub const READYSET_SERVER_STARTUPS: &str = "readyset_server_startups";
 
     /// Counter: The number of lookup misses that occurred during replay
     /// requests. Recorded at the domain on every lookup miss during a
