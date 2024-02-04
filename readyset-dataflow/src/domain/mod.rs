@@ -24,6 +24,7 @@ use futures_util::stream::StreamExt;
 use futures_util::TryFutureExt;
 pub use internal::{DomainIndex, ReplicaAddress};
 use merging_interval_tree::IntervalTreeSet;
+use nom_sql::Relation;
 use petgraph::graph::NodeIndex;
 use readyset_alloc::StdThreadBuildWrapper;
 use readyset_client::debug::info::KeyCount;
@@ -54,6 +55,9 @@ use crate::payload::{
 use crate::prelude::*;
 use crate::processing::ColumnMiss;
 use crate::{backlog, DomainRequest, Readers};
+
+/// A stub for the cache name used for domain metrics that are emitted during a migration.
+const MIGRATION_CACHE_NAME_STUB: &str = "migration";
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Config {
@@ -791,6 +795,7 @@ impl Domain {
         miss_columns: &[usize],
         dst: Destination,
         target: Target,
+        cache_name: Relation,
     ) -> Result<(), ReadySetError> {
         let miss_index = Index::new(IndexType::best_for_keys(&miss_keys), miss_columns.to_vec());
         // the cloned is a bit sad; self.request_partial_replay doesn't use
@@ -847,11 +852,12 @@ impl Domain {
                         unishard: true, // local replays are necessarily single-shard
                         requesting_shard: self.shard(),
                         requesting_replica: self.replica(),
+                        cache_name: cache_name.clone(),
                     });
                 continue;
             }
 
-            self.send_partial_replay_request(tag, miss_keys.clone())?;
+            self.send_partial_replay_request(tag, miss_keys.clone(), cache_name.clone())?;
         }
 
         Ok(())
@@ -867,6 +873,7 @@ impl Domain {
         requesting_shard: usize,
         requesting_replica: usize,
         needed_for: Tag,
+        cache_name: Relation,
     ) -> ReadySetResult<()> {
         use std::collections::hash_map::Entry;
         use std::ops::AddAssign;
@@ -875,7 +882,7 @@ impl Domain {
         let mut w = self.waiting.remove(miss_in).unwrap_or_default();
 
         self.metrics
-            .inc_replay_misses(miss_in, needed_for, missed_keys.len());
+            .inc_replay_misses(miss_in, needed_for, &cache_name, missed_keys.len());
 
         let is_generated = self
             .replay_paths
@@ -978,7 +985,13 @@ impl Domain {
         self.waiting.insert(miss_in, w);
 
         for ((target, columns), keys) in needed_replays {
-            self.find_tags_and_replay(keys, &columns, Destination(miss_in), target)?
+            self.find_tags_and_replay(
+                keys,
+                &columns,
+                Destination(miss_in),
+                target,
+                cache_name.clone(),
+            )?
         }
 
         Ok(())
@@ -993,6 +1006,7 @@ impl Domain {
         &mut self,
         tag: Tag,
         keys: Vec<KeyComparison>,
+        cache_name: Relation,
     ) -> ReadySetResult<()> {
         let requesting_shard = self.shard();
         let requesting_replica = self.replica();
@@ -1027,6 +1041,7 @@ impl Domain {
                             keys: keys.clone(), // sad to clone here
                             requesting_shard,
                             requesting_replica,
+                            cache_name: cache_name.clone(),
                         })
                         .is_err()
                     {
@@ -1051,6 +1066,7 @@ impl Domain {
                         unishard: true, // only one option, so only one path
                         requesting_shard,
                         requesting_replica,
+                        cache_name,
                     })
                     .is_err()
                 {
@@ -1075,6 +1091,7 @@ impl Domain {
                             unishard: true, // !ask_all, so only one path
                             requesting_shard,
                             requesting_replica,
+                            cache_name: cache_name.clone(),
                         })
                         .is_err()
                     {
@@ -1645,9 +1662,15 @@ impl Domain {
                         }
 
                         let replica = self.replica();
+
+                        struct Misses {
+                            misses: Vec<KeyComparison>,
+                            cache_name: Relation,
+                        }
+
                         let txs = (0..num_shards)
                             .map(|shard| -> ReadySetResult<_> {
-                                let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+                                let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<Misses>();
                                 let sender = self
                                     .channel_coordinator
                                     .builder_for(&ReplicaAddress {
@@ -1661,9 +1684,10 @@ impl Domain {
                                 tokio::spawn(
                                     UnboundedReceiverStream::new(rx)
                                         .map(move |misses| Packet::RequestReaderReplay {
-                                            keys: misses,
+                                            keys: misses.misses,
                                             cols: cols.clone(),
                                             node,
+                                            cache_name: misses.cache_name,
                                         })
                                         .map(Ok)
                                         .forward(sender)
@@ -1687,14 +1711,14 @@ impl Domain {
                         let (r_part, w_part) = backlog::new_partial(
                             num_columns,
                             index,
-                            move |misses: &mut dyn Iterator<Item = KeyComparison>| {
+                            move |misses: &mut dyn Iterator<Item = KeyComparison>, cache_name| {
                                 if num_shards == 1 {
                                     let misses = misses.collect::<Vec<_>>();
                                     if misses.is_empty() {
                                         return true;
                                     }
                                     #[allow(clippy::indexing_slicing)] // just checked len is 1
-                                    txs[0].send(misses).is_ok()
+                                    txs[0].send(Misses { misses, cache_name }).is_ok()
                                 } else {
                                     let mut per_shard = HashMap::new();
                                     for miss in misses {
@@ -1712,7 +1736,12 @@ impl Domain {
                                     per_shard.into_iter().all(|(shard, keys)| {
                                         #[allow(clippy::indexing_slicing)]
                                         // we know txs.len() is equal to num_shards
-                                        txs[shard].send(keys).is_ok()
+                                        txs[shard]
+                                            .send(Misses {
+                                                misses: keys,
+                                                cache_name: cache_name.clone(),
+                                            })
+                                            .is_ok()
                                     })
                                 }
                             },
@@ -1965,6 +1994,7 @@ impl Domain {
                         replicas: replicas.clone(),
                     },
                     data: Vec::<Record>::new().into(),
+                    cache_name: MIGRATION_CACHE_NAME_STUB.into(),
                 });
 
                 let added_cols = self.ingress_inject.get(from).cloned();
@@ -2042,6 +2072,7 @@ impl Domain {
                                     replicas: replicas.clone(),
                                 },
                                 data: chunk,
+                                cache_name: MIGRATION_CACHE_NAME_STUB.into(),
                             };
 
                             trace!(num = i, len, "sending batch");
@@ -2066,6 +2097,7 @@ impl Domain {
                                     replicas: replicas.clone(),
                                 },
                                 data: Default::default(),
+                                cache_name: MIGRATION_CACHE_NAME_STUB.into(),
                             }) {
                                 warn!(%error, "replayer noticed domain shutdown");
                             }
@@ -2378,12 +2410,19 @@ impl Domain {
                 self.total_forward_time.stop();
                 self.metrics.rec_forward_time(src, dst, start.elapsed());
             }
-            Packet::ReplayPiece { tag, .. } => {
+            Packet::ReplayPiece {
+                ref tag,
+                ref cache_name,
+                ..
+            } => {
                 let start = time::Instant::now();
+                let cache_name = cache_name.clone();
+                let tag = *tag;
                 self.total_replay_time.start();
                 self.handle_replay(m, executor)?;
                 self.total_replay_time.stop();
-                self.metrics.rec_replay_time(tag, start.elapsed());
+                self.metrics
+                    .rec_replay_time(tag, &cache_name, start.elapsed());
             }
             Packet::Evict(req) => {
                 self.handle_eviction(req, executor)?;
@@ -2400,6 +2439,7 @@ impl Domain {
                 mut keys,
                 cols,
                 node,
+                cache_name,
             } => {
                 let start = time::Instant::now();
                 self.total_replay_time.start();
@@ -2458,39 +2498,40 @@ impl Domain {
                         // Destination and target are the same since readers can't generate columns
                         Destination(node),
                         Target(node),
+                        cache_name.clone(),
                     )?;
                 }
 
                 self.total_replay_time.stop();
-                self.metrics.rec_reader_replay_time(node, start.elapsed());
+                self.metrics
+                    .rec_reader_replay_time(node, &cache_name, start.elapsed());
             }
             Packet::RequestPartialReplay {
                 tag,
-                keys,
-                unishard,
-                requesting_shard,
-                requesting_replica,
+                ref keys,
+                ref cache_name,
+                ..
             } => {
                 trace!(%tag, ?keys, "got replay request");
                 let start = time::Instant::now();
+                let cache_name = cache_name.clone();
                 self.total_replay_time.start();
-                self.seed_all(
-                    tag,
-                    requesting_shard,
-                    requesting_replica,
-                    keys.into_iter().collect(),
-                    unishard,
-                    executor,
-                )?;
+                self.seed_all(m, executor)?;
                 self.total_replay_time.stop();
-                self.metrics.rec_seed_replay_time(tag, start.elapsed());
+                self.metrics
+                    .rec_seed_replay_time(tag, &cache_name, start.elapsed());
             }
-            Packet::Finish(tag, ni) => {
+            Packet::Finish {
+                tag,
+                node,
+                cache_name,
+            } => {
                 let start = time::Instant::now();
                 self.total_replay_time.start();
-                self.finish_replay(tag, ni, executor)?;
+                self.finish_replay(tag, node, &cache_name, executor)?;
                 self.total_replay_time.stop();
-                self.metrics.rec_finish_replay_time(tag, start.elapsed());
+                self.metrics
+                    .rec_finish_replay_time(tag, &cache_name, start.elapsed());
             }
             Packet::Spin => {
                 // spinning as instructed
@@ -2663,15 +2704,31 @@ impl Domain {
         }
     }
 
-    fn seed_all(
-        &mut self,
-        tag: Tag,
-        requesting_shard: usize,
-        requesting_replica: usize,
-        keys: HashSet<KeyComparison>,
-        single_shard: bool,
-        ex: &mut dyn Executor,
-    ) -> Result<(), ReadySetError> {
+    fn seed_all(&mut self, packet: Packet, ex: &mut dyn Executor) -> Result<(), ReadySetError> {
+        let (tag, keys, unishard, requesting_shard, requesting_replica, cache_name) =
+            if let Packet::RequestPartialReplay {
+                tag,
+                keys,
+                unishard,
+                requesting_shard,
+                requesting_replica,
+                cache_name,
+            } = packet
+            {
+                (
+                    tag,
+                    keys,
+                    unishard,
+                    requesting_shard,
+                    requesting_replica,
+                    cache_name,
+                )
+            } else {
+                internal!()
+            };
+
+        let keys: HashSet<KeyComparison> = keys.into_iter().collect();
+
         #[allow(clippy::indexing_slicing)]
         // tag came from an internal data structure that guarantees it's present
         let (source, index, path) = match &self.replay_paths[tag] {
@@ -2709,7 +2766,8 @@ impl Domain {
 
         if let Some(node) = self.nodes.get(*source) {
             if node.borrow().is_base() {
-                self.metrics.inc_base_table_lookups(*source);
+                self.metrics
+                    .inc_base_table_lookups(*source, &cache_name.clone());
             }
         }
 
@@ -2748,10 +2806,11 @@ impl Domain {
                 // same for range queries was a whole bug that eta had to spend like 2
                 // hours tracking down, only to find it was as simple as this.
                 replay_keys,
-                single_shard,
+                unishard,
                 requesting_shard,
                 requesting_replica,
                 tag,
+                cache_name.clone(),
             )?;
         }
 
@@ -2769,11 +2828,12 @@ impl Domain {
                     tag,
                     context: ReplayPieceContext::Partial {
                         for_keys: found_keys,
-                        unishard: single_shard, // if we are the only source, only one path
+                        unishard, // if we are the only source, only one path
                         requesting_shard,
                         requesting_replica,
                     },
                     data: records.into(),
+                    cache_name,
                 },
                 ex,
             )?;
@@ -2784,6 +2844,12 @@ impl Domain {
 
     #[allow(clippy::cognitive_complexity)]
     fn handle_replay(&mut self, m: Packet, ex: &mut dyn Executor) -> ReadySetResult<()> {
+        let cache_name = if let Packet::ReplayPiece { ref cache_name, .. } = m {
+            cache_name.clone()
+        } else {
+            internal!()
+        };
+
         let tag = m
             .tag()
             .ok_or_else(|| internal_err!("handle_replay called on an invalid message"))?;
@@ -2841,9 +2907,9 @@ impl Domain {
                 Packet::ReplayPiece {
                     tag,
                     link,
-
                     data,
                     context,
+                    ..
                 } => (tag, link, data, context),
                 _ => internal!(),
             };
@@ -2954,6 +3020,7 @@ impl Domain {
                 tag,
                 data,
                 context,
+                cache_name: cache_name.clone(),
             });
 
             macro_rules! replay_context {
@@ -3595,6 +3662,7 @@ impl Domain {
                 next_replay.requesting_shard,
                 next_replay.requesting_replica,
                 next_replay.tag,
+                cache_name.clone(),
             )?;
         }
 
@@ -3690,6 +3758,7 @@ impl Domain {
                             keys,
                             requesting_shard,
                             requesting_replica,
+                            cache_name: cache_name.clone(),
                         });
                 }
 
@@ -3717,7 +3786,11 @@ impl Domain {
                 // but this allows finish_replay to dispatch into the node by
                 // overriding replaying_to.
                 self.not_ready.remove(&dst);
-                self.delayed_for_self.push_back(Packet::Finish(tag, dst));
+                self.delayed_for_self.push_back(Packet::Finish {
+                    tag,
+                    node: dst,
+                    cache_name: cache_name.clone(),
+                });
             }
         }
         Ok(())
@@ -3727,6 +3800,7 @@ impl Domain {
         &mut self,
         tag: Tag,
         node: LocalNodeIndex,
+        cache_name: &Relation,
         ex: &mut dyn Executor,
     ) -> Result<(), ReadySetError> {
         let mut was = mem::replace(&mut self.mode, DomainMode::Forwarding);
@@ -3819,7 +3893,11 @@ impl Domain {
             }
         } else {
             // we're not done -- inject a request to continue handling buffered things
-            self.delayed_for_self.push_back(Packet::Finish(tag, node));
+            self.delayed_for_self.push_back(Packet::Finish {
+                tag,
+                node,
+                cache_name: cache_name.clone(),
+            });
             Ok(())
         }
     }
