@@ -11,11 +11,11 @@ use metrics::{
     register_counter, register_gauge, register_histogram, Counter, Gauge, Histogram, Label,
     SharedString,
 };
-use readyset_client::internal::ReplicaAddress;
+use nom_sql::Relation;
 use readyset_client::metrics::recorded;
 use strum::{EnumCount, IntoEnumIterator};
 
-use crate::domain::{LocalNodeIndex, Tag};
+use crate::domain::{LocalNodeIndex, ReplicaAddress, Tag};
 use crate::{NodeMap, Packet, PacketDiscriminants};
 
 /// Contains handles to the various metrics collected for a domain.
@@ -165,7 +165,7 @@ impl DomainMetrics {
         }
     }
 
-    pub(super) fn rec_replay_time(&mut self, tag: Tag, time: Duration) {
+    pub(super) fn rec_replay_time(&mut self, tag: Tag, cache_name: &Relation, time: Duration) {
         if let Some((ctr, histo)) = self.total_replay_time.get(&tag) {
             ctr.increment(time.as_micros() as u64);
             histo.record(time.as_micros() as f64);
@@ -174,14 +174,16 @@ impl DomainMetrics {
                 recorded::DOMAIN_TOTAL_REPLAY_TIME,
                 "domain" => self.index.clone(),
                 "shard" => self.shard.clone(),
-                "tag" => tag.to_string()
+                "tag" => tag.to_string(),
+                "cache_name" => cache_name_to_string(cache_name)
             );
 
             let histo = register_histogram!(
                 recorded::DOMAIN_REPLAY_TIME,
                 "domain" => self.index.clone(),
                 "shard" => self.shard.clone(),
-                "tag" => tag.to_string()
+                "tag" => tag.to_string(),
+                "cache_name" => cache_name_to_string(cache_name)
             );
 
             ctr.increment(time.as_micros() as u64);
@@ -191,7 +193,7 @@ impl DomainMetrics {
         }
     }
 
-    pub(super) fn rec_seed_replay_time(&mut self, tag: Tag, time: Duration) {
+    pub(super) fn rec_seed_replay_time(&mut self, tag: Tag, cache_name: &Relation, time: Duration) {
         if let Some((ctr, histo)) = self.seed_replay_time.get(&tag) {
             ctr.increment(time.as_micros() as u64);
             histo.record(time.as_micros() as f64);
@@ -200,14 +202,16 @@ impl DomainMetrics {
                 recorded::DOMAIN_TOTAL_SEED_REPLAY_TIME,
                 "domain" => self.index.clone(),
                 "shard" => self.shard.clone(),
-                "tag" => tag.to_string()
+                "tag" => tag.to_string(),
+                "cache_name" => cache_name_to_string(cache_name)
             );
 
             let histo = register_histogram!(
                 recorded::DOMAIN_SEED_REPLAY_TIME,
                 "domain" => self.index.clone(),
                 "shard" => self.shard.clone(),
-                "tag" => tag.to_string()
+                "tag" => tag.to_string(),
+                "cache_name" => cache_name_to_string(cache_name)
             );
 
             ctr.increment(time.as_micros() as u64);
@@ -217,7 +221,12 @@ impl DomainMetrics {
         }
     }
 
-    pub(super) fn rec_finish_replay_time(&mut self, tag: Tag, time: Duration) {
+    pub(super) fn rec_finish_replay_time(
+        &mut self,
+        tag: Tag,
+        cache_name: &Relation,
+        time: Duration,
+    ) {
         if let Some((ctr, histo)) = self.finish_replay_time.get(&tag) {
             ctr.increment(time.as_micros() as u64);
             histo.record(time.as_micros() as f64);
@@ -226,14 +235,16 @@ impl DomainMetrics {
                 recorded::DOMAIN_TOTAL_FINISH_REPLAY_TIME,
                 "domain" => self.index.clone(),
                 "shard" => self.shard.clone(),
-                "tag" => tag.to_string()
+                "tag" => tag.to_string(),
+                "cache_name" => cache_name_to_string(cache_name)
             );
 
             let histo = register_histogram!(
                 recorded::DOMAIN_FINISH_REPLAY_TIME,
                 "domain" => self.index.clone(),
                 "shard" => self.shard.clone(),
-                "tag" => tag.to_string()
+                "tag" => tag.to_string(),
+                "cache_name" => cache_name_to_string(cache_name)
             );
 
             ctr.increment(time.as_micros() as u64);
@@ -276,7 +287,12 @@ impl DomainMetrics {
         }
     }
 
-    pub(super) fn rec_reader_replay_time(&mut self, node: LocalNodeIndex, time: Duration) {
+    pub(super) fn rec_reader_replay_time(
+        &mut self,
+        node: LocalNodeIndex,
+        cache_name: &Relation,
+        time: Duration,
+    ) {
         if let Some((ctr, histo)) = self.reader_replay_request_time.get(node) {
             ctr.increment(time.as_micros() as u64);
             histo.record(time.as_micros() as f64);
@@ -286,6 +302,7 @@ impl DomainMetrics {
                 "domain" => self.index.clone(),
                 "shard" => self.shard.clone(),
                 "node" => node.to_string(),
+                "cache_name" => cache_name_to_string(cache_name)
             );
 
             let histo = register_histogram!(
@@ -293,6 +310,7 @@ impl DomainMetrics {
                 "domain" => self.index.clone(),
                 "shard" => self.shard.clone(),
                 "node" => node.to_string(),
+                "cache_name" => cache_name_to_string(cache_name)
             );
 
             ctr.increment(time.as_micros() as u64);
@@ -302,7 +320,13 @@ impl DomainMetrics {
         }
     }
 
-    pub(super) fn inc_replay_misses(&mut self, miss_in: LocalNodeIndex, needed_for: Tag, n: usize) {
+    pub(super) fn inc_replay_misses(
+        &mut self,
+        miss_in: LocalNodeIndex,
+        needed_for: Tag,
+        cache_name: &Relation,
+        n: usize,
+    ) {
         if let Some(ctr) = self.replay_misses.get(&(miss_in, needed_for)) {
             ctr.increment(n as u64);
         } else {
@@ -311,7 +335,8 @@ impl DomainMetrics {
                 "domain" => self.index.clone(),
                 "shard" => self.shard.clone(),
                 "miss_in" => miss_in.id().to_string(),
-                "needed_for" => needed_for.to_string()
+                "needed_for" => needed_for.to_string(),
+                "cache_name" => cache_name_to_string(cache_name)
             );
 
             ctr.increment(n as u64);
@@ -324,7 +349,7 @@ impl DomainMetrics {
         self.packets_sent[discriminant as usize].increment(1);
     }
 
-    pub(super) fn inc_base_table_lookups(&mut self, node: LocalNodeIndex) {
+    pub(super) fn inc_base_table_lookups(&mut self, node: LocalNodeIndex, cache_name: &Relation) {
         if let Some(ctr) = self.base_table_lookups.get(node) {
             ctr.increment(1);
         } else {
@@ -333,6 +358,7 @@ impl DomainMetrics {
                 "domain" => self.index.clone(),
                 "shard" => self.shard.clone(),
                 "node" => node.to_string(),
+                "cache_name" => cache_name_to_string(cache_name)
             );
             ctr.increment(1);
             self.base_table_lookups.insert(node, ctr);
@@ -358,4 +384,11 @@ impl DomainMetrics {
             self.node_state_size.insert(node, gauge);
         }
     }
+}
+
+/// Converts the given cache_name to a string by invoking `display_unquoted()`. This method should
+/// only be used for converting cache names to strings for the purposes of including them as metric
+/// labels.
+fn cache_name_to_string(cache_name: &Relation) -> String {
+    cache_name.display_unquoted().to_string()
 }

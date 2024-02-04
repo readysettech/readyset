@@ -32,6 +32,7 @@ pub mod recorded {
     /// | shard | The shard the replay miss is recorded in |
     /// | miss_in | The LocalNodeIndex of the data flow node where the miss occurred |
     /// | needed_for | The client tag of the request that the replay is required for. |
+    /// | cache_name | The name of the cache associated with this replay.
     pub const DOMAIN_REPLAY_MISSES: &str = "readyset_domain.replay_misses";
 
     /// Histogram: The time in microseconds that a domain spends
@@ -67,6 +68,7 @@ pub mod recorded {
     /// | domain | The index of the domain the replay miss is recorded in. |
     /// | shard | The shard the replay miss is recorded in. |
     /// | tag | The client tag of the request that the replay is required for. |
+    /// | cache_name | The name of the cache associated with this replay.
     pub const DOMAIN_REPLAY_TIME: &str = "readyset_domain.handle_replay_time";
 
     /// Counter: The total time in microseconds that a domain spends
@@ -78,6 +80,7 @@ pub mod recorded {
     /// | domain | The index of the domain the replay miss is recorded in. |
     /// | shard | The shard the replay miss is recorded in. |
     /// | tag | The client tag of the request that the replay is required for. |
+    /// | cache_name | The name of the cache associated with this replay.
     pub const DOMAIN_TOTAL_REPLAY_TIME: &str = "readyset_domain.total_handle_replay_time";
 
     /// Histogram: The time in microseconds spent handling a reader replay
@@ -90,6 +93,7 @@ pub mod recorded {
     /// | domain | The index of the domain the reader replay request is recorded in. |
     /// | shard | The shard the reader replay request is recorded in. |
     /// | node | The LocalNodeIndex of the reader node handling the packet. |
+    /// | cache_name | The name of the cache associated with this replay.
     pub const DOMAIN_READER_REPLAY_REQUEST_TIME: &str =
         "readyset_domain.reader_replay_request_time_us";
 
@@ -103,6 +107,7 @@ pub mod recorded {
     /// | domain | The index of the domain the reader replay request is recorded in. |
     /// | shard | The shard the reader replay request is recorded in. |
     /// | node | The LocalNodeIndex of the reader node handling the packet. |
+    /// | cache_name | The name of the cache associated with this replay.
     pub const DOMAIN_READER_TOTAL_REPLAY_REQUEST_TIME: &str =
         "readyset_domain.reader_total_replay_request_time_us";
 
@@ -115,6 +120,7 @@ pub mod recorded {
     /// | domain | The index of the domain the replay request is recorded in. |
     /// | shard |The shard the replay request is recorded in. |
     /// | tag | The client tag of the request that the replay is required for. |
+    /// | cache_name | The name of the cache associated with this replay.
     pub const DOMAIN_SEED_REPLAY_TIME: &str = "readyset_domain.seed_replay_time_us";
 
     /// Counter: The total time in microseconds that a domain spends
@@ -126,6 +132,7 @@ pub mod recorded {
     /// | domain | The index of the domain the replay request is recorded in. |
     /// | shard |The shard the replay request is recorded in. |
     /// | tag | The client tag of the request that the replay is required for. |
+    /// | cache_name | The name of the cache associated with this replay.
     pub const DOMAIN_TOTAL_SEED_REPLAY_TIME: &str = "readyset_domain.total_seed_replay_time_us";
 
     /// Histogram: The time in microseconds that a domain spawning a state
@@ -186,6 +193,7 @@ pub mod recorded {
     /// | domain | The index of the domain the replay request is recorded in. |
     /// | shard | The shard the replay request is recorded in. |
     /// | tag | The client tag of the request that the Finish packet is required for. |
+    /// | cache_name | The name of the cache associated with this replay.
     pub const DOMAIN_FINISH_REPLAY_TIME: &str = "readyset_domain.finish_replay_time_us";
 
     /// Counter: The total time in microseconds that a domain spends
@@ -197,6 +205,7 @@ pub mod recorded {
     /// | domain | The index of the domain the replay request is recorded in. |
     /// | shard | The shard the replay request is recorded in. |
     /// | tag | The client tag of the request that the Finish packet is required for. |
+    /// | cache_name | The name of the cache associated with this replay.
     pub const DOMAIN_TOTAL_FINISH_REPLAY_TIME: &str = "readyset_domain.total_finish_replay_time_us";
 
     /// Histogram: The amount of time spent handling an eviction
@@ -280,6 +289,7 @@ pub mod recorded {
     /// | table_name | The name of the base table. |
     /// | shard | The shard of the base table the lookup is requested in. |
     /// | node | The LocalNodeIndex of the base table node handling the packet. |
+    /// | cache_name | The name of the cache associated with this replay.
     pub const BASE_TABLE_LOOKUP_REQUESTS: &str = "readyset_base_table.lookup_requests";
 
     /// Counter: The number of packets dropped by an egress node.

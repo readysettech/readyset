@@ -6,6 +6,7 @@ use std::sync::Arc;
 use ahash::RandomState;
 use common::SizeOf;
 use dataflow_expression::{PostLookup, ReaderProcessing};
+use nom_sql::Relation;
 use reader_map::{EvictionQuantity, EvictionStrategy};
 use readyset_client::consistency::Timestamp;
 use readyset_client::results::SharedResults;
@@ -23,7 +24,7 @@ pub type ReaderUpdatedNotifier = tokio::sync::broadcast::Receiver<ReaderNotifica
 pub(crate) type ReaderUpdatedSender = tokio::sync::broadcast::Sender<ReaderNotification>;
 
 pub(crate) trait Trigger =
-    Fn(&mut dyn Iterator<Item = KeyComparison>) -> bool + 'static + Send + Sync;
+    Fn(&mut dyn Iterator<Item = KeyComparison>, Relation) -> bool + 'static + Send + Sync;
 
 /// Allocate a new end-user facing result table.
 ///
@@ -499,7 +500,7 @@ impl std::fmt::Debug for SingleReadHandle {
 
 impl SingleReadHandle {
     /// Trigger a replay of a missing key from a partially materialized view.
-    pub fn trigger<I>(&self, keys: I) -> bool
+    pub fn trigger<I>(&self, keys: I, name: Relation) -> bool
     where
         I: Iterator<Item = KeyComparison>,
     {
@@ -511,7 +512,7 @@ impl SingleReadHandle {
         let mut it = keys;
 
         // trigger a replay to populate
-        (*self.trigger.as_ref().unwrap())(&mut it)
+        (*self.trigger.as_ref().unwrap())(&mut it, name)
     }
 
     /// Returns None if this handle is not ready, Some(true) if this handle fully contains the given
@@ -749,7 +750,7 @@ mod tests {
         let (r, mut w) = new_partial(
             1,
             Index::hash_map(vec![0]),
-            |_: &mut dyn Iterator<Item = KeyComparison>| true,
+            |_: &mut dyn Iterator<Item = KeyComparison>, _| true,
             EvictionKind::Random,
             ReaderProcessing::default(),
         );
@@ -774,7 +775,7 @@ mod tests {
             let (r, mut w) = new_partial(
                 1,
                 Index::hash_map(vec![0]),
-                |_: &mut dyn Iterator<Item = KeyComparison>| true,
+                |_: &mut dyn Iterator<Item = KeyComparison>, _| true,
                 EvictionKind::Random,
                 ReaderProcessing::default(),
             );
@@ -793,7 +794,7 @@ mod tests {
             let (r, mut w) = new_partial(
                 1,
                 Index::btree_map(vec![0]),
-                |_: &mut dyn Iterator<Item = KeyComparison>| true,
+                |_: &mut dyn Iterator<Item = KeyComparison>, _| true,
                 EvictionKind::Random,
                 ReaderProcessing::default(),
             );
@@ -823,7 +824,7 @@ mod tests {
             let (r, mut w) = new_partial(
                 1,
                 Index::btree_map(vec![0]),
-                |_: &mut dyn Iterator<Item = KeyComparison>| true,
+                |_: &mut dyn Iterator<Item = KeyComparison>, _| true,
                 EvictionKind::Random,
                 ReaderProcessing::default(),
             );
@@ -844,7 +845,7 @@ mod tests {
             let (r, mut w) = new_partial(
                 1,
                 Index::btree_map(vec![0]),
-                |_: &mut dyn Iterator<Item = KeyComparison>| true,
+                |_: &mut dyn Iterator<Item = KeyComparison>, _| true,
                 EvictionKind::Random,
                 ReaderProcessing::default(),
             );
