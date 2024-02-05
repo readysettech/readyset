@@ -26,6 +26,7 @@ pub(crate) struct QueryLogger {
     query_count: Counter,
     prepare_count: Counter,
     execute_count: Counter,
+    mode: QueryLogMode,
 }
 
 struct QueryMetrics {
@@ -56,7 +57,7 @@ impl QueryMetrics {
     fn parse_histogram(
         &mut self,
         kind: (EventType, SqlQueryType),
-        mode: &QueryLogMode,
+        mode: QueryLogMode,
     ) -> &mut Histogram {
         self.histograms
             .entry(kind)
@@ -70,10 +71,10 @@ impl QueryMetrics {
 
                 if mode.is_verbose() {
                     labels.push(("query", self.query.clone()));
-                }
 
-                if let Some(id) = &self.query_id {
-                    labels.push(("query_id", id.clone()));
+                    if let Some(id) = &self.query_id {
+                        labels.push(("query_id", id.clone()));
+                    }
                 }
 
                 register_histogram!(recorded::QUERY_LOG_PARSE_TIME, &labels)
@@ -83,7 +84,7 @@ impl QueryMetrics {
     fn readyset_histogram(
         &mut self,
         kind: (EventType, SqlQueryType),
-        mode: &QueryLogMode,
+        mode: QueryLogMode,
     ) -> &mut Histogram {
         self.histograms
             .entry(kind)
@@ -95,10 +96,10 @@ impl QueryMetrics {
 
                 if mode.is_verbose() {
                     labels.push(("query", self.query.clone()));
-                }
 
-                if let Some(id) = &self.query_id {
-                    labels.push(("query_id", id.clone()));
+                    if let Some(id) = &self.query_id {
+                        labels.push(("query_id", id.clone()));
+                    }
                 }
 
                 register_histogram!(recorded::QUERY_LOG_EXECUTION_TIME, &labels)
@@ -108,7 +109,7 @@ impl QueryMetrics {
     fn upstream_histogram(
         &mut self,
         kind: (EventType, SqlQueryType),
-        mode: &QueryLogMode,
+        mode: QueryLogMode,
     ) -> &mut Histogram {
         self.histograms
             .entry(kind)
@@ -119,48 +120,59 @@ impl QueryMetrics {
 
                 if mode.is_verbose() {
                     labels.push(("query", self.query.clone()));
-                }
 
-                if let Some(id) = &self.query_id {
-                    labels.push(("query_id", id.clone()));
+                    if let Some(id) = &self.query_id {
+                        labels.push(("query_id", id.clone()));
+                    }
                 }
 
                 register_histogram!(recorded::QUERY_LOG_EXECUTION_TIME, &labels)
             })
     }
 
-    fn readyset_counter(&mut self, kind: (EventType, SqlQueryType)) -> &mut Counter {
+    fn readyset_counter(
+        &mut self,
+        kind: (EventType, SqlQueryType),
+        mode: QueryLogMode,
+    ) -> &mut Counter {
         self.counters
             .entry(kind)
             .or_default()
             .readyset_exe_count
             .get_or_insert_with(|| {
-                let mut labels = vec![
-                    ("query", self.query.clone()),
-                    ("database_type", SharedString::from(DatabaseType::ReadySet)),
-                ];
+                let mut labels =
+                    vec![("database_type", SharedString::from(DatabaseType::ReadySet))];
 
-                if let Some(id) = &self.query_id {
-                    labels.push(("query_id", id.clone()));
+                if mode.is_verbose() {
+                    labels.push(("query", self.query.clone()));
+
+                    if let Some(id) = &self.query_id {
+                        labels.push(("query_id", id.clone()));
+                    }
                 }
 
                 register_counter!(recorded::QUERY_LOG_EXECUTION_COUNT, &labels)
             })
     }
 
-    fn upstream_counter(&mut self, kind: (EventType, SqlQueryType)) -> &mut Counter {
+    fn upstream_counter(
+        &mut self,
+        kind: (EventType, SqlQueryType),
+        mode: QueryLogMode,
+    ) -> &mut Counter {
         self.counters
             .entry(kind)
             .or_default()
             .upstream_exe_count
             .get_or_insert_with(|| {
-                let mut labels = vec![
-                    ("query", self.query.clone()),
-                    ("database_type", SharedString::from(DatabaseType::MySql)),
-                ];
+                let mut labels = vec![("database_type", SharedString::from(DatabaseType::MySql))];
 
-                if let Some(id) = &self.query_id {
-                    labels.push(("query_id", id.clone()));
+                if mode.is_verbose() {
+                    labels.push(("query", self.query.clone()));
+
+                    if let Some(id) = &self.query_id {
+                        labels.push(("query_id", id.clone()));
+                    }
                 }
 
                 register_counter!(recorded::QUERY_LOG_EXECUTION_COUNT, &labels)
@@ -189,22 +201,21 @@ impl QueryLogger {
         self.per_id_metrics.entry(query_id).or_insert_with(|| {
             let query_string = Self::query_string(&query);
             let query_id = SharedString::from(query_id.to_string());
+            let labels = if self.mode.is_verbose() {
+                vec![
+                    ("query", query_string.clone()),
+                    ("query_id", query_id.clone()),
+                ]
+            } else {
+                vec![]
+            };
 
             QueryMetrics {
-                num_keys: register_counter!(
-                    recorded::QUERY_LOG_TOTAL_KEYS_READ,
-                    "query" => query_string.clone(),
-                    "query_id" => query_id.clone(),
-                ),
-                cache_misses: register_counter!(
-                    recorded::QUERY_LOG_QUERY_CACHE_MISSED,
-                    "query" => query_string.clone(),
-                    "query_id" => query_id.clone(),
-                ),
+                num_keys: register_counter!(recorded::QUERY_LOG_TOTAL_KEYS_READ, &labels),
+                cache_misses: register_counter!(recorded::QUERY_LOG_QUERY_CACHE_MISSED, &labels),
                 cache_keys_missed: register_counter!(
                     recorded::QUERY_LOG_TOTAL_CACHE_MISSES,
-                    "query" => query_string.clone(),
-                    "query_id" => query_id.clone(),
+                    &labels
                 ),
                 query: query_string,
                 query_id: Some(query_id),
@@ -219,19 +230,24 @@ impl QueryLogger {
             .entry(query)
             .or_insert_with_key(|query| {
                 let query_string = Self::query_string(query);
+                let labels = if self.mode.is_verbose() {
+                    vec![("query", query_string.clone())]
+                } else {
+                    vec![]
+                };
 
                 QueryMetrics {
                     num_keys: register_counter!(
                         readyset_client_metrics::recorded::QUERY_LOG_TOTAL_KEYS_READ,
-                        "query" => query_string.clone(),
+                        &labels
                     ),
                     cache_misses: register_counter!(
                         readyset_client_metrics::recorded::QUERY_LOG_QUERY_CACHE_MISSED,
-                        "query" => query_string.clone(),
+                        &labels
                     ),
                     cache_keys_missed: register_counter!(
                         readyset_client_metrics::recorded::QUERY_LOG_TOTAL_CACHE_MISSES,
-                        "query" => query_string.clone(),
+                        &labels
                     ),
                     query: query_string,
                     query_id: None,
@@ -268,6 +284,7 @@ impl QueryLogger {
             query_count: register_counter!(recorded::QUERY_LOG_EVENT_TYPE, "type" => "query"),
             prepare_count: register_counter!(recorded::QUERY_LOG_EVENT_TYPE, "type" => "prepare"),
             execute_count: register_counter!(recorded::QUERY_LOG_EVENT_TYPE, "type" => "execute"),
+            mode,
         };
 
         loop {
@@ -333,22 +350,22 @@ impl QueryLogger {
 
                     if mode.is_verbose() && let Some(duration) = event.parse_duration {
                         metrics
-                            .parse_histogram((event.event, event.sql_type), &mode)
+                            .parse_histogram((event.event, event.sql_type), mode)
                             .record(duration);
                     }
 
                     if let Some(duration) = event.readyset_duration {
                         metrics
-                            .readyset_histogram((event.event, event.sql_type), &mode)
+                            .readyset_histogram((event.event, event.sql_type), mode)
                             .record(duration);
-                        metrics.readyset_counter((event.event, event.sql_type)).increment(1);
+                        metrics.readyset_counter((event.event, event.sql_type), mode).increment(1);
                     }
 
-                    if mode.allow_proxied_queries() && let Some(duration) = event.upstream_duration {
+                    if let Some(duration) = event.upstream_duration {
                         metrics
-                            .upstream_histogram((event.event, event.sql_type), &mode)
+                            .upstream_histogram((event.event, event.sql_type), mode)
                             .record(duration);
-                        metrics.upstream_counter((event.event, event.sql_type)).increment(1);
+                        metrics.upstream_counter((event.event, event.sql_type), mode).increment(1);
                     }
                 }
             }

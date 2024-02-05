@@ -93,9 +93,7 @@ use readyset_client::results::Results;
 use readyset_client::utils::retry_with_exponential_backoff;
 use readyset_client::{ColumnSchema, PlaceholderIdx, ViewCreateRequest};
 pub use readyset_client_metrics::QueryDestination;
-use readyset_client_metrics::{
-    recorded, EventType, QueryExecutionEvent, QueryLogMode, SqlQueryType,
-};
+use readyset_client_metrics::{recorded, EventType, QueryExecutionEvent, SqlQueryType};
 use readyset_data::{DfType, DfValue};
 use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
 use readyset_errors::{internal, internal_err, unsupported, unsupported_err, ReadySetResult};
@@ -278,7 +276,6 @@ pub struct BackendBuilder {
     ticket: Option<Timestamp>,
     timestamp_client: Option<TimestampClient>,
     query_log_sender: Option<UnboundedSender<QueryExecutionEvent>>,
-    query_log_mode: QueryLogMode,
     unsupported_set_mode: UnsupportedSetMode,
     migration_mode: MigrationMode,
     query_max_failure_seconds: u64,
@@ -301,7 +298,6 @@ impl Default for BackendBuilder {
             ticket: None,
             timestamp_client: None,
             query_log_sender: None,
-            query_log_mode: Default::default(),
             unsupported_set_mode: UnsupportedSetMode::Error,
             migration_mode: MigrationMode::InRequestPath,
             query_max_failure_seconds: (i64::MAX / 1000) as u64,
@@ -364,7 +360,6 @@ impl BackendBuilder {
                 unsupported_set_mode: self.unsupported_set_mode,
                 migration_mode: self.migration_mode,
                 query_max_failure_duration: Duration::new(self.query_max_failure_seconds, 0),
-                query_log_mode: self.query_log_mode,
                 fallback_recovery_duration: Duration::new(self.fallback_recovery_seconds, 0),
                 enable_experimental_placeholder_inlining: self
                     .enable_experimental_placeholder_inlining,
@@ -398,10 +393,8 @@ impl BackendBuilder {
     pub fn query_log(
         mut self,
         query_log_sender: Option<UnboundedSender<QueryExecutionEvent>>,
-        mode: QueryLogMode,
     ) -> Self {
         self.query_log_sender = query_log_sender;
-        self.query_log_mode = mode;
         self
     }
 
@@ -621,8 +614,6 @@ struct BackendSettings {
     dialect: Dialect,
     slowlog: bool,
     require_authentication: bool,
-    /// Whether to log ad-hoc queries by full query text in the query logger.
-    query_log_mode: QueryLogMode,
     /// How to behave when receiving unsupported `SET` statements
     unsupported_set_mode: UnsupportedSetMode,
     /// How this backend handles migrations, See MigrationMode.
@@ -2903,6 +2894,13 @@ where
             }
             Ok(ref parsed_query) if Handler::requires_fallback(parsed_query) => {
                 if self.has_fallback() {
+                    if let SqlQuery::Select(stmt) = parsed_query {
+                        event.sql_type = SqlQueryType::Read;
+                        event.query = Some(Arc::new(parsed_query.clone()));
+                        event.query_id =
+                            Some(QueryId::from_select(stmt, self.noria.schema_search_path()));
+                    }
+
                     // Query requires a fallback and we can send it to fallback
                     Self::query_fallback(self.upstream.as_mut(), query, &mut event).await
                 } else {
@@ -2915,16 +2913,16 @@ where
             Ok(SqlQuery::Select(stmt)) => {
                 let mut view_request =
                     ViewCreateRequest::new(stmt, self.noria.schema_search_path().to_owned());
+
+                event.sql_type = SqlQueryType::Read;
+                event.query = Some(Arc::new(SqlQuery::Select(view_request.statement.clone())));
+                event.query_id = Some(QueryId::from(&view_request));
+
                 let (noria_should_try, status, processed_query_params) =
                     self.noria_should_try_select(&mut view_request);
                 let processed_query_params = processed_query_params?;
+
                 if noria_should_try {
-                    event.sql_type = SqlQueryType::Read;
-                    if self.settings.query_log_mode.allow_ad_hoc() {
-                        event.query =
-                            Some(Arc::new(SqlQuery::Select(view_request.statement.clone())));
-                        event.query_id = Some(QueryId::from(&view_request));
-                    }
                     Self::query_adhoc_select(
                         &mut self.noria,
                         self.upstream.as_mut(),

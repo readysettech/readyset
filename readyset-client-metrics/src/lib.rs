@@ -17,19 +17,17 @@ pub mod recorded;
 /// starting at `Disabled`, includes all of the preceeding (lower) level's metric
 /// details. This gradation attempts to make a reasonable tradeoff of metrics
 /// payload size vs. verbosity/debugability.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 pub enum QueryLogMode {
     /// Do not capture query metrics at all.
     Disabled,
-    /// Only record query metrics for queries that are cached by ReadySet.
-    #[default]
-    Cached,
     /// Record query metrics for all queries, including ad-hoc (simple) queries
     /// as well as prepared statements.
-    AllQueries,
+    Enabled,
     /// Expert-mode. Captures the full suite of developer-level query metrics.
-    /// Not advisable for a production environment.
-    All,
+    /// Not advisable for a production environment, since it includes metric
+    /// labels that may have very high cardinality.
+    Verbose,
 }
 
 impl QueryLogMode {
@@ -38,15 +36,7 @@ impl QueryLogMode {
     }
 
     pub fn is_verbose(&self) -> bool {
-        matches!(self, QueryLogMode::All)
-    }
-
-    pub fn allow_ad_hoc(&self) -> bool {
-        matches!(self, QueryLogMode::AllQueries | QueryLogMode::All)
-    }
-
-    pub fn allow_proxied_queries(&self) -> bool {
-        matches!(self, QueryLogMode::AllQueries | QueryLogMode::All)
+        matches!(self, QueryLogMode::Verbose)
     }
 }
 

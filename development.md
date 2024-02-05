@@ -65,13 +65,13 @@ Then, run the adapter binary. The adapter will communicate with servers that hav
 **MySQL**
 ```
 cargo run --bin readyset --release -- --database-type mysql --upstream-db-url mysql://root:readyset@127.1/readyset  --allow-unauthenticated-connections
-  --address 0.0.0.0:3307 --deployment <deployment name>  --prometheus-metrics --query-log-mode all-queries
+  --address 0.0.0.0:3307 --deployment <deployment name>  --prometheus-metrics
  ```
 
 **Postgres**
 ```
 cargo run --bin readyset --release -- --database-type postgresql --upstream-db-url postgresql://postgres:readyset@127.1/readyset  --allow-unauthenticated-connections
-  --address 0.0.0.0:5433 --deployment <deployment name> --prometheus-metrics --query-log-mode all-queries
+  --address 0.0.0.0:5433 --deployment <deployment name> --prometheus-metrics
 ```
 
 The adapter listens for connections at the address specified in the `address` flag.

@@ -13,7 +13,7 @@ services:
       DEPLOYMENT_ENV: quickstart_docker
       DB_DIR: /state
       PROMETHEUS_METRICS: true
-      QUERY_LOG_MODE: all-queries
+      QUERY_LOG_MODE: verbose
       QUERY_CACHING: explicit
       STANDALONE: true
       DEPLOYMENT: docker_compose_deployment

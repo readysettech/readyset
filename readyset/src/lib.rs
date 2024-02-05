@@ -297,8 +297,8 @@ pub struct Options {
         long,
         env = "QUERY_LOG_MODE",
         requires = "metrics",
-        default_value = "all-queries",
-        default_value_if("prometheus_metrics", "true", Some("all-queries")),
+        default_value = "enabled",
+        default_value_if("prometheus_metrics", "true", Some("enabled")),
         hide = true
     )]
     query_log_mode: QueryLogMode,
@@ -1090,7 +1090,7 @@ where
                 .allow_cache_ddl(allow_cache_ddl)
                 .require_authentication(!options.allow_unauthenticated_connections)
                 .dialect(self.parse_dialect)
-                .query_log(qlog_sender.clone(), options.query_log_mode)
+                .query_log(qlog_sender.clone())
                 .unsupported_set_mode(if options.allow_unsupported_set {
                     readyset_adapter::backend::UnsupportedSetMode::Allow
                 } else {

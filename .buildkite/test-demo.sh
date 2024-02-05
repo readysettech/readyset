@@ -166,6 +166,7 @@ run_script() {
       # If we are going to fail, dump some debug information that may be useful to look at
       show_docker_info
       docker logs readyset-cache-1
+      docker-compose -f readyset.compose.yml down -v > /dev/null 2>&1
       # The return code could have been 0, so exit with 1 explicitly
       exit 1
     fi
