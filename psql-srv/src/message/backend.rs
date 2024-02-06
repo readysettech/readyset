@@ -130,12 +130,20 @@ impl BackendMessage {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DeallocationType {
+    Single,
+    All,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CommandCompleteTag {
     Delete(u64),
     Empty,
     Insert(u64),
     Select(u64),
     Update(u64),
+    /// The bool field indicates if all prepared statements were deallocated.
+    Deallocate(DeallocationType),
 }
 
 #[allow(dead_code)]

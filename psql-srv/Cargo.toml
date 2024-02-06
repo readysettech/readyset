@@ -38,6 +38,7 @@ tracing = "0.1.29"
 uuid = "0.8"
 
 nom-sql = { path = "../nom-sql" }
+readyset-adapter-types = { path = "../readyset-adapter-types" }
 readyset-data = { path = "../readyset-data" }
 
 [dev-dependencies]

@@ -34,6 +34,7 @@ use nom_sql::SqlIdentifier;
 use postgres::SimpleQueryMessage;
 use postgres_types::Type;
 use protocol::Protocol;
+use readyset_adapter_types::DeallocateId;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_native_tls::TlsAcceptor;
 
@@ -118,7 +119,7 @@ pub trait PsqlBackend {
     /// Closes (deallocates) a prepared statement.
     ///
     /// * `statement_id` - The identifier of the prepared statement to close.
-    async fn on_close(&mut self, statement_id: u32) -> Result<(), Error>;
+    async fn on_close(&mut self, statement_id: DeallocateId) -> Result<(), Error>;
 
     /// Determine if the connection is in an open transaction.
     fn in_transaction(&self) -> bool;
@@ -173,6 +174,7 @@ pub enum QueryResponse<R> {
     /// commands (e.g., SELECT, INSERT, DELETE, etc.). The SimpleQuery protocol is distinct from
     /// the prepare/execute protocol.
     SimpleQuery(Vec<SimpleQueryMessage>),
+    Deallocate(DeallocateId),
 }
 
 /// Run a `Backend` on the provided bytestream until the bytestream is remotely closed.

@@ -25,6 +25,7 @@
 //! use async_trait::async_trait;
 //! use mysql::prelude::*;
 //! use mysql_srv::*;
+//! use readyset_adapter_types::DeallocateId;
 //! use tokio::io::AsyncWrite;
 //!
 //! struct Backend;
@@ -47,7 +48,7 @@
 //!     ) -> io::Result<()> {
 //!         results.completed(0, 0, None).await
 //!     }
-//!     async fn on_close(&mut self, _: u32) {}
+//!     async fn on_close(&mut self, _: DeallocateId) {}
 //!
 //!     async fn on_init(&mut self, _: &str, w: Option<InitWriter<'_, W>>) -> io::Result<()> {
 //!         w.unwrap().ok().await
@@ -57,7 +58,7 @@
 //!         &mut self,
 //!         query: &str,
 //!         results: QueryResultWriter<'_, W>,
-//!     ) -> io::Result<()> {
+//!     ) -> QueryResultsResponse {
 //!         if query.starts_with("SELECT @@") || query.starts_with("select @@") {
 //!             let var = &query.get(b"SELECT @@".len()..);
 //!             return match var {
@@ -70,11 +71,11 @@
 //!                         colflags: myc::constants::ColumnFlags::UNSIGNED_FLAG,
 //!                         character_set: myc::constants::UTF8_GENERAL_CI,
 //!                     }];
-//!                     let mut w = results.start(cols).await?;
-//!                     w.write_row(iter::once(67108864u32)).await?;
-//!                     Ok(w.finish().await?)
+//!                     let mut w = results.start(cols).await.expect("cols");
+//!                     w.write_row(iter::once(67108864u32)).await.expect("writer");
+//!                     QueryResultsResponse::IoResult(w.finish().await)
 //!                 }
-//!                 _ => Ok(results.completed(0, 0, None).await?),
+//!                 _ => QueryResultsResponse::IoResult(results.completed(0, 0, None).await),
 //!             };
 //!         } else {
 //!             let cols = [
@@ -96,10 +97,10 @@
 //!                 },
 //!             ];
 //!
-//!             let mut rw = results.start(&cols).await?;
-//!             rw.write_col(42)?;
-//!             rw.write_col("b's value")?;
-//!             rw.finish().await
+//!             let mut rw = results.start(&cols).await.expect("cols");
+//!             rw.write_col(42).expect("writer");
+//!             rw.write_col("b's value").expect("writer");
+//!             QueryResultsResponse::IoResult(rw.finish().await)
 //!         }
 //!     }
 //!
@@ -167,6 +168,7 @@ use async_trait::async_trait;
 use constants::{CLIENT_PLUGIN_AUTH, PROTOCOL_41, RESERVED, SECURE_CONNECTION};
 use error::{other_error, OtherErrorKind};
 use mysql_common::constants::CapabilityFlags;
+use readyset_adapter_types::{DeallocateId, ParsedCommand};
 use readyset_data::DfType;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net;
@@ -231,6 +233,14 @@ pub use crate::params::{ParamParser, ParamValue, Params};
 pub use crate::resultset::{InitWriter, QueryResultWriter, RowWriter, StatementMetaWriter};
 pub use crate::value::{ToMySqlValue, Value, ValueInner};
 
+/// A simple wrapper response to allow either an io::Result or a ParsedCommand to be returned
+pub enum QueryResultsResponse {
+    /// Variant for an `io::Result`
+    IoResult(io::Result<()>),
+    /// A parsed SQL command, like `DEALLOCATE`
+    Command(ParsedCommand),
+}
+
 /// Implementors of this trait can be used to drive a MySQL-compatible database backend.
 #[async_trait]
 pub trait MySqlShim<W: AsyncWrite + Unpin + Send> {
@@ -264,13 +274,17 @@ pub trait MySqlShim<W: AsyncWrite + Unpin + Send> {
 
     /// Called when the client wishes to deallocate resources associated with a previously prepared
     /// statement.
-    async fn on_close(&mut self, stmt: u32);
+    async fn on_close(&mut self, stmt: DeallocateId);
 
     /// Called when the client issues a query for immediate execution.
     ///
     /// Results should be returned using the given
     /// [`QueryResultWriter`](struct.QueryResultWriter.html).
-    async fn on_query(&mut self, query: &str, results: QueryResultWriter<'_, W>) -> io::Result<()>;
+    async fn on_query(
+        &mut self,
+        query: &str,
+        results: QueryResultWriter<'_, W>,
+    ) -> QueryResultsResponse;
 
     /// Called when client switches database.
     async fn on_init(&mut self, _: &str, _: Option<InitWriter<'_, W>>) -> io::Result<()>;
@@ -568,13 +582,46 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
             match cmd {
                 Command::Query(q) => {
                     let w = QueryResultWriter::new(&mut self.writer, false);
-                    self.shim
+                    let res = self
+                        .shim
                         .on_query(
                             ::std::str::from_utf8(q)
                                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
                             w,
                         )
-                        .await?;
+                        .await;
+
+                    match res {
+                        QueryResultsResponse::Command(cmd) => {
+                            match cmd {
+                                ParsedCommand::Deallocate(dealloc_id) => {
+                                    if DeallocateId::All == dealloc_id {
+                                        // mysql doesn't allow 'deallocate all',
+                                        // should probably be a nom error.
+                                        writers::write_err(
+                                            ErrorKind::ER_PARSE_ERROR,
+                                            "Unsupported 'DEALLOCATE PREPARE ALL'".as_bytes(),
+                                            &mut self.writer,
+                                        )
+                                        .await?;
+                                    } else {
+                                        self.shim.on_close(dealloc_id.clone()).await;
+                                        if let DeallocateId::Numeric(id) = dealloc_id {
+                                            stmts.remove(&id);
+                                        }
+                                        writers::write_ok_packet(
+                                            &mut self.writer,
+                                            0,
+                                            0,
+                                            StatusFlags::empty(),
+                                        )
+                                        .await?;
+                                    }
+                                }
+                            }
+                        }
+                        QueryResultsResponse::IoResult(result) => result?,
+                    }
                 }
                 Command::Prepare(q) => {
                     let w = StatementMetaWriter {
@@ -634,7 +681,7 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
                         .extend(data);
                 }
                 Command::Close(stmt) => {
-                    self.shim.on_close(stmt).await;
+                    self.shim.on_close(DeallocateId::Numeric(stmt)).await;
                     stmts.remove(&stmt);
                     // NOTE: spec dictates no response from server
                 }

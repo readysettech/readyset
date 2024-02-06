@@ -81,11 +81,11 @@ use futures::future::{self, OptionFuture};
 use lru::LruCache;
 use mysql_common::row::convert::{FromRow, FromRowError};
 use nom_sql::{
-    CacheInner, CreateCacheStatement, DeleteStatement, Dialect, DialectDisplay, DropCacheStatement,
-    InsertStatement, Relation, SelectStatement, SetStatement, ShowStatement, SqlIdentifier,
-    SqlQuery, UpdateStatement, UseStatement,
+    CacheInner, CreateCacheStatement, DeallocateStatement, DeleteStatement, Dialect,
+    DialectDisplay, DropCacheStatement, InsertStatement, Relation, SelectStatement, SetStatement,
+    ShowStatement, SqlIdentifier, SqlQuery, StatementIdentifier, UpdateStatement, UseStatement,
 };
-use readyset_adapter_types::DeallocateId;
+use readyset_adapter_types::{DeallocateId, ParsedCommand};
 use readyset_client::consensus::{Authority, AuthorityControl, CacheDDLRequest};
 use readyset_client::consistency::Timestamp;
 use readyset_client::query::*;
@@ -803,6 +803,9 @@ where
     Noria(noria_connector::QueryResult<'a>),
     /// Results from upstream
     Upstream(DB::QueryResult<'a>),
+    /// Results from parsing a SQL statement and determining that it's a command that should
+    /// be handed at an outer layer.
+    Parser(ParsedCommand),
 }
 
 impl<'a, DB: UpstreamDatabase> From<noria_connector::QueryResult<'a>> for QueryResult<'a, DB> {
@@ -819,6 +822,7 @@ where
         match self {
             Self::Noria(r) => f.debug_tuple("Noria").field(r).finish(),
             Self::Upstream(r) => f.debug_tuple("Upstream").field(r).finish(),
+            Self::Parser(r) => f.debug_tuple("Parser").field(r).finish(),
         }
     }
 }
@@ -2735,7 +2739,7 @@ where
                         upstream.query(raw_query).await.map(QueryResult::Upstream)
                     }
 
-                    SqlQuery::Deallocate(_) => unsupported!("next patch in CL"),
+                    SqlQuery::Deallocate(stmt) => Ok(Self::handle_deallocate_statement(stmt)),
 
                     SqlQuery::StartTransaction(_) | SqlQuery::Commit(_) | SqlQuery::Rollback(_) => {
                         Self::handle_transaction_boundaries(
@@ -2773,6 +2777,11 @@ where
                     SqlQuery::Insert(q) => noria.handle_insert(q).await,
                     SqlQuery::Update(q) => noria.handle_update(q).await,
                     SqlQuery::Delete(q) => noria.handle_delete(q).await,
+
+                    SqlQuery::Deallocate(stmt) => {
+                        return Ok(Self::handle_deallocate_statement(stmt.clone()))
+                    }
+
                     // Return an empty result as we are allowing unsupported set statements. Commit
                     // messages are dropped - we do not support transactions in noria standalone.
                     // We return an empty result set instead of an error to support test
@@ -2794,6 +2803,14 @@ where
         };
 
         res
+    }
+
+    fn handle_deallocate_statement<'a>(stmt: DeallocateStatement) -> QueryResult<'a, DB> {
+        let dealloc_id = match stmt.identifier {
+            StatementIdentifier::SingleStatement(name) => DeallocateId::from(name.clone()),
+            StatementIdentifier::AllStatements => DeallocateId::All,
+        };
+        QueryResult::Parser(ParsedCommand::Deallocate(dealloc_id))
     }
 
     /// Executes `query` using the reader/writer belonging to the calling `Backend` struct.

@@ -44,4 +44,10 @@ impl Codec {
     pub fn clear_statement_param_types(&mut self, statement_name: &str) {
         self.statement_param_types.remove(statement_name);
     }
+
+    /// Clear the data types of all prepared statement parameters. This is typically requested
+    /// when all prepared statements are closed (ie deallocated).
+    pub fn clear_all_statement_param_types(&mut self) {
+        self.statement_param_types.clear();
+    }
 }
