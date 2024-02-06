@@ -4,6 +4,7 @@ use std::fmt::Debug;
 use async_trait::async_trait;
 pub use database_utils::UpstreamConfig;
 use nom_sql::{SqlIdentifier, StartTransactionStatement};
+use readyset_adapter_types::DeallocateId;
 use readyset_client_metrics::QueryDestination;
 use readyset_data::DfValue;
 use readyset_errors::ReadySetError;
@@ -147,7 +148,7 @@ pub trait UpstreamDatabase: Sized + Send {
     /// free any resources associated with it.
     ///
     /// Returns an error if the statement doesn't exist
-    async fn remove_statement(&mut self, statement_id: u32) -> Result<(), Self::Error>;
+    async fn remove_statement(&mut self, statement_id: DeallocateId) -> Result<(), Self::Error>;
 
     /// Execute a raw, un-prepared query
     async fn query<'a>(&'a mut self, query: &'a str) -> Result<Self::QueryResult<'a>, Self::Error>;
@@ -280,7 +281,7 @@ where
             .await
     }
 
-    async fn remove_statement(&mut self, statement_id: u32) -> Result<(), Self::Error> {
+    async fn remove_statement(&mut self, statement_id: DeallocateId) -> Result<(), Self::Error> {
         self.upstream().await?.remove_statement(statement_id).await
     }
 

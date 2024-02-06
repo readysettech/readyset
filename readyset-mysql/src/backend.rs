@@ -21,6 +21,7 @@ use readyset_adapter::backend::{
     noria_connector, QueryResult, SinglePrepareResult, UpstreamPrepare,
 };
 use readyset_adapter::upstream_database::LazyUpstream;
+use readyset_adapter_types::DeallocateId;
 use readyset_data::{DfType, DfValue, DfValueKind};
 use readyset_errors::{internal, ReadySetError};
 use readyset_util::redacted::Sensitive;
@@ -700,7 +701,10 @@ where
     }
 
     async fn on_close(&mut self, statement_id: u32) {
-        let _ = self.noria.remove_statement(statement_id).await;
+        let _ = self
+            .noria
+            .remove_statement(DeallocateId::Numeric(statement_id))
+            .await;
     }
 
     async fn on_query(&mut self, query: &str, results: QueryResultWriter<'_, W>) -> io::Result<()> {
