@@ -26,6 +26,7 @@ members = [
     "reader-map",
     "readyset",
     "readyset-adapter",
+    "readyset-adapter-types",
     "readyset-alloc",
     "readyset-alloc-metrics",
     "readyset-client",

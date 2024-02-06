@@ -4473,6 +4473,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "readyset-adapter-types"
+version = "0.1.0"
+
+[[package]]
 name = "readyset-alloc"
 version = "0.1.0"
 dependencies = [
