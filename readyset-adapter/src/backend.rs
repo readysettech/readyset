@@ -93,7 +93,9 @@ use readyset_client::results::Results;
 use readyset_client::utils::retry_with_exponential_backoff;
 use readyset_client::{ColumnSchema, PlaceholderIdx, ViewCreateRequest};
 pub use readyset_client_metrics::QueryDestination;
-use readyset_client_metrics::{recorded, EventType, QueryExecutionEvent, SqlQueryType};
+use readyset_client_metrics::{
+    recorded, EventType, QueryExecutionEvent, ReadysetExecutionEvent, SqlQueryType,
+};
 use readyset_data::{DfType, DfValue};
 use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
 use readyset_errors::{internal, internal_err, unsupported, unsupported_err, ReadySetResult};
@@ -1022,7 +1024,7 @@ where
             });
             res
         } else {
-            let _t = event.start_noria_timer();
+            let start = Instant::now();
             let res = match stmt {
                 SqlQuery::Insert(stmt) => self.noria.prepare_insert(stmt.clone()).await?,
                 SqlQuery::Delete(stmt) => self.noria.prepare_delete(stmt.clone()).await?,
@@ -1034,6 +1036,11 @@ where
                 destination: QueryDestination::Readyset,
                 noria_error: String::new(),
             });
+
+            event.readyset_event = Some(ReadysetExecutionEvent::Other {
+                duration: start.elapsed(),
+            });
+
             Ok(PrepareResultInner::Noria(res))
         }
     }
@@ -1286,7 +1293,6 @@ where
         use noria_connector::PrepareResult::*;
 
         event.destination = Some(QueryDestination::Readyset);
-        let start = Instant::now();
 
         let res = match prep {
             Select { statement, .. } => {
@@ -1305,8 +1311,6 @@ where
         if let Err(e) = &res {
             event.set_noria_error(e);
         }
-
-        event.readyset_duration = Some(start.elapsed());
 
         res
     }
@@ -2138,9 +2142,9 @@ where
         event.sql_type = SqlQueryType::Other;
         event.destination = Some(QueryDestination::Readyset);
 
-        let _t = event.start_noria_timer();
+        let start = Instant::now();
 
-        match query {
+        let res = match query {
             SqlQuery::Explain(nom_sql::ExplainStatement::LastStatement) => {
                 self.explain_last_statement()
             }
@@ -2390,7 +2394,13 @@ where
                 .await
             }
             _ => Err(internal_err!("Provided query is not a ReadySet extension")),
-        }
+        };
+
+        event.readyset_event = Some(ReadysetExecutionEvent::Other {
+            duration: start.elapsed(),
+        });
+
+        res
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -2450,15 +2460,12 @@ where
 
         let noria_res = {
             event.destination = Some(QueryDestination::Readyset);
-            let start = Instant::now();
             let ctx = ExecuteSelectContext::AdHoc {
                 statement: view_request.statement.clone(),
                 create_if_missing: settings.migration_mode == MigrationMode::InRequestPath,
                 processed_query_params,
             };
-            let res = noria.execute_select(ctx, state.ticket.clone(), event).await;
-            event.readyset_duration = Some(start.elapsed());
-            res
+            noria.execute_select(ctx, state.ticket.clone(), event).await
         };
 
         if status.execution_info.is_none() {
@@ -2787,7 +2794,9 @@ where
                     }
                 };
 
-                event.readyset_duration = Some(start.elapsed());
+                event.readyset_event = Some(ReadysetExecutionEvent::Other {
+                    duration: start.elapsed(),
+                });
                 event.noria_error = res.as_ref().err().cloned();
                 Ok(QueryResult::Noria(res?))
             }
@@ -3085,15 +3094,21 @@ fn log_query(
 ) {
     const SLOW_DURATION: std::time::Duration = std::time::Duration::from_millis(5);
 
+    let readyset_duration = event
+        .readyset_event
+        .as_ref()
+        .map(|e| e.duration())
+        .unwrap_or_default();
+
     if slowlog
         && (event.upstream_duration.unwrap_or_default() > SLOW_DURATION
-            || event.readyset_duration.unwrap_or_default() > SLOW_DURATION)
+            || readyset_duration > SLOW_DURATION)
     {
         if let Some(query) = &event.query {
             warn!(
                 // FIXME(REA-2168): Use correct dialect.
                 query = %Sensitive(&query.display(nom_sql::Dialect::MySQL)),
-                readyset_time = ?event.readyset_duration,
+                readyset_time = ?readyset_duration,
                 upstream_time = ?event.upstream_duration,
                 "slow query"
             );

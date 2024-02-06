@@ -3,6 +3,7 @@ use std::cmp::Reverse;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
 use std::sync::{atomic, Arc};
+use std::time::Instant;
 
 use itertools::Itertools;
 use nom_sql::{
@@ -1460,6 +1461,7 @@ impl NoriaConnector {
         ticket: Option<Timestamp>,
         event: &mut readyset_client_metrics::QueryExecutionEvent,
     ) -> ReadySetResult<QueryResult<'_>> {
+        let start = Instant::now();
         let (qname, processed_query_params, params) = match ctx {
             ExecuteSelectContext::Prepared {
                 ps:
@@ -1503,18 +1505,26 @@ impl NoriaConnector {
             ticket,
             self.read_behavior,
             self.read_request_handler.as_mut(),
-            event,
             self.dialect,
         )
         .await;
 
         if let Err(e) = res.as_ref() {
             if e.is_networking_related() || e.caused_by_view_destroyed() {
-                self.failed_views.insert(qname.into_owned());
+                self.failed_views.insert(qname.clone().into_owned());
             }
         }
 
-        res
+        let res = res?;
+
+        event.readyset_event = Some(readyset_client_metrics::ReadysetExecutionEvent::CacheRead {
+            cache_name: qname.into_owned(),
+            num_keys: res.num_keys,
+            cache_misses: res.cache_misses,
+            duration: start.elapsed(),
+        });
+
+        Ok(res.result)
     }
 
     pub(crate) async fn handle_create_view<'a>(
@@ -1600,6 +1610,12 @@ fn build_view_query<'a>(
     )
 }
 
+struct ReadResult<'a> {
+    result: QueryResult<'a>,
+    num_keys: u64,
+    cache_misses: u64,
+}
+
 /// Run the supplied [`SelectStatement`] on the supplied [`View`]
 /// Assumption: the [`View`] was created for that specific [`SelectStatement`]
 #[allow(clippy::needless_lifetimes)] // clippy erroneously thinks the timelife can be elided
@@ -1611,9 +1627,8 @@ async fn do_read<'a>(
     ticket: Option<Timestamp>,
     read_behavior: ReadBehavior,
     read_request_handler: Option<&'a mut ReadRequestHandler>,
-    event: &mut readyset_client_metrics::QueryExecutionEvent,
     dialect: Dialect,
-) -> ReadySetResult<QueryResult<'a>> {
+) -> ReadySetResult<ReadResult<'a>> {
     let (reader_handle, vq) = match build_view_query(
         getter,
         processed_query_params,
@@ -1626,7 +1641,7 @@ async fn do_read<'a>(
         None => return Err(ReadySetError::NoCacheForQuery),
     };
 
-    event.num_keys = Some(vq.key_comparisons.len() as _);
+    let num_keys = vq.key_comparisons.len() as u64;
 
     let data = if let Some(rh) = read_request_handler {
         let request = readyset_client::Tagged::from(ReadQuery::Normal {
@@ -1665,11 +1680,11 @@ async fn do_read<'a>(
         reader_handle.raw_lookup(vq).await?
     };
 
-    event.cache_misses = data.total_stats().map(|s| s.cache_misses);
+    let cache_misses = data.total_stats().map(|s| s.cache_misses).unwrap_or(0);
 
     trace!("select::complete");
 
-    Ok(QueryResult::from_iter(
+    let result = QueryResult::from_iter(
         SelectSchema {
             schema: Cow::Borrowed(
                 reader_handle
@@ -1680,5 +1695,11 @@ async fn do_read<'a>(
             columns: Cow::Borrowed(reader_handle.columns()),
         },
         data,
-    ))
+    );
+
+    Ok(ReadResult {
+        result,
+        num_keys,
+        cache_misses,
+    })
 }

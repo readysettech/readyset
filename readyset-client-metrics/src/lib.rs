@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use clap::ValueEnum;
 use metrics::SharedString;
-use nom_sql::SqlQuery;
+use nom_sql::{Relation, SqlQuery};
 use readyset_client::query::QueryId;
 use readyset_errors::ReadySetError;
 use serde::Serialize;
@@ -40,7 +40,7 @@ impl QueryLogMode {
     }
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Clone)]
 /// Event logging for the execution of a single query in the adapter. Durations
 /// logged should be mirrored by an update to `QueryExecutionTimerHandle`.
 pub struct QueryExecutionEvent {
@@ -53,26 +53,50 @@ pub struct QueryExecutionEvent {
     /// If query has an assigned readyset id
     pub query_id: Option<QueryId>,
 
-    /// The number of keys that were read
-    pub num_keys: Option<u64>,
-
     /// How long the request spent in parsing.
     pub parse_duration: Option<Duration>,
 
     /// How long the execute request took to run on the upstream database
     pub upstream_duration: Option<Duration>,
 
-    /// How long the execute request took to run on ReadySet, if it was run on ReadySet at all
-    pub readyset_duration: Option<Duration>,
+    pub readyset_event: Option<ReadysetExecutionEvent>,
 
     /// Error returned by noria, if any.
     pub noria_error: Option<ReadySetError>,
 
     /// Where the query ended up executing
     pub destination: Option<QueryDestination>,
+}
 
-    /// Number of cache misses which occurred as part of a query
-    pub cache_misses: Option<u64>,
+#[derive(Debug, Clone)]
+pub enum ReadysetExecutionEvent {
+    CacheRead {
+        /// If query has a cache, the name of the cache
+        cache_name: Relation,
+
+        /// The number of keys that were read
+        num_keys: u64,
+
+        /// Number of cache misses which occurred as part of a query
+        cache_misses: u64,
+
+        /// How long the execute request took to run on ReadySet
+        duration: Duration,
+    },
+    /// A SQL extension, prepare, write (in RYW mode)
+    Other {
+        /// How long the execute request took to run on ReadySet
+        duration: Duration,
+    },
+}
+
+impl ReadysetExecutionEvent {
+    pub fn duration(&self) -> Duration {
+        match self {
+            Self::CacheRead { duration, .. } => *duration,
+            Self::Other { duration, .. } => *duration,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Clone, Copy, Default)]
@@ -180,16 +204,10 @@ impl QueryExecutionEvent {
             query_id: None,
             parse_duration: None,
             upstream_duration: None,
-            readyset_duration: None,
+            readyset_event: None,
             noria_error: None,
             destination: None,
-            cache_misses: None,
-            num_keys: None,
         }
-    }
-
-    pub fn start_noria_timer(&mut self) -> QueryExecutionTimerHandle {
-        QueryExecutionTimerHandle::new(&mut self.readyset_duration)
     }
 
     pub fn start_upstream_timer(&mut self) -> QueryExecutionTimerHandle {
