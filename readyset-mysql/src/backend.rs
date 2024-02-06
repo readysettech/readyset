@@ -12,7 +12,7 @@ use mysql_async::consts::StatusFlags;
 use mysql_common::bigdecimal03::ToPrimitive;
 use mysql_srv::{
     CachedSchema, Column, ColumnFlags, ColumnType, InitWriter, MsqlSrvError, MySqlShim,
-    QueryResultWriter, RowWriter, StatementMetaWriter,
+    QueryResultWriter, QueryResultsResponse, RowWriter, StatementMetaWriter,
 };
 use readyset_adapter::backend::noria_connector::{
     MetaVariable, PreparedSelectTypes, SelectPrepareResultInner,
@@ -479,7 +479,7 @@ where
     }
 }
 
-async fn handle_query_result<'a, W>(
+async fn handle_execute_result<'a, W>(
     result: Result<QueryResult<'a, LazyUpstream<MySqlUpstream>>, Error>,
     writer: QueryResultWriter<'_, W>,
 ) -> io::Result<()>
@@ -489,7 +489,26 @@ where
     match result {
         Ok(QueryResult::Noria(result)) => handle_readyset_result(result, writer).await,
         Ok(QueryResult::Upstream(result)) => handle_upstream_result(result, writer).await,
+        Ok(QueryResult::Parser(..)) => handle_error!(
+            Error::ReadySet(readyset_errors::unsupported_err!(
+                "Should not parse SQL commands in execute"
+            )),
+            writer
+        ),
         Err(error) => handle_error!(error, writer),
+    }
+}
+
+async fn handle_query_result<'a, W>(
+    result: Result<QueryResult<'a, LazyUpstream<MySqlUpstream>>, Error>,
+    writer: QueryResultWriter<'_, W>,
+) -> QueryResultsResponse
+where
+    W: AsyncWrite + Unpin,
+{
+    match result {
+        Ok(QueryResult::Parser(command)) => QueryResultsResponse::Command(command),
+        res => QueryResultsResponse::IoResult(handle_execute_result(res, writer).await),
     }
 }
 
@@ -670,7 +689,7 @@ where
                 }
                 rw.finish().await
             }
-            execute_result => handle_query_result(execute_result, results).await,
+            execute_result => handle_execute_result(execute_result, results).await,
         }
     }
 
@@ -700,19 +719,21 @@ where
         }
     }
 
-    async fn on_close(&mut self, statement_id: u32) {
-        let _ = self
-            .noria
-            .remove_statement(DeallocateId::Numeric(statement_id))
-            .await;
+    async fn on_close(&mut self, statement_id: DeallocateId) {
+        let _ = self.noria.remove_statement(statement_id).await;
     }
 
-    async fn on_query(&mut self, query: &str, results: QueryResultWriter<'_, W>) -> io::Result<()> {
+    async fn on_query(
+        &mut self,
+        query: &str,
+        results: QueryResultWriter<'_, W>,
+    ) -> QueryResultsResponse {
         if self.enable_statement_logging {
             info!(target: "client_statement", "Query: {query}");
         }
+
         let query_result = self.query(query).await;
-        handle_query_result(query_result, results).await
+        return handle_query_result(query_result, results).await;
     }
 
     fn password_for_username(&self, username: &str) -> Option<Vec<u8>> {

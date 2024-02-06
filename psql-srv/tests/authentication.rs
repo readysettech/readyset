@@ -11,6 +11,7 @@ use psql_srv::{
     run_backend, Credentials, CredentialsNeeded, Error, PrepareResponse, PsqlBackend, PsqlSrvRow,
     PsqlValue, QueryResponse, TransferFormat,
 };
+use readyset_adapter_types::DeallocateId;
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio_native_tls::{native_tls, TlsAcceptor};
@@ -72,7 +73,7 @@ impl PsqlBackend for ScramSha256Backend {
         unreachable!()
     }
 
-    async fn on_close(&mut self, _statement_id: u32) -> Result<(), Error> {
+    async fn on_close(&mut self, _statement_id: DeallocateId) -> Result<(), Error> {
         Ok(())
     }
 

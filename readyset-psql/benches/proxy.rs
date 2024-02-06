@@ -27,6 +27,7 @@ use psql_srv::{
     Credentials, CredentialsNeeded, PrepareResponse, PsqlBackend, PsqlSrvRow, QueryResponse,
     TransferFormat,
 };
+use readyset_adapter_types::DeallocateId;
 use readyset_data::DfValue;
 use readyset_psql::ParamRef;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -252,7 +253,7 @@ impl PsqlBackend for Backend {
         Ok(QueryResponse::Select { schema, resultset })
     }
 
-    async fn on_close(&mut self, _statement_id: u32) -> Result<(), psql_srv::Error> {
+    async fn on_close(&mut self, _statement_id: DeallocateId) -> Result<(), psql_srv::Error> {
         Ok(())
     }
 

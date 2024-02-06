@@ -8,6 +8,7 @@ use postgres_types::Type;
 use psql_srv::{
     run_backend, Credentials, CredentialsNeeded, Error, PsqlBackend, PsqlSrvRow, TransferFormat,
 };
+use readyset_adapter_types::DeallocateId;
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio_native_tls::{native_tls, TlsAcceptor};
@@ -65,7 +66,7 @@ impl PsqlBackend for TestBackend {
         panic!() // never called
     }
 
-    async fn on_close(&mut self, _statement_id: u32) -> Result<(), Error> {
+    async fn on_close(&mut self, _statement_id: DeallocateId) -> Result<(), Error> {
         Ok(())
     }
 

@@ -7,6 +7,7 @@ use readyset_adapter::backend::{
     self as cl, noria_connector, SinglePrepareResult, UpstreamPrepare,
 };
 use readyset_adapter::upstream_database::LazyUpstream;
+use readyset_adapter_types::ParsedCommand;
 use readyset_client::results::{ResultIterator, Results};
 use readyset_client::ColumnSchema;
 use readyset_data::DfType;
@@ -220,6 +221,9 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
             }
             Upstream(upstream::QueryResult::Command) => Ok(Command),
             Upstream(upstream::QueryResult::SimpleQuery(resp)) => Ok(SimpleQuery(resp)),
+            Parser(p) => match p {
+                ParsedCommand::Deallocate(name) => Ok(ps::QueryResponse::Deallocate(name)),
+            },
         }
     }
 }

@@ -19,8 +19,9 @@ use mysql::prelude::Queryable;
 use mysql::Row;
 use mysql_srv::{
     CachedSchema, Column, ErrorKind, InitWriter, MySqlIntermediary, MySqlShim, ParamParser,
-    QueryResultWriter, StatementMetaWriter,
+    QueryResultWriter, QueryResultsResponse, StatementMetaWriter,
 };
+use readyset_adapter_types::DeallocateId;
 use tokio::io::AsyncWrite;
 use tokio::net::tcp::OwnedWriteHalf;
 
@@ -85,13 +86,17 @@ where
         (self.on_e)(id, extract_params, results).await
     }
 
-    async fn on_close(&mut self, _: u32) {}
+    async fn on_close(&mut self, _: DeallocateId) {}
 
     async fn on_init(&mut self, schema: &str, writer: Option<InitWriter<'_, W>>) -> io::Result<()> {
         (self.on_i)(schema, writer.unwrap()).await
     }
 
-    async fn on_query(&mut self, query: &str, results: QueryResultWriter<'_, W>) -> io::Result<()> {
+    async fn on_query(
+        &mut self,
+        query: &str,
+        results: QueryResultWriter<'_, W>,
+    ) -> QueryResultsResponse {
         if query.starts_with("SELECT @@") || query.starts_with("select @@") {
             let var = &query.get(b"SELECT @@".len()..);
             return match var {
@@ -104,14 +109,14 @@ where
                         colflags: myc::constants::ColumnFlags::UNSIGNED_FLAG,
                         character_set: DEFAULT_CHARACTER_SET,
                     }];
-                    let mut w = results.start(cols).await?;
-                    w.write_row(iter::once(67108864u32)).await?;
-                    Ok(w.finish().await?)
+                    let mut w = results.start(cols).await.expect("cols");
+                    w.write_row(iter::once(67108864u32)).await.expect("writer");
+                    QueryResultsResponse::IoResult(w.finish().await)
                 }
-                _ => Ok(results.completed(0, 0, None).await?),
+                _ => QueryResultsResponse::IoResult(results.completed(0, 0, None).await),
             };
         } else {
-            (self.on_q)(query, results).await
+            QueryResultsResponse::IoResult((self.on_q)(query, results).await)
         }
     }
 

@@ -57,6 +57,12 @@ where
             .clear_statement_param_types(statement_name);
     }
 
+    /// Clear the data types of all prepared statements' parameters. This is typically requested
+    /// when all prepared statements are closed (ie deallocated).
+    pub fn clear_all_statement_param_types(&mut self) {
+        self.0.codec_mut().clear_all_statement_param_types();
+    }
+
     /// Read a `FrontendMessage` from the channel.
     pub async fn next(&mut self) -> Option<Result<FrontendMessage, DecodeError>> {
         self.0.next().await

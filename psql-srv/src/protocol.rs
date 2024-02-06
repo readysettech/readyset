@@ -5,6 +5,7 @@ use std::sync::Arc;
 use postgres::SimpleQueryMessage;
 use postgres_protocol::Oid;
 use postgres_types::{Kind, Type};
+use readyset_adapter_types::DeallocateId;
 use smallvec::smallvec;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_postgres::CommandCompleteContents;
@@ -17,7 +18,9 @@ use crate::message::BackendMessage::{self, *};
 use crate::message::FrontendMessage::{self, *};
 use crate::message::StatementName::*;
 use crate::message::TransferFormat::{self, *};
-use crate::message::{CommandCompleteTag, FieldDescription, SaslInitialResponse, TransactionState};
+use crate::message::{
+    CommandCompleteTag, DeallocationType, FieldDescription, SaslInitialResponse, TransactionState,
+};
 use crate::response::Response;
 use crate::scram::{
     ClientChannelBindingSupport, ClientFinalMessage, ClientFirstMessage, ServerFirstMessage,
@@ -484,10 +487,20 @@ impl Protocol {
                                 .get(name.borrow() as &str)
                                 .map(|d| d.prepared_statement_id)
                             {
-                                backend.on_close(id).await?;
+                                backend.on_close(DeallocateId::Numeric(id)).await?;
                                 channel.clear_statement_param_types(name.borrow() as &str);
                                 self.prepared_statements.remove(name.borrow() as &str);
                                 // TODO Remove all portals referencing this prepared statement.
+                            } else {
+                                // we don't know anything about this statement id, so just
+                                // pass it through to the upstream. This is an unlikely path:
+                                // receiving a command message for a statement we did not prepare.
+                                // The only way it could happen is if the client issued a `PREPARE`
+                                // SQL statement, and then "deallocated" via a Close message.
+                                // :shrug:
+                                backend
+                                    .on_close(DeallocateId::from(name.to_string()))
+                                    .await?;
                             }
                         }
                     };
@@ -598,6 +611,9 @@ impl Protocol {
                                     "Received SimpleQuery response for Execute".to_string(),
                                 ));
                             }
+                            Deallocate(..) => {
+                                unreachable!("Should not get a Deallocate command on execute()");
+                            }
                         };
                         Ok(Response::Message(CommandComplete { tag }))
                     };
@@ -681,6 +697,9 @@ impl Protocol {
                             SimpleQuery(_) => {
                                 unreachable!("SimpleQuery is handled as a special case above.")
                             }
+                            Deallocate(statement_id) => {
+                                self.on_deallocate(backend, channel, statement_id).await?
+                            }
                         };
                         Ok(Response::Messages(smallvec![
                             CommandComplete { tag },
@@ -703,7 +722,7 @@ impl Protocol {
                             .remove(prepared_statement_name.borrow() as &str)
                             .map(|d| d.prepared_statement_id)
                         {
-                            backend.on_close(id).await?;
+                            backend.on_close(DeallocateId::Numeric(id)).await?;
                             channel.clear_statement_param_types(&prepared_statement_name);
                         }
                     }
@@ -745,6 +764,40 @@ impl Protocol {
                 m => Err(Error::UnsupportedMessage(m)),
             },
         }
+    }
+
+    async fn on_deallocate<B: PsqlBackend, C: AsyncRead + AsyncWrite + Unpin>(
+        &mut self,
+        backend: &mut B,
+        channel: &mut Channel<C>,
+        statement_id: DeallocateId,
+    ) -> Result<CommandCompleteTag, Error> {
+        if statement_id == DeallocateId::All {
+            backend.on_close(statement_id.clone()).await?;
+            channel.clear_all_statement_param_types();
+
+            self.prepared_statements.clear();
+            return Ok(CommandCompleteTag::Deallocate(DeallocationType::All));
+        }
+
+        let name = statement_id.to_string();
+        if let Some(id) = self
+            .prepared_statements
+            .get(&name)
+            .map(|d| d.prepared_statement_id)
+        {
+            backend.on_close(DeallocateId::Numeric(id)).await?;
+            channel.clear_statement_param_types(&name);
+            self.prepared_statements.remove(&name);
+            // TODO Remove all portals referencing this prepared
+            // statement.
+        } else {
+            // we don't know anything about this statement id, so just
+            // pass it through to the upstream.
+            backend.on_close(statement_id).await?;
+        }
+
+        Ok(CommandCompleteTag::Deallocate(DeallocationType::Single))
     }
 
     /// An error handler producing an `ErrorResponse` message.
@@ -969,6 +1022,7 @@ mod tests {
     use futures::task::Context;
     use futures::{stream, TryStreamExt};
     use postgres::error::SqlState;
+    use readyset_adapter_types::DeallocateId;
     use tokio::io::ReadBuf;
     use tokio_test::block_on;
 
@@ -995,7 +1049,7 @@ mod tests {
         database: Option<String>,
         last_query: Option<String>,
         last_prepare: Option<String>,
-        last_close: Option<u32>,
+        last_close: Option<DeallocateId>,
         last_execute_id: Option<u32>,
         last_execute_params: Option<Vec<PsqlValue>>,
         last_transfer_formats: Option<Vec<TransferFormat>>,
@@ -1138,7 +1192,7 @@ mod tests {
             }
         }
 
-        async fn on_close(&mut self, statement_id: u32) -> Result<(), Error> {
+        async fn on_close(&mut self, statement_id: DeallocateId) -> Result<(), Error> {
             self.last_close = Some(statement_id);
             Ok(())
         }
@@ -1865,7 +1919,7 @@ mod tests {
             block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap(),
             Response::Message(CloseComplete)
         ));
-        assert_eq!(backend.last_close.unwrap(), 0);
+        assert_eq!(backend.last_close.unwrap(), DeallocateId::Numeric(0));
         assert!(protocol.prepared_statements.get("prepared1").is_none());
     }
 
@@ -1882,7 +1936,6 @@ mod tests {
         };
         block_on(protocol.on_request(startup_request, &mut backend, &mut channel)).unwrap();
 
-        // An attempt to close a missing prepared statement triggers a normal response (no error).
         let request = FrontendMessage::Close {
             name: PreparedStatement(bytes_str("prepared1")),
         };
