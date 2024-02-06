@@ -51,8 +51,8 @@ use crate::domain::channel::{ChannelCoordinator, DomainReceiver, DomainSender};
 use crate::node::special::EgressTx;
 use crate::node::{NodeProcessingResult, ProcessEnv};
 use crate::payload::{
-    EvictRequest, MaterializedState, PrepareStateKind, PrettyReplayPath, ReplayPieceContext,
-    SourceSelection,
+    EvictRequest, MaterializedState, PacketDiscriminants, PrepareStateKind, PrettyReplayPath,
+    ReplayPieceContext, SourceSelection,
 };
 use crate::prelude::*;
 use crate::processing::ColumnMiss;
@@ -2401,10 +2401,16 @@ impl Domain {
             Packet::Message { .. } | Packet::Input { .. } => {
                 // WO for https://github.com/rust-lang/rfcs/issues/1403
                 let start = time::Instant::now();
+                let d: PacketDiscriminants = (&m).into();
                 self.total_forward_time.start();
                 self.dispatch(m, executor)?;
                 self.total_forward_time.stop();
-                self.metrics.rec_forward_time(start.elapsed());
+
+                if matches!(d, PacketDiscriminants::Message) {
+                    self.metrics.rec_forward_time_message(start.elapsed());
+                } else {
+                    self.metrics.rec_forward_time_input(start.elapsed());
+                }
             }
             Packet::ReplayPiece { ref cache_name, .. } => {
                 let start = time::Instant::now();

@@ -85,9 +85,14 @@ impl DomainMetrics {
         );
     }
 
-    pub(super) fn rec_forward_time(&mut self, time: Duration) {
-        counter!(recorded::DOMAIN_TOTAL_FORWARD_TIME, time.as_micros() as u64);
-        histogram!(recorded::DOMAIN_FORWARD_TIME, time.as_micros() as f64);
+    pub(super) fn rec_forward_time_input(&mut self, time: Duration) {
+        counter!(recorded::DOMAIN_TOTAL_FORWARD_TIME, time.as_micros() as u64, "packet_type" => "input");
+        histogram!(recorded::DOMAIN_FORWARD_TIME, time.as_micros() as f64, "packet_type" => "input");
+    }
+
+    pub(super) fn rec_forward_time_message(&mut self, time: Duration) {
+        counter!(recorded::DOMAIN_TOTAL_FORWARD_TIME, time.as_micros() as u64, "packet_type" => "message");
+        histogram!(recorded::DOMAIN_FORWARD_TIME, time.as_micros() as f64, "packet_type" => "message");
     }
 
     pub(super) fn rec_reader_replay_time(&mut self, cache_name: &Relation, time: Duration) {
