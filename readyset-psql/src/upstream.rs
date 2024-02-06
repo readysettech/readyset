@@ -12,6 +12,7 @@ use postgres_types::Kind;
 use psql_srv::{Column, TransferFormat};
 use readyset_adapter::upstream_database::UpstreamDestination;
 use readyset_adapter::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
+use readyset_adapter_types::DeallocateId;
 use readyset_client_metrics::recorded;
 use readyset_data::DfValue;
 use readyset_errors::{internal_err, invariant_eq, unsupported, ReadySetError, ReadySetResult};
@@ -320,13 +321,44 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         }
     }
 
-    async fn remove_statement(&mut self, statement_id: u32) -> Result<(), Self::Error> {
-        *self
-            .prepared_statements
-            .get_mut(statement_id as usize)
-            .ok_or(Error::ReadySet(ReadySetError::PreparedStatementMissing {
-                statement_id,
-            }))? = None;
+    async fn remove_statement(&mut self, statement_id: DeallocateId) -> Result<(), Self::Error> {
+        match statement_id {
+            DeallocateId::Numeric(id) => {
+                if let Some(a) = self.prepared_statements.get_mut(id as usize) {
+                    // Note: we don't need to explictly send a close/deallocate message to the
+                    // upstream as that is handled by the Drop impl on the
+                    // Statement object.
+                    *a = None;
+                } else {
+                    self.client
+                        .simple_query(format!("DEALLOCATE {}", id).as_str())
+                        .await?;
+                }
+            }
+            DeallocateId::Named(name) => {
+                self.client
+                    .simple_query(format!("DEALLOCATE {}", name).as_str())
+                    .await?;
+            }
+            DeallocateId::All => {
+                // Note: we don't need to explictly send a close/deallocate message to the
+                // upstream as that is handled by the Drop impl on the
+                // Statement object. Of course, in the DeallocateId::All case, that will require a
+                // round-trip DEALLOCATE message for each statement object in the
+                // map, sent serially. It is assumed this API is invoked _very_
+                // infrequently.
+                self.prepared_statements.clear();
+
+                // Adding to the fun, clearing the `self.prepared_statements` only deallocates
+                // the statements we have _explicitly_ handled and prepared. If a user ran a
+                // `PREPARE` SQL statement, we don't handle that (and we will not have an entry in
+                // `self.prepared_statements`). Thus, for completeness, we need to send a
+                // `DEALLOCATE ALL` statement. Lastly, this needs to happen after the `clear()` as
+                // that will send a Close message for each statement, with the id. If we deallocate
+                // all, then trying closing by id, PG will return an error (statement not found).
+                self.client.simple_query("DEALLOCATE ALL").await?;
+            }
+        }
 
         Ok(())
     }

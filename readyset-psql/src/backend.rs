@@ -11,6 +11,7 @@ use ps::{PsqlValue, TransferFormat};
 use psql_srv as ps;
 use readyset_adapter::backend as cl;
 use readyset_adapter::upstream_database::LazyUpstream;
+use readyset_adapter_types::DeallocateId;
 use readyset_data::DfValue;
 use thiserror::Error;
 
@@ -164,7 +165,9 @@ impl ps::PsqlBackend for Backend {
     }
 
     async fn on_close(&mut self, statement_id: u32) -> Result<(), ps::Error> {
-        self.inner.remove_statement(statement_id).await?;
+        self.inner
+            .remove_statement(DeallocateId::Numeric(statement_id))
+            .await?;
         Ok(())
     }
 

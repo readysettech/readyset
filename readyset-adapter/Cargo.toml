@@ -52,6 +52,7 @@ lru = "0.12.0"
 crossbeam-skiplist = "0.1.1"
 slab = "0.4"
 
+readyset-adapter-types = { path = "../readyset-adapter-types/" }
 readyset-alloc = { path = "../readyset-alloc/" }
 readyset-client = { path = "../readyset-client/" }
 readyset-errors = { path = "../readyset-errors/" }

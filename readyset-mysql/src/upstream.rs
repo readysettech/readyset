@@ -13,9 +13,10 @@ use nom_sql::{SqlIdentifier, StartTransactionStatement};
 use pin_project::pin_project;
 use readyset_adapter::upstream_database::UpstreamDestination;
 use readyset_adapter::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
+use readyset_adapter_types::DeallocateId;
 use readyset_client_metrics::{recorded, QueryDestination};
 use readyset_data::DfValue;
-use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
+use readyset_errors::{internal_err, unsupported, ReadySetError, ReadySetResult};
 use tracing::{debug, error, info_span, Instrument};
 
 use crate::Error;
@@ -302,15 +303,29 @@ impl UpstreamDatabase for MySqlUpstream {
         handle_query_result!(result)
     }
 
-    async fn remove_statement(&mut self, statement_id: u32) -> Result<(), Self::Error> {
-        let statement = self
-            .prepared_statements
-            .remove(&statement_id)
-            .ok_or(Error::ReadySet(ReadySetError::PreparedStatementMissing {
-                statement_id,
-            }))?;
-
-        self.conn.close(statement).await?;
+    async fn remove_statement(&mut self, statement_id: DeallocateId) -> Result<(), Self::Error> {
+        match statement_id {
+            DeallocateId::Numeric(id) => match self.prepared_statements.remove(&id) {
+                Some(statement) => self.conn.close(statement).await?,
+                None => {
+                    // It's highly unlikely that a numeric statement id was _not_
+                    // prepared via the mysql wire protocol (COM_STMT_PREPARE), but
+                    // send it to the upstream for completeness and let mysql complain
+                    // if the id is not found.
+                    self.conn
+                        .query_drop(format!("DEALLOCATE PREPARE {}", id))
+                        .await?;
+                }
+            },
+            DeallocateId::Named(name) => {
+                self.conn
+                    .query_drop(format!("DEALLOCATE PREPARE {}", name))
+                    .await?
+            }
+            DeallocateId::All => {
+                unsupported!("MySQL does not support a DEALLOCATE ALL behavior");
+            }
+        }
 
         Ok(())
     }

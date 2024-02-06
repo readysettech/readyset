@@ -85,6 +85,7 @@ use nom_sql::{
     InsertStatement, Relation, SelectStatement, SetStatement, ShowStatement, SqlIdentifier,
     SqlQuery, UpdateStatement, UseStatement,
 };
+use readyset_adapter_types::DeallocateId;
 use readyset_client::consensus::{Authority, AuthorityControl, CacheDDLRequest};
 use readyset_client::consistency::Timestamp;
 use readyset_client::query::*;
@@ -1670,19 +1671,28 @@ where
         result
     }
 
-    pub async fn remove_statement(&mut self, id: u32) -> Result<(), DB::Error> {
-        let statement = self
-            .state
-            .prepared_statements
-            .try_remove(id as usize)
-            .ok_or(PreparedStatementMissing { statement_id: id })?;
-
-        if let Some(ur) = statement.prep.into_upstream() {
-            if let Some(upstream) = &mut self.upstream {
-                upstream.remove_statement(ur.statement_id).await?;
+    pub async fn remove_statement(&mut self, deallocate_id: DeallocateId) -> Result<(), DB::Error> {
+        // in all cases, we need to call upstream.remove_statement(), but in the case
+        // of a Numeric id and it's in self.state.prepared_statements, we need to use
+        // that id instead when we call upstream.remove_statement().
+        let mut dealloc_id = deallocate_id.clone();
+        match deallocate_id {
+            DeallocateId::Numeric(id) => {
+                if let Some(statement) = self.state.prepared_statements.try_remove(id as usize) {
+                    if let Some(ur) = statement.prep.into_upstream() {
+                        dealloc_id = DeallocateId::Numeric(ur.statement_id);
+                    }
+                }
             }
+            DeallocateId::All => {
+                self.state.prepared_statements.clear();
+            }
+            DeallocateId::Named(_) => {}
         }
 
+        if let Some(upstream) = &mut self.upstream {
+            upstream.remove_statement(dealloc_id).await?;
+        }
         Ok(())
     }
 

@@ -14,6 +14,7 @@ readyset-client = { path = "../readyset-client/" }
 readyset-errors = { path = "../readyset-errors/" }
 readyset-data = { path = "../readyset-data/" }
 readyset-adapter = { path = "../readyset-adapter" }
+readyset-adapter-types = { path = "../readyset-adapter-types" }
 readyset-client-metrics = { path = "../readyset-client-metrics" }
 readyset-version = { path = "../readyset-version" }
 failpoint-macros = { path = "../failpoint-macros" }
