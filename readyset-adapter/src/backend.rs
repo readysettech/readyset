@@ -144,6 +144,8 @@ enum PrepareMeta {
     Write { stmt: SqlQuery },
     /// A read (Select; may be extended in the future)
     Select(PrepareSelectMeta),
+    /// A transaction boundary (Start, Commit, Rollback)
+    Transaction { stmt: SqlQuery },
 }
 
 #[derive(Debug)]
@@ -1136,6 +1138,11 @@ where
                 | query @ SqlQuery::Update(_)
                 | query @ SqlQuery::Delete(_),
             ) => PrepareMeta::Write { stmt: query },
+            Ok(
+                query @ SqlQuery::StartTransaction(_)
+                | query @ SqlQuery::Commit(_)
+                | query @ SqlQuery::Rollback(_),
+            ) => PrepareMeta::Transaction { stmt: query },
             Ok(pq) => {
                 warn!(
                     // FIXME(REA-2168): Use correct dialect.
@@ -1172,6 +1179,7 @@ where
             | PrepareMeta::FailedToParse
             | PrepareMeta::FailedToRewrite(_)
             | PrepareMeta::Unimplemented(_)
+            | PrepareMeta::Transaction { .. }
                 if self.upstream.is_some() =>
             {
                 let _t = event.start_upstream_timer();
@@ -1192,6 +1200,10 @@ where
                 self.mirror_prepare(select_meta, query, data, event).await
             }
             PrepareMeta::Proxy => unsupported!("No upstream, so query cannot be proxied"),
+
+            PrepareMeta::Transaction { .. } => {
+                unsupported!("No upstream, transactions not supported")
+            }
             PrepareMeta::FailedToParse => unsupported!("Query failed to parse"),
             PrepareMeta::FailedToRewrite(e) | PrepareMeta::Unimplemented(e) => {
                 Err(e.clone().into())
@@ -1217,7 +1229,7 @@ where
             .await?;
 
         let (query_id, parsed_query, migration_state, view_request, always) = match meta {
-            PrepareMeta::Write { stmt } => (
+            PrepareMeta::Write { stmt } | PrepareMeta::Transaction { stmt } => (
                 None,
                 Some(Arc::new(stmt)),
                 MigrationState::Successful,
@@ -1639,6 +1651,10 @@ where
             }
         };
 
+        if let Some(q) = &cached_statement.parsed_query {
+            Self::update_transaction_boundaries(&mut self.state.proxy_state, q.as_ref());
+        }
+
         if let Some(e) = event.noria_error.as_ref() {
             if e.caused_by_view_not_found() {
                 // This can happen during cascade execution if the noria query was removed from
@@ -1693,6 +1709,23 @@ where
             upstream.remove_statement(dealloc_id).await?;
         }
         Ok(())
+    }
+
+    /// Should only be called with a SqlQuery that is of type StartTransaction, Commit, or
+    /// Rollback. Used to handle transaction boundary queries.
+    fn update_transaction_boundaries(proxy_state: &mut ProxyState, query: &SqlQuery) {
+        match query {
+            SqlQuery::StartTransaction(_) => {
+                proxy_state.start_transaction();
+            }
+            SqlQuery::Commit(_) => {
+                proxy_state.end_transaction();
+            }
+            SqlQuery::Rollback(_) => {
+                proxy_state.end_transaction();
+            }
+            _ => (),
+        }
     }
 
     /// Should only be called with a SqlQuery that is of type StartTransaction, Commit, or
