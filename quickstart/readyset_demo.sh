@@ -30,6 +30,19 @@ setup_colors() {
   fi
 }
 
+sed_in_place() {
+  system=$(uname -a | awk '{print $1;}')
+
+  if [[ $system == "Darwin" ]]; then
+    sed -i '' "$@"
+  elif [[ $system == "Linux" ]]; then
+    sed -i "$@"
+  else
+    echo -e "${RED}This script only supports Linux or macOS."
+    exit 1
+  fi
+}
+
 print_banner() {
   echo ""
   echo -e "${BLUE}██████╗ ███████╗ █████╗ ██████╗ ██╗   ██╗███████╗███████╗████████╗"
@@ -603,6 +616,7 @@ run_byo_mysql() {
 
 run_demo() {
   download_demo_compose_file
+  sed_in_place "s|readyset-postgres|readyset|" readyset.compose.yml
   run_docker_compose
   check_sample_data
   prompt_for_import

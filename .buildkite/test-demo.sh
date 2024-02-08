@@ -25,24 +25,41 @@ if [ -z "$READYSET_DOCKER_IMG" ]; then
   READYSET_DOCKER_IMG="public.ecr.aws/z3o1l5n4/readyset:latest"
 fi
 
+sed_in_place() {
+  system=$(uname -a | awk '{print $1;}')
+
+  if [[ $system == "Darwin" ]]; then
+    sed -i '' "$@"
+  elif [[ $system == "Linux" ]]; then
+    sed -i "$@"
+  else
+    echo -e "This script only supports Linux or macOS."
+    exit 1
+  fi
+}
+
 # Because the demo pulls compose files from static github paths (which in turn pull a docker image from docker hub),
 # We need to do some modifications to the demo script and docker compose files so that we are testing the pre-released version
 # of those artifacts.
 # First, modify the compose files to pull the readyset image from the build rather than docker hub
 for file in ./quickstart/compose*.yml; do
-    sed -i '' "s|docker.io/readysettech/readyset:latest|$READYSET_DOCKER_IMG|g" "$file"
-
+    sed_in_place "s|docker.io/readysettech/readyset:latest|$READYSET_DOCKER_IMG|g" "$file"
 done
 
 # Rename localhost instances to work inside a docker container
-# Next, modify the demo script to copy those files over from the local clone instead of curling from github.
-# Note: This puts the compose file in /tmp because the demo script will expect it there and do some modifications itself before writing it to .
 sed -e "s|HOST=127.0.0.1|HOST=$DOCKER_HOST_ADDR|" \
   -e "s|mysql -h \"127.0.0.1\"|mysql -h \"$DOCKER_HOST_ADDR\"|" \
   -e "s|127.0.0.1:3307|${DOCKER_HOST_ADDR}|g" \
-  -e "s|curl.*compose\.postgres\.yml\"|cp ./quickstart/compose.postgres.yml readyset.compose.yml|" \
-  -e "s|curl.*quickstart/compose\.yml\"|cp ./quickstart/compose.yml /tmp/readyset.compose.yml|" \
   "$DEMO_SCRIPT" > "$DEMO_SCRIPT_TMP"
+
+# Next, if the `USE_LOCAL_COMPOSE_FILES` flag is set, modify the demo script to copy those files
+# over from the local clone instead of curling from github.
+# Note: This puts the compose file in /tmp because the demo script will expect it there and do some modifications itself before writing it to .
+if [[ "${USE_LOCAL_COMPOSE_FILES}" == "true" ]]; then
+    sed_in_place "s|curl.*compose\.postgres\.yml\"|cp ./quickstart/compose.postgres.yml readyset.compose.yml|" "$DEMO_SCRIPT_TMP"
+    sed_in_place "s|curl.*quickstart/compose\.yml\"|cp ./quickstart/compose.yml /tmp/readyset.compose.yml|" "$DEMO_SCRIPT_TMP"
+    aws ecr get-login-password --region us-east-2 | docker login --username AWS --password-stdin 305232526136.dkr.ecr.us-east-2.amazonaws.com
+fi
 
 # Figure out how many times we need to press enter to run through the entire psql
 # interactive section of the demo.
@@ -82,7 +99,7 @@ run_script() {
 
               # Importing the sample data can take a few minutes
               # so there is a pretty long timeout.
-              set timeout 500
+              set timeout 1000
               if {\"$3\" == \"y\"} {
                 expect -re \".*Explore sample data in psql.*\" {
                   send \"$4\r\"
@@ -165,8 +182,17 @@ test_combination() {
 }
 
 show_docker_info() {
-  docker ps -a --format '{{.Names}}'
+  echo 'Containers:'
+  docker ps        --format '{{.Names}}'
+  echo ''
+
+  echo 'Volumes:'
   docker volume ls --format '{{.Name}}'
+  echo ''
+
+  echo 'Networks:'
+  docker network ls --format '{{.Name}}'
+  echo ''
 }
 
 # If testing locally, it's convenient to automatically reset the initial state by
@@ -181,10 +207,11 @@ reset_deployment_state() {
 
   # Try to stop any docker containers that could have been made by previous runs.
   # This is because we sometimes see a previous docker container still running at the beginning of a retry
-  echo "Cleaning up any stale docker containers and volumes:"
+  echo "Cleaning up any stale docker containers, volumes, and networks:"
   show_docker_info
-  docker ps -a      --format '{{.Names}}' | grep 'readyset' | xargs -I {} docker stop {}
-  docker volume  ls --format '{{.Name}}'  | grep 'readyset' | xargs -I {} docker volume  rm {}
+  docker ps         --format '{{.Names}}' | grep 'readyset' | xargs -I {} docker stop {}
+  docker ps -a      --format '{{.Names}}' | grep 'readyset' | xargs -I {} docker container rm -f -v {}
+  docker volume  ls --format '{{.Name}}'  | grep 'readyset' | xargs -I {} docker volume rm {}
 }
 
 run_mysql_docker() {
