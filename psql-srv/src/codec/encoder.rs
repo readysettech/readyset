@@ -162,7 +162,6 @@ fn encode(message: BackendMessage, dst: &mut BytesMut) -> Result<(), Error> {
             let mut tag_buf = [0u8; COMMAND_COMPLETE_TAG_BUF_LEN];
             match tag {
                 Delete(n) => write!(&mut tag_buf[..], "{} {}", COMMAND_COMPLETE_DELETE_TAG, n)?,
-                Empty => {}
                 Insert(n) => write!(
                     &mut tag_buf[..],
                     "{} {} {}",
@@ -787,20 +786,6 @@ mod tests {
         exp.put_u8(b'C'); // message id
         exp.put_i32(4 + 9); // message length
         exp.extend_from_slice(b"DELETE 0\0");
-        assert_eq!(buf, exp);
-    }
-
-    #[test]
-    fn test_encode_command_complete_empty() {
-        let mut codec = Codec::new();
-        let mut buf = BytesMut::new();
-        codec
-            .encode(CommandComplete { tag: Empty }, &mut buf)
-            .unwrap();
-        let mut exp = BytesMut::new();
-        exp.put_u8(b'C'); // message id
-        exp.put_i32(4 + 1); // message length
-        exp.extend_from_slice(b"\0"); // empty tag
         assert_eq!(buf, exp);
     }
 

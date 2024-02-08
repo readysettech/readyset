@@ -614,11 +614,17 @@ impl Protocol {
                             trailer: None,
                         })
                     } else {
-                        let tag = match response {
-                            Insert(n) => CommandCompleteTag::Insert(n),
-                            Update(n) => CommandCompleteTag::Update(n),
-                            Delete(n) => CommandCompleteTag::Delete(n),
-                            Command => CommandCompleteTag::Empty,
+                        let command_complete = match response {
+                            Insert(n) => BackendMessage::CommandComplete {
+                                tag: CommandCompleteTag::Insert(n),
+                            },
+                            Update(n) => BackendMessage::CommandComplete {
+                                tag: CommandCompleteTag::Update(n),
+                            },
+                            Delete(n) => BackendMessage::CommandComplete {
+                                tag: CommandCompleteTag::Delete(n),
+                            },
+                            Command(tag) => BackendMessage::PassThroughCommandComplete(tag.into()),
                             #[allow(clippy::unreachable)]
                             Select { .. } => {
                                 unreachable!("Select is handled as a special case above.")
@@ -632,7 +638,7 @@ impl Protocol {
                                 unreachable!("Should not get a Deallocate command on execute()");
                             }
                         };
-                        Ok(Response::Message(CommandComplete { tag }))
+                        Ok(Response::Message(command_complete))
                     };
                     self.state = State::Ready;
                     res
@@ -702,11 +708,17 @@ impl Protocol {
                         ));
                         Ok(Response::Messages(messages))
                     } else {
-                        let tag = match response {
-                            Insert(n) => CommandCompleteTag::Insert(n),
-                            Update(n) => CommandCompleteTag::Update(n),
-                            Delete(n) => CommandCompleteTag::Delete(n),
-                            Command => CommandCompleteTag::Empty,
+                        let command_complete = match response {
+                            Insert(n) => BackendMessage::CommandComplete {
+                                tag: CommandCompleteTag::Insert(n),
+                            },
+                            Update(n) => BackendMessage::CommandComplete {
+                                tag: CommandCompleteTag::Update(n),
+                            },
+                            Delete(n) => BackendMessage::CommandComplete {
+                                tag: CommandCompleteTag::Delete(n),
+                            },
+                            Command(tag) => BackendMessage::PassThroughCommandComplete(tag.into()),
                             #[allow(clippy::unreachable)]
                             Select { .. } => {
                                 unreachable!("Select is handled as a special case above.")
@@ -714,12 +726,12 @@ impl Protocol {
                             SimpleQuery(_) => {
                                 unreachable!("SimpleQuery is handled as a special case above.")
                             }
-                            Deallocate(statement_id) => {
-                                self.on_deallocate(backend, channel, statement_id).await?
-                            }
+                            Deallocate(statement_id) => BackendMessage::CommandComplete {
+                                tag: self.on_deallocate(backend, channel, statement_id).await?,
+                            },
                         };
                         Ok(Response::Messages(smallvec![
-                            CommandComplete { tag },
+                            command_complete,
                             BackendMessage::ready_for_query(self.transaction_state(backend)),
                         ]))
                     }

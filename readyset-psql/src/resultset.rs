@@ -97,7 +97,7 @@ impl Stream for Resultset {
                             None => break None,
                             Some(Err(e)) => break Some(Err(psql_srv::Error::from(e))),
                             Some(Ok(GenericResult::Row(r))) => break Some(Ok(r)),
-                            Some(Ok(GenericResult::NumRows(_))) => {}
+                            Some(Ok(GenericResult::Command(_, _))) => {}
                         }
                     },
                 };

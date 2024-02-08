@@ -139,7 +139,6 @@ pub enum DeallocationType {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CommandCompleteTag {
     Delete(u64),
-    Empty,
     Insert(u64),
     Select(u64),
     Update(u64),

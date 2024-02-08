@@ -52,7 +52,9 @@ pub enum QueryResult {
     Write {
         num_rows_affected: u64,
     },
-    Command,
+    Command {
+        tag: String,
+    },
     SimpleQuery(Vec<SimpleQueryMessage>),
 }
 
@@ -72,7 +74,7 @@ impl Debug for QueryResult {
                 .debug_struct("Write")
                 .field("num_rows_affected", num_rows_affected)
                 .finish(),
-            Self::Command => write!(f, "Command"),
+            Self::Command { tag } => f.debug_struct("Command").field("tag", tag).finish(),
             Self::SimpleQuery(ms) => f.debug_tuple("SimpleQuery").field(ms).finish(),
         }
     }
@@ -312,9 +314,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         match stream.next().await {
             None => Ok(QueryResult::EmptyRead),
             Some(Err(e)) => Err(e.into()),
-            Some(Ok(GenericResult::NumRows(num_rows_affected))) => {
-                Ok(QueryResult::Write { num_rows_affected })
-            }
+            Some(Ok(GenericResult::Command(_, tag))) => Ok(QueryResult::Command { tag }),
             Some(Ok(GenericResult::Row(first_row))) => {
                 Ok(QueryResult::Stream { first_row, stream })
             }

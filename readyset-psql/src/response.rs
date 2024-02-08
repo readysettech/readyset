@@ -79,7 +79,7 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
         use ps::QueryResponse::*;
 
         match r.0 {
-            Noria(NoriaResult::Empty) => Ok(Command),
+            Noria(NoriaResult::Empty) => Ok(Command("".to_string())),
             Noria(NoriaResult::Insert {
                 num_rows_inserted, ..
             }) => Ok(Insert(num_rows_inserted)),
@@ -219,7 +219,7 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
             Upstream(upstream::QueryResult::Write { num_rows_affected }) => {
                 Ok(Insert(num_rows_affected))
             }
-            Upstream(upstream::QueryResult::Command) => Ok(Command),
+            Upstream(upstream::QueryResult::Command { tag }) => Ok(Command(tag)),
             Upstream(upstream::QueryResult::SimpleQuery(resp)) => Ok(SimpleQuery(resp)),
             Parser(p) => match p {
                 ParsedCommand::Deallocate(name) => Ok(ps::QueryResponse::Deallocate(name)),
