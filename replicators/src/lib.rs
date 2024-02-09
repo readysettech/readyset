@@ -14,9 +14,10 @@ pub(crate) mod table_filter;
 
 use std::time::Duration;
 
-use metrics::Gauge;
+use metrics::{register_gauge, Gauge};
 use nom_sql::Relation;
 pub use noria_adapter::{cleanup, NoriaAdapter};
+use readyset_client::metrics::recorded;
 use readyset_errors::ReadySetError;
 pub use replication_offset::mysql::MySqlPosition;
 pub use replication_offset::postgres::PostgresPosition;
@@ -39,6 +40,28 @@ pub enum ReplicatorMessage {
 pub enum ControllerMessage {
     /// Drop the specified table and require a new partial snapshot
     ResnapshotTable { table: Relation },
+}
+
+/// A handle to the metric we use to track the number of tables currently snapshotting. To use this
+/// handle, just keep it in scope while the table is snapshotting; once the handle is dropped, the
+/// gauge will be decremented. The type is designed to ensure that we *always* 1) increment the
+/// gauge when the handle is created and 2) decrement the gauge when the handle is dropped.
+struct TablesSnapshottingGaugeGuard(Gauge);
+
+impl TablesSnapshottingGaugeGuard {
+    /// Creates a new handle and increments the gauge by 1. The gauge is automatically decremented
+    /// when the handle is dropped.
+    fn new() -> Self {
+        let gauge = register_gauge!(recorded::REPLICATOR_TABLES_SNAPSHOTTING);
+        gauge.increment(1.0);
+        Self(gauge)
+    }
+}
+
+impl Drop for TablesSnapshottingGaugeGuard {
+    fn drop(&mut self) {
+        self.0.decrement(1.0);
+    }
 }
 
 /// Provide a simplistic human-readable estimate for how much time remains to complete an operation
@@ -64,7 +87,7 @@ pub(crate) fn estimate_remaining_time(elapsed: Duration, progress: i64, total: i
 /// unknown (equals to 0 or 1), then estimated time and progress will be set to 'n/a'
 /// To provide feedback to a user, number of replicated rows and estimated total rows are logged
 /// If total number of rows is unknown progress %% is set to 0.0 (in metric).
-pub(crate) fn log_snapshot_progress(elapsed: Duration, cnt: i64, total: i64, metric: &Gauge) {
+pub(crate) fn log_snapshot_progress(elapsed: Duration, cnt: i64, total: i64) {
     let estimate = estimate_remaining_time(elapsed, cnt, total);
     let mut progress_percent: f64;
     progress_percent = if total > 1 {
@@ -84,5 +107,4 @@ pub(crate) fn log_snapshot_progress(elapsed: Duration, cnt: i64, total: i64, met
     };
     let rows_total_est = if total > cnt { total } else { cnt };
     info!(rows_replicated = %cnt, rows_total_est = %rows_total_est, %progress, %estimate, "Snapshotting progress");
-    metric.set(progress_percent);
 }
