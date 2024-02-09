@@ -3,6 +3,7 @@ use std::fmt::{self, Display};
 
 use dataflow_state::MaterializedNodeState;
 use itertools::Itertools;
+use nom_sql::Relation;
 use readyset_client::{self, KeyComparison, PacketData, PacketTrace};
 use readyset_data::DfType;
 use serde::{Deserialize, Serialize};
@@ -345,9 +346,6 @@ pub enum DomainRequest {
         state: PrepareStateKind,
     },
 
-    /// Ask domain to log its state size
-    UpdateStateSize,
-
     /// Inform domain about a new replay path.
     SetupReplayPath {
         tag: Tag,
@@ -465,13 +463,20 @@ pub enum Packet {
         tag: Tag,
         data: Records,
         context: ReplayPieceContext,
+        /// The cache name associated with the replay. Only used for metric labels.
+        cache_name: Relation,
     },
 
     // Trigger an eviction as specified by the to the [`EvictRequest`].
     Evict(EvictRequest),
 
     // Internal control
-    Finish(Tag, LocalNodeIndex),
+    Finish {
+        tag: Tag,
+        node: LocalNodeIndex,
+        /// The cache name associated with the replay. Only used for metric labels.
+        cache_name: Relation,
+    },
 
     // Control messages
     /// Ask domain (nicely) to replay a particular set of keys.
@@ -481,6 +486,8 @@ pub enum Packet {
         unishard: bool,
         requesting_shard: usize,
         requesting_replica: usize,
+        /// The cache name associated with the replay. Only used for metric labels.
+        cache_name: Relation,
     },
 
     /// Ask domain (nicely) to replay a particular set of keys into a Reader.
@@ -488,6 +495,8 @@ pub enum Packet {
         node: LocalNodeIndex,
         cols: Vec<usize>,
         keys: Vec<KeyComparison>,
+        /// The cache name associated with the replay. Only used for metric labels.
+        cache_name: Relation,
     },
 
     /// A packet used solely to drive the event loop forward.
@@ -626,11 +635,13 @@ impl Packet {
                 tag,
                 ref data,
                 ref context,
+                ref cache_name,
             } => Packet::ReplayPiece {
                 link,
                 tag,
                 data: data.clone(),
                 context: context.clone(),
+                cache_name: cache_name.clone(),
             },
             Packet::Timestamp {
                 ref timestamp,

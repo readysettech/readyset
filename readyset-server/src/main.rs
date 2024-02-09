@@ -2,7 +2,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::process;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use clap::builder::NonEmptyStringValueParser;
 use clap::Parser;
@@ -211,13 +211,7 @@ fn main() -> anyhow::Result<()> {
             ("opt_level", READYSET_VERSION.opt_level),
         ]
     );
-    metrics::counter!(
-        recorded::NORIA_STARTUP_TIMESTAMP,
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64
-    );
+    metrics::counter!(recorded::READYSET_SERVER_STARTUPS, 1);
 
     if let Some(volume_id) = &opts.worker_options.volume_id {
         info!(%volume_id);

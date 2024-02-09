@@ -4,11 +4,8 @@ use indexmap::IndexMap;
 use metrics::SharedString;
 use metrics_exporter_prometheus::formatting::{sanitize_label_key, sanitize_label_value};
 use metrics_exporter_prometheus::{Distribution, PrometheusHandle};
-// adding an alias to disambiguate vs readyset_client_metrics::recorded
-use readyset_client::metrics::recorded as client_recorded;
 use readyset_client_metrics::recorded::QUERY_LOG_EXECUTION_COUNT;
 use readyset_client_metrics::DatabaseType;
-use readyset_data::TimestampTz;
 
 #[derive(Debug, Default, Clone)]
 pub struct MetricsSummary {
@@ -121,10 +118,6 @@ impl MetricsHandle {
     /// `SHOW READYSET STATUS`
     pub fn readyset_status(&self) -> Vec<(String, String)> {
         let mut statuses = Vec::new();
-
-        let time_ms = self.sum_counter(client_recorded::NORIA_STARTUP_TIMESTAMP);
-        let time = TimestampTz::from_unix_ms(time_ms);
-        statuses.push(("Process start time".to_string(), time.to_string()));
 
         let val = self.sum_gauge(readyset_client_metrics::recorded::CONNECTED_CLIENTS);
         statuses.push(("Connected clients count".to_string(), val.to_string()));

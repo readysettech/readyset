@@ -191,48 +191,6 @@ async fn new_leader_metrics() {
     deployment.teardown().await.unwrap();
 }
 
-// Validate that `NORIA_STARTUP_TIMESTAMP` is being populated with a reasonably
-// plausible timestamp
-#[clustertest]
-async fn ensure_startup_timestamp_metric() {
-    // TODO: Move over to an integration test when metrics support is added to
-    // integration tests
-    // All received times must be at least this value
-    let test_start_timetsamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as f64;
-
-    let mut deployment =
-        DeploymentBuilder::new(DatabaseType::MySQL, "ct_ensure_startup_timestamp_metric")
-            .with_servers(2, ServerParams::default())
-            .deploy_upstream()
-            .deploy_adapter()
-            .start()
-            .await
-            .unwrap();
-
-    for address in deployment.server_addrs() {
-        let found_timestamp = match get_metric(&mut deployment, address.clone(), recorded::NORIA_STARTUP_TIMESTAMP).await {
-            Some(DumpedMetricValue::Counter(v)) => v,
-            err => panic!(
-                "For readyset-server {}, expected a Some(DumpedMetricValue::Counter), but instead received {:?}",
-                address, err
-            ),
-        };
-
-        assert!(
-            test_start_timetsamp <= found_timestamp,
-            "readyset-server {} has too early of a timestamp ({} but should be after {})",
-            address,
-            found_timestamp,
-            test_start_timetsamp
-        );
-    }
-
-    deployment.teardown().await.unwrap();
-}
-
 #[clustertest]
 async fn replicated_readers() {
     let mut deployment = DeploymentBuilder::new(DatabaseType::MySQL, "ct_replicated_readers")

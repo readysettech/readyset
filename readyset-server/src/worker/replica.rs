@@ -118,7 +118,9 @@ fn flatten_request_reader_replay(
     let mut i = 0;
     while i < packets.len() {
         match packets.get_mut(i) {
-            Some(Packet::RequestReaderReplay { node, cols, keys }) if *node == n && *cols == c => {
+            Some(Packet::RequestReaderReplay {
+                node, cols, keys, ..
+            }) if *node == n && *cols == c => {
                 unique_keys.extend(keys.drain(..));
                 packets.remove(i);
             }
@@ -435,7 +437,7 @@ impl Replica {
                                     // After processing we need to ack timestamp and input messages from base
                                     connections.iter_mut().find(|(t, _)| *t == *token).map(|(_, conn)| (*tag, conn))
                                 }
-                                Packet::RequestReaderReplay { node, cols, keys } => {
+                                Packet::RequestReaderReplay { node, cols, keys, .. } => {
                                     // We want to batch multiple reader replay requests into a single call while
                                     // deduplicating non unique keys
                                     let mut unique_keys: HashSet<_> = keys.drain(..).collect();

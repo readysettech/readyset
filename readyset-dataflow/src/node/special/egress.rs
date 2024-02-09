@@ -23,11 +23,6 @@ pub struct EgressTx {
     domain_index: DomainIndex,
     shard: usize,
     replication: SenderReplication,
-
-    #[serde(skip)]
-    sent_ctr: Option<metrics::Counter>,
-    #[serde(skip)]
-    dropped_ctr: Option<metrics::Counter>,
 }
 
 impl EgressTx {
@@ -44,8 +39,6 @@ impl EgressTx {
             domain_index,
             shard,
             replication,
-            sent_ctr: None,
-            dropped_ctr: None,
         }
     }
 
@@ -59,27 +52,11 @@ impl EgressTx {
     }
 
     fn inc_sent(&mut self) {
-        if let Some(ctr) = &self.sent_ctr {
-            ctr.increment(1);
-        } else {
-            let node = self.node.index().to_string();
-            let ctr =
-                metrics::register_counter!(recorded::EGRESS_NODE_SENT_PACKETS, "node" => node);
-            ctr.increment(1);
-            self.sent_ctr.replace(ctr);
-        }
+        metrics::counter!(recorded::EGRESS_NODE_SENT_PACKETS, 1)
     }
 
     fn inc_dropped(&mut self) {
-        if let Some(ctr) = &self.dropped_ctr {
-            ctr.increment(1);
-        } else {
-            let node = self.node.index().to_string();
-            let ctr =
-                metrics::register_counter!(recorded::EGRESS_NODE_DROPPED_PACKETS, "node" => node);
-            ctr.increment(1);
-            self.dropped_ctr.replace(ctr);
-        }
+        metrics::counter!(recorded::EGRESS_NODE_DROPPED_PACKETS, 1);
     }
 }
 

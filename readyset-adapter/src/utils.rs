@@ -9,7 +9,7 @@ use nom_sql::{
     InsertStatement, Literal, SelectStatement, SqlQuery, TableKey, UpdateStatement,
 };
 use readyset_client::{ColumnSchema, Modification, Operation};
-use readyset_data::{DfType, DfValue, Dialect};
+use readyset_data::{DfType, DfValue, Dialect, TimestampTz};
 use readyset_errors::{
     bad_request_err, invalid_query, invalid_query_err, invariant, invariant_eq, unsupported,
     unsupported_err, ReadySetResult,
@@ -598,6 +598,19 @@ pub(crate) fn create_dummy_column(name: &str) -> ColumnSchema {
         },
         column_type: DfType::DEFAULT_TEXT,
         base: None,
+    }
+}
+
+/// If the input is `Some`, converts the UNIX timestamp to a human-readable string with the
+/// timezone "UTC." If the input is `None`, returns `"NULL"`.
+pub(crate) fn time_or_null(time_ms: Option<u64>) -> String {
+    if let Some(t) = time_ms {
+        // TimestampTz treats unix ms as not having a timezone, but since we lose the knowledge
+        // that this timestamp came from a unix epoch, adding it back in explicitly helps provide
+        // the timezone context.
+        format!("{} UTC", TimestampTz::from_unix_ms(t))
+    } else {
+        "NULL".to_string()
     }
 }
 

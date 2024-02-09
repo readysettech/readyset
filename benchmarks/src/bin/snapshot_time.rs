@@ -2,12 +2,10 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use clap::{Parser, ValueHint};
-use readyset_client::metrics::{recorded, MetricsDump};
 use readyset_client::recipe::changelist::ChangeList;
 use readyset_data::Dialect;
 use readyset_server::metrics::{
-    get_global_recorder, install_global_recorder, CompositeMetricsRecorder, MetricsRecorder,
-    RecorderType,
+    install_global_recorder, CompositeMetricsRecorder, MetricsRecorder,
 };
 use readyset_server::NoriaMetricsRecorder;
 
@@ -48,8 +46,6 @@ impl SnapshotBenchmark {
 
             println!("Tables replicated: {}", noria.tables().await?.len());
 
-            println!("Disk space used:   {:.2} MiB", tables_size_metric_mib());
-
             if let Some(queries) = &self.queries {
                 let queries_sql = std::fs::read_to_string(queries)?;
                 let start = Instant::now();
@@ -59,7 +55,6 @@ impl SnapshotBenchmark {
                     )
                     .await?;
                 println!("Migration time:    {} s", start.elapsed().as_secs());
-                println!("Disk space used:   {:.2} MiB", tables_size_metric_mib());
             }
 
             shutdown_tx.shutdown().await;
@@ -74,19 +69,6 @@ fn init_metrics_recorder() {
         NoriaMetricsRecorder::new(),
     )]);
     install_global_recorder(rec).unwrap();
-}
-
-fn tables_size_metric_mib() -> f64 {
-    let metrics_handle = get_global_recorder().unwrap();
-
-    let metrics: MetricsDump =
-        serde_json::from_str(&metrics_handle.render(RecorderType::Noria).unwrap()).unwrap();
-
-    let base_sizes = &metrics.metrics[recorded::ESTIMATED_BASE_TABLE_SIZE_BYTES];
-
-    let byte_size: f64 = base_sizes.iter().map(|s| s.value.value().unwrap()).sum();
-
-    byte_size / 1024. / 1024.
 }
 
 #[tokio::main]

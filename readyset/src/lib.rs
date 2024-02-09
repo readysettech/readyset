@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime};
 
 use anyhow::{anyhow, bail};
 use async_trait::async_trait;
@@ -786,13 +786,8 @@ where
                 ("opt_level", READYSET_VERSION.opt_level),
             ]
         );
-        metrics::counter!(
-            recorded::NORIA_STARTUP_TIMESTAMP,
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_millis() as u64
-        );
+        metrics::counter!(recorded::READYSET_ADAPTER_STARTUPS, 1);
+        let adapter_start_time = SystemTime::now();
 
         let (shutdown_tx, shutdown_rx) = shutdown::channel();
 
@@ -1161,6 +1156,7 @@ where
                                     query_status_cache,
                                     adapter_authority.clone(),
                                     status_reporter_clone,
+                                    adapter_start_time,
                                 );
                                 connection_handler.process_connection(s, backend).await;
                             }
