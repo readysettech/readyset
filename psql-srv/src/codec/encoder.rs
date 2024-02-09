@@ -26,6 +26,7 @@ const ID_PARAMETER_STATUS: u8 = b'S';
 const ID_PARSE_COMPLETE: u8 = b'1';
 const ID_READY_FOR_QUERY: u8 = b'Z';
 const ID_ROW_DESCRIPTION: u8 = b'T';
+const ID_NO_DATA: u8 = b'n';
 
 const AUTHENTICATION_OK_SUCCESS: i32 = 0;
 const AUTHENTICATION_CLEARTEXT_REQUIRED: i32 = 3;
@@ -213,6 +214,11 @@ fn encode(message: BackendMessage, dst: &mut BytesMut) -> Result<(), Error> {
             }
             // Update the value count field to match the number of values just serialized.
             set_i16(i16::try_from(n_values)?, dst, start_ofs + 5)?;
+        }
+
+        NoData => {
+            put_u8(ID_NO_DATA, dst);
+            put_i32(LENGTH_PLACEHOLDER, dst);
         }
 
         PassThroughSimpleRow(row) => {
@@ -896,6 +902,17 @@ mod tests {
         exp.put_i32(-1); // null value sentinel
         exp.put_i32(9); // length of value
         exp.extend_from_slice(b"some text");
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
+    fn test_encode_no_data() {
+        let mut codec = Codec::new();
+        let mut buf = BytesMut::new();
+        codec.encode(NoData, &mut buf).unwrap();
+        let mut exp = BytesMut::new();
+        exp.put_u8(b'n'); // message id
+        exp.put_i32(4); // message length
         assert_eq!(buf, exp);
     }
 

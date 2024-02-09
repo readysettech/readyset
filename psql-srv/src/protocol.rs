@@ -516,13 +516,21 @@ impl Protocol {
                                 Error::InternalError("missing prepared statement".to_string())
                             })?;
                         debug_assert_eq!(row_schema.len(), result_transfer_formats.len());
-                        let mut field_descriptions = Vec::with_capacity(row_schema.len());
-                        for (i, f) in row_schema.iter().zip(result_transfer_formats.iter()) {
-                            field_descriptions.push(
-                                make_field_description(i, *f, backend, extended_types).await?,
-                            );
+
+                        // row_schema defines the types of columns to be returned. if there's
+                        // no columns to be returned, then there's no rows returned and thus
+                        // `NoData`
+                        if row_schema.is_empty() {
+                            Ok(Response::Message(NoData))
+                        } else {
+                            let mut field_descriptions = Vec::with_capacity(row_schema.len());
+                            for (i, f) in row_schema.iter().zip(result_transfer_formats.iter()) {
+                                field_descriptions.push(
+                                    make_field_description(i, *f, backend, extended_types).await?,
+                                );
+                            }
+                            Ok(Response::Message(RowDescription { field_descriptions }))
                         }
-                        Ok(Response::Message(RowDescription { field_descriptions }))
                     }
 
                     PreparedStatement(name) => {
@@ -539,23 +547,32 @@ impl Protocol {
                             .get(name.borrow() as &str)
                             .ok_or_else(|| Error::MissingPreparedStatement(name.to_string()))?;
 
-                        let mut field_descriptions = Vec::with_capacity(row_schema.len());
-                        for i in row_schema {
-                            field_descriptions.push(
-                                make_field_description(
-                                    i,
-                                    TRANSFER_FORMAT_PLACEHOLDER,
-                                    backend,
-                                    extended_types,
-                                )
-                                .await?,
-                            );
-                        }
+                        // row_schema defines the types of columns to be returned. if there's
+                        // no columns to be returned, then there's no rows returned and thus
+                        // `NoData`
+                        let data_descriptor = if row_schema.is_empty() {
+                            NoData
+                        } else {
+                            let mut field_descriptions = Vec::with_capacity(row_schema.len());
+                            for i in row_schema {
+                                field_descriptions.push(
+                                    make_field_description(
+                                        i,
+                                        TRANSFER_FORMAT_PLACEHOLDER,
+                                        backend,
+                                        extended_types,
+                                    )
+                                    .await?,
+                                );
+                            }
+                            RowDescription { field_descriptions }
+                        };
+
                         Ok(Response::Messages(smallvec![
                             ParameterDescription {
                                 parameter_data_types: param_schema.clone(),
                             },
-                            RowDescription { field_descriptions },
+                            data_descriptor,
                         ]))
                     }
                 },

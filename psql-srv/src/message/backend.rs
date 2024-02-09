@@ -73,6 +73,7 @@ pub enum BackendMessage {
         line: Option<u32>,
         routine: Option<String>,
     },
+    NoData,
     ParameterDescription {
         parameter_data_types: Vec<Type>,
     },
