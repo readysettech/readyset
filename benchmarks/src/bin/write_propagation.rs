@@ -17,7 +17,7 @@ use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{mpsc, Arc};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use benchmarks::utils::backend::Backend;
 use benchmarks::utils::generate::load_to_backend;
@@ -113,6 +113,7 @@ impl Writer {
                 (Dialect::DEFAULT_POSTGRESQL, nom_sql::Dialect::PostgreSQL)
             }
         };
+        let adapter_start_time = SystemTime::now();
         let noria = NoriaConnector::new(
             ch.clone(),
             auto_increments,
@@ -126,7 +127,7 @@ impl Writer {
         )
         .await;
 
-        let mut b = Backend::new(&self.database_url, noria, authority).await?;
+        let mut b = Backend::new(&self.database_url, noria, authority, adapter_start_time).await?;
 
         let mut view = ch.view("w").await.unwrap();
 

@@ -7,13 +7,13 @@ use readyset_client::consensus::{Authority, AuthorityControl};
 use readyset_client::debug::stats::PersistentStats;
 use readyset_client::status::ReadySetControllerStatus;
 use readyset_client::ReadySetHandle;
-use readyset_data::TimestampTz;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tracing::warn;
 
 use crate::backend::noria_connector::{MetaVariable, QueryResult};
 use crate::upstream_database::LazyUpstream;
+use crate::utils::time_or_null;
 use crate::UpstreamDatabase;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -174,17 +174,5 @@ where
                 None
             }
         }
-    }
-}
-
-// Helper function for formatting
-fn time_or_null(time_ms: Option<u64>) -> String {
-    if let Some(t) = time_ms {
-        // TimestampTz treats unix ms as not having a timezone, but since we lose the knowledge
-        // that this timestamp came from a unix epoch, adding it back in explicitly helps provide
-        // the timezone context.
-        format!("{} UTC", TimestampTz::from_unix_ms(t))
-    } else {
-        "NULL".to_string()
     }
 }

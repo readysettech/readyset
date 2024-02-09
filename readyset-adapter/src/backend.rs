@@ -74,7 +74,7 @@ use std::fmt::{self, Debug};
 use std::marker::PhantomData;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crossbeam_skiplist::SkipSet;
 use futures::future::{self, OptionFuture};
@@ -114,7 +114,7 @@ use crate::query_handler::SetBehavior;
 use crate::query_status_cache::QueryStatusCache;
 use crate::status_reporter::ReadySetStatusReporter;
 pub use crate::upstream_database::UpstreamPrepare;
-use crate::utils::create_dummy_column;
+use crate::utils::{create_dummy_column, time_or_null};
 use crate::{create_dummy_schema, QueryHandler, UpstreamDatabase, UpstreamDestination};
 
 pub mod noria_connector;
@@ -326,6 +326,7 @@ impl BackendBuilder {
         query_status_cache: &'static QueryStatusCache,
         authority: Arc<Authority>,
         status_reporter: ReadySetStatusReporter<DB>,
+        adapter_start_time: SystemTime,
     ) -> Backend<DB, Handler> {
         metrics::increment_gauge!(recorded::CONNECTED_CLIENTS, 1.0);
         metrics::increment_counter!(recorded::CLIENT_CONNECTIONS_OPENED);
@@ -373,6 +374,7 @@ impl BackendBuilder {
             connections: self.connections,
             status_reporter,
             allow_cache_ddl: self.allow_cache_ddl,
+            adapter_start_time,
             _query_handler: PhantomData,
         }
     }
@@ -582,6 +584,9 @@ where
     /// received will instead return an error prompting the user to use ReadySet cloud to manage
     /// their caches.
     allow_cache_ddl: bool,
+
+    /// The time at which the adapter started.
+    adapter_start_time: SystemTime,
 
     _query_handler: PhantomData<Handler>,
 }
@@ -2101,10 +2106,19 @@ where
     }
 
     fn readyset_adapter_status(&self) -> ReadySetResult<noria_connector::QueryResult<'static>> {
-        let statuses = match self.metrics_handle.as_ref() {
+        let mut statuses = match self.metrics_handle.as_ref() {
             Some(handle) => handle.readyset_status(),
             None => vec![],
         };
+        let time_ms = self
+            .adapter_start_time
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        statuses.push((
+            "Process start time".to_string(),
+            time_or_null(Some(time_ms)),
+        ));
 
         Ok(noria_connector::QueryResult::MetaVariables(
             statuses.into_iter().map(MetaVariable::from).collect(),

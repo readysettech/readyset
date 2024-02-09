@@ -289,6 +289,7 @@ mod test {
                     requesting_replica: 0,
                     unishard: false,
                 },
+                cache_name: "test".into(),
             };
 
             let mut packet_filter = PacketFilter::default();
@@ -611,6 +612,7 @@ mod test {
                 tag: Tag::new(1),
                 data: Default::default(),
                 context,
+                cache_name: "test".into(),
             }
         }
     }

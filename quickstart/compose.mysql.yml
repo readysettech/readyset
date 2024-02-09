@@ -59,7 +59,7 @@ services:
       RS_PORT: 3307
       RS_GRAFANA_PORT: 4000
   mysql:
-    image: mysql:8
+    image: mysql:8.0
     environment:
       - MYSQL_ROOT_PASSWORD=readyset
       - MYSQL_DATABASE=testdb
