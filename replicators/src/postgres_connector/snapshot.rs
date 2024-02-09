@@ -9,7 +9,6 @@ use failpoint_macros::set_failpoint;
 use futures::stream::FuturesUnordered;
 use futures::{pin_mut, StreamExt, TryFutureExt};
 use itertools::Itertools;
-use metrics::register_gauge;
 use nom_sql::{
     parse_key_specification_string, parse_sql_type, Column, ColumnConstraint, ColumnSpecification,
     CreateTableBody, CreateTableStatement, Dialect, DialectDisplay, NonReplicatedRelation,
@@ -18,7 +17,6 @@ use nom_sql::{
 use postgres_types::{accepts, FromSql, Kind, Type};
 #[cfg(feature = "failure_injection")]
 use readyset_client::failpoints;
-use readyset_client::metrics::recorded;
 use readyset_client::recipe::changelist::{Change, ChangeList, PostgresTableMetadata};
 use readyset_client::TableOperation;
 use readyset_data::{DfType, DfValue, Dialect as DataDialect, PgEnumMetadata};
@@ -31,6 +29,7 @@ use tracing::{debug, info, info_span, trace, warn, Instrument};
 use super::connector::CreatedSlot;
 use crate::db_util::CreateSchema;
 use crate::table_filter::TableFilter;
+use crate::TablesSnapshottingGaugeHandle;
 
 const BATCH_SIZE: usize = 1024; // How many queries to buffer before pushing to ReadySet
 
@@ -520,11 +519,7 @@ impl TableDescription {
         pin_mut!(binary_row_batches);
 
         info!(%approximate_rows, "Snapshotting started");
-        let progress_percentage_metric: metrics::Gauge = register_gauge!(
-            recorded::REPLICATOR_SNAPSHOT_PERCENT,
-            "schema" => self.schema()?.to_string(),
-            "name" => self.name.name.to_string()
-        );
+        let _tables_snapshotting_metric_handle = TablesSnapshottingGaugeHandle::new();
         let start_time = Instant::now();
         let mut last_report_time = start_time;
         let snapshot_report_interval_secs = snapshot_report_interval_secs as u64;
@@ -542,7 +537,6 @@ impl TableDescription {
                             .map(|i| row.try_get::<DfValue>(i))
                             .collect::<Result<Vec<_>, _>>()
                             .map_err(|err| {
-                                progress_percentage_metric.set(0.0);
                                 ReadySetError::ReplicationFailed(format!(
                                     "Failed converting to DfValue, table: {}, row: {}, err: {}",
                                     noria_table.table_name().display(Dialect::PostgreSQL),
@@ -581,23 +575,14 @@ impl TableDescription {
             } else {
                 noria_table
                     .insert_many(noria_rows_iter.collect::<Result<Vec<_>, _>>()?)
-                    .await
-                    .map_err(|err| {
-                        progress_percentage_metric.set(0.0);
-                        err
-                    })?;
+                    .await?
             }
 
             if snapshot_report_interval_secs != 0
                 && last_report_time.elapsed().as_secs() > snapshot_report_interval_secs
             {
                 last_report_time = Instant::now();
-                crate::log_snapshot_progress(
-                    start_time.elapsed(),
-                    cnt as i64,
-                    approximate_rows,
-                    &progress_percentage_metric,
-                );
+                crate::log_snapshot_progress(start_time.elapsed(), cnt as i64, approximate_rows);
             }
         }
 
@@ -613,7 +598,6 @@ impl TableDescription {
         }
 
         info!(rows_replicated = %cnt, "Snapshotting finished");
-        progress_percentage_metric.set(100.0);
 
         Ok(())
     }

@@ -8,12 +8,10 @@ use futures::future::TryFutureExt;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use itertools::Itertools;
-use metrics::register_gauge;
 use mysql::prelude::Queryable;
 use mysql::{Transaction, TxOpts};
 use mysql_async as mysql;
 use nom_sql::{DialectDisplay, NonReplicatedRelation, NotReplicatedReason, Relation};
-use readyset_client::metrics::recorded;
 use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_data::Dialect;
 use readyset_errors::{internal_err, ReadySetResult};
@@ -25,6 +23,7 @@ use tracing_futures::Instrument;
 
 use crate::db_util::DatabaseSchemas;
 use crate::table_filter::TableFilter;
+use crate::TablesSnapshottingGaugeHandle;
 
 const BATCH_SIZE: usize = 1000; // How many queries to buffer before pushing to ReadySet
 
@@ -400,10 +399,7 @@ impl MySqlReplicator {
         info!(rows = %nrows, "Snapshotting started");
 
         table_mutator.set_snapshot_mode(true).await?;
-        let progress_percentage_metric: metrics::Gauge = register_gauge!(
-            recorded::REPLICATOR_SNAPSHOT_PERCENT,
-            "name" => table_mutator.table_name().display(nom_sql::Dialect::MySQL).to_string(),
-        );
+        let _tables_snapshotting_metric_handle = TablesSnapshottingGaugeHandle::new();
 
         let start_time = Instant::now();
         let mut last_report_time = start_time;
@@ -418,7 +414,6 @@ impl MySqlReplicator {
                     break;
                 }
                 Err(err) => {
-                    progress_percentage_metric.set(0.0);
                     return Err(log_err(err));
                 }
             };
@@ -429,34 +424,25 @@ impl MySqlReplicator {
             if rows.len() == BATCH_SIZE {
                 // We aggregate rows into batches and then send them all to noria
                 let send_rows = std::mem::replace(&mut rows, Vec::with_capacity(BATCH_SIZE));
-                table_mutator.insert_many(send_rows).await.map_err(|err| {
-                    progress_percentage_metric.set(0.0);
-                    log_err(err)
-                })?;
+                table_mutator
+                    .insert_many(send_rows)
+                    .await
+                    .map_err(log_err)?;
             }
 
             if snapshot_report_interval_secs != 0
                 && last_report_time.elapsed().as_secs() > snapshot_report_interval_secs
             {
                 last_report_time = Instant::now();
-                crate::log_snapshot_progress(
-                    start_time.elapsed(),
-                    cnt as i64,
-                    nrows as i64,
-                    &progress_percentage_metric,
-                );
+                crate::log_snapshot_progress(start_time.elapsed(), cnt as i64, nrows as i64);
             }
         }
 
         if !rows.is_empty() {
-            table_mutator.insert_many(rows).await.map_err(|err| {
-                progress_percentage_metric.set(0.0);
-                log_err(err)
-            })?;
+            table_mutator.insert_many(rows).await.map_err(log_err)?;
         }
 
         info!(rows_replicated = %cnt, "Snapshotting finished");
-        progress_percentage_metric.set(100.0);
 
         Ok(())
     }
