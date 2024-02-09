@@ -64,7 +64,13 @@ check_dependencies() {
 
 download_demo_compose_file() {
   echo -e "${BLUE}${WHALE}Downloading the ReadySet Docker Compose file... ${NOCOLOR}"
-  curl -Ls -o readyset.compose.yml "https://raw.githubusercontent.com/readysettech/readyset/main/quickstart/compose.postgres.yml"
+  curl -Ls "https://raw.githubusercontent.com/readysettech/readyset/main/quickstart/compose.postgres.yml" > /tmp/readyset.compose.yml
+  sed "s|readyset-postgres|readyset|" /tmp/readyset.compose.yml > readyset.compose.yml
+  ls
+  echo "cwd:"
+  pwd
+  echo 'compose:'
+  cat readyset.compose.yml
 }
 
 download_byo_compose_file() {
