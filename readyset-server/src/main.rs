@@ -211,12 +211,12 @@ fn main() -> anyhow::Result<()> {
             ("opt_level", READYSET_VERSION.opt_level),
         ]
     );
-    metrics::counter!(
+    metrics::gauge!(
         recorded::NORIA_STARTUP_TIMESTAMP,
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
-            .as_millis() as u64
+            .as_millis() as f64
     );
 
     if let Some(volume_id) = &opts.worker_options.volume_id {

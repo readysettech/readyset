@@ -786,12 +786,12 @@ where
                 ("opt_level", READYSET_VERSION.opt_level),
             ]
         );
-        metrics::counter!(
+        metrics::gauge!(
             recorded::NORIA_STARTUP_TIMESTAMP,
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
-                .as_millis() as u64
+                .as_millis() as f64
         );
 
         let (shutdown_tx, shutdown_rx) = shutdown::channel();

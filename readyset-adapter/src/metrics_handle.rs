@@ -122,8 +122,8 @@ impl MetricsHandle {
     pub fn readyset_status(&self) -> Vec<(String, String)> {
         let mut statuses = Vec::new();
 
-        let time_ms = self.sum_counter(client_recorded::NORIA_STARTUP_TIMESTAMP);
-        let time = TimestampTz::from_unix_ms(time_ms);
+        let time_ms = self.sum_gauge(client_recorded::NORIA_STARTUP_TIMESTAMP);
+        let time = TimestampTz::from_unix_ms(time_ms as u64);
         statuses.push(("Process start time".to_string(), time.to_string()));
 
         let val = self.sum_gauge(readyset_client_metrics::recorded::CONNECTED_CLIENTS);
