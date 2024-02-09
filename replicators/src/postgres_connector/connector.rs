@@ -522,8 +522,11 @@ impl PostgresWalConnector {
 /// Not really needed when `TEMPORARY` slot is Used
 pub async fn drop_replication_slot(client: &mut pgsql::Client, name: &str) -> ReadySetResult<()> {
     info!(slot = name, "Dropping replication slot if exists");
+    // SQL command to drop the replication slot over replication connection
+    let formatted_command = format!("DROP_REPLICATION_SLOT {name}");
+
     let res: ReadySetResult<Vec<pgsql::SimpleQueryMessage>> = client
-        .simple_query(&format!("DROP_REPLICATION_SLOT {}", name))
+        .simple_query(&formatted_command)
         .await
         .map_err(ReadySetError::from);
 
