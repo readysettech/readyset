@@ -32,20 +32,33 @@ async fn last_statement_destination(conn: &mut DatabaseConnection) -> QueryDesti
     }
 }
 
-async fn replication_slot_exists(conn: &mut DatabaseConnection) -> bool {
-    const QUERY: &str = "SELECT slot_name FROM pg_replication_slots WHERE slot_name = 'readyset'";
+async fn replication_slot_exists(conn: &mut DatabaseConnection, slot_name: &str) -> bool {
+    const QUERY: &str = "SELECT slot_name FROM pg_replication_slots WHERE slot_name = $1";
     if let Ok(row) = match conn {
         DatabaseConnection::MySQL(_) => return false,
-        DatabaseConnection::PostgreSQL(client, _) => client.query_one(QUERY, &[]).await,
-        DatabaseConnection::PostgreSQLPool(client) => client.query_one(QUERY, &[]).await,
+        DatabaseConnection::PostgreSQL(client, _) => client.query_one(QUERY, &[&slot_name]).await,
+        DatabaseConnection::PostgreSQLPool(client) => client.query_one(QUERY, &[&slot_name]).await,
     } {
         let value: &str = row.get(0);
-        value == "readyset"
+        value == slot_name
     } else {
         false
     }
 }
 
+async fn create_replication_slot(conn: &mut DatabaseConnection, slot_name: &str) -> bool {
+    const QUERY: &str = "SELECT pg_create_logical_replication_slot($1, 'pgoutput')";
+    if let Ok(row) = match conn {
+        DatabaseConnection::MySQL(_) => return false,
+        DatabaseConnection::PostgreSQL(client, _) => client.query_one(QUERY, &[&slot_name]).await,
+        DatabaseConnection::PostgreSQLPool(client) => client.query_one(QUERY, &[&slot_name]).await,
+    } {
+        let value: &str = row.get(0);
+        value.contains(slot_name)
+    } else {
+        false
+    }
+}
 async fn publication_exists(conn: &mut DatabaseConnection) -> bool {
     const QUERY: &str = "SELECT pubname FROM pg_publication WHERE pubname = 'readyset'";
     if let Ok(row) = match conn {
@@ -62,6 +75,8 @@ async fn publication_exists(conn: &mut DatabaseConnection) -> bool {
 
 #[clustertest]
 async fn cleanup_works() {
+    let repl_slot_name = "readyset";
+    let resnapshot_repl_slot_name = "readyset_resnapshot_readyset";
     let deployment_name = "ct_cleanup_works";
     let mut deployment = readyset_postgres(deployment_name).start().await.unwrap();
 
@@ -90,7 +105,9 @@ async fn cleanup_works() {
 
     // At this point deployment related assets should still exist. Let's check for them.
     if let DatabaseConnection::PostgreSQL(_, _) = upstream {
-        assert!(replication_slot_exists(&mut upstream).await);
+        assert!(replication_slot_exists(&mut upstream, repl_slot_name).await);
+        assert!(create_replication_slot(&mut upstream, resnapshot_repl_slot_name).await);
+        assert!(replication_slot_exists(&mut upstream, resnapshot_repl_slot_name).await);
         assert!(publication_exists(&mut upstream).await);
     }
 
@@ -105,7 +122,8 @@ async fn cleanup_works() {
     // Wait for adapters to die naturally, which should happen when cleanup finishes.
     deployment.wait_for_adapter_death().await;
 
-    assert!(!replication_slot_exists(&mut upstream).await);
+    assert!(!replication_slot_exists(&mut upstream, repl_slot_name).await);
+    assert!(!replication_slot_exists(&mut upstream, resnapshot_repl_slot_name).await);
     assert!(!publication_exists(&mut upstream).await);
 }
 
