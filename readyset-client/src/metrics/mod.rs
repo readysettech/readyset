@@ -247,6 +247,21 @@ pub mod recorded {
     /// | packet_type | The type of packet |
     pub const DOMAIN_PACKETS_QUEUED: &str = "readyset_domain.packets_queued";
 
+    /// Histogram: The amount of time in microseconds an operator node spends handling a call to
+    /// `Ingredient::on_input`.
+    ///
+    /// | Tag | Description |
+    /// | --- | ----------- |
+    /// | ntype | The operator node type. |
+    pub const NODE_ON_INPUT_DURATION: &str = "readyset_domain.node_on_input_duration_us";
+
+    /// Counter: The number of times `Ingredient::on_input` has been invoked for a node.
+    ///
+    /// | Tag | Description |
+    /// | --- | ----------- |
+    /// | ntype | The operator node type. |
+    pub const NODE_ON_INPUT_INVOCATIONS: &str = "readyset_domain.node_on_input_invocations";
+
     /// Histogram: The time a snapshot takes to be performed.
     pub const REPLICATOR_SNAPSHOT_DURATION: &str = "readyset_replicator.snapshot_duration_us";
 
