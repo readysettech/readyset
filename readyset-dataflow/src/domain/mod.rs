@@ -77,6 +77,9 @@ pub struct Config {
 
     #[serde(default)]
     pub eviction_kind: crate::EvictionKind,
+
+    /// Whether to emit verbose metrics for the domain.
+    pub verbose_metrics: bool,
 }
 
 const BATCH_SIZE: usize = 256;
@@ -459,7 +462,7 @@ impl DomainBuilder {
 
             aggressively_update_state_sizes: self.config.aggressively_update_state_sizes,
 
-            metrics: domain_metrics::DomainMetrics::new(),
+            metrics: domain_metrics::DomainMetrics::new(self.config.verbose_metrics),
 
             eviction_kind: self.config.eviction_kind,
             remapped_keys: Default::default(),
