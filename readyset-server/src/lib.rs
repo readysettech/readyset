@@ -518,6 +518,7 @@ impl Default for Config {
                 // now.
                 table_request_timeout: Duration::from_millis(1800000),
                 eviction_kind: dataflow::EvictionKind::Random,
+                verbose_metrics: false,
             },
             persistence: Default::default(),
             min_workers: 1,
@@ -668,6 +669,17 @@ pub struct WorkerOptions {
         hide = true
     )]
     pub background_recovery_interval_seconds: u64,
+
+    /// Whether to emit verbose metrics for the domains on this worker. This should be used very
+    /// sparingly, as the metrics emitted will have high label cardinality and can be quite
+    /// expensive!
+    #[arg(
+        long,
+        env = "VERBOSE_DOMAIN_METRICS",
+        default_value = "false",
+        hide = true
+    )]
+    pub verbose_domain_metrics: bool,
 }
 
 impl WorkerOptions {

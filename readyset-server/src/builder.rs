@@ -95,6 +95,7 @@ impl Builder {
         ));
 
         builder.set_replication_strategy(opts.domain_replication_options.into());
+        builder.set_verbose_domain_metrics(opts.verbose_domain_metrics);
 
         if let Some(volume_id) = opts.volume_id {
             builder.set_volume_id(volume_id);
@@ -315,6 +316,12 @@ impl Builder {
     /// that field for more information.
     pub fn set_view_request_timeout(&mut self, value: std::time::Duration) {
         self.config.domain_config.view_request_timeout = value;
+    }
+
+    /// Sets the value of [`Config::domain_config::verbose_metrics`]. See documentation of
+    /// that field for more information.
+    pub fn set_verbose_domain_metrics(&mut self, value: bool) {
+        self.config.domain_config.verbose_metrics = value;
     }
 
     /// Sets the value of [`Config::domain_config::table_request_timeout`]. See documentation of
