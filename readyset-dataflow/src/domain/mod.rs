@@ -2765,8 +2765,7 @@ impl Domain {
 
         if let Some(node) = self.nodes.get(*source) {
             if node.borrow().is_base() {
-                self.metrics
-                    .inc_base_table_lookups(&cache_name, node.borrow().name());
+                self.metrics.inc_base_table_lookups(&cache_name);
             }
         }
 
