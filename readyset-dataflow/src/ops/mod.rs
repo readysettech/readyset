@@ -1,7 +1,10 @@
 use std::collections::{HashMap, HashSet};
+use std::time::Instant;
 
 use dataflow_state::PointKey;
 use derive_more::From;
+use metrics::{counter, histogram};
+use readyset_client::metrics::recorded;
 use readyset_client::KeyComparison;
 use readyset_errors::ReadySetResult;
 use serde::{Deserialize, Serialize};
@@ -151,7 +154,8 @@ impl Ingredient for NodeOperator {
         states: &StateMap,
         auxiliary_node_states: &mut AuxiliaryNodeStateMap,
     ) -> ReadySetResult<ProcessingResult> {
-        impl_ingredient_fn_mut!(
+        let start = Instant::now();
+        let result = impl_ingredient_fn_mut!(
             self,
             on_input,
             from,
@@ -160,7 +164,13 @@ impl Ingredient for NodeOperator {
             domain,
             states,
             auxiliary_node_states
-        )
+        );
+
+        let elapsed = start.elapsed().as_micros();
+        histogram!(recorded::NODE_ON_INPUT_DURATION, elapsed as f64, "ntype" => self.to_string());
+        counter!(recorded::NODE_ON_INPUT_INVOCATIONS, 1, "ntype" => self.to_string());
+
+        result
     }
     fn on_input_raw(
         &mut self,
