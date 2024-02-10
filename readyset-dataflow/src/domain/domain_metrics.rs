@@ -15,11 +15,15 @@ use crate::{Packet, PacketDiscriminants};
 /// Whenever possible the handles are generated at init time, others
 /// that require dynamic labels are created on demand and stored in
 /// a BTreeMap or a NodeMap.
-pub(super) struct DomainMetrics;
+pub(super) struct DomainMetrics {
+    /// Whether to record metrics that include metric labels with high cardinality. This flag
+    /// should be used very sparingly, as the cost of emitting these metrics could be quite high!
+    verbose: bool,
+}
 
 impl DomainMetrics {
-    pub(super) fn new() -> Self {
-        DomainMetrics
+    pub(super) fn new(verbose: bool) -> Self {
+        DomainMetrics { verbose }
     }
 
     pub(super) fn inc_eviction_requests(&self) {
@@ -44,45 +48,51 @@ impl DomainMetrics {
     }
 
     pub(super) fn rec_replay_time(&mut self, cache_name: &Relation, time: Duration) {
-        counter!(
-            recorded::DOMAIN_TOTAL_REPLAY_TIME,
-            time.as_micros() as u64,
-            "cache_name" => cache_name_to_string(cache_name)
-        );
+        if self.verbose {
+            counter!(
+                recorded::DOMAIN_TOTAL_REPLAY_TIME,
+                time.as_micros() as u64,
+                "cache_name" => cache_name_to_string(cache_name)
+            );
 
-        histogram!(
-            recorded::DOMAIN_REPLAY_TIME,
-            time.as_micros() as f64,
-            "cache_name" => cache_name_to_string(cache_name)
-        );
+            histogram!(
+                recorded::DOMAIN_REPLAY_TIME,
+                time.as_micros() as f64,
+                "cache_name" => cache_name_to_string(cache_name)
+            );
+        }
     }
 
     pub(super) fn rec_seed_replay_time(&mut self, cache_name: &Relation, time: Duration) {
-        counter!(
-            recorded::DOMAIN_TOTAL_SEED_REPLAY_TIME,
-            time.as_micros() as u64,
-            "cache_name" => cache_name_to_string(cache_name)
-        );
+        if self.verbose {
+            counter!(
+                recorded::DOMAIN_TOTAL_SEED_REPLAY_TIME,
+                time.as_micros() as u64,
+                "cache_name" => cache_name_to_string(cache_name)
+            );
 
-        histogram!(
-            recorded::DOMAIN_SEED_REPLAY_TIME,
-            time.as_micros() as f64,
-            "cache_name" => cache_name_to_string(cache_name)
-        );
+            histogram!(
+                recorded::DOMAIN_SEED_REPLAY_TIME,
+                time.as_micros() as f64,
+                "cache_name" => cache_name_to_string(cache_name)
+            );
+        }
     }
 
     pub(super) fn rec_finish_replay_time(&mut self, cache_name: &Relation, time: Duration) {
-        counter!(
-            recorded::DOMAIN_TOTAL_FINISH_REPLAY_TIME,
-            time.as_micros() as u64,
-            "cache_name" => cache_name_to_string(cache_name)
-        );
+        if self.verbose {
+            counter!(
+                recorded::DOMAIN_TOTAL_FINISH_REPLAY_TIME,
+                time.as_micros() as u64,
+                "cache_name" => cache_name_to_string(cache_name)
+            );
 
-        histogram!(
-            recorded::DOMAIN_FINISH_REPLAY_TIME,
-            time.as_micros() as f64,
-            "cache_name" => cache_name_to_string(cache_name)
-        );
+            histogram!(
+                recorded::DOMAIN_FINISH_REPLAY_TIME,
+                time.as_micros() as f64,
+                "cache_name" => cache_name_to_string(cache_name)
+            );
+        }
     }
 
     pub(super) fn rec_forward_time_input(&mut self, time: Duration) {
@@ -96,17 +106,19 @@ impl DomainMetrics {
     }
 
     pub(super) fn rec_reader_replay_time(&mut self, cache_name: &Relation, time: Duration) {
-        counter!(
-            recorded::DOMAIN_READER_TOTAL_REPLAY_REQUEST_TIME,
-            time.as_micros() as u64,
-            "cache_name" => cache_name_to_string(cache_name)
-        );
+        if self.verbose {
+            counter!(
+                recorded::DOMAIN_READER_TOTAL_REPLAY_REQUEST_TIME,
+                time.as_micros() as u64,
+                "cache_name" => cache_name_to_string(cache_name)
+            );
 
-        histogram!(
-            recorded::DOMAIN_READER_REPLAY_REQUEST_TIME,
-            time.as_micros() as f64,
-            "cache_name" => cache_name_to_string(cache_name)
-        );
+            histogram!(
+                recorded::DOMAIN_READER_REPLAY_REQUEST_TIME,
+                time.as_micros() as f64,
+                "cache_name" => cache_name_to_string(cache_name)
+            );
+        }
     }
 
     pub(super) fn inc_replay_misses(&mut self, cache_name: &Relation, n: usize) {
@@ -133,20 +145,24 @@ impl DomainMetrics {
     }
 
     pub(super) fn set_base_table_size(&self, name: &Relation, size: u64) {
-        gauge!(
-            recorded::ESTIMATED_BASE_TABLE_SIZE_BYTES,
-            size as f64,
-            "table_name" => cache_name_to_string(name),
-        );
+        if self.verbose {
+            gauge!(
+                recorded::ESTIMATED_BASE_TABLE_SIZE_BYTES,
+                size as f64,
+                "table_name" => cache_name_to_string(name),
+            );
+        }
     }
 
     pub(super) fn inc_base_table_lookups(&mut self, cache_name: &Relation, table_name: &Relation) {
-        counter!(
-            recorded::BASE_TABLE_LOOKUP_REQUESTS,
-            1,
-            "cache_name" => cache_name_to_string(cache_name),
-            "table_name" => cache_name_to_string(table_name)
-        );
+        if self.verbose {
+            counter!(
+                recorded::BASE_TABLE_LOOKUP_REQUESTS,
+                1,
+                "cache_name" => cache_name_to_string(cache_name),
+                "table_name" => cache_name_to_string(table_name)
+            );
+        }
     }
 }
 
