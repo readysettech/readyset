@@ -154,13 +154,12 @@ impl DomainMetrics {
         }
     }
 
-    pub(super) fn inc_base_table_lookups(&mut self, cache_name: &Relation, table_name: &Relation) {
+    pub(super) fn inc_base_table_lookups(&mut self, cache_name: &Relation) {
         if self.verbose {
             counter!(
                 recorded::BASE_TABLE_LOOKUP_REQUESTS,
                 1,
                 "cache_name" => cache_name_to_string(cache_name),
-                "table_name" => cache_name_to_string(table_name)
             );
         }
     }
