@@ -999,6 +999,7 @@ impl<'a> PostgresReplicator<'a> {
         ON n.oid = c.relnamespace
         WHERE c.relkind IN ($1) AND n.nspname <> 'pg_catalog'
                                 AND n.nspname <> 'information_schema'
+                                AND n.nspname <> 'readyset'
                                 AND n.nspname !~ '^pg_toast'
                                 AND c.oid NOT IN(
         SELECT c.oid
