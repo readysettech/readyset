@@ -218,6 +218,8 @@ impl AdapterBuilder {
                 "--allow-unauthenticated-connections".to_string(),
                 "--migration-request-timeout-ms".to_string(),
                 "1000".to_string(),
+                "--query-log-mode".to_string(),
+                "verbose".to_string(),
             ],
             auto_restart: false,
         }
