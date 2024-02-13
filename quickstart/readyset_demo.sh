@@ -77,12 +77,12 @@ check_dependencies() {
 
 download_demo_compose_file() {
   echo -e "${BLUE}${WHALE}Downloading the ReadySet Docker Compose file... ${NOCOLOR}"
-  curl -Ls -o readyset.compose.yml "https://raw.githubusercontent.com/readysettech/readyset/main/quickstart/compose.postgres.yml"
+  curl -Ls -o readyset.compose.yml "https://raw.githubusercontent.com/readysettech/readyset/current/quickstart/compose.postgres.yml"
 }
 
 download_byo_compose_file() {
   echo -e "${BLUE}${WHALE}Downloading the ReadySet Docker Compose file... ${NOCOLOR}"
-  curl -Ls -o /tmp/readyset.compose.yml "https://raw.githubusercontent.com/readysettech/readyset/main/quickstart/compose.yml"
+  curl -Ls -o /tmp/readyset.compose.yml "https://raw.githubusercontent.com/readysettech/readyset/current/quickstart/compose.yml"
 }
 
 run_docker_compose() {
@@ -383,7 +383,7 @@ free_form_connect() {
   else
     echo -e "${BLUE}Type 'exit' to exit.${NOCOLOR}"
     parse_mysql_connection_string
-    mysql -h "127.0.0.1" -P "3307" -u $username -p$password
+    mysql -h "127.0.0.1" -P "3307" -u "$username" -p"$password"
   fi
 }
 
