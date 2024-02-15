@@ -4071,6 +4071,7 @@ dependencies = [
  "bytes",
  "chrono",
  "cidr",
+ "criterion",
  "database-utils",
  "eui48",
  "futures",

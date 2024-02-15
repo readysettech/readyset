@@ -47,3 +47,8 @@ tokio-test = "0.4.1"
 database-utils = { path = "../database-utils" }
 readyset-tracing = { path = "../readyset-tracing" }
 postgres-native-tls = { workspace = true }
+criterion = { workspace = true, features = ["html_reports"] }
+
+[[bench]]
+name = "parse"
+harness = false
