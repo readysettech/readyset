@@ -110,7 +110,6 @@ pub async fn cleanup(config: UpstreamConfig) -> ReadySetResult<()> {
             }
             _ => REPLICATION_SLOT.to_string(),
         };
-        let resnapshot_slot_name = resnapshot_slot_name(&repl_slot_name);
 
         let dbname = options.get_dbname().ok_or_else(|| {
             ReadySetError::ReplicationFailed("No database specified for replication".to_string())
@@ -125,20 +124,15 @@ pub async fn cleanup(config: UpstreamConfig) -> ReadySetResult<()> {
         let _connection_handle = tokio::spawn(connection);
 
         drop_publication(&mut client, &repl_slot_name).await?;
-        // Drop primary replication slot
+
         drop_replication_slot(&mut client, &repl_slot_name).await?;
-        // Drop resnapshot replication slot (if exists, if does not we output debug message)
-        drop_replication_slot(&mut client, &resnapshot_slot_name).await?;
-        // Drop schema
+
         drop_readyset_schema(&mut client).await?;
     }
 
     Ok(())
 }
 
-pub fn resnapshot_slot_name(repl_slot_name: &String) -> String {
-    format!("{}_{}", RESNAPSHOT_SLOT, repl_slot_name)
-}
 /// An adapter that converts database events into ReadySet API calls
 pub struct NoriaAdapter {
     /// The ReadySet API handle
@@ -595,7 +589,7 @@ impl NoriaAdapter {
 
         info!("Connected to PostgreSQL");
 
-        let resnapshot_slot_name = resnapshot_slot_name(&repl_slot_name);
+        let resnapshot_slot_name = format!("{}_{}", RESNAPSHOT_SLOT, repl_slot_name);
         let replication_slot = if let Some(slot) = &connector.replication_slot {
             Some(slot.clone())
         } else {
