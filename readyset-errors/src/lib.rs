@@ -7,7 +7,7 @@ use std::error::Error;
 use std::io;
 
 use derive_more::Display;
-use nom_sql::Relation;
+use nom_sql::{DialectDisplay, Relation, SelectStatement};
 use petgraph::graph::NodeIndex;
 use readyset_util::redacted::Sensitive;
 use serde::{Deserialize, Serialize};
@@ -286,6 +286,10 @@ pub enum ReadySetError {
     /// A view couldn't be found.
     #[error("Could not find view {0}")]
     ViewNotFound(String),
+
+    /// A view couldn't be found for the given query.
+    #[error("Could not find view for query {}", Sensitive(&statement.display(nom_sql::Dialect::MySQL)))]
+    ViewNotFoundForQuery { statement: SelectStatement },
 
     /// A view couldn't be found in the given pool of worker.
     #[error("Could not find view '{name}' in workers '{workers:?}'")]

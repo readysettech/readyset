@@ -2235,7 +2235,11 @@ where
                         // If the QSC didn't have this query, check with the controller to see if a
                         // view already exists there
                         if migration_state.is_none()
-                            && self.noria.get_view_status(view_request.clone()).await?
+                            && self
+                                .noria
+                                .get_view_name(view_request.clone())
+                                .await?
+                                .is_some()
                         {
                             migration_state = Some(MigrationState::Successful);
                         }
