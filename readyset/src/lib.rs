@@ -996,12 +996,14 @@ where
             let loop_interval = options.views_polling_interval;
             let expr_dialect = self.expr_dialect;
             let shutdown_rx = shutdown_rx.clone();
+            let view_name_cache = view_name_cache.clone();
             let fut = async move {
                 let mut views_synchronizer = ViewsSynchronizer::new(
                     rh,
                     query_status_cache,
                     std::time::Duration::from_secs(loop_interval),
                     expr_dialect,
+                    view_name_cache.new_local(),
                 );
                 views_synchronizer.run(shutdown_rx).await
             };
