@@ -429,6 +429,25 @@ impl BuiltinFunction {
                     DfType::DEFAULT_TEXT,
                 )
             }
+            "date_trunc" => {
+                // this is the time unit (precision) to truncate by ('hour', 'minute', and so on).
+                // called 'field' in the postgres docs.
+                let precision = next_arg()?;
+
+                // next is an Expr that evaluates to either timestamp or timestamptz.
+                // the postgres date_trunc() function also accepts INTERVAL, but that's
+                // not a supported type in DfType as of March-2024.
+                let source = next_arg()?;
+                let ret_type = source.ty().clone();
+
+                // last is an optional time zone argument to the function.
+                // We do not yet support the optional time zone.
+                if args.next().is_some() {
+                    unsupported!("The time zone parameter is not yet supported.");
+                }
+
+                (Self::DateTrunc(precision, source), ret_type)
+            }
             _ => unsupported!("Function {name} does not exist"),
         };
 

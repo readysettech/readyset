@@ -1,0 +1,111 @@
+# tests for readyset's support of the postgres builtin function `date_trunc`.
+# these are based on the tests from postgres's regression tests (located in
+# `//postgres/src/test/regress/expected/`).
+# Note: the outputs from the postgres regression files are in a different `datestyle`
+# than ISO (which is all readyset deals with), so the outputs here a slightly
+# translated from the original test code.
+
+# `timestamp` type conversions
+statement ok
+CREATE TABLE trunc_test_ts(id int, ts timestamp)
+
+statement ok
+INSERT INTO trunc_test_ts values(1, '1970-03-20 04:30:00.00000')
+
+query D nosort
+SELECT DATE_TRUNC('millennium', ts) from trunc_test_ts where id = 1 
+----
+1001-01-01 00:00:00
+
+query D nosort
+SELECT DATE_TRUNC('CENTURY', ts) from trunc_test_ts where id = 1 
+----
+1901-01-01 00:00:00
+
+statement ok
+INSERT INTO trunc_test_ts values(2, '2004-02-29 15:44:17.71393')
+
+query D nosort
+SELECT DATE_TRUNC('week', ts) from trunc_test_ts where id = 2 
+----
+2004-02-23 00:00:00
+
+statement ok
+INSERT INTO trunc_test_ts values(3, '214-02-05 15:40:00 BC')
+
+query D nosort
+SELECT ts from trunc_test_ts where id = 3
+----
+0214-02-05 15:40:00 BC
+
+query D nosort
+SELECT DATE_TRUNC('year', ts) from trunc_test_ts where id = 3
+----
+0214-01-01 00:00:00 BC
+
+query D nosort
+SELECT DATE_TRUNC('century', ts) from trunc_test_ts where id = 3
+----
+0300-01-01 00:00:00 BC
+
+query D nosort
+SELECT DATE_TRUNC('millennium', ts) from trunc_test_ts where id = 3
+----
+1000-01-01 00:00:00 BC
+
+
+# `timestamptz` type conversions
+statement ok
+CREATE TABLE trunc_test_tstz(id int, ts timestamptz)
+
+statement ok
+INSERT INTO trunc_test_tstz values(1, '2004-02-29 15:44:17.71393-0800')
+
+query Z nosort
+SELECT DATE_TRUNC('week', ts) from trunc_test_tstz where id = 1
+----
+2004-02-23 00:00:00-0000
+
+
+# `date` type conversions
+statement ok
+CREATE TABLE trunc_test_date(id int, d date)
+
+statement ok
+INSERT INTO trunc_test_date values(1, '1970-03-20')
+
+query D nosort
+SELECT DATE_TRUNC('millennium', d) from trunc_test_date where id = 1
+----
+1001-01-01 00:00:00
+
+query D nosort
+SELECT DATE_TRUNC('century', d) from trunc_test_date where id = 1
+----
+1901-01-01 00:00:00
+
+statement ok
+INSERT INTO trunc_test_date values(2, '2004-08-10')
+
+query D nosort
+SELECT DATE_TRUNC('century', d) from trunc_test_date where id = 2
+----
+2001-01-01 00:00:00
+
+statement ok
+INSERT INTO trunc_test_date values(3, '0004-02-02')
+
+query D nosort
+SELECT DATE_TRUNC('century', d) from trunc_test_date where id = 3
+----
+0001-01-01 00:00:00
+
+statement ok
+INSERT INTO trunc_test_date values(4, '1993-12-25')
+
+query D nosort
+SELECT DATE_TRUNC('decade', d) from trunc_test_date where id = 4
+----
+1990-01-01 00:00:00
+
+
