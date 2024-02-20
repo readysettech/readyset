@@ -193,6 +193,7 @@ fn main() -> anyhow::Result<()> {
         recs.push(MetricsRecorder::Prometheus(
             PrometheusBuilder::new()
                 .add_global_label("deployment", &opts.deployment)
+                .set_quantiles(&readyset_client::metrics::HISTOGRAM_QUANTILES)?
                 .build_recorder(),
         ));
     }
