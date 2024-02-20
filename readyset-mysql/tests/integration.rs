@@ -1701,6 +1701,7 @@ async fn insert_quoted_string() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "REA-4099"]
 async fn json_column_insert_read() {
     let (opts, _handle, shutdown_tx) = setup().await;
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();

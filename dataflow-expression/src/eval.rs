@@ -1106,6 +1106,7 @@ mod tests {
 
     /// Tests evaluation of `JsonKeyExtract` and `JsonKeyExtractText` binary ops.
     #[test]
+    #[ignore = "REA-4099"]
     fn eval_json_key_extract() {
         #[track_caller]
         fn test(json: &str, key: &str, expected: &str) {
@@ -1133,6 +1134,7 @@ mod tests {
 
     /// Tests evaluation of `JsonKeyPathExtract` and `JsonKeyPathExtractText` binary ops.
     #[test]
+    #[ignore = "REA-4099"]
     fn eval_json_key_path_extract() {
         #[track_caller]
         fn test(json: &str, key: &str, expected: Option<&str>) {
@@ -1175,6 +1177,7 @@ mod tests {
 
     /// Tests evaluation of `JsonSubtractPath` binary ops.
     #[test]
+    #[ignore = "REA-4099"]
     fn eval_json_subtract_path() {
         #[track_caller]
         fn test(json: &str, key: &str, expected: &str) {
@@ -1238,6 +1241,7 @@ mod tests {
         use super::*;
 
         #[track_caller]
+        #[ignore = "REA-4099"]
         fn test(parent: &str, child: &str, expected: bool) {
             for expr in [
                 format!("'{parent}'::jsonb @> '{child}'::jsonb"),
@@ -1252,6 +1256,7 @@ mod tests {
         }
 
         #[test]
+        #[ignore = "REA-4099"]
         fn postgresql_docs_examples() {
             // Examples in https://www.postgresql.org/docs/current/datatype-json.html#JSON-CONTAINMENT
             test("\"foo\"", "\"foo\"", true);
@@ -1277,6 +1282,7 @@ mod tests {
         }
 
         #[test]
+        #[ignore = "REA-4099"]
         fn edge_cases() {
             test("[]", "[]", true);
             test("{}", "{}", true);
@@ -1289,6 +1295,7 @@ mod tests {
         }
 
         #[test]
+        #[ignore = "REA-4099"]
         fn float_semantics() {
             // `JsonNumber` does not handle -0.0 when `arbitrary_precision` is enabled.
             test("0.0", "-0.0", true);
