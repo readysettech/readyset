@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
 use crate::common::{column_identifier_no_alias, function_expr, ws_sep_comma};
-use crate::literal::literal;
+use crate::literal::{literal, Double, Float};
 use crate::select::nested_selection;
 use crate::set::{variable_scope_prefix, Variable};
 use crate::sql_type::{mysql_int_cast_targets, type_identifier};
@@ -1216,10 +1216,35 @@ where
             _ => unreachable!("Invalid fixity for prefix op"),
         };
 
-        Ok(Expr::UnaryOp {
-            op,
-            rhs: Box::new(rhs),
-        })
+        if op == UnaryOperator::Neg {
+            match rhs {
+                Expr::Literal(Literal::UnsignedInteger(i)) => {
+                    Ok(Expr::Literal(Literal::Integer(-(i as i64))))
+                }
+                Expr::Literal(Literal::Integer(i)) => Ok(Expr::Literal(Literal::Integer(-i))),
+                Expr::Literal(Literal::Float(Float { value, precision })) => {
+                    Ok(Expr::Literal(Literal::Float(Float {
+                        value: -value,
+                        precision,
+                    })))
+                }
+                Expr::Literal(Literal::Double(Double { value, precision })) => {
+                    Ok(Expr::Literal(Literal::Double(Double {
+                        value: -value,
+                        precision,
+                    })))
+                }
+                rhs => Ok(Expr::UnaryOp {
+                    op,
+                    rhs: Box::new(rhs),
+                }),
+            }
+        } else {
+            Ok(Expr::UnaryOp {
+                op,
+                rhs: Box::new(rhs),
+            })
+        }
     }
 
     fn postfix(
@@ -1699,10 +1724,7 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 Expr::Cast {
-                    expr: Box::new(Expr::UnaryOp {
-                        op: UnaryOperator::Neg,
-                        rhs: Box::new(Expr::Literal(Literal::Integer(128))),
-                    }),
+                    expr: Box::new(Expr::Literal(Literal::Integer(-128))),
                     ty: SqlType::UnsignedBigInt(None),
                     postgres_style: false
                 }
@@ -2267,10 +2289,7 @@ mod tests {
         #[test]
         fn neg_integer() {
             let qs = b"-256";
-            let expected = Expr::UnaryOp {
-                op: UnaryOperator::Neg,
-                rhs: Box::new(Expr::Literal(Literal::Integer(256))),
-            };
+            let expected = Expr::Literal(Literal::Integer(-256));
             let (remaining, result) =
                 to_nom_result(expression(Dialect::MySQL)(LocatedSpan::new(qs))).unwrap();
             assert_eq!(std::str::from_utf8(remaining).unwrap(), "");
@@ -2315,10 +2334,7 @@ mod tests {
             let qs = b"NOT -1";
             let expected = Expr::UnaryOp {
                 op: UnaryOperator::Not,
-                rhs: Box::new(Expr::UnaryOp {
-                    op: UnaryOperator::Neg,
-                    rhs: Box::new(Expr::Literal(Literal::Integer(1))),
-                }),
+                rhs: Box::new(Expr::Literal(Literal::Integer(-1))),
             };
             let (remaining, result) =
                 to_nom_result(expression(Dialect::MySQL)(LocatedSpan::new(qs))).unwrap();
@@ -2329,13 +2345,7 @@ mod tests {
         #[test]
         fn neg_neg() {
             let qs = b"--1";
-            let expected = Expr::UnaryOp {
-                op: UnaryOperator::Neg,
-                rhs: Box::new(Expr::UnaryOp {
-                    op: UnaryOperator::Neg,
-                    rhs: Box::new(Expr::Literal(Literal::Integer(1))),
-                }),
-            };
+            let expected = Expr::Literal(Literal::Integer(1));
             let (remaining, result) =
                 to_nom_result(expression(Dialect::MySQL)(LocatedSpan::new(qs))).unwrap();
             assert_eq!(std::str::from_utf8(remaining).unwrap(), "");

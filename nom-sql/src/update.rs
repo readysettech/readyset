@@ -162,8 +162,7 @@ mod tests {
         use super::*;
         use crate::column::Column;
         use crate::table::Relation;
-        use crate::Expr::UnaryOp;
-        use crate::{BinaryOperator, Double, FunctionExpr, ItemPlaceholder, UnaryOperator};
+        use crate::{BinaryOperator, Double, FunctionExpr, ItemPlaceholder};
 
         #[test]
         fn updated_with_neg_float() {
@@ -185,13 +184,10 @@ mod tests {
                     table: Relation::from("stories"),
                     fields: vec![(
                         Column::from("hotness"),
-                        UnaryOp {
-                            op: UnaryOperator::Neg,
-                            rhs: Box::new(Expr::Literal(Literal::Double(Double {
-                                value: 19216.5479744,
-                                precision: 7,
-                            })))
-                        },
+                        Expr::Literal(Literal::Double(Double {
+                            value: -19216.5479744,
+                            precision: 7,
+                        }))
                     )],
                     where_clause: expected_where_cond,
                 }
@@ -261,8 +257,7 @@ mod tests {
         use super::*;
         use crate::column::Column;
         use crate::table::Relation;
-        use crate::Expr::UnaryOp;
-        use crate::{BinaryOperator, Double, UnaryOperator};
+        use crate::{BinaryOperator, Double};
 
         #[test]
         fn updated_with_neg_float() {
@@ -284,13 +279,10 @@ mod tests {
                     table: Relation::from("stories"),
                     fields: vec![(
                         Column::from("hotness"),
-                        UnaryOp {
-                            op: UnaryOperator::Neg,
-                            rhs: Box::new(Expr::Literal(Literal::Double(Double {
-                                value: 19216.5479744,
-                                precision: 7,
-                            })))
-                        },
+                        Expr::Literal(Literal::Double(Double {
+                            value: -19216.5479744,
+                            precision: 7,
+                        }))
                     ),],
                     where_clause: expected_where_cond,
                 }

@@ -93,6 +93,14 @@ async fn example_exprs_eval_same_as_mysql() {
     for expr in [
         "1 != 2",
         "1 != 1",
+        // TODO(ethan) These currently fail
+        // "-1 = -1",
+        // "-1.0 = -1.0",
+        // "-1 = -1.0",
+        "1 = --1",
+        "1 != -1",
+        "1.0 = --1.0",
+        "1.0 != -1.0",
         "4 + 5",
         "4 + '5'",
         "5 > 4",
