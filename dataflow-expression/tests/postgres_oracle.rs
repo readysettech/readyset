@@ -70,10 +70,9 @@ async fn example_exprs_eval_same_as_postgres() {
         "1 != 1",
         "4 + 5",
         "5 > 4",
-        // TODO(ethan) These currently fail
-        // "-1 = -1",
-        // "-1.0 = -1.0",
-        // "-1 = -1.0",
+        "-1 = -1",
+        "-1.0 = -1.0",
+        "-1 = -1.0",
         "1 != -1",
         "1.0 != -1.0",
         "'a' like 'A'",
