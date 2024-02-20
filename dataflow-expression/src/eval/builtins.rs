@@ -1,21 +1,28 @@
 use std::borrow::Borrow;
 use std::cmp::Ordering;
-use std::fmt::Write;
+use std::fmt::{self, Write};
 use std::ops::{Add, Div, Mul, Sub};
+use std::str::FromStr;
 
-use chrono::{Datelike, LocalResult, Month, NaiveDate, NaiveDateTime, TimeZone, Timelike, Weekday};
+use chrono::{
+    Datelike, LocalResult, Month, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Timelike, Weekday,
+};
 use chrono_tz::Tz;
 use itertools::Either;
 use mysql_time::MySqlTime;
 use readyset_data::{DfType, DfValue};
-use readyset_errors::{invalid_query_err, ReadySetError, ReadySetResult};
+use readyset_errors::{invalid_query_err, unsupported, ReadySetError, ReadySetResult};
 use readyset_util::math::integer_rnd;
 use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 use rust_decimal::Decimal;
 use serde_json::Value as JsonValue;
+use test_strategy::Arbitrary;
 use vec1::Vec1;
 
 use crate::{BuiltinFunction, Expr};
+
+const NANOS_IN_MICRO: u32 = 1_000;
+const NANOS_IN_MILLI: u32 = 1_000_000;
 
 macro_rules! try_cast_or_none {
     ($df_value:expr, $to_ty:expr, $from_ty:expr) => {{
@@ -106,6 +113,163 @@ fn addtime_datetime(time1: &NaiveDateTime, time2: &MySqlTime) -> NaiveDateTime {
 
 fn addtime_times(time1: &MySqlTime, time2: &MySqlTime) -> MySqlTime {
     time1.add(*time2)
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Ord, PartialOrd, Arbitrary)]
+pub enum DateTruncPrecision {
+    Microseconds,
+    Milliseconds,
+    Second,
+    Minute,
+    Hour,
+    Day,
+    Week,
+    Month,
+    Quarter,
+    Year,
+    Decade,
+    Century,
+    Millennium,
+}
+
+impl fmt::Display for DateTruncPrecision {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            DateTruncPrecision::Microseconds => write!(f, "microseconds"),
+            DateTruncPrecision::Milliseconds => write!(f, "milliseconds"),
+            DateTruncPrecision::Second => write!(f, "second"),
+            DateTruncPrecision::Minute => write!(f, "minute"),
+            DateTruncPrecision::Hour => write!(f, "hour"),
+            DateTruncPrecision::Day => write!(f, "day"),
+            DateTruncPrecision::Week => write!(f, "week"),
+            DateTruncPrecision::Month => write!(f, "month"),
+            DateTruncPrecision::Quarter => write!(f, "quarter"),
+            DateTruncPrecision::Year => write!(f, "year"),
+            DateTruncPrecision::Decade => write!(f, "decade"),
+            DateTruncPrecision::Century => write!(f, "century"),
+            DateTruncPrecision::Millennium => write!(f, "millennium"),
+        }
+    }
+}
+
+impl FromStr for DateTruncPrecision {
+    type Err = ReadySetError;
+
+    fn from_str(s: &str) -> ReadySetResult<DateTruncPrecision> {
+        match s.to_lowercase().as_str() {
+            "microseconds" => Ok(DateTruncPrecision::Microseconds),
+            "milliseconds" => Ok(DateTruncPrecision::Milliseconds),
+            "second" => Ok(DateTruncPrecision::Second),
+            "minute" => Ok(DateTruncPrecision::Minute),
+            "hour" => Ok(DateTruncPrecision::Hour),
+            "day" => Ok(DateTruncPrecision::Day),
+            "week" => Ok(DateTruncPrecision::Week),
+            "month" => Ok(DateTruncPrecision::Month),
+            "quarter" => Ok(DateTruncPrecision::Quarter),
+            "year" => Ok(DateTruncPrecision::Year),
+            "decade" => Ok(DateTruncPrecision::Decade),
+            "century" => Ok(DateTruncPrecision::Century),
+            "millennium" => Ok(DateTruncPrecision::Millennium),
+            _ => unsupported!("Unknown precision value: {}", s),
+        }
+    }
+}
+
+impl TryFrom<&DfValue> for DateTruncPrecision {
+    type Error = ReadySetError;
+
+    fn try_from(v: &DfValue) -> ReadySetResult<DateTruncPrecision> {
+        match v.as_str() {
+            Some(s) => s.parse(),
+            None => unsupported!("Unsupported precision: {:?}", v),
+        }
+    }
+}
+
+fn date_trunc(precision: DateTruncPrecision, dt: NaiveDateTime) -> ReadySetResult<NaiveDateTime> {
+    // note: cannot use the `DurationRound::duration_trunc()` fn as it calls
+    // `NaiveDateTime::timestamp_nanos_opt()`, and that can only represent dates between 1677 AD
+    // and 2262 AD (see chrono docs). Thus, we do the time truncations ourselves.
+    match precision {
+        DateTruncPrecision::Microseconds => {
+            let nanos = dt.nanosecond().saturating_div(NANOS_IN_MICRO);
+            Ok(dt
+                .date()
+                .and_hms_nano_opt(dt.hour(), dt.minute(), dt.second(), nanos)
+                .unwrap())
+        }
+        DateTruncPrecision::Milliseconds => {
+            let nanos = dt.nanosecond().saturating_div(NANOS_IN_MILLI);
+            Ok(dt
+                .date()
+                .and_hms_nano_opt(dt.hour(), dt.minute(), dt.second(), nanos)
+                .unwrap())
+        }
+        DateTruncPrecision::Second => Ok(dt
+            .date()
+            .and_hms_opt(dt.hour(), dt.minute(), dt.second())
+            .unwrap()),
+        DateTruncPrecision::Minute => Ok(dt.date().and_hms_opt(dt.hour(), dt.minute(), 0).unwrap()),
+        DateTruncPrecision::Hour => Ok(dt.date().and_hms_opt(dt.hour(), 0, 0).unwrap()),
+        DateTruncPrecision::Day => Ok(NaiveDateTime::new(dt.date(), NaiveTime::MIN)),
+        // 'week' truncates to the previous Monday (unless the date is already Monday).
+        // That is part of the ISO-8601 standard.
+        DateTruncPrecision::Week => Ok(NaiveDateTime::new(
+            dt.date() - chrono::Duration::days(dt.weekday().num_days_from_monday() as i64),
+            NaiveTime::MIN,
+        )),
+        DateTruncPrecision::Month => Ok(NaiveDateTime::new(
+            NaiveDate::from_ymd_opt(dt.year(), dt.month(), 1).unwrap(),
+            NaiveTime::MIN,
+        )),
+        // 'quarter', also part of the ISO-8601 standard, resolves to the first date
+        // of every three months (Jan/Apr/July/Oct).
+        DateTruncPrecision::Quarter => {
+            let quarter_month = ((dt.month0() / 3) * 3) + 1;
+            Ok(NaiveDateTime::new(
+                NaiveDate::from_ymd_opt(dt.year(), quarter_month, 1).unwrap(),
+                NaiveTime::MIN,
+            ))
+        }
+        DateTruncPrecision::Year => Ok(NaiveDateTime::new(
+            NaiveDate::from_ymd_opt(dt.year(), 1, 1).unwrap(),
+            NaiveTime::from_hms_opt(0, 0, 0).unwrap(),
+        )),
+        DateTruncPrecision::Decade => {
+            let year = dt.year();
+            let decade = year - (year % 10);
+            Ok(NaiveDateTime::new(
+                NaiveDate::from_ymd_opt(decade, 1, 1).unwrap(),
+                NaiveTime::MIN,
+            ))
+        }
+        // 'century' truncation does not reduce to '2000', but '2001'.
+        DateTruncPrecision::Century => {
+            let year = dt.year();
+            let century = if year > 0 {
+                ((year + 99) / 100) * 100 - 99
+            } else {
+                -((99 - (year - 1)) / 100) * 100 + 1
+            };
+            Ok(NaiveDateTime::new(
+                NaiveDate::from_ymd_opt(century, 1, 1).unwrap(),
+                NaiveTime::MIN,
+            ))
+        }
+        // // 'millennium' truncation does not reduce to '2000', but '2001'.
+        DateTruncPrecision::Millennium => {
+            let year = dt.year();
+            let millennium = if year > 0 {
+                ((year + 999) / 1000) * 1000 - 999
+            } else {
+                -((999 - (year - 1)) / 1000) * 1000 + 1
+            };
+            Ok(NaiveDateTime::new(
+                NaiveDate::from_ymd_opt(millennium, 1, 1).unwrap(),
+                NaiveTime::MIN,
+            ))
+        }
+    }
 }
 
 /// Format the given time value according to the given `format_string`, using the [MySQL date
@@ -838,6 +1002,36 @@ impl BuiltinFunction {
                 }
 
                 Ok(res.into())
+            }
+            BuiltinFunction::DateTrunc(precision, source) => {
+                let precision =
+                    DateTruncPrecision::try_from(&non_null!(precision.eval(record)?)).unwrap();
+
+                // When we eval on the `source`, we'll get a TimestampTz, regardless if the user
+                // passed a timestamp or timestamptz, or if they wanted to cast to
+                // timestamp or timestamptz. Thus, we'll need to coerce to the return type
+                // (hopefully we figured that out correctly in the lowering).
+                let ts = non_null!(source.eval(record)?);
+                let coerced = ts.coerce_to(ty, &DfType::Unknown)?;
+                let timestamptz = match coerced {
+                    DfValue::TimestampTz(t) => t,
+                    _ => {
+                        // when PG can't figure out what date_trunc() to invoke, it errors like:
+                        // ERROR:  function date_trunc(unknown, unknown) is not unique.
+                        // HINT:  Could not choose a best candidate function. You might need to add
+                        // explicit type casts.
+                        // typically this is due to a literal timestamp string with not casting:
+                        // date_trunc('day', '2038-01-01 03:08:00 -05:00')
+                        return Err(invalid_query_err!(
+                            "You might need to add explicit type casts to date_trunc() arguments."
+                        ));
+                    }
+                };
+
+                let datetime = timestamptz.to_chrono();
+                Ok(DfValue::from(
+                    date_trunc(precision, datetime.naive_utc()).unwrap(),
+                ))
             }
         }
     }

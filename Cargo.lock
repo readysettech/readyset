@@ -1295,6 +1295,7 @@ dependencies = [
  "mysql_async",
  "nom-sql",
  "partial-map",
+ "postgres 0.19.7",
  "proptest",
  "readyset-data",
  "readyset-errors",
