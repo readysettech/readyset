@@ -180,8 +180,10 @@ impl QueryLogger {
                         Some(ReadysetExecutionEvent::CacheRead { cache_misses, num_keys, duration, cache_name }) => {
                             let mut labels = vec![("cache_name", SharedString::from(cache_name.display_unquoted().to_string()))];
 
-                            counter!(recorded::QUERY_LOG_TOTAL_KEYS_READ, num_keys, &labels);
-                            counter!(recorded::QUERY_LOG_TOTAL_CACHE_MISSES, cache_misses, &labels);
+                            if mode.is_verbose() {
+                                counter!(recorded::QUERY_LOG_TOTAL_KEYS_READ, num_keys, &labels);
+                                counter!(recorded::QUERY_LOG_TOTAL_CACHE_MISSES, cache_misses, &labels);
+                            }
 
                             labels.push(("database_type", SharedString::from(DatabaseType::ReadySet)));
 
