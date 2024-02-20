@@ -193,6 +193,7 @@ fn main() -> anyhow::Result<()> {
         recs.push(MetricsRecorder::Prometheus(
             PrometheusBuilder::new()
                 .add_global_label("deployment", &opts.deployment)
+                .set_quantiles(&[0.5, 0.9, 0.99])?
                 .build_recorder(),
         ));
     }

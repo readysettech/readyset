@@ -750,6 +750,7 @@ where
             let recorder = PrometheusBuilder::new()
                 .add_global_label("upstream_db_type", database_label)
                 .add_global_label("deployment", &options.deployment)
+                .set_quantiles(&[0.5, 0.9, 0.99])?
                 .build_recorder();
 
             let handle = recorder.handle();
