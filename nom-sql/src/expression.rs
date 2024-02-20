@@ -1092,32 +1092,11 @@ where
         // separate precedence/associativity table) per SQL dialect that we support but for now
         // this seems to be good enough.
         Ok(match input {
-            Infix(And) => Affix::Infix(Precedence(4), Associativity::Right),
-            Infix(Or) => Affix::Infix(Precedence(2), Associativity::Right),
-            Infix(Like) => Affix::Infix(Precedence(7), Associativity::Right),
-            Infix(NotLike) => Affix::Infix(Precedence(7), Associativity::Right),
-            Infix(ILike) => Affix::Infix(Precedence(7), Associativity::Right),
-            Infix(NotILike) => Affix::Infix(Precedence(7), Associativity::Right),
-            Infix(Equal) => Affix::Infix(Precedence(7), Associativity::Right),
-            Infix(NotEqual) => Affix::Infix(Precedence(7), Associativity::Right),
-            Infix(Greater) => Affix::Infix(Precedence(7), Associativity::Right),
-            Infix(GreaterOrEqual) => Affix::Infix(Precedence(7), Associativity::Right),
-            Infix(Less) => Affix::Infix(Precedence(7), Associativity::Right),
-            Infix(LessOrEqual) => Affix::Infix(Precedence(7), Associativity::Right),
-            Infix(Is) => Affix::Infix(Precedence(7), Associativity::Right),
-            Infix(IsNot) => Affix::Infix(Precedence(7), Associativity::Right),
-            In | NotIn => Affix::Infix(Precedence(7), Associativity::Right),
-            Infix(Add) => Affix::Infix(Precedence(11), Associativity::Right),
-            Infix(Subtract) => Affix::Infix(Precedence(11), Associativity::Right),
+            Prefix(Neg) => Affix::Prefix(Precedence(14)),
             Infix(Multiply) => Affix::Infix(Precedence(12), Associativity::Right),
             Infix(Divide) => Affix::Infix(Precedence(12), Associativity::Right),
-            Prefix(Not) => Affix::Prefix(Precedence(6)),
-            Prefix(Neg) => Affix::Prefix(Precedence(5)),
-            Primary(_) => Affix::Nilfix,
-            Group(_) => Affix::Nilfix,
-            PgsqlCast(..) => Affix::Nilfix,
-            OpSuffix(..) => Affix::Nilfix,
-
+            Infix(Add) => Affix::Infix(Precedence(11), Associativity::Right),
+            Infix(Subtract) => Affix::Infix(Precedence(11), Associativity::Right),
             // All JSON operators have the same precedence.
             //
             // Not positive whether this 8 puts all other operators at the correct relative
@@ -1134,6 +1113,27 @@ where
             Infix(AtArrowRight) => Affix::Infix(Precedence(8), Associativity::Left),
             Infix(AtArrowLeft) => Affix::Infix(Precedence(8), Associativity::Left),
             Infix(HashSubtract) => Affix::Infix(Precedence(8), Associativity::Left),
+
+            Infix(Like) => Affix::Infix(Precedence(7), Associativity::Right),
+            Infix(NotLike) => Affix::Infix(Precedence(7), Associativity::Right),
+            Infix(ILike) => Affix::Infix(Precedence(7), Associativity::Right),
+            Infix(NotILike) => Affix::Infix(Precedence(7), Associativity::Right),
+            Infix(Equal) => Affix::Infix(Precedence(7), Associativity::Right),
+            Infix(NotEqual) => Affix::Infix(Precedence(7), Associativity::Right),
+            Infix(Greater) => Affix::Infix(Precedence(7), Associativity::Right),
+            Infix(GreaterOrEqual) => Affix::Infix(Precedence(7), Associativity::Right),
+            Infix(Less) => Affix::Infix(Precedence(7), Associativity::Right),
+            Infix(LessOrEqual) => Affix::Infix(Precedence(7), Associativity::Right),
+            Infix(Is) => Affix::Infix(Precedence(7), Associativity::Right),
+            Infix(IsNot) => Affix::Infix(Precedence(7), Associativity::Right),
+            In | NotIn => Affix::Infix(Precedence(7), Associativity::Right),
+            Prefix(Not) => Affix::Prefix(Precedence(5)),
+            Infix(And) => Affix::Infix(Precedence(4), Associativity::Right),
+            Infix(Or) => Affix::Infix(Precedence(2), Associativity::Right),
+            Primary(_) => Affix::Nilfix,
+            Group(_) => Affix::Nilfix,
+            PgsqlCast(..) => Affix::Nilfix,
+            OpSuffix(..) => Affix::Nilfix,
         })
     }
 
