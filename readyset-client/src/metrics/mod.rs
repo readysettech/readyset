@@ -36,11 +36,6 @@ pub mod recorded {
     /// the domain following handling each Message and Input packet.
     pub const DOMAIN_FORWARD_TIME: &str = "readyset_forward_time_us";
 
-    /// Counter: The total time the domain spends handling and forwarding
-    /// a Message or Input packet. Recorded at the domain following handling
-    /// each Message and Input packet.
-    pub const DOMAIN_TOTAL_FORWARD_TIME: &str = "readyset_total_forward_time_us";
-
     /// Histogram: The time in microseconds that a domain spends
     /// handling a ReplayPiece packet. Recorded at the domain following
     /// ReplayPiece packet handling.
@@ -49,15 +44,6 @@ pub mod recorded {
     /// | --- | ----------- |
     /// | cache_name | The name of the cache associated with this replay.
     pub const DOMAIN_REPLAY_TIME: &str = "readyset_domain.handle_replay_time";
-
-    /// Counter: The total time in microseconds that a domain spends
-    /// handling a ReplayPiece packet. Recorded at the domain following
-    /// ReplayPiece packet handling.
-    ///
-    /// | Tag | Description |
-    /// | --- | ----------- |
-    /// | cache_name | The name of the cache associated with this replay.
-    pub const DOMAIN_TOTAL_REPLAY_TIME: &str = "readyset_domain.total_handle_replay_time";
 
     /// Histogram: The time in microseconds spent handling a reader replay
     /// request. Recorded at the domain following RequestReaderReplay
@@ -70,17 +56,6 @@ pub mod recorded {
     pub const DOMAIN_READER_REPLAY_REQUEST_TIME: &str =
         "readyset_domain.reader_replay_request_time_us";
 
-    /// Counter: The total time in microseconds spent handling a reader replay
-    /// request. Recorded at the domain following RequestReaderReplay
-    /// packet handling.
-    ///
-    ///
-    /// | Tag | Description |
-    /// | --- | ----------- |
-    /// | cache_name | The name of the cache associated with this replay.
-    pub const DOMAIN_READER_TOTAL_REPLAY_REQUEST_TIME: &str =
-        "readyset_domain.reader_total_replay_request_time_us";
-
     /// Histogram: The time in microseconds that a domain spends
     /// handling a RequestPartialReplay packet. Recorded at the domain
     /// following RequestPartialReplay packet handling.
@@ -90,39 +65,17 @@ pub mod recorded {
     /// | cache_name | The name of the cache associated with this replay.
     pub const DOMAIN_SEED_REPLAY_TIME: &str = "readyset_domain.seed_replay_time_us";
 
-    /// Counter: The total time in microseconds that a domain spends
-    /// handling a RequestPartialReplay packet. Recorded at the domain
-    /// following RequestPartialReplay packet handling.
-    ///
-    /// | Tag | Description |
-    /// | --- | ----------- |
-    /// | cache_name | The name of the cache associated with this replay.
-    pub const DOMAIN_TOTAL_SEED_REPLAY_TIME: &str = "readyset_domain.total_seed_replay_time_us";
-
     /// Histogram: The time in microseconds that a domain spawning a state
     /// chunker at a node during the processing of a StartReplay packet.
     /// Recorded at the domain when the state chunker thread is finished
     /// executing.
     pub const DOMAIN_CHUNKED_REPLAY_TIME: &str = "readyset_domain.chunked_replay_time_us";
 
-    /// Counter: The total time in microseconds that a domain spawning a state
-    /// chunker at a node during the processing of a StartReplay packet.
-    /// Recorded at the domain when the state chunker thread is finished
-    /// executing.
-    pub const DOMAIN_TOTAL_CHUNKED_REPLAY_TIME: &str =
-        "readyset_domain.total_chunked_replay_time_us";
-
     /// Histogram: The time in microseconds that a domain spends
     /// handling a StartReplay packet. Recorded at the domain
     /// following StartReplay packet handling.
     pub const DOMAIN_CHUNKED_REPLAY_START_TIME: &str =
         "readyset_domain.chunked_replay_start_time_us";
-
-    /// Counter: The total time in microseconds that a domain spends
-    /// handling a StartReplay packet. Recorded at the domain
-    /// following StartReplay packet handling.
-    pub const DOMAIN_TOTAL_CHUNKED_REPLAY_START_TIME: &str =
-        "readyset_domain.total_chunked_replay_start_time_us";
 
     /// Histogram: The time in microseconds that a domain spends
     /// handling a Finish packet for a replay. Recorded at the domain
@@ -132,15 +85,6 @@ pub mod recorded {
     /// | --- | ----------- |
     /// | cache_name | The name of the cache associated with this replay.
     pub const DOMAIN_FINISH_REPLAY_TIME: &str = "readyset_domain.finish_replay_time_us";
-
-    /// Counter: The total time in microseconds that a domain spends
-    /// handling a Finish packet for a replay. Recorded at the domain
-    /// following Finish packet handling.
-    ///
-    /// | Tag | Description |
-    /// | --- | ----------- |
-    /// | cache_name | The name of the cache associated with this replay.
-    pub const DOMAIN_TOTAL_FINISH_REPLAY_TIME: &str = "readyset_domain.total_finish_replay_time_us";
 
     /// Histogram: The amount of time spent handling an eviction
     /// request.
@@ -317,13 +261,6 @@ pub mod recorded {
     /// Gauge: Indicates whether a server is the leader. Set to 1 when the
     /// server is leader, 0 for follower.
     pub const CONTROLLER_IS_LEADER: &str = "readyset_controller.is_leader";
-
-    /// Counter: The total amount of time spent servicing controller RPCs.
-    ///
-    /// | Tag | Description |
-    /// | --- | ----------- |
-    /// | path | The http path associated with the rpc request. |
-    pub const CONTROLLER_RPC_OVERALL_TIME: &str = "readyset_controller.rpc_overall_time";
 
     /// Histogram: The distribution of time spent servicing controller RPCs
     /// for each request.

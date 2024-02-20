@@ -11,7 +11,7 @@ use dataflow::prelude::ChannelCoordinator;
 use failpoint_macros::set_failpoint;
 use futures::future::Either;
 use hyper::http::{Method, StatusCode};
-use metrics::{counter, gauge, histogram};
+use metrics::{gauge, histogram};
 use nom_sql::Relation;
 use readyset_client::consensus::{
     Authority, AuthorityControl, AuthorityWorkerHeartbeatResponse, CacheDDLRequest,
@@ -1362,12 +1362,6 @@ async fn handle_controller_request(
                 .expect("Bincode serialization of ReadySetError should not fail"))),
         }
     };
-
-    counter!(
-        recorded::CONTROLLER_RPC_OVERALL_TIME,
-        request_start.elapsed().as_micros() as u64,
-        "path" => path.clone()
-    );
 
     histogram!(
         recorded::CONTROLLER_RPC_REQUEST_TIME,

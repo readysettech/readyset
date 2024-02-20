@@ -36,11 +36,6 @@ impl DomainMetrics {
     }
 
     pub(super) fn rec_chunked_replay_start_time(&mut self, time: Duration) {
-        counter!(
-            recorded::DOMAIN_TOTAL_CHUNKED_REPLAY_START_TIME,
-            time.as_micros() as u64,
-        );
-
         histogram!(
             recorded::DOMAIN_CHUNKED_REPLAY_START_TIME,
             time.as_micros() as f64,
@@ -49,12 +44,6 @@ impl DomainMetrics {
 
     pub(super) fn rec_replay_time(&mut self, cache_name: &Relation, time: Duration) {
         if self.verbose {
-            counter!(
-                recorded::DOMAIN_TOTAL_REPLAY_TIME,
-                time.as_micros() as u64,
-                "cache_name" => cache_name_to_string(cache_name)
-            );
-
             histogram!(
                 recorded::DOMAIN_REPLAY_TIME,
                 time.as_micros() as f64,
@@ -65,12 +54,6 @@ impl DomainMetrics {
 
     pub(super) fn rec_seed_replay_time(&mut self, cache_name: &Relation, time: Duration) {
         if self.verbose {
-            counter!(
-                recorded::DOMAIN_TOTAL_SEED_REPLAY_TIME,
-                time.as_micros() as u64,
-                "cache_name" => cache_name_to_string(cache_name)
-            );
-
             histogram!(
                 recorded::DOMAIN_SEED_REPLAY_TIME,
                 time.as_micros() as f64,
@@ -81,12 +64,6 @@ impl DomainMetrics {
 
     pub(super) fn rec_finish_replay_time(&mut self, cache_name: &Relation, time: Duration) {
         if self.verbose {
-            counter!(
-                recorded::DOMAIN_TOTAL_FINISH_REPLAY_TIME,
-                time.as_micros() as u64,
-                "cache_name" => cache_name_to_string(cache_name)
-            );
-
             histogram!(
                 recorded::DOMAIN_FINISH_REPLAY_TIME,
                 time.as_micros() as f64,
@@ -96,23 +73,15 @@ impl DomainMetrics {
     }
 
     pub(super) fn rec_forward_time_input(&mut self, time: Duration) {
-        counter!(recorded::DOMAIN_TOTAL_FORWARD_TIME, time.as_micros() as u64, "packet_type" => "input");
         histogram!(recorded::DOMAIN_FORWARD_TIME, time.as_micros() as f64, "packet_type" => "input");
     }
 
     pub(super) fn rec_forward_time_message(&mut self, time: Duration) {
-        counter!(recorded::DOMAIN_TOTAL_FORWARD_TIME, time.as_micros() as u64, "packet_type" => "message");
         histogram!(recorded::DOMAIN_FORWARD_TIME, time.as_micros() as f64, "packet_type" => "message");
     }
 
     pub(super) fn rec_reader_replay_time(&mut self, cache_name: &Relation, time: Duration) {
         if self.verbose {
-            counter!(
-                recorded::DOMAIN_READER_TOTAL_REPLAY_REQUEST_TIME,
-                time.as_micros() as u64,
-                "cache_name" => cache_name_to_string(cache_name)
-            );
-
             histogram!(
                 recorded::DOMAIN_READER_REPLAY_REQUEST_TIME,
                 time.as_micros() as f64,
