@@ -237,11 +237,13 @@ where
 }
 
 async fn get_num_view_queries(metrics: &mut MetricsClient) -> u32 {
+    let query_log_execution_count = format!("{}_count", recorded::QUERY_LOG_EXECUTION_TIME);
+
     match metrics.get_metrics().await {
         Ok(metrics) => metrics
             .iter()
             .map(
-                |d| match get_metric!(d.metrics, recorded::QUERY_LOG_EXECUTION_COUNT) {
+                |d| match get_metric!(d.metrics, &query_log_execution_count) {
                     Some(DumpedMetricValue::Counter(n)) => n as u32,
                     _ => 0,
                 },
