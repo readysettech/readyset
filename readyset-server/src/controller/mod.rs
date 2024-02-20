@@ -1366,11 +1366,29 @@ async fn handle_controller_request(
     histogram!(
         recorded::CONTROLLER_RPC_REQUEST_TIME,
         request_start.elapsed().as_micros() as f64,
-        "path" => path
+        "path" => coalesce_path(path),
     );
 
     if reply_tx.send(ret).is_err() {
         warn!("client hung up");
+    }
+}
+
+/// Transforms the given controller RPC path into a smaller set of paths for the purpose of using
+/// the path as a metric label. The most interesting/frequent RPC paths are kept as-is, and less
+/// interesting paths are bucketed into an "other" category.
+fn coalesce_path(path: String) -> String {
+    match path.as_str() {
+        "/extend_recipe"
+        | "/views"
+        | "/verbose_views"
+        | "/view_statuses"
+        | "/view_builder"
+        | "/min_persisted_replication_offset"
+        | "/replication_offsets"
+        | "/set_schema_replication_offset"
+        | "/dry_run" => path,
+        _ => "other".into(),
     }
 }
 
