@@ -23,16 +23,16 @@ RUN set -eux; \
         protobuf-compiler \
         rsync; \
     rm -rf /var/lib/apt/lists/*
-
+#
 RUN curl -L https://github.com/docker/compose/releases/download/v2.6.0/docker-compose-linux-`uname -m` -o /usr/local/bin/docker-compose; \
     chmod a+x /usr/local/bin/docker-compose
-
-RUN set -eux; \
-    cargo install detect_flake; \
-    cargo install critcmp;
-
-RUN cargo install sccache --locked
-ENV RUSTC_WRAPPER=sccache
+#
+# RUN set -eux; \
+#     cargo install detect_flake; \
+#     cargo install critcmp;
+#
+# RUN cargo install sccache --locked
+# ENV RUSTC_WRAPPER=sccache
 
 # CARGO_HOME is set by the nightly container to be /usr/local/cargo.
 # This is where it reads configs from for cargo and where cargo installs binaries.
