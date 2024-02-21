@@ -122,11 +122,13 @@ impl DomainMetrics {
     }
 
     pub(super) fn inc_replay_misses(&mut self, cache_name: &Relation, n: usize) {
-        counter!(
-            recorded::DOMAIN_REPLAY_MISSES,
-            n as u64,
-            "cache_name" => cache_name_to_string(cache_name)
-        );
+        if self.verbose {
+            counter!(
+                recorded::DOMAIN_REPLAY_MISSES,
+                n as u64,
+                "cache_name" => cache_name_to_string(cache_name)
+            );
+        }
     }
 
     pub(super) fn inc_packets_sent(&mut self, packet: &Packet) {
