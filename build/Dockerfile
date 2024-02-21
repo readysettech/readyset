@@ -4,7 +4,9 @@ WORKDIR /tmp
 
 COPY rust-toolchain .
 
-RUN rustup default "$(cat public/rust-toolchain)"; rm rust-toolchain
+RUN rustup default "$(cat rust-toolchain)"; rm rust-toolchain
+RUN rustup component add clippy
+RUN rustup component add rustfmt
 
 RUN set -eux; \
     apt-get update; \
