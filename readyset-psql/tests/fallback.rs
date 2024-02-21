@@ -2102,6 +2102,8 @@ async fn recreate_replication_slot() {
 // Tests that a cache with a name can still be queried after it is cleared from the query status
 // cache
 #[tokio::test(flavor = "multi_thread")]
+#[serial]
+#[slow]
 async fn named_cache_queryable_after_being_cleared() {
     readyset_tracing::init_test_logging();
     let prefix = "named_cache_queryable_after_being_cleared";
