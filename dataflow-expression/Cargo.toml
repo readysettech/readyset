@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 chrono = { version = "0.4.0", features = ["serde"] }
-chrono-tz = { version = "0.5", features = ["serde"] }
+chrono-tz = { version = "0.8.6", features = ["serde"] }
 serde = { version = "1.0.8", features = ["derive"] }
 serde_json = { version = "1.0" }
 rust_decimal = { version = "1.26" }
