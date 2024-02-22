@@ -16,6 +16,7 @@ use dataflow::{
 use failpoint_macros::set_failpoint;
 use futures::pin_mut;
 use futures_util::future::TryFutureExt;
+use metrics::counter;
 use pin_project::pin_project;
 use readyset_client::consistency::Timestamp;
 #[cfg(feature = "failure_injection")]
@@ -133,8 +134,6 @@ pub struct ReadRequestHandler {
     global_readers: Readers,
     readers_cache: ReaderMap,
     wait: tokio::sync::mpsc::UnboundedSender<(BlockingRead, Ack)>,
-    miss_ctr: metrics::Counter,
-    hit_ctr: metrics::Counter,
     upquery_timeout: Duration,
 }
 
@@ -157,8 +156,6 @@ impl ReadRequestHandler {
             global_readers: readers,
             readers_cache: Default::default(),
             wait,
-            miss_ctr: metrics::register_counter!(recorded::SERVER_VIEW_QUERY_MISS),
-            hit_ctr: metrics::register_counter!(recorded::SERVER_VIEW_QUERY_HIT),
             upquery_timeout,
         }
     }
@@ -220,7 +217,7 @@ impl ReadRequestHandler {
             Ok(hit) => {
                 // We hit on all keys, and there is no consistency miss, can return results
                 // immediately
-                self.hit_ctr.increment(1);
+                counter!(recorded::SERVER_VIEW_QUERY_HIT, 1, "cache_name" => target.name.display_unquoted().to_string());
 
                 let results = ResultIterator::new(hit, &reader.post_lookup, limit, offset, filter);
 
@@ -237,7 +234,7 @@ impl ReadRequestHandler {
             }
         };
 
-        self.miss_ctr.increment(1);
+        counter!(recorded::SERVER_VIEW_QUERY_MISS, 1, "cache_name" => target.name.display_unquoted().to_string());
 
         // Trigger backfills for all the keys we missed on, regardless of a consistency hit/miss
         if !keys_to_replay.is_empty() {

@@ -215,9 +215,17 @@ pub mod recorded {
     pub const EVICTION_FREED_MEMORY: &str = "readyset_eviction_freed_memory";
 
     /// Counter: The number of times a query was served entirely from reader cache.
+    ///
+    /// | Tag | Description |
+    /// | --- | ----------- |
+    /// | cache_name | The name of the cache associated with this replay.
     pub const SERVER_VIEW_QUERY_HIT: &str = "readyset_server.view_query_result_hit";
 
     /// Counter: The number of times a query required at least a partial replay.
+    ///
+    /// | Tag | Description |
+    /// | --- | ----------- |
+    /// | cache_name | The name of the cache associated with this replay.
     pub const SERVER_VIEW_QUERY_MISS: &str = "readyset_server.view_query_result_miss";
 
     /// Histogram: The amount of time in microseconds spent waiting for an upquery during a read

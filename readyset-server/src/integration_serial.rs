@@ -139,7 +139,7 @@ async fn it_works_basic_impl() {
     );
     assert_eq!(
         get_metric!(metrics_dump, recorded::SERVER_VIEW_QUERY_HIT),
-        Some(DumpedMetricValue::Counter(0.0))
+        None,
     );
 
     // update value again
