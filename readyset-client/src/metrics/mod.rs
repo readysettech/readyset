@@ -216,6 +216,10 @@ pub mod recorded {
 
     /// Histogram: The amount of time in microseconds spent waiting for an upquery during a read
     /// request.
+    ///
+    /// | Tag | Description |
+    /// | --- | ----------- |
+    /// | cache_name | The name of the cache associated with this upquery.
     pub const SERVER_VIEW_UPQUERY_DURATION: &str = "readyset_server.view_query_upquery_duration_us";
 
     /// Counter: The number of times a dataflow node type is added to the
