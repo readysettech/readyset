@@ -8,7 +8,7 @@ use readyset_adapter::backend::{
 };
 use readyset_adapter::upstream_database::LazyUpstream;
 use readyset_adapter_types::ParsedCommand;
-use readyset_client::results::{ResultIterator, Results};
+use readyset_client::results::ResultIterator;
 use readyset_client::ColumnSchema;
 use readyset_data::DfType;
 use upstream::StatementMeta;
@@ -115,10 +115,10 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                 });
 
                 let resultset = Resultset::from_readyset(
-                    ResultIterator::owned(vec![Results::new(vec![vars
+                    ResultIterator::owned(vec![vec![vars
                         .into_iter()
                         .map(|v| readyset_data::DfValue::from(v.value))
-                        .collect()])]),
+                        .collect()]]),
                     &select_schema,
                 )?;
                 Ok(Select {
@@ -153,10 +153,8 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                     rows.push(vec![v.name.as_str().into(), v.value.into()]);
                 }
 
-                let resultset = Resultset::from_readyset(
-                    ResultIterator::owned(vec![Results::new(rows)]),
-                    &select_schema,
-                )?;
+                let resultset =
+                    Resultset::from_readyset(ResultIterator::owned(vec![rows]), &select_schema)?;
                 Ok(Select {
                     schema: select_schema.try_into()?,
                     resultset,
@@ -191,10 +189,8 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                     rows.push(vec![v.name.as_str().into(), v.value.into()]);
                 }
 
-                let resultset = Resultset::from_readyset(
-                    ResultIterator::owned(vec![Results::new(rows)]),
-                    &select_schema,
-                )?;
+                let resultset =
+                    Resultset::from_readyset(ResultIterator::owned(vec![rows]), &select_schema)?;
                 Ok(Select {
                     schema: select_schema.try_into()?,
                     resultset,

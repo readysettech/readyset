@@ -212,10 +212,10 @@ pub enum QueryResult<'a> {
 }
 
 impl<'a> QueryResult<'a> {
-    pub fn from_owned(schema: SelectSchema<'a>, data: Vec<Results>) -> Self {
+    pub fn from_owned(schema: SelectSchema<'a>, data: Results) -> Self {
         QueryResult::Select {
             schema,
-            rows: ResultIterator::owned(data),
+            rows: ResultIterator::owned(vec![data]),
         }
     }
 
@@ -484,7 +484,7 @@ impl NoriaConnector {
 
         data.sort_by(|r1, r2| r1[1].cmp(&r2[1]));
 
-        Ok(QueryResult::from_owned(schema, vec![Results::new(data)]))
+        Ok(QueryResult::from_owned(schema, data))
     }
 
     pub(crate) async fn explain_materializations(
@@ -538,7 +538,7 @@ impl NoriaConnector {
             })
             .collect();
 
-        Ok(QueryResult::from_owned(schema, vec![Results::new(data)]))
+        Ok(QueryResult::from_owned(schema, data))
     }
 
     pub(crate) async fn verbose_views(&mut self) -> ReadySetResult<Vec<CacheExpr>> {
@@ -926,7 +926,7 @@ impl NoriaConnector {
             })
             .collect::<Vec<_>>();
 
-        Ok(QueryResult::from_owned(schema, vec![Results::new(data)]))
+        Ok(QueryResult::from_owned(schema, data))
     }
 
     /// Set the schema search path
@@ -1666,7 +1666,7 @@ async fn do_read<'a>(
 
     let num_keys = vq.key_comparisons.len() as u64;
 
-    let data = if let Some(rh) = read_request_handler {
+    let (data, cache_misses) = if let Some(rh) = read_request_handler {
         let request = readyset_client::Tagged::from(ReadQuery::Normal {
             target: ReaderAddress {
                 node: *reader_handle.node(),
@@ -1681,12 +1681,16 @@ async fn do_read<'a>(
         let tag = request.tag;
         if let ReadQuery::Normal { target, query } = request.v {
             // Issue a normal read query returning the raw unserialized results.
-            let result = match rh.handle_normal_read_query(tag, target, query, true) {
-                CallResult::Immediate(result) => result?,
-                CallResult::Async(chan) => chan.await?,
+            let (result, cache_misses) = match rh.handle_normal_read_query(tag, target, query, true)
+            {
+                CallResult::Immediate(result) => (result?, 0),
+                CallResult::ReadReply {
+                    future,
+                    cache_misses,
+                } => (future.await?, cache_misses),
             };
 
-            result
+            let unserialized_results = result
                 .v
                 .into_normal()
                 .ok_or_else(|| internal_err!("Unexpected response type from reader service"))??
@@ -1695,15 +1699,15 @@ async fn do_read<'a>(
                 .pop()
                 .ok_or_else(|| internal_err!("Expected a single result set for local reader"))?
                 .into_unserialized()
-                .expect("Requested raw result")
+                .expect("Requested raw result");
+
+            (unserialized_results, cache_misses)
         } else {
-            reader_handle.raw_lookup(vq).await?
+            (reader_handle.raw_lookup(vq).await?, 0)
         }
     } else {
-        reader_handle.raw_lookup(vq).await?
+        (reader_handle.raw_lookup(vq).await?, 0)
     };
-
-    let cache_misses = data.total_stats().map(|s| s.cache_misses).unwrap_or(0);
 
     trace!("select::complete");
 

@@ -7,7 +7,6 @@ use nom_sql::{Column, Expr, FieldDefinitionExpr, Literal, SqlIdentifier, SqlQuer
 use readyset_adapter::backend::noria_connector::QueryResult;
 use readyset_adapter::backend::SelectSchema;
 use readyset_adapter::{QueryHandler, SetBehavior};
-use readyset_client::results::Results;
 use readyset_client::ColumnSchema;
 use readyset_data::{DfType, DfValue};
 use readyset_errors::{ReadySetError, ReadySetResult};
@@ -860,7 +859,7 @@ impl QueryHandler for MySqlQueryHandler {
                         }]),
                         columns: Cow::Owned(vec![field_name]),
                     },
-                    vec![Results::new(vec![vec![MAX_ALLOWED_PACKET_DEFAULT]])],
+                    vec![vec![MAX_ALLOWED_PACKET_DEFAULT]],
                 ))
             }
             _ => Ok(QueryResult::empty(SelectSchema {

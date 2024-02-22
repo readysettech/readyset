@@ -89,7 +89,6 @@ use readyset_adapter_types::{DeallocateId, ParsedCommand};
 use readyset_client::consensus::{Authority, AuthorityControl, CacheDDLRequest};
 use readyset_client::consistency::Timestamp;
 use readyset_client::query::*;
-use readyset_client::results::Results;
 use readyset_client::utils::retry_with_exponential_backoff;
 use readyset_client::{ColumnSchema, PlaceholderIdx, ViewCreateRequest};
 pub use readyset_client_metrics::QueryDestination;
@@ -2085,7 +2084,7 @@ where
 
         Ok(noria_connector::QueryResult::from_owned(
             select_schema,
-            vec![Results::new(data)],
+            data,
         ))
     }
 
@@ -2143,7 +2142,7 @@ where
 
         Ok(noria_connector::QueryResult::from_owned(
             select_schema,
-            vec![Results::new(results)],
+            results,
         ))
     }
 
@@ -3064,7 +3063,7 @@ where
 
         Ok(noria_connector::QueryResult::from_owned(
             select_schema,
-            vec![Results::new(results)],
+            results,
         ))
     }
 
@@ -3098,10 +3097,7 @@ where
             .map(|conn| vec![conn.to_string().into()])
             .collect::<Vec<_>>();
 
-        Ok(noria_connector::QueryResult::from_owned(
-            schema,
-            vec![Results::new(data)],
-        ))
+        Ok(noria_connector::QueryResult::from_owned(schema, data))
     }
 
     pub fn in_transaction(&self) -> bool {
