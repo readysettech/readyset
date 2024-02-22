@@ -3,7 +3,9 @@ use std::fmt;
 use std::hash::Hash;
 use std::str::FromStr;
 
-use chrono::{Date, DateTime, Datelike, FixedOffset, NaiveDate, NaiveDateTime, Timelike};
+use chrono::{
+    DateTime, Datelike, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Timelike,
+};
 use proptest::arbitrary::Arbitrary;
 use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
@@ -70,7 +72,7 @@ impl TimestampTz {
             (time_ms / 1000) as i64,
             ((time_ms % 1000) * 1_000 * 1_000) as u32,
         );
-        Self::from(NaiveDateTime::from_timestamp(secs, ns))
+        Self::from(NaiveDateTime::from_timestamp_opt(secs, ns).unwrap())
     }
 
     /// Returns true if the contained offset should be negated
@@ -150,7 +152,13 @@ impl TimestampTz {
 
 impl From<&TimestampTz> for DateTime<FixedOffset> {
     fn from(ts: &TimestampTz) -> Self {
-        DateTime::from_utc(ts.datetime, FixedOffset::east(ts.get_offset()))
+        // need to make a local copy of the datetime as it's at an unaligned
+        // position in TimestampTz struct, and we need to pass a reference to
+        // the FixedOffset functions.
+        let dt = ts.datetime;
+        FixedOffset::east_opt(ts.get_offset())
+            .unwrap()
+            .from_utc_datetime(&dt)
     }
 }
 
@@ -201,24 +209,10 @@ impl From<DateTime<FixedOffset>> for TimestampTz {
     }
 }
 
-impl From<Date<FixedOffset>> for TimestampTz {
-    fn from(dt: Date<FixedOffset>) -> Self {
-        let mut ts = TimestampTz {
-            datetime: dt.and_hms(0, 0, 0).naive_utc(),
-            extra: Default::default(),
-        };
-
-        ts.set_offset(dt.offset().local_minus_utc());
-        ts.set_date_only();
-
-        ts
-    }
-}
-
 impl From<NaiveDate> for TimestampTz {
     fn from(dt: NaiveDate) -> Self {
         let mut ts = TimestampTz {
-            datetime: dt.and_hms(0, 0, 0),
+            datetime: dt.and_hms_opt(0, 0, 0).unwrap(),
             extra: Default::default(),
         };
 
@@ -369,10 +363,16 @@ impl TimestampTz {
                 Ok(DfValue::TimestampTz(ts))
             }
             DfType::Date => Ok(if self.has_timezone() {
-                DfValue::TimestampTz(self.to_chrono().date().into())
+                let datetime = self.to_chrono();
+                let dd = datetime.timezone().from_utc_datetime(&NaiveDateTime::new(
+                    datetime.date_naive(),
+                    NaiveTime::from_hms_opt(0, 0, 0).unwrap(),
+                ));
+                DfValue::TimestampTz(dd.into())
             } else {
                 DfValue::TimestampTz(self.to_chrono().date_naive().into())
             }),
+
             // TODO(ENG-1833): Use `subsecond_digits` value.
             DfType::Time { .. } => Ok(self.to_chrono().naive_local().time().into()),
 
@@ -403,7 +403,11 @@ impl TimestampTz {
             ))),
 
             DfType::Bool => Ok(DfValue::from(
-                self.to_chrono().naive_local() != NaiveDate::from_ymd(0, 0, 0).and_hms(0, 0, 0),
+                self.to_chrono().naive_local()
+                    != NaiveDate::from_ymd_opt(0, 0, 0)
+                        .unwrap()
+                        .and_hms_opt(0, 0, 0)
+                        .unwrap(),
             )),
 
             DfType::Text(collation) => Ok(DfValue::from_str_and_collation(
@@ -501,15 +505,19 @@ impl Arbitrary for TimestampTz {
 
 #[cfg(test)]
 mod tests {
-    use chrono::TimeZone;
+    use chrono::{NaiveTime, TimeZone};
 
     use super::*;
     use crate::{Collation, DfType};
 
     #[test]
     fn timestamp_coercion() {
-        let ts =
-            DfValue::from(chrono::NaiveDate::from_ymd(2022, 2, 9).and_hms_milli(13, 14, 15, 169));
+        let ts = DfValue::from(
+            chrono::NaiveDate::from_ymd_opt(2022, 2, 9)
+                .unwrap()
+                .and_hms_milli_opt(13, 14, 15, 169)
+                .unwrap(),
+        );
 
         assert_eq!(
             ts.coerce_to(&DfType::BigInt, &DfType::Unknown).unwrap(),
@@ -630,7 +638,10 @@ mod tests {
                 .unwrap()
                 .to_chrono()
                 .naive_local(),
-            chrono::NaiveDate::from_ymd(1000, 1, 1).and_hms(0, 0, 0)
+            chrono::NaiveDate::from_ymd_opt(1000, 1, 1)
+                .unwrap()
+                .and_hms_opt(0, 0, 0)
+                .unwrap()
         );
 
         assert_eq!(
@@ -638,7 +649,10 @@ mod tests {
                 .unwrap()
                 .to_chrono()
                 .naive_local(),
-            chrono::NaiveDate::from_ymd(9999, 12, 31).and_hms_micro(23, 59, 59, 999999)
+            chrono::NaiveDate::from_ymd_opt(9999, 12, 31)
+                .unwrap()
+                .and_hms_micro_opt(23, 59, 59, 999999)
+                .unwrap()
         );
 
         assert_eq!(
@@ -646,7 +660,10 @@ mod tests {
                 .unwrap()
                 .to_chrono()
                 .naive_local(),
-            chrono::NaiveDate::from_ymd(9999, 12, 31).and_hms_micro(23, 59, 59, 990000)
+            chrono::NaiveDate::from_ymd_opt(9999, 12, 31)
+                .unwrap()
+                .and_hms_micro_opt(23, 59, 59, 990000)
+                .unwrap()
         );
 
         assert_eq!(
@@ -654,43 +671,57 @@ mod tests {
                 .unwrap()
                 .to_chrono()
                 .naive_local(),
-            chrono::NaiveDate::from_ymd(2012, 2, 9).and_hms(12, 12, 12)
+            chrono::NaiveDate::from_ymd_opt(2012, 2, 9)
+                .unwrap()
+                .and_hms_opt(12, 12, 12)
+                .unwrap()
         );
 
         assert_eq!(
             TimestampTz::from_str("2004-10-19 10:23:54+02")
                 .unwrap()
                 .to_chrono(),
-            chrono::FixedOffset::east(2 * 60 * 60)
-                .ymd(2004, 10, 19)
-                .and_hms(10, 23, 54)
+            chrono::FixedOffset::east_opt(2 * 60 * 60)
+                .unwrap()
+                .with_ymd_and_hms(2004, 10, 19, 10, 23, 54)
+                .single()
+                .unwrap()
         );
 
         assert_eq!(
             TimestampTz::from_str("2004-10-19 10:23:54.1234+02")
                 .unwrap()
                 .to_chrono(),
-            chrono::FixedOffset::east(2 * 60 * 60)
-                .ymd(2004, 10, 19)
-                .and_hms_micro(10, 23, 54, 123400)
+            chrono::FixedOffset::east_opt(2 * 60 * 60)
+                .unwrap()
+                .from_local_datetime(&NaiveDateTime::new(
+                    NaiveDate::from_ymd_opt(2004, 10, 19).unwrap(),
+                    NaiveTime::from_hms_micro_opt(10, 23, 54, 123400).unwrap(),
+                ))
+                .single()
+                .unwrap()
         );
 
         assert_eq!(
             TimestampTz::from_str("2004-10-19 10:23:54+02 BC")
                 .unwrap()
                 .to_chrono(),
-            chrono::FixedOffset::east(2 * 60 * 60)
-                .ymd(-2003, 10, 19)
-                .and_hms(10, 23, 54)
+            chrono::FixedOffset::east_opt(2 * 60 * 60)
+                .unwrap()
+                .with_ymd_and_hms(-2003, 10, 19, 10, 23, 54)
+                .single()
+                .unwrap()
         );
 
         assert_eq!(
             TimestampTz::from_str("10000-10-19 10:23:54+02")
                 .unwrap()
                 .to_chrono(),
-            chrono::FixedOffset::east(2 * 60 * 60)
-                .ymd(10000, 10, 19)
-                .and_hms(10, 23, 54)
+            chrono::FixedOffset::east_opt(2 * 60 * 60)
+                .unwrap()
+                .with_ymd_and_hms(10000, 10, 19, 10, 23, 54)
+                .single()
+                .unwrap()
         );
 
         #[allow(clippy::zero_prefixed_literal)]
@@ -699,9 +730,11 @@ mod tests {
             TimestampTz::from_str("0005-02-29 12:34:56+00 BC")
                 .unwrap()
                 .to_chrono(),
-            chrono::FixedOffset::east(0)
-                .ymd(year_5_bce, 2, 29)
-                .and_hms(12, 34, 56)
+            chrono::FixedOffset::east_opt(0)
+                .unwrap()
+                .with_ymd_and_hms(year_5_bce, 2, 29, 12, 34, 56)
+                .single()
+                .unwrap()
         );
     }
 }

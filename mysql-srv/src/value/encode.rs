@@ -564,7 +564,7 @@ impl ToMySqlValue for NaiveDateTime {
                 Ok(())
             }
             ColumnType::MYSQL_TYPE_DATE => {
-                if self.time() != NaiveTime::from_hms(0, 0, 0) {
+                if self.time() != NaiveTime::from_hms_opt(0, 0, 0).unwrap() {
                     return Err(bad(self, c));
                 }
                 self.date().to_mysql_bin(w, c)
@@ -640,8 +640,10 @@ impl ToMySqlValue for myc::value::Value {
             myc::value::Value::Float(f) => f.to_mysql_text(w),
             myc::value::Value::Double(d) => d.to_mysql_text(w),
             myc::value::Value::Date(y, mo, d, h, mi, s, us) => {
-                NaiveDate::from_ymd(i32::from(y), u32::from(mo), u32::from(d))
-                    .and_hms_micro(u32::from(h), u32::from(mi), u32::from(s), us)
+                NaiveDate::from_ymd_opt(i32::from(y), u32::from(mo), u32::from(d))
+                    .unwrap()
+                    .and_hms_micro_opt(u32::from(h), u32::from(mi), u32::from(s), us)
+                    .unwrap()
                     .to_mysql_text(w)
             }
             myc::value::Value::Time(neg, d, h, m, s, us) => {
@@ -711,8 +713,10 @@ impl ToMySqlValue for myc::value::Value {
             myc::value::Value::Float(f) => f.to_mysql_bin(w, c),
             myc::value::Value::Double(d) => d.to_mysql_bin(w, c),
             myc::value::Value::Date(y, mo, d, h, mi, s, us) => {
-                NaiveDate::from_ymd(i32::from(y), u32::from(mo), u32::from(d))
-                    .and_hms_micro(u32::from(h), u32::from(mi), u32::from(s), us)
+                NaiveDate::from_ymd_opt(i32::from(y), u32::from(mo), u32::from(d))
+                    .unwrap()
+                    .and_hms_micro_opt(u32::from(h), u32::from(mi), u32::from(s), us)
+                    .unwrap()
                     .to_mysql_bin(w, c)
             }
             myc::value::Value::Time(neg, d, h, m, s, us) => {
@@ -801,15 +805,14 @@ mod tests {
         rt!(opt_none, Option<u8>, None);
         rt!(opt_some, Option<u8>, Some(1));
 
-        rt!(
-            time,
-            chrono::NaiveDate,
-            chrono::Local::today().naive_local()
-        );
+        rt!(time, chrono::NaiveDate, chrono::Local::now().date_naive());
         rt!(
             datetime,
             chrono::NaiveDateTime,
-            chrono::Utc.ymd(1989, 12, 7).and_hms(8, 0, 4).naive_utc()
+            chrono::Utc
+                .with_ymd_and_hms(1989, 12, 7, 8, 0, 4)
+                .unwrap()
+                .naive_utc()
         );
         rt!(dur, time::Duration, time::Duration::from_secs(1893));
         rt!(bytes, Vec<u8>, vec![0x42, 0x00, 0x1a]);
@@ -986,13 +989,17 @@ mod tests {
         rt!(
             date,
             chrono::NaiveDate,
-            chrono::Local::today().naive_local(),
+            chrono::Local::now().date_naive(),
             ColumnType::MYSQL_TYPE_DATE
         );
         rt!(
             datetime,
             chrono::NaiveDateTime,
-            chrono::Utc.ymd(1989, 12, 7).and_hms(8, 0, 4).naive_utc(),
+            chrono::Utc
+                .with_ymd_and_hms(1989, 12, 7, 8, 0, 4)
+                .single()
+                .unwrap()
+                .naive_utc(),
             ColumnType::MYSQL_TYPE_DATETIME
         );
         rt!(

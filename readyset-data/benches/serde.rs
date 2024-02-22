@@ -23,10 +23,11 @@ fn serde(c: &mut Criterion) {
     let long_bytes = DfValue::ByteArray(long_string.as_bytes().to_vec().into());
 
     let timestamp_tz = DfValue::from(chrono::TimeZone::from_utc_datetime(
-        &chrono::FixedOffset::west(18_000),
-        &chrono::NaiveDateTime::from_timestamp(0, 42_000_000),
+        &chrono::FixedOffset::west_opt(18_000).unwrap(),
+        &chrono::NaiveDateTime::from_timestamp_opt(0, 42_000_000).unwrap(),
     ));
-    let timestamp = DfValue::from(chrono::NaiveDateTime::from_timestamp(0, 42_000_000));
+    let timestamp =
+        DfValue::from(chrono::NaiveDateTime::from_timestamp_opt(0, 42_000_000).unwrap());
 
     let time: DfValue = MySqlTime::from_hmsus(false, 10, 30, 24, 100).into();
 

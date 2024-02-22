@@ -1556,7 +1556,10 @@ async fn write_timestamps() {
     assert_eq!(result.0, 1);
     assert_eq!(
         result.1,
-        NaiveDate::from_ymd(2020, 1, 23).and_hms(17, 8, 24)
+        NaiveDate::from_ymd_opt(2020, 1, 23)
+            .unwrap()
+            .and_hms_opt(17, 8, 24)
+            .unwrap()
     );
 
     conn.query_drop("UPDATE posts SET created_at = '2021-01-25 17:08:24' WHERE id = 1")
@@ -1571,7 +1574,10 @@ async fn write_timestamps() {
     assert_eq!(result.0, 1);
     assert_eq!(
         result.1,
-        NaiveDate::from_ymd(2021, 1, 25).and_hms(17, 8, 24)
+        NaiveDate::from_ymd_opt(2021, 1, 25)
+            .unwrap()
+            .and_hms_opt(17, 8, 24)
+            .unwrap()
     );
 
     shutdown_tx.shutdown().await;
@@ -1593,8 +1599,8 @@ async fn round_trip_time_type() {
     conn.exec_drop(
         "INSERT INTO daily_events (start_time, end_time) VALUES (?, ?)",
         (
-            NaiveTime::from_hms(10, 30, 00),
-            NaiveTime::from_hms(10, 45, 15),
+            NaiveTime::from_hms_opt(10, 30, 00).unwrap(),
+            NaiveTime::from_hms_opt(10, 45, 15).unwrap(),
         ),
     )
     .await
@@ -1610,12 +1616,12 @@ async fn round_trip_time_type() {
         res,
         vec![
             (
-                NaiveTime::from_hms(8, 00, 00),
-                NaiveTime::from_hms(9, 00, 00),
+                NaiveTime::from_hms_opt(8, 00, 00).unwrap(),
+                NaiveTime::from_hms_opt(9, 00, 00).unwrap(),
             ),
             (
-                NaiveTime::from_hms(10, 30, 00),
-                NaiveTime::from_hms(10, 45, 15),
+                NaiveTime::from_hms_opt(10, 30, 00).unwrap(),
+                NaiveTime::from_hms_opt(10, 45, 15).unwrap(),
             )
         ]
     );

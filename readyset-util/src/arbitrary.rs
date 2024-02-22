@@ -6,7 +6,7 @@ use std::time::{Duration as StdDuration, SystemTime, UNIX_EPOCH};
 
 use bit_vec::BitVec;
 use chrono::{
-    Date, DateTime, Duration, FixedOffset, LocalResult, NaiveDate, NaiveDateTime, NaiveTime,
+    DateTime, Duration, FixedOffset, LocalResult, NaiveDate, NaiveDateTime, NaiveTime, TimeZone,
 };
 use chrono_tz::Tz;
 use cidr::IpInet;
@@ -23,18 +23,19 @@ pub fn arbitrary_naive_date() -> impl Strategy<Value = NaiveDate> {
         if doy == 366 && NaiveDate::from_ymd_opt(y, 2, 29).is_none() {
             doy = 365
         }
-        NaiveDate::from_yo(y, doy)
+        NaiveDate::from_yo_opt(y, doy).unwrap()
     })
 }
 
 /// Strategy to generate an arbitrary [`NaiveDate`] with a positive year value
 pub fn arbitrary_positive_naive_date() -> impl Strategy<Value = NaiveDate> {
-    (0i32..3000, 1u32..365).prop_map(|(y, doy)| NaiveDate::from_yo(y, doy))
+    (0i32..3000, 1u32..365).prop_map(|(y, doy)| NaiveDate::from_yo_opt(y, doy).unwrap())
 }
 
 /// Generate an arbitrary [`NaiveTime`]
 pub fn arbitrary_naive_time() -> impl Strategy<Value = NaiveTime> {
-    (0u32..23, 0u32..59, 0u32..59).prop_map(|(hour, min, sec)| NaiveTime::from_hms(hour, min, sec))
+    (0u32..23, 0u32..59, 0u32..59)
+        .prop_map(|(hour, min, sec)| NaiveTime::from_hms_opt(hour, min, sec).unwrap())
 }
 
 /// Generate an arbitrary [`Duration`] within a MySQL TIME valid range.
@@ -59,8 +60,8 @@ pub fn arbitrary_naive_date_time() -> impl Strategy<Value = NaiveDateTime> {
         .prop_map(|(date, time)| NaiveDateTime::new(date, time))
 }
 
-/// Strategy to generate an arbitrary [`Date<FixedOffset>`]
-pub fn arbitrary_date() -> impl Strategy<Value = Date<FixedOffset>> {
+/// Strategy to generate an arbitrary [`DateTime<FixedOffset>`]
+pub fn arbitrary_date() -> impl Strategy<Value = DateTime<FixedOffset>> {
     // The numbers correspond to the restrictions of `Date` and `FixedOffset`.
     (-2000i32..3000, 1u32..365, (-86_399..86_399)).prop_map(|(mut y, doy, offset)| {
         if y == 0 {
@@ -68,27 +69,32 @@ pub fn arbitrary_date() -> impl Strategy<Value = Date<FixedOffset>> {
             // with a year zero
             y = 1;
         }
-        Date::<FixedOffset>::from_utc(
-            NaiveDate::from_yo(y, doy),
-            FixedOffset::west_opt(offset).unwrap_or_else(|| {
+        FixedOffset::west_opt(offset)
+            .unwrap_or_else(|| {
                 panic!(
                     "FixedOffset::west(secs) requires that -86_400 < secs < 86_400. Secs used: {}",
                     offset
                 )
-            }),
-        )
+            })
+            .from_utc_datetime(&NaiveDateTime::new(
+                NaiveDate::from_yo_opt(y, doy).unwrap(),
+                NaiveTime::from_hms_opt(0, 0, 0).unwrap(),
+            ))
     })
 }
 
 /// Strategy to generate an arbitrary [`DateTime<FixedOffset>`]
 pub fn arbitrary_date_time() -> impl Strategy<Value = DateTime<FixedOffset>> {
-    (arbitrary_date(), arbitrary_naive_time()).prop_map(|(date, time)| date.and_time(time).unwrap())
+    (arbitrary_date(), arbitrary_naive_time()).prop_map(|(date, time)| {
+        date.timezone()
+            .from_utc_datetime(&NaiveDateTime::new(date.date_naive(), time))
+    })
 }
 
 /// Strategy to generate an arbitrary [`NaiveDateTime`] within Timestamp range.
 pub fn arbitrary_timestamp_naive_date_time() -> impl Strategy<Value = NaiveDateTime> {
-    let to_date = |(y, doy)| NaiveDate::from_yo(y, doy);
-    let to_time = |(hour, min, sec)| NaiveTime::from_hms(hour, min, sec);
+    let to_date = |(y, doy)| NaiveDate::from_yo_opt(y, doy).unwrap();
+    let to_time = |(hour, min, sec)| NaiveTime::from_hms_opt(hour, min, sec).unwrap();
     let dates = (1970i32..2037, 1u32..365).prop_map(to_date);
     let times = (0u32..23, 0u32..59, 0u32..59).prop_map(to_time);
     let last_dates = (2038i32..2039, 1u32..20).prop_map(to_date);

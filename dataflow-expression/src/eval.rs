@@ -801,8 +801,8 @@ mod tests {
     #[test]
     fn eval_comparisons() {
         let dt = NaiveDateTime::new(
-            NaiveDate::from_ymd(2009, 10, 17),
-            NaiveTime::from_hms(12, 0, 0),
+            NaiveDate::from_ymd_opt(2009, 10, 17).unwrap(),
+            NaiveTime::from_hms_opt(12, 0, 0).unwrap(),
         );
         let text_dt: DfValue = "2009-10-17 12:00:00".into();
         let text_less_dt: DfValue = "2009-10-16 12:00:00".into();
