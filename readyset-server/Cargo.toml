@@ -101,6 +101,7 @@ health-reporter = { path = "../health-reporter" }
 database-utils = { path = "../database-utils" }
 catalog-tables = { path = "../catalog-tables" }
 replication-offset = { path = "../replication-offset" }
+readyset-client-metrics = { path = "../readyset-client-metrics" }
 num_cpus = "1.16.0"
 
 [dev-dependencies]

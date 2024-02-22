@@ -5,7 +5,8 @@ use mysql_async::prelude::{FromRow, Queryable, StatementLike};
 use mysql_async::Params;
 use readyset_client::get_metric;
 use readyset_client::metrics::client::MetricsClient;
-use readyset_client::metrics::{recorded, DumpedMetricValue};
+use readyset_client::metrics::DumpedMetricValue;
+use readyset_client_metrics::recorded;
 use tokio::time::sleep;
 
 fn equal_rows<T>(a: &[T], b: &[T]) -> bool
@@ -240,10 +241,7 @@ async fn get_num_view_queries(metrics: &mut MetricsClient) -> u32 {
         Ok(metrics) => metrics
             .iter()
             .map(
-                |d| match get_metric!(d.metrics, recorded::SERVER_VIEW_QUERY_HIT) {
-                    Some(DumpedMetricValue::Counter(n)) => n as u32,
-                    _ => 0,
-                } + match get_metric!(d.metrics, recorded::SERVER_VIEW_QUERY_MISS) {
+                |d| match get_metric!(d.metrics, recorded::QUERY_LOG_EXECUTION_COUNT) {
                     Some(DumpedMetricValue::Counter(n)) => n as u32,
                     _ => 0,
                 },

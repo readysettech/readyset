@@ -214,12 +214,6 @@ pub mod recorded {
     /// Histogram: The total number of bytes evicted.
     pub const EVICTION_FREED_MEMORY: &str = "readyset_eviction_freed_memory";
 
-    /// Counter: The number of times a query was served entirely from reader cache.
-    pub const SERVER_VIEW_QUERY_HIT: &str = "readyset_server.view_query_result_hit";
-
-    /// Counter: The number of times a query required at least a partial replay.
-    pub const SERVER_VIEW_QUERY_MISS: &str = "readyset_server.view_query_result_miss";
-
     /// Histogram: The amount of time in microseconds spent waiting for an upquery during a read
     /// request.
     pub const SERVER_VIEW_UPQUERY_DURATION: &str = "readyset_server.view_query_upquery_duration_us";

@@ -1211,7 +1211,7 @@
                         },
                         {
                             "editorMode": "builder",
-                            "expr": "readyset_query_log_query_cache_missed",
+                            "expr": "readyset_query_log_execution_time_count{hit_or_miss=\"miss\"}",
                             "hide": false,
                             "instant": false,
                             "legendFormat": "cache miss::{{query}}",

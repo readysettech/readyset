@@ -7,6 +7,7 @@
 /// | --- | ----------- |
 /// | query | The query text being executed. |
 /// | database_type | The database type being executed. Must be a [`DatabaseType`] |
+/// | hit_or_miss | Whether a query against Readyset was a hit or a miss. This label is only present if the `database_type` label is "readyset".
 ///
 /// [`DatabaseType`]: crate::DatabaseType
 pub const QUERY_LOG_EXECUTION_TIME: &str = "readyset_query_log_execution_time";
@@ -36,13 +37,6 @@ pub const QUERY_LOG_TOTAL_KEYS_READ: &str = "readyset_query_log_total_keys_read"
 /// | --- | ----------- |
 /// | query | The query text being executed. |
 pub const QUERY_LOG_TOTAL_CACHE_MISSES: &str = "readyset_query_log_total_cache_misses";
-
-/// Counter: The number of queries which encountered at least one cache miss.
-///
-/// | Tag | Description |
-/// | --- | ----------- |
-/// | query | The query text being executed. |
-pub const QUERY_LOG_QUERY_CACHE_MISSED: &str = "readyset_query_log_query_cache_missed";
 
 /// Counter: The number of successful queries (dry runs/real) processed by the migration handler.
 pub const MIGRATION_HANDLER_SUCCESSES: &str = "readyset_migration_handler_successes";

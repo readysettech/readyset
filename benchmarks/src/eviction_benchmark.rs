@@ -22,7 +22,8 @@ use clap::Parser;
 use database_utils::{DatabaseURL, QueryableConnection};
 use metrics::Unit;
 use prometheus_parse::Scrape;
-use readyset_client::metrics::recorded;
+use readyset_client::metrics::recorded as server_recorded;
+use readyset_client_metrics::recorded as adapter_recorded;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::{debug, error, info};
@@ -191,12 +192,16 @@ fn get_total_for_metric(scrape: &prometheus_parse::Scrape, metric: &'static str)
         .sum()
 }
 
-fn get_metric(scrape: &prometheus_parse::Scrape, metric: &'static str) -> f64 {
+fn get_metric(
+    scrape: &prometheus_parse::Scrape,
+    metric: &str,
+    labels: HashMap<&'static str, &'static str>,
+) -> f64 {
     let metric_name = metric.replace('.', "_");
     scrape
         .samples
         .iter()
-        .find(|m| m.metric == metric_name)
+        .find(|m| m.metric == metric_name && labels.iter().all(|(k, v)| m.labels.get(k) == Some(v)))
         .map(|m| match m.value {
             prometheus_parse::Value::Counter(f) => f,
             prometheus_parse::Value::Gauge(f) => f,
@@ -296,9 +301,18 @@ async fn metrics_task(
     interval.tick().await; // First tick is immediate
 
     let initial = scrape_metrics(&metrics_url, &metrics_client).await?;
-    let mut last_evicted = get_total_for_metric(&initial, recorded::EVICTION_FREED_MEMORY);
-    let mut last_hits = get_metric(&initial, recorded::SERVER_VIEW_QUERY_HIT);
-    let mut last_misses = get_metric(&initial, recorded::SERVER_VIEW_QUERY_MISS);
+    let query_count_metric = format!("{}_count", adapter_recorded::QUERY_LOG_EXECUTION_TIME);
+    let mut last_evicted = get_total_for_metric(&initial, server_recorded::EVICTION_FREED_MEMORY);
+    let mut last_hits = get_metric(
+        &initial,
+        &query_count_metric,
+        [("hit_or_miss", "hit")].into(),
+    );
+    let mut last_misses = get_metric(
+        &initial,
+        &query_count_metric,
+        [("hit_or_miss", "miss")].into(),
+    );
     let mut scale = 1.0;
 
     let mut last_hit_rate = hit_rate(last_hits, last_misses);
@@ -309,9 +323,17 @@ async fn metrics_task(
 
         let metrics = scrape_metrics(&metrics_url, &metrics_client).await?;
 
-        let evicted = get_total_for_metric(&metrics, recorded::EVICTION_FREED_MEMORY);
-        let hit = get_metric(&metrics, recorded::SERVER_VIEW_QUERY_HIT);
-        let miss = get_metric(&metrics, recorded::SERVER_VIEW_QUERY_MISS);
+        let evicted = get_total_for_metric(&metrics, server_recorded::EVICTION_FREED_MEMORY);
+        let hit = get_metric(
+            &metrics,
+            &query_count_metric,
+            [("hit_or_miss", "hit")].into(),
+        );
+        let miss = get_metric(
+            &metrics,
+            &query_count_metric,
+            [("hit_or_miss", "miss")].into(),
+        );
 
         sender.send(EvictionBenchmarkResultBatch {
             queries: Vec::new(),

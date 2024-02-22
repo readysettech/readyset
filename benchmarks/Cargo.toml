@@ -49,6 +49,7 @@ redis = { version = "0.23.3", features = ["tokio-comp", "aio"] }
 # local dependencies
 database-utils = { path = "../database-utils" }
 readyset-client = { path = "../readyset-client" }
+readyset-client-metrics = { path = "../readyset-client-metrics" }
 readyset-data = { path = "../readyset-data" }
 readyset-errors = { path = "../readyset-errors" }
 nom-sql = { path = "../nom-sql" }
