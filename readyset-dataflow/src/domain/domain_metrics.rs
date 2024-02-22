@@ -32,7 +32,7 @@ impl DomainMetrics {
 
     pub(super) fn rec_eviction_time(&self, time: Duration, total_freed: u64) {
         histogram!(recorded::EVICTION_TIME, time.as_micros() as f64);
-        histogram!(recorded::EVICTION_FREED_MEMORY, total_freed as f64);
+        histogram!(recorded::EVICTION_BYTES_FREED, total_freed as f64);
     }
 
     pub(super) fn rec_chunked_replay_start_time(&mut self, time: Duration) {

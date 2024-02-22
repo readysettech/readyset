@@ -164,8 +164,8 @@ pub mod recorded {
     /// Counter: The number of eviction packets received.
     pub const EVICTION_REQUESTS: &str = "readyset_eviction_requests";
 
-    /// Histogram: The total number of bytes evicted.
-    pub const EVICTION_FREED_MEMORY: &str = "readyset_eviction_freed_memory";
+    /// Histogram: The number of bytes evicted per `EvictRequest::Bytes` message.
+    pub const EVICTION_BYTES_FREED: &str = "readyset_eviction_bytes_freed";
 
     /// Histogram: The amount of time in microseconds spent waiting for an upquery during a read
     /// request.
