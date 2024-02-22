@@ -445,16 +445,18 @@ pub fn value_of_type(typ: &SqlType) -> DfValue {
             if *prec == 1 { 1 } else { 15 },
             (*scale).unwrap_or(1) as _,
         )),
-        SqlType::DateTime(_) | SqlType::Timestamp => {
-            NaiveDate::from_ymd(2020, 1, 1).and_hms(12, 30, 45).into()
-        }
+        SqlType::DateTime(_) | SqlType::Timestamp => NaiveDate::from_ymd_opt(2020, 1, 1)
+            .unwrap()
+            .and_hms_opt(12, 30, 45)
+            .into(),
         SqlType::TimestampTz => DfValue::from(
-            FixedOffset::west(18_000)
-                .ymd(2020, 1, 1)
-                .and_hms(12, 30, 45),
+            FixedOffset::west_opt(18_000)
+                .unwrap()
+                .with_ymd_and_hms(2020, 1, 1, 12, 30, 45)
+                .single(),
         ),
-        SqlType::Time => NaiveTime::from_hms(12, 30, 45).into(),
-        SqlType::Date => NaiveDate::from_ymd(2020, 1, 1).into(),
+        SqlType::Time => NaiveTime::from_hms_opt(12, 30, 45).into(),
+        SqlType::Date => NaiveDate::from_ymd_opt(2020, 1, 1).into(),
         SqlType::Bool => 1i32.into(),
         SqlType::Enum(_) => unimplemented!(),
         SqlType::Json | SqlType::Jsonb => "{}".into(),
@@ -543,18 +545,20 @@ where
         )),
         SqlType::DateTime(_) | SqlType::Timestamp => {
             // Generate a random month and day within the same year.
-            NaiveDate::from_ymd(2020, rng.gen_range(1..12), rng.gen_range(1..28))
-                .and_hms(12, 30, 45)
+            NaiveDate::from_ymd_opt(2020, rng.gen_range(1..12), rng.gen_range(1..28))
+                .unwrap()
+                .and_hms_opt(12, 30, 45)
                 .into()
         }
         SqlType::TimestampTz => DfValue::from(
-            FixedOffset::west(18_000)
-                .ymd(2020, rng.gen_range(1..12), rng.gen_range(1..28))
-                .and_hms(12, 30, 45),
+            FixedOffset::west_opt(18_000)
+                .unwrap()
+                .with_ymd_and_hms(2020, rng.gen_range(1..12), rng.gen_range(1..28), 12, 30, 45)
+                .single(),
         ),
-        SqlType::Time => NaiveTime::from_hms(12, 30, 45).into(),
+        SqlType::Time => NaiveTime::from_hms_opt(12, 30, 45).into(),
         SqlType::Date => {
-            NaiveDate::from_ymd(2020, rng.gen_range(1..12), rng.gen_range(1..28)).into()
+            NaiveDate::from_ymd_opt(2020, rng.gen_range(1..12), rng.gen_range(1..28)).into()
         }
         SqlType::Bool => DfValue::from(rng.gen_bool(0.5)),
         SqlType::Enum(_) => unimplemented!(),
@@ -665,19 +669,28 @@ pub fn unique_value_of_type(typ: &SqlType, idx: u32) -> DfValue {
             None => Decimal::new((15 + idx) as i64, 2),
         }
         .into(),
-        SqlType::DateTime(_) | SqlType::Timestamp => {
-            (NaiveDate::from_ymd(2020, 1, 1).and_hms(0, 0, 0) + Duration::minutes(idx as _)).into()
-        }
+        SqlType::DateTime(_) | SqlType::Timestamp => (NaiveDate::from_ymd_opt(2020, 1, 1)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            + Duration::minutes(idx as _))
+        .into(),
         SqlType::TimestampTz => DfValue::from(
-            FixedOffset::west(18_000).ymd(2020, 1, 1).and_hms(12, 0, 0)
+            FixedOffset::west_opt(18_000)
+                .unwrap()
+                .with_ymd_and_hms(2020, 1, 1, 12, 0, 0)
+                .single()
+                .expect("should have a value")
                 + Duration::minutes(idx as _),
         ),
         SqlType::Date => {
-            DfValue::from(NaiveDate::from_ymd(1000, 1, 1) + Duration::days(idx.into()))
+            DfValue::from(NaiveDate::from_ymd_opt(1000, 1, 1).unwrap() + Duration::days(idx.into()))
         }
         SqlType::Enum(_) => unimplemented!(),
         SqlType::Bool => unimplemented!(),
-        SqlType::Time => (NaiveTime::from_hms(0, 0, 0) + Duration::seconds(idx as _)).into(),
+        SqlType::Time => {
+            (NaiveTime::from_hms_opt(0, 0, 0).unwrap() + Duration::seconds(idx as _)).into()
+        }
         SqlType::Json | SqlType::Jsonb => DfValue::from(format!("{{\"k\": {}}}", idx)),
         SqlType::MacAddr => {
             let b1: u8 = ((idx >> 24) & 0xff) as u8;

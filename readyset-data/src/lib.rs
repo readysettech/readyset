@@ -213,9 +213,12 @@ impl DfValue {
             DfValue::None => DfValue::None,
             DfValue::Text(_) | DfValue::TinyText(_) => DfValue::TinyText("".try_into().unwrap()), /* Safe because fits in length */
             DfValue::TimestampTz(_) => DfValue::from(
-                FixedOffset::west(-MAX_SECONDS_DATETIME_OFFSET).from_utc_datetime(
-                    &NaiveDateTime::new(NaiveDate::MIN, NaiveTime::from_hms(0, 0, 0)),
-                ),
+                FixedOffset::west_opt(-MAX_SECONDS_DATETIME_OFFSET)
+                    .unwrap()
+                    .from_utc_datetime(&NaiveDateTime::new(
+                        NaiveDate::MIN,
+                        NaiveTime::from_hms_opt(0, 0, 0).unwrap(),
+                    )),
             ),
             DfValue::Float(..) => DfValue::Float(f32::MIN),
             DfValue::Double(..) => DfValue::Double(f64::MIN),
@@ -240,9 +243,12 @@ impl DfValue {
         match other {
             DfValue::None => DfValue::None,
             DfValue::TimestampTz(_) => DfValue::from(
-                FixedOffset::east(MAX_SECONDS_DATETIME_OFFSET).from_utc_datetime(
-                    &NaiveDateTime::new(NaiveDate::MAX, NaiveTime::from_hms(23, 59, 59)),
-                ),
+                FixedOffset::east_opt(MAX_SECONDS_DATETIME_OFFSET)
+                    .unwrap()
+                    .from_utc_datetime(&NaiveDateTime::new(
+                        NaiveDate::MAX,
+                        NaiveTime::from_hms_opt(23, 59, 59).unwrap(),
+                    )),
             ),
             DfValue::Float(..) => DfValue::Float(f32::MAX),
             DfValue::Double(..) => DfValue::Double(f64::MIN),
@@ -323,7 +329,11 @@ impl DfValue {
             DfValue::Text(ref t) => !t.as_str().is_empty(),
             DfValue::TinyText(ref tt) => !tt.as_bytes().is_empty(),
             DfValue::TimestampTz(ref dt) => {
-                dt.to_chrono().naive_local() != NaiveDate::from_ymd(0, 0, 0).and_hms(0, 0, 0)
+                dt.to_chrono().naive_local()
+                    != NaiveDate::from_ymd_opt(0, 0, 0)
+                        .unwrap()
+                        .and_hms_opt(0, 0, 0)
+                        .unwrap()
             }
             DfValue::Time(ref t) => *t != MySqlTime::from_microseconds(0),
             DfValue::ByteArray(ref array) => !array.is_empty(),
@@ -2307,8 +2317,9 @@ mod tests {
         assert_eq!(std::mem::size_of::<DfValue>(), 16);
 
         let timestamp_tz = DfValue::from(
-            FixedOffset::west(18_000)
-                .from_utc_datetime(&NaiveDateTime::from_timestamp(0, 42_000_000)),
+            FixedOffset::west_opt(18_000)
+                .unwrap()
+                .from_utc_datetime(&NaiveDateTime::from_timestamp_opt(0, 42_000_000).unwrap()),
         );
 
         match &timestamp_tz {
@@ -2530,7 +2541,10 @@ mod tests {
         assert_eq!(converted_float, initial_float);
 
         // Test Value::Date.
-        let ts = NaiveDate::from_ymd(1111, 1, 11).and_hms_micro(2, 3, 4, 5);
+        let ts = NaiveDate::from_ymd_opt(1111, 1, 11)
+            .unwrap()
+            .and_hms_micro_opt(2, 3, 4, 5)
+            .unwrap();
         let a = Value::from(ts);
         let a_dt = DfValue::try_from(a);
         assert!(a_dt.is_ok());
@@ -2715,10 +2729,15 @@ mod tests {
         let double_from_real: DfValue = DfValue::try_from(-8.99_f64).unwrap();
         let double = DfValue::Double(-8.99);
         let numeric = DfValue::from(Decimal::new(-899, 2)); // -8.99
-        let timestamp = DfValue::TimestampTz(NaiveDateTime::from_timestamp(0, 42_000_000).into());
+        let timestamp = DfValue::TimestampTz(
+            NaiveDateTime::from_timestamp_opt(0, 42_000_000)
+                .unwrap()
+                .into(),
+        );
         let timestamp_tz = DfValue::from(
-            FixedOffset::west(19_800)
-                .from_utc_datetime(&NaiveDateTime::from_timestamp(0, 42_000_000)),
+            FixedOffset::west_opt(19_800)
+                .unwrap()
+                .from_utc_datetime(&NaiveDateTime::from_timestamp_opt(0, 42_000_000).unwrap()),
         );
         let int = DfValue::Int(5);
         let bytes = DfValue::ByteArray(Arc::new(vec![0, 8, 39, 92, 100, 128]));
@@ -2760,15 +2779,25 @@ mod tests {
         let double_from_real2: DfValue = DfValue::try_from(-8.98_f64).unwrap();
         let numeric = DfValue::from(Decimal::new(-899, 2)); // -8.99
         let numeric2 = DfValue::from(Decimal::new(-898, 2)); // -8.99
-        let time = DfValue::TimestampTz(NaiveDateTime::from_timestamp(0, 42_000_000).into());
-        let time2 = DfValue::TimestampTz(NaiveDateTime::from_timestamp(1, 42_000_000).into());
+        let time = DfValue::TimestampTz(
+            NaiveDateTime::from_timestamp_opt(0, 42_000_000)
+                .unwrap()
+                .into(),
+        );
+        let time2 = DfValue::TimestampTz(
+            NaiveDateTime::from_timestamp_opt(1, 42_000_000)
+                .unwrap()
+                .into(),
+        );
         let timestamp_tz = DfValue::from(
-            FixedOffset::west(18_000)
-                .from_utc_datetime(&NaiveDateTime::from_timestamp(0, 42_000_000)),
+            FixedOffset::west_opt(18_000)
+                .unwrap()
+                .from_utc_datetime(&NaiveDateTime::from_timestamp_opt(0, 42_000_000).unwrap()),
         );
         let timestamp_tz2 = DfValue::from(
-            FixedOffset::west(18_000)
-                .from_utc_datetime(&NaiveDateTime::from_timestamp(1, 42_000_000)),
+            FixedOffset::west_opt(18_000)
+                .unwrap()
+                .from_utc_datetime(&NaiveDateTime::from_timestamp_opt(1, 42_000_000).unwrap()),
         );
         let shrt = DfValue::Int(5);
         let shrt6 = DfValue::Int(6);
@@ -3174,15 +3203,25 @@ mod tests {
         let double_from_real2: DfValue = DfValue::try_from(-8.98_f64).unwrap();
         let numeric = DfValue::from(Decimal::new(-899, 2)); // -8.99
         let numeric2 = DfValue::from(Decimal::new(-898, 2)); // -8.99
-        let time = DfValue::TimestampTz(NaiveDateTime::from_timestamp(0, 42_000_000).into());
-        let time2 = DfValue::TimestampTz(NaiveDateTime::from_timestamp(1, 42_000_000).into());
+        let time = DfValue::TimestampTz(
+            NaiveDateTime::from_timestamp_opt(0, 42_000_000)
+                .unwrap()
+                .into(),
+        );
+        let time2 = DfValue::TimestampTz(
+            NaiveDateTime::from_timestamp_opt(1, 42_000_000)
+                .unwrap()
+                .into(),
+        );
         let timestamp_tz = DfValue::from(
-            FixedOffset::west(18_000)
-                .from_utc_datetime(&NaiveDateTime::from_timestamp(0, 42_000_000)),
+            FixedOffset::west_opt(18_000)
+                .unwrap()
+                .from_utc_datetime(&NaiveDateTime::from_timestamp_opt(0, 42_000_000).unwrap()),
         );
         let timestamp_tz2 = DfValue::from(
-            FixedOffset::west(18_000)
-                .from_utc_datetime(&NaiveDateTime::from_timestamp(1, 42_000_000)),
+            FixedOffset::west_opt(18_000)
+                .unwrap()
+                .from_utc_datetime(&NaiveDateTime::from_timestamp_opt(1, 42_000_000).unwrap()),
         );
         let shrt = DfValue::Int(5);
         let shrt6 = DfValue::Int(6);
@@ -3484,7 +3523,7 @@ mod tests {
         #[proptest]
         fn parse_datetimes(#[strategy(arbitrary_naive_date())] nd: NaiveDate) {
             let subsecond_digits = Dialect::DEFAULT_MYSQL.default_subsecond_digits();
-            let dt = NaiveDateTime::new(nd, NaiveTime::from_hms(12, 0, 0));
+            let dt = NaiveDateTime::new(nd, NaiveTime::from_hms_opt(12, 0, 0).unwrap());
             let expected = DfValue::from(dt);
             let input = DfValue::from(dt.format(crate::timestamp::TIMESTAMP_FORMAT).to_string());
 
@@ -3497,7 +3536,10 @@ mod tests {
 
         #[proptest]
         fn parse_dates(#[strategy(arbitrary_naive_date())] nd: NaiveDate) {
-            let expected = DfValue::from(NaiveDateTime::new(nd, NaiveTime::from_hms(0, 0, 0)));
+            let expected = DfValue::from(NaiveDateTime::new(
+                nd,
+                NaiveTime::from_hms_opt(0, 0, 0).unwrap(),
+            ));
             let input = DfValue::from(nd.format(crate::timestamp::DATE_FORMAT).to_string());
             let result = input.coerce_to(&DfType::Date, &DfType::Unknown).unwrap();
             assert_eq!(result, expected);
@@ -3506,16 +3548,21 @@ mod tests {
         #[test]
         fn timestamp_surjections() {
             let subsecond_digits = Dialect::DEFAULT_MYSQL.default_subsecond_digits();
-            let input = DfValue::from(NaiveDate::from_ymd(2021, 3, 17).and_hms(11, 34, 56));
+            let input = DfValue::from(
+                NaiveDate::from_ymd_opt(2021, 3, 17)
+                    .unwrap()
+                    .and_hms_opt(11, 34, 56)
+                    .unwrap(),
+            );
             assert_eq!(
                 input.coerce_to(&DfType::Date, &DfType::Unknown).unwrap(),
-                NaiveDate::from_ymd(2021, 3, 17).into()
+                NaiveDate::from_ymd_opt(2021, 3, 17).unwrap().into()
             );
             assert_eq!(
                 input
                     .coerce_to(&DfType::Time { subsecond_digits }, &DfType::Unknown)
                     .unwrap(),
-                NaiveTime::from_hms(11, 34, 56).into()
+                NaiveTime::from_hms_opt(11, 34, 56).unwrap().into()
             );
         }
 
@@ -3659,28 +3706,38 @@ mod tests {
                 DfValue::from(20070523i64)
                     .coerce_to(&DfType::Date, &DfType::Unknown)
                     .unwrap(),
-                DfValue::from(NaiveDate::from_ymd(2007, 5, 23))
+                DfValue::from(NaiveDate::from_ymd_opt(2007, 5, 23).unwrap())
             );
 
             assert_eq!(
                 DfValue::from(70523u64)
                     .coerce_to(&DfType::Date, &DfType::Unknown)
                     .unwrap(),
-                DfValue::from(NaiveDate::from_ymd(2007, 5, 23))
+                DfValue::from(NaiveDate::from_ymd_opt(2007, 5, 23).unwrap())
             );
 
             assert_eq!(
                 DfValue::from(19830905132800i64)
                     .coerce_to(&DfType::Timestamp { subsecond_digits }, &DfType::Unknown)
                     .unwrap(),
-                DfValue::from(NaiveDate::from_ymd(1983, 9, 5).and_hms(13, 28, 00))
+                DfValue::from(
+                    NaiveDate::from_ymd_opt(1983, 9, 5)
+                        .unwrap()
+                        .and_hms_opt(13, 28, 00)
+                        .unwrap()
+                )
             );
 
             assert_eq!(
                 DfValue::from(830905132800u64)
                     .coerce_to(&DfType::DateTime { subsecond_digits }, &DfType::Unknown)
                     .unwrap(),
-                DfValue::from(NaiveDate::from_ymd(1983, 9, 5).and_hms(13, 28, 00))
+                DfValue::from(
+                    NaiveDate::from_ymd_opt(1983, 9, 5)
+                        .unwrap()
+                        .and_hms_opt(13, 28, 00)
+                        .unwrap()
+                )
             );
 
             assert_eq!(

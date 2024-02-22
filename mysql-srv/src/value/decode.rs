@@ -219,11 +219,12 @@ impl<'a> TryFrom<Value<'a>> for NaiveDate {
             if v.len() != 4 {
                 return Err(MsqlSrvError::InvalidDate);
             }
-            Ok(NaiveDate::from_ymd(
+            Ok(NaiveDate::from_ymd_opt(
                 i32::from(v.read_u16::<LittleEndian>()?),
                 u32::from(v.read_u8()?),
                 u32::from(v.read_u8()?),
-            ))
+            )
+            .unwrap())
         } else {
             Err(MsqlSrvError::InvalidConversion {
                 target_type: "NaiveDate".to_string(),
@@ -240,14 +241,15 @@ impl<'a> TryFrom<Value<'a>> for NaiveDateTime {
             if !(v.len() == 4 || v.len() == 7 || v.len() == 11) {
                 return Err(MsqlSrvError::InvalidDatetime);
             }
-            let d = NaiveDate::from_ymd(
+            let d = NaiveDate::from_ymd_opt(
                 i32::from(v.read_u16::<LittleEndian>()?),
                 u32::from(v.read_u8()?),
                 u32::from(v.read_u8()?),
-            );
+            )
+            .unwrap();
 
             if v.is_empty() {
-                return Ok(d.and_hms(0, 0, 0));
+                return Ok(d.and_hms_opt(0, 0, 0).unwrap());
             }
 
             let h = u32::from(v.read_u8()?);
@@ -255,10 +257,10 @@ impl<'a> TryFrom<Value<'a>> for NaiveDateTime {
             let s = u32::from(v.read_u8()?);
 
             if v.is_empty() {
-                Ok(d.and_hms(h, m, s))
+                Ok(d.and_hms_opt(h, m, s).unwrap())
             } else {
                 let us = v.read_u32::<LittleEndian>()?;
-                Ok(d.and_hms_micro(h, m, s, us))
+                Ok(d.and_hms_micro_opt(h, m, s, us).unwrap())
             }
         } else {
             Err(MsqlSrvError::InvalidConversion {
@@ -514,7 +516,7 @@ mod tests {
     rt!(
         date_only_time,
         chrono::NaiveDate,
-        chrono::Local::today().naive_local(),
+        chrono::Local::now().date_naive(),
         ColumnType::MYSQL_TYPE_DATE
     );
     rt!(
@@ -526,7 +528,10 @@ mod tests {
     rt!(
         datetime,
         chrono::NaiveDateTime,
-        chrono::Utc.ymd(1989, 12, 7).and_hms(8, 0, 4).naive_utc(),
+        chrono::Utc
+            .with_ymd_and_hms(1989, 12, 7, 8, 0, 4)
+            .unwrap()
+            .naive_utc(),
         ColumnType::MYSQL_TYPE_DATETIME
     );
     rt!(
@@ -547,6 +552,12 @@ mod tests {
     fn naive_date_time_midnight() {
         let val = Value(ValueInner::Datetime(&[228, 7, 1, 1]));
         let res = NaiveDateTime::try_from(val).unwrap();
-        assert_eq!(res, NaiveDate::from_ymd(2020, 1, 1).and_hms(0, 0, 0))
+        assert_eq!(
+            res,
+            NaiveDate::from_ymd_opt(2020, 1, 1)
+                .unwrap()
+                .and_hms_opt(0, 0, 0)
+                .unwrap()
+        )
     }
 }

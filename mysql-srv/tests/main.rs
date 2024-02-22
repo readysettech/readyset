@@ -701,7 +701,10 @@ fn insert_exec() {
             assert_eq!(
                 std::convert::TryInto::<chrono::NaiveDateTime>::try_into(params[3].value)
                     .expect("Error calling try_into"),
-                chrono::NaiveDate::from_ymd(2018, 4, 6).and_hms(13, 0, 56)
+                chrono::NaiveDate::from_ymd_opt(2018, 4, 6)
+                    .unwrap()
+                    .and_hms_opt(13, 0, 56)
+                    .unwrap()
             );
             assert_eq!(
                 std::convert::TryInto::<&str>::try_into(params[4].value)

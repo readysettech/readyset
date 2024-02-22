@@ -561,7 +561,7 @@ fn binlog_val_to_noria_val(
                 // currently set to None
                 return Ok(DfValue::None);
             }
-            let time = chrono::naive::NaiveDateTime::from_timestamp(epoch, 0);
+            let time = chrono::naive::NaiveDateTime::from_timestamp_opt(epoch, 0).unwrap();
             // Can unwrap because we know it maps directly to [`DfValue`]
             Ok(time.into())
         }
@@ -572,7 +572,7 @@ fn binlog_val_to_noria_val(
             let (secs, usecs) = s.split_once('.').unwrap(); // safe to unwrap because format is fixed
             let secs = secs.parse::<i64>().unwrap();
             let usecs = usecs.parse::<u32>().unwrap();
-            let time = chrono::naive::NaiveDateTime::from_timestamp(secs, usecs * 32);
+            let time = chrono::naive::NaiveDateTime::from_timestamp_opt(secs, usecs * 32).unwrap();
             // Can wrap because we know this maps directly to [`DfValue`]
             Ok(time.into())
         }

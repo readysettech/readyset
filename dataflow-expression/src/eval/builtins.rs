@@ -845,7 +845,7 @@ impl BuiltinFunction {
 
 #[cfg(test)]
 mod tests {
-    use chrono::{NaiveTime, Timelike};
+    use chrono::NaiveTime;
     use chrono_tz::{Asia, Atlantic};
     use lazy_static::lazy_static;
     use nom_sql::parse_expr;
@@ -894,12 +894,12 @@ mod tests {
     fn eval_call_convert_tz() {
         let expr = parse_and_lower("convert_tz(c0, c1, c2)", MySQL);
         let datetime = NaiveDateTime::new(
-            NaiveDate::from_ymd(2003, 10, 12),
-            NaiveTime::from_hms(5, 13, 33),
+            NaiveDate::from_ymd_opt(2003, 10, 12).unwrap(),
+            NaiveTime::from_hms_opt(5, 13, 33).unwrap(),
         );
         let expected = NaiveDateTime::new(
-            NaiveDate::from_ymd(2003, 10, 12),
-            NaiveTime::from_hms(11, 58, 33),
+            NaiveDate::from_ymd_opt(2003, 10, 12).unwrap(),
+            NaiveTime::from_hms_opt(11, 58, 33).unwrap(),
         );
         let src = "Atlantic/Cape_Verde";
         let target = "Asia/Kathmandu";
@@ -951,7 +951,7 @@ mod tests {
         let expr = parse_and_lower("dayofweek(c0)", MySQL);
         let expected = DfValue::Int(2);
 
-        let date = NaiveDate::from_ymd(2021, 3, 22); // Monday
+        let date = NaiveDate::from_ymd_opt(2021, 3, 22).unwrap(); // Monday
 
         assert_eq!(expr.eval::<DfValue>(&[date.into()]).unwrap(), expected);
         assert_eq!(
@@ -961,7 +961,7 @@ mod tests {
 
         let datetime = NaiveDateTime::new(
             date, // Monday
-            NaiveTime::from_hms(18, 8, 00),
+            NaiveTime::from_hms_opt(18, 8, 00).unwrap(),
         );
         assert_eq!(expr.eval::<DfValue>(&[datetime.into()]).unwrap(), expected);
         assert_eq!(
@@ -998,8 +998,8 @@ mod tests {
     fn eval_call_month() {
         let expr = parse_and_lower("month(c0)", MySQL);
         let datetime = NaiveDateTime::new(
-            NaiveDate::from_ymd(2003, 10, 12),
-            NaiveTime::from_hms(5, 13, 33),
+            NaiveDate::from_ymd_opt(2003, 10, 12).unwrap(),
+            NaiveTime::from_hms_opt(5, 13, 33).unwrap(),
         );
         let expected = 10_u32;
         assert_eq!(
@@ -1030,12 +1030,12 @@ mod tests {
     fn eval_call_timediff() {
         let expr = parse_and_lower("timediff(c0, c1)", MySQL);
         let param1 = NaiveDateTime::new(
-            NaiveDate::from_ymd(2003, 10, 12),
-            NaiveTime::from_hms(5, 13, 33),
+            NaiveDate::from_ymd_opt(2003, 10, 12).unwrap(),
+            NaiveTime::from_hms_opt(5, 13, 33).unwrap(),
         );
         let param2 = NaiveDateTime::new(
-            NaiveDate::from_ymd(2003, 10, 14),
-            NaiveTime::from_hms(4, 13, 33),
+            NaiveDate::from_ymd_opt(2003, 10, 14).unwrap(),
+            NaiveTime::from_hms_opt(4, 13, 33).unwrap(),
         );
         assert_eq!(
             expr.eval::<DfValue>(&[param1.into(), param2.into()])
@@ -1048,12 +1048,12 @@ mod tests {
             DfValue::Time(MySqlTime::from_hmsus(false, 47, 0, 0, 0))
         );
         let param1 = NaiveDateTime::new(
-            NaiveDate::from_ymd(2003, 10, 12),
-            NaiveTime::from_hms(5, 13, 33),
+            NaiveDate::from_ymd_opt(2003, 10, 12).unwrap(),
+            NaiveTime::from_hms_opt(5, 13, 33).unwrap(),
         );
         let param2 = NaiveDateTime::new(
-            NaiveDate::from_ymd(2003, 10, 10),
-            NaiveTime::from_hms(4, 13, 33),
+            NaiveDate::from_ymd_opt(2003, 10, 10).unwrap(),
+            NaiveTime::from_hms_opt(4, 13, 33).unwrap(),
         );
         assert_eq!(
             expr.eval::<DfValue>(&[param1.into(), param2.into()])
@@ -1065,7 +1065,7 @@ mod tests {
                 .unwrap(),
             DfValue::Time(MySqlTime::from_hmsus(true, 49, 0, 0, 0))
         );
-        let param2 = NaiveTime::from_hms(4, 13, 33);
+        let param2 = NaiveTime::from_hms_opt(4, 13, 33).unwrap();
         assert_eq!(
             expr.eval::<DfValue>(&[param1.into(), param2.into()])
                 .unwrap(),
@@ -1076,7 +1076,7 @@ mod tests {
                 .unwrap(),
             DfValue::None
         );
-        let param1 = NaiveTime::from_hms(5, 13, 33);
+        let param1 = NaiveTime::from_hms_opt(5, 13, 33).unwrap();
         assert_eq!(
             expr.eval::<DfValue>(&[param1.into(), param2.into()])
                 .unwrap(),
@@ -1135,12 +1135,12 @@ mod tests {
     fn eval_call_addtime() {
         let expr = parse_and_lower("addtime(c0, c1)", MySQL);
         let param1 = NaiveDateTime::new(
-            NaiveDate::from_ymd(2003, 10, 12),
-            NaiveTime::from_hms(5, 13, 33),
+            NaiveDate::from_ymd_opt(2003, 10, 12).unwrap(),
+            NaiveTime::from_hms_opt(5, 13, 33).unwrap(),
         );
         let param2 = NaiveDateTime::new(
-            NaiveDate::from_ymd(2003, 10, 14),
-            NaiveTime::from_hms(4, 13, 33),
+            NaiveDate::from_ymd_opt(2003, 10, 14).unwrap(),
+            NaiveTime::from_hms_opt(4, 13, 33).unwrap(),
         );
         assert_eq!(
             expr.eval::<DfValue>(&[param1.into(), param2.into()])
@@ -1152,14 +1152,14 @@ mod tests {
                 .unwrap(),
             DfValue::None
         );
-        let param2 = NaiveTime::from_hms(4, 13, 33);
+        let param2 = NaiveTime::from_hms_opt(4, 13, 33).unwrap();
         assert_eq!(
             expr.eval::<DfValue>(&[param1.into(), param2.into()])
                 .unwrap(),
             DfValue::TimestampTz(
                 NaiveDateTime::new(
-                    NaiveDate::from_ymd(2003, 10, 12),
-                    NaiveTime::from_hms(9, 27, 6),
+                    NaiveDate::from_ymd_opt(2003, 10, 12).unwrap(),
+                    NaiveTime::from_hms_opt(9, 27, 6).unwrap(),
                 )
                 .into()
             )
@@ -1169,8 +1169,8 @@ mod tests {
                 .unwrap(),
             DfValue::TimestampTz(
                 NaiveDateTime::new(
-                    NaiveDate::from_ymd(2003, 10, 12),
-                    NaiveTime::from_hms(9, 27, 6),
+                    NaiveDate::from_ymd_opt(2003, 10, 12).unwrap(),
+                    NaiveTime::from_hms_opt(9, 27, 6).unwrap(),
                 )
                 .into()
             )
@@ -1181,8 +1181,8 @@ mod tests {
                 .unwrap(),
             DfValue::TimestampTz(
                 NaiveDateTime::new(
-                    NaiveDate::from_ymd(2003, 10, 12),
-                    NaiveTime::from_hms(2, 1, 58),
+                    NaiveDate::from_ymd_opt(2003, 10, 12).unwrap(),
+                    NaiveTime::from_hms_opt(2, 1, 58).unwrap(),
                 )
                 .into()
             )
@@ -1192,8 +1192,8 @@ mod tests {
                 .unwrap(),
             DfValue::TimestampTz(
                 NaiveDateTime::new(
-                    NaiveDate::from_ymd(2003, 10, 12),
-                    NaiveTime::from_hms(2, 1, 58),
+                    NaiveDate::from_ymd_opt(2003, 10, 12).unwrap(),
+                    NaiveTime::from_hms_opt(2, 1, 58).unwrap(),
                 )
                 .into()
             )
@@ -1446,8 +1446,7 @@ mod tests {
         let src_tz = Atlantic::Cape_Verde;
         let target_tz = Asia::Kathmandu;
         let expected = src_tz
-            .yo_opt(datetime.year(), datetime.ordinal())
-            .and_hms_opt(datetime.hour(), datetime.minute(), datetime.second())
+            .from_local_datetime(&datetime)
             .unwrap()
             .with_timezone(&target_tz)
             .naive_local();

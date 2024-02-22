@@ -122,7 +122,11 @@ mod tests {
         let s = "this needs to be longer than 14 chars to make it be a Text";
         let txt: DfValue = DfValue::from(s);
         let shrt = DfValue::Int(5);
-        let time = DfValue::TimestampTz(NaiveDateTime::from_timestamp(0, 42_000_000).into());
+        let time = DfValue::TimestampTz(
+            NaiveDateTime::from_timestamp_opt(0, 42_000_000)
+                .unwrap()
+                .into(),
+        );
 
         let rec = vec![DfValue::Int(5), "asdfasdfasdfasdf".into(), "asdf".into()];
 

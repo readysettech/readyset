@@ -230,12 +230,10 @@ impl TryFrom<mysql_async::Value> for Value {
                 ))
             }
             Date(y, mo, d, h, min, s, us) => Ok(Self::Date(
-                NaiveDate::from_ymd(y.into(), mo.into(), d.into()).and_hms_micro(
-                    h.into(),
-                    min.into(),
-                    s.into(),
-                    us,
-                ),
+                NaiveDate::from_ymd_opt(y.into(), mo.into(), d.into())
+                    .unwrap()
+                    .and_hms_micro_opt(h.into(), min.into(), s.into(), us)
+                    .unwrap(),
             )),
             Time(neg, d, h, m, s, us) => Ok(Self::Time(MySqlTime::from_hmsus(
                 !neg,
@@ -576,7 +574,8 @@ impl Value {
             (Self::Text(txt), Type::Real) => Ok(Cow::Owned(Self::from(txt.parse::<f64>()?))),
             (Self::Text(txt), Type::Date) => Ok(Cow::Owned(Self::Date(
                 NaiveDateTime::parse_from_str(txt, "%Y-%m-%d %H:%M:%S").or_else(|_| {
-                    NaiveDate::parse_from_str(txt, "%Y-%m-%d").map(|nd| nd.and_hms(0, 0, 0))
+                    NaiveDate::parse_from_str(txt, "%Y-%m-%d")
+                        .map(|nd| nd.and_hms_opt(0, 0, 0).unwrap())
                 })?,
             ))),
             (Self::Text(txt), Type::Time) => Ok(Cow::Owned(Self::Time(txt.parse()?))),

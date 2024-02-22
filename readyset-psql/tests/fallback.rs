@@ -250,7 +250,7 @@ async fn proxy_unsupported_sets() {
     assert_eq!(res.len(), 1);
     assert_eq!(
         res[0].get::<_, NaiveDate>(0),
-        NaiveDate::from_ymd(2022, 3, 5)
+        NaiveDate::from_ymd_opt(2022, 3, 5).unwrap()
     );
 
     shutdown_tx.shutdown().await;

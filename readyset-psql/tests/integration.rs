@@ -1148,7 +1148,10 @@ async fn write_timestamps() {
     assert_eq!(row.get::<usize, i32>(0), 1);
     assert_eq!(
         row.get::<usize, NaiveDateTime>(1),
-        NaiveDate::from_ymd(2020, 1, 23).and_hms(17, 8, 24)
+        NaiveDate::from_ymd_opt(2020, 1, 23)
+            .unwrap()
+            .and_hms_opt(17, 8, 24)
+            .unwrap()
     );
 
     // Test text format response.
@@ -1182,7 +1185,10 @@ async fn write_timestamps() {
     assert_eq!(row.get::<usize, i32>(0), 1);
     assert_eq!(
         row.get::<usize, NaiveDateTime>(1),
-        NaiveDate::from_ymd(2021, 1, 25).and_hms(17, 8, 24)
+        NaiveDate::from_ymd_opt(2021, 1, 25)
+            .unwrap()
+            .and_hms_opt(17, 8, 24)
+            .unwrap()
     );
 
     shutdown_tx.shutdown().await;

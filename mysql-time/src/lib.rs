@@ -564,12 +564,13 @@ impl From<NaiveTime> for MySqlTime {
 
 impl From<MySqlTime> for NaiveTime {
     fn from(t: MySqlTime) -> Self {
-        NaiveTime::from_hms_micro(
+        NaiveTime::from_hms_micro_opt(
             t.hour().into(),
             t.minutes().into(),
             t.seconds().into(),
             t.microseconds(),
         )
+        .unwrap()
     }
 }
 

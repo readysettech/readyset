@@ -5277,7 +5277,10 @@ async fn cast_projection() {
     table
         .insert(vec![
             1i32.into(),
-            NaiveDate::from_ymd(2020, 3, 16).and_hms(16, 40, 30).into(),
+            NaiveDate::from_ymd_opt(2020, 3, 16)
+                .unwrap()
+                .and_hms_opt(16, 40, 30)
+                .into(),
         ])
         .await
         .unwrap();
@@ -5295,7 +5298,10 @@ async fn cast_projection() {
 
     assert_eq!(
         result,
-        vec![DfValue::from(1), NaiveDate::from_ymd(2020, 3, 16).into()]
+        vec![
+            DfValue::from(1),
+            NaiveDate::from_ymd_opt(2020, 3, 16).into()
+        ]
     );
 
     shutdown_tx.shutdown().await;
@@ -5505,11 +5511,11 @@ async fn filter_on_expression() {
     t.insert_many(vec![
         vec![
             DfValue::from(1),
-            DfValue::from(NaiveDate::from_ymd(1995, 6, 2)),
+            DfValue::from(NaiveDate::from_ymd_opt(1995, 6, 2).unwrap()),
         ],
         vec![
             DfValue::from(2),
-            DfValue::from(NaiveDate::from_ymd(2015, 5, 15)),
+            DfValue::from(NaiveDate::from_ymd_opt(2015, 5, 15).unwrap()),
         ],
     ])
     .await

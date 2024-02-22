@@ -276,7 +276,8 @@ impl<'de> Deserialize<'de> for DfValue {
                     .map(|(ts, extra)| {
                         // We deserialize the NaiveDateTime by extracting nsecs from the top 64 bits
                         // of the encoded i128, and secs from the low 64 bits
-                        let datetime = NaiveDateTime::from_timestamp(ts as _, (ts >> 64) as _);
+                        let datetime =
+                            NaiveDateTime::from_timestamp_opt(ts as _, (ts >> 64) as _).unwrap();
                         DfValue::TimestampTz(TimestampTz { datetime, extra })
                     }),
                     (Variant::Array, variant) => {

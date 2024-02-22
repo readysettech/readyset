@@ -494,6 +494,7 @@ fn get_text_value(src: &mut Bytes, t: &Type) -> Result<PsqlValue, Error> {
 mod tests {
 
     use bytes::{BufMut, BytesMut};
+    use chrono::TimeZone;
     use postgres_types::ToSql;
     use readyset_data::DfValue;
 
@@ -1132,7 +1133,7 @@ mod tests {
 
     #[test]
     fn test_decode_binary_timestamp() {
-        let dt = NaiveDateTime::from_timestamp(1_000_000_000, 42_000_000);
+        let dt = NaiveDateTime::from_timestamp_opt(1_000_000_000, 42_000_000).unwrap();
         let mut buf = BytesMut::new();
         buf.put_i32(8); // size
         dt.to_sql(&Type::TIMESTAMP, &mut buf).unwrap(); // value
@@ -1246,13 +1247,12 @@ mod tests {
 
     #[test]
     fn test_decode_binary_timestamp_tz() {
-        let dt = DateTime::<FixedOffset>::from_utc(
-            NaiveDateTime::new(
-                NaiveDate::from_ymd(2020, 1, 2),
-                NaiveTime::from_hms_milli(3, 4, 5, 660),
-            ),
-            FixedOffset::east(18000), // +05:00
-        );
+        let dt = FixedOffset::east_opt(18000)
+            .unwrap()
+            .from_utc_datetime(&NaiveDateTime::new(
+                NaiveDate::from_ymd_opt(2020, 1, 2).unwrap(),
+                NaiveTime::from_hms_milli_opt(3, 4, 5, 660).unwrap(),
+            ));
         let mut buf = BytesMut::new();
         buf.put_i32(-1); // size (placeholder)
         dt.to_sql(&Type::TIMESTAMPTZ, &mut buf).unwrap(); // add value
@@ -1488,13 +1488,13 @@ mod tests {
     #[test]
     fn test_decode_text_timestamp_tz() {
         let dt_string = "2020-01-02 08:04:05.660 +05:00";
-        let expected = DateTime::<FixedOffset>::from_utc(
-            NaiveDateTime::new(
-                NaiveDate::from_ymd(2020, 1, 2),
-                NaiveTime::from_hms_milli(3, 4, 5, 660),
-            ),
-            FixedOffset::east(18000), // +05:00
-        );
+        let expected =
+            FixedOffset::east_opt(18000)
+                .unwrap()
+                .from_utc_datetime(&NaiveDateTime::new(
+                    NaiveDate::from_ymd_opt(2020, 1, 2).unwrap(),
+                    NaiveTime::from_hms_milli_opt(3, 4, 5, 660).unwrap(),
+                ));
         let mut buf = BytesMut::new();
         buf.put_i32(30); // size (placeholder)
         buf.extend_from_slice(dt_string.as_bytes());
