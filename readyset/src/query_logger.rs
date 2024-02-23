@@ -200,7 +200,6 @@ impl QueryLogger {
                             }
 
                             histogram!(recorded::QUERY_LOG_EXECUTION_TIME, duration.as_micros() as f64, &labels);
-                            counter!(recorded::QUERY_LOG_EXECUTION_COUNT, 1, &labels);
                         }
                         Some(ReadysetExecutionEvent::Other { duration }) => {
                             let mut labels =
@@ -215,7 +214,6 @@ impl QueryLogger {
                             }
 
                             histogram!(recorded::QUERY_LOG_EXECUTION_TIME, duration.as_micros() as f64, &labels);
-                            counter!(recorded::QUERY_LOG_EXECUTION_COUNT, 1, &labels);
                         }
                         None => (),
                     }
@@ -233,7 +231,6 @@ impl QueryLogger {
                         }
 
                         histogram!(recorded::QUERY_LOG_EXECUTION_TIME, duration.as_micros() as f64, &labels);
-                        counter!(recorded::QUERY_LOG_EXECUTION_COUNT, 1, &labels);
                     }
                 }
             }

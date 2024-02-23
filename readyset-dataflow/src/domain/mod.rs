@@ -24,7 +24,7 @@ use futures_util::stream::StreamExt;
 use futures_util::TryFutureExt;
 pub use internal::{DomainIndex, ReplicaAddress};
 use merging_interval_tree::IntervalTreeSet;
-use metrics::{counter, histogram};
+use metrics::histogram;
 use nom_sql::Relation;
 use petgraph::graph::NodeIndex;
 use readyset_alloc::StdThreadBuildWrapper;
@@ -2110,10 +2110,6 @@ impl Domain {
                         );
 
                         let time = start.elapsed();
-                        counter!(
-                            recorded::DOMAIN_TOTAL_CHUNKED_REPLAY_TIME,
-                            time.as_micros() as u64
-                        );
                         histogram!(
                             recorded::DOMAIN_CHUNKED_REPLAY_TIME,
                             time.as_micros() as f64

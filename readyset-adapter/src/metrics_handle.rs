@@ -4,7 +4,7 @@ use indexmap::IndexMap;
 use metrics::SharedString;
 use metrics_exporter_prometheus::formatting::{sanitize_label_key, sanitize_label_value};
 use metrics_exporter_prometheus::{Distribution, PrometheusHandle};
-use readyset_client_metrics::recorded::QUERY_LOG_EXECUTION_COUNT;
+use readyset_client_metrics::recorded::QUERY_LOG_EXECUTION_TIME;
 use readyset_client_metrics::DatabaseType;
 
 #[derive(Debug, Default, Clone)]
@@ -54,15 +54,14 @@ impl MetricsHandle {
 
     /// Clone a snapshot of all QUERY_LOG_EXECUTION_COUNT counters.
     pub fn snapshot_counters(&mut self, database_type: DatabaseType) {
-        fn filter(key: &str) -> bool {
-            key == QUERY_LOG_EXECUTION_COUNT
-        }
+        let count_key = format!("{QUERY_LOG_EXECUTION_TIME}_count");
+        let filter = |key: &str| -> bool { key == count_key };
 
         let db_type = SharedString::from(database_type).to_string();
 
         let counters = self
             .counters(Some(filter))
-            .get(QUERY_LOG_EXECUTION_COUNT)
+            .get(&count_key)
             .cloned()
             .map(|h| {
                 h.into_iter()

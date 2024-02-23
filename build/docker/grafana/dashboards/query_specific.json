@@ -93,7 +93,7 @@
             "targets": [
                 {
                     "exemplar": true,
-                    "expr": "readyset_query_log_execution_count{deployment=\"$deployment\",query_id=\"${queryfilter:raw}\"}",
+                    "expr": "readyset_query_log_execution_time_count{deployment=\"$deployment\",query_id=\"${queryfilter:raw}\"}",
                     "interval": "",
                     "legendFormat": "{{query}}",
                     "queryType": "randomWalk",
