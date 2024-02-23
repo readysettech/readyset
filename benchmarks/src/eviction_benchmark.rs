@@ -302,7 +302,7 @@ async fn metrics_task(
 
     let initial = scrape_metrics(&metrics_url, &metrics_client).await?;
     let query_count_metric = format!("{}_count", adapter_recorded::QUERY_LOG_EXECUTION_TIME);
-    let mut last_evicted = get_total_for_metric(&initial, server_recorded::EVICTION_FREED_MEMORY);
+    let mut last_evicted = get_total_for_metric(&initial, server_recorded::EVICTION_BYTES_FREED);
     let mut last_hits = get_metric(
         &initial,
         &query_count_metric,
@@ -323,7 +323,7 @@ async fn metrics_task(
 
         let metrics = scrape_metrics(&metrics_url, &metrics_client).await?;
 
-        let evicted = get_total_for_metric(&metrics, server_recorded::EVICTION_FREED_MEMORY);
+        let evicted = get_total_for_metric(&metrics, server_recorded::EVICTION_BYTES_FREED);
         let hit = get_metric(
             &metrics,
             &query_count_metric,
