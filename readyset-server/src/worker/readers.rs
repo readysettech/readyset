@@ -16,6 +16,7 @@ use dataflow::{
 use failpoint_macros::set_failpoint;
 use futures::pin_mut;
 use futures_util::future::TryFutureExt;
+use metrics::histogram;
 use pin_project::pin_project;
 use readyset_client::consistency::Timestamp;
 #[cfg(feature = "failure_injection")]
@@ -337,7 +338,6 @@ impl Service<Tagged<ReadQuery>> for ReadRequestHandler {
 /// A spawned task responsible for repeating reads that could not be immediately served from cache,
 /// until they succeed.
 pub async fn retry_misses(mut rx: UnboundedReceiver<(BlockingRead, Ack)>) {
-    let upquery_hist = metrics::register_histogram!(recorded::SERVER_VIEW_UPQUERY_DURATION);
     let mut reader_cache: ReaderMap = Default::default();
 
     while let Some((mut pending, ack)) = rx.recv().await {
@@ -357,7 +357,12 @@ pub async fn retry_misses(mut rx: UnboundedReceiver<(BlockingRead, Ack)>) {
             }
 
             if let Poll::Ready(res) = pending.check(&mut reader_cache) {
-                upquery_hist.record(pending.first.elapsed().as_micros() as f64);
+                histogram!(
+                    recorded::SERVER_VIEW_UPQUERY_DURATION,
+                    pending.first.elapsed().as_micros() as f64,
+                    "cache_name" => pending.target.name.display_unquoted().to_string()
+                );
+
                 if let Some(a) = ack {
                     let _ = a.send(res);
                 };
