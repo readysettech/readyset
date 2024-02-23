@@ -22,6 +22,7 @@ benchmarks = { path = "../benchmarks" }
 nom-sql = { path = "../nom-sql" }
 
 readyset-client = { path = "../readyset-client" }
+readyset-client-metrics = { path = "../readyset-client-metrics" }
 readyset-mysql = { path = "../readyset-mysql" }
 readyset-psql = { path = "../readyset-psql" }
 readyset = { path = "../readyset" }

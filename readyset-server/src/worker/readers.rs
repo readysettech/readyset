@@ -132,8 +132,6 @@ pub struct ReadRequestHandler {
     global_readers: Readers,
     readers_cache: ReaderMap,
     wait: tokio::sync::mpsc::UnboundedSender<(BlockingRead, Ack)>,
-    miss_ctr: metrics::Counter,
-    hit_ctr: metrics::Counter,
     upquery_timeout: Duration,
 }
 
@@ -157,8 +155,6 @@ impl ReadRequestHandler {
             global_readers: readers,
             readers_cache: Default::default(),
             wait,
-            miss_ctr: metrics::register_counter!(recorded::SERVER_VIEW_QUERY_MISS),
-            hit_ctr: metrics::register_counter!(recorded::SERVER_VIEW_QUERY_HIT),
             upquery_timeout,
         }
     }
@@ -220,8 +216,6 @@ impl ReadRequestHandler {
             Ok(hit) => {
                 // We hit on all keys, and there is no consistency miss, can return results
                 // immediately
-                self.hit_ctr.increment(1);
-
                 let results = ResultIterator::new(hit, &reader.post_lookup, limit, offset, filter);
 
                 let results = if raw_result {
@@ -235,7 +229,6 @@ impl ReadRequestHandler {
         };
 
         let cache_misses = keys_to_replay.len() as u64;
-        self.miss_ctr.increment(1);
 
         // Trigger backfills for all the keys we missed on, regardless of a consistency hit/miss
         if !keys_to_replay.is_empty() {

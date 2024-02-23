@@ -183,9 +183,11 @@ impl QueryLogger {
                             counter!(recorded::QUERY_LOG_TOTAL_KEYS_READ, num_keys, &labels);
                             counter!(recorded::QUERY_LOG_TOTAL_CACHE_MISSES, cache_misses, &labels);
 
-                            if cache_misses != 0 {
-                                counter!(recorded::QUERY_LOG_QUERY_CACHE_MISSED, cache_misses, &labels);
-                            }
+                            if cache_misses == 0 {
+                                labels.push(("hit_or_miss", "hit".into()));
+                            } else {
+                                labels.push(("hit_or_miss", "miss".into()));
+                            };
 
                             labels.push(("database_type", SharedString::from(DatabaseType::ReadySet)));
 

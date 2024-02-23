@@ -28,7 +28,8 @@ use readyset::mysql::MySqlHandler;
 use readyset::psql::PsqlHandler;
 use readyset::{NoriaAdapter, Options};
 use readyset_client::get_metric;
-use readyset_client::metrics::{recorded, MetricsDump};
+use readyset_client::metrics::MetricsDump;
+use readyset_client_metrics::recorded;
 use readyset_data::DfValue;
 use readyset_psql::AuthenticationMethod;
 use regex::Regex;
@@ -386,11 +387,12 @@ fn get_metrics() -> anyhow::Result<MetricsDump> {
 
 fn get_cache_hit_ratio() -> anyhow::Result<f64> {
     let metrics = get_metrics()?;
-    let hit = match get_metric!(metrics, recorded::SERVER_VIEW_QUERY_HIT).unwrap() {
+    let metric_name = format!("{}_count", recorded::QUERY_LOG_EXECUTION_TIME);
+    let hit = match get_metric!(metrics, &metric_name).unwrap() {
         readyset_client::metrics::DumpedMetricValue::Counter(hit) => hit,
         _ => unreachable!(),
     };
-    let miss = match get_metric!(metrics, recorded::SERVER_VIEW_QUERY_MISS).unwrap() {
+    let miss = match get_metric!(metrics, &metric_name).unwrap() {
         readyset_client::metrics::DumpedMetricValue::Counter(miss) => miss,
         _ => unreachable!(),
     };

@@ -342,7 +342,7 @@
                         "uid": "PBFE396EC0B189D67"
                     },
                     "exemplar": true,
-                    "expr": "rate(readyset_server_view_query_result_miss{}[$__rate_interval])",
+                    "expr": "rate(readyset_query_log_execution_time_count{hit_or_miss=\"miss\"}[$__rate_interval])",
                     "interval": "",
                     "legendFormat": "miss",
                     "queryType": "randomWalk",
@@ -354,7 +354,7 @@
                         "uid": "PBFE396EC0B189D67"
                     },
                     "exemplar": true,
-                    "expr": "rate(readyset_server_view_query_result_hit{}[$__rate_interval])",
+                    "expr": "rate(readyset_query_log_execution_time_count{hit_or_miss=\"hit\"}[$__rate_interval])",
                     "hide": false,
                     "interval": "",
                     "legendFormat": "hit",

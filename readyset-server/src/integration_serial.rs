@@ -12,8 +12,7 @@ use dataflow::node::special::Base;
 use dataflow::ops::union::{self, Union};
 use dataflow::utils::make_columns;
 use readyset_client::consensus::StandaloneAuthority;
-use readyset_client::get_metric;
-use readyset_client::metrics::{recorded, DumpedMetricValue, MetricsDump};
+use readyset_client::metrics::{recorded, MetricsDump};
 use readyset_client::recipe::changelist::ChangeList;
 use readyset_data::{DfValue, Dialect};
 use rusty_fork::rusty_fork_test;
@@ -133,14 +132,13 @@ async fn it_works_basic_impl() {
         get_counter(recorded::EGRESS_NODE_SENT_PACKETS, metrics_dump),
         1.0
     );
-    assert_eq!(
-        get_metric!(metrics_dump, recorded::SERVER_VIEW_QUERY_MISS),
-        Some(DumpedMetricValue::Counter(1.0))
-    );
-    assert_eq!(
-        get_metric!(metrics_dump, recorded::SERVER_VIEW_QUERY_HIT),
-        Some(DumpedMetricValue::Counter(0.0))
-    );
+
+    // Ensure that the previous read triggered an upquery
+    assert!(!metrics_dump
+        .metrics
+        .get(recorded::SERVER_VIEW_UPQUERY_DURATION)
+        .unwrap()
+        .is_empty());
 
     // update value again
     mutb.insert(vec![id.clone(), DfValue::from(4i32)])
