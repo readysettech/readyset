@@ -8,6 +8,15 @@ pub use metrics::Key;
 use metrics_util::Histogram;
 use serde::{Deserialize, Serialize};
 
+/// The quantiles that will be included in all of the histograms we output.
+///
+/// The default quantiles included by the Prometheus recorded are 0.0, 0.5, 0.9, 0.95, 0.99, and
+/// 0.999. Realistically, we won't need such granualar information, and including 7 quantiles with
+/// every histogram means that each histogram outputs 7x the number of time series that would
+/// otherwise be output given the other labels on the metric. Limiting the number of quantiles to 3
+/// helps limit the number of time series produced by Readyset deployments.
+pub const HISTOGRAM_QUANTILES: [f64; 3] = [0.5, 0.9, 0.99];
+
 /// A client for accessing readyset metrics for a deployment.
 pub mod client;
 
