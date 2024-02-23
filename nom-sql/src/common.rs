@@ -827,21 +827,16 @@ pub fn field_reference(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], FieldReference> {
     move |i| {
-        match dialect {
-            Dialect::PostgreSQL => map(expression(dialect), FieldReference::Expr)(i),
-            // Only MySQL supports numeric field references (postgresql considers them integer
-            // literals, I'm pretty sure)
-            Dialect::MySQL => alt((
-                map(
-                    map_res(
-                        map_res(digit1, |i: LocatedSpan<&[u8]>| str::from_utf8(&i)),
-                        u64::from_str,
-                    ),
-                    FieldReference::Numeric,
+        alt((
+            map(
+                map_res(
+                    map_res(digit1, |i: LocatedSpan<&[u8]>| str::from_utf8(&i)),
+                    u64::from_str,
                 ),
-                map(expression(dialect), FieldReference::Expr),
-            ))(i),
-        }
+                FieldReference::Numeric,
+            ),
+            map(expression(dialect), FieldReference::Expr),
+        ))(i)
     }
 }
 
