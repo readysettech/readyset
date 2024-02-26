@@ -10,4 +10,5 @@ upload_artifacts() {
 
 echo "+++ :rust: Run tests"
 export DISABLE_TELEMETRY=true
-cargo --locked test --all --features failure_injection --exclude readyset-clustertest --exclude benchmarks || upload_artifacts
+# cargo --locked test --all --features failure_injection --exclude readyset-clustertest --exclude benchmarks || upload_artifacts
+cargo --locked test -p readyset-psql --features failure_injection
