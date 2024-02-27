@@ -80,10 +80,15 @@ metrics = { git = "https://github.com/readysettech/metrics.git" }
 metrics-util = { git = "https://github.com/readysettech/metrics.git" }
 
 [profile.release]
-debug=true
+debug = true
+
+[profile.release-lto]
+inherits = "release"
+lto = "fat"
+codegen-units = 1
 
 [profile.release-dist]
 # configs for distro release packages (i.e. deb, rpm, etc.)
-inherits = "release"
+inherits = "release-lto"
 debug = false
 strip = "debuginfo"
