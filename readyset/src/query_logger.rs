@@ -10,7 +10,7 @@ use readyset_client_metrics::{
     recorded, DatabaseType, EventType, QueryExecutionEvent, QueryLogMode, ReadysetExecutionEvent,
     SqlQueryType,
 };
-use readyset_sql_passes::adapter_rewrites::{self, AdapterRewriteParams};
+use readyset_sql_passes::adapter_rewrites;
 use readyset_sql_passes::anonymize::anonymize_literals;
 use readyset_util::shutdown::ShutdownReceiver;
 use tokio::select;
@@ -63,15 +63,10 @@ impl QueryMetrics {
 
 impl QueryLogger {
     fn query_string(query: &SqlQuery) -> SharedString {
-        const ADAPTER_REWRITE_PARAMS: AdapterRewriteParams = AdapterRewriteParams {
-            server_supports_pagination: true,
-            server_supports_mixed_comparisons: true,
-        };
-
         SharedString::from(match query {
             SqlQuery::Select(stmt) => {
                 let mut stmt = stmt.clone();
-                if adapter_rewrites::process_query(&mut stmt, ADAPTER_REWRITE_PARAMS).is_ok() {
+                if adapter_rewrites::process_query(&mut stmt, true).is_ok() {
                     anonymize_literals(&mut stmt);
                     // FIXME(REA-2168): Use correct dialect.
                     stmt.display(nom_sql::Dialect::MySQL).to_string()

@@ -525,9 +525,9 @@ impl Leader {
                 state_copy.extend_recipe(body, true).await?;
                 return_serialized!(ExtendRecipeResult::Done);
             }
-            (&Method::GET | &Method::POST, "/adapter_rewrite_params") => {
+            (&Method::GET | &Method::POST, "/supports_pagination") => {
                 let ds = self.dataflow_state_handle.read().await;
-                let supports = ds.recipe.adapter_rewrite_params();
+                let supports = ds.recipe.supports_pagination();
                 return_serialized!(supports)
             }
             (&Method::POST, "/evict_single") => {

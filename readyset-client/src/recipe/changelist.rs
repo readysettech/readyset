@@ -43,7 +43,7 @@ use nom_sql::{
 };
 use readyset_data::DfType;
 use readyset_errors::{internal, unsupported, ReadySetError, ReadySetResult};
-use readyset_sql_passes::adapter_rewrites::{self, AdapterRewriteParams};
+use readyset_sql_passes::adapter_rewrites;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 use tracing::error;
@@ -483,7 +483,7 @@ impl Change {
     /// rewrites on the parsed query string before passing it to the server via `/extend_recipe`.
     pub fn from_cache_ddl_request(
         ddl_req: &CacheDDLRequest,
-        adapter_rewrite_params: AdapterRewriteParams,
+        server_supports_pagination: bool,
     ) -> ReadySetResult<Self> {
         macro_rules! mk_error {
             ($str:expr) => {
@@ -531,7 +531,7 @@ impl Change {
 
                         adapter_rewrites::process_query(
                             &mut statement,
-                            adapter_rewrite_params
+                            server_supports_pagination,
                         )?;
 
                         Change::CreateCache(CreateCache {

@@ -26,7 +26,7 @@ use readyset_errors::{
     ReadySetResult,
 };
 use readyset_server::worker::readers::{CallResult, ReadRequestHandler};
-use readyset_sql_passes::adapter_rewrites::{self, AdapterRewriteParams, ProcessedQueryParams};
+use readyset_sql_passes::adapter_rewrites::{self, ProcessedQueryParams};
 use readyset_util::redacted::Sensitive;
 use readyset_util::shared_cache::{self, LocalCache};
 use tokio::sync::RwLock;
@@ -62,7 +62,9 @@ pub struct NoriaBackendInner {
     noria: ReadySetHandle,
     tables: BTreeMap<Relation, Table>,
     views: LocalCache<Relation, View>,
-    rewrite_params: AdapterRewriteParams,
+    /// The server can handle (non-parameterized) LIMITs and (parameterized) OFFSETs in the
+    /// dataflow graph
+    server_supports_pagination: bool,
 }
 
 macro_rules! noria_await {
@@ -78,13 +80,13 @@ impl NoriaBackendInner {
     async fn new(
         ch: ReadySetHandle,
         views: LocalCache<Relation, View>,
-        rewrite_params: AdapterRewriteParams,
+        server_supports_pagination: bool,
     ) -> Self {
         NoriaBackendInner {
             tables: BTreeMap::new(),
             views,
             noria: ch,
-            rewrite_params,
+            server_supports_pagination,
         }
     }
 
@@ -363,7 +365,7 @@ impl NoriaConnector {
         dialect: Dialect,
         parse_dialect: nom_sql::Dialect,
         schema_search_path: Vec<SqlIdentifier>,
-        rewrite_params: AdapterRewriteParams,
+        server_supports_pagination: bool,
     ) -> Self {
         NoriaConnector::new_with_local_reads(
             ch,
@@ -375,7 +377,7 @@ impl NoriaConnector {
             dialect,
             parse_dialect,
             schema_search_path,
-            rewrite_params,
+            server_supports_pagination,
         )
         .await
     }
@@ -391,9 +393,9 @@ impl NoriaConnector {
         dialect: Dialect,
         parse_dialect: nom_sql::Dialect,
         schema_search_path: Vec<SqlIdentifier>,
-        rewrite_params: AdapterRewriteParams,
+        server_supports_pagination: bool,
     ) -> Self {
-        let backend = NoriaBackendInner::new(ch, view_cache, rewrite_params).await;
+        let backend = NoriaBackendInner::new(ch, view_cache, server_supports_pagination).await;
 
         NoriaConnector {
             inner: NoriaBackend {
@@ -552,15 +554,12 @@ impl NoriaConnector {
             .collect())
     }
 
-    pub(crate) fn rewrite_params(&self) -> AdapterRewriteParams {
+    pub(crate) fn server_supports_pagination(&self) -> bool {
         self.inner
             .inner
             .as_ref()
-            .map(|v| v.rewrite_params)
-            .unwrap_or_else(|| AdapterRewriteParams {
-                server_supports_pagination: false,
-                server_supports_mixed_comparisons: false,
-            })
+            .map(|v| v.server_supports_pagination)
+            .unwrap_or(false)
     }
 
     // TODO(andrew): Allow client to map table names to NodeIndexes without having to query ReadySet
@@ -1416,7 +1415,7 @@ impl NoriaConnector {
 
         trace!("select::collapse where-in clauses");
         let processed_query_params =
-            adapter_rewrites::process_query(&mut statement, self.rewrite_params())?;
+            adapter_rewrites::process_query(&mut statement, self.server_supports_pagination())?;
 
         // check if we already have this query prepared
         trace!("select::access view");
