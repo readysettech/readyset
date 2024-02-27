@@ -21,7 +21,7 @@ for num_indices in "${indices[@]}"; do
     fi
 done
 
-cargo build --release --bin benchmarks
+cargo build --profile=release-lto --bin benchmarks
 for num_indices in "${indices[@]}"; do
     echo "=== Benchmarking ${num_indices} indices ==="
     target/release/benchmarks \

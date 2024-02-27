@@ -1,7 +1,7 @@
 To reproduce results, run with:
 
 ```shell
-cargo build --release
+cargo build --profile=release-lto
 rm results.log
 for w in 1 2 4; do
   for d in uniform skewed; do
