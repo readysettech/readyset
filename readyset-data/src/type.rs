@@ -284,8 +284,8 @@ impl DfType {
             Bit(len) => Self::Bit(len.unwrap_or(1)),
             VarBit(len) => Self::VarBit(len),
 
-            Json => unsupported!("Unsupported type: Json"),
-            Jsonb => unsupported!("Unsupported type: Jsonb"),
+            Json => Self::Json,
+            Jsonb => Self::Jsonb,
 
             Date => Self::Date,
             #[allow(clippy::or_fun_call)]
@@ -302,9 +302,9 @@ impl DfType {
                 subsecond_digits: dialect.default_subsecond_digits(),
             },
             Interval { .. } => unsupported!("Unsupported type: INTERVAL"),
-            Uuid => unsupported!("Unsupported type: Uuid"),
-            MacAddr => unsupported!("Unsupported type: MacAddr"),
-            Inet => unsupported!("Unsupported type: Inet"),
+            Uuid => Self::Uuid,
+            MacAddr => Self::MacAddr,
+            Inet => Self::Inet,
             Citext => Self::Text(Collation::Citext),
             Other(ref id) => resolve_custom_type(id.clone()).ok_or_else(|| {
                 let id_upper = format!("{}", id.display_unquoted()).to_uppercase();
