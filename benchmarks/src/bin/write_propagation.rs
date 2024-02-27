@@ -106,7 +106,7 @@ impl Writer {
         let auto_increments: Arc<RwLock<HashMap<Relation, AtomicUsize>>> = Arc::default();
         let view_name_cache = SharedCache::new();
         let view_cache = SharedCache::new();
-        let adapter_rewrite_params = ch.adapter_rewrite_params().await?;
+        let server_supports_pagination = ch.supports_pagination().await?;
         let (dialect, nom_sql_dialect) = match DatabaseURL::from_str(&self.database_url)? {
             DatabaseURL::MySQL(_) => (Dialect::DEFAULT_MYSQL, nom_sql::Dialect::MySQL),
             DatabaseURL::PostgreSQL(_) => {
@@ -123,7 +123,7 @@ impl Writer {
             dialect,
             nom_sql_dialect,
             vec![],
-            adapter_rewrite_params,
+            server_supports_pagination,
         )
         .await;
 

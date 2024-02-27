@@ -14,7 +14,6 @@ use petgraph::graph::NodeIndex;
 use readyset_errors::{
     internal, internal_err, rpc_err, rpc_err_no_downcast, ReadySetError, ReadySetResult,
 };
-use readyset_sql_passes::adapter_rewrites::AdapterRewriteParams;
 use replication_offset::ReplicationOffsets;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -926,8 +925,8 @@ impl ReadySetHandle {
     );
 
     simple_request!(
-        /// Returns the params to use when performing adapter rewrites.
-        adapter_rewrite_params() -> AdapterRewriteParams
+        /// Returns true if topk and pagination support are enabled on the server
+        supports_pagination() -> bool
     );
 
     simple_request!(

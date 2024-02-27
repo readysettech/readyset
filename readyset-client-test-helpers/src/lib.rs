@@ -89,7 +89,6 @@ pub struct TestBuilder {
     storage_dir_path: Option<PathBuf>,
     authority: Option<Arc<Authority>>,
     replication_server_id: Option<ReplicationServerId>,
-    allow_mixed_comparisons: bool,
 }
 
 impl Default for TestBuilder {
@@ -114,7 +113,6 @@ impl TestBuilder {
             storage_dir_path: None,
             authority: None,
             replication_server_id: None,
-            allow_mixed_comparisons: true,
         }
     }
 
@@ -187,11 +185,6 @@ impl TestBuilder {
         self
     }
 
-    pub fn allow_mixed_comparisons(mut self, allow_mixed_comparisons: bool) -> Self {
-        self.allow_mixed_comparisons = allow_mixed_comparisons;
-        self
-    }
-
     pub async fn build<A>(self) -> (A::ConnectionOpts, Handle, ShutdownSender)
     where
         A: Adapter + 'static,
@@ -239,8 +232,7 @@ impl TestBuilder {
         builder.set_persistence(persistence);
         builder.set_allow_topk(true);
         builder.set_allow_paginate(true);
-        builder.set_allow_mixed_comparisons(self.allow_mixed_comparisons);
-
+        builder.set_allow_mixed_comparisons(true);
         if !self.partial {
             builder.disable_partial();
         }
@@ -315,7 +307,7 @@ impl TestBuilder {
                     };
 
                     let mut rh = ReadySetHandle::new(authority.clone()).await;
-                    let adapter_rewrite_params = rh.adapter_rewrite_params().await.unwrap();
+                    let server_supports_pagination = rh.supports_pagination().await.unwrap();
                     let noria = NoriaConnector::new(
                         rh.clone(),
                         auto_increments,
@@ -325,7 +317,7 @@ impl TestBuilder {
                         A::EXPR_DIALECT,
                         A::DIALECT,
                         schema_search_path,
-                        adapter_rewrite_params,
+                        server_supports_pagination,
                     )
                     .await;
 
