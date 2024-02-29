@@ -948,7 +948,7 @@ impl State for PersistentStateHandle {
                 // The key in the exclusive bound might not actually exist in the db, in which case
                 // `seek` brings us to the next key after that. We only want to skip forward as long
                 // as the current key has the exact same prefix as our `start_key`.
-                while let Some(cur_key) = iterator.value() {
+                while let Some(cur_key) = iterator.key() {
                     if prefix_transform(cur_key) == start_key {
                         iterator.next();
                     } else {
