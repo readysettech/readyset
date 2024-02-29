@@ -197,20 +197,19 @@ impl Recipe {
         &self.inc
     }
 
-    /// Returns the query name if, after rewriting according to `dialect`, `self` contains a query
-    /// that is semantically equivalent to the given `query`. Returns `None` if `self` does not
-    /// contain the query.
+    /// Returns `true` if, after rewriting according to `dialect`, `self` contains a query that is
+    /// semantically equivalent to the given `query`.
     ///
     /// Returns an error if rewriting fails for any reason
-    pub(crate) fn expression_name_for_query(
+    pub(crate) fn contains(
         &self,
         query: ViewCreateRequest,
         dialect: Dialect,
-    ) -> ReadySetResult<Option<Relation>> {
+    ) -> ReadySetResult<bool> {
         let statement =
             self.inc
                 .rewrite(query.statement, &query.schema_search_path, dialect, None)?;
-        Ok(self.inc.registry.expression_name(&statement))
+        Ok(self.inc.registry.contains(&statement))
     }
 
     /// Returns the MatchedCaches for the query if they exists.

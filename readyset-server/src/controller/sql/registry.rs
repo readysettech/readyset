@@ -431,18 +431,12 @@ impl ExprRegistry {
         self.expressions.get(query_id)
     }
 
-    /// Returns the name of the given expression if it is present in the recipe.
-    pub(super) fn expression_name<E>(&self, expression: E) -> Option<Relation>
+    /// Returns true if the given expression exists in `self`
+    pub(super) fn contains<E>(&self, expression: E) -> bool
     where
         E: Into<ExprId>,
     {
-        self.expressions
-            .get(&expression.into())
-            .map(|exp| match exp {
-                RecipeExpr::View { name, .. }
-                | RecipeExpr::Cache { name, .. }
-                | RecipeExpr::Table { name, .. } => name.clone(),
-            })
+        self.expressions.contains_key(&expression.into())
     }
 
     /// Retrieves the original name for the query with the given `alias` (which might already be the
@@ -1003,7 +997,7 @@ mod tests {
 
             registry.add_query(expr).unwrap();
 
-            assert!(registry.expression_name(&stmt).is_some())
+            assert!(registry.contains(&stmt))
         }
 
         #[test]
