@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::vec;
 
@@ -6,6 +7,7 @@ use futures::stream;
 use postgres::config::{ChannelBinding, SslMode};
 use postgres::error::SqlState;
 use postgres::NoTls;
+use postgres_protocol::Oid;
 use postgres_types::Type;
 use psql_srv::{
     run_backend, Credentials, CredentialsNeeded, Error, PrepareResponse, PsqlBackend, PsqlSrvRow,
@@ -79,6 +81,10 @@ impl PsqlBackend for ScramSha256Backend {
 
     fn in_transaction(&self) -> bool {
         false
+    }
+
+    async fn load_extended_types(&mut self) -> Result<HashMap<Oid, i16>, psql_srv::Error> {
+        Ok(HashMap::default())
     }
 }
 

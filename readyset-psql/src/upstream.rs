@@ -17,6 +17,7 @@ use readyset_client_metrics::recorded;
 use readyset_data::DfValue;
 use readyset_errors::{internal_err, invariant_eq, unsupported, ReadySetError, ReadySetResult};
 use tokio_postgres as pgsql;
+use tokio_postgres::SimpleQueryStream;
 use tracing::{debug, info_span};
 use tracing_futures::Instrument;
 
@@ -46,6 +47,7 @@ pub struct PostgreSqlUpstream {
 pub enum QueryResult {
     EmptyRead,
     Stream {
+        // Stashing the first row lets us send a RowDescription before sending data rows
         first_row: Row,
         stream: Pin<Box<ResultStream>>,
     },
@@ -56,6 +58,11 @@ pub enum QueryResult {
         tag: String,
     },
     SimpleQuery(Vec<SimpleQueryMessage>),
+    SimpleQueryStream {
+        // Stashing the first message lets us send a RowDescription before sending data rows
+        first_message: SimpleQueryMessage,
+        stream: Pin<Box<SimpleQueryStream>>,
+    },
 }
 
 impl Debug for QueryResult {
@@ -76,6 +83,14 @@ impl Debug for QueryResult {
                 .finish(),
             Self::Command { tag } => f.debug_struct("Command").field("tag", tag).finish(),
             Self::SimpleQuery(ms) => f.debug_tuple("SimpleQuery").field(ms).finish(),
+            Self::SimpleQueryStream {
+                first_message,
+                stream: _,
+            } => f
+                .debug_struct("SimpleQueryStream")
+                .field("first_message", first_message)
+                .field("stream", &"...")
+                .finish(),
         }
     }
 }
@@ -275,6 +290,22 @@ impl UpstreamDatabase for PostgreSqlUpstream {
     }
 
     async fn query<'a>(&'a mut self, query: &'a str) -> Result<Self::QueryResult<'a>, Error> {
+        let mut stream = Box::pin(self.client.simple_query_raw(query).await?);
+
+        match stream.next().await {
+            None => Ok(QueryResult::EmptyRead),
+            Some(Err(e)) => Err(e.into()),
+            Some(Ok(first_message)) => Ok(QueryResult::SimpleQueryStream {
+                first_message,
+                stream,
+            }),
+        }
+    }
+
+    async fn simple_query<'a>(
+        &'a mut self,
+        query: &'a str,
+    ) -> Result<Self::QueryResult<'a>, Error> {
         let res = self.client.simple_query(query).await?;
         Ok(QueryResult::SimpleQuery(res))
     }

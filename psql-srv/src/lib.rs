@@ -26,12 +26,14 @@ mod scram;
 pub mod util;
 mod value;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::Stream;
 use nom_sql::SqlIdentifier;
 use postgres::SimpleQueryMessage;
+use postgres_protocol::Oid;
 use postgres_types::Type;
 use protocol::Protocol;
 use readyset_adapter_types::DeallocateId;
@@ -124,6 +126,9 @@ pub trait PsqlBackend {
 
     /// Determine if the connection is in an open transaction.
     fn in_transaction(&self) -> bool;
+
+    /// Loads any extended types from the upstream postgres, returning a map of Oid to typelen
+    async fn load_extended_types(&mut self) -> Result<HashMap<Oid, i16>, Error>;
 }
 
 // TODO: There are several representations of Column/Field, we can probably consolidate them.
@@ -141,6 +146,12 @@ pub enum Column {
         col_type: Type,
     },
     OwnedField(OwnedField),
+}
+
+impl From<OwnedField> for Column {
+    fn from(owned_field: OwnedField) -> Self {
+        Self::OwnedField(owned_field)
+    }
 }
 
 /// A response produced by `Backend::on_prepare`, containing metadata about a newly created
@@ -161,6 +172,10 @@ pub enum QueryResponse<R> {
     Select {
         /// The schema of the resultset produced by the select statement.
         schema: Vec<Column>,
+        /// The actual resultset produced by the select statement.
+        resultset: R,
+    },
+    Stream {
         /// The actual resultset produced by the select statement.
         resultset: R,
     },

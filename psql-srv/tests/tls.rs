@@ -1,9 +1,11 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::vec;
 
 use async_trait::async_trait;
 use database_utils::{DatabaseURL, QueryableConnection};
 use futures::stream;
+use postgres_protocol::Oid;
 use postgres_types::Type;
 use psql_srv::{
     run_backend, Credentials, CredentialsNeeded, Error, PsqlBackend, PsqlSrvRow, TransferFormat,
@@ -76,6 +78,10 @@ impl PsqlBackend for TestBackend {
 
     fn in_transaction(&self) -> bool {
         false
+    }
+
+    async fn load_extended_types(&mut self) -> Result<HashMap<Oid, i16>, psql_srv::Error> {
+        Ok(HashMap::default())
     }
 }
 

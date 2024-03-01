@@ -321,6 +321,14 @@ impl UpstreamDatabase for MySqlUpstream {
         handle_query_result!(result)
     }
 
+    // MySQL does not have a separation of Simple/Extended query protocols like Postgres does.
+    async fn simple_query<'a>(
+        &'a mut self,
+        _query: &'a str,
+    ) -> Result<Self::QueryResult<'a>, Error> {
+        unsupported!("MySQL does not have a simple_query protocol");
+    }
+
     /// Executes the given query on the mysql backend.
     async fn handle_ryw_write<'a, S>(
         &'a mut self,

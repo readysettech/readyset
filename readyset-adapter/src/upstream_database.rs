@@ -153,6 +153,22 @@ pub trait UpstreamDatabase: Sized + Send {
     /// Execute a raw, un-prepared query
     async fn query<'a>(&'a mut self, query: &'a str) -> Result<Self::QueryResult<'a>, Self::Error>;
 
+    /// Execute a raw, un-prepared query (or multiple queries concatenated in the provided `query`
+    /// string, separated by semicolons) using the 'simple query' protocol flow[0],
+    ///
+    ///
+    /// Note that the implementation of simple_query buffers results in memory before returning, so
+    /// it should not be used for cases where there are large result sets. Use
+    /// [`query`](Self::query) for most cases.
+    ///
+    /// Note that this is only relevant for PostgreSQL upstreams.
+    ///
+    /// [0] https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-SIMPLE-QUERY
+    async fn simple_query<'a>(
+        &'a mut self,
+        query: &'a str,
+    ) -> Result<Self::QueryResult<'a>, Self::Error>;
+
     /// Execute a raw, un-prepared write query, constructing and returning a RYW ticket for the
     /// write
     // TODO: newtype RYW ticket, not just String
@@ -287,6 +303,13 @@ where
 
     async fn query<'a>(&'a mut self, query: &'a str) -> Result<Self::QueryResult<'a>, Self::Error> {
         self.upstream().await?.query(query).await
+    }
+
+    async fn simple_query<'a>(
+        &'a mut self,
+        query: &'a str,
+    ) -> Result<Self::QueryResult<'a>, Self::Error> {
+        self.upstream().await?.simple_query(query).await
     }
 
     // TODO: newtype RYW ticket, not just String

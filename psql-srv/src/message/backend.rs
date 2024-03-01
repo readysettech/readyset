@@ -6,7 +6,7 @@ use postgres::error::ErrorPosition;
 pub use postgres::error::SqlState;
 use postgres::{Row, SimpleQueryRow};
 use postgres_types::Type;
-use tokio_postgres::OwnedField;
+use tokio_postgres::{OwnedField, SimpleQueryMessage};
 
 use crate::message::TransferFormat;
 use crate::value::PsqlValue;
@@ -167,6 +167,7 @@ pub struct FieldDescription {
 
 #[derive(Debug)]
 pub enum PsqlSrvRow {
+    SimpleQueryMessage(SimpleQueryMessage),
     RawRow(Row),
     ValueVec(Vec<PsqlValue>),
 }
@@ -180,5 +181,10 @@ impl From<Vec<PsqlValue>> for PsqlSrvRow {
 impl From<Row> for PsqlSrvRow {
     fn from(value: Row) -> Self {
         Self::RawRow(value)
+    }
+}
+impl From<SimpleQueryRow> for PsqlSrvRow {
+    fn from(value: SimpleQueryRow) -> Self {
+        Self::SimpleQueryMessage(SimpleQueryMessage::Row(value))
     }
 }
