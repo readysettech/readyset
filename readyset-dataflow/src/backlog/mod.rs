@@ -84,7 +84,7 @@ fn new_inner(
     let contiguous = {
         let mut contiguous = true;
         let mut last = None;
-        for &k in &index.columns {
+        for &k in index.columns() {
             if let Some(last) = last {
                 if k != last + 1 {
                     contiguous = false;
@@ -114,7 +114,7 @@ fn new_inner(
                 .with_meta(-1)
                 .with_timestamp(Timestamp::default())
                 .with_hasher(RandomState::default())
-                .with_index_type(index.index_type)
+                .with_index_type(index.index_type())
                 .with_eviction_strategy(eviction_strategy)
                 .with_insertion_order(Some(pre_processing.clone()))
                 .construct();
@@ -267,7 +267,7 @@ impl WriteHandle {
     }
 
     pub(crate) fn contains_record(&self, rec: &[DfValue]) -> reader_map::Result<bool> {
-        let key_cols = self.index.columns.as_slice();
+        let key_cols = self.index.columns();
         if self.contiguous {
             self.contains_key(&rec[key_cols[0]..(key_cols[0] + key_cols.len())])
         } else {
@@ -303,7 +303,7 @@ impl WriteHandle {
     where
         I: IntoIterator<Item = Record>,
     {
-        let mem_delta = self.handle.add(&self.index.columns, self.cols, rs);
+        let mem_delta = self.handle.add(self.index.columns(), self.cols, rs);
         match mem_delta.cmp(&0) {
             Ordering::Greater => {
                 self.mem_size += mem_delta as usize;
@@ -393,7 +393,7 @@ impl WriteHandle {
         }
 
         #[allow(clippy::unreachable)] // Documented invariant.
-        let range = match (self.index.index_type, &key) {
+        let range = match (self.index.index_type(), &key) {
             (IndexType::HashMap, KeyComparison::Equal(equal)) => {
                 return self.mut_with_key(equal.as_vec()).mark_filled();
             }
@@ -434,7 +434,7 @@ impl WriteHandle {
 
     /// The index type of the underlying state
     pub(crate) fn index_type(&self) -> IndexType {
-        self.index.index_type
+        self.index.index_type()
     }
 
     pub(crate) fn set_replay_done(&mut self, replay_done: bool) {

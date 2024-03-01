@@ -151,8 +151,8 @@ impl ReplayPaths {
             // a lookup of a double-ended range where both ends are inclusive bounds of the same
             // value - if that happens, we still need to resolve the tag for the BTree index,
             // not the Hash index.
-            if index.index_type == IndexType::HashMap {
-                indexes.get(&Index::new(IndexType::BTreeMap, index.columns.clone()))
+            if index.index_type() == IndexType::HashMap {
+                indexes.get(&Index::btree_map(index.columns().to_vec()))
             } else {
                 None
             }
@@ -180,7 +180,7 @@ impl ReplayPaths {
                                 remapped_keys.remove(
                                     path.last_segment().node,
                                     target,
-                                    &target_index.columns,
+                                    target_index.columns(),
                                     keys,
                                 )
                             })
@@ -256,7 +256,7 @@ impl ReplayPaths {
                         // on the join column in the other side, so we *know* it can't have
                         // forwarded anything related to the write we're now handling.
                         index
-                            .columns
+                            .columns()
                             .iter()
                             .map(|&k| {
                                 node.parent_columns(k)
