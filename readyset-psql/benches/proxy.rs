@@ -159,7 +159,7 @@ impl PsqlBackend for Backend {
                 .map(|row| {
                     row.columns()
                         .iter()
-                        .map(|col| psql_srv::Column {
+                        .map(|col| psql_srv::Column::Column {
                             name: col.name().into(),
                             col_type: col.type_().clone(),
                             table_oid: None,
@@ -189,7 +189,7 @@ impl PsqlBackend for Backend {
             row_schema: stmt
                 .columns()
                 .iter()
-                .map(|c| psql_srv::Column {
+                .map(|c| psql_srv::Column::Column {
                     name: c.name().into(),
                     col_type: c.type_().clone(),
                     table_oid: None,
@@ -234,7 +234,7 @@ impl PsqlBackend for Backend {
             .map(|row| {
                 row.columns()
                     .iter()
-                    .map(|col| psql_srv::Column {
+                    .map(|col| psql_srv::Column::Column {
                         name: col.name().into(),
                         col_type: col.type_().clone(),
                         table_oid: None,

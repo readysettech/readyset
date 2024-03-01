@@ -245,7 +245,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
                 .columns()
                 .iter()
                 .map(|col| -> Result<_, Error> {
-                    Ok(Column {
+                    Ok(Column::Column {
                         name: col.name().into(),
                         col_type: col.type_().clone(),
                         table_oid: col.table_oid(),

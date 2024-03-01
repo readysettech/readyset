@@ -37,6 +37,7 @@ use protocol::Protocol;
 use readyset_adapter_types::DeallocateId;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_native_tls::TlsAcceptor;
+use tokio_postgres::OwnedField;
 
 pub use crate::bytes::BytesStr;
 pub use crate::error::Error;
@@ -125,20 +126,21 @@ pub trait PsqlBackend {
     fn in_transaction(&self) -> bool;
 }
 
+// TODO: There are several representations of Column/Field, we can probably consolidate them.
 /// A description of a column, either in the parameters to a query or in a resultset
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct Column {
-    /// The name of the column
-    pub name: SqlIdentifier,
-
-    /// The OID of the column's table, if known
-    pub table_oid: Option<u32>,
-
-    /// The attribute number of the column, if known
-    pub attnum: Option<i16>,
-
-    /// The type of the column
-    pub col_type: Type,
+pub enum Column {
+    Column {
+        /// The name of the column
+        name: SqlIdentifier,
+        /// The OID of the column's table, if known
+        table_oid: Option<u32>,
+        /// The attribute number of the column, if known
+        attnum: Option<i16>,
+        /// The type of the column
+        col_type: Type,
+    },
+    OwnedField(OwnedField),
 }
 
 /// A response produced by `Backend::on_prepare`, containing metadata about a newly created

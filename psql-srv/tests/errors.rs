@@ -59,7 +59,7 @@ impl PsqlBackend for ErrorBackend {
             Ok(PrepareResponse {
                 prepared_statement_id: 1,
                 param_schema: vec![],
-                row_schema: vec![Column {
+                row_schema: vec![Column::Column {
                     name: "x".into(),
                     table_oid: None,
                     attnum: None,
@@ -78,7 +78,7 @@ impl PsqlBackend for ErrorBackend {
         match self.0 {
             ErrorPosition::Execute => Err(Error::InternalError("a database".to_owned())),
             ErrorPosition::Serialize => Ok(QueryResponse::Select {
-                schema: vec![Column {
+                schema: vec![Column::Column {
                     name: "x".into(),
                     table_oid: None,
                     attnum: None,

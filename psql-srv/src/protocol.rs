@@ -918,123 +918,155 @@ async fn make_field_description<B: PsqlBackend>(
     backend: &mut B,
     extended_types: &mut HashMap<Oid, i16>,
 ) -> Result<FieldDescription, Error> {
-    let data_type_size = match col.col_type.kind() {
-        Kind::Array(_) => TYPLEN_VARLENA,
-        Kind::Enum(_) => TYPLEN_VARLENA,
-        _ => match col.col_type {
-            Type::BOOL => TYPLEN_1,
-            Type::BYTEA => TYPLEN_VARLENA,
-            Type::CHAR => TYPLEN_1,
-            Type::NAME => TYPLEN_VARLENA,
-            Type::INT8 => TYPLEN_8,
-            Type::INT2 => TYPLEN_2,
-            Type::INT2_VECTOR => TYPLEN_VARLENA,
-            Type::INT4 => TYPLEN_4,
-            Type::REGPROC => TYPLEN_4,
-            Type::TEXT => TYPLEN_VARLENA,
-            Type::OID => TYPLEN_4,
-            Type::TID => TYPLEN_6,
-            Type::XID => TYPLEN_4,
-            Type::CID => TYPLEN_4,
-            Type::OID_VECTOR => TYPLEN_VARLENA,
-            Type::PG_DDL_COMMAND => TYPLEN_8,
-            Type::JSON => TYPLEN_VARLENA,
-            Type::XML => TYPLEN_VARLENA,
-            Type::PG_NODE_TREE => TYPLEN_VARLENA,
-            Type::TABLE_AM_HANDLER => TYPLEN_4,
-            Type::INDEX_AM_HANDLER => TYPLEN_4,
-            Type::POINT => TYPLEN_16,
-            Type::LSEG => TYPLEN_32,
-            Type::PATH => TYPLEN_VARLENA,
-            Type::BOX => TYPLEN_32,
-            Type::POLYGON => TYPLEN_VARLENA,
-            Type::LINE => TYPLEN_24,
-            Type::CIDR => TYPLEN_VARLENA,
-            Type::FLOAT4 => TYPLEN_4,
-            Type::FLOAT8 => TYPLEN_8,
-            Type::UNKNOWN => TYPLEN_CSTRING,
-            Type::CIRCLE => TYPLEN_24,
-            Type::MACADDR8 => TYPLEN_8,
-            Type::MONEY => TYPLEN_8,
-            Type::MACADDR => TYPLEN_6,
-            Type::INET => TYPLEN_VARLENA,
-            Type::ACLITEM => TYPLEN_12,
-            Type::BPCHAR => TYPLEN_VARLENA,
-            Type::VARCHAR => TYPLEN_VARLENA,
-            Type::DATE => TYPLEN_4,
-            Type::TIME => TYPLEN_8,
-            Type::TIMESTAMP => TYPLEN_8,
-            Type::TIMESTAMPTZ => TYPLEN_8,
-            Type::INTERVAL => TYPLEN_16,
-            Type::TIMETZ => TYPLEN_12,
-            Type::BIT => TYPLEN_VARLENA,
-            Type::VARBIT => TYPLEN_VARLENA,
-            Type::NUMERIC => TYPLEN_VARLENA,
-            Type::REFCURSOR => TYPLEN_VARLENA,
-            Type::REGPROCEDURE => TYPLEN_4,
-            Type::REGOPER => TYPLEN_4,
-            Type::REGOPERATOR => TYPLEN_4,
-            Type::REGCLASS => TYPLEN_4,
-            Type::REGTYPE => TYPLEN_4,
-            Type::RECORD => TYPLEN_VARLENA,
-            Type::CSTRING => TYPLEN_CSTRING,
-            Type::ANY => TYPLEN_4,
-            Type::VOID => TYPLEN_4,
-            Type::TRIGGER => TYPLEN_4,
-            Type::LANGUAGE_HANDLER => TYPLEN_4,
-            Type::INTERNAL => TYPLEN_8,
-            Type::ANYELEMENT => TYPLEN_4,
-            Type::UUID => TYPLEN_16,
-            Type::TXID_SNAPSHOT => TYPLEN_VARLENA,
-            Type::FDW_HANDLER => TYPLEN_4,
-            Type::PG_LSN => TYPLEN_8,
-            Type::TSM_HANDLER => TYPLEN_4,
-            Type::PG_NDISTINCT => TYPLEN_VARLENA,
-            Type::PG_DEPENDENCIES => TYPLEN_VARLENA,
-            Type::ANYENUM => TYPLEN_4,
-            Type::TS_VECTOR => TYPLEN_VARLENA,
-            Type::TSQUERY => TYPLEN_VARLENA,
-            Type::GTS_VECTOR => TYPLEN_VARLENA,
-            Type::REGCONFIG => TYPLEN_4,
-            Type::REGDICTIONARY => TYPLEN_4,
-            Type::JSONB => TYPLEN_VARLENA,
-            Type::ANY_RANGE => TYPLEN_VARLENA,
-            Type::EVENT_TRIGGER => TYPLEN_4,
-            Type::INT4_RANGE => TYPLEN_VARLENA,
-            Type::NUM_RANGE => TYPLEN_VARLENA,
-            Type::TS_RANGE => TYPLEN_VARLENA,
-            Type::TSTZ_RANGE => TYPLEN_VARLENA,
-            Type::DATE_RANGE => TYPLEN_VARLENA,
-            Type::INT8_RANGE => TYPLEN_VARLENA,
-            Type::JSONPATH => TYPLEN_VARLENA,
-            Type::REGNAMESPACE => TYPLEN_4,
-            Type::REGROLE => TYPLEN_4,
-            Type::REGCOLLATION => TYPLEN_4,
-            Type::PG_MCV_LIST => TYPLEN_VARLENA,
-            Type::PG_SNAPSHOT => TYPLEN_VARLENA,
-            Type::XID8 => TYPLEN_8,
-            Type::ANYCOMPATIBLE => TYPLEN_4,
-            Type::ANYCOMPATIBLE_RANGE => TYPLEN_VARLENA,
-            ref ty => {
-                if extended_types.is_empty() {
-                    *extended_types = load_extended_types(backend).await?;
-                }
-                extended_types
-                    .get(&ty.oid())
-                    .cloned()
-                    .ok_or_else(|| Error::UnsupportedType(col.col_type.clone()))?
-            }
-        },
+    let data_type_size = data_type_size(col, backend, extended_types).await?;
+
+    let field_name = match col {
+        Column::Column { name, .. } => name.clone(),
+        Column::OwnedField(o) => o.name().into(),
     };
 
+    let table_id = match col {
+        Column::Column { table_oid, .. } => table_oid.unwrap_or(UNKNOWN_TABLE),
+        Column::OwnedField(o) => o.table_oid(),
+    };
+
+    let col_id = match col {
+        Column::Column { attnum, .. } => attnum.unwrap_or(UNKNOWN_COLUMN),
+        Column::OwnedField(o) => o.column_id(),
+    };
+    //
+    let data_type = match col {
+        Column::Column { col_type, .. } => Some(col_type.clone()),
+        Column::OwnedField(o) => Type::from_oid(o.type_oid()),
+    }
+    .ok_or_else(|| Error::InternalError("unrecognized type".to_string()))?;
+
     Ok(FieldDescription {
-        field_name: col.name.clone(),
-        table_id: col.table_oid.unwrap_or(UNKNOWN_TABLE),
-        col_id: col.attnum.unwrap_or(UNKNOWN_COLUMN),
-        data_type: col.col_type.clone(),
+        field_name,
+        table_id,
+        col_id,
+        data_type,
         data_type_size,
         type_modifier: ATTTYPMOD_NONE,
         transfer_format,
+    })
+}
+
+async fn data_type_size<B: PsqlBackend>(
+    col: &Column,
+    backend: &mut B,
+    extended_types: &mut HashMap<Oid, i16>,
+) -> Result<i16, Error> {
+    Ok(match col {
+        Column::OwnedField(o) => o.type_size(),
+        Column::Column { col_type, .. } => match col_type.kind() {
+            Kind::Array(_) => TYPLEN_VARLENA,
+            Kind::Enum(_) => TYPLEN_VARLENA,
+            _ => match *col_type {
+                Type::BOOL => TYPLEN_1,
+                Type::BYTEA => TYPLEN_VARLENA,
+                Type::CHAR => TYPLEN_1,
+                Type::NAME => TYPLEN_VARLENA,
+                Type::INT8 => TYPLEN_8,
+                Type::INT2 => TYPLEN_2,
+                Type::INT2_VECTOR => TYPLEN_VARLENA,
+                Type::INT4 => TYPLEN_4,
+                Type::REGPROC => TYPLEN_4,
+                Type::TEXT => TYPLEN_VARLENA,
+                Type::OID => TYPLEN_4,
+                Type::TID => TYPLEN_6,
+                Type::XID => TYPLEN_4,
+                Type::CID => TYPLEN_4,
+                Type::OID_VECTOR => TYPLEN_VARLENA,
+                Type::PG_DDL_COMMAND => TYPLEN_8,
+                Type::JSON => TYPLEN_VARLENA,
+                Type::XML => TYPLEN_VARLENA,
+                Type::PG_NODE_TREE => TYPLEN_VARLENA,
+                Type::TABLE_AM_HANDLER => TYPLEN_4,
+                Type::INDEX_AM_HANDLER => TYPLEN_4,
+                Type::POINT => TYPLEN_16,
+                Type::LSEG => TYPLEN_32,
+                Type::PATH => TYPLEN_VARLENA,
+                Type::BOX => TYPLEN_32,
+                Type::POLYGON => TYPLEN_VARLENA,
+                Type::LINE => TYPLEN_24,
+                Type::CIDR => TYPLEN_VARLENA,
+                Type::FLOAT4 => TYPLEN_4,
+                Type::FLOAT8 => TYPLEN_8,
+                Type::UNKNOWN => TYPLEN_CSTRING,
+                Type::CIRCLE => TYPLEN_24,
+                Type::MACADDR8 => TYPLEN_8,
+                Type::MONEY => TYPLEN_8,
+                Type::MACADDR => TYPLEN_6,
+                Type::INET => TYPLEN_VARLENA,
+                Type::ACLITEM => TYPLEN_12,
+                Type::BPCHAR => TYPLEN_VARLENA,
+                Type::VARCHAR => TYPLEN_VARLENA,
+                Type::DATE => TYPLEN_4,
+                Type::TIME => TYPLEN_8,
+                Type::TIMESTAMP => TYPLEN_8,
+                Type::TIMESTAMPTZ => TYPLEN_8,
+                Type::INTERVAL => TYPLEN_16,
+                Type::TIMETZ => TYPLEN_12,
+                Type::BIT => TYPLEN_VARLENA,
+                Type::VARBIT => TYPLEN_VARLENA,
+                Type::NUMERIC => TYPLEN_VARLENA,
+                Type::REFCURSOR => TYPLEN_VARLENA,
+                Type::REGPROCEDURE => TYPLEN_4,
+                Type::REGOPER => TYPLEN_4,
+                Type::REGOPERATOR => TYPLEN_4,
+                Type::REGCLASS => TYPLEN_4,
+                Type::REGTYPE => TYPLEN_4,
+                Type::RECORD => TYPLEN_VARLENA,
+                Type::CSTRING => TYPLEN_CSTRING,
+                Type::ANY => TYPLEN_4,
+                Type::VOID => TYPLEN_4,
+                Type::TRIGGER => TYPLEN_4,
+                Type::LANGUAGE_HANDLER => TYPLEN_4,
+                Type::INTERNAL => TYPLEN_8,
+                Type::ANYELEMENT => TYPLEN_4,
+                Type::UUID => TYPLEN_16,
+                Type::TXID_SNAPSHOT => TYPLEN_VARLENA,
+                Type::FDW_HANDLER => TYPLEN_4,
+                Type::PG_LSN => TYPLEN_8,
+                Type::TSM_HANDLER => TYPLEN_4,
+                Type::PG_NDISTINCT => TYPLEN_VARLENA,
+                Type::PG_DEPENDENCIES => TYPLEN_VARLENA,
+                Type::ANYENUM => TYPLEN_4,
+                Type::TS_VECTOR => TYPLEN_VARLENA,
+                Type::TSQUERY => TYPLEN_VARLENA,
+                Type::GTS_VECTOR => TYPLEN_VARLENA,
+                Type::REGCONFIG => TYPLEN_4,
+                Type::REGDICTIONARY => TYPLEN_4,
+                Type::JSONB => TYPLEN_VARLENA,
+                Type::ANY_RANGE => TYPLEN_VARLENA,
+                Type::EVENT_TRIGGER => TYPLEN_4,
+                Type::INT4_RANGE => TYPLEN_VARLENA,
+                Type::NUM_RANGE => TYPLEN_VARLENA,
+                Type::TS_RANGE => TYPLEN_VARLENA,
+                Type::TSTZ_RANGE => TYPLEN_VARLENA,
+                Type::DATE_RANGE => TYPLEN_VARLENA,
+                Type::INT8_RANGE => TYPLEN_VARLENA,
+                Type::JSONPATH => TYPLEN_VARLENA,
+                Type::REGNAMESPACE => TYPLEN_4,
+                Type::REGROLE => TYPLEN_4,
+                Type::REGCOLLATION => TYPLEN_4,
+                Type::PG_MCV_LIST => TYPLEN_VARLENA,
+                Type::PG_SNAPSHOT => TYPLEN_VARLENA,
+                Type::XID8 => TYPLEN_8,
+                Type::ANYCOMPATIBLE => TYPLEN_4,
+                Type::ANYCOMPATIBLE_RANGE => TYPLEN_VARLENA,
+                ref ty => {
+                    if extended_types.is_empty() {
+                        *extended_types = load_extended_types(backend).await?;
+                    }
+                    extended_types
+                        .get(&ty.oid())
+                        .cloned()
+                        .ok_or_else(|| Error::UnsupportedType(col_type.clone()))?
+                }
+            },
+        },
     })
 }
 
@@ -1131,13 +1163,13 @@ mod tests {
             } else if self.is_query_read {
                 Ok(QueryResponse::Select {
                     schema: vec![
-                        Column {
+                        Column::Column {
                             name: "col1".into(),
                             table_oid: None,
                             attnum: None,
                             col_type: Type::INT4,
                         },
-                        Column {
+                        Column::Column {
                             name: "col2".into(),
                             table_oid: None,
                             attnum: None,
@@ -1167,13 +1199,13 @@ mod tests {
                     prepared_statement_id: 0,
                     param_schema: vec![Type::FLOAT8, Type::INT4],
                     row_schema: vec![
-                        Column {
+                        Column::Column {
                             name: "col1".into(),
                             table_oid: None,
                             attnum: None,
                             col_type: Type::INT4,
                         },
-                        Column {
+                        Column::Column {
                             name: "col2".into(),
                             table_oid: None,
                             attnum: None,
@@ -1198,13 +1230,13 @@ mod tests {
             } else if self.is_query_read {
                 Ok(QueryResponse::Select {
                     schema: vec![
-                        Column {
+                        Column::Column {
                             name: "col1".into(),
                             table_oid: None,
                             attnum: None,
                             col_type: Type::INT4,
                         },
-                        Column {
+                        Column::Column {
                             name: "col2".into(),
                             table_oid: None,
                             attnum: None,
@@ -1677,13 +1709,13 @@ mod tests {
                 prepared_statement_id: 0,
                 param_schema: vec![Type::FLOAT8, Type::INT4],
                 row_schema: vec![
-                    Column {
+                    Column::Column {
                         name: "col1".into(),
                         table_oid: None,
                         attnum: None,
                         col_type: Type::INT4
                     },
-                    Column {
+                    Column::Column {
                         name: "col2".into(),
                         table_oid: None,
                         attnum: None,
