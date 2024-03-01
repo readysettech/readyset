@@ -12,6 +12,7 @@
 //! $ cargo criterion -p readyset-psql --bench proxy
 //! ```
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -22,7 +23,7 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use futures::future::{try_select, Either};
 use futures::stream::Peekable;
 use futures::{ready, Stream, StreamExt, TryStreamExt};
-use postgres_types::Type;
+use postgres_types::{Oid, Type};
 use psql_srv::{
     Credentials, CredentialsNeeded, PrepareResponse, PsqlBackend, PsqlSrvRow, QueryResponse,
     TransferFormat,
@@ -259,6 +260,10 @@ impl PsqlBackend for Backend {
 
     fn in_transaction(&self) -> bool {
         false
+    }
+
+    async fn load_extended_types(&mut self) -> Result<HashMap<Oid, i16>, psql_srv::Error> {
+        Ok(HashMap::new())
     }
 }
 

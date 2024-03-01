@@ -2,6 +2,8 @@ use std::sync::Arc;
 
 use futures::prelude::*;
 use smallvec::SmallVec;
+use tokio_postgres::SimpleQueryMessage;
+use tracing::trace;
 
 use crate::codec::EncodeError;
 use crate::error::Error;
@@ -18,9 +20,9 @@ pub enum Response<S> {
     /// Send multiple messages at once
     Messages(SmallVec<[BackendMessage; 2]>),
 
-    /// `Select` is the most complex variant, containing data rows to be sent to the frontend in
-    /// response to a select query.
-    Select {
+    /// `Stream` is the most complex variant, containing data rows to be sent to the frontend in
+    /// response to a one or more queries.
+    Stream {
         header: Option<BackendMessage>,
         resultset: S,
         result_transfer_formats: Option<Arc<Vec<TransferFormat>>>,
@@ -40,29 +42,43 @@ where
         match self {
             Empty => Ok(()),
 
-            Message(m) => sink.feed(m).await,
+            Message(m) => {
+                trace!("Sending message: {:?}", m);
+                sink.feed(m).await
+            }
 
             Messages(ms) => {
+                trace!("Sending messages");
                 for m in ms {
+                    trace!("Sending message: {:?}", m);
                     sink.feed(m).await?
                 }
                 Ok(())
             }
 
-            Select {
+            Stream {
                 header,
                 mut resultset,
                 result_transfer_formats,
                 trailer,
             } => {
                 if let Some(header) = header {
+                    trace!("Sending header: {:?}", header);
                     sink.feed(header).await?;
                 }
 
+                // For multi-selects, the responses will have the CommandComplete messages with the
+                // number of associated rows in the stream itself. Otherwise, we keep track of
+                // them and send our own command complete message for our single result set.
                 let mut n_rows = 0;
+                let mut sent_command_complete = false;
+                // We send a row description for each batch of rows, then the rows themselves, then
+                // a command complete
+                let mut sent_row_description = false;
                 while let Some(r) = resultset.next().await {
                     match r {
                         Ok(PsqlSrvRow::ValueVec(row)) => {
+                            trace!("Sending row: {:?}", row);
                             sink.feed(BackendMessage::DataRow {
                                 values: row,
                                 explicit_transfer_formats: result_transfer_formats.clone(),
@@ -71,21 +87,66 @@ where
                             n_rows += 1;
                         }
                         Ok(PsqlSrvRow::RawRow(row)) => {
+                            trace!("Sending raw row: {:?}", row);
                             sink.feed(BackendMessage::PassThroughDataRow(row)).await?;
                             n_rows += 1;
                         }
                         Err(e) => {
+                            trace!("Sending error: {:?}", e);
                             sink.feed(e.into()).await?;
+                        }
+                        Ok(PsqlSrvRow::SimpleQueryMessage(m)) => {
+                            trace!("Sending simple query message: {:?}", m);
+                            debug_assert_eq!(n_rows, 0, "should not see a mix of simple query messages and rows that we count manually");
+
+                            match m {
+                                SimpleQueryMessage::Row(r) => {
+                                    if !sent_row_description {
+                                        sent_row_description = true;
+                                        trace!("Sending row description: {:?}", r.fields());
+                                        sink.feed(BackendMessage::PassThroughRowDescription(
+                                            r.fields().to_vec(),
+                                        ))
+                                        .await?;
+                                    }
+                                    trace!("Sending pass-through row: {:?}", r);
+                                    sink.feed(BackendMessage::PassThroughSimpleRow(r)).await?;
+                                }
+                                SimpleQueryMessage::CommandComplete(c) => {
+                                    if let Some(fields) = &c.fields {
+                                        sink.feed(BackendMessage::PassThroughRowDescription(
+                                            fields.to_vec(),
+                                        ))
+                                        .await?;
+                                    }
+
+                                    trace!("Sending pass-through command complete: {:?}", c);
+                                    sink.feed(BackendMessage::PassThroughCommandComplete(c.tag))
+                                        .await?;
+
+                                    // We may have sent a row description, but it was for this
+                                    // batch, so reset it for the next batch
+                                    sent_row_description = false;
+                                    sent_command_complete = true;
+                                }
+                                _ => {
+                                    unimplemented!("Unhandled variant of SimpleQueryMessage added")
+                                }
+                            }
                         }
                     }
                 }
 
-                sink.feed(BackendMessage::CommandComplete {
-                    tag: CommandCompleteTag::Select(n_rows),
-                })
-                .await?;
+                if !sent_command_complete {
+                    trace!("Sending command complete: {:?}", n_rows);
+                    sink.feed(BackendMessage::CommandComplete {
+                        tag: CommandCompleteTag::Select(n_rows),
+                    })
+                    .await?;
+                }
 
                 if let Some(trailer) = trailer {
+                    trace!("Sending trailer: {:?}", trailer);
                     sink.feed(trailer).await?;
                 }
 
@@ -161,7 +222,7 @@ mod tests {
 
     #[test]
     fn write_select_simple_empty() {
-        let response = TestResponse::Select {
+        let response = TestResponse::Stream {
             header: None,
             resultset: stream::iter(vec![]),
             result_transfer_formats: None,
@@ -188,7 +249,7 @@ mod tests {
 
     #[test]
     fn write_select() {
-        let response = Response::Select {
+        let response = Response::Stream {
             header: Some(BackendMessage::RowDescription {
                 field_descriptions: vec![],
             }),

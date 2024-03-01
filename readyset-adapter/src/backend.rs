@@ -798,6 +798,9 @@ where
     Noria(noria_connector::QueryResult<'a>),
     /// Results from upstream
     Upstream(DB::QueryResult<'a>),
+    /// Results from upstream that are explicitly buffered in a Vec (from postgres' Simple Query
+    /// Protocol)
+    UpstreamBufferedInMemory(DB::QueryResult<'a>),
     /// Results from parsing a SQL statement and determining that it's a command that should
     /// be handed at an outer layer.
     Parser(ParsedCommand),
@@ -817,6 +820,9 @@ where
         match self {
             Self::Noria(r) => f.debug_tuple("Noria").field(r).finish(),
             Self::Upstream(r) => f.debug_tuple("Upstream").field(r).finish(),
+            Self::UpstreamBufferedInMemory(r) => {
+                f.debug_tuple("UpstreamBufferedInMemory").field(r).finish()
+            }
             Self::Parser(r) => f.debug_tuple("Parser").field(r).finish(),
         }
     }
@@ -881,6 +887,20 @@ where
             Err(_) => QueryDestination::Upstream,
         });
         result.map(QueryResult::Upstream)
+    }
+
+    /// Executes query on the upstream database using the "simple query" protocol, which buffers
+    /// results in memory before returning. Note that this only applies to PostgreSQL backends, and
+    /// for MySQL will return an error.
+    pub async fn simple_query_upstream<'a>(
+        &'a mut self,
+        query: &'a str,
+    ) -> Result<QueryResult<'a, DB>, DB::Error> {
+        let upstream = self.upstream.as_mut().ok_or_else(|| {
+            ReadySetError::Internal("This case requires an upstream connector".to_string())
+        })?;
+        let result = upstream.simple_query(query).await;
+        result.map(QueryResult::UpstreamBufferedInMemory)
     }
 
     /// Prepares query on the mysql_backend, if present, when it cannot be parsed or prepared by
