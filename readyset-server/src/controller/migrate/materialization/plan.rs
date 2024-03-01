@@ -474,13 +474,13 @@ impl<'a> Plan<'a> {
                         #[allow(clippy::indexing_slicing)] // replay paths contain valid nodes
                         if self.graph[first.0].is_internal() {
                             if let ColumnSource::GeneratedFromColumns(generated_from) =
-                                self.graph[first.0].column_source(&index.columns)
+                                self.graph[first.0].column_source(index.columns())
                             {
                                 debug!(
                                     domain = %domain.index(),
                                     ?tag,
                                     on_node = %first.0.index(),
-                                    generated_columns = ?index.columns,
+                                    generated_columns = ?index.columns(),
                                     ?generated_from,
                                     "telling domain about generated columns",
                                 );
@@ -664,7 +664,7 @@ impl<'a> Plan<'a> {
                                                 // look at
                                                 // one shard, otherwise we need to ask all
                                                 source_index
-                                                    .columns
+                                                    .columns()
                                                     .iter()
                                                     .position(|source_column| source_column == &c)
                                             }

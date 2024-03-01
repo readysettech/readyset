@@ -63,7 +63,7 @@ fn base_row_bytes(keys: &[DfValue]) -> u64 {
 
 impl State for MemoryState {
     fn add_index(&mut self, index: Index, partial: Option<Vec<Tag>>) {
-        let (i, exists) = if let Some(i) = self.state_for(&index.columns, index.index_type) {
+        let (i, exists) = if let Some(i) = self.state_for(index.columns(), index.index_type()) {
             // already keyed by this key; just adding tags
             (i, true)
         } else {
@@ -411,7 +411,7 @@ impl State for MemoryState {
             // to worry about duplicate rows yet, so we can just copy in every row directly:
             for row in first_strict_index.values().flatten() {
                 // SAFETY: row remains inside the same state
-                weak_index.insert(&index.columns, unsafe { row.clone() }, false);
+                weak_index.insert(index.columns(), unsafe { row.clone() }, false);
             }
         }
 
@@ -432,19 +432,20 @@ impl State for MemoryState {
                 // But, on the other hand, that would probably be more memory-intensive, so it's
                 // unclear what's the better tradeoff, and we can always look at optimizing this
                 // later if need be.
-                let key = PointKey::from(index.columns.iter().map(|i| row[*i].clone()));
+                let key = PointKey::from(index.columns().iter().map(|i| row[*i].clone()));
                 if weak_index.lookup(&key).is_none() {
                     // If one copy of the row isn't a duplicate, none of the copies are, so go
                     // ahead and insert every copy in one go to save on repeated checks:
                     for _ in 0..duplicate_count {
                         // SAFETY: row remains inside the same state
-                        weak_index.insert(&index.columns, unsafe { row.clone() }, false);
+                        weak_index.insert(index.columns(), unsafe { row.clone() }, false);
                     }
                 }
             }
         }
 
-        self.weak_indices.insert(index.columns, weak_index);
+        self.weak_indices
+            .insert(index.columns().to_vec(), weak_index);
     }
 
     fn lookup_weak<'a>(&'a self, columns: &[usize], key: &PointKey) -> Option<RecordResult<'a>> {
@@ -746,7 +747,7 @@ mod tests {
             fn setup() -> MemoryState {
                 let mut state = MemoryState::default();
                 let tag = Tag::new(1);
-                state.add_index(Index::new(IndexType::BTreeMap, vec![0]), Some(vec![tag]));
+                state.add_index(Index::btree_map(vec![0]), Some(vec![tag]));
                 state.mark_filled(
                     KeyComparison::from_range(&(vec1![DfValue::from(0)]..vec1![DfValue::from(10)])),
                     tag,
@@ -784,8 +785,8 @@ mod tests {
                 let tag_2 = Tag::new(2);
 
                 // Initialize MemoryState with two indices
-                state.add_index(Index::new(IndexType::HashMap, vec![0]), Some(vec![tag_1]));
-                state.add_index(Index::new(IndexType::HashMap, vec![1]), Some(vec![tag_2]));
+                state.add_index(Index::hash_map(vec![0]), Some(vec![tag_1]));
+                state.add_index(Index::hash_map(vec![1]), Some(vec![tag_2]));
 
                 // Mark two holes filled for Tag 1, and one for Tag 2
                 state.mark_filled(KeyComparison::from(vec1![DfValue::from(0)]), tag_1);
@@ -810,7 +811,7 @@ mod tests {
 
             fn setup() -> MemoryState {
                 let mut state = MemoryState::default();
-                state.add_index(Index::new(IndexType::BTreeMap, vec![0]), None);
+                state.add_index(Index::btree_map(vec![0]), None);
                 state
                     .process_records(
                         &mut (0..10)
@@ -1252,11 +1253,11 @@ mod tests {
                             .unwrap();
                     }
                     Operation::CreateStrictIndex(columns, tag) => {
-                        let index = Index::new(IndexType::HashMap, columns.clone());
+                        let index = Index::hash_map(columns.clone());
                         ctxt.add_index(index, Some(vec![*tag]));
                     }
                     Operation::CreateWeakIndex(columns) => {
-                        let index = Index::new(IndexType::HashMap, columns.clone());
+                        let index = Index::hash_map(columns.clone());
                         ctxt.add_weak_index(index);
                     }
                 }

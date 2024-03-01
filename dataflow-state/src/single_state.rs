@@ -45,7 +45,7 @@ impl SingleState {
     /// Construct a new, empty [`SingleState`] for the given `index`. If `partial`
     pub(super) fn new(index: Index, partial: bool) -> Self {
         let mut state = KeyedState::from(&index);
-        if !partial && index.index_type == IndexType::BTreeMap {
+        if !partial && index.index_type() == IndexType::BTreeMap {
             // For fully materialized indices, we never miss - so mark that the full range of keys
             // has been filled.
             state.insert_range((Bound::Unbounded, Bound::Unbounded))
@@ -61,7 +61,7 @@ impl SingleState {
     /// Inserts the given row, or returns false if a hole was encountered (and the record hence
     /// not inserted).
     pub(super) fn insert_row(&mut self, row: Row) -> bool {
-        let added = self.state.insert(&self.index.columns, row, self.partial);
+        let added = self.state.insert(self.index.columns(), row, self.partial);
         if added {
             self.row_count += 1;
         }
@@ -70,7 +70,7 @@ impl SingleState {
 
     /// Attempt to remove row `r`.
     pub(super) fn remove_row(&mut self, r: &[DfValue], hit: &mut bool) -> Option<Row> {
-        let row = self.state.remove(&self.index.columns, r, Some(hit));
+        let row = self.state.remove(self.index.columns(), r, Some(hit));
         if row.is_some() {
             self.row_count = self.row_count.saturating_sub(1);
         }
@@ -398,12 +398,12 @@ impl SingleState {
 
     /// Return this state's index type
     pub(super) fn index_type(&self) -> IndexType {
-        self.index().index_type
+        self.index().index_type()
     }
 
     /// Return a slice containing the indices of the columns that this index is keyed on
     pub(super) fn columns(&self) -> &[usize] {
-        &self.index.columns
+        self.index.columns()
     }
 
     pub(super) fn partial(&self) -> bool {
@@ -452,14 +452,14 @@ mod tests {
 
     #[test]
     fn mark_filled_point() {
-        let mut state = SingleState::new(Index::new(IndexType::BTreeMap, vec![0]), true);
+        let mut state = SingleState::new(Index::btree_map(vec![0]), true);
         state.mark_filled(KeyComparison::Equal(vec1![0.into()]));
         assert!(state.lookup(&PointKey::from([0.into()])).is_some())
     }
 
     #[test]
     fn mark_filled_range() {
-        let mut state = SingleState::new(Index::new(IndexType::BTreeMap, vec![0]), true);
+        let mut state = SingleState::new(Index::btree_map(vec![0]), true);
         state.mark_filled(KeyComparison::Range((
             Bound::Included(vec1![0.into()]),
             Bound::Excluded(vec1![5.into()]),
@@ -477,7 +477,7 @@ mod tests {
 
         #[test]
         fn equal() {
-            let mut state = SingleState::new(Index::new(IndexType::BTreeMap, vec![0]), true);
+            let mut state = SingleState::new(Index::btree_map(vec![0]), true);
             let key = KeyComparison::Equal(vec1![0.into()]);
             state.mark_filled(key.clone());
             state.insert_row(vec![0.into(), 1.into()].into());
@@ -487,7 +487,7 @@ mod tests {
 
         #[test]
         fn range() {
-            let mut state = SingleState::new(Index::new(IndexType::BTreeMap, vec![0]), true);
+            let mut state = SingleState::new(Index::btree_map(vec![0]), true);
             let key =
                 KeyComparison::from_range(&(vec1![DfValue::from(0)]..vec1![DfValue::from(10)]));
             state.mark_filled(key.clone());
@@ -509,7 +509,7 @@ mod tests {
 
         #[test]
         fn row_count_after_eviction() {
-            let mut state = SingleState::new(Index::new(IndexType::HashMap, vec![0]), true);
+            let mut state = SingleState::new(Index::hash_map(vec![0]), true);
             state.mark_filled(KeyComparison::Equal(
                 Vec1::try_from(vec![1.into()]).unwrap(),
             ));

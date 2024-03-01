@@ -79,8 +79,8 @@ impl<'a> Display for PrettyReplayPath<'a> {
                 write!(
                     f,
                     " ({:?}[{}])",
-                    idx.index_type,
-                    idx.columns.iter().join(", ")
+                    idx.index_type(),
+                    idx.columns().iter().join(", ")
                 )?;
             }
 

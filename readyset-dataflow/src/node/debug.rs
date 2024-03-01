@@ -207,7 +207,7 @@ impl Node {
                 NodeType::Reader(ref r) => {
                     let key = match r.index() {
                         None => String::from("none"),
-                        Some(index) => format!("{:?}({:?})", index.index_type, index.columns),
+                        Some(index) => format!("{:?}({:?})", index.index_type(), index.columns()),
                     };
                     s.push_str(&format!(
                         "{{ {{ {} / {} {} {} {} }} | (reader / ⚷: {}) | {} }}",

@@ -351,9 +351,9 @@ impl Materializations {
                 .map(|lookup_index| {
                     let index = lookup_index.index();
                     let index = Index::new(
-                        index.index_type,
+                        index.index_type(),
                         index
-                            .columns
+                            .columns()
                             .iter()
                             .map(|&col| {
                                 if !n.is_internal() {
@@ -380,7 +380,8 @@ impl Materializations {
                                 })
                             })
                             .collect::<ReadySetResult<Vec<usize>>>()?,
-                    );
+                        index.query_type(),
+                    )?;
                     Ok(match lookup_index {
                         LookupIndex::Strict(_) => LookupIndex::Strict(index),
                         LookupIndex::Weak(_) => LookupIndex::Weak(index),
@@ -576,9 +577,10 @@ impl Materializations {
                     graph,
                     ColumnRef {
                         node: ni,
-                        columns: index.columns.clone(),
+                        columns: index.columns().to_vec(),
                     },
-                    index.index_type,
+                    index.index_type(),
+                    index.query_type(),
                 )?);
             }
 
@@ -845,9 +847,10 @@ impl Materializations {
                         graph,
                         ColumnRef {
                             node: ni,
-                            columns: index.columns.clone(),
+                            columns: index.columns().to_vec(),
                         },
-                        index.index_type,
+                        index.index_type(),
+                        index.query_type(),
                     )?;
 
                     for path in paths {
@@ -867,31 +870,31 @@ impl Materializations {
                                             // the child having state present for that key.
 
                                             // Are the indexes the same type?
-                                            if parent_index.index_type != child_index.index_type {
+                                            if parent_index.index_type() != child_index.index_type()
+                                            {
                                                 continue;
                                             }
 
                                             // do we share a column?
                                             if parent_index
-                                                .columns
+                                                .columns()
                                                 .iter()
-                                                .all(|&c| !child_index.columns.contains(&c))
+                                                .all(|&c| !child_index.columns().contains(&c))
                                             {
                                                 continue;
                                             }
 
                                             // is there a column we *don't* share?
-                                            let unshared =
-                                                parent_index
-                                                    .columns
-                                                    .iter()
-                                                    .cloned()
-                                                    .find(|&c| !child_index.columns.contains(&c))
-                                                    .or_else(|| {
-                                                        child_index.columns.iter().cloned().find(
-                                                            |c| !parent_index.columns.contains(c),
-                                                        )
-                                                    });
+                                            let unshared = parent_index
+                                                .columns()
+                                                .iter()
+                                                .cloned()
+                                                .find(|&c| !child_index.columns().contains(&c))
+                                                .or_else(|| {
+                                                    child_index.columns().iter().cloned().find(
+                                                        |c| !parent_index.columns().contains(c),
+                                                    )
+                                                });
                                             if let Some(not_shared) = unshared {
                                                 // This might be fine if we also have the child's
                                                 // index in

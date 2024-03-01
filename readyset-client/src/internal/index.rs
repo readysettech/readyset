@@ -1,6 +1,8 @@
 use std::cmp::Ordering;
+use std::hash::Hash;
 
 use nom_sql::BinaryOperator;
+use readyset_errors::{internal, ReadySetResult};
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
@@ -82,33 +84,108 @@ impl IndexType {
     }
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize, Hash, Arbitrary)]
+pub enum QueryType {
+    Point,
+    Range,
+    Both,
+    None,
+}
+
+impl From<&KeyComparison> for QueryType {
+    fn from(value: &KeyComparison) -> Self {
+        match value {
+            KeyComparison::Equal(_) => QueryType::Point,
+            KeyComparison::Range(_) => QueryType::Range,
+        }
+    }
+}
+
 /// A description of an index used on a relation
-#[derive(Debug, Clone, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Hash)]
+#[derive(Debug, Clone, Eq, Serialize, Deserialize)]
 pub struct Index {
     /// The type of the index
-    pub index_type: IndexType,
+    index_type: IndexType,
 
     /// The column indices in the underlying relation that this index is on
-    pub columns: Vec<usize>,
+    columns: Vec<usize>,
+
+    /// The type of queries that will be served by this index
+    query_type: QueryType,
+}
+
+impl PartialEq for Index {
+    fn eq(&self, other: &Self) -> bool {
+        (self.index_type, &self.columns) == (other.index_type, &other.columns)
+    }
+}
+
+impl PartialOrd for Index {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Index {
+    fn cmp(&self, other: &Self) -> Ordering {
+        (self.index_type, &self.columns).cmp(&(other.index_type, &other.columns))
+    }
+}
+
+impl Hash for Index {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.index_type.hash(state);
+        self.columns.hash(state);
+    }
 }
 
 impl Index {
     /// Create a new Index with the given index type and column indices
-    pub fn new(index_type: IndexType, columns: Vec<usize>) -> Self {
-        Self {
-            index_type,
-            columns,
+    pub fn new(
+        index_type: IndexType,
+        columns: Vec<usize>,
+        query_type: QueryType,
+    ) -> ReadySetResult<Self> {
+        match (index_type, query_type) {
+            (IndexType::HashMap, QueryType::Range | QueryType::Both) => {
+                internal!("Tried to hashmap index for range query")
+            }
+            _ => Ok(Self {
+                index_type,
+                query_type,
+                columns,
+            }),
         }
     }
 
     /// Construct a new [`HashMap`](IndexType::HashMap) index with the given column indices
     pub fn hash_map(columns: Vec<usize>) -> Self {
-        Self::new(IndexType::HashMap, columns)
+        Self {
+            index_type: IndexType::HashMap,
+            query_type: QueryType::Point,
+            columns,
+        }
     }
 
     /// Construct a new [`BTreeMap`](IndexType::HashMap) index with the given column indices
     pub fn btree_map(columns: Vec<usize>) -> Self {
-        Self::new(IndexType::BTreeMap, columns)
+        Self {
+            index_type: IndexType::BTreeMap,
+            query_type: QueryType::Range,
+            columns,
+        }
+    }
+
+    pub fn columns(&self) -> &[usize] {
+        self.columns.as_slice()
+    }
+
+    pub fn index_type(&self) -> IndexType {
+        self.index_type
+    }
+
+    pub fn query_type(&self) -> QueryType {
+        self.query_type
     }
 
     /// Returns the length of this index's key
