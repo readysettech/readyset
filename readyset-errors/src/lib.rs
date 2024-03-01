@@ -768,9 +768,12 @@ impl ReadySetError {
         self.any_cause(|e| e.is_unsupported())
     }
 
-    /// Returns `true` if self is ['ViewNotFound'].
+    /// Returns `true` if self is ['ViewNotFound'] or ['ViewNotFoundForQuery'].
     pub fn is_view_not_found(&self) -> bool {
-        matches!(self, Self::ViewNotFound(..))
+        matches!(
+            self,
+            Self::ViewNotFound(..) | Self::ViewNotFoundForQuery { .. }
+        )
     }
 
     /// Returns `true` if self either *is* [`ViewNotFound`], or was *caused by* [`ViewNotFound`].
