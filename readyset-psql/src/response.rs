@@ -220,7 +220,19 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                 Ok(Insert(num_rows_affected))
             }
             Upstream(upstream::QueryResult::Command { tag }) => Ok(Command(tag)),
+            Upstream(upstream::QueryResult::SimpleQueryStream {
+                first_message,
+                stream,
+            }) => Ok(ps::QueryResponse::Stream {
+                resultset: Resultset::from_simple_query_stream(stream, first_message),
+            }),
+            // We still use the SimpleQuery response for some upstream responses that are not
+            // Selects
             Upstream(upstream::QueryResult::SimpleQuery(resp)) => Ok(SimpleQuery(resp)),
+            UpstreamBufferedInMemory(upstream::QueryResult::SimpleQuery(resp)) => Ok(SimpleQuery(resp)),
+            UpstreamBufferedInMemory(..) => Err(ps::Error::InternalError(
+                "Mismatched QueryResult for UpstreamBufferedInMemory response type: Expected SimpleQuery".to_string(),
+            )),
             Parser(p) => match p {
                 ParsedCommand::Deallocate(name) => Ok(ps::QueryResponse::Deallocate(name)),
             },

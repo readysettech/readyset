@@ -7,7 +7,7 @@ use ps::{PsqlSrvRow, PsqlValue};
 use psql_srv as ps;
 use readyset_client::results::ResultIterator;
 use tokio_postgres::types::Type;
-use tokio_postgres::{GenericResult, ResultStream};
+use tokio_postgres::{GenericResult, ResultStream, SimpleQueryMessage, SimpleQueryStream};
 
 use crate::schema::{type_to_pgsql, SelectSchema};
 use crate::value::TypedDfValue;
@@ -18,6 +18,10 @@ enum ResultsetInner {
     Stream {
         first_row: Option<tokio_postgres::Row>,
         stream: Pin<Box<ResultStream>>,
+    },
+    SimpleQueryStream {
+        first_message: Option<SimpleQueryMessage>,
+        stream: Pin<Box<SimpleQueryStream>>,
     },
 }
 
@@ -72,6 +76,19 @@ impl Resultset {
             project_field_types: Arc::new(schema),
         }
     }
+
+    pub fn from_simple_query_stream(
+        stream: Pin<Box<SimpleQueryStream>>,
+        first_msg: tokio_postgres::SimpleQueryMessage,
+    ) -> Self {
+        Self {
+            results: ResultsetInner::SimpleQueryStream {
+                first_message: Some(first_msg),
+                stream,
+            },
+            project_field_types: Arc::new(vec![]),
+        }
+    }
 }
 
 impl Stream for Resultset {
@@ -103,6 +120,20 @@ impl Stream for Resultset {
                 };
 
                 row.map(|res| res.map(PsqlSrvRow::RawRow))
+            }
+            ResultsetInner::SimpleQueryStream {
+                first_message,
+                stream,
+            } => {
+                let row = match first_message.take() {
+                    Some(row) => Some(Ok(row)),
+                    None => match ready!(stream.as_mut().poll_next(cx)) {
+                        None => None,
+                        Some(Err(e)) => Some(Err(psql_srv::Error::from(e))),
+                        Some(Ok(msg)) => Some(Ok(msg)),
+                    },
+                };
+                row.map(|res| res.map(PsqlSrvRow::SimpleQueryMessage))
             }
         };
 

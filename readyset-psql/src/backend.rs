@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::ops::Deref;
 use std::str::FromStr;
@@ -6,7 +7,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use clap::ValueEnum;
 use eui48::MacAddressFormat;
-use postgres_types::Type;
+use postgres_types::{Oid, Type};
 use ps::{PsqlValue, TransferFormat};
 use psql_srv as ps;
 use readyset_adapter::backend as cl;
@@ -14,6 +15,7 @@ use readyset_adapter::upstream_database::LazyUpstream;
 use readyset_adapter_types::DeallocateId;
 use readyset_data::DfValue;
 use thiserror::Error;
+use tokio_postgres::SimpleQueryMessage;
 
 use crate::error::Error;
 use crate::query_handler::PostgreSqlQueryHandler;
@@ -84,6 +86,15 @@ impl Deref for Backend {
 impl Backend {
     async fn query<'a>(&'a mut self, query: &'a str) -> Result<QueryResponse<'_>, Error> {
         Ok(QueryResponse(self.inner.query(query).await?))
+    }
+
+    async fn simple_query_upstream<'a>(
+        &'a mut self,
+        query: &'a str,
+    ) -> Result<QueryResponse<'_>, Error> {
+        Ok(QueryResponse(
+            self.inner.simple_query_upstream(query).await?,
+        ))
     }
 
     async fn prepare(
@@ -171,6 +182,38 @@ impl ps::PsqlBackend for Backend {
 
     fn in_transaction(&self) -> bool {
         self.inner.in_transaction()
+    }
+
+    /// Loads any extended types from the upstream postgres, returning a map of Oid to typelen
+    async fn load_extended_types(&mut self) -> Result<HashMap<Oid, i16>, ps::Error> {
+        let err = |m| {
+            ps::Error::InternalError(format!(
+                "failed while loading extended type information: {m}"
+            ))
+        };
+
+        let response = self
+            .simple_query_upstream("select oid, typlen from pg_catalog.pg_type")
+            .await?
+            .try_into()?;
+
+        match response {
+            ps::QueryResponse::SimpleQuery(r) => r
+                .into_iter()
+                .filter_map(|m| match m {
+                    SimpleQueryMessage::Row(row) => Some(row),
+                    _ => None,
+                })
+                .map(|row| match (row.get(0), row.get(1)) {
+                    (Some(oid), Some(typlen)) => Ok((
+                        oid.parse().map_err(|_| err("could not parse oid"))?,
+                        typlen.parse().map_err(|_| err("could not parse typlen"))?,
+                    )),
+                    _ => Err(err("wrong number of columns returned from upstream")),
+                })
+                .collect(),
+            _ => Err(err("wrong query response type")),
+        }
     }
 }
 

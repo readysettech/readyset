@@ -9,6 +9,7 @@ use readyset_adapter_types::DeallocateId;
 use smallvec::smallvec;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_postgres::CommandCompleteContents;
+use tracing::trace;
 
 use crate::bytes::BytesStr;
 use crate::channel::Channel;
@@ -202,6 +203,7 @@ impl Protocol {
         backend: &mut B,
         channel: &mut Channel<C>,
     ) -> Result<Response<B::Resultset>, Error> {
+        trace!(?message, "protocol on_request");
         let get_ready_message = |version| {
             smallvec![
                 AuthenticationOk,
@@ -607,7 +609,7 @@ impl Protocol {
                         .on_execute(*prepared_statement_id, params, result_transfer_formats)
                         .await?;
                     let res = if let Select { resultset, .. } = response {
-                        Ok(Response::Select {
+                        Ok(Response::Stream {
                             header: None,
                             resultset,
                             result_transfer_formats: Some(result_transfer_formats.clone()),
@@ -627,7 +629,9 @@ impl Protocol {
                             Command(tag) => BackendMessage::PassThroughCommandComplete(tag.into()),
                             #[allow(clippy::unreachable)]
                             Select { .. } => {
-                                unreachable!("Select is handled as a special case above.")
+                                return Err(Error::InternalError(
+                                    "Received Select response for Execute".to_string(),
+                                ));
                             }
                             SimpleQuery(_) => {
                                 return Err(Error::InternalError(
@@ -635,7 +639,14 @@ impl Protocol {
                                 ));
                             }
                             Deallocate(..) => {
-                                unreachable!("Should not get a Deallocate command on execute()");
+                                return Err(Error::InternalError(
+                                    "Received Deallocate command for Execute".to_string(),
+                                ));
+                            }
+                            Stream { .. } => {
+                                return Err(Error::InternalError(
+                                    "Received Stream response for Execute".to_string(),
+                                ));
                             }
                         };
                         Ok(Response::Message(command_complete))
@@ -657,8 +668,18 @@ impl Protocol {
                             );
                         }
 
-                        Ok(Response::Select {
+                        Ok(Response::Stream {
                             header: Some(RowDescription { field_descriptions }),
+                            resultset,
+                            result_transfer_formats: None,
+                            trailer: Some(BackendMessage::ready_for_query(
+                                self.transaction_state(backend),
+                            )),
+                        })
+                    } else if let Stream { resultset } = response {
+                        trace!("protocol response stream");
+                        Ok(Response::Stream {
+                            header: None,
                             resultset,
                             result_transfer_formats: None,
                             trailer: Some(BackendMessage::ready_for_query(
@@ -669,6 +690,7 @@ impl Protocol {
                         let mut messages = smallvec![];
                         let mut processing_select = false;
                         for msg in resp {
+                            trace!(?msg, "building simplequery resp");
                             match msg {
                                 SimpleQueryMessage::Row(row) => {
                                     if !processing_select {
@@ -719,16 +741,22 @@ impl Protocol {
                                 tag: CommandCompleteTag::Delete(n),
                             },
                             Command(tag) => BackendMessage::PassThroughCommandComplete(tag.into()),
-                            #[allow(clippy::unreachable)]
-                            Select { .. } => {
-                                unreachable!("Select is handled as a special case above.")
-                            }
-                            SimpleQuery(_) => {
-                                unreachable!("SimpleQuery is handled as a special case above.")
-                            }
                             Deallocate(statement_id) => BackendMessage::CommandComplete {
                                 tag: self.on_deallocate(backend, channel, statement_id).await?,
                             },
+                            // We have already handled these cases above, so they are unexpected
+                            #[allow(clippy::unreachable)]
+                            Select { .. } => {
+                                return Err(Error::InternalError("Unexpected Select".to_string()));
+                            }
+                            SimpleQuery(_) => {
+                                return Err(Error::InternalError(
+                                    "Unexpected SimpleQuery".to_string(),
+                                ));
+                            }
+                            Stream { .. } => {
+                                return Err(Error::InternalError("Unexpected Stream".to_string()));
+                            }
                         };
                         Ok(Response::Messages(smallvec![
                             command_complete,
@@ -882,36 +910,6 @@ impl Protocol {
     }
 }
 
-async fn load_extended_types<B: PsqlBackend>(backend: &mut B) -> Result<HashMap<Oid, i16>, Error> {
-    let err = |m| {
-        Error::InternalError(format!(
-            "failed while loading extended type information: {m}"
-        ))
-    };
-
-    let response = backend
-        .on_query("select oid, typlen from pg_catalog.pg_type")
-        .await?;
-
-    match response {
-        SimpleQuery(r) => r
-            .into_iter()
-            .filter_map(|m| match m {
-                SimpleQueryMessage::Row(row) => Some(row),
-                _ => None,
-            })
-            .map(|row| match (row.get(0), row.get(1)) {
-                (Some(oid), Some(typlen)) => Ok((
-                    oid.parse().map_err(|_| err("could not parse oid"))?,
-                    typlen.parse().map_err(|_| err("could not parse typlen"))?,
-                )),
-                _ => Err(err("wrong number of columns returned from upstream")),
-            })
-            .collect(),
-        _ => Err(err("wrong query response type")),
-    }
-}
-
 async fn make_field_description<B: PsqlBackend>(
     col: &Column,
     transfer_format: TransferFormat,
@@ -1058,7 +1056,7 @@ async fn data_type_size<B: PsqlBackend>(
                 Type::ANYCOMPATIBLE_RANGE => TYPLEN_VARLENA,
                 ref ty => {
                     if extended_types.is_empty() {
-                        *extended_types = load_extended_types(backend).await?;
+                        *extended_types = backend.load_extended_types().await?;
                     }
                     extended_types
                         .get(&ty.oid())
@@ -1260,6 +1258,10 @@ mod tests {
 
         fn in_transaction(&self) -> bool {
             self.in_transaction
+        }
+
+        async fn load_extended_types(&mut self) -> Result<HashMap<Oid, i16>, Error> {
+            Ok(HashMap::default())
         }
     }
 
@@ -1554,7 +1556,7 @@ mod tests {
             .await
             .unwrap()
         {
-            Response::Select {
+            Response::Stream {
                 header,
                 resultset,
                 result_transfer_formats,
@@ -2289,7 +2291,7 @@ mod tests {
             .await
             .unwrap()
         {
-            Response::Select {
+            Response::Stream {
                 header,
                 resultset,
                 result_transfer_formats,

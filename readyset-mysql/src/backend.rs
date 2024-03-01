@@ -469,6 +469,12 @@ where
     match result {
         Ok(QueryResult::Noria(result)) => handle_readyset_result(result, writer).await,
         Ok(QueryResult::Upstream(result)) => handle_upstream_result(result, writer).await,
+        Ok(QueryResult::UpstreamBufferedInMemory(..)) => handle_error!(
+            Error::ReadySet(readyset_errors::unsupported_err!(
+                "Execute should not use simple query protocol"
+            )),
+            writer
+        ),
         Ok(QueryResult::Parser(..)) => handle_error!(
             Error::ReadySet(readyset_errors::unsupported_err!(
                 "Should not parse SQL commands in execute"
