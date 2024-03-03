@@ -4,6 +4,7 @@ use bytes::{BufMut, BytesMut};
 use eui48::MacAddressFormat;
 use postgres::error::ErrorPosition;
 use postgres_types::{ToSql, Type};
+use readyset_util::fmt;
 use tokio_util::codec::Encoder;
 
 use crate::codec::error::EncodeError as Error;
@@ -77,7 +78,6 @@ const LENGTH_PLACEHOLDER: i32 = -1;
 const NUL_BYTE: u8 = b'\0';
 const NUL_CHAR: char = '\0';
 const TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S%.f";
-const TIMESTAMP_TZ_FORMAT: &str = "%Y-%m-%d %H:%M:%S%.f %:z";
 const TIME_FORMAT: &str = "%H:%M:%S%.f";
 const DATE_FORMAT: &str = "%Y-%m-%d";
 
@@ -647,18 +647,18 @@ fn put_text_value(val: PsqlValue, dst: &mut BytesMut) -> Result<(), Error> {
         PsqlValue::Timestamp(v) => {
             // TODO: Does not correctly handle all valid timestamp representations. For example,
             // 8601/SQL timestamp format is assumed; infinity/-infinity are not supported.
-            write!(dst, "{}", v.format(TIMESTAMP_FORMAT))?;
+            fmt::write_timestamp(dst, v);
         }
         PsqlValue::TimestampTz(v) => {
             // TODO: Does not correctly handle all valid timestamp representations. For example,
             // 8601/SQL timestamp format is assumed; infinity/-infinity are not supported.
-            write!(dst, "{}", v.format(TIMESTAMP_TZ_FORMAT))?;
+            fmt::write_timestamp_tz(dst, v);
         }
         PsqlValue::Date(v) => {
-            write!(dst, "{}", v.format(DATE_FORMAT))?;
+            fmt::write_date(dst, v);
         }
         PsqlValue::Time(v) => {
-            write!(dst, "{}", v.format(TIME_FORMAT))?;
+            fmt::write_time(dst, v);
         }
         PsqlValue::ByteArray(b) => {
             write!(

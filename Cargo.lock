@@ -3836,7 +3836,7 @@ dependencies = [
 [[package]]
 name = "postgres-derive"
 version = "0.4.5"
-source = "git+https://github.com/readysettech/rust-postgres.git#5774049efa0629110ddd16f62a0ac870791fae57"
+source = "git+https://github.com/readysettech/rust-postgres.git#dd34e4c4c38a2882c8722674456ef2f6e1d28297"
 dependencies = [
  "heck 0.4.1",
  "proc-macro2 1.0.69",
@@ -3858,7 +3858,7 @@ dependencies = [
 [[package]]
 name = "postgres-protocol"
 version = "0.6.6"
-source = "git+https://github.com/readysettech/rust-postgres.git#5774049efa0629110ddd16f62a0ac870791fae57"
+source = "git+https://github.com/readysettech/rust-postgres.git#dd34e4c4c38a2882c8722674456ef2f6e1d28297"
 dependencies = [
  "base64 0.21.0",
  "byteorder",
@@ -3875,7 +3875,7 @@ dependencies = [
 [[package]]
 name = "postgres-types"
 version = "0.2.6"
-source = "git+https://github.com/readysettech/rust-postgres.git#5774049efa0629110ddd16f62a0ac870791fae57"
+source = "git+https://github.com/readysettech/rust-postgres.git#dd34e4c4c38a2882c8722674456ef2f6e1d28297"
 dependencies = [
  "bit-vec",
  "bytes",
@@ -4087,6 +4087,7 @@ dependencies = [
  "readyset-adapter-types",
  "readyset-data",
  "readyset-tracing",
+ "readyset-util",
  "rust_decimal",
  "serde_json",
  "sha2",
@@ -5231,12 +5232,16 @@ dependencies = [
  "async-stream",
  "backoff",
  "bit-vec",
+ "bytes",
  "chrono",
  "chrono-tz",
  "cidr",
+ "criterion",
  "eui48",
  "futures",
+ "pprof",
  "proptest",
+ "rand 0.8.5",
  "rust_decimal",
  "serde",
  "serde_json",
@@ -6597,7 +6602,7 @@ dependencies = [
 [[package]]
 name = "tokio-postgres"
 version = "0.7.10"
-source = "git+https://github.com/readysettech/rust-postgres.git#5774049efa0629110ddd16f62a0ac870791fae57"
+source = "git+https://github.com/readysettech/rust-postgres.git#dd34e4c4c38a2882c8722674456ef2f6e1d28297"
 dependencies = [
  "async-trait",
  "byteorder",
