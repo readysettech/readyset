@@ -817,6 +817,12 @@ impl Expr {
                 let (left_coerce_target, right_coerce_target) =
                     op.argument_type_coercions(left.ty(), right.ty(), dialect)?;
 
+                if let (Expr::Column { ty: to_ty, .. }, Expr::Literal { val, ty: from_ty }) =
+                    (&*left, &mut *right)
+                {
+                    *val = val.coerce_to(to_ty, from_ty)?;
+                }
+
                 if let Some(ty) = left_coerce_target {
                     left = Box::new(Self::Cast {
                         expr: left,
