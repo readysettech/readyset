@@ -77,9 +77,6 @@ const LENGTH_NULL_SENTINEL: i32 = -1;
 const LENGTH_PLACEHOLDER: i32 = -1;
 const NUL_BYTE: u8 = b'\0';
 const NUL_CHAR: char = '\0';
-const TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S%.f";
-const TIME_FORMAT: &str = "%H:%M:%S%.f";
-const DATE_FORMAT: &str = "%Y-%m-%d";
 
 impl Encoder<BackendMessage> for Codec {
     type Error = Error;
@@ -700,6 +697,8 @@ fn put_text_value(val: PsqlValue, dst: &mut BytesMut) -> Result<(), Error> {
 
 #[cfg(test)]
 mod tests {
+    const TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S%.f";
+
     use std::sync::Arc;
 
     use bit_vec::BitVec;

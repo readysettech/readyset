@@ -295,7 +295,9 @@ pub mod prelude {
 
 /// Wrapper types for ReadySet query results.
 pub mod results {
-    pub use super::view::results::{Key, ResultIterator, Results, Row, SharedResults, SharedRows};
+    pub use super::view::results::{
+        Key, MergeIterator, ResultIterator, Results, Row, RowComparator, SharedResults, SharedRows,
+    };
 }
 
 task_local! {

@@ -82,12 +82,11 @@ impl Stream for Resultset {
         let next = match &mut self.get_mut().results {
             ResultsetInner::Empty => None,
             ResultsetInner::ReadySet(i) => i.next().map(|values| {
-                values
-                    .into_iter()
-                    .zip(project_field_types.iter())
-                    .map(|(value, col_type)| PsqlValue::try_from(TypedDfValue { value, col_type }))
-                    .collect::<Result<Vec<_>, _>>()
-                    .map(PsqlSrvRow::ValueVec)
+                let mut results = Vec::with_capacity(values.len());
+                for (value, col_type) in values.into_iter().zip(project_field_types.iter()) {
+                    results.push(PsqlValue::try_from(TypedDfValue { value, col_type })?);
+                }
+                Ok(PsqlSrvRow::ValueVec(results))
             }),
             ResultsetInner::Stream { first_row, stream } => {
                 let row = match first_row.take() {
