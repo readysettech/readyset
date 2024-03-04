@@ -551,7 +551,7 @@ impl TestScript {
 
         let mut rh = ReadySetHandle::new(authority.clone()).await;
 
-        let server_supports_pagination = rh.supports_pagination().await.unwrap();
+        let adapter_rewrite_params = rh.adapter_rewrite_params().await.unwrap();
         let adapter_start_time = SystemTime::now();
 
         let task = tokio::spawn(async move {
@@ -572,7 +572,7 @@ impl TestScript {
                     DatabaseType::PostgreSQL => nom_sql::Dialect::PostgreSQL,
                 },
                 Default::default(),
-                server_supports_pagination,
+                adapter_rewrite_params,
             )
             .await;
             let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
