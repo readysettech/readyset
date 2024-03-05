@@ -32,7 +32,7 @@ use upstream::StatementMeta;
 
 use crate::constants::DEFAULT_CHARACTER_SET;
 use crate::schema::convert_column;
-use crate::upstream::{self, CachedReadResult, MySqlUpstream};
+use crate::upstream::{self, MySqlUpstream};
 use crate::value::mysql_value_to_dataflow_value;
 use crate::{Error, MySqlQueryHandler};
 
@@ -451,26 +451,6 @@ where
             }
 
             if let Some(status_flags) = stream.status_flags() {
-                rw = rw.set_status_flags(status_flags)
-            }
-
-            rw.finish().await
-        }
-        upstream::QueryResult::CachedReadResult(CachedReadResult {
-            data,
-            columns,
-            status_flags,
-        }) => {
-            let formatted_cols = columns.iter().map(|c| c.into()).collect::<Vec<_>>();
-            let mut rw = writer.start(&formatted_cols).await?;
-            for row in data.into_iter() {
-                for (i, _) in row.columns_ref().iter().enumerate() {
-                    rw.write_col(row.as_ref(i).expect("Must match column number"))?;
-                }
-                rw.end_row().await?;
-            }
-
-            if let Some(status_flags) = status_flags {
                 rw = rw.set_status_flags(status_flags)
             }
 

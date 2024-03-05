@@ -65,7 +65,6 @@ pub enum QueryResult<'a> {
         stream: ReadResultStream<'a>,
         columns: Arc<[Column]>,
     },
-    CachedReadResult(CachedReadResult),
     Command {
         status_flags: StatusFlags,
     },
@@ -74,19 +73,6 @@ pub enum QueryResult<'a> {
 impl<'a> UpstreamDestination for QueryResult<'a> {
     fn destination(&self) -> QueryDestination {
         QueryDestination::Upstream
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct CachedReadResult {
-    pub data: Vec<Row>,
-    pub columns: Arc<[Column]>,
-    pub status_flags: Option<StatusFlags>,
-}
-
-impl<'a> From<CachedReadResult> for QueryResult<'a> {
-    fn from(r: CachedReadResult) -> Self {
-        QueryResult::CachedReadResult(r)
     }
 }
 
