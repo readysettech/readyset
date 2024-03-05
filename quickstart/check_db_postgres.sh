@@ -235,7 +235,7 @@ suggest_vpc_cidr_block() {
 
 # Function to check if PostgreSQL instalation is compliant with Readyset
 check_postgres_compliance() {
-    local pg_version=$(execute_sql "SHOW server_version_num;")
+    local pg_version=$(execute_sql "SHOW server_version_num;" | tr -d ' ')
     out_of_compliance=false
     if [[ $pg_version -lt "130000" ]]; then
         echo "Your PostgreSQL version is not supported. Please upgrade to PostgreSQL 13 or later."
@@ -243,7 +243,7 @@ check_postgres_compliance() {
     fi
 
     # Check WAL level
-    local wal_level=$(execute_sql "SHOW wal_level;")
+    local wal_level=$(execute_sql "SHOW wal_level;" | tr -d ' ')
     if [[ $wal_level != "logical" ]]; then
         echo "Your PostgreSQL WAL level is not supported. Please set wal_level to logical."
         out_of_compliance=true
@@ -269,7 +269,7 @@ check_postgres_compliance() {
             )
         ) THEN true
         ELSE false
-    END;")
+    END;" | tr -d ' ' )
     if [[ $is_super != "t" ]]; then
         echo "Your user is not a superuser. Please use a superuser to run Readyset."
         out_of_compliance=true
