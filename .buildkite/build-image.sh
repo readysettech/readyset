@@ -77,6 +77,8 @@ build_cmd_prefix=(
     "docker" "build" \
     "-f" "$dockerfile" \
     "-t" "$image:$VERSION" \
+    "--no-cache" \
+    "--progress=plain" \
     "--build-arg" "BUILDKIT_INLINE_CACHE=1" \
 )
 build_cmd_suffix=(
