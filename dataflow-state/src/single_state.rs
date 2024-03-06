@@ -58,14 +58,18 @@ impl SingleState {
         }
     }
 
-    /// Inserts the given row, or returns false if a hole was encountered (and the record hence
-    /// not inserted).
-    pub(super) fn insert_row(&mut self, row: Row) -> bool {
-        let added = self.state.insert(&self.index.columns, row, self.partial);
-        if added {
+    /// Inserts the given row and returns Some(n) where n is the number of copies of the row in the
+    /// state after the insert, or returns None if a hole was encountered (and the record hence not
+    /// inserted).
+    pub(super) fn insert_row(&mut self, row: Row) -> Option<usize> {
+        let new_row_count = self.state.insert(&self.index.columns, row, self.partial);
+
+        // If we didn't get None, we successfully inserted the row:
+        if new_row_count.is_some() {
             self.row_count += 1;
         }
-        added
+
+        new_row_count
     }
 
     /// Attempt to remove row `r`.
@@ -468,6 +472,24 @@ mod tests {
         assert!(state
             .lookup_range(&RangeKey::from(&(vec1![0.into()]..vec1![5.into()])))
             .is_some());
+    }
+
+    #[test]
+    fn insert_row_counts() {
+        let mut state = SingleState::new(Index::new(IndexType::BTreeMap, vec![0]), true);
+        let test_row: Vec<DfValue> = vec![0.into(), 1.into()];
+
+        // Hole not filled yet, so we should get None, since the row was not inserted:
+        assert_eq!(None, state.insert_row(test_row.clone().into()));
+
+        // After filling the hole and inserting the same row, we should get correct row counts:
+        state.mark_filled(KeyComparison::Equal(vec1![0.into()]));
+        assert_eq!(Some(1), state.insert_row(test_row.clone().into()));
+        assert_eq!(Some(2), state.insert_row(test_row.clone().into()));
+
+        let mut hit = false;
+        state.remove_row(&test_row, &mut hit);
+        assert_eq!(Some(2), state.insert_row(test_row.clone().into()));
     }
 
     mod evict_keys {
