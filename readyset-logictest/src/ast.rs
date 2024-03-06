@@ -14,7 +14,7 @@ use std::{cmp, vec};
 
 use anyhow::{anyhow, bail};
 use bit_vec::BitVec;
-use chrono::{NaiveDate, NaiveTime};
+use chrono::{DateTime, FixedOffset, NaiveDate, NaiveTime};
 use derive_more::{From, TryInto};
 use itertools::Itertools;
 use mysql_common::chrono::NaiveDateTime;
@@ -108,8 +108,10 @@ pub enum Type {
     Integer,
     Real,
     Numeric,
+    // note: `Date` currently behaves more like a `DateTime`/`Timestamp`
     Date,
     Time,
+    TimestampTz,
     ByteArray,
     BitVec,
 }
@@ -141,6 +143,7 @@ impl Display for Type {
             Self::Time => write!(f, "M"),
             Self::ByteArray => write!(f, "B"),
             Self::BitVec => write!(f, "BV"),
+            Self::TimestampTz => write!(f, "Z"),
         }
     }
 }
@@ -190,8 +193,10 @@ pub enum Value {
     Text(String),
     Integer(i64),
     Real(i64, u64),
+    // note: `Date` currently behaves more like a `DateTime`/`Timestamp`
     Date(NaiveDateTime),
     Time(MySqlTime),
+    TimestampTz(DateTime<FixedOffset>),
     ByteArray(Vec<u8>),
     Numeric(Decimal),
     Null,
@@ -318,6 +323,7 @@ impl From<Value> for mysql_async::Value {
             // These types are PostgreSQL-specific
             Value::ByteArray(_) => unimplemented!(),
             Value::BitVector(_) => unimplemented!(),
+            Value::TimestampTz(_) => unimplemented!(),
         }
     }
 }
@@ -338,6 +344,7 @@ impl pgsql::types::ToSql for Value {
             Value::ByteArray(array) => array.to_sql(ty, out),
             Value::Null => None::<i8>.to_sql(ty, out),
             Value::BitVector(b) => b.to_sql(ty, out),
+            Value::TimestampTz(ts) => ts.to_sql(ty, out),
         }
     }
 
@@ -381,8 +388,23 @@ impl<'a> pgsql::types::FromSql<'a> for Value {
             Type::FLOAT8 => Ok(Self::from(f64::from_sql(ty, raw)?)),
             Type::NUMERIC => Ok(Self::Numeric(Decimal::from_sql(ty, raw)?)),
             Type::TEXT => Ok(Self::Text(String::from_sql(ty, raw)?)),
-            Type::DATE => Ok(Self::Date(NaiveDateTime::from_sql(ty, raw)?)),
+            Type::DATE => {
+                // This is a hack to work around the fact that we don't have
+                // a distinct 'Date' type, and that the existing 'Date' is
+                // actually a 'DateTime' (a/k/a Timestamp)
+                let val = match NaiveDateTime::from_sql(ty, raw) {
+                    Ok(datetime) => datetime,
+                    Err(_) => NaiveDate::from_sql(ty, raw)?.and_hms_opt(0, 0, 0).unwrap(),
+                };
+                Ok(Self::Date(val))
+            }
             Type::TIME => Ok(Self::Time(NaiveTime::from_sql(ty, raw)?.into())),
+            Type::TIMESTAMP => Ok(Self::TimestampTz(DateTime::<FixedOffset>::from_sql(
+                ty, raw,
+            )?)),
+            Type::TIMESTAMPTZ => Ok(Self::TimestampTz(DateTime::<FixedOffset>::from_sql(
+                ty, raw,
+            )?)),
             Type::BIT | Type::VARBIT => Ok(Self::BitVector(BitVec::from_sql(ty, raw)?)),
             _ => Err("Invalid type".into()),
         }
@@ -402,6 +424,8 @@ impl<'a> pgsql::types::FromSql<'a> for Value {
             | Type::NUMERIC
             | Type::TEXT
             | Type::DATE
+            | Type::TIMESTAMP
+            | Type::TIMESTAMPTZ
             | Type::TIME => true,
             ref ty if ty.name() == "citext" => true,
             _ => false,
@@ -475,6 +499,7 @@ impl Display for Value {
                     b.iter().map(|bit| if bit { "1" } else { "0" }).join("")
                 )
             }
+            Self::TimestampTz(ts) => write!(f, "{}", ts),
         }
     }
 }
@@ -518,6 +543,7 @@ impl Value {
             Self::ByteArray(_) => Some(Type::ByteArray),
             Self::Null => None,
             Self::BitVector(_) => Some(Type::BitVec),
+            Self::TimestampTz(_) => Some(Type::TimestampTz),
         }
     }
 
@@ -559,6 +585,7 @@ impl Value {
             // These types are PostgreSQL specific.
             Type::ByteArray => unimplemented!(),
             Type::BitVec => unimplemented!(),
+            Type::TimestampTz => unimplemented!(),
         }
     }
 
@@ -569,7 +596,9 @@ impl Value {
             | (Self::Real(_, _), Type::Real)
             | (Self::Date(_), Type::Date)
             | (Self::Time(_), Type::Time)
+            | (Self::TimestampTz(_), Type::TimestampTz)
             | (Self::Null, _) => Ok(Cow::Borrowed(self)),
+            (Self::TimestampTz(ts), Type::Date) => Ok(Cow::Owned(Self::Date(ts.naive_local()))),
             (Self::Text(txt), Type::Integer) => Ok(Cow::Owned(Self::Integer(txt.parse()?))),
             (Self::Text(txt), Type::Real) => Ok(Cow::Owned(Self::from(txt.parse::<f64>()?))),
             (Self::Text(txt), Type::Date) => Ok(Cow::Owned(Self::Date(

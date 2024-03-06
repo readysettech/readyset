@@ -11,7 +11,6 @@ use std::io;
 use std::str::FromStr;
 
 use anyhow::{anyhow, bail, Context};
-use chrono::NaiveDateTime;
 use mysql_time::MySqlTime;
 use nom::branch::alt;
 use nom::bytes::complete::tag;
@@ -25,7 +24,7 @@ use nom::IResult;
 use nom_locate::LocatedSpan;
 use nom_sql::to_nom_result;
 use nom_sql::whitespace::whitespace1;
-use readyset_data::TIMESTAMP_PARSE_FORMAT;
+use readyset_data::TimestampTz;
 
 use crate::ast::*;
 
@@ -112,6 +111,7 @@ fn column_type(i: &[u8]) -> IResult<&[u8], Type> {
         map(tag("R"), |_| Type::Real),
         map(tag("D"), |_| Type::Date),
         map(tag("M"), |_| Type::Time),
+        map(tag("Z"), |_| Type::TimestampTz),
         map(tag("BV"), |_| Type::BitVec),
     ))(i)
 }
@@ -189,13 +189,18 @@ fn value(i: &[u8]) -> IResult<&[u8], Value> {
         map(terminated(integer, line_ending), Value::Integer),
         terminated(
             map_opt(not_line_ending, |s: &[u8]| {
-                Some(Value::Date(
-                    NaiveDateTime::parse_from_str(
-                        String::from_utf8_lossy(s).as_ref(),
-                        TIMESTAMP_PARSE_FORMAT,
-                    )
-                    .ok()?,
-                ))
+                let ts = String::from_utf8_lossy(s);
+                // TimestampTz::from_str() will handle BC dates correctly
+                match TimestampTz::from_str(ts.as_ref()) {
+                    Ok(ts) => {
+                        if ts.has_timezone() {
+                            Some(Value::TimestampTz(ts.to_chrono()))
+                        } else {
+                            Some(Value::Date(ts.to_chrono().naive_utc()))
+                        }
+                    }
+                    Err(_) => None,
+                }
             }),
             line_ending,
         ),
@@ -404,6 +409,7 @@ where
 mod tests {
     use std::collections::HashMap;
 
+    use chrono::{FixedOffset, NaiveDateTime, TimeZone};
     use nom::combinator::complete;
     use pretty_assertions::assert_eq;
 
@@ -799,6 +805,71 @@ SELECT CASE WHEN c>(SELECT avg(c) FROM t1) THEN a*2 ELSE b*10 END
                 params: Default::default(),
             })]
         );
+    }
+
+    #[test]
+    fn parse_query_with_timestamp() {
+        let input = b"statement ok
+CREATE TABLE t2(x timestamptz)
+
+query Z valuesort
+SELECT * FROM t2
+----
+
+statement ok
+INSERT INTO t2(x) VALUES ('2024-03-05 12:34:56-0800')
+
+query Z nosort
+SELECT * FROM t2
+----
+2024-03-05 12:34:56-0800
+";
+        let result = complete(records)(input);
+        assert_eq!(
+            result.unwrap().1,
+            vec![
+                Record::Statement(Statement {
+                    result: StatementResult::Ok,
+                    command: "CREATE TABLE t2(x timestamptz)".to_string(),
+                    conditionals: vec![],
+                },),
+                Record::Query(Query {
+                    column_types: Some(vec![Type::TimestampTz]),
+                    sort_mode: Some(SortMode::ValueSort),
+                    label: None,
+                    conditionals: vec![],
+                    query: "SELECT * FROM t2".to_string(),
+                    results: QueryResults::Results(vec![]),
+                    params: Default::default(),
+                }),
+                Record::Statement(Statement {
+                    result: StatementResult::Ok,
+                    command: "INSERT INTO t2(x) VALUES ('2024-03-05 12:34:56-0800')".to_string(),
+                    conditionals: vec![],
+                }),
+                Record::Query(Query {
+                    label: None,
+                    column_types: Some(vec![Type::TimestampTz]),
+                    sort_mode: Some(SortMode::NoSort),
+                    conditionals: vec![],
+                    query: "SELECT * FROM t2".to_string(),
+                    results: QueryResults::Results(vec![Value::TimestampTz(
+                        FixedOffset::from_str("-0800")
+                            .unwrap()
+                            .from_local_datetime(
+                                &NaiveDateTime::parse_from_str(
+                                    "2024-03-05 12:34:56",
+                                    "%Y-%m-%d %H:%M:%S"
+                                )
+                                .unwrap()
+                            )
+                            .single()
+                            .unwrap()
+                    )]),
+                    params: Default::default(),
+                }),
+            ]
+        )
     }
 
     #[test]
