@@ -366,8 +366,8 @@ pub use crate::table::{
     TableOperation, TableReplicationStatus, TableRequest, TableStatus,
 };
 pub use crate::view::{
-    KeyComparison, LookupResult, ReadQuery, ReadReply, ReadReplyBatch, ReadReplyStats, SchemaType,
-    View, ViewCreateRequest, ViewQuery,
+    KeyComparison, LookupResult, ReadQuery, ReadReply, ReadReplyBatch, SchemaType, View,
+    ViewCreateRequest, ViewQuery,
 };
 
 pub mod builders {

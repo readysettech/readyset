@@ -828,45 +828,27 @@ pub enum LookupResult<D> {
     /// The view query was executed in non-blocking mode and resulted in a cache miss.
     NonBlockingMiss,
     /// The results of the view query lookup.
-    Results(Vec<D>, ReadReplyStats),
+    Results(Vec<D>),
 }
 
 impl<D> LookupResult<D> {
     /// Maps a set of lookup results from Vec<D> to Vec<U>.
-    pub fn map_results<U, F>(self, mut f: F) -> LookupResult<U>
+    pub fn map_results<U, F>(self, f: F) -> LookupResult<U>
     where
-        F: FnMut(D, &ReadReplyStats) -> U,
+        F: Fn(D) -> U,
     {
         match self {
             Self::NonBlockingMiss => LookupResult::NonBlockingMiss,
-            Self::Results(d, stats) => {
-                LookupResult::Results(d.into_iter().map(|d| f(d, &stats)).collect(), stats)
-            }
+            Self::Results(d) => LookupResult::Results(d.into_iter().map(f).collect()),
         }
     }
 
     /// Converts a lookup result into the inner `Results` type.
     pub fn into_results(self) -> Option<Vec<D>> {
-        if let Self::Results(v, _) = self {
+        if let Self::Results(v) = self {
             Some(v)
         } else {
             None
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug, Default, PartialEq, Eq, Clone)]
-pub struct ReadReplyStats {
-    /// The count of cache misses which have occurred
-    pub cache_misses: u64,
-}
-
-impl ReadReplyStats {
-    /// Creates a new [`ReadReplyStats`]
-    #[must_use]
-    pub fn merge(&self, other: &Self) -> Self {
-        Self {
-            cache_misses: self.cache_misses + other.cache_misses,
         }
     }
 }
@@ -1240,11 +1222,7 @@ impl Service<ViewQuery> for ReaderHandle {
                                 .ok_or_else(|| {
                                     internal_err!("Unexpected response type from reader service")
                                 })?
-                                .map(|l| {
-                                    l.map_results(|rows, stats| {
-                                        Results::with_stats(rows.into(), stats.clone())
-                                    })
-                                })
+                                .map(|l| l.map_results(Into::into))
                         };
                         instrument_if_enabled(future, span)
                     })
@@ -1323,24 +1301,20 @@ impl Service<ViewQuery> for ReaderHandle {
                 .try_collect::<Vec<LookupResult<ReadReplyBatch>>>()
                 .map_ok(move |e| {
                     // Flatten this to a single LookupResult<Results>.
-                    e.into_iter().fold(
-                        LookupResult::Results(Vec::new(), ReadReplyStats::default()),
-                        |mut acc, x| {
-                            if let LookupResult::Results(d, _) = &mut acc {
+                    e.into_iter()
+                        .fold(LookupResult::Results(Vec::new()), |mut acc, x| {
+                            if let LookupResult::Results(d) = &mut acc {
                                 match x {
                                     LookupResult::NonBlockingMiss => {
                                         return LookupResult::NonBlockingMiss;
                                     }
-                                    LookupResult::Results(u, stats) => {
-                                        d.extend(u.into_iter().map(|rows| {
-                                            Results::with_stats(rows.into(), stats.clone())
-                                        }));
+                                    LookupResult::Results(u) => {
+                                        d.extend(u.into_iter().map(Into::into));
                                     }
                                 }
                             }
                             acc
-                        },
-                    )
+                        })
                 }),
         )
     }
@@ -1485,7 +1459,7 @@ impl ReaderHandle {
         future::poll_fn(|cx| self.poll_ready(cx)).await?;
         match self.call(query).await? {
             LookupResult::NonBlockingMiss => Err(ReadySetError::ReaderMissingKey),
-            LookupResult::Results(results, _) => Ok(ResultIterator::owned(results)),
+            LookupResult::Results(results) => Ok(ResultIterator::owned(results)),
         }
     }
 

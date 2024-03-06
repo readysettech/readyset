@@ -9,8 +9,6 @@ use smallvec::SmallVec;
 use streaming_iterator::StreamingIterator;
 use tournament_kway::{Comparator, StreamingTournament};
 
-use crate::ReadReplyStats;
-
 /// A lookup key into a reader
 pub type Key = Box<[DfValue]>;
 
@@ -24,32 +22,7 @@ pub type SharedRows = triomphe::Arc<SmallVec<[Row; 1]>>;
 pub type SharedResults = SmallVec<[SharedRows; 1]>;
 
 /// A set of uniquely owned results
-#[derive(Debug)]
-pub struct Results {
-    results: Vec<Vec<DfValue>>,
-    /// When present, contains stats related to the operation
-    pub stats: Option<ReadReplyStats>,
-}
-
-impl Results {
-    pub fn new(results: Vec<Vec<DfValue>>) -> Self {
-        Self {
-            results,
-            stats: None,
-        }
-    }
-
-    pub fn with_stats(results: Vec<Vec<DfValue>>, stats: ReadReplyStats) -> Self {
-        Self {
-            results,
-            stats: Some(stats),
-        }
-    }
-
-    pub fn into_data(self) -> Vec<Vec<DfValue>> {
-        self.results
-    }
-}
+pub type Results = Vec<Vec<DfValue>>;
 
 /// A ['StreamingIterator`] over rows of a noria select response with filters
 #[derive(Debug)]
@@ -269,10 +242,7 @@ impl ResultIterator {
                     }
                 }
 
-                return ResultIterator::owned(vec![Results {
-                    results,
-                    stats: None,
-                }]);
+                return ResultIterator::owned(vec![results]);
             }
         };
 
@@ -309,23 +279,6 @@ impl ResultIterator {
         }
     }
 
-    /// Get aggregated stats for all results in the set
-    pub fn total_stats(&self) -> Option<ReadReplyStats> {
-        match &self.inner {
-            ResultIteratorInner::OwnedResults(OwnedResultIterator { data, .. }) => data
-                .iter()
-                .map(|r| &r.stats)
-                .fold(None, |total, cur| match cur {
-                    Some(stats) => Some(ReadReplyStats {
-                        cache_misses: stats.cache_misses
-                            + total.map(|s| s.cache_misses).unwrap_or(0),
-                    }),
-                    None => total,
-                }),
-            _ => None,
-        }
-    }
-
     /// Advance the iterator skipping rows which don't pass the filter predicate
     fn advance_filtered(&mut self) {
         loop {
@@ -356,7 +309,7 @@ impl StreamingIterator for OwnedResultIterator {
             None => self.row.get_or_insert(NonMaxUsize::zero()),
         };
         while let Some(rows) = self.data.get(self.set) {
-            if rows.results.get(**row).is_some() {
+            if rows.get(**row).is_some() {
                 break;
             }
             self.set += 1;
@@ -367,7 +320,7 @@ impl StreamingIterator for OwnedResultIterator {
     #[inline(always)]
     fn get(&self) -> Option<&Self::Item> {
         self.row
-            .and_then(|row| self.data.get(self.set).and_then(|s| s.results.get(*row)))
+            .and_then(|row| self.data.get(self.set).and_then(|s| s.get(*row)))
             .map(|v| v.as_slice())
     }
 }
