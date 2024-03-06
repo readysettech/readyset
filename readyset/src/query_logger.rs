@@ -183,10 +183,6 @@ impl QueryLogger {
                             counter!(recorded::QUERY_LOG_TOTAL_KEYS_READ, num_keys, &labels);
                             counter!(recorded::QUERY_LOG_TOTAL_CACHE_MISSES, cache_misses, &labels);
 
-                            if cache_misses != 0 {
-                                counter!(recorded::QUERY_LOG_QUERY_CACHE_MISSED, cache_misses, &labels);
-                            }
-
                             labels.push(("database_type", SharedString::from(DatabaseType::ReadySet)));
 
                             if mode.is_verbose() {
