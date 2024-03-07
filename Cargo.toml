@@ -74,6 +74,7 @@ postgres-protocol = {  git = "https://github.com/readysettech/rust-postgres.git"
 postgres-types = {  git = "https://github.com/readysettech/rust-postgres.git"}
 tokio-postgres = {  git = "https://github.com/readysettech/rust-postgres.git"}
 tokio = { version = "1.32",  features = ["full"] }
+tokio-test = { version = "0.4.3" }
 rocksdb = { git = "https://github.com/readysettech/rust-rocksdb.git", default-features = false, features = ["lz4", "jemalloc"] }
 metrics-exporter-prometheus = { git = "https://github.com/readysettech/metrics.git" }
 metrics = { git = "https://github.com/readysettech/metrics.git" }

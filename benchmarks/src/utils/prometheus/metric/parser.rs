@@ -237,7 +237,7 @@ where
                 (Line::Empty, _) => (),
                 (Line::Help(name, description), true) => {
                     let metric = current_metric.as_mut().unwrap();
-                    if(metric.name == name) {
+                    if metric.name == name {
                         metric.description = Some(description);
                     } else {
                         yield current_metric.take().unwrap().try_into();
@@ -249,7 +249,7 @@ where
                 },
                 (Line::Type(name, kind), true) => {
                     let metric = current_metric.as_mut().unwrap();
-                    if(metric.name == name) {
+                    if metric.name == name {
                         metric.kind = Some(kind);
                     } else {
                         yield current_metric.take().unwrap().try_into();
