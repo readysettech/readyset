@@ -364,6 +364,7 @@ impl QueryableConnection for DatabaseConnectionPool {
 /// [`max_connections`].
 ///
 /// [`DatabaseURL::pool_builder`]: crate::DatabaseURL::pool_builder
+#[allow(clippy::large_enum_variant)]
 pub enum DatabaseConnectionPoolBuilder {
     MySQL(mysql_async::OptsBuilder, mysql_async::PoolOpts),
     PostgreSQL(deadpool_postgres::PoolBuilder),
