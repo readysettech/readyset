@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use futures_util::StreamExt;
 use itertools::{izip, Itertools};
 use mysql_async::consts::StatusFlags;
-use mysql_common::bigdecimal03::ToPrimitive;
+use mysql_common::bigdecimal::ToPrimitive;
 use mysql_srv::{
     CachedSchema, Column, ColumnFlags, ColumnType, InitWriter, MsqlSrvError, MySqlShim,
     QueryResultWriter, QueryResultsResponse, RowWriter, StatementMetaWriter,

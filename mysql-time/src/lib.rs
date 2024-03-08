@@ -7,7 +7,7 @@ use std::ops::{Add, Sub};
 use std::str::FromStr;
 
 use chrono::{Duration, NaiveDateTime, NaiveTime, Timelike};
-use mysql_common::value::convert::{ConvIr, FromValue, FromValueError};
+use mysql_common::value::convert::{FromValue, FromValueError};
 use mysql_common::value::Value;
 use proptest::arbitrary::Arbitrary;
 use proptest::strategy::Strategy;
@@ -593,12 +593,18 @@ impl TryFrom<MySqlTime> for Value {
 
 #[derive(Debug)]
 pub struct ParseIr<T> {
-    value: Value,
     output: T,
 }
 
-impl ConvIr<MySqlTime> for ParseIr<MySqlTime> {
-    fn new(v: Value) -> Result<ParseIr<MySqlTime>, FromValueError> {
+impl From<ParseIr<MySqlTime>> for MySqlTime {
+    fn from(value: ParseIr<MySqlTime>) -> Self {
+        value.output
+    }
+}
+
+impl TryFrom<Value> for ParseIr<MySqlTime> {
+    type Error = FromValueError;
+    fn try_from(v: Value) -> Result<ParseIr<MySqlTime>, FromValueError> {
         match v {
             Value::Time(is_neg, days, hours, minutes, seconds, microseconds) => {
                 let hours = (days * 24) as u16 + hours as u16;
@@ -610,26 +616,14 @@ impl ConvIr<MySqlTime> for ParseIr<MySqlTime> {
                         seconds,
                         microseconds as u64,
                     ),
-                    value: v,
                 })
             }
             Value::Bytes(val_bytes) => match MySqlTime::from_bytes(&val_bytes) {
-                Ok(time) => Ok(ParseIr {
-                    output: time,
-                    value: Value::Bytes(val_bytes),
-                }),
+                Ok(time) => Ok(ParseIr { output: time }),
                 Err(_) => Err(FromValueError(Value::Bytes(val_bytes))),
             },
             v => Err(FromValueError(v)),
         }
-    }
-
-    fn commit(self) -> MySqlTime {
-        self.output
-    }
-
-    fn rollback(self) -> Value {
-        self.value
     }
 }
 

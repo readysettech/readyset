@@ -129,16 +129,19 @@ fn run_for_all_in_directory<F: FnMut(String, String)>(directory: &str, mut f: F)
 
 pub fn setup_mysql(addr: &str) -> mysql::Pool {
     use mysql::Opts;
+    use mysql::Pool;
+    use mysql::PoolConstraints;
+    use mysql::PoolOpts;
 
     let addr = format!("mysql://{}", addr);
     let db = &addr[addr.rfind('/').unwrap() + 1..];
     let options = Opts::from_url(&addr[0..addr.rfind('/').unwrap()]).unwrap();
-
     // clear the db (note that we strip of /db so we get default)
     let opts = OptsBuilder::from_opts(options.clone())
         .db_name(Some(db))
-        .init(vec!["SET max_heap_table_size = 4294967296;"]);
-    let pool = mysql::Pool::new_manual(1, 4, opts).unwrap();
+        .init(vec!["SET max_heap_table_size = 4294967296;"])
+        .pool_opts(PoolOpts::default().with_constraints(PoolConstraints::new(1, 4).expect("Min is set bigger than max!")));
+    let pool = Pool::new(opts).unwrap();
     let mut conn = pool.get_conn().unwrap();
     if conn.query_drop(format!("USE {}", db)).is_ok() {
         conn.query_drop(format!("DROP DATABASE {}", &db).as_str())
@@ -153,8 +156,9 @@ pub fn setup_mysql(addr: &str) -> mysql::Pool {
     // now we connect for real
     let opts = OptsBuilder::from_opts(options)
         .db_name(Some(db))
-        .init(vec!["SET max_heap_table_size = 4294967296;"]);
-    mysql::Pool::new_manual(1, 4, opts).unwrap()
+        .init(vec!["SET max_heap_table_size = 4294967296;"])
+    .pool_opts(PoolOpts::default().with_constraints(PoolConstraints::new(1, 4).expect("Min is set bigger than max!")));
+    Pool::new(opts).unwrap()
 }
 
 fn generate_target_results(schemas: &BTreeMap<String, Schema>) {

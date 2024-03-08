@@ -41,7 +41,7 @@ tracing-futures = "0.2.2"
 slab = "0.4"
 futures-util = "0.3.0"
 futures = "0.3"
-mysql_common = { version = "0.29.2", features = ["chrono"] }
+mysql_common = { version = "0.30.3", features = ["chrono"] }
 vec1 = { version = "1.6.0", features = ["serde"] }
 proptest = "1.0.0"
 derive_more = "0.99.11"
