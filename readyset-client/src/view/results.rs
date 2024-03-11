@@ -116,25 +116,25 @@ struct MultiKeyIterator {
 
 /// An iterator over multiple sets of cached results with an order by clause
 #[derive(Debug)]
-struct MergeIterator {
+pub struct MergeIterator {
     // Tournament tree that merges multiple ordered sets of results
     inner: StreamingTournament<SingleKeyIterator, RowComparator>,
 }
 
 #[derive(Clone, Debug)]
-struct RowComparator {
-    order_by: Arc<[(usize, OrderType)]>,
+pub struct RowComparator {
+    pub order_by: Arc<[(usize, OrderType)]>,
 }
 
-impl<T> Comparator<[T]> for RowComparator
-where
-    T: Ord,
-{
-    fn cmp(&self, a: &[T], b: &[T]) -> Ordering {
-        self.order_by
-            .iter()
-            .map(|&(idx, order_type)| order_type.apply(a[idx].cmp(&b[idx])))
-            .fold(Ordering::Equal, |acc, next| acc.then(next))
+impl Comparator<[DfValue]> for RowComparator {
+    fn cmp(&self, a: &[DfValue], b: &[DfValue]) -> Ordering {
+        let mut order = Ordering::Equal;
+
+        for (idx, order_type) in self.order_by.iter() {
+            order = order.then(order_type.apply(a[*idx].cmp(&b[*idx])));
+        }
+
+        order
     }
 }
 
@@ -327,7 +327,7 @@ impl ResultIterator {
     }
 
     /// Advance the iterator skipping rows which don't pass the filter predicate
-    fn advance_filtered(&mut self) {
+    pub fn advance_filtered(&mut self) {
         loop {
             self.inner.advance();
             if let Some(filter) = &self.filter {
@@ -346,7 +346,6 @@ impl ResultIterator {
 impl StreamingIterator for OwnedResultIterator {
     type Item = [DfValue];
 
-    #[inline(always)]
     fn advance(&mut self) {
         let row = match self.row.as_mut() {
             Some(row) => {
@@ -364,7 +363,6 @@ impl StreamingIterator for OwnedResultIterator {
         }
     }
 
-    #[inline(always)]
     fn get(&self) -> Option<&Self::Item> {
         self.row
             .and_then(|row| self.data.get(self.set).and_then(|s| s.results.get(*row)))
@@ -381,7 +379,6 @@ impl SingleKeyIterator {
 impl StreamingIterator for SingleKeyIterator {
     type Item = [DfValue];
 
-    #[inline(always)]
     fn advance(&mut self) {
         match self.row.as_mut() {
             None => self.row = Some(NonMaxUsize::zero()),
@@ -389,7 +386,6 @@ impl StreamingIterator for SingleKeyIterator {
         }
     }
 
-    #[inline(always)]
     fn get(&self) -> Option<&Self::Item> {
         self.row.and_then(|row| self.data.get(*row)).map(|r| &r[..])
     }
@@ -408,7 +404,6 @@ impl MultiKeyIterator {
 impl StreamingIterator for MultiKeyIterator {
     type Item = [DfValue];
 
-    #[inline(always)]
     fn advance(&mut self) {
         let row = match self.row.as_mut() {
             Some(row) => {
@@ -429,7 +424,6 @@ impl StreamingIterator for MultiKeyIterator {
         }
     }
 
-    #[inline(always)]
     fn get(&self) -> Option<&Self::Item> {
         self.row
             .and_then(|row| self.data.get(self.set).and_then(|s| s.get(*row)))
@@ -438,7 +432,7 @@ impl StreamingIterator for MultiKeyIterator {
 }
 
 impl MergeIterator {
-    pub(crate) fn new(data: SharedResults, comparator: RowComparator) -> Self {
+    pub fn new(data: SharedResults, comparator: RowComparator) -> Self {
         MergeIterator {
             inner: StreamingTournament::from_iters(
                 data.into_iter().map(SingleKeyIterator::new),
@@ -451,12 +445,10 @@ impl MergeIterator {
 impl StreamingIterator for MergeIterator {
     type Item = [DfValue];
 
-    #[inline(always)]
     fn advance(&mut self) {
         self.inner.advance();
     }
 
-    #[inline(always)]
     fn get(&self) -> Option<&Self::Item> {
         self.inner.get()
     }
@@ -483,7 +475,6 @@ impl AggregateIterator {
 impl StreamingIterator for AggregateIterator {
     type Item = [DfValue];
 
-    #[inline(always)]
     fn advance(&mut self) {
         // First assign the next row if possible
         if self.out_row.is_none() {
@@ -524,7 +515,6 @@ impl StreamingIterator for AggregateIterator {
         self.out_row = Some(aggregate_row)
     }
 
-    #[inline(always)]
     fn get(&self) -> Option<&Self::Item> {
         self.out_row.as_deref()
     }
@@ -533,7 +523,6 @@ impl StreamingIterator for AggregateIterator {
 impl StreamingIterator for ResultIteratorInner {
     type Item = [DfValue];
 
-    #[inline(always)]
     fn advance(&mut self) {
         match self {
             ResultIteratorInner::OwnedResults(i) => i.advance(),
@@ -543,7 +532,6 @@ impl StreamingIterator for ResultIteratorInner {
         }
     }
 
-    #[inline(always)]
     fn get(&self) -> Option<&Self::Item> {
         match &self {
             ResultIteratorInner::OwnedResults(i) => i.get(),
@@ -557,7 +545,6 @@ impl StreamingIterator for ResultIteratorInner {
 impl StreamingIterator for ResultIterator {
     type Item = [DfValue];
 
-    #[inline(always)]
     fn advance(&mut self) {
         if let Some(offset) = self.offset.take() {
             for _ in 0..offset {
@@ -582,7 +569,6 @@ impl StreamingIterator for ResultIterator {
         }
     }
 
-    #[inline(always)]
     fn get(&self) -> Option<&Self::Item> {
         if self.limit == Some(usize::MAX) {
             // limit exists, and wraped around, so we are done here

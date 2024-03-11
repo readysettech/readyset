@@ -20,5 +20,5 @@
 mod comparator;
 mod streaming_tournament;
 
-pub use comparator::Comparator;
+pub use comparator::{Comparator, GreaterComparator};
 pub use streaming_tournament::StreamingTournament;

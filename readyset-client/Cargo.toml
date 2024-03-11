@@ -94,6 +94,15 @@ replication-offset = { path = "../replication-offset" }
 [dev-dependencies]
 serial_test = "0.5.1"
 tempfile = "3.4"
+criterion = { workspace = true }
+test-strategy = "0.2.0"
+rand = "0.8.5"
+pprof = { version = "0.13", features = ["flamegraph", "criterion"] }
 
 [features]
 failure_injection = ["fail/failpoints"]
+
+[[bench]]
+name = "streaming_tournament"
+harness = false
+
