@@ -6,7 +6,8 @@ use std::time::{Duration as StdDuration, SystemTime, UNIX_EPOCH};
 
 use bit_vec::BitVec;
 use chrono::{
-    DateTime, Duration, FixedOffset, LocalResult, NaiveDate, NaiveDateTime, NaiveTime, TimeZone,
+    DateTime, Datelike, Duration, FixedOffset, LocalResult, NaiveDate, NaiveDateTime, NaiveTime,
+    TimeZone,
 };
 use chrono_tz::Tz;
 use cidr::IpInet;
@@ -18,13 +19,15 @@ use uuid::Uuid;
 
 /// Strategy to generate an arbitrary [`NaiveDate`]
 pub fn arbitrary_naive_date() -> impl Strategy<Value = NaiveDate> {
-    (-4713i32..=262143, 1u32..=366).prop_map(|(y, mut doy)| {
-        // If this is a leap day and *not* a leap year, drop the day back to 365
-        if doy == 366 && NaiveDate::from_ymd_opt(y, 2, 29).is_none() {
-            doy = 365
-        }
-        NaiveDate::from_yo_opt(y, doy).unwrap()
-    })
+    (-4713i32..262143, 1u32..=366)
+        .prop_filter("there is no year 0", |(y, _)| *y != 0)
+        .prop_map(|(y, mut doy)| {
+            // If this is a leap day and *not* a leap year, drop the day back to 365
+            if doy == 366 && NaiveDate::from_ymd_opt(y, 2, 29).is_none() {
+                doy = 365
+            }
+            NaiveDate::from_yo_opt(y, doy).unwrap()
+        })
 }
 
 /// Strategy to generate an arbitrary [`NaiveDate`] with a positive year value
@@ -85,10 +88,12 @@ pub fn arbitrary_date() -> impl Strategy<Value = DateTime<FixedOffset>> {
 
 /// Strategy to generate an arbitrary [`DateTime<FixedOffset>`]
 pub fn arbitrary_date_time() -> impl Strategy<Value = DateTime<FixedOffset>> {
-    (arbitrary_date(), arbitrary_naive_time()).prop_map(|(date, time)| {
-        date.timezone()
-            .from_utc_datetime(&NaiveDateTime::new(date.date_naive(), time))
-    })
+    (arbitrary_date(), arbitrary_naive_time())
+        .prop_map(|(date, time)| {
+            date.timezone()
+                .from_utc_datetime(&NaiveDateTime::new(date.date_naive(), time))
+        })
+        .prop_filter("there is no year 0", |dt| dt.year() != 0)
 }
 
 /// Strategy to generate an arbitrary [`NaiveDateTime`] within Timestamp range.
