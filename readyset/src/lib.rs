@@ -51,6 +51,7 @@ use readyset_dataflow::Readers;
 use readyset_errors::{internal_err, ReadySetError};
 use readyset_server::metrics::{CompositeMetricsRecorder, MetricsRecorder};
 use readyset_server::worker::readers::{retry_misses, Ack, BlockingRead, ReadRequestHandler};
+use readyset_sql_passes::adapter_rewrites::AdapterRewriteParams;
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetryInitializer};
 use readyset_util::futures::abort_on_panic;
 use readyset_util::redacted::RedactedString;
@@ -687,12 +688,17 @@ where
 
         let migration_request_timeout = options.migration_request_timeout_ms;
         let controller_request_timeout = options.controller_request_timeout_ms;
-        let server_supports_pagination = options
-            .server_worker_options
-            .enable_experimental_topk_support
-            && options
+        let adapter_rewrite_params = AdapterRewriteParams {
+            server_supports_pagination: options
                 .server_worker_options
-                .enable_experimental_paginate_support;
+                .enable_experimental_topk_support
+                && options
+                    .server_worker_options
+                    .enable_experimental_paginate_support,
+            server_supports_mixed_comparisons: options
+                .server_worker_options
+                .enable_experimental_mixed_comparisons,
+        };
         let no_upstream_connections = options.no_upstream_connections;
 
         let rh = rt.block_on(async {
@@ -963,7 +969,7 @@ where
                         expr_dialect,
                         parse_dialect,
                         schema_search_path,
-                        server_supports_pagination,
+                        adapter_rewrite_params,
                     )
                     .instrument(connection.in_scope(|| {
                         span!(Level::DEBUG, "Building migration task noria connector")
@@ -1061,7 +1067,8 @@ where
 
         health_reporter.set_state(AdapterState::Healthy);
 
-        rs_connect.in_scope(|| info!(supported = %server_supports_pagination));
+        rs_connect
+            .in_scope(|| info!(supported = %adapter_rewrite_params.server_supports_pagination));
 
         let expr_dialect = self.expr_dialect;
         let parse_dialect = self.parse_dialect;
@@ -1147,7 +1154,7 @@ where
                                     expr_dialect,
                                     parse_dialect,
                                     ssp.clone(),
-                                    server_supports_pagination,
+                                    adapter_rewrite_params,
                                 )
                                 .instrument(debug_span!("Building noria connector"))
                                 .await;

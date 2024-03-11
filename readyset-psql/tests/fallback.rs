@@ -2598,7 +2598,12 @@ async fn drop_and_recreate_demo_cache() {
     // There was an error returned at one point in doing this, so this test is an attempt to block
     // a breaking change to the demo script at CI time.
     readyset_tracing::init_test_logging();
-    let (opts, _handle, shutdown_tx) = setup().await;
+    let (opts, _handle, shutdown_tx) = TestBuilder::default()
+        .fallback(true)
+        .allow_mixed_comparisons(false)
+        .build::<PostgreSQLAdapter>()
+        .await;
+
     let conn = connect(opts).await;
 
     let queries = [
