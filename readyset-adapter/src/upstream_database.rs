@@ -164,7 +164,6 @@ pub trait UpstreamDatabase: Sized + Send {
     /// Note that this is only relevant for PostgreSQL upstreams.
     ///
     /// [0] https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-SIMPLE-QUERY
-    ///
     async fn simple_query<'a>(
         &'a mut self,
         query: &'a str,
