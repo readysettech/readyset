@@ -414,7 +414,7 @@ impl TryFrom<DfValue> for Value {
 
     fn try_from(value: DfValue) -> Result<Self, Self::Error> {
         match value {
-            DfValue::None | DfValue::Max => Ok(Value::Null),
+            DfValue::None | DfValue::Min => Ok(Value::Null),
             DfValue::Int(i) => Ok(Value::Integer(i)),
             DfValue::UnsignedInt(u) => Ok(Value::Integer(u.try_into()?)),
             DfValue::Float(f) => Ok(f.into()),

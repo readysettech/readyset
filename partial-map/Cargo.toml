@@ -7,3 +7,4 @@ edition = "2021"
 
 [dependencies]
 merging-interval-tree = { path = "../merging-interval-tree" }
+readyset-util = { path = "../readyset-util" }

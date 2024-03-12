@@ -1107,9 +1107,9 @@ mod tests {
         });
         cache.update_query_migration_state(&q, inlined_state);
 
+        cache.inlined_cache_miss(&q, vec![DfValue::Min]);
+        cache.inlined_cache_miss(&q, vec![DfValue::Min]);
         cache.inlined_cache_miss(&q, vec![DfValue::None]);
-        cache.inlined_cache_miss(&q, vec![DfValue::None]);
-        cache.inlined_cache_miss(&q, vec![DfValue::Max]);
 
         assert_eq!(
             cache
@@ -1161,8 +1161,8 @@ mod tests {
         });
         cache.update_query_migration_state(&q, inlined_state.clone());
 
+        cache.inlined_cache_miss(&q, vec![DfValue::Min]);
         cache.inlined_cache_miss(&q, vec![DfValue::None]);
-        cache.inlined_cache_miss(&q, vec![DfValue::Max]);
         cache.inlined_cache_miss(&q, vec![DfValue::Int(1)]);
 
         assert_eq!(cache.query_migration_state(&q).1, inlined_state);
@@ -1190,7 +1190,7 @@ mod tests {
             .get(&q)
             .unwrap()
             .value()
-            .contains(&vec![DfValue::Max]))
+            .contains(&vec![DfValue::None]))
     }
 
     #[test]
@@ -1205,16 +1205,16 @@ mod tests {
         });
         cache.update_query_migration_state(&q, inlined_state);
 
+        cache.inlined_cache_miss(&q, vec![DfValue::Min]);
         cache.inlined_cache_miss(&q, vec![DfValue::None]);
-        cache.inlined_cache_miss(&q, vec![DfValue::Max]);
 
         assert!(cache.pending_migration().is_empty());
         let pending = cache.pending_inlined_migration();
         assert_eq!(pending[0].query(), &q);
         assert_eq!(pending[0].placeholders(), &[1]);
         assert_eq!(pending[0].literals().len(), 2);
-        assert!(pending[0].literals().contains(&vec![DfValue::Max]));
         assert!(pending[0].literals().contains(&vec![DfValue::None]));
+        assert!(pending[0].literals().contains(&vec![DfValue::Min]));
     }
 
     #[test]
