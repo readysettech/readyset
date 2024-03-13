@@ -789,6 +789,7 @@ fn type_identifier_part1(
                     tag_no_case("double"),
                     opt(preceded(whitespace1, tag_no_case("precision"))),
                     whitespace0,
+                    // FIXME: postgres does not support this precision field
                     opt(precision),
                     whitespace0,
                     opt_signed,
@@ -796,8 +797,11 @@ fn type_identifier_part1(
                 |_| SqlType::Double,
             ),
             map(
-                tuple((tag_no_case("numeric"), whitespace0, opt(numeric_precision))),
-                |t| SqlType::Numeric(t.2),
+                tuple((
+                    tag_no_case("numeric"),
+                    opt(preceded(whitespace0, numeric_precision)),
+                )),
+                |t| SqlType::Numeric(t.1),
             ),
             enum_type(dialect),
             map(

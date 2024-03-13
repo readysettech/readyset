@@ -2445,5 +2445,54 @@ mod tests {
             let res = test_parse!(selection(Dialect::PostgreSQL), qstr.as_bytes());
             assert_eq!(res, expected);
         }
+
+        #[test]
+        fn select_with_numeric_cast() {
+            let qstr = "select a::numeric as n from t";
+
+            let expected = SelectStatement {
+                tables: vec![TableExpr::from(Relation::from("t"))],
+                fields: vec![FieldDefinitionExpr::Expr {
+                    expr: Expr::Cast {
+                        expr: Box::new(Expr::Column(Column::from("a"))),
+                        ty: SqlType::Numeric(None),
+                        postgres_style: true,
+                    },
+                    alias: Some("n".into()),
+                }],
+                ..Default::default()
+            };
+
+            let res = test_parse!(selection(Dialect::PostgreSQL), qstr.as_bytes());
+            assert_eq!(res, expected);
+        }
+
+        #[test]
+        fn select_with_numeric_cast_and_precision() {
+            let qstr = "select a::numeric(1,2) as n from t";
+
+            let expected = SelectStatement {
+                tables: vec![TableExpr::from(Relation::from("t"))],
+                fields: vec![FieldDefinitionExpr::Expr {
+                    expr: Expr::Cast {
+                        expr: Box::new(Expr::Column(Column::from("a"))),
+                        ty: SqlType::Numeric(Some((1, Some(2)))),
+                        postgres_style: true,
+                    },
+                    alias: Some("n".into()),
+                }],
+                ..Default::default()
+            };
+
+            let res = test_parse!(selection(Dialect::PostgreSQL), qstr.as_bytes());
+            assert_eq!(res, expected);
+        }
+
+        #[test]
+        fn select_with_invalid_numeric_cast() {
+            let qstr = "select a::numericas n from t";
+
+            test_parse_expect_err!(selection(Dialect::PostgreSQL), qstr.as_bytes());
+        }
     }
 }

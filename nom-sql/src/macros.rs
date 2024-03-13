@@ -25,6 +25,14 @@ macro_rules! test_parse {
 }
 
 #[cfg(test)]
+macro_rules! test_parse_expect_err {
+    ($parser: expr, $src: expr) => {{
+        let res = crate::to_nom_result($parser(nom_locate::LocatedSpan::new($src)));
+        assert!(res.is_err(), "res expected to be err but is ok",);
+    }};
+}
+
+#[cfg(test)]
 /// Generates a round-trip test that displays and then parses a provided type with a provided
 /// parser.
 ///
