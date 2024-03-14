@@ -53,6 +53,9 @@
 //!     async fn on_init(&mut self, _: &str, w: Option<InitWriter<'_, W>>) -> io::Result<()> {
 //!         w.unwrap().ok().await
 //!     }
+//!     async fn on_change_user(&mut self, _: &str, _: &str, _: &str) -> io::Result<()> {
+//!         Ok(())
+//!     }
 //!
 //!     async fn on_query(
 //!         &mut self,
@@ -176,6 +179,7 @@ use tracing::{debug, info, trace};
 use writers::write_err;
 
 use crate::authentication::{generate_auth_data, hash_password, AUTH_PLUGIN_NAME};
+use crate::commands::change_user;
 pub use crate::myc::constants::{ColumnFlags, ColumnType, StatusFlags};
 pub use crate::writers::prepare_column_definitions;
 
@@ -289,6 +293,9 @@ pub trait MySqlShim<W: AsyncWrite + Unpin + Send> {
     /// Called when client switches database.
     async fn on_init(&mut self, _: &str, _: Option<InitWriter<'_, W>>) -> io::Result<()>;
 
+    /// Called when client switches user.
+    async fn on_change_user(&mut self, _: &str, _: &str, _: &str) -> io::Result<()>;
+
     /// Retrieve the password for the user with the given username, if any.
     ///
     /// If the user doesn't exist, return [`None`].
@@ -320,6 +327,10 @@ pub struct MySqlIntermediary<B, R: AsyncRead + Unpin, W: AsyncWrite + Unpin> {
     schema_cache: HashMap<u32, CachedSchema>,
     /// Whether to log statements received from a client
     enable_statement_logging: bool,
+    /// The capabilities of the client
+    client_capabilities: CapabilityFlags,
+    /// Auth data sent to client
+    auth_data: [u8; 20],
 }
 
 impl<B: MySqlShim<net::tcp::OwnedWriteHalf> + Send>
@@ -391,6 +402,8 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
             writer: w,
             schema_cache: HashMap::new(),
             enable_statement_logging,
+            client_capabilities: CapabilityFlags::empty(),
+            auth_data: [0; 20],
         };
         if let (true, database) = mi.init().await? {
             if let Some(database) = database {
@@ -414,7 +427,7 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
     async fn init(&mut self) -> Result<(bool, Option<String>), io::Error> {
         let auth_data =
             generate_auth_data().map_err(|_| other_error(OtherErrorKind::AuthDataErr))?;
-
+        self.auth_data = auth_data;
         let mut init_packet = Vec::with_capacity(
             1 + 16 + 4 + 8 + 1 + 2 + 1 + 2 + 2 + 1 + 6 + 4 + 12 + 1 + AUTH_PLUGIN_NAME.len() + 1,
         );
@@ -468,6 +481,7 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
 
         self.writer.set_seq(seq + 1);
 
+        self.client_capabilities = handshake.capabilities;
         let username = handshake.username.to_owned();
         let password = handshake.password.to_vec();
         let database = handshake.database.map(String::from);
@@ -580,6 +594,85 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
                 info!(target: "client_statement", "{:?}", cmd);
             }
             match cmd {
+                Command::ChangeUser(q) => {
+                    let change_user = change_user(q, self.client_capabilities)
+                        .map_err(|e| {
+                            other_error(OtherErrorKind::GenericErr {
+                                error: format!("{:?}", e),
+                            })
+                        })?
+                        .1;
+                    let username = change_user.username.to_owned();
+                    let authpassword = change_user.password.to_vec();
+
+                    if change_user.auth_plugin_name != AUTH_PLUGIN_NAME {
+                        // This should never happen, as we already accepted a connection using
+                        // AUTH_PLUGIN_NAME
+                        writers::write_err(
+                            ErrorKind::ER_ACCESS_DENIED_ERROR,
+                            format!(
+                                "Access denied for user {}. Incorrect auth plugin {}",
+                                username, change_user.auth_plugin_name
+                            )
+                            .as_bytes(),
+                            &mut self.writer,
+                        )
+                        .await?;
+                        self.writer.flush().await?;
+                        continue;
+                    }
+                    let plain_password = self.shim.password_for_username(&username);
+                    let auth_success = !self.shim.require_authentication()
+                        || plain_password.as_ref().map_or(false, |password| {
+                            let expected = hash_password(&password, &self.auth_data);
+                            let actual = authpassword.as_slice();
+                            trace!(?expected, ?actual);
+                            expected == actual
+                        });
+
+                    if auth_success {
+                        debug!("Successfully authenticated client");
+                        match self
+                            .shim
+                            .on_change_user(
+                                &username,
+                                &plain_password
+                                    .as_ref()
+                                    .map(|p| String::from_utf8_lossy(p))
+                                    .unwrap_or_default(),
+                                change_user.database.unwrap_or_default(),
+                            )
+                            .await
+                        {
+                            Ok(()) => {
+                                writers::write_ok_packet(
+                                    &mut self.writer,
+                                    0,
+                                    0,
+                                    StatusFlags::empty(),
+                                )
+                                .await?;
+                            }
+                            Err(_) => {
+                                writers::write_err(
+                                    ErrorKind::ER_ACCESS_DENIED_ERROR,
+                                    format!("Access denied for user {}", username).as_bytes(),
+                                    &mut self.writer,
+                                )
+                                .await?;
+                            }
+                        }
+                    } else {
+                        debug!("Received incorrect password");
+                        writers::write_err(
+                            ErrorKind::ER_ACCESS_DENIED_ERROR,
+                            format!("Access denied for user {}", username).as_bytes(),
+                            &mut self.writer,
+                        )
+                        .await?;
+                    }
+                    self.writer.flush().await?;
+                }
                 Command::Query(q) => {
                     let w = QueryResultWriter::new(&mut self.writer, false);
                     let res = self

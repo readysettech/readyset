@@ -1,4 +1,5 @@
 use mysql_async::prelude::*;
+use mysql_async::ChangeUserOpts;
 use readyset_adapter::backend::UnsupportedSetMode;
 use readyset_adapter::BackendBuilder;
 use readyset_client::query::QueryId;
@@ -964,4 +965,57 @@ async fn last_statement_matches(dest: &str, status: &str, client: &mut mysql_asy
     let dest_col = rows[0].0.clone();
     let status_col = rows[0].1.clone();
     dest_col.contains(dest) && status_col.contains(status)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn it_change_user() {
+    let mut users = std::collections::HashMap::new();
+    users.insert("root".to_string(), "noria".to_string());
+    let (opts, _handle, shutdown_tx) = setup_with(
+        BackendBuilder::new()
+            .require_authentication(false)
+            .users(users),
+    )
+    .await;
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    conn.query_drop("CREATE TEMPORARY TABLE t (id INT)")
+        .await
+        .unwrap();
+    conn.query_drop("INSERT INTO t (id) VALUES (1)")
+        .await
+        .unwrap();
+    let row_temp_table: Vec<i64> = conn.query("SELECT COUNT(*) FROM t").await.unwrap();
+    assert_eq!(row_temp_table.len(), 1);
+    assert_eq!(row_temp_table[0], 1);
+    let _ = conn
+        .change_user(
+            ChangeUserOpts::default()
+                .with_user(Some("root".to_string()))
+                .with_db_name(Some("noria".to_string()))
+                .with_pass(Some("noria".to_string())),
+        )
+        .await;
+    // Temporary table t should be gone after changing user
+    let row = conn.query_drop("SELECT COUNT(*) FROM t").await;
+
+    assert_eq!(
+        row.map_err(|e| e.to_string()),
+        Err("Server error: `ERROR 42S02 (1146): Table 'noria.t' doesn't exist'".to_string())
+    );
+
+    // Run change user again to make sure it can query the database
+    let _ = conn
+        .change_user(
+            ChangeUserOpts::default()
+                .with_user(Some("root".to_string()))
+                .with_db_name(Some("noria".to_string()))
+                .with_pass(Some("noria".to_string())),
+        )
+        .await;
+
+    let row: Vec<String> = conn.query("SELECT @@version").await.unwrap();
+    assert_eq!(row.len(), 1);
+
+    shutdown_tx.shutdown().await;
 }
