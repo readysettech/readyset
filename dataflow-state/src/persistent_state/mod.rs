@@ -948,7 +948,7 @@ impl State for PersistentStateHandle {
                 // The key in the exclusive bound might not actually exist in the db, in which case
                 // `seek` brings us to the next key after that. We only want to skip forward as long
                 // as the current key has the exact same prefix as our `start_key`.
-                while let Some(cur_key) = iterator.value() {
+                while let Some(cur_key) = iterator.key() {
                     if prefix_transform(cur_key) == start_key {
                         iterator.next();
                     } else {
@@ -3434,14 +3434,19 @@ mod tests {
             state
                 .process_records(
                     &mut (-10..10)
-                        .map(|n| Record::from(vec![n.into(), n.into(), n.into()]))
+                        .map(|i| Record::from(row_for_secondary_key(i)))
                         .collect::<Records>(),
                     None,
                     None,
                 )
                 .unwrap();
+            state.add_index(Index::btree_map(vec![0]), None);
             state.add_index(Index::btree_map(vec![1]), None);
             state
+        }
+
+        fn row_for_secondary_key(k: i64) -> Vec<DfValue> {
+            vec![(k - 1).into(), k.into(), (k + 1).into()]
         }
 
         #[test]
@@ -3454,7 +3459,7 @@ mod tests {
                 ),
                 RangeLookupResult::Some(
                     (3..10)
-                        .map(|n| vec![n.into(), n.into(), n.into()])
+                        .map(row_for_secondary_key)
                         .collect::<Vec<_>>()
                         .into()
                 )
@@ -3517,7 +3522,7 @@ mod tests {
                 ),
                 RangeLookupResult::Some(
                     (4..=7)
-                        .map(|n| vec![n.into(), n.into(), n.into()])
+                        .map(row_for_secondary_key)
                         .collect::<Vec<_>>()
                         .into()
                 )
@@ -3536,10 +3541,7 @@ mod tests {
                     ))
                 ),
                 RangeLookupResult::Some(
-                    (4..7)
-                        .map(|n| vec![n.into(), n.into(), n.into()])
-                        .collect::<Vec<_>>()
-                        .into()
+                    (4..7).map(row_for_secondary_key).collect::<Vec<_>>().into()
                 )
             );
         }
@@ -3556,10 +3558,7 @@ mod tests {
                     ))
                 ),
                 RangeLookupResult::Some(
-                    (3..7)
-                        .map(|n| vec![n.into(), n.into(), n.into()])
-                        .collect::<Vec<_>>()
-                        .into()
+                    (3..7).map(row_for_secondary_key).collect::<Vec<_>>().into()
                 )
             );
         }
@@ -3577,7 +3576,7 @@ mod tests {
                 ),
                 RangeLookupResult::Some(
                     (4..=7)
-                        .map(|n| vec![n.into(), n.into(), n.into()])
+                        .map(row_for_secondary_key)
                         .collect::<Vec<_>>()
                         .into()
                 )
@@ -3594,7 +3593,7 @@ mod tests {
                 ),
                 RangeLookupResult::Some(
                     (-10..=7)
-                        .map(|n| vec![n.into(), n.into(), n.into()])
+                        .map(row_for_secondary_key)
                         .collect::<Vec<_>>()
                         .into()
                 )
@@ -3611,7 +3610,7 @@ mod tests {
                 ),
                 RangeLookupResult::Some(
                     (-10..7)
-                        .map(|n| vec![n.into(), n.into(), n.into()])
+                        .map(row_for_secondary_key)
                         .collect::<Vec<_>>()
                         .into()
                 )
@@ -3626,13 +3625,13 @@ mod tests {
                 state.lookup_range(
                     &[0, 1],
                     &RangeKey::from(&(
-                        Included(vec1![DfValue::from(3), DfValue::from(3)]),
+                        Included(vec1![DfValue::from(2), DfValue::from(3)]),
                         Unbounded
                     ))
                 ),
                 RangeLookupResult::Some(
                     (3..10)
-                        .map(|n| vec![n.into(), n.into(), n.into()])
+                        .map(row_for_secondary_key)
                         .collect::<Vec<_>>()
                         .into()
                 )
@@ -3659,9 +3658,9 @@ mod tests {
                     &RangeKey::from(&(Included(vec1![DfValue::from(3)]), Unbounded))
                 ),
                 RangeLookupResult::Some(
-                    vec![vec![3.into(), 3.into(), 3.into()], extra_row_beginning]
+                    vec![vec![2.into(), 3.into(), 4.into()], extra_row_beginning]
                         .into_iter()
-                        .chain((4..10).map(|n| vec![n.into(), n.into(), n.into()]))
+                        .chain((4..10).map(row_for_secondary_key))
                         .chain(iter::once(extra_row_end))
                         .collect::<Vec<_>>()
                         .into()
