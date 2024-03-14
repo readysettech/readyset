@@ -868,6 +868,18 @@ where
         Ok(())
     }
 
+    pub async fn change_user(
+        &mut self,
+        user: &str,
+        password: &str,
+        database: &str,
+    ) -> Result<(), DB::Error> {
+        if let Some(upstream) = &mut self.upstream {
+            upstream.change_user(user, password, database).await?;
+        }
+        Ok(())
+    }
+
     /// Executes query on the upstream database, for when it cannot be parsed or executed by noria.
     /// Returns the query result, or an error if fallback is not configured
     #[instrument(skip_all)]

@@ -7,7 +7,8 @@ use futures_util::Stream;
 use mysql_async::consts::{CapabilityFlags, StatusFlags};
 use mysql_async::prelude::Queryable;
 use mysql_async::{
-    Column, Conn, Opts, OptsBuilder, ResultSetStream, Row, SslOpts, TxOpts, UrlError,
+    ChangeUserOpts, Column, Conn, Opts, OptsBuilder, ResultSetStream, Row, SslOpts, TxOpts,
+    UrlError,
 };
 use nom_sql::{SqlIdentifier, StartTransactionStatement};
 use pin_project::pin_project;
@@ -242,6 +243,24 @@ impl UpstreamDatabase for MySqlUpstream {
 
     async fn is_connected(&mut self) -> Result<bool, Self::Error> {
         Ok(self.conn.ping().await.is_ok())
+    }
+
+    async fn change_user(
+        &mut self,
+        user: &str,
+        password: &str,
+        database: &str,
+    ) -> Result<(), Self::Error> {
+        self.conn
+            .change_user(
+                ChangeUserOpts::default()
+                    .with_user(Some(user.to_string()))
+                    .with_pass(Some(password.to_string()))
+                    .with_db_name(Some(database.to_string())),
+            )
+            .await
+            .map_err(Error::MySql)?;
+        Ok(())
     }
 
     /// Prepares the given query using the mysql connection. Note, queries are prepared on a

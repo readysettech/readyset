@@ -102,6 +102,14 @@ pub trait UpstreamDatabase: Sized + Send {
     /// Test the connection with the upstream database
     async fn is_connected(&mut self) -> Result<bool, Self::Error>;
 
+    /// Reconnect using new user
+    async fn change_user(
+        &mut self,
+        user: &str,
+        password: &str,
+        database: &str,
+    ) -> Result<(), Self::Error>;
+
     /// Returns a database name if it was included in the original connection string, or None if no
     /// database name was included in the original connection string.
     fn database(&self) -> Option<&str> {
@@ -255,6 +263,18 @@ where
 
     async fn is_connected(&mut self) -> Result<bool, Self::Error> {
         Ok(self.upstream().await?.is_connected().await?)
+    }
+
+    async fn change_user(
+        &mut self,
+        user: &str,
+        password: &str,
+        database: &str,
+    ) -> Result<(), Self::Error> {
+        self.upstream()
+            .await?
+            .change_user(user, password, database)
+            .await
     }
 
     fn database(&self) -> Option<&str> {

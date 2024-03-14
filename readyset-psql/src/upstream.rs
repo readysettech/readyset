@@ -234,6 +234,15 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         Ok(!self.client.simple_query("select 1").await?.is_empty())
     }
 
+    async fn change_user(
+        &mut self,
+        _user: &str,
+        _password: &str,
+        _database: &str,
+    ) -> Result<(), Self::Error> {
+        unsupported!("Changing user not yet implemented for PostgreSQL")
+    }
+
     // Returns the upstream server's version, with ReadySet's info appended, to indicate to clients
     // that they're going via ReadySet
     fn version(&self) -> String {
