@@ -17,6 +17,7 @@ use readyset_data::{DfType, DfValue};
 use readyset_errors::{
     internal_err, invalid_query_err, unsupported, ReadySetError, ReadySetResult,
 };
+use serde::{Deserialize, Serialize};
 use tracing::trace;
 
 /// Struct storing information about parameters processed from a raw user supplied query, which
@@ -59,6 +60,18 @@ fn use_fallback_pagination(server_supports_pagination: bool, limit_clause: &Limi
     true
 }
 
+/// Parameters to be passed to [`process_query`].
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+pub struct AdapterRewriteParams {
+    /// The server can handle (non-parameterized) LIMITs and (parameterized) OFFSETs in the
+    /// dataflow graph
+    pub server_supports_pagination: bool,
+    /// The server allows both equals and range comparisons to be parameterized in a query. If this
+    /// flag is true, both equals and range parameters in supported positions will be
+    /// autoparameterized during the adapter rewrite passes.
+    pub server_supports_mixed_comparisons: bool,
+}
+
 /// This rewrite pass accomplishes the following:
 /// - Remaps dollar sign placeholders so that they appear in order
 /// - Replaces literals with placeholders when they can be used as lookup indices in the noria
@@ -68,21 +81,22 @@ fn use_fallback_pagination(server_supports_pagination: bool, limit_clause: &Limi
 /// - Removes `OFFSET ?` if there isn't a `LIMIT`
 pub fn process_query(
     query: &mut SelectStatement,
-    server_supports_pagination: bool,
+    params: AdapterRewriteParams,
 ) -> ReadySetResult<ProcessedQueryParams> {
     let reordered_placeholders = reorder_numbered_placeholders(query);
 
     let limit_clause = mem::take(&mut query.limit_clause);
 
     let force_paginate_in_adapter =
-        use_fallback_pagination(server_supports_pagination, &query.limit_clause);
+        use_fallback_pagination(params.server_supports_pagination, &query.limit_clause);
 
     if !force_paginate_in_adapter {
         // If adapter pagination shouldn't be used reinstate the limit clause
         query.limit_clause.clone_from(&limit_clause);
     }
 
-    let auto_parameters = autoparametrize::auto_parametrize_query(query);
+    let auto_parameters =
+        autoparametrize::auto_parametrize_query(query, params.server_supports_mixed_comparisons);
     let rewritten_in_conditions = collapse_where_in(query)?;
     number_placeholders(query)?;
     Ok(ProcessedQueryParams {
@@ -932,13 +946,18 @@ mod tests {
 
         use super::*;
 
+        const PARAMS: AdapterRewriteParams = AdapterRewriteParams {
+            server_supports_pagination: false,
+            server_supports_mixed_comparisons: false,
+        };
+
         fn process_and_make_keys(
             query: &str,
             params: Vec<DfValue>,
             dialect: nom_sql::Dialect,
         ) -> (Vec<Vec<DfValue>>, SelectStatement) {
             let mut query = parse_select_statement(query, dialect);
-            let processed = process_query(&mut query, false).unwrap();
+            let processed = process_query(&mut query, PARAMS).unwrap();
             (
                 processed
                     .make_keys(&params)
@@ -969,7 +988,7 @@ mod tests {
             params: &[DfValue],
             dialect: nom_sql::Dialect,
         ) -> (Option<usize>, Option<usize>) {
-            let proc = process_query(&mut parse_select_statement(query, dialect), false).unwrap();
+            let proc = process_query(&mut parse_select_statement(query, dialect), PARAMS).unwrap();
             proc.limit_offset_params(params).unwrap()
         }
 
@@ -990,7 +1009,23 @@ mod tests {
                 "SELECT id FROM users WHERE credit_card_number = $1 AND id = $2",
             );
 
-            process_query(&mut query, false).expect("Should be able to rewrite query");
+            process_query(&mut query, PARAMS).expect("Should be able to rewrite query");
+            assert_eq!(
+                query.display(nom_sql::Dialect::PostgreSQL).to_string(),
+                expected.display(nom_sql::Dialect::PostgreSQL).to_string()
+            );
+        }
+
+        #[test]
+        fn rewrite_literals_range() {
+            let mut query = parse_select_statement_postgres(
+                "SELECT id FROM users WHERE credit_card_number = 'look at this PII' AND id = 3",
+            );
+            let expected = parse_select_statement_postgres(
+                "SELECT id FROM users WHERE credit_card_number = $1 AND id = $2",
+            );
+
+            process_query(&mut query, PARAMS).expect("Should be able to rewrite query");
             assert_eq!(
                 query.display(nom_sql::Dialect::PostgreSQL).to_string(),
                 expected.display(nom_sql::Dialect::PostgreSQL).to_string()
@@ -1005,7 +1040,7 @@ mod tests {
             let expected = parse_select_statement_postgres(
                 "SELECT id + 3 FROM users WHERE credit_card_number = $1",
             );
-            process_query(&mut query, false).expect("Should be able to rewrite query");
+            process_query(&mut query, PARAMS).expect("Should be able to rewrite query");
             assert_eq!(query, expected);
         }
 
