@@ -27,18 +27,19 @@ use tokio::net::tcp::OwnedWriteHalf;
 
 static DEFAULT_CHARACTER_SET: u16 = myc::constants::UTF8_GENERAL_CI;
 
-struct TestingShim<Q, P, E, I, W> {
+struct TestingShim<Q, P, E, I, CU, W> {
     columns: Vec<Column>,
     params: Vec<Column>,
     on_q: Q,
     on_p: P,
     on_e: E,
     on_i: I,
+    on_cu: CU,
     _phantom: PhantomData<W>,
 }
 
 #[async_trait]
-impl<Q, P, E, I, W> MySqlShim<W> for TestingShim<Q, P, E, I, W>
+impl<Q, P, E, I, CU, W> MySqlShim<W> for TestingShim<Q, P, E, I, CU, W>
 where
     Q: for<'a> FnMut(
             &'a str,
@@ -55,6 +56,12 @@ where
     I: for<'a> FnMut(
             &'a str,
             InitWriter<'a, W>,
+        ) -> Pin<Box<dyn Future<Output = io::Result<()>> + 'a + Send>>
+        + Send,
+    CU: for<'a> FnMut(
+            &'a str,
+            &'a str,
+            &'a str,
         ) -> Pin<Box<dyn Future<Output = io::Result<()>> + 'a + Send>>
         + Send,
     W: AsyncWrite + Unpin + Send + 'static,
@@ -92,6 +99,14 @@ where
         (self.on_i)(schema, writer.unwrap()).await
     }
 
+    async fn on_change_user(
+        &mut self,
+        username: &str,
+        password: &str,
+        schema: &str,
+    ) -> io::Result<()> {
+        (self.on_cu)(username, password, schema).await
+    }
     async fn on_query(
         &mut self,
         query: &str,
@@ -133,7 +148,7 @@ where
     }
 }
 
-impl<Q, P, E, I> TestingShim<Q, P, E, I, OwnedWriteHalf>
+impl<Q, P, E, I, CU> TestingShim<Q, P, E, I, CU, OwnedWriteHalf>
 where
     Q: for<'a> FnMut(
             &'a str,
@@ -155,8 +170,15 @@ where
         ) -> Pin<Box<dyn Future<Output = io::Result<()>> + 'a + Send>>
         + Send
         + 'static,
+    CU: for<'a> FnMut(
+            &'a str,
+            &'a str,
+            &'a str,
+        ) -> Pin<Box<dyn Future<Output = io::Result<()>> + 'a + Send>>
+        + Send
+        + 'static,
 {
-    fn new(on_q: Q, on_p: P, on_e: E, on_i: I) -> Self {
+    fn new(on_q: Q, on_p: P, on_e: E, on_i: I, on_cu: CU) -> Self {
         TestingShim {
             columns: Vec::new(),
             params: Vec::new(),
@@ -164,6 +186,7 @@ where
             on_p,
             on_e,
             on_i,
+            on_cu,
             _phantom: PhantomData,
         }
     }
@@ -211,6 +234,7 @@ fn it_connects() {
         move |_| unreachable!(),
         move |_, _, _| unreachable!(),
         move |_, _| unreachable!(),
+        move |_, _, _| unreachable!(),
     )
     .test(|_| {})
 }
@@ -254,6 +278,7 @@ fn it_inits_ok() {
             assert_eq!(schema, "test");
             Box::pin(async move { writer.ok().await })
         },
+        move |_, _, _| unreachable!(),
     )
     .test(|db| assert!(db.select_db("test")));
 }
@@ -275,6 +300,7 @@ fn it_inits_error() {
                     .await
             })
         },
+        move |_, _, _| unreachable!(),
     )
     .test(|db| assert!(!db.select_db("test")));
 }
@@ -286,6 +312,7 @@ fn it_pings() {
         |_| unreachable!(),
         |_, _, _| unreachable!(),
         |_, _| unreachable!(),
+        move |_, _, _| unreachable!(),
     )
     .test(|db| assert!(db.ping()))
 }
@@ -297,6 +324,7 @@ fn empty_response() {
         |_| unreachable!(),
         |_, _, _| unreachable!(),
         |_, _| unreachable!(),
+        move |_, _, _| unreachable!(),
     )
     .test(|db| {
         assert_eq!(db.query::<Row, _>("SELECT a, b FROM foo").unwrap().len(), 0);
@@ -321,6 +349,7 @@ fn no_rows() {
         |_| unreachable!(),
         |_, _, _| unreachable!(),
         |_, _| unreachable!(),
+        move |_, _, _| unreachable!(),
     )
     .test(|db| {
         assert_eq!(db.query::<Row, _>("SELECT a, b FROM foo").unwrap().len(), 0);
@@ -334,6 +363,7 @@ fn no_columns() {
         |_| unreachable!(),
         |_, _, _| unreachable!(),
         |_, _| unreachable!(),
+        move |_, _, _| unreachable!(),
     )
     .test(|db| {
         assert_eq!(db.query::<Row, _>("SELECT a, b FROM foo").unwrap().len(), 0);
@@ -353,6 +383,7 @@ fn no_columns_but_rows() {
         |_| unreachable!(),
         |_, _, _| unreachable!(),
         |_, _| unreachable!(),
+        move |_, _, _| unreachable!(),
     )
     .test(|db| {
         assert_eq!(db.query::<Row, _>("SELECT a, b FROM foo").unwrap().len(), 0);
@@ -367,6 +398,7 @@ fn error_response() {
         |_| unreachable!(),
         |_, _, _| unreachable!(),
         |_, _| unreachable!(),
+        move |_, _, _| unreachable!(),
     )
     .test(|db| {
         if let mysql::Error::MySqlError(e) = db.query::<Row, _>("SELECT a, b FROM foo").unwrap_err()
@@ -406,6 +438,7 @@ fn it_queries_nulls() {
         |_| unreachable!(),
         |_, _, _| unreachable!(),
         |_, _| unreachable!(),
+        move |_, _, _| unreachable!(),
     )
     .test(|db| {
         let res = db.query::<Row, _>("SELECT a, b FROM foo").unwrap();
@@ -435,6 +468,7 @@ fn it_queries() {
         |_| unreachable!(),
         |_, _, _| unreachable!(),
         |_, _| unreachable!(),
+        move |_, _, _| unreachable!(),
     )
     .test(|db| {
         let res = db.query::<Row, _>("SELECT a, b FROM foo").unwrap();
@@ -467,6 +501,7 @@ fn multi_result() {
         |_| unreachable!(),
         |_, _, _| unreachable!(),
         |_, _| unreachable!(),
+        move |_, _, _| unreachable!(),
     )
     .test(|db| {
         let mut result = db
@@ -516,6 +551,7 @@ fn it_queries_many_rows() {
         |_| unreachable!(),
         |_, _, _| unreachable!(),
         |_, _| unreachable!(),
+        move |_, _, _| unreachable!(),
     )
     .test(|db| {
         let mut rows = 0;
@@ -577,6 +613,7 @@ fn it_prepares() {
             })
         },
         |_, _| unreachable!(),
+        move |_, _, _| unreachable!(),
     )
     .with_params(params)
     .with_columns(cols2)
@@ -725,6 +762,7 @@ fn insert_exec() {
             Box::pin(async move { w.completed(42, 1, None).await })
         },
         |_, _| unreachable!(),
+        move |_, _, _| unreachable!(),
     )
     .with_params(params)
     .test(|db| {
@@ -797,6 +835,7 @@ fn send_long() {
             })
         },
         |_, _| unreachable!(),
+        move |_, _, _| unreachable!(),
     )
     .with_params(params)
     .with_columns(cols2)
@@ -852,6 +891,7 @@ fn it_prepares_many() {
             })
         },
         |_, _| unreachable!(),
+        move |_, _, _| unreachable!(),
     )
     .with_params(Vec::new())
     .with_columns(cols2)
@@ -894,6 +934,7 @@ fn prepared_empty() {
             Box::pin(async move { w.completed(0, 0, None).await })
         },
         |_, _| unreachable!(),
+        move |_, _, _| unreachable!(),
     )
     .with_params(params)
     .with_columns(cols2)
@@ -933,6 +974,7 @@ fn prepared_no_params() {
             })
         },
         |_, _| unreachable!(),
+        move |_, _, _| unreachable!(),
     )
     .with_params(params)
     .with_columns(cols2)
@@ -1013,6 +1055,7 @@ fn prepared_nulls() {
             })
         },
         |_, _| unreachable!(),
+        move |_, _, _| unreachable!(),
     )
     .with_params(params)
     .with_columns(cols2)
@@ -1048,6 +1091,7 @@ fn prepared_no_rows() {
             Box::pin(async move { w.start(&cols[..]).await?.finish().await })
         },
         |_, _| unreachable!(),
+        move |_, _, _| unreachable!(),
     )
     .with_columns(cols2)
     .test(|db| {
@@ -1073,6 +1117,7 @@ fn prepared_no_cols_but_rows() {
             })
         },
         |_, _| unreachable!(),
+        move |_, _, _| unreachable!(),
     )
     .test(|db| {
         assert_eq!(
@@ -1091,6 +1136,7 @@ fn prepared_no_cols() {
         |_| 0,
         move |_, _, w| Box::pin(async move { w.start(&[]).await?.finish().await }),
         |_, _| unreachable!(),
+        move |_, _, _| unreachable!(),
     )
     .test(|db| {
         assert_eq!(
@@ -1113,6 +1159,7 @@ fn really_long_query() {
         |_| 0,
         |_, _, _| unreachable!(),
         |_, _| unreachable!(),
+        move |_, _, _| unreachable!(),
     )
     .test(move |db| {
         db.query::<Row, _>(long).unwrap();
