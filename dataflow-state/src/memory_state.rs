@@ -245,38 +245,43 @@ impl State for MemoryState {
 
             // otherwise the length must be strictly less than, because otherwise it's either the
             // same index, or we'd have to magic up datatypes out of thin air
-            if state.columns().len() < columns.len() {
+            // if state.columns().len() < columns.len() {
+            if state.columns().iter().all(|col| columns.contains(col)) {
                 // For each column in `columns`, find the corresponding column in `state.key()`,
                 // if there is one, and return (its position in state.key(), its value from `key`).
                 // FIXME(eta): this seems accidentally quadratic.
-                let mut positions = columns
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(i, col_idx)| {
-                        state
-                            .columns()
+                // let mut positions = columns
+                //     .iter()
+                //     .enumerate()
+                //     .filter_map(|(i, col_idx)| {
+                //         state
+                //             .columns()
+                //             .iter()
+                //             .position(|x| x == col_idx)
+                //             .map(|pos| (pos, key.get(i).expect("bogus key passed to lookup")))
+                //     })
+                //     .collect::<Vec<_>>();
+                // if positions.len() == state.columns().len() {
+                // the index only contains columns from `columns` (and none other).
+                // make a new lookup key
+                // let kt = PointKey::from(positions.into_iter().map(|(_, val)| val.clone()));
+                let vals = state.columns().iter().map(|col| {
+                    let i = columns.iter().position(|c| col == c).unwrap();
+                    key.get(i).unwrap().clone()
+                });
+                let kt = PointKey::from(vals);
+                if let LookupResult::Some(mut ret) = state.lookup(&kt) {
+                    // filter the rows in this index to ones which actually match the key
+                    // FIXME(eta): again, probably O(terrible)
+                    ret.retain(|row| {
+                        columns
                             .iter()
-                            .position(|x| x == col_idx)
-                            .map(|pos| (pos, key.get(i).expect("bogus key passed to lookup")))
-                    })
-                    .collect::<Vec<_>>();
-                if positions.len() == state.columns().len() {
-                    // the index only contains columns from `columns` (and none other).
-                    // make a new lookup key
-                    positions.sort_unstable_by_key(|(idx, _)| *idx);
-                    let kt = PointKey::from(positions.into_iter().map(|(_, val)| val.clone()));
-                    if let LookupResult::Some(mut ret) = state.lookup(&kt) {
-                        // filter the rows in this index to ones which actually match the key
-                        // FIXME(eta): again, probably O(terrible)
-                        ret.retain(|row| {
-                            columns
-                                .iter()
-                                .enumerate()
-                                .all(|(key_idx, &col_idx)| row.get(col_idx) == key.get(key_idx))
-                        });
-                        return LookupResult::Some(ret);
-                    }
+                            .enumerate()
+                            .all(|(key_idx, &col_idx)| row.get(col_idx) == key.get(key_idx))
+                    });
+                    return LookupResult::Some(ret);
                 }
+                // }
             }
         }
         // oh well, that was a lot of CPU cycles and we didn't even have the records :(
