@@ -70,7 +70,7 @@ fn deduce_column_source(
     }
 
     let colsrc = if let Some(ref index) = *index {
-        n.column_source(index.columns())
+        n.column_source(&index.columns)
     } else {
         // if we don't have any columns to pass to `column_source`, we're going for
         // a full materialization.
@@ -90,52 +90,42 @@ fn deduce_column_source(
     };
 
     Ok(match colsrc {
-        ColumnSource::ExactCopy(ColumnRef { node, columns }) => {
-            let index = index.as_ref().unwrap();
-            DeducedColumnSource {
-                ancestors: vec![IndexRef::partial(
-                    node,
-                    #[allow(clippy::unwrap_used)]
-                    // we only hit ExactCopy if we have a partial index
-                    Index::new(index.index_type(), columns.to_vec(), index.query_type())?,
-                )],
-                break_path: false,
-            }
-        }
-        ColumnSource::Union(refs) => {
-            let index = index.as_ref().unwrap();
-            DeducedColumnSource {
-                ancestors: refs
-                    .into_iter()
-                    .map(|ColumnRef { node, columns }| {
-                        Ok(IndexRef::partial(
-                            node,
-                            #[allow(clippy::unwrap_used)]
-                            // we only hit Union if we have a partial index
-                            Index::new(index.index_type(), columns.to_vec(), index.query_type())?,
-                        ))
-                    })
-                    .collect::<ReadySetResult<Vec<_>>>()?,
-                break_path: false,
-            }
-        }
-        ColumnSource::GeneratedFromColumns(refs) => {
-            let index = index.as_ref().unwrap();
-            DeducedColumnSource {
-                ancestors: refs
-                    .into_iter()
-                    .map(|ColumnRef { node, columns }| {
-                        Ok(IndexRef::partial(
-                            node,
-                            #[allow(clippy::unwrap_used)]
-                            // we only hit GeneratedFromColumns if we have a partial index
-                            Index::new(index.index_type(), columns.to_vec(), index.query_type())?,
-                        ))
-                    })
-                    .collect::<ReadySetResult<Vec<_>>>()?,
-                break_path: true,
-            }
-        }
+        ColumnSource::ExactCopy(ColumnRef { node, columns }) => DeducedColumnSource {
+            ancestors: vec![IndexRef::partial(
+                node,
+                #[allow(clippy::unwrap_used)] // we only hit ExactCopy if we have a partial index
+                Index::new(index.as_ref().unwrap().index_type, columns.to_vec()),
+            )],
+            break_path: false,
+        },
+        ColumnSource::Union(refs) => DeducedColumnSource {
+            ancestors: refs
+                .into_iter()
+                .map(|ColumnRef { node, columns }| {
+                    IndexRef::partial(
+                        node,
+                        #[allow(clippy::unwrap_used)]
+                        // we only hit Union if we have a partial index
+                        Index::new(index.as_ref().unwrap().index_type, columns.to_vec()),
+                    )
+                })
+                .collect(),
+            break_path: false,
+        },
+        ColumnSource::GeneratedFromColumns(refs) => DeducedColumnSource {
+            ancestors: refs
+                .into_iter()
+                .map(|ColumnRef { node, columns }| {
+                    IndexRef::partial(
+                        node,
+                        #[allow(clippy::unwrap_used)]
+                        // we only hit GeneratedFromColumns if we have a partial index
+                        Index::new(index.as_ref().unwrap().index_type, columns.to_vec()),
+                    )
+                })
+                .collect(),
+            break_path: true,
+        },
         ColumnSource::RequiresFullReplay(nodes) => DeducedColumnSource {
             ancestors: nodes.into_iter().map(|n| IndexRef::full(n)).collect(),
             break_path: false,
@@ -434,14 +424,13 @@ pub fn replay_paths_for<F>(
     ColumnRef { node, columns }: ColumnRef,
     index_type: IndexType,
     stop_at: F,
-    query_type: QueryType,
 ) -> ReadySetResult<Vec<RawReplayPath>>
 where
     F: Fn(NodeIndex) -> bool,
 {
     replay_paths_for_opt(
         graph,
-        IndexRef::partial(node, Index::new(index_type, columns.to_vec(), query_type)?),
+        IndexRef::partial(node, Index::new(index_type, columns.to_vec())),
         stop_at,
     )
 }
@@ -473,10 +462,9 @@ pub fn replay_paths_for_nonstop(
     graph: &Graph,
     colref: ColumnRef,
     index_type: IndexType,
-    query_type: QueryType,
 ) -> ReadySetResult<Vec<RawReplayPath>> {
     let never_stop = |_| false;
-    replay_paths_for(graph, colref, index_type, never_stop, query_type)
+    replay_paths_for(graph, colref, index_type, never_stop)
 }
 
 fn trace(
@@ -646,8 +634,7 @@ mod tests {
                     node: a,
                     columns: vec![0]
                 },
-                IndexType::HashMap,
-                QueryType::Point,
+                IndexType::HashMap
             )
             .unwrap(),
             vec![RawReplayPath::from_replay(vec1![IndexRef::partial(
@@ -662,8 +649,7 @@ mod tests {
                     node: b,
                     columns: vec![0]
                 },
-                IndexType::HashMap,
-                QueryType::Point,
+                IndexType::HashMap
             )
             .unwrap(),
             vec![RawReplayPath::from_replay(vec1![IndexRef::partial(
@@ -680,8 +666,7 @@ mod tests {
                     node: a,
                     columns: vec![0, 1]
                 },
-                IndexType::HashMap,
-                QueryType::Point,
+                IndexType::HashMap
             )
             .unwrap(),
             vec![RawReplayPath::from_replay(vec1![IndexRef::partial(
@@ -697,8 +682,7 @@ mod tests {
                     node: a,
                     columns: vec![1, 0]
                 },
-                IndexType::HashMap,
-                QueryType::Point,
+                IndexType::HashMap
             )
             .unwrap(),
             vec![RawReplayPath::from_replay(vec1![IndexRef::partial(
@@ -726,8 +710,7 @@ mod tests {
                     node: x,
                     columns: vec![0]
                 },
-                IndexType::HashMap,
-                QueryType::Point,
+                IndexType::HashMap
             )
             .unwrap(),
             vec![RawReplayPath::from_replay(vec1![
@@ -743,8 +726,7 @@ mod tests {
                     node: x,
                     columns: vec![0, 1]
                 },
-                IndexType::HashMap,
-                QueryType::Point,
+                IndexType::HashMap
             )
             .unwrap(),
             vec![RawReplayPath::from_replay(vec1![
@@ -784,8 +766,7 @@ mod tests {
                     node: x,
                     columns: vec![0]
                 },
-                IndexType::HashMap,
-                QueryType::Point,
+                IndexType::HashMap
             )
             .unwrap(),
             vec![RawReplayPath::from_replay(vec1![
@@ -800,8 +781,7 @@ mod tests {
                     node: x,
                     columns: vec![0, 1]
                 },
-                IndexType::HashMap,
-                QueryType::Point,
+                IndexType::HashMap
             )
             .unwrap(),
             vec![RawReplayPath::from_replay(vec1![
@@ -841,8 +821,7 @@ mod tests {
                     node: x,
                     columns: vec![0]
                 },
-                IndexType::HashMap,
-                QueryType::Point,
+                IndexType::HashMap
             )
             .unwrap(),
             vec![RawReplayPath::from_replay(vec1![
@@ -857,8 +836,7 @@ mod tests {
                     node: x,
                     columns: vec![1]
                 },
-                IndexType::HashMap,
-                QueryType::Point,
+                IndexType::HashMap
             )
             .unwrap(),
             vec![RawReplayPath::from_replay(vec1![
@@ -873,8 +851,7 @@ mod tests {
                     node: x,
                     columns: vec![0, 1]
                 },
-                IndexType::HashMap,
-                QueryType::Point,
+                IndexType::HashMap
             )
             .unwrap(),
             vec![RawReplayPath::from_replay(vec1![
@@ -909,7 +886,6 @@ mod tests {
                 columns: vec![0],
             },
             IndexType::HashMap,
-            QueryType::Point,
         )
         .unwrap();
         paths.sort_unstable();
@@ -934,7 +910,6 @@ mod tests {
                 columns: vec![0, 1],
             },
             IndexType::HashMap,
-            QueryType::Point,
         )
         .unwrap();
         paths.sort_unstable();
@@ -983,8 +958,7 @@ mod tests {
                     node: x,
                     columns: vec![0]
                 },
-                IndexType::HashMap,
-                QueryType::Point,
+                IndexType::HashMap
             )
             .unwrap(),
             vec![RawReplayPath::from_replay(vec1![
@@ -1001,8 +975,7 @@ mod tests {
                     node: x,
                     columns: vec![2]
                 },
-                IndexType::HashMap,
-                QueryType::Point,
+                IndexType::HashMap
             )
             .unwrap(),
             vec![RawReplayPath::from_replay(vec1![
@@ -1019,7 +992,6 @@ mod tests {
                 columns: vec![1],
             },
             IndexType::HashMap,
-            QueryType::Point,
         )
         .unwrap();
         paths.sort_unstable();
@@ -1039,7 +1011,6 @@ mod tests {
                 columns: vec![0, 1],
             },
             IndexType::HashMap,
-            QueryType::Point,
         )
         .unwrap();
         paths.sort_unstable();
@@ -1059,7 +1030,6 @@ mod tests {
                 columns: vec![1, 2],
             },
             IndexType::HashMap,
-            QueryType::Point,
         )
         .unwrap();
         paths.sort_unstable();
@@ -1111,7 +1081,6 @@ mod tests {
                 columns: vec![0, 1, 2],
             },
             IndexType::HashMap,
-            QueryType::Point,
         )
         .unwrap();
         paths.sort_unstable();
@@ -1136,7 +1105,6 @@ mod tests {
                 columns: vec![0, 2],
             },
             IndexType::HashMap,
-            QueryType::Point,
         )
         .unwrap();
         paths.sort_unstable();
@@ -1157,7 +1125,6 @@ mod tests {
                 columns: vec![0, 2],
             },
             IndexType::HashMap,
-            QueryType::Point,
         )
         .unwrap();
 
@@ -1218,7 +1185,6 @@ mod tests {
                 columns: vec![1, 2],
             },
             IndexType::HashMap,
-            QueryType::Point,
         )
         .unwrap();
         paths.sort_by_key(|p| p.segments()[0].node);
@@ -1243,7 +1209,6 @@ mod tests {
                 columns: vec![1, 2],
             },
             IndexType::HashMap,
-            QueryType::Point,
         )
         .unwrap();
         assert_eq!(generated_cols_paths.len(), 1);

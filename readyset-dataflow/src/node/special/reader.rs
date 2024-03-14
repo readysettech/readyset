@@ -72,11 +72,11 @@ impl Reader {
     }
 
     pub fn key(&self) -> Option<&[usize]> {
-        self.index.as_ref().map(|s| s.columns())
+        self.index.as_ref().map(|s| &s.columns[..])
     }
 
     pub fn index_type(&self) -> Option<IndexType> {
-        self.index.as_ref().map(|index| index.index_type())
+        self.index.as_ref().map(|index| index.index_type)
     }
 
     #[must_use]
@@ -86,17 +86,8 @@ impl Reader {
     }
 
     pub fn set_index(&mut self, index: &Index) {
-        let index = index.clone();
-
-        // TODO ethan here
-        let requires_point_key = self.placeholder_map.iter().any(|(p, _)| p.is_equal_param());
-        let requires_range_key = self.placeholder_map.iter().any(|(p, _)| p.is_range_param());
-
-        if requires_range_key && requires_point_key {
-            assert!(index.index_type() == IndexType::BTreeMap);
-        }
         if let Some(ref m_index) = self.index {
-            debug_assert_eq!(m_index, &index);
+            debug_assert_eq!(m_index, index);
         } else {
             self.index = Some(index.clone());
         }

@@ -935,33 +935,18 @@ impl<'df> Migration<'df> {
         &mut self,
         name: Relation,
         n: NodeIndex,
-        index_type: IndexType,
-        columns: Vec<usize>,
-        // index: &Index,
+        index: &Index,
         reader_processing: ReaderProcessing,
         placeholder_map: Vec<(ViewPlaceholder, KeyColumnIdx)>,
-    ) -> ReadySetResult<()> {
+    ) {
         let ri = self.ensure_reader_for(n, Some(name), reader_processing);
 
         // we know it's a reader - we just made it!
         #[allow(clippy::indexing_slicing, clippy::unwrap_used)]
         let r = self.dataflow_state.ingredients[ri].as_mut_reader().unwrap();
 
-        let requires_equal_param = placeholder_map.iter().any(|(p, _)| p.is_equal_param());
-        let requires_range_param = placeholder_map.iter().any(|(p, _)| p.is_range_param());
-
-        let query_type = match (requires_equal_param, requires_range_param) {
-            (true, true) => QueryType::Both,
-            (true, false) => QueryType::Point,
-            (false, true) => QueryType::Range,
-            (false, false) => QueryType::None,
-        };
-        let index = Index::new(index_type, columns, query_type)?;
-
-        r.set_index(&index);
+        r.set_index(index);
         r.set_mapping(placeholder_map);
-
-        Ok(())
     }
 
     /// Build a `MigrationPlan` for this migration, and apply it if the planning stage succeeds.

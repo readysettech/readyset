@@ -37,7 +37,7 @@
 //! $ cargo bench -- --help
 //! ```
 use clap::Parser;
-use common::{Index, Record};
+use common::{Index, IndexType, Record};
 use criterion::{black_box, Criterion};
 use dataflow_state::{
     DurabilityMode, PersistenceParameters, PersistentState, PointKey, RangeKey, SnapshotMode, State,
@@ -271,11 +271,11 @@ impl PersistentStateBenchArgs {
         // true, we assume that the state already contains the proper data from a previous run of
         // the benchmarks.
         if !self.reuse_persistence {
-            state.add_index(Index::hash_map(vec![0]), None);
-            state.add_index(Index::hash_map(vec![1, 2]), None);
-            state.add_index(Index::hash_map(vec![3]), None);
+            state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
+            state.add_index(Index::new(IndexType::HashMap, vec![1, 2]), None);
+            state.add_index(Index::new(IndexType::HashMap, vec![3]), None);
 
-            state.add_index(Index::btree_map(vec![1]), None);
+            state.add_index(Index::new(IndexType::BTreeMap, vec![1]), None);
 
             state.set_snapshot_mode(SnapshotMode::SnapshotModeEnabled);
 
@@ -326,11 +326,11 @@ impl PersistentStateBenchArgs {
         if !self.reuse_persistence {
             state.set_snapshot_mode(SnapshotMode::SnapshotModeEnabled);
 
-            state.add_index(Index::hash_map(vec![0]), None);
-            state.add_index(Index::hash_map(vec![1]), None);
-            state.add_index(Index::hash_map(vec![3]), None);
+            state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
+            state.add_index(Index::new(IndexType::HashMap, vec![1]), None);
+            state.add_index(Index::new(IndexType::HashMap, vec![3]), None);
 
-            state.add_index(Index::btree_map(vec![1]), None);
+            state.add_index(Index::new(IndexType::BTreeMap, vec![1]), None);
 
             let batches = (0..self.unique_entries)
                 .map(|i| {
