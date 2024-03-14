@@ -3632,6 +3632,7 @@ name = "partial-map"
 version = "0.1.0"
 dependencies = [
  "merging-interval-tree",
+ "readyset-util",
 ]
 
 [[package]]
@@ -4388,6 +4389,7 @@ dependencies = [
  "quickcheck_macros",
  "rand 0.7.3",
  "readyset-client",
+ "readyset-data",
  "smallvec",
  "thiserror",
  "triomphe",
@@ -4762,7 +4764,9 @@ dependencies = [
  "tokio",
  "tokio-postgres",
  "triomphe",
+ "tuple",
  "uuid 0.8.2",
+ "vec1",
 ]
 
 [[package]]

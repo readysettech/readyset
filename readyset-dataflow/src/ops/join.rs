@@ -4,6 +4,7 @@ use std::convert::{TryFrom, TryInto};
 use dataflow_state::PointKey;
 use itertools::Itertools;
 use readyset_client::KeyComparison;
+use readyset_data::BoundPair;
 use readyset_errors::{internal_err, ReadySetResult};
 use readyset_util::intervals::into_bound_endpoint;
 use readyset_util::Indices;
@@ -597,7 +598,7 @@ impl Ingredient for Join {
                         })?,
                     )
                 }
-                KeyComparison::Range((lower, upper)) => {
+                KeyComparison::Range(BoundPair(lower, upper)) => {
                     let mut left_lower =
                         lower.as_ref().map(|_| Vec::with_capacity(left_cols.len()));
                     let mut right_lower =
@@ -607,22 +608,22 @@ impl Ingredient for Join {
                     let mut right_upper =
                         upper.as_ref().map(|_| Vec::with_capacity(right_cols.len()));
 
-                    if let Some(lower_endpoint) = into_bound_endpoint(lower) {
+                    if let Some(lower_endpoint) = into_bound_endpoint(lower.into_std_bound()) {
                         for (value, side) in lower_endpoint.into_iter().zip(&col_sides) {
                             into_bound_endpoint(match side {
-                                Side::Left => left_lower.as_mut(),
-                                Side::Right => right_lower.as_mut(),
+                                Side::Left => left_lower.as_mut().into_std_bound(),
+                                Side::Right => right_lower.as_mut().into_std_bound(),
                             })
                             .unwrap()
                             .push(value);
                         }
                     }
 
-                    if let Some(upper_endpoint) = into_bound_endpoint(upper) {
+                    if let Some(upper_endpoint) = into_bound_endpoint(upper.into_std_bound()) {
                         for (value, side) in upper_endpoint.into_iter().zip(&col_sides) {
                             into_bound_endpoint(match side {
-                                Side::Left => left_upper.as_mut(),
-                                Side::Right => right_upper.as_mut(),
+                                Side::Left => left_upper.as_mut().into_std_bound(),
+                                Side::Right => right_upper.as_mut().into_std_bound(),
                             })
                             .unwrap()
                             .push(value);
@@ -633,11 +634,11 @@ impl Ingredient for Join {
                     // If any of these is empty, that means the columns weren't actually straddling
                     // both parents - which is an invariant of this function!
                     (
-                        KeyComparison::Range((
+                        KeyComparison::Range(BoundPair(
                             left_lower.map(|k| k.try_into().unwrap()),
                             left_upper.map(|k| k.try_into().unwrap()),
                         )),
-                        KeyComparison::Range((
+                        KeyComparison::Range(BoundPair(
                             right_lower.map(|k| k.try_into().unwrap()),
                             right_upper.map(|k| k.try_into().unwrap()),
                         )),
@@ -897,7 +898,8 @@ mod tests {
     }
 
     mod handle_upquery {
-        use std::ops::Bound;
+
+        use readyset_data::{range, Bound};
 
         use super::*;
 
@@ -979,17 +981,17 @@ mod tests {
                 .handle_upquery(ColumnMiss {
                     node,
                     column_indices: vec![0, 1, 2],
-                    missed_keys: vec1![KeyComparison::Range((
-                        Bound::Included(vec1![
+                    missed_keys: vec1![KeyComparison::Range(range!(
+                        =vec1![
                             DfValue::from(1),
                             DfValue::from(2),
                             DfValue::from(3)
-                        ]),
-                        Bound::Excluded(vec1![
+                        ],
+                        vec1![
                             DfValue::from(4),
                             DfValue::from(5),
                             DfValue::from(6)
-                        ])
+                        ]
                     ))],
                 })
                 .unwrap();
@@ -1002,16 +1004,16 @@ mod tests {
 
             assert_eq!(
                 left_miss.missed_keys,
-                vec1![KeyComparison::Range((
-                    Bound::Included(vec1![DfValue::from(1), DfValue::from(2)]),
-                    Bound::Excluded(vec1![DfValue::from(4), DfValue::from(5)])
+                vec1![KeyComparison::Range(range!(
+                    =vec1![DfValue::from(1), DfValue::from(2)],
+                    vec1![DfValue::from(4), DfValue::from(5)]
                 ))]
             );
             assert_eq!(
                 right_miss.missed_keys,
-                vec1![KeyComparison::Range((
-                    Bound::Included(vec1![DfValue::from(3)]),
-                    Bound::Excluded(vec1![DfValue::from(6)])
+                vec1![KeyComparison::Range(range!(
+                    =vec1![DfValue::from(3)],
+                    vec1![DfValue::from(6)]
                 ))]
             );
         }
@@ -1025,14 +1027,17 @@ mod tests {
                 .handle_upquery(ColumnMiss {
                     node,
                     column_indices: vec![0, 1, 2],
-                    missed_keys: vec1![KeyComparison::Range((
-                        Bound::Included(vec1![
-                            DfValue::from(1),
-                            DfValue::from(2),
-                            DfValue::from(3)
-                        ]),
-                        Bound::Unbounded
-                    ))],
+                    missed_keys: vec1![KeyComparison::Range(
+                        range!(
+                            =vec1![
+                                DfValue::from(1),
+                                DfValue::from(2),
+                                DfValue::from(3)
+                            ],
+                            inf
+                        )
+                        .unwrap()
+                    )],
                 })
                 .unwrap();
 
@@ -1044,17 +1049,19 @@ mod tests {
 
             assert_eq!(
                 left_miss.missed_keys,
-                vec1![KeyComparison::Range((
-                    Bound::Included(vec1![DfValue::from(1), DfValue::from(2)]),
-                    Bound::Unbounded
-                ))]
+                vec1![KeyComparison::Range(
+                    range!(vec1![DfValue::from(1), DfValue::from(2)], inf).unwrap()
+                )]
             );
             assert_eq!(
                 right_miss.missed_keys,
-                vec1![KeyComparison::Range((
-                    Bound::Included(vec1![DfValue::from(3)]),
-                    Bound::Unbounded
-                ))]
+                vec1![KeyComparison::Range(
+                    range!(
+                        =vec1![DfValue::from(3)],
+                        inf
+                    )
+                    .unwrap()
+                )]
             );
         }
     }

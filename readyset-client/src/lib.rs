@@ -450,7 +450,7 @@ pub fn shard_by(dt: &DfValue, shards: usize) -> usize {
             hasher.finish() as usize % shards
         }
         // a bit hacky: send all NULL values to the first shard
-        DfValue::None | DfValue::Max => 0,
+        DfValue::None | DfValue::Min => 0,
         DfValue::Float(_)
         | DfValue::Double(_)
         | DfValue::Time(_)
