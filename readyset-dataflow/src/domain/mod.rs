@@ -811,19 +811,7 @@ impl Domain {
         target: Target,
         cache_name: Relation,
     ) -> Result<(), ReadySetError> {
-        let contains_equal_key = miss_keys.iter().any(|k| k.is_equal());
-        let contains_range_key = miss_keys.iter().any(|k| k.is_range());
-        let query_type = match (contains_equal_key, contains_range_key) {
-            (true, true) => QueryType::Both,
-            (true, false) => QueryType::Point,
-            (false, true) => QueryType::Range,
-            (false, false) => QueryType::None,
-        };
-        let miss_index = Index::new(
-            IndexType::best_for_keys(&miss_keys),
-            miss_columns.to_vec(),
-            query_type,
-        )?;
+        let miss_index = Index::new(IndexType::best_for_keys(&miss_keys), miss_columns.to_vec());
         // the cloned is a bit sad; self.request_partial_replay doesn't use
         // self.replay_paths_by_dst.
         let tags = self
@@ -1705,12 +1693,12 @@ impl Domain {
                                     })?
                                     .build_async()?;
 
-                                let cols = index.columns().to_vec();
+                                let cols = index.columns.clone();
                                 tokio::spawn(
                                     UnboundedReceiverStream::new(rx)
                                         .map(move |misses| Packet::RequestReaderReplay {
                                             keys: misses.misses,
-                                            cols: cols.to_vec(),
+                                            cols: cols.clone(),
                                             node,
                                             cache_name: misses.cache_name,
                                         })
@@ -2377,7 +2365,7 @@ impl Domain {
             DomainRequest::GeneratedColumns { node, index, tag } => {
                 // Record that these columns are generated...
                 self.replay_paths
-                    .insert_generated_columns(node, index.columns().to_vec(), tag);
+                    .insert_generated_columns(node, index.columns.clone(), tag);
                 // ...and also make sure we use that tag to index those columns in this node, so we
                 // know what hole to fill when we've satisfied replays to those columns
                 self.state
@@ -2796,7 +2784,7 @@ impl Domain {
             records,
             found_keys,
             replay_keys,
-        } = self.do_lookup(state, index.columns(), keys)?;
+        } = self.do_lookup(state, &index.columns, keys)?;
 
         let records = records
             .into_iter()
@@ -2818,7 +2806,7 @@ impl Domain {
 
             self.on_replay_misses(
                 src,
-                index.columns(),
+                &index.columns,
                 // NOTE:
                 // `replay_keys` are tuples of (replay_key, miss_key), where `replay_key` is the
                 // key we're trying to replay and `miss_key` is the part of it we
@@ -2984,7 +2972,7 @@ impl Domain {
                         for_keys.retain(|k| {
                             w.redos.contains_key(&Hole {
                                 node: target.expect("already checked target_in_self"),
-                                column_indices: partial_index.columns().to_owned(),
+                                column_indices: partial_index.columns.to_owned(),
                                 key: k.clone(),
                             })
                         });
@@ -3023,7 +3011,7 @@ impl Domain {
                         let partial_keys = path.first().partial_index.as_ref().unwrap();
                         data.retain(|r| {
                             for_keys.iter().any(|k| {
-                                k.contains(partial_keys.columns().iter().map(|c| {
+                                k.contains(partial_keys.columns.iter().map(|c| {
                                     #[allow(clippy::indexing_slicing)]
                                     // record came from processing, which means it
                                     // must have the right number of columns
@@ -3096,7 +3084,7 @@ impl Domain {
 
                 // Is this segment the target of the replay path?
                 let is_target = backfill_keys.is_some() && segment.is_target;
-                let cols = segment.partial_index.as_ref().map(|idx| idx.columns());
+                let cols = segment.partial_index.as_ref().map(|idx| &idx.columns);
                 // If this replay path is targeting a set of generated columns, figure out
                 // what the tags are for those generated columns so we can mark them as
                 // filled later
@@ -3160,8 +3148,8 @@ impl Domain {
                                             .target_index
                                             .as_ref()
                                             .unwrap()
-                                            .columns()
-                                            .to_vec(),
+                                            .columns
+                                            .clone(),
                                         key,
                                     };
                                     if let Some(redos) = waiting.redos.get(&hole) {
@@ -3361,7 +3349,7 @@ impl Domain {
                         // XXX: this clone and collect here is *really* sad
                         let r = r.rec();
                         !missed_on.iter().any(|miss| {
-                            miss.contains(partial_index.columns().iter().map(|&c| {
+                            miss.contains(partial_index.columns.iter().map(|&c| {
                                 #[allow(clippy::indexing_slicing)]
                                 // record came from processing, which means it
                                 // must have the right number of columns
@@ -3488,8 +3476,8 @@ impl Domain {
                         let tag_match = |rp: &ReplayPath, pn| {
                             let path_index = rp.target_index.as_ref().unwrap();
                             rp.target_node() == Some(pn)
-                                && path_index.columns() == lookup.cols
-                                && path_index.index_type().supports_key(&lookup.key)
+                                && path_index.columns == lookup.cols
+                                && path_index.index_type.supports_key(&lookup.key)
                         };
 
                         for &pn in &pns {
@@ -3511,12 +3499,7 @@ impl Domain {
                                     if let Some(tags) = self.replay_paths.tags_for_index(
                                         Destination(pn),
                                         Target(pn),
-                                        &Index::new(
-                                            *index_type,
-                                            lookup.cols.clone(),
-                                            // TODO ethan is this right
-                                            (&lookup.key).into(),
-                                        )?,
+                                        &Index::new(*index_type, lookup.cols.clone()),
                                     ) {
                                         // this is the tag we would have used to fill a
                                         // lookup hole in this ancestor, so this is the
@@ -3724,7 +3707,7 @@ impl Domain {
                 for key in for_keys.unwrap() {
                     let hole = Hole {
                         node: target,
-                        column_indices: key_index.columns().to_vec(),
+                        column_indices: key_index.columns.clone(),
                         key,
                     };
                     let replay = match waiting.redos.remove(&hole) {
@@ -4049,7 +4032,7 @@ impl Domain {
                 // partial_key must be Some for partial replay paths
                 nodes[segment.node].borrow_mut().process_eviction(
                     from,
-                    segment.partial_index.as_ref().unwrap().columns(),
+                    &segment.partial_index.as_ref().unwrap().columns,
                     keys,
                     tag,
                     shard,

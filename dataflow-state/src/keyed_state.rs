@@ -640,7 +640,7 @@ impl KeyedState {
 impl From<&Index> for KeyedState {
     fn from(index: &Index) -> Self {
         use IndexType::*;
-        match (index.len(), &index.index_type()) {
+        match (index.len(), &index.index_type) {
             (0, _) => KeyedState::AllRows(Default::default()),
             (1, BTreeMap) => KeyedState::SingleBTree(Default::default()),
             (2, BTreeMap) => KeyedState::DoubleBTree(Default::default()),
@@ -676,13 +676,11 @@ mod tests {
             vec![0, 1, 3, 4, 5, 6],
             vec![0, 1, 3, 4, 5, 6, 7],
         ] {
-            let index = Index::hash_map(index_cols.clone());
-            let mut state = KeyedState::from(&index);
-            assert!(state.evict_with_seed(123).is_none());
-
-            let index = Index::btree_map(index_cols.clone());
-            let mut state = KeyedState::from(&index);
-            assert!(state.evict_with_seed(123).is_none());
+            for index_type in [IndexType::HashMap, IndexType::BTreeMap] {
+                let index = Index::new(index_type, index_cols.clone());
+                let mut state = KeyedState::from(&index);
+                assert!(state.evict_with_seed(123).is_none());
+            }
         }
     }
 }

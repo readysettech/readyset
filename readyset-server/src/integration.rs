@@ -12,7 +12,7 @@ use std::time::Duration;
 use std::{iter, thread};
 
 use chrono::NaiveDate;
-use common::{Index, IndexType};
+use common::Index;
 use dataflow::node::special::Base;
 use dataflow::ops::grouped::aggregate::Aggregation;
 use dataflow::ops::identity::Identity;
@@ -394,12 +394,10 @@ async fn broad_recursing_upquery() {
             mig.maintain(
                 "reader".into(),
                 join,
-                IndexType::HashMap,
-                vec![2],
+                &Index::hash_map(vec![2]),
                 Default::default(),
                 Default::default(),
-            )
-            .unwrap();
+            );
             (x, y)
         })
         .await;
@@ -4966,12 +4964,10 @@ async fn range_upquery_after_point_queries() {
             mig.maintain(
                 "btree_reader".into(),
                 join,
-                IndexType::BTreeMap,
-                vec![0],
+                &Index::btree_map(vec![0]),
                 Default::default(),
                 Default::default(),
-            )
-            .unwrap();
+            );
 
             // each node can only have one reader, so add an identity node above the join for the
             // hash reader
@@ -4985,12 +4981,10 @@ async fn range_upquery_after_point_queries() {
             mig.maintain(
                 "hash_reader".into(),
                 hash_id,
-                IndexType::HashMap,
-                vec![0],
+                &Index::hash_map(vec![0]),
                 Default::default(),
                 Default::default(),
-            )
-            .unwrap();
+            );
 
             (a, b)
         })

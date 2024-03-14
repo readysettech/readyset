@@ -449,7 +449,7 @@ impl LookupIndex {
 
     /// Return a reference to the set of columns in the underlying [`Index`]
     pub fn columns(&self) -> &[usize] {
-        self.index().columns()
+        &self.index().columns
     }
 
     /// Return the length of the columns in the underlying [`Index`]

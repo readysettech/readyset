@@ -307,7 +307,6 @@ impl QueryGraph {
 
     /// Construct a representation of the lookup key of a view for this query graph, based on the
     /// parameters in this query and the page number if this query is parametrized on an offset key.
-    // TODO ethan here this is where index type seems to be chosen
     pub(crate) fn view_key(&self, config: &mir::Config) -> ReadySetResult<ViewKey> {
         let offset = self.pagination.as_ref().and_then(|p| p.offset);
         if self.parameters().is_empty() {
@@ -349,7 +348,6 @@ impl QueryGraph {
                 operator: BinaryOperator,
                 config: &mir::Config,
             ) -> ReadySetResult<Option<IndexType>> {
-                // TODO ethan here especially
                 let new_index_type = Some(IndexType::for_operator(operator).ok_or_else(|| {
                     unsupported_err!("Unsupported binary operator `{}`", operator)
                 })?);
