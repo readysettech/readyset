@@ -372,7 +372,7 @@ impl QueryGraph {
             fn combine_comparisons(
                 current_view_placeholder: &ViewPlaceholder,
                 new_param: &Parameter,
-            ) -> ReadySetResult<ViewPlaceholder> {
+            ) -> Option<ViewPlaceholder> {
                 match (current_view_placeholder, new_param) {
                     (
                         ViewPlaceholder::OneToOne(idx, BinaryOperator::GreaterOrEqual),
@@ -381,7 +381,7 @@ impl QueryGraph {
                             placeholder_idx: Some(ref placeholder_idx),
                             ..
                         },
-                    ) => Ok(ViewPlaceholder::Between(*idx, *placeholder_idx)),
+                    ) => Some(ViewPlaceholder::Between(*idx, *placeholder_idx)),
                     (
                         ViewPlaceholder::OneToOne(idx, BinaryOperator::LessOrEqual),
                         Parameter {
@@ -389,8 +389,8 @@ impl QueryGraph {
                             placeholder_idx: Some(ref placeholder_idx),
                             ..
                         },
-                    ) => Ok(ViewPlaceholder::Between(*placeholder_idx, *idx)),
-                    _ => unsupported!("Conflicting binary operators in query"),
+                    ) => Some(ViewPlaceholder::Between(*placeholder_idx, *idx)),
+                    _ => None,
                 }
             }
 
@@ -404,8 +404,21 @@ impl QueryGraph {
                             if *col == param.col
                                 && matches!(placeholder, ViewPlaceholder::OneToOne(_, ref op) if *op != param.op) =>
                         {
-                            *placeholder = combine_comparisons(placeholder, param)?;
-                            Ok((index_type, columns))
+                            // Try to combine the one-to-one placeholder with the given param into
+                            // a between placeholder
+                            if let Some(p) = combine_comparisons(placeholder, param) {
+                                *placeholder = p;
+                            } else {
+                                // If the param and placeholder aren't a <= and >= pair, just tack
+                                // on the param as another one-to-one placeholder
+                                columns.push((
+                                    mir::Column::from(param.col.clone()),
+                                    param
+                                        .placeholder_idx
+                                        .map(|idx| ViewPlaceholder::OneToOne(idx, param.op))
+                                        .unwrap_or(ViewPlaceholder::Generated),
+                                ));
+                            }
                         }
                         // Otherwise, add a new ViewPlaceholder and continue
                         _ => {
@@ -416,9 +429,9 @@ impl QueryGraph {
                                     .map(|idx| ViewPlaceholder::OneToOne(idx, param.op))
                                     .unwrap_or(ViewPlaceholder::Generated),
                             ));
-                            Ok((index_type, columns))
                         }
                     }
+                    Ok((index_type, columns))
                 },
             )?;
 
