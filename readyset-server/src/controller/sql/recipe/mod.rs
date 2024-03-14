@@ -6,6 +6,7 @@ use readyset_client::recipe::changelist::ChangeList;
 use readyset_client::ViewCreateRequest;
 use readyset_data::Dialect;
 use readyset_errors::ReadySetResult;
+use readyset_sql_passes::adapter_rewrites::AdapterRewriteParams;
 use readyset_util::hash::hash;
 use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
@@ -219,7 +220,21 @@ impl Recipe {
     }
 
     /// Returns true only if this recipe supports pagination.
-    pub(crate) fn supports_pagination(&self) -> bool {
-        self.mir_config().allow_paginate && self.mir_config().allow_topk
+    pub(crate) fn adapter_rewrite_params(&self) -> AdapterRewriteParams {
+        AdapterRewriteParams {
+            server_supports_mixed_comparisons: self.mir_config().allow_mixed_comparisons,
+            server_supports_pagination: self.mir_config().allow_paginate
+                && self.mir_config().allow_topk,
+        }
     }
+    //
+    // /// Returns true only if this recipe supports pagination.
+    // pub(crate) fn supports_pagination(&self) -> bool {
+    //     self.mir_config().allow_paginate && self.mir_config().allow_topk
+    // }
+    //
+    // /// Returns true only if this recipe supports mixed comparisons
+    // pub(crate) fn supports_mixed_comparisons(&self) -> bool {
+    //     self.mir_config().allow_mixed_comparisons
+    // }
 }

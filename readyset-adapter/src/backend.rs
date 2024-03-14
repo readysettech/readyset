@@ -1114,7 +1114,7 @@ where
         stmt: &nom_sql::SelectStatement,
     ) -> ReadySetResult<(nom_sql::SelectStatement, bool)> {
         let mut rewritten = stmt.clone();
-        adapter_rewrites::process_query(&mut rewritten, self.noria.server_supports_pagination())?;
+        adapter_rewrites::process_query(&mut rewritten, self.noria.rewrite_params())?;
         // Attempt ReadySet unless the query is unsupported or dropped
         let should_do_readyset = !matches!(
             self.state
@@ -1834,7 +1834,7 @@ where
             }
         }
         // Now migrate the new query
-        adapter_rewrites::process_query(&mut stmt, self.noria.server_supports_pagination())?;
+        adapter_rewrites::process_query(&mut stmt, self.noria.rewrite_params())?;
         let migration_state = match self
             .noria
             .handle_create_cached_query(
@@ -2220,7 +2220,7 @@ where
                                 let mut stmt = *stmt.clone();
                                 adapter_rewrites::process_query(
                                     &mut stmt,
-                                    self.noria.server_supports_pagination(),
+                                    self.noria.rewrite_params(),
                                 )?;
 
                                 ViewCreateRequest::new(
@@ -2599,10 +2599,7 @@ where
         Option<QueryStatus>,
         ReadySetResult<ProcessedQueryParams>,
     ) {
-        match adapter_rewrites::process_query(
-            &mut q.statement,
-            self.noria.server_supports_pagination(),
-        ) {
+        match adapter_rewrites::process_query(&mut q.statement, self.noria.rewrite_params()) {
             Ok(processed_query_params) => {
                 let s = self.state.query_status_cache.query_status(q);
                 let should_try = if self.state.proxy_state.should_proxy() {
