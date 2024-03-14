@@ -699,6 +699,20 @@ where
         }
     }
 
+    async fn on_change_user(
+        &mut self,
+        user: &str,
+        password: &str,
+        database: &str,
+    ) -> io::Result<()> {
+        if self.enable_statement_logging {
+            info!(target: "client_statement", "change user: {database}");
+        }
+        self.change_user(user, password, database)
+            .await
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+    }
+
     async fn on_close(&mut self, statement_id: DeallocateId) {
         let _ = self.noria.remove_statement(statement_id).await;
     }

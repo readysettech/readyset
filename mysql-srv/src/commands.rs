@@ -6,7 +6,7 @@ use nom::number::complete::{le_i16, le_i24, le_i64, le_u16, le_u32, le_u8};
 use nom::sequence::preceded;
 use nom::IResult;
 
-use crate::myc::constants::{CapabilityFlags, Command as CommandByte};
+use crate::myc::constants::{CapabilityFlags, Command as CommandByte, UTF8MB4_GENERAL_CI};
 
 #[derive(Debug)]
 pub struct ClientHandshake<'a> {
@@ -17,6 +17,15 @@ pub struct ClientHandshake<'a> {
     pub password: &'a [u8],
     pub database: Option<&'a str>,
     pub auth_plugin_name: Option<&'a str>,
+}
+
+#[derive(Debug)]
+pub struct ClientChangeUser<'a> {
+    pub username: &'a str,
+    pub password: &'a [u8],
+    pub database: Option<&'a str>,
+    pub charset: u16,
+    pub auth_plugin_name: &'a str,
 }
 
 /// Parse a "length-encoded integer" as specified by the [mysql binary protocol documentation][docs]
@@ -50,6 +59,53 @@ fn null_terminated_string(i: &[u8]) -> IResult<&[u8], &str> {
     let (i, res) = map_res(take_until(&b"\0"[..]), parse_bytes_to_string)(i)?;
     let (i, _) = take(1u8)(i)?;
     Ok((i, res))
+}
+
+/// Parse a COM_CHANGE_USER packet as specified by the [mysql binary protocol documentation][docs]
+/// [docs]: https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_com_change_user.html
+pub fn change_user(
+    i: &[u8],
+    client_capability_flags: CapabilityFlags,
+) -> IResult<&[u8], ClientChangeUser<'_>> {
+    let (i, username) = null_terminated_string(i)?;
+    let (i, password) =
+        if client_capability_flags.contains(CapabilityFlags::CLIENT_SECURE_CONNECTION) {
+            let (q, auth_token_length) = le_u8(i)?;
+            take(auth_token_length)(q)?
+        } else {
+            map(null_terminated_string, |s| s.as_bytes())(i)?
+        };
+    let (i, database) = map(null_terminated_string, Some)(i)?;
+    let (i, charset, auth_plugin_name) = if !i.is_empty() {
+        let (i, charset) = if client_capability_flags.contains(CapabilityFlags::CLIENT_PROTOCOL_41)
+        {
+            let (i, bytes) = take(2usize)(i)?;
+            let charset = u16::from_le_bytes(bytes.try_into().unwrap());
+            (i, charset)
+        } else {
+            (i, UTF8MB4_GENERAL_CI)
+        };
+        let (i, auth_plugin_name) =
+            if client_capability_flags.contains(CapabilityFlags::CLIENT_PLUGIN_AUTH) {
+                null_terminated_string(i)?
+            } else {
+                (i, "")
+            };
+        (i, charset, auth_plugin_name)
+    } else {
+        (i, UTF8MB4_GENERAL_CI, "")
+    };
+
+    Ok((
+        i,
+        ClientChangeUser {
+            username,
+            password,
+            database,
+            charset,
+            auth_plugin_name,
+        },
+    ))
 }
 
 /// <https://dev.mysql.com/doc/internals/en/connection-phase-packets.html#packet-Protocol::HandshakeResponse41>
@@ -116,6 +172,7 @@ pub enum Command<'a> {
     },
     Ping,
     Quit,
+    ChangeUser(&'a [u8]),
 }
 
 pub fn execute(i: &[u8]) -> IResult<&[u8], Command<'_>> {
@@ -175,6 +232,10 @@ pub fn parse(i: &[u8]) -> IResult<&[u8], Command<'_>> {
         ),
         map(tag(&[CommandByte::COM_QUIT as u8]), |_| Command::Quit),
         map(tag(&[CommandByte::COM_PING as u8]), |_| Command::Ping),
+        map(
+            preceded(tag(&[CommandByte::COM_CHANGE_USER as u8]), rest),
+            Command::ChangeUser,
+        ),
     ))(i)
 }
 
@@ -250,5 +311,49 @@ mod tests {
             cmd,
             Command::ListFields(&b"select @@version_comment limit 1"[..])
         );
+    }
+
+    #[tokio::test]
+    async fn it_parses_change_user() {
+        let data = &[
+            0x24, 0x00, 0x00, 0x00, 0x72, 0x6f, 0x6f, 0x74, 0x00, 0x00, 0x74, 0x65, 0x73, 0x74,
+            0x00, 0x2d, 0x00, 0x6d, 0x79, 0x73, 0x71, 0x6c, 0x5f, 0x6e, 0x61, 0x74, 0x69, 0x76,
+            0x65, 0x5f, 0x70, 0x61, 0x73, 0x73, 0x77, 0x6f, 0x72, 0x64, 0x00, 0x00,
+        ];
+        let r = Cursor::new(&data[..]);
+        let mut pr = PacketReader::new(r);
+        let (_, p) = pr.next().await.unwrap().unwrap();
+        let capability_flags = CapabilityFlags::CLIENT_PROTOCOL_41
+            | CapabilityFlags::CLIENT_SECURE_CONNECTION
+            | CapabilityFlags::CLIENT_PLUGIN_AUTH;
+        let (_, changeuser) = change_user(&p, capability_flags).unwrap();
+        assert_eq!(changeuser.username, "root");
+        assert_eq!(changeuser.password, b"");
+        assert_eq!(changeuser.database, Some("test"));
+        assert_eq!(changeuser.charset, UTF8MB4_GENERAL_CI);
+        assert_eq!(changeuser.auth_plugin_name, "mysql_native_password");
+
+        let data = &[
+            0x38, 0x00, 0x00, 0x00, 0x72, 0x6f, 0x6f, 0x74, 0x00, 0x14, 0x95, 0x16, 0xb1, 0x01,
+            0x40, 0x6d, 0x7c, 0xc3, 0x17, 0x22, 0xc5, 0x9d, 0x00, 0xf3, 0x5d, 0x37, 0xb9, 0xb5,
+            0x6d, 0x0f, 0x74, 0x65, 0x73, 0x74, 0x00, 0x2d, 0x00, 0x6d, 0x79, 0x73, 0x71, 0x6c,
+            0x5f, 0x6e, 0x61, 0x74, 0x69, 0x76, 0x65, 0x5f, 0x70, 0x61, 0x73, 0x73, 0x77, 0x6f,
+            0x72, 0x64, 0x00, 0x00,
+        ];
+        let r = Cursor::new(&data[..]);
+        let mut pr = PacketReader::new(r);
+        let (_, p) = pr.next().await.unwrap().unwrap();
+        let (_, changeuser) = change_user(&p, capability_flags).unwrap();
+        assert_eq!(changeuser.username, "root");
+        assert_eq!(
+            changeuser.password,
+            &[
+                0x95, 0x16, 0xb1, 0x01, 0x40, 0x6d, 0x7c, 0xc3, 0x17, 0x22, 0xc5, 0x9d, 0x00, 0xf3,
+                0x5d, 0x37, 0xb9, 0xb5, 0x6d, 0x0f
+            ]
+        );
+        assert_eq!(changeuser.database, Some("test"));
+        assert_eq!(changeuser.charset, UTF8MB4_GENERAL_CI);
+        assert_eq!(changeuser.auth_plugin_name, "mysql_native_password");
     }
 }
