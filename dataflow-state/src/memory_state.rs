@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use common::{IndexType, Record, Records, SizeOf, Tag};
@@ -204,78 +204,31 @@ impl State for MemoryState {
         // resulting in upqueries along an overlapping replay path.
         // FIXME(eta): a lot of this could be computed at index addition time.
         for state in self.state.iter() {
-            // Try other index types with the same columns
-            if state.columns() == columns && state.index_type() != self.state[index].index_type() {
-                let res = state.lookup(key);
-                if res.is_some() {
-                    return res;
-                }
-            }
-
-            // We might have another index with the same columns in another order
-            if state.columns() != columns && state.columns().len() == columns.len() {
-                // Make a map from column index -> the position in the index we're trying to do a
-                // lookup into
-                //
-                // eg if we're mapping [3, 4] to [4, 3]
-                // we get {4 => 0, 3 => 1}
-                let col_positions = state
-                    .columns()
-                    .iter()
-                    .copied()
-                    .enumerate()
-                    .map(|(idx, col)| (col, idx))
-                    .collect::<BTreeMap<_, _>>();
-                if columns.iter().all(|c| col_positions.contains_key(c)) {
-                    let mut shuffled_key = vec![DfValue::None; key.len()];
-                    for (key_pos, col) in columns.iter().enumerate() {
-                        let val = key
-                            .get(key_pos)
-                            .expect("Columns and key must have the same len");
-                        let pos = col_positions[col];
-                        shuffled_key[pos] = val.clone();
-                    }
-                    let key = PointKey::from(shuffled_key);
-                    let res = state.lookup(&key);
-                    if res.is_some() {
-                        return res;
-                    }
-                }
-            }
-
-            // otherwise the length must be strictly less than, because otherwise it's either the
-            // same index, or we'd have to magic up datatypes out of thin air
-            if state.columns().len() < columns.len() {
-                // For each column in `columns`, find the corresponding column in `state.key()`,
-                // if there is one, and return (its position in state.key(), its value from `key`).
+            // We can only perform lookups on states that are indexed on a subset of the columns in
+            // the key passed into this method
+            if state.columns().iter().all(|col| columns.contains(col)) {
+                // For each column in this state, find the corresponding column in the column list
+                // passed to this method and then the value in the given key for that column.
                 // FIXME(eta): this seems accidentally quadratic.
-                let mut positions = columns
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(i, col_idx)| {
-                        state
-                            .columns()
+                let vals = state.columns().iter().map(|col| {
+                    let i = columns.iter().position(|c| col == c).unwrap();
+                    key.get(i).unwrap().clone()
+                });
+                let kt = PointKey::from(vals);
+                if let LookupResult::Some(mut ret) = state.lookup(&kt) {
+                    // Filter the rows in this index to ones which actually match the key. This
+                    // is required if the desired key is a superset of the key we are looking up
+                    // here. For example, if the columns passed into this method were [0, 1] and we
+                    // do a lookup here on [0], we need to filter out the rows that don't match our
+                    // key on column 1
+                    // FIXME(eta): again, probably O(terrible)
+                    ret.retain(|row| {
+                        columns
                             .iter()
-                            .position(|x| x == col_idx)
-                            .map(|pos| (pos, key.get(i).expect("bogus key passed to lookup")))
-                    })
-                    .collect::<Vec<_>>();
-                if positions.len() == state.columns().len() {
-                    // the index only contains columns from `columns` (and none other).
-                    // make a new lookup key
-                    positions.sort_unstable_by_key(|(idx, _)| *idx);
-                    let kt = PointKey::from(positions.into_iter().map(|(_, val)| val.clone()));
-                    if let LookupResult::Some(mut ret) = state.lookup(&kt) {
-                        // filter the rows in this index to ones which actually match the key
-                        // FIXME(eta): again, probably O(terrible)
-                        ret.retain(|row| {
-                            columns
-                                .iter()
-                                .enumerate()
-                                .all(|(key_idx, &col_idx)| row.get(col_idx) == key.get(key_idx))
-                        });
-                        return LookupResult::Some(ret);
-                    }
+                            .enumerate()
+                            .all(|(key_idx, &col_idx)| row.get(col_idx) == key.get(key_idx))
+                    });
+                    return LookupResult::Some(ret);
                 }
             }
         }
@@ -666,6 +619,74 @@ mod tests {
         );
     }
 
+    // Tests that lookups on keys with duplicate columns can perform lookups on states with
+    // deduplicated set of columns
+    #[test]
+    fn duplicate_columns() {
+        let mut state = MemoryState::default();
+        state.add_index(Index::hash_map(vec![0]), Some(vec![Tag::new(0)]));
+        state.add_index(Index::hash_map(vec![0, 0]), Some(vec![Tag::new(1)]));
+
+        state.mark_filled(KeyComparison::Equal(vec1![1.into()]), Tag::new(0));
+        state.insert(
+            vec![1.into(), 1.into(), 1.into(), 1.into()],
+            Some(Tag::new(0)),
+        );
+
+        let res = state.lookup(&[0, 0], &PointKey::Double((1.into(), 1.into())));
+        assert!(res.is_some());
+        let rows = res.unwrap();
+        assert_eq!(
+            rows,
+            RecordResult::Owned(vec![vec![1.into(), 1.into(), 1.into(), 1.into()]])
+        );
+    }
+
+    // Tests that a lookup on a superset of columns in another index will still find the rows in
+    // that index
+    #[test]
+    fn superset_lookup() {
+        let mut state = MemoryState::default();
+        state.add_index(Index::hash_map(vec![0]), Some(vec![Tag::new(0)]));
+        state.add_index(Index::hash_map(vec![0, 1]), Some(vec![Tag::new(1)]));
+
+        state.mark_filled(KeyComparison::Equal(vec1![1.into()]), Tag::new(0));
+        state.insert(
+            vec![1.into(), 2.into(), 3.into(), 4.into()],
+            Some(Tag::new(0)),
+        );
+        state.insert(
+            vec![1.into(), 3.into(), 4.into(), 5.into()],
+            Some(Tag::new(0)),
+        );
+
+        let res = state.lookup(&[0, 1], &PointKey::Double((1.into(), 2.into())));
+        assert!(res.is_some());
+        let rows = res.unwrap();
+        assert_eq!(
+            rows,
+            RecordResult::Owned(vec![vec![1.into(), 2.into(), 3.into(), 4.into()]])
+        );
+    }
+
+    // Tests that lookups on a subset of columns from another index do not return rows from that
+    // index
+    #[test]
+    fn subset_lookup_miss() {
+        let mut state = MemoryState::default();
+        state.add_index(Index::hash_map(vec![0]), Some(vec![Tag::new(0)]));
+        state.add_index(Index::hash_map(vec![0, 1]), Some(vec![Tag::new(1)]));
+
+        state.mark_filled(KeyComparison::Equal(vec1![1.into(), 2.into()]), Tag::new(1));
+        state.insert(
+            vec![1.into(), 2.into(), 3.into(), 4.into()],
+            Some(Tag::new(1)),
+        );
+
+        let res = state.lookup(&[0], &PointKey::Single(1.into()));
+        assert!(res.is_missing());
+    }
+
     #[test]
     fn shuffled_columns() {
         let mut state = MemoryState::default();
@@ -1034,6 +1055,7 @@ mod tests {
     }
 
     mod weak_index_proptest {
+        use std::collections::BTreeMap;
         use std::ops::RangeInclusive;
         use std::time::Duration;
 
