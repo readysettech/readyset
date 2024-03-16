@@ -345,4 +345,18 @@ mod tests {
         let res = select.detect_unsupported_placeholders(Config::default());
         extracts_placeholders(res, &[2, 3]);
     }
+
+    #[test]
+    fn ignores_supported_expr_in_rhs_of_where_single() {
+        let select = parse_select_statement("SELECT a FROM t WHERE b = '2023-01-01'::TIMESTAMP");
+        let res = select.detect_unsupported_placeholders(Config::default());
+        extracts_placeholders(res, &[]);
+    }
+
+    #[test]
+    fn ignores_supported_expr_in_rhs_of_where_range() {
+        let select = parse_select_statement("SELECT a FROM t WHERE b >= '2023-01-01'::TIMESTAMP AND tsHour <= '2023-02-01'::TIMESTAMP");
+        let res = select.detect_unsupported_placeholders(Config::default());
+        extracts_placeholders(res, &[]);
+    }
 }
