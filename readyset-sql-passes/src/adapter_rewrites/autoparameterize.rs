@@ -156,6 +156,12 @@ pub fn auto_parameterize_query(query: &mut SelectStatement) -> Vec<(usize, Liter
                             | BinaryOperator::GreaterOrEqual,
                         rhs: box Expr::Literal(Literal::Placeholder(..)),
                         ..
+                        // rhs: box Expr::Literal(Literal::Placeholder(..)) |
+                        //      box Expr::Cast {
+                        //        expr: box Expr::Literal(Literal::Placeholder(..)),
+                        //         ..
+                        //     },
+                        // ..
                     } | Expr::Between {
                         min: box Expr::Literal(Literal::Placeholder(..)),
                         ..

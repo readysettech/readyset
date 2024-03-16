@@ -22,6 +22,7 @@ use readyset_errors::{
 };
 use readyset_sql_passes::{is_aggregate, is_correlated, is_predicate, map_aggregates, LogicalOp};
 use serde::{Deserialize, Serialize};
+use tracing::trace;
 
 use super::mir::{self, PAGE_NUMBER_COL};
 
@@ -511,6 +512,7 @@ fn classify_conditionals(
     global: &mut Vec<Expr>,
     params: &mut Vec<Parameter>,
 ) -> ReadySetResult<()> {
+    trace!(?ce, pretty = true,"classify_conditionals");
     // Handling OR and AND expressions requires some care as there are some corner cases.
     //    a) we don't support OR expressions with predicates with placeholder parameters,
     //       because these expressions are meaningless in the Soup context.
@@ -606,10 +608,13 @@ fn classify_conditionals(
                     }
                 }
 
+
                 params.extend(new_params);
             } else if is_predicate(op) {
+                trace!(?rhs, pretty=true, ?lhs, pretty=true, ?op, pretty=true, "is_predicate");
                 // atomic selection predicate
                 if let Expr::Literal(Literal::Placeholder(ref placeholder)) = **rhs {
+                    trace!("atomic selection predicate");
                     if let Expr::Column(ref lf) = **lhs {
                         let idx = match placeholder {
                             ItemPlaceholder::DollarNumber(idx) => Some(*idx as usize),
@@ -625,6 +630,7 @@ fn classify_conditionals(
                     table: Some(table), ..
                 }) = &**lhs
                 {
+                    trace!("local");
                     local.entry(table.clone()).or_default().push(ce.clone());
                 } else {
                     // comparisons between computed columns and literals are global
@@ -685,7 +691,10 @@ fn classify_conditionals(
         | Expr::Cast { .. }
         | Expr::Array(_)
         | Expr::Row { .. }
-        | Expr::Variable(_) => global.push(ce.clone()),
+        | Expr::Variable(_) => {
+            trace!("adding global predicate");
+            global.push(ce.clone());
+        }
     }
     Ok(())
 }
@@ -871,6 +880,7 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                     preds: Vec<Expr>,
                     fields: &Vec<FieldDefinitionExpr>|
      -> ReadySetResult<QueryGraphNode> {
+        trace!(?rel, ?preds, ?fields, "new_node");
         Ok(QueryGraphNode {
             relation: rel.clone(),
             predicates: preds,
