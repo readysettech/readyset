@@ -3,6 +3,7 @@ use std::mem;
 use nom_sql::analysis::visit::{self, walk_expr, Visitor};
 use nom_sql::{BinaryOperator, Expr, ItemPlaceholder, Literal, SelectStatement};
 use readyset_errors::{ReadySetError, ReadySetResult};
+use tracing::trace;
 use vec1::Vec1;
 
 pub trait DetectUnsupportedPlaceholders {
@@ -69,6 +70,7 @@ impl UnsupportedPlaceholderVisitor {
     ///
     /// Placeholders used in `Expr::Between` are handled elsewhere.
     fn record_comparison_expr(&mut self, lhs: &Expr, rhs: &Expr, op: &BinaryOperator) {
+        trace!(?lhs, ?op, ?rhs, "recording comparison expr");
         if !self.config.allow_mixed_comparisons {
             match (lhs, rhs, op) {
                 (
@@ -131,6 +133,7 @@ impl<'ast> Visitor<'ast> for UnsupportedPlaceholderVisitor {
     /// Otherwise, walk the expression and record any placeholder values we find in
     /// `Self::unsupported_placeholders`.
     fn visit_expr(&mut self, expr: &'ast nom_sql::Expr) -> Result<(), Self::Error> {
+        trace!(?expr, "visit_expr");
         // Walk expression if we're not in the WHERE clause of any SELECT statement
         if !self.context.in_where_clause {
             return walk_expr(self, expr);
@@ -140,17 +143,27 @@ impl<'ast> Visitor<'ast> for UnsupportedPlaceholderVisitor {
         match expr {
             Expr::BinaryOp { lhs, rhs, op } => {
                 // The placeholder is supported if we have an equality or ordering comparison with a
-                // column on the left and literal on the right.
-                if !(matches!(**lhs, Expr::Column(_))
-                    && matches!(**rhs, Expr::Literal(_)) // no need to walk for any literal
-                    //&& matches!(**rhs, Expr::Literal(_))
+                // column on the left and literal or cast on the right.
+                if (matches!(**lhs, Expr::Column(_))
                     && (matches!(op, BinaryOperator::Equal) || op.is_ordering_comparison()))
                 {
-                    let Ok(_) = walk_expr(self, expr);
+                    match **rhs {
+                        // We currently support placeholders in this position as well as casts of
+                        // placeholders. We shoul be able to support arbitrary expression evaluation as
+                        // well, but correctness confidence needs something like REA-3124, and it's
+                        // easier to have confidence in cases we know there is a desire for and add
+                        // some testing around those manually.
+                        Expr::Literal(Literal::Placeholder(ItemPlaceholder::DollarNumber(_))) |
+                        Expr::Cast { expr: box Expr::Literal(Literal::Placeholder(ItemPlaceholder::DollarNumber(_))), .. } => {
+                            self.record_comparison_expr(lhs, rhs, op);
+                        }
+                        _ => {
+                            let Ok(_) = walk_expr(self, expr);
+                        }
+                    }
                 } else {
-                    // Record placeholders in either Context::equality_comparisons or
-                    // Context::ordering_comparisons.
-                    self.record_comparison_expr(lhs, rhs, op);
+                    let Ok(_) = walk_expr(self, expr);
+
                 }
             }
             Expr::Between {
@@ -348,14 +361,16 @@ mod tests {
 
     #[test]
     fn ignores_supported_expr_in_rhs_of_where_single() {
-        let select = parse_select_statement("SELECT a FROM t WHERE b = '2023-01-01'::TIMESTAMP");
+        readyset_tracing::init_test_logging();
+        let select = parse_select_statement("SELECT a FROM t WHERE b = $1::TIMESTAMP");
         let res = select.detect_unsupported_placeholders(Config::default());
         extracts_placeholders(res, &[]);
     }
 
     #[test]
     fn ignores_supported_expr_in_rhs_of_where_range() {
-        let select = parse_select_statement("SELECT a FROM t WHERE b >= '2023-01-01'::TIMESTAMP AND tsHour <= '2023-02-01'::TIMESTAMP");
+        readyset_tracing::init_test_logging();
+        let select = parse_select_statement("SELECT a FROM t WHERE b >= $1::TIMESTAMP AND tsHour <= $2::TIMESTAMP");
         let res = select.detect_unsupported_placeholders(Config::default());
         extracts_placeholders(res, &[]);
     }

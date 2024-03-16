@@ -18,6 +18,7 @@ readyset-data = { path = "../readyset-data" }
 dataflow-expression = { path = "../dataflow-expression" }
 
 [dev-dependencies]
+readyset-tracing = { path = "../readyset-tracing" }
 criterion = { workspace = true }
 
 [[bench]]
