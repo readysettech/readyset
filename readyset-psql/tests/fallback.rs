@@ -2702,3 +2702,66 @@ async fn drop_all_proxied_queries() {
 
     shutdown_tx.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cast_parameter() {
+    let (opts, _handle, shutdown_tx) = TestBuilder::default()
+        .recreate_database(false)
+        .fallback_url(PostgreSQLAdapter::upstream_url("noria"))
+        .migration_mode(MigrationMode::OutOfBand)
+        .migration_style(MigrationStyle::Explicit)
+        .build::<PostgreSQLAdapter>()
+        .await;
+    let conn = connect(opts).await;
+
+    conn.simple_query("DROP TABLE IF EXISTS tz").await.unwrap();
+    conn.simple_query("CREATE TABLE tz (t timestamptz)")
+        .await
+        .unwrap();
+
+    readyset_tracing::init_test_logging();
+    conn.simple_query("CREATE CACHE FROM SELECT * FROM tz where t = $1::timestamp")
+        .await
+        .unwrap();
+
+    sleep().await;
+    conn.simple_query("SELECT * FROM tz WHERE t = 1::timestamp")
+        .await
+        .unwrap();
+
+
+    assert!(last_statement_matches("readyset", "ok", &conn).await);
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn post_lookup() {
+    readyset_tracing::init_test_logging();
+    let (opts, _handle, shutdown_tx) = TestBuilder::default()
+        .recreate_database(false)
+        .fallback_url(PostgreSQLAdapter::upstream_url("noria"))
+        .migration_mode(MigrationMode::OutOfBand)
+        .migration_style(MigrationStyle::Explicit)
+        .build::<PostgreSQLAdapter>()
+        .await;
+    let conn = connect(opts).await;
+
+    conn.simple_query("DROP TABLE IF EXISTS tz").await.unwrap();
+    conn.simple_query("CREATE TABLE tz (t timestamptz)")
+        .await
+        .unwrap();
+
+    conn.simple_query("CREATE CACHE FROM SELECT * FROM tz where t = $1 order by t")
+        .await
+        .unwrap();
+
+    sleep().await;
+    conn.simple_query("SELECT * FROM tz WHERE t = 1")
+        .await
+        .unwrap();
+
+    assert!(last_statement_matches("readyset", "ok", &conn).await);
+
+    shutdown_tx.shutdown().await;
+}
