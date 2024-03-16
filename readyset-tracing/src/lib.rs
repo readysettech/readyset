@@ -574,5 +574,7 @@ pub fn init_test_logging() {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_env("LOG_LEVEL"))
         .with_test_writer()
+        .without_time()
+        .compact()
         .try_init();
 }
