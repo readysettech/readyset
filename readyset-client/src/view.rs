@@ -6,7 +6,7 @@ use std::fmt;
 use std::future::Future;
 use std::hash::{Hash, Hasher};
 use std::net::SocketAddr;
-use std::ops::{Range, RangeBounds};
+use std::ops::{Bound, Range, RangeBounds};
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
@@ -26,7 +26,7 @@ use petgraph::graph::NodeIndex;
 use proptest::arbitrary::Arbitrary;
 use rand::prelude::IteratorRandom;
 use rand::thread_rng;
-use readyset_data::{range, Bound, BoundPair, DfType, DfValue};
+use readyset_data::{DfType, DfValue};
 use readyset_errors::{
     internal, internal_err, rpc_err, unsupported, view_err, ReadySetError, ReadySetResult,
 };
@@ -34,6 +34,7 @@ use readyset_sql_passes::anonymize::{Anonymize, Anonymizer};
 use readyset_tracing::child_span;
 use readyset_tracing::presampled::instrument_if_enabled;
 use readyset_tracing::propagation::Instrumented;
+use readyset_util::intervals::{cmp_start_end, BoundPair};
 use readyset_util::redacted::Sensitive;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
@@ -392,14 +393,14 @@ impl KeyComparison {
 
         let key = Vec1::try_from(key).map_err(|_| ReadySetError::EmptyKey)?;
         let inner = match operator {
-            Greater => BoundPair::unbounded_upper(Bound::Excluded(key)),
-            GreaterOrEqual => BoundPair::unbounded_upper(Bound::Included(key)),
-            Less => BoundPair::unbounded_lower(Bound::Excluded(key)),
-            LessOrEqual => BoundPair::unbounded_lower(Bound::Included(key)),
+            Greater => (Bound::Excluded(key), Bound::Unbounded),
+            GreaterOrEqual => (Bound::Included(key), Bound::Unbounded),
+            Less => (Bound::Unbounded, Bound::Excluded(key)),
+            LessOrEqual => (Bound::Unbounded, Bound::Included(key)),
             Equal => return Ok(key.into()),
             _ => unsupported!("Unsupported operator `{operator}` in key"),
         };
-        Ok(Self::Range(inner?))
+        Ok(Self::Range(inner))
     }
 
     /// Project a KeyComparison into an optional equality predicate, or return None if it's a range
@@ -407,10 +408,11 @@ impl KeyComparison {
     pub fn equal(&self) -> Option<&Vec1<DfValue>> {
         match self {
             KeyComparison::Equal(ref key) => Some(key),
-            KeyComparison::Range(BoundPair(
-                Bound::Included(ref key),
-                Bound::Included(ref key2),
-            )) if key == key2 => Some(key),
+            KeyComparison::Range((Bound::Included(ref key), Bound::Included(ref key2)))
+                if key == key2 =>
+            {
+                Some(key)
+            }
             _ => None,
         }
     }
@@ -421,7 +423,7 @@ impl KeyComparison {
     pub fn into_equal(self) -> Option<Vec1<DfValue>> {
         match self {
             KeyComparison::Equal(key) => Some(key),
-            KeyComparison::Range(BoundPair(Bound::Included(key), Bound::Included(ref key2)))
+            KeyComparison::Range((Bound::Included(key), Bound::Included(ref key2)))
                 if key == *key2 =>
             {
                 Some(key)
@@ -443,17 +445,17 @@ impl KeyComparison {
     ///
     /// If the range has length 1 (both the ends are inclusive bounds on the same value) will return
     /// [`KeyComparison::Equal`].
-    // pub fn from_range<R>(lower: Bound<&Vec1<DfValue>>, upper: Bound<&Vec1<DfValue>>) -> Self
-    // where
-    //     R: RangeBounds<Vec1<DfValue>>,
-    // {
-    //     match (lower, upper) {
-    //         (Bound::Included(key1), Bound::Included(key2)) if key1 == key2 => {
-    //             KeyComparison::Equal(key1.clone())
-    //         }
-    //         (start, end) => KeyComparison::Range((start.cloned(), end.cloned())),
-    //     }
-    // }
+    pub fn from_range<R>(range: &R) -> Self
+    where
+        R: RangeBounds<Vec1<DfValue>>,
+    {
+        match (range.start_bound(), range.end_bound()) {
+            (Bound::Included(key1), Bound::Included(key2)) if key1 == key2 => {
+                KeyComparison::Equal(key1.clone())
+            }
+            (start, end) => KeyComparison::Range((start.cloned(), end.cloned())),
+        }
+    }
 
     /// Convert the [`KeyComparison`] into a [`KeyComparison::Range`].
     ///
@@ -462,7 +464,9 @@ impl KeyComparison {
     pub fn into_range(self) -> KeyComparison {
         match self {
             KeyComparison::Range(_) => self,
-            KeyComparison::Equal(key) => KeyComparison::Range(range!(=key.clone(), =key)),
+            KeyComparison::Equal(key) => {
+                KeyComparison::Range((Bound::Included(key.clone()), Bound::Included(key)))
+            }
         }
     }
 
@@ -484,10 +488,10 @@ impl KeyComparison {
     /// assert!(reversed.is_reversed_range());
     /// ```
     pub fn is_reversed_range(&self) -> bool {
-        match self {
-            KeyComparison::Equal(_) => false,
-            KeyComparison::Range(key) => key.is_reversed_range(),
-        }
+        cmp_start_end(
+            <Self as RangeBounds<Vec1<DfValue>>>::start_bound(self),
+            <Self as RangeBounds<Vec1<DfValue>>>::end_bound(self),
+        ) == Ordering::Greater
     }
 
     /// Returns the shard key(s) that the given cell in this [`KeyComparison`] must target, given
@@ -522,10 +526,21 @@ impl KeyComparison {
     /// is an unbounded lookup
     ///
     /// Since all KeyComparisons wrap a [`Vec1`], this function will never return `Some(0)`
-    pub fn len(&self) -> usize {
+    pub fn len(&self) -> Option<usize> {
         match self {
-            Self::Equal(key) => key.len(),
-            Self::Range(key) => key.len(),
+            Self::Equal(key) => Some(key.len()),
+            Self::Range((Bound::Unbounded, Bound::Unbounded)) => None,
+            Self::Range(
+                (Bound::Included(ref key) | Bound::Excluded(ref key), Bound::Unbounded)
+                | (Bound::Unbounded, Bound::Included(ref key) | Bound::Excluded(ref key)),
+            ) => Some(key.len()),
+            Self::Range((
+                Bound::Included(ref start) | Bound::Excluded(ref start),
+                Bound::Included(ref end) | Bound::Excluded(ref end),
+            )) => {
+                debug_assert_eq!(start.len(), end.len());
+                Some(start.len())
+            }
         }
     }
 
@@ -574,7 +589,17 @@ impl KeyComparison {
     {
         match self {
             Self::Equal(equal) => key.into_iter().cmp(equal.iter()) == Ordering::Equal,
-            Self::Range(bound_pair) => bound_pair.contains(key),
+            Self::Range((lower, upper)) => {
+                (match lower {
+                    Bound::Included(start) => key.clone().into_iter().cmp(start.iter()).is_ge(),
+                    Bound::Excluded(start) => key.clone().into_iter().cmp(start.iter()).is_gt(),
+                    Bound::Unbounded => true,
+                }) && (match upper {
+                    Bound::Included(end) => key.into_iter().cmp(end.iter()).is_le(),
+                    Bound::Excluded(end) => key.into_iter().cmp(end.iter()).is_lt(),
+                    Bound::Unbounded => true,
+                })
+            }
         }
     }
 
@@ -599,8 +624,8 @@ impl KeyComparison {
     {
         match self {
             KeyComparison::Equal(k) => KeyComparison::Equal(f(k)),
-            KeyComparison::Range(BoundPair(lower, upper)) => {
-                KeyComparison::Range(BoundPair(lower.map(&mut f), upper.map(&mut f)))
+            KeyComparison::Range((lower, upper)) => {
+                KeyComparison::Range((lower.map(&mut f), upper.map(&mut f)))
             }
         }
     }
@@ -612,9 +637,7 @@ impl PartialEq for KeyComparison {
         match (self, other) {
             (Equal(k1), Equal(k2)) => k1 == k2,
             (Range(r1), Range(r2)) => r1 == r2,
-            (Equal(eq), Range(BoundPair(Bound::Included(k1), Bound::Included(k2)))) => {
-                eq == k1 && k1 == k2
-            }
+            (Equal(eq), Range((Bound::Included(k1), Bound::Included(k2)))) => eq == k1 && k1 == k2,
             (Equal(_), Range(_)) => false,
             (Range(_), Equal(_)) => other == self,
         }
@@ -627,9 +650,7 @@ impl Hash for KeyComparison {
     fn hash<H: Hasher>(&self, state: &mut H) {
         match self {
             Self::Equal(k) => k.hash(state),
-            Self::Range(BoundPair(Bound::Included(k1), Bound::Included(k2))) if k1 == k2 => {
-                k1.hash(state)
-            }
+            Self::Range((Bound::Included(k1), Bound::Included(k2))) if k1 == k2 => k1.hash(state),
             Self::Range(r) => r.hash(state),
         }
     }
@@ -653,7 +674,7 @@ impl From<Vec1<DfValue>> for KeyComparison {
 
 impl From<Range<Vec1<DfValue>>> for KeyComparison {
     fn from(range: Range<Vec1<DfValue>>) -> Self {
-        KeyComparison::Range(range!(=range.start, range.end))
+        KeyComparison::Range((Bound::Included(range.start), Bound::Excluded(range.end)))
     }
 }
 
@@ -661,15 +682,13 @@ impl TryFrom<BoundPair<Vec<DfValue>>> for KeyComparison {
     type Error = vec1::Size0Error;
 
     /// Converts to a [`KeyComparison::Range`]
-    fn try_from(BoundPair(lower, upper): BoundPair<Vec<DfValue>>) -> Result<Self, Self::Error> {
+    fn try_from((lower, upper): BoundPair<Vec<DfValue>>) -> Result<Self, Self::Error> {
         let convert_bound = |bound| match bound {
+            Bound::Unbounded => Ok(Bound::Unbounded),
             Bound::Included(x) => Ok(Bound::Included(Vec1::try_from(x)?)),
             Bound::Excluded(x) => Ok(Bound::Excluded(Vec1::try_from(x)?)),
         };
-        Ok(Self::Range(BoundPair(
-            convert_bound(lower)?,
-            convert_bound(upper)?,
-        )))
+        Ok(Self::Range((convert_bound(lower)?, convert_bound(upper)?)))
     }
 }
 
@@ -681,73 +700,69 @@ impl From<BoundPair<Vec1<DfValue>>> for KeyComparison {
 }
 
 impl RangeBounds<Vec1<DfValue>> for KeyComparison {
-    fn start_bound(&self) -> std::ops::Bound<&Vec1<DfValue>> {
+    fn start_bound(&self) -> Bound<&Vec1<DfValue>> {
         use Bound::*;
         use KeyComparison::*;
-        let bound = match self {
+        match self {
             Equal(ref key) => Included(key),
-            Range(BoundPair(Included(ref k), _)) => Included(k),
-            Range(BoundPair(Excluded(ref k), _)) => Excluded(k),
-        };
-
-        bound.into_std_bound()
+            Range((Unbounded, _)) => Unbounded,
+            Range((Included(ref k), _)) => Included(k),
+            Range((Excluded(ref k), _)) => Excluded(k),
+        }
     }
 
-    fn end_bound(&self) -> std::ops::Bound<&Vec1<DfValue>> {
+    fn end_bound(&self) -> Bound<&Vec1<DfValue>> {
         use Bound::*;
         use KeyComparison::*;
-        let bound = match self {
+        match self {
             Equal(ref key) => Included(key),
-            Range(BoundPair(_, Included(ref k))) => Included(k),
-            Range(BoundPair(_, Excluded(ref k))) => Excluded(k),
-        };
-
-        bound.into_std_bound()
+            Range((_, Unbounded)) => Unbounded,
+            Range((_, Included(ref k))) => Included(k),
+            Range((_, Excluded(ref k))) => Excluded(k),
+        }
     }
 }
 
 impl RangeBounds<Vec<DfValue>> for KeyComparison {
-    fn start_bound(&self) -> std::ops::Bound<&Vec<DfValue>> {
+    fn start_bound(&self) -> Bound<&Vec<DfValue>> {
         self.start_bound().map(Vec1::as_vec)
     }
 
-    fn end_bound(&self) -> std::ops::Bound<&Vec<DfValue>> {
+    fn end_bound(&self) -> Bound<&Vec<DfValue>> {
         self.end_bound().map(Vec1::as_vec)
     }
 }
 
 impl RangeBounds<Vec1<DfValue>> for &KeyComparison {
-    fn start_bound(&self) -> std::ops::Bound<&Vec1<DfValue>> {
+    fn start_bound(&self) -> Bound<&Vec1<DfValue>> {
         use Bound::*;
         use KeyComparison::*;
-        let bound = match self {
+        match self {
             Equal(ref key) => Included(key),
-            Range(BoundPair(Included(ref k), _)) => Included(k),
-            Range(BoundPair(Excluded(ref k), _)) => Excluded(k),
-        };
-
-        bound.into_std_bound()
+            Range((Unbounded, _)) => Unbounded,
+            Range((Included(ref k), _)) => Included(k),
+            Range((Excluded(ref k), _)) => Excluded(k),
+        }
     }
 
-    fn end_bound(&self) -> std::ops::Bound<&Vec1<DfValue>> {
+    fn end_bound(&self) -> Bound<&Vec1<DfValue>> {
         use Bound::*;
         use KeyComparison::*;
-        let bound = match self {
+        match self {
             Equal(ref key) => Included(key),
-            Range(BoundPair(_, Included(ref k))) => Included(k),
-            Range(BoundPair(_, Excluded(ref k))) => Excluded(k),
-        };
-
-        bound.into_std_bound()
+            Range((_, Unbounded)) => Unbounded,
+            Range((_, Included(ref k))) => Included(k),
+            Range((_, Excluded(ref k))) => Excluded(k),
+        }
     }
 }
 
 impl RangeBounds<Vec<DfValue>> for &KeyComparison {
-    fn start_bound(&self) -> std::ops::Bound<&Vec<DfValue>> {
+    fn start_bound(&self) -> Bound<&Vec<DfValue>> {
         (**self).start_bound()
     }
 
-    fn end_bound(&self) -> std::ops::Bound<&Vec<DfValue>> {
+    fn end_bound(&self) -> Bound<&Vec<DfValue>> {
         (**self).end_bound()
     }
 }
@@ -775,7 +790,7 @@ impl Arbitrary for KeyComparison {
                 // know we are generating vectors of length 1 and beyond.
                 KeyComparison::try_from(k).unwrap()
             }),
-            (bound(), bound()).prop_map(|(l, u)| KeyComparison::Range(BoundPair(l, u)))
+            (bound(), bound()).prop_map(KeyComparison::Range)
         ]
         .boxed()
     }
@@ -1672,27 +1687,25 @@ impl ReaderHandle {
                                                 false,
                                             )));
                                             lower_bound.push(value);
-                                            upper_bound.push(DfValue::None); // NULL is the maxmimum
-                                                                             // DfValue
+                                            upper_bound.push(DfValue::Max);
                                         }
                                         BinaryOperator::LessOrEqual => {
                                             filters.push(make_op((
                                                 DfBinaryOperator::LessOrEqual,
                                                 false,
                                             )));
-                                            lower_bound.push(DfValue::Min);
+                                            lower_bound.push(DfValue::None); // NULL is the minimum DfValue
                                             upper_bound.push(value);
                                         }
                                         BinaryOperator::Greater => {
                                             filters
                                                 .push(make_op((DfBinaryOperator::Greater, false)));
                                             lower_bound.push(value);
-                                            upper_bound.push(DfValue::None); // NULL is the maxmimum
-                                                                             // DfValue
+                                            upper_bound.push(DfValue::Max);
                                         }
                                         BinaryOperator::Less => {
                                             filters.push(make_op((DfBinaryOperator::Less, false)));
-                                            lower_bound.push(DfValue::Min);
+                                            lower_bound.push(DfValue::None); // NULL is the minimum DfValue
                                             upper_bound.push(value);
                                         }
                                         op => unsupported!(
@@ -1763,9 +1776,9 @@ impl ReaderHandle {
 
                     if let Some((lower, upper)) = bounds {
                         debug_assert!(k.is_empty());
-                        Ok(KeyComparison::Range(range!(
-                            =lower.try_into()?,
-                            =upper.try_into()?
+                        Ok(KeyComparison::Range((
+                            Bound::Included(lower.try_into()?),
+                            Bound::Included(upper.try_into()?),
                         )))
                     } else {
                         KeyComparison::from_key_and_operator(k, binop_to_use)
@@ -2036,8 +2049,6 @@ impl std::ops::DerefMut for ReadReplyBatch {
 
 #[cfg(test)]
 mod tests {
-    use readyset_data::range;
-
     use super::*;
 
     #[allow(clippy::eq_op)]
@@ -2194,8 +2205,8 @@ mod tests {
             assert!(query.filter.is_none());
             assert_eq!(
                 query.key_comparisons,
-                vec![KeyComparison::Range(
-                    range!(=vec1![DfValue::from(1)], =vec1![DfValue::from(2)])
+                vec![KeyComparison::from_range(
+                    &(vec1![DfValue::from(1)]..=vec1![DfValue::from(2)])
                 )]
             );
         }
@@ -2219,9 +2230,9 @@ mod tests {
 
             assert_eq!(
                 query.key_comparisons,
-                vec![KeyComparison::Range(
-                    range!(=vec1![DfValue::from("a"), DfValue::from(1)],
-                        =vec1![DfValue::from("a"), DfValue::None])
+                vec![KeyComparison::from_range(
+                    &(vec1![DfValue::from("a"), DfValue::from(1)]
+                        ..=vec1![DfValue::from("a"), DfValue::Max])
                 )]
             );
         }
@@ -2247,9 +2258,9 @@ mod tests {
             assert!(query.filter.is_none());
             assert_eq!(
                 query.key_comparisons,
-                vec![KeyComparison::Range(
-                    range!(=vec1![DfValue::from("a"), DfValue::from(1)],
-                        =vec1![DfValue::from("a"), DfValue::from(2)])
+                vec![KeyComparison::from_range(
+                    &(vec1![DfValue::from("a"), DfValue::from(1)]
+                        ..=vec1![DfValue::from("a"), DfValue::from(2)])
                 )]
             );
         }
@@ -2285,9 +2296,9 @@ mod tests {
             );
             assert_eq!(
                 query.key_comparisons,
-                vec![KeyComparison::Range(
-                    range!(=vec1![DfValue::from("a"), DfValue::from(1)],
-                        =vec1![DfValue::from("a"), DfValue::None])
+                vec![KeyComparison::from_range(
+                    &(vec1![DfValue::from("a"), DfValue::from(1)]
+                        ..=vec1![DfValue::from("a"), DfValue::Max])
                 )]
             );
         }
@@ -2340,13 +2351,10 @@ mod tests {
 
             assert_eq!(
                 query.key_comparisons,
-                vec![KeyComparison::Range(
-                    BoundPair::unbounded_upper(Bound::Excluded(vec1![
-                        DfValue::from(1),
-                        DfValue::from("a")
-                    ]))
-                    .unwrap()
-                )]
+                vec![KeyComparison::Range((
+                    Bound::Excluded(vec1![DfValue::from(1), DfValue::from("a")]),
+                    Bound::Unbounded
+                ))]
             );
         }
 
@@ -2388,9 +2396,10 @@ mod tests {
 
             assert_eq!(
                 query.key_comparisons,
-                vec![KeyComparison::Range(
-                    range!(=vec1![DfValue::from(1), DfValue::from("a")], inf).unwrap()
-                )]
+                vec![KeyComparison::Range((
+                    Bound::Included(vec1![DfValue::from(1), DfValue::from("a")]),
+                    Bound::Unbounded
+                ))]
             );
         }
 

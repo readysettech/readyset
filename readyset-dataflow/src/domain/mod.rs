@@ -32,7 +32,6 @@ use readyset_client::debug::info::KeyCount;
 use readyset_client::internal::{self, Index};
 use readyset_client::metrics::recorded;
 use readyset_client::{KeyComparison, PersistencePoint, ReaderAddress};
-use readyset_data::BoundPair;
 use readyset_errors::{internal, internal_err, ReadySetError, ReadySetResult};
 use readyset_util::futures::abort_on_panic;
 use readyset_util::progress::report_progress_with;
@@ -314,12 +313,7 @@ impl RequestedKeys {
                         requested.insert_interval::<Vec1<_>, _>(key);
                         diff
                     })
-                    .map(|(lower, upper)| {
-                        KeyComparison::Range(BoundPair(
-                            lower.try_into().unwrap(),
-                            upper.try_into().unwrap(),
-                        ))
-                    })
+                    .map(|r| KeyComparison::from_range(&r))
                     .collect()
             }
         }
@@ -346,12 +340,9 @@ impl RequestedKeys {
                 *keys = keys
                     .iter()
                     .flat_map(|key| {
-                        requested.get_interval_overlaps(key).map(|(lower, upper)| {
-                            KeyComparison::Range(BoundPair(
-                                lower.cloned().try_into().unwrap(),
-                                upper.cloned().try_into().unwrap(),
-                            ))
-                        })
+                        requested
+                            .get_interval_overlaps(key)
+                            .map(|r| KeyComparison::from_range(&r))
                     })
                     .collect()
             }
@@ -1735,7 +1726,7 @@ impl Domain {
                                 } else {
                                     let mut per_shard = HashMap::new();
                                     for miss in misses {
-                                        assert_eq!(miss.len(), 1);
+                                        assert!(matches!(miss.len(), Some(1) | None));
                                         for shard in miss.shard_keys(num_shards) {
                                             per_shard
                                                 .entry(shard)

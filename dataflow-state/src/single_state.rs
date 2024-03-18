@@ -1,10 +1,11 @@
+use std::ops::{Bound, RangeBounds};
 use std::rc::Rc;
 
 use common::{IndexType, SizeOf};
 use itertools::Either;
 use readyset_client::internal::Index;
 use readyset_client::KeyComparison;
-use readyset_data::{BoundPair, DfValue};
+use readyset_data::DfValue;
 use vec1::Vec1;
 
 use crate::keyed_state::KeyedState;
@@ -47,8 +48,7 @@ impl SingleState {
         if !partial && index.index_type == IndexType::BTreeMap {
             // For fully materialized indices, we never miss - so mark that the full range of keys
             // has been filled.
-            // TODO ethan is this right? also is this unwrap ok?
-            state.insert_range(BoundPair::unbounded(index.columns.len()).unwrap());
+            state.insert_range((Bound::Unbounded, Bound::Unbounded))
         }
         Self {
             index,
@@ -213,7 +213,7 @@ impl SingleState {
         assert!(replaced.is_none());
     }
 
-    fn mark_range_filled(&mut self, range: BoundPair<Vec1<DfValue>>) {
+    fn mark_range_filled(&mut self, range: (Bound<Vec1<DfValue>>, Bound<Vec1<DfValue>>)) {
         self.state.insert_range(range);
     }
 
@@ -315,8 +315,8 @@ impl SingleState {
                         remove_range!(m, range, (DfValue, _, _, _, _, _))
                     }
                     KeyedState::MultiBTree(ref mut m, _) => Box::new(
-                        m.remove_range::<[DfValue], _>(BoundPair(
-                            range.start_bound().map(|x| x.as_slice()),
+                        m.remove_range::<[DfValue], _>((
+                            range.start_bound().map(Vec1::as_slice),
                             range.end_bound().map(Vec1::as_slice),
                         ))
                         .flat_map(|(_, rows)| rows),
@@ -444,7 +444,8 @@ impl SingleState {
 
 #[cfg(test)]
 mod tests {
-    use readyset_data::{range, Bound};
+    use std::ops::Bound;
+
     use vec1::vec1;
 
     use super::*;
@@ -458,13 +459,14 @@ mod tests {
 
     #[test]
     fn mark_filled_range() {
-        let mut state = SingleState::new(Index::new(IndexType::BTreeMap, vec![0]), true);
-        state.mark_filled(KeyComparison::Range(
-            range!(=vec1![0.into()], vec1![5.into()]),
-        ));
+        let mut state = SingleState::new(Index::btree_map(vec![0]), true);
+        state.mark_filled(KeyComparison::Range((
+            Bound::Included(vec1![0.into()]),
+            Bound::Excluded(vec1![5.into()]),
+        )));
         assert!(state.lookup(&PointKey::from([0.into()])).is_some());
         assert!(state
-            .lookup_range(&RangeKey::from(&range!(=vec1![0.into()], vec1![5.into()])))
+            .lookup_range(&RangeKey::from(&(vec1![0.into()]..vec1![5.into()])))
             .is_some());
     }
 
@@ -487,11 +489,11 @@ mod tests {
         fn range() {
             let mut state = SingleState::new(Index::new(IndexType::BTreeMap, vec![0]), true);
             let key =
-                KeyComparison::Range(range!(=vec1![DfValue::from(0)], vec1![DfValue::from(10)]));
+                KeyComparison::from_range(&(vec1![DfValue::from(0)]..vec1![DfValue::from(10)]));
             state.mark_filled(key.clone());
             assert!(state
                 .lookup_range(&RangeKey::from(
-                    &range!(=vec1![DfValue::from(0)], vec1![DfValue::from(10)])
+                    &(vec1![DfValue::from(0)]..vec1![DfValue::from(10)])
                 ))
                 .is_some());
 
@@ -500,7 +502,7 @@ mod tests {
             assert!(state.lookup(&PointKey::from([0.into()])).is_missing());
             assert!(state
                 .lookup_range(&RangeKey::from(
-                    &range!(=vec1![DfValue::from(0)], vec1![DfValue::from(10)])
+                    &(vec1![DfValue::from(0)]..vec1![DfValue::from(10)])
                 ))
                 .is_missing())
         }

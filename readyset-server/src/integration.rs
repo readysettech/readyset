@@ -7,6 +7,7 @@
 
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::ops::Bound;
 use std::sync::Arc;
 use std::time::Duration;
 use std::{iter, thread};
@@ -35,7 +36,7 @@ use readyset_client::consistency::Timestamp;
 use readyset_client::internal::LocalNodeIndex;
 use readyset_client::recipe::changelist::{Change, ChangeList, CreateCache};
 use readyset_client::{KeyComparison, Modification, SchemaType, ViewPlaceholder, ViewQuery};
-use readyset_data::{range, Bound, BoundPair, DfType, DfValue, Dialect};
+use readyset_data::{DfType, DfValue, Dialect};
 use readyset_errors::ReadySetError::{self, RpcFailed, SelectQueryCreationFailed};
 use readyset_util::eventually;
 use readyset_util::shutdown::ShutdownSender;
@@ -4143,8 +4144,8 @@ async fn between_parametrized() {
     let expected: Vec<Vec<DfValue>> = (3..6).map(|i| vec![DfValue::from(i)]).collect();
     let rows = q
         .multi_lookup(
-            vec![KeyComparison::Range(
-                range!(=vec1![DfValue::from(3)], =vec1![DfValue::from(5)]),
+            vec![KeyComparison::from_range(
+                &(vec1![DfValue::from(3)]..=vec1![DfValue::from(5)]),
             )],
             true,
         )
@@ -5226,7 +5227,7 @@ async fn post_read_ilike() {
 
     let res = reader
         .raw_lookup(ViewQuery {
-            key_comparisons: vec![KeyComparison::Range(BoundPair::unbounded(1).unwrap())],
+            key_comparisons: vec![KeyComparison::from_range(&(..))],
             block: true,
             filter: Some(DfExpr::Op {
                 left: Box::new(DfExpr::Column {
@@ -7090,9 +7091,10 @@ async fn straddled_join_range_query() {
 
     let rows = q
         .multi_lookup(
-            vec![KeyComparison::Range(
-                range!(vec1![1i32.into(), 1i32.into()], inf).unwrap(),
-            )],
+            vec![KeyComparison::Range((
+                Bound::Excluded(vec1![1i32.into(), 1i32.into()]),
+                Bound::Unbounded,
+            ))],
             true,
         )
         .await
@@ -7143,13 +7145,10 @@ async fn overlapping_range_queries() {
             let mut q = g.view("q").await.unwrap().into_reader_handle().unwrap();
             let results = q
                 .multi_lookup(
-                    vec![KeyComparison::Range(
-                        range!(
-                            =vec1![DfValue::from(m * 10)],
-                            inf
-                        )
-                        .unwrap(),
-                    )],
+                    vec![KeyComparison::Range((
+                        Bound::Included(vec1![DfValue::from(m * 10)]),
+                        Bound::Unbounded,
+                    ))],
                     true,
                 )
                 .await
@@ -7220,13 +7219,10 @@ async fn overlapping_remapped_range_queries() {
             let mut q = g.view("q").await.unwrap().into_reader_handle().unwrap();
             let results = q
                 .multi_lookup(
-                    vec![KeyComparison::Range(
-                        range!(
-                            =vec1![DfValue::from(m * 10), DfValue::from(m * 10)],
-                            inf
-                        )
-                        .unwrap(),
-                    )],
+                    vec![KeyComparison::Range((
+                        Bound::Included(vec1![DfValue::from(m * 10), DfValue::from(m * 10)]),
+                        Bound::Unbounded,
+                    ))],
                     true,
                 )
                 .await
@@ -7297,7 +7293,10 @@ async fn range_query_through_union() {
 
     let rows = q
         .multi_lookup(
-            vec![KeyComparison::Range(range!(vec1![1.into()], inf).unwrap())],
+            vec![KeyComparison::Range((
+                Bound::Excluded(vec1![1.into()]),
+                Bound::Unbounded,
+            ))],
             true,
         )
         .await
@@ -7396,18 +7395,20 @@ async fn mixed_inclusive_range_and_equality() {
 
     let rows = q
         .multi_lookup(
-            vec![KeyComparison::Range(range!(=vec1![
-                DfValue::from(4i32),
-                DfValue::from(2i32),
-                DfValue::from(1i32),
-                DfValue::from(3i32)
-            ]
-                , =vec1![
+            vec![KeyComparison::from_range(
+                &(vec1![
                     DfValue::from(4i32),
                     DfValue::from(2i32),
-                    DfValue::from(i32::MAX),
-                    DfValue::from(i32::MAX)
-                ]))],
+                    DfValue::from(1i32),
+                    DfValue::from(3i32)
+                ]
+                    ..=vec1![
+                        DfValue::from(4i32),
+                        DfValue::from(2i32),
+                        DfValue::from(i32::MAX),
+                        DfValue::from(i32::MAX)
+                    ]),
+            )],
             true,
         )
         .await
@@ -7923,9 +7924,9 @@ async fn aggressive_eviction_range_impl() {
     for i in (0..500).rev() {
         let offset = i % 10;
         let vq = ViewQuery::from((
-            vec![KeyComparison::Range(range!(
-                =vec1![DfValue::Int(offset)],
-                vec1![DfValue::Int(offset + 20)]
+            vec![KeyComparison::Range((
+                Bound::Included(vec1![DfValue::Int(offset)]),
+                Bound::Excluded(vec1![DfValue::Int(offset + 20)]),
             ))],
             true,
         ));

@@ -1,9 +1,9 @@
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
+use std::ops::Bound;
 
 use common::DfValue;
 use readyset_client::KeyComparison;
-use readyset_data::{Bound, BoundPair};
 use readyset_errors::{internal, ReadySetResult};
 use serde::{Deserialize, Serialize};
 use vec1::Vec1;
@@ -103,7 +103,7 @@ impl PacketFilter {
                             KeyComparison::Equal(ref cond) => {
                                 check_bound(ci, row, cond, |d1, d2| d1 == d2)
                             }
-                            KeyComparison::Range(BoundPair(ref lower_bound, ref upper_bound)) => {
+                            KeyComparison::Range((ref lower_bound, ref upper_bound)) => {
                                 check_lower_bound(lower_bound, ci, row)
                                     && check_upper_bound(upper_bound, ci, row)
                             }
@@ -174,6 +174,7 @@ fn check_lower_bound(lower_bound: &Bound<Vec1<DfValue>>, ci: &[usize], row: &[Df
             check_bound(ci, row, bound, |d1: &DfValue, d2: &DfValue| d1 >= d2)
         }
         Bound::Excluded(bound) => check_bound(ci, row, bound, |d1: &DfValue, d2: &DfValue| d1 > d2),
+        Bound::Unbounded => true,
     }
 }
 
@@ -183,6 +184,7 @@ fn check_upper_bound(upper_bound: &Bound<Vec1<DfValue>>, ci: &[usize], row: &[Df
             check_bound(ci, row, bound, |d1: &DfValue, d2: &DfValue| d1 <= d2)
         }
         Bound::Excluded(bound) => check_bound(ci, row, bound, |d1: &DfValue, d2: &DfValue| d1 < d2),
+        Bound::Unbounded => true,
     }
 }
 
@@ -229,8 +231,9 @@ mod test {
     }
 
     mod update_processing {
+        use std::ops::Bound;
+
         use common::Record;
-        use readyset_data::range;
 
         use super::*;
 
@@ -455,9 +458,9 @@ mod test {
 
             let ni = NodeIndex::new(3);
 
-            let key = KeyComparison::Range(range!(
-                =vec1![10.into()],
-                vec1![20.into()]
+            let key = KeyComparison::Range((
+                Bound::Included(vec1![10.into()]),
+                Bound::Excluded(vec1![20.into()]),
             ));
             let mut keys = HashSet::new();
             keys.insert(key);
