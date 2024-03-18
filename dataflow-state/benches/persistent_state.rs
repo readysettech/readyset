@@ -36,8 +36,6 @@
 //! ```notrust
 //! $ cargo bench -- --help
 //! ```
-use std::ops::Bound;
-
 use clap::Parser;
 use common::{Index, Record};
 use criterion::{black_box, Criterion};
@@ -45,7 +43,7 @@ use dataflow_state::{
     DurabilityMode, PersistenceParameters, PersistentState, PointKey, RangeKey, SnapshotMode, State,
 };
 use itertools::Itertools;
-use readyset_data::DfValue;
+use readyset_data::{range, Bound, BoundPair, DfValue};
 
 lazy_static::lazy_static! {
     static ref LARGE_STRINGS: Vec<String> = ["a", "b", "c"]
@@ -184,10 +182,9 @@ pub fn rocksdb_range_lookup(c: &mut Criterion, state: &PersistentState) {
     let mut group = c.benchmark_group("RocksDB lookup_range");
     group.bench_function("lookup_range", |b| {
         b.iter(|| {
-            black_box(state.lookup_range(
-                &[1],
-                &RangeKey::Single((Bound::Included(key.clone()), Bound::Unbounded)),
-            ));
+            black_box(
+                state.lookup_range(&[1], &RangeKey::Single(range!(=key.clone(), inf).unwrap())),
+            );
         })
     });
     group.finish();
@@ -199,10 +196,9 @@ pub fn rocksdb_range_lookup_large_strings(c: &mut Criterion, state: &PersistentS
     let mut group = c.benchmark_group("RocksDB with large strings");
     group.bench_function("lookup_range", |b| {
         b.iter(|| {
-            black_box(state.lookup_range(
-                &[1],
-                &RangeKey::Single((Bound::Included(key.clone()), Bound::Unbounded)),
-            ));
+            black_box(
+                state.lookup_range(&[1], &RangeKey::Single(range!(=key.clone(), inf).unwrap())),
+            );
         })
     });
     group.finish();

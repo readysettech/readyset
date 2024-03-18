@@ -1,6 +1,5 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::ops::Bound;
 use std::sync::Arc;
 
 use ahash::RandomState;
@@ -11,6 +10,7 @@ use reader_map::{EvictionQuantity, EvictionStrategy};
 use readyset_client::consistency::Timestamp;
 use readyset_client::results::SharedResults;
 use readyset_client::KeyComparison;
+use readyset_data::{range, Bound, BoundPair};
 use vec1::Vec1;
 
 pub use self::multir::LookupError;
@@ -259,10 +259,12 @@ impl WriteHandle {
     pub(crate) fn contains(&self, key: &KeyComparison) -> reader_map::Result<bool> {
         match key {
             KeyComparison::Equal(k) => self.handle.read().contains_key(k),
-            KeyComparison::Range((start, end)) => self.handle.read().contains_range(&(
-                start.as_ref().map(Vec1::as_vec),
-                end.as_ref().map(Vec1::as_vec),
-            )),
+            KeyComparison::Range(BoundPair(start, end)) => {
+                self.handle.read().contains_range(&BoundPair(
+                    start.as_ref().map(Vec1::as_vec),
+                    end.as_ref().map(Vec1::as_vec),
+                ))
+            }
         }
     }
 
@@ -355,17 +357,18 @@ impl WriteHandle {
     }
 
     pub(crate) fn mark_hole(&mut self, key: &KeyComparison) -> ReadySetResult<u64> {
-        if let Some(len) = key.len() {
-            invariant_eq!(len, self.index.len());
-        }
+        invariant_eq!(key.len(), self.index.len());
+
         match key {
             KeyComparison::Equal(k) => Ok(self.mut_with_key(k.as_vec()).mark_hole()),
-            KeyComparison::Range((start, end)) => {
+            KeyComparison::Range(BoundPair(start, end)) => {
                 let start = start.clone();
                 let end = end.clone();
                 // We don't want to clone things more than once, so construct the range key, then
                 // deconstruct it again
-                let range_key = KeyComparison::Range((start, end));
+                // TODO ethan remove BoundPair type and just have standalone functions that create
+                // ranges?
+                let range_key = KeyComparison::Range(BoundPair(start, end));
                 let size = self
                     .handle
                     .read()
@@ -379,8 +382,10 @@ impl WriteHandle {
 
                 self.mem_size = self.mem_size.saturating_sub(size as usize);
                 if let KeyComparison::Range(range) = range_key {
-                    self.handle
-                        .empty_range((range.0.map(Vec1::into_vec), range.1.map(Vec1::into_vec)));
+                    self.handle.empty_range(BoundPair(
+                        range.0.map(Vec1::into_vec),
+                        range.1.map(Vec1::into_vec),
+                    ));
                 }
                 Ok(size)
             }
@@ -388,9 +393,7 @@ impl WriteHandle {
     }
 
     pub(crate) fn mark_filled(&mut self, key: KeyComparison) -> ReadySetResult<()> {
-        if let Some(len) = key.len() {
-            invariant_eq!(len, self.index.len());
-        }
+        invariant_eq!(key.len(), self.index.len());
 
         #[allow(clippy::unreachable)] // Documented invariant.
         let range = match (self.index.index_type(), &key) {
@@ -400,11 +403,11 @@ impl WriteHandle {
             (IndexType::HashMap, KeyComparison::Range(_)) => {
                 unreachable!("Range key with a HashMap index")
             }
-            (IndexType::BTreeMap, KeyComparison::Equal(equal)) => (
-                Bound::Included(equal.as_vec()),
-                Bound::Included(equal.as_vec()),
+            (IndexType::BTreeMap, KeyComparison::Equal(equal)) => range!(
+                =equal.as_vec(),
+                =equal.as_vec()
             ),
-            (IndexType::BTreeMap, KeyComparison::Range((start, end))) => (
+            (IndexType::BTreeMap, KeyComparison::Range(BoundPair(start, end))) => BoundPair(
                 start.as_ref().map(Vec1::as_vec),
                 end.as_ref().map(Vec1::as_vec),
             ),
@@ -520,7 +523,7 @@ impl SingleReadHandle {
     pub fn contains(&self, key: &KeyComparison) -> reader_map::Result<bool> {
         match key {
             KeyComparison::Equal(k) => self.handle.contains_key(k),
-            KeyComparison::Range((start, end)) => self.handle.contains_range(&(
+            KeyComparison::Range(BoundPair(start, end)) => self.handle.contains_range(&BoundPair(
                 start.as_ref().map(Vec1::as_vec),
                 end.as_ref().map(Vec1::as_vec),
             )),
@@ -588,9 +591,8 @@ impl SingleReadHandle {
 #[cfg(test)]
 #[allow(clippy::panic)]
 mod tests {
-    use std::ops::Bound;
-
     use readyset_client::results::SharedRows;
+    use readyset_data::Bound;
 
     use super::*;
 
@@ -800,15 +802,15 @@ mod tests {
             );
             w.swap();
 
-            let range_key = &[KeyComparison::Range((
-                Bound::Included(vec1![DfValue::from(0)]),
-                Bound::Excluded(vec1![DfValue::from(10)]),
+            let range_key = &[KeyComparison::Range(range!(
+                =vec1![DfValue::from(0)],
+                vec1![DfValue::from(10)]
             ))];
 
             assert!(r.get_multi(range_key).err().unwrap().is_miss());
 
-            w.mark_filled(KeyComparison::from_range(
-                &(vec1![DfValue::from(0)]..vec1![DfValue::from(10)]),
+            w.mark_filled(KeyComparison::Range(
+                range!(=vec1![DfValue::from(0)], vec1![DfValue::from(10)]),
             ))
             .unwrap();
             w.swap();
@@ -851,20 +853,22 @@ mod tests {
             );
             w.swap();
 
-            let range_key = &[KeyComparison::Range((
-                Bound::Included(vec1![DfValue::from(0)]),
-                Bound::Excluded(vec1![DfValue::from(10)]),
+            let range_key = &[KeyComparison::Range(range!(
+                =vec1![DfValue::from(0)],
+                vec1![DfValue::from(10)]
             ))];
 
-            w.mark_filled(KeyComparison::from_range(
-                &(vec1![DfValue::from(0)]..vec1![DfValue::from(10)]),
+            w.mark_filled(KeyComparison::Range(
+                // TODO ethan change range! syntax to exc/inc for all to be explicit about
+                // inclusivity
+                range!(=vec1![DfValue::from(0)], vec1![DfValue::from(10)]),
             ))
             .unwrap();
             w.swap();
             r.get_multi(range_key).unwrap();
 
-            w.mark_hole(&KeyComparison::from_range(
-                &(vec1![DfValue::from(0)]..vec1![DfValue::from(10)]),
+            w.mark_hole(&KeyComparison::Range(
+                range!(=vec1![DfValue::from(0)], vec1![DfValue::from(10)]),
             ))
             .unwrap();
             w.swap();

@@ -1,9 +1,10 @@
-use std::ops::{Bound, RangeBounds};
+use std::ops::RangeBounds;
 
 use ahash::RandomState;
 use dataflow_expression::PreInsertion;
 use reader_map::EvictionQuantity;
 use readyset_client::consistency::Timestamp;
+use readyset_data::BoundPair;
 
 use super::{key_to_single, Key};
 use crate::prelude::*;
@@ -68,10 +69,10 @@ impl Handle {
         }
     }
 
-    pub fn empty_range(&mut self, range: (Bound<Vec<DfValue>>, Bound<Vec<DfValue>>)) {
+    pub fn empty_range(&mut self, range: BoundPair<Vec<DfValue>>) {
         match self {
             Handle::Single(h) => {
-                h.remove_range((
+                h.remove_range(BoundPair(
                     range.0.map(|mut r| {
                         debug_assert_eq!(r.len(), 1);
                         r.pop().unwrap()
