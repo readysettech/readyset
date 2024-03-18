@@ -1,10 +1,10 @@
 use std::cmp::Ordering;
 use std::collections::{hash_map, BTreeMap, HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
+use std::ops::Bound;
 
 use itertools::Itertools;
 use readyset_client::KeyComparison;
-use readyset_data::{Bound, BoundPair};
 use readyset_errors::{invariant, ReadySetResult};
 use readyset_util::hash::hash;
 use readyset_util::intervals::{cmp_endbound, cmp_startbound};
@@ -209,35 +209,17 @@ impl Ord for BufferedReplayKey {
             .cmp(&other.tag)
             .then_with(|| match (&self.key, &other.key) {
                 (KeyComparison::Equal(k1), KeyComparison::Equal(k2)) => k1.cmp(k2),
-                (
-                    KeyComparison::Range(BoundPair(l1, u1)),
-                    KeyComparison::Range(BoundPair(l2, u2)),
-                ) => cmp_startbound(l1.as_ref().into_std_bound(), l2.as_ref().into_std_bound())
-                    .then_with(|| {
-                        cmp_endbound(u1.as_ref().into_std_bound(), u2.as_ref().into_std_bound())
-                    }),
-                (KeyComparison::Equal(k), KeyComparison::Range(BoundPair(l, u))) => cmp_startbound(
-                    Bound::Included(k).into_std_bound(),
-                    l.as_ref().into_std_bound(),
-                )
-                .then_with(|| {
-                    cmp_endbound(
-                        Bound::Included(k).into_std_bound(),
-                        u.as_ref().into_std_bound(),
-                    )
-                }),
-                (KeyComparison::Range(BoundPair(u, l)), KeyComparison::Equal(k)) => {
-                    // TODO ethan replace into_std_bound() with From impl
-                    cmp_startbound(
-                        l.as_ref().into_std_bound(),
-                        Bound::Included(k).into_std_bound(),
-                    )
-                    .then_with(|| {
-                        cmp_endbound(
-                            u.as_ref().into_std_bound(),
-                            Bound::Included(k).into_std_bound(),
-                        )
-                    })
+                (KeyComparison::Range((l1, u1)), KeyComparison::Range((l2, u2))) => {
+                    cmp_startbound(l1.as_ref(), l2.as_ref())
+                        .then_with(|| cmp_endbound(u1.as_ref(), u2.as_ref()))
+                }
+                (KeyComparison::Equal(k), KeyComparison::Range((l, u))) => {
+                    cmp_startbound(Bound::Included(k), l.as_ref())
+                        .then_with(|| cmp_endbound(Bound::Included(k), u.as_ref()))
+                }
+                (KeyComparison::Range((u, l)), KeyComparison::Equal(k)) => {
+                    cmp_startbound(l.as_ref(), Bound::Included(k))
+                        .then_with(|| cmp_endbound(u.as_ref(), Bound::Included(k)))
                 }
             })
             .then_with(|| self.requesting_shard.cmp(&other.requesting_shard))

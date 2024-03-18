@@ -1,9 +1,11 @@
-use std::{iter, ops};
+use std::iter;
+use std::ops::{Bound, RangeBounds};
 
 use common::{Index, IndexType};
 use indexmap::IndexMap;
 use partial_map::PartialMap;
-use readyset_data::{Bound, BoundPair, DfValue};
+use readyset_data::DfValue;
+use readyset_util::intervals::into_bound_endpoint;
 use tuple::TupleElements;
 use vec1::Vec1;
 
@@ -310,9 +312,9 @@ impl KeyedState {
     /// # Panics
     ///
     /// Panics if this `KeyedState` is backed by a HashMap index
-    pub(super) fn insert_range(&mut self, range: BoundPair<Vec1<DfValue>>) {
+    pub(super) fn insert_range(&mut self, range: (Bound<Vec1<DfValue>>, Bound<Vec1<DfValue>>)) {
         match self {
-            KeyedState::SingleBTree(ref mut map) => map.insert_range(BoundPair(
+            KeyedState::SingleBTree(ref mut map) => map.insert_range((
                 range.0.map(|k| k.split_off_first().0),
                 range.1.map(|k| k.split_off_first().0),
             )),
@@ -334,12 +336,10 @@ impl KeyedState {
             // This is unwieldy, but allowing callers to insert the wrong length of Vec into us
             // would be very bad!
             KeyedState::MultiBTree(ref mut map, len)
-                if range.0.len() == *len && range.1.len() == *len =>
+                if (into_bound_endpoint(range.0.as_ref()).map_or(true, |x| x.len() == *len)
+                    && into_bound_endpoint(range.1.as_ref()).map_or(true, |x| x.len() == *len)) =>
             {
-                map.insert_range(BoundPair(
-                    range.0.map(Vec1::into_vec),
-                    range.1.map(Vec1::into_vec),
-                ))
+                map.insert_range((range.0.map(Vec1::into_vec), range.1.map(Vec1::into_vec)))
             }
             _ =>
             #[allow(clippy::panic)] // documented invariant
@@ -361,19 +361,12 @@ impl KeyedState {
         key: &RangeKey,
     ) -> Result<Box<dyn Iterator<Item = &'a Row> + 'a>, Misses> {
         fn to_misses<K: TupleElements<Element = DfValue>>(
-            misses: Vec<(ops::Bound<K>, ops::Bound<K>)>,
+            misses: Vec<(Bound<K>, Bound<K>)>,
         ) -> Misses {
             misses
                 .into_iter()
                 .map(|(lower, upper)| {
-                    let lower: Bound<_> = lower
-                        .try_into()
-                        .expect("we did not pass in an unbounded bound, so we should not be getting one back");
-                    let upper: Bound<_> = upper
-                        .try_into()
-                        .expect("we did not pass in an unbounded bound, so we should not be getting one back");
-
-                    BoundPair(
+                    (
                         lower.map(|k| k.into_elements().collect()),
                         upper.map(|k| k.into_elements().collect()),
                     )
@@ -387,6 +380,12 @@ impl KeyedState {
             Box::new(r.flat_map(|(_, rows)| rows))
         }
 
+        macro_rules! full_range {
+            ($m: expr) => {
+                $m.range(&(..)).map(flatten_rows).map_err(to_misses)
+            };
+        }
+
         macro_rules! range {
             ($m: expr, $range: ident) => {
                 $m.range($range).map(flatten_rows).map_err(to_misses)
@@ -394,45 +393,37 @@ impl KeyedState {
         }
 
         match (self, key) {
+            (KeyedState::SingleBTree(m), &RangeKey::Unbounded) => m
+                .range(&(..))
+                .map_err(|misses| {
+                    misses
+                        .into_iter()
+                        .map(|(lower, upper)| (lower.map(|k| vec![k]), upper.map(|k| vec![k])))
+                        .collect()
+                })
+                .map(flatten_rows),
+            (KeyedState::DoubleBTree(m), &RangeKey::Unbounded) => full_range!(m),
+            (KeyedState::TriBTree(m), &RangeKey::Unbounded) => full_range!(m),
+            (KeyedState::QuadBTree(m), &RangeKey::Unbounded) => full_range!(m),
+            (KeyedState::SexBTree(m), &RangeKey::Unbounded) => full_range!(m),
             (KeyedState::SingleBTree(m), RangeKey::Single(range)) => {
                 m.range(range).map(flatten_rows).map_err(|misses| {
                     misses
                         .into_iter()
-                        .map(|(lower, upper)| {
-                            let lower: Bound<_> = lower.try_into().expect("we did not pass in an unbounded bound, so we should not be getting one back");
-                            let upper: Bound<_>  = upper.try_into().expect("we did not pass in an unbounded bound, so we should not be getting one back");
-
-                            BoundPair(lower.map(|k| vec![k]), upper.map(|k| vec![k]))
-                        })
+                        .map(|(lower, upper)| (lower.map(|k| vec![k]), upper.map(|k| vec![k])))
                         .collect()
                 })
             }
             (KeyedState::DoubleBTree(m), RangeKey::Double(range)) => range!(m, range),
             (KeyedState::TriBTree(m), RangeKey::Tri(range)) => range!(m, range),
             (KeyedState::QuadBTree(m), RangeKey::Quad(range)) => range!(m, range),
-            (KeyedState::SexBTree(m), RangeKey::Sex(range)) => {
-                range!(m, range)
-               
-            }
-            (KeyedState::MultiBTree(m, _), RangeKey::Multi(range)) => {
-                m
-                .range::<_, [DfValue]>(&BoundPair(
+            (KeyedState::SexBTree(m), RangeKey::Sex(range)) => range!(m, range),
+            (KeyedState::MultiBTree(m, _), RangeKey::Multi(range)) => m
+                .range::<_, [DfValue]>(&(
                     range.0.as_ref().map(|b| b.as_ref()),
                     range.1.as_ref().map(|b| b.as_ref()),
                 ))
-                .map(flatten_rows)
-                .map_err(|misses|{
-                    misses
-                        .into_iter()
-                        .map(|(lower, upper)| {
-                            let lower: Bound<_> = lower.try_into().expect("we did not pass in an unbounded bound, so we should not be getting one back");
-                            let upper: Bound<_>  = upper.try_into().expect("we did not pass in an unbounded bound, so we should not be getting one back");
-
-                            BoundPair(lower, upper)
-                        })
-                        .collect()
-                })
-            }
+                .map(flatten_rows),
             (
                 KeyedState::SingleHash(_)
                 | KeyedState::DoubleHash(_)
@@ -584,7 +575,10 @@ impl KeyedState {
     /// # Panics
     ///
     /// Panics if this `KeyedState` is backed by a HashMap index
-    pub(super) fn evict_range(&mut self, range: &BoundPair<Vec1<DfValue>>) -> Rows {
+    pub(super) fn evict_range<R>(&mut self, range: &R) -> Rows
+    where
+        R: RangeBounds<Vec1<DfValue>>,
+    {
         macro_rules! do_evict_range {
             ($m: expr, $range: expr, $hint: ty) => {
                 $m.remove_range(<$hint as MakeKey<DfValue>>::from_range($range))
@@ -601,7 +595,7 @@ impl KeyedState {
             KeyedState::QuinBTree(m) => do_evict_range!(m, range, (DfValue, _, _, _, _)),
             KeyedState::SexBTree(m) => do_evict_range!(m, range, (DfValue, _, _, _, _, _)),
             KeyedState::MultiBTree(m, _) => m
-                .remove_range::<[DfValue], _>(BoundPair(
+                .remove_range::<[DfValue], _>((
                     range.start_bound().map(Vec1::as_slice),
                     range.end_bound().map(Vec1::as_slice),
                 ))

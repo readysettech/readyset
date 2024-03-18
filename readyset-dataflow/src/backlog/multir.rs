@@ -10,7 +10,6 @@ use reader_map::refs::Miss;
 use readyset_client::consistency::Timestamp;
 use readyset_client::results::{SharedResults, SharedRows};
 use readyset_client::KeyComparison;
-use readyset_data::{Bound, BoundPair};
 use readyset_errors::ReadySetError;
 use serde::{Deserialize, Serialize};
 use tracing::warn;
@@ -135,7 +134,7 @@ impl Handle {
                     Some(v) => hits.push(v.as_ref().clone()),
                     None => misses.push(Cow::Borrowed(key)),
                 },
-                KeyComparison::Range(BoundPair(start, end)) => {
+                KeyComparison::Range((start, end)) => {
                     if key.is_reversed_range() {
                         warn!("Reader received lookup for range with start bound above end bound; returning empty result set");
                         hits.push(Default::default());
@@ -144,12 +143,12 @@ impl Handle {
 
                     let start_bound = start.as_ref().map(|v| &v[0]);
                     let end_bound = end.as_ref().map(|v| &v[0]);
-                    match map.range(&BoundPair(start_bound, end_bound)) {
+                    match map.range(&(start_bound, end_bound)) {
                         Ok(hit) => hits.extend(hit.map(|(_, v)| v.as_ref().clone())),
                         Err(Miss(miss)) => misses.extend(miss.into_iter().map(|(start, end)| {
-                            Cow::Owned(KeyComparison::Range(BoundPair(
-                                Bound::try_from(start).unwrap().map(|s| vec1![s]),
-                                Bound::try_from(end).unwrap().map(|e| vec1![e]),
+                            Cow::Owned(KeyComparison::Range((
+                                start.map(|s| vec1![s]),
+                                end.map(|e| vec1![e]),
                             )))
                         })),
                     }
@@ -189,26 +188,22 @@ impl Handle {
                     Some(v) => hits.push(v.as_ref().clone()),
                     None => misses.push(Cow::Borrowed(key)),
                 },
-                KeyComparison::Range(BoundPair(start, end)) => {
+                KeyComparison::Range((start, end)) => {
                     if key.is_reversed_range() {
                         warn!("Reader received lookup for range with start bound above end bound; returning empty result set");
                         hits.push(Default::default());
                         continue;
                     }
 
-                    match map.range::<_, [DfValue]>(&BoundPair(
+                    match map.range::<_, [DfValue]>(&(
                         start.as_ref().map(|v| v.as_slice()),
                         end.as_ref().map(|v| v.as_slice()),
                     )) {
                         Ok(hit) => hits.extend(hit.map(|(_, v)| v.as_ref().clone())),
                         Err(Miss(miss)) => misses.extend(miss.into_iter().map(|(start, end)| {
-                            Cow::Owned(KeyComparison::Range(BoundPair(
-                                Bound::try_from(start)
-                                    .unwrap()
-                                    .map(|s| Vec1::try_from_vec(s).unwrap()),
-                                Bound::try_from(end)
-                                    .unwrap()
-                                    .map(|e| Vec1::try_from_vec(e).unwrap()),
+                            Cow::Owned(KeyComparison::Range((
+                                start.map(|s| Vec1::try_from_vec(s).unwrap()),
+                                end.map(|e| Vec1::try_from_vec(e).unwrap()),
                             )))
                         })),
                     }
@@ -297,18 +292,18 @@ impl Handle {
     /// keys miss, or an error if the underlying reader map is not able to accept reads
     ///
     /// This is equivalent to testing if `get` returns an Err other than `NotReady`
-    pub(super) fn contains_range(
-        &self,
-        range: &BoundPair<&Vec<DfValue>>,
-    ) -> reader_map::Result<bool> {
+    pub(super) fn contains_range<R>(&self, range: &R) -> reader_map::Result<bool>
+    where
+        R: RangeBounds<Vec<DfValue>>,
+    {
         match *self {
             Handle::Single(ref h) => {
                 let map = h.enter()?;
-                let start_bound = range.start_bound().map(|v: &&Vec<DfValue>| {
+                let start_bound = range.start_bound().map(|v| {
                     assert!(v.len() == 1);
                     &v[0]
                 });
-                let end_bound = range.end_bound().map(|v: &&Vec<DfValue>| {
+                let end_bound = range.end_bound().map(|v| {
                     assert!(v.len() == 1);
                     &v[0]
                 });
@@ -323,18 +318,18 @@ impl Handle {
 
     /// Returns Ok(true) if this handle partially contains the given key range, Ok(false) if all of
     /// the keys miss, or an error if the underlying reader map is not able to accept reads
-    pub(super) fn overlaps_range(
-        &self,
-        range: &BoundPair<&Vec<DfValue>>,
-    ) -> reader_map::Result<bool> {
+    pub(super) fn overlaps_range<R>(&self, range: &R) -> reader_map::Result<bool>
+    where
+        R: RangeBounds<Vec<DfValue>>,
+    {
         match *self {
             Handle::Single(ref h) => {
                 let map = h.enter()?;
-                let start_bound = range.start_bound().map(|v: &&Vec<DfValue>| {
+                let start_bound = range.start_bound().map(|v| {
                     assert!(v.len() == 1);
                     &v[0]
                 });
-                let end_bound = range.end_bound().map(|v: &&Vec<DfValue>| {
+                let end_bound = range.end_bound().map(|v| {
                     assert!(v.len() == 1);
                     &v[0]
                 });
@@ -358,9 +353,10 @@ impl Handle {
 
 #[cfg(test)]
 mod tests {
+    use std::ops::Bound;
+
     use proptest::prelude::*;
     use reader_map::handles::WriteHandle;
-    use readyset_data::range;
 
     use super::*;
 
@@ -415,9 +411,9 @@ mod tests {
         w.insert_range((DfValue::from(0i32))..(DfValue::from(10i32)));
         w.publish();
 
-        let key = KeyComparison::Range(range!(
-            =vec1![2i32.into()],
-            =vec1![3i32.into()]
+        let key = KeyComparison::Range((
+            Bound::Included(vec1![2i32.into()]),
+            Bound::Included(vec1![3i32.into()]),
         ));
 
         let res = handle.get_multi(&[key]).unwrap();
@@ -464,9 +460,9 @@ mod tests {
         w.insert_range(vec![0i32.into(), 0i32.into()]..vec![10i32.into(), 10i32.into()]);
         w.publish();
 
-        let key = KeyComparison::Range(range!(
-            =vec1![2i32.into(), 2i32.into()],
-            =vec1![3i32.into(), 3i32.into()]
+        let key = KeyComparison::Range((
+            Bound::Included(vec1![2i32.into(), 2i32.into()]),
+            Bound::Included(vec1![3i32.into(), 3i32.into()]),
         ));
 
         let res = handle.get_multi(&[key]).unwrap();

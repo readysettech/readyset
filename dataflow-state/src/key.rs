@@ -1,8 +1,9 @@
-use std::fmt;
+use std::ops::{Bound, RangeBounds};
 
 use common::DfValue;
 use derive_more::From;
-use readyset_data::{Bound, BoundPair, TextRef};
+use readyset_data::TextRef;
+use readyset_util::intervals::BoundPair;
 use serde::ser::{SerializeSeq, SerializeTuple};
 use serde::Serialize;
 use test_strategy::Arbitrary;
@@ -149,6 +150,8 @@ impl Serialize for PointKey {
 
 #[derive(Clone, Debug, Serialize, Eq, PartialEq)]
 pub enum RangeKey {
+    /// Key-length-polymorphic double-unbounded range key
+    Unbounded,
     Single(BoundPair<DfValue>),
     Double(BoundPair<(DfValue, DfValue)>),
     Tri(BoundPair<(DfValue, DfValue, DfValue)>),
@@ -182,18 +185,24 @@ impl RangeKey {
     ///     RangeKey::Single((Included(0.into()), Excluded(1.into())))
     /// );
     /// ```
-    pub fn from(range: &BoundPair<Vec1<DfValue>>) -> Self {
+    pub fn from<R>(range: &R) -> Self
+    where
+        R: RangeBounds<Vec1<DfValue>>,
+    {
         use Bound::*;
         let len = match (range.start_bound(), range.end_bound()) {
+            (Unbounded, Unbounded) => return RangeKey::Unbounded,
             (Included(start) | Excluded(start), Included(end) | Excluded(end)) => {
                 assert_eq!(start.len(), end.len());
                 start.len()
             }
+            (Included(start) | Excluded(start), Unbounded) => start.len(),
+            (Unbounded, Included(end) | Excluded(end)) => end.len(),
         };
 
         macro_rules! make {
             ($variant: ident, |$elem: ident| $make_tuple: expr) => {
-                RangeKey::$variant(BoundPair(
+                RangeKey::$variant((
                     make!(bound, start_bound, $elem, $make_tuple),
                     make!(bound, end_bound, $elem, $make_tuple),
                 ))
@@ -215,7 +224,7 @@ impl RangeKey {
             4 => make!(Quad, |elem| (elem(), elem(), elem(), elem())),
             5 => make!(Quin, |elem| (elem(), elem(), elem(), elem(), elem())),
             6 => make!(Sex, |elem| (elem(), elem(), elem(), elem(), elem(), elem())),
-            _ => RangeKey::Multi(BoundPair(
+            _ => RangeKey::Multi((
                 range
                     .start_bound()
                     .map(|key| key.clone().into_vec().into_boxed_slice()),
@@ -229,54 +238,50 @@ impl RangeKey {
     /// Returns the upper bound of the range key
     pub fn upper_bound(&self) -> Bound<Vec<&DfValue>> {
         match self {
-            RangeKey::Single(BoundPair(_, upper)) => upper.as_ref().map(|dt| vec![dt]),
-            RangeKey::Double(BoundPair(_, upper)) => {
-                upper.as_ref().map(|dts| dts.elements().collect())
-            }
-            RangeKey::Tri(BoundPair(_, upper)) => {
-                upper.as_ref().map(|dts| dts.elements().collect())
-            }
-            RangeKey::Quad(BoundPair(_, upper)) => {
-                upper.as_ref().map(|dts| dts.elements().collect())
-            }
-            RangeKey::Quin(BoundPair(_, upper)) => {
-                upper.as_ref().map(|dts| dts.elements().collect())
-            }
-            RangeKey::Sex(BoundPair(_, upper)) => {
-                upper.as_ref().map(|dts| dts.elements().collect())
-            }
-            RangeKey::Multi(BoundPair(_, upper)) => upper.as_ref().map(|dts| dts.iter().collect()),
+            RangeKey::Unbounded => Bound::Unbounded,
+            RangeKey::Single((_, upper)) => upper.as_ref().map(|dt| vec![dt]),
+            RangeKey::Double((_, upper)) => upper.as_ref().map(|dts| dts.elements().collect()),
+            RangeKey::Tri((_, upper)) => upper.as_ref().map(|dts| dts.elements().collect()),
+            RangeKey::Quad((_, upper)) => upper.as_ref().map(|dts| dts.elements().collect()),
+            RangeKey::Quin((_, upper)) => upper.as_ref().map(|dts| dts.elements().collect()),
+            RangeKey::Sex((_, upper)) => upper.as_ref().map(|dts| dts.elements().collect()),
+            RangeKey::Multi((_, upper)) => upper.as_ref().map(|dts| dts.iter().collect()),
         }
     }
 
     /// Return the length of this range key, or None if the key is Unbounded
-    pub fn len(&self) -> usize {
+    pub fn len(&self) -> Option<usize> {
         match self {
-            RangeKey::Single(_) => 1,
-            RangeKey::Double(_) => 2,
-            RangeKey::Tri(_) => 3,
-            RangeKey::Quad(_) => 4,
-            RangeKey::Quin(_) => 5,
-            RangeKey::Sex(_) => 6,
+            RangeKey::Unbounded | RangeKey::Multi((Bound::Unbounded, Bound::Unbounded)) => None,
+            RangeKey::Single(_) => Some(1),
+            RangeKey::Double(_) => Some(2),
+            RangeKey::Tri(_) => Some(3),
+            RangeKey::Quad(_) => Some(4),
+            RangeKey::Quin(_) => Some(5),
+            RangeKey::Sex(_) => Some(6),
             RangeKey::Multi(
-                BoundPair(Bound::Included(k), _) | BoundPair(Bound::Excluded(k), _),
-            ) => k.len(),
+                (Bound::Included(k), _)
+                | (Bound::Excluded(k), _)
+                | (_, Bound::Included(k))
+                | (_, Bound::Excluded(k)),
+            ) => Some(k.len()),
         }
     }
 
     /// Convert this [`RangeKey`] into a pair of bounds on [`PointKey`]s, for use during
     /// serialization of lookup keys for ranges
     pub(crate) fn into_point_keys(self) -> BoundPair<PointKey> {
+        use Bound::*;
+
         macro_rules! point_keys {
             ($r:ident, $variant:ident) => {
-                BoundPair($r.0.map(PointKey::$variant), $r.1.map(PointKey::$variant))
+                ($r.0.map(PointKey::$variant), $r.1.map(PointKey::$variant))
             };
         }
 
         match self {
-            RangeKey::Single(BoundPair(l, u)) => {
-                BoundPair(l.map(PointKey::Single), u.map(PointKey::Single))
-            }
+            RangeKey::Unbounded => (Unbounded, Unbounded),
+            RangeKey::Single((l, u)) => (l.map(PointKey::Single), u.map(PointKey::Single)),
             RangeKey::Double(r) => point_keys!(r, Double),
             RangeKey::Tri(r) => point_keys!(r, Tri),
             RangeKey::Quad(r) => point_keys!(r, Quad),
@@ -289,9 +294,9 @@ impl RangeKey {
     pub fn as_bound_pair(&self) -> BoundPair<Vec<DfValue>> {
         fn as_bound_pair<T>(bound_pair: &BoundPair<T>) -> BoundPair<Vec<DfValue>>
         where
-            T: TupleElements<Element = DfValue> + fmt::Debug,
+            T: TupleElements<Element = DfValue>,
         {
-            BoundPair(
+            (
                 bound_pair
                     .0
                     .as_ref()
@@ -304,7 +309,8 @@ impl RangeKey {
         }
 
         match self {
-            RangeKey::Single(BoundPair(lower, upper)) => BoundPair(
+            RangeKey::Unbounded => (Bound::Unbounded, Bound::Unbounded),
+            RangeKey::Single((lower, upper)) => (
                 lower.as_ref().map(|dt| vec![dt.clone()]),
                 upper.as_ref().map(|dt| vec![dt.clone()]),
             ),
@@ -313,7 +319,7 @@ impl RangeKey {
             RangeKey::Quad(bp) => as_bound_pair(bp),
             RangeKey::Quin(bp) => as_bound_pair(bp),
             RangeKey::Sex(bp) => as_bound_pair(bp),
-            RangeKey::Multi(BoundPair(lower, upper)) => BoundPair(
+            RangeKey::Multi((lower, upper)) => (
                 lower.as_ref().map(|dts| dts.to_vec()),
                 upper.as_ref().map(|dts| dts.to_vec()),
             ),

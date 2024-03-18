@@ -1,7 +1,5 @@
 use std::borrow::Borrow;
-use std::fmt;
-
-use readyset_data::BoundPair;
+use std::ops::{Bound, RangeBounds};
 
 #[macro_export]
 macro_rules! adapt_range {
@@ -21,19 +19,20 @@ macro_rules! adapt_range {
 pub(super) trait MakeKey<A> {
     fn from_row(key: &[usize], row: &[A]) -> Self;
     fn from_key(key: &[A]) -> Self;
-    fn from_range<I>(BoundPair(lower, upper): &BoundPair<I>) -> BoundPair<Self>
+    fn from_range<R, I>(range: &R) -> (Bound<Self>, Bound<Self>)
     where
+        R: RangeBounds<I>,
         I: Borrow<[A]>,
         Self: Sized,
     {
-        BoundPair(
-            lower.as_ref().map(|k| Self::from_key(k.borrow())),
-            upper.as_ref().map(|k| Self::from_key(k.borrow())),
+        (
+            range.start_bound().map(|k| Self::from_key(k.borrow())),
+            range.end_bound().map(|k| Self::from_key(k.borrow())),
         )
     }
 }
 
-impl<A: Clone + fmt::Debug> MakeKey<A> for (A, A) {
+impl<A: Clone> MakeKey<A> for (A, A) {
     #[inline(always)]
     fn from_row(key: &[usize], row: &[A]) -> Self {
         debug_assert_eq!(key.len(), 2);
@@ -46,7 +45,7 @@ impl<A: Clone + fmt::Debug> MakeKey<A> for (A, A) {
     }
 }
 
-impl<A: Clone + fmt::Debug> MakeKey<A> for A {
+impl<A: Clone> MakeKey<A> for A {
     #[inline(always)]
     fn from_row(key: &[usize], row: &[A]) -> Self {
         debug_assert_eq!(key.len(), 1);
@@ -60,7 +59,7 @@ impl<A: Clone + fmt::Debug> MakeKey<A> for A {
     }
 }
 
-impl<A: Clone + fmt::Debug> MakeKey<A> for (A, A, A) {
+impl<A: Clone> MakeKey<A> for (A, A, A) {
     #[inline(always)]
     fn from_row(key: &[usize], row: &[A]) -> Self {
         debug_assert_eq!(key.len(), 3);
@@ -77,7 +76,7 @@ impl<A: Clone + fmt::Debug> MakeKey<A> for (A, A, A) {
     }
 }
 
-impl<A: Clone + fmt::Debug> MakeKey<A> for (A, A, A, A) {
+impl<A: Clone> MakeKey<A> for (A, A, A, A) {
     #[inline(always)]
     fn from_row(key: &[usize], row: &[A]) -> Self {
         debug_assert_eq!(key.len(), 4);
@@ -100,7 +99,7 @@ impl<A: Clone + fmt::Debug> MakeKey<A> for (A, A, A, A) {
     }
 }
 
-impl<A: Clone + fmt::Debug> MakeKey<A> for (A, A, A, A, A) {
+impl<A: Clone> MakeKey<A> for (A, A, A, A, A) {
     #[inline(always)]
     fn from_row(key: &[usize], row: &[A]) -> Self {
         debug_assert_eq!(key.len(), 5);
@@ -125,7 +124,7 @@ impl<A: Clone + fmt::Debug> MakeKey<A> for (A, A, A, A, A) {
     }
 }
 
-impl<A: Clone + fmt::Debug> MakeKey<A> for (A, A, A, A, A, A) {
+impl<A: Clone> MakeKey<A> for (A, A, A, A, A, A) {
     #[inline(always)]
     fn from_row(key: &[usize], row: &[A]) -> Self {
         debug_assert_eq!(key.len(), 6);
@@ -151,7 +150,7 @@ impl<A: Clone + fmt::Debug> MakeKey<A> for (A, A, A, A, A, A) {
         )
     }
 }
-impl<A: Clone + fmt::Debug> MakeKey<A> for Vec<A> {
+impl<A: Clone> MakeKey<A> for Vec<A> {
     #[inline(always)]
     fn from_row(key: &[usize], row: &[A]) -> Self {
         key.iter().map(|&x| row[x].clone()).collect()
