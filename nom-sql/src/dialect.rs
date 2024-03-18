@@ -53,7 +53,6 @@ where
     }
 }
 
-#[cfg(test)]
 impl<T> DialectDisplay for Vec<T>
 where
     T: DialectDisplay,

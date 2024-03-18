@@ -13,7 +13,7 @@ use nom_sql::{
     BinaryOperator, Column, DialectDisplay, Expr, FieldDefinitionExpr, FieldReference,
     FunctionExpr, InValue, ItemPlaceholder, JoinConstraint, JoinOperator, JoinRightSide,
     LimitClause, Literal, OrderBy, OrderType, Relation, SelectStatement, SqlIdentifier, TableExpr,
-    TableExprInner,
+    TableExprInner, Dialect,
 };
 use readyset_client::{PlaceholderIdx, ViewPlaceholder};
 use readyset_errors::{
@@ -626,11 +626,27 @@ fn classify_conditionals(
                             placeholder_idx: idx,
                         });
                     }
+
+                } else if let Expr::Cast{ expr: box Expr::Literal(Literal::Placeholder(ref placeholder)), .. }  = **rhs {
+                    // TODO: extend this to be able to handle parameters in arbitrary expressions
+                    // in rhs
+                    if let Expr::Column(ref lf) = **lhs {
+                        let idx = match placeholder {
+                            ItemPlaceholder::DollarNumber(idx) => Some(*idx as usize),
+                            _ => None,
+                        };
+                        trace!(rhs = %rhs.display(Dialect::PostgreSQL), "Adding parameter for cast");
+                        params.push(Parameter {
+                            col: lf.clone(),
+                            op: *op,
+                            placeholder_idx: idx,
+                        });
+                    }
                 } else if let Expr::Column(Column {
                     table: Some(table), ..
                 }) = &**lhs
                 {
-                    trace!("local");
+                    trace!(rhs = %rhs.display(nom_sql::Dialect::PostgreSQL), "local");
                     local.entry(table.clone()).or_default().push(ce.clone());
                 } else {
                     // comparisons between computed columns and literals are global
@@ -880,7 +896,7 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                     preds: Vec<Expr>,
                     fields: &Vec<FieldDefinitionExpr>|
      -> ReadySetResult<QueryGraphNode> {
-        trace!(?rel, ?preds, ?fields, "new_node");
+        trace!(rel = %rel.display_unquoted(), preds = %preds.display(nom_sql::Dialect::PostgreSQL), ?fields, "new_node");
         Ok(QueryGraphNode {
             relation: rel.clone(),
             predicates: preds,

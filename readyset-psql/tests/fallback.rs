@@ -2720,12 +2720,15 @@ async fn cast_parameter() {
         .unwrap();
 
     readyset_tracing::init_test_logging();
+    // conn.simple_query("CREATE CACHE FROM SELECT * FROM tz where t <= $1::timestamp and t >= $2::timestamp")
+    //     .await
+    //     .unwrap();
     conn.simple_query("CREATE CACHE FROM SELECT * FROM tz where t = $1::timestamp")
         .await
         .unwrap();
 
     sleep().await;
-    conn.simple_query("SELECT * FROM tz WHERE t = 1::timestamp")
+    conn.simple_query("SELECT * FROM tz WHERE t = '2020-01-01'::timestamp")
         .await
         .unwrap();
 
