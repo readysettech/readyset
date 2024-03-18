@@ -723,6 +723,14 @@ where
         let _ = self.noria.remove_statement(statement_id).await;
     }
 
+    async fn on_reset(&mut self) -> io::Result<()> {
+        let _ = match self.reset().await {
+            Ok(()) => Ok(()),
+            Err(e) => Err(io::Error::new(io::ErrorKind::Other, e.to_string())),
+        };
+        Ok(())
+    }
+
     async fn on_query(
         &mut self,
         query: &str,

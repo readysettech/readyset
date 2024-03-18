@@ -928,6 +928,31 @@ async fn replication_failure_ignores_table() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
+async fn reset_user() {
+    let (opts, _handle, shutdown_tx) = setup().await;
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    conn.query_drop("CREATE TEMPORARY TABLE t (id INT)")
+        .await
+        .unwrap();
+    conn.query_drop("INSERT INTO t (id) VALUES (1)")
+        .await
+        .unwrap();
+    let row_temp_table: Vec<i64> = conn.query("SELECT COUNT(*) FROM t").await.unwrap();
+    assert_eq!(row_temp_table.len(), 1);
+    assert_eq!(row_temp_table[0], 1);
+    conn.reset().await.unwrap();
+    let row = conn.query_drop("SELECT COUNT(*) FROM t").await;
+
+    assert_eq!(
+        row.map_err(|e| e.to_string()),
+        Err("Server error: `ERROR 42S02 (1146): Table 'noria.t' doesn't exist'".to_string())
+    );
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
 #[slow]
 #[ignore = "REA-3933 (see comments on ticket)"]
 async fn show_proxied_queries_show_caches_query_text_matches() {

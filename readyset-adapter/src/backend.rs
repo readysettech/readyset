@@ -849,6 +849,15 @@ where
             .unwrap_or_else(|| DB::DEFAULT_DB_VERSION.to_string())
     }
 
+    /// Reset the current upstream connection
+    pub async fn reset(&mut self) -> Result<(), DB::Error> {
+        if let Some(upstream) = &mut self.upstream {
+            upstream.reset().await
+        } else {
+            Ok(())
+        }
+    }
+
     /// Switch the active database for this backend to the given named database.
     ///
     /// Internally, this will set the schema search path to a single-element vector with the

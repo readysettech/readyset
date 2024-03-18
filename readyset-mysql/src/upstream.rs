@@ -241,6 +241,11 @@ impl UpstreamDatabase for MySqlUpstream {
         format!("{major}.{minor}.{patch}-readyset\0")
     }
 
+    async fn reset(&mut self) -> Result<(), Self::Error> {
+        self.conn.reset().await?;
+        Ok(())
+    }
+
     async fn is_connected(&mut self) -> Result<bool, Self::Error> {
         Ok(self.conn.ping().await.is_ok())
     }

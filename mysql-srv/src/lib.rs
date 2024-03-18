@@ -50,6 +50,10 @@
 //!     }
 //!     async fn on_close(&mut self, _: DeallocateId) {}
 //!
+//!     async fn on_reset(&mut self) -> io::Result<()> {
+//!         Ok(())
+//!     }
+//!
 //!     async fn on_init(&mut self, _: &str, w: Option<InitWriter<'_, W>>) -> io::Result<()> {
 //!         w.unwrap().ok().await
 //!     }
@@ -289,6 +293,9 @@ pub trait MySqlShim<W: AsyncWrite + Unpin + Send> {
         query: &str,
         results: QueryResultWriter<'_, W>,
     ) -> QueryResultsResponse;
+
+    /// Called when the client issues a reset command
+    async fn on_reset(&mut self) -> io::Result<()>;
 
     /// Called when client switches database.
     async fn on_init(&mut self, _: &str, _: Option<InitWriter<'_, W>>) -> io::Result<()>;
@@ -812,6 +819,11 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
                     // statements, so failure with any one will be forwarded to the underlying
                     // database as a single statement, meaning that the underlying database does
                     // not need to have multi-statement support enabled for this connection.
+                    writers::write_ok_packet(&mut self.writer, 0, 0, StatusFlags::empty()).await?;
+                    self.writer.flush().await?;
+                }
+                Command::Reset => {
+                    self.shim.on_reset().await?;
                     writers::write_ok_packet(&mut self.writer, 0, 0, StatusFlags::empty()).await?;
                     self.writer.flush().await?;
                 }

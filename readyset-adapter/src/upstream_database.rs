@@ -110,6 +110,9 @@ pub trait UpstreamDatabase: Sized + Send {
         database: &str,
     ) -> Result<(), Self::Error>;
 
+    /// Reset the connection to the upstream database
+    async fn reset(&mut self) -> Result<(), Self::Error>;
+
     /// Returns a database name if it was included in the original connection string, or None if no
     /// database name was included in the original connection string.
     fn database(&self) -> Option<&str> {
@@ -275,6 +278,10 @@ where
             .await?
             .change_user(user, password, database)
             .await
+    }
+
+    async fn reset(&mut self) -> Result<(), Self::Error> {
+        self.upstream().await?.reset().await
     }
 
     fn database(&self) -> Option<&str> {

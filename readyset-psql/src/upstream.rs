@@ -230,6 +230,11 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         })
     }
 
+    async fn reset(&mut self) -> Result<(), Self::Error> {
+        self.client.simple_query("DISCARD ALL").await?;
+        Ok(())
+    }
+
     async fn is_connected(&mut self) -> Result<bool, Self::Error> {
         Ok(!self.client.simple_query("select 1").await?.is_empty())
     }

@@ -95,6 +95,10 @@ where
 
     async fn on_close(&mut self, _: DeallocateId) {}
 
+    async fn on_reset(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+
     async fn on_init(&mut self, schema: &str, writer: Option<InitWriter<'_, W>>) -> io::Result<()> {
         (self.on_i)(schema, writer.unwrap()).await
     }

@@ -157,6 +157,7 @@ pub enum Command<'a> {
     Query(&'a [u8]),
     ListFields(&'a [u8]),
     Close(u32),
+    Reset,
     ResetStmtData(u32),
     Prepare(&'a [u8]),
     Init(&'a [u8]),
@@ -230,6 +231,9 @@ pub fn parse(i: &[u8]) -> IResult<&[u8], Command<'_>> {
             preceded(tag(&[CommandByte::COM_STMT_CLOSE as u8]), le_u32),
             Command::Close,
         ),
+        map(tag(&[CommandByte::COM_RESET_CONNECTION as u8]), |_| {
+            Command::Reset
+        }),
         map(tag(&[CommandByte::COM_QUIT as u8]), |_| Command::Quit),
         map(tag(&[CommandByte::COM_PING as u8]), |_| Command::Ping),
         map(
