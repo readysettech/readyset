@@ -891,8 +891,6 @@ impl<'df> Migration<'df> {
     }
 
     /// Set up the given node such that its output can be efficiently queried.
-    ///
-    /// To query into the maintained state, use `Leader::get_getter`.
     pub fn maintain_anonymous(&mut self, n: NodeIndex, index: &Index) -> NodeIndex {
         let ri = self.ensure_reader_for(n, None, Default::default());
 
@@ -908,8 +906,6 @@ impl<'df> Migration<'df> {
 
     /// Set up the given node such that its output can be efficiently queried, with the given
     /// [`ReaderProcessing`] operations to be performed on the results of all lookups
-    ///
-    /// To query into the maintained state, use `Leader::get_getter`.
     pub fn maintain_anonymous_with_reader_processing(
         &mut self,
         n: NodeIndex,
@@ -929,8 +925,6 @@ impl<'df> Migration<'df> {
     }
 
     /// Set up the given node such that its output can be efficiently queried.
-    ///
-    /// To query into the maintained state, use `Leader::get_getter`.
     pub fn maintain(
         &mut self,
         name: Relation,
