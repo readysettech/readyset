@@ -136,7 +136,7 @@
 //!         mysql::Opts::from_url(&format!("mysql://root:password@127.0.0.1:{}", port)).unwrap(),
 //!     )
 //!     .unwrap();
-//!     assert_eq!(db.ping(), true);
+//!     assert!(db.ping().is_ok());
 //!     assert_eq!(
 //!         db.query::<mysql::Row, _>("SELECT a, b FROM foo")
 //!             .unwrap()

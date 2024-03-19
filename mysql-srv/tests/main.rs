@@ -280,7 +280,7 @@ fn it_inits_ok() {
         },
         move |_, _, _| unreachable!(),
     )
-    .test(|db| assert!(db.select_db("test")));
+    .test(|db| assert!(db.select_db("test").is_ok()));
 }
 
 #[test]
@@ -302,7 +302,7 @@ fn it_inits_error() {
         },
         move |_, _, _| unreachable!(),
     )
-    .test(|db| assert!(!db.select_db("test")));
+    .test(|db| assert!(db.select_db("test").is_err()));
 }
 
 #[test]
@@ -314,7 +314,7 @@ fn it_pings() {
         |_, _| unreachable!(),
         move |_, _, _| unreachable!(),
     )
-    .test(|db| assert!(db.ping()))
+    .test(|db| assert!(db.ping().is_ok()))
 }
 
 #[test]

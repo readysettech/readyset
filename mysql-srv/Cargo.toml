@@ -14,7 +14,7 @@ categories = ["api-bindings", "network-programming", "database-implementations"]
 [dependencies]
 nom = "7.1"
 mysql_async = { workspace = true }
-mysql_common = { version = "0.30", features = ["chrono"] }
+mysql_common = { version = "0.32", features = ["chrono"] }
 byteorder = "1"
 chrono = "0.4"
 time = "0.3"
@@ -31,7 +31,7 @@ readyset-data = { path = "../readyset-data" }
 
 [dev-dependencies]
 tokio-postgres = { workspace = true }
-mysql = "24.0.0"
+mysql = "25"
 
 slab = "0.4.2"
 futures = "0.3"

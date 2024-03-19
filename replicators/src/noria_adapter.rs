@@ -300,7 +300,7 @@ impl NoriaAdapter {
         use replication_offset::mysql::MySqlPosition;
 
         if let Some(cert_path) = config.ssl_root_cert.clone() {
-            let ssl_opts = SslOpts::default().with_root_cert_path(Some(cert_path));
+            let ssl_opts = SslOpts::default().with_root_certs(vec![cert_path.into()]);
             mysql_options = OptsBuilder::from_opts(mysql_options)
                 .ssl_opts(ssl_opts)
                 .into();

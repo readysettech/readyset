@@ -170,7 +170,7 @@ impl MySqlUpstream {
             Opts::from_url(url).map_err(|e: UrlError| Error::MySql(mysql_async::Error::Url(e)))?;
 
         if let Some(cert_path) = upstream_config.ssl_root_cert.clone() {
-            let ssl_opts = SslOpts::default().with_root_cert_path(Some(cert_path));
+            let ssl_opts = SslOpts::default().with_root_certs(vec![cert_path.into()]);
             opts = OptsBuilder::from_opts(opts).ssl_opts(ssl_opts).into();
         }
 

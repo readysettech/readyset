@@ -180,8 +180,8 @@ impl MySqlBinlogConnector {
             }
         }
         let event = self.reader.read(&packet[1..])?;
-        assert!(Self::validate_event_checksum(&event)); // TODO: definitely should never fail a CRC check, but what to do if we do?
-        Ok(event)
+        assert!(Self::validate_event_checksum(&event.clone().unwrap())); // TODO: definitely should never fail a CRC check, but what to do if we do?
+        Ok(event.unwrap())
     }
 
     /// Process binlog events until an actionable event occurs.

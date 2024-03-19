@@ -112,7 +112,7 @@ backtrace = { version = "=0.3.65", features = ["serialize-serde"] }
 toml = "0.5"
 diff = "0.1.10"
 tempfile = "3.4"
-mysql = "24.0.0"
+mysql = "25"
 chrono = "0.4.19"
 serial_test = "0.5.1"
 assert_approx_eq = "1.1.0"

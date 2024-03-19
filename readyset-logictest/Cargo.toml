@@ -13,7 +13,7 @@ derive_more = "0.99.11"
 hex = "0.4.3"
 md5 = "0.7.0"
 mysql_async = { workspace = true }
-mysql_common = { version = "0.30.3", features = ["chrono"] }
+mysql_common = { version = "0.32", features = ["chrono"] }
 tikv-jemallocator = "0.5"
 tokio-postgres = { workspace = true, features = ["with-chrono-0_4"] }
 postgres-native-tls = { workspace = true }
