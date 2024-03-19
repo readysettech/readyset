@@ -310,6 +310,14 @@ pub(super) fn post_lookup_aggregates(
                 Avg { .. } => {
                     unsupported!("Average is not supported as a post-lookup aggregate")
                 }
+                Count { distinct, .. } if *distinct => {
+                    // TODO(REA-4289)
+                    unsupported!("COUNT(DISTINCT ...) is not supported as a post-lookup aggregate")
+                }
+                Sum { distinct, .. } if *distinct => {
+                    // TODO(REA-4289)
+                    unsupported!("SUM(DISTINCT ...) is not supported as a post-lookup aggregate")
+                }
                 // Count and sum are handled the same way, as re-aggregating counts is
                 // done by just summing the numbers together
                 Count { .. } | CountStar | Sum { .. } => PostLookupAggregateFunction::Sum,
