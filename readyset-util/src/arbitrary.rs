@@ -18,7 +18,7 @@ use uuid::Uuid;
 
 /// Strategy to generate an arbitrary [`NaiveDate`]
 pub fn arbitrary_naive_date() -> impl Strategy<Value = NaiveDate> {
-    (-4713i32..=262143, 1u32..=366).prop_map(|(y, mut doy)| {
+    (-4713i32..=262142, 1u32..=366).prop_map(|(y, mut doy)| {
         // If this is a leap day and *not* a leap year, drop the day back to 365
         if doy == 366 && NaiveDate::from_ymd_opt(y, 2, 29).is_none() {
             doy = 365
