@@ -1,12 +1,13 @@
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
-use std::ops::{Bound, RangeBounds};
+use std::ops::RangeBounds;
 use std::{iter, mem};
 
 use dataflow_state::PointKey;
 use derive_more::From;
 use readyset_client::KeyComparison;
+use readyset_data::BoundPair;
 use readyset_errors::ReadySetResult;
 use readyset_util::Indices;
 use serde::{Deserialize, Serialize};
@@ -35,7 +36,7 @@ pub(crate) enum MissReplayKey {
     ///
     /// * The endpoints of the range must be the same length
     /// * The endpoints of the range may not be empty
-    Range((Bound<Vec1<DfValue>>, Bound<Vec1<DfValue>>)),
+    Range(BoundPair<Vec1<DfValue>>),
 }
 
 /// Indication, for a [`Miss`], for how to derive the key that was used for the lookup that resulted
@@ -178,20 +179,20 @@ impl<'a> MissBuilder<'a> {
                     // NOTE: Since overlapping range queries will be deduplicated by the domain, we
                     // can be assured that we will find at most one range that covers our record
                     // here.
-                    .find(|(lower, upper)| {
-                        (
+                    .find(|BoundPair(lower, upper)| {
+                        BoundPair(
                             lower.as_ref().map(|b| b.as_ref()),
                             upper.as_ref().map(|b| b.as_ref()),
                         )
-                            .contains(record_key_memo.get_or_insert_with(
-                                // TODO(aspen): This clone shouldn't be necessary, but comparing
-                                // Vec<&DfValue> with &Vec<DfValue> is surprisingly difficult
-                                || {
-                                    record
-                                        .cloned_indices(replay_key_cols.iter().copied())
-                                        .unwrap()
-                                },
-                            ))
+                        .contains(record_key_memo.get_or_insert_with(
+                            // TODO(aspen): This clone shouldn't be necessary, but comparing
+                            // Vec<&DfValue> with &Vec<DfValue> is surprisingly difficult
+                            || {
+                                record
+                                    .cloned_indices(replay_key_cols.iter().copied())
+                                    .unwrap()
+                            },
+                        ))
                     });
                 Some(match range {
                     Some(k) => MissReplayKey::Range(k.clone()),
@@ -228,9 +229,7 @@ impl Miss {
                 .unwrap()
                 .try_into()
                 .unwrap(),
-            MissReplayKey::Range((lower, upper)) => {
-                KeyComparison::Range((lower.clone(), upper.clone()))
-            }
+            MissReplayKey::Range(pair) => KeyComparison::Range(pair.clone()),
         })
     }
 

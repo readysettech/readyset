@@ -16,6 +16,7 @@ readyset-client = { path = "../readyset-client" }
 partial-map = { path = "../partial-map" }
 thiserror = "1.0.31"
 iter-enum = "1.1.1"
+readyset-data = { path = "../readyset-data" }
 
 [dev-dependencies]
 quickcheck = "0.9"

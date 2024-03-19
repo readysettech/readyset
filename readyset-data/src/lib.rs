@@ -1,11 +1,11 @@
-#![feature(box_patterns, iter_order_by)]
+#![feature(box_patterns, iter_order_by, never_type)]
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::convert::{TryFrom, TryInto};
 use std::error::Error;
 use std::hash::{Hash, Hasher};
-use std::ops::{Add, Div, Mul, Sub};
+use std::ops::{self, Add, Deref, Div, Mul, RangeBounds, Sub};
 use std::sync::Arc;
 use std::{fmt, io, str};
 
@@ -20,7 +20,9 @@ use itertools::Itertools;
 use mysql_time::MySqlTime;
 use nom_sql::{DialectDisplay, Double, Float, Literal, SqlType};
 use postgres_types::Format;
-use readyset_errors::{internal, invalid_query_err, unsupported, ReadySetError, ReadySetResult};
+use readyset_errors::{
+    internal, internal_err, invalid_query_err, unsupported, ReadySetError, ReadySetResult,
+};
 use readyset_util::arbitrary::{arbitrary_decimal, arbitrary_duration};
 use readyset_util::redacted::Sensitive;
 use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
@@ -29,6 +31,7 @@ use serde_json::Value as JsonValue;
 use test_strategy::Arbitrary;
 use tokio_postgres::types::{to_sql_checked, FromSql, IsNull, Kind, ToSql, Type};
 use uuid::Uuid;
+use vec1::Vec1;
 
 mod array;
 mod collation;
@@ -43,6 +46,7 @@ mod r#type;
 
 pub use ndarray::{ArrayD, IxDyn};
 use proptest::arbitrary::Arbitrary;
+use proptest::prelude::*;
 
 pub use crate::array::Array;
 pub use crate::collation::Collation;
@@ -72,6 +76,431 @@ pub struct PassThrough {
 pub enum PassThroughFormat {
     Binary,
     Text,
+}
+
+pub trait DfValueContainer: Sized {
+    type Error;
+
+    fn construct(value: DfValue, size: usize) -> Result<Self, Self::Error>;
+    fn len(&self) -> usize;
+    fn is_empty(&self) -> bool;
+    fn iter(&self) -> impl Iterator<Item = &DfValue>;
+}
+
+impl DfValueContainer for (DfValue,) {
+    type Error = !;
+
+    fn construct(value: DfValue, size: usize) -> Result<Self, Self::Error> {
+        debug_assert!(size == 1);
+
+        Ok((value,))
+    }
+
+    fn len(&self) -> usize {
+        1
+    }
+
+    fn is_empty(&self) -> bool {
+        false
+    }
+
+    fn iter(&self) -> impl Iterator<Item = &DfValue> {
+        [&self.0].into_iter()
+    }
+}
+
+impl DfValueContainer for (DfValue, DfValue) {
+    type Error = !;
+
+    fn construct(value: DfValue, size: usize) -> Result<Self, Self::Error> {
+        debug_assert!(size == 2);
+
+        Ok((value.clone(), value))
+    }
+
+    fn len(&self) -> usize {
+        2
+    }
+
+    fn is_empty(&self) -> bool {
+        false
+    }
+
+    fn iter(&self) -> impl Iterator<Item = &DfValue> {
+        [&self.0, &self.1].into_iter()
+    }
+}
+
+impl DfValueContainer for (DfValue, DfValue, DfValue) {
+    type Error = !;
+
+    fn construct(value: DfValue, size: usize) -> Result<Self, Self::Error> {
+        debug_assert!(size == 3);
+
+        Ok((value.clone(), value.clone(), value))
+    }
+
+    fn len(&self) -> usize {
+        3
+    }
+
+    fn is_empty(&self) -> bool {
+        false
+    }
+
+    fn iter(&self) -> impl Iterator<Item = &DfValue> {
+        [&self.0, &self.1, &self.2].into_iter()
+    }
+}
+
+impl DfValueContainer for (DfValue, DfValue, DfValue, DfValue) {
+    type Error = !;
+
+    fn construct(value: DfValue, size: usize) -> Result<Self, Self::Error> {
+        debug_assert!(size == 4);
+
+        Ok((value.clone(), value.clone(), value.clone(), value))
+    }
+
+    fn len(&self) -> usize {
+        4
+    }
+
+    fn is_empty(&self) -> bool {
+        false
+    }
+
+    fn iter(&self) -> impl Iterator<Item = &DfValue> {
+        [&self.0, &self.1, &self.2, &self.3].into_iter()
+    }
+}
+
+impl DfValueContainer for (DfValue, DfValue, DfValue, DfValue, DfValue) {
+    type Error = !;
+
+    fn construct(value: DfValue, size: usize) -> Result<Self, Self::Error> {
+        debug_assert!(size == 5);
+
+        Ok((
+            value.clone(),
+            value.clone(),
+            value.clone(),
+            value.clone(),
+            value,
+        ))
+    }
+
+    fn len(&self) -> usize {
+        5
+    }
+
+    fn is_empty(&self) -> bool {
+        false
+    }
+
+    fn iter(&self) -> impl Iterator<Item = &DfValue> {
+        [&self.0, &self.1, &self.2, &self.3, &self.4].into_iter()
+    }
+}
+
+impl DfValueContainer for (DfValue, DfValue, DfValue, DfValue, DfValue, DfValue) {
+    type Error = !;
+
+    fn construct(value: DfValue, size: usize) -> Result<Self, Self::Error> {
+        debug_assert!(size == 6);
+
+        Ok((
+            value.clone(),
+            value.clone(),
+            value.clone(),
+            value.clone(),
+            value.clone(),
+            value,
+        ))
+    }
+
+    fn len(&self) -> usize {
+        6
+    }
+
+    fn is_empty(&self) -> bool {
+        false
+    }
+
+    fn iter(&self) -> impl Iterator<Item = &DfValue> {
+        [&self.0, &self.1, &self.2, &self.3, &self.4, &self.5].into_iter()
+    }
+}
+
+impl DfValueContainer for DfValue {
+    type Error = ReadySetError;
+
+    fn construct(value: DfValue, size: usize) -> Result<Self, Self::Error> {
+        if size == 1 {
+            Ok(value)
+        } else {
+            Err(internal_err!("cannot construct DfValue with length != 1"))
+        }
+    }
+
+    fn len(&self) -> usize {
+        1
+    }
+
+    fn is_empty(&self) -> bool {
+        false
+    }
+
+    fn iter(&self) -> impl Iterator<Item = &DfValue> {
+        [self].into_iter()
+    }
+}
+
+impl DfValueContainer for Vec1<DfValue> {
+    type Error = vec1::Size0Error;
+
+    fn construct(value: DfValue, size: usize) -> Result<Self, Self::Error> {
+        Vec1::try_from((0..size).map(|_| value.clone()).collect::<Vec<_>>())
+    }
+
+    fn len(&self) -> usize {
+        self.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        false
+    }
+
+    fn iter(&self) -> impl Iterator<Item = &DfValue> {
+        self.deref().iter()
+    }
+}
+
+#[macro_export]
+macro_rules! range {
+    (inf, inf, size: $s:expr) => {
+        BoundPair::unbounded($s)
+    };
+    (=$lower:expr, inf) => {
+        BoundPair::unbounded_upper(Bound::Included($lower))
+    };
+    ($lower:expr, inf) => {
+        BoundPair::unbounded_upper(Bound::Excluded($lower))
+    };
+    (inf, =$upper:expr) => {
+        BoundPair::unbounded_lower(Bound::Included($upper))
+    };
+    (inf, $upper:expr) => {
+        BoundPair::unbounded_lower(Bound::Excluded($upper))
+    };
+    ($lower:expr, $upper:expr) => {
+        BoundPair(Bound::Excluded($lower), Bound::Excluded($upper))
+    };
+    ($lower:expr, =$upper:expr) => {
+        BoundPair(Bound::Excluded($lower), Bound::Included($upper))
+    };
+    (=$lower:expr, $upper:expr) => {
+        BoundPair(Bound::Included($lower), Bound::Excluded($upper))
+    };
+    (=$lower:expr, =$upper:expr) => {
+        BoundPair(Bound::Included($lower), Bound::Included($upper))
+    };
+}
+
+#[derive(Debug, Hash, Serialize, Deserialize, Clone, Eq, PartialEq)]
+pub enum Bound<T> {
+    Included(T),
+    Excluded(T),
+}
+
+impl<T> RangeBounds<T> for BoundPair<T> {
+    fn start_bound(&self) -> std::ops::Bound<&T> {
+        self.0.as_ref().into_std_bound()
+    }
+
+    fn end_bound(&self) -> std::ops::Bound<&T> {
+        self.1.as_ref().into_std_bound()
+    }
+}
+
+impl<T> RangeBounds<T> for BoundPair<&T>
+where
+    T: ?Sized,
+{
+    fn start_bound(&self) -> std::ops::Bound<&T> {
+        self.0.clone().into_std_bound()
+    }
+
+    fn end_bound(&self) -> std::ops::Bound<&T> {
+        self.1.clone().into_std_bound()
+    }
+}
+
+impl<T> Arbitrary for Bound<T>
+where
+    T: Arbitrary + 'static,
+    T::Parameters: Clone,
+{
+    type Parameters = T::Parameters;
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
+        prop_oneof![
+            any_with::<T>(args.clone()).prop_map(Bound::Included),
+            any_with::<T>(args).prop_map(Bound::Excluded)
+        ]
+        .boxed()
+    }
+}
+
+impl<T> Bound<T> {
+    pub fn as_mut(&mut self) -> Bound<&mut T> {
+        match *self {
+            Bound::Included(ref mut b) => Bound::Included(b),
+            Bound::Excluded(ref mut b) => Bound::Excluded(b),
+        }
+    }
+
+    pub fn map<U, F>(self, f: F) -> Bound<U>
+    where
+        F: FnOnce(T) -> U,
+    {
+        match self {
+            Bound::Included(b) => Bound::Included(f(b)),
+            Bound::Excluded(b) => Bound::Excluded(f(b)),
+        }
+    }
+
+    pub fn as_ref(&self) -> Bound<&T> {
+        match self {
+            Bound::Excluded(b) => Bound::Excluded(b),
+            Bound::Included(b) => Bound::Included(b),
+        }
+    }
+
+    pub fn into_std_bound(self) -> std::ops::Bound<T> {
+        match self {
+            Bound::Included(b) => std::ops::Bound::Included(b),
+            Bound::Excluded(b) => std::ops::Bound::Excluded(b),
+        }
+    }
+}
+
+impl<T> Bound<T>
+where
+    T: DfValueContainer,
+{
+    pub fn len(&self) -> usize {
+        match self {
+            Bound::Excluded(b) | Bound::Included(b) => b.len(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+impl<T> Bound<&T>
+where
+    T: Clone,
+{
+    pub fn cloned(self) -> Bound<T> {
+        match self {
+            Bound::Included(b) => Bound::Included(b.clone()),
+            Bound::Excluded(b) => Bound::Excluded(b.clone()),
+        }
+    }
+}
+
+impl<T> TryFrom<ops::Bound<T>> for Bound<T> {
+    type Error = ReadySetError;
+
+    fn try_from(value: ops::Bound<T>) -> Result<Self, Self::Error> {
+        match value {
+            ops::Bound::Included(b) => Ok(Bound::Included(b)),
+            ops::Bound::Excluded(b) => Ok(Bound::Excluded(b)),
+            ops::Bound::Unbounded => Err(internal_err!(
+                "cannot convert std::ops::Bound::Unbounded to readyset_data::Bound"
+            )),
+        }
+    }
+}
+
+#[derive(Debug, Hash, Serialize, Deserialize, Clone, Eq, PartialEq)]
+pub struct BoundPair<T>(pub Bound<T>, pub Bound<T>);
+
+impl<T> BoundPair<T>
+where
+    T: DfValueContainer + fmt::Debug,
+{
+    pub fn unbounded_upper(lower: Bound<T>) -> Result<BoundPair<T>, T::Error> {
+        let key_len = lower.len();
+        Ok(BoundPair(
+            lower,
+            Bound::Excluded(T::construct(DfValue::MAX_VALUE, key_len)?),
+        ))
+    }
+
+    pub fn unbounded_lower(upper: Bound<T>) -> Result<BoundPair<T>, T::Error> {
+        Ok(BoundPair(
+            Bound::Excluded(T::construct(DfValue::MIN_VALUE, upper.len())?),
+            upper,
+        ))
+    }
+
+    pub fn unbounded(size: usize) -> Result<BoundPair<T>, T::Error> {
+        Ok(BoundPair(
+            Bound::Excluded(T::construct(DfValue::MIN_VALUE, size)?),
+            Bound::Excluded(T::construct(DfValue::MAX_VALUE, size)?),
+        ))
+    }
+
+    pub fn start_bound(&self) -> Bound<&T> {
+        self.0.as_ref()
+    }
+
+    pub fn end_bound(&self) -> Bound<&T> {
+        self.1.as_ref()
+    }
+
+    pub fn contains<'a, I>(&'a self, key: I) -> bool
+    where
+        I: IntoIterator<Item = &'a DfValue> + Clone,
+    {
+        (match &self.0 {
+            Bound::Included(start) => key.clone().into_iter().cmp(start.iter()).is_ge(),
+            Bound::Excluded(start) => key.clone().into_iter().cmp(start.iter()).is_gt(),
+        }) && (match &self.1 {
+            Bound::Included(end) => key.into_iter().cmp(end.iter()).is_le(),
+            Bound::Excluded(end) => key.into_iter().cmp(end.iter()).is_lt(),
+        })
+    }
+
+    pub fn len(&self) -> usize {
+        let BoundPair(lower, upper) = self;
+        debug_assert!(lower.len() == upper.len());
+
+        lower.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    // TODO ethan is this right
+    pub fn is_reversed_range(&self) -> bool {
+        match self {
+            BoundPair(
+                Bound::Included(lower) | Bound::Excluded(lower),
+                Bound::Included(upper) | Bound::Excluded(upper),
+            ) => lower.iter().cmp(upper.iter()) == Ordering::Greater,
+        }
+    }
+
+    pub fn as_ref(&self) -> BoundPair<&T> {
+        BoundPair(self.0.as_ref(), self.1.as_ref())
+    }
 }
 
 /// The main type used for user data throughout the codebase.
@@ -179,6 +608,9 @@ impl fmt::Display for DfValue {
 pub const TIME_FORMAT: &str = "%H:%M:%S";
 
 impl DfValue {
+    const MIN_VALUE: DfValue = DfValue::None;
+    const MAX_VALUE: DfValue = DfValue::Max;
+
     /// Construct a new [`DfValue::Array`] containing an empty array
     pub fn empty_array() -> Self {
         // TODO: static singleton empty array?
@@ -2306,7 +2738,6 @@ mod arbitrary {
 #[cfg(test)]
 mod tests {
     use derive_more::{From, Into};
-    use proptest::prelude::*;
     use readyset_util::{eq_laws, hash_laws, ord_laws};
     use test_strategy::proptest;
 
