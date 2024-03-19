@@ -868,7 +868,23 @@ impl<'df> Migration<'df> {
     ) -> NodeIndex {
         use std::collections::hash_map::Entry;
         match self.readers.entry(n) {
-            Entry::Occupied(ni) => *ni.into_mut(),
+            Entry::Occupied(ni) => {
+                let ni = *ni.into_mut();
+                debug_assert!(
+                    {
+                        let node = &self.dataflow_state.ingredients[ni];
+                        let name_matches = name.map_or(true, |n| *node.name() == n);
+                        name_matches
+                            && *node
+                                .as_reader()
+                                .expect("non-reader in readers")
+                                .reader_processing()
+                                == reader_processing
+                    },
+                    "existing reader state doesn't meet requirements"
+                );
+                ni
+            }
             Entry::Vacant(e) => {
                 // make a reader
                 let r = node::special::Reader::new(n, reader_processing);
