@@ -161,14 +161,21 @@ where
 
     async fn upstream_reachable(&mut self) -> Option<bool> {
         // Check current connection status
-        if let Ok(is_connected) = self.upstream.is_connected().await {
-            return Some(is_connected);
+        if self.upstream.is_connected().await.unwrap_or(false) {
+            return Some(true);
         }
 
         // Our connection may have been broken.
         // Attempt to reconnect once to confirm reachability.
         match self.upstream.connect().await {
-            Ok(_) => Some(true),
+            Ok(_) => {
+                if let Ok(is_connected) = self.upstream.is_connected().await {
+                    Some(is_connected)
+                } else {
+                    warn!("Unable to re-establish connection to Upstream");
+                    None
+                }
+            }
             Err(e) => {
                 warn!("Unable to re-establish connection to Upstream: {}", e);
                 None

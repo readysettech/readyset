@@ -16,7 +16,23 @@ use readyset_errors::ReadySetError;
 use readyset_server::Handle;
 use readyset_telemetry_reporter::{TelemetryEvent, TelemetryInitializer, TelemetryReporter};
 use readyset_util::shutdown::ShutdownSender;
+use regex::Regex;
 use test_utils::skip_flaky_finder;
+
+async fn setup_with_mysql() -> (mysql_async::Opts, Handle, ShutdownSender) {
+    readyset_tracing::init_test_logging();
+    let mut users = std::collections::HashMap::new();
+    users.insert("root".to_string(), "noria".to_string());
+
+    TestBuilder::new(
+        BackendBuilder::new()
+            .require_authentication(false)
+            .users(users),
+    )
+    .fallback(true)
+    .build::<MySQLAdapter>()
+    .await
+}
 
 async fn setup() -> (mysql_async::Opts, Handle, ShutdownSender) {
     readyset_tracing::init_test_logging();
@@ -1827,7 +1843,7 @@ async fn show_caches_with_always() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn show_readyset_status() {
-    let (opts, _handle, shutdown_tx) = setup().await;
+    let (opts, _handle, shutdown_tx) = setup_with_mysql().await;
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();
     let mut ret: Vec<mysql::Row> = conn.query("SHOW READYSET STATUS;").await.unwrap();
 
@@ -1839,9 +1855,18 @@ async fn show_readyset_status() {
         }
     };
 
+    let valid_binlog = |s: String| {
+        if s == "NULL" {
+            true
+        } else {
+            let re = Regex::new(r"^binlog\.\d{6}\:\d{1,}$").unwrap();
+            re.is_match(&s)
+        }
+    };
+
     // NOTE: If this readyset extension has changed, verify the new behavior is correct then update
     // the expected values below
-    assert_eq!(ret.len(), 6);
+    assert_eq!(ret.len(), 8);
     let row = ret.remove(0);
     assert_eq!(row.get::<String, _>(0).unwrap(), "Database Connection");
     assert_eq!(row.get::<String, _>(1).unwrap(), "Connected");
@@ -1851,6 +1876,18 @@ async fn show_readyset_status() {
     let row = ret.remove(0);
     assert_eq!(row.get::<String, _>(0).unwrap(), "Snapshot Status");
     assert_eq!(row.get::<String, _>(1).unwrap(), "Completed");
+    let row = ret.remove(0);
+    assert_eq!(
+        row.get::<String, _>(0).unwrap(),
+        "Maximum Replication Offset"
+    );
+    assert!(valid_binlog(row.get::<String, _>(1).unwrap()));
+    let row = ret.remove(0);
+    assert_eq!(
+        row.get::<String, _>(0).unwrap(),
+        "Minimum Replication Offset"
+    );
+    assert!(valid_binlog(row.get::<String, _>(1).unwrap()));
     let row = ret.remove(0);
     assert_eq!(row.get::<String, _>(0).unwrap(), "Last started Controller");
     assert!(valid_timestamp(row.get::<String, _>(1).unwrap()));
