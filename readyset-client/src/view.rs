@@ -134,6 +134,24 @@ pub enum ViewPlaceholder {
     },
 }
 
+impl ViewPlaceholder {
+    pub fn is_range_param(&self) -> bool {
+        match self {
+            ViewPlaceholder::OneToOne(_, op) if op.is_ordering_comparison() => true,
+            ViewPlaceholder::Between(_, _) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_equal_param(&self) -> bool {
+        matches!(
+            self,
+            ViewPlaceholder::OneToOne(_, BinaryOperator::Equal)
+                | ViewPlaceholder::PageNumber { .. }
+        )
+    }
+}
+
 #[derive(Debug)]
 struct Endpoint {
     addr: SocketAddr,

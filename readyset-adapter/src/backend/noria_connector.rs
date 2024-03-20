@@ -527,8 +527,12 @@ impl NoriaConnector {
                     mi.indexes
                         .into_iter()
                         .map(|idx| {
-                            format!("{:?}[{}]", idx.index_type, idx.columns.iter().join(", "))
-                                .into()
+                            format!(
+                                "{:?}[{}]",
+                                idx.index_type(),
+                                idx.columns().iter().join(", ")
+                            )
+                            .into()
                         })
                         .collect::<Vec<DfValue>>()
                         .into(),
