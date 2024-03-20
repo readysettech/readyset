@@ -27,6 +27,7 @@ use readyset_client::{
     ViewQuery,
 };
 use readyset_errors::internal_err;
+use readyset_util::intervals::BoundPair;
 use readyset_util::shutdown::ShutdownReceiver;
 use serde::ser::Serializer;
 use serde::Serialize;
@@ -173,7 +174,7 @@ impl ReadRequestHandler {
         raw_result: bool,
     ) -> CallResult<impl Future<Output = Reply>> {
         let ViewQuery {
-            key_comparisons,
+            mut key_comparisons,
             block,
             timestamp,
             filter,
@@ -199,11 +200,15 @@ impl ReadRequestHandler {
             };
         }
 
+
+        tracing::info!("getting reader");
         let reader = get_reader_from_cache(&target, &mut self.readers_cache, &self.global_readers);
+
         let reader = match reader {
             Ok(r) => r,
             Err(e) => reply_with_error!(e),
         };
+        reader.pre_lookup(&mut key_comparisons);
 
         let consistency_miss = !has_sufficient_timestamp(reader, &timestamp);
 

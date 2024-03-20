@@ -297,7 +297,7 @@ pub enum MirNodeInner {
         keys: Vec<(Column, ViewPlaceholder)>,
         index_type: IndexType,
 
-        /// Whether or not this leaf node was already lowered to dataflow or not.
+        /// Whether or not this leaf node was already lowered to dataflow.
         lowered_to_df: bool,
 
         /// Optional set of columns and direction to order the results of lookups to this leaf
@@ -311,6 +311,10 @@ pub enum MirNodeInner {
         default_row: Option<Vec<DfValue>>,
         /// Aggregates to perform in the reader on result sets for keys after performing the lookup
         aggregates: Option<PostLookupAggregates<Column>>,
+
+        /// (placeholder index, Expr) pairs for placeholders that need to do a pre-lookup
+        /// expression evaluation on them before reading
+        placeholder_exprs: Option<Vec<(usize, Expr)>>,
     },
 }
 
@@ -327,6 +331,7 @@ impl MirNodeInner {
             returned_cols: None,
             default_row: None,
             aggregates: None,
+            placeholder_exprs: None,
         }
     }
 

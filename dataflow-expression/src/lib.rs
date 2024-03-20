@@ -19,7 +19,7 @@ pub use crate::binary_operator::*;
 pub use crate::lower::LowerContext;
 pub use crate::reader_processing::{
     PostLookup, PostLookupAggregate, PostLookupAggregateFunction, PostLookupAggregates,
-    PreInsertion, ReaderProcessing,
+    PreInsertion, PreLookup, ReaderProcessing,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

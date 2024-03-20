@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use dataflow::{PostLookupAggregate, PostLookupAggregateFunction, PostLookupAggregates};
+use dataflow::{PostLookupAggregate, PostLookupAggregateFunction, PreLookup, PostLookupAggregates};
 use mir::node::node_inner::MirNodeInner;
 use mir::node::ProjectExpr;
 use mir::{Column, NodeIndex};
@@ -337,4 +337,11 @@ pub(super) fn post_lookup_aggregates(
             .collect(),
         aggregates,
     }))
+}
+
+// TODO: not in grouped?
+pub(super) fn pre_lookup_placeholder_exprs(
+    query_graph: &QueryGraph,
+    query_name: &Relation,
+) -> ReadySetResult<Option<PreLookup>> {
 }

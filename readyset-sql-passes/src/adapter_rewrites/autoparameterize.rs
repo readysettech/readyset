@@ -1,7 +1,7 @@
 use std::{iter, mem};
 
 use nom_sql::analysis::visit_mut::{self, VisitorMut};
-use nom_sql::{BinaryOperator, Expr, InValue, ItemPlaceholder, Literal, SelectStatement, Dialect, DialectDisplay};
+use nom_sql::{BinaryOperator, Expr, InValue, ItemPlaceholder, Literal, SelectStatement};
 use tracing::trace;
 
 #[derive(Default)]
@@ -64,7 +64,11 @@ impl<'ast> VisitorMut<'ast> for AutoParameterizeVisitor {
                 Expr::BinaryOp {
                     lhs: box Expr::Column(_),
                     op: BinaryOperator::Equal,
-                    rhs: box Expr::Cast { expr: box Expr::Literal(lit), .. },
+                    rhs:
+                        box Expr::Cast {
+                            expr: box Expr::Literal(lit),
+                            ..
+                        },
                 } => {
                     trace!("continuing as supported for cast");
                     self.replace_literal(lit);
@@ -131,10 +135,7 @@ impl<'ast> VisitorMut<'ast> for AutoParameterizeVisitor {
                     self.in_supported_position = true;
                     return Ok(());
                 }
-                Expr::Cast {
-                    expr,
-                    ..
-                } => {
+                Expr::Cast { expr, .. } => {
                     self.visit_expr(expr)?;
                 }
                 _ => self.in_supported_position = false,
@@ -199,6 +200,7 @@ pub fn auto_parameterize_query(query: &mut SelectStatement) -> Vec<(usize, Liter
     visitor.visit_select_statement(query).unwrap();
     visitor.out
 }
+
 #[cfg(test)]
 mod tests {
     use nom_sql::{Dialect, DialectDisplay};

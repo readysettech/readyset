@@ -1925,6 +1925,8 @@ impl SqlToMirConverter {
                 &mut prev_node,
             )?;
 
+            // FIXME: where is 4?
+
             // 5. Generate the necessary filter nodes for local predicates associated with each
             // relation node in the query graph.
             //
@@ -2060,6 +2062,8 @@ impl SqlToMirConverter {
                 func_nodes.extend(paginate_nodes.clone());
                 final_node = *paginate_nodes.last().unwrap();
             }
+
+            // FIXME: why are there 2 #10s?
 
             // 10. Generate leaf views that expose the query result
 
@@ -2270,6 +2274,7 @@ impl SqlToMirConverter {
                             returned_cols: Some(returned_cols),
                             default_row: query_graph.default_row.clone(),
                             aggregates,
+                            placeholder_exprs: None, // TODO
                         },
                     ),
                     &[leaf_project_reorder_node],

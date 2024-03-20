@@ -149,12 +149,19 @@ impl<'ast> Visitor<'ast> for UnsupportedPlaceholderVisitor {
                 {
                     match **rhs {
                         // We currently support placeholders in this position as well as casts of
-                        // placeholders. We shoul be able to support arbitrary expression evaluation as
-                        // well, but correctness confidence needs something like REA-3124, and it's
-                        // easier to have confidence in cases we know there is a desire for and add
+                        // placeholders. We should be able to support arbitrary expression evaluation
+                        // as well, but correctness confidence needs
+                        // something like REA-3124, and it's easier to have
+                        // confidence in cases we know there is a desire for and add
                         // some testing around those manually.
-                        Expr::Literal(Literal::Placeholder(ItemPlaceholder::DollarNumber(_))) |
-                        Expr::Cast { expr: box Expr::Literal(Literal::Placeholder(ItemPlaceholder::DollarNumber(_))), .. } => {
+                        Expr::Literal(Literal::Placeholder(ItemPlaceholder::DollarNumber(_)))
+                        | Expr::Cast {
+                            expr:
+                                box Expr::Literal(Literal::Placeholder(ItemPlaceholder::DollarNumber(
+                                    _,
+                                ))),
+                            ..
+                        } => {
                             self.record_comparison_expr(lhs, rhs, op);
                         }
                         _ => {
@@ -163,7 +170,6 @@ impl<'ast> Visitor<'ast> for UnsupportedPlaceholderVisitor {
                     }
                 } else {
                     let Ok(_) = walk_expr(self, expr);
-
                 }
             }
             Expr::Between {
@@ -370,7 +376,9 @@ mod tests {
     #[test]
     fn ignores_supported_expr_in_rhs_of_where_range() {
         readyset_tracing::init_test_logging();
-        let select = parse_select_statement("SELECT a FROM t WHERE b >= $1::TIMESTAMP AND tsHour <= $2::TIMESTAMP");
+        let select = parse_select_statement(
+            "SELECT a FROM t WHERE b >= $1::TIMESTAMP AND tsHour <= $2::TIMESTAMP",
+        );
         let res = select.detect_unsupported_placeholders(Config::default());
         extracts_placeholders(res, &[]);
     }
