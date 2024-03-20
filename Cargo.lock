@@ -4956,6 +4956,7 @@ dependencies = [
  "readyset-tracing",
  "readyset-util",
  "readyset-version",
+ "regex",
  "reqwest",
  "serial_test",
  "streaming-iterator",

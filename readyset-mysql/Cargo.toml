@@ -53,6 +53,7 @@ proptest-stateful = { path = "../proptest-stateful" }
 test-strategy = "0.2.0"
 readyset-tracing = { path = "../readyset-tracing" }
 reqwest = "0.11.3"
+regex = "1.8.4"
 
 [features]
 vertical_tests = []
