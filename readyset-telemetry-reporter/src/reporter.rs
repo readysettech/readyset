@@ -127,7 +127,10 @@ impl TelemetryReporter {
         // machines or corporate images that have the same machine id. Still, this is a decent
         // heuristic for unique users
 
-        let user_id = api_key.or_else(|| machine_uid::get().ok().map(blake2b_string));
+        let user_id = match api_key {
+            Some(key) if !key.is_empty() => Some(key),
+            _ => machine_uid::get().ok().map(blake2b_string),
+        };
 
         Self {
             rx,

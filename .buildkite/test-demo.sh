@@ -70,6 +70,7 @@ run_script() {
     # Annoyingly, expect exits with 0 if it sees a syntax error in the script, so let's
     # use return code 42 to signal success and manually translate that to 0 afterwards.
     expect -c "
+        set env(RS_API_KEY) readyset-internal
         spawn bash $DEMO_SCRIPT_TMP
 
         set timeout 8

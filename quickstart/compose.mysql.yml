@@ -10,6 +10,7 @@ services:
       # e.g. curl -X GET http://localhost:6034/metrics
       - "6034:6034"
     environment:
+      RS_API_KEY: ${RS_API_KEY-""}
       DEPLOYMENT_ENV: quickstart_docker
       DB_DIR: /state
       PROMETHEUS_METRICS: true
