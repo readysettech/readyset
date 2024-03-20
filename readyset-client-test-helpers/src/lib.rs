@@ -266,14 +266,12 @@ impl TestBuilder {
             let rh = handle.clone();
             let expr_dialect = Dialect::DEFAULT_POSTGRESQL;
             let shutdown_rx = shutdown_tx.subscribe();
-            let view_name_cache = view_name_cache.clone();
             tokio::spawn(async move {
                 let mut views_synchronizer = ViewsSynchronizer::new(
                     rh,
                     query_status_cache,
                     std::time::Duration::from_secs(1),
                     expr_dialect,
-                    view_name_cache.new_local(),
                 );
                 views_synchronizer.run(shutdown_rx).await
             });

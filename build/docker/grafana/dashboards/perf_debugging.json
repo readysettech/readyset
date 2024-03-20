@@ -749,7 +749,7 @@
                         "uid": "PBFE396EC0B189D67"
                     },
                     "exemplar": true,
-                    "expr": "readyset_controller_rpc_view_names_num_queries{}",
+                    "expr": "readyset_controller_rpc_view_statuses_num_queries{}",
                     "interval": "",
                     "legendFormat": "",
                     "queryType": "randomWalk",

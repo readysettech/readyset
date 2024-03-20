@@ -301,18 +301,14 @@ impl DfState {
             .collect()
     }
 
-    pub(super) fn view_names(
+    pub(super) fn view_statuses(
         &self,
         queries: Vec<ViewCreateRequest>,
         dialect: Dialect,
-    ) -> Vec<Option<Relation>> {
+    ) -> Vec<bool> {
         queries
             .into_iter()
-            .map(|query| {
-                self.recipe
-                    .expression_name_for_query(query, dialect)
-                    .unwrap_or(None)
-            })
+            .map(|query| self.recipe.contains(query, dialect).unwrap_or(false))
             .collect()
     }
 
