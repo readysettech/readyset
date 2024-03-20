@@ -4,7 +4,7 @@ mod binary_operator;
 mod eval;
 pub mod like;
 mod lower;
-mod post_lookup;
+mod reader_processing;
 pub mod utils;
 
 use std::fmt::{self, Display, Formatter};
@@ -17,7 +17,7 @@ use vec1::Vec1;
 
 pub use crate::binary_operator::*;
 pub use crate::lower::LowerContext;
-pub use crate::post_lookup::{
+pub use crate::reader_processing::{
     PostLookup, PostLookupAggregate, PostLookupAggregateFunction, PostLookupAggregates,
     PreInsertion, ReaderProcessing,
 };
