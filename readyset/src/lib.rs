@@ -1092,7 +1092,8 @@ where
                 .allow_cache_ddl(allow_cache_ddl)
                 .require_authentication(!options.allow_unauthenticated_connections)
                 .dialect(self.parse_dialect)
-                .query_log(qlog_sender.clone())
+                .query_log_sender(qlog_sender.clone())
+                .query_log_mode(Some(options.query_log_mode))
                 .unsupported_set_mode(if options.allow_unsupported_set {
                     readyset_adapter::backend::UnsupportedSetMode::Allow
                 } else {
