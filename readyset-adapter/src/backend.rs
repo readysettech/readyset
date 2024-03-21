@@ -94,7 +94,7 @@ use readyset_client::utils::retry_with_exponential_backoff;
 use readyset_client::{ColumnSchema, PlaceholderIdx, ViewCreateRequest};
 pub use readyset_client_metrics::QueryDestination;
 use readyset_client_metrics::{
-    recorded, EventType, QueryExecutionEvent, ReadysetExecutionEvent, SqlQueryType,
+    recorded, EventType, QueryExecutionEvent, QueryLogMode, ReadysetExecutionEvent, SqlQueryType,
 };
 use readyset_data::{DfType, DfValue};
 use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
@@ -280,6 +280,7 @@ pub struct BackendBuilder {
     ticket: Option<Timestamp>,
     timestamp_client: Option<TimestampClient>,
     query_log_sender: Option<UnboundedSender<QueryExecutionEvent>>,
+    query_log_mode: Option<QueryLogMode>,
     unsupported_set_mode: UnsupportedSetMode,
     migration_mode: MigrationMode,
     query_max_failure_seconds: u64,
@@ -302,6 +303,7 @@ impl Default for BackendBuilder {
             ticket: None,
             timestamp_client: None,
             query_log_sender: None,
+            query_log_mode: None,
             unsupported_set_mode: UnsupportedSetMode::Error,
             migration_mode: MigrationMode::InRequestPath,
             query_max_failure_seconds: (i64::MAX / 1000) as u64,
@@ -348,6 +350,7 @@ impl BackendBuilder {
             upstream,
             users: self.users,
             query_log_sender: self.query_log_sender,
+            query_log_mode: self.query_log_mode,
             last_query: None,
             state: BackendState {
                 proxy_state,
@@ -394,11 +397,16 @@ impl BackendBuilder {
         self
     }
 
-    pub fn query_log(
+    pub fn query_log_sender(
         mut self,
         query_log_sender: Option<UnboundedSender<QueryExecutionEvent>>,
     ) -> Self {
         self.query_log_sender = query_log_sender;
+        self
+    }
+
+    pub fn query_log_mode(mut self, query_log_mode: Option<QueryLogMode>) -> Self {
+        self.query_log_mode = query_log_mode;
         self
     }
 
@@ -553,6 +561,7 @@ where
     pub users: HashMap<String, String>,
 
     query_log_sender: Option<UnboundedSender<QueryExecutionEvent>>,
+    query_log_mode: Option<QueryLogMode>,
 
     /// Information regarding the last query sent over this connection. If None, then no queries
     /// have been handled using this connection (Backend) yet.
@@ -1300,9 +1309,13 @@ where
             _ => (None, None, MigrationState::Successful, None, false),
         };
 
-        if let Some(parsed) = &parsed_query {
-            query_event.query = Some(parsed.clone());
+        if let Some(QueryLogMode::Verbose) = self.query_log_mode {
+            // We only use the full query in verbose mode, so avoid cloning if we don't need to
+            if let Some(parsed) = &parsed_query {
+                query_event.query = Some(parsed.clone());
+            }
         }
+
         query_event.query_id = query_id;
 
         let statement_id = self.state.prepared_statements.insert(PreparedStatement {
@@ -3002,7 +3015,11 @@ where
                     ViewCreateRequest::new(stmt, self.noria.schema_search_path().to_owned());
 
                 event.sql_type = SqlQueryType::Read;
-                event.query = Some(Arc::new(SqlQuery::Select(view_request.statement.clone())));
+
+                if let Some(QueryLogMode::Verbose) = self.query_log_mode {
+                    event.query = Some(Arc::new(SqlQuery::Select(view_request.statement.clone())));
+                }
+
                 event.query_id = Some(QueryId::from(&view_request));
 
                 let (noria_should_try, status, processed_query_params) =
