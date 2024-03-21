@@ -1093,7 +1093,7 @@ impl fmt::Debug for ReaderHandle {
             .field("node", &self.node)
             .field("columns", &self.columns)
             .field("shard_addrs", &self.shard_addrs)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
