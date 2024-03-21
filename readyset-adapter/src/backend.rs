@@ -2530,7 +2530,7 @@ where
         let noria_res = {
             event.destination = Some(QueryDestination::Readyset);
             let ctx = ExecuteSelectContext::AdHoc {
-                statement: view_request.statement.clone(),
+                statement: &view_request.statement,
                 create_if_missing: settings.migration_mode == MigrationMode::InRequestPath,
                 processed_query_params,
             };

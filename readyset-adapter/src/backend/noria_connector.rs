@@ -348,7 +348,7 @@ pub(crate) enum ExecuteSelectContext<'ctx> {
         params: &'ctx [DfValue],
     },
     AdHoc {
-        statement: nom_sql::SelectStatement,
+        statement: &'ctx nom_sql::SelectStatement,
         create_if_missing: bool,
         processed_query_params: ProcessedQueryParams,
     },
@@ -1503,7 +1503,7 @@ impl NoriaConnector {
                 processed_query_params,
             } => {
                 let name = self
-                    .get_view_name_cached(&statement, false, create_if_missing, None)
+                    .get_view_name_cached(statement, false, create_if_missing, None)
                     .await?;
                 (
                     Cow::Owned(name),
