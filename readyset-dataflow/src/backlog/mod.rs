@@ -11,6 +11,7 @@ use reader_map::{EvictionQuantity, EvictionStrategy};
 use readyset_client::consistency::Timestamp;
 use readyset_client::results::SharedResults;
 use readyset_client::KeyComparison;
+use readyset_util::ranges::BoundRange;
 use vec1::Vec1;
 
 pub use self::multir::LookupError;
@@ -259,7 +260,7 @@ impl WriteHandle {
     pub(crate) fn contains(&self, key: &KeyComparison) -> reader_map::Result<bool> {
         match key {
             KeyComparison::Equal(k) => self.handle.read().contains_key(k),
-            KeyComparison::Range((start, end)) => self.handle.read().contains_range(&(
+            KeyComparison::Range(BoundRange(start, end)) => self.handle.read().contains_range(&(
                 start.as_ref().map(Vec1::as_vec),
                 end.as_ref().map(Vec1::as_vec),
             )),
@@ -360,12 +361,12 @@ impl WriteHandle {
         }
         match key {
             KeyComparison::Equal(k) => Ok(self.mut_with_key(k.as_vec()).mark_hole()),
-            KeyComparison::Range((start, end)) => {
+            KeyComparison::Range(BoundRange(start, end)) => {
                 let start = start.clone();
                 let end = end.clone();
                 // We don't want to clone things more than once, so construct the range key, then
                 // deconstruct it again
-                let range_key = KeyComparison::Range((start, end));
+                let range_key = KeyComparison::Range(BoundRange(start, end));
                 let size = self
                     .handle
                     .read()
@@ -404,7 +405,7 @@ impl WriteHandle {
                 Bound::Included(equal.as_vec()),
                 Bound::Included(equal.as_vec()),
             ),
-            (IndexType::BTreeMap, KeyComparison::Range((start, end))) => (
+            (IndexType::BTreeMap, KeyComparison::Range(BoundRange(start, end))) => (
                 start.as_ref().map(Vec1::as_vec),
                 end.as_ref().map(Vec1::as_vec),
             ),
@@ -520,7 +521,7 @@ impl SingleReadHandle {
     pub fn contains(&self, key: &KeyComparison) -> reader_map::Result<bool> {
         match key {
             KeyComparison::Equal(k) => self.handle.contains_key(k),
-            KeyComparison::Range((start, end)) => self.handle.contains_range(&(
+            KeyComparison::Range(BoundRange(start, end)) => self.handle.contains_range(&(
                 start.as_ref().map(Vec1::as_vec),
                 end.as_ref().map(Vec1::as_vec),
             )),
@@ -800,7 +801,7 @@ mod tests {
             );
             w.swap();
 
-            let range_key = &[KeyComparison::Range((
+            let range_key = &[KeyComparison::Range(BoundRange(
                 Bound::Included(vec1![DfValue::from(0)]),
                 Bound::Excluded(vec1![DfValue::from(10)]),
             ))];
@@ -851,7 +852,7 @@ mod tests {
             );
             w.swap();
 
-            let range_key = &[KeyComparison::Range((
+            let range_key = &[KeyComparison::Range(BoundRange(
                 Bound::Included(vec1![DfValue::from(0)]),
                 Bound::Excluded(vec1![DfValue::from(10)]),
             ))];
