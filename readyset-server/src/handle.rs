@@ -17,7 +17,6 @@ pub struct Handle {
     /// Has a valid controller handle on `new` and is set to None if the
     /// controller has been shutdown.
     pub c: Option<ReadySetHandle>,
-    #[allow(dead_code)]
     event_tx: Option<Sender<HandleRequest>>,
     descriptor: ControllerDescriptor,
 }
