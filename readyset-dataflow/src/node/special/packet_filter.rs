@@ -5,6 +5,7 @@ use std::ops::Bound;
 use common::DfValue;
 use readyset_client::KeyComparison;
 use readyset_errors::{internal, ReadySetResult};
+use readyset_util::ranges::BoundRange;
 use serde::{Deserialize, Serialize};
 use vec1::Vec1;
 
@@ -103,7 +104,7 @@ impl PacketFilter {
                             KeyComparison::Equal(ref cond) => {
                                 check_bound(ci, row, cond, |d1, d2| d1 == d2)
                             }
-                            KeyComparison::Range((ref lower_bound, ref upper_bound)) => {
+                            KeyComparison::Range(BoundRange(ref lower_bound, ref upper_bound)) => {
                                 check_lower_bound(lower_bound, ci, row)
                                     && check_upper_bound(upper_bound, ci, row)
                             }
@@ -234,6 +235,7 @@ mod test {
         use std::ops::Bound;
 
         use common::Record;
+        use readyset_util::ranges::BoundRange;
 
         use super::*;
 
@@ -458,7 +460,7 @@ mod test {
 
             let ni = NodeIndex::new(3);
 
-            let key = KeyComparison::Range((
+            let key = KeyComparison::Range(BoundRange(
                 Bound::Included(vec1![10.into()]),
                 Bound::Excluded(vec1![20.into()]),
             ));

@@ -6,6 +6,7 @@ use itertools::Itertools;
 use readyset_client::KeyComparison;
 use readyset_errors::{internal_err, ReadySetResult};
 use readyset_util::intervals::into_bound_endpoint;
+use readyset_util::ranges::BoundRange;
 use readyset_util::Indices;
 use serde::{Deserialize, Serialize};
 use vec1::{vec1, Vec1};
@@ -597,7 +598,7 @@ impl Ingredient for Join {
                         })?,
                     )
                 }
-                KeyComparison::Range((lower, upper)) => {
+                KeyComparison::Range(BoundRange(lower, upper)) => {
                     let mut left_lower =
                         lower.as_ref().map(|_| Vec::with_capacity(left_cols.len()));
                     let mut right_lower =
@@ -633,11 +634,11 @@ impl Ingredient for Join {
                     // If any of these is empty, that means the columns weren't actually straddling
                     // both parents - which is an invariant of this function!
                     (
-                        KeyComparison::Range((
+                        KeyComparison::Range(BoundRange(
                             left_lower.map(|k| k.try_into().unwrap()),
                             left_upper.map(|k| k.try_into().unwrap()),
                         )),
-                        KeyComparison::Range((
+                        KeyComparison::Range(BoundRange(
                             right_lower.map(|k| k.try_into().unwrap()),
                             right_upper.map(|k| k.try_into().unwrap()),
                         )),
@@ -979,7 +980,7 @@ mod tests {
                 .handle_upquery(ColumnMiss {
                     node,
                     column_indices: vec![0, 1, 2],
-                    missed_keys: vec1![KeyComparison::Range((
+                    missed_keys: vec1![KeyComparison::Range(BoundRange(
                         Bound::Included(vec1![
                             DfValue::from(1),
                             DfValue::from(2),
@@ -1002,14 +1003,14 @@ mod tests {
 
             assert_eq!(
                 left_miss.missed_keys,
-                vec1![KeyComparison::Range((
+                vec1![KeyComparison::Range(BoundRange(
                     Bound::Included(vec1![DfValue::from(1), DfValue::from(2)]),
                     Bound::Excluded(vec1![DfValue::from(4), DfValue::from(5)])
                 ))]
             );
             assert_eq!(
                 right_miss.missed_keys,
-                vec1![KeyComparison::Range((
+                vec1![KeyComparison::Range(BoundRange(
                     Bound::Included(vec1![DfValue::from(3)]),
                     Bound::Excluded(vec1![DfValue::from(6)])
                 ))]
@@ -1025,7 +1026,7 @@ mod tests {
                 .handle_upquery(ColumnMiss {
                     node,
                     column_indices: vec![0, 1, 2],
-                    missed_keys: vec1![KeyComparison::Range((
+                    missed_keys: vec1![KeyComparison::Range(BoundRange(
                         Bound::Included(vec1![
                             DfValue::from(1),
                             DfValue::from(2),
@@ -1044,14 +1045,14 @@ mod tests {
 
             assert_eq!(
                 left_miss.missed_keys,
-                vec1![KeyComparison::Range((
+                vec1![KeyComparison::Range(BoundRange(
                     Bound::Included(vec1![DfValue::from(1), DfValue::from(2)]),
                     Bound::Unbounded
                 ))]
             );
             assert_eq!(
                 right_miss.missed_keys,
-                vec1![KeyComparison::Range((
+                vec1![KeyComparison::Range(BoundRange(
                     Bound::Included(vec1![DfValue::from(3)]),
                     Bound::Unbounded
                 ))]

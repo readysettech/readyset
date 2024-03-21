@@ -31,6 +31,7 @@ use tokio_postgres::types::{to_sql_checked, FromSql, IsNull, Kind, ToSql, Type};
 use uuid::Uuid;
 
 mod array;
+mod bounds;
 mod collation;
 pub mod dialect;
 mod r#enum;
@@ -179,6 +180,9 @@ impl fmt::Display for DfValue {
 pub const TIME_FORMAT: &str = "%H:%M:%S";
 
 impl DfValue {
+    pub const MIN_VALUE: Self = Self::None;
+    pub const MAX_VALUE: Self = Self::Max;
+
     /// Construct a new [`DfValue::Array`] containing an empty array
     pub fn empty_array() -> Self {
         // TODO: static singleton empty array?

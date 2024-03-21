@@ -499,6 +499,7 @@ mod tests {
     use std::convert::TryInto;
     use std::ops::Bound;
 
+    use readyset_util::ranges::BoundRange;
     use vec1::vec1;
 
     use super::*;
@@ -596,7 +597,7 @@ mod tests {
             state
                 .lookup_range(
                     &[0],
-                    &RangeKey::Single((Bound::Unbounded, Bound::Included(3.into())))
+                    &RangeKey::Single(BoundRange(Bound::Unbounded, Bound::Included(3.into())))
                 )
                 .unwrap()
                 .len(),
@@ -790,7 +791,7 @@ mod tests {
                 let range = vec1![DfValue::from(11)]..vec1![DfValue::from(20)];
                 assert_eq!(
                     state.lookup_range(&[0], &RangeKey::from(&range)),
-                    RangeLookupResult::Missing(vec![(
+                    RangeLookupResult::Missing(vec![BoundRange(
                         range.start_bound().map(Vec1::as_vec).cloned(),
                         range.end_bound().map(Vec1::as_vec).cloned()
                     )])
