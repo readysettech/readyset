@@ -1,6 +1,5 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::ops::Bound;
 use std::sync::Arc;
 
 use ahash::RandomState;
@@ -11,6 +10,7 @@ use reader_map::{EvictionQuantity, EvictionStrategy};
 use readyset_client::consistency::Timestamp;
 use readyset_client::results::SharedResults;
 use readyset_client::KeyComparison;
+use readyset_data::range;
 use vec1::Vec1;
 
 pub use self::multir::LookupError;
@@ -124,7 +124,7 @@ fn new_inner(
             // want to pass whether we're fully materialized down into the reader_map and skip
             // inserting into the interval tree entirely (maybe make it an option?) if so
             if trigger.is_none() {
-                w.insert_range(..);
+                w.insert_full_range();
             }
             (multiw::Handle::$variant(w), multir::Handle::$variant(r))
         }};
@@ -355,9 +355,8 @@ impl WriteHandle {
     }
 
     pub(crate) fn mark_hole(&mut self, key: &KeyComparison) -> ReadySetResult<u64> {
-        if let Some(len) = key.len() {
-            invariant_eq!(len, self.index.len());
-        }
+        invariant_eq!(key.len(), self.index.len());
+
         match key {
             KeyComparison::Equal(k) => Ok(self.mut_with_key(k.as_vec()).mark_hole()),
             KeyComparison::Range((start, end)) => {
@@ -388,9 +387,7 @@ impl WriteHandle {
     }
 
     pub(crate) fn mark_filled(&mut self, key: KeyComparison) -> ReadySetResult<()> {
-        if let Some(len) = key.len() {
-            invariant_eq!(len, self.index.len());
-        }
+        invariant_eq!(key.len(), self.index.len());
 
         #[allow(clippy::unreachable)] // Documented invariant.
         let range = match (self.index.index_type, &key) {
@@ -400,9 +397,9 @@ impl WriteHandle {
             (IndexType::HashMap, KeyComparison::Range(_)) => {
                 unreachable!("Range key with a HashMap index")
             }
-            (IndexType::BTreeMap, KeyComparison::Equal(equal)) => (
-                Bound::Included(equal.as_vec()),
-                Bound::Included(equal.as_vec()),
+            (IndexType::BTreeMap, KeyComparison::Equal(equal)) => range!(
+                =equal.as_vec(),
+                =equal.as_vec()
             ),
             (IndexType::BTreeMap, KeyComparison::Range((start, end))) => (
                 start.as_ref().map(Vec1::as_vec),
@@ -414,7 +411,9 @@ impl WriteHandle {
             return Err(ReadySetError::RangeAlreadyFilled);
         }
 
-        self.handle.insert_range(range);
+        // TODO ethan remove clones
+        self.handle
+            .insert_range((range.0.cloned(), range.1.cloned()));
         Ok(())
     }
 
@@ -588,8 +587,6 @@ impl SingleReadHandle {
 #[cfg(test)]
 #[allow(clippy::panic)]
 mod tests {
-    use std::ops::Bound;
-
     use readyset_client::results::SharedRows;
 
     use super::*;
@@ -800,15 +797,15 @@ mod tests {
             );
             w.swap();
 
-            let range_key = &[KeyComparison::Range((
-                Bound::Included(vec1![DfValue::from(0)]),
-                Bound::Excluded(vec1![DfValue::from(10)]),
+            let range_key = &[KeyComparison::Range(range!(
+                =vec1![DfValue::from(0)],
+                vec1![DfValue::from(10)]
             ))];
 
             assert!(r.get_multi(range_key).err().unwrap().is_miss());
 
-            w.mark_filled(KeyComparison::from_range(
-                &(vec1![DfValue::from(0)]..vec1![DfValue::from(10)]),
+            w.mark_filled(KeyComparison::Range(
+                range!(=vec1![DfValue::from(0)], vec1![DfValue::from(10)]),
             ))
             .unwrap();
             w.swap();
@@ -851,20 +848,20 @@ mod tests {
             );
             w.swap();
 
-            let range_key = &[KeyComparison::Range((
-                Bound::Included(vec1![DfValue::from(0)]),
-                Bound::Excluded(vec1![DfValue::from(10)]),
+            let range_key = &[KeyComparison::Range(range!(
+                =vec1![DfValue::from(0)],
+                vec1![DfValue::from(10)]
             ))];
 
-            w.mark_filled(KeyComparison::from_range(
-                &(vec1![DfValue::from(0)]..vec1![DfValue::from(10)]),
+            w.mark_filled(KeyComparison::Range(
+                range!(=vec1![DfValue::from(0)], vec1![DfValue::from(10)]),
             ))
             .unwrap();
             w.swap();
             r.get_multi(range_key).unwrap();
 
-            w.mark_hole(&KeyComparison::from_range(
-                &(vec1![DfValue::from(0)]..vec1![DfValue::from(10)]),
+            w.mark_hole(&KeyComparison::Range(
+                range!(=vec1![DfValue::from(0)], vec1![DfValue::from(10)]),
             ))
             .unwrap();
             w.swap();

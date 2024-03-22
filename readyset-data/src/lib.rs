@@ -1,4 +1,4 @@
-#![feature(box_patterns, iter_order_by)]
+#![feature(box_patterns, iter_order_by, never_type)]
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
@@ -36,6 +36,7 @@ pub mod dialect;
 mod r#enum;
 mod float;
 mod integer;
+mod ranges;
 mod serde;
 mod text;
 mod timestamp;
@@ -43,11 +44,13 @@ mod r#type;
 
 pub use ndarray::{ArrayD, IxDyn};
 use proptest::arbitrary::Arbitrary;
+use proptest::prelude::*;
 
 pub use crate::array::Array;
 pub use crate::collation::Collation;
 pub use crate::dialect::Dialect;
 pub use crate::r#type::{DfType, PgEnumMetadata, PgTypeCategory};
+pub use crate::ranges::{Bound, BoundedRange, IntoBoundedRange};
 pub use crate::serde::TextRef;
 pub use crate::text::{Text, TinyText};
 pub use crate::timestamp::{TimestampTz, TIMESTAMP_FORMAT, TIMESTAMP_PARSE_FORMAT};
@@ -179,6 +182,12 @@ impl fmt::Display for DfValue {
 pub const TIME_FORMAT: &str = "%H:%M:%S";
 
 impl DfValue {
+    /// The maximal possible DfValue.
+    pub const MIN_VALUE: Self = DfValue::None;
+
+    /// The minimal possible DfValue.
+    pub const MAX_VALUE: Self = DfValue::Max;
+
     /// Construct a new [`DfValue::Array`] containing an empty array
     pub fn empty_array() -> Self {
         // TODO: static singleton empty array?
@@ -2306,7 +2315,6 @@ mod arbitrary {
 #[cfg(test)]
 mod tests {
     use derive_more::{From, Into};
-    use proptest::prelude::*;
     use readyset_util::{eq_laws, hash_laws, ord_laws};
     use test_strategy::proptest;
 

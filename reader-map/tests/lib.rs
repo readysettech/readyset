@@ -1,6 +1,6 @@
 use std::collections::hash_map::RandomState;
 use std::hash::Hash;
-use std::ops::Bound;
+use std::ops::RangeBounds;
 
 use partial_map::InsertionOrder;
 use reader_map::handles::{ReadHandle, WriteHandle};
@@ -8,6 +8,7 @@ use reader_map::refs::Miss;
 use reader_map::Error::*;
 use reader_map::{DefaultInsertionOrder, EvictionQuantity, Options};
 use readyset_client::internal::IndexType;
+use readyset_util::ranges::Bound;
 
 macro_rules! assert_match {
     ($x:expr, $p:pat) => {
@@ -16,6 +17,17 @@ macro_rules! assert_match {
             panic!(concat!(stringify!($x), " did not match ", stringify!($p)));
         }
     };
+}
+
+fn range<R, T>(r: R) -> (Bound<T>, Bound<T>)
+where
+    R: RangeBounds<T>,
+    T: Clone,
+{
+    (
+        r.start_bound().cloned().try_into().unwrap(),
+        r.end_bound().cloned().try_into().unwrap(),
+    )
 }
 
 /// Create an empty eventually consistent map with meta and timestamp information.
@@ -817,27 +829,25 @@ fn insert_remove_entry() {
 
 #[test]
 fn range_works() {
-    use std::ops::Bound::{Included, Unbounded};
-
     let (mut w, r) = reader_map::new();
     for (k, v) in [(3, 9), (3, 30), (4, 10)] {
         w.insert(k, v);
     }
-    w.insert_range((Included(2), Unbounded));
+    w.insert_range(range(2..i32::MAX));
     w.publish();
 
     {
         let m = r.enter().unwrap();
-        m.range(&(3..4)).unwrap();
+        m.range(&range(3..4)).unwrap();
 
-        let results = m.range(&(3..4)).unwrap().collect::<Vec<_>>();
+        let results = m.range(&range(3..4)).unwrap().collect::<Vec<_>>();
         assert_eq!(results.len(), 1);
         assert_eq!(
             results[0].1.iter().cloned().collect::<Vec<_>>(),
             vec![9, 30]
         );
 
-        let results = m.range(&(3..=4)).unwrap().collect::<Vec<_>>();
+        let results = m.range(&range(3..=4)).unwrap().collect::<Vec<_>>();
         assert_eq!(results.len(), 2);
         assert_eq!(
             results[0].1.iter().cloned().collect::<Vec<_>>(),
@@ -855,12 +865,12 @@ fn insert_range_pre_publish() {
     // publish. This tests that that works properly for the interval tree by checking reads with
     // both an even and an odd number of publishes
     let (mut w, r) = reader_map::new::<i32, i32>();
-    w.insert_range(..);
+    w.insert_range(range(i32::MIN..=i32::MAX));
     w.publish();
 
     {
         let m = r.enter().unwrap();
-        m.range(&(1..=2)).unwrap();
+        m.range(&range(1..=2)).unwrap();
     }
 
     w.insert(1, 2);
@@ -869,7 +879,7 @@ fn insert_range_pre_publish() {
     {
         let m = r.enter().unwrap();
         assert_eq!(
-            m.range(&(1..=2))
+            m.range(&range(1..=2))
                 .unwrap()
                 .map(|(k, v)| (*k, v.into_iter().cloned().collect::<Vec<_>>()))
                 .collect::<Vec<_>>(),
@@ -884,14 +894,14 @@ fn remove_range_works() {
     for (k, v) in [(3, 9), (3, 30), (4, 10)] {
         w.insert(k, v);
     }
-    w.insert_range(2..=6);
+    w.insert_range(range(2..=6));
     w.insert(5, 7);
     w.insert(9, 20);
     w.publish();
 
     {
         let m = r.enter().unwrap();
-        m.range(&(3..4)).unwrap();
+        m.range(&range(3..4)).unwrap();
     }
 
     w.remove_range((Bound::Included(4), Bound::Included(5)));
@@ -899,7 +909,7 @@ fn remove_range_works() {
 
     {
         let m = r.enter().unwrap();
-        m.range(&(3..=4)).unwrap_err();
+        m.range(&range(3..=4)).unwrap_err();
         assert!(m.get(&4).is_none());
         assert!(m.get(&3).is_some());
         assert!(m.get(&9).is_some());
@@ -912,13 +922,13 @@ fn contains_range_works() {
     for (k, v) in [(3, 9), (3, 30), (4, 10)] {
         w.insert(k, v);
     }
-    w.insert_range(2..6);
+    w.insert_range(range(2..6));
     w.publish();
 
     {
         let m = r.enter().unwrap();
-        assert!(m.contains_range(&(3..4)));
-        assert!(!m.contains_range(&(6..)));
+        assert!(m.contains_range(&range(3..4)));
+        assert!(!m.contains_range(&range(6..)));
     }
 }
 
@@ -941,7 +951,7 @@ fn timestamp_changes_on_publish() {
 #[test]
 fn get_respects_ranges() {
     let (mut w, r) = reader_map::new::<i32, i32>();
-    w.insert_range(2..6);
+    w.insert_range(range(2..6));
     w.publish();
 
     {
@@ -955,7 +965,7 @@ fn get_respects_ranges() {
 #[test]
 fn contains_key_respects_ranges() {
     let (mut w, r) = reader_map::new::<i32, i32>();
-    w.insert_range(2..6);
+    w.insert_range(range(2..6));
     w.publish();
 
     {
@@ -1165,7 +1175,7 @@ fn eviction_range_lru() -> reader_map::Result<()> {
         .with_eviction_strategy(reader_map::EvictionStrategy::new_lru())
         .construct();
 
-    w.insert_range('a'..='z');
+    w.insert_range(range('a'..='z'));
     for (v, k) in ('a'..='z').enumerate() {
         w.insert(k, (k, v));
     }
@@ -1173,22 +1183,22 @@ fn eviction_range_lru() -> reader_map::Result<()> {
     w.publish();
 
     let mut meta_cnt = 0;
-    for (_, v) in r.enter()?.range(&(&'q'..=&'z')).unwrap() {
+    for (_, v) in r.enter()?.range(&range('q'..='z')).unwrap() {
         assert_eq!(v.eviction_meta().value(), meta_cnt);
         meta_cnt += 1;
     }
 
-    for (_, v) in r.enter()?.range(&(&'k'..=&'s')).unwrap() {
+    for (_, v) in r.enter()?.range(&range('k'..='s')).unwrap() {
         assert_eq!(v.eviction_meta().value(), meta_cnt);
         meta_cnt += 1;
     }
 
-    for (_, v) in r.enter()?.range(&(&'a'..=&'m')).unwrap() {
+    for (_, v) in r.enter()?.range(&range('a'..='m')).unwrap() {
         assert_eq!(v.eviction_meta().value(), meta_cnt);
         meta_cnt += 1;
     }
 
-    for (_, v) in r.enter()?.range(&(&'x'..=&'z')).unwrap() {
+    for (_, v) in r.enter()?.range(&range('x'..='z')).unwrap() {
         assert_eq!(v.eviction_meta().value(), meta_cnt);
         meta_cnt += 1;
     }
@@ -1203,7 +1213,7 @@ fn eviction_range_lru() -> reader_map::Result<()> {
     let to_evict = evict(&mut w, 0.30);
     assert_eq!(to_evict, ['n', 'o', 'p', 'q', 't', 'u', 'v', 'w']);
     w.publish();
-    let Miss(misses) = r.enter()?.range(&(&'a'..=&'z')).unwrap_err();
+    let Miss(misses) = r.enter()?.range(&range('a'..='z')).unwrap_err();
     assert_eq!(
         misses,
         [
@@ -1217,7 +1227,7 @@ fn eviction_range_lru() -> reader_map::Result<()> {
     let to_evict = evict(&mut w, 0.49);
     assert_eq!(to_evict, ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'r', 's']);
     w.publish();
-    let Miss(misses) = r.enter()?.range(&(&'a'..=&'z')).unwrap_err();
+    let Miss(misses) = r.enter()?.range(&range('a'..='z')).unwrap_err();
     assert_eq!(
         misses,
         [
@@ -1232,7 +1242,7 @@ fn eviction_range_lru() -> reader_map::Result<()> {
     // x,y,z
     // h,i,j,k,l,m
     // Let's read i,j,k and then evict 6:
-    for (_, v) in r.enter()?.range(&(&'i'..=&'k')).unwrap() {
+    for (_, v) in r.enter()?.range(&range('i'..='k')).unwrap() {
         assert_eq!(v.eviction_meta().value(), meta_cnt);
         meta_cnt += 1;
     }
@@ -1240,7 +1250,7 @@ fn eviction_range_lru() -> reader_map::Result<()> {
     let to_evict = evict(&mut w, 0.6);
     assert_eq!(to_evict, ['h', 'l', 'm', 'x', 'y', 'z']);
     w.publish();
-    let Miss(misses) = r.enter()?.range(&(&'a'..=&'z')).unwrap_err();
+    let Miss(misses) = r.enter()?.range(&range('a'..='z')).unwrap_err();
     assert_eq!(
         misses,
         [
@@ -1250,7 +1260,7 @@ fn eviction_range_lru() -> reader_map::Result<()> {
         ]
     );
 
-    for (_, v) in r.enter()?.range(&(&'i'..=&'k')).unwrap() {
+    for (_, v) in r.enter()?.range(&range('i'..='k')).unwrap() {
         assert_eq!(v.eviction_meta().value(), meta_cnt);
         meta_cnt += 1;
     }

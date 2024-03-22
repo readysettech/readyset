@@ -497,8 +497,8 @@ impl MemoryState {
 #[cfg(test)]
 mod tests {
     use std::convert::TryInto;
-    use std::ops::Bound;
 
+    use readyset_data::{range, IntoBoundedRange};
     use vec1::vec1;
 
     use super::*;
@@ -596,7 +596,7 @@ mod tests {
             state
                 .lookup_range(
                     &[0],
-                    &RangeKey::Single((Bound::Unbounded, Bound::Included(3.into())))
+                    &RangeKey::Single(DfValue::from(3).less_than_or_equal_to())
                 )
                 .unwrap()
                 .len(),
@@ -608,7 +608,10 @@ mod tests {
     fn point_lookup_only_btree() {
         let mut state = MemoryState::default();
         state.add_index(Index::btree_map(vec![0]), Some(vec![Tag::new(1)]));
-        state.mark_filled(KeyComparison::from_range(&(..)), Tag::new(1));
+        state.mark_filled(
+            KeyComparison::Range(range!(vec1![DfValue::MIN_VALUE], vec1![DfValue::MAX_VALUE])),
+            Tag::new(1),
+        );
         state.insert(vec![DfValue::from(1), DfValue::from(2)], Some(Tag::new(1)));
 
         let res = state.lookup(&[0], &PointKey::Single(DfValue::from(1)));
@@ -753,15 +756,11 @@ mod tests {
     }
 
     mod lookup_range {
-        use std::ops::{Bound, RangeBounds};
-
         use vec1::vec1;
 
         use super::*;
 
         mod partial {
-            use vec1::Vec1;
-
             use super::*;
 
             fn setup() -> MemoryState {
@@ -769,7 +768,9 @@ mod tests {
                 let tag = Tag::new(1);
                 state.add_index(Index::new(IndexType::BTreeMap, vec![0]), Some(vec![tag]));
                 state.mark_filled(
-                    KeyComparison::from_range(&(vec1![DfValue::from(0)]..vec1![DfValue::from(10)])),
+                    KeyComparison::Range(
+                        range!(=vec1![DfValue::from(0)], vec1![DfValue::from(10)]),
+                    ),
                     tag,
                 );
                 state
@@ -787,12 +788,12 @@ mod tests {
             #[test]
             fn missing() {
                 let state = setup();
-                let range = vec1![DfValue::from(11)]..vec1![DfValue::from(20)];
+                let range = range!(=vec1![DfValue::from(11)], vec1![DfValue::from(20)]);
                 assert_eq!(
                     state.lookup_range(&[0], &RangeKey::from(&range)),
                     RangeLookupResult::Missing(vec![(
-                        range.start_bound().map(Vec1::as_vec).cloned(),
-                        range.end_bound().map(Vec1::as_vec).cloned()
+                        range.0.map(|b| b.as_vec().to_owned()),
+                        range.1.map(|b| b.as_vec().to_owned()),
                     )])
                 );
             }
@@ -850,7 +851,10 @@ mod tests {
                 assert_eq!(
                     state.lookup_range(
                         &[0],
-                        &RangeKey::from(&(vec1![DfValue::from(11)]..vec1![DfValue::from(20)]))
+                        &RangeKey::from(&range!(
+                            =vec1![DfValue::from(11)],
+                            vec1![DfValue::from(20)]
+                        ))
                     ),
                     RangeLookupResult::Some(vec![].into())
                 );
@@ -862,7 +866,7 @@ mod tests {
                 assert_eq!(
                     state.lookup_range(
                         &[0],
-                        &RangeKey::from(&(vec1![DfValue::from(3)]..vec1![DfValue::from(7)]))
+                        &RangeKey::from(&range!(=vec1![DfValue::from(3)], vec1![DfValue::from(7)]))
                     ),
                     RangeLookupResult::Some(
                         (3..7).map(|n| vec![n.into()]).collect::<Vec<_>>().into()
@@ -876,7 +880,9 @@ mod tests {
                 assert_eq!(
                     state.lookup_range(
                         &[0],
-                        &RangeKey::from(&(vec1![DfValue::from(3)]..=vec1![DfValue::from(7)]))
+                        &RangeKey::from(
+                            &range!(=vec1![DfValue::from(3)], =vec1![DfValue::from(7)])
+                        )
                     ),
                     RangeLookupResult::Some(
                         (3..=7).map(|n| vec![n.into()]).collect::<Vec<_>>().into()
@@ -890,10 +896,7 @@ mod tests {
                 assert_eq!(
                     state.lookup_range(
                         &[0],
-                        &RangeKey::from(&(
-                            Bound::Excluded(vec1![DfValue::from(3)]),
-                            Bound::Excluded(vec1![DfValue::from(7)])
-                        ))
+                        &RangeKey::from(&range!(vec1![DfValue::from(3)], vec1![DfValue::from(7)]))
                     ),
                     RangeLookupResult::Some(
                         (3..7)
@@ -911,9 +914,9 @@ mod tests {
                 assert_eq!(
                     state.lookup_range(
                         &[0],
-                        &RangeKey::from(&(
-                            Bound::Excluded(vec1![DfValue::from(3)]),
-                            Bound::Included(vec1![DfValue::from(7)])
+                        &RangeKey::from(&range!(
+                            vec1![DfValue::from(3)],
+                            =vec1![DfValue::from(7)]
                         ))
                     ),
                     RangeLookupResult::Some(
@@ -930,7 +933,10 @@ mod tests {
             fn inclusive_unbounded() {
                 let state = setup();
                 assert_eq!(
-                    state.lookup_range(&[0], &RangeKey::from(&(vec1![DfValue::from(3)]..))),
+                    state.lookup_range(
+                        &[0],
+                        &RangeKey::from(&vec1![DfValue::from(3)].greater_than_or_equal_to())
+                    ),
                     RangeLookupResult::Some(
                         (3..10).map(|n| vec![n.into()]).collect::<Vec<_>>().into()
                     )
@@ -941,7 +947,10 @@ mod tests {
             fn unbounded_inclusive() {
                 let state = setup();
                 assert_eq!(
-                    state.lookup_range(&[0], &RangeKey::from(&(..=vec1![DfValue::from(3)]))),
+                    state.lookup_range(
+                        &[0],
+                        &RangeKey::from(&vec1![DfValue::from(3)].less_than_or_equal_to())
+                    ),
                     RangeLookupResult::Some(
                         (0..=3).map(|n| vec![n.into()]).collect::<Vec<_>>().into()
                     )
@@ -952,7 +961,7 @@ mod tests {
             fn unbounded_exclusive() {
                 let state = setup();
                 assert_eq!(
-                    state.lookup_range(&[0], &RangeKey::from(&(..vec1![DfValue::from(3)]))),
+                    state.lookup_range(&[0], &RangeKey::from(&vec1![DfValue::from(3)].less_than())),
                     RangeLookupResult::Some(
                         (0..3).map(|n| vec![n.into()]).collect::<Vec<_>>().into()
                     )

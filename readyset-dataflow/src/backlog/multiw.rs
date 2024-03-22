@@ -1,9 +1,9 @@
-use std::ops::{Bound, RangeBounds};
-
 use ahash::RandomState;
 use dataflow_expression::PreInsertion;
 use reader_map::EvictionQuantity;
 use readyset_client::consistency::Timestamp;
+use readyset_data::BoundedRange;
+use readyset_util::ranges::RangeBounds;
 
 use super::{key_to_single, Key};
 use crate::prelude::*;
@@ -68,7 +68,7 @@ impl Handle {
         }
     }
 
-    pub fn empty_range(&mut self, range: (Bound<Vec<DfValue>>, Bound<Vec<DfValue>>)) {
+    pub fn empty_range(&mut self, range: BoundedRange<Vec<DfValue>>) {
         match self {
             Handle::Single(h) => {
                 h.remove_range((
@@ -178,20 +178,18 @@ impl Handle {
         }
     }
 
-    pub fn insert_range<R>(&mut self, range: R)
-    where
-        R: RangeBounds<Vec<DfValue>>,
-    {
+    pub fn insert_range(&mut self, range: BoundedRange<Vec<DfValue>>) {
         match self {
             Handle::Single(h) => {
                 h.insert_range((
                     range.start_bound().map(|r| {
                         debug_assert_eq!(r.len(), 1);
-                        &r[0]
+                        // TODO ethan remove clones
+                        r[0].clone()
                     }),
                     range.end_bound().map(|r| {
                         debug_assert_eq!(r.len(), 1);
-                        &r[0]
+                        r[0].clone()
                     }),
                 ));
             }
