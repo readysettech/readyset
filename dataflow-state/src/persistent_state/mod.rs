@@ -86,7 +86,7 @@ use readyset_client::internal::Index;
 use readyset_client::{KeyComparison, SqlIdentifier};
 use readyset_data::DfValue;
 use readyset_errors::{internal_err, invariant, ReadySetError, ReadySetResult};
-use readyset_util::intervals::BoundPair;
+use readyset_util::ranges::BoundRange;
 use replication_offset::ReplicationOffset;
 use rocksdb::{
     self, BlockBasedOptions, ColumnFamilyDescriptor, CompactOptions, IteratorMode, SliceTransform,
@@ -923,7 +923,7 @@ impl State for PersistentStateHandle {
             .cf_handle(PK_CF)
             .expect("Primary key column family not found");
 
-        let (lower, upper) = serialize_range(key.clone());
+        let BoundRange(lower, upper) = serialize_range(key.clone());
 
         let mut opts = rocksdb::ReadOptions::default();
         let mut inclusive_end = None;
@@ -1083,9 +1083,9 @@ fn serialize_key<K: Serialize, E: Serialize>(k: K, extra: E) -> Vec<u8> {
     bincode::options().serialize(&(size, k, extra)).unwrap()
 }
 
-fn serialize_range(range: RangeKey) -> BoundPair<Vec<u8>> {
-    let (lower, upper) = range.into_point_keys();
-    (
+fn serialize_range(range: RangeKey) -> BoundRange<Vec<u8>> {
+    let BoundRange(lower, upper) = range.into_point_keys();
+    BoundRange(
         lower.map(|v| serialize_key(v, ())),
         upper.map(|v| serialize_key(v, ())),
     )

@@ -11,6 +11,7 @@ use readyset_client::consistency::Timestamp;
 use readyset_client::results::{SharedResults, SharedRows};
 use readyset_client::KeyComparison;
 use readyset_errors::ReadySetError;
+use readyset_util::ranges::BoundRange;
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 use vec1::{vec1, Vec1};
@@ -134,7 +135,7 @@ impl Handle {
                     Some(v) => hits.push(v.as_ref().clone()),
                     None => misses.push(Cow::Borrowed(key)),
                 },
-                KeyComparison::Range((start, end)) => {
+                KeyComparison::Range(BoundRange(start, end)) => {
                     if key.is_reversed_range() {
                         warn!("Reader received lookup for range with start bound above end bound; returning empty result set");
                         hits.push(Default::default());
@@ -146,7 +147,7 @@ impl Handle {
                     match map.range(&(start_bound, end_bound)) {
                         Ok(hit) => hits.extend(hit.map(|(_, v)| v.as_ref().clone())),
                         Err(Miss(miss)) => misses.extend(miss.into_iter().map(|(start, end)| {
-                            Cow::Owned(KeyComparison::Range((
+                            Cow::Owned(KeyComparison::Range(BoundRange(
                                 start.map(|s| vec1![s]),
                                 end.map(|e| vec1![e]),
                             )))
@@ -188,7 +189,7 @@ impl Handle {
                     Some(v) => hits.push(v.as_ref().clone()),
                     None => misses.push(Cow::Borrowed(key)),
                 },
-                KeyComparison::Range((start, end)) => {
+                KeyComparison::Range(BoundRange(start, end)) => {
                     if key.is_reversed_range() {
                         warn!("Reader received lookup for range with start bound above end bound; returning empty result set");
                         hits.push(Default::default());
@@ -201,7 +202,7 @@ impl Handle {
                     )) {
                         Ok(hit) => hits.extend(hit.map(|(_, v)| v.as_ref().clone())),
                         Err(Miss(miss)) => misses.extend(miss.into_iter().map(|(start, end)| {
-                            Cow::Owned(KeyComparison::Range((
+                            Cow::Owned(KeyComparison::Range(BoundRange(
                                 start.map(|s| Vec1::try_from_vec(s).unwrap()),
                                 end.map(|e| Vec1::try_from_vec(e).unwrap()),
                             )))
@@ -411,7 +412,7 @@ mod tests {
         w.insert_range((DfValue::from(0i32))..(DfValue::from(10i32)));
         w.publish();
 
-        let key = KeyComparison::Range((
+        let key = KeyComparison::Range(BoundRange(
             Bound::Included(vec1![2i32.into()]),
             Bound::Included(vec1![3i32.into()]),
         ));
@@ -460,7 +461,7 @@ mod tests {
         w.insert_range(vec![0i32.into(), 0i32.into()]..vec![10i32.into(), 10i32.into()]);
         w.publish();
 
-        let key = KeyComparison::Range((
+        let key = KeyComparison::Range(BoundRange(
             Bound::Included(vec1![2i32.into(), 2i32.into()]),
             Bound::Included(vec1![3i32.into(), 3i32.into()]),
         ));

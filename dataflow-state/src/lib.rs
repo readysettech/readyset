@@ -10,7 +10,7 @@ mod single_state;
 use std::borrow::Cow;
 use std::fmt::{self, Debug};
 use std::iter::FromIterator;
-use std::ops::{Bound, Deref};
+use std::ops::Deref;
 use std::rc::Rc;
 use std::vec;
 
@@ -25,6 +25,7 @@ use readyset_client::internal::Index;
 use readyset_client::{KeyComparison, PersistencePoint};
 use readyset_data::DfValue;
 use readyset_errors::ReadySetResult;
+use readyset_util::ranges::BoundRange;
 use replication_offset::ReplicationOffset;
 use serde::{Deserialize, Serialize};
 
@@ -746,7 +747,7 @@ impl<'a> LookupResult<'a> {
     }
 }
 
-pub type Misses = Vec<(Bound<Vec<DfValue>>, Bound<Vec<DfValue>>)>;
+pub type Misses = Vec<BoundRange<Vec<DfValue>>>;
 
 #[derive(Eq, PartialEq, Debug)]
 pub enum RangeLookupResult<'a> {

@@ -17,6 +17,7 @@ pub mod math;
 pub mod nonmaxusize;
 pub mod progress;
 pub mod properties;
+pub mod ranges;
 pub mod redacted;
 pub mod shared_cache;
 pub mod shutdown;

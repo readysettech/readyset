@@ -46,6 +46,7 @@ use dataflow_state::{
 };
 use itertools::Itertools;
 use readyset_data::DfValue;
+use readyset_util::ranges::BoundRange;
 
 lazy_static::lazy_static! {
     static ref LARGE_STRINGS: Vec<String> = ["a", "b", "c"]
@@ -186,7 +187,7 @@ pub fn rocksdb_range_lookup(c: &mut Criterion, state: &PersistentState) {
         b.iter(|| {
             black_box(state.lookup_range(
                 &[1],
-                &RangeKey::Single((Bound::Included(key.clone()), Bound::Unbounded)),
+                &RangeKey::Single(BoundRange(Bound::Included(key.clone()), Bound::Unbounded)),
             ));
         })
     });
@@ -201,7 +202,7 @@ pub fn rocksdb_range_lookup_large_strings(c: &mut Criterion, state: &PersistentS
         b.iter(|| {
             black_box(state.lookup_range(
                 &[1],
-                &RangeKey::Single((Bound::Included(key.clone()), Bound::Unbounded)),
+                &RangeKey::Single(BoundRange(Bound::Included(key.clone()), Bound::Unbounded)),
             ));
         })
     });

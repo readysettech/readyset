@@ -1,4 +1,4 @@
-use std::ops::{Bound, RangeBounds};
+use std::ops::Bound;
 use std::rc::Rc;
 
 use common::{IndexType, SizeOf};
@@ -6,6 +6,7 @@ use itertools::Either;
 use readyset_client::internal::Index;
 use readyset_client::KeyComparison;
 use readyset_data::DfValue;
+use readyset_util::ranges::BoundRange;
 use vec1::Vec1;
 
 use crate::keyed_state::KeyedState;
@@ -48,7 +49,7 @@ impl SingleState {
         if !partial && index.index_type == IndexType::BTreeMap {
             // For fully materialized indices, we never miss - so mark that the full range of keys
             // has been filled.
-            state.insert_range((Bound::Unbounded, Bound::Unbounded))
+            state.insert_range(BoundRange(Bound::Unbounded, Bound::Unbounded))
         }
         Self {
             index,
@@ -213,7 +214,7 @@ impl SingleState {
         assert!(replaced.is_none());
     }
 
-    fn mark_range_filled(&mut self, range: (Bound<Vec1<DfValue>>, Bound<Vec1<DfValue>>)) {
+    fn mark_range_filled(&mut self, range: BoundRange<Vec1<DfValue>>) {
         self.state.insert_range(range);
     }
 
@@ -460,7 +461,7 @@ mod tests {
     #[test]
     fn mark_filled_range() {
         let mut state = SingleState::new(Index::new(IndexType::BTreeMap, vec![0]), true);
-        state.mark_filled(KeyComparison::Range((
+        state.mark_filled(KeyComparison::Range(BoundRange(
             Bound::Included(vec1![0.into()]),
             Bound::Excluded(vec1![5.into()]),
         )));

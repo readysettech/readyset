@@ -8,6 +8,7 @@ use readyset_client::KeyComparison;
 use readyset_errors::{invariant, ReadySetResult};
 use readyset_util::hash::hash;
 use readyset_util::intervals::{cmp_endbound, cmp_startbound};
+use readyset_util::ranges::BoundRange;
 use readyset_util::Indices;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
@@ -209,15 +210,16 @@ impl Ord for BufferedReplayKey {
             .cmp(&other.tag)
             .then_with(|| match (&self.key, &other.key) {
                 (KeyComparison::Equal(k1), KeyComparison::Equal(k2)) => k1.cmp(k2),
-                (KeyComparison::Range((l1, u1)), KeyComparison::Range((l2, u2))) => {
-                    cmp_startbound(l1.as_ref(), l2.as_ref())
-                        .then_with(|| cmp_endbound(u1.as_ref(), u2.as_ref()))
-                }
-                (KeyComparison::Equal(k), KeyComparison::Range((l, u))) => {
+                (
+                    KeyComparison::Range(BoundRange(l1, u1)),
+                    KeyComparison::Range(BoundRange(l2, u2)),
+                ) => cmp_startbound(l1.as_ref(), l2.as_ref())
+                    .then_with(|| cmp_endbound(u1.as_ref(), u2.as_ref())),
+                (KeyComparison::Equal(k), KeyComparison::Range(BoundRange(l, u))) => {
                     cmp_startbound(Bound::Included(k), l.as_ref())
                         .then_with(|| cmp_endbound(Bound::Included(k), u.as_ref()))
                 }
-                (KeyComparison::Range((u, l)), KeyComparison::Equal(k)) => {
+                (KeyComparison::Range(BoundRange(u, l)), KeyComparison::Equal(k)) => {
                     cmp_startbound(l.as_ref(), Bound::Included(k))
                         .then_with(|| cmp_endbound(u.as_ref(), Bound::Included(k)))
                 }

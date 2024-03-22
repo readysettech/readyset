@@ -39,6 +39,7 @@ use readyset_client::{KeyComparison, Modification, SchemaType, ViewPlaceholder, 
 use readyset_data::{DfType, DfValue, Dialect};
 use readyset_errors::ReadySetError::{self, RpcFailed, SelectQueryCreationFailed};
 use readyset_util::eventually;
+use readyset_util::ranges::BoundRange;
 use readyset_util::shutdown::ShutdownSender;
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
@@ -7091,7 +7092,7 @@ async fn straddled_join_range_query() {
 
     let rows = q
         .multi_lookup(
-            vec![KeyComparison::Range((
+            vec![KeyComparison::Range(BoundRange(
                 Bound::Excluded(vec1![1i32.into(), 1i32.into()]),
                 Bound::Unbounded,
             ))],
@@ -7145,7 +7146,7 @@ async fn overlapping_range_queries() {
             let mut q = g.view("q").await.unwrap().into_reader_handle().unwrap();
             let results = q
                 .multi_lookup(
-                    vec![KeyComparison::Range((
+                    vec![KeyComparison::Range(BoundRange(
                         Bound::Included(vec1![DfValue::from(m * 10)]),
                         Bound::Unbounded,
                     ))],
@@ -7219,7 +7220,7 @@ async fn overlapping_remapped_range_queries() {
             let mut q = g.view("q").await.unwrap().into_reader_handle().unwrap();
             let results = q
                 .multi_lookup(
-                    vec![KeyComparison::Range((
+                    vec![KeyComparison::Range(BoundRange(
                         Bound::Included(vec1![DfValue::from(m * 10), DfValue::from(m * 10)]),
                         Bound::Unbounded,
                     ))],
@@ -7293,7 +7294,7 @@ async fn range_query_through_union() {
 
     let rows = q
         .multi_lookup(
-            vec![KeyComparison::Range((
+            vec![KeyComparison::Range(BoundRange(
                 Bound::Excluded(vec1![1.into()]),
                 Bound::Unbounded,
             ))],
@@ -7924,7 +7925,7 @@ async fn aggressive_eviction_range_impl() {
     for i in (0..500).rev() {
         let offset = i % 10;
         let vq = ViewQuery::from((
-            vec![KeyComparison::Range((
+            vec![KeyComparison::Range(BoundRange(
                 Bound::Included(vec1![DfValue::Int(offset)]),
                 Bound::Excluded(vec1![DfValue::Int(offset + 20)]),
             ))],

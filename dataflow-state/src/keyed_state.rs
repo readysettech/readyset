@@ -6,6 +6,7 @@ use indexmap::IndexMap;
 use partial_map::PartialMap;
 use readyset_data::DfValue;
 use readyset_util::intervals::into_bound_endpoint;
+use readyset_util::ranges::BoundRange;
 use tuple::TupleElements;
 use vec1::Vec1;
 
@@ -312,7 +313,7 @@ impl KeyedState {
     /// # Panics
     ///
     /// Panics if this `KeyedState` is backed by a HashMap index
-    pub(super) fn insert_range(&mut self, range: (Bound<Vec1<DfValue>>, Bound<Vec1<DfValue>>)) {
+    pub(super) fn insert_range(&mut self, range: BoundRange<Vec1<DfValue>>) {
         match self {
             KeyedState::SingleBTree(ref mut map) => map.insert_range((
                 range.0.map(|k| k.split_off_first().0),
@@ -366,7 +367,7 @@ impl KeyedState {
             misses
                 .into_iter()
                 .map(|(lower, upper)| {
-                    (
+                    BoundRange(
                         lower.map(|k| k.into_elements().collect()),
                         upper.map(|k| k.into_elements().collect()),
                     )
@@ -398,7 +399,9 @@ impl KeyedState {
                 .map_err(|misses| {
                     misses
                         .into_iter()
-                        .map(|(lower, upper)| (lower.map(|k| vec![k]), upper.map(|k| vec![k])))
+                        .map(|(lower, upper)| {
+                            BoundRange(lower.map(|k| vec![k]), upper.map(|k| vec![k]))
+                        })
                         .collect()
                 })
                 .map(flatten_rows),
@@ -410,7 +413,9 @@ impl KeyedState {
                 m.range(range).map(flatten_rows).map_err(|misses| {
                     misses
                         .into_iter()
-                        .map(|(lower, upper)| (lower.map(|k| vec![k]), upper.map(|k| vec![k])))
+                        .map(|(lower, upper)| {
+                            BoundRange(lower.map(|k| vec![k]), upper.map(|k| vec![k]))
+                        })
                         .collect()
                 })
             }
@@ -423,7 +428,8 @@ impl KeyedState {
                     range.0.as_ref().map(|b| b.as_ref()),
                     range.1.as_ref().map(|b| b.as_ref()),
                 ))
-                .map(flatten_rows),
+                .map(flatten_rows)
+                .map_err(|misses| misses.into_iter().map(|(l, u)| BoundRange(l, u)).collect()),
             (
                 KeyedState::SingleHash(_)
                 | KeyedState::DoubleHash(_)
