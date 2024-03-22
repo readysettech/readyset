@@ -295,9 +295,9 @@ pub struct QueryGraph {
 }
 
 impl QueryGraph {
-    /// Returns the set of columns on which this query is parametrized. They can come from
+    /// Returns the set of columns on which this query is parameterized. They can come from
     /// multiple tables involved in the query.
-    /// Does not include limit or offset parameters on which this query may be parametrized.
+    /// Does not include limit or offset parameters on which this query may be parameterized.
     pub fn parameters(&self) -> Vec<&Parameter> {
         self.relations
             .values()
@@ -306,7 +306,8 @@ impl QueryGraph {
     }
 
     /// Construct a representation of the lookup key of a view for this query graph, based on the
-    /// parameters in this query and the page number if this query is parametrized on an offset key.
+    /// parameters in this query and the page number if this query is parameterized on an offset
+    /// key.
     pub(crate) fn view_key(&self, config: &mir::Config) -> ReadySetResult<ViewKey> {
         let offset = self.pagination.as_ref().and_then(|p| p.offset);
         if self.parameters().is_empty() {
@@ -795,7 +796,7 @@ pub(crate) fn extract_limit_offset(
         Literal::Integer(val) => u64::try_from(*val)
             .map_err(|_| unsupported_err!("LIMIT field cannot have a negative value"))?,
         Literal::Placeholder(_) => {
-            unsupported!("ReadySet does not support parametrized LIMIT fields")
+            unsupported!("ReadySet does not support parameterized LIMIT fields")
         }
         _ => unsupported!("Invalid LIMIT statement"),
     };
@@ -813,7 +814,7 @@ pub(crate) fn extract_limit_offset(
                         limit,
                     })
                 }
-                _ => unsupported!("Numeric OFFSETs must be parametrized"),
+                _ => unsupported!("Numeric OFFSETs must be parameterized"),
             }
         })
         .transpose()?;

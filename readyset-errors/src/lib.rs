@@ -306,7 +306,7 @@ pub enum ReadySetError {
 
     /// No cache found for the given query parameters.
     ///
-    /// This error may occur when attempting to find an inlined cache to satisfy a parametrized
+    /// This error may occur when attempting to find an inlined cache to satisfy a parameterized
     /// query. This error should not reach the client when an upstream database is present.
     #[error("Existing caches do not satisfy the given query parameters.")]
     NoCacheForQuery,

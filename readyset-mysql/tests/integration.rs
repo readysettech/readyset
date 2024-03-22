@@ -1160,7 +1160,7 @@ async fn absurdly_simple_select() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn ad_hoc_unparametrized_select() {
+async fn ad_hoc_unparameterized_select() {
     let (opts, _handle, shutdown_tx) = setup().await;
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE test (x int, y int)")
@@ -1201,7 +1201,7 @@ async fn ad_hoc_unparametrized_select() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn ad_hoc_unparametrized_where_in() {
+async fn ad_hoc_unparameterized_where_in() {
     let (opts, _handle, shutdown_tx) = setup().await;
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE test (x int, y int)")
@@ -1236,7 +1236,7 @@ async fn ad_hoc_unparametrized_where_in() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn prepared_unparametrized_select() {
+async fn prepared_unparameterized_select() {
     let (opts, _handle, shutdown_tx) = setup().await;
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE test (x int, y int)")
