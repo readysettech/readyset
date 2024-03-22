@@ -4,7 +4,7 @@ use nom_sql::analysis::visit_mut::{self, VisitorMut};
 use nom_sql::{BinaryOperator, Expr, InValue, ItemPlaceholder, Literal, SelectStatement};
 
 #[derive(Default)]
-struct AutoParametrizeVisitor {
+struct AutoParameterizeVisitor {
     out: Vec<(usize, Literal)>,
     has_aggregates: bool,
     in_supported_position: bool,
@@ -12,7 +12,7 @@ struct AutoParametrizeVisitor {
     query_depth: u8,
 }
 
-impl AutoParametrizeVisitor {
+impl AutoParameterizeVisitor {
     fn replace_literal(&mut self, literal: &mut Literal) {
         let literal = mem::replace(literal, Literal::Placeholder(ItemPlaceholder::QuestionMark));
         self.out.push((self.param_index, literal));
@@ -20,7 +20,7 @@ impl AutoParametrizeVisitor {
     }
 }
 
-impl<'ast> VisitorMut<'ast> for AutoParametrizeVisitor {
+impl<'ast> VisitorMut<'ast> for AutoParameterizeVisitor {
     type Error = !;
 
     fn visit_literal(&mut self, literal: &'ast mut Literal) -> Result<(), Self::Error> {
@@ -140,8 +140,8 @@ impl<'ast> VisitorMut<'ast> for AutoParametrizeVisitor {
 /// Replace all literals that are in positions we support parameters in the given query with
 /// parameters, and return the values for those parameters alongside the index in the parameter list
 /// where they appear as a tuple of (placeholder position, value).
-pub fn auto_parametrize_query(query: &mut SelectStatement) -> Vec<(usize, Literal)> {
-    // Don't try to auto-parametrize equal-queries that already contain range params for now, since
+pub fn auto_parameterize_query(query: &mut SelectStatement) -> Vec<(usize, Literal)> {
+    // Don't try to auto-parameterize equal-queries that already contain range params for now, since
     // we don't yet allow mixing range and equal parameters in the same query
     if query.where_clause.iter().any(|expr| {
         iter::once(expr)
@@ -169,7 +169,7 @@ pub fn auto_parametrize_query(query: &mut SelectStatement) -> Vec<(usize, Litera
         return vec![];
     }
 
-    let mut visitor = AutoParametrizeVisitor {
+    let mut visitor = AutoParameterizeVisitor {
         has_aggregates: query.contains_aggregate_select(),
         ..Default::default()
     };
@@ -191,7 +191,7 @@ mod tests {
         try_parse_select_statement(q, dialect).unwrap()
     }
 
-    fn test_auto_parametrize(
+    fn test_auto_parameterize(
         query: &str,
         expected_query: &str,
         expected_parameters: Vec<(usize, Literal)>,
@@ -199,7 +199,7 @@ mod tests {
     ) {
         let mut query = parse_select_statement(query, dialect);
         let expected = parse_select_statement(expected_query, dialect);
-        let res = auto_parametrize_query(&mut query);
+        let res = auto_parameterize_query(&mut query);
         assert_eq!(
             query,
             expected,
@@ -210,12 +210,12 @@ mod tests {
         assert_eq!(res, expected_parameters);
     }
 
-    fn test_auto_parametrize_mysql(
+    fn test_auto_parameterize_mysql(
         query: &str,
         expected_query: &str,
         expected_parameters: Vec<(usize, Literal)>,
     ) {
-        test_auto_parametrize(
+        test_auto_parameterize(
             query,
             expected_query,
             expected_parameters,
@@ -223,12 +223,12 @@ mod tests {
         )
     }
 
-    fn test_auto_parametrize_postgres(
+    fn test_auto_parameterize_postgres(
         query: &str,
         expected_query: &str,
         expected_parameters: Vec<(usize, Literal)>,
     ) {
-        test_auto_parametrize(
+        test_auto_parameterize(
             query,
             expected_query,
             expected_parameters,
@@ -238,13 +238,13 @@ mod tests {
 
     #[test]
     fn no_literals() {
-        test_auto_parametrize_mysql("SELECT * FROM users", "SELECT * FROM users", vec![]);
-        test_auto_parametrize_postgres("SELECT * FROM users", "SELECT * FROM users", vec![]);
+        test_auto_parameterize_mysql("SELECT * FROM users", "SELECT * FROM users", vec![]);
+        test_auto_parameterize_postgres("SELECT * FROM users", "SELECT * FROM users", vec![]);
     }
 
     #[test]
     fn simple_parameter() {
-        test_auto_parametrize_mysql(
+        test_auto_parameterize_mysql(
             "SELECT id FROM users WHERE id = 1",
             "SELECT id FROM users WHERE id = ?",
             vec![(0, 1.into())],
@@ -253,7 +253,7 @@ mod tests {
 
     #[test]
     fn and_parameters() {
-        test_auto_parametrize_mysql(
+        test_auto_parameterize_mysql(
             "SELECT id FROM users WHERE id = 1 AND name = \"bob\"",
             "SELECT id FROM users WHERE id = ? AND name = ?",
             vec![(0, 1.into()), (1, "bob".into())],
@@ -262,7 +262,7 @@ mod tests {
 
     #[test]
     fn existing_param_before() {
-        test_auto_parametrize_mysql(
+        test_auto_parameterize_mysql(
             "SELECT id FROM users WHERE x = ? AND id = 1 AND name = \"bob\"",
             "SELECT id FROM users WHERE x = ? AND id = ? AND name = ?",
             vec![(1, 1.into()), (2, "bob".into())],
@@ -271,7 +271,7 @@ mod tests {
 
     #[test]
     fn existing_param_after() {
-        test_auto_parametrize_mysql(
+        test_auto_parameterize_mysql(
             "SELECT id FROM users WHERE id = 1 AND name = \"bob\" AND x = ?",
             "SELECT id FROM users WHERE id = ? AND name = ? AND x = ?",
             vec![(0, 1.into()), (1, "bob".into())],
@@ -280,7 +280,7 @@ mod tests {
 
     #[test]
     fn existing_param_between() {
-        test_auto_parametrize_mysql(
+        test_auto_parameterize_mysql(
             "SELECT id FROM users WHERE id = 1 AND x = ? AND name = \"bob\"",
             "SELECT id FROM users WHERE id = ? AND x = ? AND name = ?",
             vec![(0, 1.into()), (2, "bob".into())],
@@ -289,7 +289,7 @@ mod tests {
 
     #[test]
     fn literal_in_or() {
-        test_auto_parametrize_mysql(
+        test_auto_parameterize_mysql(
             "SELECT id FROM users WHERE (id = 1 OR id = 2) AND name = \"bob\"",
             "SELECT id FROM users WHERE (id = 1 OR id = 2) AND name = ?",
             vec![(0, "bob".into())],
@@ -298,7 +298,7 @@ mod tests {
 
     #[test]
     fn literal_in_subquery_where() {
-        test_auto_parametrize_mysql(
+        test_auto_parameterize_mysql(
                 "SELECT id FROM users JOIN (SELECT id FROM users WHERE id = 1) s ON users.id = s.id WHERE id = 1",
                 "SELECT id FROM users JOIN (SELECT id FROM users WHERE id = 1) s ON users.id = s.id WHERE id = ?",
                 vec![(0, 1.into())],
@@ -307,7 +307,7 @@ mod tests {
 
     #[test]
     fn literal_in_field() {
-        test_auto_parametrize_mysql(
+        test_auto_parameterize_mysql(
             "SELECT id + 1 FROM users WHERE id = 1",
             "SELECT id + 1 FROM users WHERE id = ?",
             vec![(0, 1.into())],
@@ -316,7 +316,7 @@ mod tests {
 
     #[test]
     fn literal_in_in_rhs() {
-        test_auto_parametrize_mysql(
+        test_auto_parameterize_mysql(
                 "select hashtags.* from hashtags inner join invites_hashtags on hashtags.id = invites_hashtags.hashtag_id where invites_hashtags.invite_id in (10,20,31)",
                 "select hashtags.* from hashtags inner join invites_hashtags on hashtags.id = invites_hashtags.hashtag_id where invites_hashtags.invite_id in (?,?,?)",
                     vec![(0, 10.into()), (1, 20.into()), (2, 31.into())],
@@ -325,7 +325,7 @@ mod tests {
 
     #[test]
     fn mixed_in_with_equality() {
-        test_auto_parametrize_mysql(
+        test_auto_parameterize_mysql(
             "SELECT id FROM users WHERE id in (1, 2) AND name = 'bob'",
             "SELECT id FROM users WHERE id in (?, ?) AND name = ?",
             vec![(0, 1.into()), (1, 2.into()), (2, "bob".into())],
@@ -334,7 +334,7 @@ mod tests {
 
     #[test]
     fn equal_in_equal() {
-        test_auto_parametrize_mysql(
+        test_auto_parameterize_mysql(
             "SELECT id FROM users WHERE x = 'foo' AND id in (1, 2) AND name = 'bob'",
             "SELECT id FROM users WHERE x = ? AND id in (?, ?) AND name = ?",
             vec![
@@ -348,7 +348,7 @@ mod tests {
 
     #[test]
     fn in_with_aggregates() {
-        test_auto_parametrize_mysql(
+        test_auto_parameterize_mysql(
             "SELECT count(*) FROM users WHERE id = 1 AND x IN (1, 2)",
             "SELECT count(*) FROM users WHERE id = ? AND x IN (1, 2)",
             vec![(0, 1.into())],
@@ -357,7 +357,7 @@ mod tests {
 
     #[test]
     fn literal_equals_column() {
-        test_auto_parametrize_mysql(
+        test_auto_parameterize_mysql(
             "SELECT * FROM users WHERE 1 = id",
             "SELECT * FROM users WHERE id = ?",
             vec![(0, 1.into())],
@@ -366,7 +366,7 @@ mod tests {
 
     #[test]
     fn existing_range_param() {
-        test_auto_parametrize_mysql(
+        test_auto_parameterize_mysql(
             "SELECT * FROM posts WHERE id = 1 AND score > ?",
             "SELECT * FROM posts WHERE id = 1 AND score > ?",
             vec![],
@@ -375,7 +375,7 @@ mod tests {
 
     #[test]
     fn offset() {
-        test_auto_parametrize_mysql(
+        test_auto_parameterize_mysql(
             "SELECT * FROM posts WHERE id = 1 ORDER BY SCORE ASC LIMIT 3 OFFSET 6",
             "SELECT * FROM posts WHERE id = ? ORDER BY SCORE ASC LIMIT 3 OFFSET ?",
             vec![(0, 1.into()), (1, 6.into())],
@@ -384,7 +384,7 @@ mod tests {
 
     #[test]
     fn constant_filter_with_param_betwen() {
-        test_auto_parametrize_mysql(
+        test_auto_parameterize_mysql(
             "SELECT * FROM posts WHERE id = 1 AND created_at BETWEEN ? and ?",
             "SELECT * FROM posts WHERE id = 1 AND created_at BETWEEN ? and ?",
             vec![],

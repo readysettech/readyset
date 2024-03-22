@@ -175,7 +175,7 @@ async fn range_query() {
     shutdown_tx.shutdown().await;
 }
 
-// TODO: remove this once we support aggregates on parametrized IN
+// TODO: remove this once we support aggregates on parameterized IN
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 #[slow]

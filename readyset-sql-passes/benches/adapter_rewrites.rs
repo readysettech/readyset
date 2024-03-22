@@ -2,20 +2,20 @@ use criterion::{black_box, criterion_group, criterion_main, BatchSize, Bencher, 
 use nom_sql::{parse_select_statement, Dialect};
 use readyset_sql_passes::adapter_rewrites;
 
-fn auto_parametrize_query(c: &mut Criterion) {
+fn auto_parameterize_query(c: &mut Criterion) {
     let run_benchmark = |b: &mut Bencher, src: &str| {
         let q = parse_select_statement(Dialect::MySQL, src).unwrap();
         b.iter_batched(
             || q.clone(),
             |mut q| {
-                adapter_rewrites::auto_parametrize_query(&mut q);
+                adapter_rewrites::auto_parameterize_query(&mut q);
                 black_box(q)
             },
             BatchSize::SmallInput,
         )
     };
 
-    c.benchmark_group("auto_parametrize_query")
+    c.benchmark_group("auto_parameterize_query")
         .bench_with_input("trivial", "SELECT * FROM t", run_benchmark)
         .bench_with_input(
             "simple",
@@ -40,5 +40,5 @@ fn auto_parametrize_query(c: &mut Criterion) {
         );
 }
 
-criterion_group!(benches, auto_parametrize_query);
+criterion_group!(benches, auto_parameterize_query);
 criterion_main!(benches);

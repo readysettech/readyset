@@ -4111,8 +4111,8 @@ async fn between() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn between_parametrized() {
-    let (mut g, shutdown_tx) = start_simple_unsharded("between_parametrized").await;
+async fn between_parameterized() {
+    let (mut g, shutdown_tx) = start_simple_unsharded("between_parameterized").await;
 
     g.extend_recipe(
         ChangeList::from_str("CREATE TABLE things (bigness INT);", Dialect::DEFAULT_MYSQL).unwrap(),

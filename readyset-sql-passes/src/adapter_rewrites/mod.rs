@@ -1,4 +1,4 @@
-mod autoparametrize;
+mod autoparameterize;
 
 use std::borrow::Cow;
 use std::cmp::max;
@@ -6,7 +6,7 @@ use std::convert::{TryFrom, TryInto};
 use std::fmt::Debug;
 use std::{iter, mem};
 
-pub use autoparametrize::auto_parametrize_query;
+pub use autoparameterize::auto_parameterize_query;
 use itertools::{Either, Itertools};
 use nom_sql::analysis::visit_mut::{self, VisitorMut};
 use nom_sql::{
@@ -82,7 +82,7 @@ pub fn process_query(
         query.limit_clause.clone_from(&limit_clause);
     }
 
-    let auto_parameters = autoparametrize::auto_parametrize_query(query);
+    let auto_parameters = autoparameterize::auto_parameterize_query(query);
     let rewritten_in_conditions = collapse_where_in(query)?;
     number_placeholders(query)?;
     Ok(ProcessedQueryParams {
@@ -518,13 +518,13 @@ pub fn number_placeholders(query: &mut SelectStatement) -> ReadySetResult<()> {
 }
 
 /// Splice the given list of extracted parameters, which should be a tuple of (placeholder position,
-/// value) as returned by [`auto_parametrize_query`] into the given list of parameters supplied by
+/// value) as returned by [`auto_parameterize_query`] into the given list of parameters supplied by
 /// the user, by interleaving them into the params based on the placeholder position.
 ///
 /// # Invariants
 ///
 /// `extracted_auto_params` must be sorted by the first index (this is the case with the return
-/// value of [`auto_parametrize_query`]).
+/// value of [`auto_parameterize_query`]).
 fn splice_auto_parameters<'param, T: Clone>(
     mut params: &'param [T],
     extracted_auto_params: &[(usize, T)],

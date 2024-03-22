@@ -1269,7 +1269,7 @@ pub struct QueryOperationArgs {
 /// [`add_to_query`](QueryOperation::add_to_query)) with the aid of a mutable reference to a
 /// [`GeneratorState`].
 ///
-/// Some operations are parametrized on fields that, due to having too large of a state space to
+/// Some operations are parameterized on fields that, due to having too large of a state space to
 /// enumerate exhaustively, are hardcoded when query operations are built from a user-supplied
 /// string on the command-line (via [`Operations`]), and can only be changed when generating queries
 /// randomly via the proptest [`Arbitrary`] implementation. See [this design doc][0] for more
