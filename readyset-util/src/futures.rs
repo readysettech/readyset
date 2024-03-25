@@ -176,8 +176,8 @@ where
 macro_rules! eventually {
     ($(attempts: $attempts: expr,)? $(sleep: $sleep: expr,)? run_test: { $($test_body: tt)* },
             then_assert: |$test_res: pat_param| $($assert_body: tt)+) => {{
-        let attempts = 40;
-        let sleep = std::time::Duration::from_millis(500);
+        let attempts = 10;
+        let sleep = std::time::Duration::from_millis(100);
         // Shadow the above defaults if custom values were provided:
         $(let attempts = $attempts;)?
         $(let sleep = $sleep;)?
