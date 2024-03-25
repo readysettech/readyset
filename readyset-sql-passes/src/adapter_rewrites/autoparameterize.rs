@@ -1,7 +1,8 @@
 use std::{iter, mem};
 
 use nom_sql::analysis::visit_mut::{self, VisitorMut};
-use nom_sql::{BinaryOperator, Expr, InValue, ItemPlaceholder, Literal, SelectStatement};
+use nom_sql::{BinaryOperator, Expr, InValue, ItemPlaceholder, Literal, SelectStatement, Dialect, DialectDisplay};
+use tracing::trace;
 
 #[derive(Default)]
 struct AutoParameterizeVisitor {
@@ -34,6 +35,7 @@ impl<'ast> VisitorMut<'ast> for AutoParameterizeVisitor {
         &mut self,
         select_statement: &'ast mut SelectStatement,
     ) -> Result<(), Self::Error> {
+        trace!("auto_param visit_select_statement");
         self.query_depth = self.query_depth.saturating_add(1);
         visit_mut::walk_select_statement(self, select_statement)?;
         self.query_depth = self.query_depth.saturating_sub(1);
@@ -51,6 +53,7 @@ impl<'ast> VisitorMut<'ast> for AutoParameterizeVisitor {
 
     fn visit_expr(&mut self, expression: &'ast mut Expr) -> Result<(), Self::Error> {
         let was_supported = self.in_supported_position;
+        trace!(%was_supported, ?expression/* = %expression.display(Dialect::PostgreSQL)*/, "auto param visit_expr");
         if was_supported {
             match expression {
                 Expr::BinaryOp {
@@ -58,6 +61,15 @@ impl<'ast> VisitorMut<'ast> for AutoParameterizeVisitor {
                     op: BinaryOperator::Equal,
                     rhs: box Expr::Literal(Literal::Placeholder(_)),
                 } => {}
+                Expr::BinaryOp {
+                    lhs: box Expr::Column(_),
+                    op: BinaryOperator::Equal,
+                    rhs: box Expr::Cast { expr: box Expr::Literal(lit), .. },
+                } => {
+                    trace!("continuing as supported for cast");
+                    self.replace_literal(lit);
+                    return Ok(());
+                }
                 Expr::BinaryOp {
                     lhs: box Expr::Column(_),
                     op: BinaryOperator::Equal,
@@ -119,6 +131,12 @@ impl<'ast> VisitorMut<'ast> for AutoParameterizeVisitor {
                     self.in_supported_position = true;
                     return Ok(());
                 }
+                Expr::Cast {
+                    expr,
+                    ..
+                } => {
+                    self.visit_expr(expr)?;
+                }
                 _ => self.in_supported_position = false,
             }
         }
@@ -154,14 +172,12 @@ pub fn auto_parameterize_query(query: &mut SelectStatement) -> Vec<(usize, Liter
                             | BinaryOperator::Greater
                             | BinaryOperator::LessOrEqual
                             | BinaryOperator::GreaterOrEqual,
-                        rhs: box Expr::Literal(Literal::Placeholder(..)),
+                        rhs: box Expr::Literal(Literal::Placeholder(..)) |
+                             box Expr::Cast {
+                               expr: box Expr::Literal(Literal::Placeholder(..)),
+                                ..
+                            },
                         ..
-                        // rhs: box Expr::Literal(Literal::Placeholder(..)) |
-                        //      box Expr::Cast {
-                        //        expr: box Expr::Literal(Literal::Placeholder(..)),
-                        //         ..
-                        //     },
-                        // ..
                     } | Expr::Between {
                         min: box Expr::Literal(Literal::Placeholder(..)),
                         ..

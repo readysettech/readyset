@@ -2008,6 +2008,51 @@ async fn show_caches_contains_select_statement() {
 
     shutdown_tx.shutdown().await;
 }
+#[tokio::test(flavor = "multi_thread")]
+async fn cast_in_lookup() {
+    readyset_tracing::init_test_logging();
+    let (opts, _handle, shutdown_tx) = setup().await;
+    let conn = connect(opts).await;
+
+    conn.simple_query("DROP TABLE IF EXISTS tz").await.unwrap();
+    conn.simple_query("CREATE TABLE tz (t timestamptz)").await.unwrap();
+    conn.simple_query("INSERT INTO tz VALUES('2024-03-18 00:00:00+00')").await.unwrap();
+
+    eventually!(conn
+        .simple_query("CREATE CACHE FROM SELECT * FROM tz where t = '2024-03-18 00:00:00+00'::timestamp")
+        .await
+        .is_ok());
+
+    let query_text = match conn
+        .simple_query("SHOW CACHES")
+        .await
+        .unwrap()
+        .into_iter()
+        .next()
+        .unwrap()
+    {
+        SimpleQueryMessage::Row(row) => row.get(2).unwrap().to_owned(),
+        _ => panic!(),
+    };
+
+    // Check that the literal was parameterized
+    dbg!(&query_text);
+    assert!(query_text.contains("$1 :: TIMESTAMP"));
+
+
+    // The cast should drop the timezone offset and return 1 row (+ a commandcomplete)
+    let res = conn
+        .simple_query("SELECT * from tz where t = '2024-03-18 00:00:00+01'::timestamp")
+        .await
+        .unwrap();
+    dbg!(&res);
+    assert_eq!(res.len(), 2);
+
+    // Check that the literal was parameterized
+    assert_eq!(query_text, r#"SELECT "t"."x" FROM "t""#);
+
+    shutdown_tx.shutdown().await;
+}
 
 mod http_tests {
     use super::*;

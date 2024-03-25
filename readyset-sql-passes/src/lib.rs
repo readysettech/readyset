@@ -34,11 +34,10 @@ use dataflow_expression::Dialect;
 pub use nom_sql::analysis::{contains_aggregate, is_aggregate};
 use nom_sql::{
     CompoundSelectStatement, CreateTableBody, CreateTableStatement, CreateViewStatement,
-    DialectDisplay, NonReplicatedRelation, Relation, SelectSpecification, SelectStatement,
+    NonReplicatedRelation, Relation, SelectSpecification, SelectStatement,
     SqlIdentifier,
 };
 use readyset_errors::ReadySetResult;
-use tracing::trace;
 
 pub use crate::alias_removal::AliasRemoval;
 pub use crate::create_table_columns::CreateTableColumns;
