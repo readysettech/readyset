@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use ahash::RandomState;
 use common::SizeOf;
-use dataflow_expression::{PostLookup, ReaderProcessing};
+use dataflow_expression::{PostLookup, PreLookup, ReaderProcessing};
 use nom_sql::Relation;
 use reader_map::{EvictionQuantity, EvictionStrategy};
 use readyset_client::consistency::Timestamp;
@@ -105,6 +105,7 @@ fn new_inner(
     let ReaderProcessing {
         pre_processing,
         post_processing,
+        pre_lookup,
     } = reader_processing;
 
     macro_rules! make {
@@ -156,6 +157,7 @@ fn new_inner(
         trigger,
         index,
         post_lookup: post_processing,
+        pre_lookup,
         receiver,
         eviction_epoch: 0,
     };
@@ -469,6 +471,7 @@ pub struct SingleReadHandle {
     trigger: Option<Arc<dyn Trigger>>,
     index: Index,
     pub post_lookup: PostLookup,
+    pub pre_lookup: PreLookup,
     /// Receives a notification whenever the [`WriteHandle`] is updated after filling an upquery
     receiver: ReaderUpdatedNotifier,
     /// Caches the eviction epoch of the associated [`WriteHandle`]
@@ -482,6 +485,7 @@ impl Clone for SingleReadHandle {
             trigger: self.trigger.clone(),
             index: self.index.clone(),
             post_lookup: self.post_lookup.clone(),
+            pre_lookup: self.pre_lookup.clone(),
             receiver: self.receiver.resubscribe(),
             eviction_epoch: self.eviction_epoch,
         }
@@ -582,6 +586,30 @@ impl SingleReadHandle {
         }
 
         self.eviction_epoch
+    }
+
+    pub fn pre_lookup(&self, key_comparisons: &mut Vec<KeyComparison>) {
+        tracing::info!("pre lookup");
+        if let Some(placeholder_exprs) = &self.pre_lookup.placeholder_exprs {
+            for (idx, expr) in placeholder_exprs {
+                for key in key_comparisons.iter_mut() {
+                    match key {
+                        KeyComparison::Equal(_) => {
+                            dbg!(&idx);
+                            dbg!(&expr);
+                            dbg!(&key);
+                        }
+                        KeyComparison::Range(_) => {
+                            dbg!(&idx);
+                            dbg!(&expr);
+                            dbg!(&key);
+                            todo!();
+                        }
+                    }
+
+                }
+            }
+        }
     }
 }
 

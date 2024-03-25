@@ -2008,6 +2008,7 @@ async fn show_caches_contains_select_statement() {
 
     shutdown_tx.shutdown().await;
 }
+
 #[tokio::test(flavor = "multi_thread")]
 async fn cast_in_lookup() {
     readyset_tracing::init_test_logging();
@@ -2015,11 +2016,17 @@ async fn cast_in_lookup() {
     let conn = connect(opts).await;
 
     conn.simple_query("DROP TABLE IF EXISTS tz").await.unwrap();
-    conn.simple_query("CREATE TABLE tz (t timestamptz)").await.unwrap();
-    conn.simple_query("INSERT INTO tz VALUES('2024-03-18 00:00:00+00')").await.unwrap();
+    conn.simple_query("CREATE TABLE tz (t timestamptz, a int)")
+        .await
+        .unwrap();
+    conn.simple_query("INSERT INTO tz VALUES('2024-03-18 00:00:00+00', 1)")
+        .await
+        .unwrap();
 
     eventually!(conn
-        .simple_query("CREATE CACHE FROM SELECT * FROM tz where t = '2024-03-18 00:00:00+00'::timestamp")
+        .simple_query(
+            "CREATE CACHE FROM SELECT * FROM tz where a = 1::int AND t = '2024-03-18 00:00:00+00'::timestamp"
+        )
         .await
         .is_ok());
 
@@ -2037,12 +2044,13 @@ async fn cast_in_lookup() {
 
     // Check that the literal was parameterized
     dbg!(&query_text);
-    assert!(query_text.contains("$1 :: TIMESTAMP"));
-
+    assert!(query_text.contains("$2 :: TIMESTAMP"));
 
     // The cast should drop the timezone offset and return 1 row (+ a commandcomplete)
     let res = conn
-        .simple_query("SELECT * from tz where t = '2024-03-18 00:00:00+01'::timestamp")
+        .simple_query(
+            "SELECT * from tz where a = 1::int AND t = '2024-03-18 00:00:00+01'::timestamp",
+        )
         .await
         .unwrap();
     dbg!(&res);

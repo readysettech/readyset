@@ -34,8 +34,7 @@ use dataflow_expression::Dialect;
 pub use nom_sql::analysis::{contains_aggregate, is_aggregate};
 use nom_sql::{
     CompoundSelectStatement, CreateTableBody, CreateTableStatement, CreateViewStatement,
-    NonReplicatedRelation, Relation, SelectSpecification, SelectStatement,
-    SqlIdentifier,
+    NonReplicatedRelation, Relation, SelectSpecification, SelectStatement, SqlIdentifier,
 };
 use readyset_errors::ReadySetResult;
 
@@ -158,57 +157,23 @@ impl Rewrite for CreateTableStatement {
     }
 }
 
-// impl Rewrite for SelectStatement {
-//     fn rewrite(self, context: &mut RewriteContext) -> ReadySetResult<Self> {
-//         self.rewrite_between()
-//             .scalar_optimize_expressions(context.dialect)
-//             .strip_post_filters()
-//             .resolve_schemas(
-//                 context.tables(),
-//                 context.custom_types,
-//                 context.search_path,
-//                 context.invalidating_tables.as_deref_mut(),
-//             )?
-//             .expand_stars(context.view_schemas, context.non_replicated_relations)?
-//             .expand_implied_tables(context.view_schemas)?
-//             .normalize_topk_with_aggregate()?
-//             .detect_problematic_self_joins()?
-//             .remove_numeric_field_references()?
-//             .order_limit_removal(&context.base_schemas)
-//     }
-// }
 impl Rewrite for SelectStatement {
     fn rewrite(self, context: &mut RewriteContext) -> ReadySetResult<Self> {
-        let stmt = self.rewrite_between();
-        // trace!(stmt=%stmt.display(nom_sql::Dialect::PostgreSQL).to_string(), "After rewrite_between");
-
-        let stmt = stmt.scalar_optimize_expressions(context.dialect);
-        // trace!(stmt=%stmt.display(nom_sql::Dialect::PostgreSQL).to_string(), "After scalar_optimize_expressions");
-
-        let stmt = stmt.strip_post_filters();
-        // trace!(stmt=%stmt.display(nom_sql::Dialect::PostgreSQL).to_string(), "After strip_post_filters");
-
-        let stmt = stmt.resolve_schemas(
-            context.tables(),
-            context.custom_types,
-            context.search_path,
-            context.invalidating_tables.as_deref_mut(),
-        )?;
-        // trace!(stmt=%stmt.display(nom_sql::Dialect::PostgreSQL).to_string(), "After resolve_schemas");
-
-        let stmt = stmt.expand_stars(context.view_schemas, context.non_replicated_relations)?;
-        // trace!(stmt=%stmt.display(nom_sql::Dialect::PostgreSQL).to_string(), "After expand_stars");
-        let stmt = stmt.expand_implied_tables(context.view_schemas)?;
-        // trace!(stmt=%stmt.display(nom_sql::Dialect::PostgreSQL).to_string(), "After expand_implied_tables");
-        let stmt = stmt.normalize_topk_with_aggregate()?;
-        // trace!(stmt=%stmt.display(nom_sql::Dialect::PostgreSQL).to_string(), "After normalize_topk_with_aggregate");
-        let stmt = stmt.detect_problematic_self_joins()?;
-        // trace!(stmt=%stmt.display(nom_sql::Dialect::PostgreSQL).to_string(), "After detect_problematic_self_joins");
-        let stmt = stmt.remove_numeric_field_references()?;
-        // trace!(stmt=%stmt.display(nom_sql::Dialect::PostgreSQL).to_string(), "After remove_numeric_field_references");
-        let stmt = stmt.order_limit_removal(&context.base_schemas)?;
-        // trace!(stmt=%stmt.display(nom_sql::Dialect::PostgreSQL).to_string(), "After order_limit_removal");
-        Ok(stmt)
+        self.rewrite_between()
+            .scalar_optimize_expressions(context.dialect)
+            .strip_post_filters()
+            .resolve_schemas(
+                context.tables(),
+                context.custom_types,
+                context.search_path,
+                context.invalidating_tables.as_deref_mut(),
+            )?
+            .expand_stars(context.view_schemas, context.non_replicated_relations)?
+            .expand_implied_tables(context.view_schemas)?
+            .normalize_topk_with_aggregate()?
+            .detect_problematic_self_joins()?
+            .remove_numeric_field_references()?
+            .order_limit_removal(&context.base_schemas)
     }
 }
 

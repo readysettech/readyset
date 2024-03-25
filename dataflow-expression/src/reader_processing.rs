@@ -9,6 +9,8 @@ use readyset_data::DfValue;
 use readyset_errors::{internal, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
+use crate::Expr;
+
 /// Representation of an aggregate function
 // TODO(aspen): It would be really nice to deduplicate this somehow with the grouped operator itself
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
@@ -106,6 +108,8 @@ impl<Column> PostLookupAggregates<Column> {
 #[derive(Serialize, Deserialize, Debug, Clone, Default, Eq, PartialEq)]
 /// Operations to perform on rows before insertion into a reader or after a lookup
 pub struct ReaderProcessing {
+    /// Pre processing on parameters prior to lookup into a reader
+    pub pre_lookup: PreLookup,
     /// Pre processing on rows prior to insertion into a reader
     pub pre_processing: PreInsertion,
     /// Post processing on result sets after a lookup is finished
@@ -113,7 +117,7 @@ pub struct ReaderProcessing {
 }
 
 impl ReaderProcessing {
-    /// Constructs a new [`PostLookup`]
+    /// Constructs a new [`ReaderProcessing`]
     pub fn new(
         order_by: Option<Vec<(usize, OrderType)>>,
         limit: Option<usize>,
@@ -146,6 +150,7 @@ impl ReaderProcessing {
         Ok(ReaderProcessing {
             pre_processing,
             post_processing,
+            pre_lookup: Default::default(),
         })
     }
 }
@@ -191,6 +196,15 @@ pub struct PreInsertion {
     /// The set of column indices to group the aggregate by, `group_by` takes precedence over
     /// `order_by` when determining row order, so that aggregates are processed one by one.
     group_by: Option<Vec<usize>>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default, Eq, PartialEq)]
+/// Expressions to evaluate on parameters before looking up into a reader
+pub struct PreLookup {
+    /// Each element is the a pair of (placeholder index, expression to )
+    // TODO: If we expand beyond expressions on a single placeholder, this will need to be adjusted
+    // to be many placeholder idxs : expr
+    pub placeholder_exprs: Option<Vec<(usize, Expr)>>,
 }
 
 impl InsertionOrder<Box<[DfValue]>> for PreInsertion {

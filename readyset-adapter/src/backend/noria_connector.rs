@@ -1621,7 +1621,9 @@ fn build_view_query<'a>(
     dialect: Dialect,
 ) -> ReadySetResult<Option<(&'a mut ReaderHandle, ViewQuery)>> {
     let (limit, offset) = processed_query_params.limit_offset_params(params)?;
+    trace!(?params, "build_view_query");
     let raw_keys = processed_query_params.make_keys(params)?;
+    trace!(?raw_keys, "build_view_query");
 
     getter.build_view_query(
         raw_keys,

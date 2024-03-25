@@ -10,10 +10,10 @@ use common::{DfValue, IndexType};
 use nom_sql::analysis::visit_mut::{walk_expr, VisitorMut};
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::{
-    BinaryOperator, Column, DialectDisplay, Expr, FieldDefinitionExpr, FieldReference,
+    BinaryOperator, Column, Dialect, DialectDisplay, Expr, FieldDefinitionExpr, FieldReference,
     FunctionExpr, InValue, ItemPlaceholder, JoinConstraint, JoinOperator, JoinRightSide,
     LimitClause, Literal, OrderBy, OrderType, Relation, SelectStatement, SqlIdentifier, TableExpr,
-    TableExprInner, Dialect,
+    TableExprInner,
 };
 use readyset_client::{PlaceholderIdx, ViewPlaceholder};
 use readyset_errors::{
@@ -202,6 +202,7 @@ pub struct Parameter {
     pub col: Column,
     pub op: nom_sql::BinaryOperator,
     pub placeholder_idx: Option<PlaceholderIdx>,
+    pub expr: Option<Expr>,
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
@@ -512,7 +513,7 @@ fn classify_conditionals(
     global: &mut Vec<Expr>,
     params: &mut Vec<Parameter>,
 ) -> ReadySetResult<()> {
-    trace!(?ce, pretty = true,"classify_conditionals");
+    trace!(?ce, pretty = true, "classify_conditionals");
     // Handling OR and AND expressions requires some care as there are some corner cases.
     //    a) we don't support OR expressions with predicates with placeholder parameters,
     //       because these expressions are meaningless in the Soup context.
@@ -608,10 +609,17 @@ fn classify_conditionals(
                     }
                 }
 
-
                 params.extend(new_params);
             } else if is_predicate(op) {
-                trace!(?rhs, pretty=true, ?lhs, pretty=true, ?op, pretty=true, "is_predicate");
+                trace!(
+                    ?rhs,
+                    pretty = true,
+                    ?lhs,
+                    pretty = true,
+                    ?op,
+                    pretty = true,
+                    "is_predicate"
+                );
                 // atomic selection predicate
                 if let Expr::Literal(Literal::Placeholder(ref placeholder)) = **rhs {
                     trace!("atomic selection predicate");
@@ -624,10 +632,14 @@ fn classify_conditionals(
                             col: lf.clone(),
                             op: *op,
                             placeholder_idx: idx,
+                            expr: None,
                         });
                     }
-
-                } else if let Expr::Cast{ expr: box Expr::Literal(Literal::Placeholder(ref placeholder)), .. }  = **rhs {
+                } else if let Expr::Cast {
+                    expr: box Expr::Literal(Literal::Placeholder(ref placeholder)),
+                    ..
+                } = **rhs
+                {
                     // TODO: extend this to be able to handle parameters in arbitrary expressions
                     // in rhs
                     if let Expr::Column(ref lf) = **lhs {
@@ -640,6 +652,7 @@ fn classify_conditionals(
                             col: lf.clone(),
                             op: *op,
                             placeholder_idx: idx,
+                            expr: Some(Expr::Literal(Literal::Placeholder(placeholder.clone()))),
                         });
                     }
                 } else if let Expr::Column(Column {

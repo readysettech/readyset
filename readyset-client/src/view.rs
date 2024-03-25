@@ -191,7 +191,6 @@ impl ColumnSchema {
         })
     }
 }
-
 /// A `ViewSchema` is used to describe the columns of a stored ReadySet
 /// view as a vector of columns. The ViewSchema contains a vector with all
 /// projected columns and a vector with columns returned to the client.
@@ -1567,11 +1566,12 @@ impl ReaderHandle {
             SchemaType::ProjectedSchema,
         )?;
 
-        trace!("select::lookup");
-        let bogo = vec![vec1![DfValue::from(0i32)].into()];
+        trace!(?key_types, "select::lookup");
         let mut filters = Vec::new();
+        // TODO: where do the pre lookup things fit in here?
 
         let keys = if raw_keys.is_empty() {
+            let bogo = vec![vec1![DfValue::from(0i32)].into()];
             bogo
         } else {
             let mut current_binop = None;
@@ -1646,6 +1646,7 @@ impl ReaderHandle {
                         match view_placeholder {
                             ViewPlaceholder::Generated => continue,
                             ViewPlaceholder::OneToOne(idx, binop) => {
+                                trace!("oneToOne");
                                 let key_type = *key_types
                                     .get(key_column_idx)
                                     .ok_or_else(|| internal_err!("No key_type for key"))?;
@@ -1842,6 +1843,7 @@ impl ReusedReaderHandle {
         // If any placeholders in our query correspond to inlined values in the migrated query,
         // verify that we are executing our query with these values.
         for params in raw_keys.iter() {
+            dbg!(&self.required_values);
             for (idx, val) in &self.required_values {
                 // Placeholders are 1-indexed, but params are 0-indexed
                 let client_val = params.get(idx - 1).ok_or_else(|| {
@@ -2069,6 +2071,7 @@ mod tests {
 
         use super::*;
 
+        #[cfg(test)]
         fn make_build_query(
             raw_keys: Vec<Cow<'_, [DfValue]>>,
             limit: Option<usize>,
