@@ -1,6 +1,7 @@
 use dataflow_expression::Dialect;
 use nom_sql::analysis::visit_mut::VisitorMut;
 use nom_sql::{Expr, SelectStatement};
+use tracing::trace;
 
 use self::constant_fold::constant_fold_expr;
 use self::normalize_negation::normalize_negation;
