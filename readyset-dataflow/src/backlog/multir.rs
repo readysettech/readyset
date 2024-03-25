@@ -1,7 +1,6 @@
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::convert::TryInto;
-use std::ops::RangeBounds;
 
 use ahash::RandomState;
 use common::DfValue;
@@ -10,7 +9,9 @@ use reader_map::refs::Miss;
 use readyset_client::consistency::Timestamp;
 use readyset_client::results::{SharedResults, SharedRows};
 use readyset_client::KeyComparison;
+use readyset_data::Bound;
 use readyset_errors::ReadySetError;
+use readyset_util::ranges::RangeBounds;
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 use vec1::{vec1, Vec1};
@@ -141,8 +142,8 @@ impl Handle {
                         continue;
                     }
 
-                    let start_bound = start.as_ref().map(|v| &v[0]);
-                    let end_bound = end.as_ref().map(|v| &v[0]);
+                    let start_bound: Bound<_> = start.as_ref().map(|v| &v[0]);
+                    let end_bound: Bound<_> = end.as_ref().map(|v| &v[0]);
                     match map.range(&(start_bound, end_bound)) {
                         Ok(hit) => hits.extend(hit.map(|(_, v)| v.as_ref().clone())),
                         Err(Miss(miss)) => misses.extend(miss.into_iter().map(|(start, end)| {
@@ -311,7 +312,7 @@ impl Handle {
             }
             Handle::Many(ref h) => {
                 let map = h.enter()?;
-                Ok(map.contains_range(&(range.start_bound(), range.end_bound())))
+                Ok(map.contains_range(range))
             }
         }
     }
@@ -333,11 +334,11 @@ impl Handle {
                     assert!(v.len() == 1);
                     &v[0]
                 });
-                Ok(map.overlaps_range(&(start_bound, end_bound)))
+                Ok(map.contains_range(&(start_bound, end_bound)))
             }
             Handle::Many(ref h) => {
                 let map = h.enter()?;
-                Ok(map.overlaps_range(&(range.start_bound(), range.end_bound())))
+                Ok(map.contains_range(range))
             }
         }
     }
@@ -353,10 +354,9 @@ impl Handle {
 
 #[cfg(test)]
 mod tests {
-    use std::ops::Bound;
-
     use proptest::prelude::*;
     use reader_map::handles::WriteHandle;
+    use readyset_data::range;
 
     use super::*;
 
@@ -408,12 +408,12 @@ mod tests {
                 w.insert(k, v);
             });
 
-        w.insert_range((DfValue::from(0i32))..(DfValue::from(10i32)));
+        w.insert_range(range!(=DfValue::from(0i32), DfValue::from(10i32)));
         w.publish();
 
-        let key = KeyComparison::Range((
-            Bound::Included(vec1![2i32.into()]),
-            Bound::Included(vec1![3i32.into()]),
+        let key = KeyComparison::Range(range!(
+            =vec1![2i32.into()],
+            =vec1![3i32.into()]
         ));
 
         let res = handle.get_multi(&[key]).unwrap();
@@ -457,12 +457,12 @@ mod tests {
             .for_each(|(k, v)| {
                 w.insert(k, v);
             });
-        w.insert_range(vec![0i32.into(), 0i32.into()]..vec![10i32.into(), 10i32.into()]);
+        w.insert_range(range!(=vec![0i32.into(), 0i32.into()], vec![10i32.into(), 10i32.into()]));
         w.publish();
 
-        let key = KeyComparison::Range((
-            Bound::Included(vec1![2i32.into(), 2i32.into()]),
-            Bound::Included(vec1![3i32.into(), 3i32.into()]),
+        let key = KeyComparison::Range(range!(
+            =vec1![2i32.into(), 2i32.into()],
+            =vec1![3i32.into(), 3i32.into()]
         ));
 
         let res = handle.get_multi(&[key]).unwrap();
@@ -487,7 +487,7 @@ mod tests {
                 w.insert(k, v);
             });
 
-        w.insert_range((DfValue::from(0i32))..(DfValue::from(10i32)));
+        w.insert_range(range!(=DfValue::from(0i32), DfValue::from(10i32)));
         w.publish();
 
         let keys = vec![

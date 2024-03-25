@@ -13,6 +13,7 @@ left-right = "0.11"
 itertools = "0.10"
 
 readyset-client = { path = "../readyset-client" }
+readyset-util = { path = "../readyset-util" }
 partial-map = { path = "../partial-map" }
 thiserror = "1.0.31"
 iter-enum = "1.1.1"

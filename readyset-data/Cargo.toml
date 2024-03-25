@@ -35,6 +35,7 @@ nom_locate = "4.0.0"
 postgres-protocol = { workspace = true }
 cidr = "0.2.1"
 postgres-types = { workspace = true, features = ["with-cidr-0_2"] }
+vec1 = "1.6.0"
 
 # Local dependencies
 nom-sql = { path = "../nom-sql" }

@@ -7,6 +7,7 @@ edition = "2021"
 description = "An efficient non-overlapping interval tree that merges overlapping and adjacent intervals to prevent fragmentation"
 
 [dependencies]
+readyset-util = {path = "../readyset-util"}
 
 [dev-dependencies]
 test-strategy = "0.2"
