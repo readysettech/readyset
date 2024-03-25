@@ -7,7 +7,6 @@
 
 use std::collections::HashMap;
 use std::convert::TryFrom;
-use std::ops::Bound;
 use std::sync::Arc;
 use std::time::Duration;
 use std::{iter, thread};
@@ -36,7 +35,7 @@ use readyset_client::consistency::Timestamp;
 use readyset_client::internal::LocalNodeIndex;
 use readyset_client::recipe::changelist::{Change, ChangeList, CreateCache};
 use readyset_client::{KeyComparison, Modification, SchemaType, ViewPlaceholder, ViewQuery};
-use readyset_data::{DfType, DfValue, Dialect};
+use readyset_data::{Bound, DfType, DfValue, Dialect, IntoBoundedRange};
 use readyset_errors::ReadySetError::{self, RpcFailed, SelectQueryCreationFailed};
 use readyset_util::eventually;
 use readyset_util::shutdown::ShutdownSender;
@@ -5227,7 +5226,10 @@ async fn post_read_ilike() {
 
     let res = reader
         .raw_lookup(ViewQuery {
-            key_comparisons: vec![KeyComparison::from_range(&(..))],
+            key_comparisons: vec![KeyComparison::Range((
+                Bound::Excluded(vec1![DfValue::MIN_VALUE]),
+                Bound::Excluded(vec1![DfValue::MAX_VALUE]),
+            ))],
             block: true,
             filter: Some(DfExpr::Op {
                 left: Box::new(DfExpr::Column {
@@ -7091,10 +7093,9 @@ async fn straddled_join_range_query() {
 
     let rows = q
         .multi_lookup(
-            vec![KeyComparison::Range((
-                Bound::Excluded(vec1![1i32.into(), 1i32.into()]),
-                Bound::Unbounded,
-            ))],
+            vec![KeyComparison::Range(
+                vec1![1i32.into(), 1i32.into()].range_from(),
+            )],
             true,
         )
         .await
@@ -7145,10 +7146,9 @@ async fn overlapping_range_queries() {
             let mut q = g.view("q").await.unwrap().into_reader_handle().unwrap();
             let results = q
                 .multi_lookup(
-                    vec![KeyComparison::Range((
-                        Bound::Included(vec1![DfValue::from(m * 10)]),
-                        Bound::Unbounded,
-                    ))],
+                    vec![KeyComparison::Range(
+                        vec1![DfValue::from(m * 10)].range_from_inclusive(),
+                    )],
                     true,
                 )
                 .await
@@ -7219,10 +7219,9 @@ async fn overlapping_remapped_range_queries() {
             let mut q = g.view("q").await.unwrap().into_reader_handle().unwrap();
             let results = q
                 .multi_lookup(
-                    vec![KeyComparison::Range((
-                        Bound::Included(vec1![DfValue::from(m * 10), DfValue::from(m * 10)]),
-                        Bound::Unbounded,
-                    ))],
+                    vec![KeyComparison::Range(
+                        vec1![DfValue::from(m * 10), DfValue::from(m * 10)].range_from_inclusive(),
+                    )],
                     true,
                 )
                 .await
@@ -7293,10 +7292,7 @@ async fn range_query_through_union() {
 
     let rows = q
         .multi_lookup(
-            vec![KeyComparison::Range((
-                Bound::Excluded(vec1![1.into()]),
-                Bound::Unbounded,
-            ))],
+            vec![KeyComparison::Range(vec1![1.into()].range_from())],
             true,
         )
         .await

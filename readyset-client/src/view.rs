@@ -6,7 +6,7 @@ use std::fmt;
 use std::future::Future;
 use std::hash::{Hash, Hasher};
 use std::net::SocketAddr;
-use std::ops::{Bound, Range, RangeBounds};
+use std::ops::Range;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
@@ -26,7 +26,7 @@ use petgraph::graph::NodeIndex;
 use proptest::arbitrary::Arbitrary;
 use rand::prelude::IteratorRandom;
 use rand::thread_rng;
-use readyset_data::{DfType, DfValue};
+use readyset_data::{Bound, BoundedRange, DfType, DfValue, IntoBoundedRange, RangeBounds};
 use readyset_errors::{
     internal, internal_err, rpc_err, unsupported, view_err, ReadySetError, ReadySetResult,
 };
@@ -34,7 +34,7 @@ use readyset_sql_passes::anonymize::{Anonymize, Anonymizer};
 use readyset_tracing::child_span;
 use readyset_tracing::presampled::instrument_if_enabled;
 use readyset_tracing::propagation::Instrumented;
-use readyset_util::intervals::{cmp_start_end, BoundPair};
+use readyset_util::intervals::cmp_start_end;
 use readyset_util::redacted::Sensitive;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
@@ -378,7 +378,7 @@ pub enum KeyComparison {
     Equal(Vec1<DfValue>),
 
     /// Look up all keys within a range
-    Range(BoundPair<Vec1<DfValue>>),
+    Range(BoundedRange<Vec1<DfValue>>),
 }
 
 #[allow(clippy::len_without_is_empty)] // can never be empty
@@ -393,10 +393,10 @@ impl KeyComparison {
 
         let key = Vec1::try_from(key).map_err(|_| ReadySetError::EmptyKey)?;
         let inner = match operator {
-            Greater => (Bound::Excluded(key), Bound::Unbounded),
-            GreaterOrEqual => (Bound::Included(key), Bound::Unbounded),
-            Less => (Bound::Unbounded, Bound::Excluded(key)),
-            LessOrEqual => (Bound::Unbounded, Bound::Included(key)),
+            Greater => key.range_from(),
+            GreaterOrEqual => key.range_from_inclusive(),
+            Less => key.range_to(),
+            LessOrEqual => key.range_to_inclusive(),
             Equal => return Ok(key.into()),
             _ => unsupported!("Unsupported operator `{operator}` in key"),
         };
@@ -434,7 +434,7 @@ impl KeyComparison {
 
     /// Project a KeyComparison into an optional range predicate, or return None if it's a range
     /// predicate
-    pub fn range(&self) -> Option<&BoundPair<Vec1<DfValue>>> {
+    pub fn range(&self) -> Option<&BoundedRange<Vec1<DfValue>>> {
         match self {
             KeyComparison::Range(ref range) => Some(range),
             _ => None,
@@ -489,8 +489,8 @@ impl KeyComparison {
     /// ```
     pub fn is_reversed_range(&self) -> bool {
         cmp_start_end(
-            <Self as RangeBounds<Vec1<DfValue>>>::start_bound(self),
-            <Self as RangeBounds<Vec1<DfValue>>>::end_bound(self),
+            <Self as RangeBounds<Vec1<DfValue>>>::start_bound(self).into(),
+            <Self as RangeBounds<Vec1<DfValue>>>::end_bound(self).into(),
         ) == Ordering::Greater
     }
 
@@ -526,20 +526,15 @@ impl KeyComparison {
     /// is an unbounded lookup
     ///
     /// Since all KeyComparisons wrap a [`Vec1`], this function will never return `Some(0)`
-    pub fn len(&self) -> Option<usize> {
+    pub fn len(&self) -> usize {
         match self {
-            Self::Equal(key) => Some(key.len()),
-            Self::Range((Bound::Unbounded, Bound::Unbounded)) => None,
-            Self::Range(
-                (Bound::Included(ref key) | Bound::Excluded(ref key), Bound::Unbounded)
-                | (Bound::Unbounded, Bound::Included(ref key) | Bound::Excluded(ref key)),
-            ) => Some(key.len()),
+            Self::Equal(key) => key.len(),
             Self::Range((
                 Bound::Included(ref start) | Bound::Excluded(ref start),
                 Bound::Included(ref end) | Bound::Excluded(ref end),
             )) => {
                 debug_assert_eq!(start.len(), end.len());
-                Some(start.len())
+                start.len()
             }
         }
     }
@@ -569,9 +564,8 @@ impl KeyComparison {
     /// Range keys contain anything in the range, comparing lexicographically
     ///
     /// ```rust
-    /// use std::ops::Bound::*;
-    ///
     /// use readyset_client::KeyComparison;
+    /// use readyset_data::Bound::*;
     /// use readyset_data::DfValue;
     /// use vec1::vec1;
     ///
@@ -593,11 +587,9 @@ impl KeyComparison {
                 (match lower {
                     Bound::Included(start) => key.clone().into_iter().cmp(start.iter()).is_ge(),
                     Bound::Excluded(start) => key.clone().into_iter().cmp(start.iter()).is_gt(),
-                    Bound::Unbounded => true,
                 }) && (match upper {
                     Bound::Included(end) => key.into_iter().cmp(end.iter()).is_le(),
                     Bound::Excluded(end) => key.into_iter().cmp(end.iter()).is_lt(),
-                    Bound::Unbounded => true,
                 })
             }
         }
@@ -678,13 +670,12 @@ impl From<Range<Vec1<DfValue>>> for KeyComparison {
     }
 }
 
-impl TryFrom<BoundPair<Vec<DfValue>>> for KeyComparison {
+impl TryFrom<BoundedRange<Vec<DfValue>>> for KeyComparison {
     type Error = vec1::Size0Error;
 
     /// Converts to a [`KeyComparison::Range`]
-    fn try_from((lower, upper): BoundPair<Vec<DfValue>>) -> Result<Self, Self::Error> {
+    fn try_from((lower, upper): BoundedRange<Vec<DfValue>>) -> Result<Self, Self::Error> {
         let convert_bound = |bound| match bound {
-            Bound::Unbounded => Ok(Bound::Unbounded),
             Bound::Included(x) => Ok(Bound::Included(Vec1::try_from(x)?)),
             Bound::Excluded(x) => Ok(Bound::Excluded(Vec1::try_from(x)?)),
         };
@@ -692,22 +683,14 @@ impl TryFrom<BoundPair<Vec<DfValue>>> for KeyComparison {
     }
 }
 
-impl From<BoundPair<Vec1<DfValue>>> for KeyComparison {
-    /// Converts to a [`KeyComparison::Range`]
-    fn from(range: BoundPair<Vec1<DfValue>>) -> Self {
-        KeyComparison::Range(range)
-    }
-}
-
+// TODO ethan change these
 impl RangeBounds<Vec1<DfValue>> for KeyComparison {
     fn start_bound(&self) -> Bound<&Vec1<DfValue>> {
         use Bound::*;
         use KeyComparison::*;
         match self {
             Equal(ref key) => Included(key),
-            Range((Unbounded, _)) => Unbounded,
-            Range((Included(ref k), _)) => Included(k),
-            Range((Excluded(ref k), _)) => Excluded(k),
+            Range(bp) => bp.start_bound(),
         }
     }
 
@@ -716,9 +699,7 @@ impl RangeBounds<Vec1<DfValue>> for KeyComparison {
         use KeyComparison::*;
         match self {
             Equal(ref key) => Included(key),
-            Range((_, Unbounded)) => Unbounded,
-            Range((_, Included(ref k))) => Included(k),
-            Range((_, Excluded(ref k))) => Excluded(k),
+            Range(bp) => bp.end_bound(),
         }
     }
 }
@@ -735,24 +716,18 @@ impl RangeBounds<Vec<DfValue>> for KeyComparison {
 
 impl RangeBounds<Vec1<DfValue>> for &KeyComparison {
     fn start_bound(&self) -> Bound<&Vec1<DfValue>> {
-        use Bound::*;
         use KeyComparison::*;
         match self {
-            Equal(ref key) => Included(key),
-            Range((Unbounded, _)) => Unbounded,
-            Range((Included(ref k), _)) => Included(k),
-            Range((Excluded(ref k), _)) => Excluded(k),
+            Equal(ref key) => Bound::Included(key),
+            Range(bp) => bp.start_bound(),
         }
     }
 
     fn end_bound(&self) -> Bound<&Vec1<DfValue>> {
-        use Bound::*;
         use KeyComparison::*;
         match self {
-            Equal(ref key) => Included(key),
-            Range((_, Unbounded)) => Unbounded,
-            Range((_, Included(ref k))) => Included(k),
-            Range((_, Excluded(ref k))) => Excluded(k),
+            Equal(ref key) => Bound::Included(key),
+            Range(bp) => bp.start_bound(),
         }
     }
 }
@@ -790,7 +765,7 @@ impl Arbitrary for KeyComparison {
                 // know we are generating vectors of length 1 and beyond.
                 KeyComparison::try_from(k).unwrap()
             }),
-            (bound(), bound()).prop_map(KeyComparison::Range)
+            (bound(), bound()).prop_map(|(l, u)| KeyComparison::Range((l, u)))
         ]
         .boxed()
     }
@@ -1556,6 +1531,22 @@ impl ReaderHandle {
         blocking_read: bool,
         dialect: Dialect,
     ) -> ReadySetResult<Option<ViewQuery>> {
+        // TODO ethan
+        // why are the raw keys arrays?
+        // can we just return None if one of the raw keys is null?
+        for key in &raw_keys {
+            if key.iter().any(|k| k.is_none()) {
+                return Ok(Some(ViewQuery {
+                    key_comparisons: vec![],
+                    block: blocking_read,
+                    filter: None,
+                    limit,
+                    offset,
+                    timestamp: ticket,
+                }));
+            }
+        }
+
         let schema = self
             .schema()
             .ok_or_else(|| internal_err!("No schema for view"))?;
@@ -2351,10 +2342,9 @@ mod tests {
 
             assert_eq!(
                 query.key_comparisons,
-                vec![KeyComparison::Range((
-                    Bound::Excluded(vec1![DfValue::from(1), DfValue::from("a")]),
-                    Bound::Unbounded
-                ))]
+                vec![KeyComparison::Range(
+                    vec1![DfValue::from(1), DfValue::from("a")].range_from()
+                )]
             );
         }
 
@@ -2396,10 +2386,9 @@ mod tests {
 
             assert_eq!(
                 query.key_comparisons,
-                vec![KeyComparison::Range((
-                    Bound::Included(vec1![DfValue::from(1), DfValue::from("a")]),
-                    Bound::Unbounded
-                ))]
+                vec![KeyComparison::Range(
+                    vec1![DfValue::from(1), DfValue::from("a")].range_from_inclusive(),
+                )]
             );
         }
 

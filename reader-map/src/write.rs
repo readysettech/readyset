@@ -1,11 +1,11 @@
 use std::collections::hash_map::RandomState;
 use std::fmt;
 use std::hash::{BuildHasher, Hash};
-use std::ops::{Bound, RangeBounds};
 
 use left_right::Absorb;
 use partial_map::InsertionOrder;
 use readyset_client::internal::IndexType;
+use readyset_data::{Bound, RangeBounds};
 
 use crate::eviction::EvictionMeta;
 use crate::inner::Inner;
@@ -175,6 +175,11 @@ where
             range.start_bound().cloned(),
             range.end_bound().cloned(),
         )))
+    }
+
+    /// Inserts the full range of keys into the map.
+    pub fn insert_full_range(&mut self) -> &mut Self {
+        self.add_op(Operation::AddFullRange)
     }
 
     /// Clear the value-bag of the given key, without removing it.
@@ -388,6 +393,7 @@ where
                 }
             }
             Operation::AddRange(range) => self.data.add_range(range.clone()),
+            Operation::AddFullRange => self.data.add_full_range(),
             Operation::Clear(key, eviction_meta) => {
                 self.data_entry(key.clone(), eviction_meta).clear()
             }
@@ -455,6 +461,7 @@ where
                 }
             }
             Operation::AddRange(range) => self.data.add_range(range),
+            Operation::AddFullRange => self.data.add_full_range(),
             Operation::Clear(key, mut eviction_meta) => {
                 self.data_entry(key, &mut eviction_meta).clear()
             }
@@ -516,6 +523,8 @@ pub(super) enum Operation<K, V, M, T> {
     Add(K, V, Option<EvictionMeta>, Option<usize>),
     /// Add an interval to the list of filled intervals
     AddRange((Bound<K>, Bound<K>)),
+    /// Add the full range of keys
+    AddFullRange,
     /// Remove this value from the set of entries for this key. Last element of the tuple is the
     /// removal index for [`absorb_second`] and computed in [`absorb_first`]
     RemoveValue(K, V, Option<usize>),
@@ -550,6 +559,7 @@ where
         match self {
             Operation::Add(a, b, c, _) => f.debug_tuple("Add").field(a).field(b).field(c).finish(),
             Operation::AddRange(a) => f.debug_tuple("AddRange").field(a).finish(),
+            Operation::AddFullRange => f.debug_tuple("AddFullRange").finish(),
             Operation::RemoveValue(a, b, _) => {
                 f.debug_tuple("RemoveValue").field(a).field(b).finish()
             }

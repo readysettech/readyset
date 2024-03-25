@@ -1,6 +1,5 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::ops::Bound;
 use std::sync::Arc;
 
 use ahash::RandomState;
@@ -11,6 +10,7 @@ use reader_map::{EvictionQuantity, EvictionStrategy};
 use readyset_client::consistency::Timestamp;
 use readyset_client::results::SharedResults;
 use readyset_client::KeyComparison;
+use readyset_data::Bound;
 use vec1::Vec1;
 
 pub use self::multir::LookupError;
@@ -124,7 +124,7 @@ fn new_inner(
             // want to pass whether we're fully materialized down into the reader_map and skip
             // inserting into the interval tree entirely (maybe make it an option?) if so
             if trigger.is_none() {
-                w.insert_range(..);
+                w.insert_full_range();
             }
             (multiw::Handle::$variant(w), multir::Handle::$variant(r))
         }};
@@ -355,9 +355,8 @@ impl WriteHandle {
     }
 
     pub(crate) fn mark_hole(&mut self, key: &KeyComparison) -> ReadySetResult<u64> {
-        if let Some(len) = key.len() {
-            invariant_eq!(len, self.index.len());
-        }
+        invariant_eq!(key.len(), self.index.len());
+
         match key {
             KeyComparison::Equal(k) => Ok(self.mut_with_key(k.as_vec()).mark_hole()),
             KeyComparison::Range((start, end)) => {
@@ -388,9 +387,7 @@ impl WriteHandle {
     }
 
     pub(crate) fn mark_filled(&mut self, key: KeyComparison) -> ReadySetResult<()> {
-        if let Some(len) = key.len() {
-            invariant_eq!(len, self.index.len());
-        }
+        invariant_eq!(key.len(), self.index.len());
 
         #[allow(clippy::unreachable)] // Documented invariant.
         let range = match (self.index.index_type, &key) {
@@ -588,9 +585,8 @@ impl SingleReadHandle {
 #[cfg(test)]
 #[allow(clippy::panic)]
 mod tests {
-    use std::ops::Bound;
-
     use readyset_client::results::SharedRows;
+    use readyset_data::Bound;
 
     use super::*;
 

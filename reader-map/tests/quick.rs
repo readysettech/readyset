@@ -14,10 +14,11 @@ use std::cmp::{min, Ord};
 use std::collections::{BTreeMap, HashSet};
 use std::fmt::Debug;
 use std::hash::{BuildHasher, Hash};
-use std::ops::{Bound, Deref, RangeBounds};
+use std::ops::Deref;
 
 use quickcheck::{Arbitrary, Gen};
 use rand::Rng;
+use readyset_data::{Bound, RangeBounds};
 
 fn set<'a, T: 'a, I>(iter: I) -> HashSet<T>
 where
