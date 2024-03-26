@@ -63,6 +63,9 @@ pub struct PostgresWalConnector {
     controller: ReadySetHandle,
     /// The interval on which we should send status updates to the upstream Postgres instance
     status_update_interval: Duration,
+    /// Whether or not we just processed a table error and need to allow mismatched lsns for the
+    /// next commit
+    had_table_error: bool,
 }
 
 /// The decoded response to `IDENTIFY_SYSTEM`
@@ -155,6 +158,7 @@ impl PostgresWalConnector {
             in_transaction: false,
             controller,
             status_update_interval,
+            had_table_error: false,
         };
 
         if full_resnapshot || next_position.is_none() {
@@ -682,6 +686,10 @@ impl Connector for PostgresWalConnector {
                 info!(target: "replicator_statement", "{:?}", event);
             }
 
+            if let Err(ReadySetError::TableError { .. }) = event {
+                self.had_table_error = true;
+            }
+
             let mut event = event?;
 
             // Check if next event is for another table, in which case we have to flush the events
@@ -817,9 +825,14 @@ impl Connector for PostgresWalConnector {
                     cur_pos = PostgresPosition::commit_start(final_lsn);
                 }
                 WalEvent::Commit { lsn, end_lsn } => {
-                    // If the `CommitLsn` from the COMMIT does not match the `CommitLsn` from the
+                    // Unless we just failed to process the previous event due to a table error, in
+                    // which case we will have dropped the cache for the associated table, If the
+                    // `CommitLsn` from the COMMIT does not match the `CommitLsn` from the
                     // BEGIN, something has gone very wrong
-                    invariant_eq!(lsn, cur_pos.commit_lsn);
+                    if !self.had_table_error {
+                        invariant_eq!(lsn, cur_pos.commit_lsn);
+                    }
+                    self.had_table_error = false;
 
                     // COMMITs should only happen in the context of a transaction
                     invariant!(self.in_transaction);
