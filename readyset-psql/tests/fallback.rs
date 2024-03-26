@@ -1105,6 +1105,25 @@ async fn replication_failure_ignores_table(failpoint: &str) {
 
     assert_table_ignored(&client).await;
 
+    // Check That we don't see any 'Last replication error' rows
+    let results = client
+        .simple_query("SHOW READYSET STATUS")
+        .await
+        .unwrap()
+        .into_iter()
+        .filter_map(|m| {
+            if let SimpleQueryMessage::Row(r) = m {
+                r.get(0).map(String::from)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<String>>();
+
+    assert!(results
+        .iter()
+        .all(|r| !r.contains("Last replication error")));
+
     shutdown_tx.shutdown().await;
 }
 
@@ -2698,6 +2717,47 @@ async fn drop_all_proxied_queries() {
     assert!(matches!(
         command,
         SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 0, .. })
+    ));
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+#[slow]
+async fn numeric_inf_nan() {
+    readyset_tracing::init_test_logging();
+    let (opts, _handle, shutdown_tx) = setup().await;
+    let conn = connect(opts).await;
+
+    conn.simple_query("create table numer (a numeric);")
+        .await
+        .unwrap();
+
+    eventually!(conn
+        .simple_query("create cache from select * from numer")
+        .await
+        .is_ok());
+
+    conn.simple_query("insert into numer (a) values (1.0), ('NaN'), ('Infinity'), ('-Infinity')")
+        .await
+        .unwrap();
+
+    sleep().await;
+
+    let command = conn
+        .simple_query("SELECT * from numer")
+        .await
+        .unwrap()
+        .into_iter()
+        .last()
+        .unwrap();
+
+    // We expect to see all rows because the table was dropped since we don't support NaN/Infinity
+    // and the query should be proxied
+    assert!(matches!(
+        command,
+        SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 4, .. })
     ));
 
     shutdown_tx.shutdown().await;
