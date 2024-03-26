@@ -59,6 +59,16 @@ temp-dir = "0.1"
 [features]
 failure_injection = ["fail/failpoints", "readyset-client/failure_injection", "readyset-server/failure_injection"]
 
+[package.metadata.generate-rpm]
+assets = [
+    { source = "target/release/readyset", dest = "/usr/bin/readyset", mode = "755" },
+    { source = "debian/readyset.conf", dest = "/etc/readyset/readyset.conf", mode = "644" },
+    { source = "debian/systemd/readyset.service", dest = "/lib/systemd/system/readyset.service", mode = "644" },
+]
+license = "BSL"
+description = """\
+A real-time SQL caching engine for Postgres and MySQL."""
+
 [package.metadata.deb]
 maintainer = "ReadySet Technology <info@readyset.io>"
 copyright = "2023, ReadySet Technology, Inc."
