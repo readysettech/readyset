@@ -40,6 +40,11 @@ pub enum WalError {
     },
 }
 
+#[derive(Debug)]
+pub enum NumericParseErrorKind {
+    RustDecimalError(rust_decimal::Error),
+    UnsupportedValue(String),
+}
 /// The kinds of table-specific errors that can arise during replication
 #[derive(Debug)]
 pub enum TableErrorKind {
@@ -54,7 +59,7 @@ pub enum TableErrorKind {
     TimestampTzParseError,
     DateParseError,
     TimeParseError(mysql_time::ConvertError),
-    NumericParseError(rust_decimal::Error),
+    NumericParseError(NumericParseErrorKind),
     BitVectorParseError(String),
     ArrayParseError,
     InvalidMapping(String),

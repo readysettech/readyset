@@ -15,7 +15,7 @@ use tracing::{debug, error, trace};
 
 use super::ddl_replication::DdlEvent;
 use super::wal::{self, RelationMapping, WalData, WalError, WalRecord};
-use crate::postgres_connector::wal::{TableErrorKind, TupleEntry};
+use crate::postgres_connector::wal::{NumericParseErrorKind, TableErrorKind, TupleEntry};
 
 /// The names of the schema table that DDL replication logs will be written to
 pub(crate) const DDL_REPLICATION_LOG_SCHEMA: &str = "readyset";
@@ -651,13 +651,28 @@ impl wal::TupleData {
                                         schema: relation.schema_name_lossy(),
                                     })?
                                     .try_into()?,
-                                PGType::NUMERIC => Decimal::from_str_exact(str.as_ref())
-                                    .map_err(|e| WalError::TableError {
-                                        kind: TableErrorKind::NumericParseError(e),
-                                        table: relation.relation_name_lossy(),
-                                        schema: relation.schema_name_lossy(),
-                                    })
-                                    .map(DfValue::from)?,
+                                PGType::NUMERIC => match str.as_ref() {
+                                    "NaN" | "Infinity" | "-Infinity" => {
+                                        return Err(WalError::TableError {
+                                            kind: TableErrorKind::NumericParseError(
+                                                NumericParseErrorKind::UnsupportedValue(
+                                                    str.to_string(),
+                                                ),
+                                            ),
+                                            table: relation.relation_name_lossy(),
+                                            schema: relation.schema_name_lossy(),
+                                        });
+                                    }
+                                    s => Decimal::from_str_exact(s)
+                                        .map_err(|e| WalError::TableError {
+                                            kind: TableErrorKind::NumericParseError(
+                                                NumericParseErrorKind::RustDecimalError(e),
+                                            ),
+                                            table: relation.relation_name_lossy(),
+                                            schema: relation.schema_name_lossy(),
+                                        })
+                                        .map(DfValue::from)?,
+                                },
                                 PGType::CHAR => match text.as_ref() {
                                     [] => DfValue::None,
                                     [c] => DfValue::Int(i8::from_ne_bytes([*c]).into()),
