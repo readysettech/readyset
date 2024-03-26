@@ -1,13 +1,14 @@
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
-use std::ops::{Bound, RangeBounds};
 use std::{iter, mem};
 
 use dataflow_state::PointKey;
 use derive_more::From;
 use readyset_client::KeyComparison;
+use readyset_data::Bound;
 use readyset_errors::ReadySetResult;
+use readyset_util::ranges::RangeBounds;
 use readyset_util::Indices;
 use serde::{Deserialize, Serialize};
 use vec1::Vec1;
@@ -228,9 +229,7 @@ impl Miss {
                 .unwrap()
                 .try_into()
                 .unwrap(),
-            MissReplayKey::Range((lower, upper)) => {
-                KeyComparison::Range((lower.clone(), upper.clone()))
-            }
+            MissReplayKey::Range(pair) => KeyComparison::Range(pair.clone()),
         })
     }
 

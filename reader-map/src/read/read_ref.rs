@@ -3,9 +3,9 @@ use std::collections::btree_map;
 use std::collections::hash_map::RandomState;
 use std::fmt;
 use std::hash::{BuildHasher, Hash};
-use std::ops::RangeBounds;
 
 use left_right::ReadGuard;
+use readyset_data::RangeBounds;
 
 use crate::inner::{Inner, Miss};
 use crate::values::Values;
@@ -177,14 +177,6 @@ where
         R: RangeBounds<K>,
     {
         self.guard.data.contains_range(range)
-    }
-
-    /// Returns true if the map contains at least part of the specified range of keys.
-    pub fn overlaps_range<R>(&self, range: &R) -> bool
-    where
-        R: RangeBounds<K>,
-    {
-        self.guard.data.overlaps_range(range)
     }
 }
 

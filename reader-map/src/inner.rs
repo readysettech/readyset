@@ -2,12 +2,12 @@ use std::borrow::Borrow;
 use std::collections::{hash_map, HashMap};
 use std::fmt;
 use std::hash::{BuildHasher, Hash};
-use std::ops::{Bound, RangeBounds};
 
 use iter_enum::{ExactSizeIterator, Iterator};
 use itertools::Either;
 use partial_map::PartialMap;
 use readyset_client::internal::IndexType;
+use readyset_data::{Bound, RangeBounds};
 
 use crate::eviction::{EvictionMeta, EvictionStrategy};
 use crate::values::Values;
@@ -146,6 +146,15 @@ impl<K, V, S> Data<K, V, S> {
         }
     }
 
+    pub(crate) fn add_full_range(&mut self)
+    where
+        K: Ord + Clone,
+    {
+        if let Self::BTreeMap(ref mut map, ..) = self {
+            map.insert_full_range();
+        }
+    }
+
     pub(crate) fn remove_range<R>(&mut self, range: R)
     where
         R: RangeBounds<K>,
@@ -170,17 +179,6 @@ impl<K, V, S> Data<K, V, S> {
     {
         match self {
             Self::BTreeMap(map, ..) => map.contains_range(range),
-            Self::HashMap(..) => panic!("contains_range called on a HashMap reader_map"),
-        }
-    }
-
-    pub(crate) fn overlaps_range<R>(&self, range: &R) -> bool
-    where
-        R: RangeBounds<K>,
-        K: Ord,
-    {
-        match self {
-            Self::BTreeMap(map, ..) => map.overlaps_range(range),
             Self::HashMap(..) => panic!("contains_range called on a HashMap reader_map"),
         }
     }

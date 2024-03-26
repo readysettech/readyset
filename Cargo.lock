@@ -2837,6 +2837,7 @@ name = "merging-interval-tree"
 version = "0.1.0"
 dependencies = [
  "proptest",
+ "readyset-util",
  "test-strategy",
 ]
 
@@ -3590,6 +3591,7 @@ name = "partial-map"
 version = "0.1.0"
 dependencies = [
  "merging-interval-tree",
+ "readyset-util",
 ]
 
 [[package]]
@@ -4380,6 +4382,7 @@ dependencies = [
  "quickcheck_macros",
  "rand 0.7.3",
  "readyset-client",
+ "readyset-data",
  "smallvec",
  "thiserror",
  "triomphe",
@@ -4737,6 +4740,8 @@ dependencies = [
  "postgres-protocol",
  "postgres-types",
  "proptest",
+ "quickcheck",
+ "rand 0.7.3",
  "readyset-errors",
  "readyset-util",
  "regex",
@@ -4750,11 +4755,13 @@ dependencies = [
  "strum",
  "strum_macros",
  "test-strategy",
+ "thiserror",
  "time",
  "tokio",
  "tokio-postgres",
  "triomphe",
  "uuid 0.8.2",
+ "vec1",
 ]
 
 [[package]]
@@ -5230,10 +5237,13 @@ dependencies = [
  "eui48",
  "futures",
  "proptest",
+ "quickcheck",
+ "rand 0.7.3",
  "rust_decimal",
  "serde",
  "serde_json",
  "test-strategy",
+ "thiserror",
  "tokio",
  "tracing",
  "uuid 0.8.2",

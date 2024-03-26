@@ -1,9 +1,9 @@
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
-use std::ops::Bound;
 
 use common::DfValue;
 use readyset_client::KeyComparison;
+use readyset_data::Bound;
 use readyset_errors::{internal, ReadySetResult};
 use serde::{Deserialize, Serialize};
 use vec1::Vec1;
@@ -174,7 +174,6 @@ fn check_lower_bound(lower_bound: &Bound<Vec1<DfValue>>, ci: &[usize], row: &[Df
             check_bound(ci, row, bound, |d1: &DfValue, d2: &DfValue| d1 >= d2)
         }
         Bound::Excluded(bound) => check_bound(ci, row, bound, |d1: &DfValue, d2: &DfValue| d1 > d2),
-        Bound::Unbounded => true,
     }
 }
 
@@ -184,7 +183,6 @@ fn check_upper_bound(upper_bound: &Bound<Vec1<DfValue>>, ci: &[usize], row: &[Df
             check_bound(ci, row, bound, |d1: &DfValue, d2: &DfValue| d1 <= d2)
         }
         Bound::Excluded(bound) => check_bound(ci, row, bound, |d1: &DfValue, d2: &DfValue| d1 < d2),
-        Bound::Unbounded => true,
     }
 }
 
@@ -231,8 +229,6 @@ mod test {
     }
 
     mod update_processing {
-        use std::ops::Bound;
-
         use common::Record;
 
         use super::*;

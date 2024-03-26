@@ -1,5 +1,6 @@
 use std::borrow::Borrow;
-use std::ops::{Bound, RangeBounds};
+
+use readyset_data::Bound;
 
 #[macro_export]
 macro_rules! adapt_range {
@@ -19,15 +20,14 @@ macro_rules! adapt_range {
 pub(super) trait MakeKey<A> {
     fn from_row(key: &[usize], row: &[A]) -> Self;
     fn from_key(key: &[A]) -> Self;
-    fn from_range<R, I>(range: &R) -> (Bound<Self>, Bound<Self>)
+    fn from_range<I>((lower, upper): &(Bound<I>, Bound<I>)) -> (Bound<Self>, Bound<Self>)
     where
-        R: RangeBounds<I>,
         I: Borrow<[A]>,
         Self: Sized,
     {
         (
-            range.start_bound().map(|k| Self::from_key(k.borrow())),
-            range.end_bound().map(|k| Self::from_key(k.borrow())),
+            lower.as_ref().map(|k| Self::from_key(k.borrow())),
+            upper.as_ref().map(|k| Self::from_key(k.borrow())),
         )
     }
 }

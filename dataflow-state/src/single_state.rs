@@ -1,11 +1,10 @@
-use std::ops::{Bound, RangeBounds};
 use std::rc::Rc;
 
 use common::{IndexType, SizeOf};
 use itertools::Either;
 use readyset_client::internal::Index;
 use readyset_client::KeyComparison;
-use readyset_data::DfValue;
+use readyset_data::{Bound, DfValue};
 use vec1::Vec1;
 
 use crate::keyed_state::KeyedState;
@@ -48,7 +47,7 @@ impl SingleState {
         if !partial && index.index_type == IndexType::BTreeMap {
             // For fully materialized indices, we never miss - so mark that the full range of keys
             // has been filled.
-            state.insert_range((Bound::Unbounded, Bound::Unbounded))
+            state.insert_full_range();
         }
         Self {
             index,
@@ -316,8 +315,8 @@ impl SingleState {
                     }
                     KeyedState::MultiBTree(ref mut m, _) => Box::new(
                         m.remove_range::<[DfValue], _>((
-                            range.start_bound().map(Vec1::as_slice),
-                            range.end_bound().map(Vec1::as_slice),
+                            range.0.as_ref().map(|x| x.as_slice()),
+                            range.1.as_ref().map(|x| x.as_slice()),
                         ))
                         .flat_map(|(_, rows)| rows),
                     ),
@@ -444,8 +443,7 @@ impl SingleState {
 
 #[cfg(test)]
 mod tests {
-    use std::ops::Bound;
-
+    use readyset_data::Bound;
     use vec1::vec1;
 
     use super::*;
