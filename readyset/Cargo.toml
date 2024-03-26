@@ -2,8 +2,11 @@
 name = "readyset"
 version = "1.3.0"
 publish = false
-authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
+authors = ["Readyset Technology, Inc. <info@readyset.io>"]
 edition = "2021"
+license = "BSL 1.1"
+description = """\
+A real-time SQL caching engine for Postgres and MySQL."""
 
 
 [dependencies]
@@ -59,19 +62,29 @@ temp-dir = "0.1"
 [features]
 failure_injection = ["fail/failpoints", "readyset-client/failure_injection", "readyset-server/failure_injection"]
 
+[package.metadata.generate-rpm]
+assets = [
+    { source = "target/release/readyset", dest = "/usr/bin/readyset", mode = "755" },
+    { source = "pkg/common/readyset.conf", dest = "/etc/readyset/readyset.conf", mode = "600", config = true },
+    { source = "pkg/common/readyset.service", dest = "/lib/systemd/system/readyset.service", mode = "644" },
+]
+# These get set using cargo-generate-rpm --metadata-overwrite=<SCRIPTLETS.TOML> at package build time.
+#post_install_script = ...
+#pre_uninstall_script = ...
+#post_uninstall_script = ...
+
+
 [package.metadata.deb]
-maintainer = "ReadySet Technology <info@readyset.io>"
-copyright = "2023, ReadySet Technology, Inc."
+maintainer = "Readyset Technology <info@readyset.io>"
+copyright = "2024, Readyset Technology, Inc."
 license-file = ["../LICENSE", "1"]
-extended-description = """\
-A real-time SQL caching engine for Postgres and MySQL."""
 depends = "$auto"
 section = "Databases"
 priority = "optional"
 assets = [
     ["target/release/readyset", "usr/bin/", "755"],
-    ["debian/readyset.conf", "/etc/readyset/readyset.conf", "644"],
-    ["debian/systemd/readyset.service", "/lib/systemd/system/readyset.service", "644"],
+    ["pkg/common/readyset.conf", "/etc/readyset/readyset.conf", "600"],
+    ["pkg/common/readyset.service", "/lib/systemd/system/readyset.service", "644"],
 ]
-maintainer-scripts = "debian/scripts"
+maintainer-scripts = "pkg/debian"
 conf-files = ["/etc/readyset/readyset.conf"]
