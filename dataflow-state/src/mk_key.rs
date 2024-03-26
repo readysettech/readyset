@@ -1,5 +1,6 @@
 use std::borrow::Borrow;
-use std::ops::{Bound, RangeBounds};
+
+use readyset_data::{Bound, RangeBounds};
 
 #[macro_export]
 macro_rules! adapt_range {

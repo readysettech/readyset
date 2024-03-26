@@ -607,24 +607,22 @@ impl Ingredient for Join {
                     let mut right_upper =
                         upper.as_ref().map(|_| Vec::with_capacity(right_cols.len()));
 
-                    if let Some(lower_endpoint) = into_bound_endpoint(lower) {
+                    if let Some(lower_endpoint) = into_bound_endpoint(lower.into()) {
                         for (value, side) in lower_endpoint.into_iter().zip(&col_sides) {
-                            into_bound_endpoint(match side {
-                                Side::Left => left_lower.as_mut(),
-                                Side::Right => right_lower.as_mut(),
-                            })
-                            .unwrap()
+                            match side {
+                                Side::Left => left_lower.inner_mut(),
+                                Side::Right => right_lower.inner_mut(),
+                            }
                             .push(value);
                         }
                     }
 
-                    if let Some(upper_endpoint) = into_bound_endpoint(upper) {
+                    if let Some(upper_endpoint) = into_bound_endpoint(upper.into()) {
                         for (value, side) in upper_endpoint.into_iter().zip(&col_sides) {
-                            into_bound_endpoint(match side {
-                                Side::Left => left_upper.as_mut(),
-                                Side::Right => right_upper.as_mut(),
-                            })
-                            .unwrap()
+                            match side {
+                                Side::Left => left_upper.inner_mut(),
+                                Side::Right => right_upper.inner_mut(),
+                            }
                             .push(value);
                         }
                     }
@@ -897,7 +895,7 @@ mod tests {
     }
 
     mod handle_upquery {
-        use std::ops::Bound;
+        use readyset_data::{Bound, IntoBoundedRange};
 
         use super::*;
 
@@ -1025,14 +1023,10 @@ mod tests {
                 .handle_upquery(ColumnMiss {
                     node,
                     column_indices: vec![0, 1, 2],
-                    missed_keys: vec1![KeyComparison::Range((
-                        Bound::Included(vec1![
-                            DfValue::from(1),
-                            DfValue::from(2),
-                            DfValue::from(3)
-                        ]),
-                        Bound::Unbounded
-                    ))],
+                    missed_keys: vec1![KeyComparison::Range(
+                        vec1![DfValue::from(1), DfValue::from(2), DfValue::from(3)]
+                            .range_from_inclusive()
+                    )],
                 })
                 .unwrap();
 
@@ -1044,17 +1038,15 @@ mod tests {
 
             assert_eq!(
                 left_miss.missed_keys,
-                vec1![KeyComparison::Range((
-                    Bound::Included(vec1![DfValue::from(1), DfValue::from(2)]),
-                    Bound::Unbounded
-                ))]
+                vec1![KeyComparison::Range(
+                    vec1![DfValue::from(1), DfValue::from(2)].range_from_inclusive()
+                )]
             );
             assert_eq!(
                 right_miss.missed_keys,
-                vec1![KeyComparison::Range((
-                    Bound::Included(vec1![DfValue::from(3)]),
-                    Bound::Unbounded
-                ))]
+                vec1![KeyComparison::Range(
+                    vec1![DfValue::from(3)].range_from_inclusive()
+                )]
             );
         }
     }

@@ -1,6 +1,5 @@
 use std::collections::hash_map::RandomState;
 use std::hash::Hash;
-use std::ops::Bound;
 
 use partial_map::InsertionOrder;
 use reader_map::handles::{ReadHandle, WriteHandle};
@@ -8,6 +7,7 @@ use reader_map::refs::Miss;
 use reader_map::Error::*;
 use reader_map::{DefaultInsertionOrder, EvictionQuantity, Options};
 use readyset_client::internal::IndexType;
+use readyset_util::ranges::Bound;
 
 macro_rules! assert_match {
     ($x:expr, $p:pat) => {
@@ -817,13 +817,11 @@ fn insert_remove_entry() {
 
 #[test]
 fn range_works() {
-    use std::ops::Bound::{Included, Unbounded};
-
     let (mut w, r) = reader_map::new();
     for (k, v) in [(3, 9), (3, 30), (4, 10)] {
         w.insert(k, v);
     }
-    w.insert_range((Included(2), Unbounded));
+    w.insert_range(2..i32::MAX);
     w.publish();
 
     {
@@ -855,7 +853,7 @@ fn insert_range_pre_publish() {
     // publish. This tests that that works properly for the interval tree by checking reads with
     // both an even and an odd number of publishes
     let (mut w, r) = reader_map::new::<i32, i32>();
-    w.insert_range(..);
+    w.insert_range(i32::MIN..=i32::MAX);
     w.publish();
 
     {
@@ -918,7 +916,7 @@ fn contains_range_works() {
     {
         let m = r.enter().unwrap();
         assert!(m.contains_range(&(3..4)));
-        assert!(!m.contains_range(&(6..)));
+        assert!(!m.contains_range(&(6..usize::MAX)));
     }
 }
 
@@ -1173,22 +1171,22 @@ fn eviction_range_lru() -> reader_map::Result<()> {
     w.publish();
 
     let mut meta_cnt = 0;
-    for (_, v) in r.enter()?.range(&(&'q'..=&'z')).unwrap() {
+    for (_, v) in r.enter()?.range(&('q'..='z')).unwrap() {
         assert_eq!(v.eviction_meta().value(), meta_cnt);
         meta_cnt += 1;
     }
 
-    for (_, v) in r.enter()?.range(&(&'k'..=&'s')).unwrap() {
+    for (_, v) in r.enter()?.range(&('k'..='s')).unwrap() {
         assert_eq!(v.eviction_meta().value(), meta_cnt);
         meta_cnt += 1;
     }
 
-    for (_, v) in r.enter()?.range(&(&'a'..=&'m')).unwrap() {
+    for (_, v) in r.enter()?.range(&('a'..='m')).unwrap() {
         assert_eq!(v.eviction_meta().value(), meta_cnt);
         meta_cnt += 1;
     }
 
-    for (_, v) in r.enter()?.range(&(&'x'..=&'z')).unwrap() {
+    for (_, v) in r.enter()?.range(&('x'..='z')).unwrap() {
         assert_eq!(v.eviction_meta().value(), meta_cnt);
         meta_cnt += 1;
     }
@@ -1203,7 +1201,7 @@ fn eviction_range_lru() -> reader_map::Result<()> {
     let to_evict = evict(&mut w, 0.30);
     assert_eq!(to_evict, ['n', 'o', 'p', 'q', 't', 'u', 'v', 'w']);
     w.publish();
-    let Miss(misses) = r.enter()?.range(&(&'a'..=&'z')).unwrap_err();
+    let Miss(misses) = r.enter()?.range(&('a'..='z')).unwrap_err();
     assert_eq!(
         misses,
         [
@@ -1217,7 +1215,7 @@ fn eviction_range_lru() -> reader_map::Result<()> {
     let to_evict = evict(&mut w, 0.49);
     assert_eq!(to_evict, ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'r', 's']);
     w.publish();
-    let Miss(misses) = r.enter()?.range(&(&'a'..=&'z')).unwrap_err();
+    let Miss(misses) = r.enter()?.range(&('a'..='z')).unwrap_err();
     assert_eq!(
         misses,
         [
@@ -1232,7 +1230,7 @@ fn eviction_range_lru() -> reader_map::Result<()> {
     // x,y,z
     // h,i,j,k,l,m
     // Let's read i,j,k and then evict 6:
-    for (_, v) in r.enter()?.range(&(&'i'..=&'k')).unwrap() {
+    for (_, v) in r.enter()?.range(&('i'..='k')).unwrap() {
         assert_eq!(v.eviction_meta().value(), meta_cnt);
         meta_cnt += 1;
     }
@@ -1240,7 +1238,7 @@ fn eviction_range_lru() -> reader_map::Result<()> {
     let to_evict = evict(&mut w, 0.6);
     assert_eq!(to_evict, ['h', 'l', 'm', 'x', 'y', 'z']);
     w.publish();
-    let Miss(misses) = r.enter()?.range(&(&'a'..=&'z')).unwrap_err();
+    let Miss(misses) = r.enter()?.range(&('a'..='z')).unwrap_err();
     assert_eq!(
         misses,
         [
@@ -1250,7 +1248,7 @@ fn eviction_range_lru() -> reader_map::Result<()> {
         ]
     );
 
-    for (_, v) in r.enter()?.range(&(&'i'..=&'k')).unwrap() {
+    for (_, v) in r.enter()?.range(&('i'..='k')).unwrap() {
         assert_eq!(v.eviction_meta().value(), meta_cnt);
         meta_cnt += 1;
     }

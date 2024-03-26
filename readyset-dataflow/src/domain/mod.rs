@@ -35,6 +35,7 @@ use readyset_client::{KeyComparison, PersistencePoint, ReaderAddress};
 use readyset_errors::{internal, internal_err, ReadySetError, ReadySetResult};
 use readyset_util::futures::abort_on_panic;
 use readyset_util::progress::report_progress_with;
+use readyset_util::ranges::RangeBounds;
 use readyset_util::redacted::Sensitive;
 use readyset_util::Indices;
 use replication_offset::ReplicationOffset;
@@ -303,17 +304,28 @@ impl RequestedKeys {
                     .iter()
                     .flat_map(|key| {
                         let diff = requested
-                            .get_interval_difference(key)
+                            .get_interval_difference(&key.as_std_range())
                             .map(
                                 |(lower, upper): (Bound<&Vec1<DfValue>>, Bound<&Vec1<DfValue>>)| {
                                     (lower.cloned(), upper.cloned())
                                 },
                             )
                             .collect::<Vec<_>>();
-                        requested.insert_interval::<Vec1<_>, _>(key);
+                        requested.insert_interval::<Vec1<_>, _>(key.as_std_range());
                         diff
                     })
-                    .map(|r| KeyComparison::from_range(&r))
+                    .map(|(lower, upper)| {
+                        // It is safe to unwrap here because we know we will never get a
+                        // `std::ops::Bound::Unbounded` back from the interval tree, since we're
+                        // never passing in unbounded bounds
+                        let expect_message =
+                            "we should never get unbounded bounds back from the interval tree";
+
+                        KeyComparison::Range((
+                            lower.try_into().expect(expect_message),
+                            upper.try_into().expect(expect_message),
+                        ))
+                    })
                     .collect()
             }
         }
@@ -340,9 +352,26 @@ impl RequestedKeys {
                 *keys = keys
                     .iter()
                     .flat_map(|key| {
-                        requested
-                            .get_interval_overlaps(key)
-                            .map(|r| KeyComparison::from_range(&r))
+                        requested.get_interval_overlaps(key).map(|(lower, upper)| {
+                            // It is safe to unwrap here because we know we will never get a
+                            // `std::ops::Bound::Unbounded` back from the interval tree, since we're
+                            // never passing in unbounded bounds
+                            let expect_message =
+                                "we should never get unbounded bounds back from the interval tree";
+
+                            KeyComparison::Range((
+                                lower
+                                    .cloned()
+                                    .map(|l| Vec1::try_from(l).unwrap())
+                                    .try_into()
+                                    .expect(expect_message),
+                                upper
+                                    .cloned()
+                                    .map(|u| Vec1::try_from(u).unwrap())
+                                    .try_into()
+                                    .expect(expect_message),
+                            ))
+                        })
                     })
                     .collect()
             }
@@ -363,7 +392,7 @@ impl RequestedKeys {
                 );
             }
             RequestedKeys::Ranges(requested) => {
-                requested.remove_interval::<Vec1<_>, _>(key);
+                requested.remove_interval::<Vec1<_>, _>(&key.as_std_range());
             }
         }
     }
@@ -1726,7 +1755,7 @@ impl Domain {
                                 } else {
                                     let mut per_shard = HashMap::new();
                                     for miss in misses {
-                                        assert!(matches!(miss.len(), Some(1) | None));
+                                        assert_eq!(miss.len(), 1);
                                         for shard in miss.shard_keys(num_shards) {
                                             per_shard
                                                 .entry(shard)

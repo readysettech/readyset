@@ -2,12 +2,12 @@ use std::borrow::Borrow;
 use std::collections::{hash_map, HashMap};
 use std::fmt;
 use std::hash::{BuildHasher, Hash};
-use std::ops::{Bound, RangeBounds};
 
 use iter_enum::{ExactSizeIterator, Iterator};
 use itertools::Either;
 use partial_map::PartialMap;
 use readyset_client::internal::IndexType;
+use readyset_util::ranges::{Bound, RangeBounds};
 
 use crate::eviction::{EvictionMeta, EvictionStrategy};
 use crate::values::Values;
@@ -143,6 +143,15 @@ impl<K, V, S> Data<K, V, S> {
     {
         if let Self::BTreeMap(ref mut map, ..) = self {
             map.insert_range(range);
+        }
+    }
+
+    pub(crate) fn add_full_range(&mut self)
+    where
+        K: Ord + Clone,
+    {
+        if let Self::BTreeMap(ref mut map, ..) = self {
+            map.insert_full_range();
         }
     }
 

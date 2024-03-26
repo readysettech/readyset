@@ -1,7 +1,6 @@
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::convert::TryInto;
-use std::ops::RangeBounds;
 
 use ahash::RandomState;
 use common::DfValue;
@@ -11,6 +10,7 @@ use readyset_client::consistency::Timestamp;
 use readyset_client::results::{SharedResults, SharedRows};
 use readyset_client::KeyComparison;
 use readyset_errors::ReadySetError;
+use readyset_util::ranges::RangeBounds;
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 use vec1::{vec1, Vec1};
@@ -353,10 +353,9 @@ impl Handle {
 
 #[cfg(test)]
 mod tests {
-    use std::ops::Bound;
-
     use proptest::prelude::*;
     use reader_map::handles::WriteHandle;
+    use readyset_data::Bound;
 
     use super::*;
 

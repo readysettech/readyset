@@ -3592,6 +3592,7 @@ name = "partial-map"
 version = "0.1.0"
 dependencies = [
  "merging-interval-tree",
+ "readyset-util",
 ]
 
 [[package]]
@@ -4382,6 +4383,7 @@ dependencies = [
  "quickcheck_macros",
  "rand 0.7.3",
  "readyset-client",
+ "readyset-util",
  "smallvec",
  "thiserror",
  "triomphe",

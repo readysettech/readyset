@@ -1,11 +1,10 @@
 use std::iter;
-use std::ops::{Bound, RangeBounds};
 
 use common::{Index, IndexType};
 use indexmap::IndexMap;
 use partial_map::PartialMap;
-use readyset_data::DfValue;
-use readyset_util::intervals::into_bound_endpoint;
+use readyset_data::{Bound, DfValue};
+use readyset_util::ranges::RangeBounds;
 use tuple::TupleElements;
 use vec1::Vec1;
 
@@ -335,16 +334,66 @@ impl KeyedState {
             }
             // This is unwieldy, but allowing callers to insert the wrong length of Vec into us
             // would be very bad!
-            KeyedState::MultiBTree(ref mut map, len)
-                if (into_bound_endpoint(range.0.as_ref()).map_or(true, |x| x.len() == *len)
-                    && into_bound_endpoint(range.1.as_ref()).map_or(true, |x| x.len() == *len)) =>
-            {
+            KeyedState::MultiBTree(ref mut map, len) => {
+                assert!(range.0.len() == *len && range.1.len() == *len);
                 map.insert_range((range.0.map(Vec1::into_vec), range.1.map(Vec1::into_vec)))
             }
-            _ =>
+            KeyedState::AllRows(_) => panic!("insert_range called on an AllRows KeyedState"),
+            KeyedState::SingleHash(_)
+            | KeyedState::DoubleHash(_)
+            | KeyedState::TriHash(_)
+            | KeyedState::QuadHash(_)
+            | KeyedState::QuinHash(_)
+            | KeyedState::SexHash(_)
+            | KeyedState::MultiHash(_, _) =>
             #[allow(clippy::panic)] // documented invariant
             {
                 panic!("insert_range called on a HashMap KeyedState")
+            }
+        };
+    }
+
+    /// Mark every key in the state as filled. Note that `KeyedState::insert_range()` cannot be
+    /// used for this purpose, since a [`Bound`] cannot be used to represent an unbounded upper or
+    /// lower bound.
+    ///
+    /// # Panics
+    ///
+    /// Panics if this `KeyedState` is backed by a HashMap index
+    pub(super) fn insert_full_range(&mut self) {
+        match self {
+            KeyedState::SingleBTree(ref mut map) => {
+                map.insert_full_range();
+            }
+            KeyedState::DoubleBTree(ref mut map) => {
+                map.insert_full_range();
+            }
+            KeyedState::TriBTree(ref mut map) => {
+                map.insert_full_range();
+            }
+            KeyedState::QuadBTree(ref mut map) => {
+                map.insert_full_range();
+            }
+            KeyedState::QuinBTree(ref mut map) => {
+                map.insert_full_range();
+            }
+            KeyedState::SexBTree(ref mut map) => {
+                map.insert_full_range();
+            }
+            KeyedState::MultiBTree(ref mut map, _) => {
+                map.insert_full_range();
+            }
+            KeyedState::AllRows(_) => panic!("insert_full_range called on an AllRows KeyedState"),
+            KeyedState::SingleHash(_)
+            | KeyedState::DoubleHash(_)
+            | KeyedState::TriHash(_)
+            | KeyedState::QuadHash(_)
+            | KeyedState::QuinHash(_)
+            | KeyedState::SexHash(_)
+            | KeyedState::MultiHash(_, _) =>
+            #[allow(clippy::panic)] // documented invariant
+            {
+                panic!("insert_full_range called on a HashMap KeyedState")
             }
         };
     }
@@ -380,12 +429,6 @@ impl KeyedState {
             Box::new(r.flat_map(|(_, rows)| rows))
         }
 
-        macro_rules! full_range {
-            ($m: expr) => {
-                $m.range(&(..)).map(flatten_rows).map_err(to_misses)
-            };
-        }
-
         macro_rules! range {
             ($m: expr, $range: ident) => {
                 $m.range($range).map(flatten_rows).map_err(to_misses)
@@ -393,19 +436,6 @@ impl KeyedState {
         }
 
         match (self, key) {
-            (KeyedState::SingleBTree(m), &RangeKey::Unbounded) => m
-                .range(&(..))
-                .map_err(|misses| {
-                    misses
-                        .into_iter()
-                        .map(|(lower, upper)| (lower.map(|k| vec![k]), upper.map(|k| vec![k])))
-                        .collect()
-                })
-                .map(flatten_rows),
-            (KeyedState::DoubleBTree(m), &RangeKey::Unbounded) => full_range!(m),
-            (KeyedState::TriBTree(m), &RangeKey::Unbounded) => full_range!(m),
-            (KeyedState::QuadBTree(m), &RangeKey::Unbounded) => full_range!(m),
-            (KeyedState::SexBTree(m), &RangeKey::Unbounded) => full_range!(m),
             (KeyedState::SingleBTree(m), RangeKey::Single(range)) => {
                 m.range(range).map(flatten_rows).map_err(|misses| {
                     misses
