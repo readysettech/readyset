@@ -3,9 +3,9 @@ use std::collections::btree_map;
 use std::collections::hash_map::RandomState;
 use std::fmt;
 use std::hash::{BuildHasher, Hash};
-use std::ops::RangeBounds;
 
 use left_right::ReadGuard;
+use readyset_util::ranges::RangeBounds;
 
 use crate::inner::{Inner, Miss};
 use crate::values::Values;

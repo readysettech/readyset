@@ -65,7 +65,6 @@ mod handle;
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::io::{self, Read};
-use std::ops::Bound;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::mpsc::RecvTimeoutError;
@@ -84,9 +83,8 @@ use readyset_alloc::thread::StdThreadBuildWrapper;
 use readyset_client::debug::info::KeyCount;
 use readyset_client::internal::Index;
 use readyset_client::{KeyComparison, SqlIdentifier};
-use readyset_data::DfValue;
+use readyset_data::{Bound, BoundedRange, DfValue};
 use readyset_errors::{internal_err, invariant, ReadySetError, ReadySetResult};
-use readyset_util::intervals::BoundPair;
 use replication_offset::ReplicationOffset;
 use rocksdb::{
     self, BlockBasedOptions, ColumnFamilyDescriptor, CompactOptions, IteratorMode, SliceTransform,
@@ -910,7 +908,7 @@ impl State for PersistentStateHandle {
             // TODO(vlad): The read handle missed on binlog position, but that doesn't mean we want
             // to replay the entire range, all we want is for something to trigger a
             // replay and a repeat lookup
-            return RangeLookupResult::Missing(vec![key.as_bound_pair()]);
+            return RangeLookupResult::Missing(vec![key.as_bounded_range()]);
         }
 
         let index = inner.shared_state.index(IndexType::BTreeMap, columns);
@@ -936,7 +934,6 @@ impl State for PersistentStateHandle {
                 inclusive_end = Some(k.clone());
                 opts.set_iterate_upper_bound(k);
             }
-            _ => {}
         }
 
         let mut iterator = inner.db.raw_iterator_cf_opt(cf, opts);
@@ -956,7 +953,6 @@ impl State for PersistentStateHandle {
                     }
                 }
             }
-            Bound::Unbounded => iterator.seek_to_first(),
         }
 
         let mut rows = Vec::new();
@@ -1083,7 +1079,7 @@ fn serialize_key<K: Serialize, E: Serialize>(k: K, extra: E) -> Vec<u8> {
     bincode::options().serialize(&(size, k, extra)).unwrap()
 }
 
-fn serialize_range(range: RangeKey) -> BoundPair<Vec<u8>> {
+fn serialize_range(range: RangeKey) -> BoundedRange<Vec<u8>> {
     let (lower, upper) = range.into_point_keys();
     (
         lower.map(|v| serialize_key(v, ())),
@@ -2249,6 +2245,7 @@ mod tests {
     use std::path::PathBuf;
 
     use pretty_assertions::assert_eq;
+    use readyset_data::Bound::*;
     use readyset_data::Collation;
     use replication_offset::mysql::MySqlPosition;
     use replication_offset::postgres::PostgresPosition;
@@ -3195,9 +3192,9 @@ mod tests {
 
     mod lookup_range {
         use std::iter;
-        use std::ops::Bound::*;
 
         use pretty_assertions::assert_eq;
+        use readyset_data::IntoBoundedRange;
         use vec1::vec1;
 
         use super::*;
@@ -3356,7 +3353,10 @@ mod tests {
         fn inclusive_unbounded() {
             let state = setup();
             assert_eq!(
-                state.lookup_range(&[0], &RangeKey::from(&(vec1![DfValue::from(3)]..))),
+                state.lookup_range(
+                    &[0],
+                    &RangeKey::from(&vec1![DfValue::from(3)].range_from_inclusive())
+                ),
                 RangeLookupResult::Some((3..10).map(|n| vec![n.into()]).collect::<Vec<_>>().into())
             );
         }
@@ -3369,7 +3369,10 @@ mod tests {
                 .unwrap();
 
             assert_eq!(
-                state.lookup_range(&[0], &RangeKey::from(&(..=vec1![DfValue::from(3)]))),
+                state.lookup_range(
+                    &[0],
+                    &RangeKey::from(&vec1![DfValue::from(3)].range_to_inclusive())
+                ),
                 RangeLookupResult::Some(
                     vec![
                         vec![DfValue::from(0)],
@@ -3400,7 +3403,10 @@ mod tests {
             state.add_index(Index::btree_map(vec![0]), None);
 
             assert_eq!(
-                state.lookup_range(&[0], &RangeKey::from(&(vec1![DfValue::from(2)]..))),
+                state.lookup_range(
+                    &[0],
+                    &RangeKey::from(&vec1![DfValue::from(2)].range_from_inclusive())
+                ),
                 RangeLookupResult::Some(
                     [(2, 4), (2, 5), (3, 6), (3, 7)]
                         .iter()
@@ -3415,7 +3421,10 @@ mod tests {
         fn unbounded_inclusive() {
             let state = setup();
             assert_eq!(
-                state.lookup_range(&[0], &RangeKey::from(&(..=vec1![DfValue::from(3)]))),
+                state.lookup_range(
+                    &[0],
+                    &RangeKey::from(&vec1![DfValue::from(3)].range_to_inclusive())
+                ),
                 RangeLookupResult::Some((0..=3).map(|n| vec![n.into()]).collect::<Vec<_>>().into())
             );
         }
@@ -3424,7 +3433,7 @@ mod tests {
         fn unbounded_exclusive() {
             let state = setup();
             assert_eq!(
-                state.lookup_range(&[0], &RangeKey::from(&(..vec1![DfValue::from(3)]))),
+                state.lookup_range(&[0], &RangeKey::from(&vec1![DfValue::from(3)].range_to())),
                 RangeLookupResult::Some((0..3).map(|n| vec![n.into()]).collect::<Vec<_>>().into())
             );
         }
@@ -3455,7 +3464,7 @@ mod tests {
             assert_eq!(
                 state.lookup_range(
                     &[1],
-                    &RangeKey::from(&(Included(vec1![DfValue::from(3)]), Unbounded))
+                    &RangeKey::from(&vec1![DfValue::from(3)].range_from_inclusive())
                 ),
                 RangeLookupResult::Some(
                     (3..10)
@@ -3496,7 +3505,7 @@ mod tests {
             assert_eq!(
                 state.lookup_range(
                     &[1],
-                    &RangeKey::from(&(Excluded(vec1![DfValue::from(10)]), Unbounded))
+                    &RangeKey::from(&vec1![DfValue::from(10)].range_from())
                 ),
                 RangeLookupResult::Some(
                     [(8, 555671065), (9, 925768521), (0, 1221662829)]
@@ -3589,7 +3598,7 @@ mod tests {
             assert_eq!(
                 state.lookup_range(
                     &[1],
-                    &RangeKey::from(&(Unbounded, Included(vec1![DfValue::from(7)])))
+                    &RangeKey::from(&vec1![DfValue::from(7)].range_to_inclusive())
                 ),
                 RangeLookupResult::Some(
                     (-10..=7)
@@ -3604,10 +3613,7 @@ mod tests {
         fn unbounded_exclusive_secondary() {
             let state = setup_secondary();
             assert_eq!(
-                state.lookup_range(
-                    &[1],
-                    &RangeKey::from(&(Unbounded, Excluded(vec1![DfValue::from(7)])))
-                ),
+                state.lookup_range(&[1], &RangeKey::from(&vec1![DfValue::from(7)].range_to())),
                 RangeLookupResult::Some(
                     (-10..7)
                         .map(row_for_secondary_key)
@@ -3624,10 +3630,9 @@ mod tests {
             assert_eq!(
                 state.lookup_range(
                     &[0, 1],
-                    &RangeKey::from(&(
-                        Included(vec1![DfValue::from(2), DfValue::from(3)]),
-                        Unbounded
-                    ))
+                    &RangeKey::from(
+                        &vec1![DfValue::from(2), DfValue::from(3)].range_from_inclusive()
+                    )
                 ),
                 RangeLookupResult::Some(
                     (3..10)
@@ -3655,7 +3660,7 @@ mod tests {
             assert_eq!(
                 state.lookup_range(
                     &[1],
-                    &RangeKey::from(&(Included(vec1![DfValue::from(3)]), Unbounded))
+                    &RangeKey::from(&vec1![DfValue::from(3)].range_from_inclusive())
                 ),
                 RangeLookupResult::Some(
                     vec![vec![2.into(), 3.into(), 4.into()], extra_row_beginning]
