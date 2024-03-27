@@ -41,3 +41,13 @@ select id from t1 where v1 = null;
 query I nosort
 select id from t1 where v1 = null and v2 = 3;
 ----
+
+query I rowsort
+select id from t1 where v1 in (1, 2, NULL) AND v2 IN (2, 3, NULL)
+----
+1
+2
+
+query I rowsort
+select id from t1 where v1 in (NULL) AND v2 IN (NULL)
+----
