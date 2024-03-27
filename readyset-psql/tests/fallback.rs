@@ -2762,3 +2762,49 @@ async fn numeric_inf_nan() {
 
     shutdown_tx.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+#[slow]
+async fn numeric_snapshot_nan() {
+    readyset_tracing::init_test_logging();
+    let mut upstream_config = upstream_config();
+    upstream_config.dbname("noria");
+    let upstream_conn = connect(upstream_config).await;
+
+    upstream_conn
+        .simple_query(
+            "drop table if exists numer;
+            create table numer (a numeric);
+            insert into numer (a) values ('NaN')",
+        )
+        .await
+        .unwrap();
+
+    let (opts, _handle, shutdown_tx) = TestBuilder::default()
+        .recreate_database(false)
+        .fallback_url(PostgreSQLAdapter::upstream_url("noria"))
+        .migration_mode(MigrationMode::OutOfBand)
+        .build::<PostgreSQLAdapter>()
+        .await;
+
+    let conn = connect(opts).await;
+
+    let result = conn
+        .simple_query("SHOW READYSET TABLES")
+        .await
+        .unwrap()
+        .into_iter()
+        .filter_map(|m| {
+            if let SimpleQueryMessage::Row(r) = m {
+                r.get(1).map(String::from)
+            } else {
+                None
+            }
+        })
+        .last()
+        .unwrap();
+    assert!(result.contains("Not Replicated"));
+
+    shutdown_tx.shutdown().await;
+}

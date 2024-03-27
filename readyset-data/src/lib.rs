@@ -59,6 +59,10 @@ type JsonObject = serde_json::Map<String, JsonValue>;
 /// 86_000 - 60 = 85_940.
 const MAX_SECONDS_DATETIME_OFFSET: i32 = 85_940;
 
+/// This is the byte representation of NaN for Postgres' Numeric
+/// Which sets `NUMERIC_SPECIAL` and `NUMERIC_NAN`
+const NUMERIC_NAN: &[u8] = &[0, 0, 0, 0, 192, 0, 0, 0];
+
 /// Used to wrap arbitrary Postgres types which aren't natively supported, enabling more extensive
 /// proxying support
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -1872,6 +1876,14 @@ impl<'a> FromSql<'a> for DfValue {
                     // rust-decimal has a bug whereby it will successfully deserialize from the
                     // Postgres binary format NUMERIC values with scales in [0, 255], but it will
                     // panic when serializing them to bincode if they are outside [0, 28].
+                    //
+                    // rust-decimal also has a bug where it converts NaN to 0, so until [this
+                    // issue][] is merged and we update rust-decimal to that version, explicitly
+                    // reject NaN here.
+                    // [][https://github.com/paupino/rust-decimal/issues/655]
+                    if raw == NUMERIC_NAN {
+                        unsupported!("Numeric NaN is not supported");
+                    }
                     let d = Decimal::from_sql(ty, raw)?;
                     if d.scale() > 28 {
                         Err(format!("Could not convert Postgres type {ty} into a DfValue. Error: scale > 28").into())
