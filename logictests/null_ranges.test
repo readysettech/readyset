@@ -16,3 +16,18 @@ SELECT x FROM t WHERE x > 0
 1
 2
 
+query nosort
+SELECT x FROM t WHERE x > NULL
+----
+
+query nosort
+SELECT x FROM t WHERE x >= NULL
+----
+
+query nosort
+SELECT x FROM t WHERE x < NULL
+----
+
+query nosort
+SELECT x FROM t WHERE x <= NULL
+----
