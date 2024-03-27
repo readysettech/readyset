@@ -25,5 +25,4 @@ tracing-appender = "0.2.3"
 opentelemetry_sdk = { version = "0.21.2", features = ["rt-tokio"] }
 
 [dev-dependencies]
-anyhow = "1.0.53"
 tracing-attributes = "0.1.27"

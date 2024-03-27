@@ -20,6 +20,5 @@ readyset-util = { path = "../readyset-util" }
 readyset-errors = { path = "../readyset-errors" }
 async-trait = "0.1"
 nom-sql = { path = "../nom-sql" }
-readyset-client = { path = "../readyset-client" }
 deadpool-postgres = "0.10.3"
 num_cpus = "1.15.0"
