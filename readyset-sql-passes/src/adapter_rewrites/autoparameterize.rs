@@ -5,6 +5,8 @@ use nom_sql::{BinaryOperator, Expr, InValue, ItemPlaceholder, Literal, SelectSta
 
 #[derive(Default)]
 struct AutoParameterizeVisitor {
+    autoparameterize_equals: bool,
+    autoparameterize_ranges: bool,
     out: Vec<(usize, Literal)>,
     has_aggregates: bool,
     in_supported_position: bool,
@@ -60,10 +62,29 @@ impl<'ast> VisitorMut<'ast> for AutoParameterizeVisitor {
                 } => {}
                 Expr::BinaryOp {
                     lhs: box Expr::Column(_),
+                    op,
+                    rhs: box Expr::Literal(Literal::Placeholder(_)),
+                } if op.is_ordering_comparison() => {}
+                Expr::BinaryOp {
+                    lhs: box Expr::Column(_),
                     op: BinaryOperator::Equal,
                     rhs: box Expr::Literal(lit),
                 } => {
-                    self.replace_literal(lit);
+                    if self.autoparameterize_equals {
+                        self.replace_literal(lit);
+                    }
+
+                    return Ok(());
+                }
+                Expr::BinaryOp {
+                    lhs: box Expr::Column(_),
+                    op,
+                    rhs: box Expr::Literal(lit),
+                } if op.is_ordering_comparison() => {
+                    if self.autoparameterize_ranges {
+                        self.replace_literal(lit);
+                    }
+
                     return Ok(());
                 }
                 Expr::BinaryOp {
@@ -71,6 +92,178 @@ impl<'ast> VisitorMut<'ast> for AutoParameterizeVisitor {
                     op: BinaryOperator::Equal,
                     rhs: rhs @ box Expr::Column(_),
                 } => {
+                    // for lit = col, swap the equality first then revisit
+                    mem::swap(lhs, rhs);
+                    return self.visit_expr(expression);
+                }
+                Expr::BinaryOp {
+                    lhs: lhs @ box Expr::Literal(_),
+                    op,
+                    rhs: rhs @ box Expr::Column(_),
+                } if op.is_ordering_comparison() => {
+                    // for lit = col, swap the inequality first then revisit
+                    mem::swap(lhs, rhs);
+                    return self.visit_expr(expression);
+                }
+                Expr::In {
+                    lhs: box Expr::Column(_),
+                    rhs: InValue::List(exprs),
+                    negated: false,
+                } if exprs.iter().all(|e| {
+                    matches!(
+                        e,
+                        Expr::Literal(lit) if !matches!(lit, Literal::Placeholder(_))
+                    )
+                }) && !self.has_aggregates =>
+                {
+                    if self.autoparameterize_equals {
+                        let exprs = mem::replace(
+                            exprs,
+                            iter::repeat(Expr::Literal(Literal::Placeholder(
+                                ItemPlaceholder::QuestionMark,
+                            )))
+                            .take(exprs.len())
+                            .collect(),
+                        );
+                        let num_exprs = exprs.len();
+                        let start_index = self.param_index;
+                        self.out.extend(exprs.into_iter().enumerate().filter_map(
+                            move |(i, expr)| match expr {
+                                Expr::Literal(lit) => Some((i + start_index, lit)),
+                                // unreachable since we checked everything in the list is a literal
+                                // above, but best not to panic regardless
+                                _ => None,
+                            },
+                        ));
+                        self.param_index += num_exprs;
+                    }
+                    return Ok(());
+                }
+                Expr::BinaryOp {
+                    lhs,
+                    op: BinaryOperator::And,
+                    rhs,
+                } => {
+                    self.visit_expr(lhs.as_mut())?;
+                    self.in_supported_position = true;
+                    self.visit_expr(rhs.as_mut())?;
+                    self.in_supported_position = true;
+                    return Ok(());
+                }
+                _ => self.in_supported_position = false,
+            }
+        }
+
+        visit_mut::walk_expr(self, expression)?;
+        self.in_supported_position = was_supported;
+        Ok(())
+    }
+
+    fn visit_offset(&mut self, offset: &'ast mut Literal) -> Result<(), Self::Error> {
+        if !matches!(offset, Literal::Placeholder(_)) && self.autoparameterize_equals {
+            self.replace_literal(offset);
+        }
+
+        visit_mut::walk_offset(self, offset)
+    }
+}
+
+/// Walks through the query to determine whether the query has equals comparisons, range
+/// comparisons, equals placeholders, and range placeholders in positions that support
+/// autoparameterization.
+#[derive(Default)]
+struct AnalyzeLiteralsVisitor {
+    contains_equal: bool,
+    contains_range: bool,
+    contains_equal_placeholder: bool,
+    contains_range_placeholder: bool,
+    query_depth: u8,
+    in_supported_position: bool,
+    has_aggregates: bool,
+}
+
+impl<'ast> VisitorMut<'ast> for AnalyzeLiteralsVisitor {
+    type Error = !;
+
+    fn visit_select_statement(
+        &mut self,
+        select_statement: &'ast mut SelectStatement,
+    ) -> Result<(), Self::Error> {
+        self.query_depth = self.query_depth.saturating_add(1);
+        visit_mut::walk_select_statement(self, select_statement)?;
+        self.query_depth = self.query_depth.saturating_sub(1);
+        Ok(())
+    }
+
+    fn visit_where_clause(&mut self, expression: &'ast mut Expr) -> Result<(), Self::Error> {
+        // We can only support parameters in the WHERE clause of the top-level query, not any
+        // subqueries it contains.
+        self.in_supported_position = self.query_depth <= 1;
+        self.visit_expr(expression)?;
+        self.in_supported_position = false;
+        Ok(())
+    }
+
+    fn visit_expr(&mut self, expression: &'ast mut Expr) -> Result<(), Self::Error> {
+        let was_supported = self.in_supported_position;
+        if was_supported {
+            match expression {
+                Expr::BinaryOp {
+                    lhs: box Expr::Column(_),
+                    op: BinaryOperator::Equal,
+                    rhs: box Expr::Literal(lit),
+                } => {
+                    self.contains_equal = true;
+
+                    if let Literal::Placeholder(_) = lit {
+                        self.contains_equal_placeholder = true;
+                    }
+
+                    return Ok(());
+                }
+                Expr::BinaryOp {
+                    lhs: box Expr::Column(_),
+                    op,
+                    rhs: box Expr::Literal(lit),
+                } if op.is_ordering_comparison() => {
+                    self.contains_range = true;
+
+                    if let Literal::Placeholder(_) = lit {
+                        self.contains_range_placeholder = true;
+                    }
+
+                    return Ok(());
+                }
+                Expr::Between {
+                    min: box Expr::Literal(lit),
+                    ..
+                }
+                | Expr::Between {
+                    max: box Expr::Literal(lit),
+                    ..
+                } => {
+                    self.contains_range = true;
+
+                    if let Literal::Placeholder(_) = lit {
+                        self.contains_range_placeholder = true;
+                    }
+
+                    return Ok(());
+                }
+                Expr::BinaryOp {
+                    lhs: lhs @ box Expr::Literal(_),
+                    op: BinaryOperator::Equal,
+                    rhs: rhs @ box Expr::Column(_),
+                } => {
+                    // for lit = col, swap the equality first then revisit
+                    mem::swap(lhs, rhs);
+                    return self.visit_expr(expression);
+                }
+                Expr::BinaryOp {
+                    lhs: lhs @ box Expr::Literal(_),
+                    op,
+                    rhs: rhs @ box Expr::Column(_),
+                } if op.is_ordering_comparison() => {
                     // for lit = col, swap the equality first then revisit
                     mem::swap(lhs, rhs);
                     return self.visit_expr(expression);
@@ -86,26 +279,7 @@ impl<'ast> VisitorMut<'ast> for AutoParameterizeVisitor {
                     )
                 }) && !self.has_aggregates =>
                 {
-                    let exprs = mem::replace(
-                        exprs,
-                        iter::repeat(Expr::Literal(Literal::Placeholder(
-                            ItemPlaceholder::QuestionMark,
-                        )))
-                        .take(exprs.len())
-                        .collect(),
-                    );
-                    let num_exprs = exprs.len();
-                    let start_index = self.param_index;
-                    self.out
-                        .extend(exprs.into_iter().enumerate().filter_map(
-                            move |(i, expr)| match expr {
-                                Expr::Literal(lit) => Some((i + start_index, lit)),
-                                // unreachable since we checked everything in the list is a literal
-                                // above, but best not to panic regardless
-                                _ => None,
-                            },
-                        ));
-                    self.param_index += num_exprs;
+                    self.contains_equal = true;
                     return Ok(());
                 }
                 Expr::BinaryOp {
@@ -130,7 +304,7 @@ impl<'ast> VisitorMut<'ast> for AutoParameterizeVisitor {
 
     fn visit_offset(&mut self, offset: &'ast mut Literal) -> Result<(), Self::Error> {
         if !matches!(offset, Literal::Placeholder(_)) {
-            self.replace_literal(offset);
+            self.contains_equal = true;
         }
 
         visit_mut::walk_offset(self, offset)
@@ -140,36 +314,53 @@ impl<'ast> VisitorMut<'ast> for AutoParameterizeVisitor {
 /// Replace all literals that are in positions we support parameters in the given query with
 /// parameters, and return the values for those parameters alongside the index in the parameter list
 /// where they appear as a tuple of (placeholder position, value).
-pub fn auto_parameterize_query(query: &mut SelectStatement) -> Vec<(usize, Literal)> {
+pub fn auto_parameterize_query(
+    query: &mut SelectStatement,
+    server_supports_mixed_comparisons: bool,
+) -> Vec<(usize, Literal)> {
     // Don't try to auto-parameterize equal-queries that already contain range params for now, since
     // we don't yet allow mixing range and equal parameters in the same query
-    if query.where_clause.iter().any(|expr| {
-        iter::once(expr)
-            .chain(expr.recursive_subexpressions())
-            .any(|subexpr| {
-                matches!(
-                    subexpr,
-                    Expr::BinaryOp {
-                        op: BinaryOperator::Less
-                            | BinaryOperator::Greater
-                            | BinaryOperator::LessOrEqual
-                            | BinaryOperator::GreaterOrEqual,
-                        rhs: box Expr::Literal(Literal::Placeholder(..)),
-                        ..
-                    } | Expr::Between {
-                        min: box Expr::Literal(Literal::Placeholder(..)),
-                        ..
-                    } | Expr::Between {
-                        max: box Expr::Literal(Literal::Placeholder(..)),
-                        ..
-                    }
-                )
-            })
-    }) {
-        return vec![];
-    }
+    let mut visitor = AnalyzeLiteralsVisitor::default();
+    visitor.visit_select_statement(query).unwrap();
+
+    let (autoparameterize_equals, autoparameterize_ranges) = if server_supports_mixed_comparisons {
+        (true, true)
+    } else if !visitor.contains_range {
+        // If a query contains no range comparisons in positions that support
+        // autoparameterization, we can just proceed with autoparameterizing equals
+        // comparisons
+        (true, false)
+    } else if !visitor.contains_equal {
+        // If a query contains no equals comparisons in positions that support
+        // autoparameterization, we can just proceed with autoparameterizing range
+        // comparisons
+        (false, true)
+    } else {
+        // If we're here, it means the query has both range and equals comparisons in
+        // positions that support autoparameterization
+
+        match (
+            visitor.contains_equal_placeholder,
+            visitor.contains_range_placeholder,
+        ) {
+            // If the query contains only equals placeholders, we try to autoparameterize the rest
+            // of the equals comparisons in the query
+            (true, false) => (true, false),
+            // If the query contains only range placeholders, we try to autoparameterize the rest
+            // of the range comparisons in the query
+            (false, true) => (false, true),
+            // If the query contains no placeholderse, we try to autoparameterize the equals
+            // comparisons only, since we don't support mixed comparisons yet
+            (false, false) => (true, false),
+            // If the query contains equal and range placeholders, we bail, since we don't support
+            // mixed comparisons yet
+            (true, true) => return vec![],
+        }
+    };
 
     let mut visitor = AutoParameterizeVisitor {
+        autoparameterize_equals,
+        autoparameterize_ranges,
         has_aggregates: query.contains_aggregate_select(),
         ..Default::default()
     };
@@ -177,6 +368,7 @@ pub fn auto_parameterize_query(query: &mut SelectStatement) -> Vec<(usize, Liter
     visitor.visit_select_statement(query).unwrap();
     visitor.out
 }
+
 #[cfg(test)]
 mod tests {
     use nom_sql::{Dialect, DialectDisplay};
@@ -194,12 +386,15 @@ mod tests {
     fn test_auto_parameterize(
         query: &str,
         expected_query: &str,
-        expected_parameters: Vec<(usize, Literal)>,
+        // These are parameters that are expected to have been added by the autoparameterization
+        // rewrite pass
+        expected_added_parameters: Vec<(usize, Literal)>,
         dialect: nom_sql::Dialect,
+        server_supports_mixed_comparisons: bool,
     ) {
         let mut query = parse_select_statement(query, dialect);
         let expected = parse_select_statement(expected_query, dialect);
-        let res = auto_parameterize_query(&mut query);
+        let res = auto_parameterize_query(&mut query, server_supports_mixed_comparisons);
         assert_eq!(
             query,
             expected,
@@ -207,32 +402,38 @@ mod tests {
             query.display(dialect),
             expected.display(dialect),
         );
-        assert_eq!(res, expected_parameters);
+        assert_eq!(res, expected_added_parameters);
     }
 
     fn test_auto_parameterize_mysql(
         query: &str,
         expected_query: &str,
-        expected_parameters: Vec<(usize, Literal)>,
+        // These are parameters that are expected to have been added by the autoparameterization
+        // rewrite pass
+        expected_added_parameters: Vec<(usize, Literal)>,
     ) {
         test_auto_parameterize(
             query,
             expected_query,
-            expected_parameters,
+            expected_added_parameters,
             nom_sql::Dialect::MySQL,
+            false,
         )
     }
 
     fn test_auto_parameterize_postgres(
         query: &str,
         expected_query: &str,
-        expected_parameters: Vec<(usize, Literal)>,
+        // These are parameters that are expected to have been added by the autoparameterization
+        // rewrite pass
+        expected_added_parameters: Vec<(usize, Literal)>,
     ) {
         test_auto_parameterize(
             query,
             expected_query,
-            expected_parameters,
+            expected_added_parameters,
             nom_sql::Dialect::PostgreSQL,
+            false,
         )
     }
 
@@ -389,5 +590,277 @@ mod tests {
             "SELECT * FROM posts WHERE id = 1 AND created_at BETWEEN ? and ?",
             vec![],
         );
+    }
+
+    #[test]
+    fn range_query_literals() {
+        test_auto_parameterize_mysql(
+            "SELECT * FROM posts WHERE score > 0 AND score < 10",
+            "SELECT * FROM posts WHERE score > ? AND score < ?",
+            vec![(0, 0.into()), (1, 10.into())],
+        );
+    }
+
+    #[test]
+    fn range_query_literals_inclusive() {
+        test_auto_parameterize_mysql(
+            "SELECT * FROM posts WHERE score >= 0 AND score <= 10",
+            "SELECT * FROM posts WHERE score >= ? AND score <= ?",
+            vec![(0, 0.into()), (1, 10.into())],
+        );
+    }
+
+    #[test]
+    fn range_query_literals_inclusive_exclusive() {
+        test_auto_parameterize_mysql(
+            "SELECT * FROM posts WHERE score >= 0 AND score < 10",
+            "SELECT * FROM posts WHERE score >= ? AND score < ?",
+            vec![(0, 0.into()), (1, 10.into())],
+        );
+    }
+
+    #[test]
+    fn range_query_literals_exclusive_inclusive() {
+        test_auto_parameterize_mysql(
+            "SELECT * FROM posts WHERE score > 0 AND score <= 10",
+            "SELECT * FROM posts WHERE score > ? AND score <= ?",
+            vec![(0, 0.into()), (1, 10.into())],
+        );
+    }
+
+    #[test]
+    fn equals_then_range() {
+        test_auto_parameterize_mysql(
+            "SELECT * FROM posts WHERE id = 1 AND score > 0 AND score < 10",
+            "SELECT * FROM posts WHERE id = ? AND score > 0 AND score < 10",
+            vec![(0, 1.into())],
+        );
+    }
+
+    #[test]
+    fn range_then_equals() {
+        test_auto_parameterize_mysql(
+            "SELECT * FROM posts WHERE score > 0 AND score < 10 AND id = 1",
+            "SELECT * FROM posts WHERE score > 0 AND score < 10 AND id = ?",
+            vec![(0, 1.into())],
+        );
+    }
+
+    #[test]
+    fn range_with_or() {
+        test_auto_parameterize_mysql(
+            "SELECT * FROM posts WHERE score > 0 OR score < 10",
+            "SELECT * FROM posts WHERE score > 0 OR score < 10",
+            vec![],
+        );
+    }
+
+    #[test]
+    fn nested_range() {
+        test_auto_parameterize_mysql(
+            "SELECT * FROM posts WHERE id in (SELECT id FROM posts WHERE score > 0 AND score < 10)",
+            "SELECT * FROM posts WHERE id in (SELECT id FROM posts WHERE score > 0 AND score < 10)",
+            vec![],
+        );
+    }
+
+    #[test]
+    fn less_than() {
+        test_auto_parameterize_mysql(
+            "SELECT * FROM posts WHERE id < 10",
+            "SELECT * FROM posts WHERE id < ?",
+            vec![(0, 10.into())],
+        );
+    }
+
+    #[test]
+    fn less_than_equal() {
+        test_auto_parameterize_mysql(
+            "SELECT * FROM posts WHERE id <= 10",
+            "SELECT * FROM posts WHERE id <= ?",
+            vec![(0, 10.into())],
+        );
+    }
+
+    #[test]
+    fn greater_than() {
+        test_auto_parameterize_mysql(
+            "SELECT * FROM posts WHERE id > 10",
+            "SELECT * FROM posts WHERE id > ?",
+            vec![(0, 10.into())],
+        );
+    }
+
+    #[test]
+    fn greater_than_equal() {
+        test_auto_parameterize_mysql(
+            "SELECT * FROM posts WHERE id >= 10",
+            "SELECT * FROM posts WHERE id >= ?",
+            vec![(0, 10.into())],
+        );
+    }
+
+    #[test]
+    fn range_with_pre_existing_equals_param() {
+        test_auto_parameterize_mysql(
+            "SELECT * FROM posts WHERE id = ? AND views > 10",
+            "SELECT * FROM posts WHERE id = ? AND views > 10",
+            vec![],
+        );
+    }
+
+    #[test]
+    fn equals_with_pre_existing_range_param() {
+        test_auto_parameterize_mysql(
+            "SELECT * FROM posts WHERE id = 10 AND views > ? AND date > 10",
+            "SELECT * FROM posts WHERE id = 10 AND views > ? AND date > ?",
+            vec![(1, 10.into())],
+        );
+    }
+
+    #[test]
+    fn ranges_only() {
+        test_auto_parameterize_mysql(
+            "SELECT * FROM posts WHERE id > 10 AND views > 2",
+            "SELECT * FROM posts WHERE id > ? AND views > ?",
+            vec![(0, 10.into()), (1, 2.into())],
+        );
+    }
+
+    #[test]
+    fn some_equals() {
+        test_auto_parameterize_mysql(
+            "SELECT * FROM posts WHERE id = ? AND views = 10",
+            "SELECT * FROM posts WHERE id = ? AND views = ?",
+            vec![(1, 10.into())],
+        );
+    }
+
+    #[test]
+    fn some_equals_with_ranges() {
+        test_auto_parameterize_mysql(
+            "SELECT * FROM posts WHERE id = ? AND date = 10 AND views > 10",
+            "SELECT * FROM posts WHERE id = ? AND date = ? AND views > 10",
+            vec![(1, 10.into())],
+        );
+    }
+
+    #[test]
+    fn supported_equals_with_unsupported_ranges() {
+        test_auto_parameterize_mysql(
+            "SELECT id FROM users JOIN (SELECT id FROM users WHERE id < 1) s ON users.id = s.id WHERE id = 1",
+            "SELECT id FROM users JOIN (SELECT id FROM users WHERE id < 1) s ON users.id = s.id WHERE id = ?",
+            vec![(0, 1.into())],
+        )
+    }
+
+    #[test]
+    fn supported_ranges_with_unsupported_equals() {
+        test_auto_parameterize_mysql(
+            "SELECT id FROM users JOIN (SELECT id FROM users WHERE id = 1) s ON users.id = s.id WHERE id < 1",
+            "SELECT id FROM users JOIN (SELECT id FROM users WHERE id = 1) s ON users.id = s.id WHERE id < ?",
+            vec![(0, 1.into())],
+        )
+    }
+
+    #[test]
+    fn supported_ranges_and_equals_with_unsupported_equals() {
+        test_auto_parameterize_mysql(
+            "SELECT id FROM users JOIN (SELECT id FROM users WHERE id = 1) s ON users.id = s.id WHERE id = 1 AND age > 21",
+            "SELECT id FROM users JOIN (SELECT id FROM users WHERE id = 1) s ON users.id = s.id WHERE id = ? AND age > 21",
+            vec![(0, 1.into())],
+        )
+    }
+
+    #[test]
+    fn supported_ranges_and_equals_with_unsupported_ranges() {
+        test_auto_parameterize_mysql(
+            "SELECT id FROM users JOIN (SELECT id FROM users WHERE age > 50) s ON users.id = s.id WHERE id = 1 AND age > 21",
+            "SELECT id FROM users JOIN (SELECT id FROM users WHERE age > 50) s ON users.id = s.id WHERE id = ? AND age > 21",
+            vec![(0, 1.into())],
+        )
+    }
+
+    mod mixed_comparisons {
+        use super::*;
+
+        fn test_auto_parameterize_mysql(
+            query: &str,
+            expected_query: &str,
+            // These are parameters that are expected to have been added by the
+            // autoparameterization rewrite pass
+            expected_added_parameters: Vec<(usize, Literal)>,
+        ) {
+            test_auto_parameterize(
+                query,
+                expected_query,
+                expected_added_parameters,
+                nom_sql::Dialect::MySQL,
+                true,
+            )
+        }
+
+        #[test]
+        fn some_equals_with_ranges() {
+            test_auto_parameterize_mysql(
+                "SELECT * FROM posts WHERE id = ? AND date = 10 AND views > 9",
+                "SELECT * FROM posts WHERE id = ? AND date = ? AND views > ?",
+                vec![(1, 10.into()), (2, 9.into())],
+            );
+        }
+
+        #[test]
+        fn range_with_pre_existing_equals_param() {
+            test_auto_parameterize_mysql(
+                "SELECT * FROM posts WHERE id = ? AND views > 10",
+                "SELECT * FROM posts WHERE id = ? AND views > ?",
+                vec![(1, 10.into())],
+            );
+        }
+
+        #[test]
+        fn equals_with_pre_existing_range_param() {
+            test_auto_parameterize_mysql(
+                "SELECT * FROM posts WHERE id = 10 AND views > ? AND date > 9",
+                "SELECT * FROM posts WHERE id = ? AND views > ? AND date > ?",
+                vec![(0, 10.into()), (2, 9.into())],
+            );
+        }
+
+        #[test]
+        fn supported_equals_with_unsupported_ranges() {
+            test_auto_parameterize_mysql(
+                "SELECT id FROM users JOIN (SELECT id FROM users WHERE id < 1) s ON users.id = s.id WHERE id = 1",
+                "SELECT id FROM users JOIN (SELECT id FROM users WHERE id < 1) s ON users.id = s.id WHERE id = ?",
+                vec![(0, 1.into())],
+            )
+        }
+
+        #[test]
+        fn supported_ranges_with_unsupported_equals() {
+            test_auto_parameterize_mysql(
+                "SELECT id FROM users JOIN (SELECT id FROM users WHERE id = 1) s ON users.id = s.id WHERE id < 1",
+                "SELECT id FROM users JOIN (SELECT id FROM users WHERE id = 1) s ON users.id = s.id WHERE id < ?",
+                vec![(0, 1.into())],
+            )
+        }
+
+        #[test]
+        fn supported_ranges_and_equals_with_unsupported_equals() {
+            test_auto_parameterize_mysql(
+                "SELECT id FROM users JOIN (SELECT id FROM users WHERE id = 1) s ON users.id = s.id WHERE id = 1 AND age > 21",
+                "SELECT id FROM users JOIN (SELECT id FROM users WHERE id = 1) s ON users.id = s.id WHERE id = ? AND age > ?",
+                vec![(0, 1.into()), (1, 21.into())],
+            )
+        }
+
+        #[test]
+        fn supported_ranges_and_equals_with_unsupported_ranges() {
+            test_auto_parameterize_mysql(
+                "SELECT id FROM users JOIN (SELECT id FROM users WHERE age > 50) s ON users.id = s.id WHERE id = 1 AND age > 21",
+                "SELECT id FROM users JOIN (SELECT id FROM users WHERE age > 50) s ON users.id = s.id WHERE id = ? AND age > ?",
+                vec![(0, 1.into()), (1, 21.into())],
+            )
+        }
     }
 }
