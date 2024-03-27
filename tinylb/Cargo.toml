@@ -8,5 +8,4 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0"
 clap = { workspace = true, features = ["derive", "env"] }
-futures = "0.3"
 tokio = { workspace = true, features = ["full"] }

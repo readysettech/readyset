@@ -26,7 +26,6 @@ readyset-mysql = { path = "../readyset-mysql" }
 readyset-psql = { path = "../readyset-psql" }
 readyset = { path = "../readyset" }
 
-core_affinity = "0.5"
 criterion = { workspace = true, features = ["async_tokio"] }
 fork = "0.1"
 futures = "0.3"
