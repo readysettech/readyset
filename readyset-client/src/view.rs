@@ -1538,28 +1538,73 @@ impl ReaderHandle {
         ticket: Option<Timestamp>,
         blocking_read: bool,
         dialect: Dialect,
-    ) -> ReadySetResult<Option<ViewQuery>> {
-        let schema = self
+    ) -> ReadySetResult<ViewQuery> {
+        trace!("select::lookup");
+
+        let (keys, filters) = if raw_keys.is_empty() {
+            let bogo = vec![vec1![DfValue::from(0i32)].into()];
+            (bogo, Vec::new())
+        } else {
+            let mut key_comparison_builder = KeyComparisonBuilder::new(self, key_remap, dialect)?;
+
+            let keys = raw_keys
+                .into_iter()
+                .map(|key| key_comparison_builder.build_key(key))
+                .collect::<ReadySetResult<Vec<_>>>()?;
+
+            (keys, key_comparison_builder.filters)
+        };
+
+        trace!(?keys, ?filters, "Built view query");
+
+        Ok(ViewQuery {
+            key_comparisons: keys,
+            block: blocking_read,
+            filter: filters.into_iter().reduce(|expr1, expr2| DfExpr::Op {
+                left: Box::new(expr1),
+                op: DfBinaryOperator::And,
+                right: Box::new(expr2),
+                ty: DfType::Bool, // AND is a boolean operator
+            }),
+            limit,
+            offset,
+            timestamp: ticket,
+        })
+    }
+}
+
+struct KeyComparisonBuilder<'a> {
+    mixed_binops: bool,
+    filters: Vec<DfExpr>,
+    key_map: &'a [(ViewPlaceholder, KeyColumnIdx)],
+    key_types: HashMap<usize, &'a DfType>,
+    key_remap: Option<&'a HashMap<PlaceholderIdx, Literal>>,
+    binop_to_use: BinaryOperator,
+    dialect: Dialect,
+}
+
+impl<'a> KeyComparisonBuilder<'a> {
+    fn new(
+        reader_handle: &'a ReaderHandle,
+        key_remap: Option<&'a HashMap<PlaceholderIdx, Literal>>,
+        dialect: Dialect,
+    ) -> ReadySetResult<KeyComparisonBuilder<'a>> {
+        let schema = reader_handle
             .schema()
             .ok_or_else(|| internal_err!("No schema for view"))?;
 
         let key_types = schema.col_types(
-            self.key_map()
+            reader_handle
+                .key_map()
                 .iter()
                 .map(|(_, key_column_idx)| *key_column_idx),
             SchemaType::ProjectedSchema,
         )?;
 
-        trace!("select::lookup");
-        let bogo = vec![vec1![DfValue::from(0i32)].into()];
-        let mut filters = Vec::new();
-
-        let keys = if raw_keys.is_empty() {
-            bogo
-        } else {
-            let mut current_binop = None;
-            // Whether we have multiple different binary operators in our key comparisons
-            let mixed_binops = !self
+        let mut current_binop = None;
+        // Whether we have multiple different binary operators in our key comparisons
+        let mixed_binops =
+            !reader_handle
                 .key_map()
                 .iter()
                 .all(|(placeholder, _)| match placeholder {
@@ -1572,219 +1617,201 @@ impl ReaderHandle {
                     // Generated and PageNumber placeholders can be used
                     ViewPlaceholder::Generated | ViewPlaceholder::PageNumber { .. } => true,
                 });
-            // The binary operator we will use to build our key if we do not have a mixed comparison
-            let binop_to_use = current_binop.unwrap_or(BinaryOperator::Equal);
+        // The binary operator we will use to build our key if we do not have a mixed comparison
+        let binop_to_use = current_binop.unwrap_or(BinaryOperator::Equal);
 
-            let key_types: HashMap<usize, &DfType> = self
-                .key_map()
-                .iter()
-                .zip(key_types)
-                .map(|((_, key_column_idx), key_type)| (*key_column_idx, key_type))
-                .collect();
+        let key_types: HashMap<usize, &DfType> = reader_handle
+            .key_map()
+            .iter()
+            .zip(key_types)
+            .map(|((_, key_column_idx), key_type)| (*key_column_idx, key_type))
+            .collect();
 
-            // parameter numbering is 1-based, but vecs are 0-based, so subtract 1
-            // also, no from_ty since the key value is a literal
-            let remap_key = |key: &[DfValue],
-                             idx: &PlaceholderIdx,
-                             key_type: &DfType|
-             -> ReadySetResult<_> {
-                Ok(match key_remap {
-                    Some(remap) => {
-                        match remap.get(idx).ok_or_else(|| {
-                            internal_err!("Key remapping for ReusedReaderHandle is missing indices")
-                        })? {
-                            Literal::Placeholder(ItemPlaceholder::DollarNumber(idx)) => key
-                                .get(*idx as usize - 1)
-                                .ok_or_else(|| {
-                                    internal_err!(
-                                    "Key remapping for ReusedReaderHandle contains erroneous index"
-                                )
-                                })?
-                                .coerce_to(key_type, &DfType::Unknown)?,
-                            Literal::Placeholder(_) => {
-                                internal!(
+        Ok(Self {
+            key_remap,
+            dialect,
+            mixed_binops,
+            binop_to_use,
+            key_types,
+            key_map: reader_handle.key_map(),
+            filters: Vec::new(),
+        })
+    }
+
+    // parameter numbering is 1-based, but vecs are 0-based, so subtract 1
+    // also, no from_ty since the key value is a literal
+    fn remap_key(
+        &self,
+        key: &[DfValue],
+        idx: &PlaceholderIdx,
+        key_type: &DfType,
+    ) -> ReadySetResult<DfValue> {
+        Ok(match self.key_remap {
+            Some(remap) => {
+                match remap.get(idx).ok_or_else(|| {
+                    internal_err!("Key remapping for ReusedReaderHandle is missing indices")
+                })? {
+                    Literal::Placeholder(ItemPlaceholder::DollarNumber(idx)) => key
+                        .get(*idx as usize - 1)
+                        .ok_or_else(|| {
+                            internal_err!(
+                                "Key remapping for ReusedReaderHandle contains erroneous index"
+                            )
+                        })?
+                        .coerce_to(key_type, &DfType::Unknown)?,
+                    Literal::Placeholder(_) => {
+                        internal!(
                                 "Key remapping for ReusedReaderHandle contains non-numbered placeholder"
                             )
-                            }
-                            literal => {
-                                DfValue::try_from(literal)?.coerce_to(key_type, &DfType::Unknown)?
-                            }
-                        }
                     }
-                    None => key[*idx - 1].coerce_to(key_type, &DfType::Unknown)?,
-                })
-            };
+                    literal => DfValue::try_from(literal)?.coerce_to(key_type, &DfType::Unknown)?,
+                }
+            }
+            None => key[*idx - 1].coerce_to(key_type, &DfType::Unknown)?,
+        })
+    }
 
-            raw_keys
-                .into_iter()
-                .map(|key| {
-                    let mut k = vec![];
-                    let mut bounds: Option<(Vec<DfValue>, Vec<DfValue>)> = if mixed_binops {
-                        Some((vec![], vec![]))
-                    } else {
-                        None
+    fn build_key(&mut self, raw_key: Cow<'_, [DfValue]>) -> ReadySetResult<KeyComparison> {
+        let mut k = vec![];
+        let mut bounds: Option<(Vec<DfValue>, Vec<DfValue>)> = if self.mixed_binops {
+            Some((vec![], vec![]))
+        } else {
+            None
+        };
+
+        // All ViewPlaceholder indices must be remapped using key_remap
+        for (view_placeholder, key_column_idx) in self.key_map {
+            match view_placeholder {
+                ViewPlaceholder::Generated => continue,
+                ViewPlaceholder::OneToOne(idx, binop) => {
+                    let key_type = *self
+                        .key_types
+                        .get(key_column_idx)
+                        .ok_or_else(|| internal_err!("No key_type for key"))?;
+
+                    let value = self.remap_key(raw_key.as_ref(), idx, key_type)?;
+
+                    let make_op = |(op, negated): (DfBinaryOperator, bool)| {
+                        let op = DfExpr::Op {
+                            left: Box::new(DfExpr::Column {
+                                index: *key_column_idx,
+                                ty: key_type.clone(),
+                            }),
+                            op,
+                            right: Box::new(DfExpr::Literal {
+                                val: value.clone(),
+                                ty: key_type.clone(),
+                            }),
+                            ty: DfType::Bool, // TODO: infer type
+                        };
+                        if negated {
+                            DfExpr::Not {
+                                expr: Box::new(op),
+                                ty: DfType::Bool,
+                            }
+                        } else {
+                            op
+                        }
                     };
-                    // All ViewPlaceholder indices must be remapped using key_remap
-                    for (view_placeholder, key_column_idx) in self.key_map() {
-                        match view_placeholder {
-                            ViewPlaceholder::Generated => continue,
-                            ViewPlaceholder::OneToOne(idx, binop) => {
-                                let key_type = *key_types
-                                    .get(key_column_idx)
-                                    .ok_or_else(|| internal_err!("No key_type for key"))?;
 
-                                let value = remap_key(key.as_ref(), idx, key_type)?;
-
-                                let make_op = |(op, negated): (DfBinaryOperator, bool)| {
-                                    let op = DfExpr::Op {
-                                        left: Box::new(DfExpr::Column {
-                                            index: *key_column_idx,
-                                            ty: key_type.clone(),
-                                        }),
-                                        op,
-                                        right: Box::new(DfExpr::Literal {
-                                            val: value.clone(),
-                                            ty: key_type.clone(),
-                                        }),
-                                        ty: DfType::Bool, // TODO: infer type
-                                    };
-                                    if negated {
-                                        DfExpr::Not {
-                                            expr: Box::new(op),
-                                            ty: DfType::Bool,
-                                        }
-                                    } else {
-                                        op
-                                    }
-                                };
-
-                                if let Some((lower_bound, upper_bound)) = &mut bounds {
-                                    match binop {
-                                        BinaryOperator::Equal => {
-                                            lower_bound.push(value.clone());
-                                            upper_bound.push(value);
-                                        }
-                                        BinaryOperator::GreaterOrEqual => {
-                                            filters.push(make_op((
-                                                DfBinaryOperator::GreaterOrEqual,
-                                                false,
-                                            )));
-                                            lower_bound.push(value);
-                                            upper_bound.push(DfValue::Max);
-                                        }
-                                        BinaryOperator::LessOrEqual => {
-                                            filters.push(make_op((
-                                                DfBinaryOperator::LessOrEqual,
-                                                false,
-                                            )));
-                                            lower_bound.push(DfValue::None); // NULL is the minimum DfValue
-                                            upper_bound.push(value);
-                                        }
-                                        BinaryOperator::Greater => {
-                                            filters
-                                                .push(make_op((DfBinaryOperator::Greater, false)));
-                                            lower_bound.push(value);
-                                            upper_bound.push(DfValue::Max);
-                                        }
-                                        BinaryOperator::Less => {
-                                            filters.push(make_op((DfBinaryOperator::Less, false)));
-                                            lower_bound.push(DfValue::None); // NULL is the minimum DfValue
-                                            upper_bound.push(value);
-                                        }
-                                        op => unsupported!(
-                                            "Unsupported binary operator in query: `{}`",
-                                            op
-                                        ),
-                                    }
-                                } else {
-                                    // We need to additionally filter post-lookup for certain
-                                    // compound ranges, since we
-                                    // always sort keys lexicographically within the
-                                    // reader map. This is the case for...
-                                    if (
-                                        // All keys within open (exclusive) ranges (consider eg:
-                                        //     (1, 2) > (1, 1)
-                                        //     even though
-                                        //     NOT (1 > 1 && 2 > 1)
-                                        // )
-                                        matches!(
-                                        binop_to_use,
+                    if let Some((lower_bound, upper_bound)) = &mut bounds {
+                        match binop {
+                            BinaryOperator::Equal => {
+                                lower_bound.push(value.clone());
+                                upper_bound.push(value);
+                            }
+                            BinaryOperator::GreaterOrEqual => {
+                                self.filters
+                                    .push(make_op((DfBinaryOperator::GreaterOrEqual, false)));
+                                lower_bound.push(value);
+                                upper_bound.push(DfValue::Max);
+                            }
+                            BinaryOperator::LessOrEqual => {
+                                self.filters
+                                    .push(make_op((DfBinaryOperator::LessOrEqual, false)));
+                                lower_bound.push(DfValue::None); // NULL is the minimum DfValue
+                                upper_bound.push(value);
+                            }
+                            BinaryOperator::Greater => {
+                                self.filters
+                                    .push(make_op((DfBinaryOperator::Greater, false)));
+                                lower_bound.push(value);
+                                upper_bound.push(DfValue::Max);
+                            }
+                            BinaryOperator::Less => {
+                                self.filters.push(make_op((DfBinaryOperator::Less, false)));
+                                lower_bound.push(DfValue::None); // NULL is the minimum DfValue
+                                upper_bound.push(value);
+                            }
+                            op => unsupported!("Unsupported binary operator in query: `{}`", op),
+                        }
+                    } else {
+                        // We need to additionally filter post-lookup for certain
+                        // compound ranges, since we
+                        // always sort keys lexicographically within the
+                        // reader map. This is the case for...
+                        if (
+                            // All keys within open (exclusive) ranges (consider eg:
+                            //     (1, 2) > (1, 1)
+                            //     even though
+                            //     NOT (1 > 1 && 2 > 1)
+                            // )
+                            matches!(
+                                        self.binop_to_use,
                                         BinaryOperator::Less | BinaryOperator::Greater
                                     )
                                         // As long as the range is actually compound
-                                        && self.key_map().len() > 1
-                                    ) || (
-                                        // Or all other range keys beyond the *first* key within a
-                                        // compound range
-                                        binop_to_use != BinaryOperator::Equal && !k.is_empty()
-                                    ) {
-                                        filters.push(make_op(DfBinaryOperator::from_sql_op(
-                                            binop_to_use,
-                                            dialect,
-                                            key_type,
-                                            key_type,
-                                        )?));
-                                    }
-                                    k.push(value);
-                                }
-                            }
-                            ViewPlaceholder::Between(lower_idx, upper_idx) => {
-                                let key_type = key_types[key_column_idx];
-
-                                let lower_value = remap_key(key.as_ref(), lower_idx, key_type)?;
-                                let upper_value = remap_key(key.as_ref(), upper_idx, key_type)?;
-                                let (lower_key, upper_key) =
-                                    bounds.get_or_insert_with(Default::default);
-                                lower_key.push(lower_value);
-                                upper_key.push(upper_value);
-                            }
-                            ViewPlaceholder::PageNumber {
-                                offset_placeholder,
-                                limit,
-                            } => {
-                                // offset parameters should always be a BigInt
-                                let offset: u64 =
-                                    remap_key(key.as_ref(), offset_placeholder, &DfType::BigInt)?
-                                        .try_into()?;
-                                if offset % *limit != 0 {
-                                    unsupported!(
-                                        "OFFSET must currently be an integer multiple of LIMIT"
-                                    );
-                                }
-                                let page_number = offset / *limit;
-                                k.push(page_number.into());
-                            }
-                        };
+                                        && self.key_map.len() > 1
+                        ) || (
+                            // Or all other range keys beyond the *first* key within a
+                            // compound range
+                            self.binop_to_use != BinaryOperator::Equal && !k.is_empty()
+                        ) {
+                            self.filters.push(make_op(DfBinaryOperator::from_sql_op(
+                                self.binop_to_use,
+                                self.dialect,
+                                key_type,
+                                key_type,
+                            )?));
+                        }
+                        k.push(value);
                     }
+                }
+                ViewPlaceholder::Between(lower_idx, upper_idx) => {
+                    let key_type = self.key_types[key_column_idx];
 
-                    if let Some((lower, upper)) = bounds {
-                        debug_assert!(k.is_empty());
-                        Ok(KeyComparison::Range((
-                            Bound::Included(lower.try_into()?),
-                            Bound::Included(upper.try_into()?),
-                        )))
-                    } else {
-                        KeyComparison::from_key_and_operator(k, binop_to_use)
+                    let lower_value = self.remap_key(raw_key.as_ref(), lower_idx, key_type)?;
+                    let upper_value = self.remap_key(raw_key.as_ref(), upper_idx, key_type)?;
+                    let (lower_key, upper_key) = bounds.get_or_insert_with(Default::default);
+                    lower_key.push(lower_value);
+                    upper_key.push(upper_value);
+                }
+                ViewPlaceholder::PageNumber {
+                    offset_placeholder,
+                    limit,
+                } => {
+                    // offset parameters should always be a BigInt
+                    let offset: u64 = self
+                        .remap_key(raw_key.as_ref(), offset_placeholder, &DfType::BigInt)?
+                        .try_into()?;
+                    if offset % *limit != 0 {
+                        unsupported!("OFFSET must currently be an integer multiple of LIMIT");
                     }
-                })
-                .collect::<ReadySetResult<Vec<_>>>()?
-        };
+                    let page_number = offset / *limit;
+                    k.push(page_number.into());
+                }
+            };
+        }
 
-        trace!(?keys, ?filters, "Built view query");
-
-        Ok(Some(ViewQuery {
-            key_comparisons: keys,
-            block: blocking_read,
-            filter: filters.into_iter().reduce(|expr1, expr2| DfExpr::Op {
-                left: Box::new(expr1),
-                op: DfBinaryOperator::And,
-                right: Box::new(expr2),
-                ty: DfType::Bool, // AND is a boolean operator
-            }),
-            limit,
-            offset,
-            timestamp: ticket,
-        }))
+        if let Some((lower, upper)) = bounds {
+            debug_assert!(k.is_empty());
+            Ok(KeyComparison::Range((
+                Bound::Included(lower.try_into()?),
+                Bound::Included(upper.try_into()?),
+            )))
+        } else {
+            KeyComparison::from_key_and_operator(k, self.binop_to_use)
+        }
     }
 }
 
@@ -1847,15 +1874,17 @@ impl ReusedReaderHandle {
             raw_keys
         };
 
-        self.reader_handle.build_view_query(
-            Some(&self.key_remapping),
-            raw_keys,
-            limit,
-            offset,
-            ticket,
-            blocking_read,
-            dialect,
-        )
+        self.reader_handle
+            .build_view_query(
+                Some(&self.key_remapping),
+                raw_keys,
+                limit,
+                offset,
+                ticket,
+                blocking_read,
+                dialect,
+            )
+            .map(Some)
     }
 }
 
@@ -1887,7 +1916,7 @@ impl View {
                     blocking_read,
                     dialect,
                 )
-                .map(|r| r.map(|vq| (handle, vq))),
+                .map(|vq| Some((handle, vq))),
             View::MultipleReused(handles) => {
                 let mut last_error = None;
                 for reused_handle in handles {
