@@ -2825,8 +2825,6 @@ where
                         upstream.query(raw_query).await.map(QueryResult::Upstream)
                     }
 
-                    SqlQuery::Deallocate(stmt) => Ok(Self::handle_deallocate_statement(stmt)),
-
                     SqlQuery::StartTransaction(_) | SqlQuery::Commit(_) | SqlQuery::Rollback(_) => {
                         Self::handle_transaction_boundaries(
                             Some(upstream),
@@ -2836,6 +2834,7 @@ where
                         .await
                     }
                     SqlQuery::CreateCache(_)
+                    | SqlQuery::Deallocate(_)
                     | SqlQuery::DropCache(_)
                     | SqlQuery::DropAllCaches(_)
                     | SqlQuery::DropAllProxiedQueries(_)
@@ -2863,10 +2862,7 @@ where
                     SqlQuery::Insert(q) => noria.handle_insert(q).await,
                     SqlQuery::Update(q) => noria.handle_update(q).await,
                     SqlQuery::Delete(q) => noria.handle_delete(q).await,
-
-                    SqlQuery::Deallocate(stmt) => {
-                        return Ok(Self::handle_deallocate_statement(stmt.clone()))
-                    }
+                    SqlQuery::Deallocate(_) => unreachable!("deallocate path returns prior"),
 
                     // Return an empty result as we are allowing unsupported set statements. Commit
                     // messages are dropped - we do not support transactions in noria standalone.
@@ -3040,6 +3036,7 @@ where
                     Self::query_fallback(self.upstream.as_mut(), query, &mut event).await
                 }
             }
+            Ok(SqlQuery::Deallocate(stmt)) => Ok(Self::handle_deallocate_statement(stmt)),
             Ok(_) if self.state.proxy_state.should_proxy() => {
                 Self::query_fallback(self.upstream.as_mut(), query, &mut event).await
             }
