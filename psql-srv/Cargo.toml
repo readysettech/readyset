@@ -9,33 +9,33 @@ description = "Bindings for emulating a PostgreSQL server"
 readme = "README.md"
 
 [dependencies]
-async-trait = "0.1"
+async-trait = { workspace = true }
 base64 = "0.21"
-bit-vec = { version = "0.6", features = ["serde"] }
-bytes = "1.0.1"
-chrono = "0.4.19"
-cidr = "0.2.1"
+bit-vec = { workspace = true, features = ["serde"] }
+bytes = { workspace = true }
+chrono = { workspace = true }
+cidr = { workspace = true }
 eui48 = { workspace = true }
-futures = "0.3"
-hex = "0.4.3"
-hmac = "0.12.1"
-nom = "7.1"
+futures = { workspace = true }
+hex = { workspace = true }
+hmac = { workspace = true }
+nom = { workspace = true }
 postgres = { workspace = true }
 postgres-protocol = { workspace = true }
 postgres-types = { workspace = true, features = ["with-chrono-0_4", "with-cidr-0_2"] }
 rand = "0.8.5"
-rust_decimal = { version = "1.26" }
-serde_json = { version = "1", features = ["arbitrary_precision"] }
-sha2 = "0.10.6"
-smallvec = "1.6"
-stringprep = "0.1.2"
-thiserror = "1.0.26"
+rust_decimal = { workspace = true }
+serde_json = { workspace = true, features = ["arbitrary_precision"] }
+sha2 = { workspace = true }
+smallvec = { workspace = true }
+stringprep = { workspace = true }
+thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
-tokio-native-tls = "0.3.1"
+tokio-native-tls = { workspace = true }
 tokio-postgres = { workspace = true, features = ["with-chrono-0_4", "with-eui48-1", "with-uuid-0_8", "with-serde_json-1", "with-bit-vec-0_6"] }
-tokio-util = { version = "0.6.6", features = ["codec"] }
-tracing = "0.1.29"
-uuid = "0.8"
+tokio-util = { workspace = true, features = ["codec"] }
+tracing = { workspace = true }
+uuid = { workspace = true }
 
 nom-sql = { path = "../nom-sql" }
 readyset-adapter-types = { path = "../readyset-adapter-types" }

@@ -13,8 +13,8 @@ authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
 [dependencies]
-async-trait = "0.1"
-proptest = "1.0.0"
+async-trait = { workspace = true }
+proptest = { workspace = true }
 rand = "0.8.5"
-tokio = { version = "1.32", features = ["full"] }
+tokio = { workspace = true, features = ["full"] }
 
