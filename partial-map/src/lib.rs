@@ -4,9 +4,9 @@ use std::borrow::Borrow;
 pub use std::collections::btree_map::{Iter, Keys, Range, Values, ValuesMut};
 use std::collections::{btree_map, BTreeMap};
 use std::fmt;
-use std::ops::{Bound, RangeBounds};
 
 use merging_interval_tree::IntervalTreeSet;
+use readyset_util::ranges::{Bound, RangeBounds};
 
 /// A [`BTreeMap`] that knows what ranges of keys it has
 ///
@@ -211,7 +211,7 @@ where
         K: Borrow<Q>,
         Q: Ord + ?Sized,
     {
-        self.interval_tree.covers_interval(range)
+        self.interval_tree.covers_interval(&range.as_std_range())
     }
 
     /// Returns true if the map contains at least part of the given range
@@ -222,7 +222,7 @@ where
         Q: Ord + ?Sized,
     {
         self.interval_tree
-            .get_interval_overlaps(range)
+            .get_interval_overlaps(&range.as_std_range())
             .next()
             .is_some()
     }
@@ -245,7 +245,17 @@ where
         K: Clone,
         R: RangeBounds<K>,
     {
-        self.interval_tree.insert_interval(range);
+        self.interval_tree.insert_interval(range.as_std_range());
+    }
+
+    /// Mark the full range of keys as filled in this map.
+    ///
+    /// All keys will be considered to be set to the [`default`](std::Default::default) value.
+    pub fn insert_full_range(&mut self)
+    where
+        K: Clone,
+    {
+        self.interval_tree.insert_interval(..);
     }
 
     /// Gets the given key's corresponding entry in the map for in-place manipulation.
@@ -279,6 +289,7 @@ where
     pub fn range<'a, R, Q>(
         &'a self,
         range: &R,
+        // TODO ethan here
     ) -> Result<Range<'a, K, V>, Vec<(Bound<K>, Bound<K>)>>
     where
         R: RangeBounds<Q>,
@@ -287,12 +298,29 @@ where
     {
         let diff = self
             .interval_tree
-            .get_interval_difference(range)
-            .map(|(lower, upper)| (lower.map(ToOwned::to_owned), upper.map(ToOwned::to_owned)))
+            .get_interval_difference(&range.as_std_range())
+            .map(|(lower, upper)| {
+                // It is safe to unwrap here because we know we will never get a
+                // `std::ops::Bound::Unbounded` back from the interval tree, since we're never
+                // passing in unbounded bounds
+                let expect_message =
+                    "we should never get unbounded bounds back from the interval tree";
+
+                (
+                    lower
+                        .map(ToOwned::to_owned)
+                        .try_into()
+                        .expect(expect_message),
+                    upper
+                        .map(ToOwned::to_owned)
+                        .try_into()
+                        .expect(expect_message),
+                )
+            })
             .collect::<Vec<_>>();
 
         if diff.is_empty() {
-            Ok(self.map.range((range.start_bound(), range.end_bound())))
+            Ok(self.map.range(range.as_std_range()))
         } else {
             Err(diff)
         }
@@ -341,7 +369,7 @@ where
         B: Ord + ?Sized + ToOwned<Owned = K>,
         R: RangeBounds<B> + 'a,
     {
-        self.interval_tree.remove_interval(&range);
+        self.interval_tree.remove_interval(&range.as_std_range());
         // NOTE: it is deeply unfortunate that rust's BTreeMap doesn't have a drain(range) function
         // the way Vec does. This is forcing us into an O(n) operation where we could have an
         // O(log(n)) one.
@@ -451,7 +479,7 @@ mod tests {
     #[test]
     fn entry_filled() {
         let mut map: PartialMap<i32, ()> = PartialMap::new();
-        map.insert_range(1..);
+        map.insert_range((Bound::Included(1), Bound::Included(i32::MAX)));
         assert!(matches!(map.entry(2), Entry::Occupied(_)));
     }
 }

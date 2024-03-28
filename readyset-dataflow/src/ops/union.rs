@@ -1,13 +1,14 @@
 use std::cmp::Ordering;
 use std::collections::{hash_map, BTreeMap, HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
-use std::ops::Bound;
 
 use itertools::Itertools;
 use readyset_client::KeyComparison;
+use readyset_data::Bound;
 use readyset_errors::{invariant, ReadySetResult};
 use readyset_util::hash::hash;
 use readyset_util::intervals::{cmp_endbound, cmp_startbound};
+use readyset_util::ranges::RangeBounds;
 use readyset_util::Indices;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
@@ -210,16 +211,16 @@ impl Ord for BufferedReplayKey {
             .then_with(|| match (&self.key, &other.key) {
                 (KeyComparison::Equal(k1), KeyComparison::Equal(k2)) => k1.cmp(k2),
                 (KeyComparison::Range((l1, u1)), KeyComparison::Range((l2, u2))) => {
-                    cmp_startbound(l1.as_ref(), l2.as_ref())
-                        .then_with(|| cmp_endbound(u1.as_ref(), u2.as_ref()))
+                    cmp_startbound(l1.as_ref().into(), l2.as_ref().into())
+                        .then_with(|| cmp_endbound(u1.as_ref().into(), u2.as_ref().into()))
                 }
                 (KeyComparison::Equal(k), KeyComparison::Range((l, u))) => {
-                    cmp_startbound(Bound::Included(k), l.as_ref())
-                        .then_with(|| cmp_endbound(Bound::Included(k), u.as_ref()))
+                    cmp_startbound(Bound::Included(k).into(), l.as_ref().into())
+                        .then_with(|| cmp_endbound(Bound::Included(k).into(), u.as_ref().into()))
                 }
                 (KeyComparison::Range((u, l)), KeyComparison::Equal(k)) => {
-                    cmp_startbound(l.as_ref(), Bound::Included(k))
-                        .then_with(|| cmp_endbound(u.as_ref(), Bound::Included(k)))
+                    cmp_startbound(l.as_ref().into(), Bound::Included(k).into())
+                        .then_with(|| cmp_endbound(u.as_ref().into(), Bound::Included(k).into()))
                 }
             })
             .then_with(|| self.requesting_shard.cmp(&other.requesting_shard))
@@ -898,7 +899,7 @@ impl Ingredient for Union {
                     keys.iter()
                         .filter_map(|key| {
                             let rs = rs_by_key
-                                .range_mut::<Vec1<DfValue>, _>(key)
+                                .range_mut::<Vec1<DfValue>, _>(key.as_std_range())
                                 .flat_map(|(_, rs)| mem::take(rs))
                                 .collect();
 
