@@ -1549,7 +1549,7 @@ impl ReaderHandle {
 
             let keys = raw_keys
                 .into_iter()
-                .map(|key| key_comparison_builder.build_key(key))
+                .filter_map(|key| key_comparison_builder.build_key(key).transpose())
                 .collect::<ReadySetResult<Vec<_>>>()?;
 
             (keys, key_comparison_builder.filters)
@@ -1671,7 +1671,7 @@ impl<'a> KeyComparisonBuilder<'a> {
         })
     }
 
-    fn build_key(&mut self, raw_key: Cow<'_, [DfValue]>) -> ReadySetResult<KeyComparison> {
+    fn build_key(&mut self, raw_key: Cow<'_, [DfValue]>) -> ReadySetResult<Option<KeyComparison>> {
         let mut k = vec![];
         let mut bounds: Option<(Vec<DfValue>, Vec<DfValue>)> = if self.mixed_binops {
             Some((vec![], vec![]))
@@ -1690,6 +1690,12 @@ impl<'a> KeyComparisonBuilder<'a> {
                         .ok_or_else(|| internal_err!("No key_type for key"))?;
 
                     let value = self.remap_key(raw_key.as_ref(), idx, key_type)?;
+
+                    // Skip the key entirely if the value in the key is NULL, since we don't want
+                    // to return any results for comparisons against NULL values
+                    if value.is_none() {
+                        return Ok(None);
+                    }
 
                     let make_op = |(op, negated): (DfBinaryOperator, bool)| {
                         let op = DfExpr::Op {
@@ -1782,6 +1788,13 @@ impl<'a> KeyComparisonBuilder<'a> {
 
                     let lower_value = self.remap_key(raw_key.as_ref(), lower_idx, key_type)?;
                     let upper_value = self.remap_key(raw_key.as_ref(), upper_idx, key_type)?;
+
+                    // Skip the key entirely if the value in the key is NULL, since we don't want
+                    // to return any results for comparisons against NULL values
+                    if lower_value.is_none() || upper_value.is_none() {
+                        return Ok(None);
+                    }
+
                     let (lower_key, upper_key) = bounds.get_or_insert_with(Default::default);
                     lower_key.push(lower_value);
                     upper_key.push(upper_value);
@@ -1805,12 +1818,12 @@ impl<'a> KeyComparisonBuilder<'a> {
 
         if let Some((lower, upper)) = bounds {
             debug_assert!(k.is_empty());
-            Ok(KeyComparison::Range((
+            Ok(Some(KeyComparison::Range((
                 Bound::Included(lower.try_into()?),
                 Bound::Included(upper.try_into()?),
-            )))
+            ))))
         } else {
-            KeyComparison::from_key_and_operator(k, self.binop_to_use)
+            KeyComparison::from_key_and_operator(k, self.binop_to_use).map(Some)
         }
     }
 }
