@@ -289,7 +289,6 @@ where
     pub fn range<'a, R, Q>(
         &'a self,
         range: &R,
-        // TODO ethan here
     ) -> Result<Range<'a, K, V>, Vec<(Bound<K>, Bound<K>)>>
     where
         R: RangeBounds<Q>,
