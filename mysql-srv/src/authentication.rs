@@ -28,7 +28,16 @@ fn xor_slice_mut<const N: usize>(b1: &mut [u8; N], b2: &[u8; N]) {
 pub fn generate_auth_data() -> Result<AuthData, MsqlSrvError> {
     let mut buf = [0u8; 20];
     match getrandom(&mut buf) {
-        Ok(_) => Ok(buf),
+        Ok(_) => {
+            // MySQL's auth data must be printable ASCII characters
+            for byte in &mut buf {
+                *byte &= 0x7f;
+                if *byte == b'\0' || *byte == b'$' {
+                    *byte = *byte % 90 + 37;
+                }
+            }
+            Ok(buf)
+        }
         Err(_) => Err(MsqlSrvError::GetRandomError),
     }
 }
