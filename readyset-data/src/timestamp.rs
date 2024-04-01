@@ -260,6 +260,10 @@ impl FromStr for TimestampTz {
                     TIMESTAMP_TZ_PARSE_FORMAT,
                 ) {
                     Ok(dt.into())
+                } else if let Ok(dt) =
+                    NaiveDateTime::parse_from_str(&neg_year_str, TIMESTAMP_PARSE_FORMAT)
+                {
+                    Ok(dt.into())
                 } else {
                     let d = NaiveDate::parse_from_str(&neg_year_str, DATE_FORMAT)?;
                     Ok(d.into())
@@ -726,6 +730,7 @@ mod tests {
 
         #[allow(clippy::zero_prefixed_literal)]
         let year_5_bce = -0004;
+        // BC date with time zone
         assert_eq!(
             TimestampTz::from_str("0005-02-29 12:34:56+00 BC")
                 .unwrap()
@@ -733,6 +738,17 @@ mod tests {
             chrono::FixedOffset::east_opt(0)
                 .unwrap()
                 .with_ymd_and_hms(year_5_bce, 2, 29, 12, 34, 56)
+                .single()
+                .unwrap()
+        );
+        // BC date without time zone
+        assert_eq!(
+            TimestampTz::from_str("0005-02-21 12:34:56 BC")
+                .unwrap()
+                .to_chrono(),
+            chrono::FixedOffset::east_opt(0)
+                .unwrap()
+                .with_ymd_and_hms(year_5_bce, 2, 21, 12, 34, 56)
                 .single()
                 .unwrap()
         );

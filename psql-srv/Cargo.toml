@@ -43,7 +43,7 @@ readyset-data = { path = "../readyset-data" }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["full"] }
-tokio-test = "0.4.1"
+tokio-test = { workspace = true }
 database-utils = { path = "../database-utils" }
 readyset-tracing = { path = "../readyset-tracing" }
 postgres-native-tls = { workspace = true }

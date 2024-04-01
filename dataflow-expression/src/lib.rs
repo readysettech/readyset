@@ -9,6 +9,7 @@ pub mod utils;
 
 use std::fmt::{self, Display, Formatter};
 
+pub use eval::builtins::DateTruncPrecision;
 use itertools::Itertools;
 pub use readyset_data::Dialect;
 use readyset_data::{DfType, DfValue};
@@ -108,6 +109,9 @@ pub enum BuiltinFunction {
 
     /// [`array_to_string`](https://www.postgresql.org/docs/current/functions-array.html)
     ArrayToString(Expr, Expr, Option<Expr>),
+
+    /// [`date_trunc`](https://www.postgresql.org/docs/current/functions-datetime.html#FUNCTIONS-DATETIME-TRUNC)
+    DateTrunc(Expr, Expr),
 }
 
 impl BuiltinFunction {
@@ -141,6 +145,7 @@ impl BuiltinFunction {
             Greatest { .. } => "greatest",
             Least { .. } => "least",
             ArrayToString { .. } => "array_to_string",
+            DateTrunc { .. } => "date_trunc",
         }
     }
 }
@@ -235,6 +240,9 @@ impl Display for BuiltinFunction {
                     write!(f, ", {null_string}")?;
                 }
                 write!(f, ")")
+            }
+            DateTrunc(field, source) => {
+                write!(f, "({}, {})", field, source)
             }
         }
     }

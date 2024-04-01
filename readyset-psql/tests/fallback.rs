@@ -2790,21 +2790,25 @@ async fn numeric_snapshot_nan() {
 
     let conn = connect(opts).await;
 
-    let result = conn
-        .simple_query("SHOW READYSET TABLES")
-        .await
-        .unwrap()
-        .into_iter()
-        .filter_map(|m| {
-            if let SimpleQueryMessage::Row(r) = m {
-                r.get(1).map(String::from)
-            } else {
-                None
-            }
-        })
-        .last()
-        .unwrap();
-    assert!(result.contains("Not Replicated"));
+    eventually!(run_test: {
+        let result = conn
+            .simple_query("SHOW READYSET TABLES")
+            .await
+            .unwrap()
+            .into_iter()
+            .filter_map(|m| {
+                if let SimpleQueryMessage::Row(r) = m {
+                    r.get(1).map(String::from)
+                } else {
+                    None
+                }
+            })
+            .last()
+            .unwrap();
+        AssertUnwindSafe(|| result)
+    }, then_assert: |result| {
+        assert!(result().contains("Not Replicated"));
+    });
 
     shutdown_tx.shutdown().await;
 }

@@ -1,9 +1,9 @@
-use std::ops::{Bound, RangeBounds};
-
 use ahash::RandomState;
 use dataflow_expression::PreInsertion;
 use reader_map::EvictionQuantity;
 use readyset_client::consistency::Timestamp;
+use readyset_data::Bound;
+use readyset_util::ranges::RangeBounds;
 
 use super::{key_to_single, Key};
 use crate::prelude::*;

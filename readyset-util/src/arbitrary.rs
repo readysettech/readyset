@@ -6,7 +6,8 @@ use std::time::{Duration as StdDuration, SystemTime, UNIX_EPOCH};
 
 use bit_vec::BitVec;
 use chrono::{
-    DateTime, Duration, FixedOffset, LocalResult, NaiveDate, NaiveDateTime, NaiveTime, TimeZone,
+    DateTime, Duration, FixedOffset, LocalResult, NaiveDate, NaiveDateTime, NaiveTime, Offset,
+    TimeZone,
 };
 use chrono_tz::Tz;
 use cidr::IpInet;
@@ -115,6 +116,14 @@ pub fn arbitrary_systemtime() -> impl Strategy<Value = SystemTime> {
     })
 }
 
+/// Strategy to generate an arbitrary [`DateTime<FixedOffset>`], with an arbitrary timezone.
+pub fn arbitrary_date_time_timezone() -> impl Strategy<Value = DateTime<FixedOffset>> {
+    (arbitrary_timestamp_naive_date_time(), arbitrary_timezone()).prop_map(|(date, zone)| {
+        let offset = zone.from_utc_datetime(&date).offset().fix();
+        offset.from_local_datetime(&date).single().unwrap()
+    })
+}
+
 /// Strategy to generate an arbitrary [`NaiveDateTime`] that represents a valid time in the given
 /// timezone.
 pub fn arbitrary_timestamp_naive_date_time_for_timezone(
@@ -126,6 +135,12 @@ pub fn arbitrary_timestamp_naive_date_time_for_timezone(
             matches!(timestamp.and_local_timezone(tz), LocalResult::Single(_))
         },
     )
+}
+
+/// Strategy to generate an arbitrary timezone from the full range of timezones
+/// as supported by `chrono-tz`.
+pub fn arbitrary_timezone() -> impl Strategy<Value = Tz> {
+    (0..chrono_tz::TZ_VARIANTS.len()).prop_map(|idx| chrono_tz::TZ_VARIANTS[idx])
 }
 
 /// Strategy to generate an arbitrary [`MacAddress`].
