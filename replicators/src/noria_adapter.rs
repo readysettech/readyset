@@ -932,25 +932,11 @@ impl NoriaAdapter {
             table
         } else {
             // The only error we are semi "ok" to ignore for table actions is when a table is not
-            // found and should not be replicated. Failing to execute an action for an existing
-            // table may very well get noria into an inconsistent state. This may happen
-            // if eg. a worker fails. This is Ok, since replicator task will reconnect
-            // again and retry the action as many times as needed for it to succeed, but
-            // it is not safe to continue past this point on a failure.
-
-            if self.table_filter.should_be_processed(
-                table.schema.as_deref().ok_or_else(|| {
-                    internal_err!("All tables should have a schema in the replicator")
-                })?,
-                &table.name,
-            ) {
-                warn!(
-                    table_name = %table.display(nom_sql::Dialect::PostgreSQL),
-                    num_actions = actions.len(),
-                    "Could not find table, Resnapshot needed"
-                );
-                return Err(ReadySetError::ResnapshotNeeded);
-            }
+            // found. Failing to execute an action for an existing table may very well get noria
+            // into an inconsistent state. This may happen if eg. a worker fails.
+            // This is Ok, since replicator task will reconnect again and retry the action as many
+            // times as needed for it to succeed, but it is not safe to continue past this point on
+            // a failure.
             if self.warned_missing_tables.insert(table.clone()) {
                 warn!(
                     table_name = %table.display(nom_sql::Dialect::PostgreSQL),
