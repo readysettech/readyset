@@ -172,7 +172,7 @@ use std::io;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use constants::{CLIENT_PLUGIN_AUTH, CONNECT_WITH_DB, PROTOCOL_41, RESERVED, SECURE_CONNECTION};
+use constants::{CLIENT_PLUGIN_AUTH, PROTOCOL_41, RESERVED, SECURE_CONNECTION};
 use error::{other_error, OtherErrorKind};
 use mysql_common::constants::CapabilityFlags;
 use readyset_adapter_types::{DeallocateId, ParsedCommand};
@@ -388,8 +388,7 @@ struct StatementData {
     params: u16,
 }
 
-const CAPABILITIES: u32 =
-    PROTOCOL_41 | SECURE_CONNECTION | RESERVED | CLIENT_PLUGIN_AUTH | CONNECT_WITH_DB;
+const CAPABILITIES: u32 = PROTOCOL_41 | SECURE_CONNECTION | RESERVED | CLIENT_PLUGIN_AUTH;
 
 impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
     MySqlIntermediary<B, R, W>
