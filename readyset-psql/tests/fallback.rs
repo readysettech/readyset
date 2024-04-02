@@ -2612,6 +2612,8 @@ mod failure_injection_tests {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[serial]
+#[slow]
 async fn drop_and_recreate_demo_cache() {
     // This tests dropping and recreating the cached used by the readyset demo script.
     // There was an error returned at one point in doing this, so this test is an attempt to block
