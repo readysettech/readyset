@@ -25,6 +25,9 @@ pub enum DecodeError {
     #[error("invalid binary data value: {0}")]
     InvalidBinaryDataValue(#[from] Box<dyn std::error::Error + Send + Sync>),
 
+    #[error("invalid boolean: {0}")]
+    InvalidTextBooleanError(String),
+
     #[error("invalid format: {0}")]
     InvalidFormat(i16),
 

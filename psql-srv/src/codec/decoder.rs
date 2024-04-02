@@ -47,7 +47,6 @@ const STARTUP_MESSAGE_DATABASE_PARAMETER: &str = "database";
 const STARTUP_MESSAGE_TERMINATOR: &str = "";
 const STARTUP_MESSAGE_USER_PARAMETER: &str = "user";
 
-const BOOL_TRUE_TEXT_REP: &str = "t";
 const HEADER_LENGTH: usize = 5;
 const LENGTH_NULL_SENTINEL: i32 = -1;
 const NUL_BYTE: u8 = b'\0';
@@ -416,7 +415,15 @@ fn get_text_value(src: &mut Bytes, t: &Type) -> Result<PsqlValue, Error> {
     let text = BytesStr::try_from(src.split_to(usize::try_from(len)?))?;
     let text_str: &str = text.borrow();
     match *t {
-        Type::BOOL => Ok(PsqlValue::Bool(text_str == BOOL_TRUE_TEXT_REP)),
+        Type::BOOL => {
+            // acceptable bool values are documented here:
+            // https://www.postgresql.org/docs/current/datatype-boolean.html
+            match text_str.to_lowercase().as_str() {
+                "t" | "true" | "yes" | "y" | "on" | "1" => Ok(PsqlValue::Bool(true)),
+                "f" | "false" | "no" | "n" | "off" | "0" => Ok(PsqlValue::Bool(false)),
+                _ => Err(Error::InvalidTextBooleanError(text_str.to_string())),
+            }
+        }
         Type::VARCHAR => Ok(PsqlValue::VarChar(text_str.into())),
         Type::NAME => Ok(PsqlValue::Name(text_str.into())),
         Type::BPCHAR => Ok(PsqlValue::BpChar(text_str.into())),
