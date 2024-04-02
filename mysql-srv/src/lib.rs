@@ -448,7 +448,9 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
         init_packet.extend_from_slice(&[0x21]); // UTF8_GENERAL_CI
         init_packet.extend_from_slice(&[0x00, 0x00]); // status flags
         init_packet.extend_from_slice(&CAPABILITIES.to_le_bytes()[2..]);
-        init_packet.extend_from_slice(&[auth_data.len() as u8]);
+        // We will add a \0 byte below so we need to account for that when sending the length, since
+        // rust strings don't add the null terminator
+        init_packet.extend_from_slice(&[(auth_data.len() + 1) as u8]);
         init_packet.extend_from_slice(&[0x00; 10][..]); // filler
         init_packet.extend_from_slice(&auth_data[8..]);
         init_packet.push(0);
