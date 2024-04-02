@@ -265,12 +265,12 @@ mod types {
         use Abc::*;
 
         client
-            .simple_query("CREATE TABLE t (id serial primary key, x abc);")
+            .simple_query("CREATE TABLE enumt (id serial primary key, x abc);")
             .await
             .unwrap();
 
         client
-            .simple_query("INSERT INTO t (x) VALUES ('b'), ('c'), ('a'), ('a')")
+            .simple_query("INSERT INTO enumt (x) VALUES ('b'), ('c'), ('a'), ('a')")
             .await
             .unwrap();
 
@@ -307,7 +307,7 @@ mod types {
         eventually!(
             run_test: {
                 let mut project_eq_res = client
-                    .query("SELECT x = 'a' FROM t", &[])
+                    .query("SELECT x = 'a' FROM enumt", &[])
                     .await
                     .unwrap()
                     .into_iter()
@@ -325,7 +325,7 @@ mod types {
 
         let where_eq_res: i64 = client
             .query_one(
-                "WITH a AS (SELECT COUNT(*) AS c FROM t WHERE x = 'a') SELECT c FROM a",
+                "WITH a AS (SELECT COUNT(*) AS c FROM enumt WHERE x = 'a') SELECT c FROM a",
                 &[],
             )
             .await
@@ -344,7 +344,7 @@ mod types {
         );
 
         let upquery_res = client
-            .query("SELECT x FROM t WHERE x = $1", &[&B])
+            .query("SELECT x FROM enumt WHERE x = $1", &[&B])
             .await
             .unwrap()
             .into_iter()
@@ -373,7 +373,7 @@ mod types {
         );
 
         let sort_res = client
-            .query("SELECT x FROM t ORDER BY x ASC", &[])
+            .query("SELECT x FROM enumt ORDER BY x ASC", &[])
             .await
             .unwrap()
             .into_iter()
@@ -387,7 +387,7 @@ mod types {
         );
 
         let mut range_res = client
-            .query("SELECT x FROM t WHERE x >= $1", &[&B])
+            .query("SELECT x FROM enumt WHERE x >= $1", &[&B])
             .await
             .unwrap()
             .into_iter()
@@ -430,7 +430,7 @@ mod types {
 
         let proxied_parameter_res = client
             .query_one(
-                "SELECT COUNT(*) FROM (SELECT * FROM t WHERE x = $1) sq",
+                "SELECT COUNT(*) FROM (SELECT * FROM enumt WHERE x = $1) sq",
                 &[&A],
             )
             .await
@@ -440,7 +440,7 @@ mod types {
 
         let proxied_array_parameter_res = client
             .query_one(
-                "SELECT COUNT(*) FROM (SELECT * FROM t WHERE x = ANY($1)) sq",
+                "SELECT COUNT(*) FROM (SELECT * FROM enumt WHERE x = ANY($1)) sq",
                 &[&vec![A, B]],
             )
             .await
@@ -449,12 +449,12 @@ mod types {
         assert_eq!(proxied_array_parameter_res, 3);
 
         client
-            .simple_query("UPDATE t SET x = 'c' WHERE id = 1")
+            .simple_query("UPDATE enumt SET x = 'c' WHERE id = 1")
             .await
             .unwrap();
 
         let post_update_res = client
-            .query("SELECT x FROM t ORDER BY x ASC", &[])
+            .query("SELECT x FROM enumt ORDER BY x ASC", &[])
             .await
             .unwrap()
             .into_iter()
@@ -463,7 +463,7 @@ mod types {
         assert_eq!(post_update_res, vec![A, A, C, C]);
 
         client
-            .simple_query("UPDATE t SET x = 'b' WHERE id = 1")
+            .simple_query("UPDATE enumt SET x = 'b' WHERE id = 1")
             .await
             .unwrap();
 
@@ -473,7 +473,7 @@ mod types {
             .unwrap();
 
         client
-            .simple_query("INSERT INTO t (x) VALUES ('d')")
+            .simple_query("INSERT INTO enumt (x) VALUES ('d')")
             .await
             .unwrap();
 
@@ -512,13 +512,15 @@ mod types {
         sleep().await;
 
         client
-            .simple_query("CREATE CACHE FROM SELECT x FROM t ORDER BY x ASC")
+            .simple_query("CREATE CACHE FROM SELECT x FROM enumt ORDER BY x ASC")
             .await
             .unwrap();
-        let _ = client.query("SELECT x FROM t ORDER BY x ASC", &[]).await;
+        let _ = client
+            .query("SELECT x FROM enumt ORDER BY x ASC", &[])
+            .await;
 
         let sort_res = client
-            .query("SELECT x FROM t ORDER BY x ASC", &[])
+            .query("SELECT x FROM enumt ORDER BY x ASC", &[])
             .await
             .unwrap()
             .into_iter()
@@ -548,7 +550,7 @@ mod types {
             QueryDestination::Readyset
         );
 
-        client.simple_query("DROP TABLE t;").await.unwrap();
+        client.simple_query("DROP TABLE enumt;").await.unwrap();
         client.simple_query("DROP TYPE abc CASCADE").await.unwrap();
 
         client
@@ -557,22 +559,24 @@ mod types {
             .unwrap();
 
         client
-            .simple_query("CREATE TABLE t (x abc);")
+            .simple_query("CREATE TABLE enumt (x abc);")
             .await
             .unwrap();
 
         client
-            .simple_query("INSERT INTO t (x) VALUES ('b'), ('c'), ('a'), ('a')")
+            .simple_query("INSERT INTO enumt (x) VALUES ('b'), ('c'), ('a'), ('a')")
             .await
             .unwrap();
 
         sleep().await;
 
         client
-            .simple_query("CREATE CACHE FROM SELECT x FROM t ORDER BY x ASC")
+            .simple_query("CREATE CACHE FROM SELECT x FROM enumt ORDER BY x ASC")
             .await
             .unwrap();
-        let _ = client.query("SELECT x FROM t ORDER BY x ASC", &[]).await;
+        let _ = client
+            .query("SELECT x FROM enumt ORDER BY x ASC", &[])
+            .await;
 
         // wrapping this test in an eventually! macro as it frequently fails in CI.
         // the most likely culprit is eventual consistency on small CI instances,
@@ -580,7 +584,7 @@ mod types {
         eventually!(
             run_test: {
                 client
-                    .query("SELECT x FROM t ORDER BY x ASC", &[])
+                    .query("SELECT x FROM enumt ORDER BY x ASC", &[])
                     .await
                     .unwrap()
                     .into_iter()
