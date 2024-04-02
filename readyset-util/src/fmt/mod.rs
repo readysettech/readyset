@@ -1,6 +1,10 @@
 //! Formatting utilities.
 
+mod num;
+
 use std::fmt::*;
+
+pub use num::write_padded_u32;
 
 /// Like [`std::format_args!`] but with ownership of arguments.
 #[macro_export]

@@ -8,6 +8,7 @@ description = "Extensions to the Rust standard library"
 
 [dependencies]
 backoff = { version = "0.4.0", features = ["tokio"] }
+bytes = "1.0"
 proptest = "1.0.0"
 chrono = { version = "0.4.0", features = ["serde"] }
 chrono-tz = "0.8.6"
@@ -25,8 +26,17 @@ cidr = "0.2.1"
 thiserror = "1.0.26"
 
 [dev-dependencies]
+criterion = { workspace = true }
 test-strategy = "0.2.0"
+rand = "0.8.5"
+pprof = { version = "0.13", features = ["flamegraph", "criterion"] }
+postgres = { workspace = true, features = ["with-chrono-0_4", "with-eui48-1", "with-uuid-0_8", "with-serde_json-1", "with-bit-vec-0_6"] }
 
 [features]
 # Redact the display of strings marked sensitive from logs and error messages
 redact_sensitive = []
+
+[[bench]]
+name = "fmt"
+harness = false
+
