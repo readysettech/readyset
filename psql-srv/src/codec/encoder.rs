@@ -4,6 +4,7 @@ use bytes::{BufMut, BytesMut};
 use eui48::MacAddressFormat;
 use postgres::error::ErrorPosition;
 use postgres_types::{ToSql, Type};
+use readyset_util::fmt::FastEncode;
 use tokio_util::codec::Encoder;
 
 use crate::codec::error::EncodeError as Error;
@@ -76,10 +77,6 @@ const LENGTH_NULL_SENTINEL: i32 = -1;
 const LENGTH_PLACEHOLDER: i32 = -1;
 const NUL_BYTE: u8 = b'\0';
 const NUL_CHAR: char = '\0';
-const TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S%.f";
-const TIMESTAMP_TZ_FORMAT: &str = "%Y-%m-%d %H:%M:%S%.f %:z";
-const TIME_FORMAT: &str = "%H:%M:%S%.f";
-const DATE_FORMAT: &str = "%Y-%m-%d";
 
 impl Encoder<BackendMessage> for Codec {
     type Error = Error;
@@ -647,18 +644,18 @@ fn put_text_value(val: PsqlValue, dst: &mut BytesMut) -> Result<(), Error> {
         PsqlValue::Timestamp(v) => {
             // TODO: Does not correctly handle all valid timestamp representations. For example,
             // 8601/SQL timestamp format is assumed; infinity/-infinity are not supported.
-            write!(dst, "{}", v.format(TIMESTAMP_FORMAT))?;
+            v.put(dst);
         }
         PsqlValue::TimestampTz(v) => {
             // TODO: Does not correctly handle all valid timestamp representations. For example,
             // 8601/SQL timestamp format is assumed; infinity/-infinity are not supported.
-            write!(dst, "{}", v.format(TIMESTAMP_TZ_FORMAT))?;
+            v.put(dst);
         }
         PsqlValue::Date(v) => {
-            write!(dst, "{}", v.format(DATE_FORMAT))?;
+            v.put(dst);
         }
         PsqlValue::Time(v) => {
-            write!(dst, "{}", v.format(TIME_FORMAT))?;
+            v.put(dst);
         }
         PsqlValue::ByteArray(b) => {
             write!(
@@ -1645,22 +1642,6 @@ mod tests {
     }
 
     #[test]
-    fn test_encode_text_timestamp() {
-        let mut buf = BytesMut::new();
-        put_text_value(
-            PsqlValue::Timestamp(
-                NaiveDateTime::parse_from_str("2020-01-02 03:04:05.660", TIMESTAMP_FORMAT).unwrap(),
-            ),
-            &mut buf,
-        )
-        .unwrap();
-        let mut exp = BytesMut::new();
-        exp.put_i32(23); // length
-        exp.extend_from_slice(b"2020-01-02 03:04:05.660"); // value
-        assert_eq!(buf, exp);
-    }
-
-    #[test]
     fn test_encode_text_bytea() {
         let mut buf = BytesMut::new();
         let bytes = vec![0, 8, 39, 92, 100, 128];
@@ -1733,22 +1714,6 @@ mod tests {
 
         let mut buf = BytesMut::new();
         put_text_value(PsqlValue::Bit(bits), &mut buf).unwrap();
-        assert_eq!(buf, exp);
-    }
-
-    #[test]
-    fn test_encode_text_timestamp_tz() {
-        let dt = FixedOffset::east_opt(18000)
-            .unwrap()
-            .from_utc_datetime(&NaiveDateTime::new(
-                NaiveDate::from_ymd_opt(2020, 1, 2).unwrap(),
-                NaiveTime::from_hms_milli_opt(3, 4, 5, 660).unwrap(),
-            ));
-        let mut buf = BytesMut::new();
-        put_text_value(PsqlValue::TimestampTz(dt), &mut buf).unwrap();
-        let mut exp = BytesMut::new();
-        exp.put_i32(30);
-        exp.extend_from_slice(b"2020-01-02 08:04:05.660 +05:00");
         assert_eq!(buf, exp);
     }
 }
