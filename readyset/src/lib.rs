@@ -378,7 +378,7 @@ pub struct Options {
     fallback_recovery_seconds: u64,
 
     /// Whether to use non-blocking or blocking reads against the cache.
-    #[arg(long, env = "NON_BLOCKING_READS", hide = true)]
+    #[arg(long, env = "NON_BLOCKING_READS", default_value = "true", hide = true)]
     non_blocking_reads: bool,
 
     #[command(flatten)]
