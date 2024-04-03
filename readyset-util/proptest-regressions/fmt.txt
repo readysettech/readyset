@@ -1,0 +1,36 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc a32d7921f66cc2bbd8f5fe69417d7b488f2d7ec97e85094e4259739c80635517 # shrinks to time = 00:00:00.807232500
+cc de0f29caab04840dcab9ff06dad46aa81c01836bc608054213280377dd30e375 # shrinks to date = -0001-01-01
+cc e782ebd127f1188593f090284e14ad2bbaf86ec4d7d72f5b4c49a1afd994f87d # shrinks to (ts, tz) = (2100-03-14T02:00:00, America/Chicago)
+cc c2308566bb20205b9d89b4091a96b0d0a713cbc732a0f3e9b3eb2cf5d33d7c2d # shrinks to date = -0364-02-29
+cc b03c023cba878b1bf470d05ad7c4a67470971b04ecb9f06f3a71cfaffe56d9ed # shrinks to date = -4713-01-01
+cc 3878b2d01fbe34416a71e7af15de6c416e6b4f1372443836be49423ff43c37db # shrinks to (ts, tz) = (0001-01-01T00:00:00, Africa/Kinshasa)
+cc 58614b101d4d8295d1f5c98786b1f27f8b516e6794e805d8f8f74e3f87eef96a # shrinks to (ts, tz) = (-0001-01-01T00:00:00, Europe/Vaduz)
+cc 572db60cc48fb5e6a2591176bc7efa1efeb2548e3e38a6126ee138623d08c7fd # shrinks to (ts, tz) = (-0001-01-01T00:00:00, Indian/Kerguelen)
+cc d6bfef140a9e03599e79463ffce4cee5421fa0233cc0bd114ad4732a9f990df9 # shrinks to (ts, tz) = (-0001-01-01T00:00:00, Europe/Oslo)
+cc 6f0c766840de95cd08631e79bcea42d8f20004c45148a6de779bba725efa2ac7 # shrinks to (ts, tz) = (0001-01-01T00:00:00, Canada/Yukon)
+cc 262c3178d091d8fa22799077f42177b63a8ade9ad161ec13c6d0dfddac05d046 # shrinks to (ts, tz) = (0001-01-01T00:00:00, Europe/Amsterdam)
+cc 1c164ae8852333b408c8833003db500e0f43dee4702038798ca3c545e8b7ac8b # shrinks to (ts, tz) = (-0001-01-01T00:00:00, Europe/Stockholm)
+cc 0fdd1661a5be9eab3f0955988cdd28ca86735107c1f8bbe232b62e5e9f4d3e51 # shrinks to (ts, tz) = (-0001-01-01T00:00:00, America/Curacao)
+cc 0e7673657ffcf4aeaaaa74025234cf534ab83130d95859202aef4962926a44c6 # shrinks to (ts, tz) = (-0001-01-01T00:00:00, America/Nassau)
+cc 799eddb6295c201d3669ecc9aa0423a1a1edacbfcf38d8353180948c67482338 # shrinks to (ts, tz) = (0001-01-01T00:00:00, Africa/Djibouti)
+cc 349381f51a75132709d42641fe520c7ff139c34e8c87f8c940b29bb70dad1a00 # shrinks to (ts, tz) = (-0001-01-01T00:00:00, America/Guadeloupe)
+cc ef0cfa379b52b165575ad886b8a3de9b581a0f7c55a06ba9b80e11b199dd541f # shrinks to (ts, tz) = (-0001-01-01T00:00:00, Pacific/Midway)
+cc 09893b86132e9024d3498b26db1a4675405a441a11c78a4b85b4fceb83bbba96 # shrinks to (ts, tz) = (-0001-01-01T00:00:00, Atlantic/Reykjavik)
+cc 95b0da760ca0e48aceca466a1c65dde60c3ea30d855ff8b80034f9658379fb43 # shrinks to (ts, tz) = (0001-01-01T00:00:00, Europe/Monaco)
+cc e4d32eff7e576df4f2b1be4df43ac37da0a27b9849ae311896c05d8547216dfb # shrinks to (ts, tz) = (-0001-01-01T00:00:00, Europe/Ljubljana)
+cc b020b2dcee6d8ca7ce54f3b8d112020b9609723256521af705b0fad28ffa27a4 # shrinks to (ts, tz) = (-0001-01-01T00:00:00, America/Anchorage)
+cc d86da348e9bcc603c7158d364895958ff83fb7a30b2dada76223b79ab3e70f85 # shrinks to (ts, tz) = (0001-01-01T00:00:00, US/Alaska)
+cc d8f229e20deb0e302001aa895a0fdfb4cfd2f488e804c316a7435832b9f5abb2 # shrinks to (ts, tz) = (-0001-01-01T00:00:00, Europe/Luxembourg)
+cc ab3070e3a9b557ccdae434ffa8621f2aeed1f2eacb8396ba4151ba379d01a9e9 # shrinks to (ts, tz) = (-0001-01-01T00:00:00, Asia/Kuala_Lumpur)
+cc 4e66f03cf8f2a5395cc6c5d25dd671bd28fa5c0dbb71ec4cafb42275c78a0cf0 # shrinks to (ts, tz) = (0001-01-01T00:00:00, Europe/Copenhagen)
+cc ce1a2ca4466a3b7ca171c80bcbec664ae1e113599af36d442f1cdacb4189600e # shrinks to (ts, tz) = (-0001-01-01T00:00:00, Asia/Kuwait)
+cc 118ec4a15cb32759e60b3c61bfa458f432142ff3d0ca69f50d8217bba363c060 # shrinks to (ts, tz) = (1977-04-03T02:00:00, WET)
+cc fdf15d286291c55754ac051f0e80990359fda27e23f3c36cef6f23a41e1271ff # shrinks to (ts, tz) = (1977-04-03T04:00:00, EET)
+cc 9d6742602111848c33b6fa2c67dcc99b2e0047036908f353b788551170cef97b # shrinks to (ts, tz) = (1977-04-04T00:00:00, MET)
+cc 573d73cc6a855372bd72aa2104edef2870b7b1a8e7232d423fed0dc96b860800 # shrinks to (ts, tz) = (-0360-02-29T00:00:00, Africa/Abidjan)
