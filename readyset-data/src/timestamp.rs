@@ -18,9 +18,6 @@ pub const TIMESTAMP_PARSE_FORMAT: &str = "%Y-%m-%d %H:%M:%S%.f";
 /// The format for timestamps when presented as text
 pub const TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S";
 
-/// The format for timestamps with time zone when parsed as text
-pub const TIMESTAMP_TZ_PARSE_FORMAT: &str = "%Y-%m-%d %H:%M:%S%.f%#z";
-
 /// The format for timestamps with time zone when presented as text
 pub const TIMESTAMP_TZ_FORMAT: &str = "%Y-%m-%d %H:%M:%S%:z";
 
@@ -318,17 +315,38 @@ impl TimestampTz {
             Cow::Owned(format!("+{ts}"))
         };
 
-        // If there is a dot, there is a microseconds field attached
-        Ok(
-            if let Ok(dt) = DateTime::<FixedOffset>::parse_from_str(&ts, TIMESTAMP_TZ_PARSE_FORMAT)
-            {
-                dt.into()
-            } else if let Ok(dt) = NaiveDateTime::parse_from_str(&ts, TIMESTAMP_PARSE_FORMAT) {
-                dt.into()
-            } else {
-                NaiveDate::parse_from_str(&ts, DATE_FORMAT)?.into()
-            },
-        )
+        let (date, remainder) = match NaiveDate::parse_and_remainder(&ts, "%Y-%m-%d") {
+            Ok((date, remainder)) => (date, remainder),
+            Err(e) => return Err(anyhow::anyhow!(e)),
+        };
+        if remainder.is_empty() {
+            return Ok(date.into());
+        }
+
+        let (time, remainder) = NaiveTime::parse_and_remainder(remainder, "%H:%M:%S%.f").unwrap();
+        let timestamp = date.and_time(time);
+        if remainder.is_empty() {
+            return Ok(timestamp.into());
+        }
+
+        // FixedOffset::from_str() assumes a format of `%z`, which is +/- follow by hours/minutes,
+        // for example: -0800.
+        let offset = match FixedOffset::from_str(remainder) {
+            Ok(offset) => offset,
+            Err(_e) => {
+                // To support an offset without minutes, as pgjdbc truncates the minutes value
+                // if it's "00" (no minute offset from the hour offset), blindly append two zeros
+                // to the end of the timezone tag to see if we get lucky parsing it.
+                let mut offset_tag = remainder.to_owned();
+                offset_tag.push_str(String::from("00").as_str());
+                FixedOffset::from_str(&offset_tag)?
+            }
+        };
+        Ok(offset
+            .from_local_datetime(&timestamp)
+            .single()
+            .unwrap()
+            .into())
     }
 
     /// Attempt to coerce this timestamp to a specific [`DfType`].
