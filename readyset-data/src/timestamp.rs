@@ -254,20 +254,7 @@ impl FromStr for TimestampTz {
 
                 let year = -(year_str.parse::<i32>()? - 1);
                 let neg_year_str = format!("{year}-{rest}");
-
-                if let Ok(dt) = DateTime::<FixedOffset>::parse_from_str(
-                    &neg_year_str,
-                    TIMESTAMP_TZ_PARSE_FORMAT,
-                ) {
-                    Ok(dt.into())
-                } else if let Ok(dt) =
-                    NaiveDateTime::parse_from_str(&neg_year_str, TIMESTAMP_PARSE_FORMAT)
-                {
-                    Ok(dt.into())
-                } else {
-                    let d = NaiveDate::parse_from_str(&neg_year_str, DATE_FORMAT)?;
-                    Ok(d.into())
-                }
+                Self::from_str_no_bc(&neg_year_str)
             }
             None => Self::from_str_no_bc(ts),
         }
