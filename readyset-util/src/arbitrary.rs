@@ -2,6 +2,7 @@
 
 use std::iter::FromIterator;
 use std::net::{Ipv4Addr, Ipv6Addr};
+use std::ops::RangeInclusive;
 use std::time::{Duration as StdDuration, SystemTime, UNIX_EPOCH};
 
 use bit_vec::BitVec;
@@ -17,15 +18,24 @@ use proptest::sample::SizeRange;
 use rust_decimal::Decimal;
 use uuid::Uuid;
 
+const NANOS_IN_SEC: u32 = 1_000_000_000;
+
+/// Strategy to generate an arbitrary [`NaiveDate`] that falls within a variable range
+pub fn arbitrary_naive_date_in_range(y: RangeInclusive<i32>) -> impl Strategy<Value = NaiveDate> {
+    (y, 1u32..=366)
+        .prop_filter("there is no year 0", |(y, _)| *y != 0)
+        .prop_map(|(y, mut doy)| {
+            // If this is a leap day and *not* a leap year, drop the day back to 365
+            if doy == 366 && NaiveDate::from_ymd_opt(y, 2, 29).is_none() {
+                doy = 365
+            }
+            NaiveDate::from_yo_opt(y, doy).unwrap()
+        })
+}
+
 /// Strategy to generate an arbitrary [`NaiveDate`]
 pub fn arbitrary_naive_date() -> impl Strategy<Value = NaiveDate> {
-    (-4713i32..=262142, 1u32..=366).prop_map(|(y, mut doy)| {
-        // If this is a leap day and *not* a leap year, drop the day back to 365
-        if doy == 366 && NaiveDate::from_ymd_opt(y, 2, 29).is_none() {
-            doy = 365
-        }
-        NaiveDate::from_yo_opt(y, doy).unwrap()
-    })
+    arbitrary_naive_date_in_range(-4712i32..=262142)
 }
 
 /// Strategy to generate an arbitrary [`NaiveDate`] with a positive year value
@@ -37,6 +47,13 @@ pub fn arbitrary_positive_naive_date() -> impl Strategy<Value = NaiveDate> {
 pub fn arbitrary_naive_time() -> impl Strategy<Value = NaiveTime> {
     (0u32..23, 0u32..59, 0u32..59)
         .prop_map(|(hour, min, sec)| NaiveTime::from_hms_opt(hour, min, sec).unwrap())
+}
+
+/// Generate an arbitrary [`NaiveTime`] with arbitrary fractional seconds of microsecond precision
+pub fn arbitrary_naive_time_with_seconds_fraction() -> impl Strategy<Value = NaiveTime> {
+    (0u32..23, 0u32..59, 0u32..59, 0u32..NANOS_IN_SEC).prop_map(|(hour, min, sec, nano)| {
+        NaiveTime::from_hms_nano_opt(hour, min, sec, nano).unwrap()
+    })
 }
 
 /// Generate an arbitrary [`Duration`] within a MySQL TIME valid range.
