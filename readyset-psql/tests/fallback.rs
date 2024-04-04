@@ -2798,7 +2798,8 @@ async fn numeric_snapshot_nan() {
     let conn = connect(opts).await;
 
     eventually!(run_test: {
-        let result = conn
+        let result = {
+            let all = conn
             .simple_query("SHOW READYSET TABLES")
             .await
             .unwrap()
@@ -2809,9 +2810,11 @@ async fn numeric_snapshot_nan() {
                 } else {
                     None
                 }
-            })
-            .last()
-            .unwrap();
+            }).collect::<Vec<String>>();
+            dbg!(&all);
+            all.into_iter().last().unwrap()
+        };
+        dbg!(&result);
         AssertUnwindSafe(|| result)
     }, then_assert: |result| {
         assert!(result().contains("Not Replicated"));
