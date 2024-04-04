@@ -222,7 +222,15 @@ impl ReadRequestHandler {
                 // immediately
                 self.hit_ctr.increment(1);
 
-                let results = ResultIterator::new(hit, &reader.post_lookup, limit, offset, filter);
+                let results = ResultIterator::new(
+                    hit,
+                    &reader.post_lookup,
+                    limit,
+                    offset,
+                    filter,
+                    reader.columns(),
+                    &key_comparisons,
+                );
 
                 let results = if raw_result {
                     ServerReadReplyBatch::Unserialized(results)
@@ -513,6 +521,8 @@ impl BlockingRead {
                     self.limit,
                     self.offset,
                     self.filter.take(),
+                    reader.columns(),
+                    &self.key_comparisons,
                 );
 
                 let results = if self.raw_result {
@@ -610,6 +620,8 @@ mod readreply {
                                 None,
                                 None,
                                 None,
+                                &[],
+                                &[],
                             ))
                         })
                         .collect(),
@@ -774,6 +786,8 @@ mod readreply {
                                 None,
                                 None,
                                 None,
+                                &[],
+                                &[],
                             ))
                         })
                         .collect(),
