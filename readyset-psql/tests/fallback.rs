@@ -2826,3 +2826,32 @@ async fn numeric_snapshot_nan() {
 
     shutdown_tx.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn real_type() {
+    let (opts, _handle, shutdown_tx) = setup().await;
+    let conn = connect(opts).await;
+
+    conn.simple_query("DROP TABLE IF EXISTS t").await.unwrap();
+    conn.simple_query("CREATE TABLE t (f1 real)").await.unwrap();
+    conn.simple_query("INSERT INTO t (f1) VALUES (1004.3)")
+        .await
+        .unwrap();
+
+    eventually!(conn
+        .simple_query("CREATE CACHE FROM SELECT * FROM t WHERE f1 <> 1004.3")
+        .await
+        .is_ok());
+
+    eventually! {
+        let len = conn
+            .query("SELECT * FROM t WHERE f1 <> 1004.3", &[])
+            .await
+            .unwrap()
+            .len();
+        len == 0
+    }
+
+    shutdown_tx.shutdown().await;
+}
