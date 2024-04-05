@@ -435,7 +435,7 @@ impl MySqlBinlogConnector {
     pub(crate) async fn next_action_inner(
         &mut self,
         until: Option<&ReplicationOffset>,
-    ) -> mysql::Result<(ReplicationAction, &MySqlPosition)> {
+    ) -> mysql::Result<(Vec<ReplicationAction>, &MySqlPosition)> {
         use mysql_common::binlog::events;
 
         loop {
@@ -459,8 +459,10 @@ impl MySqlBinlogConnector {
             })? {
                 EventType::ROTATE_EVENT => {
                     return Ok((
-                        self.process_event_rotate(binlog_event.read_event()?)
-                            .await?,
+                        vec![
+                            self.process_event_rotate(binlog_event.read_event()?)
+                                .await?,
+                        ],
                         &self.next_position,
                     ));
                 }
@@ -476,7 +478,7 @@ impl MySqlBinlogConnector {
                         }
                         Err(err) => return Err(err),
                     };
-                    return Ok((action, &self.next_position));
+                    return Ok((vec![action], &self.next_position));
                 }
                 ev @ EventType::TABLE_MAP_EVENT => {
                     // Used for row-based binary logging. This event precedes each row operation
@@ -497,24 +499,30 @@ impl MySqlBinlogConnector {
 
                 EventType::WRITE_ROWS_EVENT => {
                     return Ok((
-                        self.process_event_write_rows(binlog_event.read_event()?)
-                            .await?,
+                        vec![
+                            self.process_event_write_rows(binlog_event.read_event()?)
+                                .await?,
+                        ],
                         &self.next_position,
                     ));
                 }
 
                 EventType::UPDATE_ROWS_EVENT => {
                     return Ok((
-                        self.process_event_update_rows(binlog_event.read_event()?)
-                            .await?,
+                        vec![
+                            self.process_event_update_rows(binlog_event.read_event()?)
+                                .await?,
+                        ],
                         &self.next_position,
                     ));
                 }
 
                 EventType::DELETE_ROWS_EVENT => {
                     return Ok((
-                        self.process_event_delete_rows(binlog_event.read_event()?)
-                            .await?,
+                        vec![
+                            self.process_event_delete_rows(binlog_event.read_event()?)
+                                .await?,
+                        ],
                         &self.next_position,
                     ));
                 }
@@ -602,7 +610,7 @@ impl MySqlBinlogConnector {
             if let Some(limit) = until {
                 let limit = MySqlPosition::try_from(limit).expect("Valid binlog limit");
                 if self.next_position >= limit {
-                    return Ok((ReplicationAction::LogPosition, &self.next_position));
+                    return Ok((vec![ReplicationAction::LogPosition], &self.next_position));
                 }
             }
         }
@@ -718,7 +726,7 @@ impl Connector for MySqlBinlogConnector {
         &mut self,
         _: &ReplicationOffset,
         until: Option<&ReplicationOffset>,
-    ) -> ReadySetResult<(ReplicationAction, ReplicationOffset)> {
+    ) -> ReadySetResult<(Vec<ReplicationAction>, ReplicationOffset)> {
         let (action, pos) = self.next_action_inner(until).await?;
         Ok((action, pos.into()))
     }
