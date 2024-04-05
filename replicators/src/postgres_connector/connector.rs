@@ -578,7 +578,7 @@ impl Connector for PostgresWalConnector {
         &mut self,
         last_pos: &ReplicationOffset,
         until: Option<&ReplicationOffset>,
-    ) -> ReadySetResult<(ReplicationAction, ReplicationOffset)> {
+    ) -> ReadySetResult<(Vec<ReplicationAction>, ReplicationOffset)> {
         set_failpoint_return_err!(failpoints::POSTGRES_REPLICATION_NEXT_ACTION);
 
         // If it has been longer than the defined status update interval, send a status update to
@@ -609,7 +609,7 @@ impl Connector for PostgresWalConnector {
             if actions.is_empty()
                 && matches!(until, Some(until) if &ReplicationOffset::from(cur_pos) >= until)
             {
-                return Ok((ReplicationAction::LogPosition, cur_pos.into()));
+                return Ok((vec![ReplicationAction::LogPosition], cur_pos.into()));
             }
 
             // Get the next buffered event or error, or read a new event from the WAL stream.
@@ -624,11 +624,11 @@ impl Connector for PostgresWalConnector {
                 Err(_) if !actions.is_empty() => {
                     self.peek = Some(event);
                     return Ok((
-                        ReplicationAction::TableAction {
+                        vec![ReplicationAction::TableAction {
                             table: cur_table,
                             actions,
                             txid: None,
-                        },
+                        }],
                         cur_pos.into(),
                     ));
                 }
@@ -669,11 +669,11 @@ impl Connector for PostgresWalConnector {
                 {
                     self.peek = Some(event);
                     return Ok((
-                        ReplicationAction::TableAction {
+                        vec![ReplicationAction::TableAction {
                             table: cur_table,
                             actions,
                             txid: None,
-                        },
+                        }],
                         cur_pos.into(),
                     ));
                 }
@@ -714,14 +714,14 @@ impl Connector for PostgresWalConnector {
 
                             actions.push(TableOperation::Truncate);
                             return Ok((
-                                ReplicationAction::TableAction {
+                                vec![ReplicationAction::TableAction {
                                     table: Relation {
                                         schema: Some(schema.into()),
                                         name: name.into(),
                                     },
                                     actions,
                                     txid: None,
-                                },
+                                }],
                                 cur_pos.with_lsn(*lsn).into(),
                             ));
                         } else {
@@ -741,11 +741,11 @@ impl Connector for PostgresWalConnector {
                         }
 
                         return Ok((
-                            ReplicationAction::TableAction {
+                            vec![ReplicationAction::TableAction {
                                 table: cur_table,
                                 actions,
                                 txid: None,
-                            },
+                            }],
                             cur_pos.into(),
                         ));
                     }
@@ -761,11 +761,11 @@ impl Connector for PostgresWalConnector {
                     if !actions.is_empty() {
                         self.peek = Some(Ok(event));
                         return Ok((
-                            ReplicationAction::TableAction {
+                            vec![ReplicationAction::TableAction {
                                 table: cur_table,
                                 actions,
                                 txid: None,
-                            },
+                            }],
                             cur_pos.into(),
                         ));
                     } else {
@@ -782,20 +782,20 @@ impl Connector for PostgresWalConnector {
                 WalEvent::DdlEvent { ddl_event, lsn } => {
                     if actions.is_empty() {
                         return Ok((
-                            ReplicationAction::DdlChange {
+                            vec![ReplicationAction::DdlChange {
                                 schema: ddl_event.schema().to_string(),
                                 changes: vec![ddl_event.into_change()],
-                            },
+                            }],
                             cur_pos.with_lsn(lsn).into(),
                         ));
                     } else {
                         self.peek = Some(Ok(WalEvent::DdlEvent { ddl_event, lsn }));
                         return Ok((
-                            ReplicationAction::TableAction {
+                            vec![ReplicationAction::TableAction {
                                 table: cur_table,
                                 actions,
                                 txid: None,
-                            },
+                            }],
                             cur_pos.into(),
                         ));
                     }
@@ -847,15 +847,15 @@ impl Connector for PostgresWalConnector {
 
                     if !actions.is_empty() {
                         return Ok((
-                            ReplicationAction::TableAction {
+                            vec![ReplicationAction::TableAction {
                                 table: cur_table,
                                 actions,
                                 txid: None,
-                            },
+                            }],
                             position.into(),
                         ));
                     } else {
-                        return Ok((ReplicationAction::LogPosition, position.into()));
+                        return Ok((vec![ReplicationAction::LogPosition], position.into()));
                     }
                 }
                 WalEvent::Insert { tuple, lsn, .. } => {
