@@ -96,7 +96,7 @@ impl Dialect {
     pub(crate) fn real_type(&self) -> DfType {
         // TODO: Handle `real_as_float` mode.
         match self.engine {
-            SqlEngine::PostgreSQL => DfType::Double,
+            SqlEngine::PostgreSQL => DfType::Float,
             SqlEngine::MySQL => DfType::Float,
         }
     }

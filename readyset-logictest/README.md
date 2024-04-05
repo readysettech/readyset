@@ -9,7 +9,7 @@ Sqllogictest supports three data types:
 
 - `I` - integer
 - `T` - varchar(30)
-- `R` - real
+- `R` - real (8-byte, floating-point type)
 
 The intent is to keep things as simple as possible for this kind of test.
 We have found that to be mostly sufficient, but we've added support to
