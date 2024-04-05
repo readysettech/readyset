@@ -101,8 +101,10 @@ impl<'ast> VisitorMut<'ast> for AutoParameterizeVisitor {
                     op,
                     rhs: rhs @ box Expr::Column(_),
                 } if op.is_ordering_comparison() => {
-                    // for lit = col, swap the inequality first then revisit
+                    // for lit <ordering op> col, swap operands and flip operator, then revisit
                     mem::swap(lhs, rhs);
+                    // this shouldn't fail as we just did the `op.is_ordering_comparison()` check
+                    *op = op.flip_ordering_comparison().unwrap();
                     return self.visit_expr(expression);
                 }
                 Expr::In {
@@ -264,8 +266,10 @@ impl<'ast> VisitorMut<'ast> for AnalyzeLiteralsVisitor {
                     op,
                     rhs: rhs @ box Expr::Column(_),
                 } if op.is_ordering_comparison() => {
-                    // for lit = col, swap the equality first then revisit
+                    // for lit <ordering op> col, swap operands and flip operator, then revisit
                     mem::swap(lhs, rhs);
+                    // this shouldn't fail as we just did the `op.is_ordering_comparison()` check
+                    *op = op.flip_ordering_comparison().unwrap();
                     return self.visit_expr(expression);
                 }
                 Expr::In {

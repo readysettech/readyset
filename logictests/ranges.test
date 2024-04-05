@@ -70,3 +70,21 @@ select x from t1 where x > ? and y < ?
 ? = 4
 ----
 3
+
+# test floating-point range selection, based on REA-4193
+statement ok
+CREATE TABLE FLOAT8_TBL(f1 double precision)
+
+statement ok
+INSERT INTO FLOAT8_TBL(f1) VALUES
+('0.0'),
+('1004.3'),
+('-34.84'),
+('123456.5')
+
+query R rowsort
+SELECT f1 FROM FLOAT8_TBL f WHERE '1004.3' > f.f1
+----
+-34.84
+0.0
+
