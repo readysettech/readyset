@@ -76,6 +76,10 @@ pub enum ReadySetError {
     #[error("The provided query is invalid: {0}")]
     InvalidQuery(String),
 
+    /// The query event should be skipped
+    #[error("The query event should be skipped")]
+    SkipEvent,
+
     /// The query ID is invalid
     #[error("The provided query ID is invalid: {0}")]
     InvalidQueryId(String),
