@@ -2805,13 +2805,20 @@ async fn numeric_snapshot_nan() {
             .into_iter()
             .filter_map(|m| {
                 if let SimpleQueryMessage::Row(r) = m {
-                    r.get(1).map(String::from)
+                    let (table, status) = (r.get(0).map(String::from).unwrap(), r.get(1).map(String::from).unwrap());
+                        // Tables from other tests can linger in the upstream, so filter this to only
+                        // numer
+                        if table.contains("numer") {
+                            Some((table, status))
+                        } else {
+                            None
+                        }
                 } else {
                     None
                 }
             })
             .last()
-            .unwrap();
+            .unwrap().1;
         AssertUnwindSafe(|| result)
     }, then_assert: |result| {
         assert!(result().contains("Not Replicated"));

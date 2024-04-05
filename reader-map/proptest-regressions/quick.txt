@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 3a62f3267a92c5a31e12528a3ea72ed91d963e1c3d84dfb975756d19c1f78e11 # shrinks to input = _KeysValuesArgs { ops: [RemoveRange((Included(0), Excluded(0)))] }
+cc f4d3dbbfcf53c6e9333cd151f575f31d4f96be27f8ae4010bdbe8da1ccaaff51 # shrinks to input = _OperationsI8Args { ops: [RemoveRange((Included(0), Included(-1)))] }
+cc 8d361df8193a09078417b234807e7e22e95117f0c8d480f0a7a3d21f5f27d0bd # shrinks to input = _OperationsStringArgs { ops: [RemoveRange((Excluded("a"), Excluded(" ")))] }

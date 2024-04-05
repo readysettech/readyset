@@ -1,24 +1,21 @@
-#![cfg(not(miri))]
 #![feature(btree_extract_if)]
 
 extern crate reader_map;
 
-use reader_map::handles::{ReadHandle, WriteHandle};
-use reader_map::DefaultInsertionOrder;
-
-extern crate quickcheck;
-#[macro_use(quickcheck)]
-extern crate quickcheck_macros;
-
-use std::cmp::{min, Ord};
+use std::cmp::Ord;
 use std::collections::{BTreeMap, HashSet};
 use std::fmt::Debug;
 use std::hash::{BuildHasher, Hash};
-use std::ops::Deref;
+use std::ops::Range;
 
-use quickcheck::{Arbitrary, Gen};
-use rand::Rng;
+use proptest::collection::size_range;
+use proptest::prelude::*;
+use reader_map::handles::{ReadHandle, WriteHandle};
+use reader_map::DefaultInsertionOrder;
 use readyset_util::ranges::{Bound, RangeBounds};
+use test_strategy::{proptest, Arbitrary};
+
+const LARGE_VEC_RANGE: Range<usize> = 10..1000;
 
 fn set<'a, T: 'a, I>(iter: I) -> HashSet<T>
 where
@@ -28,19 +25,19 @@ where
     iter.into_iter().cloned().collect()
 }
 
-#[quickcheck]
-fn contains(insert: Vec<u32>) -> bool {
+#[proptest]
+fn contains(insert: Vec<u32>) {
     let (mut w, r) = reader_map::new();
     for &key in &insert {
         w.insert(key, ());
     }
     w.publish();
 
-    insert.iter().all(|&key| r.get(&key).unwrap().is_some())
+    assert!(insert.iter().all(|&key| r.get(&key).unwrap().is_some()));
 }
 
-#[quickcheck]
-fn contains_not(insert: Vec<u8>, not: Vec<u8>) -> bool {
+#[proptest]
+fn contains_not(insert: Vec<u8>, not: Vec<u8>) {
     let (mut w, r) = reader_map::new();
     for &key in &insert {
         w.insert(key, ());
@@ -48,11 +45,11 @@ fn contains_not(insert: Vec<u8>, not: Vec<u8>) -> bool {
     w.publish();
 
     let nots = &set(&not) - &set(&insert);
-    nots.iter().all(|&key| r.get(&key).unwrap().is_none())
+    assert!(nots.iter().all(|&key| r.get(&key).unwrap().is_none()));
 }
 
-#[quickcheck]
-fn insert_empty(insert: Vec<u8>, remove: Vec<u8>) -> bool {
+#[proptest]
+fn insert_empty(insert: Vec<u8>, remove: Vec<u8>) {
     let (mut w, r) = reader_map::new();
     for &key in &insert {
         w.insert(key, ());
@@ -63,54 +60,55 @@ fn insert_empty(insert: Vec<u8>, remove: Vec<u8>) -> bool {
     }
     w.publish();
     let elements = &set(&insert) - &set(&remove);
-    r.len() == elements.len()
-        && r.enter().iter().flat_map(|r| r.keys()).count() == elements.len()
-        && elements.iter().all(|k| r.get(k).unwrap().is_some())
+
+    assert_eq!(r.len(), elements.len());
+    assert_eq!(
+        r.enter().iter().flat_map(|r| r.keys()).count(),
+        elements.len()
+    );
+    assert!(elements.iter().all(|k| r.get(k).unwrap().is_some()));
 }
 
 use Op::*;
-#[derive(Copy, Clone, Debug)]
-enum Op<K, V> {
+#[derive(Arbitrary, Copy, Clone, Debug)]
+enum Op<K: Ord + Clone, V> {
     Add(K, V),
     Remove(K),
     RemoveValue(K, V),
-    RemoveRange((Bound<K>, Bound<K>)),
+    RemoveRange(#[strategy(arbitrary_range())] (Bound<K>, Bound<K>)),
     Refresh,
 }
 
-impl<K, V> Arbitrary for Op<K, V>
-where
-    K: Arbitrary + PartialEq + PartialOrd,
-    V: Arbitrary,
-{
-    fn arbitrary<G: Gen>(g: &mut G) -> Self {
-        match g.gen::<u32>() % 4 {
-            0 => Add(K::arbitrary(g), V::arbitrary(g)),
-            1 => Remove(K::arbitrary(g)),
-            2 => RemoveValue(K::arbitrary(g), V::arbitrary(g)),
-            3 => loop {
-                let bounds = (Bound::arbitrary(g), Bound::arbitrary(g));
+fn arbitrary_range<T: Arbitrary + Ord + Clone + 'static>(
+) -> impl Strategy<Value = (Bound<T>, Bound<T>)> {
+    use Bound::*;
 
-                match bounds {
-                    (Bound::Excluded(s), Bound::Excluded(e))
-                    | (Bound::Included(s), Bound::Excluded(e))
-                    | (Bound::Excluded(s), Bound::Included(e))
-                        if s == e =>
-                    {
-                        continue;
-                    }
-                    (
-                        Bound::Included(s) | Bound::Excluded(s),
-                        Bound::Included(e) | Bound::Excluded(e),
-                    ) if s > e => {
-                        continue;
-                    }
-                    _ => return RemoveRange(bounds),
+    (any::<Bound<T>>(), any::<Bound<T>>())
+        .prop_filter("bounds cannot be equal", |(b1, b2)| match (b1, b2) {
+            (Included(b1), Excluded(b2))
+            | (Excluded(b1), Included(b2))
+            | (Excluded(b1), Excluded(b2)) => b1 != b2,
+            _ => true,
+        })
+        .prop_map(|(b1, b2)| {
+            fn inner<T>(bound: Bound<&T>) -> Option<&T> {
+                match bound {
+                    Bound::Included(b) => Some(b),
+                    Bound::Excluded(b) => Some(b),
                 }
-            },
-            _ => Refresh,
-        }
-    }
+            }
+
+            match (inner(b1.as_ref()), inner(b2.as_ref())) {
+                (Some(b1_inner), Some(b2_inner)) => {
+                    if b1_inner <= b2_inner {
+                        (b1, b2)
+                    } else {
+                        (b2, b1)
+                    }
+                }
+                (_, _) => (b1, b2),
+            }
+        })
 }
 
 fn do_ops<K, V, S>(
@@ -190,61 +188,8 @@ where
     true
 }
 
-/// quickcheck Arbitrary adaptor -- make a larger vec
-#[derive(Clone, Debug)]
-struct Large<T>(T);
-
-impl<T> Deref for Large<T> {
-    type Target = T;
-    fn deref(&self) -> &T {
-        &self.0
-    }
-}
-
-impl<T> Arbitrary for Large<Vec<T>>
-where
-    T: Arbitrary,
-{
-    fn arbitrary<G: Gen>(g: &mut G) -> Self {
-        let len = g.next_u32() % (g.size() * 10) as u32;
-        Large((0..len).map(|_| T::arbitrary(g)).collect())
-    }
-
-    fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
-        Box::new((**self).shrink().map(Large))
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Ord, PartialOrd, Hash)]
-struct Alphabet(String);
-
-impl Deref for Alphabet {
-    type Target = String;
-    fn deref(&self) -> &String {
-        &self.0
-    }
-}
-
-const ALPHABET: &[u8] = b"abcdefghijklmnopqrstuvwxyz";
-
-impl Arbitrary for Alphabet {
-    fn arbitrary<G: Gen>(g: &mut G) -> Self {
-        let len = g.next_u32() % g.size() as u32;
-        let len = min(len, 16);
-        Alphabet(
-            (0..len)
-                .map(|_| ALPHABET[g.next_u32() as usize % ALPHABET.len()] as char)
-                .collect(),
-        )
-    }
-
-    fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
-        Box::new((**self).shrink().map(Alphabet))
-    }
-}
-
-#[quickcheck]
-fn operations_i8(ops: Large<Vec<Op<i8, i8>>>) -> bool {
+#[proptest]
+fn operations_i8(#[any(size_range(LARGE_VEC_RANGE).lift())] ops: Vec<Op<i8, i8>>) {
     let (mut w, r) = reader_map::new();
     let mut write_ref = BTreeMap::new();
     let mut read_ref = BTreeMap::new();
@@ -252,11 +197,11 @@ fn operations_i8(ops: Large<Vec<Op<i8, i8>>>) -> bool {
     assert_maps_equivalent(&r, &read_ref);
 
     w.publish();
-    assert_maps_equivalent(&r, &write_ref)
+    assert_maps_equivalent(&r, &write_ref);
 }
 
-#[quickcheck]
-fn operations_string(ops: Vec<Op<Alphabet, i8>>) -> bool {
+#[proptest]
+fn operations_string(ops: Vec<Op<String, i8>>) {
     let (mut w, r) = reader_map::new();
     let mut write_ref = BTreeMap::new();
     let mut read_ref = BTreeMap::new();
@@ -264,11 +209,11 @@ fn operations_string(ops: Vec<Op<Alphabet, i8>>) -> bool {
     assert_maps_equivalent(&r, &read_ref);
 
     w.publish();
-    assert_maps_equivalent(&r, &write_ref)
+    assert_maps_equivalent(&r, &write_ref);
 }
 
-#[quickcheck]
-fn keys_values(ops: Large<Vec<Op<i8, i8>>>) -> bool {
+#[proptest]
+fn keys_values(#[any(size_range(LARGE_VEC_RANGE).lift())] ops: Vec<Op<i8, i8>>) {
     let (mut w, r) = reader_map::new();
     let mut write_ref = BTreeMap::new();
     let mut read_ref = BTreeMap::new();
@@ -296,6 +241,5 @@ fn keys_values(ops: Large<Vec<Op<i8, i8>>>) -> bool {
             w_visit.publish();
         }
         assert_eq!(r_visit.len(), read_ref.len());
-    }
-    true
+    };
 }

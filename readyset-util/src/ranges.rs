@@ -5,8 +5,6 @@ use std::str;
 
 use proptest::arbitrary::Arbitrary;
 use proptest::prelude::*;
-use quickcheck::Gen;
-use rand::Rng;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -98,17 +96,20 @@ pub enum Bound<T> {
 impl<T> Arbitrary for Bound<T>
 where
     T: Arbitrary + 'static,
-    T::Parameters: Clone,
 {
     type Parameters = T::Parameters;
     type Strategy = BoxedStrategy<Self>;
 
     fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
-        prop_oneof![
-            any_with::<T>(args.clone()).prop_map(Bound::Included),
-            any_with::<T>(args).prop_map(Bound::Excluded)
-        ]
-        .boxed()
+        any_with::<T>(args)
+            .prop_perturb(|inner, mut rng| {
+                if rng.gen_bool(0.5) {
+                    Bound::Included(inner)
+                } else {
+                    Bound::Excluded(inner)
+                }
+            })
+            .boxed()
     }
 }
 
@@ -195,23 +196,6 @@ impl<T> TryFrom<ops::Bound<T>> for Bound<T> {
             ops::Bound::Included(b) => Ok(Bound::Included(b)),
             ops::Bound::Excluded(b) => Ok(Bound::Excluded(b)),
             ops::Bound::Unbounded => Err(BoundConversionError),
-        }
-    }
-}
-
-impl<T: quickcheck::Arbitrary> quickcheck::Arbitrary for Bound<T> {
-    fn arbitrary<G: Gen>(g: &mut G) -> Bound<T> {
-        if g.gen::<bool>() {
-            Bound::Included(T::arbitrary(g))
-        } else {
-            Bound::Excluded(T::arbitrary(g))
-        }
-    }
-
-    fn shrink(&self) -> Box<dyn Iterator<Item = Bound<T>>> {
-        match *self {
-            Bound::Included(ref x) => Box::new(x.shrink().map(Bound::Included)),
-            Bound::Excluded(ref x) => Box::new(x.shrink().map(Bound::Excluded)),
         }
     }
 }
