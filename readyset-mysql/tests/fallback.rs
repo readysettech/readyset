@@ -734,6 +734,64 @@ async fn transaction_proxies() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 #[slow]
+async fn show_caches_index_hints() {
+    let (opts, _handle, shutdown_tx) = setup().await;
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+
+    let _ = conn.query_drop("CREATE TABLE t_idx_hnt (a INT PRIMARY KEY, b INT, c INT, KEY `idx_1`(b), KEY `idx_2`(c))")
+        .await;
+
+    // Run a base query
+    let _ = conn
+        .query_drop("SELECT a, b, c FROM t_idx_hnt WHERE a = 1;")
+        .await;
+
+    // Check we have cached this query
+    // in-request-path migrations is enabled, we should have a cached query
+    let cached_queries = conn
+        .query::<(String, String, String, String), _>("SHOW CACHES;")
+        .await
+        .unwrap();
+    assert!(cached_queries.len() == 1);
+
+    // Run all possible index hints
+    let index_hint_type_list: Vec<&str> = vec!["USE", "IGNORE", "FORCE"];
+    let index_or_key_list: Vec<&str> = vec!["INDEX", "KEY"];
+    let index_for_list: Vec<&str> = vec!["", "FOR JOIN", "FOR ORDER BY", "FOR GROUP BY"];
+    let index_name_list: Vec<&str> = vec!["`idx_1`", "`idx_2`", "`primary`"];
+    for hint_type in index_hint_type_list {
+        for index_or_key in index_or_key_list.iter() {
+            for index_for in index_for_list.iter() {
+                let mut formatted_index_list_str = String::new();
+                for n in index_name_list.iter() {
+                    if formatted_index_list_str.is_empty() {
+                        formatted_index_list_str = n.to_string();
+                    } else {
+                        formatted_index_list_str = format!("{}, {}", formatted_index_list_str, n);
+                    }
+                    let qstring = format!(
+                        "SELECT a, b, c FROM `t_idx_hnt` {} {} {}({}) WHERE a = 1",
+                        hint_type, index_or_key, index_for, formatted_index_list_str
+                    );
+                    conn.query_drop(&qstring).await.unwrap();
+                }
+            }
+        }
+    }
+
+    // All variants of index hints should resolve to the same base query
+    let cached_queries = conn
+        .query::<(String, String, String, String), _>("SHOW CACHES;")
+        .await
+        .unwrap();
+    assert!(cached_queries.len() == 1);
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+#[slow]
 async fn valid_sql_parsing_failed_shows_proxied() {
     let (opts, _handle, shutdown_tx) = setup().await;
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();

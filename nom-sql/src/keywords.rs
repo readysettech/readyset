@@ -95,6 +95,7 @@ fn keyword_e_to_i(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], &[u8]> {
             terminated(tag_no_case("EXPLAIN"), keyword_follow_char),
             terminated(tag_no_case("FAIL"), keyword_follow_char),
             terminated(tag_no_case("FOR"), keyword_follow_char),
+            terminated(tag_no_case("FORCE"), keyword_follow_char),
             terminated(tag_no_case("FOREIGN"), keyword_follow_char),
             terminated(tag_no_case("FROM"), keyword_follow_char),
             terminated(tag_no_case("FULL"), keyword_follow_char),
@@ -112,7 +113,6 @@ fn keyword_e_to_i(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], &[u8]> {
             terminated(tag_no_case("INITIALLY"), keyword_follow_char),
             terminated(tag_no_case("INNER"), keyword_follow_char),
             terminated(tag_no_case("INSTEAD"), keyword_follow_char),
-            terminated(tag_no_case("INTERSECT"), keyword_follow_char),
         )),
         |i| *i,
     )(i)
@@ -121,6 +121,7 @@ fn keyword_e_to_i(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], &[u8]> {
 fn keyword_i_to_p(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], &[u8]> {
     map(
         alt((
+            terminated(tag_no_case("INTERSECT"), keyword_follow_char),
             terminated(tag_no_case("INTO"), keyword_follow_char),
             terminated(tag_no_case("IS"), keyword_follow_char),
             terminated(tag_no_case("JOIN"), keyword_follow_char),
@@ -141,7 +142,6 @@ fn keyword_i_to_p(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], &[u8]> {
             terminated(tag_no_case("ORDER"), keyword_follow_char),
             terminated(tag_no_case("OUTER"), keyword_follow_char),
             terminated(tag_no_case("PLAN"), keyword_follow_char),
-            terminated(tag_no_case("PRAGMA"), keyword_follow_char),
         )),
         |i| *i,
     )(i)
@@ -150,6 +150,7 @@ fn keyword_i_to_p(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], &[u8]> {
 fn keyword_p_to_t(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], &[u8]> {
     map(
         alt((
+            terminated(tag_no_case("PRAGMA"), keyword_follow_char),
             terminated(tag_no_case("PRIMARY"), keyword_follow_char),
             terminated(tag_no_case("QUERY"), keyword_follow_char),
             terminated(tag_no_case("RAISE"), keyword_follow_char),
@@ -170,7 +171,6 @@ fn keyword_p_to_t(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], &[u8]> {
             terminated(tag_no_case("TEMP"), keyword_follow_char),
             terminated(tag_no_case("TEMPORARY"), keyword_follow_char),
             terminated(tag_no_case("THEN"), keyword_follow_char),
-            terminated(tag_no_case("TO"), keyword_follow_char),
         )),
         |i| *i,
     )(i)
@@ -179,11 +179,13 @@ fn keyword_p_to_t(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], &[u8]> {
 fn keyword_t_to_z(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], &[u8]> {
     map(
         alt((
+            terminated(tag_no_case("TO"), keyword_follow_char),
             terminated(tag_no_case("TRANSACTION"), keyword_follow_char),
             terminated(tag_no_case("TRIGGER"), keyword_follow_char),
             terminated(tag_no_case("UNION"), keyword_follow_char),
             terminated(tag_no_case("UNIQUE"), keyword_follow_char),
             terminated(tag_no_case("UPDATE"), keyword_follow_char),
+            terminated(tag_no_case("USE"), keyword_follow_char),
             terminated(tag_no_case("USING"), keyword_follow_char),
             terminated(tag_no_case("VACUUM"), keyword_follow_char),
             terminated(tag_no_case("VIEW"), keyword_follow_char),

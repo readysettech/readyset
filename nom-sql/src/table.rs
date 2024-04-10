@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
 use crate::common::{as_alias, ws_sep_comma};
+use crate::index_hint::{index_hint_list, IndexHint};
 use crate::select::nested_selection;
 use crate::whitespace::whitespace0;
 use crate::{Dialect, DialectDisplay, NomSqlResult, SelectStatement, SqlIdentifier};
@@ -133,11 +134,12 @@ impl DialectDisplay for TableExprInner {
     }
 }
 
-/// An expression for a table in the `FROM` clause of a query, with optional alias
+/// An expression for a table in the `FROM` clause of a query, with optional alias and index hint
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Arbitrary)]
 pub struct TableExpr {
     pub inner: TableExprInner,
     pub alias: Option<SqlIdentifier>,
+    pub index_hint: Option<IndexHint>,
 }
 
 /// Constructs a [`TableExpr`] with no alias
@@ -146,6 +148,7 @@ impl From<Relation> for TableExpr {
         Self {
             inner: TableExprInner::Table(table),
             alias: None,
+            index_hint: None,
         }
     }
 }
@@ -213,7 +216,17 @@ pub fn table_expr(
     move |i| {
         let (i, inner) = table_expr_inner(dialect)(i)?;
         let (i, alias) = opt(as_alias(dialect))(i)?;
-        Ok((i, TableExpr { inner, alias }))
+        let (i, _) = opt(index_hint_list(dialect))(i)?;
+        Ok((
+            i,
+            TableExpr {
+                inner,
+                alias,
+                // We don't actually care about the index list.
+                // Just parse it and always return an empty object.
+                index_hint: None,
+            },
+        ))
     }
 }
 

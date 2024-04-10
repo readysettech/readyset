@@ -120,6 +120,7 @@ fn query_indexed_by_columns(
         tables: vec![TableExpr {
             inner: TableExprInner::Table(table.name.clone().into()),
             alias: None,
+            index_hint: None,
         }],
         fields: vec![FieldDefinitionExpr::All],
         where_clause: cols

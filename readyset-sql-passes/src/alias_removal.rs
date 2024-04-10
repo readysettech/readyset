@@ -253,6 +253,7 @@ mod tests {
                     schema: None,
                 }),
                 alias: Some("t".into()),
+                index_hint: None,
             }],
             fields: vec![FieldDefinitionExpr::from(Column::from("t.id"))],
             where_clause: Some(Expr::BinaryOp {
@@ -291,6 +292,7 @@ mod tests {
                             name: "PaperTag".into(),
                         }),
                         alias: None,
+                        index_hint: None,
                     }]
                 );
             }
@@ -326,6 +328,7 @@ mod tests {
                     name: "PaperTag".into(),
                 }),
                 alias: Some("t".into()),
+                index_hint: None,
             }],
             fields: vec![FieldDefinitionExpr::from(col_small.clone())],
             where_clause: Some(Expr::BinaryOp {
@@ -361,6 +364,7 @@ mod tests {
                             name: "PaperTag".into(),
                         }),
                         alias: None,
+                        index_hint: None,
                     }]
                 );
             }
@@ -402,6 +406,7 @@ mod tests {
                             name: "__query_name__t1".into(),
                         }),
                         alias: None,
+                        index_hint: None,
                     }]
                 );
                 assert_eq!(
@@ -414,6 +419,7 @@ mod tests {
                                 name: "__query_name__t2".into(),
                             }),
                             alias: None,
+                            index_hint: None,
                         }),
                         constraint: JoinConstraint::On(Expr::BinaryOp {
                             op: BinaryOperator::Equal,

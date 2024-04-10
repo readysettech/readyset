@@ -82,6 +82,7 @@ mod dialect;
 mod drop;
 mod explain;
 mod expression;
+mod index_hint;
 mod insert;
 mod join;
 mod keywords;

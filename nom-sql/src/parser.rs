@@ -324,7 +324,9 @@ mod tests {
         use std::hash::{Hash, Hasher};
 
         use super::*;
+        use crate::index_hint::IndexHint;
         use crate::table::Relation;
+        use crate::SqlIdentifier;
 
         #[test]
         fn trim_query() {
@@ -517,6 +519,57 @@ mod tests {
             assert!(res1.is_ok());
             assert_eq!(expected0, res0.unwrap().display(Dialect::MySQL).to_string());
             assert_eq!(expected1, res1.unwrap().display(Dialect::MySQL).to_string());
+        }
+
+        #[test]
+        fn select_index_hint() {
+            let base_query = "SELECT * FROM `users`";
+            let index_hint_type_list: Vec<&str> = vec!["USE", "IGNORE", "FORCE"];
+            let index_or_key_list: Vec<&str> = vec!["INDEX", "KEY"];
+            let index_for_list: Vec<&str> = vec!["", " FOR JOIN", " FOR ORDER BY", " FOR GROUP BY"];
+            let index_name_list: Vec<&str> = vec!["index_name", "primary", "index_name1"];
+            for hint_type in index_hint_type_list {
+                for index_or_key in index_or_key_list.iter() {
+                    for index_for in index_for_list.iter() {
+                        let mut formatted_index_list_str = String::new();
+                        let mut index_list: Vec<SqlIdentifier> = vec![];
+                        for n in index_name_list.iter() {
+                            index_list.push(SqlIdentifier::from(*n));
+                            if formatted_index_list_str.is_empty() {
+                                formatted_index_list_str = n.to_string();
+                            } else {
+                                formatted_index_list_str =
+                                    format!("{}, {}", formatted_index_list_str, n);
+                            }
+                            let index_hint_str = format!(
+                                "{} {}{} ({})",
+                                hint_type, index_or_key, index_for, formatted_index_list_str
+                            );
+                            let qstring = format!("SELECT * FROM `users` {}", index_hint_str);
+                            let res = parse_query(Dialect::MySQL, &qstring);
+                            assert!(res.is_ok());
+                            assert_eq!(
+                                base_query,
+                                res.unwrap().display(Dialect::MySQL).to_string()
+                            );
+
+                            let index_hit = IndexHint {
+                                hint_type: hint_type.into(),
+                                index_or_key: index_or_key.into(),
+                                index_usage_type: match index_for {
+                                    &"" => None,
+                                    _ => Some(index_for.trim().into()),
+                                },
+                                index_list: index_list.clone(),
+                            };
+                            assert_eq!(
+                                index_hint_str,
+                                index_hit.display(Dialect::MySQL).to_string()
+                            );
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -809,7 +862,8 @@ mod tests {
                     }],
                     tables: vec![TableExpr {
                         inner: TableExprInner::Table("t1".into()),
-                        alias: None
+                        alias: None,
+                        index_hint: None,
                     }],
                     ..Default::default()
                 })

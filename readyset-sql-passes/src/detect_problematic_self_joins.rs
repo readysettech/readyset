@@ -145,6 +145,7 @@ fn check_select_statement<'a>(
                         JoinRightSide::Table(TableExpr {
                             inner: TableExprInner::Subquery(sq),
                             alias: Some(alias),
+                            index_hint: None,
                         }) if table.schema.is_none() && *alias == table.name => {
                             res = Some(Either::Right(trace_subquery(
                                 sq,
