@@ -498,13 +498,13 @@ impl ReadySetHandle {
         /// For each of the given list of queries, determine whether that query (or a semantically
         /// equivalent query) has been created as a `View`.
         ///
-        /// To save on data, this returns a list of `Option<Relation>` corresponding to the provided
-        /// list of queries, where each option is `Some(<query name>)` if the query at the same
-        /// position in the argument list has been installed as a view.
-        view_names(
+        /// To save on data, this returns a list of booleans corresponding to the provided list of
+        /// query, where each boolean is `true` if the query at the same position in the argument list
+        /// has been installed as a view.
+        view_statuses(
             queries: Vec<ViewCreateRequest>,
             dialect: dataflow_expression::Dialect,
-        ) -> Vec<Option<Relation>>
+        ) -> Vec<bool>
     );
 
     /// Obtain a `View` that allows you to query the given external view.

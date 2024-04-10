@@ -7,7 +7,7 @@ use std::error::Error;
 use std::io;
 
 use derive_more::Display;
-use nom_sql::{DialectDisplay, Relation, SelectStatement};
+use nom_sql::Relation;
 use petgraph::graph::NodeIndex;
 use readyset_util::redacted::Sensitive;
 use serde::{Deserialize, Serialize};
@@ -286,10 +286,6 @@ pub enum ReadySetError {
     /// A view couldn't be found.
     #[error("Could not find view {0}")]
     ViewNotFound(String),
-
-    /// A view couldn't be found for the given query.
-    #[error("Could not find view for query {}", Sensitive(&statement.display(nom_sql::Dialect::MySQL)))]
-    ViewNotFoundForQuery { statement: SelectStatement },
 
     /// A view couldn't be found in the given pool of worker.
     #[error("Could not find view '{name}' in workers '{workers:?}'")]
@@ -770,10 +766,7 @@ impl ReadySetError {
 
     /// Returns `true` if self is ['ViewNotFound'] or ['ViewNotFoundForQuery'].
     pub fn is_view_not_found(&self) -> bool {
-        matches!(
-            self,
-            Self::ViewNotFound(..) | Self::ViewNotFoundForQuery { .. }
-        )
+        matches!(self, Self::ViewNotFound(..))
     }
 
     /// Returns `true` if self either *is* [`ViewNotFound`], or was *caused by* [`ViewNotFound`].

@@ -1,5 +1,4 @@
 use std::panic::AssertUnwindSafe;
-use std::sync::Arc;
 
 use chrono::NaiveDate;
 use postgres_types::private::BytesMut;
@@ -16,7 +15,7 @@ use serial_test::serial;
 use test_utils::slow;
 
 mod common;
-use common::{connect, setup_standalone_with_authority};
+use common::connect;
 use postgres_types::{accepts, to_sql_checked, FromSql, IsNull, ToSql, Type};
 use tokio_postgres::{Client, CommandCompleteContents, SimpleQueryMessage};
 
@@ -2215,11 +2214,109 @@ async fn named_cache_queryable_after_being_cleared() {
     shutdown_tx.shutdown().await;
 }
 
+// Tests that a cache with a name can still be queried after it is cleared from the query status
+// cache
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+#[slow]
+async fn named_cache_queryable_after_being_cleared() {
+    readyset_tracing::init_test_logging();
+    let prefix = "named_cache_queryable_after_being_cleared";
+
+    let storage_dir = {
+        let (builder, authority, storage_dir) = setup_standalone_with_authority(prefix, None);
+        let (config, handle, shutdown_tx) = builder
+            .fallback(true)
+            .migration_style(MigrationStyle::Explicit)
+            .migration_mode(MigrationMode::OutOfBand)
+            .build::<PostgreSQLAdapter>()
+            .await;
+
+        let conn = connect(config).await;
+
+        conn.simple_query("DROP TABLE IF EXISTS t").await.unwrap();
+        conn.simple_query("CREATE TABLE t (x int)").await.unwrap();
+        eventually!(conn
+            .simple_query("CREATE CACHE test FROM SELECT * FROM t WHERE x = 1")
+            .await
+            .is_ok());
+        conn.simple_query("SELECT * FROM t WHERE x = 1")
+            .await
+            .unwrap();
+        let destination = match conn
+            .simple_query("EXPLAIN LAST STATEMENT")
+            .await
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap()
+        {
+            SimpleQueryMessage::Row(row) => row.get(0).unwrap().to_owned(),
+            _ => panic!(),
+        };
+
+        assert_eq!(destination, "readyset");
+
+        shutdown_tx.shutdown().await;
+        sleep().await;
+        drop(handle);
+
+        // Workers are cleared from the authority only when `Authority::drop` is called, so we
+        // need to wait for all the other `Arc<Authority>`s to be dropped. Without this, the
+        // next server we start up could end up registering the worker from the old server in
+        // addition to the new one, which would cause connection issues, since the old worker
+        // is no longer running.
+        while Arc::strong_count(&authority) > 1 {
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        }
+
+        storage_dir
+    };
+
+    let (builder, _authority, _tempdir) =
+        setup_standalone_with_authority(prefix, Some(storage_dir));
+
+    let (config, _handle, shutdown_tx) = builder
+        .fallback(true)
+        .recreate_database(false)
+        .migration_style(MigrationStyle::Explicit)
+        .migration_mode(MigrationMode::OutOfBand)
+        .build::<PostgreSQLAdapter>()
+        .await;
+
+    let conn = connect(config).await;
+
+    eventually!(run_test: {
+        conn.simple_query("SELECT * FROM t WHERE x = 1")
+            .await
+            .unwrap();
+
+        let destination = match conn
+            .simple_query("EXPLAIN LAST STATEMENT")
+            .await
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap()
+        {
+            SimpleQueryMessage::Row(row) => row.get(0).unwrap().to_owned(),
+            _ => panic!(),
+        };
+        AssertUnwindSafe(|| destination)
+    },
+    then_assert: |destination| {
+        assert_eq!(destination(), "readyset");
+    });
+
+    shutdown_tx.shutdown().await;
+}
+
 #[cfg(feature = "failure_injection")]
 mod failure_injection_tests {
     // TODO: move the above cfg failure_injection tests into this mod
 
     use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
 
     use lazy_static::lazy_static;
     use readyset_adapter::query_status_cache::MigrationStyle;
@@ -2231,6 +2328,7 @@ mod failure_injection_tests {
     use tracing::debug;
 
     use super::*;
+    use crate::common::setup_standalone_with_authority;
     use crate::Handle;
 
     async fn assert_query_hits_readyset(conn: &Client, query: &'static str) {

@@ -1014,9 +1014,7 @@ impl NoriaConnector {
         .map(|_| ())
     }
 
-    /// Gets the view name for the given statement from the view name cache, querying the server
-    /// for the name if it is not cached.
-    pub(crate) async fn get_view_name_cached(
+    pub(crate) async fn get_view_name(
         &mut self,
         q: &nom_sql::SelectStatement,
         is_prepared: bool,
@@ -1028,12 +1026,10 @@ impl NoriaConnector {
         let view_request = ViewCreateRequest::new(q.clone(), search_path.clone());
         self.view_name_cache
             .get_mut_or_try_insert_with(&view_request, shared_cache::InsertMode::Shared, async {
+                let qname: Relation = QueryId::from_select(q, search_path.as_slice()).into();
+
+                // add the query to ReadySet
                 if create_if_not_exist {
-                    // If create_if_not_exist is true, Readyset is configured to create caches on
-                    // the fly. Even if a view already does exist for the given query we still want
-                    // to send over a `CreateCache` change to ensure that new invalidating tables
-                    // are being created if the schema search path has changed
-                    let qname: Relation = QueryId::from_select(q, search_path.as_slice()).into();
                     if is_prepared {
                         info!(
                             query = %Sensitive(&q.display(self.parse_dialect)),
@@ -1068,46 +1064,28 @@ impl NoriaConnector {
                             error!(%error, "add query failed");
                         }
 
-                        Err(error)
-                    } else {
-                        Ok(qname)
+                        return Err(error);
                     }
                 } else {
-                    // `create_if_not_exist` is false, we check to see if the server has a view for
-                    // the given query
-                    let qname = noria_await!(
+                    match noria_await!(
                         self.inner.get_mut()?,
-                        self.inner
-                            .get_mut()?
-                            .noria
-                            .view_names(vec![view_request.clone()], self.dialect)
-                    )?
-                    .into_iter()
-                    .nth(0)
-                    .unwrap();
-
-                    if let Some(qname) = qname {
-                        // The server has the view, so we retrieve it and insert it into the view
-                        // name cache
-                        let view = noria_await!(
-                            self.inner.get_mut()?,
-                            self.inner.get_mut()?.noria.view(qname.clone())
-                        )?;
-
-                        self.inner
-                            .get_mut()?
-                            .views
-                            .insert(qname.clone(), view)
-                            .await;
-
-                        Ok(qname)
-                    } else {
-                        // The server does not have a view for this query, so we return an error
-                        Err(ReadySetError::ViewNotFoundForQuery {
-                            statement: q.clone(),
-                        })
+                        self.inner.get_mut()?.noria.view(qname.clone())
+                    ) {
+                        Ok(view) => {
+                            // We should not have an entry, but if we do it's safe to overwrite
+                            // since we got this information from the controller.
+                            self.inner
+                                .get_mut()?
+                                .views
+                                .insert(qname.clone(), view)
+                                .await;
+                        }
+                        Err(e) => {
+                            return Err(e);
+                        }
                     }
                 }
+                Ok(qname)
             })
             .await
             .cloned()
@@ -1421,7 +1399,7 @@ impl NoriaConnector {
         // check if we already have this query prepared
         trace!("select::access view");
         let qname = self
-            .get_view_name_cached(
+            .get_view_name(
                 &statement,
                 true,
                 create_if_not_exist,
@@ -1504,7 +1482,7 @@ impl NoriaConnector {
                 processed_query_params,
             } => {
                 let name = self
-                    .get_view_name_cached(statement, false, create_if_missing, None)
+                    .get_view_name(&statement, false, create_if_missing, None)
                     .await?;
                 (
                     Cow::Owned(name),
@@ -1578,7 +1556,7 @@ impl NoriaConnector {
         is_prepared: bool,
     ) -> ReadySetResult<()> {
         let qname = self
-            .get_view_name_cached(
+            .get_view_name(
                 statement,
                 is_prepared,
                 create_if_not_exists,
@@ -1596,18 +1574,17 @@ impl NoriaConnector {
         self.inner.inner.as_ref().map(|i| i.noria.clone())
     }
 
-    /// Queries the server for the view name if a view exists for the given query and `None`
-    /// otherwise.
-    pub(crate) async fn get_view_name(
+    /// Returns true if a view exists for the given query and false otherwise.
+    pub(crate) async fn get_view_status(
         &mut self,
         query: ViewCreateRequest,
-    ) -> ReadySetResult<Option<Relation>> {
+    ) -> ReadySetResult<bool> {
         self.inner
             .get_mut()?
             .noria
-            .view_names(vec![query], self.dialect)
+            .view_statuses(vec![query], self.dialect)
             .await
-            .map(|names| names.into_iter().nth(0).unwrap())
+            .map(|statuses| statuses[0])
     }
 }
 
