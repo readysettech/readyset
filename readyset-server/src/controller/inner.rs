@@ -373,14 +373,14 @@ impl Leader {
                 let ds = self.dataflow_state_handle.read().await;
                 return_serialized!(ds.verbose_views())
             }
-            (&Method::POST, "/view_names") => {
+            (&Method::POST, "/view_statuses") => {
                 let (queries, dialect): (Vec<ViewCreateRequest>, _) = bincode::deserialize(&body)?;
                 gauge!(
-                    recorded::CONTROLLER_RPC_VIEW_NAMES_NUM_QUERIES,
+                    recorded::CONTROLLER_RPC_VIEW_STATUSES_NUM_QUERIES,
                     queries.len() as f64,
                 );
                 let ds = self.dataflow_state_handle.read().await;
-                return_serialized!(ds.view_names(queries, dialect))
+                return_serialized!(ds.view_statuses(queries, dialect))
             }
             (&Method::GET, "/nodes") => {
                 let ds = self.dataflow_state_handle.read().await;

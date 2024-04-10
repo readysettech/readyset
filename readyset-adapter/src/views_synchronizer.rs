@@ -1,10 +1,9 @@
 use std::sync::Arc;
 
 use dataflow_expression::Dialect;
-use nom_sql::{DialectDisplay, Relation};
+use nom_sql::DialectDisplay;
 use readyset_client::query::MigrationState;
-use readyset_client::{ReadySetHandle, ViewCreateRequest};
-use readyset_util::shared_cache::LocalCache;
+use readyset_client::ReadySetHandle;
 use readyset_util::shutdown::ShutdownReceiver;
 use tokio::select;
 use tracing::{debug, info, instrument, trace, warn};
@@ -20,8 +19,6 @@ pub struct ViewsSynchronizer {
     poll_interval: std::time::Duration,
     /// Dialect to pass to ReadySet to control the expression semantics used for all queries
     dialect: Dialect,
-    /// Global and thread-local cache of view endpoints and prepared statements.
-    view_name_cache: LocalCache<ViewCreateRequest, Relation>,
 }
 
 impl ViewsSynchronizer {
@@ -30,14 +27,12 @@ impl ViewsSynchronizer {
         query_status_cache: &'static QueryStatusCache,
         poll_interval: std::time::Duration,
         dialect: Dialect,
-        view_name_cache: LocalCache<ViewCreateRequest, Relation>,
     ) -> Self {
         ViewsSynchronizer {
             controller,
             query_status_cache,
             poll_interval,
             dialect,
-            view_name_cache,
         }
     }
 
@@ -82,19 +77,18 @@ impl ViewsSynchronizer {
 
         match self
             .controller
-            .view_names(queries.clone(), self.dialect)
+            .view_statuses(queries.clone(), self.dialect)
             .await
         {
             Ok(statuses) => {
-                for (query, name) in queries.into_iter().zip(statuses) {
+                for (query, migrated) in queries.into_iter().zip(statuses) {
                     trace!(
                         // FIXME(REA-2168): Use correct dialect.
                         query = %query.statement.display(nom_sql::Dialect::MySQL),
-                        name = ?name,
+                        migrated,
                         "Loaded query status from controller"
                     );
-                    if let Some(name) = name {
-                        self.view_name_cache.insert(query.clone(), name).await;
+                    if migrated {
                         self.query_status_cache
                             .update_query_migration_state(&query, MigrationState::Successful)
                     }
