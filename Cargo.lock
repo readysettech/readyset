@@ -4038,6 +4038,7 @@ dependencies = [
  "readyset-adapter-types",
  "readyset-data",
  "readyset-tracing",
+ "readyset-util",
  "rust_decimal",
  "serde_json",
  "sha2",

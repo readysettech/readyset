@@ -40,6 +40,7 @@ uuid = "0.8"
 nom-sql = { path = "../nom-sql" }
 readyset-adapter-types = { path = "../readyset-adapter-types" }
 readyset-data = { path = "../readyset-data" }
+readyset-util = { path = "../readyset-util" }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["full"] }
