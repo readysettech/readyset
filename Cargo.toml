@@ -84,8 +84,12 @@ metrics-util = { git = "https://github.com/readysettech/metrics.git" }
 debug=true
 lto="thin"
 
+[profile.release-fat-lto]
+inherits = "release"
+lto="fat"
+
 [profile.release-dist]
 # configs for distro release packages (i.e. deb, rpm, etc.)
-inherits = "release"
+inherits = "release-fat-lto"
 debug = false
 strip = "debuginfo"
