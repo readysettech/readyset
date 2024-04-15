@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::io;
 
@@ -382,7 +383,7 @@ impl MySqlBinlogConnector {
     /// affect the schema. This event should be skipped in the parent function.
     async fn process_event_query(
         &mut self,
-        q_event: &mysql_common::binlog::events::QueryEvent<'_>,
+        q_event: mysql_common::binlog::events::QueryEvent<'_>,
     ) -> mysql::Result<ReplicationAction> {
         // Written when an updating statement is done.
         if self.enable_statement_logging {
@@ -424,6 +425,125 @@ impl MySqlBinlogConnector {
         };
 
         Ok(ReplicationAction::DdlChange { schema, changes })
+    }
+
+    /// Merge table actions into a hashmap of actions.
+    /// If the table already exists in the hashmap, the actions are merged.
+    /// If the table does not exist in the hashmap, a new entry is created.
+    /// # Arguments
+    /// * `map` - the hashmap to merge the actions into
+    /// * `action` - the action to merge
+    /// # Returns
+    /// This function does not return anything, it modifies the hashmap in place.
+    async fn merge_table_actions(
+        &mut self,
+        map: &mut HashMap<Relation, ReplicationAction>,
+        action: ReplicationAction,
+    ) {
+        match action {
+            ReplicationAction::TableAction {
+                table,
+                actions: incoming_actions,
+                txid: incoming_txid,
+            } => {
+                map.entry(table.clone())
+                    .and_modify(|e| {
+                        if let ReplicationAction::TableAction { actions, txid, .. } = e {
+                            actions.extend(incoming_actions.clone());
+                            *txid = incoming_txid.or(*txid);
+                        }
+                    })
+                    .or_insert(ReplicationAction::TableAction {
+                        table,
+                        actions: incoming_actions,
+                        txid: incoming_txid,
+                    });
+            }
+            _ => {
+                error!("Unexpected action type: {:?}", action);
+            }
+        }
+    }
+
+    /// Process inner events from a TRANSACTION_PAYLOAD_EVENT.
+    /// This occurs when binlog_transaction_compression is enabled.
+    /// This function returns a vector of all actionable inner events
+    /// # Arguments
+    ///
+    /// * `payload_event` - the payload event to process
+    /// # Returns
+    /// This function returns a vector of all actionable inner events
+    async fn process_event_transaction_payload(
+        &mut self,
+        payload_event: mysql_common::binlog::events::TransactionPayloadEvent<'_>,
+    ) -> mysql::Result<Vec<ReplicationAction>> {
+        let mut hash_actions: HashMap<Relation, ReplicationAction> = HashMap::new();
+        if self.enable_statement_logging {
+            info!(target: "replicator_statement", "{:?}", payload_event);
+        }
+        let mut buff = payload_event.decompressed()?;
+        loop {
+            let binlog_ev = match self.reader.read_decompressed(&mut buff)? {
+                Some(ev) => ev,
+                None => {
+                    break;
+                }
+            };
+            match binlog_ev.header().event_type().map_err(|ev| {
+                mysql_async::Error::Other(Box::new(internal_err!(
+                    "Unknown binlog event type {}",
+                    ev
+                )))
+            })? {
+                EventType::QUERY_EVENT => {
+                    // We only accept query events in the transaction payload that do not affect the
+                    // schema. Those are BEGIN and COMMIT and they emit a
+                    // `ReadySetError::SkipEvent`.
+                    let _ = match self.process_event_query(binlog_ev.read_event()?).await {
+                        Err(mysql_async::Error::Other(ref err))
+                            if err.downcast_ref::<ReadySetError>()
+                                == Some(&ReadySetError::SkipEvent) =>
+                        {
+                            continue;
+                        }
+                        Err(err) => return Err(err),
+                        Ok(action) => mysql_async::Error::Other(Box::new(internal_err!(
+                            "Unexpected query event in transaction payload {:?}",
+                            action
+                        ))),
+                    };
+                }
+                EventType::WRITE_ROWS_EVENT => {
+                    let binlog_action = self
+                        .process_event_write_rows(binlog_ev.read_event()?)
+                        .await?;
+                    self.merge_table_actions(&mut hash_actions, binlog_action)
+                        .await;
+                }
+
+                EventType::UPDATE_ROWS_EVENT => {
+                    let binlog_action = self
+                        .process_event_update_rows(binlog_ev.read_event()?)
+                        .await?;
+                    self.merge_table_actions(&mut hash_actions, binlog_action)
+                        .await;
+                }
+
+                EventType::DELETE_ROWS_EVENT => {
+                    let binlog_action = self
+                        .process_event_delete_rows(binlog_ev.read_event()?)
+                        .await?;
+                    self.merge_table_actions(&mut hash_actions, binlog_action)
+                        .await;
+                }
+                ev => {
+                    if self.enable_statement_logging {
+                        info!(target: "replicator_statement", "unhandled event: {:?}", ev);
+                    }
+                }
+            }
+        }
+        Ok(hash_actions.into_values().collect())
     }
 
     /// Process binlog events until an actionable event occurs.
@@ -468,7 +588,7 @@ impl MySqlBinlogConnector {
                 }
 
                 EventType::QUERY_EVENT => {
-                    let action = match self.process_event_query(&binlog_event.read_event()?).await {
+                    let action = match self.process_event_query(binlog_event.read_event()?).await {
                         Ok(action) => action,
                         Err(mysql_async::Error::Other(ref err))
                             if err.downcast_ref::<ReadySetError>()
@@ -523,6 +643,14 @@ impl MySqlBinlogConnector {
                             self.process_event_delete_rows(binlog_event.read_event()?)
                                 .await?,
                         ],
+                        &self.next_position,
+                    ));
+                }
+
+                EventType::TRANSACTION_PAYLOAD_EVENT => {
+                    return Ok((
+                        self.process_event_transaction_payload(binlog_event.read_event()?)
+                            .await?,
                         &self.next_position,
                     ));
                 }
@@ -727,7 +855,7 @@ impl Connector for MySqlBinlogConnector {
         _: &ReplicationOffset,
         until: Option<&ReplicationOffset>,
     ) -> ReadySetResult<(Vec<ReplicationAction>, ReplicationOffset)> {
-        let (action, pos) = self.next_action_inner(until).await?;
-        Ok((action, pos.into()))
+        let (actions, pos) = self.next_action_inner(until).await?;
+        Ok((actions, pos.into()))
     }
 }

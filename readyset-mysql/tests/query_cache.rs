@@ -677,3 +677,84 @@ async fn drop_all_caches() {
 
     shutdown_tx.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn test_binlog_transaction_compression() {
+    let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
+    let (opts, _handle, shutdown_tx) = setup(
+        query_status_cache,
+        true, // fallback enabled
+        MigrationMode::OutOfBand,
+        UnsupportedSetMode::Error,
+    )
+    .await;
+
+    let mut conn = Conn::new(opts).await.unwrap();
+    conn.query_drop("CREATE TABLE t (a INT, b INT)")
+        .await
+        .unwrap();
+    conn.query_drop("CREATE TABLE t2 (a INT, b INT)")
+        .await
+        .unwrap();
+    conn.query_drop("INSERT INTO t2 VALUES  (1,1)")
+        .await
+        .unwrap();
+    conn.query_drop("INSERT INTO t2 VALUES  (2,1)")
+        .await
+        .unwrap();
+    sleep().await;
+
+    conn.query_drop("CREATE CACHE test FROM SELECT a, b FROM t WHERE a = ?")
+        .await
+        .unwrap();
+
+    conn.query_drop("CREATE CACHE test2 FROM SELECT a, b FROM t2 WHERE a = ?")
+        .await
+        .unwrap();
+
+    // Ensure we are processing record in order.
+    conn.query_drop("START TRANSACTION").await.unwrap();
+    conn.query_drop("INSERT INTO t VALUES  (1,1)")
+        .await
+        .unwrap();
+    conn.query_drop("DELETE FROM t WHERE a = 1").await.unwrap();
+    conn.query_drop("COMMIT").await.unwrap();
+
+    sleep().await;
+    let row: Vec<(u32, u32)> = conn.query("SELECT a, b FROM t WHERE a = 1").await.unwrap();
+    assert_eq!(row.len(), 0);
+    let last_status = last_query_info(&mut conn).await;
+    assert_eq!(last_status.destination, QueryDestination::Readyset);
+
+    // Ensure we are processing records from multiple tables.
+    conn.query_drop("START TRANSACTION").await.unwrap();
+    conn.query_drop("INSERT INTO t VALUES  (3,1)")
+        .await
+        .unwrap();
+    conn.query_drop("UPDATE t2 SET b = 2 WHERE a = 1")
+        .await
+        .unwrap();
+    conn.query_drop("DELETE FROM t2 WHERE a = 2").await.unwrap();
+    conn.query_drop("COMMIT").await.unwrap();
+
+    sleep().await;
+
+    let row: Vec<(u32, u32)> = conn.query("SELECT a, b FROM t WHERE a = 3").await.unwrap();
+    assert_eq!(row.len(), 1);
+    let last_status = last_query_info(&mut conn).await;
+    assert_eq!(last_status.destination, QueryDestination::Readyset);
+
+    let row: Vec<(u32, u32)> = conn.query("SELECT a, b FROM t2 WHERE a = 1").await.unwrap();
+    assert_eq!(row.len(), 1);
+    assert!(row.iter().any(|(a, b)| *a == 1 && *b == 2));
+    let last_status = last_query_info(&mut conn).await;
+    assert_eq!(last_status.destination, QueryDestination::Readyset);
+
+    let row: Vec<(u32, u32)> = conn.query("SELECT a, b FROM t2 WHERE a = 2").await.unwrap();
+    assert_eq!(row.len(), 0);
+    let last_status = last_query_info(&mut conn).await;
+    assert_eq!(last_status.destination, QueryDestination::Readyset);
+
+    shutdown_tx.shutdown().await;
+}

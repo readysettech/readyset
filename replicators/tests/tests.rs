@@ -1614,6 +1614,93 @@ async fn mysql_enum_replication() {
     shutdown_tx.shutdown().await;
 }
 
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+//#[slow]
+async fn mysql_binlog_transaction_compression() {
+    readyset_tracing::init_test_logging();
+    let url = &mysql_url();
+    let mut client = DbConnection::connect(url).await.unwrap();
+    client
+        .query("SET binlog_transaction_compression = 'ON'")
+        .await
+        .unwrap();
+    client
+        .query(
+            "
+            DROP TABLE IF EXISTS `binlog_compression_test`;
+            CREATE TABLE `binlog_compression_test` (
+                id int NOT NULL PRIMARY KEY,
+                val varchar(255)
+            );
+            INSERT INTO binlog_compression_test VALUES (1, 'I am a teapot');
+            INSERT INTO binlog_compression_test VALUES (2, 'I am not a teapot');
+            DROP TABLE IF EXISTS `binlog_compression_test2`;
+            CREATE TABLE `binlog_compression_test2` (
+                id int NOT NULL PRIMARY KEY,
+                val varchar(255)
+            );
+            INSERT INTO binlog_compression_test2 VALUES (1, 'I am a teapot');
+            INSERT INTO binlog_compression_test2 VALUES (2, 'I am not a teapot');
+            ",
+        )
+        .await
+        .unwrap();
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
+        .await
+        .unwrap();
+    ctx.notification_channel
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+
+    client
+        .query(
+            "START TRANSACTION;
+        INSERT INTO binlog_compression_test VALUES (3, 'I am a big teapot');
+        INSERT INTO binlog_compression_test2 VALUES (3, 'I am a big teapot');
+        DELETE FROM binlog_compression_test WHERE id = 2;
+        DELETE FROM binlog_compression_test2 WHERE id = 2;
+        UPDATE binlog_compression_test SET val = 'I am a small teapot' WHERE id = 1;
+        UPDATE binlog_compression_test2 SET val = 'I am a small teapot' WHERE id = 1;
+        INSERT INTO binlog_compression_test2 VALUES (4, 'I am a tiny teapot');
+        INSERT INTO binlog_compression_test VALUES (4, 'I am a tiny teapot');
+
+
+        COMMIT;",
+        )
+        .await
+        .unwrap();
+    ctx.check_results(
+        "binlog_compression_test",
+        "mysql_binlog_transaction_compression",
+        &[
+            &[DfValue::Int(1), DfValue::Text("I am a small teapot".into())],
+            &[DfValue::Int(3), DfValue::Text("I am a big teapot".into())],
+            &[DfValue::Int(4), DfValue::Text("I am a tiny teapot".into())],
+        ],
+    )
+    .await
+    .unwrap();
+    ctx.check_results(
+        "binlog_compression_test2",
+        "mysql_binlog_transaction_compression2",
+        &[
+            &[DfValue::Int(1), DfValue::Text("I am a small teapot".into())],
+            &[DfValue::Int(3), DfValue::Text("I am a big teapot".into())],
+            &[DfValue::Int(4), DfValue::Text("I am a tiny teapot".into())],
+        ],
+    )
+    .await
+    .unwrap();
+
+    client.stop().await;
+    ctx.stop().await;
+    shutdown_tx.shutdown().await;
+}
+
 async fn postgresql_ddl_replicate_drop_table_internal(url: &str) {
     readyset_tracing::init_test_logging();
     let mut client = DbConnection::connect(url).await.unwrap();
