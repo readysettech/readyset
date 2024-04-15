@@ -93,3 +93,10 @@ lto="fat"
 inherits = "release-fat-lto"
 debug = false
 strip = "debuginfo"
+
+[profile.release-dist-quick]
+# configs for distro release packages (i.e. deb, rpm, etc.), but without
+# fat-lto so it will build faster.  (Only use for change list builds.)
+inherits = "release"
+debug = false
+strip = "debuginfo"
