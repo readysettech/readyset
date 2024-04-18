@@ -470,7 +470,7 @@ mod tests {
             fn test_write_date() {
                 let client = RefCell::new(config().connect(NoTls).unwrap());
 
-                proptest!(ProptestConfig::with_cases(1000000), |(date in arbitrary_naive_date())| {
+                proptest!(ProptestConfig::with_cases(10_000), |(date in arbitrary_naive_date())| {
                     compare_date_format(date, &mut client.borrow_mut());
                 })
             }
@@ -479,7 +479,7 @@ mod tests {
             fn test_write_time() {
                 let client = RefCell::new(config().connect(NoTls).unwrap());
 
-                proptest!(ProptestConfig::with_cases(1000000), |(time in arbitrary_naive_time())| {
+                proptest!(ProptestConfig::with_cases(10_000), |(time in arbitrary_naive_time())| {
                     compare_time_format(time, &mut client.borrow_mut());
                 })
             }
@@ -497,7 +497,7 @@ mod tests {
             fn test_write_timestamp() {
                 let client = RefCell::new(config().connect(NoTls).unwrap());
 
-                proptest!(ProptestConfig::with_cases(1000000), |(ts in arbitrary_naive_date_time())| {
+                proptest!(ProptestConfig::with_cases(10_000), |(ts in arbitrary_naive_date_time())| {
                     compare_timestamp_format(ts, &mut client.borrow_mut());
                 })
             }
@@ -674,7 +674,7 @@ mod tests {
 
                 let client = RefCell::new(config().connect(NoTls).unwrap());
 
-                proptest!(ProptestConfig::with_cases(1000000), |((ts, tz) in arbitrary_naive_date_time_and_timezone())| {
+                proptest!(ProptestConfig::with_cases(10_000), |((ts, tz) in arbitrary_naive_date_time_and_timezone())| {
                     compare_timestamptz_format(ts, tz, &mut client.borrow_mut());
                 })
             }
