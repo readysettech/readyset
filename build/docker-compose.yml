@@ -13,18 +13,24 @@ services:
       - MYSQL_DATABASE=noria
   postgres:
     image: postgres:14
+    tmpfs:
+      - /var/lib/pg/mem-data14
     environment:
       - POSTGRES_PASSWORD=noria
       - POSTGRES_DB=noria
+      - PGDATA=/var/lib/pg/mem-data14
     command:
       - "postgres"
       - "-c"
       - "wal_level=logical"
   postgres13:
     image: postgres:13
+    tmpfs:
+      - /var/lib/pg/mem-data13
     environment:
       - POSTGRES_PASSWORD=noria
       - POSTGRES_DB=noria
+      - PGDATA=/var/lib/pg/mem-data13
     command:
       - "postgres"
       - "-c"
