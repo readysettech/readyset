@@ -13,15 +13,15 @@ services:
       RS_API_KEY: ${RS_API_KEY-""}
       DEPLOYMENT_ENV: quickstart_docker
       DB_DIR: /state
-      PROMETHEUS_METRICS: true
+      PROMETHEUS_METRICS: "true"
       QUERY_LOG_MODE: verbose
       QUERY_CACHING: explicit
-      STANDALONE: true
+      STANDALONE: "true"
       DEPLOYMENT: docker_compose_deployment
       LISTEN_ADDRESS: 0.0.0.0:3307
       # We don't have control over whether users are using a password or not for the
       # demo/quickstart, so use the more permissive mode.
-      ALLOW_UNAUTHENTICATED_CONNECTIONS: true
+      ALLOW_UNAUTHENTICATED_CONNECTIONS: "true"
       UPSTREAM_DB_URL: mysql://root:readyset@mysql/testdb
       CONTROLLER_ADDRESS: 0.0.0.0
     volumes:
