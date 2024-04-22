@@ -166,13 +166,17 @@ impl MySqlUpstream {
             .as_deref()
             .ok_or(ReadySetError::InvalidUpstreamDatabase)?;
 
-        let mut opts =
-            Opts::from_url(url).map_err(|e: UrlError| Error::MySql(mysql_async::Error::Url(e)))?;
+        let mut builder = {
+            let opts = Opts::from_url(url)
+                .map_err(|e: UrlError| Error::MySql(mysql_async::Error::Url(e)))?;
+            OptsBuilder::from_opts(opts).stmt_cache_size(0)
+        };
 
         if let Some(cert_path) = upstream_config.ssl_root_cert.clone() {
             let ssl_opts = SslOpts::default().with_root_certs(vec![cert_path.into()]);
-            opts = OptsBuilder::from_opts(opts).ssl_opts(ssl_opts).into();
+            builder = builder.ssl_opts(ssl_opts);
         }
+        let opts: Opts = builder.into();
 
         let span = info_span!(
             "Connecting to MySQL upstream",
