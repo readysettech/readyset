@@ -12,7 +12,7 @@ use mysql_async as mysql;
 use mysql_common::binlog;
 use mysql_common::binlog::row::BinlogRow;
 use mysql_common::binlog::value::BinlogValue;
-use nom_sql::Relation;
+use nom_sql::{Relation, SqlIdentifier};
 use readyset_client::metrics::recorded;
 use readyset_client::recipe::ChangeList;
 use readyset_data::{DfValue, Dialect};
@@ -25,6 +25,7 @@ use crate::noria_adapter::{Connector, ReplicationAction};
 
 const CHECKSUM_QUERY: &str = "SET @source_binlog_checksum='CRC32'";
 const DEFAULT_SERVER_ID: u32 = u32::MAX - 55;
+const MAX_POSITION_TIME: u64 = 10;
 
 /// A connector that connects to a MySQL server and starts reading binlogs from a given position.
 ///
@@ -55,6 +56,9 @@ pub(crate) struct MySqlBinlogConnector {
     current_gtid: Option<u64>,
     /// Whether to log statements received by the connector
     enable_statement_logging: bool,
+    /// Timestamp of the last reported position. This is use to ensure we keep the distance
+    /// between min/max position as short as possible.
+    last_reported_pos_ts: std::time::Instant,
 }
 
 impl MySqlBinlogConnector {
@@ -131,6 +135,8 @@ impl MySqlBinlogConnector {
             next_position,
             current_gtid: None,
             enable_statement_logging,
+            last_reported_pos_ts: std::time::Instant::now()
+                - std::time::Duration::from_secs(MAX_POSITION_TIME),
         };
 
         connector.register_as_replica().await?;
@@ -376,7 +382,8 @@ impl MySqlBinlogConnector {
     ///
     /// # Arguments
     ///
-    /// * `q_event` - the query event to process
+    /// * `q_event` - the query event to process.
+    /// * `is_last` - a boolean indicating if this is the last event during catchup.
     ///
     /// # Returns
     /// This function might return an error of type `ReadySetError::SkipEvent` if the query does not
@@ -384,6 +391,7 @@ impl MySqlBinlogConnector {
     async fn process_event_query(
         &mut self,
         q_event: mysql_common::binlog::events::QueryEvent<'_>,
+        is_last: bool,
     ) -> mysql::Result<ReplicationAction> {
         // Written when an updating statement is done.
         if self.enable_statement_logging {
@@ -405,11 +413,20 @@ impl MySqlBinlogConnector {
             }
             // If the query does not affect the schema, just keep going
             // TODO: Transactions begin with the `BEGIN` queries, but we do not
-            // currently support those
+            // currently support those.
+            // `COMMIT` queries are issued for writes on non-transactional storage engines
+            // such as MyISAM. We report the position after the `COMMIT` query if necessary.
             _ => {
-                return Err(mysql_async::Error::Other(Box::new(
-                    ReadySetError::SkipEvent,
-                )))
+                match q_event.query().eq("COMMIT") && (self.report_position_elapsed() || is_last) {
+                    true => {
+                        return Ok(ReplicationAction::LogPosition);
+                    }
+                    false => {
+                        return Err(mysql_async::Error::Other(Box::new(
+                            ReadySetError::SkipEvent,
+                        )))
+                    }
+                }
             }
         };
 
@@ -430,9 +447,11 @@ impl MySqlBinlogConnector {
     /// Merge table actions into a hashmap of actions.
     /// If the table already exists in the hashmap, the actions are merged.
     /// If the table does not exist in the hashmap, a new entry is created.
+    ///
     /// # Arguments
     /// * `map` - the hashmap to merge the actions into
     /// * `action` - the action to merge
+    ///
     /// # Returns
     /// This function does not return anything, it modifies the hashmap in place.
     async fn merge_table_actions(
@@ -471,11 +490,14 @@ impl MySqlBinlogConnector {
     /// # Arguments
     ///
     /// * `payload_event` - the payload event to process
+    /// * `is_last` - a boolean indicating if this is the last event during catchup.
+    ///
     /// # Returns
     /// This function returns a vector of all actionable inner events
     async fn process_event_transaction_payload(
         &mut self,
         payload_event: mysql_common::binlog::events::TransactionPayloadEvent<'_>,
+        is_last: bool,
     ) -> mysql::Result<Vec<ReplicationAction>> {
         let mut hash_actions: HashMap<Relation, ReplicationAction> = HashMap::new();
         if self.enable_statement_logging {
@@ -497,9 +519,15 @@ impl MySqlBinlogConnector {
             })? {
                 EventType::QUERY_EVENT => {
                     // We only accept query events in the transaction payload that do not affect the
-                    // schema. Those are BEGIN and COMMIT and they emit a
-                    // `ReadySetError::SkipEvent`.
-                    let _ = match self.process_event_query(binlog_ev.read_event()?).await {
+                    // schema. Those are `BEGIN` and `COMMIT`. `BEGIN` will return a
+                    // `ReadySetError::SkipEvent` and `COMMIT` will return a
+                    // `ReplicationAction::LogPosition` if necessary. We skip
+                    // `ReplicationAction::LogPosition` here because we will report the position
+                    // only once at the end.
+                    match self
+                        .process_event_query(binlog_ev.read_event()?, is_last)
+                        .await
+                    {
                         Err(mysql_async::Error::Other(ref err))
                             if err.downcast_ref::<ReadySetError>()
                                 == Some(&ReadySetError::SkipEvent) =>
@@ -507,10 +535,17 @@ impl MySqlBinlogConnector {
                             continue;
                         }
                         Err(err) => return Err(err),
-                        Ok(action) => mysql_async::Error::Other(Box::new(internal_err!(
-                            "Unexpected query event in transaction payload {:?}",
-                            action
-                        ))),
+                        Ok(action) => match action {
+                            ReplicationAction::LogPosition { .. } => {
+                                continue;
+                            }
+                            _ => {
+                                return Err(mysql_async::Error::Other(Box::new(internal_err!(
+                                    "Unexpected query event in transaction payload {:?}",
+                                    action
+                                ))));
+                            }
+                        },
                     };
                 }
                 EventType::WRITE_ROWS_EVENT => {
@@ -543,7 +578,32 @@ impl MySqlBinlogConnector {
                 }
             }
         }
+        // We will always have received at least one COMMIT from either COM_QUERY or XID_EVENT.
+        // To avoid reporting multiple times the same position we only report it once here if
+        // necessary.
+        if !hash_actions.is_empty() && (self.report_position_elapsed() || is_last) {
+            hash_actions.insert(
+                Relation {
+                    schema: None,
+                    name: SqlIdentifier::from(""),
+                },
+                ReplicationAction::LogPosition,
+            );
+        }
         Ok(hash_actions.into_values().collect())
+    }
+
+    /// Check whatever we need to report the current position
+    /// If last_reported_pos_ts has elapsed, update it with the current timestamp.
+    ///
+    /// # Returns
+    /// This function returns a boolean indicating if we need to report the current position
+    fn report_position_elapsed(&mut self) -> bool {
+        if self.last_reported_pos_ts.elapsed().as_secs() > MAX_POSITION_TIME {
+            self.last_reported_pos_ts = std::time::Instant::now();
+            return true;
+        }
+        false
     }
 
     /// Process binlog events until an actionable event occurs.
@@ -571,6 +631,13 @@ impl MySqlBinlogConnector {
                 self.next_position.position = u64::from(binlog_event.header().log_pos());
             }
 
+            let is_last = match until {
+                Some(limit) => {
+                    let limit = MySqlPosition::try_from(limit).expect("Valid binlog limit");
+                    self.next_position >= limit
+                }
+                None => false,
+            };
             match binlog_event.header().event_type().map_err(|ev| {
                 mysql_async::Error::Other(Box::new(internal_err!(
                     "Unknown binlog event type {}",
@@ -588,7 +655,10 @@ impl MySqlBinlogConnector {
                 }
 
                 EventType::QUERY_EVENT => {
-                    let action = match self.process_event_query(binlog_event.read_event()?).await {
+                    let action = match self
+                        .process_event_query(binlog_event.read_event()?, is_last)
+                        .await
+                    {
                         Ok(action) => action,
                         Err(mysql_async::Error::Other(ref err))
                             if err.downcast_ref::<ReadySetError>()
@@ -649,10 +719,19 @@ impl MySqlBinlogConnector {
 
                 EventType::TRANSACTION_PAYLOAD_EVENT => {
                     return Ok((
-                        self.process_event_transaction_payload(binlog_event.read_event()?)
+                        self.process_event_transaction_payload(binlog_event.read_event()?, is_last)
                             .await?,
                         &self.next_position,
                     ));
+                }
+
+                EventType::XID_EVENT => {
+                    // Generated for a commit of a transaction that modifies one or more tables of
+                    // an XA-capable storage engine (InnoDB).
+                    if self.report_position_elapsed() || is_last {
+                        return Ok((vec![ReplicationAction::LogPosition], &self.next_position));
+                    }
+                    continue;
                 }
 
                 EventType::WRITE_ROWS_EVENT_V1 => unimplemented!(), /* The V1 event numbers are */
@@ -735,11 +814,8 @@ impl MySqlBinlogConnector {
 
             // We didn't get an actionable event, but we still need to check that we haven't reached
             // the until limit
-            if let Some(limit) = until {
-                let limit = MySqlPosition::try_from(limit).expect("Valid binlog limit");
-                if self.next_position >= limit {
-                    return Ok((vec![ReplicationAction::LogPosition], &self.next_position));
-                }
+            if is_last {
+                return Ok((vec![ReplicationAction::LogPosition], &self.next_position));
             }
         }
     }
