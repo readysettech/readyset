@@ -11,7 +11,6 @@ A real-time SQL caching engine for Postgres and MySQL."""
 
 [dependencies]
 anyhow = { workspace = true }
-async-trait = { workspace = true }
 clap = { workspace = true, features = ["derive","env"] }
 futures-util = { workspace = true }
 fail = { workspace = true }

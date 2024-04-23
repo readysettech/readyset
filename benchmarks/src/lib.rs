@@ -23,7 +23,6 @@
 //!     row_count: u32,
 //! }
 //!
-//! #[async_trait::async_trait]
 //! impl BenchmarkControl for MyBenchmark {
 //!     async fn setup(&self, deployment: &DeploymentParameters) -> Result<()> {
 //!         let mut conn = deployment.connect_to_setup().await?;

@@ -22,14 +22,12 @@
 //! use std::collections::HashMap;
 //! use std::iter;
 //!
-//! use async_trait::async_trait;
 //! use mysql::prelude::*;
 //! use mysql_srv::*;
 //! use readyset_adapter_types::DeallocateId;
 //! use tokio::io::AsyncWrite;
 //!
 //! struct Backend;
-//! #[async_trait]
 //! impl<W: AsyncWrite + Unpin + Send + 'static> MySqlShim<W> for Backend {
 //!     async fn on_prepare(
 //!         &mut self,
@@ -171,7 +169,6 @@ use std::collections::HashMap;
 use std::io;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use constants::{CLIENT_PLUGIN_AUTH, CONNECT_WITH_DB, PROTOCOL_41, RESERVED, SECURE_CONNECTION};
 use error::{other_error, OtherErrorKind};
 use mysql_common::constants::CapabilityFlags;
@@ -250,7 +247,8 @@ pub enum QueryResultsResponse {
 }
 
 /// Implementors of this trait can be used to drive a MySQL-compatible database backend.
-#[async_trait]
+// Only used internally
+#[allow(async_fn_in_trait)]
 pub trait MySqlShim<W: AsyncWrite + Unpin + Send> {
     /// Called when the client issues a request to prepare `query` for later execution.
     ///

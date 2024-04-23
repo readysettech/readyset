@@ -5,7 +5,6 @@ use std::str::FromStr;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use async_trait::async_trait;
 use clap::Parser;
 use database_utils::{DatabaseURL, QueryableConnection};
 use metrics::Unit;
@@ -84,7 +83,6 @@ pub struct ReadWriteBenchmarkThreadParams {
     upstream_conn_str: String,
 }
 
-#[async_trait]
 impl BenchmarkControl for ReadWriteBenchmark {
     async fn setup(&self, deployment: &DeploymentParameters) -> Result<()> {
         self.data_generator
@@ -190,7 +188,6 @@ impl ReadWriteBenchmarkResultBatch {
     }
 }
 
-#[async_trait]
 impl MultithreadBenchmark for ReadWriteBenchmark {
     type BenchmarkResult = ReadWriteBenchmarkResultBatch;
     type Parameters = ReadWriteBenchmarkThreadParams;

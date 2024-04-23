@@ -8,7 +8,6 @@ use std::str::FromStr;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use async_trait::async_trait;
 use clap::Parser;
 use database_utils::{DatabaseURL, QueryableConnection};
 use metrics::Unit;
@@ -60,7 +59,6 @@ pub struct QueryBenchmarkThreadParams {
     query: ArbitraryQueryParameters,
 }
 
-#[async_trait]
 impl BenchmarkControl for QueryBenchmark {
     async fn setup(&self, deployment: &DeploymentParameters) -> Result<()> {
         self.data_generator
@@ -155,7 +153,6 @@ impl QueryBenchmarkResultBatch {
     }
 }
 
-#[async_trait]
 impl MultithreadBenchmark for QueryBenchmark {
     type BenchmarkResult = QueryBenchmarkResultBatch;
     type Parameters = QueryBenchmarkThreadParams;
