@@ -72,7 +72,7 @@ impl TimestampTz {
             (time_ms / 1000) as i64,
             ((time_ms % 1000) * 1_000 * 1_000) as u32,
         );
-        Self::from(NaiveDateTime::from_timestamp_opt(secs, ns).unwrap())
+        Self::from(DateTime::from_timestamp(secs, ns).unwrap().naive_utc())
     }
 
     /// Returns true if the contained offset should be negated

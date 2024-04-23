@@ -3,7 +3,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use bit_vec::BitVec;
-use chrono::NaiveDateTime;
+use chrono::DateTime;
 use mysql_time::MySqlTime;
 use rust_decimal::Decimal;
 use serde::de::{DeserializeSeed, EnumAccess, VariantAccess, Visitor};
@@ -143,8 +143,8 @@ impl serde::ser::Serialize for DfValue {
             DfValue::TimestampTz(ts) => {
                 let extra = ts.extra;
                 let nt = ts.to_chrono();
-                let ts = nt.naive_utc().timestamp() as u64 as u128
-                    + ((nt.naive_utc().timestamp_subsec_nanos() as u128) << 64);
+                let ts = nt.naive_utc().and_utc().timestamp() as u64 as u128
+                    + ((nt.naive_utc().and_utc().timestamp_subsec_nanos() as u128) << 64);
                 serialize_variant(serializer, Variant::TimestampTz, &(ts, extra))
             }
             DfValue::Array(vs) => serialize_variant(serializer, Variant::Array, &vs),
@@ -276,8 +276,9 @@ impl<'de> Deserialize<'de> for DfValue {
                     .map(|(ts, extra)| {
                         // We deserialize the NaiveDateTime by extracting nsecs from the top 64 bits
                         // of the encoded i128, and secs from the low 64 bits
-                        let datetime =
-                            NaiveDateTime::from_timestamp_opt(ts as _, (ts >> 64) as _).unwrap();
+                        let datetime = DateTime::from_timestamp(ts as _, (ts >> 64) as _)
+                            .unwrap()
+                            .naive_utc();
                         DfValue::TimestampTz(TimestampTz { datetime, extra })
                     }),
                     (Variant::Array, variant) => {
