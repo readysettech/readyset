@@ -1,7 +1,7 @@
+use std::future::Future;
 use std::time::Duration;
 
 use anyhow::Result;
-use async_trait::async_trait;
 use futures::stream::futures_unordered::FuturesUnordered;
 use futures::StreamExt;
 use tokio::select;
@@ -14,7 +14,6 @@ use crate::benchmark::BenchmarkResults;
 /// A group of methods that facilitate executing a single benchmark from multiple
 /// threads. This should be used in conjunction with `run_multithread_benchmark`
 /// to spawn the threads to run the benchmark.
-#[async_trait]
 pub(crate) trait MultithreadBenchmark {
     /// The result messages passed to the result's thread via an UnboundedSender.
     type BenchmarkResult: Send;
@@ -22,18 +21,18 @@ pub(crate) trait MultithreadBenchmark {
     type Parameters: Clone;
     /// Process a batch of benchmark results collected over `interval`. This aggregates
     /// all updates send on the `sender` parameter fo `benchmark_thread`.
-    async fn handle_benchmark_results(
+    fn handle_benchmark_results(
         results: Vec<Self::BenchmarkResult>,
         interval: Duration,
         results: &mut BenchmarkResults,
-    ) -> Result<()>;
+    ) -> impl Future<Output = Result<()>> + Send;
 
     /// Benchmarking code that is initialized using `params` that sends `BenchmarkResult`
     /// to be batched along `sender`.
-    async fn benchmark_thread(
+    fn benchmark_thread(
         params: Self::Parameters,
         sender: UnboundedSender<Self::BenchmarkResult>,
-    ) -> Result<()>;
+    ) -> impl Future<Output = Result<()>> + Send;
 }
 
 /// Returns after `duration` if it is Some, otherwise, never returns. Useful

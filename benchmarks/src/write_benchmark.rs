@@ -6,7 +6,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Result};
-use async_trait::async_trait;
 use clap::{Parser, ValueHint};
 use database_utils::{DatabaseConnection, DatabaseError, DatabaseURL, QueryableConnection};
 use itertools::Itertools;
@@ -167,7 +166,6 @@ async fn create_indices(
     Ok(())
 }
 
-#[async_trait]
 impl BenchmarkControl for WriteBenchmark {
     async fn setup(&self, deployment: &DeploymentParameters) -> Result<()> {
         let mut conn = DatabaseURL::from_str(&deployment.target_conn_str)?
@@ -224,7 +222,6 @@ impl BenchmarkControl for WriteBenchmark {
     }
 }
 
-#[async_trait]
 impl MultithreadBenchmark for WriteBenchmark {
     type BenchmarkResult = u128;
     type Parameters = WriteBenchmarkThreadData;

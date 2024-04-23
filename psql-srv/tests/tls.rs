@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::vec;
 
-use async_trait::async_trait;
 use database_utils::{DatabaseURL, QueryableConnection};
 use futures::stream;
 use postgres_protocol::Oid;
@@ -28,7 +27,6 @@ impl TryFrom<TestValue> for psql_srv::PsqlValue {
     }
 }
 
-#[async_trait]
 impl PsqlBackend for TestBackend {
     type Resultset = stream::Iter<vec::IntoIter<Result<PsqlSrvRow, Error>>>;
 

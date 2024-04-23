@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::vec;
 
-use async_trait::async_trait;
 use futures::stream;
 use postgres::config::{ChannelBinding, SslMode};
 use postgres::error::SqlState;
@@ -34,7 +33,6 @@ struct ScramSha256Backend {
     password: &'static str,
 }
 
-#[async_trait]
 impl PsqlBackend for ScramSha256Backend {
     type Resultset = stream::Iter<vec::IntoIter<Result<PsqlSrvRow, psql_srv::Error>>>;
 

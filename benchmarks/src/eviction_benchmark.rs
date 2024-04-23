@@ -17,7 +17,6 @@ use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use async_trait::async_trait;
 use clap::Parser;
 use database_utils::{DatabaseURL, QueryableConnection};
 use metrics::Unit;
@@ -83,7 +82,6 @@ pub struct EvictionBenchmarkParams {
     target_hit_rate: f64,
 }
 
-#[async_trait]
 impl BenchmarkControl for EvictionBenchmark {
     async fn setup(&self, deployment: &DeploymentParameters) -> Result<()> {
         self.data_generator
@@ -335,7 +333,6 @@ async fn metrics_task(
     }
 }
 
-#[async_trait]
 impl MultithreadBenchmark for EvictionBenchmark {
     type BenchmarkResult = EvictionBenchmarkResultBatch;
     type Parameters = EvictionBenchmarkParams;
