@@ -246,6 +246,8 @@ pub const CONNECTION_FROM_BASE: u8 = 1;
 /// connection is *not* originating from a base table domain.
 pub const CONNECTION_FROM_DOMAIN: u8 = 2;
 
+use std::hash::{BuildHasher, Hash, Hasher};
+
 use nom_sql::Relation;
 use readyset_tracing::propagation::Instrumented;
 use replication_offset::ReplicationOffset;
@@ -435,8 +437,8 @@ pub fn shard_by(dt: &DfValue, shards: usize) -> usize {
         DfValue::Int(n) => n as usize % shards,
         DfValue::UnsignedInt(n) => n as usize % shards,
         DfValue::Text(..) | DfValue::TinyText(..) | DfValue::TimestampTz(_) => {
-            use std::hash::Hasher;
-            let mut hasher = ahash::AHasher::new_with_keys(0x3306, 0x6033);
+            let mut hasher =
+                ahash::RandomState::with_seeds(0x3306, 0x6033, 0x5432, 0x6034).build_hasher();
             // this unwrap should be safe because there are no error paths with a Text, TinyText,
             // nor Timestamp converting to Text
             #[allow(clippy::unwrap_used)]
@@ -459,10 +461,9 @@ pub fn shard_by(dt: &DfValue, shards: usize) -> usize {
         | DfValue::BitVector(_)
         | DfValue::Array(_)
         | DfValue::PassThrough(_) => {
-            use std::hash::{Hash, Hasher};
-            let mut hasher = ahash::AHasher::new_with_keys(0x3306, 0x6033);
-            dt.hash(&mut hasher);
-            hasher.finish() as usize % shards
+            let hash = ahash::RandomState::with_seeds(0x3306, 0x6033, 0x5432, 0x6034).hash_one(dt);
+
+            hash as usize % shards
         }
     }
 }

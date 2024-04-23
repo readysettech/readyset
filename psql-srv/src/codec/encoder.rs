@@ -701,7 +701,7 @@ mod tests {
 
     use bit_vec::BitVec;
     use bytes::{BufMut, BytesMut};
-    use chrono::{FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, TimeZone};
+    use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, TimeZone};
     use eui48::MacAddress;
     use postgres::SimpleQueryRow;
     use postgres_protocol::message::backend::DataRowBody;
@@ -1403,7 +1403,9 @@ mod tests {
 
     #[test]
     fn test_encode_binary_timestamp() {
-        let dt = NaiveDateTime::from_timestamp_opt(1_000_000_000, 42_000_000).unwrap();
+        let dt = DateTime::from_timestamp(1_000_000_000, 42_000_000)
+            .unwrap()
+            .naive_utc();
         let mut buf = BytesMut::new();
         put_binary_value(PsqlValue::Timestamp(dt), &mut buf).unwrap();
         let mut exp = BytesMut::new();
