@@ -7,7 +7,6 @@ edition = "2021"
 
 [dependencies]
 clap = { workspace = true, features = ["derive","env"] }
-once_cell = { workspace = true }
 parking_lot = { workspace = true }
 rand = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
