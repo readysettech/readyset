@@ -1,0 +1,75 @@
+pre_install_script = '''
+#!/bin/bash
+
+set -e
+
+RS_USER=readyset
+RS_DIR=/var/lib/readyset
+
+# Create readyset:readyset user/group and set homedir to /var/lib/readyset
+if [[ $1 -eq 1 ]] ; then
+    # New installation
+    if ! id ${RS_USER} > /dev/null 2>&1; then
+        useradd --home-dir ${RS_DIR} --system --create-home --user-group ${RS_USER}
+    fi
+fi
+'''
+post_install_script = '''
+#!/bin/bash
+
+set -e
+
+if [[ $1 -eq 1 ]] ; then
+    # New installation
+    RS_USER=readyset
+    RS_GROUP=${RS_USER}
+    RS_HOME_DIR=/var/lib/readyset
+    RS_HOME_DIR_PERMS=700
+
+    # Ensure that the home directory has the correct ownership
+    chown -R ${RS_USER}:${RS_GROUP} ${RS_HOME_DIR}
+
+    # Ensure that the home directory has the correct permissions
+    chmod ${RS_HOME_DIR_PERMS} ${RS_HOME_DIR}
+
+    # Run commands equivalent to what the RPM systemd macros would do
+    systemctl --no-reload preset readyset.service &>/dev/null
+    systemctl daemon-reload
+    systemctl enable readyset.service
+fi
+cat << EOF
+
+********************************************************************************
+Notice: The UPSTREAM_DB_URL and LISTEN_ADDRESS values must be set in
+/etc/readyset/readyset.conf before starting the readyset service.
+
+********************************************************************************
+
+EOF
+
+# Ensure the script exits with a success status
+exit 0
+'''
+
+pre_uninstall_script = '''
+#!/bin/bash
+
+set -e
+
+if [[ $1 -eq 0 ]] ; then
+    # Package removal, not upgrade
+    # Run commands equivalent to what the RPM systemd macros would do
+    systemctl --no-reload disable --now readyset.service &>/dev/null
+    systemctl daemon-reload
+fi
+'''
+
+post_uninstall_script = '''
+#!/bin/bash -e
+
+if [[ $1 -ge 0 ]] ; then
+    # Run commands equivalent to what the RPM systemd macros would do
+    systemctl try-restart readyset.service &>/dev/null 2>&1
+    systemctl daemon-reload
+fi
+'''
