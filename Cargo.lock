@@ -1252,7 +1252,6 @@ dependencies = [
 name = "database-utils"
 version = "0.1.0"
 dependencies = [
- "async-trait",
  "clap 4.3.2",
  "deadpool-postgres",
  "derive_more",
@@ -1585,14 +1584,14 @@ dependencies = [
 
 [[package]]
 name = "enum_dispatch"
-version = "0.3.8"
+version = "0.3.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0eb359f1476bf611266ac1f5355bc14aeca37b299d0ebccc038ee7058891c9cb"
+checksum = "aa18ce2bc66555b3218614519ac839ddb759a7d6720732f979ef8d13be147ecd"
 dependencies = [
  "once_cell",
  "proc-macro2 1.0.69",
  "quote 1.0.33",
- "syn 1.0.109",
+ "syn 2.0.39",
 ]
 
 [[package]]
@@ -2923,7 +2922,6 @@ dependencies = [
 name = "mysql-srv"
 version = "0.8.8"
 dependencies = [
- "async-trait",
  "byteorder",
  "chrono",
  "futures",
@@ -4005,7 +4003,6 @@ dependencies = [
 name = "psql-srv"
 version = "0.1.0"
 dependencies = [
- "async-trait",
  "base64 0.21.0",
  "bit-vec",
  "bytes",
@@ -4276,7 +4273,6 @@ name = "readyset"
 version = "1.3.0"
 dependencies = [
  "anyhow",
- "async-trait",
  "chrono",
  "clap 4.3.2",
  "crossbeam-skiplist",

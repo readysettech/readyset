@@ -9,7 +9,6 @@ description = "Bindings for emulating a PostgreSQL server"
 readme = "README.md"
 
 [dependencies]
-async-trait = { workspace = true }
 base64 = "0.21"
 bit-vec = { workspace = true, features = ["serde"] }
 bytes = { workspace = true }

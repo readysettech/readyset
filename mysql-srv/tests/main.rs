@@ -14,7 +14,6 @@ use std::marker::PhantomData;
 use std::pin::Pin;
 use std::{io, net, thread};
 
-use async_trait::async_trait;
 use mysql::prelude::Queryable;
 use mysql::Row;
 use mysql_srv::{
@@ -38,7 +37,6 @@ struct TestingShim<Q, P, E, I, CU, W> {
     _phantom: PhantomData<W>,
 }
 
-#[async_trait]
 impl<Q, P, E, I, CU, W> MySqlShim<W> for TestingShim<Q, P, E, I, CU, W>
 where
     Q: for<'a> FnMut(
@@ -118,7 +116,7 @@ where
     ) -> QueryResultsResponse {
         if query.starts_with("SELECT @@") || query.starts_with("select @@") {
             let var = &query.get(b"SELECT @@".len()..);
-            return match var {
+            match var {
                 Some("max_allowed_packet") => {
                     let cols = &[Column {
                         table: String::new(),
@@ -133,7 +131,7 @@ where
                     QueryResultsResponse::IoResult(w.finish().await)
                 }
                 _ => QueryResultsResponse::IoResult(results.completed(0, 0, None).await),
-            };
+            }
         } else {
             QueryResultsResponse::IoResult((self.on_q)(query, results).await)
         }

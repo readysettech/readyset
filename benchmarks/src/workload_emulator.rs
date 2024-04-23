@@ -15,7 +15,6 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use async_trait::async_trait;
 use clap::{Parser, ValueEnum};
 use database_utils::{DatabaseConnection, DatabaseStatement, QueryableConnection};
 use metrics::Unit;
@@ -178,7 +177,6 @@ impl WorkloadResultBatch {
     }
 }
 
-#[async_trait]
 impl BenchmarkControl for WorkloadEmulator {
     async fn setup(&self, deployment: &DeploymentParameters) -> anyhow::Result<()> {
         if let Some(ref data_generator) = self.data_generator {
@@ -472,7 +470,6 @@ fn ttl_jitter(ttl_secs: u32) -> u32 {
     ttl_secs + (ttl_secs as f32 * variance) as u32
 }
 
-#[async_trait]
 impl MultithreadBenchmark for WorkloadEmulator {
     type BenchmarkResult = WorkloadResultBatch;
     type Parameters = WorkloadThreadParams;

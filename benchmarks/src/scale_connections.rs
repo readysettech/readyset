@@ -3,7 +3,6 @@ use std::str::FromStr;
 use std::time::Instant;
 
 use anyhow::Result;
-use async_trait::async_trait;
 use clap::Parser;
 use database_utils::DatabaseURL;
 use metrics::Unit;
@@ -27,7 +26,6 @@ pub struct ScaleConnections {
     parallel: bool,
 }
 
-#[async_trait]
 impl BenchmarkControl for ScaleConnections {
     async fn setup(&self, _: &DeploymentParameters) -> Result<()> {
         Ok(())

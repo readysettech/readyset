@@ -18,7 +18,6 @@ clap = { workspace = true, features = ["derive","env"] }
 serde = { workspace = true, features = ["derive"] }
 readyset-util = { path = "../readyset-util" }
 readyset-errors = { path = "../readyset-errors" }
-async-trait = { workspace = true }
 nom-sql = { path = "../nom-sql" }
 deadpool-postgres = { workspace = true }
 num_cpus = { workspace = true }

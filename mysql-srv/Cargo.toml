@@ -19,7 +19,6 @@ byteorder = { workspace = true }
 chrono = { workspace = true }
 time = { workspace = true }
 getrandom = { workspace = true }
-async-trait = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 thiserror = { workspace = true }
 sha-1 = { workspace = true }

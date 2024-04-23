@@ -5,7 +5,6 @@ use std::convert::TryFrom;
 use std::fmt::Formatter;
 use std::ops::{Deref, DerefMut};
 
-use async_trait::async_trait;
 use futures_util::StreamExt;
 use itertools::{izip, Itertools};
 use mysql_async::consts::StatusFlags;
@@ -498,7 +497,6 @@ where
     }
 }
 
-#[async_trait]
 impl<W> MySqlShim<W> for Backend
 where
     W: AsyncWrite + Unpin + Send + 'static,
@@ -600,7 +598,7 @@ where
             Err(e) => info.error(e.error_kind(), e.to_string().as_bytes()).await,
         };
 
-        Ok(res?)
+        res
     }
 
     async fn on_execute(
@@ -741,7 +739,7 @@ where
         }
 
         let query_result = self.query(query).await;
-        return handle_query_result(query_result, results).await;
+        handle_query_result(query_result, results).await
     }
 
     fn password_for_username(&self, username: &str) -> Option<Vec<u8>> {
