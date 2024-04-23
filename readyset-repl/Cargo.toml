@@ -6,16 +6,16 @@ authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
 [dependencies]
-anyhow = "1.0"
+anyhow = { workspace = true }
 clap = { workspace = true, features = ["derive", "wrap_help"] }
-console = "0.15.5"
-rustyline = "11.0"
-rustyline-derive = "0.6.0"
+console = { workspace = true }
+rustyline = { workspace = true }
+rustyline-derive = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
-prettytable = "0.10.0"
+prettytable = { workspace = true }
 postgres-types = { workspace = true }
-textwrap = "0.14"
-nom = "7.1.1"
+textwrap = { workspace = true }
+nom = { workspace = true }
 
 database-utils = { path = "../database-utils" }
 readyset-data = { path = "../readyset-data" }

@@ -6,15 +6,15 @@ authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
 [dependencies]
-nom = "7.1"
-regex = "1.4.3"
-serde = { version = "1.0.8", features = ["rc"] }
+nom = { workspace = true }
+regex = { workspace = true }
+serde = { workspace = true, features = ["rc"] }
 readyset-util = { path = "../readyset-util" }
-proptest = "1.0.0"
-thiserror = "1.0.26"
-chrono = "0.4"
-mysql_common = "0.32"
+proptest = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }
+mysql_common = { workspace = true }
 
 [dev-dependencies]
-test-strategy = "0.2.0"
+test-strategy = { workspace = true }
 
