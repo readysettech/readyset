@@ -15,7 +15,6 @@
 //! [presampling](presampled) - sampling spans at creation time rather than when a subscriber would
 //! send them to a collector.
 
-#![feature(core_intrinsics)]
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
