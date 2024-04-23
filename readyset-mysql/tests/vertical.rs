@@ -389,7 +389,7 @@ where
             } => {
                 let table_rows = self.rows.entry(table).or_default();
                 let old_state_row = table_rows.iter_mut().find(|r| *r == old_row).unwrap();
-                *old_state_row = new_row.clone();
+                old_state_row.clone_from(new_row);
             }
             Operation::Delete { table, row } => {
                 let table_rows = self.rows.entry(table).or_default();

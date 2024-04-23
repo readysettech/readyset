@@ -146,7 +146,6 @@ impl Storage for PostgresStorage {
                 None
             }
             [row, ..] => Some(Stats {
-                samples: row.get(0),
                 mean: row.get(1),
                 stdev: row.get(2),
             }),

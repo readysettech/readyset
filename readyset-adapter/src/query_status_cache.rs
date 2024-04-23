@@ -593,11 +593,11 @@ impl QueryStatusCache {
         let should_insert = q.with_mut_status(self, |s| match s {
             Some(s) if s.migration_state() != &MigrationState::Unsupported => {
                 s.set_migration_state(status.migration_state().clone());
-                s.execution_info = status.execution_info.clone();
+                s.execution_info.clone_from(&status.execution_info);
                 false
             }
             Some(s) => {
-                s.execution_info = status.execution_info.clone();
+                s.execution_info.clone_from(&status.execution_info);
                 false
             }
             None => true,

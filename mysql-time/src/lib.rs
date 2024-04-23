@@ -51,9 +51,19 @@ pub struct MySqlTime {
 }
 
 impl MySqlTime {
+    /// The maximum value that a [`MySqlTime`] can represent: `838:59:59`.
+    pub const MAX: MySqlTime = MySqlTime {
+        nanos: MAX_MYSQL_TIME_SECONDS * (10 ^ 9),
+    };
+
+    /// The minimum value that a [`MySqlTime`] can represent: `-838:59:59`.
+    pub const MIN: MySqlTime = MySqlTime {
+        nanos: -MAX_MYSQL_TIME_SECONDS * (10 ^ 9),
+    };
+
     /// Creates a new [`MySqlTime`] with the given [`chrono::Duration`].
     /// Note that if the [`chrono::Duration`] surpasses the MySQL's TIME max value, then
-    /// the [`MySqlTime::max_value()`] is used (resp. [`MySqlTime::min_value()`] if the
+    /// the [`MySqlTime::MAX`] is used (resp. [`MySqlTime::MIN`] if the
     /// [`chrono::Duration`] falls below the MySQL's TIME min value).
     ///
     /// # Example
@@ -82,10 +92,10 @@ impl MySqlTime {
     pub fn new(duration: Duration) -> MySqlTime {
         let secs = duration.num_seconds();
         if secs > MAX_MYSQL_TIME_SECONDS {
-            return MySqlTime::max_value();
+            return MySqlTime::MAX;
         }
         if secs < (-MAX_MYSQL_TIME_SECONDS) {
-            return MySqlTime::min_value();
+            return MySqlTime::MIN;
         }
         MySqlTime {
             nanos: duration.num_nanoseconds().expect("Limit checked above"),
@@ -190,32 +200,6 @@ impl MySqlTime {
             seconds,
             microseconds as u64,
         ))
-    }
-
-    /// Returns the maximum value that a [`MySqlTime`] can represent: `838:59:59`.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// use mysql_time::MySqlTime;
-    ///
-    /// let mysql_time_max: MySqlTime = MySqlTime::max_value(); // 838:59:59
-    /// ```
-    pub fn max_value() -> MySqlTime {
-        MySqlTime::new(Duration::seconds(MAX_MYSQL_TIME_SECONDS))
-    }
-
-    /// Returns the minimum value that a [`MySqlTime`] can represent: `-838:59:59`.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use mysql_time::MySqlTime;
-    ///
-    /// let mysql_time_min: MySqlTime = MySqlTime::min_value(); // -838:59:59
-    /// ```
-    pub fn min_value() -> MySqlTime {
-        MySqlTime::new(Duration::seconds(-MAX_MYSQL_TIME_SECONDS))
     }
 
     /// Returns the sign of the [`MySqlTime`] as 1 if it's positive, or -1 if it's negative.
@@ -747,7 +731,7 @@ mod tests {
     #[proptest]
     fn from_microseconds(#[strategy(arbitrary_duration())] duration: Duration) {
         let mysql_time =
-            MySqlTime::from_microseconds(duration.num_microseconds().unwrap_or(i64::max_value()));
+            MySqlTime::from_microseconds(duration.num_microseconds().unwrap_or(i64::MAX));
         let total_secs = duration.num_seconds();
         assert_valid!(mysql_time, total_secs);
     }

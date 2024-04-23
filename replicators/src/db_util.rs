@@ -1,6 +1,7 @@
 //! Database Utilities
 //! Contains helpers for determining the schemas and tables of a database for use in replication
 use std::collections::HashMap;
+use std::fmt;
 
 use nom_sql::{Dialect, DialectDisplay};
 use readyset_errors::ReadySetError;
@@ -54,9 +55,9 @@ impl DatabaseSchemas {
     }
 }
 
-impl ToString for DatabaseSchemas {
-    fn to_string(&self) -> String {
-        format!("{:?}", self)
+impl fmt::Display for DatabaseSchemas {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
     }
 }
 
@@ -163,9 +164,9 @@ impl CreateSchema {
     }
 }
 
-impl ToString for CreateSchema {
-    fn to_string(&self) -> String {
-        format!("{self:?}")
+impl fmt::Display for CreateSchema {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{self:?}")
     }
 }
 

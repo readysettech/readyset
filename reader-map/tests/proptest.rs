@@ -17,10 +17,10 @@ use test_strategy::{proptest, Arbitrary};
 
 const LARGE_VEC_RANGE: Range<usize> = 10..1000;
 
-fn set<'a, T: 'a, I>(iter: I) -> HashSet<T>
+fn set<'a, T, I>(iter: I) -> HashSet<T>
 where
     I: IntoIterator<Item = &'a T>,
-    T: Copy + Hash + Eq,
+    T: Copy + Hash + Eq + 'a,
 {
     iter.into_iter().cloned().collect()
 }

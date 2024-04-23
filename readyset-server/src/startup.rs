@@ -187,7 +187,6 @@ async fn start_controller(
 }
 
 async fn start_request_router(
-    authority: Arc<Authority>,
     listen_addr: IpAddr,
     external_addr: SocketAddr,
     worker_tx: Sender<WorkerRequest>,
@@ -202,7 +201,6 @@ async fn start_request_router(
         port: external_addr.port(),
         worker_tx: worker_tx.clone(),
         controller_tx,
-        authority: authority.clone(),
         health_reporter: health_reporter.clone(),
         failpoint_channel,
     };
@@ -279,7 +277,6 @@ pub(crate) async fn start_instance_inner(
     let (tx, rx) = maybe_create_failpoint_chann(wait_for_failpoint);
     let mut health_reporter = HealthReporter::new();
     let http_uri = start_request_router(
-        authority.clone(),
         listen_addr,
         external_addr,
         worker_tx.clone(),

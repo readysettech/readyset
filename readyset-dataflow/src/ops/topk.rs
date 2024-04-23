@@ -459,10 +459,6 @@ impl Ingredient for TopK {
             self.order
         )
     }
-
-    fn is_selective(&self) -> bool {
-        true
-    }
 }
 
 #[cfg(test)]

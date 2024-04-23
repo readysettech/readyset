@@ -181,7 +181,7 @@ impl<'ast, 'schema> VisitorMut<'ast> for ExpandImpliedTablesVisitor<'schema> {
             }
 
             if let Some(t) = matches.first() {
-                table.schema = t.schema.clone();
+                table.schema.clone_from(&t.schema);
             }
         } else {
             column.table = self.find_table(&column.name);

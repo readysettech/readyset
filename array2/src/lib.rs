@@ -23,7 +23,6 @@
 #![feature(int_roundings)]
 use std::fmt::Debug;
 use std::ops::{Index, IndexMut};
-use std::usize;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;

@@ -235,9 +235,9 @@ impl DfValue {
             ),
             DfValue::Float(..) => DfValue::Float(f32::MIN),
             DfValue::Double(..) => DfValue::Double(f64::MIN),
-            DfValue::Int(_) => DfValue::Int(i64::min_value()),
+            DfValue::Int(_) => DfValue::Int(i64::MIN),
             DfValue::UnsignedInt(_) => DfValue::UnsignedInt(0),
-            DfValue::Time(_) => DfValue::Time(MySqlTime::min_value()),
+            DfValue::Time(_) => DfValue::Time(MySqlTime::MIN),
             DfValue::ByteArray(_) => DfValue::ByteArray(Arc::new(Vec::new())),
             DfValue::Numeric(_) => DfValue::from(Decimal::MIN),
             DfValue::BitVector(_) => DfValue::from(BitVec::new()),
@@ -265,9 +265,9 @@ impl DfValue {
             ),
             DfValue::Float(..) => DfValue::Float(f32::MAX),
             DfValue::Double(..) => DfValue::Double(f64::MIN),
-            DfValue::Int(_) => DfValue::Int(i64::max_value()),
-            DfValue::UnsignedInt(_) => DfValue::UnsignedInt(u64::max_value()),
-            DfValue::Time(_) => DfValue::Time(MySqlTime::max_value()),
+            DfValue::Int(_) => DfValue::Int(i64::MAX),
+            DfValue::UnsignedInt(_) => DfValue::UnsignedInt(u64::MAX),
+            DfValue::Time(_) => DfValue::Time(MySqlTime::MAX),
             DfValue::Numeric(_) => DfValue::from(Decimal::MAX),
             DfValue::TinyText(_)
             | DfValue::Text(_)
@@ -2998,17 +2998,17 @@ mod tests {
 
     #[test]
     fn data_type_conversion() {
-        let bigint_i64_min = DfValue::Int(std::i64::MIN);
-        let bigint_i32_min = DfValue::Int(std::i32::MIN as i64);
-        let bigint_u32_min = DfValue::Int(std::u32::MIN as i64);
-        let bigint_i32_max = DfValue::Int(std::i32::MAX as i64);
-        let bigint_u32_max = DfValue::Int(std::u32::MAX as i64);
-        let bigint_i64_max = DfValue::Int(std::i64::MAX);
-        let ubigint_u32_min = DfValue::UnsignedInt(std::u32::MIN as u64);
-        let ubigint_i32_max = DfValue::UnsignedInt(std::i32::MAX as u64);
-        let ubigint_u32_max = DfValue::UnsignedInt(std::u32::MAX as u64);
-        let ubigint_i64_max = DfValue::UnsignedInt(std::i64::MAX as u64);
-        let ubigint_u64_max = DfValue::UnsignedInt(std::u64::MAX);
+        let bigint_i64_min = DfValue::Int(i64::MIN);
+        let bigint_i32_min = DfValue::Int(i32::MIN as i64);
+        let bigint_u32_min = DfValue::Int(u32::MIN as i64);
+        let bigint_i32_max = DfValue::Int(i32::MAX as i64);
+        let bigint_u32_max = DfValue::Int(u32::MAX as i64);
+        let bigint_i64_max = DfValue::Int(i64::MAX);
+        let ubigint_u32_min = DfValue::UnsignedInt(u32::MIN as u64);
+        let ubigint_i32_max = DfValue::UnsignedInt(i32::MAX as u64);
+        let ubigint_u32_max = DfValue::UnsignedInt(u32::MAX as u64);
+        let ubigint_i64_max = DfValue::UnsignedInt(i64::MAX as u64);
+        let ubigint_u64_max = DfValue::UnsignedInt(u64::MAX);
 
         fn _data_type_conversion_test_eq_i32(d: &DfValue) {
             assert_eq!(

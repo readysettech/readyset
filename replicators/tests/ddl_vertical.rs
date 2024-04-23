@@ -661,7 +661,7 @@ impl ModelState for DDLModelState {
                     .iter_mut()
                     .find(|cs| cs.name == *col_name)
                     .unwrap();
-                spec.name = new_name.clone();
+                spec.name.clone_from(new_name);
             }
             Operation::DeleteRow(..) => (),
             Operation::CreateSimpleView { name, table_source } => {
@@ -731,7 +731,7 @@ impl ModelState for DDLModelState {
                     .iter_mut()
                     .find(|v| *v == value_name)
                     .unwrap();
-                *val_ref = new_name.clone();
+                val_ref.clone_from(new_name);
             }
             Operation::Evict { .. } => (),
         }
