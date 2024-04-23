@@ -4960,7 +4960,6 @@ dependencies = [
  "nom",
  "nom-sql",
  "num_cpus",
- "once_cell",
  "parking_lot 0.12.1",
  "petgraph",
  "pin-project",
@@ -5076,7 +5075,6 @@ version = "0.1.0"
 dependencies = [
  "clap 4.3.2",
  "lazy_static",
- "once_cell",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry-semantic-conventions",
