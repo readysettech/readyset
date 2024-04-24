@@ -9,7 +9,7 @@ use smallvec::SmallVec;
 use streaming_iterator::StreamingIterator;
 use tournament_kway::{Comparator, StreamingTournament};
 
-use crate::ReadReplyStats;
+use crate::{KeyComparison, ReadReplyStats};
 
 /// A lookup key into a reader
 pub type Key = Box<[DfValue]>;
@@ -159,6 +159,8 @@ impl ResultIterator {
         adapter_limit: Option<usize>,
         offset: Option<usize>,
         mut filter: Option<Expr>,
+        cols: &[usize],
+        key_comparisons: &[KeyComparison],
     ) -> Self {
         let PostLookup {
             order_by,
@@ -198,12 +200,43 @@ impl ResultIterator {
                 } else {
                     // With group by, merge results using a k-way merge iterator on group-by
                     // predicates and aggregate
-                    let comparator = RowComparator {
-                        order_by: aggregates
-                            .group_by
+
+                    // If the result set was produced by a lookup on a single key, we know that:
+                    //
+                    // - For point keys, the values across the result set for the columns in the key
+                    //   will all be equivalent
+                    // - For range keys, the values across the result set for the columns whose
+                    //   values are the same on both bounds of the key (e.g. Range([0, 1], [0, 2])
+                    //   is constant across the zeroth column in the key) will all be equivalent
+                    //
+                    // If we know that the value at a particular column is equivalent across all
+                    // the rows in the result set, we know that there's no reason to perform any
+                    // comparisons at those columns, even if the column appears in the aggregate
+                    // or ORDER BY list. So, we filter out any such columns from our order_by cols
+                    // before creating the comparator.
+                    let comparator = if key_comparisons.len() == 1 {
+                        let equals_cols = key_comparisons[0]
+                            .constant_indices()
                             .iter()
-                            .map(|&col| (col, OrderType::OrderAscending))
-                            .collect(),
+                            .map(|i| cols[*i])
+                            .collect::<Vec<usize>>();
+
+                        RowComparator {
+                            order_by: aggregates
+                                .group_by
+                                .iter()
+                                .filter(|col| !equals_cols.contains(col))
+                                .map(|&col| (col, OrderType::OrderAscending))
+                                .collect(),
+                        }
+                    } else {
+                        RowComparator {
+                            order_by: aggregates
+                                .group_by
+                                .iter()
+                                .map(|&col| (col, OrderType::OrderAscending))
+                                .collect(),
+                        }
                     };
 
                     debug_assert!(data
@@ -224,12 +257,43 @@ impl ResultIterator {
                 // When both aggregates and order by are specified it is tricky to lazily evaluate
                 // rows, so sadly we end up having to collect all of the rows, aggregate, then sort
                 // them
-                let comparator = RowComparator {
-                    order_by: aggregates
-                        .group_by
+
+                // If the result set was produced by a lookup on a single key, we know that:
+                //
+                // - For point keys, the values across the result set for the columns in the key
+                //   will all be equivalent
+                // - For range keys, the values across the result set for the columns whose values
+                //   are the same on both bounds of the key (e.g. Range([0, 1], [0, 2]) is constant
+                //   across the zeroth column in the key) will all be equivalent
+                //
+                // If we know that the value at a particular column is equivalent across all
+                // the rows in the result set, we know that there's no reason to perform any
+                // comparisons at those columns, even if the column appears in the aggregate
+                // or ORDER BY list. So, we filter out any such columns from our order_by cols
+                // before creating the comparator.
+                let comparator = if key_comparisons.len() == 1 {
+                    let equals_cols = key_comparisons[0]
+                        .constant_indices()
                         .iter()
-                        .map(|&col| (col, OrderType::OrderAscending))
-                        .collect(),
+                        .map(|i| cols[*i])
+                        .collect::<Vec<usize>>();
+
+                    RowComparator {
+                        order_by: aggregates
+                            .group_by
+                            .iter()
+                            .filter(|col| !equals_cols.contains(col))
+                            .map(|&col| (col, OrderType::OrderAscending))
+                            .collect(),
+                    }
+                } else {
+                    RowComparator {
+                        order_by: aggregates
+                            .group_by
+                            .iter()
+                            .map(|&col| (col, OrderType::OrderAscending))
+                            .collect(),
+                    }
                 };
 
                 debug_assert!(data

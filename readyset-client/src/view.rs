@@ -620,6 +620,29 @@ impl KeyComparison {
             }
         }
     }
+
+    /// If this [`KeyComparison`] is a range, this method returns the indices into each bound such
+    /// that the value at that index is equal between both bounds. This is useful to determine
+    /// which columns within a result set are constant across every row.
+    ///
+    /// If this `KeyComparison` is an equals key, this method returns an empty `Vec`.
+    pub fn constant_indices(&self) -> Vec<usize> {
+        match self {
+            Self::Range((lower, upper)) => {
+                let l = lower.inner();
+                let u = upper.inner();
+                debug_assert!(l.len() == u.len());
+
+                l.iter()
+                    .zip(u.iter())
+                    .enumerate()
+                    .filter(|(_, (lower_val, upper_val))| lower_val == upper_val)
+                    .map(|(i, _)| i)
+                    .collect()
+            }
+            Self::Equal(v) => (0..v.len()).collect(),
+        }
+    }
 }
 
 impl PartialEq for KeyComparison {

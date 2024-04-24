@@ -114,6 +114,14 @@ where
 }
 
 impl<T> Bound<T> {
+    /// Returns a reference to the value wrapped by the [`Bound`].
+    pub fn inner(&self) -> &T {
+        match *self {
+            Bound::Included(ref b) => b,
+            Bound::Excluded(ref b) => b,
+        }
+    }
+
     /// Returns a mutable reference to the value wrapped by the [`Bound`].
     pub fn inner_mut(&mut self) -> &mut T {
         match *self {

@@ -580,6 +580,10 @@ impl SingleReadHandle {
 
         self.eviction_epoch
     }
+
+    pub fn columns(&self) -> &[usize] {
+        self.index.columns.as_slice()
+    }
 }
 
 #[cfg(test)]
