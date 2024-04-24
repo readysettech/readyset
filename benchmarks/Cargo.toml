@@ -6,45 +6,45 @@ authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
 [dependencies]
-crossbeam-skiplist = { workspace = true }
+crossbeam-skiplist = "0.1.1"
 tokio = { workspace = true, features = ["full"] }
-anyhow = { workspace = true }
-csv = { workspace = true }
-nom = { workspace = true }
-nom_locate = { workspace = true }
-rand = { workspace = true }
-rand_distr = { workspace = true }
-tracing = { workspace = true }
-async-trait = { workspace = true }
-enum_dispatch = { workspace = true }
-futures = { workspace = true }
-vec1 = { workspace = true }
-url = { workspace = true }
-hdrhistogram = { workspace = true }
-zipf = { workspace = true }
+anyhow = "1.0.38"
+csv = "1.2"
+nom = "7.1"
+nom_locate = "4.0.0"
+rand = "0.8.3"
+rand_distr = "0.4"
+tracing = "0.1.29"
+async-trait = "0.1"
+enum_dispatch = "0.3.7"
+futures = "0.3"
+vec1 = "1.8.0"
+url = "2.2.2"
+hdrhistogram = "7.4"
+zipf = "7.0.0"
 clap = { workspace = true, features = ["derive", "env"] }
-reqwest = { workspace = true, features = ["stream", "native-tls"] }
-chrono = { workspace = true }
-atomic-counter = { workspace = true }
-serde_json = { workspace = true }
-serde_yaml = { workspace = true }
-serde = { workspace = true }
-serde_with = { workspace = true }
+reqwest = { version = "0.11.20", features = ["stream", "native-tls"] }
+chrono = "0.4"
+atomic-counter = "1.0.1"
+serde_json = "1.0"
+serde_yaml = "0.8"
+serde = "1.0"
+serde_with = "1.12"
 metrics = { workspace = true }
 metrics-util = { workspace = true }
 metrics-exporter-prometheus = { workspace = true }
-itertools = { workspace = true }
-num-integer = { workspace = true }
-lazy_static = { workspace = true }
-thiserror = { workspace = true }
-async-stream = { workspace = true }
-parking_lot = { workspace = true }
-indicatif = { workspace = true }
-prometheus-parse = { workspace = true }
-walkdir = { workspace = true }
+itertools = "0.10"
+num-integer = "0.1.44"
+lazy_static = "1.4.0"
+thiserror = "1.0.30"
+async-stream = "0.3.2"
+parking_lot = "0.11.2"
+indicatif = "0.17"
+prometheus-parse = "0.2.2"
+walkdir = "2.3"
 tokio-postgres = { workspace = true }
-vmemcached = { workspace = true }
-redis = { workspace = true, features = ["tokio-comp", "aio"] }
+vmemcached = "0.5.0"
+redis = { version = "0.23.3", features = ["tokio-comp", "aio"] }
 
 # local dependencies
 database-utils = { path = "../database-utils" }
@@ -96,8 +96,8 @@ path = "src/bin/snapshot_time.rs"
 [features]
 
 [dev-dependencies]
-indoc = { workspace = true }
-itertools = { workspace = true }
-proptest = { workspace = true }
-test-strategy = { workspace = true }
-url = { workspace = true }
+indoc = "1.0.3"
+itertools = "0.10"
+proptest = "1.0.0"
+test-strategy = "0.2.0"
+url = "2.2.2"

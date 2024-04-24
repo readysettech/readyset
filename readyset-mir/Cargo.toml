@@ -7,16 +7,16 @@ edition = "2021"
 description = "ReadySet MIR crate"
 
 [dependencies]
-regex = { workspace = true }
-lazy_static = { workspace = true }
-petgraph = { workspace = true, features = ["serde-1"] }
-itertools = { workspace = true }
-tracing = { workspace = true, features = ["release_max_level_debug"] }
-serde = { workspace = true, features = ["rc", "derive"] }
-proptest = { workspace = true }
-vec1 = { workspace = true }
-fixedbitset = { workspace = true }
-derive_more = { workspace = true }
+regex = "1.5"
+lazy_static = "1.4"
+petgraph = { version = "0.5", features = ["serde-1"] }
+itertools = "0.10"
+tracing = { version = "0.1", features = ["release_max_level_debug"] }
+serde = { version = "1.0.8", features = ["rc", "derive"] }
+proptest = "1.0.0"
+vec1 = "1.6"
+fixedbitset = { version = "0.2.0", default-features = false }
+derive_more = "0.99.17"
 
 # local deps
 common = { path = "../readyset-common", package = "readyset-common" }

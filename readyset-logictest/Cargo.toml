@@ -6,35 +6,35 @@ authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
 [dependencies]
-anyhow = { workspace = true }
+anyhow = "1.0.38"
 clap = { workspace = true, features = ["derive","env"] }
-console = { workspace = true }
-derive_more = { workspace = true }
-hex = { workspace = true }
-md5 = { workspace = true }
+console = "0.15.5"
+derive_more = "0.99.11"
+hex = "0.4.3"
+md5 = "0.7.0"
 mysql_async = { workspace = true }
-mysql_common = { workspace = true, features = ["chrono"] }
-tikv-jemallocator = { workspace = true }
+mysql_common = { version = "0.32", features = ["chrono"] }
+tikv-jemallocator = "0.5"
 tokio-postgres = { workspace = true, features = ["with-chrono-0_4"] }
 postgres-native-tls = { workspace = true }
-native-tls = { workspace = true }
-nom = { workspace = true }
-nom_locate = { workspace = true }
+native-tls = "0.2.7"
+nom = "7.1"
+nom_locate = "4.0.0"
 tokio = { workspace = true, features = ["full"] }
-itertools = { workspace = true }
-chrono = { workspace = true }
-pretty_assertions = { workspace = true }
-walkdir = { workspace = true }
-proptest = { workspace = true }
-futures = { workspace = true }
-bytes = { workspace = true }
-enum-display-derive = { workspace = true }
-lazy_static = { workspace = true }
-humantime = { workspace = true }
-rust_decimal = { workspace = true, features = ["db-tokio-postgres"] }
-indicatif = { workspace = true }
-bit-vec = { workspace = true, features = ["serde"] }
-thiserror = { workspace = true }
+itertools = "0.10.0"
+chrono = "0.4.19"
+pretty_assertions = "1.4.0"
+walkdir = "2.3.2"
+proptest = "1.0.0"
+futures = "0.3"
+bytes = "1.0.1"
+enum-display-derive = "0.1.1"
+lazy_static = "1.4.0"
+humantime = "2.1"
+rust_decimal = { version = "1.26", features = ["db-tokio-postgres"] }
+indicatif = "0.17"
+bit-vec = { version = "0.6", features = ["serde"] }
+thiserror = "1.0.30"
 
 readyset-server = { path = "../readyset-server/" }
 readyset-adapter = { path = "../readyset-adapter/" }

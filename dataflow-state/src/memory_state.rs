@@ -262,7 +262,7 @@ impl State for MemoryState {
     /// `weak_indices`.
     fn evict_bytes(&mut self, bytes: usize) -> Option<EvictBytesResult> {
         let mut rng = rand::thread_rng();
-        let state_index = rng.gen_range(0..self.state.len());
+        let state_index = rng.gen_range(0, self.state.len());
         let mut bytes_freed = 0u64;
         let mut keys_evicted = Vec::new();
 

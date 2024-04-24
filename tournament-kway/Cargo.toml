@@ -9,8 +9,8 @@ keywords = ["sort", "tournament", "tree", "kway", "merge"]
 description = "Implementation of a k-way merge using a tournament tree"
 
 [dependencies]
-streaming-iterator = { workspace = true }
+streaming-iterator = "0.1"
 
 [dev-dependencies]
-proptest = { workspace = true }
-test-strategy = { workspace = true }
+proptest = "1.0"
+test-strategy = "0.2"

@@ -9,5 +9,5 @@ description = "An efficient non-overlapping interval tree that merges overlappin
 [dependencies]
 
 [dev-dependencies]
-test-strategy = { workspace = true }
-proptest = { workspace = true }
+test-strategy = "0.2"
+proptest = "1.0"

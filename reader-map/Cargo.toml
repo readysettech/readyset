@@ -6,19 +6,19 @@ authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
 [dependencies]
-triomphe = { workspace = true }
-smallvec = { workspace = true, features = ["union"] }
-rand = { workspace = true }
-left-right = { workspace = true }
-itertools = { workspace = true }
+triomphe = "0.1"
+smallvec = { version = "1.8", default-features = false, features = ["union"] }
+rand = { version = "0.7", default-features = false, features = ["std", "alloc"] }
+left-right = "0.11"
+itertools = "0.10"
 
 readyset-client = { path = "../readyset-client" }
 readyset-util = { path = "../readyset-util" }
 partial-map = { path = "../partial-map" }
-thiserror = { workspace = true }
-iter-enum = { workspace = true }
+thiserror = "1.0.31"
+iter-enum = "1.1.1"
 
 [dev-dependencies]
-proptest = { workspace = true }
-test-strategy = { workspace = true }
+proptest = "1.0.0"
+test-strategy = "0.2.0"
 

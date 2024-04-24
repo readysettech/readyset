@@ -6,30 +6,30 @@ authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
 [dependencies]
-anyhow = { workspace = true }
-chrono = { workspace = true }
+anyhow = "1.0.38"
+chrono = "0.4.19"
 clap = { workspace = true, features = ["derive","env"] }
-derive_more = { workspace = true }
-futures-util = { workspace = true }
-itertools = { workspace = true }
-lazy_static = { workspace = true }
-rand = { workspace = true }
-regex = { workspace = true }
-serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true }
-strum = { workspace = true }
-strum_macros = { workspace = true }
-thiserror = { workspace = true }
-proptest = { workspace = true }
-test-strategy = { workspace = true }
-rust_decimal = { workspace = true }
+derive_more = "0.99.11"
+futures-util = "0.3.13"
+itertools = "0.10"
+lazy_static = "1.4.0"
+rand = "0.8.3"
+regex = "1.4.3"
+serde = { version = "1.0.123", features = ["derive"] }
+serde_json = "1.0.63"
+strum = "0.23"
+strum_macros = "0.23"
+thiserror = "1.0.26"
+proptest = "1.0.0"
+test-strategy = "0.2.0"
+rust_decimal = { version = "1.26" }
 eui48 = { workspace = true }
-uuid = { workspace = true }
-bit-vec = { workspace = true, features = ["serde"] }
-rand_regex = { workspace = true }
-zipf = { workspace = true }
-parking_lot = { workspace = true }
-growable-bloom-filter = { workspace = true }
+uuid = "0.8"
+bit-vec = { version = "0.6", features = ["serde"] }
+rand_regex = "0.15.1"
+zipf = "7.0.0"
+parking_lot = "0.11.2"
+growable-bloom-filter = "2.0.1"
 
 data-generator = { path = "../data-generator" }
 nom-sql = { path = "../nom-sql" }
@@ -39,6 +39,6 @@ readyset-util = { path = "../readyset-util" }
 
 [dev-dependencies]
 mysql_async.workspace = true
-serial_test = { workspace = true }
+serial_test = "0.5"
 tokio = { workspace = true, features = ["full"] }
 tokio-postgres.workspace = true

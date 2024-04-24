@@ -6,19 +6,19 @@ authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
 [dependencies]
-derive_more = { workspace = true }
-futures = { workspace = true }
+derive_more = "0.99.17"
+futures = "0.3.21"
 mysql_async = { workspace = true }
-native-tls = { workspace = true }
-thiserror = { workspace = true }
+native-tls = "0.2.8"
+thiserror = "1.0.30"
 tokio = { workspace = true, features = ["full"] }
 tokio-postgres = { workspace = true, features = ["with-chrono-0_4"] }
 postgres-native-tls = { workspace = true }
 clap = { workspace = true, features = ["derive","env"] }
-serde = { workspace = true, features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
 readyset-util = { path = "../readyset-util" }
 readyset-errors = { path = "../readyset-errors" }
-async-trait = { workspace = true }
+async-trait = "0.1"
 nom-sql = { path = "../nom-sql" }
-deadpool-postgres = { workspace = true }
-num_cpus = { workspace = true }
+deadpool-postgres = "0.10.3"
+num_cpus = "1.15.0"

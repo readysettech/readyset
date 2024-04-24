@@ -6,5 +6,5 @@ authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
 [dependencies]
-serde = { workspace = true, features = ["derive"] }
-thiserror = { workspace = true }
+serde = { version = "1.0.137", features = ["derive"] }
+thiserror = "1.0.31"
