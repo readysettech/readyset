@@ -378,10 +378,12 @@ impl MirGraph {
             },
             // otherwise, just look up in the column set
             // Compare by name if there is no table
-            _ => match if c.table.is_none() {
-                self.columns(node).iter().position(|cc| cc.name == c.name)
-            } else {
-                self.columns(node).iter().position(|cc| cc == c)
+            _ => match {
+                if c.table.is_none() {
+                    self.columns(node).iter().position(|cc| cc.name == c.name)
+                } else {
+                    self.columns(node).iter().position(|cc| cc == c)
+                }
             } {
                 Some(id) => Ok(id),
                 None => err,

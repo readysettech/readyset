@@ -774,7 +774,7 @@ impl<'a> PostgresReplicator<'a> {
         let mut tables = Vec::with_capacity(table_list.len());
         for table in table_list {
             let table_name = &table.name.clone().to_string();
-            let res = table
+            match table
                 .get_table(get_transaction!(self))
                 .and_then(|create_table| {
                     future::ready(
@@ -809,9 +809,8 @@ impl<'a> PostgresReplicator<'a> {
                         ))
                         .map_ok(|_| create_table)
                 })
-                .await;
-
-            match res {
+                .await
+            {
                 Ok(create_table) => {
                     tables.push(create_table);
                 }
@@ -837,7 +836,7 @@ impl<'a> PostgresReplicator<'a> {
             let view_name = view.name.clone();
             let view_schema = view.schema.clone();
 
-            let res = view
+            match view
                 .get_create_view(get_transaction!(self))
                 .map_err(|e| e.into())
                 .and_then(|create_view| {
@@ -857,9 +856,8 @@ impl<'a> PostgresReplicator<'a> {
                         .with_schema_search_path(vec![view_schema.clone().into()]),
                     )
                 })
-                .await;
-
-            match res {
+                .await
+            {
                 Ok(_) => {}
                 Err(error) => {
                     warn!(

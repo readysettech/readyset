@@ -307,6 +307,12 @@ impl std::borrow::Borrow<str> for SqlIdentifier {
     }
 }
 
+impl std::borrow::Borrow<[u8]> for SqlIdentifier {
+    fn borrow(&self) -> &[u8] {
+        self.as_ref()
+    }
+}
+
 impl PartialOrd for SqlIdentifier {
     #[inline]
     #[allow(clippy::non_canonical_partial_ord_impl)]
