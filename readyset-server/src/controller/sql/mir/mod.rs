@@ -2238,10 +2238,41 @@ impl SqlToMirConverter {
                     project_order,
                 );
 
-                let aggregates = if view_key.index_type != IndexType::HashMap {
-                    post_lookup_aggregates(query_graph, query_name)?
+                let post_lookup_aggregates = if view_key.index_type == IndexType::HashMap {
+                    // If we have aggregates under the IndexType::HashMap, they aren't necessarily
+                    // post-lookup operations. For example, `select sum(col2) from t where col1 =
+                    // ?`, the aggregate will be handled in the dataflow graph.
+                    // But if the query originally contained a `where col1 in
+                    // (?, ?)`, the aggregate does need to be executed as a
+                    // post-lookup. Adding a post-lookup is necessary for `where in` for correctly
+                    // aggregating results, but a mild perf impediment for aggregates with a simple
+                    // equality (we'll run an aggregation on a single row). However, we've lost the
+                    // "did this come from a `where in` information" way above, as it's rewritten in
+                    // the adapter. Hence, to avoid that penalty on all users,
+                    // only add the post-lookup to users who have opted in to
+                    // using post-lookups.
+                    if self.config.allow_post_lookup {
+                        match post_lookup_aggregates(query_graph, query_name) {
+                            Ok(aggs) => aggs,
+                            // This part is a hack. When we get an ReadySetError::Unsupported,
+                            // that is because the aggregate was a AVG, COUNT(DISTINCT..), or
+                            // SUM(DISTINCT..). We can only support those (currently!) when the
+                            // query contained an equality clause, and
+                            // not a `where in` clause (that was
+                            // rewritten as an equality).  As mentioned above, we don't know which
+                            // one the original query had, thus this
+                            // code opts to preserve the functionality
+                            // of the simple equality. Once again, this only applies if the user
+                            // opted in to using "experimental"
+                            // post-lookups.
+                            Err(ReadySetError::Unsupported(..)) => None,
+                            Err(e) => return Err(e),
+                        }
+                    } else {
+                        None
+                    }
                 } else {
-                    None
+                    post_lookup_aggregates(query_graph, query_name)?
                 };
 
                 let order_by = query_graph
@@ -2252,7 +2283,7 @@ impl SqlToMirConverter {
                 let limit = query_graph.pagination.as_ref().map(|p| p.limit);
 
                 if !self.config.allow_post_lookup
-                    && (aggregates.is_some() || order_by.is_some() || limit.is_some())
+                    && (post_lookup_aggregates.is_some() || order_by.is_some() || limit.is_some())
                 {
                     unsupported!("Queries which perform operations post-lookup are not supported");
                 }
@@ -2269,7 +2300,7 @@ impl SqlToMirConverter {
                             limit,
                             returned_cols: Some(returned_cols),
                             default_row: query_graph.default_row.clone(),
-                            aggregates,
+                            aggregates: post_lookup_aggregates,
                         },
                     ),
                     &[leaf_project_reorder_node],

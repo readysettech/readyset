@@ -229,7 +229,7 @@ impl Parse {
 }
 
 /// Run a test script, or all test scripts in a directory, against either ReadySet or a reference
-/// MySQL database
+/// upstream database
 #[derive(Parser)]
 struct Verify {
     #[command(flatten)]
