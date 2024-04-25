@@ -1,15 +1,17 @@
 ## Development
 
-This section is for developers who want to build ReadySet from source as they work on the ReadySet codebase.
+This section is for developers who want to build Readyset from source as they work on the Readyset
+codebase.  It is recommended to build Readyset on a system with at least 4 cores, 8GB of RAM, and 20GB of
+storage.
 
 ### Install prerequisites
 
-1. Install ReadySet dependencies.
+1. Install Readyset dependencies.
 
    **macOS with [homebrew](https://brew.sh/):**
 
    ```bash
-   brew install lz4 openssl@1.1
+   brew install lz4 openssl
    ```
 
    Add the following to your [cargo config](https://doc.rust-lang.org/cargo/reference/config.html)
@@ -49,13 +51,13 @@ This section is for developers who want to build ReadySet from source as they wo
 
 1. Install Rust via [rustup.rs](https://rustup.rs/).
 
-   ReadySet is written entirely in Rust.
+   Readyset is written entirely in Rust.
 
 1. Install Docker via [Get Docker](https://docs.docker.com/get-docker/) and Docker Compose via [Install Docker Compose](https://docs.docker.com/compose/install/).
 
-   ReadySet runs alongside a backing Postgres or MySQL database and, when run in distributed fashion, uses Consul for leader election, failure detection, and internal cluster state management. You'll use Docker Compose to create and manage these resources for local development.
+   Readyset runs alongside a backing Postgres or MySQL database and, when run in distributed fashion, uses Consul for leader election, failure detection, and internal cluster state management. You'll use Docker Compose to create and manage these resources for local development.
 
-### Build and run ReadySet
+### Build and run Readyset
 
 1. Clone the repo using `git` and navigate into it:
 
@@ -70,9 +72,9 @@ This section is for developers who want to build ReadySet from source as they wo
    docker-compose up -d
    ```
 
-   This starts both Postgres and MySQL in containers, although you will run ReadySet against only one at a time. If you don't want to run both databases, edit `docker-compose.yml` and comment out the `mysql` or `postgres` fields.
+   This starts both Postgres and MySQL in containers, although you will run Readyset against only one at a time. If you don't want to run both databases, edit `docker-compose.yml` and comment out the `mysql` or `postgres` fields.
 
-1. Compile and run ReadySet, replacing `<deployment name>` with a unique identifier for the deployment.
+1. Compile and run Readyset, replacing `<deployment name>` with a unique identifier for the deployment.
 
    **Run against Postgres:**
 
@@ -86,11 +88,11 @@ This section is for developers who want to build ReadySet from source as they wo
    cargo run --bin readyset --release -- --database-type=mysql --upstream-db-url=mysql://root:readyset@127.0.0.1:3306/testdb --username=root --password=readyset --address=0.0.0.0:3307 --deployment=<deployment name> --prometheus-metrics
    ```
 
-   This runs the ReadySet Server and Adapter as a single process, a simple, standard way to run ReadySet that is also the easiest approach when developing. For production deployments, however, it is possible to run the Server and Adapter as separate processes. See the [scale out deployment pattern](https://docs.readyset.io/guides/deploy/production-notes/#scale-out) in the docs.
+   This runs the Readyset Server and Adapter as a single process, a simple, standard way to run Readyset that is also the easiest approach when developing. For production deployments, however, it is possible to run the Server and Adapter as separate processes. See the [scale out deployment pattern](https://docs.readyset.io/guides/deploy/production-notes/#scale-out) in the docs.
 
-   For details about ReadySet options, see the CLI docs (coming soon).
+   For details about Readyset options, see the CLI docs (coming soon).
 
-1. With ReadySet up and running, you can now connect the Postgres or MySQL shell:
+1. With Readyset up and running, you can now connect the Postgres or MySQL shell:
 
    **Postgres:**
 
@@ -128,3 +130,39 @@ cargo test --skip integration_serial
 - Running tests may require increasing file descriptor limits. You can do so by running `ulimit -Sn 65535`.
 
 
+### Building binary packages
+
+Linux distribution packages can be built that will install Readyset as a `systemd` service.  The
+current configurations have been tested with Fedora 39, Ubuntu 22.04, Debian 12, and Amazon Linux
+2023. However, they may work just fine on other distros as well.  In addition to the set-up steps
+for building Readyset, the following dependencies are required:
+
+For `deb`:
+```bash
+    cargo install cargo-deb
+```
+
+For `rpm`:
+```bash
+    cargo install cargo-generate-rpm
+```
+
+To build a stripped `readyset` binary:
+```bash
+    cargo --locked build --profile=release-dist-quick  --bin readyset
+```
+
+After building, to generate a `deb` package run:
+```bash
+    cargo deb --no-build --profile=release-dist-quick -p readyset
+```
+
+To generate an `rpm` package run:
+```bash
+    cargo generate-rpm --profile=release-dist-quick -p readyset \
+         --metadata-overwrite=readyset/pkg/rpm/scriptlets.toml
+```
+
+To install and use `readyset` from the binary packages, see [the instructions on our main documentation site][binpkgs].
+
+[binpkgs]: https://docs.readyset.io/get-started/install-rs/binaries/install-package
