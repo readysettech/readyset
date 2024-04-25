@@ -204,7 +204,7 @@ impl MySqlReplicator {
         let mut bad_tables = Vec::new();
         // Process `CREATE TABLE` statements
         for (db, table) in replicated_tables.iter() {
-            match create_for_table(&mut tx, db, table, TableKind::BaseTable)
+            let res = create_for_table(&mut tx, db, table, TableKind::BaseTable)
                 .map_err(|e| e.into())
                 .and_then(|create_table| {
                     debug!(%create_table, "Extending recipe");
@@ -222,8 +222,9 @@ impl MySqlReplicator {
                         changelist.with_schema_search_path(vec![db.clone().into()]),
                     )
                 })
-                .await
-            {
+                .await;
+
+            match res {
                 Ok(_) => {}
                 Err(error) => {
                     warn!(%error, "Error extending CREATE TABLE, table will not be used");
@@ -256,7 +257,7 @@ impl MySqlReplicator {
 
         // Process `CREATE VIEW` statements
         for (db, view) in all_views.iter() {
-            match create_for_table(&mut tx, db, view, TableKind::View)
+            let res = create_for_table(&mut tx, db, view, TableKind::View)
                 .map_err(|e| e.into())
                 .and_then(|create_view| {
                     db_schemas.extend_create_schema_for_view(
@@ -272,8 +273,9 @@ impl MySqlReplicator {
                         changelist.with_schema_search_path(vec![db.clone().into()]),
                     )
                 })
-                .await
-            {
+                .await;
+
+            match res {
                 Ok(_) => {}
                 Err(error) => {
                     warn!(%view, %error, "Error extending CREATE VIEW, view will not be used");
