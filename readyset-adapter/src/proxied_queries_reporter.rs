@@ -41,16 +41,16 @@ impl ProxiedQueriesReporter {
                 TelemetryEvent::ProxiedQuery,
                 TelemetryBuilder::new()
                     .proxied_query(anon_q)
-                    .migration_status(query.status.migration_state.to_string())
+                    .migration_status(query.status.migration_state().to_string())
                     .build(),
             ))
         };
 
-        match reported_queries.insert(query.id, query.status.migration_state.clone()) {
+        match reported_queries.insert(query.id, query.status.migration_state().clone()) {
             Some(old_migration_state) => {
                 // Check whether we know of a new migration state for this query. Send an event if
                 // so
-                if old_migration_state != query.status.migration_state {
+                if &old_migration_state != query.status.migration_state() {
                     build_event()
                 } else {
                     None
@@ -105,11 +105,7 @@ mod tests {
             query: Query::ParseFailed(Arc::new(
                 "this is easier than making a view create request".to_string(),
             )),
-            status: QueryStatus {
-                migration_state: MigrationState::Pending,
-                execution_info: None,
-                always: false,
-            },
+            status: QueryStatus::new(MigrationState::Pending),
         };
         proxied_queries_reporter.report_query(&mut init_q).await;
         let status = {
@@ -126,11 +122,7 @@ mod tests {
             query: Query::ParseFailed(Arc::new(
                 "this is easier than making a view create request".to_string(),
             )),
-            status: QueryStatus {
-                migration_state: MigrationState::Successful,
-                execution_info: None,
-                always: false,
-            },
+            status: QueryStatus::new(MigrationState::Successful),
         };
         proxied_queries_reporter.report_query(&mut updated_q).await;
         let status = {

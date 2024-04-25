@@ -310,7 +310,7 @@ impl QueryStatusCache {
     {
         let q = q.into();
         let status = QueryStatus::default_for_query(&q);
-        let migration_state = status.migration_state.clone();
+        let migration_state = status.migration_state().clone();
         let id = self.insert_with_status(q, status);
         (id, migration_state)
     }
@@ -326,9 +326,9 @@ impl QueryStatusCache {
             Query::Parsed { .. } => status,
             Query::ParseFailed(_) => {
                 let mut status = status;
-                if status.migration_state != MigrationState::Unsupported {
+                if status.migration_state() != &MigrationState::Unsupported {
                     error!("Cannot set migration state to anything other than Unsupported for a Query::ParseFailed");
-                    status.migration_state = MigrationState::Unsupported
+                    status.set_migration_state(MigrationState::Unsupported);
                 }
                 status
             }
@@ -355,7 +355,7 @@ impl QueryStatusCache {
         let query_state = self.id_to_status.get(&id);
 
         match query_state {
-            Some(s) => (id, s.value().migration_state.clone()),
+            Some(s) => (id, s.value().migration_state().clone()),
             None => self.insert(q.clone()),
         }
     }
@@ -370,7 +370,7 @@ impl QueryStatusCache {
         let id = q.query_id();
         let query_state = self.id_to_status.get(&id);
 
-        (id, query_state.map(|s| s.value().migration_state.clone()))
+        (id, query_state.map(|s| s.value().migration_state().clone()))
     }
 
     /// This function returns the query status of a query. If the query does not exist
@@ -491,10 +491,10 @@ impl QueryStatusCache {
                     //
                     // `Inlined` queries may only be changed from `Inlined` to `Unsupported`.
                     if !matches!(
-                        s.migration_state,
+                        s.migration_state(),
                         MigrationState::Unsupported | MigrationState::Inlined(_)
                     ) {
-                        s.migration_state = MigrationState::Pending
+                        s.set_migration_state(MigrationState::Pending);
                     }
                     false
                 }
@@ -504,14 +504,7 @@ impl QueryStatusCache {
         });
 
         if should_insert {
-            self.insert_with_status(
-                q.clone(),
-                QueryStatus {
-                    migration_state: MigrationState::Pending,
-                    execution_info: None,
-                    always: false,
-                },
-            );
+            self.insert_with_status(q.clone(), QueryStatus::new(MigrationState::Pending));
         }
     }
 
@@ -526,37 +519,15 @@ impl QueryStatusCache {
         // Dropped should not be set manually
         debug_assert!(!matches!(m, MigrationState::Dropped));
 
-        let should_insert = q.with_mut_status(self, |s| {
-            match s {
-                Some(s) => {
-                    match s.migration_state {
-                        // We do not support transitions from the `Unsupported` state, as we assume
-                        // any `Unsupported` query will remain `Unsupported` for the duration of
-                        // this process.
-                        MigrationState::Unsupported => {}
-                        // A query with an Inlined state can only transition to Unsupported.
-                        MigrationState::Inlined(_) => {
-                            if matches!(m, MigrationState::Unsupported) {
-                                s.migration_state = MigrationState::Unsupported;
-                            }
-                        }
-                        // All other state transitions are allowed.
-                        _ => s.migration_state = m.clone(),
-                    }
-                    false
-                }
-                None => true,
+        let should_insert = q.with_mut_status(self, |s| match s {
+            Some(s) => {
+                s.set_migration_state(m.clone());
+                false
             }
+            None => true,
         });
         if should_insert {
-            self.insert_with_status(
-                q.clone(),
-                QueryStatus {
-                    migration_state: m,
-                    execution_info: None,
-                    always: false,
-                },
-            );
+            self.insert_with_status(q.clone(), QueryStatus::new(m));
         }
     }
 
@@ -570,20 +541,13 @@ impl QueryStatusCache {
     {
         let should_insert = q.with_mut_status(self, |s| match s {
             Some(s) => {
-                s.migration_state = MigrationState::Dropped;
+                s.set_migration_state(MigrationState::Dropped);
                 false
             }
             None => true,
         });
         if should_insert {
-            self.insert_with_status(
-                q.clone(),
-                QueryStatus {
-                    migration_state: MigrationState::Dropped,
-                    execution_info: None,
-                    always: false,
-                },
-            );
+            self.insert_with_status(q.clone(), QueryStatus::new(MigrationState::Dropped));
         }
     }
 
@@ -592,20 +556,13 @@ impl QueryStatusCache {
     pub fn unsupported_inlined_migration(&self, q: &ViewCreateRequest) {
         let should_insert = q.with_mut_status(self, |s| match s {
             Some(s) => {
-                s.migration_state = MigrationState::Unsupported;
+                s.set_migration_state(MigrationState::Unsupported);
                 false
             }
             None => true,
         });
         if should_insert {
-            self.insert_with_status(
-                q.clone(),
-                QueryStatus {
-                    migration_state: MigrationState::Unsupported,
-                    execution_info: None,
-                    always: false,
-                },
-            );
+            self.insert_with_status(q.clone(), QueryStatus::new(MigrationState::Unsupported));
         }
         self.persistent_handle.pending_inlined_migrations.remove(q);
     }
@@ -619,7 +576,7 @@ impl QueryStatusCache {
         Q: QueryStatusKey,
     {
         q.with_mut_status(self, |s| match s {
-            Some(s) if s.migration_state != MigrationState::Unsupported => {
+            Some(s) if s.migration_state() != &MigrationState::Unsupported => {
                 s.always = always;
             }
             _ => {}
@@ -634,8 +591,8 @@ impl QueryStatusCache {
         Q: QueryStatusKey,
     {
         let should_insert = q.with_mut_status(self, |s| match s {
-            Some(s) if s.migration_state != MigrationState::Unsupported => {
-                s.migration_state = status.migration_state.clone();
+            Some(s) if s.migration_state() != &MigrationState::Unsupported => {
+                s.set_migration_state(status.migration_state().clone());
                 s.execution_info = status.execution_info.clone();
                 false
             }
@@ -659,7 +616,7 @@ impl QueryStatusCache {
             .iter_mut()
             .filter(|v| v.is_successful())
             .for_each(|mut v| {
-                v.migration_state = MigrationState::Pending;
+                v.set_migration_state(MigrationState::Pending);
                 v.always = false;
             });
         let mut statuses = self.persistent_handle.statuses.write();
@@ -667,7 +624,7 @@ impl QueryStatusCache {
             .iter_mut()
             .filter(|(_query_id, (_query, status))| status.is_successful())
             .for_each(|(_query_id, (_query, ref mut status))| {
-                status.migration_state = MigrationState::Pending;
+                status.set_migration_state(MigrationState::Pending);
                 status.always = false;
             });
     }
@@ -726,11 +683,7 @@ impl QueryStatusCache {
 
         // Then update the inlined state epoch for the query
         query.with_mut_status(self, |s| {
-            if let Some(QueryStatus {
-                migration_state: MigrationState::Inlined(ref mut state),
-                ..
-            }) = s
-            {
+            if let Some(state) = s.and_then(|s| s.as_inlined_mut()) {
                 state.epoch += 1;
             }
         })
@@ -746,7 +699,7 @@ impl QueryStatusCache {
                 // Get the placeholders that require inlining
                 let placeholders =
                     q.key()
-                        .with_status(self, |s| match s.map(|s| &s.migration_state) {
+                        .with_status(self, |s| match s.map(|s| s.migration_state()) {
                             Some(MigrationState::Inlined(InlinedState {
                                 inlined_placeholders,
                                 ..
@@ -772,6 +725,7 @@ impl QueryStatusCache {
     /// Does not include any queries that require inlining.
     pub fn pending_migration(&self) -> QueryList {
         let statuses = self.persistent_handle.statuses.read();
+
         statuses
             .iter()
             .filter_map(|(_query_id, (query, status))| {
@@ -1172,8 +1126,8 @@ mod tests {
             epoch: 1,
         });
         cache.update_query_migration_state(&q, inlined_state.clone());
-        let state = cache.query_status(&q).migration_state;
-        assert_eq!(state, inlined_state);
+        let state = cache.query_status(&q);
+        assert_eq!(state.migration_state(), &inlined_state);
         assert_eq!(
             cache
                 .persistent_handle

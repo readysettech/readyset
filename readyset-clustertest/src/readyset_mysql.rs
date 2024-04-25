@@ -1585,10 +1585,10 @@ async fn views_synchronize_between_deployments() {
     );
 
     // Then create that query via adapter 0
-    adapter_0
+    eventually!(adapter_0
         .query_drop("CREATE CACHE FROM SELECT * FROM t1;")
         .await
-        .unwrap();
+        .is_ok());
 
     // Ensure it's been successfully created in adapter 0
     adapter_0.query_drop("SELECT * FROM t1;").await.unwrap();

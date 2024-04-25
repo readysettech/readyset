@@ -1023,6 +1023,7 @@ impl NoriaConnector {
         create_if_not_exist: bool,
         override_schema_search_path: Option<Vec<SqlIdentifier>>,
     ) -> ReadySetResult<Relation> {
+        println!("get_view_name_cached");
         let search_path =
             override_schema_search_path.unwrap_or_else(|| self.schema_search_path().to_vec());
         let view_request = ViewCreateRequest::new(q.clone(), search_path.clone());

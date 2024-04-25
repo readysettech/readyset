@@ -2046,7 +2046,7 @@ where
         }
 
         if only_supported {
-            queries.retain(|q| q.status.migration_state.is_supported());
+            queries.retain(|q| q.status.is_supported());
         }
 
         let select_schema = if let Some(handle) = self.metrics_handle.as_mut() {
@@ -2075,15 +2075,7 @@ where
         let mut data = queries
             .into_iter()
             .map(|DeniedQuery { id, query, status }| {
-                let s = match status.migration_state {
-                    MigrationState::DryRunSucceeded
-                    | MigrationState::Successful
-                    | MigrationState::Dropped => "yes",
-                    MigrationState::Pending | MigrationState::Inlined(_) => "pending",
-                    MigrationState::Unsupported => "unsupported",
-                }
-                .to_string();
-
+                let s = status.supported_state().to_string();
                 let mut row = vec![
                     DfValue::from(id.to_string()),
                     DfValue::from(Self::format_query_text(
@@ -2506,11 +2498,7 @@ where
         event: &mut QueryExecutionEvent,
         processed_query_params: ProcessedQueryParams,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
-        let mut status = status.unwrap_or(QueryStatus {
-            migration_state: MigrationState::Unsupported,
-            execution_info: None,
-            always: false,
-        });
+        let mut status = status.unwrap_or(QueryStatus::new(MigrationState::Unsupported));
         let original_status = status.clone();
         let did_work = if let Some(ref mut i) = status.execution_info {
             i.reset_if_exceeded_recovery(
@@ -2524,9 +2512,9 @@ where
         // Test several conditions to see if we should proxy
         let upstream_exists = upstream.is_some();
         let proxy_out_of_band = settings.migration_mode != MigrationMode::InRequestPath
-            && status.migration_state != MigrationState::Successful;
+            && status.migration_state() != &MigrationState::Successful;
         let unsupported_or_dropped = matches!(
-            &status.migration_state,
+            status.migration_state(),
             MigrationState::Unsupported | MigrationState::Dropped
         );
         let exceeded_network_failure = status
@@ -2568,7 +2556,7 @@ where
         match noria_res {
             Ok(noria_ok) => {
                 // We managed to select on ReadySet, good for us
-                status.migration_state = MigrationState::Successful;
+                status.set_migration_state(MigrationState::Successful);
                 if let Some(i) = status.execution_info.as_mut() {
                     i.execute_succeeded()
                 }
@@ -2591,9 +2579,9 @@ where
                 }
 
                 if noria_err.caused_by_view_not_found() {
-                    status.migration_state = MigrationState::Pending;
+                    status.set_migration_state(MigrationState::Pending);
                 } else if noria_err.caused_by_unsupported() {
-                    status.migration_state = MigrationState::Unsupported;
+                    status.set_migration_state(MigrationState::Unsupported);
                 };
 
                 let always = status.always;
