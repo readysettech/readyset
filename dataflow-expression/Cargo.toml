@@ -6,17 +6,17 @@ authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
 [dependencies]
-chrono = { version = "0.4.0", features = ["serde"] }
-chrono-tz = { version = "0.8.6", features = ["serde"] }
-serde = { version = "1.0.8", features = ["derive"] }
-serde_json = { version = "1.0" }
-rust_decimal = { version = "1.26" }
-lazy_static = "1.4.0"
-regex = "1.4.3"
-itertools = "0.10.3"
-vec1 = "1.6"
-proptest = "1.0.0"
-test-strategy = "0.2.0"
+chrono = { workspace = true, features = ["serde"] }
+chrono-tz = { workspace = true, features = ["serde"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+rust_decimal = { workspace = true }
+lazy_static = { workspace = true }
+regex = { workspace = true }
+itertools = { workspace = true }
+vec1 = { workspace = true }
+proptest = { workspace = true }
+test-strategy = { workspace = true }
 
 # Local deps
 readyset-util = { path = "../readyset-util" }

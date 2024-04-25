@@ -10,11 +10,11 @@ publish = false
 
 [dependencies]
 reader_map = { path = "../" }
-chashmap = "2.1.0"
+chashmap = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
-zipf = "6"
-rand = "0.7"
-parking_lot = "0.10.1"
+zipf = { workspace = true }
+rand = { workspace = true }
+parking_lot = { workspace = true }
 
 [profile.release]
 lto = true
