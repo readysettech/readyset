@@ -1599,7 +1599,7 @@ async fn views_synchronize_between_deployments() {
 
     // Eventually it should show up in adapter 1 too
     eventually! {
-        adapter_1.as_mysql_conn().unwrap().query_drop("SELECT * FROM t1;").await.unwrap();
+        adapter_1.as_mysql_conn().unwrap().query_drop("SELECT * FROM t1;");
         last_statement_destination(adapter_1.as_mysql_conn().unwrap()).await == QueryDestination::Readyset
     }
 
