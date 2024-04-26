@@ -220,7 +220,7 @@ impl Serialize for DeniedQuery {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueryStatus {
     /// The migration state of the query
-    pub migration_state: MigrationState,
+    migration_state: MigrationState,
     /// The execution info of the query, if any
     pub execution_info: Option<ExecutionInfo>,
     /// If we should always cache the query (never proxy to upstream)
@@ -228,6 +228,16 @@ pub struct QueryStatus {
 }
 
 impl QueryStatus {
+    /// Constructs a QueryStatus with the given migration state, no migration state,
+    /// and always set to false
+    pub fn new(migration_state: MigrationState) -> Self {
+        Self {
+            migration_state,
+            execution_info: None,
+            always: false,
+        }
+    }
+
     /// Constructs a QueryStatus with the default migration state for the query, no migration state,
     /// and always set to false
     pub fn default_for_query(query: &Query) -> Self {
@@ -247,12 +257,46 @@ impl QueryStatus {
         }
     }
 
+    pub fn set_migration_state(&mut self, migration_state: MigrationState) {
+        if self.migration_state.can_transit_to(&migration_state) {
+            self.migration_state = migration_state;
+        }
+    }
+
+    /// Returns a reference to the [`MigrationState`]
+    pub fn migration_state(&self) -> &MigrationState {
+        &self.migration_state
+    }
+
+    pub fn supported_state(&self) -> SupportedState {
+        match &self.migration_state {
+            MigrationState::DryRunSucceeded
+            | MigrationState::Successful
+            | MigrationState::Dropped => SupportedState::Yes,
+            MigrationState::Pending | MigrationState::Inlined(_) => SupportedState::Pending,
+            MigrationState::Unsupported => SupportedState::Unsupported,
+        }
+    }
+
+    /// Returns true if this query status represents a [pending][] query
+    ///
+    /// [pending]: MigrationState::Pending
+    #[must_use]
+    pub fn as_inlined_mut(&mut self) -> Option<&mut InlinedState> {
+        if let MigrationState::Inlined(ref mut state) = self.migration_state {
+            Some(state)
+        } else {
+            None
+        }
+    }
+
     /// Returns true if this query status represents a [pending][] query
     ///
     /// [pending]: MigrationState::Pending
     #[must_use]
     pub fn is_pending(&self) -> bool {
-        self.migration_state == MigrationState::Pending
+        // TODO ethan is this necessary change?
+        self.migration_state.is_pending()
     }
 
     /// Returns true if this query status represents a [successfully migrated][] query
@@ -271,11 +315,20 @@ impl QueryStatus {
         self.migration_state == MigrationState::Unsupported
     }
 
+    /// Returns true if this query status represents an [unsupported][] query
+    ///
+    /// [unsupported]: MigrationState::Unsupported
+    #[must_use]
+    pub fn is_supported(&self) -> bool {
+        self.migration_state.is_supported()
+    }
+
     /// Returns true if this query status represents an [dropped][] query
     ///
     /// [unsupported]: MigrationState::Dropped
     #[must_use]
     pub fn is_dropped(&self) -> bool {
+        // TODO ethan see about making migration state internals private?
         self.migration_state == MigrationState::Dropped
     }
 
@@ -360,6 +413,23 @@ impl InlinedState {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SupportedState {
+    Pending,
+    Yes,
+    Unsupported,
+}
+
+impl fmt::Display for SupportedState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SupportedState::Pending => write!(f, "pending"),
+            SupportedState::Yes => write!(f, "yes"),
+            SupportedState::Unsupported => write!(f, "unsupported"),
+        }
+    }
+}
+
 /// Represents the current migration state of a given query. This state should be updated any time
 /// a migration is performed, or we learn that the migration state has changed, i.e. we receive a
 /// ViewNotFound error indicating a query is not migrated.
@@ -415,6 +485,26 @@ impl MigrationState {
             self,
             MigrationState::Dropped | MigrationState::DryRunSucceeded | MigrationState::Successful
         )
+    }
+
+    pub fn can_transit_to(&self, next_state: &MigrationState) -> bool {
+        use MigrationState::*;
+
+        match self {
+            // Any state can trivially transit to itself
+            s if s == next_state => true,
+            // We do not support transitions from the `Unsupported` state, as we assume
+            // any `Unsupported` query will remain `Unsupported` for the duration of
+            // this process.
+            Unsupported => false,
+            // A query with an Inlined state can only transition to Unsupported.
+            Inlined(_) => matches!(next_state, Unsupported),
+            // A query that has a view cannot transition to DryRunSucceeded or Pending
+            Successful => matches!(next_state, Dropped | Pending),
+            DryRunSucceeded => matches!(next_state, Successful),
+            Dropped => matches!(next_state, Successful),
+            Pending => matches!(next_state, DryRunSucceeded | Unsupported | Successful),
+        }
     }
 }
 
