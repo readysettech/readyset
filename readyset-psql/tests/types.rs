@@ -550,32 +550,54 @@ mod types {
             QueryDestination::Readyset
         );
 
-        client.simple_query("DROP TABLE enumt;").await.unwrap();
-        client.simple_query("DROP TYPE abc CASCADE").await.unwrap();
-
         client
-            .simple_query("CREATE TYPE abc AS ENUM ('c', 'b', 'a');")
+            .simple_query("CREATE TYPE abc_rev AS ENUM ('c', 'b', 'a');")
             .await
             .unwrap();
 
         client
-            .simple_query("CREATE TABLE enumt (x abc);")
+            .simple_query("CREATE TABLE enumt2 (x abc_rev);")
             .await
             .unwrap();
 
         client
-            .simple_query("INSERT INTO enumt (x) VALUES ('b'), ('c'), ('a'), ('a')")
+            .simple_query("INSERT INTO enumt2 (x) VALUES ('b'), ('c'), ('a'), ('a')")
             .await
             .unwrap();
 
         sleep().await;
 
+        #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+        enum AbcRev {
+            C,
+            B,
+            A,
+        }
+
+        impl<'a> FromSql<'a> for AbcRev {
+            fn from_sql(
+                _ty: &postgres_types::Type,
+                raw: &'a [u8],
+            ) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
+                match raw {
+                    b"a" => Ok(Self::A),
+                    b"b" => Ok(Self::B),
+                    b"c" => Ok(Self::C),
+                    r => Err(format!("Unknown variant: '{}'", String::from_utf8_lossy(r)).into()),
+                }
+            }
+
+            fn accepts(ty: &postgres_types::Type) -> bool {
+                ty.name() == "abc_rev"
+            }
+        }
+
         client
-            .simple_query("CREATE CACHE FROM SELECT x FROM enumt ORDER BY x ASC")
+            .simple_query("CREATE CACHE FROM SELECT x FROM enumt2 ORDER BY x ASC")
             .await
             .unwrap();
         let _ = client
-            .query("SELECT x FROM enumt ORDER BY x ASC", &[])
+            .query("SELECT x FROM enumt2 ORDER BY x ASC", &[])
             .await;
 
         // wrapping this test in an eventually! macro as it frequently fails in CI.
@@ -584,15 +606,15 @@ mod types {
         eventually!(
             run_test: {
                 client
-                    .query("SELECT x FROM enumt ORDER BY x ASC", &[])
+                    .query("SELECT x FROM enumt2 ORDER BY x ASC", &[])
                     .await
                     .unwrap()
                     .into_iter()
                     .map(|r| r.get(0))
-                    .collect::<Vec<Abc>>()
+                    .collect::<Vec<AbcRev>>()
             },
             then_assert: |sort_res| {
-                assert_eq!(sort_res, vec![C, B, A, A]);
+                assert_eq!(sort_res, vec![AbcRev::C, AbcRev::B, AbcRev::A, AbcRev::A]);
             }
         );
 
@@ -604,7 +626,7 @@ mod types {
         // Rename the type
 
         client
-            .simple_query("ALTER TYPE abc RENAME TO cba")
+            .simple_query("ALTER TYPE abc_rev RENAME TO cba")
             .await
             .unwrap();
         client
