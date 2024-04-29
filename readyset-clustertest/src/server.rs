@@ -194,6 +194,10 @@ impl ReadysetServerBuilder {
     pub fn allow_full_materialization(self) -> Self {
         self.push_arg("--allow-full-materialization")
     }
+
+    pub fn enable_post_lookups(self) -> Self {
+        self.push_arg("--enable-experimental-post-lookup")
+    }
 }
 
 /// Manages running a readyset binary with the correct arguments.
@@ -347,6 +351,10 @@ impl AdapterBuilder {
 
     pub fn allow_full_materialization(self) -> Self {
         self.push_arg("--allow-full-materialization")
+    }
+
+    pub fn enable_post_lookups(self) -> Self {
+        self.push_arg("--enable-experimental-post-lookup")
     }
 
     pub fn prometheus_metrics(self) -> Self {
