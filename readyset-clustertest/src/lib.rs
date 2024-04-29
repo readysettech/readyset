@@ -379,6 +379,8 @@ pub struct ServerStartParams {
     wait_for_failpoint: bool,
     /// Whether to allow full materialization nodes or not
     allow_full_materialization: bool,
+    /// Whether to allow post-lookup operations
+    enable_post_lookups: bool,
 }
 
 /// Set of parameters defining an entire cluster's topology.
@@ -451,6 +453,8 @@ pub struct DeploymentBuilder {
     enable_experimental_placeholder_inlining: bool,
     /// Whether to allow fully materialized nodes or not
     allow_full_materialization: bool,
+    /// Whether to enable post-lookup operations
+    enable_post_lookups: bool,
     /// Whether to allow prometheus metrics
     prometheus_metrics: bool,
     /// How to execute the adapter and server processes.
@@ -528,6 +532,7 @@ impl DeploymentBuilder {
             cleanup: false,
             enable_experimental_placeholder_inlining: false,
             allow_full_materialization: false,
+            enable_post_lookups: false,
             prometheus_metrics: true,
         }
     }
@@ -685,6 +690,12 @@ impl DeploymentBuilder {
         self
     }
 
+    /// Enable post-lookup operations
+    pub fn enable_post_lookups(mut self) -> Self {
+        self.enable_post_lookups = true;
+        self
+    }
+
     /// Sets whether or not to automatically create inlined caches for queries with unsupported
     /// placeholders
     pub fn enable_experimental_placeholder_inlining(mut self) -> Self {
@@ -729,6 +740,7 @@ impl DeploymentBuilder {
             enable_experimental_placeholder_inlining: self.enable_experimental_placeholder_inlining,
             deployment_mode: self.deployment_mode,
             allow_full_materialization: self.allow_full_materialization,
+            enable_post_lookups: self.enable_post_lookups,
             prometheus_metrics: self.prometheus_metrics,
         }
     }
@@ -750,6 +762,7 @@ impl DeploymentBuilder {
             auto_restart: self.auto_restart,
             wait_for_failpoint,
             allow_full_materialization: self.allow_full_materialization,
+            enable_post_lookups: self.enable_post_lookups,
         }
     }
 
@@ -1546,6 +1559,8 @@ pub struct AdapterStartParams {
     deployment_mode: DeploymentMode,
     /// Whether or not to allow full materializations
     allow_full_materialization: bool,
+    /// Whether or not to enable post-lookup operations
+    enable_post_lookups: bool,
     /// Whether to enable prometheus metrics
     prometheus_metrics: bool,
 }
@@ -1591,6 +1606,9 @@ async fn start_server(
     }
     if server_start_params.allow_full_materialization {
         builder = builder.allow_full_materialization();
+    }
+    if server_start_params.enable_post_lookups {
+        builder = builder.enable_post_lookups();
     }
     let addr = Url::parse(&format!("http://127.0.0.1:{}", port)).unwrap();
     Ok(ServerHandle {
@@ -1686,6 +1704,10 @@ async fn start_adapter(
 
     if params.allow_full_materialization {
         builder = builder.allow_full_materialization();
+    }
+
+    if params.enable_post_lookups {
+        builder = builder.enable_post_lookups();
     }
 
     if params.prometheus_metrics {
