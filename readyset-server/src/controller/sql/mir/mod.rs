@@ -2308,6 +2308,7 @@ impl SqlToMirConverter {
                         &[final_node],
                     )
                 } else if let Ok(placeholders) = unsupported_placeholders.try_into() {
+                    println!("named query to mir");
                     return Err(ReadySetError::UnsupportedPlaceholders { placeholders });
                 } else {
                     final_node

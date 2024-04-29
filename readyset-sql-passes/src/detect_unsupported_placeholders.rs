@@ -226,6 +226,7 @@ impl DetectUnsupportedPlaceholders for SelectStatement {
         if unsupported_placeholders.is_empty() {
             Ok(())
         } else {
+            println!("detect unsupported");
             #[allow(clippy::unwrap_used)] // checked that !is_empty()
             Err(ReadySetError::UnsupportedPlaceholders {
                 placeholders: Vec1::try_from(unsupported_placeholders).unwrap(),

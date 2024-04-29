@@ -1,4 +1,5 @@
 mod autoparameterize;
+mod expand_tuples;
 
 use std::borrow::Cow;
 use std::cmp::max;
@@ -95,6 +96,8 @@ pub fn process_query(
         query.limit_clause.clone_from(&limit_clause);
     }
 
+    expand_tuples::expand_tuples(query);
+
     let auto_parameters =
         autoparameterize::auto_parameterize_query(query, params.server_supports_mixed_comparisons);
     let rewritten_in_conditions = collapse_where_in(query)?;
@@ -184,6 +187,7 @@ impl ProcessedQueryParams {
     where
         T: Clone + TryFrom<Literal, Error = ReadySetError> + Debug + Default + PartialEq,
     {
+        dbg!(&params);
         let params = if let Some(order_map) = &self.reordered_placeholders {
             Cow::Owned(reorder_params(params, order_map)?)
         } else {
@@ -1565,6 +1569,26 @@ mod tests {
                 keys,
                 vec![vec![1.into(), 1.into()], vec![1.into(), 2.into()]]
             );
+        }
+
+        #[test]
+        fn expand_tuple_with_existing_param() {
+            let (keys, actual) = process_and_make_keys_postgres(
+                "SELECT * FROM t WHERE (w, x, y, z) = $1",
+                vec![1.into(), 2.into(), 3.into(), 4.into()],
+            );
+            let expected = parse_select_statement_postgres(
+                "SELECT * FROM t WHERE w = $1 AND x = $2 AND y = $3 AND z = $4",
+            );
+
+            assert_eq!(
+                expected,
+                actual,
+                "{}",
+                actual.display(nom_sql::Dialect::PostgreSQL)
+            );
+
+            assert_eq!(keys, vec![vec![1.into(), 2.into(), 3.into(), 4.into()]]);
         }
     }
 }

@@ -2076,6 +2076,69 @@ WHERE
     shutdown_tx.shutdown().await;
 }
 
+async fn assert_last_statement_readyset(conn: &Client) {
+    let (destination, status) = match conn
+        .simple_query("EXPLAIN LAST STATEMENT")
+        .await
+        .unwrap()
+        .into_iter()
+        .next()
+        .unwrap()
+    {
+        SimpleQueryMessage::Row(row) => (
+            row.get(0).unwrap().to_owned(),
+            row.get(1).unwrap().to_owned(),
+        ),
+        _ => panic!(),
+    };
+
+    assert_eq!(destination, "readyset");
+    assert_eq!(status, "ok");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn tuple_cache_reuse() {
+    let (opts, _handle, shutdown_tx) = setup().await;
+    let conn = connect(opts).await;
+
+    conn.simple_query("DROP TABLE IF EXISTS t").await.unwrap();
+    conn.simple_query("CREATE TABLE t (x int, y int, z int)")
+        .await
+        .unwrap();
+    conn.simple_query("INSERT INTO t (x, y, z) VALUES (1, 1, 3), (1, 2, -1), (3, 2, 1)")
+        .await
+        .unwrap();
+
+    eventually!(conn
+        .simple_query("CREATE CACHE FROM SELECT * FROM t WHERE (x, y, z) = $1")
+        .await
+        .is_ok());
+
+    eventually! {
+        let len = conn
+            .query("SELECT * FROM t WHERE (x, y, z) = (1, 1, 3)", &[])
+            .await
+            .unwrap()
+            .len();
+        len == 1
+    }
+
+    assert_last_statement_readyset(&conn).await;
+
+    eventually! {
+        let len = conn
+            .query("SELECT * FROM t WHERE x = 3 AND y = 2 AND z = 1", &[])
+            .await
+            .unwrap()
+            .len();
+        len == 1
+    }
+
+    assert_last_statement_readyset(&conn).await;
+
+    shutdown_tx.shutdown().await;
+}
+
 mod http_tests {
     use super::*;
     #[tokio::test(flavor = "multi_thread")]
