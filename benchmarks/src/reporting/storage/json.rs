@@ -44,7 +44,6 @@ struct Data {
 impl Data {
     fn to_stats(&self) -> Stats {
         Stats {
-            samples: self.samples as i64,
             mean: self.mean,
             stdev: self.stdev,
         }

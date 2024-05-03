@@ -80,7 +80,7 @@ rocksdb = { git = "https://github.com/readysettech/rust-rocksdb.git", default-fe
 metrics-exporter-prometheus = { git = "https://github.com/readysettech/metrics.git" }
 metrics = { git = "https://github.com/readysettech/metrics.git" }
 metrics-util = { git = "https://github.com/readysettech/metrics.git" }
-ahash = "0.7"
+ahash = "0.8"
 anyhow = "1.0.82"
 assert_approx_eq = "1.1.0"
 assert_unordered = "0.3"

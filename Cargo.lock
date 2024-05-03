@@ -1321,7 +1321,7 @@ dependencies = [
 name = "dataflow-state"
 version = "0.0.1"
 dependencies = [
- "ahash 0.7.8",
+ "ahash 0.8.11",
  "anyhow",
  "async-trait",
  "bincode",
@@ -4356,7 +4356,7 @@ dependencies = [
 name = "readyset-adapter"
 version = "0.1.0"
 dependencies = [
- "ahash 0.7.8",
+ "ahash 0.8.11",
  "anyhow",
  "async-trait",
  "bincode",
@@ -4455,7 +4455,7 @@ dependencies = [
 name = "readyset-client"
 version = "0.7.0"
 dependencies = [
- "ahash 0.7.8",
+ "ahash 0.8.11",
  "anyhow",
  "array2",
  "async-bincode",
@@ -4678,7 +4678,7 @@ dependencies = [
 name = "readyset-dataflow"
 version = "0.7.0"
 dependencies = [
- "ahash 0.7.8",
+ "ahash 0.8.11",
  "anyhow",
  "async-bincode",
  "backoff",
@@ -4959,7 +4959,7 @@ dependencies = [
 name = "readyset-server"
 version = "0.7.0"
 dependencies = [
- "ahash 0.7.8",
+ "ahash 0.8.11",
  "anyhow",
  "array2",
  "assert_approx_eq",

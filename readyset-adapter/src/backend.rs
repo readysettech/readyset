@@ -1573,7 +1573,7 @@ where
             .ok_or(PreparedStatementMissing { statement_id: id })?;
 
         let mut event = QueryExecutionEvent::new(EventType::Execute);
-        event.query = cached_statement.parsed_query.clone();
+        event.query.clone_from(&cached_statement.parsed_query);
         event.query_id = cached_statement.query_id;
 
         let upstream = &mut self.upstream;
@@ -2373,7 +2373,7 @@ where
                 if let Err(e) = &res {
                     if let Some(ddl_req) = ddl_req {
                         let remove_res = retry_with_exponential_backoff(
-                            async || {
+                            || async {
                                 let ddl_req = ddl_req.clone();
                                 self.authority.remove_cache_ddl_request(ddl_req).await
                             },
@@ -2416,7 +2416,7 @@ where
                     )
                 {
                     let remove_res = retry_with_exponential_backoff(
-                        async || {
+                        || async {
                             let ddl_req = ddl_req.clone();
                             self.authority.remove_cache_ddl_request(ddl_req).await
                         },

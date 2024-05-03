@@ -11,7 +11,9 @@ use crate::myc::constants::{CapabilityFlags, Command as CommandByte, UTF8MB4_GEN
 #[derive(Debug)]
 pub struct ClientHandshake<'a> {
     pub capabilities: CapabilityFlags,
+    #[allow(dead_code)]
     pub maxps: u32,
+    #[allow(dead_code)]
     pub charset: u16,
     pub username: &'a str,
     pub password: &'a [u8],
@@ -24,6 +26,7 @@ pub struct ClientChangeUser<'a> {
     pub username: &'a str,
     pub password: &'a [u8],
     pub database: Option<&'a str>,
+    #[allow(dead_code)]
     pub charset: u16,
     pub auth_plugin_name: &'a str,
 }

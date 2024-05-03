@@ -707,7 +707,6 @@ impl Controller {
                 }
                 req = self.replicator_channel.receiver.recv() => {
                     fn now() -> u64 {
-                        #[allow(clippy::unwrap_used)] // won't error comparing to UNIX EPOCH
                         SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64
                     }
 

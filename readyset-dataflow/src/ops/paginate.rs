@@ -360,10 +360,6 @@ impl Ingredient for Paginate {
             self.order
         )
     }
-
-    fn is_selective(&self) -> bool {
-        true
-    }
 }
 
 #[cfg(test)]

@@ -64,6 +64,7 @@ enum ConstraintKind {
     PrimaryKey,
     UniqueKey,
     ForeignKey,
+    #[allow(dead_code)]
     Other(u8),
 }
 

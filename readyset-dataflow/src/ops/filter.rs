@@ -137,10 +137,6 @@ impl Ingredient for Filter {
             IngredientLookupResult::Miss => Ok(IngredientLookupResult::Miss),
         }
     }
-
-    fn is_selective(&self) -> bool {
-        true
-    }
 }
 
 #[cfg(test)]

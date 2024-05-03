@@ -9,7 +9,6 @@
     trait_alias,
     btree_extract_if,
     bound_as_ref,
-    bound_map,
     stmt_expr_attributes,
     extract_if,
     hash_extract_if,
