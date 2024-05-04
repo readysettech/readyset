@@ -119,12 +119,12 @@ pub enum ItemPlaceholder {
     ColonNumber(u32),
 }
 
-impl ToString for ItemPlaceholder {
-    fn to_string(&self) -> String {
+impl fmt::Display for ItemPlaceholder {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
-            ItemPlaceholder::QuestionMark => "?".to_string(),
-            ItemPlaceholder::DollarNumber(ref i) => format!("${}", i),
-            ItemPlaceholder::ColonNumber(ref i) => format!(":{}", i),
+            ItemPlaceholder::QuestionMark => write!(f, "?"),
+            ItemPlaceholder::DollarNumber(ref i) => write!(f, "${}", i),
+            ItemPlaceholder::ColonNumber(ref i) => write!(f, ":{}", i),
         }
     }
 }
@@ -259,7 +259,7 @@ impl DialectDisplay for Literal {
                         write!(f, "X'{}'", b.iter().map(|v| format!("{:02X}", v)).join(""))
                     }
                 },
-                Literal::Placeholder(item) => write!(f, "{}", item.to_string()),
+                Literal::Placeholder(item) => write!(f, "{}", item),
                 Literal::BitVector(ref b) => {
                     write!(
                         f,

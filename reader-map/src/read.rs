@@ -113,10 +113,10 @@ where
     }
 
     /// Internal version of `get_and`
-    fn get_raw<Q: ?Sized>(&self, key: &Q) -> Result<Option<ReadGuard<'_, Values<V>>>>
+    fn get_raw<Q>(&self, key: &Q) -> Result<Option<ReadGuard<'_, Values<V>>>>
     where
         K: Borrow<Q>,
-        Q: Ord + Hash,
+        Q: Ord + Hash + ?Sized,
     {
         let MapReadRef { guard } = self.enter()?;
         Ok(ReadGuard::try_map(guard, |inner| {
@@ -139,10 +139,10 @@ where
     /// published by the writer. If no publish has happened, or the map has been destroyed, this
     /// function returns an [`Error`].
     #[inline]
-    pub fn get<'rh, Q: ?Sized>(&'rh self, key: &'_ Q) -> Result<Option<ReadGuard<'rh, Values<V>>>>
+    pub fn get<'rh, Q>(&'rh self, key: &'_ Q) -> Result<Option<ReadGuard<'rh, Values<V>>>>
     where
         K: Borrow<Q>,
-        Q: Ord + Hash,
+        Q: Ord + Hash + ?Sized,
     {
         // call `borrow` here to monomorphize `get_raw` fewer times
         self.get_raw(key.borrow())
@@ -163,10 +163,10 @@ where
     /// refreshed by the writer. If no refresh has happened, or the map has been destroyed, this
     /// function returns an [`Error`].
     #[inline]
-    pub fn first<'rh, Q: ?Sized>(&'rh self, key: &'_ Q) -> Result<Option<ReadGuard<'rh, V>>>
+    pub fn first<'rh, Q>(&'rh self, key: &'_ Q) -> Result<Option<ReadGuard<'rh, V>>>
     where
         K: Borrow<Q>,
-        Q: Ord + Clone + Hash,
+        Q: Ord + Clone + Hash + ?Sized,
     {
         let vs = if let Some(vs) = self.get_raw(key.borrow())? {
             vs
@@ -189,10 +189,10 @@ where
     /// function returns an [`Error`].
     ///
     /// If no values exist for the given key, `Ok(None, _)` is returned.
-    pub fn meta_get<Q: ?Sized>(&self, key: &Q) -> Result<(Option<ReadGuard<'_, Values<V>>>, M)>
+    pub fn meta_get<Q>(&self, key: &Q) -> Result<(Option<ReadGuard<'_, Values<V>>>, M)>
     where
         K: Borrow<Q>,
-        Q: Ord + Clone + Hash,
+        Q: Ord + Clone + Hash + ?Sized,
     {
         let MapReadRef { guard } = self.enter()?;
         let meta = guard.meta.clone();

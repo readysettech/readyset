@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::fmt;
 use std::time::Instant;
 
 use dataflow_state::PointKey;
@@ -59,21 +60,20 @@ pub enum NodeOperator {
     TopK(topk::TopK),
 }
 
-impl ToString for NodeOperator {
-    fn to_string(&self) -> String {
+impl fmt::Display for NodeOperator {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
-            NodeOperator::Aggregation(_) => "Aggregation",
-            NodeOperator::Extremum(_) => "Extremum",
-            NodeOperator::Concat(_) => "Concat",
-            NodeOperator::Join(_) => "Join",
-            NodeOperator::Paginate(_) => "Paginate",
-            NodeOperator::Project(_) => "Project",
-            NodeOperator::Union(_) => "Union",
-            NodeOperator::Identity(_) => "Identity",
-            NodeOperator::Filter(_) => "Filter",
-            NodeOperator::TopK(_) => "TopK",
+            NodeOperator::Aggregation(_) => write!(f, "Aggregation"),
+            NodeOperator::Extremum(_) => write!(f, "Extremum"),
+            NodeOperator::Concat(_) => write!(f, "Concat"),
+            NodeOperator::Join(_) => write!(f, "Join"),
+            NodeOperator::Paginate(_) => write!(f, "Paginate"),
+            NodeOperator::Project(_) => write!(f, "Project"),
+            NodeOperator::Union(_) => write!(f, "Union"),
+            NodeOperator::Identity(_) => write!(f, "Identity"),
+            NodeOperator::Filter(_) => write!(f, "Filter"),
+            NodeOperator::TopK(_) => write!(f, "TopK"),
         }
-        .to_string()
     }
 }
 
@@ -220,9 +220,6 @@ impl Ingredient for NodeOperator {
         mode: LookupMode,
     ) -> ReadySetResult<IngredientLookupResult<'a>> {
         impl_ingredient_fn_ref!(self, lookup, parent, columns, key, domain, states, mode)
-    }
-    fn is_selective(&self) -> bool {
-        impl_ingredient_fn_ref!(self, is_selective,)
     }
     fn requires_full_materialization(&self) -> bool {
         impl_ingredient_fn_ref!(self, requires_full_materialization,)

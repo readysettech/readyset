@@ -143,6 +143,7 @@ impl TestChannel {
     }
 }
 
+#[allow(dead_code)]
 /// Channel used to send notifications from the controller to replicator.
 struct TestControllChannel(UnboundedSender<ControllerMessage>);
 

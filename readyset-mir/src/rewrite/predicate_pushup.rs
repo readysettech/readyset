@@ -186,7 +186,7 @@ fn map_columns_above_alias_table(
             .get(&column.name)
             .ok_or_else(|| unsupported_err!("Parent of AliasTable node missing required column"))?;
 
-        column.table = new_column.table.clone();
+        column.table.clone_from(&new_column.table);
     }
 
     Ok(())

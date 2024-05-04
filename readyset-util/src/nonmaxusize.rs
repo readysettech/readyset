@@ -50,7 +50,9 @@ mod test {
             std::mem::size_of::<usize>()
         );
 
-        assert!(unsafe { Some(NonMaxUsize(usize::MAX)) }.is_none());
+        let expected_none = unsafe { Some(NonMaxUsize(usize::MAX)) };
+        assert!(expected_none.is_none());
+
         assert!(unsafe { Some(NonMaxUsize(usize::MAX - 1)) }.is_some());
         assert!(unsafe { Some(NonMaxUsize(0)) }.is_some());
     }

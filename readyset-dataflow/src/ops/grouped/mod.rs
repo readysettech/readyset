@@ -451,8 +451,4 @@ where
     fn description(&self, detailed: bool) -> String {
         self.inner.description(detailed)
     }
-
-    fn is_selective(&self) -> bool {
-        true
-    }
 }

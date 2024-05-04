@@ -182,7 +182,7 @@ impl ResultIterator {
 
                 debug_assert!(data
                     .iter()
-                    .all(|s| { s.is_sorted_by(|a, b| Some(comparator.cmp(a, b))) }));
+                    .all(|s| { s.is_sorted_by(|a, b| comparator.cmp(a, b).is_le()) }));
 
                 ResultIteratorInner::MultiKeyMerge(MergeIterator::new(data, comparator))
             }
@@ -208,7 +208,7 @@ impl ResultIterator {
 
                     debug_assert!(data
                         .iter()
-                        .all(|s| { s.is_sorted_by(|a, b| Some(comparator.cmp(a, b))) }));
+                        .all(|s| { s.is_sorted_by(|a, b| comparator.cmp(a, b).is_le()) }));
 
                     ResultIteratorInner::MultiKeyAggregateMerge(AggregateIterator {
                         inner: Box::new(ResultIteratorInner::MultiKeyMerge(MergeIterator::new(
@@ -234,7 +234,7 @@ impl ResultIterator {
 
                 debug_assert!(data
                     .iter()
-                    .all(|s| { s.is_sorted_by(|a, b| Some(comparator.cmp(a, b))) }));
+                    .all(|s| { s.is_sorted_by(|a, b| comparator.cmp(a, b).is_le()) }));
 
                 let temp_iter = ResultIterator {
                     inner: ResultIteratorInner::MultiKeyAggregateMerge(AggregateIterator {

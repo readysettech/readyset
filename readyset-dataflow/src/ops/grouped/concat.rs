@@ -184,7 +184,7 @@ impl GroupedOperation for GroupConcat {
                 write!(&mut out_str, "{}", self.separator).unwrap();
             }
         }
-        prev_state.string_repr = out_str.clone();
+        prev_state.string_repr.clone_from(&out_str);
         last_state.insert(group, prev_state);
         Ok(Some(out_str.into()))
     }

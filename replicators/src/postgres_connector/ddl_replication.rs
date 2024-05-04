@@ -184,6 +184,7 @@ pub(crate) struct DdlEvent {
 
 /// This is just an ugly wrapper because `deserialize_with` doesn't play well with Options
 #[derive(Debug, Deserialize, Clone)]
+#[allow(dead_code)]
 pub(crate) struct ParsedStatement(#[serde(deserialize_with = "parse_pgsql")] SqlQuery);
 
 fn parse_pgsql<'de, D>(deserializer: D) -> Result<SqlQuery, D::Error>

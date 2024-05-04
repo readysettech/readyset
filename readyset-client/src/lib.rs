@@ -142,7 +142,6 @@
     result_flattening,
     type_alias_impl_trait,
     stmt_expr_attributes,
-    bound_map,
     bound_as_ref,
     box_into_inner,
     is_sorted,
@@ -260,21 +259,21 @@ pub mod consistency;
 mod controller;
 pub mod metrics;
 pub mod query;
+pub mod recipe;
 pub mod status;
 mod table;
 pub mod utils;
 mod view;
-use std::convert::TryFrom;
-use std::default::Default;
-pub mod recipe;
 
 #[allow(unreachable_pub)] // https://github.com/rust-lang/rust/issues/57411
 pub mod consensus;
 #[allow(unreachable_pub)] // https://github.com/rust-lang/rust/issues/57411
 pub mod internal;
 
-// for the row! macro
+use std::convert::TryFrom;
+use std::default::Default;
 use std::future::Future;
+use std::hash::Hash;
 use std::pin::Pin;
 
 pub use nom_sql::{ColumnConstraint, SqlIdentifier};
@@ -462,7 +461,6 @@ pub fn shard_by(dt: &DfValue, shards: usize) -> usize {
         | DfValue::Array(_)
         | DfValue::PassThrough(_) => {
             let hash = ahash::RandomState::with_seeds(0x3306, 0x6033, 0x5432, 0x6034).hash_one(dt);
-
             hash as usize % shards
         }
     }

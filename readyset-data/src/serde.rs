@@ -161,64 +161,65 @@ impl serde::ser::Serialize for DfValue {
     }
 }
 
+struct FieldVisitor;
+
+impl<'de> serde::de::Visitor<'de> for FieldVisitor {
+    type Value = Variant;
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("variant identifier")
+    }
+
+    fn visit_u64<E>(self, val: u64) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        if let Some(f) = Variant::from_repr(val as _) {
+            Ok(f)
+        } else {
+            Err(serde::de::Error::invalid_value(
+                serde::de::Unexpected::Unsigned(val),
+                &"variant index 0 <= i < 11",
+            ))
+        }
+    }
+
+    fn visit_str<E>(self, val: &str) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        val.parse()
+            .map_err(|_| serde::de::Error::unknown_variant(val, Variant::VARIANTS))
+    }
+
+    fn visit_bytes<E>(self, val: &[u8]) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        match std::str::from_utf8(val).map(|s| s.parse()) {
+            Ok(Ok(field)) => Ok(field),
+            _ => Err(serde::de::Error::unknown_variant(
+                &String::from_utf8_lossy(val),
+                Variant::VARIANTS,
+            )),
+        }
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Variant {
+    #[inline]
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        serde::Deserializer::deserialize_identifier(deserializer, FieldVisitor)
+    }
+}
+
 impl<'de> Deserialize<'de> for DfValue {
     fn deserialize<D>(deserializer: D) -> Result<DfValue, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        struct FieldVisitor;
-        impl<'de> serde::de::Visitor<'de> for FieldVisitor {
-            type Value = Variant;
-            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.write_str("variant identifier")
-            }
-
-            fn visit_u64<E>(self, val: u64) -> Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                if let Some(f) = Variant::from_repr(val as _) {
-                    Ok(f)
-                } else {
-                    Err(serde::de::Error::invalid_value(
-                        serde::de::Unexpected::Unsigned(val),
-                        &"variant index 0 <= i < 11",
-                    ))
-                }
-            }
-
-            fn visit_str<E>(self, val: &str) -> Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                val.parse()
-                    .map_err(|_| serde::de::Error::unknown_variant(val, Variant::VARIANTS))
-            }
-
-            fn visit_bytes<E>(self, val: &[u8]) -> Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                match std::str::from_utf8(val).map(|s| s.parse()) {
-                    Ok(Ok(field)) => Ok(field),
-                    _ => Err(serde::de::Error::unknown_variant(
-                        &String::from_utf8_lossy(val),
-                        Variant::VARIANTS,
-                    )),
-                }
-            }
-        }
-
-        impl<'de> serde::Deserialize<'de> for Variant {
-            #[inline]
-            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-            where
-                D: serde::Deserializer<'de>,
-            {
-                serde::Deserializer::deserialize_identifier(deserializer, FieldVisitor)
-            }
-        }
-
         struct Visitor;
         impl<'de> serde::de::Visitor<'de> for Visitor {
             type Value = DfValue;

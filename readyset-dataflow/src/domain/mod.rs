@@ -4003,10 +4003,10 @@ impl Domain {
                         #[allow(clippy::indexing_slicing)] // nodes in replay paths must exist
                         if let Some(result) = state[dest.node].evict_keys(tag, &keys) {
                             bytes_freed += result.bytes_freed;
-                            #[allow(clippy::unwrap_used)]
                             // we can only evict from partial replay paths, so we must have a
                             // partial key
                             bytes_freed += trigger_downstream_evictions(
+                                #[allow(clippy::unwrap_used)]
                                 dest.partial_index.as_ref().unwrap(),
                                 &keys,
                                 dest.node,
