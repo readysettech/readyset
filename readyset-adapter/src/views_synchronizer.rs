@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use dataflow_expression::Dialect;
@@ -8,6 +9,7 @@ use readyset_util::shared_cache::LocalCache;
 use readyset_util::shutdown::ShutdownReceiver;
 use tokio::select;
 use tracing::{debug, info, instrument, trace, warn};
+use xxhash_rust::xxh3;
 
 use crate::query_status_cache::QueryStatusCache;
 
@@ -22,6 +24,13 @@ pub struct ViewsSynchronizer {
     dialect: Dialect,
     /// Global and thread-local cache of view endpoints and prepared statements.
     view_name_cache: LocalCache<ViewCreateRequest, Relation>,
+    /// A cache to keep track of the queries for which we've already checked the server for
+    /// existing views. Note that this cache is *not* updated (i.e. a query is not removed) when a
+    /// "dry run succeeded" query is migrated.
+    ///
+    /// This HashSet stores 128-bit hashes computed via xxHash in an attempt to minimize the amount
+    /// of data we need to store to keep track of the queries we've already seen.
+    views_checked: HashSet<u128>,
 }
 
 impl ViewsSynchronizer {
@@ -38,6 +47,7 @@ impl ViewsSynchronizer {
             poll_interval,
             dialect,
             view_name_cache,
+            views_checked: HashSet::new(),
         }
     }
 
@@ -69,16 +79,26 @@ impl ViewsSynchronizer {
 
     async fn poll(&mut self) {
         debug!("Views synchronizer polling");
-        let queries = self
+        let (queries, hashes): (Vec<_>, Vec<_>) = self
             .query_status_cache
-            .pending_migration()
+            .queries_with_statuses(&[MigrationState::DryRunSucceeded, MigrationState::Pending])
             .into_iter()
             .filter_map(|(q, _)| {
-                q.into_parsed()
-                    // once arc_unwrap_or_clone is stabilized, we can use that cleaner syntax
-                    .map(|p| Arc::try_unwrap(p).unwrap_or_else(|arc| (*arc).clone()))
+                q.into_parsed().and_then(|p| {
+                    let hash = xxh3::xxh3_128(&bincode::serialize(&*p).unwrap());
+
+                    if self.views_checked.contains(&hash) {
+                        // once arc_unwrap_or_clone is stabilized, we can use that cleaner syntax
+                        Some((
+                            Arc::try_unwrap(p).unwrap_or_else(|arc| (*arc).clone()),
+                            hash,
+                        ))
+                    } else {
+                        None
+                    }
+                })
             })
-            .collect::<Vec<_>>();
+            .unzip();
 
         match self
             .controller
@@ -86,7 +106,7 @@ impl ViewsSynchronizer {
             .await
         {
             Ok(statuses) => {
-                for (query, name) in queries.into_iter().zip(statuses) {
+                for ((query, name), hash) in queries.into_iter().zip(statuses).zip(hashes) {
                     trace!(
                         // FIXME(REA-2168): Use correct dialect.
                         query = %query.statement.display(nom_sql::Dialect::MySQL),
@@ -96,7 +116,8 @@ impl ViewsSynchronizer {
                     if let Some(name) = name {
                         self.view_name_cache.insert(query.clone(), name).await;
                         self.query_status_cache
-                            .update_query_migration_state(&query, MigrationState::Successful)
+                            .update_query_migration_state(&query, MigrationState::Successful);
+                        self.views_checked.insert(hash);
                     }
                 }
             }
