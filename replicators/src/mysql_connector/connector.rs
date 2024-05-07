@@ -23,7 +23,7 @@ use tracing::{error, info, warn};
 
 use crate::noria_adapter::{Connector, ReplicationAction};
 
-const CHECKSUM_QUERY: &str = "SET @master_binlog_checksum='CRC32'";
+const CHECKSUM_QUERY: &str = "SET @source_binlog_checksum='CRC32'";
 const DEFAULT_SERVER_ID: u32 = u32::MAX - 55;
 
 /// A connector that connects to a MySQL server and starts reading binlogs from a given position.
