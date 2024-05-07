@@ -4,6 +4,7 @@
 pub mod mysql;
 pub mod psql;
 mod query_logger;
+
 use std::collections::HashMap;
 use std::fs::remove_dir_all;
 use std::io;
@@ -64,6 +65,7 @@ use tokio::time::{sleep, timeout};
 use tokio_stream::wrappers::TcpListenerStream;
 use tracing::{debug, debug_span, error, info, info_span, span, warn, Level};
 use tracing_futures::Instrument;
+use url::form_urlencoded::parse;
 
 // readyset_alloc initializes the global allocator
 extern crate readyset_alloc;
@@ -594,44 +596,53 @@ where
             return rt.block_on(async { self.cleanup(upstream_config, deployment_dir).await });
         }
 
-        let users: &'static HashMap<String, String> = Box::leak(Box::new(
-            if !options.allow_unauthenticated_connections {
+        let users: &'static HashMap<String, String> =
+            Box::leak(Box::new(if !options.allow_unauthenticated_connections {
                 HashMap::from([{
                     let upstream_url = upstream_config
                         .upstream_db_url
                         .as_ref()
                         .and_then(|s| s.parse::<DatabaseURL>().ok());
 
+                    let decoded_username = upstream_url.as_ref().and_then(|url| {
+                        parse(url.user()?.as_bytes())
+                            .map(|(key, _)| key.to_string())
+                            .next()
+                    });
+
+                    let decoded_password = upstream_url
+                        .as_ref()
+                        .and_then(|url| url.password())
+                        .and_then(|password| {
+                            parse(password.as_bytes())
+                                .map(|(key, _)| key.to_string())
+                                .next()
+                        });
+
                     match (
                         (options.username, options.password),
-                        (
-                            upstream_url.as_ref().and_then(|url| url.user()),
-                            upstream_url.as_ref().and_then(|url| url.password()),
-                        ),
+                        (decoded_username, decoded_password),
                     ) {
-                        // --username and --password
                         ((Some(user), Some(pass)), _) => (user, pass.0),
-                        // --password, username from url
-                        ((None, Some(pass)), (Some(user), _)) => (user.to_owned(), pass.0),
-                        // username and password from url
-                        (_, (Some(user), Some(pass))) => (user.to_owned(), pass.to_owned()),
+                        ((None, Some(pass)), (Some(user), _)) => (user, pass.0),
+                        (_, (Some(user), Some(pass))) => (user, pass),
                         _ => {
                             if upstream_url.is_some() {
                                 bail!(
                                     "Failed to infer ReadySet username and password from \
-                                    upstream DB URL. Please ensure they are present and \
-                                    correctly formatted as follows: \
-                                    <protocol>://<username>:<password>@<address>[:<port>][/<database>] \
-                                    You can also configure ReadySet to accept credentials \
-                                    different from those of your upstream database via \
-                                    --username/-u and --password/-p, or use \
-                                    --allow-unauthenticated-connections."
+                            upstream DB URL. Please ensure they are present and \
+                            correctly formatted as follows: \
+                            <protocol>://<username>:<password>@<address>[:<port>][/<database>] \
+                            You can also configure ReadySet to accept credentials \
+                            different from those of your upstream database via \
+                            --username/-u and --password/-p, or use \
+                            --allow-unauthenticated-connections."
                                 )
                             } else {
                                 bail!(
                                     "Must specify --username/-u and --password/-p if one of \
-                                    --allow-unauthenticated-connections or --upstream-db-url is not \
-                                    passed"
+                            --allow-unauthenticated-connections or --upstream-db-url is not \
+                            passed"
                                 )
                             }
                         }
@@ -639,8 +650,7 @@ where
                 }])
             } else {
                 HashMap::new()
-            },
-        ));
+            }));
 
         info!(version = %VERSION_STR_ONELINE);
 

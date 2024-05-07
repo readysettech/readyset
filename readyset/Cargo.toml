@@ -53,6 +53,7 @@ readyset-tracing = { path = "../readyset-tracing" }
 readyset-version = { path = "../readyset-version" }
 replicators = { path = "../replicators" }
 serde_json = "1.0.89"
+url = "2.2.2"
 
 
 [dev-dependencies]
