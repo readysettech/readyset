@@ -35,6 +35,11 @@ pub(crate) fn convert_column(col: &ColumnSchema) -> ReadySetResult<mysql_srv::Co
             colflags |= mysql_srv::ColumnFlags::UNSIGNED_FLAG;
             MYSQL_TYPE_SHORT
         }
+        DfType::MediumInt => MYSQL_TYPE_INT24,
+        DfType::UnsignedMediumInt => {
+            colflags |= mysql_srv::ColumnFlags::UNSIGNED_FLAG;
+            MYSQL_TYPE_INT24
+        }
         DfType::Bool => MYSQL_TYPE_BIT,
         DfType::DateTime { .. } => MYSQL_TYPE_DATETIME,
         DfType::Blob => MYSQL_TYPE_BLOB,

@@ -471,6 +471,8 @@ fn mysql_type_conversion(left_ty: &DfType, right_ty: &DfType) -> DfType {
             | DfType::UnsignedTinyInt
             | DfType::SmallInt
             | DfType::UnsignedSmallInt
+            | DfType::MediumInt
+            | DfType::UnsignedMediumInt
             | DfType::Int
             | DfType::UnsignedInt
             | DfType::BigInt
@@ -479,6 +481,8 @@ fn mysql_type_conversion(left_ty: &DfType, right_ty: &DfType) -> DfType {
             | DfType::UnsignedTinyInt
             | DfType::SmallInt
             | DfType::UnsignedSmallInt
+            | DfType::MediumInt
+            | DfType::UnsignedMediumInt
             | DfType::Int
             | DfType::UnsignedInt
             | DfType::BigInt
@@ -503,6 +507,8 @@ fn mysql_type_conversion(left_ty: &DfType, right_ty: &DfType) -> DfType {
             | DfType::UnsignedTinyInt
             | DfType::SmallInt
             | DfType::UnsignedSmallInt
+            | DfType::MediumInt
+            | DfType::UnsignedMediumInt
             | DfType::Int
             | DfType::UnsignedInt
             | DfType::BigInt

@@ -2243,12 +2243,18 @@ mod arbitrary {
                 .boxed(),
             Some(DfType::TinyInt) => any::<i8>().prop_map(|i| DfValue::Int(i as i64)).boxed(),
             Some(DfType::SmallInt) => any::<i16>().prop_map(|i| DfValue::Int(i as i64)).boxed(),
+            Some(DfType::MediumInt) => ((-1i32 << 23)..(1i32 << 23))
+                .prop_map(|i| DfValue::Int(i as i64))
+                .boxed(),
             Some(DfType::Int) => any::<i32>().prop_map(|i| DfValue::Int(i as i64)).boxed(),
             Some(DfType::BigInt) => any::<i64>().prop_map(DfValue::Int).boxed(),
             Some(DfType::UnsignedTinyInt) => any::<u8>()
                 .prop_map(|u| DfValue::UnsignedInt(u as u64))
                 .boxed(),
             Some(DfType::UnsignedSmallInt) => any::<u16>()
+                .prop_map(|u| DfValue::UnsignedInt(u as u64))
+                .boxed(),
+            Some(DfType::UnsignedMediumInt) => (0..(1u32 << 24))
                 .prop_map(|u| DfValue::UnsignedInt(u as u64))
                 .boxed(),
             Some(DfType::UnsignedInt) => any::<u32>()

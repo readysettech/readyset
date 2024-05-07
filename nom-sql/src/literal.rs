@@ -315,6 +315,12 @@ impl Literal {
             SqlType::UnsignedSmallInt(_) => any::<u16>()
                 .prop_map(|i| Self::UnsignedInteger(i as _))
                 .boxed(),
+            SqlType::MediumInt(_) => ((-1i32 << 23)..(1i32 << 23))
+                .prop_map(|i| Self::Integer(i as _))
+                .boxed(),
+            SqlType::UnsignedMediumInt(_) => (0..(1u32 << 24))
+                .prop_map(|i| Self::UnsignedInteger(i as _))
+                .boxed(),
             SqlType::Blob
             | SqlType::ByteArray
             | SqlType::LongBlob

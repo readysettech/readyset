@@ -82,6 +82,14 @@ pub(crate) fn coerce_f64(val: f64, to_ty: &DfType, from_ty: &DfType) -> ReadySet
         DfType::UnsignedSmallInt => coerce_f64_to_uint::<u16>(val)
             .ok_or_else(bounds_err)
             .map(DfValue::from),
+        DfType::MediumInt => coerce_f64_to_int::<i32>(val)
+            .filter(|i| ((-1 << 23)..(1 << 23)).contains(i))
+            .ok_or_else(bounds_err)
+            .map(DfValue::from),
+        DfType::UnsignedMediumInt => coerce_f64_to_uint::<u32>(val)
+            .filter(|&i| i < (1 << 24))
+            .ok_or_else(bounds_err)
+            .map(DfValue::from),
         DfType::Int => coerce_f64_to_int::<i32>(val)
             .ok_or_else(bounds_err)
             .map(DfValue::from),
@@ -184,6 +192,16 @@ pub(crate) fn coerce_decimal(
         DfType::UnsignedTinyInt => val.to_u8().ok_or_else(err).map(DfValue::from),
         DfType::SmallInt => val.to_i16().ok_or_else(err).map(DfValue::from),
         DfType::UnsignedSmallInt => val.to_u16().ok_or_else(err).map(DfValue::from),
+        DfType::MediumInt => val
+            .to_i32()
+            .filter(|i| ((-1 << 23)..(1 << 23)).contains(i))
+            .ok_or_else(err)
+            .map(DfValue::from),
+        DfType::UnsignedMediumInt => val
+            .to_u32()
+            .filter(|&i| i < (1 << 24))
+            .ok_or_else(err)
+            .map(DfValue::from),
         DfType::Int => val.to_i32().ok_or_else(err).map(DfValue::from),
         DfType::UnsignedInt => val.to_u32().ok_or_else(err).map(DfValue::from),
         DfType::BigInt => val.to_i64().ok_or_else(err).map(DfValue::from),
@@ -309,6 +327,30 @@ mod tests {
         } else {
             assert_eq!(
                 DfValue::Double(val as f64).coerce_to(&DfType::UnsignedSmallInt, &DfType::Unknown),
+                Ok(DfValue::UnsignedInt(val.round() as u64))
+            );
+        }
+    }
+
+    #[proptest]
+    fn float_to_mediumint(val: f32) {
+        if val < (-1i32 << 23) as f32 - 0.5 || val >= ((1i32 << 23) - 1) as f32 + 0.5 {
+            DfValue::Double(val as _)
+                .coerce_to(&DfType::MediumInt, &DfType::Unknown)
+                .expect_err("OOB");
+        } else {
+            assert_eq!(
+                DfValue::Double(val as f64).coerce_to(&DfType::MediumInt, &DfType::Unknown),
+                Ok(DfValue::Int(val.round() as i64))
+            );
+        }
+        if val < -0.5f32 || val >= ((1u32 << 24) - 1) as f32 + 0.5 {
+            DfValue::Double(val as _)
+                .coerce_to(&DfType::UnsignedMediumInt, &DfType::Unknown)
+                .expect_err("OOB");
+        } else {
+            assert_eq!(
+                DfValue::Double(val as f64).coerce_to(&DfType::UnsignedMediumInt, &DfType::Unknown),
                 Ok(DfValue::UnsignedInt(val.round() as u64))
             );
         }
@@ -494,5 +536,32 @@ mod tests {
                 .coerce_to(&DfType::UnsignedBigInt, &DfType::Unknown),
             Ok(DfValue::UnsignedInt(17946744073709551616))
         );
+
+        assert_eq!(
+            DfValue::Double(-8388608.49).coerce_to(&DfType::MediumInt, &DfType::Unknown),
+            Ok(DfValue::Int(-8388608))
+        );
+
+        DfValue::Double(-8388608.51)
+            .coerce_to(&DfType::MediumInt, &DfType::Unknown)
+            .unwrap_err();
+
+        assert_eq!(
+            DfValue::Double(8388607.49).coerce_to(&DfType::MediumInt, &DfType::Unknown),
+            Ok(DfValue::Int(8388607))
+        );
+
+        DfValue::Double(8388607.51)
+            .coerce_to(&DfType::MediumInt, &DfType::Unknown)
+            .unwrap_err();
+
+        assert_eq!(
+            DfValue::Double(16777215.49).coerce_to(&DfType::UnsignedMediumInt, &DfType::Unknown),
+            Ok(DfValue::UnsignedInt(16777215))
+        );
+
+        DfValue::Double(16777215.51)
+            .coerce_to(&DfType::UnsignedMediumInt, &DfType::Unknown)
+            .unwrap_err();
     }
 }

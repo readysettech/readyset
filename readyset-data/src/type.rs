@@ -73,6 +73,12 @@ pub enum DfType {
     /// [`u16`].
     UnsignedSmallInt,
 
+    /// Notionally an `i24`, but really an [`i32`] that we bounds check.
+    MediumInt,
+
+    /// Notionally an `u24`, but really an [`u32`] that we bounds check.
+    UnsignedMediumInt,
+
     /// [`f32`]: a IEEE 754 floating-point 32-bit real value.
     ///
     /// This is either:
@@ -248,10 +254,12 @@ impl DfType {
             Int(_) | Int4 => Self::Int,
             TinyInt(_) => Self::TinyInt,
             SmallInt(_) | Int2 => Self::SmallInt,
+            MediumInt(_) => Self::MediumInt,
             BigInt(_) | Int8 => Self::BigInt,
             UnsignedInt(_) => Self::UnsignedInt,
             UnsignedTinyInt(_) => Self::UnsignedTinyInt,
             UnsignedSmallInt(_) => Self::UnsignedSmallInt,
+            UnsignedMediumInt(_) => Self::UnsignedMediumInt,
             UnsignedBigInt(_) => Self::UnsignedBigInt,
 
             Double => Self::Double,
@@ -343,6 +351,9 @@ impl DfType {
             | DfType::UnsignedTinyInt
             | DfType::SmallInt
             | DfType::UnsignedSmallInt
+            // XXX(mvzink): MEDIUMINT isn't implemented by PostgreSQL, but this seems better than making this fn fail
+            | DfType::MediumInt
+            | DfType::UnsignedMediumInt
             | DfType::Float
             | DfType::Double
             | DfType::Numeric { .. } => PgTypeCategory::Numeric,
@@ -670,6 +681,8 @@ impl fmt::Display for DfType {
             | Self::UnsignedTinyInt
             | Self::SmallInt
             | Self::UnsignedSmallInt
+            | Self::MediumInt
+            | Self::UnsignedMediumInt
             | Self::Int
             | Self::UnsignedInt
             | Self::BigInt
