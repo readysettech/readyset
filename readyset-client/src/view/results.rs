@@ -172,6 +172,7 @@ impl ResultIterator {
         let limit = adapter_limit.or(*limit); // Limit specifies total number of results to return
 
         let inner = match (order_by, aggregates) {
+            (_, _) if data.len() == 1 => ResultIteratorInner::MultiKey(MultiKeyIterator::new(data)),
             // No specific order is required, simply iterate over each result set one by one
             (None, None) => ResultIteratorInner::MultiKey(MultiKeyIterator::new(data)),
             (Some(order_by), None) => {
