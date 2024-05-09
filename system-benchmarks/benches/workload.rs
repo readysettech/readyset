@@ -221,8 +221,8 @@ impl Benchmark {
                 }
 
                 Benchmark {
-                    name,
-                    schema: schema.expect("No schema for benchmark {name}"),
+                    name: name.clone(),
+                    schema: schema.unwrap_or_else(|| panic!("No schema for benchmark '{}'", name)),
                     workloads,
                 }
             })
