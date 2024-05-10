@@ -172,8 +172,15 @@ impl ResultIterator {
         let limit = adapter_limit.or(*limit); // Limit specifies total number of results to return
 
         let inner = match (order_by, aggregates) {
+            // No data in the result set, so return as simply as possible.
+            (_, _) if data.is_empty() => ResultIteratorInner::MultiKey(MultiKeyIterator::new(data)),
             // No specific order is required, simply iterate over each result set one by one
             (None, None) => ResultIteratorInner::MultiKey(MultiKeyIterator::new(data)),
+            // if there's an order by clause, yet the result set has only one row for a single key,
+            // return a simple iterator as there's nothing to order (it's a single row)
+            (Some(_), None) if data.len() == 1 && data.first().is_some_and(|v| v.len() == 1) => {
+                ResultIteratorInner::MultiKey(MultiKeyIterator::new(data))
+            }
             (Some(order_by), None) => {
                 // Order by is specified, merge results using a k-way merge iterator
                 let comparator = RowComparator {
@@ -185,6 +192,11 @@ impl ResultIterator {
                     .all(|s| { s.is_sorted_by(|a, b| Some(comparator.cmp(a, b))) }));
 
                 ResultIteratorInner::MultiKeyMerge(MergeIterator::new(data, comparator))
+            }
+            // if there's an aggregation, but only one key in the result set, we can return a
+            // simple iterator as results are already aggregated in the dataflow graph.
+            (None, Some(_)) if data.len() == 1 => {
+                ResultIteratorInner::MultiKey(MultiKeyIterator::new(data))
             }
             (None, Some(aggregates)) => {
                 if aggregates.group_by.is_empty() {
@@ -219,6 +231,12 @@ impl ResultIterator {
                         filter: filter.take(),
                     })
                 }
+            }
+            // if there's an order by clause with an aggregate, yet the result set has only one row
+            // for a single key, return a simple iterator as there's nothing to order
+            // (it's a single row)
+            (Some(_), Some(_)) if data.len() == 1 && data.first().is_some_and(|v| v.len() == 1) => {
+                ResultIteratorInner::MultiKey(MultiKeyIterator::new(data))
             }
             (Some(order_by), Some(aggregates)) => {
                 // When both aggregates and order by are specified it is tricky to lazily evaluate
