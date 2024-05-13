@@ -711,6 +711,10 @@ impl<'a> PostgresReplicator<'a> {
         trace!(?view_list, "Loaded view list");
         trace!(?custom_types, "Loaded custom types");
 
+        self.drop_leftover_tables(&table_list, &view_list)
+            .await
+            .map_err(|e| e.context("Error while cleaning up leftover cache tables"))?;
+
         self.set_replica_identity_for_tables(&table_list).await?;
 
         self.noria
@@ -765,10 +769,6 @@ impl<'a> PostgresReplicator<'a> {
                 warn!(%error, custom_type=?ty, "Error creating custom type, type will not be used");
             }
         }
-
-        self.drop_leftover_tables(&table_list, &view_list)
-            .await
-            .map_err(|e| e.context("Error while cleaning up leftover cache tables"))?;
 
         // For each table, retrieve its structure
         let mut tables = Vec::with_capacity(table_list.len());
@@ -1042,12 +1042,13 @@ impl<'a> PostgresReplicator<'a> {
     }
 
     /// Get a list of ReadySet cache tables and compare against the list of upstream tables and
-    /// views, dropping any cache tables that are missing upstream.
+    /// views, dropping any cache tables that are missing upstream or newly filtered out.
     ///
     /// This function is called during snapshotting to detect and handle cases where we somehow
     /// have a leftover cache that doesn't correspond to any upstream table or view. Without
     /// removing such tables, we can run potentially run into problems later on where we panic due
-    /// to failure to get a replication offset.
+    /// to failure to get a replication offset. This also allows us to forget about previously
+    /// replicated base tables that have since been filtered, e.g. by `--replication-tables-ignore`.
     async fn drop_leftover_tables(
         &mut self,
         table_list: &[TableEntry],
