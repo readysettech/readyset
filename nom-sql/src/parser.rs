@@ -34,6 +34,7 @@ use crate::transaction::{
     commit, rollback, start_transaction, CommitStatement, RollbackStatement,
     StartTransactionStatement,
 };
+use crate::truncate::{truncate, TruncateStatement};
 use crate::update::{updating, UpdateStatement};
 use crate::use_statement::{use_statement, UseStatement};
 use crate::whitespace::whitespace0;
@@ -69,6 +70,7 @@ pub enum SqlQuery {
     Explain(ExplainStatement),
     Comment(CommentStatement),
     Deallocate(DeallocateStatement),
+    Truncate(TruncateStatement),
 }
 
 impl DialectDisplay for SqlQuery {
@@ -98,6 +100,7 @@ impl DialectDisplay for SqlQuery {
             Self::Comment(c) => write!(f, "{}", c.display(dialect)),
             Self::DropAllProxiedQueries(drop) => write!(f, "{}", drop.display(dialect)),
             Self::Deallocate(dealloc) => write!(f, "{}", dealloc.display(dialect)),
+            Self::Truncate(truncate) => write!(f, "{}", truncate.display(dialect)),
         })
     }
 }
@@ -147,6 +150,7 @@ impl SqlQuery {
             Self::Explain(_) => "EXPLAIN",
             Self::Comment(_) => "COMMENT",
             Self::Deallocate(_) => "DEALLOCATE",
+            Self::Truncate(_) => "TRUNCATE",
         }
     }
 
@@ -191,6 +195,7 @@ impl SqlQuery {
             | SqlQuery::Rollback(_)
             | SqlQuery::RenameTable(_)
             | SqlQuery::Use(_)
+            | SqlQuery::Truncate(_)
             | SqlQuery::Comment(_) => false,
         }
     }
@@ -244,6 +249,7 @@ fn sql_query_part2(
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlQuery> {
     move |i| {
         alt((
+            map(truncate(dialect), SqlQuery::Truncate),
             // This does a more expensive clone of `i`, so process it last.
             map(create_cached_query(dialect), SqlQuery::CreateCache),
             map(comment(dialect), SqlQuery::Comment),

@@ -2810,6 +2810,7 @@ where
                     | SqlQuery::DropTable(_)
                     | SqlQuery::DropView(_)
                     | SqlQuery::AlterTable(_)
+                    | SqlQuery::Truncate(_)
                     | SqlQuery::Use(_) => {
                         event.sql_type = SqlQueryType::Other;
                         upstream.query(raw_query).await.map(QueryResult::Upstream)
@@ -2862,6 +2863,7 @@ where
                     SqlQuery::Insert(q) => noria.handle_insert(q).await,
                     SqlQuery::Update(q) => noria.handle_update(q).await,
                     SqlQuery::Delete(q) => noria.handle_delete(q).await,
+                    SqlQuery::Truncate(q) => noria.handle_truncate(q).await,
                     SqlQuery::Deallocate(_) => unreachable!("deallocate path returns prior"),
 
                     // Return an empty result as we are allowing unsupported set statements. Commit

@@ -8,7 +8,7 @@ use std::time::Instant;
 use itertools::Itertools;
 use nom_sql::{
     self, ColumnConstraint, DeleteStatement, DialectDisplay, Expr, InsertStatement, Relation,
-    SqlIdentifier, SqlQuery, UnaryOperator, UpdateStatement,
+    SqlIdentifier, SqlQuery, TruncateStatement, UnaryOperator, UpdateStatement,
 };
 use readyset_client::consistency::Timestamp;
 use readyset_client::internal::LocalNodeIndex;
@@ -855,6 +855,24 @@ impl NoriaConnector {
                     .with_schema_search_path(self.schema_search_path.clone())
             )
         )?;
+        Ok(QueryResult::Empty)
+    }
+
+    pub(crate) async fn handle_truncate(
+        &mut self,
+        q: &TruncateStatement,
+    ) -> ReadySetResult<QueryResult<'_>> {
+        for table in &q.tables {
+            trace!(table = %table.relation.name, "truncate::access mutator");
+            let mutator = self
+                .inner
+                .get_mut()?
+                .get_noria_table(&table.relation)
+                .await?;
+            trace!("truncate::perform truncate");
+            mutator.truncate().await?;
+            trace!("truncate::done");
+        }
         Ok(QueryResult::Empty)
     }
 

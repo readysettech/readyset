@@ -15,6 +15,7 @@ use crate::rename::{RenameTableOperation, RenameTableStatement};
 use crate::select::{LimitClause, LimitValue};
 use crate::set::Variable;
 use crate::transaction::{CommitStatement, RollbackStatement, StartTransactionStatement};
+use crate::truncate::TruncateStatement;
 use crate::{
     AlterColumnOperation, AlterTableDefinition, AlterTableStatement, CacheInner, CaseWhenBranch,
     Column, ColumnConstraint, ColumnSpecification, CommentStatement, CommonTableExpr,
@@ -435,6 +436,13 @@ pub trait VisitorMut<'ast>: Sized {
         _deallocate_statement: &'ast DeallocateStatement,
     ) -> Result<(), Self::Error> {
         Ok(())
+    }
+
+    fn visit_truncate_statement(
+        &mut self,
+        truncate_statement: &'ast mut TruncateStatement,
+    ) -> Result<(), Self::Error> {
+        walk_truncate_statement(self, truncate_statement)
     }
 
     fn visit_sql_query(&mut self, sql_query: &'ast mut SqlQuery) -> Result<(), Self::Error> {
@@ -1143,6 +1151,17 @@ pub fn walk_drop_view_statement<'a, V: VisitorMut<'a>>(
     Ok(())
 }
 
+pub fn walk_truncate_statement<'a, V: VisitorMut<'a>>(
+    visitor: &mut V,
+    truncate_statement: &'a mut TruncateStatement,
+) -> Result<(), V::Error> {
+    for table in &mut truncate_statement.tables {
+        visitor.visit_table(&mut table.relation)?;
+    }
+
+    Ok(())
+}
+
 pub fn walk_sql_query<'a, V: VisitorMut<'a>>(
     visitor: &mut V,
     sql_query: &'a mut SqlQuery,
@@ -1176,6 +1195,7 @@ pub fn walk_sql_query<'a, V: VisitorMut<'a>>(
         SqlQuery::Explain(statement) => visitor.visit_explain_statement(statement),
         SqlQuery::Comment(statement) => visitor.visit_comment_statement(statement),
         SqlQuery::Deallocate(statement) => visitor.visit_deallocate_statement(statement),
+        SqlQuery::Truncate(statement) => visitor.visit_truncate_statement(statement),
     }
 }
 
