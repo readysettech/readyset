@@ -15,6 +15,7 @@ use mysql_common::binlog::value::BinlogValue;
 use nom_sql::{Relation, SqlIdentifier};
 use readyset_client::metrics::recorded;
 use readyset_client::recipe::ChangeList;
+use readyset_client::TableOperation;
 use readyset_data::{DfValue, Dialect};
 use readyset_errors::{internal, internal_err, ReadySetError, ReadySetResult};
 use replication_offset::mysql::MySqlPosition;
@@ -411,23 +412,8 @@ impl MySqlBinlogConnector {
                 // `CREATE TABLE` and `ALTER TABLE` and those always change only one DB.
                 names.first().unwrap().as_str().to_string()
             }
-            // If the query does not affect the schema, just keep going
-            // TODO: Transactions begin with the `BEGIN` queries, but we do not
-            // currently support those.
-            // `COMMIT` queries are issued for writes on non-transactional storage engines
-            // such as MyISAM. We report the position after the `COMMIT` query if necessary.
-            _ => {
-                match q_event.query().eq("COMMIT") && (self.report_position_elapsed() || is_last) {
-                    true => {
-                        return Ok(ReplicationAction::LogPosition);
-                    }
-                    false => {
-                        return Err(mysql_async::Error::Other(Box::new(
-                            ReadySetError::SkipEvent,
-                        )))
-                    }
-                }
-            }
+            // Even if the query does not affect the schema, it may still require a table action.
+            _ => return self.try_non_ddl_action_from_query(q_event, is_last),
         };
 
         let changes = match ChangeList::from_str(q_event.query(), Dialect::DEFAULT_MYSQL) {
@@ -442,6 +428,42 @@ impl MySqlBinlogConnector {
         };
 
         Ok(ReplicationAction::DdlChange { schema, changes })
+    }
+
+    /// Attempt to produce a non-DDL [`ReplicationAction`] from the give query.
+    ///
+    /// `COMMIT` queries are issued for writes on non-transactional storage engines such as MyISAM.
+    /// We report the position after the `COMMIT` query if necessary.
+    ///
+    /// TRUNCATE statements are also parsed and handled here.
+    ///
+    /// TODO: Transactions begin with `BEGIN` queries, but we do not currently support those.
+    fn try_non_ddl_action_from_query(
+        &mut self,
+        q_event: mysql_common::binlog::events::QueryEvent<'_>,
+        is_last: bool,
+    ) -> mysql::Result<ReplicationAction> {
+        use nom_sql::{parse_query, Dialect, SqlQuery};
+        match parse_query(Dialect::MySQL, q_event.query()) {
+            Ok(SqlQuery::Commit(_)) if self.report_position_elapsed() || is_last => {
+                Ok(ReplicationAction::LogPosition)
+            }
+            Ok(SqlQuery::Truncate(truncate)) if truncate.tables.len() == 1 => {
+                // MySQL only allows one table in the statement, or we would be in trouble.
+                let mut relation = truncate.tables[0].relation.clone();
+                if relation.schema.is_none() {
+                    relation.schema = Some(SqlIdentifier::from(q_event.schema()))
+                }
+                Ok(ReplicationAction::TableAction {
+                    table: relation,
+                    actions: vec![TableOperation::Truncate],
+                    txid: self.current_gtid,
+                })
+            }
+            _ => Err(mysql_async::Error::Other(Box::new(
+                ReadySetError::SkipEvent,
+            ))),
+        }
     }
 
     /// Merge table actions into a hashmap of actions.
