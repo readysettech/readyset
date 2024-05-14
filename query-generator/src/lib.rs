@@ -2243,30 +2243,16 @@ impl Arbitrary for Operations {
     fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
         any_with::<Vec<QueryOperation>>(args)
             .prop_map(|mut ops| {
-                // Don't generate an aggregate or distinct in the same query as a WHERE IN clause,
-                // since we don't support those queries (ENG-2942)
-                let mut agg_or_distinct_found = false;
-                let mut in_parameter_found = false;
-
                 // Don't generate an OR filter in the same query as a parameter of any kind, since
                 // we don't support those queries (ENG-2976)
                 let mut parameter_found = false;
                 let mut or_filter_found = false;
 
                 ops.retain(|op| match op {
-                    QueryOperation::ColumnAggregate(_) | QueryOperation::Distinct => {
-                        if in_parameter_found {
-                            false
-                        } else {
-                            agg_or_distinct_found = true;
-                            true
-                        }
-                    }
                     QueryOperation::InParameter { .. } => {
-                        if agg_or_distinct_found || or_filter_found {
+                        if or_filter_found {
                             false
                         } else {
-                            in_parameter_found = true;
                             parameter_found = true;
                             true
                         }
