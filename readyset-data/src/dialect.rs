@@ -108,6 +108,18 @@ impl Dialect {
             SqlEngine::PostgreSQL => DfType::Int,
         }
     }
+
+    /// Return whether the specified storage engine type is supported by Readyset. Only applicable
+    /// to MySQL. Currently, only InnoDB and MyRocks are supported.
+    pub fn storage_engine_is_supported<S: AsRef<str>>(&self, storage_engine: S) -> bool {
+        match self.engine {
+            SqlEngine::MySQL => {
+                storage_engine.as_ref().eq_ignore_ascii_case("InnoDB")
+                    || storage_engine.as_ref().eq_ignore_ascii_case("RocksDB")
+            }
+            SqlEngine::PostgreSQL => true,
+        }
+    }
 }
 
 impl From<Dialect> for nom_sql::Dialect {

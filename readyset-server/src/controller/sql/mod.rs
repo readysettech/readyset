@@ -6,14 +6,15 @@ use ::mir::visualize::GraphViz;
 use ::mir::DfNodeIndex;
 use ::serde::{Deserialize, Serialize};
 use nom_sql::{
-    CompoundSelectOperator, CompoundSelectStatement, CreateTableBody, DialectDisplay,
-    FieldDefinitionExpr, NonReplicatedRelation, NotReplicatedReason, Relation, SelectSpecification,
-    SelectStatement, SqlIdentifier, SqlType, TableExpr,
+    CompoundSelectOperator, CompoundSelectStatement, CreateTableBody, CreateTableOption,
+    DialectDisplay, FieldDefinitionExpr, NonReplicatedRelation, NotReplicatedReason, Relation,
+    SelectSpecification, SelectStatement, SqlIdentifier, SqlType, TableExpr,
 };
 use petgraph::graph::NodeIndex;
 use readyset_client::query::QueryId;
 use readyset_client::recipe::changelist::{AlterTypeChange, Change, PostgresTableMetadata};
 use readyset_client::recipe::ChangeList;
+use readyset_data::dialect::SqlEngine;
 use readyset_data::{DfType, Dialect, PgEnumMetadata};
 use readyset_errors::{
     internal, internal_err, invalid_query_err, invariant, unsupported, ReadySetError,
@@ -238,6 +239,28 @@ impl SqlIncorporator {
                             Sensitive(&unparsed)
                         ),
                     };
+                    if dialect.engine() == SqlEngine::MySQL {
+                        let options = match cts.options {
+                            Ok(options) => options,
+                            Err(unparsed) => unsupported!(
+                                "CREATE TABLE {} options failed to parse: {}",
+                                cts.table.display_unquoted(),
+                                Sensitive(&unparsed)
+                            ),
+                        };
+                        if let Some(CreateTableOption::Engine(Some(storage_engine))) = options
+                            .iter()
+                            .find(|option| matches!(option, CreateTableOption::Engine(Some(_))))
+                        {
+                            if !dialect.storage_engine_is_supported(storage_engine) {
+                                unsupported!(
+                                    "CREATE TABLE {} specifies unsupported storage engine: {}",
+                                    cts.table.display_unquoted(),
+                                    storage_engine
+                                )
+                            }
+                        }
+                    }
                     if body.fields.is_empty() {
                         return Err(ReadySetError::TableError {
                             table: cts.table.clone(),

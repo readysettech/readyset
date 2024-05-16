@@ -693,7 +693,7 @@ async fn mysql_binary_collation_padding_inner() -> ReadySetResult<()> {
             DROP TABLE IF EXISTS `col_bin_pad` CASCADE;
             CREATE TABLE `col_bin_pad` (
                 id int NOT NULL PRIMARY KEY,
-                c BINARY(3) 
+                c BINARY(3)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
             INSERT INTO `col_bin_pad` VALUES (1, 'ࠈ');
             INSERT INTO `col_bin_pad` VALUES (2, 'A');
@@ -806,7 +806,7 @@ async fn mysql_char_collation_padding_inner() -> ReadySetResult<()> {
             DROP TABLE IF EXISTS `col_pad` CASCADE;
             CREATE TABLE `col_pad` (
                 id int NOT NULL PRIMARY KEY,
-                c CHAR(3) 
+                c CHAR(3)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
             INSERT INTO `col_pad` VALUES (1, 'ࠈࠈ');
             INSERT INTO `col_pad` VALUES (2, 'A');
@@ -3173,6 +3173,68 @@ async fn pgsql_dont_replicate_partitioned_table() {
             .await
             .unwrap()
             .contains(&NonReplicatedRelation::new(relation.clone()))
+    }
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn mysql_dont_replicate_unsupported_storage_engine() {
+    readyset_tracing::init_test_logging();
+    let url = mysql_url();
+    let mut client = DbConnection::connect(&url).await.unwrap();
+
+    client
+        .query(
+            "DROP TABLE IF EXISTS t CASCADE;
+             CREATE TABLE t (x int) ENGINE=MEMORY;",
+        )
+        .await
+        .unwrap();
+
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
+        .await
+        .unwrap();
+    ctx.notification_channel
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+
+    ctx.noria.table("t").await.unwrap_err();
+    let relation = Relation {
+        schema: Some("public".into()),
+        name: "t".into(),
+    };
+
+    assert!(ctx
+        .noria
+        .non_replicated_relations()
+        .await
+        .unwrap()
+        .contains(&NonReplicatedRelation::new(relation.clone())));
+
+    client
+        .query(
+            "DROP TABLE IF EXISTS t2 CASCADE;
+            CREATE TABLE t2 (y int) ENGINE=MEMORY",
+        )
+        .await
+        .unwrap();
+    let relation = Relation {
+        schema: Some("public".into()),
+        name: "t2".into(),
+    };
+    eventually! {
+        let nrr = ctx
+            .noria
+            .non_replicated_relations()
+            .await
+            .unwrap();
+        debug!(?nrr);
+        nrr.contains(&NonReplicatedRelation::new(relation.clone()))
     }
 
     shutdown_tx.shutdown().await;

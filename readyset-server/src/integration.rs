@@ -9398,3 +9398,30 @@ async fn evict_single_intermediate_state() {
 
     shutdown_tx.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn check_supported_mysql_storage_engines() {
+    let (mut g, shutdown_tx) = start_simple_unsharded("unsupported_engine").await;
+
+    g.extend_recipe(
+        ChangeList::from_str(
+            "CREATE TABLE test (value double) ENGINE=MEMORY;",
+            Dialect::DEFAULT_MYSQL,
+        )
+        .unwrap(),
+    )
+    .await
+    .expect_err("Should not replicate table with unsupported storage engine");
+
+    g.extend_recipe(
+        ChangeList::from_str(
+            "CREATE TABLE test (value double) ENGINE=innodb;",
+            Dialect::DEFAULT_MYSQL,
+        )
+        .unwrap(),
+    )
+    .await
+    .expect("Should replicate table with supported storage engine");
+
+    shutdown_tx.shutdown().await;
+}
