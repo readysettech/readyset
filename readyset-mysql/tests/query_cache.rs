@@ -758,3 +758,140 @@ async fn test_binlog_transaction_compression() {
 
     shutdown_tx.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn test_char_padding_lookup() {
+    let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
+    let (opts, _handle, shutdown_tx) = setup(
+        query_status_cache,
+        true, // fallback enabled
+        MigrationMode::OutOfBand,
+        UnsupportedSetMode::Error,
+    )
+    .await;
+    let mut conn = Conn::new(opts).await.unwrap();
+    conn.query_drop(
+        "CREATE TABLE `col_pad_lookup` (
+        id int NOT NULL PRIMARY KEY,
+        c CHAR(3) 
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;",
+    )
+    .await
+    .unwrap();
+    conn.query_drop("INSERT INTO `col_pad_lookup` VALUES (1, 'ࠈࠈ');")
+        .await
+        .unwrap();
+    conn.query_drop("INSERT INTO `col_pad_lookup` VALUES (2, 'A');")
+        .await
+        .unwrap();
+    conn.query_drop("INSERT INTO `col_pad_lookup` VALUES (3, 'AAA');")
+        .await
+        .unwrap();
+    sleep().await;
+    conn.query_drop("CREATE CACHE test FROM SELECT id, c FROM col_pad_lookup WHERE c = ?")
+        .await
+        .unwrap();
+    let row: Vec<(u32, String)> = conn
+        .query("SELECT id, c FROM col_pad_lookup WHERE c = 'ࠈࠈ'")
+        .await
+        .unwrap();
+    assert_eq!(row.len(), 1);
+    let last_status = last_query_info(&mut conn).await;
+    assert_eq!(last_status.destination, QueryDestination::Readyset);
+    assert_eq!(row[0].1, "ࠈࠈ ");
+
+    let row: Vec<(u32, String)> = conn
+        .query("SELECT id, c FROM col_pad_lookup WHERE c = 'A'")
+        .await
+        .unwrap();
+    assert_eq!(row.len(), 1);
+    let last_status = last_query_info(&mut conn).await;
+    assert_eq!(last_status.destination, QueryDestination::Readyset);
+    assert_eq!(row[0].1, "A  ");
+
+    let row: Vec<(u32, String)> = conn
+        .query("SELECT id, c FROM col_pad_lookup WHERE c = 'AAA'")
+        .await
+        .unwrap();
+    assert_eq!(row.len(), 1);
+    let last_status = last_query_info(&mut conn).await;
+    assert_eq!(last_status.destination, QueryDestination::Readyset);
+    assert_eq!(row[0].1, "AAA");
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn test_binary_padding_lookup() {
+    let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
+    let (opts, _handle, shutdown_tx) = setup(
+        query_status_cache,
+        true, // fallback enabled
+        MigrationMode::OutOfBand,
+        UnsupportedSetMode::Error,
+    )
+    .await;
+    let mut conn = Conn::new(opts).await.unwrap();
+    conn.query_drop(
+        "CREATE TABLE `col_pad_bin_lookup` (
+        id int NOT NULL PRIMARY KEY,
+        b BINARY(3) 
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;",
+    )
+    .await
+    .unwrap();
+    conn.query_drop("INSERT INTO `col_pad_bin_lookup` VALUES (1, 'ࠈ');")
+        .await
+        .unwrap();
+    conn.query_drop("INSERT INTO `col_pad_bin_lookup` VALUES (2, '¥');")
+        .await
+        .unwrap();
+    conn.query_drop("INSERT INTO `col_pad_bin_lookup` VALUES (3, 'A');")
+        .await
+        .unwrap();
+    conn.query_drop("INSERT INTO `col_pad_bin_lookup` VALUES (4, 'A¥');")
+        .await
+        .unwrap();
+
+    sleep().await;
+    conn.query_drop("CREATE CACHE test FROM SELECT id, b FROM col_pad_bin_lookup WHERE b = ?")
+        .await
+        .unwrap();
+    let row: Vec<(u32, String)> = conn
+        .query("SELECT id, b FROM col_pad_bin_lookup WHERE b = 'ࠈ'")
+        .await
+        .unwrap();
+    assert_eq!(row.len(), 1);
+    let last_status = last_query_info(&mut conn).await;
+    assert_eq!(last_status.destination, QueryDestination::Readyset);
+    assert_eq!(row[0].1, "0xe0a088");
+
+    let row: Vec<(u32, String)> = conn
+        .query("SELECT id, b FROM col_pad_bin_lookup WHERE b = '¥'")
+        .await
+        .unwrap();
+    assert_eq!(row.len(), 1);
+    let last_status = last_query_info(&mut conn).await;
+    assert_eq!(last_status.destination, QueryDestination::Readyset);
+    assert_eq!(row[0].1, "0xc2a500");
+
+    let row: Vec<(u32, String)> = conn
+        .query("SELECT id, b FROM col_pad_bin_lookup WHERE b = 'A'")
+        .await
+        .unwrap();
+    assert_eq!(row.len(), 1);
+    let last_status = last_query_info(&mut conn).await;
+    assert_eq!(last_status.destination, QueryDestination::Readyset);
+    assert_eq!(row[0].1, "0x410000");
+
+    let row: Vec<(u32, String)> = conn
+        .query("SELECT id, b FROM col_pad_bin_lookup WHERE b = 'A¥'")
+        .await
+        .unwrap();
+    assert_eq!(row.len(), 1);
+    let last_status = last_query_info(&mut conn).await;
+    assert_eq!(last_status.destination, QueryDestination::Readyset);
+    assert_eq!(row[0].1, "0x41c2a5");
+    shutdown_tx.shutdown().await;
+}

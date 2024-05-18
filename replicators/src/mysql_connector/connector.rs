@@ -5,7 +5,7 @@ use std::io;
 use async_trait::async_trait;
 use binlog::consts::{BinlogChecksumAlg, EventType};
 use metrics::counter;
-use mysql::binlog::events::StatusVarVal;
+use mysql::binlog::events::{OptionalMetaExtractor, StatusVarVal};
 use mysql::binlog::jsonb::{self, JsonbToJsonError};
 use mysql::prelude::Queryable;
 use mysql_async as mysql;
@@ -22,6 +22,7 @@ use replication_offset::mysql::MySqlPosition;
 use replication_offset::ReplicationOffset;
 use tracing::{error, info, warn};
 
+use crate::mysql_connector::utils::mysql_pad_collation_column;
 use crate::noria_adapter::{Connector, ReplicationAction};
 
 const CHECKSUM_QUERY: &str = "SET @source_binlog_checksum='CRC32'";
@@ -847,6 +848,7 @@ fn binlog_val_to_noria_val(
     val: &mysql_common::value::Value,
     col_kind: mysql_common::constants::ColumnType,
     meta: &[u8],
+    collation: u16,
 ) -> mysql::Result<DfValue> {
     // Not all values are coerced to the value expected by ReadySet directly
 
@@ -891,6 +893,17 @@ fn binlog_val_to_noria_val(
             // Can wrap because we know this maps directly to [`DfValue`]
             Ok(time.into())
         }
+        (ColumnType::MYSQL_TYPE_STRING, meta) => {
+            match mysql_pad_collation_column(
+                buf,
+                col_kind,
+                collation,
+                meta[1] as usize, // 2nd byte of meta is the length of the string
+            ) {
+                Ok(s) => Ok(s),
+                Err(e) => Err(mysql_async::Error::Other(Box::new(internal_err!("{e}")))),
+            }
+        }
         _ => Ok(val.try_into().map_err(|e| {
             mysql_async::Error::Other(Box::new(internal_err!("Unable to coerce value {}", e)))
         })?),
@@ -901,6 +914,9 @@ fn binlog_row_to_noria_row(
     binlog_row: &BinlogRow,
     tme: &binlog::events::TableMapEvent<'static>,
 ) -> mysql::Result<Vec<DfValue>> {
+    let opt_meta_extractor = OptionalMetaExtractor::new(tme.iter_optional_meta()).unwrap();
+    let mut charset_iter = opt_meta_extractor.iter_charset();
+    let mut enum_and_set_charset_iter = opt_meta_extractor.iter_enum_and_set_charset();
     (0..binlog_row.len())
         .map(|idx| {
             match binlog_row.as_ref(idx).unwrap() {
@@ -916,7 +932,17 @@ fn binlog_row_to_noria_row(
                             .unwrap(),
                         tme.get_column_metadata(idx).unwrap(),
                     );
-                    binlog_val_to_noria_val(val, kind, meta)
+                    let charset = if kind.is_character_type() {
+                        charset_iter.next().transpose()?.unwrap_or_default()
+                    } else if kind.is_enum_or_set_type() {
+                        enum_and_set_charset_iter
+                            .next()
+                            .transpose()?
+                            .unwrap_or_default()
+                    } else {
+                        Default::default()
+                    };
+                    binlog_val_to_noria_val(val, kind, meta, charset)
                 }
                 BinlogValue::Jsonb(val) => {
                     let json: Result<serde_json::Value, _> = val.clone().try_into(); // urgh no TryFrom impl

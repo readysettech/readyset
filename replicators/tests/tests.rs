@@ -684,6 +684,238 @@ async fn mysql_datetime_replication() {
     mysql_datetime_replication_inner().await.unwrap();
 }
 
+async fn mysql_binary_collation_padding_inner() -> ReadySetResult<()> {
+    let url = &mysql_url();
+    let mut client = DbConnection::connect(url).await?;
+    client
+        .query(
+            "
+            DROP TABLE IF EXISTS `col_bin_pad` CASCADE;
+            CREATE TABLE `col_bin_pad` (
+                id int NOT NULL PRIMARY KEY,
+                c BINARY(3) 
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+            INSERT INTO `col_bin_pad` VALUES (1, 'ࠈ');
+            INSERT INTO `col_bin_pad` VALUES (2, 'A');
+            INSERT INTO `col_bin_pad` VALUES (3, 'AAA');
+            INSERT INTO `col_bin_pad` VALUES (4, '¥');",
+        )
+        .await?;
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None).await?;
+    ctx.notification_channel
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+    ctx.check_results(
+        "col_bin_pad",
+        "Snapshot",
+        &[
+            &[
+                DfValue::Int(1),
+                // 'ࠈ' is the UTF-8 encoding of U+E0A088
+                DfValue::ByteArray(vec![0xE0, 0xA0, 0x88].into()),
+            ],
+            &[
+                DfValue::Int(2),
+                DfValue::ByteArray(vec![0x41, 0x0, 0x0].into()),
+            ],
+            &[
+                DfValue::Int(3),
+                DfValue::ByteArray(vec![0x41, 0x41, 0x41].into()),
+            ],
+            &[
+                DfValue::Int(4),
+                // '¥' is the UTF-8 encoding of U+C2A5
+                DfValue::ByteArray(vec![0xC2, 0xA5, 0x0].into()),
+            ],
+        ],
+    )
+    .await?;
+
+    // Replication and mix of characters from 1st and 2rd byte on the same row
+    client
+        .query(
+            "
+        INSERT INTO `col_bin_pad` VALUES (5, 'B¥');
+        INSERT INTO `col_bin_pad` VALUES (6, 'B');
+        INSERT INTO `col_bin_pad` VALUES (7, 'BBB');
+        INSERT INTO `col_bin_pad` VALUES (8, '¥');
+        ",
+        )
+        .await
+        .unwrap();
+    ctx.check_results(
+        "col_bin_pad",
+        "Replication",
+        &[
+            &[
+                DfValue::Int(1),
+                // 'ࠈ' is the UTF-8 encoding of U+E0A088
+                DfValue::ByteArray(vec![0xE0, 0xA0, 0x88].into()),
+            ],
+            &[
+                DfValue::Int(2),
+                DfValue::ByteArray(vec![0x41, 0x0, 0x0].into()),
+            ],
+            &[
+                DfValue::Int(3),
+                DfValue::ByteArray(vec![0x41, 0x41, 0x41].into()),
+            ],
+            &[
+                DfValue::Int(4),
+                // '¥' is the UTF-8 encoding of U+C2A5
+                DfValue::ByteArray(vec![0xC2, 0xA5, 0x0].into()),
+            ],
+            &[
+                DfValue::Int(5),
+                // '¥' is the UTF-8 encoding of U+C2A5
+                DfValue::ByteArray(vec![0x42, 0xC2, 0xA5].into()),
+            ],
+            &[
+                DfValue::Int(6),
+                DfValue::ByteArray(vec![0x42, 0x0, 0x0].into()),
+            ],
+            &[
+                DfValue::Int(7),
+                DfValue::ByteArray(vec![0x42, 0x42, 0x42].into()),
+            ],
+            &[
+                DfValue::Int(8),
+                // '¥' is the UTF-8 encoding of U+C2A5
+                DfValue::ByteArray(vec![0xC2, 0xA5, 0x0].into()),
+            ],
+        ],
+    )
+    .await?;
+
+    client.stop().await;
+    ctx.stop().await;
+    shutdown_tx.shutdown().await;
+
+    Ok(())
+}
+
+async fn mysql_char_collation_padding_inner() -> ReadySetResult<()> {
+    let url = &mysql_url();
+    let mut client = DbConnection::connect(url).await?;
+    client
+        .query(
+            "
+            DROP TABLE IF EXISTS `col_pad` CASCADE;
+            CREATE TABLE `col_pad` (
+                id int NOT NULL PRIMARY KEY,
+                c CHAR(3) 
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+            INSERT INTO `col_pad` VALUES (1, 'ࠈࠈ');
+            INSERT INTO `col_pad` VALUES (2, 'A');
+            INSERT INTO `col_pad` VALUES (3, 'AAA');",
+        )
+        .await?;
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None).await?;
+    ctx.notification_channel
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+    ctx.check_results(
+        "col_pad",
+        "Snapshot",
+        &[
+            &[
+                DfValue::Int(1),
+                // 'ࠈࠈ ' is the UTF-8 encoding of U+E0A088 U+E0A088 U+20
+                DfValue::TinyText(
+                    TinyText::from_slice(vec![0xE0, 0xA0, 0x88, 0xE0, 0xA0, 0x88, 0x20].as_slice())
+                        .unwrap_or_else(|_| TinyText::from_arr(b"")),
+                ),
+            ],
+            &[
+                DfValue::Int(2),
+                DfValue::TinyText(TinyText::from_arr(b"A  ")),
+            ],
+            &[
+                DfValue::Int(3),
+                DfValue::TinyText(TinyText::from_arr(b"AAA")),
+            ],
+        ],
+    )
+    .await?;
+
+    // Replication and mix of characters from 1st and 3rd byte on the same row
+    client
+        .query(
+            "
+        INSERT INTO `col_pad` VALUES (4, 'Bࠉ');
+        INSERT INTO `col_pad` VALUES (5, 'B');
+        INSERT INTO `col_pad` VALUES (6, 'BBB');
+        ",
+        )
+        .await
+        .unwrap();
+    ctx.check_results(
+        "col_pad",
+        "Replication",
+        &[
+            &[
+                DfValue::Int(1),
+                // 'ࠈࠈ ' is the UTF-8 encoding of U+E0A088 U+E0A088 U+20
+                DfValue::TinyText(
+                    TinyText::from_slice(vec![0xE0, 0xA0, 0x88, 0xE0, 0xA0, 0x88, 0x20].as_slice())
+                        .unwrap_or_else(|_| TinyText::from_arr(b"")),
+                ),
+            ],
+            &[
+                DfValue::Int(2),
+                DfValue::TinyText(TinyText::from_arr(b"A  ")),
+            ],
+            &[
+                DfValue::Int(3),
+                DfValue::TinyText(TinyText::from_arr(b"AAA")),
+            ],
+            &[
+                DfValue::Int(4),
+                // 'Bࠉ ' is the UTF-8 encoding of U+E42 U+E0A089 U+20
+                DfValue::TinyText(
+                    TinyText::from_slice(vec![0x42, 0xE0, 0xA0, 0x89, 0x20].as_slice())
+                        .unwrap_or_else(|_| TinyText::from_arr(b"")),
+                ),
+            ],
+            &[
+                DfValue::Int(5),
+                DfValue::TinyText(TinyText::from_arr(b"B  ")),
+            ],
+            &[
+                DfValue::Int(6),
+                DfValue::TinyText(TinyText::from_arr(b"BBB")),
+            ],
+        ],
+    )
+    .await?;
+
+    client.stop().await;
+    ctx.stop().await;
+    shutdown_tx.shutdown().await;
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+#[slow]
+async fn mysql_binary_collation_padding() {
+    mysql_binary_collation_padding_inner().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+#[slow]
+async fn mysql_char_collation_padding() {
+    mysql_char_collation_padding_inner().await.unwrap();
+}
+
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
 #[slow]

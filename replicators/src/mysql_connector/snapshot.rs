@@ -11,6 +11,8 @@ use itertools::Itertools;
 use mysql::prelude::Queryable;
 use mysql::{Transaction, TxOpts};
 use mysql_async as mysql;
+use mysql_common::constants::ColumnType;
+use mysql_srv::ColumnFlags;
 use nom_sql::{DialectDisplay, NonReplicatedRelation, NotReplicatedReason, Relation};
 use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_data::Dialect;
@@ -21,6 +23,7 @@ use tokio::task::JoinHandle;
 use tracing::{debug, error, info, info_span, warn};
 use tracing_futures::Instrument;
 
+use super::utils::mysql_pad_collation_column;
 use crate::db_util::DatabaseSchemas;
 use crate::table_filter::TableFilter;
 use crate::TablesSnapshottingGaugeGuard;
@@ -767,7 +770,36 @@ fn mysql_row_to_noria_row(row: mysql::Row) -> ReadySetResult<Vec<readyset_data::
     let mut noria_row = Vec::with_capacity(row.len());
     for idx in 0..row.len() {
         let val = value_to_value(row.as_ref(idx).unwrap());
-        noria_row.push(readyset_data::DfValue::try_from(val)?);
+        let col = row.columns_ref().get(idx).unwrap();
+        let flags = col.flags();
+        // ENUM and SET columns are stored as integers and retrieved as strings. We don't need
+        // padding.
+        let require_padding = col.column_type() == ColumnType::MYSQL_TYPE_STRING
+            && !flags.contains(ColumnFlags::ENUM_FLAG)
+            && !flags.contains(ColumnFlags::SET_FLAG);
+        match require_padding {
+            true => {
+                let bytes = match val.clone() {
+                    mysql_common::value::Value::Bytes(b) => b,
+                    _ => {
+                        return Err(internal_err!(
+                            "Expected MYSQL_TYPE_STRING column to be of value Bytes, got {:?}",
+                            val
+                        ));
+                    }
+                };
+                match mysql_pad_collation_column(
+                    &bytes,
+                    col.column_type(),
+                    col.character_set(),
+                    col.column_length() as usize,
+                ) {
+                    Ok(padded) => noria_row.push(padded),
+                    Err(err) => return Err(internal_err!("Error padding column: {}", err)),
+                }
+            }
+            false => noria_row.push(readyset_data::DfValue::try_from(val)?),
+        }
     }
     Ok(noria_row)
 }
