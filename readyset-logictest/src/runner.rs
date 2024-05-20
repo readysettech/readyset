@@ -465,7 +465,10 @@ impl TestScript {
             }
             QueryResults::Results(expected_vals) => {
                 if vals.len() != expected_vals.len() {
-                    bail!("The number of values returned does not match the number of values expected (left: expected, right: actual): \n {}, {}",expected_vals.len(), vals.len());
+                    bail!(
+                        "The number of values returned does not match the number of values expected (left: expected, right: actual): \n {}",
+                        pretty_assertions::Comparison::new(expected_vals, &vals)
+                    )
                 }
                 if !compare_results(&vals, expected_vals, query.column_types.is_some()) {
                     bail!(
@@ -571,7 +574,13 @@ impl TestScript {
                     DatabaseType::MySQL => nom_sql::Dialect::MySQL,
                     DatabaseType::PostgreSQL => nom_sql::Dialect::PostgreSQL,
                 },
-                Default::default(),
+                match database_type {
+                    DatabaseType::MySQL if replication_url.is_some() => vec!["noria".into()],
+                    DatabaseType::PostgreSQL if replication_url.is_some() => {
+                        vec!["noria".into(), "public".into()]
+                    }
+                    _ => Default::default(),
+                },
                 adapter_rewrite_params,
             )
             .await;
