@@ -404,21 +404,21 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
                 Ok(DfValue::from_str_and_collation(self.try_str()?, collation))
             }
 
-            DfType::VarChar(l, ..) if l as usize >= str.len() => {
+            DfType::VarChar(l, ..) if l as usize >= str.chars().count() => {
                 // VarChar, but length is sufficient to store current string
                 Ok(self.clone().into())
             }
 
-            DfType::Char(l, ..) if l as usize == str.len() => {
+            DfType::Char(l, ..) if l as usize == str.chars().count() => {
                 // Char, but length is same as current string
                 Ok(self.clone().into())
             }
 
-            DfType::Char(l, ..) if l as usize > str.len() => {
+            DfType::Char(l, ..) if l as usize > str.chars().count() => {
                 // Char, but length is greater than the current string, have to pad with whitespace
                 let mut new_string = String::with_capacity(l as usize);
                 new_string += str;
-                new_string.extend(std::iter::repeat(' ').take(l as usize - str.len()));
+                new_string.extend(std::iter::repeat(' ').take(l as usize - str.chars().count()));
                 Ok(DfValue::from(new_string))
             }
 
