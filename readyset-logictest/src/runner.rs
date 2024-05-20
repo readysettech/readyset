@@ -465,7 +465,10 @@ impl TestScript {
             }
             QueryResults::Results(expected_vals) => {
                 if vals.len() != expected_vals.len() {
-                    bail!("The number of values returned does not match the number of values expected (left: expected, right: actual): \n {}, {}",expected_vals.len(), vals.len());
+                    bail!(
+                        "The number of values returned does not match the number of values expected (left: expected, right: actual): \n {}",
+                        pretty_assertions::Comparison::new(expected_vals, &vals)
+                    )
                 }
                 if !compare_results(&vals, expected_vals, query.column_types.is_some()) {
                     bail!(
