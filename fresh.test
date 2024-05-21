@@ -1,0 +1,210 @@
+statement ok
+create table t (c int)
+
+statement ok
+insert into t values (1)
+
+query  rowsort
+select c as a0 from t where c = ?
+? = 1
+----
+1
+
+query  rowsort
+select c as a1 from t where c = ?
+? = 1
+----
+1
+
+query  rowsort
+select c as a2 from t where c = ?
+? = 1
+----
+1
+
+query  rowsort
+select c as a3 from t where c = ?
+? = 1
+----
+1
+
+query  rowsort
+select c as a4 from t where c = ?
+? = 1
+----
+1
+
+query  rowsort
+select c as a5 from t where c = ?
+? = 1
+----
+1
+
+query  rowsort
+select c as a6 from t where c = ?
+? = 1
+----
+1
+
+query  rowsort
+select c as a7 from t where c = ?
+? = 1
+----
+1
+
+query  rowsort
+select c as a8 from t where c = ?
+? = 1
+----
+1
+
+query  rowsort
+select c as a9 from t where c = ?
+? = 1
+----
+1
+
+query  rowsort
+select c as a10 from t where c = ?
+? = 1
+----
+1
+
+query  rowsort
+select c as a11 from t where c = ?
+? = 1
+----
+1
+
+query  rowsort
+select c as a12 from t where c = ?
+? = 1
+----
+1
+
+query  rowsort
+select c as a13 from t where c = ?
+? = 1
+----
+1
+
+query  rowsort
+select c as a14 from t where c = ?
+? = 1
+----
+1
+
+query  rowsort
+select c as a15 from t where c = ?
+? = 1
+----
+1
+
+query  rowsort
+select c as a16 from t where c = ?
+? = 1
+----
+1
+
+query  rowsort
+select c as a17 from t where c = ?
+? = 1
+----
+1
+
+query  rowsort
+select c as a18 from t where c = ?
+? = 1
+----
+1
+
+query  rowsort
+select c as a19 from t where c = ?
+? = 1
+----
+1
+
+query  rowsort
+select c as a20 from t where c = ?
+? = 1
+----
+1
+
+query  rowsort
+select c as a21 from t where c = ?
+? = 1
+----
+1
+
+query  rowsort
+select c as a22 from t where c = ?
+? = 1
+----
+1
+
+query  rowsort
+select c as a23 from t where c = ?
+? = 1
+----
+1
+
+query  rowsort
+select c as a24 from t where c = ?
+? = 1
+----
+1
+
+query  rowsort
+select c as a25 from t where c = ?
+? = 1
+----
+1
+
+query  rowsort
+select c as a26 from t where c = ?
+? = 1
+----
+1
+
+query  rowsort
+select c as a27 from t where c = ?
+? = 1
+----
+1
+
+query  rowsort
+select c as a28 from t where c = ?
+? = 1
+----
+1
+
+query  rowsort
+select c as a29 from t where c = ?
+? = 1
+----
+1
+
+query  rowsort
+select c as a30 from t where c = ?
+? = 1
+----
+1
+
+query  rowsort
+select c as a31 from t where c = ?
+? = 1
+----
+1
+
+query  rowsort
+select c as a32 from t where c = ?
+? = 1
+----
+1
+
+query  rowsort
+select c as a33, c as foo from t where c = ?
+? = 1
+----
+1
+1
