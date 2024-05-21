@@ -51,6 +51,7 @@ quanta = { version = "0.11", default-features = false }
 lru = "0.12.0"
 crossbeam-skiplist = "0.1.1"
 slab = "0.4"
+xxhash-rust = { version = "0.8.10", features = ["xxh3"] }
 
 readyset-adapter-types = { path = "../readyset-adapter-types/" }
 readyset-alloc = { path = "../readyset-alloc/" }
@@ -79,6 +80,10 @@ path = "src/lib.rs"
 
 [[bench]]
 name = "parse"
+harness = false
+
+[[bench]]
+name = "hash"
 harness = false
 
 [features]
