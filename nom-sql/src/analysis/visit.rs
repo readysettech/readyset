@@ -10,6 +10,7 @@
 
 #![warn(clippy::todo, clippy::unimplemented)]
 
+use crate::create::{CreateDatabaseOption, CreateDatabaseStatement};
 use crate::create_table_options::CreateTableOption;
 use crate::rename::{RenameTableOperation, RenameTableStatement};
 use crate::select::LimitClause;
@@ -205,6 +206,13 @@ pub trait Visitor<'ast>: Sized {
         walk_create_table_statement(self, create_table_statement)
     }
 
+    fn visit_create_database_statement(
+        &mut self,
+        create_database_statement: &'ast CreateDatabaseStatement,
+    ) -> Result<(), Self::Error> {
+        walk_create_database_statement(self, create_database_statement)
+    }
+
     fn visit_column_specification(
         &mut self,
         column_specification: &'ast ColumnSpecification,
@@ -219,6 +227,13 @@ pub trait Visitor<'ast>: Sized {
     fn visit_create_table_option(
         &mut self,
         _create_table_option: &'ast CreateTableOption,
+    ) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    fn visit_create_database_option(
+        &mut self,
+        _create_database_option: &'ast CreateDatabaseOption,
     ) -> Result<(), Self::Error> {
         Ok(())
     }
@@ -778,6 +793,20 @@ pub fn walk_create_table_statement<'a, V: Visitor<'a>>(
     Ok(())
 }
 
+pub fn walk_create_database_statement<'a, V: Visitor<'a>>(
+    visitor: &mut V,
+    create_database_statement: &'a CreateDatabaseStatement,
+) -> Result<(), V::Error> {
+    visitor.visit_sql_identifier(&create_database_statement.name)?;
+    if let Ok(options) = &create_database_statement.options {
+        for option in options {
+            visitor.visit_create_database_option(option)?;
+        }
+    }
+
+    Ok(())
+}
+
 pub fn walk_column_specification<'a, V: Visitor<'a>>(
     visitor: &mut V,
     column_specification: &'a ColumnSpecification,
@@ -1176,6 +1205,7 @@ pub fn walk_sql_query<'a, V: Visitor<'a>>(
         SqlQuery::Comment(statement) => visitor.visit_comment_statement(statement),
         SqlQuery::Deallocate(statement) => visitor.visit_deallocate_statement(statement),
         SqlQuery::Truncate(statement) => visitor.visit_truncate_statement(statement),
+        SqlQuery::CreateDatabase(statement) => visitor.visit_create_database_statement(statement),
     }
 }
 

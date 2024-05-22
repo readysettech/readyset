@@ -13,37 +13,10 @@ use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
 use crate::common::{ws_sep_comma, ws_sep_equals};
+use crate::create::{charset_name, collation_name, CharsetName, CollationName};
 use crate::literal::integer_literal;
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, Literal, NomSqlResult, SqlIdentifier};
-
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, Arbitrary)]
-pub enum CharsetName {
-    Quoted(SqlIdentifier),
-    Unquoted(SqlIdentifier),
-}
-
-impl fmt::Display for CharsetName {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            CharsetName::Quoted(i) | CharsetName::Unquoted(i) => write!(f, "{i}"),
-        }
-    }
-}
-
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, Arbitrary)]
-pub enum CollationName {
-    Quoted(SqlIdentifier),
-    Unquoted(SqlIdentifier),
-}
-
-impl fmt::Display for CollationName {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            CollationName::Quoted(i) | CollationName::Unquoted(i) => write!(f, "{i}"),
-        }
-    }
-}
+use crate::{Dialect, Literal, NomSqlResult};
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, Arbitrary)]
 pub enum CreateTableOption {
@@ -217,19 +190,6 @@ fn create_option_auto_increment(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Cr
     )(i)
 }
 
-fn charset_name(
-    dialect: Dialect,
-) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CharsetName> {
-    move |i| {
-        alt((
-            map(dialect.identifier(), CharsetName::Unquoted),
-            map(map_res(dialect.string_literal(), String::from_utf8), |s| {
-                CharsetName::Quoted(SqlIdentifier::from(s))
-            }),
-        ))(i)
-    }
-}
-
 fn charset_prefix(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], &[u8]> {
     let (i, _) = whitespace0(i)?;
     let (i, _) = tag_no_case("default")(i)?;
@@ -255,19 +215,6 @@ fn create_option_default_charset(
             )),
             CreateTableOption::Charset,
         )(i)
-    }
-}
-
-fn collation_name(
-    dialect: Dialect,
-) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CollationName> {
-    move |i| {
-        alt((
-            map(dialect.identifier(), CollationName::Unquoted),
-            map(map_res(dialect.string_literal(), String::from_utf8), |s| {
-                CollationName::Quoted(SqlIdentifier::from(s))
-            }),
-        ))(i)
     }
 }
 

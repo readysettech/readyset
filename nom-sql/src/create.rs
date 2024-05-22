@@ -9,7 +9,8 @@ use nom::character::complete::digit1;
 use nom::combinator::{map, map_res, opt};
 use nom::error::{ErrorKind, ParseError};
 use nom::multi::{separated_list0, separated_list1};
-use nom::sequence::{delimited, preceded, terminated, tuple};
+use nom::sequence::{delimited, preceded, separated_pair, terminated, tuple};
+use nom::{Compare, CompareResult};
 use nom_locate::LocatedSpan;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
@@ -21,13 +22,114 @@ use crate::common::{
     until_statement_terminator, ws_sep_comma, IndexType, ReferentialAction, TableKey,
 };
 use crate::compound_select::{nested_compound_selection, CompoundSelectStatement};
-use crate::create_table_options::{table_options, CreateTableOption};
+use crate::create_table_options::{
+    create_option_equals_pair, create_option_spaced_pair, table_options, CreateTableOption,
+};
 use crate::expression::expression;
 use crate::order::{order_type, OrderType};
 use crate::select::{selection, SelectStatement};
 use crate::table::{relation, Relation};
 use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Dialect, DialectDisplay, NomSqlError, NomSqlResult, SqlIdentifier};
+
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, Arbitrary)]
+pub enum CharsetName {
+    Quoted(SqlIdentifier),
+    Unquoted(SqlIdentifier),
+}
+
+impl fmt::Display for CharsetName {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            CharsetName::Quoted(i) | CharsetName::Unquoted(i) => write!(f, "{i}"),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, Arbitrary)]
+pub enum CollationName {
+    Quoted(SqlIdentifier),
+    Unquoted(SqlIdentifier),
+}
+
+impl fmt::Display for CollationName {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            CollationName::Quoted(i) | CollationName::Unquoted(i) => write!(f, "{i}"),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
+pub enum CreateDatabaseOption {
+    CharsetName { default: bool, name: CharsetName },
+    CollationName { default: bool, name: CollationName },
+    Encryption { default: bool, encrypted: bool },
+}
+
+impl fmt::Display for CreateDatabaseOption {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            CreateDatabaseOption::CharsetName { default, name } => write!(
+                f,
+                "{}CHARACTER SET = {}",
+                if *default { "DEFAULT " } else { "" },
+                name
+            ),
+            CreateDatabaseOption::CollationName { default, name } => write!(
+                f,
+                "{}COLLATE = {}",
+                if *default { "DEFAULT " } else { "" },
+                name
+            ),
+            CreateDatabaseOption::Encryption { default, encrypted } => write!(
+                f,
+                "{}ENCRYPTION = {}",
+                if *default { "DEFAULT " } else { "" },
+                if *encrypted { "Y" } else { "N" }
+            ),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
+pub struct CreateDatabaseStatement {
+    pub is_schema: bool,
+    pub if_not_exists: bool,
+    pub name: SqlIdentifier,
+    /// The result of parsing the `CREATE DATABASE` statement's options. If no options were
+    /// present, the Vec will be empty.
+    /// If parsing succeeded, then this will be an `Ok` result with the create options. If
+    /// it failed to parse, this will be an `Err` with the remainder [`String`] that could not
+    /// be parsed.
+    pub options: Result<Vec<CreateDatabaseOption>, String>,
+}
+
+impl DialectDisplay for CreateDatabaseStatement {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| {
+            assert_eq!(dialect, Dialect::MySQL);
+            write!(
+                f,
+                "CREATE {} ",
+                if self.is_schema { "SCHEMA" } else { "DATABASE" }
+            )?;
+            if self.if_not_exists {
+                write!(f, "IF NOT EXISTS ")?;
+            }
+            write!(f, "{}", self.name.as_str())?;
+            match &self.options {
+                Ok(ref opts) => {
+                    for opt in opts.iter() {
+                        write!(f, " {opt}")?;
+                    }
+                }
+                Err(unparsed) => write!(f, "{unparsed}")?,
+            }
+            Ok(())
+        })
+    }
+}
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct CreateTableBody {
@@ -664,6 +766,178 @@ pub fn create_table(
     }
 }
 
+pub(crate) fn charset_name(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CharsetName> {
+    move |i| {
+        alt((
+            map(dialect.identifier(), CharsetName::Unquoted),
+            map(map_res(dialect.string_literal(), String::from_utf8), |s| {
+                CharsetName::Quoted(SqlIdentifier::from(s))
+            }),
+        ))(i)
+    }
+}
+
+pub(crate) fn collation_name(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CollationName> {
+    move |i| {
+        alt((
+            map(dialect.identifier(), CollationName::Unquoted),
+            map(map_res(dialect.string_literal(), String::from_utf8), |s| {
+                CollationName::Quoted(SqlIdentifier::from(s))
+            }),
+        ))(i)
+    }
+}
+
+fn is_default(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], bool> {
+    let (i, s) = opt(map(tuple((tag_no_case("default"), whitespace1)), |_| ()))(i)?;
+    Ok((i, s.is_some()))
+}
+
+fn yes_no_value(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], bool> {
+    map(
+        alt((tag_no_case("y"), tag_no_case("n"))),
+        |i: LocatedSpan<&[u8]>| *i == b"y" || *i == b"Y",
+    )(i)
+}
+
+fn charset_attribute_name(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ()> {
+    map(
+        separated_pair(tag_no_case("character"), whitespace1, tag_no_case("set")),
+        |_| (),
+    )(i)
+}
+
+fn charset_option(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CreateDatabaseOption> {
+    move |i| {
+        map(
+            alt((
+                create_option_spaced_pair(charset_attribute_name, charset_name(dialect)),
+                create_option_equals_pair(charset_attribute_name, charset_name(dialect)),
+            )),
+            |name| CreateDatabaseOption::CharsetName {
+                default: false,
+                name,
+            },
+        )(i)
+    }
+}
+
+fn collate_option(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CreateDatabaseOption> {
+    move |i| {
+        map(
+            alt((
+                create_option_spaced_pair(tag_no_case("collate"), collation_name(dialect)),
+                create_option_equals_pair(tag_no_case("collate"), collation_name(dialect)),
+            )),
+            |name| CreateDatabaseOption::CollationName {
+                default: false,
+                name,
+            },
+        )(i)
+    }
+}
+
+fn encryption_option(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CreateDatabaseOption> {
+    map(
+        alt((
+            create_option_spaced_pair(tag_no_case("encryption"), yes_no_value),
+            create_option_equals_pair(tag_no_case("encryption"), yes_no_value),
+        )),
+        |encrypted| CreateDatabaseOption::Encryption {
+            default: false,
+            encrypted,
+        },
+    )(i)
+}
+
+fn database_option(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CreateDatabaseOption> {
+    move |i| {
+        let (i, _) = whitespace0(i)?;
+        let (i, is_default) = is_default(i)?;
+        let (i, option) = alt((
+            charset_option(dialect),
+            collate_option(dialect),
+            encryption_option,
+        ))(i)?;
+        Ok((
+            i,
+            match option {
+                CreateDatabaseOption::CharsetName { default: _, name } => {
+                    CreateDatabaseOption::CharsetName {
+                        default: is_default,
+                        name,
+                    }
+                }
+                CreateDatabaseOption::CollationName { default: _, name } => {
+                    CreateDatabaseOption::CollationName {
+                        default: is_default,
+                        name,
+                    }
+                }
+                CreateDatabaseOption::Encryption {
+                    default: _,
+                    encrypted,
+                } => CreateDatabaseOption::Encryption {
+                    default: is_default,
+                    encrypted,
+                },
+            },
+        ))
+    }
+}
+
+fn database_options(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<CreateDatabaseOption>> {
+    move |i| separated_list0(whitespace1, database_option(dialect))(i)
+}
+
+/// Parse rule for a SQL CREATE DATABASE statement.
+pub fn create_database(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CreateDatabaseStatement> {
+    move |i| {
+        if dialect != Dialect::MySQL {
+            return Err(nom::Err::Error(NomSqlError {
+                input: i,
+                kind: ErrorKind::Fail,
+            }));
+        }
+        let (i, _) = tag_no_case("create")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, what) = map_res(
+            alt((tag_no_case("database"), tag_no_case("schema"))),
+            |i: LocatedSpan<&[u8]>| str::from_utf8(&i),
+        )(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, if_not_exists) = if_not_exists(i)?;
+        let (i, name) = dialect.identifier()(i)?;
+        let (i, options) =
+            parse_fallible(database_options(dialect), until_statement_terminator)(i)?;
+        let (i, _) = statement_terminator(i)?;
+
+        Ok((
+            i,
+            CreateDatabaseStatement {
+                is_schema: what.compare_no_case("schema") == CompareResult::Ok,
+                if_not_exists,
+                name,
+                options,
+            },
+        ))
+    }
+}
+
 // Parse the optional CREATE VIEW parameters and discard, ideally we would want to check user
 // permissions
 pub fn create_view_params(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ()> {
@@ -856,7 +1130,6 @@ pub fn create_cached_query(
 mod tests {
     use super::*;
     use crate::column::Column;
-    use crate::create_table_options::{CharsetName, CollationName};
     use crate::table::Relation;
     use crate::{
         BinaryOperator, ColumnConstraint, Expr, FunctionExpr, LimitClause, Literal, SqlType,
@@ -1888,6 +2161,57 @@ mod tests {
                   FROM dept_emp \
                   GROUP BY emp_no"
             );
+        }
+
+        #[test]
+        fn create_database_with_options() {
+            let queries = vec![
+                // No create options, with trailing ws
+                ("Create databasE if  not Exists  noria       ",
+                "CREATE DATABASE IF NOT EXISTS noria"),
+
+                // No create options, no trailing ws
+                ("Create databasE   noria",
+                "CREATE DATABASE noria"),
+
+                // Use <SCHEMA> instead of <DATABASE>, no create options, with trailing ws
+                ("Create schema   noria       ",
+                "CREATE SCHEMA noria"),
+
+                // Use <SCHEMA> instead of <DATABASE>, no create options, no trailing ws
+                ("Create scheMA if  not Exists  noria",
+                "CREATE SCHEMA IF NOT EXISTS noria"),
+
+                // Use single, eq separated create option, with <default> attribute, no trailing ws
+                ("create databasE If  NOT exists  noria    default  character   Set =   utf16",
+                "CREATE DATABASE IF NOT EXISTS noria DEFAULT CHARACTER SET = utf16"),
+
+                // Use subset of eq separated create options, no <default> attribute for any, with trailing ws
+                ("create schema noria      character   Set =   utf16   Collate utf16_collation   Encryption=  Y     ",
+                "CREATE SCHEMA noria CHARACTER SET = utf16 COLLATE = utf16_collation ENCRYPTION = Y"),
+
+                // Use subset of eq and ws separated create options, with <default> attribute for some, with trailing ws
+                ("create databasE If  not exists  noria   DEfault  Collate utf16_collation  Character   Set =   utf16      ",
+                "CREATE DATABASE IF NOT EXISTS noria DEFAULT COLLATE = utf16_collation CHARACTER SET = utf16"),
+
+                // Use subset of eq and ws separated create options, with <default> attribute for some, with trailing ws
+                ("Create schema noria   default Encryption=Y       Collate utf16_collation   ",
+                "CREATE SCHEMA noria DEFAULT ENCRYPTION = Y COLLATE = utf16_collation"),
+
+                // Use all available eq and ws separated create options, with <default> attribute for all, with trailing ws
+                ("Create databasE if  not exists  noria     default Encryption=N   defaULT Collate utf16_collation   default   character   Set =   utf16    ",
+                "CREATE DATABASE IF NOT EXISTS noria DEFAULT ENCRYPTION = N DEFAULT COLLATE = utf16_collation DEFAULT CHARACTER SET = utf16"),
+
+                // Use all available eq and ws separated create options, no <default> attribute for all, no trailing ws
+                ("Create databasE noria   Collate utf16_collation   Encryption=N character set =   utf16",
+                "CREATE DATABASE noria COLLATE = utf16_collation ENCRYPTION = N CHARACTER SET = utf16"),
+            ];
+
+            for (query_str, expected_str) in queries {
+                let res = test_parse!(create_database(Dialect::MySQL), query_str.as_bytes());
+                assert_eq!(expected_str, res.display(Dialect::MySQL).to_string());
+                test_parse_expect_err!(create_database(Dialect::PostgreSQL), query_str.as_bytes());
+            }
         }
     }
 

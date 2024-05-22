@@ -2805,7 +2805,8 @@ where
 
                     // Table Create / Drop (RYW not supported)
                     // TODO(andrew, justin): how are these types of writes handled w.r.t RYW?
-                    SqlQuery::CreateView(_)
+                    SqlQuery::CreateDatabase(_)
+                    | SqlQuery::CreateView(_)
                     | SqlQuery::CreateTable(_)
                     | SqlQuery::DropTable(_)
                     | SqlQuery::DropView(_)

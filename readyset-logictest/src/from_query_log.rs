@@ -105,7 +105,8 @@ fn is_ddl(query: &SqlQuery) -> bool {
         | SqlQuery::Deallocate(_)
         | SqlQuery::Truncate(_)
         | SqlQuery::Comment(_) => false,
-        SqlQuery::CreateTable(_)
+        SqlQuery::CreateDatabase(_)
+        | SqlQuery::CreateTable(_)
         | SqlQuery::CreateView(_)
         | SqlQuery::DropTable(_)
         | SqlQuery::DropView(_)

@@ -13,8 +13,8 @@ use crate::comment::{comment, CommentStatement};
 use crate::common::statement_terminator;
 use crate::compound_select::{simple_or_compound_selection, CompoundSelectStatement};
 use crate::create::{
-    create_cached_query, create_table, key_specification, view_creation, CreateCacheStatement,
-    CreateTableStatement, CreateViewStatement,
+    create_cached_query, create_database, create_table, key_specification, view_creation,
+    CreateCacheStatement, CreateDatabaseStatement, CreateTableStatement, CreateViewStatement,
 };
 use crate::deallocate::{deallocate, DeallocateStatement};
 use crate::delete::{deletion, DeleteStatement};
@@ -46,6 +46,7 @@ use crate::{
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 #[allow(clippy::large_enum_variant)]
 pub enum SqlQuery {
+    CreateDatabase(CreateDatabaseStatement),
     CreateTable(CreateTableStatement),
     CreateView(CreateViewStatement),
     CreateCache(CreateCacheStatement),
@@ -101,6 +102,7 @@ impl DialectDisplay for SqlQuery {
             Self::DropAllProxiedQueries(drop) => write!(f, "{}", drop.display(dialect)),
             Self::Deallocate(dealloc) => write!(f, "{}", dealloc.display(dialect)),
             Self::Truncate(truncate) => write!(f, "{}", truncate.display(dialect)),
+            Self::CreateDatabase(create) => write!(f, "{}", create.display(dialect)),
         })
     }
 }
@@ -128,6 +130,13 @@ impl SqlQuery {
         match self {
             Self::Select(_) => "SELECT",
             Self::Insert(_) => "INSERT",
+            Self::CreateDatabase(cd) => {
+                if cd.is_schema {
+                    "CREATE SCHEMA"
+                } else {
+                    "CREATE DATABASE"
+                }
+            }
             Self::CreateTable(_) => "CREATE TABLE",
             Self::CreateView(_) => "CREATE VIEW",
             Self::CreateCache(_) => "CREATE CACHE",
@@ -178,7 +187,8 @@ impl SqlQuery {
                 | ShowStatement::ReadySetTables
                 | ShowStatement::Connections => true,
             },
-            SqlQuery::CreateTable(_)
+            SqlQuery::CreateDatabase(_)
+            | SqlQuery::CreateTable(_)
             | SqlQuery::CreateView(_)
             | SqlQuery::AlterTable(_)
             | SqlQuery::Insert(_)
@@ -240,7 +250,10 @@ fn sql_query_part1(
             map(rename_table(dialect), SqlQuery::RenameTable),
             map(use_statement(dialect), SqlQuery::Use),
             map(show(dialect), SqlQuery::Show),
-            map(explain_statement(dialect), SqlQuery::Explain),
+            alt((
+                map(explain_statement(dialect), SqlQuery::Explain),
+                map(create_database(dialect), SqlQuery::CreateDatabase),
+            )),
         ))(i)
     }
 }
