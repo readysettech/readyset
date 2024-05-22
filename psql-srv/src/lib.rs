@@ -29,7 +29,6 @@ mod value;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use futures::Stream;
 use nom_sql::SqlIdentifier;
 use postgres::SimpleQueryMessage;
@@ -62,7 +61,8 @@ pub enum Credentials<'a> {
 
 /// A trait for implementing a SQL backend that produces responses to SQL query statements. This
 /// trait is the primary interface for the `psql-srv` crate.
-#[async_trait]
+// Only used internally
+#[allow(async_fn_in_trait)]
 pub trait PsqlBackend {
     /// An associated type representing a resultset returned by a SQL query, which can be iterated
     /// to produce `Self::Row`s.

@@ -3,7 +3,6 @@ use std::convert::TryFrom;
 use std::time::Instant;
 
 use anyhow::{anyhow, bail, Result};
-use async_trait::async_trait;
 use clap::Parser;
 use database_utils::QueryableConnection;
 use metrics::Unit;
@@ -34,7 +33,6 @@ pub struct WriteLatencyBenchmark {
     updates: u32,
 }
 
-#[async_trait]
 impl BenchmarkControl for WriteLatencyBenchmark {
     async fn setup(&self, deployment: &DeploymentParameters) -> Result<()> {
         self.data_generator

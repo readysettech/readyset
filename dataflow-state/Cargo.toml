@@ -6,27 +6,27 @@ authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
 [dependencies]
-ahash = "0.7"
-anyhow = "1.0"
-bincode = "1.0.0"
+ahash = { workspace = true }
+anyhow = { workspace = true }
+bincode = { workspace = true }
 clap = { workspace = true, features = ["derive","env"] }
-derive_more = "0.99.11"
-hashbag = "0.1.2"
-indexmap = "1.1.0"
-itertools = "0.10"
-notify = "6.1.1"
-proptest = "1.0.0"
-rand = "0.7"
+derive_more = { workspace = true }
+hashbag = { workspace = true }
+indexmap = { workspace = true }
+itertools = { workspace = true }
+notify = { workspace = true }
+proptest = { workspace = true }
+rand = { workspace = true }
 rocksdb.workspace = true
-serde = { version = "1.0.8", features = ["rc"] }
-serde_json = "1.0.2"
-tempfile = "3.4"
-test-strategy = "0.2.0"
-thiserror = "1.0.26"
-tracing = { version = "0.1", features = ["release_max_level_debug"] }
-tuple = "0.5.1"
-vec1 = "1.6.0"
-parking_lot = "0.12"
+serde = { workspace = true, features = ["rc"] }
+serde_json = { workspace = true }
+tempfile = { workspace = true }
+test-strategy = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true, features = ["release_max_level_debug"] }
+tuple = { workspace = true }
+vec1 = { workspace = true }
+parking_lot = { workspace = true }
 
 # local deps
 common = { path = "../readyset-common", package = "readyset-common" }
@@ -40,11 +40,11 @@ replication-offset = { path = "../replication-offset" }
 
 [dev-dependencies]
 proptest-stateful = { path = "../proptest-stateful" }
-async-trait = "0.1"
-pretty_assertions = "1.4.0"
-lazy_static = "1.0.0"
+async-trait = { workspace = true }
+pretty_assertions = { workspace = true }
+lazy_static = { workspace = true }
 criterion = { workspace = true, features=['real_blackbox', 'async_tokio'] }
-rust_decimal = { version = "1.26", features = ["db-tokio-postgres", "serde-str"] }
+rust_decimal = { workspace = true, features = ["db-tokio-postgres", "serde-str"] }
 
 [[bench]]
 name = "persistent_state"

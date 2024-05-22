@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
 use anyhow::Result;
-use async_trait::async_trait;
 use clap::Parser;
 use metrics::Unit;
 use serde::{Deserialize, Serialize};
@@ -16,7 +15,6 @@ pub struct Template {
     // Benchmark specific parameters go here.
 }
 
-#[async_trait]
 impl BenchmarkControl for Template {
     async fn setup(&self, _: &DeploymentParameters) -> Result<()> {
         // Any code required to setup the benchmark goes. This may include

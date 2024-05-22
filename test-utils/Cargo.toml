@@ -11,4 +11,4 @@ tokio = { workspace = true, features = ["full"] }
 # Avoid adding dependencies as this is included in tests.
 
 [dev-dependencies]
-tokio-scoped = { version = "0.2.0" }
+tokio-scoped = { workspace = true }

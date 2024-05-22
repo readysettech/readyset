@@ -13,15 +13,15 @@ mem-profiling = ["tikv-jemallocator/profiling"]
 sys-malloc = []
 
 [dependencies]
-futures = { version = "0.3", features = ["executor", "thread-pool"]}
-fxhash = "0.2.1"
-lazy_static = "1.3"
-libc = "0.2"
-tikv-jemalloc-ctl = "0.5.0"
-tikv-jemalloc-sys = { version = "0.5.0", features = ["stats"] }
-tikv-jemallocator = { version = "0.5.0", features = ["unprefixed_malloc_on_supported_platforms", "stats"] }
+futures = { workspace = true, features = ["executor", "thread-pool"] }
+fxhash = { workspace = true }
+lazy_static = { workspace = true }
+libc = { workspace = true }
+tikv-jemalloc-ctl = { workspace = true }
+tikv-jemalloc-sys = { workspace = true, features = ["stats"] }
+tikv-jemallocator = { workspace = true, features = ["unprefixed_malloc_on_supported_platforms", "stats"] }
 tokio = { workspace = true, features = ["full"] }
 
 [dev-dependencies]
-tempfile = "3.0"
+tempfile = { workspace = true }
 

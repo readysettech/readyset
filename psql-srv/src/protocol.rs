@@ -1076,7 +1076,6 @@ mod tests {
     use std::task::Poll;
     use std::{io, vec};
 
-    use async_trait::async_trait;
     use bytes::BytesMut;
     use futures::task::Context;
     use futures::{stream, TryStreamExt};
@@ -1134,7 +1133,6 @@ mod tests {
         }
     }
 
-    #[async_trait]
     impl PsqlBackend for Backend {
         type Resultset = stream::Iter<vec::IntoIter<Result<PsqlSrvRow, Error>>>;
 

@@ -4,7 +4,6 @@ use std::str::FromStr;
 use std::time::Instant;
 
 use anyhow::Result;
-use async_trait::async_trait;
 use clap::Parser;
 use database_utils::{DatabaseConnection, DatabaseURL, QueryableConnection};
 use metrics::Unit;
@@ -36,7 +35,6 @@ pub struct CacheHitBenchmark {
     num_cache_misses: u32,
 }
 
-#[async_trait]
 impl BenchmarkControl for CacheHitBenchmark {
     async fn setup(&self, deployment: &DeploymentParameters) -> Result<()> {
         self.data_generator

@@ -6,6 +6,7 @@ pub mod psql;
 mod query_logger;
 use std::collections::HashMap;
 use std::fs::remove_dir_all;
+use std::future::Future;
 use std::io;
 use std::marker::Send;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs};
@@ -16,7 +17,6 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 use anyhow::{anyhow, bail};
-use async_trait::async_trait;
 use clap::builder::NonEmptyStringValueParser;
 use clap::{ArgGroup, Parser, ValueEnum};
 use crossbeam_skiplist::SkipSet;
@@ -74,19 +74,22 @@ const UPSTREAM_CONNECTION_TIMEOUT: Duration = Duration::from_secs(5);
 /// Retry interval to use when attempting to connect to the upstream database
 const UPSTREAM_CONNECTION_RETRY_INTERVAL: Duration = Duration::from_secs(1);
 
-#[async_trait]
 pub trait ConnectionHandler {
     type UpstreamDatabase: UpstreamDatabase;
     type Handler: QueryHandler;
 
-    async fn process_connection(
+    fn process_connection(
         &mut self,
         stream: net::TcpStream,
         backend: Backend<Self::UpstreamDatabase, Self::Handler>,
-    );
+    ) -> impl Future<Output = ()> + Send;
 
     /// Return an immediate error to a newly-established connection, then immediately disconnect
-    async fn immediate_error(self, stream: net::TcpStream, error_message: String);
+    fn immediate_error(
+        self,
+        stream: net::TcpStream,
+        error_message: String,
+    ) -> impl Future<Output = ()> + Send;
 }
 
 /// How to behave when receiving unsupported `SET` statements.

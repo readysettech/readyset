@@ -344,8 +344,18 @@ impl MigrationHandler {
         match controller.dry_run(changelist).await {
             Ok(_) => {
                 self.start_time.remove(view_request);
+
+                // It's possible that the ViewsSynchronizer found an existing view for this query
+                // on the server while we were performing a dry run, in which case it would have
+                // updated the query's status to "successful". In this situation, we don't want to
+                // overwrite the "successful" status, so we only write the new "dry run succeeded"
+                // status if the query's status is still "pending"
                 self.query_status_cache
-                    .update_query_migration_state(view_request, MigrationState::DryRunSucceeded);
+                    .with_mut_migration_state(view_request, |status| {
+                        if status.is_pending() {
+                            *status = MigrationState::DryRunSucceeded;
+                        }
+                    });
             }
             Err(e) if e.caused_by_unsupported() => {
                 self.start_time.remove(view_request);

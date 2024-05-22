@@ -8,8 +8,8 @@ edition = "2021"
 
 [dependencies]
 clap = { workspace = true, features = ["derive","env"] }
-async-trait = "0.1"
-lazy_static = "1.0"
+async-trait = { workspace = true }
+lazy_static = { workspace = true }
 readyset-client = { path = "../readyset-client/" }
 readyset-errors = { path = "../readyset-errors/" }
 readyset-data = { path = "../readyset-data/" }
@@ -20,36 +20,36 @@ readyset-version = { path = "../readyset-version" }
 failpoint-macros = { path = "../failpoint-macros" }
 nom-sql = { path = "../nom-sql" }
 psql-srv = { path = "../psql-srv" }
-anyhow = "1.0.42"
-fail = "0.5.0"
+anyhow = { workspace = true }
+fail = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tokio-postgres = { workspace = true, features = ["with-chrono-0_4", "with-eui48-1", "with-uuid-0_8", "with-serde_json-1", "with-bit-vec-0_6"] }
 postgres-types = { workspace = true, features = ["derive"] }
 postgres-native-tls = { workspace = true }
-native-tls = "0.2.7"
-futures = "0.3"
-itertools = "0.10"
-thiserror = "1.0.26"
-tikv-jemallocator = "0.5"
-tracing = { version = "0.1", features = ["release_max_level_debug"] }
-tracing-futures = "0.2.5"
-rust_decimal = { version = "1.26" }
+native-tls = { workspace = true }
+futures = { workspace = true }
+itertools = { workspace = true }
+thiserror = { workspace = true }
+tikv-jemallocator = { workspace = true }
+tracing = { workspace = true, features = ["release_max_level_debug"] }
+tracing-futures = { workspace = true }
+rust_decimal = { workspace = true }
 eui48 = { workspace = true }
-uuid = "0.8"
-serde_json = { version = "1", features = ["arbitrary_precision"] }
-bit-vec = { version = "0.6", features = ["serde"] }
-streaming-iterator = "0.1"
-rand = "0.8"
-cidr = "0.2.1"
+uuid = { workspace = true }
+serde_json = { workspace = true, features = ["arbitrary_precision"] }
+bit-vec = { workspace = true, features = ["serde"] }
+streaming-iterator = { workspace = true }
+rand = { workspace = true }
+cidr = { workspace = true }
 metrics = { workspace = true }
-tempfile = "3.8.1"
+tempfile = { workspace = true }
 
 [dev-dependencies]
-chrono = "0.4"
+chrono = { workspace = true }
 readyset-server = { path = "../readyset-server/" }
-proptest = "1.0.0"
-serial_test = "0.5.1"
-test-strategy = "0.2.0"
+proptest = { workspace = true }
+serial_test = { workspace = true }
+test-strategy = { workspace = true }
 readyset-util = { path = "../readyset-util" }
 readyset-client-test-helpers = { path = "../readyset-client-test-helpers", features = ["postgres"] }
 criterion = { workspace = true, features = ["async_tokio"] }
