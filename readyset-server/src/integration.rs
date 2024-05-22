@@ -4337,6 +4337,7 @@ async fn correct_nested_view_schema() {
         ("swvc.id".into(), DfType::Int),
         ("swvc.content".into(), DfType::DEFAULT_TEXT),
         ("swvc.vc".into(), DfType::BigInt),
+        ("swvc.story".into(), DfType::Int),
     ];
     assert_eq!(
         q.schema()
@@ -8306,9 +8307,9 @@ async fn reroutes_count() {
     assert_eq!(
         r2.into_vec(),
         vec![
+            vec![DfValue::Int(2)],
             vec![DfValue::Int(1)],
-            vec![DfValue::Int(1)],
-            vec![DfValue::Int(2)]
+            vec![DfValue::Int(1)]
         ]
     );
 

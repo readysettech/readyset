@@ -336,7 +336,7 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
     /// Print the DfValue name for error reporting
     fn type_name() -> String;
 
-    /// A convenience constructor for a coerction error from this type
+    /// A convenience constructor for a coercion error from this type
     fn coerce_err<D: ToString>(ty: &DfType, deets: D) -> ReadySetError {
         ReadySetError::DfValueConversionError {
             src_type: Self::type_name(),
@@ -345,8 +345,8 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
         }
     }
 
-    /// A convenience integer parser that diffirentiates between out of bounds errors and other
-    /// parse errors
+    /// A convenience integer parser that ignores non-numeric suffixes and differentiates between
+    /// out of bounds errors and other parse errors
     fn parse_int<I>(str: &str, ty: &DfType) -> ReadySetResult<DfValue>
     where
         I: FromStr<Err = ParseIntError> + Into<DfValue>,
@@ -369,6 +369,26 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
                 Err(Self::coerce_err(ty, "out of bounds"))
             }
             Err(e) => Err(Self::coerce_err(ty, e)),
+        }
+    }
+
+    fn check_mediumint_bounds(v: DfValue, ty: &DfType) -> ReadySetResult<DfValue> {
+        match v {
+            DfValue::Int(i) => {
+                if ((-1 << 23)..(1 << 23)).contains(&i) {
+                    Ok(v)
+                } else {
+                    Err(Self::coerce_err(ty, "out of bounds"))
+                }
+            }
+            DfValue::UnsignedInt(i) => {
+                if i < (1 << 24) {
+                    Ok(v)
+                } else {
+                    Err(Self::coerce_err(ty, "out of bounds"))
+                }
+            }
+            _ => Err(Self::coerce_err(ty, "unsupported")),
         }
     }
 
@@ -451,6 +471,10 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
             DfType::UnsignedTinyInt => Self::parse_int::<u8>(str, to_ty),
             DfType::SmallInt => Self::parse_int::<i16>(str, to_ty),
             DfType::UnsignedSmallInt => Self::parse_int::<u16>(str, to_ty),
+            DfType::MediumInt => Self::parse_int::<i32>(str, to_ty)
+                .and_then(|v| Self::check_mediumint_bounds(v, to_ty)),
+            DfType::UnsignedMediumInt => Self::parse_int::<u32>(str, to_ty)
+                .and_then(|v| Self::check_mediumint_bounds(v, to_ty)),
             DfType::Int => Self::parse_int::<i32>(str, to_ty),
             DfType::UnsignedInt => Self::parse_int::<u32>(str, to_ty),
             DfType::BigInt => Self::parse_int::<i64>(str, to_ty),
@@ -877,5 +901,41 @@ mod tests {
         prop_assume!(result.as_ref().unwrap().collation().is_some());
 
         assert_eq!(result.unwrap().collation(), Some(Collation::Citext));
+    }
+
+    #[test]
+    fn mediumint_bounds_checks() {
+        assert_eq!(
+            DfValue::from("-8388608")
+                .coerce_to(&DfType::MediumInt, &DfType::DEFAULT_TEXT)
+                .unwrap(),
+            DfValue::Int(-8388608),
+        );
+
+        DfValue::from("-8388609")
+            .coerce_to(&DfType::MediumInt, &DfType::DEFAULT_TEXT)
+            .unwrap_err();
+
+        assert_eq!(
+            DfValue::from("8388607")
+                .coerce_to(&DfType::MediumInt, &DfType::DEFAULT_TEXT)
+                .unwrap(),
+            DfValue::UnsignedInt(8388607),
+        );
+
+        DfValue::from("8388608")
+            .coerce_to(&DfType::MediumInt, &DfType::DEFAULT_TEXT)
+            .unwrap_err();
+
+        assert_eq!(
+            DfValue::from("16777215")
+                .coerce_to(&DfType::UnsignedMediumInt, &DfType::DEFAULT_TEXT)
+                .unwrap(),
+            DfValue::UnsignedInt(16777215),
+        );
+
+        DfValue::from("16777216")
+            .coerce_to(&DfType::UnsignedMediumInt, &DfType::DEFAULT_TEXT)
+            .unwrap_err();
     }
 }

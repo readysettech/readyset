@@ -60,6 +60,7 @@ pub use self::table::{
     TableExprInner,
 };
 pub use self::transaction::StartTransactionStatement;
+pub use self::truncate::TruncateStatement;
 pub use self::update::UpdateStatement;
 pub use self::use_statement::UseStatement;
 
@@ -96,6 +97,7 @@ mod sql_identifier;
 mod sql_type;
 mod table;
 mod transaction;
+mod truncate;
 mod update;
 mod use_statement;
 pub mod whitespace;

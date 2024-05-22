@@ -1649,6 +1649,7 @@ async fn enable_experimental_placeholder_inlining() {
         .with_servers(1, ServerParams::default())
         .explicit_migrations(500)
         .enable_experimental_placeholder_inlining()
+        .enable_post_lookups()
         .start()
         .await
         .unwrap();

@@ -139,6 +139,7 @@ async fn embedded_readers_adapters_lt_replicas() {
         .with_servers(1, ServerParams::default().no_readers())
         .embedded_readers(true)
         .allow_full_materialization()
+        .enable_post_lookups()
         .start()
         .await
         .unwrap();
@@ -308,6 +309,7 @@ async fn reader_domain_panic_handling() {
         .with_servers(1, ServerParams::default().no_readers())
         .embedded_readers(true)
         .allow_full_materialization()
+        .enable_post_lookups()
         .start()
         .await
         .unwrap();
@@ -425,6 +427,7 @@ async fn base_domain_panic_handling() {
         .with_servers(1, ServerParams::default().no_readers())
         .embedded_readers(true)
         .allow_full_materialization()
+        .enable_post_lookups()
         .start()
         .await
         .unwrap();

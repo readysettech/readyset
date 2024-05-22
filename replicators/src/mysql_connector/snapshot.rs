@@ -204,7 +204,7 @@ impl MySqlReplicator {
         let mut bad_tables = Vec::new();
         // Process `CREATE TABLE` statements
         for (db, table) in replicated_tables.iter() {
-            match create_for_table(&mut tx, db, table, TableKind::BaseTable)
+            let res = create_for_table(&mut tx, db, table, TableKind::BaseTable)
                 .map_err(|e| e.into())
                 .and_then(|create_table| {
                     debug!(%create_table, "Extending recipe");
@@ -222,8 +222,9 @@ impl MySqlReplicator {
                         changelist.with_schema_search_path(vec![db.clone().into()]),
                     )
                 })
-                .await
-            {
+                .await;
+
+            match res {
                 Ok(_) => {}
                 Err(error) => {
                     warn!(%error, "Error extending CREATE TABLE, table will not be used");
@@ -256,7 +257,7 @@ impl MySqlReplicator {
 
         // Process `CREATE VIEW` statements
         for (db, view) in all_views.iter() {
-            match create_for_table(&mut tx, db, view, TableKind::View)
+            let res = create_for_table(&mut tx, db, view, TableKind::View)
                 .map_err(|e| e.into())
                 .and_then(|create_view| {
                     db_schemas.extend_create_schema_for_view(
@@ -272,8 +273,9 @@ impl MySqlReplicator {
                         changelist.with_schema_search_path(vec![db.clone().into()]),
                     )
                 })
-                .await
-            {
+                .await;
+
+            match res {
                 Ok(_) => {}
                 Err(error) => {
                     warn!(%view, %error, "Error extending CREATE VIEW, view will not be used");
@@ -345,11 +347,37 @@ impl MySqlReplicator {
         })
     }
 
-    /// Use the SHOW MASTER STATUS statement to determine the current binary log
-    /// file name and position.
+    /// Get MySQL Server Version
+    async fn get_mysql_version(&self) -> mysql::Result<u32> {
+        let mut conn = self.pool.get_conn().await?;
+        let version: mysql::Row = conn.query_first("SELECT VERSION()").await?.unwrap();
+        let version: String = version.get(0).expect("MySQL version");
+        let version_parts: Vec<&str> = version.split('.').collect();
+        let major = version_parts[0].parse::<u32>().unwrap();
+        let minor = version_parts[1].parse::<u32>().unwrap();
+        let patch = version_parts[2].parse::<u32>().unwrap();
+        Ok(major * 10000 + minor * 100 + patch)
+    }
+
+    /// Use the SHOW MASTER STATUS or SHOW BINARY LOG STATUS statement to determine
+    /// the current binary log file name and position.
     async fn get_binlog_position(&self) -> mysql::Result<MySqlPosition> {
         let mut conn = self.pool.get_conn().await?;
-        let query = "SHOW MASTER STATUS";
+        let query = match self.get_mysql_version().await {
+            Ok(version) => {
+                if version >= 80400 {
+                    // MySQL 8.4.0 and above
+                    "SHOW BINARY LOG STATUS"
+                } else {
+                    // MySQL 8.3.0 and below
+                    "SHOW MASTER STATUS"
+                }
+            }
+            Err(err) => {
+                return Err(err);
+            }
+        };
+
         let pos: mysql::Row = conn.query_first(query).await?.ok_or_else(|| {
             mysql_async::Error::Other(Box::new(internal_err!(
                 "Empty response for SHOW MASTER STATUS. \

@@ -73,6 +73,16 @@ where
         DfType::UnsignedTinyInt => u8::try_from(val).map_err(|_| err()).map(DfValue::from),
         DfType::SmallInt => i16::try_from(val).map_err(|_| err()).map(DfValue::from),
         DfType::UnsignedSmallInt => u16::try_from(val).map_err(|_| err()).map(DfValue::from),
+        DfType::MediumInt => i32::try_from(val)
+            .ok()
+            .filter(|i| ((-1 << 23)..(1 << 23)).contains(i))
+            .ok_or_else(err)
+            .map(DfValue::from),
+        DfType::UnsignedMediumInt => u32::try_from(val)
+            .ok()
+            .filter(|&i| i < (1 << 24))
+            .ok_or_else(err)
+            .map(DfValue::from),
         DfType::Int => i32::try_from(val).map_err(|_| err()).map(DfValue::from),
         DfType::UnsignedInt => u32::try_from(val).map_err(|_| err()).map(DfValue::from),
         DfType::BigInt => i64::try_from(val).map_err(|_| err()).map(DfValue::from),

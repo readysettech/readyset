@@ -351,25 +351,14 @@ impl<'ast> VisitorMut<'ast> for CollapseWhereInVisitor {
 /// by regular filter nodes in dataflow
 fn collapse_where_in(query: &mut SelectStatement) -> ReadySetResult<Vec<RewrittenIn>> {
     let mut res = vec![];
-    let distinct = query.distinct;
-    let has_aggregates = query.contains_aggregate_select();
 
     if let Some(ref mut w) = query.where_clause {
         let mut visitor = CollapseWhereInVisitor::default();
         visitor.visit_expr(w)?;
         res = visitor.out;
 
-        // When a `SELECT` statement contains aggregates, such as `SUM` or `COUNT` (or `DISTINCT`,
-        // which is implemented via COUNT),  we can't use placeholders, as those will aggregate key
-        // lookups into a multi row response, as opposed to a single row response required by
-        // aggregates. We could support this pretty easily, but for now it's not in-scope
-        if !res.is_empty() {
-            if has_aggregates {
-                unsupported!("Aggregates with parameterized IN are not supported");
-            }
-            if distinct {
-                unsupported!("DISTINCT with parameterized IN is not supported");
-            }
+        if !res.is_empty() && query.distinct {
+            unsupported!("DISTINCT with parameterized IN is not supported");
         }
     }
     Ok(res)

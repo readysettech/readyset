@@ -20,9 +20,8 @@
 //! Internally, values are stored in a single continuous allocation row-first, alongside the length
 //! of the row.
 
-#![feature(core_intrinsics, int_roundings)]
+#![feature(int_roundings)]
 use std::fmt::Debug;
-use std::intrinsics::unlikely;
 use std::ops::{Index, IndexMut};
 use std::usize;
 
@@ -85,11 +84,16 @@ impl<T> Array2<T> {
     /// passed an empty vector or if the rows are a different size.
     #[inline]
     pub fn try_from_rows(rows: Vec<Vec<T>>) -> Result<Self> {
+        #[cold]
+        fn not_equal(x: usize, y: usize) -> bool {
+            x != y
+        }
+
         let row_size = rows.first().ok_or(Error::Empty)?.len();
         let mut elems = Vec::with_capacity(row_size * rows.len());
 
         for (row_index, row) in rows.into_iter().enumerate() {
-            if unlikely(row.len() != row_size) {
+            if not_equal(row.len(), row_size) {
                 return Err(Error::InconsistentRowSize {
                     row_index,
                     row_size,
@@ -199,9 +203,7 @@ impl<T> Array2<T> {
     /// );
     /// ```
     #[inline]
-    pub fn rows(
-        &self,
-    ) -> impl Iterator<Item = &[T]> + ExactSizeIterator + DoubleEndedIterator + '_ {
+    pub fn rows(&self) -> impl ExactSizeIterator<Item = &[T]> + DoubleEndedIterator + '_ {
         self.cells.chunks(self.row_size)
     }
 
@@ -220,7 +222,7 @@ impl<T> Array2<T> {
     /// )
     /// ```
     #[inline]
-    pub fn entries(&self) -> impl Iterator<Item = ((usize, usize), &T)> + ExactSizeIterator + '_ {
+    pub fn entries(&self) -> impl ExactSizeIterator<Item = ((usize, usize), &T)> + '_ {
         self.cells.iter().enumerate().map(move |(i, v)| {
             let row = i.div_floor(self.row_size);
             let col = i % self.row_size;
@@ -243,9 +245,7 @@ impl<T> Array2<T> {
     /// assert_eq!(my_array2, Array2::from_rows(vec![vec![1, 3], vec![4, 6]]))
     /// ```
     #[inline]
-    pub fn entries_mut(
-        &mut self,
-    ) -> impl Iterator<Item = ((usize, usize), &mut T)> + ExactSizeIterator + '_ {
+    pub fn entries_mut(&mut self) -> impl ExactSizeIterator<Item = ((usize, usize), &mut T)> + '_ {
         let row_size = self.row_size;
         self.cells.iter_mut().enumerate().map(move |(i, v)| {
             let row = i.div_floor(row_size);
@@ -270,7 +270,7 @@ impl<T> Array2<T> {
     /// )
     /// ```
     #[inline]
-    pub fn into_entries(self) -> impl Iterator<Item = ((usize, usize), T)> + ExactSizeIterator {
+    pub fn into_entries(self) -> impl ExactSizeIterator<Item = ((usize, usize), T)> {
         self.cells
             .into_vec()
             .into_iter()

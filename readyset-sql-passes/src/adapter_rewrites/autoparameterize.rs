@@ -8,7 +8,6 @@ struct AutoParameterizeVisitor {
     autoparameterize_equals: bool,
     autoparameterize_ranges: bool,
     out: Vec<(usize, Literal)>,
-    has_aggregates: bool,
     in_supported_position: bool,
     param_index: usize,
     query_depth: u8,
@@ -116,7 +115,7 @@ impl<'ast> VisitorMut<'ast> for AutoParameterizeVisitor {
                         e,
                         Expr::Literal(lit) if !matches!(lit, Literal::Placeholder(_))
                     )
-                }) && !self.has_aggregates =>
+                }) =>
                 {
                     if self.autoparameterize_equals {
                         let exprs = mem::replace(
@@ -365,7 +364,6 @@ pub fn auto_parameterize_query(
     let mut visitor = AutoParameterizeVisitor {
         autoparameterize_equals,
         autoparameterize_ranges,
-        has_aggregates: query.contains_aggregate_select(),
         ..Default::default()
     };
     #[allow(clippy::unwrap_used)] // error is !, which can never be returned
@@ -555,8 +553,8 @@ mod tests {
     fn in_with_aggregates() {
         test_auto_parameterize_mysql(
             "SELECT count(*) FROM users WHERE id = 1 AND x IN (1, 2)",
-            "SELECT count(*) FROM users WHERE id = ? AND x IN (1, 2)",
-            vec![(0, 1.into())],
+            "SELECT count(*) FROM users WHERE id = ? AND x IN (?, ?)",
+            vec![(0, 1.into()), (1, 1.into()), (2, 2.into())],
         );
     }
 

@@ -390,6 +390,8 @@ impl TimestampTz {
 
             DfType::Int
             | DfType::UnsignedInt
+            | DfType::MediumInt
+            | DfType::UnsignedMediumInt
             | DfType::SmallInt
             | DfType::UnsignedSmallInt
             | DfType::TinyInt

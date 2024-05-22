@@ -711,6 +711,10 @@ impl<'a> PostgresReplicator<'a> {
         trace!(?view_list, "Loaded view list");
         trace!(?custom_types, "Loaded custom types");
 
+        self.drop_leftover_tables(&table_list, &view_list)
+            .await
+            .map_err(|e| e.context("Error while cleaning up leftover cache tables"))?;
+
         self.set_replica_identity_for_tables(&table_list).await?;
 
         self.noria
@@ -766,15 +770,11 @@ impl<'a> PostgresReplicator<'a> {
             }
         }
 
-        self.drop_leftover_tables(&table_list, &view_list)
-            .await
-            .map_err(|e| e.context("Error while cleaning up leftover cache tables"))?;
-
         // For each table, retrieve its structure
         let mut tables = Vec::with_capacity(table_list.len());
         for table in table_list {
             let table_name = &table.name.clone().to_string();
-            match table
+            let res = table
                 .get_table(get_transaction!(self))
                 .and_then(|create_table| {
                     future::ready(
@@ -809,8 +809,9 @@ impl<'a> PostgresReplicator<'a> {
                         ))
                         .map_ok(|_| create_table)
                 })
-                .await
-            {
+                .await;
+
+            match res {
                 Ok(create_table) => {
                     tables.push(create_table);
                 }
@@ -836,7 +837,7 @@ impl<'a> PostgresReplicator<'a> {
             let view_name = view.name.clone();
             let view_schema = view.schema.clone();
 
-            match view
+            let res = view
                 .get_create_view(get_transaction!(self))
                 .map_err(|e| e.into())
                 .and_then(|create_view| {
@@ -856,8 +857,9 @@ impl<'a> PostgresReplicator<'a> {
                         .with_schema_search_path(vec![view_schema.clone().into()]),
                     )
                 })
-                .await
-            {
+                .await;
+
+            match res {
                 Ok(_) => {}
                 Err(error) => {
                     warn!(
@@ -1042,12 +1044,13 @@ impl<'a> PostgresReplicator<'a> {
     }
 
     /// Get a list of ReadySet cache tables and compare against the list of upstream tables and
-    /// views, dropping any cache tables that are missing upstream.
+    /// views, dropping any cache tables that are missing upstream or newly filtered out.
     ///
     /// This function is called during snapshotting to detect and handle cases where we somehow
     /// have a leftover cache that doesn't correspond to any upstream table or view. Without
     /// removing such tables, we can run potentially run into problems later on where we panic due
-    /// to failure to get a replication offset.
+    /// to failure to get a replication offset. This also allows us to forget about previously
+    /// replicated base tables that have since been filtered, e.g. by `--replication-tables-ignore`.
     async fn drop_leftover_tables(
         &mut self,
         table_list: &[TableEntry],
