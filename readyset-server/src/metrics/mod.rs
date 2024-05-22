@@ -1,6 +1,7 @@
 //! Support for recording and exporting in-memory metrics using the [`metrics`] crate
 
-use once_cell::sync::OnceCell;
+use std::sync::OnceLock;
+
 use thiserror::Error;
 
 pub use crate::metrics::composite_recorder::{CompositeMetricsRecorder, RecorderType};
@@ -14,7 +15,7 @@ mod recorders;
 
 /// The type of the static, globally accessible metrics recorder.
 type GlobalRecorder = CompositeMetricsRecorder;
-static METRICS_RECORDER: OnceCell<&'static GlobalRecorder> = OnceCell::new();
+static METRICS_RECORDER: OnceLock<&'static GlobalRecorder> = OnceLock::new();
 
 /// Error value returned from [`install_global_recorder`] if a metrics recorder is already set.
 ///

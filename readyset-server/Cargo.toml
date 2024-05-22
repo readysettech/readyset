@@ -64,7 +64,6 @@ sha1 = { workspace = true }
 derive_more = { workspace = true }
 streaming-iterator = { workspace = true }
 proptest = { workspace = true }
-once_cell = { workspace = true }
 enum-kinds = { workspace = true }
 slotmap = { workspace = true }
 tikv-jemalloc-ctl = { workspace = true }
