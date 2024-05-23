@@ -14,7 +14,7 @@ use std::{cmp, vec};
 
 use anyhow::{anyhow, bail};
 use bit_vec::BitVec;
-use chrono::{DateTime, FixedOffset, NaiveDate, NaiveTime};
+use chrono::{DateTime, FixedOffset, NaiveDate, NaiveTime, TimeZone};
 use derive_more::{From, TryInto};
 use itertools::Itertools;
 use mysql_common::chrono::NaiveDateTime;
@@ -642,10 +642,18 @@ impl Value {
                         .map(|nd| nd.and_hms_opt(0, 0, 0).unwrap())
                 })?,
             ))),
+            (Self::Text(txt), Type::TimestampTz) => Ok(Cow::Owned(Self::TimestampTz(
+                FixedOffset::east_opt(0).unwrap().from_utc_datetime(
+                    &NaiveDateTime::parse_from_str(txt, "%Y-%m-%d %H:%M:%S%.f")?,
+                ),
+            ))),
             (Self::Text(txt), Type::Time) => Ok(Cow::Owned(Self::Time(txt.parse()?))),
             (Self::Text(txt), Type::BitVec) => Ok(Cow::Owned(Self::BitVector(BitVec::from_bytes(
                 txt.as_bytes(),
             )))),
+            (Self::Numeric(dec), Type::Integer) => {
+                Ok(Cow::Owned(Self::Integer(dec.to_i64().unwrap())))
+            }
             (v, t) => {
                 todo!("{v:?} {t:?}")
             }

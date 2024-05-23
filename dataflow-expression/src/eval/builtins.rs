@@ -5,13 +5,15 @@ use std::ops::{Add, Div, Mul, Sub};
 use std::str::FromStr;
 
 use chrono::{
-    Datelike, LocalResult, Month, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Timelike, Weekday,
+    Datelike, Duration, LocalResult, Month, NaiveDate, NaiveDateTime, NaiveTime, Offset, TimeZone,
+    Timelike, Weekday,
 };
 use chrono_tz::Tz;
 use itertools::Either;
 use mysql_time::MySqlTime;
-use readyset_data::{DfType, DfValue};
-use readyset_errors::{invalid_query_err, unsupported, ReadySetError, ReadySetResult};
+use nom_sql::TimestampField;
+use readyset_data::{DfType, DfValue, TimestampTz};
+use readyset_errors::{internal, invalid_query_err, unsupported, ReadySetError, ReadySetResult};
 use readyset_util::math::integer_rnd;
 use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 use rust_decimal::Decimal;
@@ -21,8 +23,15 @@ use vec1::Vec1;
 
 use crate::{BuiltinFunction, Expr};
 
+const MICROS_IN_SECOND: u32 = 1_000_000;
+const MILLIS_IN_SECOND: u32 = 1_000;
 const NANOS_IN_MICRO: u32 = 1_000;
+const NANOS_IN_SECOND: u32 = 1_000_000_000;
 const NANOS_IN_MILLI: u32 = 1_000_000;
+const SECONDS_IN_HOUR: u64 = 60 * 60;
+const SECONDS_IN_MINUTE: u64 = 60;
+const SECONDS_IN_DAY: u64 = SECONDS_IN_HOUR * 24;
+const MINUTES_IN_HOUR: u64 = 60;
 
 macro_rules! try_cast_or_none {
     ($df_value:expr, $to_ty:expr, $from_ty:expr) => {{
@@ -270,6 +279,220 @@ fn date_trunc(precision: DateTruncPrecision, dt: NaiveDateTime) -> ReadySetResul
             ))
         }
     }
+}
+
+// Source:
+// https://github.com/postgres/postgres/blob/c6cf6d353c2865d82356ac86358622a101fde8ca/src/interfaces/ecpg/pgtypeslib/dt_common.c#L581-L582
+fn ymd_to_julian_date(y: i32, m: i32, d: i32) -> i32 {
+    let month: i32;
+    let year: i32;
+
+    if m > 2 {
+        month = m + 1;
+        year = y + 4800;
+    } else {
+        month = m + 13;
+        year = y + 4799;
+    }
+
+    let century = year / 100;
+    let mut julian_date = year * 365 - 32167;
+    julian_date += year / 4 - century + century / 4;
+    julian_date += 7834 * month / 256 + d;
+
+    julian_date
+}
+
+#[inline(always)]
+fn years_term(year: i32, term: i32) -> i32 {
+    if year > 0 {
+        (year + (term - 1)) / term
+    } else {
+        -(((term - 1) - (year - 1)) / term)
+    }
+}
+
+#[inline(always)]
+fn years_decade(year: i32) -> i32 {
+    if year >= 0 {
+        year / 10
+    } else {
+        -((8 - (year - 1)) / 10)
+    }
+}
+
+#[inline(always)]
+fn seconds_term(secs: u32, nanos: u32, units_per_sec: u32) -> Decimal {
+    Decimal::from(secs * units_per_sec)
+        + (Decimal::from(nanos) / Decimal::from(NANOS_IN_SECOND / units_per_sec))
+}
+
+#[inline(always)]
+fn hms_to_seconds(h: u32, m: u32, s: u32) -> u32 {
+    ((h * MINUTES_IN_HOUR as u32) + m) * SECONDS_IN_MINUTE as u32 + s
+}
+
+#[inline(always)]
+fn hms_with_nanos_to_days(h: u32, m: u32, s: u32, nanos: u32) -> Decimal {
+    seconds_term(hms_to_seconds(h, m, s), nanos, 1) / Decimal::from(SECONDS_IN_DAY).round()
+}
+
+#[inline(always)]
+fn tz_to_seconds(dt: &NaiveDateTime) -> i32 {
+    dt.and_utc().timezone().fix().local_minus_utc()
+}
+
+/* The error message we compose here, is compatible with Postgres 15, but not with 13/14
+ */
+fn invalid_extract_call_error_message(cal_type: &str, field: TimestampField) -> String {
+    let mut msg = format!(
+        "ERROR: unit \"{}\" not supported for type {}",
+        format!("{field}").to_lowercase(),
+        cal_type
+    );
+    if cal_type.eq_ignore_ascii_case("time") || cal_type.eq_ignore_ascii_case("timestamp") {
+        msg.push_str(" without time zone");
+    }
+    msg
+}
+
+fn invalid_extract_call_error(calendar_type: &str, field: TimestampField) -> ReadySetError {
+    invalid_query_err!(
+        "{}",
+        invalid_extract_call_error_message(calendar_type, field)
+    )
+}
+
+fn extract_from_time(field: TimestampField, tm: &MySqlTime) -> ReadySetResult<DfValue> {
+    macro_rules! seconds_term {
+        ($tm:expr, $units_in_second:expr) => {
+            seconds_term(
+                $tm.seconds() as u32,
+                ($tm.microseconds() * NANOS_IN_MICRO),
+                $units_in_second,
+            )
+        };
+    }
+
+    let result: DfValue = match field {
+        TimestampField::Hour => tm.hour().into(),
+        TimestampField::Minute => tm.minutes().into(),
+        TimestampField::Second => seconds_term!(tm, 1).into(),
+        TimestampField::Milliseconds => seconds_term!(tm, MILLIS_IN_SECOND).into(),
+        TimestampField::Microseconds => seconds_term!(tm, MICROS_IN_SECOND).round().into(),
+        TimestampField::Epoch => Duration::from(*tm).num_seconds().into(),
+        _ => return Err(invalid_extract_call_error("time", field)),
+    };
+
+    Ok(result)
+}
+
+fn extract_from_timestamptz(field: TimestampField, tz: &TimestampTz) -> ReadySetResult<DfValue> {
+    macro_rules! has_time_else_error {
+        ($tz:expr, $field:expr) => {
+            if $tz.has_date_only() {
+                return Err(invalid_extract_call_error("date", $field));
+            }
+        };
+    }
+
+    macro_rules! has_timezone_else_error {
+        ($tz:expr, $field:expr) => {
+            if !$tz.has_timezone() {
+                return Err(invalid_extract_call_error(
+                    if $tz.has_date_only() {
+                        "date"
+                    } else {
+                        "timestamp"
+                    },
+                    $field,
+                ));
+            }
+        };
+    }
+
+    macro_rules! seconds_term {
+        ($dt_utc:expr, $units_in_second:expr) => {
+            seconds_term($dt_utc.second(), $dt_utc.nanosecond(), $units_in_second)
+        };
+    }
+
+    let dt_utc = tz.to_chrono().naive_utc();
+    let result: DfValue = match field {
+        TimestampField::Millennium => years_term(dt_utc.year(), 1000).into(),
+        TimestampField::Century => years_term(dt_utc.year(), 100).into(),
+        TimestampField::Decade => years_decade(dt_utc.year()).into(),
+        TimestampField::Year => {
+            let year = dt_utc.year();
+            if year < 0 { year - 1 } else { year }.into()
+        }
+        TimestampField::Isoyear => {
+            let year = dt_utc.iso_week().year();
+            if year <= 0 { year - 1 } else { year }.into()
+        }
+        TimestampField::Quarter => (dt_utc.month0() / 3 + 1).into(),
+        TimestampField::Month => dt_utc.month().into(),
+        TimestampField::Week => dt_utc.iso_week().week().into(),
+        TimestampField::Day => dt_utc.day().into(),
+        TimestampField::Dow => dt_utc.weekday().num_days_from_sunday().into(),
+        TimestampField::Isodow => dt_utc.weekday().number_from_monday().into(),
+        TimestampField::Doy => dt_utc.ordinal().into(),
+        TimestampField::Hour => {
+            has_time_else_error!(tz, field);
+            dt_utc.hour().into()
+        }
+        TimestampField::Minute => {
+            has_time_else_error!(tz, field);
+            dt_utc.minute().into()
+        }
+        TimestampField::Second => {
+            has_time_else_error!(tz, field);
+            seconds_term!(dt_utc, 1).into()
+        }
+        TimestampField::Milliseconds => {
+            has_time_else_error!(tz, field);
+            seconds_term!(dt_utc, MILLIS_IN_SECOND).into()
+        }
+        TimestampField::Microseconds => {
+            has_time_else_error!(tz, field);
+            seconds_term!(dt_utc, MICROS_IN_SECOND).round().into()
+        }
+        TimestampField::Epoch => (Decimal::from(dt_utc.and_utc().timestamp_micros())
+            / Decimal::from(MICROS_IN_SECOND))
+        .round_dp(6)
+        .into(),
+        TimestampField::Julian => {
+            let julian_date: Decimal =
+                ymd_to_julian_date(dt_utc.year(), dt_utc.month() as i32, dt_utc.day() as i32)
+                    .into();
+            if tz.has_date_only() {
+                julian_date
+            } else {
+                julian_date
+                    + hms_with_nanos_to_days(
+                        dt_utc.hour(),
+                        dt_utc.minute(),
+                        dt_utc.second(),
+                        dt_utc.nanosecond(),
+                    )
+            }
+            .into()
+        }
+        TimestampField::Timezone => {
+            has_timezone_else_error!(tz, field);
+            tz_to_seconds(&dt_utc).into()
+        }
+        TimestampField::TimezoneHour => {
+            has_timezone_else_error!(tz, field);
+            (tz_to_seconds(&dt_utc) / SECONDS_IN_HOUR as i32).into()
+        }
+        TimestampField::TimezoneMinute => {
+            has_timezone_else_error!(tz, field);
+            ((tz_to_seconds(&dt_utc) % SECONDS_IN_HOUR as i32) / SECONDS_IN_MINUTE as i32).into()
+        }
+    };
+
+    Ok(result)
 }
 
 /// Format the given time value according to the given `format_string`, using the [MySQL date
@@ -1032,6 +1255,17 @@ impl BuiltinFunction {
                 Ok(DfValue::from(
                     date_trunc(precision, datetime.naive_utc()).unwrap(),
                 ))
+            }
+            BuiltinFunction::Extract(field, expr) => {
+                let ts = non_null!(expr.eval(record)?);
+                if let DfValue::TimestampTz(tz) = ts {
+                    extract_from_timestamptz(*field, &tz)
+                } else if let DfValue::Time(tm) = ts {
+                    extract_from_time(*field, &tm)
+                } else {
+                    internal!("EXTRACT function input expected to be DfValue::TimestampTz or DfValue::Time. Found {}", ts);
+                }
+                .and_then(|value| value.coerce_to(ty, &DfType::Unknown))
             }
         }
     }
