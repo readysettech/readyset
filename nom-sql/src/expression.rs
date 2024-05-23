@@ -19,7 +19,7 @@ use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
-use crate::common::{column_identifier_no_alias, function_expr, ws_sep_comma};
+use crate::common::{column_identifier_no_alias, function_expr, ws_sep_comma, TimestampField};
 use crate::literal::{literal, Double, Float};
 use crate::select::nested_selection;
 use crate::set::{variable_scope_prefix, Variable};
@@ -40,6 +40,11 @@ pub enum FunctionExpr {
 
     /// `COUNT(*)` aggregation
     CountStar,
+
+    Extract {
+        field: TimestampField,
+        expr: Box<Expr>,
+    },
 
     /// `SUM` aggregation
     Sum { expr: Box<Expr>, distinct: bool },
@@ -89,7 +94,8 @@ impl FunctionExpr {
             | FunctionExpr::Sum { expr: arg, .. }
             | FunctionExpr::Max(arg)
             | FunctionExpr::Min(arg)
-            | FunctionExpr::GroupConcat { expr: arg, .. } => {
+            | FunctionExpr::GroupConcat { expr: arg, .. }
+            | FunctionExpr::Extract { expr: arg, .. } => {
                 concrete_iter!(iter::once(arg.as_ref()))
             }
             FunctionExpr::CountStar => concrete_iter!(iter::empty()),
@@ -155,6 +161,9 @@ impl DialectDisplay for FunctionExpr {
                 }
 
                 write!(f, ")")
+            }
+            FunctionExpr::Extract { field, expr } => {
+                write!(f, "EXTRACT({field} FROM {})", expr.display(dialect))
             }
         })
     }
@@ -690,6 +699,8 @@ impl Arbitrary for Expr {
                     Just(FunctionExpr::CountStar),
                     (box_expr.clone(), any::<bool>())
                         .prop_map(|(expr, distinct)| FunctionExpr::Sum { expr, distinct }),
+                    (box_expr.clone(), any::<TimestampField>())
+                        .prop_map(|(expr, field)| FunctionExpr::Extract { expr, field }),
                     box_expr.clone().prop_map(FunctionExpr::Max),
                     box_expr.clone().prop_map(FunctionExpr::Min),
                     (box_expr.clone(), any::<Option<String>>()).prop_map(|(expr, separator)| {
