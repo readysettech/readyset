@@ -1,0 +1,18 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 2babad91d07b8955fc644887a196de3f10a2d5906841ecf2266022cab7ada9df # shrinks to field = Century, datetime = 1970-01-01T00:00:00
+cc 74a8620219bfa0ce332d4888bd451e13ebae34411b31cb3c698100aa36b7ed36 # shrinks to field = Second, datetime = 1970-01-01T00:00:01
+cc 7cb714461ce8352e2586db8c9d70dc6473741533cff95ab38f93945034ee9082 # shrinks to field = Isoyear, datetime = 1970-01-01T00:00:00
+cc 0e4282717b1b027255dedda6a563a9e476c859217c68eb85c662c7fd9f222e0a # shrinks to field = Decade, datetime = 1970-01-01T00:00:00
+cc 03b2ab6ce5e6c9a8625203de6bff831de34734dbccce73558e8cc34113459319 # shrinks to field = Epoch, datetime = 1970-01-01T00:00:01
+cc c11828b40b19ecaf688bf5e0da47f3615913ada65a2c103f9d06f06a6c6415d2 # shrinks to field = Dow, datetime = 2035-09-09T00:00:00
+cc d893989c83aaae04070d3d4f3a5268baaee176330458a0a73cb738a64940cc08 # shrinks to field = Julian, datetime = 2038-01-01T00:00:01
+cc f0e758dc44d25cc02f50841e54d5a9ce2808d9d7c3d2bf3d499eba04b893b9f2 # shrinks to field = Julian, datetime = 1970-01-01T00:00:09
+cc ad2e5c4942b266e05f9337bef7b482985b0dd83d986c2be7265a3cb45385931f # shrinks to field = Century, date = -0001-01-01
+cc ae8a16e5a382edc488ecb5d21c31ac5f9c816e47d9b15f1e86bfe1951a218655 # shrinks to field = Isoyear, date = -0001-01-03
+cc 0d521b15cabc8ee12b89ec2532e9b59923158340de74ca00a7580fb78f7c68ba # shrinks to field = Decade, date = -0001-01-02
+cc b9588ba5419366556017de48721258ee0f8568893550e25503c14d637b1744fb # shrinks to field = Century, date = -4290-01-01

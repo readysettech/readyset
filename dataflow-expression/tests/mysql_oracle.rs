@@ -79,7 +79,8 @@ async fn compare_eval(expr: &str, conn: &mut Conn) {
         expr,
         nom_sql::Dialect::MySQL,
         dataflow_expression::Dialect::DEFAULT_MYSQL,
-    );
+    )
+    .unwrap_or_else(|e| panic!("Error evaluating `{expr}`: {e}"));
     assert_eq!(
         our_result, mysql_result,
         "mismatched results for {expr} (left: us, right: mysql)"

@@ -11,6 +11,7 @@ use std::fmt::{self, Display, Formatter};
 
 pub use eval::builtins::DateTruncPrecision;
 use itertools::Itertools;
+use nom_sql::TimestampField;
 pub use readyset_data::Dialect;
 use readyset_data::{DfType, DfValue};
 use serde::{Deserialize, Serialize};
@@ -112,6 +113,9 @@ pub enum BuiltinFunction {
 
     /// [`date_trunc`](https://www.postgresql.org/docs/current/functions-datetime.html#FUNCTIONS-DATETIME-TRUNC)
     DateTrunc(Expr, Expr),
+
+    /// [`date_trunc`](https://www.postgresql.org/docs/current/functions-datetime.html#FUNCTIONS-DATETIME-TRUNC)
+    Extract(TimestampField, Expr),
 }
 
 impl BuiltinFunction {
@@ -146,6 +150,7 @@ impl BuiltinFunction {
             Least { .. } => "least",
             ArrayToString { .. } => "array_to_string",
             DateTrunc { .. } => "date_trunc",
+            Extract { .. } => "extract",
         }
     }
 }
@@ -243,6 +248,9 @@ impl Display for BuiltinFunction {
             }
             DateTrunc(field, source) => {
                 write!(f, "({}, {})", field, source)
+            }
+            Extract(field, expr) => {
+                write!(f, "({} FROM {})", field, expr)
             }
         }
     }

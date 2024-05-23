@@ -1,0 +1,10 @@
+statement ok
+CREATE TABLE t (id int, ts timestamp)
+
+statement ok
+INSERT INTO t values(1, '1970-03-20 04:30:00.00000')
+
+query I nosort
+SELECT EXTRACT(CENTURY FROM ts) from t where id = 1 
+----
+20

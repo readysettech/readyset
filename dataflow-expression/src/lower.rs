@@ -780,6 +780,13 @@ impl Expr {
 
                 Ok(Self::Call { func, ty })
             }
+            AstExpr::Call(FunctionExpr::Extract { field, expr }) => {
+                let expr = Self::lower(*expr, dialect, context.clone())?;
+                let ty = DfType::Numeric { prec: 20, scale: 6 };
+                let func = Box::new(BuiltinFunction::Extract(field, expr));
+
+                Ok(Self::Call { func, ty })
+            }
             AstExpr::Call(call) => internal!(
                 "Unexpected (aggregate?) call node in project expression: {:?}",
                 Sensitive(&call)

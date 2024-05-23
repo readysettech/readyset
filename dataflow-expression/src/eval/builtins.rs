@@ -5,11 +5,13 @@ use std::ops::{Add, Div, Mul, Sub};
 use std::str::FromStr;
 
 use chrono::{
-    Datelike, LocalResult, Month, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Timelike, Weekday,
+    DateTime, Datelike, FixedOffset, LocalResult, Month, NaiveDate, NaiveDateTime, NaiveTime,
+    TimeZone, Timelike, Weekday,
 };
 use chrono_tz::Tz;
 use itertools::Either;
 use mysql_time::MySqlTime;
+use nom_sql::TimestampField;
 use readyset_data::{DfType, DfValue};
 use readyset_errors::{invalid_query_err, unsupported, ReadySetError, ReadySetResult};
 use readyset_util::math::integer_rnd;
@@ -21,8 +23,14 @@ use vec1::Vec1;
 
 use crate::{BuiltinFunction, Expr};
 
+const MICROS_IN_SECOND: u32 = 1_000_000;
+const MILLIS_IN_SECOND: u32 = 1_000;
 const NANOS_IN_MICRO: u32 = 1_000;
 const NANOS_IN_MILLI: u32 = 1_000_000;
+const SECONDS_IN_HOUR: u64 = 60 * 60;
+const SECONDS_IN_MINUTE: u64 = 60;
+const SECONDS_IN_DAY: u64 = SECONDS_IN_HOUR * 24;
+const MINUTES_IN_HOUR: u64 = 60;
 
 macro_rules! try_cast_or_none {
     ($df_value:expr, $to_ty:expr, $from_ty:expr) => {{
@@ -186,6 +194,7 @@ impl TryFrom<&DfValue> for DateTruncPrecision {
     }
 }
 
+// TODO ethan replace math in here with new extract function
 fn date_trunc(precision: DateTruncPrecision, dt: NaiveDateTime) -> ReadySetResult<NaiveDateTime> {
     // note: cannot use the `DurationRound::duration_trunc()` fn as it calls
     // `NaiveDateTime::timestamp_nanos_opt()`, and that can only represent dates between 1677 AD
@@ -270,6 +279,138 @@ fn date_trunc(precision: DateTruncPrecision, dt: NaiveDateTime) -> ReadySetResul
             ))
         }
     }
+}
+
+fn extract_from_timestamptz(
+    field: TimestampField,
+    dt: DateTime<FixedOffset>,
+) -> ReadySetResult<DfValue> {
+    Ok(match field {
+        TimestampField::Century => {
+            let year = dt.year();
+
+            if year > 0 {
+                ((year + 99) / 100).into()
+            } else {
+                (-((99 - (year - 1)) / 100)).into()
+            }
+        }
+        // TODO are these types all right?
+        TimestampField::Day => dt.day().into(),
+        TimestampField::Decade => {
+            let year = dt.year();
+
+            let decade = if year >= 0 {
+                year / 10
+            } else {
+                -((8 - (year - 1)) / 10)
+            };
+
+            decade.into()
+        }
+        TimestampField::Dow => (dt.weekday().number_from_monday() % 7).into(),
+        TimestampField::Doy => dt.ordinal().into(),
+        // TODO do we need to handle precision? out of scope?
+        TimestampField::Epoch => {
+            let num: Decimal = dt.timestamp_micros().into();
+            let denom: Decimal = MICROS_IN_SECOND.into();
+            (num / denom).round_dp(6).into()
+        }
+        TimestampField::Hour => dt.hour().into(),
+        TimestampField::Isodow => dt.weekday().number_from_monday().into(),
+        TimestampField::Isoyear => {
+            let mut isoyear = dt.iso_week().year();
+
+            if isoyear <= 0 {
+                isoyear -= 1;
+            }
+
+            isoyear.into()
+        }
+        TimestampField::Julian => {
+            // https://github.com/postgres/postgres/blob/c6cf6d353c2865d82356ac86358622a101fde8ca/src/interfaces/ecpg/pgtypeslib/dt_common.c#L581-L582
+            let mut year = dt.year();
+            let mut month = dt.month();
+            let day = dt.day();
+
+            if month > 2 {
+                month += 1;
+                year += 4800;
+            } else {
+                month += 13;
+                year += 4799;
+            }
+            let century = year / 100;
+            let mut julian_date = year * 365 - 32167;
+            julian_date += year / 4 - century + century / 4;
+            julian_date += 7834 * month as i32 / 256 + day as i32;
+            let julian_date: Decimal = julian_date.into();
+
+            let fsec = dt.nanosecond() as u64 / 1000;
+            let numerator: Decimal = (((((dt.hour() as u64 * MINUTES_IN_HOUR)
+                + dt.minute() as u64)
+                * SECONDS_IN_MINUTE)
+                + dt.second() as u64)
+                * 1000000
+                + fsec)
+                .into();
+            let denom: Decimal = (SECONDS_IN_DAY * 1000000).into();
+            // TODO ethan I think we might need to implement postgres's division algorithm to get
+            // the exact same results
+            let fraction = numerator / denom;
+
+            (julian_date + fraction).into()
+        }
+        // TODO test for rounding errors
+        TimestampField::Microseconds => {
+            let naive = dt.naive_local();
+            let seconds = naive.second() * MICROS_IN_SECOND;
+            let frac = naive.nanosecond().saturating_div(NANOS_IN_MICRO);
+            (seconds + frac).into()
+        }
+        TimestampField::Millennium => {
+            let year = dt.year();
+
+            if year > 0 {
+                ((year + 999) / 1000).into()
+            } else {
+                (-((999 - (year - 1)) / 1000)).into()
+            }
+        }
+        TimestampField::Milliseconds => {
+            let seconds = dt.second() * MILLIS_IN_SECOND;
+            let frac = dt.nanosecond().saturating_div(NANOS_IN_MILLI);
+            (seconds + frac).into()
+        }
+        TimestampField::Minute => dt.minute().into(),
+        // TODO for INTERVALs, the month is mod 12 (starting from 0) -- do we support INTERVALs?
+        TimestampField::Month => dt.month().into(),
+        TimestampField::Quarter => (dt.month0() / 3 + 1).into(),
+        // TODO ethan how to handle time zones? postgres seems to change answer based on time zone
+        // set on pg server...we should do the same?
+        // TODO ethan how would we even handle this? what if time zone is changed after data is
+        // already in cache? would we convert the timezone when the results are being returned?
+        // would need to...
+        TimestampField::Second => dbg!(dt.naive_utc().second().into()),
+        TimestampField::Timezone => dt.offset().local_minus_utc().into(),
+        TimestampField::TimezoneHour => {
+            (dt.offset().local_minus_utc() / SECONDS_IN_HOUR as i32).into()
+        }
+        TimestampField::TimezoneMinute => {
+            ((dt.offset().local_minus_utc() % SECONDS_IN_HOUR as i32) / SECONDS_IN_MINUTE as i32)
+                .into()
+        }
+        TimestampField::Week => dt.iso_week().week().into(),
+        TimestampField::Year => {
+            let mut year = dt.year();
+
+            if year < 0 {
+                year -= 1;
+            }
+
+            year.into()
+        }
+    })
 }
 
 /// Format the given time value according to the given `format_string`, using the [MySQL date
@@ -1032,6 +1173,33 @@ impl BuiltinFunction {
                 Ok(DfValue::from(
                     date_trunc(precision, datetime.naive_utc()).unwrap(),
                 ))
+            }
+            BuiltinFunction::Extract(field, expr) => {
+                println!("here1");
+                let ts = non_null!(expr.eval(record)?);
+                println!("evalled");
+                // let coerced = ts.coerce_to(
+                //     &DfType::TimestampTz {
+                //         subsecond_digits: 6,
+                //     },
+                //     &DfType::Unknown,
+                // )?;
+
+                match ts {
+                    // TODO should this ever be ::Date or ::Time?
+                    DfValue::TimestampTz(t) => {
+                        if t.has_date_only() && !field.is_date_field() {
+                            Err(invalid_query_err!("Cannot extract field {field} from date"))
+                        } else {
+                            // TODO ethan why is it executing twice?
+                            extract_from_timestamptz(*field, t.to_chrono())
+                                .and_then(|value| value.coerce_to(ty, &DfType::Unknown))
+                        }
+                    }
+                    _ => Err(invalid_query_err!(
+                        "Cannot invoke EXTRACT() on value of type {ty}"
+                    )),
+                }
             }
         }
     }

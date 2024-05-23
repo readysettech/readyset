@@ -29,13 +29,8 @@ pub fn parse_lower_eval(
     expr: &str,
     parser_dialect: nom_sql::Dialect,
     expr_dialect: dataflow_expression::Dialect,
-) -> DfValue {
+) -> Result<DfValue, anyhow::Error> {
     let ast = parse_expr(parser_dialect, expr).unwrap();
     let lowered = Expr::lower(ast, expr_dialect, TestLowerContext).unwrap();
-    match lowered.eval::<DfValue>(&[]) {
-        Ok(res) => res,
-        Err(e) => {
-            panic!("Error evaluating `{expr}`: {e}")
-        }
-    }
+    Ok(lowered.eval::<DfValue>(&[])?)
 }
