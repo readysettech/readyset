@@ -12,28 +12,28 @@ keywords = ["api-bindings", "database", "sql", "mock"]
 categories = ["api-bindings", "network-programming", "database-implementations"]
 
 [dependencies]
-nom = "7.1"
+nom = { workspace = true }
 mysql_async = { workspace = true }
-mysql_common = { version = "0.32", features = ["chrono"] }
-byteorder = "1"
-chrono = "0.4"
-time = "0.3"
-getrandom = "0.2.2"
-async-trait = "0.1"
+mysql_common = { workspace = true, features = ["chrono"] }
+byteorder = { workspace = true }
+chrono = { workspace = true }
+time = { workspace = true }
+getrandom = { workspace = true }
+async-trait = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
-thiserror = "1.0.26"
-sha-1 = "0.10.0"
+thiserror = { workspace = true }
+sha-1 = { workspace = true }
 mysql-time = { path = "../mysql-time" }
-tracing = "0.1.35"
+tracing = { workspace = true }
 
 readyset-adapter-types = { path = "../readyset-adapter-types" }
 readyset-data = { path = "../readyset-data" }
 
 [dev-dependencies]
 tokio-postgres = { workspace = true }
-mysql = "25"
+mysql = { workspace = true }
 
-slab = "0.4.2"
-futures = "0.3"
+slab = { workspace = true }
+futures = { workspace = true }
 
 test-utils = { path = "../test-utils" }

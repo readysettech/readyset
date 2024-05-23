@@ -7,29 +7,29 @@ edition = "2021"
 description = "Extensions to the Rust standard library"
 
 [dependencies]
-backoff = { version = "0.4.0", features = ["tokio"] }
-bytes = "1.0"
-proptest = "1.0.0"
-chrono = { version = "0.4.0", features = ["serde"] }
-chrono-tz = "0.8.6"
+backoff = { workspace = true, features = ["tokio"] }
+bytes = { workspace = true }
+proptest = { workspace = true }
+chrono = { workspace = true, features = ["serde"] }
+chrono-tz = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
-futures = "0.3"
-tracing = { version = "0.1", features = ["release_max_level_debug"] }
-rust_decimal = { version = "1.26" }
+futures = { workspace = true }
+tracing = { workspace = true, features = ["release_max_level_debug"] }
+rust_decimal = { workspace = true }
 eui48 = { workspace = true }
-uuid = { version = "0.8", features = ["v4"] }
-serde_json = "1"
-bit-vec = { version = "0.6", features = ["serde"] }
-serde = { version = "1.0", features = ["derive"] }
-async-stream = "0.3.2"
-cidr = "0.2.1"
-thiserror = "1.0.26"
+uuid = { workspace = true, features = ["v4"] }
+serde_json = { workspace = true }
+bit-vec = { workspace = true, features = ["serde"] }
+serde = { workspace = true, features = ["derive"] }
+async-stream = { workspace = true }
+cidr = { workspace = true }
+thiserror = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true }
-test-strategy = "0.2.0"
-rand = "0.8.5"
-pprof = { version = "0.13", features = ["flamegraph", "criterion"] }
+test-strategy = { workspace = true }
+rand = { workspace = true }
+pprof = { workspace = true, features = ["flamegraph", "criterion"] }
 postgres = { workspace = true, features = ["with-chrono-0_4", "with-eui48-1", "with-uuid-0_8", "with-serde_json-1", "with-bit-vec-0_6"] }
 
 [features]

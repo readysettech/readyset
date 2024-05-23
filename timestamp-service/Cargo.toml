@@ -6,6 +6,6 @@ authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
 [dependencies]
-anyhow = "1.0"
+anyhow = { workspace = true }
 # local deps
 readyset-client = { path = "../readyset-client" }
