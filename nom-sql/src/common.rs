@@ -490,6 +490,7 @@ pub enum TimestampField {
     Hour,
     Isodow,
     Isoyear,
+    #[weight(0)]
     Julian,
     Microseconds,
     Millennium,
@@ -498,11 +499,38 @@ pub enum TimestampField {
     Month,
     Quarter,
     Second,
+    #[weight(0)]
     Timezone,
+    #[weight(0)]
     TimezoneHour,
+    #[weight(0)]
     TimezoneMinute,
     Week,
     Year,
+}
+
+impl TimestampField {
+    pub fn is_date_field(&self) -> bool {
+        use TimestampField::*;
+
+        matches!(
+            self,
+            Century
+                | Day
+                | Decade
+                | Dow
+                | Doy
+                | Epoch
+                | Isodow
+                | Isoyear
+                | Julian
+                | Millennium
+                | Month
+                | Quarter
+                | Week
+                | Year
+        )
+    }
 }
 
 impl fmt::Display for TimestampField {

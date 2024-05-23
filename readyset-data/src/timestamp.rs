@@ -89,7 +89,7 @@ impl TimestampTz {
 
     /// Returns true if should be displayed as date only
     #[inline(always)]
-    fn has_date_only(&self) -> bool {
+    pub fn has_date_only(&self) -> bool {
         self.extra[2] & TimestampTz::DATE_FLAG != 0
     }
 
@@ -255,10 +255,19 @@ impl FromStr for TimestampTz {
                 let year = -(year_str.parse::<i32>()? - 1);
                 let neg_year_str = format!("{year}-{rest}");
 
-                if let Ok(dt) = DateTime::<FixedOffset>::parse_from_str(
-                    &neg_year_str,
-                    TIMESTAMP_TZ_PARSE_FORMAT,
-                ) {
+                if let Ok((naive_date_time, offset_tag)) =
+                    NaiveDateTime::parse_and_remainder(&neg_year_str, TIMESTAMP_PARSE_FORMAT)
+                {
+                    // TODO ethan look to see if we are handling seconds offsets anywhere else and
+                    // use the same logic. do we handle seconds offsets correctly prior to this
+                    // change?
+                    let offset = parse_timestamp_tag(offset_tag)?;
+                    let dt = offset
+                        .from_local_datetime(&naive_date_time)
+                        .single()
+                        .ok_or(internal_err!("Invalid date format"))?;
+                    dbg!(&dt);
+
                     Ok(dt.into())
                 } else if let Ok(dt) =
                     NaiveDateTime::parse_from_str(&neg_year_str, TIMESTAMP_PARSE_FORMAT)
@@ -333,8 +342,18 @@ impl TimestampTz {
 
         // If there is a dot, there is a microseconds field attached
         Ok(
-            if let Ok(dt) = DateTime::<FixedOffset>::parse_from_str(&ts, TIMESTAMP_TZ_PARSE_FORMAT)
+            if let Ok((naive_date_time, offset_tag)) =
+                NaiveDateTime::parse_and_remainder(&ts, TIMESTAMP_PARSE_FORMAT)
             {
+                // TODO ethan look to see if we are handling seconds offsets anywhere else and
+                // use the same logic. do we handle seconds offsets correctly prior to this
+                // change?
+                let offset = parse_timestamp_tag(offset_tag)?;
+                let dt = offset
+                    .from_local_datetime(&naive_date_time)
+                    .single()
+                    .ok_or(internal_err!("Invalid date format"))?;
+                dbg!(&dt);
                 dt.into()
             } else if let Ok(dt) = NaiveDateTime::parse_from_str(&ts, TIMESTAMP_PARSE_FORMAT) {
                 dt.into()
@@ -354,6 +373,7 @@ impl TimestampTz {
                 Ok(DfValue::TimestampTz(ts))
             }
             DfType::TimestampTz { subsecond_digits } => {
+                println!("coercing...");
                 // TODO: when converting into a timestamp with tz on postgres should apply
                 // local tz, but what is local for noria?
                 let mut ts_tz = *self;
@@ -504,6 +524,41 @@ impl Arbitrary for TimestampTz {
             arbitrary_timestamp_naive_date_time().prop_map(|n| n.into()),
         ]
         .boxed()
+    }
+}
+
+pub fn parse_timestamp_tag(tag: &str) -> ReadySetResult<FixedOffset> {
+    if tag.is_empty() {
+        Ok(FixedOffset::east_opt(0).unwrap())
+    } else {
+        let err = || ReadySetError::Internal("Failed to parse timestamptz offset".into());
+
+        // An offset tag should be at least 3 characters long
+        if tag.len() < 3 {
+            return Err(err());
+        }
+
+        let is_positive = match tag.chars().next() {
+            Some('+') => true,
+            Some('-') => false,
+            _ => return Err(err()),
+        };
+
+        let mut offset = &tag[1..3].parse::<i32>().unwrap() * 60 * 60;
+
+        if tag.len() >= 6 {
+            offset += &tag[4..6].parse::<i32>().unwrap_or_default() * 60;
+
+            if tag.len() == 9 {
+                offset += &tag[7..9].parse::<i32>().unwrap_or_default();
+            }
+        }
+
+        if !is_positive {
+            offset = -offset;
+        }
+
+        FixedOffset::east_opt(offset).ok_or_else(err)
     }
 }
 
