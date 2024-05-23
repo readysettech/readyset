@@ -480,10 +480,26 @@ impl DfType {
         )
     }
 
-    /// Returns `true` if this is any `text` type
+    /// Returns `true` if this is any large integer type (bigint/int8).
     #[inline]
-    pub fn is_any_text(&self) -> bool {
-        matches!(self, Self::Text(..) | Self::VarChar(..) | Self::Char(..))
+    pub fn is_any_bigint(&self) -> bool {
+        matches!(*self, Self::BigInt | Self::UnsignedBigInt)
+    }
+
+    /// Returns `true` if this is any non-large integer type.
+    #[inline]
+    pub fn is_any_normal_int(&self) -> bool {
+        matches!(
+            *self,
+            Self::TinyInt
+                | Self::UnsignedTinyInt
+                | Self::SmallInt
+                | Self::UnsignedSmallInt
+                | Self::Int
+                | Self::UnsignedInt
+                | Self::MediumInt
+                | Self::UnsignedMediumInt
+        )
     }
 
     /// Returns `true` if this is any IEEE 754 floating-point type.
@@ -492,10 +508,34 @@ impl DfType {
         matches!(*self, Self::Float | Self::Double)
     }
 
+    /// Returns `true` if this is a 4-byte IEEE 754 floating-point type.
+    #[inline]
+    pub fn is_float(&self) -> bool {
+        matches!(*self, Self::Float)
+    }
+
+    /// Returns `true` if this is an 8-byte IEEE 754 floating-point type.
+    #[inline]
+    pub fn is_double(&self) -> bool {
+        matches!(*self, Self::Double)
+    }
+
+    /// Returns `true` if this is a decimal or numeric type.
+    #[inline]
+    pub fn is_numeric(&self) -> bool {
+        matches!(*self, Self::Numeric { .. })
+    }
+
     /// Returns `true` if this is any PostgreSQL array type.
     #[inline]
     pub fn is_array(&self) -> bool {
         matches!(self, Self::Array { .. })
+    }
+
+    /// Returns `true` if this is any `text` type
+    #[inline]
+    pub fn is_any_text(&self) -> bool {
+        matches!(self, Self::Text(..) | Self::VarChar(..) | Self::Char(..))
     }
 
     /// Returns `true` if this is any MySQL binary type.
