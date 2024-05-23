@@ -326,7 +326,7 @@ pub(super) fn post_lookup_aggregates(
                 GroupConcat { separator, .. } => PostLookupAggregateFunction::GroupConcat {
                     separator: separator.clone().unwrap_or_else(|| ",".to_owned()),
                 },
-                Call { .. } | Substring { .. } => continue,
+                Extract { .. } | Call { .. } | Substring { .. } => continue,
             },
         });
     }
