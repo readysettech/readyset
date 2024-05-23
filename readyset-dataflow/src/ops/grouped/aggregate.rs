@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
 pub use nom_sql::{BinaryOperator, Literal, SqlType};
-use readyset_data::{Collation, DfType};
+use readyset_data::dialect::SqlEngine;
+use readyset_data::{Collation, DfType, Dialect};
 use readyset_errors::{invariant, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
@@ -25,7 +26,7 @@ pub enum Aggregation {
 }
 
 impl Aggregation {
-    /// Construct a new `Aggregator` that performs this operation.
+    /// Construct a new [`Aggregator`] that performs this operation.
     ///
     /// The aggregation will aggregate the value in column number `over` from its inputs (i.e.,
     /// from the `src` node in the graph), and use the columns in the `group_by` array as a group
@@ -36,13 +37,33 @@ impl Aggregation {
         over: usize,
         group_by: &[usize],
         over_col_ty: &DfType,
+        dialect: &Dialect,
     ) -> ReadySetResult<GroupedOperator<Aggregator>> {
         let out_ty = match &self {
             Aggregation::Count { .. } => DfType::BigInt,
-            // The SUM() and AVG() functions return a DECIMAL value for exact-value arguments
-            // (integer or DECIMAL), and a DOUBLE value for approximate-value arguments (FLOAT or
-            // DOUBLE).
-            Aggregation::Sum | Aggregation::Avg => {
+            Aggregation::Sum => match dialect.engine() {
+                SqlEngine::MySQL => {
+                    if over_col_ty.is_any_float() {
+                        DfType::Double
+                    } else {
+                        DfType::DEFAULT_NUMERIC
+                    }
+                }
+                SqlEngine::PostgreSQL => {
+                    if over_col_ty.is_any_int() {
+                        DfType::BigInt
+                    } else if over_col_ty.is_any_bigint() || over_col_ty.is_numeric() {
+                        DfType::DEFAULT_NUMERIC
+                    } else if over_col_ty.is_float() {
+                        DfType::Float
+                    } else if over_col_ty.is_double() {
+                        DfType::Double
+                    } else {
+                        invalid_query!("Cannot sum over type {}", over_col_ty)
+                    }
+                }
+            },
+            Aggregation::Avg => {
                 if over_col_ty.is_any_float() {
                     DfType::Double
                 } else {
@@ -318,7 +339,13 @@ mod tests {
             "identity",
             &["x", "ys"],
             aggregation
-                .over(s.as_global(), 1, &[0], &DfType::Double)
+                .over(
+                    s.as_global(),
+                    1,
+                    &[0],
+                    &DfType::Double,
+                    &Dialect::DEFAULT_MYSQL,
+                )
                 .unwrap(),
             mat,
         );
@@ -332,7 +359,13 @@ mod tests {
             "identity",
             &["x", "z", "ys"],
             aggregation
-                .over(s.as_global(), 1, &[0, 2], &DfType::Double)
+                .over(
+                    s.as_global(),
+                    1,
+                    &[0, 2],
+                    &DfType::Double,
+                    &Dialect::DEFAULT_MYSQL,
+                )
                 .unwrap(),
             mat,
         );
@@ -344,17 +377,17 @@ mod tests {
         let src = 0.into();
 
         let c = Aggregation::Count
-            .over(src, 1, &[0, 2], &DfType::Unknown)
+            .over(src, 1, &[0, 2], &DfType::Unknown, &Dialect::DEFAULT_MYSQL)
             .unwrap();
         assert_eq!(c.description(true), "|*| γ[0, 2]");
 
         let s = Aggregation::Sum
-            .over(src, 1, &[2, 0], &DfType::Unknown)
+            .over(src, 1, &[2, 0], &DfType::Unknown, &Dialect::DEFAULT_MYSQL)
             .unwrap();
         assert_eq!(s.description(true), "𝛴(1) γ[2, 0]");
 
         let a = Aggregation::Avg
-            .over(src, 1, &[2, 0], &DfType::Unknown)
+            .over(src, 1, &[2, 0], &DfType::Unknown, &Dialect::DEFAULT_MYSQL)
             .unwrap();
         assert_eq!(a.description(true), "Avg(1) γ[2, 0]");
     }
@@ -1128,5 +1161,30 @@ mod tests {
             ]
             .into()
         );
+    }
+
+    #[test]
+    fn it_determines_postgres_sum_output_type() {
+        let grouped = Aggregation::Sum
+            .over(
+                Default::default(),
+                0,
+                &[1],
+                &DfType::Int,
+                &Dialect::DEFAULT_POSTGRESQL,
+            )
+            .unwrap();
+        assert_eq!(grouped.output_col_type(), DfType::BigInt);
+
+        let grouped = Aggregation::Sum
+            .over(
+                Default::default(),
+                0,
+                &[1],
+                &DfType::Int,
+                &Dialect::DEFAULT_MYSQL,
+            )
+            .unwrap();
+        assert!(matches!(grouped.output_col_type(), DfType::Numeric { .. }));
     }
 }
