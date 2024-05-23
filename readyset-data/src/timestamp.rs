@@ -18,9 +18,6 @@ pub const TIMESTAMP_PARSE_FORMAT: &str = "%Y-%m-%d %H:%M:%S%.f";
 /// The format for timestamps when presented as text
 pub const TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S";
 
-/// The format for timestamps with time zone when parsed as text
-pub const TIMESTAMP_TZ_PARSE_FORMAT: &str = "%Y-%m-%d %H:%M:%S%.f%#z";
-
 /// The format for timestamps with time zone when presented as text
 pub const TIMESTAMP_TZ_FORMAT: &str = "%Y-%m-%d %H:%M:%S%:z";
 
@@ -96,7 +93,7 @@ impl TimestampTz {
 
     /// Returns true if should be displayed as date only
     #[inline(always)]
-    fn has_date_only(&self) -> bool {
+    pub fn has_date_only(&self) -> bool {
         self.extra[2] & TimestampTz::DATE_FLAG != 0
     }
 
@@ -262,19 +259,7 @@ impl FromStr for TimestampTz {
                 let year = -(year_str.parse::<i32>()? - 1);
                 let neg_year_str = format!("{year}-{rest}");
 
-                if let Ok(dt) = DateTime::<FixedOffset>::parse_from_str(
-                    &neg_year_str,
-                    TIMESTAMP_TZ_PARSE_FORMAT,
-                ) {
-                    Ok(dt.into())
-                } else if let Ok(dt) =
-                    NaiveDateTime::parse_from_str(&neg_year_str, TIMESTAMP_PARSE_FORMAT)
-                {
-                    Ok(dt.into())
-                } else {
-                    let d = NaiveDate::parse_from_str(&neg_year_str, DATE_FORMAT)?;
-                    Ok(d.into())
-                }
+                Self::from_str_impl(&neg_year_str)
             }
             None => Self::from_str_no_bc(ts),
         }
@@ -330,6 +315,33 @@ impl TimestampTz {
         year * 10_000 + month * 100 + day
     }
 
+    fn from_str_impl(ts: &str) -> anyhow::Result<TimestampTz> {
+        // If there is a dot, there is a microseconds field attached
+        Ok(
+            if let Ok((naive_date_time, offset_tag)) =
+                NaiveDateTime::parse_and_remainder(ts, TIMESTAMP_PARSE_FORMAT)
+            {
+                if let Some(offset) = parse_timestamp_tag(offset_tag) {
+                    offset?
+                        .from_local_datetime(&naive_date_time)
+                        .single()
+                        .ok_or(internal_err!("Invalid date format"))?
+                        .into()
+                } else {
+                    naive_date_time.into()
+                }
+            } else if let Ok(dt) = NaiveDateTime::parse_from_str(ts, TIMESTAMP_PARSE_FORMAT) {
+                dt.into()
+            } else {
+                // Make TimestampTz object with time portion 00:00:00
+                NaiveDate::parse_from_str(ts, DATE_FORMAT)?
+                    .and_hms_opt(0, 0, 0)
+                    .ok_or(internal_err!("Invalid date format"))?
+                    .into()
+            },
+        )
+    }
+
     fn from_str_no_bc(ts: &str) -> anyhow::Result<TimestampTz> {
         let ts = ts.trim();
         let ts = if ts.starts_with(['-', '+']) {
@@ -337,18 +349,7 @@ impl TimestampTz {
         } else {
             Cow::Owned(format!("+{ts}"))
         };
-
-        // If there is a dot, there is a microseconds field attached
-        Ok(
-            if let Ok(dt) = DateTime::<FixedOffset>::parse_from_str(&ts, TIMESTAMP_TZ_PARSE_FORMAT)
-            {
-                dt.into()
-            } else if let Ok(dt) = NaiveDateTime::parse_from_str(&ts, TIMESTAMP_PARSE_FORMAT) {
-                dt.into()
-            } else {
-                NaiveDate::parse_from_str(&ts, DATE_FORMAT)?.into()
-            },
-        )
+        Self::from_str_impl(&ts)
     }
 
     /// Attempt to coerce this timestamp to a specific [`DfType`].
@@ -513,6 +514,42 @@ impl Arbitrary for TimestampTz {
             arbitrary_timestamp_naive_date_time().prop_map(|n| n.into()),
         ]
         .boxed()
+    }
+}
+
+pub fn parse_timestamp_tag(tag: &str) -> Option<ReadySetResult<FixedOffset>> {
+    let tag = tag.trim();
+    if tag.is_empty() {
+        None
+    } else {
+        let err = || ReadySetError::Internal("Failed to parse timestamptz offset".into());
+
+        // An offset tag should be at least 3 characters long
+        if tag.len() < 3 {
+            return Some(Err(err()));
+        }
+
+        let is_positive = match tag.chars().next() {
+            Some('+') => true,
+            Some('-') => false,
+            _ => return Some(Err(err())),
+        };
+
+        let mut offset = &tag[1..3].parse::<i32>().unwrap() * 60 * 60;
+
+        if tag.len() >= 6 {
+            offset += &tag[4..6].parse::<i32>().unwrap_or_default() * 60;
+
+            if tag.len() == 9 {
+                offset += &tag[7..9].parse::<i32>().unwrap_or_default();
+            }
+        }
+
+        if !is_positive {
+            offset = -offset;
+        }
+
+        Some(FixedOffset::east_opt(offset).ok_or_else(err))
     }
 }
 

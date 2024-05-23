@@ -7,8 +7,8 @@ use std::time::{Duration as StdDuration, SystemTime, UNIX_EPOCH};
 
 use bit_vec::BitVec;
 use chrono::{
-    DateTime, Duration, FixedOffset, LocalResult, NaiveDate, NaiveDateTime, NaiveTime, Offset,
-    TimeZone,
+    DateTime, Datelike, Duration, FixedOffset, LocalResult, NaiveDate, NaiveDateTime, NaiveTime,
+    Offset, TimeZone,
 };
 use chrono_tz::Tz;
 use cidr::IpInet;
@@ -81,24 +81,22 @@ pub fn arbitrary_naive_date_time() -> impl Strategy<Value = NaiveDateTime> {
 /// Strategy to generate an arbitrary [`DateTime<FixedOffset>`]
 pub fn arbitrary_date() -> impl Strategy<Value = DateTime<FixedOffset>> {
     // The numbers correspond to the restrictions of `Date` and `FixedOffset`.
-    (-2000i32..3000, 1u32..365, (-86_399..86_399)).prop_map(|(mut y, doy, offset)| {
-        if y == 0 {
-            // The gregorian calendar has no year zero - postgres complains if you send it dates
-            // with a year zero
-            y = 1;
-        }
-        FixedOffset::west_opt(offset)
-            .unwrap_or_else(|| {
-                panic!(
+    // Looks like, PG accepts timezone offset in the range: -15:59:59 .. +15:59:59
+    (-2000i32..3000, 1u32..365, (-57_599..57_599))
+        .prop_map(|(y, doy, offset)| {
+            FixedOffset::west_opt(offset)
+                .unwrap_or_else(|| {
+                    panic!(
                     "FixedOffset::west(secs) requires that -86_400 < secs < 86_400. Secs used: {}",
                     offset
                 )
-            })
-            .from_utc_datetime(&NaiveDateTime::new(
-                NaiveDate::from_yo_opt(y, doy).unwrap(),
-                NaiveTime::from_hms_opt(0, 0, 0).unwrap(),
-            ))
-    })
+                })
+                .from_utc_datetime(&NaiveDateTime::new(
+                    NaiveDate::from_yo_opt(y, doy).unwrap(),
+                    NaiveTime::from_hms_opt(0, 0, 0).unwrap(),
+                ))
+        })
+        .prop_filter("there is no year 0", |dt| dt.year() != 0)
 }
 
 /// Strategy to generate an arbitrary [`DateTime<FixedOffset>`]
@@ -107,6 +105,27 @@ pub fn arbitrary_date_time() -> impl Strategy<Value = DateTime<FixedOffset>> {
         date.timezone()
             .from_utc_datetime(&NaiveDateTime::new(date.date_naive(), time))
     })
+}
+
+/// Strategy to generate an arbitrary [`DateTime<FixedOffset>`] with nanoseconds
+pub fn arbitrary_date_time_with_nanos() -> impl Strategy<Value = DateTime<FixedOffset>> {
+    (
+        arbitrary_date(),
+        arbitrary_naive_time_with_seconds_fraction(),
+    )
+        .prop_map(|(date, time)| {
+            date.timezone()
+                .from_utc_datetime(&NaiveDateTime::new(date.date_naive(), time))
+        })
+}
+
+/// Strategy to generate an arbitrary [`NaiveDateTime`] with nanoseconds
+pub fn arbitrary_naive_date_time_with_nanos() -> impl Strategy<Value = NaiveDateTime> {
+    (
+        arbitrary_date(),
+        arbitrary_naive_time_with_seconds_fraction(),
+    )
+        .prop_map(|(date, time)| NaiveDateTime::new(date.date_naive(), time))
 }
 
 /// Strategy to generate an arbitrary [`NaiveDateTime`] within Timestamp range.

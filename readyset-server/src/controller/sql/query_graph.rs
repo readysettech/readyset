@@ -861,16 +861,13 @@ fn default_row_for_select(st: &SelectStatement) -> Option<Vec<DfValue>> {
                 FieldDefinitionExpr::Expr {
                     expr: Expr::Call(func),
                     ..
-                } => match func {
-                    FunctionExpr::Avg { .. } => DfValue::None,
-                    FunctionExpr::Count { .. } => DfValue::Int(0),
-                    FunctionExpr::CountStar => DfValue::Int(0),
-                    FunctionExpr::Sum { .. } => DfValue::None,
-                    FunctionExpr::Max(..) => DfValue::None,
-                    FunctionExpr::Min(..) => DfValue::None,
-                    FunctionExpr::GroupConcat { .. } => DfValue::None,
-                    FunctionExpr::Call { .. } | FunctionExpr::Substring { .. } => DfValue::None,
-                },
+                } => {
+                    if let FunctionExpr::CountStar | FunctionExpr::Count { .. } = func {
+                        DfValue::Int(0)
+                    } else {
+                        DfValue::None
+                    }
+                }
                 _ => DfValue::None,
             })
             .collect(),

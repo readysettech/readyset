@@ -7,7 +7,7 @@ use std::str::FromStr;
 use itertools::Itertools;
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
-use nom::character::complete::{digit1, line_ending};
+use nom::character::complete::{char, digit1, line_ending};
 use nom::combinator::{map, map_res, not, opt, peek};
 use nom::error::{ErrorKind, ParseError};
 use nom::multi::{separated_list0, separated_list1};
@@ -499,6 +499,154 @@ fn function_call_without_parens(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Fu
     ))
 }
 
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord, Hash, Serialize, Deserialize, Arbitrary,
+)]
+pub enum TimestampField {
+    Century,
+    Day,
+    Decade,
+    Dow,
+    Doy,
+    Epoch,
+    Hour,
+    Isodow,
+    Isoyear,
+    Julian,
+    Microseconds,
+    Millennium,
+    Milliseconds,
+    Minute,
+    Month,
+    Quarter,
+    Second,
+    Timezone,
+    TimezoneHour,
+    TimezoneMinute,
+    Week,
+    Year,
+}
+
+impl TimestampField {
+    pub fn is_date_field(&self) -> bool {
+        use TimestampField::*;
+
+        matches!(
+            self,
+            Century
+                | Day
+                | Decade
+                | Dow
+                | Doy
+                | Epoch
+                | Isodow
+                | Isoyear
+                | Julian
+                | Millennium
+                | Month
+                | Quarter
+                | Week
+                | Year
+        )
+    }
+}
+
+impl fmt::Display for TimestampField {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Century => write!(f, "CENTURY"),
+            Self::Day => write!(f, "DAY"),
+            Self::Decade => write!(f, "DECADE"),
+            Self::Dow => write!(f, "DOW"),
+            Self::Doy => write!(f, "DOY"),
+            Self::Epoch => write!(f, "EPOCH"),
+            Self::Hour => write!(f, "HOUR"),
+            Self::Isodow => write!(f, "ISODOW"),
+            Self::Isoyear => write!(f, "ISOYEAR"),
+            Self::Julian => write!(f, "JULIAN"),
+            Self::Microseconds => write!(f, "MICROSECONDS"),
+            Self::Millennium => write!(f, "MILLENNIUM"),
+            Self::Milliseconds => write!(f, "MILLISECONDS"),
+            Self::Minute => write!(f, "MINUTE"),
+            Self::Month => write!(f, "MONTH"),
+            Self::Quarter => write!(f, "QUARTER"),
+            Self::Second => write!(f, "SECOND"),
+            Self::Timezone => write!(f, "TIMEZONE"),
+            Self::TimezoneHour => write!(f, "TIMEZONE_HOUR"),
+            Self::TimezoneMinute => write!(f, "TIMEZONE_MINUTE"),
+            Self::Week => write!(f, "WEEK"),
+            Self::Year => write!(f, "YEAR"),
+        }
+    }
+}
+
+fn timestamp_field() -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], TimestampField> {
+    move |i| {
+        let alt1 = alt((
+            map(tag_no_case("day"), |_| TimestampField::Day),
+            map(tag_no_case("dow"), |_| TimestampField::Dow),
+            map(tag_no_case("doy"), |_| TimestampField::Doy),
+            map(tag_no_case("week"), |_| TimestampField::Week),
+            map(tag_no_case("month"), |_| TimestampField::Month),
+            map(tag_no_case("year"), |_| TimestampField::Year),
+            map(tag_no_case("hour"), |_| TimestampField::Hour),
+            map(tag_no_case("minute"), |_| TimestampField::Minute),
+            map(tag_no_case("second"), |_| TimestampField::Second),
+            map(tag_no_case("milliseconds"), |_| {
+                TimestampField::Milliseconds
+            }),
+            map(tag_no_case("microseconds"), |_| {
+                TimestampField::Microseconds
+            }),
+            map(tag_no_case("quarter"), |_| TimestampField::Quarter),
+            map(tag_no_case("century"), |_| TimestampField::Century),
+            map(tag_no_case("decade"), |_| TimestampField::Decade),
+            map(tag_no_case("epoch"), |_| TimestampField::Epoch),
+            map(tag_no_case("timezone_hour"), |_| {
+                TimestampField::TimezoneHour
+            }),
+            map(tag_no_case("timezone_minute"), |_| {
+                TimestampField::TimezoneMinute
+            }),
+            map(tag_no_case("timezone"), |_| TimestampField::Timezone),
+            map(tag_no_case("isodow"), |_| TimestampField::Isodow),
+            map(tag_no_case("isoyear"), |_| TimestampField::Isoyear),
+            map(tag_no_case("julian"), |_| TimestampField::Julian),
+        ));
+
+        // `alt` has an upper limit on the number of items it supports in tuples, so we have to
+        // split the parsing for these fields into separate invocations
+        alt((
+            alt1,
+            map(tag_no_case("millennium"), |_| TimestampField::Millennium),
+        ))(i)
+    }
+}
+
+fn extract(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], FunctionExpr> {
+    move |i| {
+        let (i, _) = tag_no_case("EXTRACT")(i)?;
+        let (i, _) = whitespace0(i)?;
+        let (i, _) = char('(')(i)?;
+        let (i, _) = whitespace0(i)?;
+        let (i, field) = timestamp_field()(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("FROM")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, expr) = expression(dialect)(i)?;
+        let (i, _) = whitespace0(i)?;
+        let (i, _) = char(')')(i)?;
+
+        Ok((
+            i,
+            FunctionExpr::Extract {
+                field,
+                expr: Box::new(expr),
+            },
+        ))
+    }
+}
+
 fn substring(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], FunctionExpr> {
     move |i| {
         let (i, _) = alt((tag_no_case("substring"), tag_no_case("substr")))(i)?;
@@ -603,6 +751,7 @@ pub fn function_expr(
                     separator,
                 },
             ),
+            extract(dialect),
             substring(dialect),
             function_call(dialect),
             function_call_without_parens,
@@ -1315,5 +1464,64 @@ mod tests {
             assert_eq!(res1, expected);
             assert_eq!(res2, expected);
         }
+    }
+
+    mod extract {
+        use super::*;
+
+        macro_rules! extract_test {
+            ($field:ident, $field_variant:ident, $field_expr:expr) => {
+                mod $field {
+                    use super::*;
+
+                    #[test]
+                    fn parse_extract_expr() {
+                        let expr = format!("EXTRACT({} FROM \"col\")", $field_expr);
+                        assert_eq!(
+                            test_parse!(extract(Dialect::PostgreSQL), expr.as_bytes()),
+                            FunctionExpr::Extract {
+                                field: TimestampField::$field_variant,
+                                expr: Box::new(Expr::Column(Column {
+                                    name: "col".into(),
+                                    table: None,
+                                })),
+                            },
+                        );
+                    }
+
+                    #[test]
+                    fn format_round_trip() {
+                        let expected = format!("EXTRACT({} FROM \"col\")", $field_expr);
+                        let actual = test_parse!(extract(Dialect::PostgreSQL), expected.as_bytes())
+                            .display(Dialect::PostgreSQL)
+                            .to_string();
+
+                        assert_eq!(expected, actual);
+                    }
+                }
+            };
+        }
+
+        extract_test!(century, Century, "CENTURY");
+        extract_test!(decade, Decade, "DECADE");
+        extract_test!(dow, Dow, "DOW");
+        extract_test!(doy, Doy, "DOY");
+        extract_test!(epoch, Epoch, "EPOCH");
+        extract_test!(hour, Hour, "HOUR");
+        extract_test!(isodow, Isodow, "ISODOW");
+        extract_test!(isoyear, Isoyear, "ISOYEAR");
+        extract_test!(julian, Julian, "JULIAN");
+        extract_test!(microseconds, Microseconds, "MICROSECONDS");
+        extract_test!(millennium, Millennium, "MILLENNIUM");
+        extract_test!(milliseconds, Milliseconds, "MILLISECONDS");
+        extract_test!(minute, Minute, "MINUTE");
+        extract_test!(month, Month, "MONTH");
+        extract_test!(quarter, Quarter, "QUARTER");
+        extract_test!(second, Second, "SECOND");
+        extract_test!(timezone_hour, TimezoneHour, "TIMEZONE_HOUR");
+        extract_test!(timezone_minute, TimezoneMinute, "TIMEZONE_MINUTE");
+        extract_test!(timezone, Timezone, "TIMEZONE");
+        extract_test!(week, Week, "WEEK");
+        extract_test!(year, Year, "YEAR");
     }
 }

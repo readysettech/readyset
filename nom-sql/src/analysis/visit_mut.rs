@@ -546,6 +546,7 @@ pub fn walk_function_expr<'ast, V: VisitorMut<'ast>>(
         FunctionExpr::Avg { expr, .. } => visitor.visit_expr(expr.as_mut()),
         FunctionExpr::Count { expr, .. } => visitor.visit_expr(expr.as_mut()),
         FunctionExpr::CountStar => Ok(()),
+        FunctionExpr::Extract { expr, .. } => visitor.visit_expr(expr.as_mut()),
         FunctionExpr::Sum { expr, .. } => visitor.visit_expr(expr.as_mut()),
         FunctionExpr::Max(expr) => visitor.visit_expr(expr.as_mut()),
         FunctionExpr::Min(expr) => visitor.visit_expr(expr.as_mut()),

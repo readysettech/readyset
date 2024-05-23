@@ -458,10 +458,16 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
                 ))
             }
 
-            DfType::Timestamp { .. }
-            | DfType::DateTime { .. }
-            | DfType::TimestampTz { .. }
-            | DfType::Date => str
+            DfType::Date => str
+                .trim()
+                .parse::<crate::TimestampTz>()
+                .map_err(|e| Self::coerce_err(to_ty, e))
+                .map(|tmz| {
+                    // Make TimestampTz object with date only internals
+                    DfValue::TimestampTz(crate::TimestampTz::from(tmz.to_chrono().date_naive()))
+                }),
+
+            DfType::Timestamp { .. } | DfType::DateTime { .. } | DfType::TimestampTz { .. } => str
                 .trim()
                 .parse::<crate::TimestampTz>()
                 .map_err(|e| Self::coerce_err(to_ty, e))
