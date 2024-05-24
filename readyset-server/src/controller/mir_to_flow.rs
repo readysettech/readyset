@@ -199,6 +199,7 @@ pub(super) fn mir_node_to_flow_parts(
                     internal!("Encountered dependent join when lowering to dataflow")
                 }
                 MirNodeInner::ViewKey { ref key } => {
+                    println!("mir to flow");
                     return Err(ReadySetError::UnsupportedPlaceholders {
                         placeholders: key.mapped_ref(
                             |ViewKeyColumn {

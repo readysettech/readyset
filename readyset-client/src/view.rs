@@ -1539,6 +1539,7 @@ impl ReaderHandle {
         blocking_read: bool,
         dialect: Dialect,
     ) -> ReadySetResult<ViewQuery> {
+        dbg!(&raw_keys);
         trace!("select::lookup");
 
         let (keys, filters) = if raw_keys.is_empty() {

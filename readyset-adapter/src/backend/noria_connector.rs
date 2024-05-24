@@ -1396,6 +1396,7 @@ impl NoriaConnector {
         create_if_not_exist: bool,
         override_schema_search_path: Option<Vec<SqlIdentifier>>,
     ) -> ReadySetResult<PrepareResult> {
+        println!("noria prepare select");
         // extract parameter columns *for the client*
         // note that we have to do this *before* processing the query, otherwise the
         // client will be confused about the number of parameters it's supposed to
@@ -1484,6 +1485,7 @@ impl NoriaConnector {
         ticket: Option<Timestamp>,
         event: &mut readyset_client_metrics::QueryExecutionEvent,
     ) -> ReadySetResult<QueryResult<'_>> {
+        println!("execute select");
         let start = Instant::now();
         let (qname, processed_query_params, params) = match ctx {
             ExecuteSelectContext::Prepared {

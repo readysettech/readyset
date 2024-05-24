@@ -958,7 +958,7 @@ where
         data: DB::PrepareData<'_>,
         event: &mut QueryExecutionEvent,
     ) -> Result<PrepareResultInner<DB>, DB::Error> {
-        let do_noria = select_meta.should_do_noria;
+        let do_noria = &select_meta.should_do_noria;
         let do_migrate = select_meta.must_migrate;
 
         let up_prep: OptionFuture<_> = self
@@ -1356,6 +1356,7 @@ where
         ticket: Option<Timestamp>,
         event: &mut QueryExecutionEvent,
     ) -> ReadySetResult<QueryResult<'a, DB>> {
+        println!("execute noria");
         use noria_connector::PrepareResult::*;
 
         event.destination = Some(QueryDestination::Readyset);
@@ -1391,6 +1392,7 @@ where
         event: &mut QueryExecutionEvent,
         is_fallback: bool,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
+        println!("executing upstream");
         let upstream = upstream.as_mut().ok_or_else(|| {
             ReadySetError::Internal("This condition requires an upstream connector".to_string())
         })?;
@@ -1453,6 +1455,7 @@ where
                           "Error received from noria, sending query to fallback");
                 }
 
+                println!("here1");
                 Self::execute_upstream(upstream, upstream_prep, params, exec_meta, event, true)
                     .await
             }
@@ -1667,6 +1670,7 @@ where
 
         let result = match &cached_statement.prep.inner {
             PrepareResultInner::Noria(prep) => {
+                println!("executing noria");
                 Self::execute_noria(noria, prep, params, ticket, &mut event)
                     .await
                     .map_err(Into::into)
@@ -1678,9 +1682,11 @@ where
                         .query_status_cache
                         .inlined_cache_miss(cached_statement.as_view_request()?, params.to_vec())
                 }
+                println!("here2");
                 Self::execute_upstream(upstream, prep, params, exec_meta, &mut event, false).await
             }
             PrepareResultInner::Both(.., uprep) if should_fallback => {
+                println!("here3");
                 Self::execute_upstream(upstream, uprep, params, exec_meta, &mut event, false).await
             }
             PrepareResultInner::Both(nprep, uprep) => {
@@ -1868,6 +1874,7 @@ where
             }
         }
         // Now migrate the new query
+        println!("doing adapter rewrites");
         adapter_rewrites::process_query(&mut stmt, self.noria.rewrite_params())?;
         let migration_state = match self
             .noria
@@ -2506,6 +2513,7 @@ where
         event: &mut QueryExecutionEvent,
         processed_query_params: ProcessedQueryParams,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
+        println!("adhoc");
         let mut status = status.unwrap_or(QueryStatus {
             migration_state: MigrationState::Unsupported,
             execution_info: None,
