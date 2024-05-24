@@ -364,7 +364,7 @@ dependencies = [
  "hdrhistogram",
  "indicatif",
  "indoc",
- "itertools 0.10.5",
+ "itertools",
  "lazy_static",
  "metrics",
  "metrics-exporter-prometheus",
@@ -451,26 +451,6 @@ dependencies = [
  "lazycell",
  "peeking_take_while",
  "prettyplease",
- "proc-macro2 1.0.81",
- "quote 1.0.36",
- "regex",
- "rustc-hash",
- "shlex",
- "syn 2.0.60",
-]
-
-[[package]]
-name = "bindgen"
-version = "0.69.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a00dc851838a2120612785d195287475a3ac45514741da670b735818822129a0"
-dependencies = [
- "bitflags 2.5.0",
- "cexpr",
- "clang-sys",
- "itertools 0.12.1",
- "lazy_static",
- "lazycell",
  "proc-macro2 1.0.81",
  "quote 1.0.36",
  "regex",
@@ -961,7 +941,7 @@ dependencies = [
  "criterion-plot",
  "futures",
  "is-terminal",
- "itertools 0.10.5",
+ "itertools",
  "num-traits",
  "once_cell",
  "oorandom",
@@ -983,7 +963,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6b50826342786a51a89e2da3a28f1c32b06e387201bc2d19791f622c673706b1"
 dependencies = [
  "cast",
- "itertools 0.10.5",
+ "itertools",
 ]
 
 [[package]]
@@ -1296,7 +1276,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "chrono-tz",
- "itertools 0.10.5",
+ "itertools",
  "lazy_static",
  "mysql-time",
  "mysql_async",
@@ -1330,7 +1310,7 @@ dependencies = [
  "derive_more",
  "hashbag",
  "indexmap 1.9.3",
- "itertools 0.10.5",
+ "itertools",
  "lazy_static",
  "notify",
  "parking_lot 0.12.1",
@@ -2234,7 +2214,7 @@ dependencies = [
  "httpdate",
  "itoa",
  "pin-project-lite",
- "socket2 0.5.6",
+ "socket2 0.4.10",
  "tokio",
  "tower-service",
  "tracing",
@@ -2483,15 +2463,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "itertools"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba291022dbbd398a455acf126c1e341954079855bc60dfdda641363bd6922569"
-dependencies = [
- "either",
-]
-
-[[package]]
 name = "itoa"
 version = "1.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2603,7 +2574,7 @@ name = "librocksdb-sys"
 version = "0.11.0+8.1.1"
 source = "git+https://github.com/readysettech/rust-rocksdb.git#b488c8e6e6e230d88ee446e3c920b1bf29808a55"
 dependencies = [
- "bindgen 0.65.1",
+ "bindgen",
  "bzip2-sys",
  "cc",
  "glob",
@@ -3031,13 +3002,13 @@ dependencies = [
 
 [[package]]
 name = "mysql_common"
-version = "0.32.2"
+version = "0.32.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ccdc1fe2bb3ef97e07ba4397327ed45509a1e2e499e2f8265243879cbc7313c"
+checksum = "d1e52cf194ab414202ead9dfda216d2a9ec59cc97ac024ba499ca686d82f040d"
 dependencies = [
  "base64 0.21.7",
  "bigdecimal",
- "bindgen 0.69.4",
+ "bindgen",
  "bitflags 2.5.0",
  "bitvec",
  "btoi",
@@ -3156,7 +3127,7 @@ dependencies = [
  "fail",
  "failpoint-macros",
  "hex",
- "itertools 0.10.5",
+ "itertools",
  "lazy_static",
  "nom",
  "nom_locate",
@@ -3969,13 +3940,12 @@ source = "git+https://github.com/readysettech/not-perf.git#f50e7896c4556395a5f61
 
 [[package]]
 name = "prometheus-parse"
-version = "0.2.5"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "811031bea65e5a401fb2e1f37d802cca6601e204ac463809a3189352d13b78a5"
+checksum = "c996f3caea1c51aa034c0d2dfd8447a12c555f4567b02677ef8a865ac4cce712"
 dependencies = [
  "chrono",
- "itertools 0.12.1",
- "once_cell",
+ "lazy_static",
  "regex",
 ]
 
@@ -4026,7 +3996,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e5d2d8d10f3c6ded6da8b05b5fb3b8a5082514344d56c9f871412d29b4e075b4"
 dependencies = [
  "anyhow",
- "itertools 0.10.5",
+ "itertools",
  "proc-macro2 1.0.81",
  "quote 1.0.36",
  "syn 1.0.109",
@@ -4111,7 +4081,7 @@ dependencies = [
  "eui48",
  "futures-util",
  "growable-bloom-filter",
- "itertools 0.10.5",
+ "itertools",
  "lazy_static",
  "mysql_async",
  "nom-sql",
@@ -4291,7 +4261,7 @@ name = "reader-map"
 version = "0.1.0"
 dependencies = [
  "iter-enum",
- "itertools 0.10.5",
+ "itertools",
  "left-right",
  "partial-map",
  "proptest",
@@ -4376,7 +4346,7 @@ dependencies = [
  "health-reporter",
  "hyper",
  "indexmap 1.9.3",
- "itertools 0.10.5",
+ "itertools",
  "lazy_static",
  "lru 0.12.3",
  "metrics",
@@ -4478,7 +4448,7 @@ dependencies = [
  "futures",
  "futures-util",
  "hyper",
- "itertools 0.10.5",
+ "itertools",
  "metrics",
  "metrics-util",
  "mysql-time",
@@ -4578,7 +4548,7 @@ dependencies = [
  "futures",
  "futures-util",
  "hyper",
- "itertools 0.10.5",
+ "itertools",
  "mysql_async",
  "nom-sql",
  "rand",
@@ -4642,7 +4612,7 @@ dependencies = [
  "enum-kinds",
  "eui48",
  "fallible-iterator",
- "itertools 0.10.5",
+ "itertools",
  "lazy_static",
  "mysql-time",
  "mysql_common",
@@ -4695,7 +4665,7 @@ dependencies = [
  "futures-util",
  "hashbag",
  "indexmap 1.9.3",
- "itertools 0.10.5",
+ "itertools",
  "lazy_static",
  "merging-interval-tree",
  "metrics",
@@ -4778,7 +4748,7 @@ dependencies = [
  "hex",
  "humantime",
  "indicatif",
- "itertools 0.10.5",
+ "itertools",
  "lazy_static",
  "md5",
  "mysql-srv",
@@ -4817,7 +4787,7 @@ version = "0.7.0"
 dependencies = [
  "derive_more",
  "fixedbitset",
- "itertools 0.10.5",
+ "itertools",
  "lazy_static",
  "nom-sql",
  "petgraph",
@@ -4848,7 +4818,7 @@ dependencies = [
  "failpoint-macros",
  "futures",
  "futures-util",
- "itertools 0.10.5",
+ "itertools",
  "lazy_static",
  "metrics",
  "mysql",
@@ -4899,7 +4869,7 @@ dependencies = [
  "fail",
  "failpoint-macros",
  "futures",
- "itertools 0.10.5",
+ "itertools",
  "lazy_static",
  "metrics",
  "native-tls",
@@ -4987,7 +4957,7 @@ dependencies = [
  "health-reporter",
  "hyper",
  "include_dir",
- "itertools 0.10.5",
+ "itertools",
  "lazy_static",
  "metrics",
  "metrics-exporter-prometheus",
@@ -5057,7 +5027,7 @@ version = "0.0.1"
 dependencies = [
  "criterion",
  "dataflow-expression",
- "itertools 0.10.5",
+ "itertools",
  "nom-sql",
  "readyset-data",
  "readyset-errors",
@@ -5286,7 +5256,7 @@ dependencies = [
  "failpoint-macros",
  "futures",
  "hex",
- "itertools 0.10.5",
+ "itertools",
  "metrics",
  "mysql-srv",
  "mysql-time",
@@ -5944,11 +5914,11 @@ dependencies = [
 
 [[package]]
 name = "sqlformat"
-version = "0.2.3"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce81b7bd7c4493975347ef60d8c7e8b742d4694f4c49f93e0a12ea263938176c"
+checksum = "0c12bc9199d1db8234678b7051747c07f517cdcf019262d1847b94ec8b1aee3e"
 dependencies = [
- "itertools 0.12.1",
+ "itertools",
  "nom",
  "unicode_categories",
 ]
@@ -6218,7 +6188,7 @@ dependencies = [
  "database-utils",
  "fork",
  "futures",
- "itertools 0.10.5",
+ "itertools",
  "libc",
  "nom-sql",
  "nperf-core",
