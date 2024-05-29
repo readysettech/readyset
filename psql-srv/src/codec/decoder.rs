@@ -1183,7 +1183,9 @@ mod tests {
 
     #[test]
     fn test_decode_binary_timestamp() {
-        let dt = NaiveDateTime::from_timestamp_opt(1_000_000_000, 42_000_000).unwrap();
+        let dt = DateTime::from_timestamp(1_000_000_000, 42_000_000)
+            .unwrap()
+            .naive_utc();
         let mut buf = BytesMut::new();
         buf.put_i32(8); // size
         dt.to_sql(&Type::TIMESTAMP, &mut buf).unwrap(); // value

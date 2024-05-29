@@ -2345,7 +2345,7 @@ mod tests {
         let timestamp_tz = DfValue::from(
             FixedOffset::west_opt(18_000)
                 .unwrap()
-                .from_utc_datetime(&NaiveDateTime::from_timestamp_opt(0, 42_000_000).unwrap()),
+                .from_utc_datetime(&DateTime::from_timestamp(0, 42_000_000).unwrap().naive_utc()),
         );
 
         match &timestamp_tz {
@@ -2756,14 +2756,15 @@ mod tests {
         let double = DfValue::Double(-8.99);
         let numeric = DfValue::from(Decimal::new(-899, 2)); // -8.99
         let timestamp = DfValue::TimestampTz(
-            NaiveDateTime::from_timestamp_opt(0, 42_000_000)
+            DateTime::from_timestamp(0, 42_000_000)
                 .unwrap()
+                .naive_utc()
                 .into(),
         );
         let timestamp_tz = DfValue::from(
             FixedOffset::west_opt(19_800)
                 .unwrap()
-                .from_utc_datetime(&NaiveDateTime::from_timestamp_opt(0, 42_000_000).unwrap()),
+                .from_utc_datetime(&DateTime::from_timestamp(0, 42_000_000).unwrap().naive_utc()),
         );
         let int = DfValue::Int(5);
         let bytes = DfValue::ByteArray(Arc::new(vec![0, 8, 39, 92, 100, 128]));
@@ -2806,24 +2807,26 @@ mod tests {
         let numeric = DfValue::from(Decimal::new(-899, 2)); // -8.99
         let numeric2 = DfValue::from(Decimal::new(-898, 2)); // -8.99
         let time = DfValue::TimestampTz(
-            NaiveDateTime::from_timestamp_opt(0, 42_000_000)
+            DateTime::from_timestamp(0, 42_000_000)
                 .unwrap()
+                .naive_utc()
                 .into(),
         );
         let time2 = DfValue::TimestampTz(
-            NaiveDateTime::from_timestamp_opt(1, 42_000_000)
+            DateTime::from_timestamp(1, 42_000_000)
                 .unwrap()
+                .naive_utc()
                 .into(),
         );
         let timestamp_tz = DfValue::from(
             FixedOffset::west_opt(18_000)
                 .unwrap()
-                .from_utc_datetime(&NaiveDateTime::from_timestamp_opt(0, 42_000_000).unwrap()),
+                .from_utc_datetime(&DateTime::from_timestamp(0, 42_000_000).unwrap().naive_utc()),
         );
         let timestamp_tz2 = DfValue::from(
             FixedOffset::west_opt(18_000)
                 .unwrap()
-                .from_utc_datetime(&NaiveDateTime::from_timestamp_opt(1, 42_000_000).unwrap()),
+                .from_utc_datetime(&DateTime::from_timestamp(1, 42_000_000).unwrap().naive_utc()),
         );
         let shrt = DfValue::Int(5);
         let shrt6 = DfValue::Int(6);
@@ -3230,24 +3233,26 @@ mod tests {
         let numeric = DfValue::from(Decimal::new(-899, 2)); // -8.99
         let numeric2 = DfValue::from(Decimal::new(-898, 2)); // -8.99
         let time = DfValue::TimestampTz(
-            NaiveDateTime::from_timestamp_opt(0, 42_000_000)
+            DateTime::from_timestamp(0, 42_000_000)
                 .unwrap()
+                .naive_utc()
                 .into(),
         );
         let time2 = DfValue::TimestampTz(
-            NaiveDateTime::from_timestamp_opt(1, 42_000_000)
+            DateTime::from_timestamp(1, 42_000_000)
                 .unwrap()
+                .naive_utc()
                 .into(),
         );
         let timestamp_tz = DfValue::from(
             FixedOffset::west_opt(18_000)
                 .unwrap()
-                .from_utc_datetime(&NaiveDateTime::from_timestamp_opt(0, 42_000_000).unwrap()),
+                .from_utc_datetime(&DateTime::from_timestamp(0, 42_000_000).unwrap().naive_utc()),
         );
         let timestamp_tz2 = DfValue::from(
             FixedOffset::west_opt(18_000)
                 .unwrap()
-                .from_utc_datetime(&NaiveDateTime::from_timestamp_opt(1, 42_000_000).unwrap()),
+                .from_utc_datetime(&DateTime::from_timestamp(1, 42_000_000).unwrap().naive_utc()),
         );
         let shrt = DfValue::Int(5);
         let shrt6 = DfValue::Int(6);
