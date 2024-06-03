@@ -552,6 +552,7 @@ where
                 SinglePrepareResult::Noria(Update { params, .. } | Delete { params, .. }),
             )) => {
                 let params = convert_columns!(params, info);
+                schema_cache.remove(&statement_id);
                 info.reply(statement_id, &params, &[]).await
             }
             Ok((
@@ -563,7 +564,7 @@ where
             )) => {
                 let params = params.iter().map(|c| c.into()).collect::<Vec<_>>();
                 let schema = schema.iter().map(|c| c.into()).collect::<Vec<_>>();
-
+                schema_cache.remove(&statement_id);
                 info.reply(statement_id, &params, &schema).await
             }
 

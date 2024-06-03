@@ -709,6 +709,7 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
                                         self.shim.on_close(dealloc_id.clone()).await;
                                         if let DeallocateId::Numeric(id) = dealloc_id {
                                             stmts.remove(&id);
+                                            self.schema_cache.remove(&id);
                                         }
                                         writers::write_ok_packet(
                                             &mut self.writer,
@@ -784,6 +785,7 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
                 Command::Close(stmt) => {
                     self.shim.on_close(DeallocateId::Numeric(stmt)).await;
                     stmts.remove(&stmt);
+                    self.schema_cache.remove(&stmt);
                     // NOTE: spec dictates no response from server
                 }
                 Command::ListFields(_) => {
