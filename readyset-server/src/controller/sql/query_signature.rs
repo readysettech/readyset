@@ -12,21 +12,19 @@ pub trait Signature {
 
 // TODO: Change relations to Hashset<&'a Relation>
 #[derive(Clone, Debug)]
-pub struct QuerySignature<'a> {
-    pub relations: HashSet<&'a str>,
-    pub attributes: HashSet<&'a Column>,
+pub struct QuerySignature {
     pub hash: u64,
 }
 
-impl<'a> PartialEq for QuerySignature<'a> {
+impl PartialEq for QuerySignature {
     fn eq(&self, other: &QuerySignature) -> bool {
         self.hash == other.hash
     }
 }
 
-impl<'a> Eq for QuerySignature<'a> {}
+impl Eq for QuerySignature {}
 
-impl<'a> Hash for QuerySignature<'a> {
+impl Hash for QuerySignature {
     fn hash<H>(&self, state: &mut H)
     where
         H: Hasher,
@@ -51,7 +49,6 @@ impl Signature for QueryGraph {
         use std::collections::hash_map::DefaultHasher;
 
         let mut hasher = DefaultHasher::new();
-        let rels = self.relations.keys().map(|r| r.name.as_str()).collect();
 
         // Compute relations part of hash
         let mut r_vec: Vec<_> = self.relations.keys().collect();
@@ -129,8 +126,6 @@ impl Signature for QueryGraph {
         }
 
         QuerySignature {
-            relations: rels,
-            attributes: attrs,
             hash: hasher.finish(),
         }
     }

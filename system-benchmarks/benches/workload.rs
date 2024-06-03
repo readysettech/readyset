@@ -615,6 +615,7 @@ fn start_adapter(upstream_url: &str) -> anyhow::Result<()> {
         "--allow-unauthenticated-connections",
         "--allow-full-materialization",
         "--enable-experimental-post-lookup",
+        "--enable-experimental-straddled-joins",
         "--upstream-db-url",
         upstream_url,
         "--durability",

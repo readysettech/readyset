@@ -151,10 +151,10 @@ where
     /// Note that not all writes will be included with this read -- only those that have been
     /// published by the writer. If no publish has happened, or the map has been destroyed, this
     /// function returns `None`.
-    pub fn first<'a, Q: ?Sized>(&'a self, key: &'_ Q) -> Option<&'a V>
+    pub fn first<'a, Q>(&'a self, key: &'_ Q) -> Option<&'a V>
     where
         K: Borrow<Q>,
-        Q: Ord + Hash,
+        Q: Ord + Hash + ?Sized,
     {
         self.guard.data.get(key).and_then(|values| values.first())
     }

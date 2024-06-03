@@ -1818,8 +1818,12 @@ impl DfState {
         self.workers = Default::default();
 
         let mut new_materializations = Materializations::new();
-        new_materializations.paths = self.materializations.paths.clone();
-        new_materializations.redundant_partial = self.materializations.redundant_partial.clone();
+        new_materializations
+            .paths
+            .clone_from(&self.materializations.paths);
+        new_materializations
+            .redundant_partial
+            .clone_from(&self.materializations.redundant_partial);
         new_materializations.tag_generator = self.materializations.tag_generator;
         new_materializations.config = self.materializations.config.clone();
 

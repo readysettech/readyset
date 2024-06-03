@@ -1,5 +1,4 @@
 #![deny(macro_use_extern_crate)]
-#![feature(bound_map)]
 
 mod local;
 mod records;

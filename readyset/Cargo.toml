@@ -1,6 +1,6 @@
 [package]
 name = "readyset"
-version = "1.3.0"
+version = "1.5.0"
 publish = false
 authors = ["Readyset Technology, Inc. <info@readyset.io>"]
 edition = "2021"

@@ -1,4 +1,4 @@
-#![feature(stmt_expr_attributes, bound_map, iter_order_by, bound_as_ref)]
+#![feature(stmt_expr_attributes, iter_order_by, bound_as_ref)]
 
 mod key;
 mod keyed_state;
