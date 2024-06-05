@@ -571,7 +571,13 @@ impl TestScript {
                     DatabaseType::MySQL => nom_sql::Dialect::MySQL,
                     DatabaseType::PostgreSQL => nom_sql::Dialect::PostgreSQL,
                 },
-                Default::default(),
+                match database_type {
+                    DatabaseType::MySQL if replication_url.is_some() => vec!["noria".into()],
+                    DatabaseType::PostgreSQL if replication_url.is_some() => {
+                        vec!["noria".into(), "public".into()]
+                    }
+                    _ => Default::default(),
+                },
                 adapter_rewrite_params,
             )
             .await;
