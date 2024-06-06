@@ -495,7 +495,7 @@ impl NoriaConnector {
             ("keys", DfType::DEFAULT_TEXT),
             ("size_bytes", DfType::BigInt),
             ("partial", DfType::Bool),
-            ("indexes", DfType::Array(Box::new(DfType::DEFAULT_TEXT))),
+            ("indexes", DfType::DEFAULT_TEXT),
         ];
         let schema = SelectSchema {
             columns: cols.iter().map(|(n, _)| n.into()).collect(),
@@ -526,9 +526,8 @@ impl NoriaConnector {
                         .into_iter()
                         .map(|idx| {
                             format!("{:?}[{}]", idx.index_type, idx.columns.iter().join(", "))
-                                .into()
                         })
-                        .collect::<Vec<DfValue>>()
+                        .join(", ")
                         .into(),
                 ]
             })
