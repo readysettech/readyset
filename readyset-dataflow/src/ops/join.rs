@@ -6,7 +6,6 @@ use itertools::Itertools;
 use readyset_client::KeyComparison;
 use readyset_errors::{internal_err, ReadySetResult};
 use readyset_util::intervals::into_bound_endpoint;
-use readyset_util::Indices;
 use serde::{Deserialize, Serialize};
 use vec1::{vec1, Vec1};
 
@@ -133,28 +132,52 @@ impl Join {
             .collect()
     }
 
-    fn handle_replay_for_generated(
-        &self,
-        left: Records,
-        right: Records,
-    ) -> ReadySetResult<Records> {
-        let mut from_key = vec![];
-        let mut other_key = vec![];
+    /// Build a hash map from one of the sides of the join.
+    fn build_join_hash_map<'a>(
+        &'a self,
+        records: &'a Records,
+        key: &[usize],
+    ) -> HashMap<Vec<DfValue>, Vec<&Record>> {
+        let mut hm = HashMap::new();
+        for rec in records {
+            let key: Vec<DfValue> = key.iter().map(|idx| rec[*idx].clone()).collect();
+            hm.entry(key)
+                .and_modify(|entry: &mut Vec<&Record>| entry.push(rec))
+                .or_insert(vec![rec]);
+        }
+        hm
+    }
+
+    /// Perform a hash join between two sets of records.
+    fn hash_join(&self, left: Records, right: Records) -> ReadySetResult<Records> {
+        let mut left_keys = vec![];
+        let mut right_keys = vec![];
         let mut ret: Vec<Record> = vec![];
         for (left_key, right_key) in &self.on {
-            from_key.push(*left_key);
-            other_key.push(*right_key);
+            left_keys.push(*left_key);
+            right_keys.push(*right_key);
         }
-        for rec in left {
-            let (rec, positive) = rec.extract();
-            invariant!(positive, "replays should only include positive records");
 
-            for other_rec in right
-                .iter()
-                .filter(|r| rec.indices(from_key.clone()) == r.indices(other_key.clone()))
-            {
-                ret.push(Record::Positive(self.generate_row(&rec, other_rec.row())))
-            }
+        // TODO(marce): We could dynamically choose the smaller side to build the hashmap
+        let hm = self.build_join_hash_map(&right, &right_keys);
+
+        for left_rec in left {
+            let key: Vec<DfValue> = left_keys.iter().map(|idx| left_rec[*idx].clone()).collect();
+            if let Some(right_recs) = hm.get(&key) {
+                invariant!(
+                    left_rec.is_positive(),
+                    "replays should only include positive records"
+                );
+                for right_rec in right_recs {
+                    invariant!(
+                        right_rec.is_positive(),
+                        "replays should only include positive records"
+                    );
+                    ret.push(Record::Positive(
+                        self.generate_row(left_rec.row(), right_rec.row()),
+                    ));
+                }
+            };
         }
         Ok(ret.into())
     }
@@ -302,7 +325,7 @@ impl Ingredient for Join {
                 )) {
                     // we have both sides now
                     let (left, right) = if is_left { (rs, other) } else { (other, rs) };
-                    let ret = self.handle_replay_for_generated(left, right)?;
+                    let ret = self.hash_join(left, right)?;
                     Ok(ProcessingResult {
                         results: ret,
                         ..Default::default()

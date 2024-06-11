@@ -518,7 +518,10 @@ fn mysql_type_conversion(left_ty: &DfType, right_ty: &DfType) -> DfType {
         // > or as floating-point values if the other argument is a floating-point value.
         (DfType::Numeric { .. }, DfType::Float | DfType::Double)
         | (DfType::Float | DfType::Double, DfType::Numeric { .. }) => DfType::Double,
-
+        (DfType::DateTime { subsecond_digits }, DfType::Text(_)) => DfType::DateTime {
+            subsecond_digits: *subsecond_digits,
+        },
+        (DfType::Bool, DfType::Bool) => DfType::Bool,
         // > In all other cases, the arguments are compared as floating-point (double-precision)
         // > numbers.
         _ => DfType::Double,
