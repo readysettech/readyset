@@ -11,15 +11,16 @@ use std::io;
 use std::str::FromStr;
 
 use anyhow::{anyhow, bail, Context};
+use bit_vec::BitVec;
 use mysql_time::MySqlTime;
 use nom::branch::alt;
-use nom::bytes::complete::tag;
+use nom::bytes::complete::{tag, tag_no_case};
 use nom::character::complete::{
     alphanumeric1, anychar, char, digit1, line_ending, not_line_ending, one_of, space0, space1,
 };
 use nom::combinator::{complete, eof, map, map_opt, map_parser, opt, peek, recognize};
-use nom::multi::{count, many0, many1, many_till};
-use nom::sequence::{pair, preceded, terminated, tuple};
+use nom::multi::{count, fold_many1, many0, many1, many_till};
+use nom::sequence::{delimited, pair, preceded, terminated, tuple};
 use nom::IResult;
 use nom_locate::LocatedSpan;
 use nom_sql::to_nom_result;
@@ -211,6 +212,20 @@ fn value(i: &[u8]) -> IResult<&[u8], Value> {
                 ))
             }),
             line_ending,
+        ),
+        map(
+            terminated(
+                delimited(
+                    tag_no_case("b'"),
+                    fold_many1(alt((char('0'), char('1'))), BitVec::new, |mut bv, c| {
+                        bv.push(c == '1');
+                        bv
+                    }),
+                    tag("'"),
+                ),
+                line_ending,
+            ),
+            Value::BitVector,
         ),
         map(
             terminated(
@@ -409,6 +424,7 @@ where
 mod tests {
     use std::collections::HashMap;
 
+    use bit_vec::BitVec;
     use chrono::{FixedOffset, NaiveDateTime, TimeZone};
     use nom::combinator::complete;
     use pretty_assertions::assert_eq;
@@ -877,5 +893,31 @@ SELECT * FROM t2
         let input = b"0.7500";
         let expected = Value::from(0.75_f64);
         assert_eq!(complete(float)(input).unwrap().1, expected);
+    }
+
+    #[test]
+    fn parse_query_with_bitvec() {
+        let input = b"query BV
+SELECT * FROM t1
+----
+b'111'
+b'00000000000000000'
+";
+        let result = complete(records)(input);
+        assert_eq!(
+            result.unwrap().1,
+            vec![Record::Query(Query {
+                label: None,
+                column_types: Some(vec![Type::BitVec]),
+                sort_mode: None,
+                conditionals: vec![],
+                query: "SELECT * FROM t1".to_string(),
+                results: QueryResults::Results(vec![
+                    Value::BitVector(BitVec::from_elem(3, true)),
+                    Value::BitVector(BitVec::from_elem(17, false)),
+                ]),
+                params: Default::default(),
+            })]
+        )
     }
 }

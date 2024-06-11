@@ -584,6 +584,7 @@ impl DfValue {
                     Some(max_size) if vec.len() > *max_size as usize => Err(mk_err()),
                     _ => Ok(self.clone()),
                 },
+                DfType::Bit(/* TODO */ _len) => Ok(self.clone()),
                 _ => Err(mk_err()),
             },
             DfValue::ByteArray(_) | DfValue::Max => Err(mk_err()),
@@ -1252,7 +1253,7 @@ impl<'a> TryFrom<&'a Literal> for DfValue {
                 .map(|d| DfValue::Numeric(Arc::new(d))),
             Literal::Blob(b) => Ok(DfValue::from(b.as_slice())),
             Literal::ByteArray(b) => Ok(DfValue::ByteArray(Arc::new(b.clone()))),
-            Literal::BitVector(b) => Ok(DfValue::from(BitVec::from_bytes(b.as_slice()))),
+            Literal::BitVector(b) => Ok(DfValue::from(b)),
             Literal::Placeholder(_) => {
                 internal!("Tried to convert a Placeholder literal to a DfValue")
             }
@@ -1294,7 +1295,7 @@ impl TryFrom<DfValue> for Literal {
             )?)),
             DfValue::ByteArray(ref array) => Ok(Literal::ByteArray(array.as_ref().clone())),
             DfValue::Numeric(ref d) => Ok(Literal::Numeric(d.mantissa(), d.scale())),
-            DfValue::BitVector(ref bits) => Ok(Literal::BitVector(bits.as_ref().to_bytes())),
+            DfValue::BitVector(ref bits) => Ok(Literal::BitVector(bits.as_ref().clone())),
             DfValue::Array(_) => unsupported!("Arrays not implemented yet"),
             DfValue::PassThrough(_) => internal!("PassThrough has no representation as a literal"),
             DfValue::Max => internal!("MAX has no representation as a literal"),
@@ -1335,6 +1336,12 @@ impl From<NaiveDateTime> for DfValue {
 impl From<DateTime<FixedOffset>> for DfValue {
     fn from(dt: DateTime<FixedOffset>) -> Self {
         DfValue::TimestampTz(dt.into())
+    }
+}
+
+impl From<&BitVec> for DfValue {
+    fn from(value: &BitVec) -> Self {
+        DfValue::BitVector(Arc::new(value.clone()))
     }
 }
 

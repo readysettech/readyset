@@ -163,7 +163,7 @@ pub enum Literal {
     // String or not.
     ByteArray(Vec<u8>),
     Placeholder(ItemPlaceholder),
-    BitVector(Vec<u8>),
+    BitVector(#[strategy(arbitrary_bitvec(0..=64))] BitVec),
 }
 
 impl From<bool> for Literal {
@@ -264,10 +264,7 @@ impl DialectDisplay for Literal {
                     write!(
                         f,
                         "B'{}'",
-                        BitVec::from_bytes(b.as_slice())
-                            .iter()
-                            .map(|bit| if bit { "1" } else { "0" })
-                            .join("")
+                        b.iter().map(|bit| if bit { "1" } else { "0" }).join("")
                     )
                 }
             }
@@ -373,12 +370,12 @@ impl Literal {
             SqlType::Bit(n) => {
                 let size = n.unwrap_or(1) as usize;
                 arbitrary_bitvec(size..=size)
-                    .prop_map(|bits| Self::BitVector(bits.to_bytes()))
+                    .prop_map(Self::BitVector)
                     .boxed()
             }
             SqlType::VarBit(n) => {
                 arbitrary_bitvec(0..n.map(|max_size| max_size as usize).unwrap_or(20_usize))
-                    .prop_map(|bits| Self::BitVector(bits.to_bytes()))
+                    .prop_map(Self::BitVector)
                     .boxed()
             }
             SqlType::Serial => any::<i32>().prop_map(Self::from).boxed(),
@@ -563,9 +560,10 @@ fn simple_literal(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResu
             integer_literal,
             boolean_literal,
             map(dialect.bytes_literal(), Literal::ByteArray),
-            map(delimited(tag_no_case("b'"), bits, tag("'")), |bits| {
-                Literal::BitVector(bits.to_bytes())
-            }),
+            map(
+                delimited(tag_no_case("b'"), bits, tag("'")),
+                Literal::BitVector,
+            ),
             map(
                 terminated(
                     tag_no_case("null"),
