@@ -1,11 +1,11 @@
-use std::iter;
+use std::{cmp, iter};
 
 use nom_sql::{
     BinaryOperator as SqlBinaryOperator, Column, DialectDisplay, Expr as AstExpr, FunctionExpr,
     InValue, Relation, UnaryOperator,
 };
 use readyset_data::dialect::SqlEngine;
-use readyset_data::{DfType, DfValue};
+use readyset_data::{Collation, DfType, DfValue};
 use readyset_errors::{
     internal, internal_err, invalid_query, invalid_query_err, unsupported, ReadySetError,
     ReadySetResult,
@@ -459,72 +459,140 @@ impl BuiltinFunction {
     }
 }
 
+fn mysql_temporal_types_cvt(left: &DfType, right: &DfType) -> Option<DfType> {
+    let left_is_date_and_time = left.is_date_and_time();
+    let right_is_date_and_time = right.is_date_and_time();
+
+    let left_is_temporal = left_is_date_and_time || left.is_any_temporal();
+    let right_is_temporal = right_is_date_and_time || right.is_any_temporal();
+
+    if left_is_temporal && right_is_temporal {
+        if left_is_date_and_time && right_is_date_and_time {
+            if let DfType::DateTime { subsecond_digits } = left {
+                Some(DfType::DateTime {
+                    subsecond_digits: cmp::max(*subsecond_digits, right.subsecond_digits()?),
+                })
+            } else if let DfType::DateTime { subsecond_digits } = right {
+                Some(DfType::DateTime {
+                    subsecond_digits: cmp::max(*subsecond_digits, left.subsecond_digits()?),
+                })
+            } else if let DfType::TimestampTz { .. } = left
+                && let DfType::TimestampTz { .. } = right
+            {
+                Some(DfType::TimestampTz {
+                    subsecond_digits: cmp::max(left.subsecond_digits()?, right.subsecond_digits()?),
+                })
+            } else {
+                Some(DfType::Timestamp {
+                    subsecond_digits: cmp::max(left.subsecond_digits()?, right.subsecond_digits()?),
+                })
+            }
+        } else if let DfType::Time {
+            subsecond_digits: left_subsec_digs,
+        } = left
+            && let DfType::Time {
+                subsecond_digits: right_subsec_digs,
+            } = right
+        {
+            Some(DfType::Time {
+                subsecond_digits: cmp::max(*left_subsec_digs, *right_subsec_digs),
+            })
+        } else if (matches!(left, DfType::Time { .. }) && right.is_any_int())
+            || (matches!(right, DfType::Time { .. }) && left.is_any_int())
+        {
+            Some(DfType::BigInt)
+        } else if left_is_date_and_time {
+            Some(left.clone())
+        } else if right_is_date_and_time {
+            Some(right.clone())
+        } else {
+            Some(DfType::Date)
+        }
+    } else if (left_is_date_and_time && right.is_any_int())
+        || (right_is_date_and_time && left.is_any_int())
+    {
+        Some(DfType::BigInt)
+    } else if left_is_temporal && right.is_any_text() {
+        Some(left.clone())
+    } else if right_is_temporal && left.is_any_text() {
+        Some(right.clone())
+    } else {
+        None
+    }
+}
+
+fn get_text_type_max_length(ty: &DfType) -> Option<u16> {
+    match ty {
+        DfType::Text(..) => Some(65535),
+        DfType::VarChar(ln, _) => Some(*ln),
+        DfType::Char(ln, _) => Some(*ln),
+        _ => None,
+    }
+}
+
+fn mysql_text_type_cvt(left: &DfType, right: &DfType) -> Option<DfType> {
+    if left.is_any_text() && right.is_any_text() {
+        if matches!(left, DfType::Text(..)) || matches!(right, DfType::Text(..)) {
+            Some(DfType::DEFAULT_TEXT)
+        } else {
+            let left_len = get_text_type_max_length(left)?;
+            let right_len = get_text_type_max_length(right)?;
+            if let DfType::Char(..) = left
+                && let DfType::Char(..) = right
+            {
+                Some(DfType::Char(
+                    cmp::max(left_len, right_len),
+                    Collation::default(),
+                ))
+            } else {
+                Some(DfType::VarChar(
+                    cmp::max(left_len, right_len),
+                    Collation::default(),
+                ))
+            }
+        }
+    } else {
+        None
+    }
+}
+
+fn mysql_numerical_type_cvt(left: &DfType, right: &DfType) -> Option<DfType> {
+    if left.is_any_float() || right.is_any_float() {
+        Some(DfType::Double)
+    } else if left.is_any_int() && right.is_any_int() {
+        if left.is_any_unsigned_int() && right.is_any_unsigned_int() {
+            Some(DfType::UnsignedBigInt)
+        } else {
+            Some(DfType::BigInt)
+        }
+    } else {
+        let left_is_decimal = left.is_numeric();
+        let right_is_decimal = right.is_numeric();
+        if left_is_decimal && right_is_decimal {
+            // TODO: should return decimal, capable of storing max pres and scale
+            Some(left.clone())
+        } else if left_is_decimal && right.is_any_exact_number() {
+            Some(left.clone())
+        } else if left.is_any_exact_number() && right_is_decimal {
+            Some(right.clone())
+        } else {
+            None
+        }
+    }
+}
+
 /// <https://dev.mysql.com/doc/refman/8.0/en/type-conversion.html>
 fn mysql_type_conversion(left_ty: &DfType, right_ty: &DfType) -> DfType {
-    match (left_ty, right_ty) {
-        //  If both arguments in a comparison operation are strings, they are compared as strings.
-        (DfType::Text(_), DfType::Text(_)) => DfType::DEFAULT_TEXT,
-
-        // If both arguments are integers, they are compared as integers.
-        (
-            DfType::TinyInt
-            | DfType::UnsignedTinyInt
-            | DfType::SmallInt
-            | DfType::UnsignedSmallInt
-            | DfType::MediumInt
-            | DfType::UnsignedMediumInt
-            | DfType::Int
-            | DfType::UnsignedInt
-            | DfType::BigInt
-            | DfType::UnsignedBigInt,
-            DfType::TinyInt
-            | DfType::UnsignedTinyInt
-            | DfType::SmallInt
-            | DfType::UnsignedSmallInt
-            | DfType::MediumInt
-            | DfType::UnsignedMediumInt
-            | DfType::Int
-            | DfType::UnsignedInt
-            | DfType::BigInt
-            | DfType::UnsignedBigInt,
-        ) => DfType::BigInt,
-
-        // > Hexadecimal values are treated as binary strings if not compared to a number.
-        // TODO
-
-        // > If one of the arguments is a TIMESTAMP or DATETIME column and the other argument is a
-        // > constant, the constant is converted to a timestamp before the comparison is performed.
-        // > This is done to be more ODBC-friendly. This is not done for the arguments to IN()
-        // TODO
-
-        // > If one of the arguments is a decimal value, comparison depends on the other argument.
-        // > The arguments are compared as decimal values if the other argument is a decimal or
-        // > integer value...
-        (
-            decimal @ DfType::Numeric { .. },
-            DfType::Numeric { .. }
-            | DfType::TinyInt
-            | DfType::UnsignedTinyInt
-            | DfType::SmallInt
-            | DfType::UnsignedSmallInt
-            | DfType::MediumInt
-            | DfType::UnsignedMediumInt
-            | DfType::Int
-            | DfType::UnsignedInt
-            | DfType::BigInt
-            | DfType::UnsignedBigInt,
-        ) => decimal.clone(),
-
-        // > or as floating-point values if the other argument is a floating-point value.
-        (DfType::Numeric { .. }, DfType::Float | DfType::Double)
-        | (DfType::Float | DfType::Double, DfType::Numeric { .. }) => DfType::Double,
-        (DfType::DateTime { subsecond_digits }, DfType::Text(_)) => DfType::DateTime {
-            subsecond_digits: *subsecond_digits,
-        },
-        (DfType::Bool, DfType::Bool) => DfType::Bool,
-        // > In all other cases, the arguments are compared as floating-point (double-precision)
-        // > numbers.
-        _ => DfType::Double,
+    if left_ty.is_bool() && right_ty.is_bool() {
+        DfType::Bool
+    } else if let Some(ty) = mysql_text_type_cvt(left_ty, right_ty) {
+        ty
+    } else if let Some(ty) = mysql_temporal_types_cvt(left_ty, right_ty) {
+        ty
+    } else if let Some(ty) = mysql_numerical_type_cvt(left_ty, right_ty) {
+        ty
+    } else {
+        DfType::Double
     }
 }
 

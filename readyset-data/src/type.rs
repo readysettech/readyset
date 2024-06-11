@@ -467,17 +467,7 @@ impl DfType {
     /// Returns `true` if this is any `*int` type.
     #[inline]
     pub fn is_any_int(&self) -> bool {
-        matches!(
-            *self,
-            Self::TinyInt
-                | Self::UnsignedTinyInt
-                | Self::SmallInt
-                | Self::UnsignedSmallInt
-                | Self::Int
-                | Self::UnsignedInt
-                | Self::BigInt
-                | Self::UnsignedBigInt
-        )
+        self.is_any_normal_int() || self.is_any_bigint()
     }
 
     /// Returns `true` if this is any large integer type (bigint/int8).
@@ -499,6 +489,19 @@ impl DfType {
                 | Self::UnsignedInt
                 | Self::MediumInt
                 | Self::UnsignedMediumInt
+        )
+    }
+
+    /// Returns `true` if this is any unsigned integer type.
+    #[inline]
+    pub fn is_any_unsigned_int(&self) -> bool {
+        matches!(
+            *self,
+            Self::UnsignedTinyInt
+                | Self::UnsignedSmallInt
+                | Self::UnsignedInt
+                | Self::UnsignedMediumInt
+                | Self::UnsignedBigInt
         )
     }
 
@@ -524,6 +527,34 @@ impl DfType {
     #[inline]
     pub fn is_numeric(&self) -> bool {
         matches!(*self, Self::Numeric { .. })
+    }
+
+    /// Returns `true` if this is DATE/TIMESTAMP/TIMESTAMPTZ/DATETIME type.
+    #[inline]
+    pub fn is_any_temporal(&self) -> bool {
+        matches!(
+            *self,
+            Self::DateTime { .. }
+                | Self::Date
+                | Self::Timestamp { .. }
+                | Self::TimestampTz { .. }
+                | Self::Time { .. }
+        )
+    }
+
+    /// Returns `true` if this is any exact number type (INTEGER(s), DECIMAL).
+    #[inline]
+    pub fn is_any_exact_number(&self) -> bool {
+        self.is_any_int() || self.is_numeric()
+    }
+
+    /// Returns `true` if this is DATETIME/TIMESTAMP/TIMESTAMPTZ.
+    #[inline]
+    pub fn is_date_and_time(&self) -> bool {
+        matches!(
+            *self,
+            Self::DateTime { .. } | Self::Timestamp { .. } | Self::TimestampTz { .. }
+        )
     }
 
     /// Returns `true` if this is any PostgreSQL array type.
