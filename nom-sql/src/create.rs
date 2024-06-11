@@ -1128,6 +1128,8 @@ pub fn create_cached_query(
 
 #[cfg(test)]
 mod tests {
+    use bit_vec::BitVec;
+
     use super::*;
     use crate::column::Column;
     use crate::table::Relation;
@@ -2882,7 +2884,7 @@ PRIMARY KEY (`id`));";
                         vec![
                             ColumnConstraint::NotNull,
                             ColumnConstraint::DefaultValue(Expr::Literal(Literal::BitVector(
-                                vec![0]
+                                BitVec::from_elem(1, false)
                             ))),
                         ],
                     ),],

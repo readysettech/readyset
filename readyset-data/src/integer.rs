@@ -2,6 +2,7 @@ use std::convert::TryFrom;
 use std::fmt;
 use std::sync::Arc;
 
+use bit_vec::BitVec;
 use readyset_errors::{ReadySetError, ReadySetResult};
 use rust_decimal::Decimal;
 
@@ -57,7 +58,7 @@ where
     u64: TryFrom<I>,
     Decimal: From<I>,
     usize: TryFrom<I>,
-    I: std::ops::BitXor<I, Output = I> + std::cmp::Eq + Copy + fmt::Display + IntAsFloat,
+    I: std::ops::BitXor<I, Output = I> + IntAsFloat + std::cmp::Eq + Copy + fmt::Display,
 {
     let err = || ReadySetError::DfValueConversionError {
         src_type: from_ty.to_string(),
@@ -111,7 +112,7 @@ where
         DfType::VarBinary(l) => {
             let mut val = val.to_string();
             val.truncate(l as usize);
-            Ok(val.to_string().into_bytes().into())
+            Ok(val.into_bytes().into())
         }
 
         DfType::Binary(l) => {
@@ -188,11 +189,14 @@ where
             Ok(DfValue::from(r#enum::apply_enum_limits(idx, variants)))
         }
 
+        DfType::Bit(/* TODO */ _len) => u64::try_from(val)
+            .map_err(|_| err())
+            .map(|v| DfValue::BitVector(Arc::new(BitVec::from_bytes(&v.to_be_bytes())))),
+
         DfType::Unknown
         | DfType::MacAddr
         | DfType::Inet
         | DfType::Uuid
-        | DfType::Bit(_)
         | DfType::VarBit(_)
         | DfType::Array(_) => Err(ReadySetError::DfValueConversionError {
             src_type: from_ty.to_string(),

@@ -1,0 +1,20 @@
+statement ok
+create table t1 (b bit(3));
+
+statement ok
+insert into t1 values (b'111');
+
+statement ok
+insert into t1 values (b'010');
+
+query BV
+select * from t1 where b = $1
+? = b'111'
+----
+b'111'
+
+query BV
+select * from t1 where b = $1
+? = b'010'
+----
+b'010'
