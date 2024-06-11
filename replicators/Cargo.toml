@@ -52,7 +52,7 @@ replication-offset = { path = "../replication-offset" }
 test-utils = { path = "../test-utils" }
 readyset-server = { path = "../readyset-server" }
 readyset-telemetry-reporter = { path = "../readyset-telemetry-reporter", features = ["test-util"] }
-readyset-client-test-helpers = { path = "../readyset-client-test-helpers", features = ["postgres"] }
+readyset-client-test-helpers = { path = "../readyset-client-test-helpers", features = ["mysql", "postgres"] }
 proptest-stateful = { path = "../proptest-stateful" }
 serial_test = { workspace = true }
 rand = { workspace = true }

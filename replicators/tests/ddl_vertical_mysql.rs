@@ -7,16 +7,16 @@
 //! find new bugs); to run it locally run:
 //!
 //! ```notrust
-//! cargo test -p replicators --features ddl_vertical_tests --test ddl_vertical
+//! cargo test -p replicators --features ddl_vertical_tests --test ddl_vertical_mysql
 //! ```
 //!
-//! This test suite will connect to a local Postgres database, which can be set up with all the
+//! This test suite will connect to a local MySQL database, which can be set up with all the
 //! correct configuration using the `docker-compose.yml` and `docker-compose.override.example.yml`
-//! in the root of the repository. To run that Postgres database, run:
+//! in the build directory of the repository. To run that MySQL database, run:
 //!
 //! ```notrust
 //! $ cp docker-compose.override.example.yml docker-compose.yml
-//! $ docker-compose up -d postgres
+//! $ docker-compose up -d MySQL
 //! ```
 //!
 //! Note that this test suite requires the *exact* configuration specified in that docker-compose
@@ -24,13 +24,15 @@
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashSet};
-use std::fmt::{Debug, Display, Formatter, Result};
+use std::fmt::{Debug, Formatter, Result};
 use std::iter::once;
 use std::panic::AssertUnwindSafe;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use itertools::Itertools;
+use mysql_async::prelude::Queryable;
+use mysql_async::{Conn, OptsBuilder, Row};
 use nom_sql::{DialectDisplay, SqlType};
 use proptest::prelude::*;
 use proptest::strategy::{BoxedStrategy, Just, Strategy};
@@ -39,16 +41,16 @@ use proptest_stateful::{
     proptest_config_with_local_failure_persistence, ModelState, ProptestStatefulConfig,
 };
 use readyset_client::SingleKeyEviction;
-use readyset_client_test_helpers::psql_helpers::{self, PostgreSQLAdapter};
-use readyset_client_test_helpers::TestBuilder;
-use readyset_data::{DfValue, TimestampTz};
+use readyset_client_test_helpers::mysql_helpers::MySQLAdapter;
+use readyset_client_test_helpers::{mysql_helpers, TestBuilder};
+use readyset_data::DfValue;
 use readyset_server::Handle;
 use readyset_util::eventually;
 use readyset_util::shutdown::ShutdownSender;
-use tokio_postgres::config::Host;
-use tokio_postgres::{Client, Config, NoTls, Row};
 
-const SQL_NAME_REGEX: &str = "[a-zA-Z_][a-zA-Z0-9_]*";
+// Disabling update case while REA-4432 is being worked on
+//const SQL_NAME_REGEX: &str = "[a-zA-Z_][a-zA-Z0-9_]*";
+const SQL_NAME_REGEX: &str = "[a-z_][a-z0-9_]*";
 
 /// This struct is used to generate arbitrary column specifications, both for creating tables, and
 /// potentially for altering them by adding columns and such.
@@ -74,12 +76,12 @@ impl Arbitrary for ColumnSpec {
     type Parameters = BTreeMap<String, Vec<String>>;
     type Strategy = BoxedStrategy<Self>;
 
-    fn arbitrary_with(enum_types: Self::Parameters) -> Self::Strategy {
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         let name_gen = SQL_NAME_REGEX
-            .prop_filter("Can't generate additional columns named \"id\"", |s| {
+            .prop_filter("Can't generate additional columns named id", |s| {
                 s.to_lowercase() != "id"
             });
-        let mut col_types = vec![
+        let col_types = vec![
             (
                 SqlType::Int(None),
                 any::<i32>().prop_map(DfValue::from).boxed(),
@@ -92,27 +94,10 @@ impl Arbitrary for ColumnSpec {
                     .boxed(),
             ),
             (
-                SqlType::VarChar(None),
+                SqlType::Text,
                 any::<String>().prop_map(DfValue::from).boxed(),
             ),
-            (
-                SqlType::TimestampTz,
-                any::<TimestampTz>().prop_map(DfValue::TimestampTz).boxed(),
-            ),
         ];
-        let enum_col_types: Vec<_> = enum_types
-            .into_iter()
-            .map(|(name, values)| {
-                (
-                    // We use SqlType::Other instead of SqlType::Enum because we want to refer
-                    // directly to the named enum type when we use this SqlType value to create a
-                    // column definition in the corresponding CREATE TABLE statement:
-                    SqlType::Other(name.into()),
-                    sample::select(values).prop_map(DfValue::from).boxed(),
-                )
-            })
-            .collect();
-        col_types.extend_from_slice(&enum_col_types);
         (name_gen, sample::select(col_types))
             .prop_map(|(name, (sql_type, gen))| ColumnSpec {
                 name,
@@ -120,22 +105,6 @@ impl Arbitrary for ColumnSpec {
                 gen,
             })
             .boxed()
-    }
-}
-
-/// Used for the [`Operation::InsertEnumValue`] variant to specify where to add the new enum value.
-#[derive(test_strategy::Arbitrary, Clone, Debug)]
-enum EnumPos {
-    Before,
-    After,
-}
-
-impl Display for EnumPos {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-        match self {
-            EnumPos::Before => f.write_str("BEFORE"),
-            EnumPos::After => f.write_str("AFTER"),
-        }
     }
 }
 
@@ -177,27 +146,6 @@ enum Operation {
     },
     /// Drops the view with the given name
     DropView(String),
-    /// Creates an ENUM type with the given name and values
-    CreateEnum(String, Vec<String>),
-    /// Drops an ENUM type with the given name
-    DropEnum(String),
-    /// Adds a value to the end of an existing ENUM type with the given names
-    AppendEnumValue {
-        type_name: String,
-        value_name: String,
-    },
-    InsertEnumValue {
-        type_name: String,
-        value_name: String,
-        position: EnumPos,
-        next_to_value: String,
-    },
-    /// Renames an existing ENUM type value
-    RenameEnumValue {
-        type_name: String,
-        value_name: String,
-        new_name: String,
-    },
     /// This operation triggers an eviction of a single key in ReadySet, using `inner` as the
     /// payload for the /evict_single RPC.
     ///
@@ -211,42 +159,18 @@ enum Operation {
     },
 }
 
-/// Returns an iterator that yields names of tables that use the given type.
-fn tables_using_type<'a>(
-    tables: &'a BTreeMap<String, Vec<ColumnSpec>>,
-    type_name: &'a str,
-) -> impl Iterator<Item = &'a str> {
-    tables.iter().filter_map(move |(name, columns)| {
-        if columns.iter().any(|cs| cs.name == type_name) {
-            Some(name.as_str())
-        } else {
-            None
-        }
-    })
-}
-
 // Generators for Operation:
 
-fn gen_column_specs(
-    enum_types: BTreeMap<String, Vec<String>>,
-) -> impl Strategy<Value = Vec<ColumnSpec>> {
-    collection::vec(any_with::<ColumnSpec>(enum_types), 1..4)
+fn gen_column_specs() -> impl Strategy<Value = Vec<ColumnSpec>> {
+    collection::vec(any_with::<ColumnSpec>(Default::default()), 1..4)
         .prop_filter("duplicate column names not allowed", |specs| {
             specs.iter().map(|cs| &cs.name).all_unique()
         })
 }
 
 prop_compose! {
-    fn gen_enum_values()(values in collection::hash_set(SQL_NAME_REGEX, 1..4)) -> Vec<String> {
-        let mut res = values.into_iter().collect::<Vec<_>>();
-        res.sort();
-        res
-    }
-}
-
-prop_compose! {
-    fn gen_create_table(enum_types: BTreeMap<String, Vec<String>>)
-                       (name in SQL_NAME_REGEX, cols in gen_column_specs(enum_types))
+    fn gen_create_table()
+                       (name in SQL_NAME_REGEX, cols in gen_column_specs())
                        -> Operation {
         Operation::CreateTable(name, cols)
     }
@@ -296,7 +220,7 @@ fn gen_add_col(tables: BTreeMap<String, Vec<ColumnSpec>>) -> impl Strategy<Value
 }
 
 fn gen_non_id_col_name() -> impl Strategy<Value = String> {
-    SQL_NAME_REGEX.prop_filter("Can't generate additional columns named \"id\"", |s| {
+    SQL_NAME_REGEX.prop_filter("Can't generate additional columns named id", |s| {
         s.to_lowercase() != "id"
     })
 }
@@ -366,67 +290,6 @@ prop_compose! {
     }
 }
 
-prop_compose! {
-    fn gen_create_enum()
-                      (name in SQL_NAME_REGEX, values in gen_enum_values().prop_shuffle())
-                      -> Operation {
-        Operation::CreateEnum(name, values)
-    }
-}
-
-prop_compose! {
-    fn gen_drop_enum(enum_types: Vec<String>)(name in sample::select(enum_types)) -> Operation {
-        Operation::DropEnum(name)
-    }
-}
-
-fn gen_append_enum_value(
-    enum_types: BTreeMap<String, Vec<String>>,
-) -> impl Strategy<Value = Operation> {
-    gen_append_enum_value_inner(enum_types.keys().cloned().collect()).prop_filter(
-        "Can't add duplicate value to existing ENUM type",
-        move |op| match op {
-            Operation::AppendEnumValue {
-                type_name,
-                value_name,
-            } => !enum_types[type_name].contains(value_name),
-            _ => unreachable!(),
-        },
-    )
-}
-
-prop_compose! {
-    fn gen_append_enum_value_inner(enum_type_names: Vec<String>)
-                               (type_name in sample::select(enum_type_names),
-                                value_name in SQL_NAME_REGEX)
-                               -> Operation {
-        Operation::AppendEnumValue { type_name, value_name }
-    }
-}
-
-prop_compose! {
-    fn gen_insert_enum_value(enum_types: BTreeMap<String, Vec<String>>)
-                            (et in sample::select(enum_types.keys().cloned().collect::<Vec<_>>()))
-                            (next_to_value in sample::select(enum_types[&et].clone()),
-                             type_name in Just(et),
-                             position in any::<EnumPos>(),
-                             value_name in SQL_NAME_REGEX)
-                            -> Operation {
-        Operation::InsertEnumValue { type_name, value_name, position, next_to_value }
-    }
-}
-
-prop_compose! {
-    fn gen_rename_enum_value(enum_types: BTreeMap<String, Vec<String>>)
-                            (et in sample::select(enum_types.keys().cloned().collect::<Vec<_>>()))
-                            (value_name in sample::select(enum_types[&et].clone()),
-                             type_name in Just(et),
-                             new_name in SQL_NAME_REGEX)
-                            -> Operation {
-        Operation::RenameEnumValue { type_name, value_name, new_name }
-    }
-}
-
 /// A definition for a test view. Currently one of:
 ///  - Simple (SELECT * FROM table)
 ///  - Join (SELECT * FROM table_a JOIN table_b ON table_a.id = table_b.id)
@@ -438,8 +301,8 @@ enum TestViewDef {
 
 struct DDLTestRunContext {
     rs_host: String,
-    rs_conn: Client,
-    pg_conn: Client,
+    rs_conn: Conn,
+    mysql_conn: Conn,
     shutdown_tx: Option<ShutdownSender>, // Needs to be Option so we can move it out of the struct
     _handle: Handle,
 }
@@ -465,8 +328,6 @@ struct DDLModelState {
     // Map of view name to view definition
     views: BTreeMap<String, TestViewDef>,
     deleted_views: HashSet<String>,
-    // Map of custom ENUM type names to type definitions (represented by a Vec of ENUM elements)
-    enum_types: BTreeMap<String, Vec<String>>,
 }
 
 #[async_trait(?Send)]
@@ -477,26 +338,24 @@ impl ModelState for DDLModelState {
 
     /// Each invocation of this function returns a [`Vec`] of [`Strategy`]s for generating
     /// [`Operation`]s *given the current state of the test model*. With a brand new model, the only
-    /// possible operations are [`Operation::CreateTable`] and [`Operation::CreateEnum`], but as
+    /// possible operation is [`Operation::CreateTable`], but as
     /// tables/types are created and rows are written, other operations become possible.
     ///
     /// Note that there is some redundancy between the logic in this function and the logic in
     /// [`Operation::preconditions`](enum.Operation.html#method.preconditions). This is necessary
-    /// because `gen_op` is used for the initial test generation, but the preconditions are used
-    /// during shrinking. (Technically, we do also check and filter on preconditions at the start
-    /// of each test, but it's best to depend on that check as little as possible since test
-    /// filters like that can lead to slow and lopsided test generation.)
+    /// because `op_generators` is used for the initial test generation, but the preconditions are
+    /// used during shrinking. (Technically, we do also check and filter on preconditions at the
+    /// start of each test, but it's best to depend on that check as little as possible since
+    /// test filters like that can lead to slow and lopsided test generation.)
     fn op_generators(&self) -> Vec<Self::OperationStrategy> {
-        // We can always create more tables or enum types, so start with those two generators:
-        let create_table_strat = gen_create_table(self.enum_types.clone()).boxed();
-        let create_enum_strat = gen_create_enum().boxed();
+        let create_table_strat = gen_create_table().boxed();
         // We can also always try to issue an eviction:
         let evict_strategy = Just(Operation::Evict {
             inner: RefCell::new(None),
         })
         .boxed();
 
-        let mut possible_ops = vec![create_table_strat, create_enum_strat, evict_strategy];
+        let mut possible_ops = vec![create_table_strat, evict_strategy];
 
         // If we have at least one table, we can do any of:
         //  * delete a table
@@ -551,7 +410,7 @@ impl ModelState for DDLModelState {
             possible_ops.push(rename_col_strat);
 
             let _drop_col_strategy = gen_drop_col(self.tables.clone(), tables_with_cols).boxed();
-            // Commented out for now because this triggers ENG-2548
+            // Commented out for now because this triggers REA-2216
             // possible_ops.push(drop_col_strategy);
         }
         // If we have at least one row written to a table, we can generate delete ops:
@@ -570,41 +429,6 @@ impl ModelState for DDLModelState {
             let delete_strategy = gen_delete_row(non_empty_tables, self.pkeys.clone()).boxed();
             possible_ops.push(delete_strategy);
         }
-
-        // If we have at least one enum type created, we can add a value or rename a value
-        if !self.enum_types.is_empty() {
-            let append_enum_value_strat = gen_append_enum_value(self.enum_types.clone()).boxed();
-            possible_ops.push(append_enum_value_strat);
-
-            let insert_enum_value_strat = gen_insert_enum_value(self.enum_types.clone()).boxed();
-            possible_ops.push(insert_enum_value_strat);
-
-            let _rename_enum_value_strat = gen_rename_enum_value(self.enum_types.clone()).boxed();
-            // TODO uncomment after ENG-2823 is fixed
-            //possible_ops.push(rename_enum_value_strat);
-        }
-
-        // If we have at least one enum type created, and no table is using it, we can drop an enum
-        let unused_enums: Vec<String> = self
-            .enum_types
-            .keys()
-            .filter_map(|name| {
-                if !self.tables.values().any(|columns| {
-                    columns
-                        .iter()
-                        .any(|cs| cs.sql_type == SqlType::Other(name.into()))
-                }) {
-                    Some(name.clone())
-                } else {
-                    None
-                }
-            })
-            .collect();
-        if !unused_enums.is_empty() {
-            let drop_enum_strat = gen_drop_enum(unused_enums).boxed();
-            possible_ops.push(drop_enum_strat);
-        }
-
         possible_ops
     }
 
@@ -662,6 +486,28 @@ impl ModelState for DDLModelState {
                     .find(|cs| cs.name == *col_name)
                     .unwrap();
                 spec.name.clone_from(new_name);
+                // MySQL does not update the column name in views when the column is renamed in the
+                // table. We need to drop all views poiting to the table.
+                let _ = self
+                    .views
+                    .iter()
+                    .map(|(view_name, view_def)| match view_def {
+                        TestViewDef::Simple(table_source) => {
+                            if table == table_source {
+                                self.deleted_views.insert(view_name.clone());
+                            }
+                        }
+                        TestViewDef::Join { table_a, table_b } => {
+                            if table == table_a || table == table_b {
+                                self.deleted_views.insert(view_name.clone());
+                            }
+                        }
+                    });
+
+                self.views.retain(|_view_name, view_def| match view_def {
+                    TestViewDef::Simple(table_source) => table != table_source,
+                    TestViewDef::Join { table_a, table_b } => table != table_a && table != table_b,
+                });
             }
             Operation::DeleteRow(..) => (),
             Operation::CreateSimpleView { name, table_source } => {
@@ -690,49 +536,6 @@ impl ModelState for DDLModelState {
                 self.views.remove(name);
                 self.deleted_views.insert(name.clone());
             }
-            Operation::CreateEnum(name, values) => {
-                self.enum_types.insert(name.clone(), values.clone());
-            }
-            Operation::DropEnum(name) => {
-                self.enum_types.remove(name);
-            }
-            Operation::AppendEnumValue {
-                type_name,
-                value_name,
-            } => {
-                self.enum_types
-                    .get_mut(type_name)
-                    .unwrap()
-                    .push(value_name.clone());
-            }
-            Operation::InsertEnumValue {
-                type_name,
-                value_name,
-                position,
-                next_to_value,
-            } => {
-                let type_values = self.enum_types.get_mut(type_name).unwrap();
-                let next_to_idx = type_values.iter().position(|v| v == next_to_value).unwrap();
-                let insert_idx = match position {
-                    EnumPos::Before => next_to_idx,
-                    EnumPos::After => next_to_idx + 1,
-                };
-                type_values.insert(insert_idx, value_name.clone());
-            }
-            Operation::RenameEnumValue {
-                type_name,
-                value_name,
-                new_name,
-            } => {
-                let val_ref = self
-                    .enum_types
-                    .get_mut(type_name)
-                    .unwrap()
-                    .iter_mut()
-                    .find(|v| *v == value_name)
-                    .unwrap();
-                val_ref.clone_from(new_name);
-            }
             Operation::Evict { .. } => (),
         }
     }
@@ -752,21 +555,12 @@ impl ModelState for DDLModelState {
     /// failure.
     fn preconditions_met(&self, op: &Self::Operation) -> bool {
         match op {
-            Operation::CreateTable(name, cols) => {
-                !self.name_in_use(name)
-                    && cols.iter().all(|cs| match cs {
-                        ColumnSpec {
-                            sql_type: SqlType::Other(type_name),
-                            ..
-                        } => self.enum_types.contains_key(type_name.name.as_str()),
-                        _ => true,
-                    })
-            }
+            Operation::CreateTable(name, _) => !self.name_in_use(name),
             Operation::DropTable(name) => self.tables.contains_key(name),
             Operation::WriteRow {
                 table,
                 pkey,
-                col_vals,
+                col_vals: _,
                 col_types,
             } => {
                 // Make sure that the table doesn't already contain a row with this key, and also
@@ -784,16 +578,6 @@ impl ModelState for DDLModelState {
                                 .iter()
                                 .zip(col_types)
                                 .all(|(cs, row_type)| cs.sql_type == *row_type)
-                            // Make sure enum values being inserted are in the current enum defs:
-                            && col_types.iter().zip(col_vals).all(|(ct, cv)| match ct {
-                                SqlType::Other(enum_name) => self
-                                    .enum_types
-                                    .get(&enum_name.name.to_string())
-                                    .map_or(false, |enum_values| {
-                                        enum_values.contains(&cv.as_str().unwrap().to_string())
-                                    }),
-                                _ => true,
-                            })
                     })
             }
             Operation::DeleteRow(table, key) => self
@@ -829,31 +613,6 @@ impl ModelState for DDLModelState {
                     && !self.views.contains_key(name)
             }
             Operation::DropView(name) => self.views.contains_key(name),
-            Operation::CreateEnum(name, _values) => !self.name_in_use(name),
-            Operation::DropEnum(name) => tables_using_type(&self.tables, name).next().is_none(),
-            Operation::AppendEnumValue {
-                type_name,
-                value_name,
-            } => self
-                .enum_types
-                .get(type_name)
-                .map_or(false, |t| !t.contains(value_name)),
-            Operation::InsertEnumValue {
-                type_name,
-                value_name,
-                next_to_value,
-                ..
-            } => self.enum_types.get(type_name).map_or(false, |t| {
-                t.contains(next_to_value) && !t.contains(value_name)
-            }),
-            Operation::RenameEnumValue {
-                type_name,
-                value_name,
-                new_name,
-            } => self
-                .enum_types
-                .get(type_name)
-                .map_or(false, |t| t.contains(value_name) && !t.contains(new_name)),
             // Even if the key is shrunk out, evicting it is a no-op, so we don't need to worry
             // about preconditions at all for evictions:
             Operation::Evict { .. } => true,
@@ -861,30 +620,27 @@ impl ModelState for DDLModelState {
     }
 
     /// Get ready to run a single test case by:
-    ///  * Setting up a test instance of ReadySet that connects to an upstream instance of Postgres
-    ///  * Wiping and recreating a fresh copy of the oracle database directly in Postgres, and
-    ///    setting up a connection
+    ///  * Setting up a test instance of ReadySet that connects to an upstream instance of MySQL
+    ///  * Wiping and recreating a fresh copy of the oracle database directly in MySQL, and setting
+    ///    up a connection
     async fn init_test_run(&self) -> Self::RunContext {
         readyset_tracing::init_test_logging();
 
         let (opts, handle, shutdown_tx) = TestBuilder::default()
             .fallback(true)
-            .build::<PostgreSQLAdapter>()
+            .build::<MySQLAdapter>()
             .await;
         // We need the raw hostname for eviction operations later:
-        let rs_host = match &opts.get_hosts()[0] {
-            Host::Tcp(host) => host.clone(),
-            _ => unreachable!(),
-        };
-        let rs_conn = connect(opts).await;
+        let rs_host = opts.ip_or_hostname().to_string();
+        let rs_conn = connect(OptsBuilder::from_opts(opts)).await;
 
         recreate_oracle_db().await;
-        let pg_conn = connect(oracle_db_config()).await;
+        let mysql_conn = connect(oracle_db_config()).await;
 
         DDLTestRunContext {
             rs_host,
             rs_conn,
-            pg_conn,
+            mysql_conn,
             _handle: handle,
             shutdown_tx: Some(shutdown_tx),
         }
@@ -892,42 +648,41 @@ impl ModelState for DDLModelState {
 
     /// Run the code to test a single operation:
     ///  * Running each step in `ops`, and checking afterward that:
-    ///    * The contents of the tables tracked by our model match across both ReadySet and Postgres
-    ///    * Any deleted tables appear as deleted in both ReadySet and Postgres
+    ///    * The contents of the tables tracked by our model match across both ReadySet and MySQL
+    ///    * Any deleted tables appear as deleted in both ReadySet and MySQL
     async fn run_op(&self, op: &Self::Operation, ctxt: &mut Self::RunContext) {
         let DDLTestRunContext {
-            rs_conn, pg_conn, ..
+            rs_conn,
+            mysql_conn,
+            ..
         } = ctxt;
 
         match op {
             Operation::CreateTable(table_name, cols) => {
                 let non_pkey_cols = cols.iter().map(|ColumnSpec { name, sql_type, .. }| {
-                    format!(
-                        "\"{name}\" {}",
-                        sql_type.display(nom_sql::Dialect::PostgreSQL)
-                    )
+                    format!("{name} {}", sql_type.display(nom_sql::Dialect::MySQL))
                 });
                 let col_defs: Vec<String> = once("id INT PRIMARY KEY".to_string())
                     .chain(non_pkey_cols)
                     .collect();
                 let col_defs = col_defs.join(", ");
-                let query = format!("CREATE TABLE \"{table_name}\" ({col_defs})");
-                rs_conn.simple_query(&query).await.unwrap();
-                pg_conn.simple_query(&query).await.unwrap();
+                let query = format!("CREATE TABLE {table_name} ({col_defs})");
+                println!("Creating table: {}", query);
+                rs_conn.query_drop(&query).await.unwrap();
+                mysql_conn.query_drop(&query).await.unwrap();
 
-                let create_cache =
-                    format!("CREATE CACHE ALWAYS FROM SELECT * FROM \"{table_name}\"");
+                let create_cache = format!("CREATE CACHE ALWAYS FROM SELECT * FROM {table_name}");
                 eventually!(run_test: {
-                    let result = rs_conn.simple_query(&create_cache).await;
+                    let result = rs_conn.query_drop(&create_cache).await;
                     AssertUnwindSafe(move || result)
                 }, then_assert: |result| {
                     result().unwrap()
                 });
             }
             Operation::DropTable(name) => {
-                let query = format!("DROP TABLE \"{name}\" CASCADE");
-                rs_conn.simple_query(&query).await.unwrap();
-                pg_conn.simple_query(&query).await.unwrap();
+                let query = format!("DROP TABLE {name} CASCADE");
+                rs_conn.query_drop(&query).await.unwrap();
+                mysql_conn.query_drop(&query).await.unwrap();
             }
             Operation::WriteRow {
                 table,
@@ -937,29 +692,36 @@ impl ModelState for DDLModelState {
             } => {
                 let pkey = DfValue::from(*pkey);
                 let params: Vec<&DfValue> = once(&pkey).chain(col_vals.iter()).collect();
-                let placeholders: Vec<_> = (1..=params.len()).map(|n| format!("${n}")).collect();
+                let params: Vec<mysql_async::Value> = params
+                    .iter()
+                    .map(|v| match v {
+                        DfValue::Int(_) => mysql_async::Value::Int(v.to_string().parse().unwrap()),
+                        DfValue::Float(_) => {
+                            mysql_async::Value::Float(v.to_string().parse().unwrap())
+                        }
+                        _ => mysql_async::Value::Bytes(v.to_string().as_bytes().to_vec()),
+                    })
+                    .collect();
+                let placeholders: Vec<_> = (1..=params.len()).map(|_| "?".to_string()).collect();
                 let placeholders = placeholders.join(", ");
-                let query = format!("INSERT INTO \"{table}\" VALUES ({placeholders})");
-                rs_conn.query_raw(&query, &params).await.unwrap();
-                pg_conn.query_raw(&query, &params).await.unwrap();
+                let query = format!("INSERT INTO {table} VALUES ({placeholders})");
+                rs_conn.exec_drop(&query, &params).await.unwrap();
+                mysql_conn.exec_drop(&query, &params).await.unwrap();
             }
             Operation::AddColumn(table_name, col_spec) => {
                 let query = format!(
-                    "ALTER TABLE \"{}\" ADD COLUMN \"{}\" {}",
+                    "ALTER TABLE {} ADD COLUMN {} {}",
                     table_name,
                     col_spec.name,
-                    col_spec.sql_type.display(nom_sql::Dialect::PostgreSQL)
+                    col_spec.sql_type.display(nom_sql::Dialect::MySQL)
                 );
-                rs_conn.simple_query(&query).await.unwrap();
-                pg_conn.simple_query(&query).await.unwrap();
+                rs_conn.query_drop(&query).await.unwrap();
+                mysql_conn.query_drop(&query).await.unwrap();
             }
             Operation::DropColumn(table_name, col_name) => {
-                let query = format!(
-                    "ALTER TABLE \"{}\" DROP COLUMN \"{}\"",
-                    table_name, col_name
-                );
-                rs_conn.simple_query(&query).await.unwrap();
-                pg_conn.simple_query(&query).await.unwrap();
+                let query = format!("ALTER TABLE {} DROP COLUMN {}", table_name, col_name);
+                rs_conn.query_drop(&query).await.unwrap();
+                mysql_conn.query_drop(&query).await.unwrap();
             }
             Operation::AlterColumnName {
                 table,
@@ -967,24 +729,24 @@ impl ModelState for DDLModelState {
                 new_name,
             } => {
                 let query = format!(
-                    "ALTER TABLE \"{}\" RENAME COLUMN \"{}\" TO \"{}\"",
+                    "ALTER TABLE {} RENAME COLUMN {} TO {}",
                     table, col_name, new_name
                 );
-                rs_conn.simple_query(&query).await.unwrap();
-                pg_conn.simple_query(&query).await.unwrap();
+                rs_conn.query_drop(&query).await.unwrap();
+                mysql_conn.query_drop(&query).await.unwrap();
             }
             Operation::DeleteRow(table_name, key) => {
-                let query = format!("DELETE FROM \"{table_name}\" WHERE id = ({key})");
-                rs_conn.simple_query(&query).await.unwrap();
-                pg_conn.simple_query(&query).await.unwrap();
+                let query = format!("DELETE FROM {table_name} WHERE id = ({key})");
+                rs_conn.query_drop(&query).await.unwrap();
+                mysql_conn.query_drop(&query).await.unwrap();
             }
             Operation::CreateSimpleView { name, table_source } => {
-                let query = format!("CREATE VIEW \"{name}\" AS SELECT * FROM \"{table_source}\"");
-                rs_conn.simple_query(&query).await.unwrap();
-                pg_conn.simple_query(&query).await.unwrap();
-                let create_cache = format!("CREATE CACHE ALWAYS FROM SELECT * FROM \"{name}\"");
+                let query = format!("CREATE VIEW {name} AS SELECT * FROM {table_source}");
+                rs_conn.query_drop(&query).await.unwrap();
+                mysql_conn.query_drop(&query).await.unwrap();
+                let create_cache = format!("CREATE CACHE ALWAYS FROM SELECT * FROM {name}");
                 eventually!(run_test: {
-                    let result = rs_conn.simple_query(&create_cache).await;
+                    let result = rs_conn.query_drop(&create_cache).await;
                     AssertUnwindSafe(move || result)
                 }, then_assert: |result| {
                     result().unwrap()
@@ -1002,77 +764,28 @@ impl ModelState for DDLModelState {
                     .map(|cs| (table_a, &cs.name))
                     .chain(self.tables[table_b].iter().map(|cs| (table_b, &cs.name)))
                     .enumerate()
-                    .map(|(i, (tab, col))| format!("\"{tab}\".\"{col}\" AS c{i}"))
+                    .map(|(i, (tab, col))| format!("{tab}.{col} AS c{i}"))
                     .collect();
                 let select_list = select_list.join(", ");
                 let view_def = format!(
-                    "SELECT {} FROM \"{}\" JOIN \"{}\" ON \"{}\".id = \"{}\".id",
+                    "SELECT {} FROM {} JOIN {} ON {}.id = {}.id",
                     select_list, table_a, table_b, table_a, table_b
                 );
-                let query = format!("CREATE VIEW \"{}\" AS {}", name, view_def);
-                rs_conn.simple_query(&query).await.unwrap();
-                pg_conn.simple_query(&query).await.unwrap();
-                let create_cache = format!("CREATE CACHE ALWAYS FROM SELECT * FROM \"{name}\"");
+                let query = format!("CREATE VIEW {} AS {}", name, view_def);
+                rs_conn.query_drop(&query).await.unwrap();
+                mysql_conn.query_drop(&query).await.unwrap();
+                let create_cache = format!("CREATE CACHE ALWAYS FROM SELECT * FROM {name}");
                 eventually!(run_test: {
-                    let result = rs_conn.simple_query(&create_cache).await;
+                    let result = rs_conn.query_drop(&create_cache).await;
                     AssertUnwindSafe(move || result)
                 }, then_assert: |result| {
                     result().unwrap()
                 });
             }
             Operation::DropView(name) => {
-                let query = format!("DROP VIEW \"{name}\"");
-                rs_conn.simple_query(&query).await.unwrap();
-                pg_conn.simple_query(&query).await.unwrap();
-            }
-            Operation::CreateEnum(name, elements) => {
-                let elements: Vec<String> = elements.iter().map(|e| format!("'{e}'")).collect();
-                let element_list = elements.join(", ");
-                // Quote the type name to prevent clashes with builtin types or reserved keywords
-                let query = format!("CREATE TYPE \"{}\" AS ENUM ({})", name, element_list);
-                rs_conn.simple_query(&query).await.unwrap();
-                pg_conn.simple_query(&query).await.unwrap();
-            }
-            Operation::DropEnum(name) => {
-                let query = format!("DROP TYPE \"{name}\"");
-                rs_conn.simple_query(&query).await.unwrap();
-                pg_conn.simple_query(&query).await.unwrap();
-            }
-            Operation::AppendEnumValue {
-                type_name,
-                value_name,
-            } => {
-                let query = format!("ALTER TYPE \"{type_name}\" ADD VALUE '{value_name}'");
-                rs_conn.simple_query(&query).await.unwrap();
-                pg_conn.simple_query(&query).await.unwrap();
-                recreate_caches_using_type(type_name, &self.tables, rs_conn).await;
-            }
-            Operation::InsertEnumValue {
-                type_name,
-                value_name,
-                position,
-                next_to_value,
-            } => {
-                let query = format!(
-                    "ALTER TYPE \"{}\" ADD VALUE '{}' {} '{}'",
-                    type_name, value_name, position, next_to_value
-                );
-                rs_conn.simple_query(&query).await.unwrap();
-                pg_conn.simple_query(&query).await.unwrap();
-                recreate_caches_using_type(type_name, &self.tables, rs_conn).await;
-            }
-            Operation::RenameEnumValue {
-                type_name,
-                value_name,
-                new_name,
-            } => {
-                let query = format!(
-                    "ALTER TYPE \"{}\" RENAME VALUE '{}' TO '{}'",
-                    type_name, value_name, new_name
-                );
-                rs_conn.simple_query(&query).await.unwrap();
-                pg_conn.simple_query(&query).await.unwrap();
-                recreate_caches_using_type(type_name, &self.tables, rs_conn).await;
+                let query = format!("DROP VIEW {name}");
+                rs_conn.query_drop(&query).await.unwrap();
+                mysql_conn.query_drop(&query).await.unwrap();
             }
             Operation::Evict { inner } => {
                 let client = reqwest::Client::new();
@@ -1095,6 +808,7 @@ impl ModelState for DDLModelState {
         }
         // If we change any previously created types, clear the client library type cache to
         // prevent false positive test failures later on in the test:
+        /* TODO: Not applicable to MySQL
         if matches!(
             op,
             Operation::DropEnum(_)
@@ -1103,54 +817,57 @@ impl ModelState for DDLModelState {
                 | Operation::InsertEnumValue { .. }
         ) {
             rs_conn.clear_type_cache();
-            pg_conn.clear_type_cache();
-        }
+            mysql_conn.clear_type_cache();
+        } */
     }
 
     async fn check_postconditions(&self, ctxt: &mut Self::RunContext) {
         let DDLTestRunContext {
-            rs_conn, pg_conn, ..
+            rs_conn,
+            mysql_conn,
+            ..
         } = ctxt;
 
         // After each op, check that all table and view contents match
         for relation in self.tables.keys().chain(self.views.keys()) {
             eventually!(run_test: {
+                println!("Checking contents of relation: {}", relation);
                 let rs_rows = rs_conn
-                    .query(&format!("SELECT * FROM \"{relation}\""), &[])
+                    .query(&format!("SELECT * FROM {relation}"))
                     .await
                     .unwrap();
-                let pg_rows = pg_conn
-                    .query(&format!("SELECT * FROM \"{relation}\""), &[])
+                let mysql_rows = mysql_conn
+                    .query(&format!("SELECT * FROM {relation}"))
                     .await
                     .unwrap();
                 // Previously, we would run all the result handling in the run_test block, but
-                // doing it in the then_assert block lets us work around a tokio-postgres client
+                // doing it in the then_assert block lets us work around a tokio-MySQL client
                 // crash caused by ENG-2548 by retrying until ReadySet stops sending us bad
                 // packets.
-                AssertUnwindSafe(move || (rs_rows, pg_rows))
+                AssertUnwindSafe(move || (rs_rows, mysql_rows))
             }, then_assert: |results| {
-                let (rs_rows, pg_rows) = results();
+                let (rs_rows, mysql_rows) = results();
 
                 let mut rs_results = rows_to_dfvalue_vec(rs_rows);
-                let mut pg_results = rows_to_dfvalue_vec(pg_rows);
+                let mut mysql_results = rows_to_dfvalue_vec(mysql_rows);
 
                 rs_results.sort_unstable();
-                pg_results.sort_unstable();
+                mysql_results.sort_unstable();
 
-                assert_eq!(pg_results, rs_results);
+                assert_eq!(mysql_results, rs_results);
             });
         }
         // Also make sure all deleted tables were actually deleted:
         for table in &self.deleted_tables {
             rs_conn
-                .query(&format!("DROP TABLE \"{table}\""), &[])
+                .query_drop(&format!("DROP TABLE {table}"))
                 .await
                 .unwrap_err();
         }
         // And then do the same for views:
         for view in &self.deleted_views {
             rs_conn
-                .query(&format!("DROP VIEW \"{view}\""), &[])
+                .query_drop(&format!("DROP VIEW {view}"))
                 .await
                 .unwrap_err();
         }
@@ -1165,45 +882,56 @@ impl DDLModelState {
     /// Returns whether the given name is in use in the model state as any of a table, a view, or
     /// an enum type.
     ///
-    /// This is useful for checking preconditions, because Postgres does not let you reuse the same
+    /// This is useful for checking preconditions, because MySQL does not let you reuse the same
     /// name for any of these three things (e.g. you're not allowed to name a view and a type the
     /// same thing).
     fn name_in_use(&self, name: &String) -> bool {
-        self.tables.contains_key(name)
-            || self.views.contains_key(name)
-            || self.enum_types.contains_key(name)
+        self.tables.contains_key(name) || self.views.contains_key(name)
     }
 }
 
-/// Spawns a new connection (either to ReadySet or directly to Postgres).
-async fn connect(config: Config) -> Client {
-    let (client, connection) = config.connect(NoTls).await.unwrap();
-    tokio::spawn(connection);
-    client
+/// Spawns a new connection (either to ReadySet or directly to MySQL).
+async fn connect(config: OptsBuilder) -> Conn {
+    mysql_async::Conn::new(config).await.unwrap()
 }
 
-/// The "oracle" database is the name of the PostgreSQL DB that we're using as an oracle to verify
-/// that the ReadySet behavior matches the native Postgres behavior.
+/// The "oracle" database is the name of the MySQL DB that we're using as an oracle to verify
+/// that the ReadySet behavior matches the native MySQL behavior.
 const ORACLE_DB_NAME: &str = "vertical_ddl_oracle";
 
-/// Gets the [`Config`] used to connect to the PostgreSQL oracle DB.
-fn oracle_db_config() -> Config {
-    let mut upstream_config = psql_helpers::upstream_config();
-    upstream_config.dbname(ORACLE_DB_NAME);
-    upstream_config
+/// Gets the [`OptsBuilder`] used to connect to the MySQL oracle DB.
+fn oracle_db_config() -> OptsBuilder {
+    mysql_helpers::upstream_config().db_name(Some(ORACLE_DB_NAME))
 }
 
 /// Drops and recreates the oracle database prior to each test run.
 async fn recreate_oracle_db() {
-    let mut config = oracle_db_config();
-    let (client, connection) = config.dbname("postgres").connect(NoTls).await.unwrap();
-    tokio::spawn(connection);
+    let config = mysql_helpers::upstream_config();
+    let mut client = connect(config).await;
 
     let drop_query = format!("DROP DATABASE IF EXISTS {ORACLE_DB_NAME}");
     let create_query = format!("CREATE DATABASE {ORACLE_DB_NAME}");
 
-    client.simple_query(&drop_query).await.unwrap();
-    client.simple_query(&create_query).await.unwrap();
+    client.query_drop(&drop_query).await.unwrap();
+    client.query_drop(&create_query).await.unwrap();
+}
+
+/// Although both are of the exact same type, there is a conflict between reexported versions
+fn value_to_value(val: &mysql_async::Value) -> mysql_common::value::Value {
+    match val {
+        mysql_async::Value::NULL => mysql_common::value::Value::NULL,
+        mysql_async::Value::Bytes(b) => mysql_common::value::Value::Bytes(b.clone()),
+        mysql_async::Value::Int(i) => mysql_common::value::Value::Int(*i),
+        mysql_async::Value::UInt(u) => mysql_common::value::Value::UInt(*u),
+        mysql_async::Value::Float(f) => mysql_common::value::Value::Float(*f),
+        mysql_async::Value::Double(d) => mysql_common::value::Value::Double(*d),
+        mysql_async::Value::Date(y, m, d, hh, mm, ss, us) => {
+            mysql_common::value::Value::Date(*y, *m, *d, *hh, *mm, *ss, *us)
+        }
+        mysql_async::Value::Time(is_neg, d, hh, mm, ss, us) => {
+            mysql_common::value::Value::Time(*is_neg, *d, *hh, *mm, *ss, *us)
+        }
+    }
 }
 
 /// Converts a [`Vec`] of [`Row`] values to a nested [`Vec`] of [`DfValue`] values. Currently just
@@ -1212,28 +940,14 @@ async fn recreate_oracle_db() {
 fn rows_to_dfvalue_vec(rows: Vec<Row>) -> Vec<Vec<DfValue>> {
     rows.iter()
         .map(|row| {
-            (0..row.len())
-                .map(|idx| row.get::<usize, DfValue>(idx))
-                .collect()
+            let mut noria_row = Vec::with_capacity(row.len());
+            for idx in 0..row.len() {
+                let val = value_to_value(row.as_ref(idx).unwrap());
+                noria_row.push(readyset_data::DfValue::try_from(val).unwrap());
+            }
+            noria_row
         })
         .collect()
-}
-
-async fn recreate_caches_using_type(
-    type_name: &str,
-    tables: &BTreeMap<String, Vec<ColumnSpec>>,
-    rs_conn: &Client,
-) {
-    for table in tables_using_type(tables, type_name) {
-        let create_cache = format!("CREATE CACHE ALWAYS FROM SELECT * FROM \"{table}\"");
-
-        eventually!(run_test: {
-            let result = rs_conn.simple_query(&create_cache).await;
-            AssertUnwindSafe(move || result)
-        }, then_assert: |result| {
-            result().unwrap()
-        });
-    }
 }
 
 #[test]
