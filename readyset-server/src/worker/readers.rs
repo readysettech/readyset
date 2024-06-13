@@ -23,8 +23,7 @@ use readyset_client::failpoints;
 use readyset_client::metrics::recorded;
 use readyset_client::results::ResultIterator;
 use readyset_client::{
-    KeyComparison, LookupResult, ReadQuery, ReadReply, ReadReplyStats, ReaderAddress, Tagged,
-    ViewQuery,
+    KeyComparison, LookupResult, ReadQuery, ReadReply, ReaderAddress, Tagged, ViewQuery,
 };
 use readyset_errors::internal_err;
 use readyset_util::shutdown::ShutdownReceiver;
@@ -142,8 +141,9 @@ pub struct ReadRequestHandler {
 pub enum CallResult<F: Future<Output = Reply>> {
     /// The call was resolved immediately
     Immediate(Reply),
-    /// The call will be resolved by polling the provided future
-    Async(F),
+    /// The result contains results from a read query and can be obtained by awaiting on the
+    /// enclosed future
+    ReadReply { future: F, cache_misses: u64 },
 }
 
 impl ReadRequestHandler {
@@ -230,13 +230,11 @@ impl ReadRequestHandler {
                     ServerReadReplyBatch::serialize(results)
                 };
 
-                reply_with_ok!(LookupResult::Results(
-                    vec![results],
-                    ReadReplyStats::default()
-                ));
+                reply_with_ok!(LookupResult::Results(vec![results]));
             }
         };
 
+        let cache_misses = keys_to_replay.len() as u64;
         self.miss_ctr.increment(1);
 
         // Trigger backfills for all the keys we missed on, regardless of a consistency hit/miss
@@ -277,7 +275,10 @@ impl ReadRequestHandler {
                 return CallResult::Immediate(Err(ReadySetError::ServerShuttingDown));
             }
 
-            CallResult::Async(rx.map_ok_or_else(|e| Err(internal_err!("{e}")), |o| o))
+            CallResult::ReadReply {
+                future: rx.map_ok_or_else(|e| Err(internal_err!("{e}")), |o| o),
+                cache_misses,
+            }
         }
     }
 
@@ -334,7 +335,7 @@ impl Service<Tagged<ReadQuery>> for ReadRequestHandler {
         async {
             match res {
                 CallResult::Immediate(immediate_response) => immediate_response,
-                CallResult::Async(async_response) => async_response.await,
+                CallResult::ReadReply { future, .. } => future.await,
             }
         }
     }
@@ -523,10 +524,7 @@ impl BlockingRead {
 
                 return Poll::Ready(Ok(Tagged {
                     tag: self.tag,
-                    v: ReadReply::Normal(Ok(LookupResult::Results(
-                        vec![results],
-                        ReadReplyStats::default(),
-                    ))),
+                    v: ReadReply::Normal(Ok(LookupResult::Results(vec![results]))),
                 }));
             }
         };
@@ -590,7 +588,7 @@ fn get_reader_from_cache<'a>(
 #[cfg(test)]
 mod readreply {
     use readyset_client::results::SharedResults;
-    use readyset_client::{LookupResult, ReadReply, ReadReplyStats, Tagged};
+    use readyset_client::{LookupResult, ReadReply, Tagged};
     use readyset_data::DfValue;
     use readyset_errors::ReadySetError;
 
@@ -613,7 +611,6 @@ mod readreply {
                             ))
                         })
                         .collect(),
-                    ReadReplyStats::default(),
                 ))),
             })
             .unwrap(),
@@ -622,7 +619,7 @@ mod readreply {
 
         match got {
             Tagged {
-                v: ReadReply::Normal(Ok(LookupResult::Results(got, _))),
+                v: ReadReply::Normal(Ok(LookupResult::Results(got))),
                 tag: 32,
             } => {
                 assert_eq!(got.len(), data.len());
@@ -643,10 +640,7 @@ mod readreply {
         let got: Tagged<ReadReply> = bincode::deserialize(
             &bincode::serialize(&Tagged {
                 tag: 32,
-                v: ReadReply::Normal::<ServerReadReplyBatch>(Ok(LookupResult::Results(
-                    Vec::new(),
-                    ReadReplyStats::default(),
-                ))),
+                v: ReadReply::Normal::<ServerReadReplyBatch>(Ok(LookupResult::Results(Vec::new()))),
             })
             .unwrap(),
         )
@@ -654,7 +648,7 @@ mod readreply {
 
         match got {
             Tagged {
-                v: ReadReply::Normal(Ok(LookupResult::Results(data, _))),
+                v: ReadReply::Normal(Ok(LookupResult::Results(data))),
                 tag: 32,
             } => {
                 assert!(data.is_empty());
@@ -777,7 +771,6 @@ mod readreply {
                             ))
                         })
                         .collect(),
-                    ReadReplyStats::default(),
                 ))),
             })
             .await
@@ -793,7 +786,7 @@ mod readreply {
 
             match got {
                 Tagged {
-                    v: ReadReply::Normal(Ok(LookupResult::Results(got, _))),
+                    v: ReadReply::Normal(Ok(LookupResult::Results(got))),
                     tag: t,
                 } => {
                     assert_eq!(tag, t);
