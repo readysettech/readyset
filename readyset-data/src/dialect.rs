@@ -97,7 +97,7 @@ impl Dialect {
         // TODO: Handle `real_as_float` mode.
         match self.engine {
             SqlEngine::PostgreSQL => DfType::Float,
-            SqlEngine::MySQL => DfType::Float,
+            SqlEngine::MySQL => DfType::Double,
         }
     }
 

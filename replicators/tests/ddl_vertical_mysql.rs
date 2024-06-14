@@ -32,7 +32,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use itertools::Itertools;
 use mysql_async::prelude::Queryable;
-use mysql_async::{Conn, OptsBuilder, Row};
+use mysql_async::{Conn, OptsBuilder, Params, Row};
 use nom_sql::{DialectDisplay, SqlType};
 use proptest::prelude::*;
 use proptest::strategy::{BoxedStrategy, Just, Strategy};
@@ -833,11 +833,11 @@ impl ModelState for DDLModelState {
             eventually!(run_test: {
                 println!("Checking contents of relation: {}", relation);
                 let rs_rows = rs_conn
-                    .query(&format!("SELECT * FROM {relation}"))
+                    .exec(&format!("SELECT * FROM {relation}"), Params::Empty)
                     .await
                     .unwrap();
                 let mysql_rows = mysql_conn
-                    .query(&format!("SELECT * FROM {relation}"))
+                    .exec(&format!("SELECT * FROM {relation}"), Params::Empty)
                     .await
                     .unwrap();
                 // Previously, we would run all the result handling in the run_test block, but
