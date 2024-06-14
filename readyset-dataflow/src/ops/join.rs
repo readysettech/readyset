@@ -137,10 +137,10 @@ impl Join {
         &'a self,
         records: &'a Records,
         key: &[usize],
-    ) -> HashMap<Vec<DfValue>, Vec<&Record>> {
+    ) -> HashMap<Vec<&DfValue>, Vec<&Record>> {
         let mut hm = HashMap::new();
         for rec in records {
-            let key: Vec<DfValue> = key.iter().map(|idx| rec[*idx].clone()).collect();
+            let key: Vec<&DfValue> = key.iter().map(|idx| &rec[*idx]).collect();
             hm.entry(key)
                 .and_modify(|entry: &mut Vec<&Record>| entry.push(rec))
                 .or_insert(vec![rec]);
@@ -161,8 +161,11 @@ impl Join {
         // TODO(marce): We could dynamically choose the smaller side to build the hashmap
         let hm = self.build_join_hash_map(&right, &right_keys);
 
-        for left_rec in left {
-            let key: Vec<DfValue> = left_keys.iter().map(|idx| left_rec[*idx].clone()).collect();
+        let mut key: Vec<&DfValue> = vec![&DfValue::None; left_keys.len()];
+        for left_rec in &left {
+            for i in 0..left_keys.len() {
+                key[i] = &left_rec[left_keys[i]];
+            }
             if let Some(right_recs) = hm.get(&key) {
                 invariant!(
                     left_rec.is_positive(),
