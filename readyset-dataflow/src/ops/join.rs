@@ -150,35 +150,52 @@ impl Join {
 
     /// Perform a hash join between two sets of records.
     fn hash_join(&self, left: Records, right: Records) -> ReadySetResult<Records> {
-        let mut left_keys = vec![];
-        let mut right_keys = vec![];
+        let mut probe_keys = vec![];
+        let mut build_keys = vec![];
         let mut ret: Vec<Record> = vec![];
+        let probe_is_left = left.len() > right.len();
         for (left_key, right_key) in &self.on {
-            left_keys.push(*left_key);
-            right_keys.push(*right_key);
-        }
-
-        // TODO(marce): We could dynamically choose the smaller side to build the hashmap
-        let hm = self.build_join_hash_map(&right, &right_keys);
-
-        let mut key: Vec<&DfValue> = vec![&DfValue::None; left_keys.len()];
-        for left_rec in &left {
-            for i in 0..left_keys.len() {
-                key[i] = &left_rec[left_keys[i]];
+            match probe_is_left {
+                true => {
+                    probe_keys.push(*left_key);
+                    build_keys.push(*right_key);
+                }
+                false => {
+                    probe_keys.push(*right_key);
+                    build_keys.push(*left_key);
+                }
             }
-            if let Some(right_recs) = hm.get(&key) {
+        }
+        let (probe_side, build_side) = match probe_is_left {
+            true => (&left, &right),
+            false => (&right, &left),
+        };
+        let hm = self.build_join_hash_map(build_side, &build_keys);
+
+        let mut key: Vec<&DfValue> = vec![&DfValue::None; probe_keys.len()];
+        for prob_rec in probe_side {
+            for i in 0..probe_keys.len() {
+                key[i] = &prob_rec[probe_keys[i]];
+            }
+            if let Some(build_recs) = hm.get(&key) {
                 invariant!(
-                    left_rec.is_positive(),
+                    prob_rec.is_positive(),
                     "replays should only include positive records"
                 );
-                for right_rec in right_recs {
+                for build_rec in build_recs {
                     invariant!(
-                        right_rec.is_positive(),
+                        build_rec.is_positive(),
                         "replays should only include positive records"
                     );
-                    ret.push(Record::Positive(
-                        self.generate_row(left_rec.row(), right_rec.row()),
-                    ));
+
+                    match probe_is_left {
+                        true => ret.push(Record::Positive(
+                            self.generate_row(prob_rec.row(), build_rec.row()),
+                        )),
+                        false => ret.push(Record::Positive(
+                            self.generate_row(build_rec.row(), prob_rec.row()),
+                        )),
+                    }
                 }
             };
         }
