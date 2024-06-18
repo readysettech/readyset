@@ -1,5 +1,11 @@
 use std::process::Command;
 
+#[derive(PartialEq)]
+enum Warn {
+    Yes,
+    No,
+}
+
 fn main() {
     println!("cargo:rerun-if-changed=../../.git/HEAD");
 
@@ -21,7 +27,7 @@ fn set_version_info() {
 /// - $RELEASE_VERSION
 /// - "unknown-release-version"
 fn set_release_version() {
-    env_or_unknown("RELEASE_VERSION", "release-version");
+    env_or_unknown("RELEASE_VERSION", "release-version", Warn::No);
 }
 
 /// Set COMMIT_ID to one of the following, in order:
@@ -41,7 +47,7 @@ fn set_commit_id() {
             })
     };
 
-    env_or_unknown_with_fallback("BUILDKITE_COMMIT", "commit-id", get_commit_id_from_git);
+    env_or_unknown_with_fallback("BUILDKITE_COMMIT", "commit-id", get_commit_id_from_git, Warn::Yes);
 }
 
 /// Set PLATFORM to one of the following, in order:
@@ -50,7 +56,7 @@ fn set_commit_id() {
 /// - "unknown-platform"
 fn set_platform() {
     let maybe_target = || std::env::var("TARGET").map(|s| s.trim().to_owned()).ok();
-    env_or_unknown_with_fallback("PLATFORM", "platform", maybe_target);
+    env_or_unknown_with_fallback("PLATFORM", "platform", maybe_target, Warn::Yes);
 }
 
 /// Set RUSTC_VERSION to one of the following, in order:
@@ -69,33 +75,33 @@ fn set_rustc_version() {
                     .map(|s| s.trim().to_owned())
             })
     };
-    env_or_unknown_with_fallback("RUSTC_VERSION", "rustc-version", maybe_rustc_version);
+    env_or_unknown_with_fallback("RUSTC_VERSION", "rustc-version", maybe_rustc_version, Warn::Yes);
 }
 
 /// Set PROFILE to one of the following, in order:
 /// - $PROFILE (set by cargo)
 /// - "unknown-profile"
 fn set_profile() {
-    env_or_unknown("PROFILE", "profile");
+    env_or_unknown("PROFILE", "profile", Warn::Yes);
 }
 
 /// Set OPT_LEVEL to one of the following, in order:
 /// - $OPT_LEVEL (set by cargo)
 /// - "unknown-profile"
 fn set_opt_level() {
-    env_or_unknown("OPT_LEVEL", "profile");
+    env_or_unknown("OPT_LEVEL", "profile", Warn::Yes);
 }
 
 /// Sets cargo::rustc-env=$env if it is set,
 /// Otherwise sets it to unknown-$unknown
-fn env_or_unknown(env: &str, unknown: &str) {
-    env_or_unknown_with_fallback(env, unknown, || None)
+fn env_or_unknown(env: &str, unknown: &str, warn: Warn) {
+    env_or_unknown_with_fallback(env, unknown, || None, warn)
 }
 
 /// Sets cargo::rustc-env=$env if it is set and not empty,
 /// otherwise runs fallback and sets it to that if it returns Some,
 /// Otherwise sets it to unknown-$unknown
-fn env_or_unknown_with_fallback<F>(env: &str, unknown: &str, fallback: F)
+fn env_or_unknown_with_fallback<F>(env: &str, unknown: &str, fallback: F, warn: Warn)
 where
     F: Fn() -> Option<String>,
 {
@@ -106,7 +112,9 @@ where
         .filter(|s| !s.is_empty())
         .unwrap_or_else(||
             fallback().unwrap_or_else(|| {
-            println!("cargo:warning=Failed to get {unknown} from either CI env or local repository. It will be absent from run-time version information.");
+            if warn == Warn::Yes {
+                println!("cargo:warning=Failed to get {unknown} from either CI env or local repository. It will be absent from run-time version information.");
+            }
             format!("unknown-{unknown}")
         }));
     println!("cargo:rustc-env={env}={rustc_env}");
