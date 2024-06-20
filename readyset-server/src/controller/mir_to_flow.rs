@@ -26,7 +26,7 @@ use mir::{Column, DfNodeIndex, NodeIndex as MirNodeIndex};
 use nom_sql::{ColumnConstraint, ColumnSpecification, Expr, OrderType, Relation};
 use petgraph::graph::NodeIndex;
 use petgraph::Direction;
-use readyset_client::internal::{Index, IndexType};
+use readyset_client::internal::IndexType;
 use readyset_client::ViewPlaceholder;
 use readyset_data::{Collation, DfType, Dialect};
 use readyset_errors::{
@@ -1168,13 +1168,12 @@ fn materialize_leaf_node(
     // already been added.
 
     // TODO(malte): consider the case when the projected columns need reordering
+    let columns: Vec<_> = key_cols
+        .iter()
+        .map(|(c, _)| graph.column_id_for_column(parent, c))
+        .collect::<ReadySetResult<Vec<_>>>()?;
 
     if !key_cols.is_empty() {
-        let columns: Vec<_> = key_cols
-            .iter()
-            .map(|(c, _)| graph.column_id_for_column(parent, c))
-            .collect::<ReadySetResult<Vec<_>>>()?;
-
         let placeholder_map = key_cols
             .iter()
             .zip(columns.iter())
@@ -1184,19 +1183,23 @@ fn materialize_leaf_node(
         mig.maintain(
             name,
             na.address(),
-            &Index::new(index_type, columns),
+            index_type,
+            columns,
             reader_processing,
             placeholder_map,
-        );
+        )?;
     } else {
         // if no key specified, default to the first column
+        let col_id = graph.column_id_for_column(parent, &key_cols[0].0)?;
+
         mig.maintain(
             name,
             na.address(),
-            &Index::new(index_type, vec![0]),
+            index_type,
+            vec![col_id],
             reader_processing,
-            Vec::default(),
-        );
+            vec![(key_cols[0].1, col_id)],
+        )?;
     }
     Ok(())
 }

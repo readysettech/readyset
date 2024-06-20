@@ -119,7 +119,7 @@ impl Node {
     pub(crate) fn process(
         &mut self,
         m: &mut Option<Packet>,
-        keyed_by: Option<&Vec<usize>>,
+        keyed_by: Option<&[usize]>,
         replay_path: Option<&crate::domain::ReplayPath>,
         swap_reader: bool,
         env: ProcessEnv,
@@ -223,7 +223,7 @@ impl Node {
             NodeType::Egress(Some(ref mut e)) => {
                 e.process(
                     m,
-                    keyed_by.map(Vec::as_slice),
+                    keyed_by,
                     env.shard.unwrap_or(0),
                     env.replica,
                     env.executor,

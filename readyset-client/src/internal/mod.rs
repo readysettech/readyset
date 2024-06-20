@@ -7,4 +7,4 @@ mod index;
 
 pub use self::addressing::{DomainIndex, LocalNodeIndex, ReplicaAddress};
 pub use self::external::MaterializationStatus;
-pub use self::index::{Index, IndexType};
+pub use self::index::{Index, IndexType, QueryType};
