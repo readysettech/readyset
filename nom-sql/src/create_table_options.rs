@@ -421,4 +421,24 @@ mod tests {
             vec![CreateTableOption::Comment("foobar".to_string())],
         );
     }
+
+    #[test]
+    fn create_table_option_comment_escape() {
+        should_parse_all(
+            "COMMENT='foo''bar'",
+            vec![CreateTableOption::Comment("foo'bar".to_string())],
+        );
+        should_parse_all(
+            "COMMENT=\"foo\"\"bar\"",
+            vec![CreateTableOption::Comment("foo\"bar".to_string())],
+        );
+        should_parse_all(
+            "COMMENT='foo\"\"bar'",
+            vec![CreateTableOption::Comment("foo\"\"bar".to_string())],
+        );
+        should_parse_all(
+            "COMMENT=\"foo''bar\"",
+            vec![CreateTableOption::Comment("foo''bar".to_string())],
+        );
+    }
 }

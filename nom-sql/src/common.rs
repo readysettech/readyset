@@ -6,7 +6,7 @@ use std::str::FromStr;
 
 use itertools::Itertools;
 use nom::branch::alt;
-use nom::bytes::complete::{tag, tag_no_case, take_until};
+use nom::bytes::complete::{tag, tag_no_case};
 use nom::character::complete::{digit1, line_ending};
 use nom::combinator::{map, map_res, not, opt, peek};
 use nom::error::{ErrorKind, ParseError};
@@ -810,17 +810,18 @@ pub(crate) fn if_not_exists(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], bool> 
 }
 
 // Parse rule for a comment part.
-pub fn parse_comment(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], String> {
-    map(
-        preceded(
-            delimited(whitespace0, tag_no_case("comment"), whitespace1),
-            map_res(
-                delimited(tag("'"), take_until("'"), tag("'")),
-                |i: LocatedSpan<&[u8]>| str::from_utf8(&i),
+pub fn parse_comment(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], String> {
+    move |i| {
+        map(
+            preceded(
+                delimited(whitespace0, tag_no_case("comment"), whitespace1),
+                map_res(move |i| dialect.string_literal()(i), String::from_utf8),
             ),
-        ),
-        String::from,
-    )(i)
+            String::from,
+        )(i)
+    }
 }
 
 pub fn field_reference(
@@ -978,12 +979,6 @@ mod tests {
                 ]
             }
         );
-    }
-
-    #[test]
-    fn comment_data() {
-        let res = parse_comment(LocatedSpan::new(b" COMMENT 'test'"));
-        assert_eq!(res.unwrap().1, "test");
     }
 
     #[test]
@@ -1203,6 +1198,22 @@ mod tests {
                     arguments: vec![]
                 }
             );
+        }
+
+        #[test]
+        fn table_column_comment() {
+            let res = test_parse!(parse_comment(Dialect::MySQL), b"comment 'foo'");
+            assert_eq!(res, "foo");
+            let res = test_parse!(parse_comment(Dialect::MySQL), b"comment \"foo\"");
+            assert_eq!(res, "foo");
+            let res = test_parse!(parse_comment(Dialect::MySQL), b"comment 'f''oo'");
+            assert_eq!(res, "f'oo");
+            let res = test_parse!(parse_comment(Dialect::MySQL), b"comment 'f\"\"oo'");
+            assert_eq!(res, "f\"\"oo");
+            let res = test_parse!(parse_comment(Dialect::MySQL), b"comment \"f\"\"oo\"");
+            assert_eq!(res, "f\"oo");
+            let res = test_parse!(parse_comment(Dialect::MySQL), b"comment \"f''oo\"");
+            assert_eq!(res, "f''oo");
         }
     }
 
