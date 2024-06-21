@@ -45,6 +45,7 @@ use readyset_client_test_helpers::mysql_helpers::MySQLAdapter;
 use readyset_client_test_helpers::{mysql_helpers, TestBuilder};
 use readyset_data::DfValue;
 use readyset_server::Handle;
+use readyset_util::arbitrary::arbitrary_timestamp_naive_date_time;
 use readyset_util::eventually;
 use readyset_util::shutdown::ShutdownSender;
 
@@ -96,6 +97,16 @@ impl Arbitrary for ColumnSpec {
             (
                 SqlType::Text,
                 any::<String>().prop_map(DfValue::from).boxed(),
+            ),
+            (
+                SqlType::Blob,
+                any::<Vec<u8>>().prop_map(DfValue::from).boxed(),
+            ),
+            (
+                SqlType::DateTime(None),
+                arbitrary_timestamp_naive_date_time()
+                    .prop_map(DfValue::from)
+                    .boxed(),
             ),
         ];
         (name_gen, sample::select(col_types))
@@ -487,23 +498,7 @@ impl ModelState for DDLModelState {
                     .unwrap();
                 spec.name.clone_from(new_name);
                 // MySQL does not update the column name in views when the column is renamed in the
-                // table. We need to drop all views poiting to the table.
-                let _ = self
-                    .views
-                    .iter()
-                    .map(|(view_name, view_def)| match view_def {
-                        TestViewDef::Simple(table_source) => {
-                            if table == table_source {
-                                self.deleted_views.insert(view_name.clone());
-                            }
-                        }
-                        TestViewDef::Join { table_a, table_b } => {
-                            if table == table_a || table == table_b {
-                                self.deleted_views.insert(view_name.clone());
-                            }
-                        }
-                    });
-
+                // table. We need to drop all views pointing to the table.
                 self.views.retain(|_view_name, view_def| match view_def {
                     TestViewDef::Simple(table_source) => table != table_source,
                     TestViewDef::Join { table_a, table_b } => table != table_a && table != table_b,
@@ -660,7 +655,7 @@ impl ModelState for DDLModelState {
         match op {
             Operation::CreateTable(table_name, cols) => {
                 let non_pkey_cols = cols.iter().map(|ColumnSpec { name, sql_type, .. }| {
-                    format!("{name} {}", sql_type.display(nom_sql::Dialect::MySQL))
+                    format!("`{name}` {}", sql_type.display(nom_sql::Dialect::MySQL))
                 });
                 let col_defs: Vec<String> = once("id INT PRIMARY KEY".to_string())
                     .chain(non_pkey_cols)
@@ -732,6 +727,24 @@ impl ModelState for DDLModelState {
                     "ALTER TABLE {} RENAME COLUMN {} TO {}",
                     table, col_name, new_name
                 );
+                for (view, def) in self.views.iter() {
+                    match def {
+                        TestViewDef::Simple(table_source) => {
+                            if table == table_source {
+                                let drop_view = format!("DROP VIEW {}", view);
+                                rs_conn.query_drop(&drop_view).await.unwrap();
+                                mysql_conn.query_drop(&drop_view).await.unwrap();
+                            }
+                        }
+                        TestViewDef::Join { table_a, table_b } => {
+                            if table == table_a || table == table_b {
+                                let drop_view = format!("DROP VIEW {}", view);
+                                rs_conn.query_drop(&drop_view).await.unwrap();
+                                mysql_conn.query_drop(&drop_view).await.unwrap();
+                            }
+                        }
+                    }
+                }
                 rs_conn.query_drop(&query).await.unwrap();
                 mysql_conn.query_drop(&query).await.unwrap();
             }
@@ -806,19 +819,6 @@ impl ModelState for DDLModelState {
                 }
             }
         }
-        // If we change any previously created types, clear the client library type cache to
-        // prevent false positive test failures later on in the test:
-        /* TODO: Not applicable to MySQL
-        if matches!(
-            op,
-            Operation::DropEnum(_)
-                | Operation::AppendEnumValue { .. }
-                | Operation::RenameEnumValue { .. }
-                | Operation::InsertEnumValue { .. }
-        ) {
-            rs_conn.clear_type_cache();
-            mysql_conn.clear_type_cache();
-        } */
     }
 
     async fn check_postconditions(&self, ctxt: &mut Self::RunContext) {
