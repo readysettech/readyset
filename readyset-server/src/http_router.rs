@@ -45,6 +45,7 @@ pub struct NoriaServerHttpRouter {
     /// Used to communicate externally that a failpoint request has been received and successfully
     /// handled.
     /// Most commonly used to block on further startup action if --wait-for-failpoint is supplied.
+    #[allow(dead_code)]
     pub failpoint_channel: Option<Arc<Sender<()>>>,
 }
 
