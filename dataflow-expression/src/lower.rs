@@ -581,6 +581,28 @@ fn mysql_numerical_type_cvt(left: &DfType, right: &DfType) -> Option<DfType> {
     }
 }
 
+fn mysql_bitstring_type_cvt(left: &DfType, right: &DfType) -> Option<DfType> {
+    if (left.is_bitstring() && (right.is_binary() || right.is_any_text() || right.is_bitstring()))
+        || (right.is_bitstring() && (left.is_binary() || left.is_any_text() || left.is_bitstring()))
+    {
+        Some(DfType::VarBinary(u16::MAX))
+    } else if (left.is_bitstring() || right.is_bitstring())
+        && (left.is_any_int() || right.is_any_int())
+    {
+        Some(DfType::BigInt)
+    } else if (left.is_bitstring() || right.is_bitstring())
+        && (left.is_any_exact_number() || right.is_any_exact_number())
+    {
+        Some(DfType::DEFAULT_NUMERIC)
+    } else if (left.is_bitstring() || right.is_bitstring())
+        && (left.is_any_float() || right.is_any_float())
+    {
+        Some(DfType::Double)
+    } else {
+        None
+    }
+}
+
 /// <https://dev.mysql.com/doc/refman/8.0/en/type-conversion.html>
 fn mysql_type_conversion(left_ty: &DfType, right_ty: &DfType) -> DfType {
     if left_ty.is_bool() && right_ty.is_bool() {
@@ -590,6 +612,8 @@ fn mysql_type_conversion(left_ty: &DfType, right_ty: &DfType) -> DfType {
     } else if let Some(ty) = mysql_temporal_types_cvt(left_ty, right_ty) {
         ty
     } else if let Some(ty) = mysql_numerical_type_cvt(left_ty, right_ty) {
+        ty
+    } else if let Some(ty) = mysql_bitstring_type_cvt(left_ty, right_ty) {
         ty
     } else {
         DfType::Double
@@ -825,6 +849,18 @@ impl Expr {
     where
         C: LowerContext,
     {
+        Self::lower_inner(expr, dialect, true, context)
+    }
+
+    fn lower_inner<C>(
+        expr: AstExpr,
+        dialect: Dialect,
+        is_top_level: bool,
+        context: C,
+    ) -> ReadySetResult<Self>
+    where
+        C: LowerContext,
+    {
         match expr {
             AstExpr::Call(FunctionExpr::Call {
                 name: fname,
@@ -832,7 +868,7 @@ impl Expr {
             }) => {
                 let args = arguments
                     .into_iter()
-                    .map(|arg| Self::lower(arg, dialect, context.clone()))
+                    .map(|arg| Self::lower_inner(arg, dialect, false, context.clone()))
                     .collect::<Result<Vec<_>, _>>()?;
                 let (func, ty) = BuiltinFunction::from_name_and_args(&fname, args, dialect)?;
                 Ok(Self::Call {
@@ -841,7 +877,7 @@ impl Expr {
                 })
             }
             AstExpr::Call(FunctionExpr::Substring { string, pos, len }) => {
-                let string = Self::lower(*string, dialect, context.clone())?;
+                let string = Self::lower_inner(*string, dialect, false, context.clone())?;
                 let ty = if string.ty().is_any_text() {
                     string.ty().clone()
                 } else {
@@ -849,9 +885,9 @@ impl Expr {
                 };
                 let func = Box::new(BuiltinFunction::Substring(
                     string,
-                    pos.map(|expr| Self::lower(*expr, dialect, context.clone()))
+                    pos.map(|expr| Self::lower_inner(*expr, dialect, false, context.clone()))
                         .transpose()?,
-                    len.map(|expr| Self::lower(*expr, dialect, context))
+                    len.map(|expr| Self::lower_inner(*expr, dialect, false, context))
                         .transpose()?,
                 ));
 
@@ -863,10 +899,14 @@ impl Expr {
             ),
             AstExpr::Literal(lit) => {
                 let is_string_literal = lit.is_string();
-                let val: DfValue = lit.try_into()?;
+                let mut val: DfValue = lit.try_into()?;
                 // TODO: Infer type from SQL
                 let ty = if is_string_literal && dialect.engine() == SqlEngine::PostgreSQL {
                     DfType::Unknown
+                } else if is_top_level && dialect.engine() == SqlEngine::MySQL && val.is_bitstring()
+                {
+                    val = val.coerce_to(&DfType::VarBinary(u16::MAX), &DfType::Unknown)?;
+                    DfType::VarBinary(u16::MAX)
                 } else {
                     val.infer_dataflow_type()
                 };
@@ -878,8 +918,8 @@ impl Expr {
                 Ok(Self::Column { index, ty })
             }
             AstExpr::BinaryOp { lhs, op, rhs } => {
-                let mut left = Box::new(Self::lower(*lhs, dialect, context.clone())?);
-                let mut right = Box::new(Self::lower(*rhs, dialect, context)?);
+                let mut left = Box::new(Self::lower_inner(*lhs, dialect, false, context.clone())?);
+                let mut right = Box::new(Self::lower_inner(*rhs, dialect, false, context)?);
                 let (op, negated) =
                     BinaryOperator::from_sql_op(op, dialect, left.ty(), right.ty())?;
 
@@ -935,7 +975,7 @@ impl Expr {
                 op: UnaryOperator::Neg,
                 rhs,
             } => {
-                let left = Box::new(Self::lower(*rhs, dialect, context)?);
+                let left = Box::new(Self::lower_inner(*rhs, dialect, false, context)?);
                 // TODO: Negation may change type to signed
                 let ty = left.ty().clone();
                 Ok(Self::Op {
@@ -952,7 +992,7 @@ impl Expr {
                 op: UnaryOperator::Not,
                 rhs,
             } => Ok(Self::Not {
-                expr: Box::new(Self::lower(*rhs, dialect, context)?),
+                expr: Box::new(Self::lower_inner(*rhs, dialect, false, context)?),
                 ty: DfType::Bool, // type of NOT is always bool
             }),
             AstExpr::Cast {
@@ -960,7 +1000,7 @@ impl Expr {
             } => {
                 let ty = DfType::from_sql_type(&to_type, dialect, |t| context.resolve_type(t))?;
                 Ok(Self::Cast {
-                    expr: Box::new(Self::lower(*expr, dialect, context)?),
+                    expr: Box::new(Self::lower_inner(*expr, dialect, false, context)?),
                     ty,
                     null_on_failure: false,
                 })
@@ -972,8 +1012,9 @@ impl Expr {
                 let branches = branches
                     .into_iter()
                     .map(|branch| {
-                        let condition = Self::lower(branch.condition, dialect, context.clone())?;
-                        let body = Self::lower(branch.body, dialect, context.clone())?;
+                        let condition =
+                            Self::lower_inner(branch.condition, dialect, false, context.clone())?;
+                        let body = Self::lower_inner(branch.body, dialect, false, context.clone())?;
                         Ok(CaseWhenBranch { condition, body })
                     })
                     .collect::<ReadySetResult<Vec<_>>>()?;
@@ -987,7 +1028,9 @@ impl Expr {
                 Ok(Self::CaseWhen {
                     branches,
                     else_expr: match else_expr {
-                        Some(else_expr) => Box::new(Self::lower(*else_expr, dialect, context)?),
+                        Some(else_expr) => {
+                            Box::new(Self::lower_inner(*else_expr, dialect, false, context)?)
+                        }
                         None => Box::new(Self::Literal {
                             val: DfValue::None,
                             ty: DfType::Unknown,
@@ -1009,29 +1052,29 @@ impl Expr {
                         BinaryOperator::Or
                     };
 
-                    let lhs = Self::lower(*lhs, dialect, context.clone())?;
                     let make_comparison = |rhs| -> ReadySetResult<_> {
-                        let equal = Self::Op {
-                            left: Box::new(lhs.clone()),
-                            op: BinaryOperator::Equal,
-                            right: Box::new(Self::lower(rhs, dialect, context.clone())?),
-                            ty: DfType::Bool, // type of = is always bool
+                        let equal = AstExpr::BinaryOp {
+                            lhs: lhs.clone(),
+                            op: SqlBinaryOperator::Equal,
+                            rhs,
                         };
+                        let equal_lowered =
+                            Self::lower_inner(equal, dialect, false, context.clone())?;
                         if negated {
                             Ok(Self::Not {
-                                expr: Box::new(equal),
+                                expr: Box::new(equal_lowered),
                                 ty: DfType::Bool,
                             })
                         } else {
-                            Ok(equal)
+                            Ok(equal_lowered)
                         }
                     };
 
-                    exprs.try_fold(make_comparison(fst)?, |acc, rhs| {
+                    exprs.try_fold(make_comparison(Box::new(fst))?, |acc, rhs| {
                         Ok(Self::Op {
                             left: Box::new(acc),
                             op: logical_op,
-                            right: Box::new(make_comparison(rhs)?),
+                            right: Box::new(make_comparison(Box::new(rhs))?),
                             ty: DfType::Bool, // type of and/or is always bool
                         })
                     })
@@ -1121,8 +1164,8 @@ impl Expr {
     where
         C: LowerContext,
     {
-        let mut left = Box::new(Self::lower(lhs, dialect, context.clone())?);
-        let mut right = Box::new(Self::lower(rhs, dialect, context)?);
+        let mut left = Box::new(Self::lower_inner(lhs, dialect, false, context.clone())?);
+        let mut right = Box::new(Self::lower_inner(rhs, dialect, false, context)?);
         let (op, negated) = BinaryOperator::from_sql_op(op, dialect, left.ty(), right.ty())?;
         if negated {
             is_all = !is_all

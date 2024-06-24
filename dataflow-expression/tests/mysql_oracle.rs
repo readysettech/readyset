@@ -150,6 +150,18 @@ async fn example_exprs_eval_same_as_mysql() {
         "concat('one',2,'three')",
         "concat('a','b')",
         "concat('a')",
+        "b'111' = 7",
+        "b'01100001' = 'a'",
+        "b'111' = b'0111'",
+        "b'1100001' = 'a'",
+        "cast(b'111' as double)",
+        "cast(b'111' as decimal)",
+        "cast(b'111' as unsigned)",
+        "cast(b'111' as binary)",
+        "b'111'",
+        "7 in (b'111')",
+        "b'111' in (7)",
+        "b'111' in (b'111')",
     ] {
         compare_eval(expr, &mut conn).await;
     }

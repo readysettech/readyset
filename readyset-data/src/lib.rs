@@ -16,6 +16,7 @@ use chrono::{self, DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, T
 use cidr::IpInet;
 use enum_kinds::EnumKind;
 use eui48::{MacAddress, MacAddressFormat};
+use integer::IntAsFloat;
 use itertools::Itertools;
 use mysql_time::MySqlTime;
 use nom_sql::{DialectDisplay, Double, Float, Literal, SqlType};
@@ -31,6 +32,7 @@ use tokio_postgres::types::{to_sql_checked, FromSql, IsNull, Kind, ToSql, Type};
 use uuid::Uuid;
 
 mod array;
+mod bitvec;
 mod collation;
 pub mod dialect;
 mod r#enum;
@@ -321,6 +323,11 @@ impl DfValue {
         matches!(*self, DfValue::Array(_))
     }
 
+    /// Checks if this value is a PostgreSQL bitvector (or not-yet-lowered MySQL bitstring literal)
+    pub fn is_bitstring(&self) -> bool {
+        matches!(*self, DfValue::BitVector(_))
+    }
+
     /// Returns `true` if this value is truthy (is not 0, 0.0, '', or NULL).
     ///
     /// # Examples
@@ -585,6 +592,26 @@ impl DfValue {
                     _ => Ok(self.clone()),
                 },
                 DfType::Bit(/* TODO */ _len) => Ok(self.clone()),
+                DfType::BigInt => Ok(DfValue::Int(bitvec::to_i64(vec).ok_or_else(mk_err)?)),
+                DfType::UnsignedBigInt => Ok(DfValue::UnsignedInt(
+                    bitvec::to_u64(vec).ok_or_else(mk_err)?,
+                )),
+                DfType::Float => Ok(DfValue::Float(
+                    bitvec::to_i64(vec).ok_or_else(mk_err)?.to_f32(),
+                )),
+                DfType::Double => Ok(DfValue::Double(
+                    bitvec::to_i64(vec).ok_or_else(mk_err)?.to_f64(),
+                )),
+                DfType::Numeric { .. } => Ok(DfValue::Numeric(Arc::new(
+                    Decimal::from_i64(bitvec::to_i64(vec).ok_or_else(mk_err)?)
+                        .ok_or_else(mk_err)?,
+                ))),
+                DfType::VarBinary(/* TODO */ _len) => {
+                    Ok(DfValue::ByteArray(Arc::new(bitvec::to_bytes_pad_left(vec))))
+                }
+                DfType::Binary(/* TODO */ _len) => {
+                    Ok(DfValue::ByteArray(Arc::new(bitvec::to_bytes_pad_left(vec))))
+                }
                 _ => Err(mk_err()),
             },
             DfValue::ByteArray(_) | DfValue::Max => Err(mk_err()),

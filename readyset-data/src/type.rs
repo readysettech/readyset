@@ -575,6 +575,11 @@ impl DfType {
         matches!(self, Self::Binary(_) | Self::VarBinary(_))
     }
 
+    /// Returns `true` if this is any bitstring type.
+    pub fn is_bitstring(&self) -> bool {
+        matches!(self, Self::Bit(_) | Self::VarBit(_))
+    }
+
     /// Returns the deepest nested type in [`DfType::Array`], otherwise returns `self`.
     #[inline]
     pub fn innermost_array_type(&self) -> &Self {

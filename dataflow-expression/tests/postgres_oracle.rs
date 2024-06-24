@@ -102,6 +102,10 @@ fn example_exprs_eval_same_as_postgres() {
         "split_part('a.b.c', '.', 4)",
         "split_part('a.b.c', '.', -1)",
         "split_part('a.b.c', '.', -4)",
+        "b'111' = b'0111'",
+        "b'111' = b'1110'",
+        "b'111'",
+        "b'111' in (b'111')",
     ] {
         compare_eval(expr, &mut client);
     }
