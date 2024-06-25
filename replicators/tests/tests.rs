@@ -3239,3 +3239,69 @@ async fn mysql_dont_replicate_unsupported_storage_engine() {
 
     shutdown_tx.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+#[slow]
+async fn mysql_dont_enforce_fk_replication() {
+    readyset_tracing::init_test_logging();
+    let url = mysql_url();
+    let mut client = DbConnection::connect(&url).await.unwrap();
+
+    client
+        .query(
+            "DROP TABLE IF EXISTS t_parent CASCADE;
+             DROP TABLE IF EXISTS t_child CASCADE;
+             DROP TABLE IF EXISTS t_child2 CASCADE;
+             CREATE TABLE t_parent (x INT PRIMARY KEY);
+             CREATE TABLE t_child (y INT, FOREIGN KEY (y) REFERENCES t_parent(x));",
+        )
+        .await
+        .unwrap();
+
+    let config = Config {
+        replication_tables: Some(String::from("public.t_child").into()),
+        ..Default::default()
+    };
+
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), Some(config))
+        .await
+        .unwrap();
+    ctx.notification_channel
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+
+    let t_parent = Relation {
+        schema: Some("public".into()),
+        name: "t_parent".into(),
+    };
+
+    let t_child = Relation {
+        schema: Some("public".into()),
+        name: "t_child".into(),
+    };
+    assert!(ctx
+        .noria
+        .non_replicated_relations()
+        .await
+        .unwrap()
+        .contains(&NonReplicatedRelation::new(t_parent.clone())));
+
+    assert!(ctx.noria.tables().await.unwrap().contains_key(&t_child));
+
+    client
+        .query("CREATE TABLE t_child2 (y INT, FOREIGN KEY (y) REFERENCES t_parent(x));")
+        .await
+        .unwrap();
+    let t_child2 = Relation {
+        schema: Some("public".into()),
+        name: "t_child2".into(),
+    };
+    eventually! {
+        ctx.noria.tables().await.unwrap().contains_key(&t_child2)
+    }
+    shutdown_tx.shutdown().await;
+}
