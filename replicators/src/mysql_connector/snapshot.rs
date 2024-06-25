@@ -230,7 +230,7 @@ impl MySqlReplicator {
             match res {
                 Ok(_) => {}
                 Err(error) => {
-                    warn!(%error, "Error extending CREATE TABLE, table will not be used");
+                    warn!(%error, "Error extending CREATE TABLE {:?}.{:?}, table will not be used", db, table);
                     // Prevent the table from being snapshotted as well
                     bad_tables.push((db.clone(), table.clone()));
 
