@@ -92,6 +92,10 @@ pub trait Visitor<'ast>: Sized {
         walk_relation(self, table)
     }
 
+    fn visit_target_table_fk(&mut self, table: &'ast Relation) -> Result<(), Self::Error> {
+        walk_relation(self, table)
+    }
+
     fn visit_literal(&mut self, _literal: &'ast Literal) -> Result<(), Self::Error> {
         Ok(())
     }
@@ -903,7 +907,7 @@ pub fn walk_table_key<'a, V: Visitor<'a>>(
             for column in columns {
                 visitor.visit_column(column)?;
             }
-            visitor.visit_table(target_table)?;
+            visitor.visit_target_table_fk(target_table)?;
             for column in target_columns {
                 visitor.visit_column(column)?;
             }
