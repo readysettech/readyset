@@ -672,6 +672,8 @@ impl FailedOpLogger {
 
 #[cfg(test)]
 mod tests {
+    use dataflow_state::PersistenceType;
+
     use super::*;
 
     #[test]
@@ -843,6 +845,7 @@ mod tests {
                 String::from("lots_of_changes_in_same_batch_persistent"),
                 Vec::<Box<[usize]>>::new(),
                 &PersistenceParameters::default(),
+                PersistenceType::BaseTable,
             )
             .unwrap();
 
@@ -860,6 +863,7 @@ mod tests {
                     String::from("delete_row_not_in_batch"),
                     Vec::<Box<[usize]>>::new(),
                     &PersistenceParameters::default(),
+                    PersistenceType::BaseTable,
                 )
                 .unwrap(),
             );
@@ -909,6 +913,7 @@ mod tests {
                     String::from("delete_row_not_in_batch_keyed"),
                     Vec::<Box<[usize]>>::new(),
                     &PersistenceParameters::default(),
+                    PersistenceType::BaseTable,
                 )
                 .unwrap(),
             );
@@ -963,6 +968,7 @@ mod tests {
                     String::from("delete_after_key_update"),
                     Vec::<Box<[usize]>>::new(),
                     &PersistenceParameters::default(),
+                    PersistenceType::BaseTable,
                 )
                 .unwrap(),
             );
@@ -1023,6 +1029,7 @@ mod tests {
                     "truncate".into(),
                     Vec::<Box<[usize]>>::new(),
                     &PersistenceParameters::default(),
+                    PersistenceType::BaseTable,
                 )
                 .unwrap(),
             );
@@ -1080,6 +1087,7 @@ mod tests {
                     "truncate".into(),
                     Vec::<Box<[usize]>>::new(),
                     &PersistenceParameters::default(),
+                    PersistenceType::BaseTable,
                 )
                 .unwrap(),
             );
@@ -1138,6 +1146,7 @@ mod tests {
                     "citext_coercion".into(),
                     Vec::<Box<[usize]>>::new(),
                     &PersistenceParameters::default(),
+                    PersistenceType::BaseTable,
                 )
                 .unwrap(),
             );

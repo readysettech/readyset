@@ -16,7 +16,7 @@ use ahash::RandomState;
 use backoff::ExponentialBackoffBuilder;
 use dataflow_state::{
     BaseTableState, EvictBytesResult, EvictKeysResult, EvictRandomResult, MaterializedNodeState,
-    PointKey, RangeKey, RangeLookupResult,
+    PersistenceType, PointKey, RangeKey, RangeLookupResult,
 };
 use failpoint_macros::failpoint;
 use futures_util::future::FutureExt;
@@ -760,8 +760,13 @@ async fn initialize_state(
             {
                 let base_name = base_name.clone();
                 tokio::task::spawn_blocking(move || {
-                    PersistentState::new(base_name, unique_keys, &persistence_params)
-                        .map_err(|e| ReadySetError::from(e))
+                    PersistentState::new(
+                        base_name,
+                        unique_keys,
+                        &persistence_params,
+                        PersistenceType::BaseTable,
+                    )
+                    .map_err(|e| ReadySetError::from(e))
                 })
             }
             .fuse(),
@@ -1665,7 +1670,20 @@ impl Domain {
                     } => {
                         if !self.state.contains_key(node) {
                             if self.experimental_materialization_persistence {
-                                unsupported!("will be supported in a follow up CL");
+                                let name = format!("full_mat-{}-{}", self.index(), node.id());
+                                // we'll add indices a little further down, so empty keys
+                                // here is fine.
+                                let keys: Vec<Box<[usize]>> = vec![];
+                                let persistence_params = self.persistence_parameters.clone();
+                                self.state.insert(
+                                    node,
+                                    MaterializedNodeState::Persistent(PersistentState::new(
+                                        name,
+                                        keys,
+                                        &persistence_params,
+                                        PersistenceType::FullMaterialization,
+                                    )?),
+                                );
                             } else {
                                 self.state.insert(
                                     node,

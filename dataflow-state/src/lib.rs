@@ -30,7 +30,8 @@ use serde::{Deserialize, Serialize};
 pub use crate::key::{PointKey, RangeKey};
 pub use crate::memory_state::MemoryState;
 pub use crate::persistent_state::{
-    DurabilityMode, PersistenceParameters, PersistentState, PersistentStateHandle, SnapshotMode,
+    DurabilityMode, PersistenceParameters, PersistenceType, PersistentState, PersistentStateHandle,
+    SnapshotMode,
 };
 
 /// Information about state evicted via a call to [`State::evict_bytes`]
@@ -267,8 +268,10 @@ impl MaterializedNodeState {
     /// replay
     pub fn set_replay_done(&mut self, replay_done: bool) {
         debug_assert!(!self.is_partial());
-        if let MaterializedNodeState::Memory(ms) = self {
-            ms.replay_done = replay_done;
+        match self {
+            MaterializedNodeState::Memory(ms) => ms.replay_done = replay_done,
+            MaterializedNodeState::Persistent(ps) => ps.set_replay_done(replay_done),
+            MaterializedNodeState::PersistentReadHandle(_rh) => (),
         }
     }
 }

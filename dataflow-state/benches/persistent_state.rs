@@ -40,7 +40,8 @@ use clap::Parser;
 use common::{Index, IndexType, Record};
 use criterion::{black_box, Criterion};
 use dataflow_state::{
-    DurabilityMode, PersistenceParameters, PersistentState, PointKey, RangeKey, SnapshotMode, State,
+    DurabilityMode, PersistenceParameters, PersistenceType, PersistentState, PointKey, RangeKey,
+    SnapshotMode, State,
 };
 use itertools::Itertools;
 use readyset_data::{DfValue, IntoBoundedRange};
@@ -262,6 +263,7 @@ impl PersistentStateBenchArgs {
                 persistence_threads: 6,
                 ..PersistenceParameters::default()
             },
+            PersistenceType::BaseTable,
         )
         .unwrap();
 
@@ -315,6 +317,7 @@ impl PersistentStateBenchArgs {
                 persistence_threads: 6,
                 ..PersistenceParameters::default()
             },
+            PersistenceType::BaseTable,
         )
         .unwrap();
 

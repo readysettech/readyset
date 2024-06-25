@@ -161,7 +161,7 @@ impl Ingredient for Project {
 mod tests {
     use dataflow_expression::utils::{make_int_column, make_literal};
     use dataflow_expression::BinaryOperator;
-    use dataflow_state::MaterializedNodeState;
+    use dataflow_state::{MaterializedNodeState, PersistenceType};
     use readyset_data::DfType;
     use Expr::Op;
 
@@ -450,6 +450,7 @@ mod tests {
                 String::from("it_queries_through_all_persistent"),
                 Vec::<Box<[usize]>>::new(),
                 &PersistenceParameters::default(),
+                PersistenceType::BaseTable,
             )
             .unwrap(),
         );
@@ -496,6 +497,7 @@ mod tests {
                 String::from("it_queries_through_some_persistent"),
                 Vec::<Box<[usize]>>::new(),
                 &PersistenceParameters::default(),
+                PersistenceType::BaseTable,
             )
             .unwrap(),
         );
@@ -538,6 +540,7 @@ mod tests {
                 String::from("it_queries_through_w_literals"),
                 Vec::<Box<[usize]>>::new(),
                 &PersistenceParameters::default(),
+                PersistenceType::BaseTable,
             )
             .unwrap(),
         );
@@ -592,6 +595,7 @@ mod tests {
                 String::from("it_queries_through_w_arithmetic_and_literals_persistent"),
                 Vec::<Box<[usize]>>::new(),
                 &PersistenceParameters::default(),
+                PersistenceType::BaseTable,
             )
             .unwrap(),
         );
@@ -638,6 +642,7 @@ mod tests {
                 String::from("it_queries_nested_expressions"),
                 Vec::<Box<[usize]>>::new(),
                 &PersistenceParameters::default(),
+                PersistenceType::BaseTable,
             )
             .unwrap(),
         );

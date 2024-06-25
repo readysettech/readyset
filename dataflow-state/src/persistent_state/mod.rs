@@ -204,6 +204,12 @@ impl SnapshotMode {
     }
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum PersistenceType {
+    BaseTable,
+    FullMaterialization,
+}
+
 /// Indicates to what degree updates should be persisted.
 #[derive(Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Eq, ValueEnum)]
 pub enum DurabilityMode {
@@ -440,6 +446,9 @@ pub struct PersistentState {
     snapshot_mode: SnapshotMode,
     compaction_threads: Vec<CompactionThreadHandle>,
     wal_flush_thread_handle: Option<(mpsc::Sender<()>, JoinHandle<()>)>,
+
+    persistence_type: PersistenceType,
+    replay_done: bool,
 }
 
 /// Things that are shared between read handles and the state itself, that can be locked under a
@@ -639,7 +648,11 @@ impl State for PersistentState {
         partial_tag: Option<Tag>,
         replication_offset: Option<ReplicationOffset>,
     ) -> ReadySetResult<()> {
-        invariant!(partial_tag.is_none(), "PersistentState can't be partial");
+        // `partial_tag` should only be present when writing to a non-base table
+        // as writing to a base table isn't part of a replay path
+        if self.persistence_type == PersistenceType::BaseTable {
+            invariant!(partial_tag.is_none(), "PersistentState can't be partial");
+        }
 
         // Streamline the records by eliminating pairs that would negate each other.
         records.remove_deleted();
@@ -768,8 +781,11 @@ impl State for PersistentState {
     }
 
     fn replay_done(&self) -> bool {
-        // Base tables by definition have always been "replayed to"
-        true
+        match self.persistence_type {
+            // Base tables by definition have always been "replayed to"
+            PersistenceType::BaseTable => true,
+            PersistenceType::FullMaterialization => self.replay_done,
+        }
     }
 
     /// Panics if called
@@ -1410,7 +1426,20 @@ impl PersistentState {
         mut name: String,
         unique_keys: K,
         params: &PersistenceParameters,
+        persistence_type: PersistenceType,
     ) -> Result<Self> {
+        let mut params = params.clone();
+
+        // For persisting full materializations, we only want the rocksdb
+        // files to live as long as the process (don't retain across restarts).
+        // Also, disable our background WAL flusher for this rocksdb instance as
+        // we'll use the "natural" rocskdb mechanisms for flushing the WAL,
+        // even though we won't write entries to the WAL (disabled via WriteOptions below).
+        if persistence_type == PersistenceType::FullMaterialization {
+            params.mode = DurabilityMode::DeleteOnExit;
+            params.wal_flush_interval_seconds = 0;
+        }
+
         let unique_keys: Vec<Box<[usize]>> =
             unique_keys.into_iter().map(|c| c.as_ref().into()).collect();
 
@@ -1459,7 +1488,13 @@ impl PersistentState {
 
         let name = SqlIdentifier::from(name);
 
-        match Self::new_inner(name.clone(), full_path.clone(), unique_keys.clone(), params) {
+        match Self::new_inner(
+            name.clone(),
+            full_path.clone(),
+            unique_keys.clone(),
+            &params,
+            persistence_type,
+        ) {
             Ok(ps) => Ok(Self {
                 _tmpdir: tmpdir,
                 ..ps
@@ -1473,7 +1508,7 @@ impl PersistentState {
                 if full_path.is_dir() {
                     fs::remove_dir_all(&full_path)?;
                 }
-                Self::new_inner(name, full_path, unique_keys, params)
+                Self::new_inner(name, full_path, unique_keys, &params, persistence_type)
             }
         }
     }
@@ -1483,6 +1518,7 @@ impl PersistentState {
         path: PathBuf,
         unique_keys: Vec<Box<[usize]>>,
         params: &PersistenceParameters,
+        persistence_type: PersistenceType,
     ) -> Result<Self> {
         let default_options = base_options(params);
         // We use a column family for each index, and one for metadata.
@@ -1617,6 +1653,8 @@ impl PersistentState {
             snapshot_mode: SnapshotMode::SnapshotModeDisabled,
             compaction_threads: vec![],
             wal_flush_thread_handle,
+            persistence_type,
+            replay_done: persistence_type == PersistenceType::BaseTable,
         };
 
         if let Some(pk) = state.unique_keys.first().cloned() {
@@ -1915,6 +1953,14 @@ impl PersistentState {
         }
     }
 
+    pub fn set_replay_done(&mut self, replay_done: bool) {
+        // only change the replay_done value for non-base tables,
+        // as base tables are always considered "replayed"
+        if self.persistence_type == PersistenceType::FullMaterialization {
+            self.replay_done = replay_done;
+        }
+    }
+
     fn serialize_prefix(key: &PointKey) -> Vec<u8> {
         serialize_key(key, ())
     }
@@ -2066,6 +2112,11 @@ impl PersistentState {
             && replication_offset.is_none()
         {
             write_options.disable_wal(true);
+        } else if self.persistence_type == PersistenceType::FullMaterialization {
+            // don't write full mat entries to a WAL, we don't care about recovery
+            // as we'll rebuild the full mat node on restart.
+            write_options.disable_wal(true);
+            write_options.set_sync(false);
         } else {
             let inner = &self.db.inner();
             if self.snapshot_mode.is_enabled() && replication_offset.is_some() {
@@ -2322,6 +2373,7 @@ mod tests {
             String::from(prefix),
             unique_keys,
             &PersistenceParameters::default(),
+            PersistenceType::BaseTable,
         )
         .unwrap()
     }
@@ -2630,6 +2682,7 @@ mod tests {
             String::from("persistent_state_primary_key"),
             Some(&pk_cols),
             &PersistenceParameters::default(),
+            PersistenceType::BaseTable,
         )
         .unwrap();
         let first: Vec<DfValue> = vec![1.into(), 2.into(), "Cat".into()];
@@ -2680,6 +2733,7 @@ mod tests {
             String::from("persistent_state_primary_key_delete"),
             Some(&pk.columns),
             &PersistenceParameters::default(),
+            PersistenceType::BaseTable,
         )
         .unwrap();
         let first: Vec<DfValue> = vec![1.into(), 2.into()];
@@ -2782,8 +2836,13 @@ mod tests {
         let first: Vec<DfValue> = vec![10.into(), "Cat".into()];
         let second: Vec<DfValue> = vec![20.into(), "Bob".into()];
         {
-            let mut state =
-                PersistentState::new(name.clone(), Vec::<Box<[usize]>>::new(), &params).unwrap();
+            let mut state = PersistentState::new(
+                name.clone(),
+                Vec::<Box<[usize]>>::new(),
+                &params,
+                PersistenceType::BaseTable,
+            )
+            .unwrap();
             state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
             state.add_index(Index::new(IndexType::HashMap, vec![1]), None);
             state
@@ -2791,7 +2850,13 @@ mod tests {
                 .unwrap();
         }
 
-        let state = PersistentState::new(name, Vec::<Box<[usize]>>::new(), &params).unwrap();
+        let state = PersistentState::new(
+            name,
+            Vec::<Box<[usize]>>::new(),
+            &params,
+            PersistenceType::BaseTable,
+        )
+        .unwrap();
         match state.lookup(&[0], &PointKey::Single(10.into())) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
                 assert_eq!(rows.len(), 1);
@@ -2819,7 +2884,13 @@ mod tests {
         let first: Vec<DfValue> = vec![10.into(), "Cat".into()];
         let second: Vec<DfValue> = vec![20.into(), "Bob".into()];
         {
-            let mut state = PersistentState::new(name.clone(), Some(&[0]), &params).unwrap();
+            let mut state = PersistentState::new(
+                name.clone(),
+                Some(&[0]),
+                &params,
+                PersistenceType::BaseTable,
+            )
+            .unwrap();
             state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
             state.add_index(Index::new(IndexType::HashMap, vec![1]), None);
             state
@@ -2827,7 +2898,8 @@ mod tests {
                 .unwrap();
         }
 
-        let state = PersistentState::new(name, Some(&[0]), &params).unwrap();
+        let state =
+            PersistentState::new(name, Some(&[0]), &params, PersistenceType::BaseTable).unwrap();
         match state.lookup(&[0], &PointKey::Single(10.into())) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
                 assert_eq!(rows.len(), 1);
@@ -3051,6 +3123,7 @@ mod tests {
                 String::from(".s-o_u#p."),
                 Vec::<Box<[usize]>>::new(),
                 &PersistenceParameters::default(),
+                PersistenceType::BaseTable,
             )
             .unwrap();
             let path = state._tmpdir.as_ref().unwrap().path();
