@@ -810,7 +810,8 @@ async fn mysql_char_collation_padding_inner() -> ReadySetResult<()> {
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
             INSERT INTO `col_pad` VALUES (1, 'ࠈࠈ');
             INSERT INTO `col_pad` VALUES (2, 'A');
-            INSERT INTO `col_pad` VALUES (3, 'AAA');",
+            INSERT INTO `col_pad` VALUES (3, 'AAA');
+            INSERT INTO `col_pad` (id) VALUES (4);",
         )
         .await?;
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None).await?;
@@ -840,6 +841,7 @@ async fn mysql_char_collation_padding_inner() -> ReadySetResult<()> {
                 DfValue::Int(3),
                 DfValue::TinyText(TinyText::from_arr(b"AAA")),
             ],
+            &[DfValue::Int(4), DfValue::None],
         ],
     )
     .await?;
@@ -848,9 +850,10 @@ async fn mysql_char_collation_padding_inner() -> ReadySetResult<()> {
     client
         .query(
             "
-        INSERT INTO `col_pad` VALUES (4, 'Bࠉ');
-        INSERT INTO `col_pad` VALUES (5, 'B');
-        INSERT INTO `col_pad` VALUES (6, 'BBB');
+        INSERT INTO `col_pad` VALUES (5, 'Bࠉ');
+        INSERT INTO `col_pad` VALUES (6, 'B');
+        INSERT INTO `col_pad` VALUES (7, 'BBB');
+        INSERT INTO `col_pad` (id) VALUES (8);
         ",
         )
         .await
@@ -875,8 +878,9 @@ async fn mysql_char_collation_padding_inner() -> ReadySetResult<()> {
                 DfValue::Int(3),
                 DfValue::TinyText(TinyText::from_arr(b"AAA")),
             ],
+            &[DfValue::Int(4), DfValue::None],
             &[
-                DfValue::Int(4),
+                DfValue::Int(5),
                 // 'Bࠉ ' is the UTF-8 encoding of U+E42 U+E0A089 U+20
                 DfValue::TinyText(
                     TinyText::from_slice(vec![0x42, 0xE0, 0xA0, 0x89, 0x20].as_slice())
@@ -884,13 +888,14 @@ async fn mysql_char_collation_padding_inner() -> ReadySetResult<()> {
                 ),
             ],
             &[
-                DfValue::Int(5),
+                DfValue::Int(6),
                 DfValue::TinyText(TinyText::from_arr(b"B  ")),
             ],
             &[
-                DfValue::Int(6),
+                DfValue::Int(7),
                 DfValue::TinyText(TinyText::from_arr(b"BBB")),
             ],
+            &[DfValue::Int(8), DfValue::None],
         ],
     )
     .await?;

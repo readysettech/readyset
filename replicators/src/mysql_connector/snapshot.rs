@@ -775,6 +775,7 @@ fn mysql_row_to_noria_row(row: mysql::Row) -> ReadySetResult<Vec<readyset_data::
         // ENUM and SET columns are stored as integers and retrieved as strings. We don't need
         // padding.
         let require_padding = col.column_type() == ColumnType::MYSQL_TYPE_STRING
+            && val != mysql_common::value::Value::NULL
             && !flags.contains(ColumnFlags::ENUM_FLAG)
             && !flags.contains(ColumnFlags::SET_FLAG);
         match require_padding {
