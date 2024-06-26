@@ -701,7 +701,9 @@ mod tests {
 
     #[proptest]
     fn real_hash_matches_eq(real1: Double, real2: Double) {
-        assert_eq!(real1 == real2, hash(&real1) == hash(&real2));
+        if real1 == real2 {
+            assert_eq!(hash(&real1), hash(&real2));
+        }
     }
 
     #[proptest]
@@ -779,6 +781,7 @@ mod tests {
             );
         }
     }
+
     mod postgres {
         use super::*;
 
