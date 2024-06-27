@@ -292,7 +292,7 @@ impl DfType {
             Bit(len) => Self::Bit(len.unwrap_or(1)),
             VarBit(len) => Self::VarBit(len),
 
-            Json => unsupported!("Unsupported type: Json"),
+            Json => Self::Json,
             Jsonb => unsupported!("Unsupported type: Jsonb"),
 
             Date => Self::Date,
