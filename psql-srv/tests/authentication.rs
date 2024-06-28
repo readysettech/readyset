@@ -88,7 +88,7 @@ impl PsqlBackend for ScramSha256Backend {
 
 async fn run_server(backend: ScramSha256Backend) -> u16 {
     let identity_file = include_bytes!("tls_certs/keyStore.p12");
-    let identity = native_tls::Identity::from_pkcs12(identity_file, "").unwrap();
+    let identity = native_tls::Identity::from_pkcs12(identity_file, "password").unwrap();
     let tls_acceptor = Some(Arc::new(TlsAcceptor::from(
         native_tls::TlsAcceptor::new(identity).unwrap(),
     )));

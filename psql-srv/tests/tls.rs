@@ -88,7 +88,7 @@ async fn connect() {
     // Load the identity file as bytes (using relative path)
     let identity_file = include_bytes!("tls_certs/keyStore.p12");
     // Test identify file does not require password
-    let identity = native_tls::Identity::from_pkcs12(identity_file, "").unwrap();
+    let identity = native_tls::Identity::from_pkcs12(identity_file, "password").unwrap();
     let tls_acceptor = Some(Arc::new(TlsAcceptor::from(
         native_tls::TlsAcceptor::new(identity).unwrap(),
     )));
