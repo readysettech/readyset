@@ -596,6 +596,10 @@ fn mysql_type_conversion(left_ty: &DfType, right_ty: &DfType) -> DfType {
         ty
     } else if let Some(ty) = mysql_numerical_type_cvt(left_ty, right_ty) {
         ty
+    } else if matches!(left_ty, DfType::Json) || matches!(right_ty, DfType::Json) {
+        DfType::Json
+    } else if matches!(left_ty, DfType::Jsonb) || matches!(right_ty, DfType::Jsonb) {
+        DfType::Jsonb
     } else {
         DfType::Double
     }

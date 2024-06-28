@@ -293,7 +293,7 @@ impl DfType {
             VarBit(len) => Self::VarBit(len),
 
             Json => Self::Json,
-            Jsonb => unsupported!("Unsupported type: Jsonb"),
+            Jsonb => Self::Jsonb,
 
             Date => Self::Date,
             #[allow(clippy::or_fun_call)]
