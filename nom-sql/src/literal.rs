@@ -557,9 +557,9 @@ fn simple_literal(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResu
     move |i| {
         alt((
             float_literal,
+            map(dialect.bytes_literal(), Literal::ByteArray),
             integer_literal,
             boolean_literal,
-            map(dialect.bytes_literal(), Literal::ByteArray),
             map(
                 delimited(tag_no_case("b'"), bits, tag("'")),
                 Literal::BitVector,

@@ -7,7 +7,7 @@ use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case, take_while1};
 use nom::character::complete::hex_digit0;
 use nom::character::is_alphanumeric;
-use nom::combinator::{map, map_res, not, opt, peek};
+use nom::combinator::{map, map_res, not, opt, peek, verify};
 use nom::error::ErrorKind;
 use nom::sequence::{delimited, preceded};
 use nom::{InputLength, InputTake};
@@ -81,7 +81,7 @@ pub(crate) fn is_sql_identifier(chr: u8) -> bool {
 fn raw_hex_bytes_psql(input: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<u8>> {
     alt((
         delimited(tag("E'\\\\x"), hex_bytes(1), tag("'::bytea")),
-        delimited(tag_no_case("x'"), hex_bytes(2), tag("'")),
+        delimited(tag_no_case("x'"), hex_bytes(1), tag("'")),
     ))(input)
 }
 
@@ -95,13 +95,10 @@ fn raw_hex_bytes_mysql(input: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<u8>
 
 fn hex_bytes(chunk: usize) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<u8>> {
     move |i| {
-        let res = map_res(hex_digit0, |i: LocatedSpan<&[u8]>| hex::decode(*i))(i);
-        if let Ok((_, res)) = res.as_ref() {
-            if res.len() % chunk != 0 {
-                failed!(i);
-            }
-        }
-        res
+        map_res(
+            verify(hex_digit0, |i: &LocatedSpan<&[u8]>| i.len() % chunk == 0),
+            |i: LocatedSpan<&[u8]>| hex::decode(*i),
+        )(i)
     }
 }
 
@@ -483,6 +480,10 @@ mod tests {
             let res = parse_dialect_bytes(Dialect::MySQL, b"0x0008275c6480");
             assert_eq!(res, expected);
 
+            let res = parse_dialect_bytes(Dialect::MySQL, b"0x6D617263656C6F");
+            let expected = Ok((&b""[..], vec![109, 97, 114, 99, 101, 108, 111]));
+            assert_eq!(res, expected);
+
             // Empty
             let res = parse_dialect_bytes(Dialect::MySQL, b"X''");
             let expected = vec![];
@@ -610,6 +611,15 @@ mod tests {
             // Malformed string
             let res = Dialect::PostgreSQL.bytes_literal()(LocatedSpan::new(b"E'\\\\'::btea"));
             res.unwrap_err();
+        }
+
+        #[test]
+        #[ignore = "REA-4485"]
+        fn bytes_parsing_odd_length() {
+            // odd length is okay in postgres
+            let res = parse_dialect_bytes(Dialect::PostgreSQL, b"X'D617263656C6F'");
+            let expected = Ok((&b""[..], vec![13, 97, 114, 99, 101, 108, 111]));
+            assert_eq!(res, expected);
         }
     }
 }
