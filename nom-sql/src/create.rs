@@ -137,6 +137,24 @@ pub struct CreateTableBody {
     pub keys: Option<Vec<TableKey>>,
 }
 
+impl CreateTableBody {
+    /// Returns the primary key of the table, if one exists.
+    pub fn get_primary_key(&self) -> Option<&TableKey> {
+        self.keys
+            .as_ref()?
+            .iter()
+            .find(|key| matches!(key, TableKey::PrimaryKey { .. }))
+    }
+
+    /// Returns the first unique key of the table, if one exists.
+    pub fn get_first_unique_key(&self) -> Option<&TableKey> {
+        self.keys
+            .as_ref()?
+            .iter()
+            .find(|key| matches!(key, TableKey::UniqueKey { .. }))
+    }
+}
+
 impl DialectDisplay for CreateTableBody {
     fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| {

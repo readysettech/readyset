@@ -134,6 +134,28 @@ impl TableKey {
             TableKey::FulltextKey { .. } => &None,
         }
     }
+
+    /// Check if the key is a primary key
+    pub fn is_primary_key(&self) -> bool {
+        matches!(self, TableKey::PrimaryKey { .. })
+    }
+
+    /// Check if the key is a unique key
+    pub fn is_unique_key(&self) -> bool {
+        matches!(self, TableKey::UniqueKey { .. })
+    }
+
+    /// Get the columns that the key is defined on
+    pub fn get_columns(&self) -> &[Column] {
+        match self {
+            TableKey::PrimaryKey { columns, .. }
+            | TableKey::UniqueKey { columns, .. }
+            | TableKey::FulltextKey { columns, .. }
+            | TableKey::Key { columns, .. }
+            | TableKey::ForeignKey { columns, .. } => columns,
+            TableKey::CheckConstraint { .. } => &[],
+        }
+    }
 }
 
 impl DialectDisplay for TableKey {
