@@ -8,7 +8,6 @@ use super::utils::MYSQL_BATCH_SIZE;
 /// The type of snapshot to be taken
 /// KeyBased: Snapshot based on the primary key or unique key
 /// FullTableScan: Snapshot the entire table
-#[allow(dead_code)]
 pub enum SnapshotType {
     KeyBased {
         keys: Vec<String>,
@@ -18,7 +17,6 @@ pub enum SnapshotType {
 }
 
 impl SnapshotType {
-    #[allow(dead_code)]
     pub fn new(table: &readyset_client::Table) -> ReadySetResult<Self> {
         let cts = match table.schema() {
             Some(cts) => cts,
@@ -45,7 +43,6 @@ impl SnapshotType {
     /// Returns:
     /// * The lower bound
     /// Errors if the snapshot type is FullTableScan or the lower bound is not set
-    #[allow(dead_code)]
     pub fn get_lower_bound(&mut self) -> ReadySetResult<Vec<mysql::Value>> {
         match self {
             SnapshotType::KeyBased {
@@ -71,7 +68,6 @@ impl SnapshotType {
     ///
     /// Returns:
     /// * A tuple containing the count query, the initial query, and the bound based query
-    #[allow(dead_code)]
     pub fn get_queries(&self, table: &readyset_client::Table) -> (String, String, String) {
         //TODO(marce): COUNT(1) Or COUNT(PK) might have better performance
         let count_query = format!(
@@ -127,7 +123,6 @@ impl SnapshotType {
     ///
     /// Arguments:
     /// * `row` - The row to compute the lower bound from
-    #[allow(dead_code)]
     pub fn set_lower_bound(&mut self, row: &mysql::Row) {
         match self {
             SnapshotType::KeyBased {
@@ -151,7 +146,6 @@ impl SnapshotType {
     ///
     /// Returns:
     /// * True if the snapshot type is key based, false otherwise
-    #[allow(dead_code)]
     pub fn is_key_based(&self) -> bool {
         matches!(self, SnapshotType::KeyBased { .. })
     }
