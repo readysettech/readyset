@@ -3265,7 +3265,7 @@ async fn mysql_dont_enforce_fk_replication() {
         .unwrap();
 
     let config = Config {
-        replication_tables: Some(String::from("public.t_child").into()),
+        replication_tables: Some(String::from("public.t_child, public.t_child2").into()),
         ..Default::default()
     };
 
