@@ -6,7 +6,6 @@ use mysql_srv::ColumnType;
 use readyset_data::DfValue;
 
 //TODO(marce): Make this a configuration parameter or dynamically adjust based on the table size
-#[allow(dead_code)]
 pub const MYSQL_BATCH_SIZE: usize = 100_000; // How many rows to fetch at a time from MySQL
 
 /// Pad a MYSQL_TYPE_STRING (CHAR / BINARY) column value to the correct length for the given column
