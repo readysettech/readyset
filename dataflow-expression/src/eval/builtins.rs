@@ -1081,7 +1081,7 @@ mod tests {
             PostgreSQL => crate::Dialect::DEFAULT_POSTGRESQL,
             MySQL => crate::Dialect::DEFAULT_MYSQL,
         };
-        Expr::lower(ast, expr_dialect, numbered_columns()).unwrap()
+        Expr::lower(ast, expr_dialect, &numbered_columns()).unwrap()
     }
 
     #[test]
@@ -1817,7 +1817,7 @@ mod tests {
                 Expr::lower(
                     ast,
                     Dialect::DEFAULT_MYSQL,
-                    resolve_columns(|c| match c.name.as_str() {
+                    &resolve_columns(|c| match c.name.as_str() {
                         "t" => Ok((0, DfType::DEFAULT_TEXT)),
                         "f" => Ok((1, DfType::DEFAULT_TEXT)),
                         _ => internal!(),

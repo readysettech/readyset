@@ -882,7 +882,7 @@ fn lower_expression(
     DfExpr::lower(
         expr,
         dialect,
-        LowerContext {
+        &LowerContext {
             graph,
             parent_node_idx: parent,
             parent_cols,
