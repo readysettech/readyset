@@ -523,6 +523,7 @@ impl ToMySqlValue for TimestampTz {
                 // are all 0, length is 4 and no other field is sent.
                 // if microseconds is 0, length is 7 and micro_seconds is not sent.
                 // otherwise the length is 11
+                // TODO(marce): Currently TimestampTZ will produce NULL for zero/invalid dates.
                 let us = ts.nanosecond() / 1_000;
                 let packet_len = if us != 0 {
                     11

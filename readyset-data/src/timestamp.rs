@@ -143,7 +143,7 @@ impl TimestampTz {
 
     /// Set the desired precision when displaying subseconds.
     #[inline(always)]
-    fn set_subsecond_digits(&mut self, count: u8) {
+    pub fn set_subsecond_digits(&mut self, count: u8) {
         self.extra[2] = ((count << TimestampTz::SUBSECOND_DIGITS_BITS.trailing_zeros())
             & TimestampTz::SUBSECOND_DIGITS_BITS)
             | (self.extra[2] & !TimestampTz::SUBSECOND_DIGITS_BITS);

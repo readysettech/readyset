@@ -1,7 +1,10 @@
+use std::env;
+use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
+use mysql::Row;
 use mysql_async::prelude::Queryable;
 use mysql_async::OptsBuilder;
 use readyset_adapter::backend::noria_connector::ReadBehavior;
@@ -15,11 +18,13 @@ use readyset_client_test_helpers::{sleep, TestBuilder};
 use readyset_errors::ReadySetError;
 use readyset_server::Handle;
 use readyset_telemetry_reporter::{TelemetryEvent, TelemetryInitializer, TelemetryReporter};
+use readyset_util::eventually;
 use readyset_util::shutdown::ShutdownSender;
 use regex::Regex;
+use serial_test::serial;
 use test_utils::skip_flaky_finder;
 
-async fn setup_with_mysql() -> (mysql_async::Opts, Handle, ShutdownSender) {
+async fn setup_with_mysql(recreate_db: bool) -> (mysql_async::Opts, Handle, ShutdownSender) {
     readyset_tracing::init_test_logging();
     let mut users = std::collections::HashMap::new();
     users.insert("root".to_string(), "noria".to_string());
@@ -30,6 +35,7 @@ async fn setup_with_mysql() -> (mysql_async::Opts, Handle, ShutdownSender) {
             .users(users),
     )
     .fallback(true)
+    .recreate_database(recreate_db)
     .build::<MySQLAdapter>()
     .await
 }
@@ -49,6 +55,14 @@ async fn setup_telemetry() -> (TelemetryReporter, mysql_async::Opts, Handle, Shu
     let (opts, handle, shutdown_tx) = TestBuilder::new(backend).build::<MySQLAdapter>().await;
 
     (reporter, opts, handle, shutdown_tx)
+}
+
+fn mysql_url() -> String {
+    format!(
+        "mysql://root:noria@{}:{}/noria",
+        env::var("MYSQL_HOST").unwrap_or_else(|_| "127.0.0.1".into()),
+        env::var("MYSQL_TCP_PORT").unwrap_or_else(|_| "3306".into()),
+    )
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1842,8 +1856,9 @@ async fn show_caches_with_always() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[serial]
 async fn show_readyset_status() {
-    let (opts, _handle, shutdown_tx) = setup_with_mysql().await;
+    let (opts, _handle, shutdown_tx) = setup_with_mysql(true).await;
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();
     let mut ret: Vec<mysql::Row> = conn.query("SHOW READYSET STATUS;").await.unwrap();
 
@@ -2105,5 +2120,156 @@ async fn test_proxied_queries_telemetry() {
     // with its initial value
     assert_eq!(telemetry.migration_status, Some("pending".to_string()));
 
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn datetime_nanosecond_precision_text_protocol() {
+    let mut direct_mysql = mysql_async::Conn::from_url(mysql_url()).await.unwrap();
+    direct_mysql.query_drop("DROP TABLE IF EXISTS dt_nano_text_protocol CASCADE;
+             CREATE TABLE dt_nano_text_protocol (col1 DATETIME, col2 DATETIME(2), col3 DATETIME(4), col4 DATETIME(6));
+             INSERT INTO dt_nano_text_protocol VALUES ('2021-01-01 00:00:00', '2021-01-01 00:00:00.00', '2021-01-01 00:00:00.0000', '2021-01-01 00:00:00.000000');
+             INSERT INTO dt_nano_text_protocol VALUES ('2021-01-01 00:00:00', '2021-01-01 00:00:00.01', '2021-01-01 00:00:00.0001', '2021-01-01 00:00:00.000001');")
+        .await
+        .unwrap();
+    let (opts, _handle, shutdown_tx) = setup_with_mysql(false).await;
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    sleep().await;
+
+    conn.query_drop("CREATE CACHE FROM SELECT * FROM dt_nano_text_protocol")
+        .await
+        .unwrap();
+    sleep().await;
+
+    let my_rows: Vec<(String, String, String, String)> = direct_mysql
+        .query("SELECT * FROM dt_nano_text_protocol")
+        .await
+        .unwrap();
+    let rs_rows: Vec<(String, String, String, String)> = conn
+        .query("SELECT * FROM dt_nano_text_protocol")
+        .await
+        .unwrap();
+    assert_eq!(rs_rows, my_rows);
+    conn.query_drop("INSERT INTO dt_nano_text_protocol VALUES ('2021-01-02 00:00:00', '2021-01-02 00:00:00.00', '2021-01-02 00:00:00.0000', '2021-01-02 00:00:00.000000');").await.unwrap();
+    conn.query_drop("INSERT INTO dt_nano_text_protocol VALUES ('2021-01-02 00:00:00', '2021-01-02 00:00:00.01', '2021-01-02 00:00:00.0001', '2021-01-02 00:00:00.000001');").await.unwrap();
+
+    sleep().await;
+
+    eventually!(run_test: {
+        let my_rows: Vec<(String, String, String, String)> = direct_mysql
+        .query("SELECT * FROM dt_nano_text_protocol")
+        .await
+        .unwrap();
+
+        let rs_rows: Vec<(String, String, String, String)> = conn
+            .query("SELECT * FROM dt_nano_text_protocol")
+            .await
+            .unwrap();
+        AssertUnwindSafe(move || (rs_rows, my_rows))
+    },then_assert: |results| {
+        let (rs_rows, my_rows) = results();
+        assert_eq!(rs_rows, my_rows)
+    });
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn datetime_nanosecond_precision_binary_protocol() {
+    let mut direct_mysql = mysql_async::Conn::from_url(mysql_url()).await.unwrap();
+    direct_mysql.query_drop("DROP TABLE IF EXISTS dt_nano_bin_protocol CASCADE;
+             CREATE TABLE dt_nano_bin_protocol (ID INT PRIMARY KEY, col1 DATETIME, col2 DATETIME(2), col3 DATETIME(4), col4 DATETIME(6));
+             INSERT INTO dt_nano_bin_protocol VALUES (1, '2021-01-01 00:00:00', '2021-01-01 00:00:00.00', '2021-01-01 00:00:00.0000', '2021-01-01 00:00:00.000000');
+             INSERT INTO dt_nano_bin_protocol VALUES (2, '2021-01-01 00:00:00', '2021-01-01 00:00:00.01', '2021-01-01 00:00:00.0001', '2021-01-01 00:00:00.000001');")
+        .await
+        .unwrap();
+    let (opts, _handle, shutdown_tx) = setup_with_mysql(false).await;
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    sleep().await;
+
+    conn.query_drop("CREATE CACHE FROM SELECT * FROM dt_nano_bin_protocol WHERE ID = ?")
+        .await
+        .unwrap();
+    sleep().await;
+
+    for id in 1..=2 {
+        let my_rows: Row = direct_mysql
+            .exec_first("SELECT * FROM dt_nano_bin_protocol WHERE ID = ?", (id,))
+            .await
+            .unwrap()
+            .unwrap();
+        let rs_rows: Row = conn
+            .exec_first("SELECT * FROM dt_nano_bin_protocol WHERE ID = ?", (id,))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(rs_rows.unwrap_raw(), my_rows.unwrap_raw())
+    }
+
+    conn.query_drop("INSERT INTO dt_nano_bin_protocol VALUES (3, '2021-01-02 00:00:00', '2021-01-02 00:00:00.00', '2021-01-02 00:00:00.0000', '2021-01-02 00:00:00.000000');").await.unwrap();
+    conn.query_drop("INSERT INTO dt_nano_bin_protocol VALUES (4, '2021-01-02 00:00:00', '2021-01-02 00:00:00.01', '2021-01-02 00:00:00.0001', '2021-01-02 00:00:00.000001');").await.unwrap();
+
+    sleep().await;
+
+    for id in 3..=4 {
+        eventually!(run_test: {
+
+            let my_rows: Row = direct_mysql
+            .exec_first("SELECT * FROM dt_nano_bin_protocol WHERE ID = ?", (id,))
+            .await
+            .unwrap()
+            .unwrap();
+        let rs_rows: Row = conn
+            .exec_first("SELECT * FROM dt_nano_bin_protocol WHERE ID = ?", (id,))
+            .await
+            .unwrap()
+            .unwrap();
+            AssertUnwindSafe(move || (rs_rows, my_rows))
+        },then_assert: |results| {
+            let (rs_rows, my_rows) = results();
+            assert_eq!(rs_rows.unwrap_raw(), my_rows.unwrap_raw())
+        });
+    }
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn datetime_binary_protocol() {
+    let (opts, _handle, shutdown_tx) = setup_with_mysql(false).await;
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut direct_mysql = mysql_async::Conn::from_url(mysql_url()).await.unwrap();
+    direct_mysql.query_drop("SET sql_mode='';").await.unwrap();
+    direct_mysql
+        .query_drop("DROP TABLE IF EXISTS dt_bin_protocol CASCADE;")
+        .await
+        .unwrap();
+    direct_mysql.query_drop("CREATE TABLE dt_bin_protocol (ID INT PRIMARY KEY, col1 DATETIME(6), col2 DATETIME(6), col3 DATETIME(6), col4 DATETIME(6));").await.unwrap();
+    direct_mysql.query_drop("INSERT INTO dt_bin_protocol VALUES (1, '0000-00-00 00:00:00.000000', '2021-01-01 00:00:00.000000', '2021-01-01 00:00:01.0000000', '2021-01-01 00:00:01.000001');")
+        .await
+        .unwrap();
+    sleep().await;
+
+    conn.query_drop("CREATE CACHE FROM SELECT * FROM dt_bin_protocol WHERE ID = ?")
+        .await
+        .unwrap();
+    sleep().await;
+    let rs_rows: Row = conn
+        .exec_first("SELECT * FROM dt_bin_protocol WHERE ID = 1", ())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        rs_rows.unwrap_raw(),
+        vec![
+            Some(mysql::Value::Int(1)),
+            Some(mysql::Value::NULL),
+            Some(mysql::Value::Date(2021, 1, 1, 0, 0, 0, 0)),
+            Some(mysql::Value::Date(2021, 1, 1, 0, 0, 1, 0)),
+            Some(mysql::Value::Date(2021, 1, 1, 0, 0, 1, 1))
+        ]
+    );
     shutdown_tx.shutdown().await;
 }
