@@ -2,6 +2,7 @@ use std::io::{self, Write};
 
 use byteorder::{LittleEndian, WriteBytesExt};
 use mysql_time::MySqlTime;
+use readyset_data::TimestampTz;
 
 use crate::error::{other_error, OtherErrorKind};
 use crate::myc::constants::{ColumnFlags, ColumnType};
@@ -500,6 +501,70 @@ impl ToMySqlValue for MySqlTime {
                 w.write_u8(self.minutes())?;
                 w.write_u8(self.seconds())?;
                 w.write_u32::<LittleEndian>(self.microseconds())
+            }
+            _ => Err(bad(self, c)),
+        }
+    }
+}
+
+impl ToMySqlValue for TimestampTz {
+    fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()> {
+        w.write_lenenc_str(self.to_string().as_bytes()).map(|_| ())
+    }
+
+    fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
+        let ts = self.to_chrono();
+        match c.coltype {
+            ColumnType::MYSQL_TYPE_DATETIME | ColumnType::MYSQL_TYPE_TIMESTAMP => {
+                // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_binary_resultset.html
+                // To save space the packet can be compressed:
+                // if year, month, day, hour, minutes, seconds and microseconds are all 0, length is
+                // 0 and no other field is sent. if hour, seconds and microseconds
+                // are all 0, length is 4 and no other field is sent.
+                // if microseconds is 0, length is 7 and micro_seconds is not sent.
+                // otherwise the length is 11
+                let us = ts.nanosecond() / 1_000;
+                let packet_len = if us != 0 {
+                    11
+                } else if (ts.hour(), ts.minute(), ts.second()) != (0, 0, 0) {
+                    7
+                } else if (ts.year(), ts.month(), ts.day()) != (0, 0, 0) {
+                    4
+                } else {
+                    0
+                };
+
+                w.write_u8(packet_len)?;
+
+                if packet_len == 0 {
+                    return Ok(()); // no need to write anything else
+                }
+
+                w.write_u16::<LittleEndian>(ts.year() as u16)?;
+                w.write_u8(ts.month() as u8)?;
+                w.write_u8(ts.day() as u8)?;
+
+                if packet_len == 4 {
+                    return Ok(()); // no need to write time
+                }
+
+                w.write_u8(ts.hour() as u8)?;
+                w.write_u8(ts.minute() as u8)?;
+                w.write_u8(ts.second() as u8)?;
+
+                if packet_len == 7 {
+                    return Ok(()); // no need to write microseconds
+                }
+
+                w.write_u32::<LittleEndian>(us)?;
+
+                Ok(())
+            }
+            ColumnType::MYSQL_TYPE_DATE => {
+                if ts.time() != NaiveTime::from_hms_opt(0, 0, 0).unwrap() {
+                    return Err(bad(self, c));
+                }
+                ts.date_naive().to_mysql_bin(w, c)
             }
             _ => Err(bad(self, c)),
         }

@@ -139,9 +139,7 @@ async fn write_column<W: AsyncWrite + Unpin>(
             mysql_srv::ColumnType::MYSQL_TYPE_DATETIME
             | mysql_srv::ColumnType::MYSQL_TYPE_DATETIME2
             | mysql_srv::ColumnType::MYSQL_TYPE_TIMESTAMP
-            | mysql_srv::ColumnType::MYSQL_TYPE_TIMESTAMP2 => {
-                rw.write_col(ts.to_chrono().naive_local())
-            }
+            | mysql_srv::ColumnType::MYSQL_TYPE_TIMESTAMP2 => rw.write_col(ts),
             ColumnType::MYSQL_TYPE_DATE => rw.write_col(ts.to_chrono().naive_local().date()),
             _ => return Err(conv_error())?,
         },
