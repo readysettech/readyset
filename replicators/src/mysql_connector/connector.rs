@@ -853,18 +853,16 @@ fn binlog_val_to_noria_val(
     // Not all values are coerced to the value expected by ReadySet directly
 
     use mysql_common::constants::ColumnType;
-
-    let buf = match val {
-        mysql_common::value::Value::Bytes(b) => b,
-        _ => {
-            return val.try_into().map_err(|e| {
-                mysql_async::Error::Other(Box::new(internal_err!("Unable to coerce value {}", e)))
-            })
-        }
-    };
-
     match (col_kind, meta) {
         (ColumnType::MYSQL_TYPE_TIMESTAMP2, &[0]) => {
+            let buf = match val {
+                mysql_common::value::Value::Bytes(b) => b,
+                _ => {
+                    return Err(mysql_async::Error::Other(Box::new(internal_err!(
+                        "Expected a byte array for timestamp"
+                    ))));
+                }
+            };
             //https://github.com/blackbeam/rust_mysql_common/blob/408effed435c059d80a9e708bcfa5d974527f476/src/binlog/value.rs#L144
             // When meta is 0, `mysql_common` encodes this value as number of seconds (since UNIX
             // EPOCH)
@@ -881,6 +879,14 @@ fn binlog_val_to_noria_val(
             Ok(time.into())
         }
         (ColumnType::MYSQL_TYPE_TIMESTAMP2, _) => {
+            let buf = match val {
+                mysql_common::value::Value::Bytes(b) => b,
+                _ => {
+                    return Err(mysql_async::Error::Other(Box::new(internal_err!(
+                        "Expected a byte array for timestamp"
+                    ))));
+                }
+            };
             // When meta is anything else, `mysql_common` encodes this value as number of
             // seconds.microseconds (since UNIX EPOCH)
             let s = String::from_utf8_lossy(buf);
@@ -894,6 +900,14 @@ fn binlog_val_to_noria_val(
             Ok(time.into())
         }
         (ColumnType::MYSQL_TYPE_STRING, meta) => {
+            let buf = match val {
+                mysql_common::value::Value::Bytes(b) => b,
+                _ => {
+                    return Err(mysql_async::Error::Other(Box::new(internal_err!(
+                        "Expected a byte array for timestamp"
+                    ))));
+                }
+            };
             match mysql_pad_collation_column(
                 buf,
                 col_kind,
@@ -903,6 +917,28 @@ fn binlog_val_to_noria_val(
                 Ok(s) => Ok(s),
                 Err(e) => Err(mysql_async::Error::Other(Box::new(internal_err!("{e}")))),
             }
+        }
+        (ColumnType::MYSQL_TYPE_DATETIME2, meta) => {
+            //meta[0] is the fractional seconds precision
+            let df_val: DfValue = val
+                .try_into()
+                .map_err(|e| {
+                    mysql_async::Error::Other(Box::new(internal_err!(
+                        "Unable to coerce value {}",
+                        e
+                    )))
+                })
+                .and_then(|val| match val {
+                    DfValue::TimestampTz(mut ts) => {
+                        ts.set_subsecond_digits(meta[0]);
+                        Ok(DfValue::TimestampTz(ts))
+                    }
+                    DfValue::None => Ok(DfValue::None), //NULL
+                    _ => Err(mysql_async::Error::Other(Box::new(internal_err!(
+                        "Expected a timestamp"
+                    )))),
+                })?;
+            Ok(df_val)
         }
         _ => Ok(val.try_into().map_err(|e| {
             mysql_async::Error::Other(Box::new(internal_err!("Unable to coerce value {}", e)))

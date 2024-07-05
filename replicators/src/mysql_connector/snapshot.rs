@@ -15,7 +15,7 @@ use mysql_common::constants::ColumnType;
 use mysql_srv::ColumnFlags;
 use nom_sql::{DialectDisplay, NonReplicatedRelation, NotReplicatedReason, Relation};
 use readyset_client::recipe::changelist::{Change, ChangeList};
-use readyset_data::Dialect;
+use readyset_data::{DfValue, Dialect};
 use readyset_errors::{internal_err, ReadySetResult};
 use replication_offset::mysql::MySqlPosition;
 use replication_offset::{ReplicationOffset, ReplicationOffsets};
@@ -772,34 +772,56 @@ fn mysql_row_to_noria_row(row: &mysql::Row) -> ReadySetResult<Vec<readyset_data:
         let val = value_to_value(row.as_ref(idx).unwrap());
         let col = row.columns_ref().get(idx).unwrap();
         let flags = col.flags();
-        // ENUM and SET columns are stored as integers and retrieved as strings. We don't need
-        // padding.
-        let require_padding = col.column_type() == ColumnType::MYSQL_TYPE_STRING
-            && val != mysql_common::value::Value::NULL
-            && !flags.contains(ColumnFlags::ENUM_FLAG)
-            && !flags.contains(ColumnFlags::SET_FLAG);
-        match require_padding {
-            true => {
-                let bytes = match val.clone() {
-                    mysql_common::value::Value::Bytes(b) => b,
-                    _ => {
-                        return Err(internal_err!(
-                            "Expected MYSQL_TYPE_STRING column to be of value Bytes, got {:?}",
-                            val
-                        ));
+        match col.column_type() {
+            ColumnType::MYSQL_TYPE_STRING => {
+                // ENUM and SET columns are stored as integers and retrieved as strings. We don't
+                // need padding.
+                let require_padding = val != mysql_common::value::Value::NULL
+                    && !flags.contains(ColumnFlags::ENUM_FLAG)
+                    && !flags.contains(ColumnFlags::SET_FLAG);
+                match require_padding {
+                    true => {
+                        let bytes = match val.clone() {
+                            mysql_common::value::Value::Bytes(b) => b,
+                            _ => {
+                                return Err(internal_err!(
+                                    "Expected MYSQL_TYPE_STRING column to be of value Bytes, got {:?}",
+                                    val
+                                ));
+                            }
+                        };
+                        match mysql_pad_collation_column(
+                            &bytes,
+                            col.column_type(),
+                            col.character_set(),
+                            col.column_length() as usize,
+                        ) {
+                            Ok(padded) => noria_row.push(padded),
+                            Err(err) => return Err(internal_err!("Error padding column: {}", err)),
+                        }
                     }
-                };
-                match mysql_pad_collation_column(
-                    &bytes,
-                    col.column_type(),
-                    col.character_set(),
-                    col.column_length() as usize,
-                ) {
-                    Ok(padded) => noria_row.push(padded),
-                    Err(err) => return Err(internal_err!("Error padding column: {}", err)),
+                    false => noria_row.push(readyset_data::DfValue::try_from(val)?),
                 }
             }
-            false => noria_row.push(readyset_data::DfValue::try_from(val)?),
+            ColumnType::MYSQL_TYPE_DATETIME => {
+                let df_val: DfValue = readyset_data::DfValue::try_from(val)
+                    .map_err(|err| {
+                        internal_err!("Error converting MYSQL_TYPE_DATETIME column: {}", err)
+                    })
+                    .and_then(|val| match val {
+                        DfValue::TimestampTz(mut ts) => {
+                            ts.set_subsecond_digits(col.decimals());
+                            Ok(DfValue::TimestampTz(ts))
+                        }
+                        DfValue::None => Ok(DfValue::None), //NULL
+                        _ => Err(internal_err!(
+                            "Expected MYSQL_TYPE_DATETIME column to be of type TimestampTz, got {:?}",
+                            val
+                        )),
+                    })?;
+                noria_row.push(df_val);
+            }
+            _ => noria_row.push(readyset_data::DfValue::try_from(val)?),
         }
     }
     Ok(noria_row)
