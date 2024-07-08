@@ -16,7 +16,7 @@ use nom_sql::{Relation, SqlIdentifier};
 use readyset_client::metrics::recorded;
 use readyset_client::recipe::ChangeList;
 use readyset_client::TableOperation;
-use readyset_data::{DfValue, Dialect};
+use readyset_data::{DfValue, Dialect, TimestampTz};
 use readyset_errors::{internal, internal_err, ReadySetError, ReadySetResult};
 use replication_offset::mysql::MySqlPosition;
 use replication_offset::ReplicationOffset;
@@ -878,7 +878,7 @@ fn binlog_val_to_noria_val(
             // Can unwrap because we know it maps directly to [`DfValue`]
             Ok(time.into())
         }
-        (ColumnType::MYSQL_TYPE_TIMESTAMP2, _) => {
+        (ColumnType::MYSQL_TYPE_TIMESTAMP2, meta) => {
             let buf = match val {
                 mysql_common::value::Value::Bytes(b) => b,
                 _ => {
@@ -890,14 +890,16 @@ fn binlog_val_to_noria_val(
             // When meta is anything else, `mysql_common` encodes this value as number of
             // seconds.microseconds (since UNIX EPOCH)
             let s = String::from_utf8_lossy(buf);
-            let (secs, usecs) = s.split_once('.').unwrap(); // safe to unwrap because format is fixed
+            let (secs, usecs) = s.split_once('.').unwrap_or((&s, "0"));
             let secs = secs.parse::<i64>().unwrap();
             let usecs = usecs.parse::<u32>().unwrap();
-            let time = chrono::DateTime::from_timestamp(secs, usecs * 32)
+            let time = chrono::DateTime::from_timestamp(secs, usecs * 1000)
                 .unwrap()
                 .naive_utc();
-            // Can wrap because we know this maps directly to [`DfValue`]
-            Ok(time.into())
+            let mut ts: TimestampTz = time.into();
+            // The meta[0] is the fractional seconds precision
+            ts.set_subsecond_digits(meta[0]);
+            Ok(DfValue::TimestampTz(ts))
         }
         (ColumnType::MYSQL_TYPE_STRING, meta) => {
             let buf = match val {

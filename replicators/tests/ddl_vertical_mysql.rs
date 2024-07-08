@@ -51,7 +51,7 @@ use readyset_util::shutdown::ShutdownSender;
 
 // Disabling update case while REA-4432 is being worked on
 //const SQL_NAME_REGEX: &str = "[a-zA-Z_][a-zA-Z0-9_]*";
-const SQL_NAME_REGEX: &str = "[a-z_][a-z0-9_]*";
+const SQL_NAME_REGEX: &str = "[a-z_][a-z0-9_]+";
 
 /// This struct is used to generate arbitrary column specifications, both for creating tables, and
 /// potentially for altering them by adding columns and such.
@@ -104,6 +104,12 @@ impl Arbitrary for ColumnSpec {
             ),
             (
                 SqlType::DateTime(None),
+                arbitrary_timestamp_naive_date_time()
+                    .prop_map(DfValue::from)
+                    .boxed(),
+            ),
+            (
+                SqlType::Timestamp,
                 arbitrary_timestamp_naive_date_time()
                     .prop_map(DfValue::from)
                     .boxed(),

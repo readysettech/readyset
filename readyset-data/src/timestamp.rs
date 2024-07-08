@@ -66,6 +66,13 @@ impl TimestampTz {
     const TOP_OFFSET_BIT: u8 = 0b_0000_0001;
 
     #[inline(always)]
+    /// Convert self to local timezone while keeping the same extra
+    pub fn to_local(&self) -> Self {
+        let mut ts = *self;
+        ts.datetime = self.to_chrono().with_timezone(&chrono::Local).naive_local();
+        ts
+    }
+    #[inline(always)]
     /// Constructs a [`TimestampTz`] when provided with the number of ms since the unix epoch.
     pub fn from_unix_ms(time_ms: u64) -> Self {
         let (secs, ns) = (

@@ -338,6 +338,11 @@ impl MySqlReplicator {
             .await
             .map_err(log_err);
 
+        // Set the timezone to UTC
+        let _ = tx
+            .query_drop("SET SESSION time_zone = '+00:00';")
+            .await
+            .map_err(log_err);
         Ok(tx)
     }
 
@@ -803,7 +808,7 @@ fn mysql_row_to_noria_row(row: &mysql::Row) -> ReadySetResult<Vec<readyset_data:
                     false => noria_row.push(readyset_data::DfValue::try_from(val)?),
                 }
             }
-            ColumnType::MYSQL_TYPE_DATETIME => {
+            ColumnType::MYSQL_TYPE_DATETIME | ColumnType::MYSQL_TYPE_TIMESTAMP => {
                 let df_val: DfValue = readyset_data::DfValue::try_from(val)
                     .map_err(|err| {
                         internal_err!("Error converting MYSQL_TYPE_DATETIME column: {}", err)
