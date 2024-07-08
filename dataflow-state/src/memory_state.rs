@@ -404,6 +404,10 @@ impl State for MemoryState {
         self.weak_indices[columns].lookup(key).map(From::from)
     }
 
+    fn shut_down(&mut self) -> ReadySetResult<()> {
+        Ok(())
+    }
+
     fn tear_down(self) -> ReadySetResult<()> {
         Ok(())
     }

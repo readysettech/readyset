@@ -252,9 +252,14 @@ pub trait State: SizeOf + Send {
     /// Remove all rows from this state
     fn clear(&mut self);
 
-    /// Tear down the state, freeing any resources.
+    /// Cleanly shut down the state, so that it can be reopened in the future.
+    /// This function is for standard restart operations.
+    fn shut_down(&mut self) -> ReadySetResult<()>;
+
+    /// Tear down the state, freeing any resources. This is a permanent operation.
     /// For those states that are backed by resources outside ReadySet, the implementation of this
-    /// method should guarantee that those resources are freed.
+    /// method should guarantee that those resources are permamently freed (delete data from disk,
+    /// for example).
     fn tear_down(self) -> ReadySetResult<()>;
 }
 
@@ -480,6 +485,14 @@ impl State for MaterializedNodeState {
             MaterializedNodeState::Memory(ms) => ms.clear(),
             MaterializedNodeState::Persistent(ps) => ps.clear(),
             MaterializedNodeState::PersistentReadHandle(rh) => rh.clear(),
+        }
+    }
+
+    fn shut_down(&mut self) -> ReadySetResult<()> {
+        match self {
+            MaterializedNodeState::Memory(ms) => ms.shut_down(),
+            MaterializedNodeState::Persistent(ps) => ps.shut_down(),
+            MaterializedNodeState::PersistentReadHandle(rh) => rh.shut_down(),
         }
     }
 

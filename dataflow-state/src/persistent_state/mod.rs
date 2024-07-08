@@ -807,18 +807,12 @@ impl State for PersistentState {
         self.db.lookup_weak(columns, key)
     }
 
-    fn tear_down(mut self) -> ReadySetResult<()> {
-        if let Some((tx, jh)) = self.wal_flush_thread_handle.take() {
-            // Stop the thread that periodically flushes the WAL
-            tx.send(()).unwrap();
+    fn shut_down(&mut self) -> ReadySetResult<()> {
+        self.shut_down_wal()
+    }
 
-            jh.join().map_err(|_| {
-                ReadySetError::Internal(format!(
-                    "could not join WAL flush thread for table {}",
-                    self.name
-                ))
-            })?;
-        }
+    fn tear_down(mut self) -> ReadySetResult<()> {
+        let _ = &self.shut_down_wal()?;
 
         let temp_dir = self._tmpdir.take();
         let full_path = self.db.inner().db.path().to_path_buf();
@@ -1048,6 +1042,10 @@ impl State for PersistentStateHandle {
     }
 
     fn clear(&mut self) {}
+
+    fn shut_down(&mut self) -> ReadySetResult<()> {
+        Ok(())
+    }
 
     fn tear_down(self) -> ReadySetResult<()> {
         Ok(())
@@ -2080,6 +2078,21 @@ impl PersistentState {
             .write_opt(batch, &write_options)
             .map_err(|e| internal_err!("Write failed: {e}"))?;
 
+        Ok(())
+    }
+
+    fn shut_down_wal(&mut self) -> ReadySetResult<()> {
+        if let Some((tx, jh)) = self.wal_flush_thread_handle.take() {
+            // Stop the thread that periodically flushes the WAL
+            tx.send(()).unwrap();
+
+            jh.join().map_err(|_| {
+                ReadySetError::Internal(format!(
+                    "could not join WAL flush thread for table {}",
+                    self.name
+                ))
+            })?;
+        }
         Ok(())
     }
 }
