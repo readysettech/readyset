@@ -2411,6 +2411,15 @@ impl Domain {
                 let key = self.handle_eviction(req, executor)?;
                 Ok(Some(bincode::serialize(&key)?))
             }
+            DomainRequest::Shutdown => {
+                self.state.values_mut().for_each(|s| {
+                    let err = s.shut_down();
+                    if let Err(e) = err {
+                        warn!(error = %e, "error on shutting down domains");
+                    }
+                });
+                Ok(None)
+            }
         };
 
         // What we just did might have done things like insert into `self.delayed_for_self`, so

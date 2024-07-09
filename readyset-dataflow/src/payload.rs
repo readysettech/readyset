@@ -431,6 +431,9 @@ pub enum DomainRequest {
 
     /// Requests an eviction from state within this Domain.
     Evict(EvictRequest),
+
+    /// Requests a domain to cleanly shut down.
+    Shutdown,
 }
 
 /// The primary unit of communication between nodes in the dataflow graph.

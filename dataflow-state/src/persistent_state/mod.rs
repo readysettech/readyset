@@ -808,6 +808,7 @@ impl State for PersistentState {
     }
 
     fn shut_down(&mut self) -> ReadySetResult<()> {
+        trace!("PersistentState received shutdown, stopping the WAL");
         self.shut_down_wal()
     }
 
