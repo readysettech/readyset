@@ -853,6 +853,9 @@ fn binlog_val_to_noria_val(
     // Not all values are coerced to the value expected by ReadySet directly
 
     use mysql_common::constants::ColumnType;
+    if let mysql_common::value::Value::NULL = val {
+        return Ok(DfValue::None);
+    }
     match (col_kind, meta) {
         (ColumnType::MYSQL_TYPE_TIMESTAMP2, &[0]) => {
             let buf = match val {
@@ -906,7 +909,7 @@ fn binlog_val_to_noria_val(
                 mysql_common::value::Value::Bytes(b) => b,
                 _ => {
                     return Err(mysql_async::Error::Other(Box::new(internal_err!(
-                        "Expected a byte array for timestamp"
+                        "Expected a byte array for string"
                     ))));
                 }
             };
