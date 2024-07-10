@@ -2238,11 +2238,17 @@ impl SizeOf for PersistentState {
                     .db
                     .cf_handle(&idx.column_family)
                     .unwrap_or_else(|| panic!("Column family not found: {}", idx.column_family));
-                inner
+                let sstable_size = inner
                     .db
                     .property_int_value_cf(cf, "rocksdb.estimate-live-data-size")
                     .unwrap()
+                    .unwrap();
+                let memtable_size = inner
+                    .db
+                    .property_int_value_cf(cf, "rocksdb.size-all-mem-tables")
                     .unwrap()
+                    .unwrap();
+                sstable_size + memtable_size
             })
             .sum()
     }
