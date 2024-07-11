@@ -1,6 +1,5 @@
 [patch.crates-io]
-tokio-postgres = {  git = "https://github.com/readysettech/rust-postgres.git"}
-eui48 = { git = "https://github.com/readysettech/eui48.git", branch = "master" }
+tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git" }
 
 [workspace]
 members = [
@@ -65,15 +64,15 @@ resolver = "2"
 clap = "4.5"
 consulrs = { git = "https://github.com/readysettech/consulrs.git", branch = "allow-disabling-rustls-tls-2" }
 criterion = "0.5"
-eui48 = { git = "https://github.com/readysettech/eui48.git", branch = "master", default-features = false }
+eui48 = { version = "1.1.0", default-features = false }
 fork = "0.1"
 mysql_async = { git = "https://github.com/readysettech/mysql_async" }
 nperf-core = { git = "https://github.com/readysettech/not-perf.git" }
-postgres = {  git = "https://github.com/readysettech/rust-postgres.git"}
-postgres-native-tls = {  git = "https://github.com/readysettech/rust-postgres.git"}
-postgres-protocol = {  git = "https://github.com/readysettech/rust-postgres.git"}
-postgres-types = {  git = "https://github.com/readysettech/rust-postgres.git"}
-tokio-postgres = {  git = "https://github.com/readysettech/rust-postgres.git"}
+postgres = { git = "https://github.com/readysettech/rust-postgres.git" }
+postgres-native-tls = { git = "https://github.com/readysettech/rust-postgres.git" }
+postgres-protocol = { git = "https://github.com/readysettech/rust-postgres.git" }
+postgres-types = { git = "https://github.com/readysettech/rust-postgres.git" }
+tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git" }
 tokio = { version = "1.37",  features = ["full"] }
 tokio-test = { version = "0.4.4" }
 rocksdb = { git = "https://github.com/readysettech/rust-rocksdb.git", default-features = false, features = ["lz4", "jemalloc"] }
