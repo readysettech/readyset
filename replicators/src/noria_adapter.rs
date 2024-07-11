@@ -118,9 +118,7 @@ pub async fn cleanup(config: UpstreamConfig) -> ReadySetResult<()> {
 
         let mut cleanup_opts = options.clone();
 
-        cleanup_opts
-            .dbname(dbname.as_ref())
-            .set_replication_database();
+        cleanup_opts.dbname(dbname).set_replication_database();
         let (mut client, connection) = cleanup_opts.connect(tls_connector).await?;
         let _connection_handle = tokio::spawn(connection);
 
