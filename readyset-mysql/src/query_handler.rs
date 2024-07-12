@@ -9,12 +9,14 @@ use readyset_adapter::backend::SelectSchema;
 use readyset_adapter::{QueryHandler, SetBehavior};
 use readyset_client::results::Results;
 use readyset_client::ColumnSchema;
-use readyset_data::{DfType, DfValue};
+use readyset_data::{Collation, DfType, DfValue, TinyText};
 use readyset_errors::{ReadySetError, ReadySetResult};
 use tracing::warn;
 
 const MAX_ALLOWED_PACKET_VARIABLE_NAME: &str = "max_allowed_packet";
 const MAX_ALLOWED_PACKET_DEFAULT: DfValue = DfValue::UnsignedInt(67108864);
+const VERSION_COMMENT_VARIABLE_NAME: &str = "version_comment";
+const VERSION_COMMENT_DEFAULT: DfValue = DfValue::TinyText(TinyText::from_arr(b"Readyset"));
 
 /// The list of mysql `SQL_MODE`s that *must* be set by a client
 const REQUIRED_SQL_MODES: [SqlMode; 3] = [
@@ -828,15 +830,29 @@ impl QueryHandler for MySqlQueryHandler {
         }
     }
 
+    fn return_default_response(query: &SqlQuery) -> bool {
+        // For now we only care if we are querying for the `@@version_comment` alone
+        match query {
+            SqlQuery::Select(stmt) => stmt.fields.iter().any(|field| {
+                matches!(field, FieldDefinitionExpr::Expr {
+                    expr: Expr::Variable(var),
+                    ..
+                } if var.as_non_user_var() == Some(VERSION_COMMENT_VARIABLE_NAME) && stmt.fields.len() == 1)
+            }),
+            _ => false,
+        }
+    }
+
     fn default_response(query: &SqlQuery) -> ReadySetResult<QueryResult<'static>> {
-        // For now we only care if we are querying for the `@@max_allowed_packet`
-        // (ignoring any other field), in which case we return a hardcoded result.
-        // This hardcoded result is needed because some libraries expect it when
+        // * @@version_comment - is a way to identify the MySQL "Flavor" of the server.
+        // We return the hardcoded value "Readyset" this query, if this is the only field in the
+        // query.
+        // * `@@max_allowed_packet` - This hardcoded result is needed because some libraries expect
+        //   it when
         // creating a new MySQL connection (i.e., when using `[mysql::Conn::new]`).
         // No matter how many fields appeared in the query, we only return the mentioned
         // hardcoded value.
-        // If `@@max_allowed_packet` was not present in the fields, we return an empty set
-        // of rows.
+        // * If none of the above rules apply, we return an empty set of rows.
         match query {
             SqlQuery::Select(stmt)
                 if stmt.fields.iter().any(|field| {
@@ -861,6 +877,30 @@ impl QueryHandler for MySqlQueryHandler {
                         columns: Cow::Owned(vec![field_name]),
                     },
                     vec![Results::new(vec![vec![MAX_ALLOWED_PACKET_DEFAULT]])],
+                ))
+            }
+            SqlQuery::Select(stmt)
+                if stmt.fields.iter().any(|field| {
+                    matches!(field, FieldDefinitionExpr::Expr {
+                        expr: Expr::Variable(var),
+                        ..
+                    } if var.as_non_user_var() == Some(VERSION_COMMENT_VARIABLE_NAME) && stmt.fields.len() == 1)
+                }) =>
+            {
+                let field_name: SqlIdentifier = format!("@@{}", VERSION_COMMENT_VARIABLE_NAME).into();
+                Ok(QueryResult::from_owned(
+                    SelectSchema {
+                        schema: Cow::Owned(vec![ColumnSchema {
+                            column: Column {
+                                name: field_name.clone(),
+                                table: None,
+                            },
+                            column_type: DfType::Char(8_u16, Collation::default()),
+                            base: None,
+                        }]),
+                        columns: Cow::Owned(vec![field_name]),
+                    },
+                    vec![Results::new(vec![vec![VERSION_COMMENT_DEFAULT]])],
                 ))
             }
             _ => Ok(QueryResult::empty(SelectSchema {

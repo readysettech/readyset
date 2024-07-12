@@ -1102,3 +1102,18 @@ async fn it_change_user() {
 
     shutdown_tx.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn select_version_comment() {
+    let (opts, _handle, shutdown_tx) = setup().await;
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let row: String = conn
+        .query_first("SELECT @@version_comment")
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(row, "Readyset");
+    shutdown_tx.shutdown().await;
+}
