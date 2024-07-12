@@ -1,0 +1,23 @@
+statement ok
+create table t1 (mint mediumint, umint mediumint unsigned);
+
+statement ok
+insert into t1 values (-8388608, 0), (8388607, 16777215);
+
+statement error
+insert into t1 values (-8388609, 0);
+
+statement error
+insert into t1 values (8388608, 0);
+
+statement error
+insert into t1 values (0, -1);
+
+statement error
+insert into t1 values (0, 16777216);
+
+query I
+select umint from t1 where mint = ?;
+? = 8388607
+----
+16777215

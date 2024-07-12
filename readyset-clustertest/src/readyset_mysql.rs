@@ -1599,7 +1599,7 @@ async fn views_synchronize_between_deployments() {
 
     // Eventually it should show up in adapter 1 too
     eventually! {
-        adapter_1.as_mysql_conn().unwrap().query_drop("SELECT * FROM t1;");
+        adapter_1.as_mysql_conn().unwrap().query_drop("SELECT * FROM t1;").await.unwrap();
         last_statement_destination(adapter_1.as_mysql_conn().unwrap()).await == QueryDestination::Readyset
     }
 
@@ -1649,6 +1649,7 @@ async fn enable_experimental_placeholder_inlining() {
         .with_servers(1, ServerParams::default())
         .explicit_migrations(500)
         .enable_experimental_placeholder_inlining()
+        .enable_post_lookups()
         .start()
         .await
         .unwrap();

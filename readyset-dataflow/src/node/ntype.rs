@@ -1,3 +1,5 @@
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 
 use crate::node::special;
@@ -67,17 +69,17 @@ impl NodeType {
     }
 }
 
-impl ToString for NodeType {
-    fn to_string(&self) -> String {
+impl fmt::Display for NodeType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            NodeType::Ingress => "Ingress".to_string(),
-            NodeType::Base(_) => "Base".to_string(),
-            NodeType::Internal(o) => format!("Internal ({})", o.to_string()),
-            NodeType::Egress(_) => "Egress".to_string(),
-            NodeType::Sharder(_) => "Sharder".to_string(),
-            NodeType::Reader(_) => "Reader".to_string(),
-            NodeType::Source => "Source".to_string(),
-            NodeType::Dropped => "Dropped".to_string(),
+            NodeType::Ingress => write!(f, "Ingress"),
+            NodeType::Base(_) => write!(f, "Base"),
+            NodeType::Internal(o) => write!(f, "Internal ({})", o),
+            NodeType::Egress(_) => write!(f, "Egress"),
+            NodeType::Sharder(_) => write!(f, "Sharder"),
+            NodeType::Reader(_) => write!(f, "Reader"),
+            NodeType::Source => write!(f, "Source"),
+            NodeType::Dropped => write!(f, "Dropped"),
         }
     }
 }

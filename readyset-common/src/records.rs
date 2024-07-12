@@ -121,10 +121,10 @@ impl<'a> IntoIterator for &'a Records {
 pub struct Records(Vec<Record>);
 
 impl Records {
-    pub fn has<Q: ?Sized>(&self, q: &Q, positive: bool) -> bool
+    pub fn has<Q>(&self, q: &Q, positive: bool) -> bool
     where
         Vec<DfValue>: Borrow<Q>,
-        Q: Eq,
+        Q: Eq + ?Sized,
     {
         self.iter().any(|r| match r {
             Record::Positive(ref r) if positive => r.borrow() == q,
@@ -133,18 +133,18 @@ impl Records {
         })
     }
 
-    pub fn has_positive<Q: ?Sized>(&self, q: &Q) -> bool
+    pub fn has_positive<Q>(&self, q: &Q) -> bool
     where
         Vec<DfValue>: Borrow<Q>,
-        Q: Eq,
+        Q: Eq + ?Sized,
     {
         self.has(q, true)
     }
 
-    pub fn has_negative<Q: ?Sized>(&self, q: &Q) -> bool
+    pub fn has_negative<Q>(&self, q: &Q) -> bool
     where
         Vec<DfValue>: Borrow<Q>,
-        Q: Eq,
+        Q: Eq + ?Sized,
     {
         self.has(q, false)
     }

@@ -292,7 +292,7 @@ pub fn column_specification(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ColumnSpecification> {
     move |i| {
-        let (remaining_input, (column, field_type, constraints, comment)) = tuple((
+        let (i, (column, field_type, constraints)) = tuple((
             column_identifier_no_alias(dialect),
             opt(delimited(
                 whitespace1,
@@ -300,8 +300,13 @@ pub fn column_specification(
                 whitespace0,
             )),
             many0(column_constraint(dialect)),
-            opt(parse_comment),
         ))(i)?;
+
+        let (i, comment) = if matches!(dialect, Dialect::MySQL) {
+            opt(parse_comment(dialect))(i)?
+        } else {
+            (i, None)
+        };
 
         let sql_type = match field_type {
             None => SqlType::Text,
@@ -309,7 +314,7 @@ pub fn column_specification(
         };
 
         Ok((
-            remaining_input,
+            i,
             ColumnSpecification {
                 column,
                 sql_type,

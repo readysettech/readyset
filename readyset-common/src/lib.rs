@@ -1,5 +1,4 @@
 #![deny(macro_use_extern_crate)]
-#![feature(bound_map)]
 
 mod local;
 mod records;
@@ -117,14 +116,15 @@ mod tests {
     fn data_type_mem_size() {
         use std::mem::{size_of, size_of_val};
 
-        use chrono::NaiveDateTime;
+        use chrono::DateTime;
 
         let s = "this needs to be longer than 14 chars to make it be a Text";
         let txt: DfValue = DfValue::from(s);
         let shrt = DfValue::Int(5);
         let time = DfValue::TimestampTz(
-            NaiveDateTime::from_timestamp_opt(0, 42_000_000)
+            DateTime::from_timestamp(0, 42_000_000)
                 .unwrap()
+                .naive_utc()
                 .into(),
         );
 

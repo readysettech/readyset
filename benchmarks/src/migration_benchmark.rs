@@ -4,7 +4,6 @@ use std::str::FromStr;
 use std::time::Instant;
 
 use anyhow::Result;
-use async_trait::async_trait;
 use clap::Parser;
 use database_utils::DatabaseURL;
 use metrics::Unit;
@@ -33,7 +32,6 @@ pub struct MigrationBenchmark {
     num_migrations: u32,
 }
 
-#[async_trait]
 impl BenchmarkControl for MigrationBenchmark {
     async fn setup(&self, deployment: &DeploymentParameters) -> Result<()> {
         self.data_generator

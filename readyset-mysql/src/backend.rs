@@ -5,7 +5,6 @@ use std::convert::TryFrom;
 use std::fmt::Formatter;
 use std::ops::{Deref, DerefMut};
 
-use async_trait::async_trait;
 use futures_util::StreamExt;
 use itertools::{izip, Itertools};
 use mysql_async::consts::StatusFlags;
@@ -138,11 +137,10 @@ async fn write_column<W: AsyncWrite + Unpin>(
 
         DfValue::TimestampTz(ts) => match cs.coltype {
             mysql_srv::ColumnType::MYSQL_TYPE_DATETIME
-            | mysql_srv::ColumnType::MYSQL_TYPE_DATETIME2
-            | mysql_srv::ColumnType::MYSQL_TYPE_TIMESTAMP
-            | mysql_srv::ColumnType::MYSQL_TYPE_TIMESTAMP2 => {
-                rw.write_col(ts.to_chrono().naive_local())
-            }
+            | mysql_srv::ColumnType::MYSQL_TYPE_DATETIME2 => rw.write_col(ts),
+
+            mysql_srv::ColumnType::MYSQL_TYPE_TIMESTAMP
+            | mysql_srv::ColumnType::MYSQL_TYPE_TIMESTAMP2 => rw.write_col(ts.to_local()),
             ColumnType::MYSQL_TYPE_DATE => rw.write_col(ts.to_chrono().naive_local().date()),
             _ => return Err(conv_error())?,
         },
@@ -498,7 +496,6 @@ where
     }
 }
 
-#[async_trait]
 impl<W> MySqlShim<W> for Backend
 where
     W: AsyncWrite + Unpin + Send + 'static,
@@ -554,6 +551,7 @@ where
                 SinglePrepareResult::Noria(Update { params, .. } | Delete { params, .. }),
             )) => {
                 let params = convert_columns!(params, info);
+                schema_cache.remove(&statement_id);
                 info.reply(statement_id, &params, &[]).await
             }
             Ok((
@@ -565,7 +563,7 @@ where
             )) => {
                 let params = params.iter().map(|c| c.into()).collect::<Vec<_>>();
                 let schema = schema.iter().map(|c| c.into()).collect::<Vec<_>>();
-
+                schema_cache.remove(&statement_id);
                 info.reply(statement_id, &params, &schema).await
             }
 
@@ -600,7 +598,7 @@ where
             Err(e) => info.error(e.error_kind(), e.to_string().as_bytes()).await,
         };
 
-        Ok(res?)
+        res
     }
 
     async fn on_execute(
@@ -741,7 +739,7 @@ where
         }
 
         let query_result = self.query(query).await;
-        return handle_query_result(query_result, results).await;
+        handle_query_result(query_result, results).await
     }
 
     fn password_for_username(&self, username: &str) -> Option<Vec<u8>> {

@@ -22,14 +22,12 @@
 //! use std::collections::HashMap;
 //! use std::iter;
 //!
-//! use async_trait::async_trait;
 //! use mysql::prelude::*;
 //! use mysql_srv::*;
 //! use readyset_adapter_types::DeallocateId;
 //! use tokio::io::AsyncWrite;
 //!
 //! struct Backend;
-//! #[async_trait]
 //! impl<W: AsyncWrite + Unpin + Send + 'static> MySqlShim<W> for Backend {
 //!     async fn on_prepare(
 //!         &mut self,
@@ -171,7 +169,6 @@ use std::collections::HashMap;
 use std::io;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use constants::{CLIENT_PLUGIN_AUTH, CONNECT_WITH_DB, PROTOCOL_41, RESERVED, SECURE_CONNECTION};
 use error::{other_error, OtherErrorKind};
 use mysql_common::constants::CapabilityFlags;
@@ -250,7 +247,8 @@ pub enum QueryResultsResponse {
 }
 
 /// Implementors of this trait can be used to drive a MySQL-compatible database backend.
-#[async_trait]
+// Only used internally
+#[allow(async_fn_in_trait)]
 pub trait MySqlShim<W: AsyncWrite + Unpin + Send> {
     /// Called when the client issues a request to prepare `query` for later execution.
     ///
@@ -711,6 +709,7 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
                                         self.shim.on_close(dealloc_id.clone()).await;
                                         if let DeallocateId::Numeric(id) = dealloc_id {
                                             stmts.remove(&id);
+                                            self.schema_cache.remove(&id);
                                         }
                                         writers::write_ok_packet(
                                             &mut self.writer,
@@ -786,6 +785,7 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
                 Command::Close(stmt) => {
                     self.shim.on_close(DeallocateId::Numeric(stmt)).await;
                     stmts.remove(&stmt);
+                    self.schema_cache.remove(&stmt);
                     // NOTE: spec dictates no response from server
                 }
                 Command::ListFields(_) => {

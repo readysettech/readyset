@@ -431,6 +431,9 @@ pub enum DomainRequest {
 
     /// Requests an eviction from state within this Domain.
     Evict(EvictRequest),
+
+    /// Requests a domain to cleanly shut down.
+    Shutdown,
 }
 
 /// The primary unit of communication between nodes in the dataflow graph.
@@ -664,20 +667,19 @@ impl Packet {
     }
 }
 
-impl ToString for Packet {
-    fn to_string(&self) -> String {
+impl fmt::Display for Packet {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Packet::Input { .. } => "Input",
-            Packet::Message { .. } => "Message",
-            Packet::RequestReaderReplay { .. } => "RequestReaderReplay",
-            Packet::RequestPartialReplay { .. } => "RequestPartialReplay",
-            Packet::ReplayPiece { .. } => "ReplayPiece",
-            Packet::Timestamp { .. } => "Timestamp",
-            Packet::Finish { .. } => "Finish",
-            Packet::Spin { .. } => "Spin",
-            Packet::Evict { .. } => "Evict",
+            Packet::Input { .. } => write!(f, "Input"),
+            Packet::Message { .. } => write!(f, "Message"),
+            Packet::RequestReaderReplay { .. } => write!(f, "RequestReaderReplay"),
+            Packet::RequestPartialReplay { .. } => write!(f, "RequestPartialReplay"),
+            Packet::ReplayPiece { .. } => write!(f, "ReplayPiece"),
+            Packet::Timestamp { .. } => write!(f, "Timestamp"),
+            Packet::Finish { .. } => write!(f, "Finish"),
+            Packet::Spin { .. } => write!(f, "Spin"),
+            Packet::Evict { .. } => write!(f, "Evict"),
         }
-        .to_string()
     }
 }
 

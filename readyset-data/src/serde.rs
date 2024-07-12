@@ -3,7 +3,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use bit_vec::BitVec;
-use chrono::NaiveDateTime;
+use chrono::DateTime;
 use mysql_time::MySqlTime;
 use rust_decimal::Decimal;
 use serde::de::{DeserializeSeed, EnumAccess, VariantAccess, Visitor};
@@ -143,8 +143,8 @@ impl serde::ser::Serialize for DfValue {
             DfValue::TimestampTz(ts) => {
                 let extra = ts.extra;
                 let nt = ts.to_chrono();
-                let ts = nt.naive_utc().timestamp() as u64 as u128
-                    + ((nt.naive_utc().timestamp_subsec_nanos() as u128) << 64);
+                let ts = nt.naive_utc().and_utc().timestamp() as u64 as u128
+                    + ((nt.naive_utc().and_utc().timestamp_subsec_nanos() as u128) << 64);
                 serialize_variant(serializer, Variant::TimestampTz, &(ts, extra))
             }
             DfValue::Array(vs) => serialize_variant(serializer, Variant::Array, &vs),
@@ -161,64 +161,65 @@ impl serde::ser::Serialize for DfValue {
     }
 }
 
+struct FieldVisitor;
+
+impl<'de> serde::de::Visitor<'de> for FieldVisitor {
+    type Value = Variant;
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("variant identifier")
+    }
+
+    fn visit_u64<E>(self, val: u64) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        if let Some(f) = Variant::from_repr(val as _) {
+            Ok(f)
+        } else {
+            Err(serde::de::Error::invalid_value(
+                serde::de::Unexpected::Unsigned(val),
+                &"variant index 0 <= i < 11",
+            ))
+        }
+    }
+
+    fn visit_str<E>(self, val: &str) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        val.parse()
+            .map_err(|_| serde::de::Error::unknown_variant(val, Variant::VARIANTS))
+    }
+
+    fn visit_bytes<E>(self, val: &[u8]) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        match std::str::from_utf8(val).map(|s| s.parse()) {
+            Ok(Ok(field)) => Ok(field),
+            _ => Err(serde::de::Error::unknown_variant(
+                &String::from_utf8_lossy(val),
+                Variant::VARIANTS,
+            )),
+        }
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Variant {
+    #[inline]
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        serde::Deserializer::deserialize_identifier(deserializer, FieldVisitor)
+    }
+}
+
 impl<'de> Deserialize<'de> for DfValue {
     fn deserialize<D>(deserializer: D) -> Result<DfValue, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        struct FieldVisitor;
-        impl<'de> serde::de::Visitor<'de> for FieldVisitor {
-            type Value = Variant;
-            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.write_str("variant identifier")
-            }
-
-            fn visit_u64<E>(self, val: u64) -> Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                if let Some(f) = Variant::from_repr(val as _) {
-                    Ok(f)
-                } else {
-                    Err(serde::de::Error::invalid_value(
-                        serde::de::Unexpected::Unsigned(val),
-                        &"variant index 0 <= i < 11",
-                    ))
-                }
-            }
-
-            fn visit_str<E>(self, val: &str) -> Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                val.parse()
-                    .map_err(|_| serde::de::Error::unknown_variant(val, Variant::VARIANTS))
-            }
-
-            fn visit_bytes<E>(self, val: &[u8]) -> Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                match std::str::from_utf8(val).map(|s| s.parse()) {
-                    Ok(Ok(field)) => Ok(field),
-                    _ => Err(serde::de::Error::unknown_variant(
-                        &String::from_utf8_lossy(val),
-                        Variant::VARIANTS,
-                    )),
-                }
-            }
-        }
-
-        impl<'de> serde::Deserialize<'de> for Variant {
-            #[inline]
-            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-            where
-                D: serde::Deserializer<'de>,
-            {
-                serde::Deserializer::deserialize_identifier(deserializer, FieldVisitor)
-            }
-        }
-
         struct Visitor;
         impl<'de> serde::de::Visitor<'de> for Visitor {
             type Value = DfValue;
@@ -276,8 +277,9 @@ impl<'de> Deserialize<'de> for DfValue {
                     .map(|(ts, extra)| {
                         // We deserialize the NaiveDateTime by extracting nsecs from the top 64 bits
                         // of the encoded i128, and secs from the low 64 bits
-                        let datetime =
-                            NaiveDateTime::from_timestamp_opt(ts as _, (ts >> 64) as _).unwrap();
+                        let datetime = DateTime::from_timestamp(ts as _, (ts >> 64) as _)
+                            .unwrap()
+                            .naive_utc();
                         DfValue::TimestampTz(TimestampTz { datetime, extra })
                     }),
                     (Variant::Array, variant) => {

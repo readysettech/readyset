@@ -10,11 +10,13 @@
 
 #![warn(clippy::todo, clippy::unimplemented)]
 
+use crate::create::{CreateDatabaseOption, CreateDatabaseStatement};
 use crate::create_table_options::CreateTableOption;
 use crate::rename::{RenameTableOperation, RenameTableStatement};
 use crate::select::LimitClause;
 use crate::set::Variable;
 use crate::transaction::{CommitStatement, RollbackStatement, StartTransactionStatement};
+use crate::truncate::TruncateStatement;
 use crate::{
     AlterColumnOperation, AlterTableDefinition, AlterTableStatement, CacheInner, CaseWhenBranch,
     Column, ColumnConstraint, ColumnSpecification, CommentStatement, CommonTableExpr,
@@ -87,6 +89,10 @@ pub trait Visitor<'ast>: Sized {
     }
 
     fn visit_table(&mut self, table: &'ast Relation) -> Result<(), Self::Error> {
+        walk_relation(self, table)
+    }
+
+    fn visit_target_table_fk(&mut self, table: &'ast Relation) -> Result<(), Self::Error> {
         walk_relation(self, table)
     }
 
@@ -204,6 +210,13 @@ pub trait Visitor<'ast>: Sized {
         walk_create_table_statement(self, create_table_statement)
     }
 
+    fn visit_create_database_statement(
+        &mut self,
+        create_database_statement: &'ast CreateDatabaseStatement,
+    ) -> Result<(), Self::Error> {
+        walk_create_database_statement(self, create_database_statement)
+    }
+
     fn visit_column_specification(
         &mut self,
         column_specification: &'ast ColumnSpecification,
@@ -218,6 +231,13 @@ pub trait Visitor<'ast>: Sized {
     fn visit_create_table_option(
         &mut self,
         _create_table_option: &'ast CreateTableOption,
+    ) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    fn visit_create_database_option(
+        &mut self,
+        _create_database_option: &'ast CreateDatabaseOption,
     ) -> Result<(), Self::Error> {
         Ok(())
     }
@@ -422,6 +442,13 @@ pub trait Visitor<'ast>: Sized {
         Ok(())
     }
 
+    fn visit_truncate_statement(
+        &mut self,
+        truncate_statement: &'ast TruncateStatement,
+    ) -> Result<(), Self::Error> {
+        walk_truncate_statement(self, truncate_statement)
+    }
+
     fn visit_sql_query(&mut self, sql_query: &'ast SqlQuery) -> Result<(), Self::Error> {
         walk_sql_query(self, sql_query)
     }
@@ -508,6 +535,7 @@ pub fn walk_function_expr<'ast, V: Visitor<'ast>>(
         FunctionExpr::Max(expr) => visitor.visit_expr(expr.as_ref()),
         FunctionExpr::Min(expr) => visitor.visit_expr(expr.as_ref()),
         FunctionExpr::GroupConcat { expr, .. } => visitor.visit_expr(expr.as_ref()),
+        FunctionExpr::Extract { expr, .. } => visitor.visit_expr(expr.as_ref()),
         FunctionExpr::Call { arguments, .. } => {
             for arg in arguments {
                 visitor.visit_expr(arg)?;
@@ -770,6 +798,20 @@ pub fn walk_create_table_statement<'a, V: Visitor<'a>>(
     Ok(())
 }
 
+pub fn walk_create_database_statement<'a, V: Visitor<'a>>(
+    visitor: &mut V,
+    create_database_statement: &'a CreateDatabaseStatement,
+) -> Result<(), V::Error> {
+    visitor.visit_sql_identifier(&create_database_statement.name)?;
+    if let Ok(options) = &create_database_statement.options {
+        for option in options {
+            visitor.visit_create_database_option(option)?;
+        }
+    }
+
+    Ok(())
+}
+
 pub fn walk_column_specification<'a, V: Visitor<'a>>(
     visitor: &mut V,
     column_specification: &'a ColumnSpecification,
@@ -866,7 +908,7 @@ pub fn walk_table_key<'a, V: Visitor<'a>>(
             for column in columns {
                 visitor.visit_column(column)?;
             }
-            visitor.visit_table(target_table)?;
+            visitor.visit_target_table_fk(target_table)?;
             for column in target_columns {
                 visitor.visit_column(column)?;
             }
@@ -1123,6 +1165,17 @@ pub fn walk_drop_view_statement<'a, V: Visitor<'a>>(
     Ok(())
 }
 
+pub fn walk_truncate_statement<'a, V: Visitor<'a>>(
+    visitor: &mut V,
+    truncate_statement: &'a TruncateStatement,
+) -> Result<(), V::Error> {
+    for table in &truncate_statement.tables {
+        visitor.visit_table(&table.relation)?;
+    }
+
+    Ok(())
+}
+
 pub fn walk_sql_query<'a, V: Visitor<'a>>(
     visitor: &mut V,
     sql_query: &'a SqlQuery,
@@ -1156,6 +1209,8 @@ pub fn walk_sql_query<'a, V: Visitor<'a>>(
         SqlQuery::Explain(statement) => visitor.visit_explain_statement(statement),
         SqlQuery::Comment(statement) => visitor.visit_comment_statement(statement),
         SqlQuery::Deallocate(statement) => visitor.visit_deallocate_statement(statement),
+        SqlQuery::Truncate(statement) => visitor.visit_truncate_statement(statement),
+        SqlQuery::CreateDatabase(statement) => visitor.visit_create_database_statement(statement),
     }
 }
 

@@ -774,7 +774,6 @@ impl<'df> Migration<'df> {
             node = ni.index(),
             "marking node as beyond materialization frontier"
         );
-        #[allow(clippy::unwrap_used)] // ni must belong to the graph
         self.dataflow_state
             .ingredients
             .node_weight_mut(ni)

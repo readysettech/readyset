@@ -66,13 +66,20 @@ impl TimestampTz {
     const TOP_OFFSET_BIT: u8 = 0b_0000_0001;
 
     #[inline(always)]
+    /// Convert self to local timezone while keeping the same extra
+    pub fn to_local(&self) -> Self {
+        let mut ts = *self;
+        ts.datetime = self.to_chrono().with_timezone(&chrono::Local).naive_local();
+        ts
+    }
+    #[inline(always)]
     /// Constructs a [`TimestampTz`] when provided with the number of ms since the unix epoch.
     pub fn from_unix_ms(time_ms: u64) -> Self {
         let (secs, ns) = (
             (time_ms / 1000) as i64,
             ((time_ms % 1000) * 1_000 * 1_000) as u32,
         );
-        Self::from(NaiveDateTime::from_timestamp_opt(secs, ns).unwrap())
+        Self::from(DateTime::from_timestamp(secs, ns).unwrap().naive_utc())
     }
 
     /// Returns true if the contained offset should be negated
@@ -143,7 +150,7 @@ impl TimestampTz {
 
     /// Set the desired precision when displaying subseconds.
     #[inline(always)]
-    fn set_subsecond_digits(&mut self, count: u8) {
+    pub fn set_subsecond_digits(&mut self, count: u8) {
         self.extra[2] = ((count << TimestampTz::SUBSECOND_DIGITS_BITS.trailing_zeros())
             & TimestampTz::SUBSECOND_DIGITS_BITS)
             | (self.extra[2] & !TimestampTz::SUBSECOND_DIGITS_BITS);
@@ -390,6 +397,8 @@ impl TimestampTz {
 
             DfType::Int
             | DfType::UnsignedInt
+            | DfType::MediumInt
+            | DfType::UnsignedMediumInt
             | DfType::SmallInt
             | DfType::UnsignedSmallInt
             | DfType::TinyInt

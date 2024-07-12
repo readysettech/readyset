@@ -579,6 +579,7 @@ fn make_grouped_node(
                 over_col_indx,
                 group_col_indx.as_slice(),
                 over_col_ty,
+                &mig.dialect,
             )?;
             let agg_col = make_agg_col(grouped.output_col_type().or_ref(over_col_ty).clone());
             cols.push(agg_col);
@@ -881,7 +882,7 @@ fn lower_expression(
     DfExpr::lower(
         expr,
         dialect,
-        LowerContext {
+        &LowerContext {
             graph,
             parent_node_idx: parent,
             parent_cols,
@@ -1021,7 +1022,13 @@ fn make_distinct_node(
         // remaining occurrences of the set.
         //
         // We use 0 as a placeholder value
-        Aggregation::Count.over(parent_na.address(), 0, &group_by_indx, &DfType::Unknown)?,
+        Aggregation::Count.over(
+            parent_na.address(),
+            0,
+            &group_by_indx,
+            &DfType::Unknown,
+            &mig.dialect,
+        )?,
     );
     Ok(DfNodeIndex::new(na))
 }

@@ -343,7 +343,7 @@ mod tests {
             MySQL => crate::Dialect::DEFAULT_MYSQL,
         };
 
-        expr_unwrap(Expr::lower(ast, expr_dialect, no_op_lower_context()), expr)
+        expr_unwrap(Expr::lower(ast, expr_dialect, &no_op_lower_context()), expr)
             .eval::<DfValue>(&[])
     }
 
@@ -1030,7 +1030,7 @@ mod tests {
         let expr = Expr::lower(
             parse_expr(nom_sql::Dialect::PostgreSQL, "a LIKE 'abc'").unwrap(),
             Dialect::DEFAULT_POSTGRESQL,
-            resolve_columns(|c| {
+            &resolve_columns(|c| {
                 if c == "a".into() {
                     Ok((0, DfType::DEFAULT_TEXT))
                 } else {
@@ -1048,7 +1048,7 @@ mod tests {
         let expr = Expr::lower(
             parse_expr(nom_sql::Dialect::PostgreSQL, "a = 'a'").unwrap(),
             Dialect::DEFAULT_POSTGRESQL,
-            resolve_columns(|c| {
+            &resolve_columns(|c| {
                 if c == "a".into() {
                     Ok((
                         0,

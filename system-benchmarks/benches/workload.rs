@@ -221,8 +221,8 @@ impl Benchmark {
                 }
 
                 Benchmark {
-                    name,
-                    schema: schema.expect("No schema for benchmark {name}"),
+                    name: name.clone(),
+                    schema: schema.unwrap_or_else(|| panic!("No schema for benchmark '{}'", name)),
                     workloads,
                 }
             })
@@ -615,6 +615,7 @@ fn start_adapter(upstream_url: &str) -> anyhow::Result<()> {
         "--allow-unauthenticated-connections",
         "--allow-full-materialization",
         "--enable-experimental-post-lookup",
+        "--enable-experimental-straddled-joins",
         "--upstream-db-url",
         upstream_url,
         "--durability",

@@ -4,11 +4,11 @@ use std::str::{self, FromStr};
 use clap::ValueEnum;
 use itertools::Itertools;
 use nom::branch::alt;
-use nom::bytes::complete::{tag, tag_no_case, take, take_while1};
+use nom::bytes::complete::{tag, tag_no_case, take_while1};
+use nom::character::complete::hex_digit0;
 use nom::character::is_alphanumeric;
-use nom::combinator::{map, map_res, not, opt, peek};
+use nom::combinator::{map, map_res, not, opt, peek, verify};
 use nom::error::ErrorKind;
-use nom::multi::fold_many0;
 use nom::sequence::{delimited, preceded};
 use nom::{InputLength, InputTake};
 use nom_locate::LocatedSpan;
@@ -21,6 +21,15 @@ use crate::literal::{raw_string_literal, QuotingStyle};
 use crate::select::{LimitClause, LimitValue};
 use crate::whitespace::whitespace0;
 use crate::{literal, Literal, NomSqlError, NomSqlResult, SqlIdentifier};
+
+macro_rules! failed {
+    ($input:expr) => {
+        return Err(nom::Err::Error(NomSqlError {
+            input: $input,
+            kind: ErrorKind::Fail,
+        }))
+    };
+}
 
 pub trait DialectDisplay {
     fn display(&self, dialect: Dialect) -> impl fmt::Display + '_;
@@ -70,23 +79,27 @@ pub(crate) fn is_sql_identifier(chr: u8) -> bool {
 
 /// Byte array literal value (PostgreSQL)
 fn raw_hex_bytes_psql(input: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<u8>> {
-    delimited(tag("E'\\\\x"), hex_bytes, tag("'::bytea"))(input)
+    alt((
+        delimited(tag("E'\\\\x"), hex_bytes(1), tag("'::bytea")),
+        delimited(tag_no_case("x'"), hex_bytes(1), tag("'")),
+    ))(input)
 }
 
 /// Blob literal value (MySQL)
 fn raw_hex_bytes_mysql(input: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<u8>> {
-    delimited(tag("X'"), hex_bytes, tag("'"))(input)
+    alt((
+        delimited(tag_no_case("x'"), hex_bytes(2), tag("'")),
+        preceded(tag("0x"), hex_bytes(2)),
+    ))(input)
 }
 
-fn hex_bytes(input: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<u8>> {
-    fold_many0(
-        map_res(take(2_usize), |i: LocatedSpan<&[u8]>| hex::decode(*i)),
-        Vec::new,
-        |mut acc: Vec<u8>, bytes: Vec<u8>| {
-            acc.extend(bytes);
-            acc
-        },
-    )(input)
+fn hex_bytes(chunk: usize) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<u8>> {
+    move |i| {
+        map_res(
+            verify(hex_digit0, |i: &LocatedSpan<&[u8]>| i.len() % chunk == 0),
+            |i: LocatedSpan<&[u8]>| hex::decode(*i),
+        )(i)
+    }
 }
 
 /// Specification for a SQL dialect to use when parsing
@@ -259,8 +272,11 @@ impl Dialect {
     }
 
     /// Parse the raw (byte) content of a bytes literal using this Dialect.
-    // TODO(fran): Improve this. This is very naive, and for Postgres specifically, it only
-    //  parses the hex-formatted byte array. We need to also add support for the escaped format.
+    // Naturally syntax and types vary between databases:
+    // - mysql: 0xFFFF | [Xx]'FFFF' -> varbinary; length must be even, 0X... is invalid!
+    // - psql: [Xx]'FFFF' -> bit-string
+    //
+    // FIXME(sac) Postgres escaped string (E'...') parsing is an incomplete hack.
     pub fn bytes_literal(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<u8>> {
         move |i| match self {
             Dialect::PostgreSQL => raw_hex_bytes_psql(i),
@@ -280,35 +296,23 @@ impl Dialect {
                     if *int >= 0 {
                         literal
                     } else {
-                        return Err(nom::Err::Error(NomSqlError {
-                            input: i,
-                            kind: ErrorKind::Fail,
-                        }));
+                        failed!(i);
                     }
                 }
                 Literal::Null => match self {
                     Dialect::PostgreSQL => literal,
                     Dialect::MySQL => {
-                        return Err(nom::Err::Error(NomSqlError {
-                            input: i,
-                            kind: ErrorKind::Fail,
-                        }));
+                        failed!(i);
                     }
                 },
                 Literal::Numeric(..) | Literal::Float(_) | Literal::Double(_) => match self {
                     Dialect::PostgreSQL => literal,
                     Dialect::MySQL => {
-                        return Err(nom::Err::Error(NomSqlError {
-                            input: i,
-                            kind: ErrorKind::Fail,
-                        }));
+                        failed!(i);
                     }
                 },
                 _ => {
-                    return Err(nom::Err::Error(NomSqlError {
-                        input: i,
-                        kind: ErrorKind::Fail,
-                    }));
+                    failed!(i);
                 }
             };
 
@@ -404,11 +408,17 @@ impl Dialect {
 
 #[cfg(test)]
 mod tests {
+    use nom::IResult;
+
     use super::*;
+    use crate::to_nom_result;
+
+    fn parse_dialect_bytes(dialect: Dialect, b: &[u8]) -> IResult<&[u8], Vec<u8>> {
+        to_nom_result(dialect.bytes_literal()(LocatedSpan::new(b)))
+    }
 
     mod mysql {
         use super::*;
-        use crate::to_nom_result;
 
         #[test]
         fn sql_identifiers() {
@@ -462,20 +472,26 @@ mod tests {
 
         #[test]
         fn bytes_parsing() {
-            let res = to_nom_result(Dialect::MySQL.bytes_literal()(LocatedSpan::new(
-                b"X'0008275c6480'",
-            )));
-            let expected = vec![0, 8, 39, 92, 100, 128];
-            assert_eq!(res, Ok((&b""[..], expected)));
+            let res = parse_dialect_bytes(Dialect::MySQL, b"X'0008275c6480'");
+            let expected = Ok((&b""[..], vec![0, 8, 39, 92, 100, 128]));
+            assert_eq!(res, expected);
+            let res = parse_dialect_bytes(Dialect::MySQL, b"x'0008275c6480'");
+            assert_eq!(res, expected);
+            let res = parse_dialect_bytes(Dialect::MySQL, b"0x0008275c6480");
+            assert_eq!(res, expected);
+
+            let res = parse_dialect_bytes(Dialect::MySQL, b"0x6D617263656C6F");
+            let expected = Ok((&b""[..], vec![109, 97, 114, 99, 101, 108, 111]));
+            assert_eq!(res, expected);
 
             // Empty
-            let res = to_nom_result(Dialect::MySQL.bytes_literal()(LocatedSpan::new(b"X''")));
+            let res = parse_dialect_bytes(Dialect::MySQL, b"X''");
             let expected = vec![];
             assert_eq!(res, Ok((&b""[..], expected)));
 
-            // Malformed string
-            let res = Dialect::MySQL.bytes_literal()(LocatedSpan::new(b"''"));
-            res.unwrap_err();
+            // Malformed strings
+            Dialect::MySQL.bytes_literal()(LocatedSpan::new(b"''")).unwrap_err();
+            Dialect::MySQL.bytes_literal()(LocatedSpan::new(b"0x123")).unwrap_err();
         }
 
         #[test]
@@ -579,6 +595,12 @@ mod tests {
             let expected = vec![0, 8, 39, 92, 100, 128];
             assert_eq!(res, Ok((&b""[..], expected)));
 
+            let res = parse_dialect_bytes(Dialect::PostgreSQL, b"X'0008275c6480'");
+            let expected = Ok((&b""[..], vec![0, 8, 39, 92, 100, 128]));
+            assert_eq!(res, expected);
+            let res = parse_dialect_bytes(Dialect::PostgreSQL, b"x'0008275c6480'");
+            assert_eq!(res, expected);
+
             // Empty
             let res = to_nom_result(Dialect::PostgreSQL.bytes_literal()(LocatedSpan::new(
                 b"E'\\\\x'::bytea",
@@ -589,6 +611,15 @@ mod tests {
             // Malformed string
             let res = Dialect::PostgreSQL.bytes_literal()(LocatedSpan::new(b"E'\\\\'::btea"));
             res.unwrap_err();
+        }
+
+        #[test]
+        #[ignore = "REA-4485"]
+        fn bytes_parsing_odd_length() {
+            // odd length is okay in postgres
+            let res = parse_dialect_bytes(Dialect::PostgreSQL, b"X'D617263656C6F'");
+            let expected = Ok((&b""[..], vec![13, 97, 114, 99, 101, 108, 111]));
+            assert_eq!(res, expected);
         }
     }
 }

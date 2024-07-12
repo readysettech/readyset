@@ -287,7 +287,7 @@ impl TryFrom<Literal> for Value {
                 Value::Text(String::from_utf8(v).map_err(|e| ValueConversionError(e.to_string()))?)
             }
             Literal::ByteArray(b) => Value::ByteArray(b),
-            Literal::BitVector(b) => Value::BitVector(BitVec::from_bytes(b.as_slice())),
+            Literal::BitVector(b) => Value::BitVector(b),
             Literal::Placeholder(_) => {
                 return Err(ValueConversionError(
                     "Placeholders are not valid values".to_string(),
@@ -320,9 +320,11 @@ impl From<Value> for mysql_async::Value {
                 t.seconds(),
                 t.microseconds(),
             ),
+            // Though `BitVec` is really PostgreSQL-specific, it's useful to compare bitstrings for
+            // non-utf8 bytes.
+            Value::BitVector(bv) => mysql_async::Value::Bytes(bv.to_bytes()),
             // These types are PostgreSQL-specific
             Value::ByteArray(_) => unimplemented!(),
-            Value::BitVector(_) => unimplemented!(),
             Value::TimestampTz(_) => unimplemented!(),
         }
     }
@@ -362,7 +364,8 @@ impl pgsql::types::ToSql for Value {
             | Type::NUMERIC
             | Type::TEXT
             | Type::DATE
-            | Type::TIME => true,
+            | Type::TIME
+            | Type::BIT => true,
             ref ty if ty.name() == "citext" => true,
             _ => false,
         }
@@ -426,7 +429,9 @@ impl<'a> pgsql::types::FromSql<'a> for Value {
             | Type::DATE
             | Type::TIMESTAMP
             | Type::TIMESTAMPTZ
-            | Type::TIME => true,
+            | Type::TIME
+            | Type::BIT
+            | Type::VARBIT => true,
             ref ty if ty.name() == "citext" => true,
             _ => false,
         }
@@ -582,9 +587,14 @@ impl Value {
                 }
                 _ => bail!("Could not convert {:?} to Time", val),
             })),
+            // Though `BitVec` is really PostgreSQL-specific, it's useful to compare bitstrings for
+            // non-utf8 bytes.
+            Type::BitVec => Ok(Self::BitVector(match val {
+                mysql_async::Value::Bytes(b) => BitVec::from_bytes(&b),
+                _ => unimplemented!(),
+            })),
             // These types are PostgreSQL specific.
             Type::ByteArray => unimplemented!(),
-            Type::BitVec => unimplemented!(),
             Type::TimestampTz => unimplemented!(),
         }
     }
@@ -597,6 +607,7 @@ impl Value {
             | (Self::Date(_), Type::Date)
             | (Self::Time(_), Type::Time)
             | (Self::TimestampTz(_), Type::TimestampTz)
+            | (Self::BitVector(_), Type::BitVec)
             | (Self::Null, _) => Ok(Cow::Borrowed(self)),
             (Self::TimestampTz(ts), Type::Date) => Ok(Cow::Owned(Self::Date(ts.naive_local()))),
             (Self::Text(txt), Type::Integer) => Ok(Cow::Owned(Self::Integer(txt.parse()?))),
@@ -608,8 +619,11 @@ impl Value {
                 })?,
             ))),
             (Self::Text(txt), Type::Time) => Ok(Cow::Owned(Self::Time(txt.parse()?))),
-            _ => {
-                todo!()
+            (Self::Text(txt), Type::BitVec) => Ok(Cow::Owned(Self::BitVector(BitVec::from_bytes(
+                txt.as_bytes(),
+            )))),
+            (v, t) => {
+                todo!("{v:?} {t:?}")
             }
         }
     }

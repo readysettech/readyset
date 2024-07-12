@@ -11,6 +11,22 @@ use tokio::net::TcpStream;
 
 use crate::Adapter;
 
+pub fn upstream_config() -> mysql_async::OptsBuilder {
+    mysql_async::OptsBuilder::default()
+        .user(Some(
+            &env::var("MYSQL_USER").unwrap_or_else(|_| "root".into()),
+        ))
+        .pass(Some(
+            &env::var("MYSQL_PASSWORD").unwrap_or_else(|_| "noria".into()),
+        ))
+        .ip_or_hostname(env::var("MYSQL_HOST").unwrap_or_else(|_| "127.0.0.1".into()))
+        .tcp_port(
+            env::var("MYSQL_TCP_PORT")
+                .unwrap_or_else(|_| "3306".into())
+                .parse()
+                .unwrap(),
+        )
+}
 /// Retrieves where the query executed by parsing the row returned by
 /// EXPLAIN LAST STATEMENT.
 pub async fn last_query_info(conn: &mut impl Queryable) -> QueryInfo {

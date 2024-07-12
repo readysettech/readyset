@@ -429,7 +429,6 @@ impl Materializations {
                 );
                 mi = parent;
                 indices = map_lookup_indices(m, mi, &indices)?;
-                #[allow(clippy::indexing_slicing)] // graph must contain mi
                 m = &graph[mi];
             }
 
@@ -743,7 +742,7 @@ impl Materializations {
                         self.partial.contains(&pi),
                         "attempting to place full materialization beyond materialization frontier"
                     );
-                    #[allow(clippy::unwrap_used)] // graph must contain pi
+                    // #[allow(clippy::unwrap_used)] // graph must contain pi
                     graph.node_weight_mut(pi).unwrap().purge = true;
                 }
             }

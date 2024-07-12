@@ -6,7 +6,6 @@ use itertools::Itertools;
 use readyset_client::KeyComparison;
 use readyset_errors::{internal_err, ReadySetResult};
 use readyset_util::intervals::into_bound_endpoint;
-use readyset_util::Indices;
 use serde::{Deserialize, Serialize};
 use vec1::{vec1, Vec1};
 
@@ -133,28 +132,72 @@ impl Join {
             .collect()
     }
 
-    fn handle_replay_for_generated(
-        &self,
-        left: Records,
-        right: Records,
-    ) -> ReadySetResult<Records> {
-        let mut from_key = vec![];
-        let mut other_key = vec![];
-        let mut ret: Vec<Record> = vec![];
-        for (left_key, right_key) in &self.on {
-            from_key.push(*left_key);
-            other_key.push(*right_key);
+    /// Build a hash map from one of the sides of the join.
+    fn build_join_hash_map<'a>(
+        &'a self,
+        records: &'a Records,
+        key: &[usize],
+    ) -> HashMap<Vec<&DfValue>, Vec<&Record>> {
+        let mut hm = HashMap::new();
+        for rec in records {
+            let key: Vec<&DfValue> = key.iter().map(|idx| &rec[*idx]).collect();
+            hm.entry(key)
+                .and_modify(|entry: &mut Vec<&Record>| entry.push(rec))
+                .or_insert(vec![rec]);
         }
-        for rec in left {
-            let (rec, positive) = rec.extract();
-            invariant!(positive, "replays should only include positive records");
+        hm
+    }
 
-            for other_rec in right
-                .iter()
-                .filter(|r| rec.indices(from_key.clone()) == r.indices(other_key.clone()))
-            {
-                ret.push(Record::Positive(self.generate_row(&rec, other_rec.row())))
+    /// Perform a hash join between two sets of records.
+    fn hash_join(&self, left: Records, right: Records) -> ReadySetResult<Records> {
+        let mut probe_keys = vec![];
+        let mut build_keys = vec![];
+        let mut ret: Vec<Record> = vec![];
+        let probe_is_left = left.len() > right.len();
+        for (left_key, right_key) in &self.on {
+            match probe_is_left {
+                true => {
+                    probe_keys.push(*left_key);
+                    build_keys.push(*right_key);
+                }
+                false => {
+                    probe_keys.push(*right_key);
+                    build_keys.push(*left_key);
+                }
             }
+        }
+        let (probe_side, build_side) = match probe_is_left {
+            true => (&left, &right),
+            false => (&right, &left),
+        };
+        let hm = self.build_join_hash_map(build_side, &build_keys);
+
+        let mut key: Vec<&DfValue> = vec![&DfValue::None; probe_keys.len()];
+        for prob_rec in probe_side {
+            for i in 0..probe_keys.len() {
+                key[i] = &prob_rec[probe_keys[i]];
+            }
+            if let Some(build_recs) = hm.get(&key) {
+                invariant!(
+                    prob_rec.is_positive(),
+                    "replays should only include positive records"
+                );
+                for build_rec in build_recs {
+                    invariant!(
+                        build_rec.is_positive(),
+                        "replays should only include positive records"
+                    );
+
+                    match probe_is_left {
+                        true => ret.push(Record::Positive(
+                            self.generate_row(prob_rec.row(), build_rec.row()),
+                        )),
+                        false => ret.push(Record::Positive(
+                            self.generate_row(build_rec.row(), prob_rec.row()),
+                        )),
+                    }
+                }
+            };
         }
         Ok(ret.into())
     }
@@ -302,7 +345,7 @@ impl Ingredient for Join {
                 )) {
                     // we have both sides now
                     let (left, right) = if is_left { (rs, other) } else { (other, rs) };
-                    let ret = self.handle_replay_for_generated(left, right)?;
+                    let ret = self.hash_join(left, right)?;
                     Ok(ProcessingResult {
                         results: ret,
                         ..Default::default()

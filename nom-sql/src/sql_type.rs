@@ -76,6 +76,8 @@ pub enum SqlType {
     UnsignedTinyInt(Option<u16>),
     SmallInt(Option<u16>),
     UnsignedSmallInt(Option<u16>),
+    MediumInt(Option<u16>),
+    UnsignedMediumInt(Option<u16>),
     Int2,
     Int4,
     Int8,
@@ -224,10 +226,12 @@ impl Arbitrary for SqlType {
                 (1..255u16).prop_map(|p| BigInt(Some(p))).boxed(),
                 (1..255u16).prop_map(|p| SmallInt(Some(p))).boxed(),
                 option::of(1..255u16).prop_map(TinyInt).boxed(),
+                option::of(1..255u16).prop_map(MediumInt).boxed(),
                 option::of(1..255u16).prop_map(UnsignedInt).boxed(),
                 option::of(1..255u16).prop_map(UnsignedSmallInt).boxed(),
                 option::of(1..255u16).prop_map(UnsignedBigInt).boxed(),
                 option::of(1..255u16).prop_map(UnsignedTinyInt).boxed(),
+                option::of(1..255u16).prop_map(UnsignedMediumInt).boxed(),
                 Just(TinyText).boxed(),
                 Just(MediumText).boxed(),
                 Just(LongText).boxed(),
@@ -333,6 +337,11 @@ impl DialectDisplay for SqlType {
                 SqlType::SmallInt(len) => write_with_len(f, "SMALLINT", len),
                 SqlType::UnsignedSmallInt(len) => {
                     write_with_len(f, "SMALLINT", len)?;
+                    write!(f, " UNSIGNED")
+                }
+                SqlType::MediumInt(len) => write_with_len(f, "MEDIUMINT", len),
+                SqlType::UnsignedMediumInt(len) => {
+                    write_with_len(f, "MEDIUMINT", len)?;
                     write!(f, " UNSIGNED")
                 }
                 SqlType::Int2 => write!(f, "INT2"),
@@ -773,6 +782,14 @@ fn type_identifier_part1(
             value(SqlType::Int8, tag_no_case("int8")),
             |i| int_type("tinyint", SqlType::UnsignedTinyInt, SqlType::TinyInt, i),
             |i| int_type("smallint", SqlType::UnsignedSmallInt, SqlType::SmallInt, i),
+            cond_fail(dialect == Dialect::MySQL, |i| {
+                int_type(
+                    "mediumint",
+                    SqlType::UnsignedMediumInt,
+                    SqlType::MediumInt,
+                    i,
+                )
+            }),
             |i| int_type("integer", SqlType::UnsignedInt, SqlType::Int, i),
             |i| int_type("int", SqlType::UnsignedInt, SqlType::Int, i),
             |i| int_type("bigint", SqlType::UnsignedBigInt, SqlType::BigInt, i),
@@ -1022,6 +1039,27 @@ pub fn mysql_int_cast_targets() -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&
     }
 }
 
+/// Calls the parser if the condition is met; fails otherwise.
+///
+/// This mirrors the intent of [`nom::combinator::cond`], but for use within [`nom::branch::alt`]:
+/// instead of resolving to [`None`] when the condition is not met, it returns a parser error so
+/// that this branch fails and another alternative can be selected.
+fn cond_fail<F>(pred: bool, f: F) -> impl FnMut(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlType>
+where
+    F: Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlType>,
+{
+    move |i| {
+        if pred {
+            f(i)
+        } else {
+            Err(nom::Err::Error(ParseError::from_error_kind(
+                i,
+                ErrorKind::Fail,
+            )))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1145,6 +1183,18 @@ mod tests {
             let res = type_identifier(Dialect::MySQL)(LocatedSpan::new(qs));
             assert!(res.is_ok());
             assert_eq!(res.unwrap().1, SqlType::Double);
+        }
+
+        #[test]
+        fn mediumint() {
+            assert_eq!(
+                test_parse!(type_identifier(Dialect::MySQL), b"mediumint(8)"),
+                SqlType::MediumInt(Some(8))
+            );
+            assert_eq!(
+                test_parse!(type_identifier(Dialect::MySQL), b"mediumint"),
+                SqlType::MediumInt(None)
+            );
         }
     }
 
@@ -1430,6 +1480,17 @@ mod tests {
                     fields: Some(IntervalFields::HourToMinute),
                     precision: Some(4),
                 }
+            );
+        }
+
+        #[test]
+        fn mediumint_not_recognized() {
+            assert_eq!(
+                test_parse!(type_identifier(Dialect::PostgreSQL), b"mediumint"),
+                SqlType::Other(Relation {
+                    schema: None,
+                    name: "mediumint".into()
+                })
             );
         }
     }

@@ -12,7 +12,6 @@ use hyper::header::CONTENT_TYPE;
 use hyper::service::make_service_fn;
 use hyper::{self, Body, Method, Request, Response, StatusCode};
 use readyset_alloc::{dump_stats, memory_and_per_thread_stats};
-use readyset_client::consensus::Authority;
 use readyset_client::metrics::recorded;
 use readyset_errors::ReadySetError;
 use readyset_util::shutdown::ShutdownReceiver;
@@ -41,13 +40,12 @@ pub struct NoriaServerHttpRouter {
     pub worker_tx: Sender<WorkerRequest>,
     /// Channel to the running `Controller`.
     pub controller_tx: Sender<ControllerRequest>,
-    /// The `Authority` used inside the server.
-    pub authority: Arc<Authority>,
     /// Used to record and report the servers current health.
     pub health_reporter: HealthReporter,
     /// Used to communicate externally that a failpoint request has been received and successfully
     /// handled.
     /// Most commonly used to block on further startup action if --wait-for-failpoint is supplied.
+    #[allow(dead_code)]
     pub failpoint_channel: Option<Arc<Sender<()>>>,
 }
 

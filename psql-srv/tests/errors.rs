@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::vec;
 
-use async_trait::async_trait;
 use futures::{stream, Future};
 use postgres::NoTls;
 use postgres_protocol::Oid;
@@ -27,7 +26,6 @@ enum ErrorPosition {
 #[derive(Clone, Copy)]
 struct ErrorBackend(ErrorPosition);
 
-#[async_trait]
 impl PsqlBackend for ErrorBackend {
     type Resultset = stream::Iter<vec::IntoIter<Result<PsqlSrvRow, psql_srv::Error>>>;
 

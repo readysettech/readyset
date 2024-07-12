@@ -1,4 +1,4 @@
-#![feature(btree_extract_if, bound_map)]
+#![feature(btree_extract_if)]
 
 use std::borrow::Borrow;
 pub use std::collections::btree_map::{Iter, Keys, Range, Values, ValuesMut};

@@ -1,11 +1,11 @@
-use std::iter;
+use std::{cmp, iter};
 
 use nom_sql::{
     BinaryOperator as SqlBinaryOperator, Column, DialectDisplay, Expr as AstExpr, FunctionExpr,
     InValue, Relation, UnaryOperator,
 };
 use readyset_data::dialect::SqlEngine;
-use readyset_data::{DfType, DfValue};
+use readyset_data::{Collation, DfType, DfValue};
 use readyset_errors::{
     internal, internal_err, invalid_query, invalid_query_err, unsupported, ReadySetError,
     ReadySetResult,
@@ -459,63 +459,140 @@ impl BuiltinFunction {
     }
 }
 
+fn mysql_temporal_types_cvt(left: &DfType, right: &DfType) -> Option<DfType> {
+    let left_is_date_and_time = left.is_date_and_time();
+    let right_is_date_and_time = right.is_date_and_time();
+
+    let left_is_temporal = left_is_date_and_time || left.is_any_temporal();
+    let right_is_temporal = right_is_date_and_time || right.is_any_temporal();
+
+    if left_is_temporal && right_is_temporal {
+        if left_is_date_and_time && right_is_date_and_time {
+            if let DfType::DateTime { subsecond_digits } = left {
+                Some(DfType::DateTime {
+                    subsecond_digits: cmp::max(*subsecond_digits, right.subsecond_digits()?),
+                })
+            } else if let DfType::DateTime { subsecond_digits } = right {
+                Some(DfType::DateTime {
+                    subsecond_digits: cmp::max(*subsecond_digits, left.subsecond_digits()?),
+                })
+            } else if let DfType::TimestampTz { .. } = left
+                && let DfType::TimestampTz { .. } = right
+            {
+                Some(DfType::TimestampTz {
+                    subsecond_digits: cmp::max(left.subsecond_digits()?, right.subsecond_digits()?),
+                })
+            } else {
+                Some(DfType::Timestamp {
+                    subsecond_digits: cmp::max(left.subsecond_digits()?, right.subsecond_digits()?),
+                })
+            }
+        } else if let DfType::Time {
+            subsecond_digits: left_subsec_digs,
+        } = left
+            && let DfType::Time {
+                subsecond_digits: right_subsec_digs,
+            } = right
+        {
+            Some(DfType::Time {
+                subsecond_digits: cmp::max(*left_subsec_digs, *right_subsec_digs),
+            })
+        } else if (matches!(left, DfType::Time { .. }) && right.is_any_int())
+            || (matches!(right, DfType::Time { .. }) && left.is_any_int())
+        {
+            Some(DfType::BigInt)
+        } else if left_is_date_and_time {
+            Some(left.clone())
+        } else if right_is_date_and_time {
+            Some(right.clone())
+        } else {
+            Some(DfType::Date)
+        }
+    } else if (left_is_date_and_time && right.is_any_int())
+        || (right_is_date_and_time && left.is_any_int())
+    {
+        Some(DfType::BigInt)
+    } else if left_is_temporal && right.is_any_text() {
+        Some(left.clone())
+    } else if right_is_temporal && left.is_any_text() {
+        Some(right.clone())
+    } else {
+        None
+    }
+}
+
+fn get_text_type_max_length(ty: &DfType) -> Option<u16> {
+    match ty {
+        DfType::Text(..) => Some(65535),
+        DfType::VarChar(ln, _) => Some(*ln),
+        DfType::Char(ln, _) => Some(*ln),
+        _ => None,
+    }
+}
+
+fn mysql_text_type_cvt(left: &DfType, right: &DfType) -> Option<DfType> {
+    if left.is_any_text() && right.is_any_text() {
+        if matches!(left, DfType::Text(..)) || matches!(right, DfType::Text(..)) {
+            Some(DfType::DEFAULT_TEXT)
+        } else {
+            let left_len = get_text_type_max_length(left)?;
+            let right_len = get_text_type_max_length(right)?;
+            if let DfType::Char(..) = left
+                && let DfType::Char(..) = right
+            {
+                Some(DfType::Char(
+                    cmp::max(left_len, right_len),
+                    Collation::default(),
+                ))
+            } else {
+                Some(DfType::VarChar(
+                    cmp::max(left_len, right_len),
+                    Collation::default(),
+                ))
+            }
+        }
+    } else {
+        None
+    }
+}
+
+fn mysql_numerical_type_cvt(left: &DfType, right: &DfType) -> Option<DfType> {
+    if left.is_any_float() || right.is_any_float() {
+        Some(DfType::Double)
+    } else if left.is_any_int() && right.is_any_int() {
+        if left.is_any_unsigned_int() && right.is_any_unsigned_int() {
+            Some(DfType::UnsignedBigInt)
+        } else {
+            Some(DfType::BigInt)
+        }
+    } else {
+        let left_is_decimal = left.is_numeric();
+        let right_is_decimal = right.is_numeric();
+        if left_is_decimal && right_is_decimal {
+            // TODO: should return decimal, capable of storing max pres and scale
+            Some(left.clone())
+        } else if left_is_decimal && right.is_any_exact_number() {
+            Some(left.clone())
+        } else if left.is_any_exact_number() && right_is_decimal {
+            Some(right.clone())
+        } else {
+            None
+        }
+    }
+}
+
 /// <https://dev.mysql.com/doc/refman/8.0/en/type-conversion.html>
 fn mysql_type_conversion(left_ty: &DfType, right_ty: &DfType) -> DfType {
-    match (left_ty, right_ty) {
-        //  If both arguments in a comparison operation are strings, they are compared as strings.
-        (DfType::Text(_), DfType::Text(_)) => DfType::DEFAULT_TEXT,
-
-        // If both arguments are integers, they are compared as integers.
-        (
-            DfType::TinyInt
-            | DfType::UnsignedTinyInt
-            | DfType::SmallInt
-            | DfType::UnsignedSmallInt
-            | DfType::Int
-            | DfType::UnsignedInt
-            | DfType::BigInt
-            | DfType::UnsignedBigInt,
-            DfType::TinyInt
-            | DfType::UnsignedTinyInt
-            | DfType::SmallInt
-            | DfType::UnsignedSmallInt
-            | DfType::Int
-            | DfType::UnsignedInt
-            | DfType::BigInt
-            | DfType::UnsignedBigInt,
-        ) => DfType::BigInt,
-
-        // > Hexadecimal values are treated as binary strings if not compared to a number.
-        // TODO
-
-        // > If one of the arguments is a TIMESTAMP or DATETIME column and the other argument is a
-        // > constant, the constant is converted to a timestamp before the comparison is performed.
-        // > This is done to be more ODBC-friendly. This is not done for the arguments to IN()
-        // TODO
-
-        // > If one of the arguments is a decimal value, comparison depends on the other argument.
-        // > The arguments are compared as decimal values if the other argument is a decimal or
-        // > integer value...
-        (
-            decimal @ DfType::Numeric { .. },
-            DfType::Numeric { .. }
-            | DfType::TinyInt
-            | DfType::UnsignedTinyInt
-            | DfType::SmallInt
-            | DfType::UnsignedSmallInt
-            | DfType::Int
-            | DfType::UnsignedInt
-            | DfType::BigInt
-            | DfType::UnsignedBigInt,
-        ) => decimal.clone(),
-
-        // > or as floating-point values if the other argument is a floating-point value.
-        (DfType::Numeric { .. }, DfType::Float | DfType::Double)
-        | (DfType::Float | DfType::Double, DfType::Numeric { .. }) => DfType::Double,
-
-        // > In all other cases, the arguments are compared as floating-point (double-precision)
-        // > numbers.
-        _ => DfType::Double,
+    if left_ty.is_bool() && right_ty.is_bool() {
+        DfType::Bool
+    } else if let Some(ty) = mysql_text_type_cvt(left_ty, right_ty) {
+        ty
+    } else if let Some(ty) = mysql_temporal_types_cvt(left_ty, right_ty) {
+        ty
+    } else if let Some(ty) = mysql_numerical_type_cvt(left_ty, right_ty) {
+        ty
+    } else {
+        DfType::Double
     }
 }
 
@@ -744,7 +821,7 @@ impl Expr {
     /// - Replacing unary negation with `(expr * -1)`
     /// - Replacing unary NOT with `(expr != 1)`
     /// - Inferring the type of each node in the expression AST.
-    pub fn lower<C>(expr: AstExpr, dialect: Dialect, context: C) -> ReadySetResult<Self>
+    pub fn lower<C>(expr: AstExpr, dialect: Dialect, context: &C) -> ReadySetResult<Self>
     where
         C: LowerContext,
     {
@@ -755,7 +832,7 @@ impl Expr {
             }) => {
                 let args = arguments
                     .into_iter()
-                    .map(|arg| Self::lower(arg, dialect, context.clone()))
+                    .map(|arg| Self::lower(arg, dialect, context))
                     .collect::<Result<Vec<_>, _>>()?;
                 let (func, ty) = BuiltinFunction::from_name_and_args(&fname, args, dialect)?;
                 Ok(Self::Call {
@@ -764,7 +841,7 @@ impl Expr {
                 })
             }
             AstExpr::Call(FunctionExpr::Substring { string, pos, len }) => {
-                let string = Self::lower(*string, dialect, context.clone())?;
+                let string = Self::lower(*string, dialect, context)?;
                 let ty = if string.ty().is_any_text() {
                     string.ty().clone()
                 } else {
@@ -772,7 +849,7 @@ impl Expr {
                 };
                 let func = Box::new(BuiltinFunction::Substring(
                     string,
-                    pos.map(|expr| Self::lower(*expr, dialect, context.clone()))
+                    pos.map(|expr| Self::lower(*expr, dialect, context))
                         .transpose()?,
                     len.map(|expr| Self::lower(*expr, dialect, context))
                         .transpose()?,
@@ -801,7 +878,7 @@ impl Expr {
                 Ok(Self::Column { index, ty })
             }
             AstExpr::BinaryOp { lhs, op, rhs } => {
-                let mut left = Box::new(Self::lower(*lhs, dialect, context.clone())?);
+                let mut left = Box::new(Self::lower(*lhs, dialect, context)?);
                 let mut right = Box::new(Self::lower(*rhs, dialect, context)?);
                 let (op, negated) =
                     BinaryOperator::from_sql_op(op, dialect, left.ty(), right.ty())?;
@@ -895,8 +972,8 @@ impl Expr {
                 let branches = branches
                     .into_iter()
                     .map(|branch| {
-                        let condition = Self::lower(branch.condition, dialect, context.clone())?;
-                        let body = Self::lower(branch.body, dialect, context.clone())?;
+                        let condition = Self::lower(branch.condition, dialect, context)?;
+                        let body = Self::lower(branch.body, dialect, context)?;
                         Ok(CaseWhenBranch { condition, body })
                     })
                     .collect::<ReadySetResult<Vec<_>>>()?;
@@ -932,12 +1009,12 @@ impl Expr {
                         BinaryOperator::Or
                     };
 
-                    let lhs = Self::lower(*lhs, dialect, context.clone())?;
+                    let lhs = Self::lower(*lhs, dialect, context)?;
                     let make_comparison = |rhs| -> ReadySetResult<_> {
                         let equal = Self::Op {
                             left: Box::new(lhs.clone()),
                             op: BinaryOperator::Equal,
-                            right: Box::new(Self::lower(rhs, dialect, context.clone())?),
+                            right: Box::new(Self::lower(rhs, dialect, context)?),
                             ty: DfType::Bool, // type of = is always bool
                         };
                         if negated {
@@ -986,7 +1063,7 @@ impl Expr {
                     expr: AstExpr,
                     out: &mut Vec<Expr>,
                     dialect: Dialect,
-                    context: C,
+                    context: &C,
                 ) -> ReadySetResult<()>
                 where
                     C: LowerContext,
@@ -994,7 +1071,7 @@ impl Expr {
                     match expr {
                         AstExpr::Array(exprs) => {
                             for expr in exprs {
-                                flatten(expr, out, dialect, context.clone())?;
+                                flatten(expr, out, dialect, context)?;
                             }
                         }
                         _ => out.push(Expr::lower(expr, dialect, context)?),
@@ -1038,13 +1115,13 @@ impl Expr {
         op: SqlBinaryOperator,
         rhs: AstExpr,
         dialect: Dialect,
-        context: C,
+        context: &C,
         mut is_all: bool,
     ) -> ReadySetResult<Expr>
     where
         C: LowerContext,
     {
-        let mut left = Box::new(Self::lower(lhs, dialect, context.clone())?);
+        let mut left = Box::new(Self::lower(lhs, dialect, context)?);
         let mut right = Box::new(Self::lower(rhs, dialect, context)?);
         let (op, negated) = BinaryOperator::from_sql_op(op, dialect, left.ty(), right.ty())?;
         if negated {
@@ -1196,7 +1273,7 @@ pub(crate) mod tests {
 
         let input = AstExpr::Literal("abc".into());
         let result =
-            Expr::lower(input, Dialect::DEFAULT_POSTGRESQL, no_op_lower_context()).unwrap();
+            Expr::lower(input, Dialect::DEFAULT_POSTGRESQL, &no_op_lower_context()).unwrap();
         assert_eq!(result.ty(), &DfType::Unknown);
     }
 
@@ -1206,7 +1283,7 @@ pub(crate) mod tests {
         let result = Expr::lower(
             input,
             Dialect::DEFAULT_MYSQL,
-            resolve_columns(|c| {
+            &resolve_columns(|c| {
                 if c == "t.x".into() {
                     Ok((0, DfType::Int))
                 } else {
@@ -1240,7 +1317,7 @@ pub(crate) mod tests {
         let result = Expr::lower(
             input,
             Dialect::DEFAULT_POSTGRESQL,
-            resolve_types(|ty| {
+            &resolve_types(|ty| {
                 if ty.schema == Some("something".into()) && ty.name == "custom" {
                     Some(enum_ty.clone())
                 } else {
@@ -1272,7 +1349,7 @@ pub(crate) mod tests {
         let result = Expr::lower(
             input,
             Dialect::DEFAULT_MYSQL,
-            resolve_columns(|c| {
+            &resolve_columns(|c| {
                 if c == "t.x".into() {
                     Ok((0, DfType::Int))
                 } else {
@@ -1310,7 +1387,7 @@ pub(crate) mod tests {
         let result = Expr::lower(
             input,
             Dialect::DEFAULT_MYSQL,
-            resolve_columns(|c| {
+            &resolve_columns(|c| {
                 if c == "t.x".into() {
                     Ok((0, DfType::Int))
                 } else {
@@ -1341,7 +1418,7 @@ pub(crate) mod tests {
     #[test]
     fn call_concat_with_texts() {
         let input = parse_expr(ParserDialect::MySQL, "concat('My', 'SQ', 'L')").unwrap();
-        let res = Expr::lower(input, Dialect::DEFAULT_MYSQL, no_op_lower_context()).unwrap();
+        let res = Expr::lower(input, Dialect::DEFAULT_MYSQL, &no_op_lower_context()).unwrap();
         assert_eq!(
             res,
             Expr::Call {
@@ -1372,7 +1449,7 @@ pub(crate) mod tests {
         let res = Expr::lower(
             input,
             Dialect::DEFAULT_MYSQL,
-            resolve_columns(|c| {
+            &resolve_columns(|c| {
                 if c == "col".into() {
                     Ok((0, DfType::Text(Collation::Citext)))
                 } else {
@@ -1406,7 +1483,7 @@ pub(crate) mod tests {
     #[test]
     fn substr_regular() {
         let input = parse_expr(ParserDialect::MySQL, "substr('abcdefghi', 1, 7)").unwrap();
-        let res = Expr::lower(input, Dialect::DEFAULT_MYSQL, no_op_lower_context()).unwrap();
+        let res = Expr::lower(input, Dialect::DEFAULT_MYSQL, &no_op_lower_context()).unwrap();
         assert_eq!(
             res,
             Expr::Call {
@@ -1432,7 +1509,7 @@ pub(crate) mod tests {
     #[test]
     fn substring_regular() {
         let input = parse_expr(ParserDialect::MySQL, "substring('abcdefghi', 1, 7)").unwrap();
-        let res = Expr::lower(input, Dialect::DEFAULT_MYSQL, no_op_lower_context()).unwrap();
+        let res = Expr::lower(input, Dialect::DEFAULT_MYSQL, &no_op_lower_context()).unwrap();
         assert_eq!(
             res,
             Expr::Call {
@@ -1458,7 +1535,7 @@ pub(crate) mod tests {
     #[test]
     fn substring_without_string_arg() {
         let input = parse_expr(ParserDialect::MySQL, "substring(123 from 2)").unwrap();
-        let res = Expr::lower(input, Dialect::DEFAULT_MYSQL, no_op_lower_context()).unwrap();
+        let res = Expr::lower(input, Dialect::DEFAULT_MYSQL, &no_op_lower_context()).unwrap();
         assert_eq!(res.ty(), &DfType::DEFAULT_TEXT);
     }
 
@@ -1472,7 +1549,7 @@ pub(crate) mod tests {
                 name: "greatest".into(),
                 arguments: args.into_iter().map(AstExpr::Literal).collect(),
             });
-            let result = Expr::lower(input, dialect, no_op_lower_context()).unwrap();
+            let result = Expr::lower(input, dialect, &no_op_lower_context()).unwrap();
             assert_eq!(result.ty(), &expected_ty);
         }
 
@@ -1557,7 +1634,7 @@ pub(crate) mod tests {
                 name: "greatest".into(),
                 arguments: args.into_iter().map(AstExpr::Literal).collect(),
             });
-            let result = Expr::lower(input, dialect, no_op_lower_context()).unwrap();
+            let result = Expr::lower(input, dialect, &no_op_lower_context()).unwrap();
             let compare_as = match result {
                 Expr::Call { func, .. } => match *func {
                     BuiltinFunction::Greatest { compare_as, .. } => compare_as,
@@ -1610,7 +1687,7 @@ pub(crate) mod tests {
         let result = Expr::lower(
             input,
             Dialect::DEFAULT_MYSQL,
-            resolve_columns(|c| {
+            &resolve_columns(|c| {
                 if c.name == "x" {
                     Ok((0, DfType::DEFAULT_TEXT))
                 } else {
@@ -1635,7 +1712,7 @@ pub(crate) mod tests {
                 rhs: Box::new(AstExpr::Literal("abc".into())),
             };
             let result =
-                Expr::lower(input, Dialect::DEFAULT_POSTGRESQL, no_op_lower_context()).unwrap();
+                Expr::lower(input, Dialect::DEFAULT_POSTGRESQL, &no_op_lower_context()).unwrap();
             assert_eq!(*result.ty(), DfType::Bool);
         }
     }
@@ -1647,7 +1724,8 @@ pub(crate) mod tests {
             "ARRAY[[1, '2'::int], array[3, 4]]",
         )
         .unwrap();
-        let result = Expr::lower(expr, Dialect::DEFAULT_POSTGRESQL, no_op_lower_context()).unwrap();
+        let result =
+            Expr::lower(expr, Dialect::DEFAULT_POSTGRESQL, &no_op_lower_context()).unwrap();
         assert_eq!(
             result,
             Expr::Array {
@@ -1682,7 +1760,8 @@ pub(crate) mod tests {
     #[test]
     fn op_some_to_any() {
         let expr = parse_expr(ParserDialect::PostgreSQL, "1 = ANY ('{1,2}')").unwrap();
-        let result = Expr::lower(expr, Dialect::DEFAULT_POSTGRESQL, no_op_lower_context()).unwrap();
+        let result =
+            Expr::lower(expr, Dialect::DEFAULT_POSTGRESQL, &no_op_lower_context()).unwrap();
         assert_eq!(
             result,
             Expr::OpAny {
@@ -1707,7 +1786,8 @@ pub(crate) mod tests {
     #[test]
     fn op_all() {
         let expr = parse_expr(ParserDialect::PostgreSQL, "1 = ALL ('{1,1}')").unwrap();
-        let result = Expr::lower(expr, Dialect::DEFAULT_POSTGRESQL, no_op_lower_context()).unwrap();
+        let result =
+            Expr::lower(expr, Dialect::DEFAULT_POSTGRESQL, &no_op_lower_context()).unwrap();
         assert_eq!(
             result,
             Expr::OpAll {
@@ -1736,7 +1816,8 @@ pub(crate) mod tests {
             "array_to_string(ARRAY[1], ',', '*')",
         )
         .unwrap();
-        let result = Expr::lower(expr, Dialect::DEFAULT_POSTGRESQL, no_op_lower_context()).unwrap();
+        let result =
+            Expr::lower(expr, Dialect::DEFAULT_POSTGRESQL, &no_op_lower_context()).unwrap();
         assert_eq!(
             result,
             Expr::Call {

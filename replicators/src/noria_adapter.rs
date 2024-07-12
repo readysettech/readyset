@@ -824,7 +824,7 @@ impl NoriaAdapter {
             return Err(ReadySetError::ResnapshotNeeded);
         }
 
-        changelist = changelist.with_schema_search_path(vec![schema.into()]);
+        changelist = changelist.with_schema_search_path(vec![schema.clone().into()]);
 
         // Collect a list of all tables we're creating for later
         let tables = changelist
@@ -862,6 +862,15 @@ impl NoriaAdapter {
                             reason: NotReplicatedReason::from_string(&error.to_string()),
                         }))
                     }));
+                for change in changelist.changes_mut() {
+                    match change {
+                        Change::AddNonReplicatedRelation(NonReplicatedRelation {
+                            ref mut name,
+                            ..
+                        }) if name.schema.is_none() => name.schema = Some((&schema).into()),
+                        _ => (),
+                    }
+                }
                 self.noria.extend_recipe(changelist).await?;
             }
             Ok(_) => {}

@@ -18,7 +18,6 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::{io, vec};
 
-use async_trait::async_trait;
 use criterion::{criterion_group, criterion_main, Criterion};
 use futures::future::{try_select, Either};
 use futures::stream::Peekable;
@@ -128,7 +127,6 @@ impl Backend {
     }
 }
 
-#[async_trait]
 impl PsqlBackend for Backend {
     type Resultset = ResultStream;
 

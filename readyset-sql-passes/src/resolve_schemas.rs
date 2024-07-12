@@ -108,6 +108,17 @@ impl<'ast, 'schema> VisitorMut<'ast> for ResolveSchemaVisitor<'schema> {
         visit_mut::walk_table_expr(self, table_expr)
     }
 
+    fn visit_target_table_fk(&mut self, table: &'ast mut Relation) -> Result<(), Self::Error> {
+        match self.visit_table(table) {
+            Ok(()) => Ok(()),
+            Err(ReadySetError::TableNotReplicated { name: _, schema: _ }) => {
+                table.schema = Some(SqlIdentifier::from("public"));
+                Ok(())
+            }
+            Err(e) => Err(e),
+        }
+    }
+
     fn visit_table(&mut self, table: &'ast mut Relation) -> Result<(), Self::Error> {
         if table.schema.is_some() {
             return Ok(());

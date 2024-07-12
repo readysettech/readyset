@@ -2,6 +2,7 @@ use std::io::{self, Write};
 
 use byteorder::{LittleEndian, WriteBytesExt};
 use mysql_time::MySqlTime;
+use readyset_data::TimestampTz;
 
 use crate::error::{other_error, OtherErrorKind};
 use crate::myc::constants::{ColumnFlags, ColumnType};
@@ -71,8 +72,8 @@ where
 // NOTE: yes, I know the = / => distinction is ugly
 macro_rules! like_try_into {
     ($self:ident, $source:ty = $target:ty, $w:ident, $m:ident, $c:ident) => {{
-        let min = <$target>::min_value() as $source;
-        let max = <$target>::max_value() as $source;
+        let min = <$target>::MIN as $source;
+        let max = <$target>::MAX as $source;
         if *$self <= max && *$self >= min {
             $w.$m(*$self as $target)
         } else {
@@ -80,8 +81,8 @@ macro_rules! like_try_into {
         }
     }};
     ($self:ident, $source:ty => $target:ty, $w:ident, $m:ident, $c:ident) => {{
-        let min = <$target>::min_value() as $source;
-        let max = <$target>::max_value() as $source;
+        let min = <$target>::MIN as $source;
+        let max = <$target>::MAX as $source;
         if *$self <= max && *$self >= min {
             $w.$m::<LittleEndian>(*$self as $target)
         } else {
@@ -506,6 +507,71 @@ impl ToMySqlValue for MySqlTime {
     }
 }
 
+impl ToMySqlValue for TimestampTz {
+    fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()> {
+        w.write_lenenc_str(self.to_string().as_bytes()).map(|_| ())
+    }
+
+    fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
+        let ts = self.to_chrono();
+        match c.coltype {
+            ColumnType::MYSQL_TYPE_DATETIME | ColumnType::MYSQL_TYPE_TIMESTAMP => {
+                // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_binary_resultset.html
+                // To save space the packet can be compressed:
+                // if year, month, day, hour, minutes, seconds and microseconds are all 0, length is
+                // 0 and no other field is sent. if hour, seconds and microseconds
+                // are all 0, length is 4 and no other field is sent.
+                // if microseconds is 0, length is 7 and micro_seconds is not sent.
+                // otherwise the length is 11
+                // TODO(marce): Currently TimestampTZ will produce NULL for zero/invalid dates.
+                let us = ts.nanosecond() / 1_000;
+                let packet_len = if us != 0 {
+                    11
+                } else if (ts.hour(), ts.minute(), ts.second()) != (0, 0, 0) {
+                    7
+                } else if (ts.year(), ts.month(), ts.day()) != (0, 0, 0) {
+                    4
+                } else {
+                    0
+                };
+
+                w.write_u8(packet_len)?;
+
+                if packet_len == 0 {
+                    return Ok(()); // no need to write anything else
+                }
+
+                w.write_u16::<LittleEndian>(ts.year() as u16)?;
+                w.write_u8(ts.month() as u8)?;
+                w.write_u8(ts.day() as u8)?;
+
+                if packet_len == 4 {
+                    return Ok(()); // no need to write time
+                }
+
+                w.write_u8(ts.hour() as u8)?;
+                w.write_u8(ts.minute() as u8)?;
+                w.write_u8(ts.second() as u8)?;
+
+                if packet_len == 7 {
+                    return Ok(()); // no need to write microseconds
+                }
+
+                w.write_u32::<LittleEndian>(us)?;
+
+                Ok(())
+            }
+            ColumnType::MYSQL_TYPE_DATE => {
+                if ts.time() != NaiveTime::from_hms_opt(0, 0, 0).unwrap() {
+                    return Err(bad(self, c));
+                }
+                ts.date_naive().to_mysql_bin(w, c)
+            }
+            _ => Err(bad(self, c)),
+        }
+    }
+}
+
 impl ToMySqlValue for NaiveDateTime {
     fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()> {
         let us = self.nanosecond() / 1_000;
@@ -684,25 +750,25 @@ impl ToMySqlValue for myc::value::Value {
                 // smallest containing type, and then call on that
                 let signed = !c.colflags.contains(ColumnFlags::UNSIGNED_FLAG);
                 if signed {
-                    if n >= i64::from(i8::min_value()) && n <= i64::from(i8::max_value()) {
+                    if n >= i64::from(i8::MIN) && n <= i64::from(i8::MAX) {
                         (n as i8).to_mysql_bin(w, c)
-                    } else if n >= i64::from(i16::min_value()) && n <= i64::from(i16::max_value()) {
+                    } else if n >= i64::from(i16::MIN) && n <= i64::from(i16::MAX) {
                         (n as i16).to_mysql_bin(w, c)
-                    } else if n >= i64::from(i32::min_value()) && n <= i64::from(i32::max_value()) {
+                    } else if n >= i64::from(i32::MIN) && n <= i64::from(i32::MAX) {
                         (n as i32).to_mysql_bin(w, c)
                     } else {
                         n.to_mysql_bin(w, c)
                     }
                 } else if n < 0 {
                     Err(bad(self, c))
-                } else if n <= i64::from(u8::max_value()) {
+                } else if n <= i64::from(u8::MAX) {
                     (n as u8).to_mysql_bin(w, c)
-                } else if n <= i64::from(u16::max_value()) {
+                } else if n <= i64::from(u16::MAX) {
                     (n as u16).to_mysql_bin(w, c)
-                } else if n <= i64::from(u32::max_value()) {
+                } else if n <= i64::from(u32::MAX) {
                     (n as u32).to_mysql_bin(w, c)
                 } else {
-                    // must work since u64::max_value() > i64::max_value(), and n >= 0
+                    // must work since u64::MAX > i64::MAX, and n >= 0
                     (n as u64).to_mysql_bin(w, c)
                 }
             }
@@ -793,14 +859,14 @@ mod tests {
         rt!(f32_one, f32, 1.0);
         rt!(f64_one, f64, 1.0);
 
-        rt!(u8_max, u8, u8::max_value());
-        rt!(i8_max, i8, i8::max_value());
-        rt!(u16_max, u16, u16::max_value());
-        rt!(i16_max, i16, i16::max_value());
-        rt!(u32_max, u32, u32::max_value());
-        rt!(i32_max, i32, i32::max_value());
-        rt!(u64_max, u64, u64::max_value());
-        rt!(i64_max, i64, i64::max_value());
+        rt!(u8_max, u8, u8::MAX);
+        rt!(i8_max, i8, i8::MAX);
+        rt!(u16_max, u16, u16::MAX);
+        rt!(i16_max, i16, i16::MAX);
+        rt!(u32_max, u32, u32::MAX);
+        rt!(i32_max, i32, i32::MAX);
+        rt!(u64_max, u64, u64::MAX);
+        rt!(i64_max, i64, i64::MAX);
 
         rt!(opt_none, Option<u8>, None);
         rt!(opt_some, Option<u8>, Some(1));
@@ -927,59 +993,23 @@ mod tests {
         );*/
         rt!(f64_one, f64, 1.0, ColumnType::MYSQL_TYPE_DOUBLE, false);
 
-        rt!(
-            u8_max,
-            u8,
-            u8::max_value(),
-            ColumnType::MYSQL_TYPE_TINY,
-            false
-        );
-        rt!(
-            i8_max,
-            i8,
-            i8::max_value(),
-            ColumnType::MYSQL_TYPE_TINY,
-            true
-        );
-        rt!(
-            u16_max,
-            u16,
-            u16::max_value(),
-            ColumnType::MYSQL_TYPE_SHORT,
-            false
-        );
-        rt!(
-            i16_max,
-            i16,
-            i16::max_value(),
-            ColumnType::MYSQL_TYPE_SHORT,
-            true
-        );
-        rt!(
-            u32_max,
-            u32,
-            u32::max_value(),
-            ColumnType::MYSQL_TYPE_LONG,
-            false
-        );
-        rt!(
-            i32_max,
-            i32,
-            i32::max_value(),
-            ColumnType::MYSQL_TYPE_LONG,
-            true
-        );
+        rt!(u8_max, u8, u8::MAX, ColumnType::MYSQL_TYPE_TINY, false);
+        rt!(i8_max, i8, i8::MAX, ColumnType::MYSQL_TYPE_TINY, true);
+        rt!(u16_max, u16, u16::MAX, ColumnType::MYSQL_TYPE_SHORT, false);
+        rt!(i16_max, i16, i16::MAX, ColumnType::MYSQL_TYPE_SHORT, true);
+        rt!(u32_max, u32, u32::MAX, ColumnType::MYSQL_TYPE_LONG, false);
+        rt!(i32_max, i32, i32::MAX, ColumnType::MYSQL_TYPE_LONG, true);
         rt!(
             u64_max,
             u64,
-            u64::max_value(),
+            u64::MAX,
             ColumnType::MYSQL_TYPE_LONGLONG,
             false
         );
         rt!(
             i64_max,
             i64,
-            i64::max_value(),
+            i64::MAX,
             ColumnType::MYSQL_TYPE_LONGLONG,
             true
         );

@@ -143,6 +143,7 @@ impl TestChannel {
     }
 }
 
+#[allow(dead_code)]
 /// Channel used to send notifications from the controller to replicator.
 struct TestControllChannel(UnboundedSender<ControllerMessage>);
 
@@ -681,6 +682,243 @@ async fn mysql_replication_big_tables() {
 #[slow]
 async fn mysql_datetime_replication() {
     mysql_datetime_replication_inner().await.unwrap();
+}
+
+async fn mysql_binary_collation_padding_inner() -> ReadySetResult<()> {
+    let url = &mysql_url();
+    let mut client = DbConnection::connect(url).await?;
+    client
+        .query(
+            "
+            DROP TABLE IF EXISTS `col_bin_pad` CASCADE;
+            CREATE TABLE `col_bin_pad` (
+                id int NOT NULL PRIMARY KEY,
+                c BINARY(3)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+            INSERT INTO `col_bin_pad` VALUES (1, 'ࠈ');
+            INSERT INTO `col_bin_pad` VALUES (2, 'A');
+            INSERT INTO `col_bin_pad` VALUES (3, 'AAA');
+            INSERT INTO `col_bin_pad` VALUES (4, '¥');",
+        )
+        .await?;
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None).await?;
+    ctx.notification_channel
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+    ctx.check_results(
+        "col_bin_pad",
+        "Snapshot",
+        &[
+            &[
+                DfValue::Int(1),
+                // 'ࠈ' is the UTF-8 encoding of U+E0A088
+                DfValue::ByteArray(vec![0xE0, 0xA0, 0x88].into()),
+            ],
+            &[
+                DfValue::Int(2),
+                DfValue::ByteArray(vec![0x41, 0x0, 0x0].into()),
+            ],
+            &[
+                DfValue::Int(3),
+                DfValue::ByteArray(vec![0x41, 0x41, 0x41].into()),
+            ],
+            &[
+                DfValue::Int(4),
+                // '¥' is the UTF-8 encoding of U+C2A5
+                DfValue::ByteArray(vec![0xC2, 0xA5, 0x0].into()),
+            ],
+        ],
+    )
+    .await?;
+
+    // Replication and mix of characters from 1st and 2rd byte on the same row
+    client
+        .query(
+            "
+        INSERT INTO `col_bin_pad` VALUES (5, 'B¥');
+        INSERT INTO `col_bin_pad` VALUES (6, 'B');
+        INSERT INTO `col_bin_pad` VALUES (7, 'BBB');
+        INSERT INTO `col_bin_pad` VALUES (8, '¥');
+        ",
+        )
+        .await
+        .unwrap();
+    ctx.check_results(
+        "col_bin_pad",
+        "Replication",
+        &[
+            &[
+                DfValue::Int(1),
+                // 'ࠈ' is the UTF-8 encoding of U+E0A088
+                DfValue::ByteArray(vec![0xE0, 0xA0, 0x88].into()),
+            ],
+            &[
+                DfValue::Int(2),
+                DfValue::ByteArray(vec![0x41, 0x0, 0x0].into()),
+            ],
+            &[
+                DfValue::Int(3),
+                DfValue::ByteArray(vec![0x41, 0x41, 0x41].into()),
+            ],
+            &[
+                DfValue::Int(4),
+                // '¥' is the UTF-8 encoding of U+C2A5
+                DfValue::ByteArray(vec![0xC2, 0xA5, 0x0].into()),
+            ],
+            &[
+                DfValue::Int(5),
+                // '¥' is the UTF-8 encoding of U+C2A5
+                DfValue::ByteArray(vec![0x42, 0xC2, 0xA5].into()),
+            ],
+            &[
+                DfValue::Int(6),
+                DfValue::ByteArray(vec![0x42, 0x0, 0x0].into()),
+            ],
+            &[
+                DfValue::Int(7),
+                DfValue::ByteArray(vec![0x42, 0x42, 0x42].into()),
+            ],
+            &[
+                DfValue::Int(8),
+                // '¥' is the UTF-8 encoding of U+C2A5
+                DfValue::ByteArray(vec![0xC2, 0xA5, 0x0].into()),
+            ],
+        ],
+    )
+    .await?;
+
+    client.stop().await;
+    ctx.stop().await;
+    shutdown_tx.shutdown().await;
+
+    Ok(())
+}
+
+async fn mysql_char_collation_padding_inner() -> ReadySetResult<()> {
+    let url = &mysql_url();
+    let mut client = DbConnection::connect(url).await?;
+    client
+        .query(
+            "
+            DROP TABLE IF EXISTS `col_pad` CASCADE;
+            CREATE TABLE `col_pad` (
+                id int NOT NULL PRIMARY KEY,
+                c CHAR(3)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+            INSERT INTO `col_pad` VALUES (1, 'ࠈࠈ');
+            INSERT INTO `col_pad` VALUES (2, 'A');
+            INSERT INTO `col_pad` VALUES (3, 'AAA');
+            INSERT INTO `col_pad` (id) VALUES (4);",
+        )
+        .await?;
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None).await?;
+    ctx.notification_channel
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+    ctx.check_results(
+        "col_pad",
+        "Snapshot",
+        &[
+            &[
+                DfValue::Int(1),
+                // 'ࠈࠈ ' is the UTF-8 encoding of U+E0A088 U+E0A088 U+20
+                DfValue::TinyText(
+                    TinyText::from_slice(vec![0xE0, 0xA0, 0x88, 0xE0, 0xA0, 0x88, 0x20].as_slice())
+                        .unwrap_or_else(|_| TinyText::from_arr(b"")),
+                ),
+            ],
+            &[
+                DfValue::Int(2),
+                DfValue::TinyText(TinyText::from_arr(b"A  ")),
+            ],
+            &[
+                DfValue::Int(3),
+                DfValue::TinyText(TinyText::from_arr(b"AAA")),
+            ],
+            &[DfValue::Int(4), DfValue::None],
+        ],
+    )
+    .await?;
+
+    // Replication and mix of characters from 1st and 3rd byte on the same row
+    client
+        .query(
+            "
+        INSERT INTO `col_pad` VALUES (5, 'Bࠉ');
+        INSERT INTO `col_pad` VALUES (6, 'B');
+        INSERT INTO `col_pad` VALUES (7, 'BBB');
+        INSERT INTO `col_pad` (id) VALUES (8);
+        ",
+        )
+        .await
+        .unwrap();
+    ctx.check_results(
+        "col_pad",
+        "Replication",
+        &[
+            &[
+                DfValue::Int(1),
+                // 'ࠈࠈ ' is the UTF-8 encoding of U+E0A088 U+E0A088 U+20
+                DfValue::TinyText(
+                    TinyText::from_slice(vec![0xE0, 0xA0, 0x88, 0xE0, 0xA0, 0x88, 0x20].as_slice())
+                        .unwrap_or_else(|_| TinyText::from_arr(b"")),
+                ),
+            ],
+            &[
+                DfValue::Int(2),
+                DfValue::TinyText(TinyText::from_arr(b"A  ")),
+            ],
+            &[
+                DfValue::Int(3),
+                DfValue::TinyText(TinyText::from_arr(b"AAA")),
+            ],
+            &[DfValue::Int(4), DfValue::None],
+            &[
+                DfValue::Int(5),
+                // 'Bࠉ ' is the UTF-8 encoding of U+E42 U+E0A089 U+20
+                DfValue::TinyText(
+                    TinyText::from_slice(vec![0x42, 0xE0, 0xA0, 0x89, 0x20].as_slice())
+                        .unwrap_or_else(|_| TinyText::from_arr(b"")),
+                ),
+            ],
+            &[
+                DfValue::Int(6),
+                DfValue::TinyText(TinyText::from_arr(b"B  ")),
+            ],
+            &[
+                DfValue::Int(7),
+                DfValue::TinyText(TinyText::from_arr(b"BBB")),
+            ],
+            &[DfValue::Int(8), DfValue::None],
+        ],
+    )
+    .await?;
+
+    client.stop().await;
+    ctx.stop().await;
+    shutdown_tx.shutdown().await;
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+#[slow]
+async fn mysql_binary_collation_padding() {
+    mysql_binary_collation_padding_inner().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+#[slow]
+async fn mysql_char_collation_padding() {
+    mysql_char_collation_padding_inner().await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -2942,5 +3180,133 @@ async fn pgsql_dont_replicate_partitioned_table() {
             .contains(&NonReplicatedRelation::new(relation.clone()))
     }
 
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn mysql_dont_replicate_unsupported_storage_engine() {
+    readyset_tracing::init_test_logging();
+    let url = mysql_url();
+    let mut client = DbConnection::connect(&url).await.unwrap();
+
+    client
+        .query(
+            "DROP TABLE IF EXISTS t CASCADE;
+             CREATE TABLE t (x int) ENGINE=MEMORY;",
+        )
+        .await
+        .unwrap();
+
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
+        .await
+        .unwrap();
+    ctx.notification_channel
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+
+    ctx.noria.table("t").await.unwrap_err();
+    let relation = Relation {
+        schema: Some("public".into()),
+        name: "t".into(),
+    };
+
+    assert!(ctx
+        .noria
+        .non_replicated_relations()
+        .await
+        .unwrap()
+        .contains(&NonReplicatedRelation::new(relation.clone())));
+
+    client
+        .query(
+            "DROP TABLE IF EXISTS t2 CASCADE;
+            CREATE TABLE t2 (y int) ENGINE=MEMORY",
+        )
+        .await
+        .unwrap();
+    let relation = Relation {
+        schema: Some("public".into()),
+        name: "t2".into(),
+    };
+    eventually! {
+        let nrr = ctx
+            .noria
+            .non_replicated_relations()
+            .await
+            .unwrap();
+        debug!(?nrr);
+        nrr.contains(&NonReplicatedRelation::new(relation.clone()))
+    }
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+#[slow]
+async fn mysql_dont_enforce_fk_replication() {
+    readyset_tracing::init_test_logging();
+    let url = mysql_url();
+    let mut client = DbConnection::connect(&url).await.unwrap();
+
+    client
+        .query(
+            "DROP TABLE IF EXISTS t_parent CASCADE;
+             DROP TABLE IF EXISTS t_child CASCADE;
+             DROP TABLE IF EXISTS t_child2 CASCADE;
+             CREATE TABLE t_parent (x INT PRIMARY KEY);
+             CREATE TABLE t_child (y INT, FOREIGN KEY (y) REFERENCES t_parent(x));",
+        )
+        .await
+        .unwrap();
+
+    let config = Config {
+        replication_tables: Some(String::from("public.t_child, public.t_child2").into()),
+        ..Default::default()
+    };
+
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), Some(config))
+        .await
+        .unwrap();
+    ctx.notification_channel
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+
+    let t_parent = Relation {
+        schema: Some("public".into()),
+        name: "t_parent".into(),
+    };
+
+    let t_child = Relation {
+        schema: Some("public".into()),
+        name: "t_child".into(),
+    };
+    assert!(ctx
+        .noria
+        .non_replicated_relations()
+        .await
+        .unwrap()
+        .contains(&NonReplicatedRelation::new(t_parent.clone())));
+
+    assert!(ctx.noria.tables().await.unwrap().contains_key(&t_child));
+
+    client
+        .query("CREATE TABLE t_child2 (y INT, FOREIGN KEY (y) REFERENCES t_parent(x));")
+        .await
+        .unwrap();
+    let t_child2 = Relation {
+        schema: Some("public".into()),
+        name: "t_child2".into(),
+    };
+    eventually! {
+        ctx.noria.tables().await.unwrap().contains_key(&t_child2)
+    }
     shutdown_tx.shutdown().await;
 }

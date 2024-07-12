@@ -3,7 +3,6 @@ use std::hash::{Hash, Hasher};
 use std::marker::{Send, Sync};
 use std::str;
 
-use async_trait::async_trait;
 use derive_more::From;
 use futures::TryStreamExt;
 use mysql::prelude::AsQuery;
@@ -15,7 +14,8 @@ use {mysql_async as mysql, tokio_postgres as pgsql};
 
 use crate::error::{ConnectionType, DatabaseError};
 
-#[async_trait]
+// Only used internally
+#[allow(async_fn_in_trait)]
 pub trait QueryableConnection: Send {
     /// Executes query_drop for either mysql or postgres, whichever is the underlying
     /// connection variant.
@@ -121,7 +121,6 @@ pub enum DatabaseConnection {
     PostgreSQLPool(deadpool_postgres::Client),
 }
 
-#[async_trait]
 impl QueryableConnection for DatabaseConnection {
     async fn query_drop<Q>(&mut self, stmt: Q) -> Result<(), DatabaseError>
     where
@@ -316,7 +315,6 @@ impl DatabaseConnectionPool {
     }
 }
 
-#[async_trait]
 impl QueryableConnection for DatabaseConnectionPool {
     async fn query_drop<Q>(&mut self, stmt: Q) -> Result<(), DatabaseError>
     where
@@ -670,7 +668,6 @@ pub enum Transaction<'a> {
     PostgresPool(deadpool_postgres::Transaction<'a>),
 }
 
-#[async_trait]
 impl<'a> QueryableConnection for Transaction<'a> {
     async fn query_drop<Q>(&mut self, stmt: Q) -> Result<(), DatabaseError>
     where

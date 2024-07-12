@@ -4,7 +4,6 @@ use std::ops::Deref;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use clap::ValueEnum;
 use eui48::MacAddressFormat;
 use postgres_types::{Oid, Type};
@@ -121,7 +120,6 @@ impl Backend {
     }
 }
 
-#[async_trait]
 impl ps::PsqlBackend for Backend {
     type Resultset = Resultset;
 

@@ -357,11 +357,11 @@ where
         self.upstream().await?.start_tx(stmt).await
     }
 
-    async fn commit<'a>(&'a mut self) -> Result<Self::QueryResult<'a>, Self::Error> {
+    async fn commit(&mut self) -> Result<Self::QueryResult<'_>, Self::Error> {
         self.upstream().await?.commit().await
     }
 
-    async fn rollback<'a>(&'a mut self) -> Result<Self::QueryResult<'a>, Self::Error> {
+    async fn rollback(&mut self) -> Result<Self::QueryResult<'_>, Self::Error> {
         self.upstream().await?.rollback().await
     }
 

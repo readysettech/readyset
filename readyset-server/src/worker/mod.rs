@@ -399,9 +399,30 @@ impl Worker {
             }
             WorkerRequestKind::KillDomains(domains) => {
                 for addr in domains {
+                    let nsde = || ReadySetError::NoSuchReplica {
+                        domain_index: addr.domain_index.index(),
+                        shard: addr.shard,
+                        replica: addr.replica,
+                    };
                     match self.domains.remove(&addr) {
                         Some(domain) => {
-                            info!(domain = %addr, "Aborting domain at request of controller");
+                            info!(domain = %addr, "Shutting down domain");
+
+                            // tell the domain to cleanly shut down. note: this serially shuts down
+                            // the the domains; it could be done in
+                            // parallel.
+                            let (tx, rx) = oneshot::channel();
+                            domain
+                                .req_tx
+                                .send(WrappedDomainRequest {
+                                    req: DomainRequest::Shutdown,
+                                    done_tx: tx,
+                                })
+                                .await
+                                .map_err(|_| nsde())?;
+                            let _ = rx.await.map_err(|_| nsde())?;
+
+                            // now, shut down the actaul thread for the domain
                             let _ = domain.abort.send(());
                         }
                         None => warn!(domain = %addr, "Asked to kill domain that is not running"),
@@ -484,6 +505,23 @@ impl Worker {
             };
 
             select! {
+                // We use `biased` here to ensure that our shutdown signal will be received and
+                // acted upon even if the other branches in this `select!` are constantly in a
+                // ready state (e.g. a stream that has many messages where very little time passes
+                // between receipt of these messages). More information about this situation can
+                // be found in the docs for `tokio::select`.
+                biased;
+                _ = self.shutdown_rx.recv() => {
+                    debug!("worker shutting down after shutdown signal received");
+                    let keys: Vec<_> = self.domains.keys().cloned().collect();
+                    if let Ok(keys) = Vec1::try_from_vec(keys) {
+                        let ret = self.handle_worker_request(WorkerRequestKind::KillDomains(keys)).await;
+                        if let Err(ref e) = ret {
+                            warn!(error = %e, "error on shutting down domains");
+                        }
+                    }
+                    return;
+                }
                 req = self.rx.recv() => {
                     if let Some(req) = req {
                         self.process_worker_request(req).await;
@@ -492,10 +530,6 @@ impl Worker {
                         debug!("worker shutting down after request handle dropped");
                         return;
                     }
-                }
-                _ = self.shutdown_rx.recv() => {
-                    debug!("worker shutting down after shutdown signal received");
-                    return;
                 }
                 _ = eviction => {
                     self.process_eviction();
@@ -550,13 +584,13 @@ async fn do_eviction(
     let span = info_span!("evicting");
     let start = std::time::Instant::now();
 
-    let mut used: usize = memory_tracker.allocated_bytes()?;
+    let used: usize = memory_tracker.allocated_bytes()?;
     gauge!(recorded::EVICTION_WORKER_HEAP_ALLOCATED_BYTES, used as f64);
     // Are we over the limit?
     match memory_limit {
         None => Ok(()),
         Some(limit) => {
-            while used >= limit {
+            if used >= limit {
                 // we are! time to evict.
                 // add current state sizes (could be out of date, as packet sent below is not
                 // necessarily received immediately)
@@ -583,6 +617,7 @@ async fn do_eviction(
                 let actual_over = used - limit;
                 let mut proportional_over =
                     ((total_reported as f64 / used as f64) * actual_over as f64).round() as usize;
+
                 // here's how we're going to proceed.
                 // we don't want to _empty_ any views if we can avoid it.
                 // and we also need to be aware that evicting something from one place may cause a
@@ -660,8 +695,6 @@ async fn do_eviction(
                         domain_senders.remove(&target);
                     }
                 }
-                // Check again the allocated memory size
-                used = memory_tracker.allocated_bytes()?;
             }
             histogram!(
                 recorded::EVICTION_WORKER_EVICTION_TIME,

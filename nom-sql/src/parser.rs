@@ -13,8 +13,8 @@ use crate::comment::{comment, CommentStatement};
 use crate::common::statement_terminator;
 use crate::compound_select::{simple_or_compound_selection, CompoundSelectStatement};
 use crate::create::{
-    create_cached_query, create_table, key_specification, view_creation, CreateCacheStatement,
-    CreateTableStatement, CreateViewStatement,
+    create_cached_query, create_database, create_table, key_specification, view_creation,
+    CreateCacheStatement, CreateDatabaseStatement, CreateTableStatement, CreateViewStatement,
 };
 use crate::deallocate::{deallocate, DeallocateStatement};
 use crate::delete::{deletion, DeleteStatement};
@@ -34,6 +34,7 @@ use crate::transaction::{
     commit, rollback, start_transaction, CommitStatement, RollbackStatement,
     StartTransactionStatement,
 };
+use crate::truncate::{truncate, TruncateStatement};
 use crate::update::{updating, UpdateStatement};
 use crate::use_statement::{use_statement, UseStatement};
 use crate::whitespace::whitespace0;
@@ -45,6 +46,7 @@ use crate::{
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 #[allow(clippy::large_enum_variant)]
 pub enum SqlQuery {
+    CreateDatabase(CreateDatabaseStatement),
     CreateTable(CreateTableStatement),
     CreateView(CreateViewStatement),
     CreateCache(CreateCacheStatement),
@@ -69,6 +71,7 @@ pub enum SqlQuery {
     Explain(ExplainStatement),
     Comment(CommentStatement),
     Deallocate(DeallocateStatement),
+    Truncate(TruncateStatement),
 }
 
 impl DialectDisplay for SqlQuery {
@@ -98,6 +101,8 @@ impl DialectDisplay for SqlQuery {
             Self::Comment(c) => write!(f, "{}", c.display(dialect)),
             Self::DropAllProxiedQueries(drop) => write!(f, "{}", drop.display(dialect)),
             Self::Deallocate(dealloc) => write!(f, "{}", dealloc.display(dialect)),
+            Self::Truncate(truncate) => write!(f, "{}", truncate.display(dialect)),
+            Self::CreateDatabase(create) => write!(f, "{}", create.display(dialect)),
         })
     }
 }
@@ -125,6 +130,13 @@ impl SqlQuery {
         match self {
             Self::Select(_) => "SELECT",
             Self::Insert(_) => "INSERT",
+            Self::CreateDatabase(cd) => {
+                if cd.is_schema {
+                    "CREATE SCHEMA"
+                } else {
+                    "CREATE DATABASE"
+                }
+            }
             Self::CreateTable(_) => "CREATE TABLE",
             Self::CreateView(_) => "CREATE VIEW",
             Self::CreateCache(_) => "CREATE CACHE",
@@ -147,6 +159,7 @@ impl SqlQuery {
             Self::Explain(_) => "EXPLAIN",
             Self::Comment(_) => "COMMENT",
             Self::Deallocate(_) => "DEALLOCATE",
+            Self::Truncate(_) => "TRUNCATE",
         }
     }
 
@@ -174,7 +187,8 @@ impl SqlQuery {
                 | ShowStatement::ReadySetTables
                 | ShowStatement::Connections => true,
             },
-            SqlQuery::CreateTable(_)
+            SqlQuery::CreateDatabase(_)
+            | SqlQuery::CreateTable(_)
             | SqlQuery::CreateView(_)
             | SqlQuery::AlterTable(_)
             | SqlQuery::Insert(_)
@@ -191,6 +205,7 @@ impl SqlQuery {
             | SqlQuery::Rollback(_)
             | SqlQuery::RenameTable(_)
             | SqlQuery::Use(_)
+            | SqlQuery::Truncate(_)
             | SqlQuery::Comment(_) => false,
         }
     }
@@ -235,7 +250,10 @@ fn sql_query_part1(
             map(rename_table(dialect), SqlQuery::RenameTable),
             map(use_statement(dialect), SqlQuery::Use),
             map(show(dialect), SqlQuery::Show),
-            map(explain_statement(dialect), SqlQuery::Explain),
+            alt((
+                map(explain_statement(dialect), SqlQuery::Explain),
+                map(create_database(dialect), SqlQuery::CreateDatabase),
+            )),
         ))(i)
     }
 }
@@ -244,6 +262,7 @@ fn sql_query_part2(
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlQuery> {
     move |i| {
         alt((
+            map(truncate(dialect), SqlQuery::Truncate),
             // This does a more expensive clone of `i`, so process it last.
             map(create_cached_query(dialect), SqlQuery::CreateCache),
             map(comment(dialect), SqlQuery::Comment),

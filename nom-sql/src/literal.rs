@@ -119,12 +119,12 @@ pub enum ItemPlaceholder {
     ColonNumber(u32),
 }
 
-impl ToString for ItemPlaceholder {
-    fn to_string(&self) -> String {
+impl fmt::Display for ItemPlaceholder {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
-            ItemPlaceholder::QuestionMark => "?".to_string(),
-            ItemPlaceholder::DollarNumber(ref i) => format!("${}", i),
-            ItemPlaceholder::ColonNumber(ref i) => format!(":{}", i),
+            ItemPlaceholder::QuestionMark => write!(f, "?"),
+            ItemPlaceholder::DollarNumber(ref i) => write!(f, "${}", i),
+            ItemPlaceholder::ColonNumber(ref i) => write!(f, ":{}", i),
         }
     }
 }
@@ -163,7 +163,7 @@ pub enum Literal {
     // String or not.
     ByteArray(Vec<u8>),
     Placeholder(ItemPlaceholder),
-    BitVector(Vec<u8>),
+    BitVector(#[strategy(arbitrary_bitvec(0..=64))] BitVec),
 }
 
 impl From<bool> for Literal {
@@ -259,15 +259,12 @@ impl DialectDisplay for Literal {
                         write!(f, "X'{}'", b.iter().map(|v| format!("{:02X}", v)).join(""))
                     }
                 },
-                Literal::Placeholder(item) => write!(f, "{}", item.to_string()),
+                Literal::Placeholder(item) => write!(f, "{}", item),
                 Literal::BitVector(ref b) => {
                     write!(
                         f,
                         "B'{}'",
-                        BitVec::from_bytes(b.as_slice())
-                            .iter()
-                            .map(|bit| if bit { "1" } else { "0" })
-                            .join("")
+                        b.iter().map(|bit| if bit { "1" } else { "0" }).join("")
                     )
                 }
             }
@@ -313,6 +310,12 @@ impl Literal {
                 any::<i16>().prop_map(|i| Self::Integer(i as _)).boxed()
             }
             SqlType::UnsignedSmallInt(_) => any::<u16>()
+                .prop_map(|i| Self::UnsignedInteger(i as _))
+                .boxed(),
+            SqlType::MediumInt(_) => ((-1i32 << 23)..(1i32 << 23))
+                .prop_map(|i| Self::Integer(i as _))
+                .boxed(),
+            SqlType::UnsignedMediumInt(_) => (0..(1u32 << 24))
                 .prop_map(|i| Self::UnsignedInteger(i as _))
                 .boxed(),
             SqlType::Blob
@@ -367,12 +370,12 @@ impl Literal {
             SqlType::Bit(n) => {
                 let size = n.unwrap_or(1) as usize;
                 arbitrary_bitvec(size..=size)
-                    .prop_map(|bits| Self::BitVector(bits.to_bytes()))
+                    .prop_map(Self::BitVector)
                     .boxed()
             }
             SqlType::VarBit(n) => {
                 arbitrary_bitvec(0..n.map(|max_size| max_size as usize).unwrap_or(20_usize))
-                    .prop_map(|bits| Self::BitVector(bits.to_bytes()))
+                    .prop_map(Self::BitVector)
                     .boxed()
             }
             SqlType::Serial => any::<i32>().prop_map(Self::from).boxed(),
@@ -554,12 +557,13 @@ fn simple_literal(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResu
     move |i| {
         alt((
             float_literal,
+            map(dialect.bytes_literal(), Literal::ByteArray),
             integer_literal,
             boolean_literal,
-            map(dialect.bytes_literal(), Literal::ByteArray),
-            map(delimited(tag_no_case("b'"), bits, tag("'")), |bits| {
-                Literal::BitVector(bits.to_bytes())
-            }),
+            map(
+                delimited(tag_no_case("b'"), bits, tag("'")),
+                Literal::BitVector,
+            ),
             map(
                 terminated(
                     tag_no_case("null"),
@@ -697,7 +701,9 @@ mod tests {
 
     #[proptest]
     fn real_hash_matches_eq(real1: Double, real2: Double) {
-        assert_eq!(real1 == real2, hash(&real1) == hash(&real2));
+        if real1 == real2 {
+            assert_eq!(hash(&real1), hash(&real2));
+        }
     }
 
     #[proptest]
@@ -775,6 +781,7 @@ mod tests {
             );
         }
     }
+
     mod postgres {
         use super::*;
 

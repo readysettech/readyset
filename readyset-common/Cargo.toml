@@ -8,16 +8,16 @@ edition = "2021"
 description = "Artifacts commonly shared among other ReadySet crates"
 
 [dependencies]
-chrono = { version = "0.4.0", features = ["serde"] }
-serde = { version = "1.0.8", features = ["rc", "derive"] }
-petgraph = { version = "0.5", features = ["serde-1"] }
-vec1 = "1.6.0"
-triomphe = "0.1"
-proptest = "1.0"
-test-strategy = "0.2.0"
-rlimit = "0.10.1"
-anyhow = "1.0"
-tracing = "0.1"
+chrono = { workspace = true, features = ["serde"] }
+serde = { workspace = true, features = ["rc", "derive"] }
+petgraph = { workspace = true, features = ["serde-1"] }
+vec1 = { workspace = true }
+triomphe = { workspace = true }
+proptest = { workspace = true }
+test-strategy = { workspace = true }
+rlimit = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
 
 # Local deps
 readyset-client = { path = "../readyset-client" }

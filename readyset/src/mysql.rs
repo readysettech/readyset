@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use mysql_srv::MySqlIntermediary;
 use readyset_adapter::upstream_database::LazyUpstream;
 use readyset_mysql::{MySqlQueryHandler, MySqlUpstream};
@@ -13,7 +12,6 @@ pub struct MySqlHandler {
     pub enable_statement_logging: bool,
 }
 
-#[async_trait]
 impl ConnectionHandler for MySqlHandler {
     type UpstreamDatabase = LazyUpstream<MySqlUpstream>;
     type Handler = MySqlQueryHandler;

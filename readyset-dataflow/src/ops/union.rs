@@ -1010,8 +1010,8 @@ impl Ingredient for Union {
                 }..=BufferedReplayKey {
                     tag,
                     key: key.clone(),
-                    requesting_shard: usize::max_value(),
-                    requesting_replica: usize::max_value(),
+                    requesting_shard: usize::MAX,
+                    requesting_replica: usize::MAX,
                 },
             ) {
                 if e.buffered.contains_key(&from) {

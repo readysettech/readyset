@@ -560,6 +560,24 @@ impl QueryStatusCache {
         }
     }
 
+    /// Yields to the given function `f` a mutable reference to the migration state of the query
+    /// `q`. The primary purpose of this method is allow for atomic reads and writes of the
+    /// migration state of a query.
+    pub fn with_mut_migration_state<Q, F>(&self, q: &Q, f: F) -> bool
+    where
+        Q: QueryStatusKey,
+        F: Fn(&mut MigrationState),
+    {
+        q.with_mut_status(self, |maybe_query_status| {
+            if let Some(query_status) = maybe_query_status {
+                f(&mut query_status.migration_state);
+                true
+            } else {
+                false
+            }
+        })
+    }
+
     /// Marks a query as dropped by the user.
     ///
     /// NOTE: this should only be called after we successfully remove a View for this query. This is
@@ -635,12 +653,12 @@ impl QueryStatusCache {
     {
         let should_insert = q.with_mut_status(self, |s| match s {
             Some(s) if s.migration_state != MigrationState::Unsupported => {
-                s.migration_state = status.migration_state.clone();
-                s.execution_info = status.execution_info.clone();
+                s.migration_state.clone_from(&status.migration_state);
+                s.execution_info.clone_from(&status.execution_info);
                 false
             }
             Some(s) => {
-                s.execution_info = status.execution_info.clone();
+                s.execution_info.clone_from(&status.execution_info);
                 false
             }
             None => true,
@@ -776,6 +794,22 @@ impl QueryStatusCache {
             .iter()
             .filter_map(|(_query_id, (query, status))| {
                 if status.is_pending() {
+                    Some((query.clone(), status.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<(Query, QueryStatus)>>()
+            .into()
+    }
+
+    /// Returns a list of queries whose migration states match `states`.
+    pub fn queries_with_statuses(&self, states: &[MigrationState]) -> QueryList {
+        let statuses = self.persistent_handle.statuses.read();
+        statuses
+            .iter()
+            .filter_map(|(_query_id, (query, status))| {
+                if states.contains(&status.migration_state) {
                     Some((query.clone(), status.clone()))
                 } else {
                     None

@@ -21,7 +21,9 @@ fn set_version_info() {
 /// - $RELEASE_VERSION
 /// - "unknown-release-version"
 fn set_release_version() {
-    env_or_unknown("RELEASE_VERSION", "release-version");
+    env_or_unknown_with_fallback("RELEASE_VERSION", "release-version", || {
+        Some(String::from("unknown-release-version"))
+    });
 }
 
 /// Set COMMIT_ID to one of the following, in order:

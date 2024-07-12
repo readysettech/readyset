@@ -11,9 +11,11 @@ use itertools::Itertools;
 use mysql::prelude::Queryable;
 use mysql::{Transaction, TxOpts};
 use mysql_async as mysql;
+use mysql_common::constants::ColumnType;
+use mysql_srv::ColumnFlags;
 use nom_sql::{DialectDisplay, NonReplicatedRelation, NotReplicatedReason, Relation};
 use readyset_client::recipe::changelist::{Change, ChangeList};
-use readyset_data::Dialect;
+use readyset_data::{DfValue, Dialect};
 use readyset_errors::{internal_err, ReadySetResult};
 use replication_offset::mysql::MySqlPosition;
 use replication_offset::{ReplicationOffset, ReplicationOffsets};
@@ -21,11 +23,14 @@ use tokio::task::JoinHandle;
 use tracing::{debug, error, info, info_span, warn};
 use tracing_futures::Instrument;
 
+use super::utils::mysql_pad_collation_column;
 use crate::db_util::DatabaseSchemas;
+use crate::mysql_connector::snapshot_type::SnapshotType;
+use crate::mysql_connector::utils::MYSQL_BATCH_SIZE;
 use crate::table_filter::TableFilter;
 use crate::TablesSnapshottingGaugeGuard;
 
-const BATCH_SIZE: usize = 1000; // How many queries to buffer before pushing to ReadySet
+const RS_BATCH_SIZE: usize = 1000; // How many queries to buffer before pushing to ReadySet
 
 const MAX_SNAPSHOT_BATCH: usize = 8; // How many tables to snapshot at the same time
 
@@ -204,7 +209,7 @@ impl MySqlReplicator {
         let mut bad_tables = Vec::new();
         // Process `CREATE TABLE` statements
         for (db, table) in replicated_tables.iter() {
-            match create_for_table(&mut tx, db, table, TableKind::BaseTable)
+            let res = create_for_table(&mut tx, db, table, TableKind::BaseTable)
                 .map_err(|e| e.into())
                 .and_then(|create_table| {
                     debug!(%create_table, "Extending recipe");
@@ -222,11 +227,12 @@ impl MySqlReplicator {
                         changelist.with_schema_search_path(vec![db.clone().into()]),
                     )
                 })
-                .await
-            {
+                .await;
+
+            match res {
                 Ok(_) => {}
                 Err(error) => {
-                    warn!(%error, "Error extending CREATE TABLE, table will not be used");
+                    warn!(%error, "Error extending CREATE TABLE {:?}.{:?}, table will not be used", db, table);
                     // Prevent the table from being snapshotted as well
                     bad_tables.push((db.clone(), table.clone()));
 
@@ -256,7 +262,7 @@ impl MySqlReplicator {
 
         // Process `CREATE VIEW` statements
         for (db, view) in all_views.iter() {
-            match create_for_table(&mut tx, db, view, TableKind::View)
+            let res = create_for_table(&mut tx, db, view, TableKind::View)
                 .map_err(|e| e.into())
                 .and_then(|create_view| {
                     db_schemas.extend_create_schema_for_view(
@@ -272,8 +278,9 @@ impl MySqlReplicator {
                         changelist.with_schema_search_path(vec![db.clone().into()]),
                     )
                 })
-                .await
-            {
+                .await;
+
+            match res {
                 Ok(_) => {}
                 Err(error) => {
                     warn!(%view, %error, "Error extending CREATE VIEW, view will not be used");
@@ -318,10 +325,8 @@ impl MySqlReplicator {
         Ok((tx, table_list))
     }
 
-    /// Call `SELECT * FROM table` and convert all rows into a ReadySet row
-    /// it may seem inefficient but apparently that is the correct way to
-    /// replicate a table, and `mysqldump` and `debezium` do just that
-    pub(crate) async fn dump_table(&self, table: &Relation) -> mysql::Result<TableDumper> {
+    /// Get one transaction that will be used to snapshot table data
+    pub(crate) async fn get_one_transaction(&self) -> mysql::Result<Transaction<'static>> {
         let mut tx = self
             .pool
             .start_transaction(tx_opts())
@@ -333,23 +338,45 @@ impl MySqlReplicator {
             .await
             .map_err(log_err);
 
-        let query_count = format!(
-            "select count(*) from {}",
-            table.display(nom_sql::Dialect::MySQL)
-        );
-        let query = format!("select * from {}", table.display(nom_sql::Dialect::MySQL));
-        Ok(TableDumper {
-            query_count,
-            query,
-            tx,
-        })
+        // Set the timezone to UTC
+        let _ = tx
+            .query_drop("SET SESSION time_zone = '+00:00';")
+            .await
+            .map_err(log_err);
+        Ok(tx)
     }
 
-    /// Use the SHOW MASTER STATUS statement to determine the current binary log
-    /// file name and position.
+    /// Get MySQL Server Version
+    async fn get_mysql_version(&self) -> mysql::Result<u32> {
+        let mut conn = self.pool.get_conn().await?;
+        let version: mysql::Row = conn.query_first("SELECT VERSION()").await?.unwrap();
+        let version: String = version.get(0).expect("MySQL version");
+        let version_parts: Vec<&str> = version.split('.').collect();
+        let major = version_parts[0].parse::<u32>().unwrap();
+        let minor = version_parts[1].parse::<u32>().unwrap();
+        let patch = version_parts[2].parse::<u32>().unwrap();
+        Ok(major * 10000 + minor * 100 + patch)
+    }
+
+    /// Use the SHOW MASTER STATUS or SHOW BINARY LOG STATUS statement to determine
+    /// the current binary log file name and position.
     async fn get_binlog_position(&self) -> mysql::Result<MySqlPosition> {
         let mut conn = self.pool.get_conn().await?;
-        let query = "SHOW MASTER STATUS";
+        let query = match self.get_mysql_version().await {
+            Ok(version) => {
+                if version >= 80400 {
+                    // MySQL 8.4.0 and above
+                    "SHOW BINARY LOG STATUS"
+                } else {
+                    // MySQL 8.3.0 and below
+                    "SHOW MASTER STATUS"
+                }
+            }
+            Err(err) => {
+                return Err(err);
+            }
+        };
+
         let pos: mysql::Row = conn.query_first(query).await?.ok_or_else(|| {
             mysql_async::Error::Other(Box::new(internal_err!(
                 "Empty response for SHOW MASTER STATUS. \
@@ -376,25 +403,39 @@ impl MySqlReplicator {
         Ok(conn)
     }
 
-    /// Replicate a single table from the provided TableDumper and into ReadySet by
-    /// converting every MySQL row into ReadySet row and calling `insert_many` in batches
-    async fn replicate_table(
-        mut dumper: TableDumper,
+    /// Copy all the rows from the provided table into ReadySet by
+    /// converting every MySQL row into ReadySet row and calling `insert_many` in batches.
+    /// Depending on the table schema, we may use a key-based snapshotting strategy.
+    /// Which consists of batching rows based on the primary key or unique key of the table.
+    /// If the table does not have a primary key or unique key, we will use a full table scan.
+    ///
+    /// # Arguments
+    /// * `trx` - The transaction to use for snapshotting. This transaction was opened while the
+    /// table were locked, meaning it will see the same data as the binlog position recorded for
+    /// this table.
+    /// * `table_mutator` - The table mutator to insert the rows into
+    async fn snapshot_table(
+        mut trx: Transaction<'static>,
         mut table_mutator: readyset_client::Table,
         snapshot_report_interval_secs: u16,
     ) -> ReadySetResult<()> {
         let mut cnt = 0;
 
+        let mut snapshot_type = SnapshotType::new(&table_mutator)?;
+        let (count_query, initial_query, bound_base_query) =
+            snapshot_type.get_queries(&table_mutator);
         // Query for number of rows first
-        let nrows: usize = dumper
-            .tx
-            .query_first(&dumper.query_count)
+        let nrows: usize = trx
+            .query_first(count_query)
             .await
             .map_err(log_err)?
             .unwrap_or(0);
 
-        let mut row_stream = dumper.stream().await.map_err(log_err)?;
-        let mut rows = Vec::with_capacity(BATCH_SIZE);
+        let mut row_stream = trx
+            .exec_iter(&initial_query, mysql::Params::Empty)
+            .await
+            .map_err(log_err)?;
+        let mut rows = Vec::with_capacity(RS_BATCH_SIZE);
 
         info!(rows = %nrows, "Snapshotting started");
 
@@ -405,36 +446,63 @@ impl MySqlReplicator {
         let mut last_report_time = start_time;
         let snapshot_report_interval_secs = snapshot_report_interval_secs as u64;
 
-        loop {
-            let row = match row_stream.next().await {
-                Ok(Some(row)) => row,
-                Ok(None) => break,
-                Err(err) if cnt == nrows => {
-                    info!(error = %err, "Error encountered during snapshot, but all rows replicated successfully");
-                    break;
-                }
-                Err(err) => {
-                    return Err(log_err(err));
-                }
-            };
+        // Loop until we have no more batches to process
+        while cnt != nrows {
+            // Still have rows in this batch
+            loop {
+                let row = row_stream.next().await.map_err(log_err)?;
+                let df_row = match row.as_ref().map(mysql_row_to_noria_row).transpose() {
+                    Ok(Some(df_row)) => df_row,
+                    Ok(None) => break,
+                    Err(err) if cnt == nrows => {
+                        info!(error = %err, "Error encountered during snapshot, but all rows replicated successfully");
+                        break;
+                    }
+                    Err(err) => {
+                        return Err(log_err(err));
+                    }
+                };
+                rows.push(df_row);
+                cnt += 1;
 
-            rows.push(row);
-            cnt += 1;
+                if rows.len() == RS_BATCH_SIZE {
+                    // We aggregate rows into batches and then send them all to noria
+                    let send_rows = std::mem::replace(&mut rows, Vec::with_capacity(RS_BATCH_SIZE));
+                    table_mutator
+                        .insert_many(send_rows)
+                        .await
+                        .map_err(log_err)?;
+                }
 
-            if rows.len() == BATCH_SIZE {
-                // We aggregate rows into batches and then send them all to noria
-                let send_rows = std::mem::replace(&mut rows, Vec::with_capacity(BATCH_SIZE));
-                table_mutator
-                    .insert_many(send_rows)
+                if cnt % MYSQL_BATCH_SIZE == 0 && cnt != nrows && snapshot_type.is_key_based() {
+                    // Last row from batch. Update lower bound with last row.
+                    // It's safe to unwrap here because we will break out of the loop at
+                    // mysql_row_to_noria_row if row was None.
+                    snapshot_type.set_lower_bound(row.as_ref().unwrap());
+                }
+
+                if snapshot_report_interval_secs != 0
+                    && last_report_time.elapsed().as_secs() > snapshot_report_interval_secs
+                {
+                    last_report_time = Instant::now();
+                    crate::log_snapshot_progress(start_time.elapsed(), cnt as i64, nrows as i64);
+                }
+            }
+            if cnt != nrows {
+                // Next batch
+                row_stream = trx
+                    .exec_iter(
+                        &bound_base_query,
+                        mysql::Params::Positional(snapshot_type.get_lower_bound()?),
+                    )
                     .await
                     .map_err(log_err)?;
-            }
-
-            if snapshot_report_interval_secs != 0
-                && last_report_time.elapsed().as_secs() > snapshot_report_interval_secs
-            {
-                last_report_time = Instant::now();
-                crate::log_snapshot_progress(start_time.elapsed(), cnt as i64, nrows as i64);
+                if row_stream.is_empty() {
+                    return Err(internal_err!(
+                        "Snapshotting for table {:?} stopped before all rows were replicated. Next batch query returned no rows.",
+                        table_mutator.table_name()
+                    ));
+                }
             }
         }
 
@@ -558,7 +626,7 @@ impl MySqlReplicator {
         let repl_offset = ReplicationOffset::from(self.get_binlog_position().await?);
         span.in_scope(|| info!("Snapshotting table"));
 
-        let dumper = self.dump_table(&table).instrument(span.clone()).await?;
+        let trx = self.get_one_transaction().instrument(span.clone()).await?;
 
         // At this point we have a transaction that will see *that* table at *this* binlog
         // position, so we can drop the read lock
@@ -571,7 +639,7 @@ impl MySqlReplicator {
             (
                 table,
                 repl_offset,
-                Self::replicate_table(dumper, table_mutator, snapshot_report_interval_secs)
+                Self::snapshot_table(trx, table_mutator, snapshot_report_interval_secs)
                     .instrument(span)
                     .await,
             )
@@ -702,44 +770,64 @@ impl MySqlReplicator {
     }
 }
 
-/// An intermediary struct that can be used to get a stream of ReadySet rows
-// This is required because mysql::QueryResult borrows from conn and then
-// we have some hard to solve borrowing issues
-pub(crate) struct TableDumper {
-    query_count: String,
-    query: String,
-    tx: mysql::Transaction<'static>,
-}
-
-impl TableDumper {
-    pub(crate) async fn stream(&mut self) -> mysql::Result<TableStream<'_>> {
-        Ok(TableStream {
-            query: self.tx.exec_iter(&self.query, ()).await?,
-        })
-    }
-}
-
-// Just another helper struct to make it streamable
-pub(crate) struct TableStream<'a> {
-    query: mysql::QueryResult<'a, 'static, mysql::BinaryProtocol>,
-}
-
-impl<'a> TableStream<'a> {
-    /// Get the next row from the query response
-    pub(crate) async fn next<'b>(
-        &'b mut self,
-    ) -> ReadySetResult<Option<Vec<readyset_data::DfValue>>> {
-        let next_row = self.query.next().await?;
-        next_row.map(mysql_row_to_noria_row).transpose()
-    }
-}
-
 /// Convert each entry in a row to a ReadySet type that can be inserted into the base tables
-fn mysql_row_to_noria_row(row: mysql::Row) -> ReadySetResult<Vec<readyset_data::DfValue>> {
+fn mysql_row_to_noria_row(row: &mysql::Row) -> ReadySetResult<Vec<readyset_data::DfValue>> {
     let mut noria_row = Vec::with_capacity(row.len());
     for idx in 0..row.len() {
         let val = value_to_value(row.as_ref(idx).unwrap());
-        noria_row.push(readyset_data::DfValue::try_from(val)?);
+        let col = row.columns_ref().get(idx).unwrap();
+        let flags = col.flags();
+        match col.column_type() {
+            ColumnType::MYSQL_TYPE_STRING => {
+                // ENUM and SET columns are stored as integers and retrieved as strings. We don't
+                // need padding.
+                let require_padding = val != mysql_common::value::Value::NULL
+                    && !flags.contains(ColumnFlags::ENUM_FLAG)
+                    && !flags.contains(ColumnFlags::SET_FLAG);
+                match require_padding {
+                    true => {
+                        let bytes = match val.clone() {
+                            mysql_common::value::Value::Bytes(b) => b,
+                            _ => {
+                                return Err(internal_err!(
+                                    "Expected MYSQL_TYPE_STRING column to be of value Bytes, got {:?}",
+                                    val
+                                ));
+                            }
+                        };
+                        match mysql_pad_collation_column(
+                            &bytes,
+                            col.column_type(),
+                            col.character_set(),
+                            col.column_length() as usize,
+                        ) {
+                            Ok(padded) => noria_row.push(padded),
+                            Err(err) => return Err(internal_err!("Error padding column: {}", err)),
+                        }
+                    }
+                    false => noria_row.push(readyset_data::DfValue::try_from(val)?),
+                }
+            }
+            ColumnType::MYSQL_TYPE_DATETIME | ColumnType::MYSQL_TYPE_TIMESTAMP => {
+                let df_val: DfValue = readyset_data::DfValue::try_from(val)
+                    .map_err(|err| {
+                        internal_err!("Error converting MYSQL_TYPE_DATETIME column: {}", err)
+                    })
+                    .and_then(|val| match val {
+                        DfValue::TimestampTz(mut ts) => {
+                            ts.set_subsecond_digits(col.decimals());
+                            Ok(DfValue::TimestampTz(ts))
+                        }
+                        DfValue::None => Ok(DfValue::None), //NULL
+                        _ => Err(internal_err!(
+                            "Expected MYSQL_TYPE_DATETIME column to be of type TimestampTz, got {:?}",
+                            val
+                        )),
+                    })?;
+                noria_row.push(df_val);
+            }
+            _ => noria_row.push(readyset_data::DfValue::try_from(val)?),
+        }
     }
     Ok(noria_row)
 }

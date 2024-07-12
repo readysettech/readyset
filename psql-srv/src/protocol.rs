@@ -1076,7 +1076,6 @@ mod tests {
     use std::task::Poll;
     use std::{io, vec};
 
-    use async_trait::async_trait;
     use bytes::BytesMut;
     use futures::task::Context;
     use futures::{stream, TryStreamExt};
@@ -1134,7 +1133,6 @@ mod tests {
         }
     }
 
-    #[async_trait]
     impl PsqlBackend for Backend {
         type Resultset = stream::Iter<vec::IntoIter<Result<PsqlSrvRow, Error>>>;
 
@@ -1971,7 +1969,7 @@ mod tests {
             parameter_data_types: vec![],
         };
         block_on(protocol.on_request(parse_request, &mut backend, &mut channel)).unwrap();
-        assert!(protocol.prepared_statements.get("prepared1").is_some());
+        assert!(protocol.prepared_statements.contains_key("prepared1"));
 
         // A prepared statement close request calls close on the backend and removes Protocol state
         // for the prepared statement.
@@ -1983,7 +1981,7 @@ mod tests {
             Response::Message(CloseComplete)
         ));
         assert_eq!(backend.last_close.unwrap(), DeallocateId::Numeric(0));
-        assert!(protocol.prepared_statements.get("prepared1").is_none());
+        assert!(!protocol.prepared_statements.contains_key("prepared1"));
     }
 
     #[test]
@@ -2038,7 +2036,7 @@ mod tests {
             block_on(protocol.on_request(bind_request, &mut backend, &mut channel)).unwrap(),
             Response::Message(BindComplete)
         ));
-        assert!(protocol.portals.get("portal1").is_some());
+        assert!(protocol.portals.contains_key("portal1"));
 
         // A portal close request removes Protocol state for the portal.
         let request = FrontendMessage::Close {
@@ -2048,7 +2046,7 @@ mod tests {
             block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap(),
             Response::Message(CloseComplete)
         ));
-        assert!(protocol.portals.get("protal1").is_none());
+        assert!(!protocol.portals.contains_key("protal1"));
     }
 
     #[test]
@@ -2093,7 +2091,7 @@ mod tests {
             parameter_data_types: vec![],
         };
         block_on(protocol.on_request(parse_request, &mut backend, &mut channel)).unwrap();
-        assert!(protocol.prepared_statements.get("prepared1").is_some());
+        assert!(protocol.prepared_statements.contains_key("prepared1"));
 
         // A prepared statement describe request generates a suitable description.
         let request = FrontendMessage::Describe {
@@ -2173,7 +2171,7 @@ mod tests {
             parameter_data_types: vec![],
         };
         block_on(protocol.on_request(parse_request, &mut backend, &mut channel)).unwrap();
-        assert!(protocol.prepared_statements.get("prepared1").is_some());
+        assert!(protocol.prepared_statements.contains_key("prepared1"));
 
         let bind_request = FrontendMessage::Bind {
             prepared_statement_name: bytes_str("prepared1"),
@@ -2265,7 +2263,7 @@ mod tests {
             .on_request(parse_request, &mut backend, &mut channel)
             .await
             .unwrap();
-        assert!(protocol.prepared_statements.get("prepared1").is_some());
+        assert!(protocol.prepared_statements.contains_key("prepared1"));
 
         let bind_request = FrontendMessage::Bind {
             prepared_statement_name: bytes_str("prepared1"),
@@ -2345,7 +2343,7 @@ mod tests {
             parameter_data_types: vec![],
         };
         block_on(protocol.on_request(parse_request, &mut backend, &mut channel)).unwrap();
-        assert!(protocol.prepared_statements.get("prepared1").is_some());
+        assert!(protocol.prepared_statements.contains_key("prepared1"));
 
         let bind_request = FrontendMessage::Bind {
             prepared_statement_name: bytes_str("prepared1"),
@@ -2386,7 +2384,7 @@ mod tests {
             parameter_data_types: vec![],
         };
         block_on(protocol.on_request(parse_request, &mut backend, &mut channel)).unwrap();
-        assert!(protocol.prepared_statements.get("prepared1").is_some());
+        assert!(protocol.prepared_statements.contains_key("prepared1"));
 
         let bind_request = FrontendMessage::Bind {
             prepared_statement_name: bytes_str("prepared1"),

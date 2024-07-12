@@ -73,6 +73,12 @@ pub enum DfType {
     /// [`u16`].
     UnsignedSmallInt,
 
+    /// Notionally an `i24`, but really an [`i32`] that we bounds check.
+    MediumInt,
+
+    /// Notionally an `u24`, but really an [`u32`] that we bounds check.
+    UnsignedMediumInt,
+
     /// [`f32`]: a IEEE 754 floating-point 32-bit real value.
     ///
     /// This is either:
@@ -248,10 +254,12 @@ impl DfType {
             Int(_) | Int4 => Self::Int,
             TinyInt(_) => Self::TinyInt,
             SmallInt(_) | Int2 => Self::SmallInt,
+            MediumInt(_) => Self::MediumInt,
             BigInt(_) | Int8 => Self::BigInt,
             UnsignedInt(_) => Self::UnsignedInt,
             UnsignedTinyInt(_) => Self::UnsignedTinyInt,
             UnsignedSmallInt(_) => Self::UnsignedSmallInt,
+            UnsignedMediumInt(_) => Self::UnsignedMediumInt,
             UnsignedBigInt(_) => Self::UnsignedBigInt,
 
             Double => Self::Double,
@@ -284,7 +292,7 @@ impl DfType {
             Bit(len) => Self::Bit(len.unwrap_or(1)),
             VarBit(len) => Self::VarBit(len),
 
-            Json => unsupported!("Unsupported type: Json"),
+            Json => Self::Json,
             Jsonb => unsupported!("Unsupported type: Jsonb"),
 
             Date => Self::Date,
@@ -343,6 +351,9 @@ impl DfType {
             | DfType::UnsignedTinyInt
             | DfType::SmallInt
             | DfType::UnsignedSmallInt
+            // XXX(mvzink): MEDIUMINT isn't implemented by PostgreSQL, but this seems better than making this fn fail
+            | DfType::MediumInt
+            | DfType::UnsignedMediumInt
             | DfType::Float
             | DfType::Double
             | DfType::Numeric { .. } => PgTypeCategory::Numeric,
@@ -456,6 +467,18 @@ impl DfType {
     /// Returns `true` if this is any `*int` type.
     #[inline]
     pub fn is_any_int(&self) -> bool {
+        self.is_any_normal_int() || self.is_any_bigint()
+    }
+
+    /// Returns `true` if this is any large integer type (bigint/int8).
+    #[inline]
+    pub fn is_any_bigint(&self) -> bool {
+        matches!(*self, Self::BigInt | Self::UnsignedBigInt)
+    }
+
+    /// Returns `true` if this is any non-large integer type.
+    #[inline]
+    pub fn is_any_normal_int(&self) -> bool {
         matches!(
             *self,
             Self::TinyInt
@@ -464,15 +487,22 @@ impl DfType {
                 | Self::UnsignedSmallInt
                 | Self::Int
                 | Self::UnsignedInt
-                | Self::BigInt
-                | Self::UnsignedBigInt
+                | Self::MediumInt
+                | Self::UnsignedMediumInt
         )
     }
 
-    /// Returns `true` if this is any `text` type
+    /// Returns `true` if this is any unsigned integer type.
     #[inline]
-    pub fn is_any_text(&self) -> bool {
-        matches!(self, Self::Text(..) | Self::VarChar(..) | Self::Char(..))
+    pub fn is_any_unsigned_int(&self) -> bool {
+        matches!(
+            *self,
+            Self::UnsignedTinyInt
+                | Self::UnsignedSmallInt
+                | Self::UnsignedInt
+                | Self::UnsignedMediumInt
+                | Self::UnsignedBigInt
+        )
     }
 
     /// Returns `true` if this is any IEEE 754 floating-point type.
@@ -481,10 +511,62 @@ impl DfType {
         matches!(*self, Self::Float | Self::Double)
     }
 
+    /// Returns `true` if this is a 4-byte IEEE 754 floating-point type.
+    #[inline]
+    pub fn is_float(&self) -> bool {
+        matches!(*self, Self::Float)
+    }
+
+    /// Returns `true` if this is an 8-byte IEEE 754 floating-point type.
+    #[inline]
+    pub fn is_double(&self) -> bool {
+        matches!(*self, Self::Double)
+    }
+
+    /// Returns `true` if this is a decimal or numeric type.
+    #[inline]
+    pub fn is_numeric(&self) -> bool {
+        matches!(*self, Self::Numeric { .. })
+    }
+
+    /// Returns `true` if this is DATE/TIMESTAMP/TIMESTAMPTZ/DATETIME type.
+    #[inline]
+    pub fn is_any_temporal(&self) -> bool {
+        matches!(
+            *self,
+            Self::DateTime { .. }
+                | Self::Date
+                | Self::Timestamp { .. }
+                | Self::TimestampTz { .. }
+                | Self::Time { .. }
+        )
+    }
+
+    /// Returns `true` if this is any exact number type (INTEGER(s), DECIMAL).
+    #[inline]
+    pub fn is_any_exact_number(&self) -> bool {
+        self.is_any_int() || self.is_numeric()
+    }
+
+    /// Returns `true` if this is DATETIME/TIMESTAMP/TIMESTAMPTZ.
+    #[inline]
+    pub fn is_date_and_time(&self) -> bool {
+        matches!(
+            *self,
+            Self::DateTime { .. } | Self::Timestamp { .. } | Self::TimestampTz { .. }
+        )
+    }
+
     /// Returns `true` if this is any PostgreSQL array type.
     #[inline]
     pub fn is_array(&self) -> bool {
         matches!(self, Self::Array { .. })
+    }
+
+    /// Returns `true` if this is any `text` type
+    #[inline]
+    pub fn is_any_text(&self) -> bool {
+        matches!(self, Self::Text(..) | Self::VarChar(..) | Self::Char(..))
     }
 
     /// Returns `true` if this is any MySQL binary type.
@@ -670,6 +752,8 @@ impl fmt::Display for DfType {
             | Self::UnsignedTinyInt
             | Self::SmallInt
             | Self::UnsignedSmallInt
+            | Self::MediumInt
+            | Self::UnsignedMediumInt
             | Self::Int
             | Self::UnsignedInt
             | Self::BigInt

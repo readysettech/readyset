@@ -489,7 +489,7 @@ impl WalFlusher {
         // Sleep for a random number of seconds between 1 and 10 to introduce jitter to
         // stagger flushes across different base tables
         let jitter = Duration::from_secs_f64(
-            rand::thread_rng().gen_range(0.0, self.flush_interval.as_secs_f64()),
+            rand::thread_rng().gen_range(0.0..self.flush_interval.as_secs_f64()),
         );
 
         // We use recv_timeout for interruptible sleep. If recv_timeout() returns `Ok`, it means
@@ -807,18 +807,13 @@ impl State for PersistentState {
         self.db.lookup_weak(columns, key)
     }
 
-    fn tear_down(mut self) -> ReadySetResult<()> {
-        if let Some((tx, jh)) = self.wal_flush_thread_handle.take() {
-            // Stop the thread that periodically flushes the WAL
-            tx.send(()).unwrap();
+    fn shut_down(&mut self) -> ReadySetResult<()> {
+        trace!("PersistentState received shutdown, stopping the WAL");
+        self.shut_down_wal()
+    }
 
-            jh.join().map_err(|_| {
-                ReadySetError::Internal(format!(
-                    "could not join WAL flush thread for table {}",
-                    self.name
-                ))
-            })?;
-        }
+    fn tear_down(mut self) -> ReadySetResult<()> {
+        let _ = &self.shut_down_wal()?;
 
         let temp_dir = self._tmpdir.take();
         let full_path = self.db.inner().db.path().to_path_buf();
@@ -1048,6 +1043,10 @@ impl State for PersistentStateHandle {
     }
 
     fn clear(&mut self) {}
+
+    fn shut_down(&mut self) -> ReadySetResult<()> {
+        Ok(())
+    }
 
     fn tear_down(self) -> ReadySetResult<()> {
         Ok(())
@@ -2082,6 +2081,21 @@ impl PersistentState {
 
         Ok(())
     }
+
+    fn shut_down_wal(&mut self) -> ReadySetResult<()> {
+        if let Some((tx, jh)) = self.wal_flush_thread_handle.take() {
+            // Stop the thread that periodically flushes the WAL
+            tx.send(()).unwrap();
+
+            jh.join().map_err(|_| {
+                ReadySetError::Internal(format!(
+                    "could not join WAL flush thread for table {}",
+                    self.name
+                ))
+            })?;
+        }
+        Ok(())
+    }
 }
 
 /// Checks if the given index is unique for this base table.
@@ -2224,11 +2238,17 @@ impl SizeOf for PersistentState {
                     .db
                     .cf_handle(&idx.column_family)
                     .unwrap_or_else(|| panic!("Column family not found: {}", idx.column_family));
-                inner
+                let sstable_size = inner
                     .db
                     .property_int_value_cf(cf, "rocksdb.estimate-live-data-size")
                     .unwrap()
+                    .unwrap();
+                let memtable_size = inner
+                    .db
+                    .property_int_value_cf(cf, "rocksdb.size-all-mem-tables")
                     .unwrap()
+                    .unwrap();
+                sstable_size + memtable_size
             })
             .sum()
     }

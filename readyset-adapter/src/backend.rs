@@ -1573,7 +1573,7 @@ where
             .ok_or(PreparedStatementMissing { statement_id: id })?;
 
         let mut event = QueryExecutionEvent::new(EventType::Execute);
-        event.query = cached_statement.parsed_query.clone();
+        event.query.clone_from(&cached_statement.parsed_query);
         event.query_id = cached_statement.query_id;
 
         let upstream = &mut self.upstream;
@@ -2373,7 +2373,7 @@ where
                 if let Err(e) = &res {
                     if let Some(ddl_req) = ddl_req {
                         let remove_res = retry_with_exponential_backoff(
-                            async || {
+                            || async {
                                 let ddl_req = ddl_req.clone();
                                 self.authority.remove_cache_ddl_request(ddl_req).await
                             },
@@ -2416,7 +2416,7 @@ where
                     )
                 {
                     let remove_res = retry_with_exponential_backoff(
-                        async || {
+                        || async {
                             let ddl_req = ddl_req.clone();
                             self.authority.remove_cache_ddl_request(ddl_req).await
                         },
@@ -2805,11 +2805,13 @@ where
 
                     // Table Create / Drop (RYW not supported)
                     // TODO(andrew, justin): how are these types of writes handled w.r.t RYW?
-                    SqlQuery::CreateView(_)
+                    SqlQuery::CreateDatabase(_)
+                    | SqlQuery::CreateView(_)
                     | SqlQuery::CreateTable(_)
                     | SqlQuery::DropTable(_)
                     | SqlQuery::DropView(_)
                     | SqlQuery::AlterTable(_)
+                    | SqlQuery::Truncate(_)
                     | SqlQuery::Use(_) => {
                         event.sql_type = SqlQueryType::Other;
                         upstream.query(raw_query).await.map(QueryResult::Upstream)
@@ -2862,6 +2864,7 @@ where
                     SqlQuery::Insert(q) => noria.handle_insert(q).await,
                     SqlQuery::Update(q) => noria.handle_update(q).await,
                     SqlQuery::Delete(q) => noria.handle_delete(q).await,
+                    SqlQuery::Truncate(q) => noria.handle_truncate(q).await,
                     SqlQuery::Deallocate(_) => unreachable!("deallocate path returns prior"),
 
                     // Return an empty result as we are allowing unsupported set statements. Commit

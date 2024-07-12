@@ -24,10 +24,15 @@ fn serde(c: &mut Criterion) {
 
     let timestamp_tz = DfValue::from(chrono::TimeZone::from_utc_datetime(
         &chrono::FixedOffset::west_opt(18_000).unwrap(),
-        &chrono::NaiveDateTime::from_timestamp_opt(0, 42_000_000).unwrap(),
+        &chrono::DateTime::from_timestamp(0, 42_000_000)
+            .unwrap()
+            .naive_utc(),
     ));
-    let timestamp =
-        DfValue::from(chrono::NaiveDateTime::from_timestamp_opt(0, 42_000_000).unwrap());
+    let timestamp = DfValue::from(
+        chrono::DateTime::from_timestamp(0, 42_000_000)
+            .unwrap()
+            .naive_utc(),
+    );
 
     let time: DfValue = MySqlTime::from_hmsus(false, 10, 30, 24, 100).into();
 

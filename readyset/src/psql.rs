@@ -1,7 +1,6 @@
 use std::io::Read;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use clap::Parser;
 use readyset_adapter::upstream_database::LazyUpstream;
 use readyset_errors::ReadySetResult;
@@ -92,7 +91,6 @@ impl PsqlHandler {
     }
 }
 
-#[async_trait]
 impl ConnectionHandler for PsqlHandler {
     type UpstreamDatabase = LazyUpstream<PostgreSqlUpstream>;
     type Handler = PostgreSqlQueryHandler;

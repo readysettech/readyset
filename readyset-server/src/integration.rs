@@ -1532,7 +1532,7 @@ async fn mutator_churn() {
                 "votecount",
                 make_columns(&["id", "votes"]),
                 Aggregation::Count
-                    .over(vote, 0, &[1], &DfType::Unknown)
+                    .over(vote, 0, &[1], &DfType::Unknown, &Dialect::DEFAULT_MYSQL)
                     .unwrap(),
             );
 
@@ -2040,7 +2040,7 @@ async fn votes() {
                 "vc",
                 make_columns(&["id", "votes"]),
                 Aggregation::Count
-                    .over(vote, 0, &[1], &DfType::Unknown)
+                    .over(vote, 0, &[1], &DfType::Unknown, &Dialect::DEFAULT_MYSQL)
                     .unwrap(),
             );
             mig.maintain_anonymous(vc, &Index::hash_map(vec![0]));
@@ -2697,7 +2697,7 @@ async fn cascading_replays_with_sharding() {
             // aggregate over the join. this will force a shard merger to be inserted because the
             // group-by column ("f2") isn't the same as the join's output sharding column ("f1"/"u")
             let a = Aggregation::Count
-                .over(j, 0, &[2], &DfType::Unknown)
+                .over(j, 0, &[2], &DfType::Unknown, &Dialect::DEFAULT_MYSQL)
                 .unwrap();
             let end = mig.add_ingredient("end", make_columns(&["u", "c"]), a);
             mig.maintain_anonymous_with_reader_processing(
@@ -2826,7 +2826,7 @@ async fn full_aggregation_with_bogokey() {
                 "agg",
                 make_columns(&["bogo", "count"]),
                 Aggregation::Count
-                    .over(bogo, 0, &[1], &DfType::Unknown)
+                    .over(bogo, 0, &[1], &DfType::Unknown, &Dialect::DEFAULT_MYSQL)
                     .unwrap(),
             );
             mig.maintain_anonymous_with_reader_processing(
@@ -2962,7 +2962,7 @@ async fn materialization_frontier() {
                 "votecount",
                 make_columns(&["id", "votes"]),
                 Aggregation::Count
-                    .over(vote, 0, &[1], &DfType::Unknown)
+                    .over(vote, 0, &[1], &DfType::Unknown, &Dialect::DEFAULT_MYSQL)
                     .unwrap(),
             );
             mig.mark_shallow(vc);
@@ -3258,7 +3258,7 @@ async fn do_full_vote_migration(sharded: bool, old_puts_after: bool) {
                 "votecount",
                 make_columns(&["id", "votes"]),
                 Aggregation::Count
-                    .over(vote, 0, &[1], &DfType::Unknown)
+                    .over(vote, 0, &[1], &DfType::Unknown, &Dialect::DEFAULT_MYSQL)
                     .unwrap(),
             );
 
@@ -3321,7 +3321,7 @@ async fn do_full_vote_migration(sharded: bool, old_puts_after: bool) {
                 "rsum",
                 make_columns(&["id", "total"]),
                 Aggregation::Sum
-                    .over(rating, 2, &[1], &DfType::Unknown)
+                    .over(rating, 2, &[1], &DfType::Unknown, &Dialect::DEFAULT_MYSQL)
                     .unwrap(),
             );
 
@@ -3427,7 +3427,7 @@ async fn live_writes() {
                 "votecount",
                 make_columns(&["id", "votes"]),
                 Aggregation::Count
-                    .over(vote, 0, &[1], &DfType::Unknown)
+                    .over(vote, 0, &[1], &DfType::Unknown, &Dialect::DEFAULT_MYSQL)
                     .unwrap(),
             );
 
@@ -3471,7 +3471,7 @@ async fn live_writes() {
                 "votecount2",
                 make_columns(&["id", "votes"]),
                 Aggregation::Sum
-                    .over(vc, 1, &[0], &DfType::Unknown)
+                    .over(vc, 1, &[0], &DfType::Unknown, &Dialect::DEFAULT_MYSQL)
                     .unwrap(),
             );
             mig.maintain_anonymous_with_reader_processing(
@@ -4337,6 +4337,7 @@ async fn correct_nested_view_schema() {
         ("swvc.id".into(), DfType::Int),
         ("swvc.content".into(), DfType::DEFAULT_TEXT),
         ("swvc.vc".into(), DfType::BigInt),
+        ("swvc.story".into(), DfType::Int),
     ];
     assert_eq!(
         q.schema()
@@ -8306,9 +8307,9 @@ async fn reroutes_count() {
     assert_eq!(
         r2.into_vec(),
         vec![
+            vec![DfValue::Int(2)],
             vec![DfValue::Int(1)],
-            vec![DfValue::Int(1)],
-            vec![DfValue::Int(2)]
+            vec![DfValue::Int(1)]
         ]
     );
 
@@ -9394,6 +9395,33 @@ async fn evict_single_intermediate_state() {
         .unwrap()
         .unwrap();
     assert_eq!(eviction.key, vec![2.into()]);
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn check_supported_mysql_storage_engines() {
+    let (mut g, shutdown_tx) = start_simple_unsharded("unsupported_engine").await;
+
+    g.extend_recipe(
+        ChangeList::from_str(
+            "CREATE TABLE test (value double) ENGINE=MEMORY;",
+            Dialect::DEFAULT_MYSQL,
+        )
+        .unwrap(),
+    )
+    .await
+    .expect_err("Should not replicate table with unsupported storage engine");
+
+    g.extend_recipe(
+        ChangeList::from_str(
+            "CREATE TABLE test (value double) ENGINE=innodb;",
+            Dialect::DEFAULT_MYSQL,
+        )
+        .unwrap(),
+    )
+    .await
+    .expect("Should replicate table with supported storage engine");
 
     shutdown_tx.shutdown().await;
 }

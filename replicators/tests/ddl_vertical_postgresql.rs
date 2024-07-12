@@ -551,7 +551,7 @@ impl ModelState for DDLModelState {
             possible_ops.push(rename_col_strat);
 
             let _drop_col_strategy = gen_drop_col(self.tables.clone(), tables_with_cols).boxed();
-            // Commented out for now because this triggers ENG-2548
+            // Commented out for now because this triggers REA-2216
             // possible_ops.push(drop_col_strategy);
         }
         // If we have at least one row written to a table, we can generate delete ops:
@@ -661,7 +661,7 @@ impl ModelState for DDLModelState {
                     .iter_mut()
                     .find(|cs| cs.name == *col_name)
                     .unwrap();
-                spec.name = new_name.clone();
+                spec.name.clone_from(new_name);
             }
             Operation::DeleteRow(..) => (),
             Operation::CreateSimpleView { name, table_source } => {
@@ -731,7 +731,7 @@ impl ModelState for DDLModelState {
                     .iter_mut()
                     .find(|v| *v == value_name)
                     .unwrap();
-                *val_ref = new_name.clone();
+                val_ref.clone_from(new_name);
             }
             Operation::Evict { .. } => (),
         }

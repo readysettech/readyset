@@ -11,7 +11,6 @@ use std::str::FromStr;
 use std::time::Instant;
 
 use anyhow::{bail, Result};
-use async_trait::async_trait;
 use clap::Parser;
 use database_utils::{DatabaseURL, QueryableConnection};
 use itertools::Itertools;
@@ -53,7 +52,6 @@ fn get_columns(num_views: usize, param_count: usize) -> Vec<String> {
     (0..num_columns).map(|i| format!("c{}", i)).collect()
 }
 
-#[async_trait]
 impl BenchmarkControl for ScaleViews {
     /// Creates a table with enough columns that we can create `num_views` off a
     /// combination of the columns.

@@ -38,7 +38,6 @@ impl AnalysisInfo {
 
 #[derive(Debug)]
 pub struct Stats {
-    pub samples: i64,
     pub mean: f64,
     pub stdev: f64,
 }
@@ -46,7 +45,6 @@ pub struct Stats {
 impl Stats {
     pub fn with(hist: &hdrhistogram::Histogram<u64>) -> Stats {
         Stats {
-            samples: hist.len() as i64,
             mean: hist.mean(),
             stdev: hist.stdev(),
         }

@@ -6,7 +6,6 @@ use std::str::FromStr;
 use std::time::Instant;
 
 use anyhow::Result;
-use async_trait::async_trait;
 use clap::Parser;
 use database_utils::{DatabaseConnection, DatabaseURL, QueryableConnection};
 use metrics::Unit;
@@ -37,7 +36,6 @@ pub struct SingleQueryBenchmark {
     ad_hoc: bool,
 }
 
-#[async_trait]
 impl BenchmarkControl for SingleQueryBenchmark {
     async fn setup(&self, deployment: &DeploymentParameters) -> Result<()> {
         self.data_generator

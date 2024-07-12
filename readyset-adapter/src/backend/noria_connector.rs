@@ -8,7 +8,7 @@ use std::time::Instant;
 use itertools::Itertools;
 use nom_sql::{
     self, ColumnConstraint, DeleteStatement, DialectDisplay, Expr, InsertStatement, Relation,
-    SqlIdentifier, SqlQuery, UnaryOperator, UpdateStatement,
+    SqlIdentifier, SqlQuery, TruncateStatement, UnaryOperator, UpdateStatement,
 };
 use readyset_client::consistency::Timestamp;
 use readyset_client::internal::LocalNodeIndex;
@@ -138,9 +138,7 @@ pub enum PreparedSelectTypes {
 }
 
 #[derive(Debug, Clone)]
-// Due to differences in data type sizes, the large_enum_variant Clippy warning was being emitted
-// for this type, but only when compiling for aarch64 targets.
-#[cfg_attr(target_arch = "aarch64", allow(clippy::large_enum_variant))]
+#[allow(clippy::large_enum_variant)]
 pub enum PrepareResult {
     Select {
         types: PreparedSelectTypes,
@@ -497,7 +495,7 @@ impl NoriaConnector {
             ("keys", DfType::DEFAULT_TEXT),
             ("size_bytes", DfType::BigInt),
             ("partial", DfType::Bool),
-            ("indexes", DfType::Array(Box::new(DfType::DEFAULT_TEXT))),
+            ("indexes", DfType::DEFAULT_TEXT),
         ];
         let schema = SelectSchema {
             columns: cols.iter().map(|(n, _)| n.into()).collect(),
@@ -528,9 +526,8 @@ impl NoriaConnector {
                         .into_iter()
                         .map(|idx| {
                             format!("{:?}[{}]", idx.index_type, idx.columns.iter().join(", "))
-                                .into()
                         })
-                        .collect::<Vec<DfValue>>()
+                        .join(", ")
                         .into(),
                 ]
             })
@@ -855,6 +852,24 @@ impl NoriaConnector {
                     .with_schema_search_path(self.schema_search_path.clone())
             )
         )?;
+        Ok(QueryResult::Empty)
+    }
+
+    pub(crate) async fn handle_truncate(
+        &mut self,
+        q: &TruncateStatement,
+    ) -> ReadySetResult<QueryResult<'_>> {
+        for table in &q.tables {
+            trace!(table = %table.relation.name, "truncate::access mutator");
+            let mutator = self
+                .inner
+                .get_mut()?
+                .get_noria_table(&table.relation)
+                .await?;
+            trace!("truncate::perform truncate");
+            mutator.truncate().await?;
+            trace!("truncate::done");
+        }
         Ok(QueryResult::Empty)
     }
 

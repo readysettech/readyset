@@ -235,9 +235,9 @@ impl DfValue {
             ),
             DfValue::Float(..) => DfValue::Float(f32::MIN),
             DfValue::Double(..) => DfValue::Double(f64::MIN),
-            DfValue::Int(_) => DfValue::Int(i64::min_value()),
+            DfValue::Int(_) => DfValue::Int(i64::MIN),
             DfValue::UnsignedInt(_) => DfValue::UnsignedInt(0),
-            DfValue::Time(_) => DfValue::Time(MySqlTime::min_value()),
+            DfValue::Time(_) => DfValue::Time(MySqlTime::MIN),
             DfValue::ByteArray(_) => DfValue::ByteArray(Arc::new(Vec::new())),
             DfValue::Numeric(_) => DfValue::from(Decimal::MIN),
             DfValue::BitVector(_) => DfValue::from(BitVec::new()),
@@ -265,9 +265,9 @@ impl DfValue {
             ),
             DfValue::Float(..) => DfValue::Float(f32::MAX),
             DfValue::Double(..) => DfValue::Double(f64::MIN),
-            DfValue::Int(_) => DfValue::Int(i64::max_value()),
-            DfValue::UnsignedInt(_) => DfValue::UnsignedInt(u64::max_value()),
-            DfValue::Time(_) => DfValue::Time(MySqlTime::max_value()),
+            DfValue::Int(_) => DfValue::Int(i64::MAX),
+            DfValue::UnsignedInt(_) => DfValue::UnsignedInt(u64::MAX),
+            DfValue::Time(_) => DfValue::Time(MySqlTime::MAX),
             DfValue::Numeric(_) => DfValue::from(Decimal::MAX),
             DfValue::TinyText(_)
             | DfValue::Text(_)
@@ -584,6 +584,7 @@ impl DfValue {
                     Some(max_size) if vec.len() > *max_size as usize => Err(mk_err()),
                     _ => Ok(self.clone()),
                 },
+                DfType::Bit(/* TODO */ _len) => Ok(self.clone()),
                 _ => Err(mk_err()),
             },
             DfValue::ByteArray(_) | DfValue::Max => Err(mk_err()),
@@ -1252,7 +1253,7 @@ impl<'a> TryFrom<&'a Literal> for DfValue {
                 .map(|d| DfValue::Numeric(Arc::new(d))),
             Literal::Blob(b) => Ok(DfValue::from(b.as_slice())),
             Literal::ByteArray(b) => Ok(DfValue::ByteArray(Arc::new(b.clone()))),
-            Literal::BitVector(b) => Ok(DfValue::from(BitVec::from_bytes(b.as_slice()))),
+            Literal::BitVector(b) => Ok(DfValue::from(b)),
             Literal::Placeholder(_) => {
                 internal!("Tried to convert a Placeholder literal to a DfValue")
             }
@@ -1294,7 +1295,7 @@ impl TryFrom<DfValue> for Literal {
             )?)),
             DfValue::ByteArray(ref array) => Ok(Literal::ByteArray(array.as_ref().clone())),
             DfValue::Numeric(ref d) => Ok(Literal::Numeric(d.mantissa(), d.scale())),
-            DfValue::BitVector(ref bits) => Ok(Literal::BitVector(bits.as_ref().to_bytes())),
+            DfValue::BitVector(ref bits) => Ok(Literal::BitVector(bits.as_ref().clone())),
             DfValue::Array(_) => unsupported!("Arrays not implemented yet"),
             DfValue::PassThrough(_) => internal!("PassThrough has no representation as a literal"),
             DfValue::Max => internal!("MAX has no representation as a literal"),
@@ -1335,6 +1336,12 @@ impl From<NaiveDateTime> for DfValue {
 impl From<DateTime<FixedOffset>> for DfValue {
     fn from(dt: DateTime<FixedOffset>) -> Self {
         DfValue::TimestampTz(dt.into())
+    }
+}
+
+impl From<&BitVec> for DfValue {
+    fn from(value: &BitVec) -> Self {
+        DfValue::BitVector(Arc::new(value.clone()))
     }
 }
 
@@ -2243,12 +2250,18 @@ mod arbitrary {
                 .boxed(),
             Some(DfType::TinyInt) => any::<i8>().prop_map(|i| DfValue::Int(i as i64)).boxed(),
             Some(DfType::SmallInt) => any::<i16>().prop_map(|i| DfValue::Int(i as i64)).boxed(),
+            Some(DfType::MediumInt) => ((-1i32 << 23)..(1i32 << 23))
+                .prop_map(|i| DfValue::Int(i as i64))
+                .boxed(),
             Some(DfType::Int) => any::<i32>().prop_map(|i| DfValue::Int(i as i64)).boxed(),
             Some(DfType::BigInt) => any::<i64>().prop_map(DfValue::Int).boxed(),
             Some(DfType::UnsignedTinyInt) => any::<u8>()
                 .prop_map(|u| DfValue::UnsignedInt(u as u64))
                 .boxed(),
             Some(DfType::UnsignedSmallInt) => any::<u16>()
+                .prop_map(|u| DfValue::UnsignedInt(u as u64))
+                .boxed(),
+            Some(DfType::UnsignedMediumInt) => (0..(1u32 << 24))
                 .prop_map(|u| DfValue::UnsignedInt(u as u64))
                 .boxed(),
             Some(DfType::UnsignedInt) => any::<u32>()
@@ -2339,7 +2352,7 @@ mod tests {
         let timestamp_tz = DfValue::from(
             FixedOffset::west_opt(18_000)
                 .unwrap()
-                .from_utc_datetime(&NaiveDateTime::from_timestamp_opt(0, 42_000_000).unwrap()),
+                .from_utc_datetime(&DateTime::from_timestamp(0, 42_000_000).unwrap().naive_utc()),
         );
 
         match &timestamp_tz {
@@ -2750,14 +2763,15 @@ mod tests {
         let double = DfValue::Double(-8.99);
         let numeric = DfValue::from(Decimal::new(-899, 2)); // -8.99
         let timestamp = DfValue::TimestampTz(
-            NaiveDateTime::from_timestamp_opt(0, 42_000_000)
+            DateTime::from_timestamp(0, 42_000_000)
                 .unwrap()
+                .naive_utc()
                 .into(),
         );
         let timestamp_tz = DfValue::from(
             FixedOffset::west_opt(19_800)
                 .unwrap()
-                .from_utc_datetime(&NaiveDateTime::from_timestamp_opt(0, 42_000_000).unwrap()),
+                .from_utc_datetime(&DateTime::from_timestamp(0, 42_000_000).unwrap().naive_utc()),
         );
         let int = DfValue::Int(5);
         let bytes = DfValue::ByteArray(Arc::new(vec![0, 8, 39, 92, 100, 128]));
@@ -2800,24 +2814,26 @@ mod tests {
         let numeric = DfValue::from(Decimal::new(-899, 2)); // -8.99
         let numeric2 = DfValue::from(Decimal::new(-898, 2)); // -8.99
         let time = DfValue::TimestampTz(
-            NaiveDateTime::from_timestamp_opt(0, 42_000_000)
+            DateTime::from_timestamp(0, 42_000_000)
                 .unwrap()
+                .naive_utc()
                 .into(),
         );
         let time2 = DfValue::TimestampTz(
-            NaiveDateTime::from_timestamp_opt(1, 42_000_000)
+            DateTime::from_timestamp(1, 42_000_000)
                 .unwrap()
+                .naive_utc()
                 .into(),
         );
         let timestamp_tz = DfValue::from(
             FixedOffset::west_opt(18_000)
                 .unwrap()
-                .from_utc_datetime(&NaiveDateTime::from_timestamp_opt(0, 42_000_000).unwrap()),
+                .from_utc_datetime(&DateTime::from_timestamp(0, 42_000_000).unwrap().naive_utc()),
         );
         let timestamp_tz2 = DfValue::from(
             FixedOffset::west_opt(18_000)
                 .unwrap()
-                .from_utc_datetime(&NaiveDateTime::from_timestamp_opt(1, 42_000_000).unwrap()),
+                .from_utc_datetime(&DateTime::from_timestamp(1, 42_000_000).unwrap().naive_utc()),
         );
         let shrt = DfValue::Int(5);
         let shrt6 = DfValue::Int(6);
@@ -2995,17 +3011,17 @@ mod tests {
 
     #[test]
     fn data_type_conversion() {
-        let bigint_i64_min = DfValue::Int(std::i64::MIN);
-        let bigint_i32_min = DfValue::Int(std::i32::MIN as i64);
-        let bigint_u32_min = DfValue::Int(std::u32::MIN as i64);
-        let bigint_i32_max = DfValue::Int(std::i32::MAX as i64);
-        let bigint_u32_max = DfValue::Int(std::u32::MAX as i64);
-        let bigint_i64_max = DfValue::Int(std::i64::MAX);
-        let ubigint_u32_min = DfValue::UnsignedInt(std::u32::MIN as u64);
-        let ubigint_i32_max = DfValue::UnsignedInt(std::i32::MAX as u64);
-        let ubigint_u32_max = DfValue::UnsignedInt(std::u32::MAX as u64);
-        let ubigint_i64_max = DfValue::UnsignedInt(std::i64::MAX as u64);
-        let ubigint_u64_max = DfValue::UnsignedInt(std::u64::MAX);
+        let bigint_i64_min = DfValue::Int(i64::MIN);
+        let bigint_i32_min = DfValue::Int(i32::MIN as i64);
+        let bigint_u32_min = DfValue::Int(u32::MIN as i64);
+        let bigint_i32_max = DfValue::Int(i32::MAX as i64);
+        let bigint_u32_max = DfValue::Int(u32::MAX as i64);
+        let bigint_i64_max = DfValue::Int(i64::MAX);
+        let ubigint_u32_min = DfValue::UnsignedInt(u32::MIN as u64);
+        let ubigint_i32_max = DfValue::UnsignedInt(i32::MAX as u64);
+        let ubigint_u32_max = DfValue::UnsignedInt(u32::MAX as u64);
+        let ubigint_i64_max = DfValue::UnsignedInt(i64::MAX as u64);
+        let ubigint_u64_max = DfValue::UnsignedInt(u64::MAX);
 
         fn _data_type_conversion_test_eq_i32(d: &DfValue) {
             assert_eq!(
@@ -3224,24 +3240,26 @@ mod tests {
         let numeric = DfValue::from(Decimal::new(-899, 2)); // -8.99
         let numeric2 = DfValue::from(Decimal::new(-898, 2)); // -8.99
         let time = DfValue::TimestampTz(
-            NaiveDateTime::from_timestamp_opt(0, 42_000_000)
+            DateTime::from_timestamp(0, 42_000_000)
                 .unwrap()
+                .naive_utc()
                 .into(),
         );
         let time2 = DfValue::TimestampTz(
-            NaiveDateTime::from_timestamp_opt(1, 42_000_000)
+            DateTime::from_timestamp(1, 42_000_000)
                 .unwrap()
+                .naive_utc()
                 .into(),
         );
         let timestamp_tz = DfValue::from(
             FixedOffset::west_opt(18_000)
                 .unwrap()
-                .from_utc_datetime(&NaiveDateTime::from_timestamp_opt(0, 42_000_000).unwrap()),
+                .from_utc_datetime(&DateTime::from_timestamp(0, 42_000_000).unwrap().naive_utc()),
         );
         let timestamp_tz2 = DfValue::from(
             FixedOffset::west_opt(18_000)
                 .unwrap()
-                .from_utc_datetime(&NaiveDateTime::from_timestamp_opt(1, 42_000_000).unwrap()),
+                .from_utc_datetime(&DateTime::from_timestamp(1, 42_000_000).unwrap().naive_utc()),
         );
         let shrt = DfValue::Int(5);
         let shrt6 = DfValue::Int(6);

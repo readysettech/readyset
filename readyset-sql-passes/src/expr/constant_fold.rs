@@ -21,7 +21,7 @@ fn const_eval(expr: &Expr, dialect: Dialect) -> ReadySetResult<Literal> {
         }
     }
 
-    let dataflow_expr = DataflowExpr::lower(expr.clone(), dialect, ConstEvalLowerContext)?;
+    let dataflow_expr = DataflowExpr::lower(expr.clone(), dialect, &ConstEvalLowerContext)?;
     let res = dataflow_expr.eval::<DfValue>(&[])?;
     res.try_into()
 }

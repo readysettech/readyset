@@ -14,7 +14,6 @@ use std::collections::HashMap;
 use std::str::FromStr;
 
 use anyhow::Result;
-use async_trait::async_trait;
 use clap::Parser;
 use database_utils::{DatabaseConnection, DatabaseType, DatabaseURL};
 use enum_dispatch::enum_dispatch;
@@ -265,7 +264,8 @@ impl BenchmarkOutput {
 
 /// The set of control functions needed to execute the benchmark in
 /// the `BenchmarkRunner`.
-#[async_trait]
+// Only used internally
+#[allow(async_fn_in_trait)]
 #[enum_dispatch]
 pub trait BenchmarkControl {
     /// Any code required to perform setup of the benchmark goes here. This

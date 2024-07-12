@@ -1,6 +1,6 @@
 use std::{fmt, str};
 
-use nom_sql::{Relation, SelectStatement, SqlIdentifier};
+use nom_sql::{Relation, SelectStatement};
 use petgraph::graph::NodeIndex;
 use readyset_client::recipe::changelist::ChangeList;
 use readyset_client::ViewCreateRequest;
@@ -85,7 +85,7 @@ impl PartialEq for Recipe {
 #[derive(Debug)]
 pub(crate) enum Schema<'a> {
     Table(&'a BaseSchema),
-    View(&'a [SqlIdentifier]),
+    View,
 }
 
 impl Recipe {
@@ -174,7 +174,7 @@ impl Recipe {
                     None => self.inc.get_view_schema(name),
                     Some(internal_qn) => self.inc.get_view_schema(internal_qn),
                 };
-                s.map(Schema::View)
+                s.map(|_| Schema::View)
             }
             Some(s) => Some(Schema::Table(s)),
         }

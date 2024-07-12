@@ -196,6 +196,7 @@ async fn replicated_readers() {
     let mut deployment = DeploymentBuilder::new(DatabaseType::MySQL, "ct_replicated_readers")
         .with_servers(2, ServerParams::default())
         .reader_replicas(2)
+        .enable_post_lookups()
         .start()
         .await
         .unwrap();
@@ -292,6 +293,7 @@ async fn replicated_readers_with_unions() {
         DeploymentBuilder::new(DatabaseType::MySQL, "ct_replicated_readers_with_unions")
             .with_servers(2, ServerParams::default())
             .reader_replicas(2)
+            .enable_post_lookups()
             .start()
             .await
             .unwrap();
@@ -757,7 +759,7 @@ async fn startup_permutations() {
 
     // FIXME[ENG-1668]: Either the system cannot startup healthily for the following situations, or
     // there are bugs in the failure injection we are doing in tests.
-    let known_failures = vec![
+    let known_failures = [
         vec![Authority, Adapter, Server, Upstream],
         vec![Upstream, Adapter, Server, Authority],
         vec![Adapter, Authority, Server, Upstream],

@@ -120,7 +120,7 @@ impl TcpSender {
         // end, or else we'll silently get the wrong data (but no deserialization errors!)
         // https://app.clubhouse.io/readysettech/story/437 to fix that
         let c = bincode::options()
-            .with_limit(u32::max_value() as u64)
+            .with_limit(u32::MAX as u64)
             .allow_trailing_bytes();
         let size = c
             .serialized_size(packet)

@@ -18,7 +18,7 @@ pub use self::alter::{
 };
 pub use self::column::{Column, ColumnConstraint, ColumnSpecification};
 pub use self::comment::CommentStatement;
-pub use self::common::{FieldDefinitionExpr, FieldReference, IndexType, TableKey};
+pub use self::common::{FieldDefinitionExpr, FieldReference, IndexType, TableKey, TimestampField};
 pub use self::compound_select::{CompoundSelectOperator, CompoundSelectStatement};
 pub use self::create::{
     CacheInner, CreateCacheStatement, CreateTableBody, CreateTableStatement, CreateViewStatement,
@@ -60,6 +60,7 @@ pub use self::table::{
     TableExprInner,
 };
 pub use self::transaction::StartTransactionStatement;
+pub use self::truncate::TruncateStatement;
 pub use self::update::UpdateStatement;
 pub use self::use_statement::UseStatement;
 
@@ -96,6 +97,7 @@ mod sql_identifier;
 mod sql_type;
 mod table;
 mod transaction;
+mod truncate;
 mod update;
 mod use_statement;
 pub mod whitespace;

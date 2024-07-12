@@ -59,6 +59,7 @@
 #![cfg_attr(test, feature(test))]
 #![cfg_attr(test, feature(custom_test_frameworks))]
 #![cfg_attr(test, test_runner(runner::run_env_conditional_tests))]
+#![allow(internal_features)]
 #![feature(core_intrinsics)]
 
 #[macro_use]

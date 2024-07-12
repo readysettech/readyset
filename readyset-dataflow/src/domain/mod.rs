@@ -2411,6 +2411,15 @@ impl Domain {
                 let key = self.handle_eviction(req, executor)?;
                 Ok(Some(bincode::serialize(&key)?))
             }
+            DomainRequest::Shutdown => {
+                self.state.values_mut().for_each(|s| {
+                    let err = s.shut_down();
+                    if let Err(e) = err {
+                        warn!(error = %e, "error on shutting down domains");
+                    }
+                });
+                Ok(None)
+            }
         };
 
         // What we just did might have done things like insert into `self.delayed_for_self`, so
@@ -4003,10 +4012,10 @@ impl Domain {
                         #[allow(clippy::indexing_slicing)] // nodes in replay paths must exist
                         if let Some(result) = state[dest.node].evict_keys(tag, &keys) {
                             bytes_freed += result.bytes_freed;
-                            #[allow(clippy::unwrap_used)]
                             // we can only evict from partial replay paths, so we must have a
                             // partial key
                             bytes_freed += trigger_downstream_evictions(
+                                #[allow(clippy::unwrap_used)]
                                 dest.partial_index.as_ref().unwrap(),
                                 &keys,
                                 dest.node,

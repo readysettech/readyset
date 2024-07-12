@@ -817,11 +817,6 @@ where
         }
     }
 
-    /// Performance hint: should return true if this operator reduces the size of its input
-    fn is_selective(&self) -> bool {
-        false
-    }
-
     /// Returns true if this operator requires a full materialization
     fn requires_full_materialization(&self) -> bool {
         false
