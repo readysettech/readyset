@@ -2989,7 +2989,7 @@ where
                 .await
             }
             Ok(ref parsed_query) if Handler::requires_fallback(parsed_query) => {
-                if self.has_fallback() {
+                if !Handler::return_default_response(parsed_query) && self.has_fallback() {
                     if let SqlQuery::Select(stmt) = parsed_query {
                         event.sql_type = SqlQueryType::Read;
                         event.query = Some(Arc::new(parsed_query.clone()));
@@ -3000,7 +3000,8 @@ where
                     // Query requires a fallback and we can send it to fallback
                     Self::query_fallback(self.upstream.as_mut(), query, &mut event).await
                 } else {
-                    // Query requires a fallback, but none is available
+                    // Query should return a default response or requires a fallback, but none is
+                    // available
                     Handler::default_response(parsed_query)
                         .map(QueryResult::Noria)
                         .map_err(Into::into)

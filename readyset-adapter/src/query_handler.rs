@@ -36,8 +36,12 @@ pub trait QueryHandler: Sized + Send {
 
     /// Provides a default response for the given query.
     /// This should only be used in cases where the query can't be executed by ReadySet
-    /// and there is no fallback mechanism enabled.
+    /// and there is no fallback mechanism enabled or we deliberately want to return a default
+    /// response based on the rules from [`return_default_response`].
     fn default_response(query: &SqlQuery) -> ReadySetResult<noria_connector::QueryResult<'static>>;
+
+    /// Whether or not a given query should return a default response.
+    fn return_default_response(query: &SqlQuery) -> bool;
 
     /// Classify the given SET statement based on how we should handle it
     ///
