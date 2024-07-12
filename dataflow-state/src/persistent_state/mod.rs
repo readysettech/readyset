@@ -92,7 +92,7 @@ use rocksdb::{
 };
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use tempfile::{tempdir, TempDir};
+use tempfile::{Builder, TempDir};
 use test_strategy::Arbitrary;
 use thiserror::Error;
 use tracing::{debug, error, info, info_span, instrument, trace, warn};
@@ -119,6 +119,9 @@ const DEFAULT_CF: &str = "default";
 
 // The column family for the primary key. It is always zero, because it is always the first index.
 const PK_CF: &str = "0";
+
+// The subdirectory name where temporary, working files will be written.
+const WORKING_DIR: &str = "readyset.tmp";
 
 // Maximum rows per WriteBatch when building new indices for existing rows.
 const INDEX_BATCH_SIZE: usize = 10_000;
@@ -244,6 +247,9 @@ pub struct PersistenceParameters {
     /// An optional path to a directory where to store the DB files, if None will be stored in the
     /// current working directory
     pub storage_dir: Option<PathBuf>,
+    /// An optional path to a directory where the working/temporary DB files can be stored. If
+    /// None, the files will be stored in a subdirectory under `storage_dir`.
+    pub working_temp_dir: Option<PathBuf>,
     /// The interval on which the RocksDB WAL will be flushed and synced to disk. If this value is
     /// set to 0, the WAL will be flushed and synced to disk with every write
     #[serde(default)]
@@ -257,6 +263,7 @@ impl Default for PersistenceParameters {
             db_filename_prefix: String::from("readyset"),
             persistence_threads: 1,
             storage_dir: None,
+            working_temp_dir: None,
             wal_flush_interval_seconds: 0,
         }
     }
@@ -277,6 +284,7 @@ impl PersistenceParameters {
         db_filename_prefix: Option<String>,
         persistence_threads: i32,
         storage_dir: Option<PathBuf>,
+        working_temp_dir: Option<PathBuf>,
         wal_flush_interval_seconds: u64,
     ) -> Self {
         // NOTE(fran): DO NOT impose a particular format on `db_filename_prefix`. If you need to,
@@ -291,6 +299,7 @@ impl PersistenceParameters {
             db_filename_prefix,
             persistence_threads,
             storage_dir,
+            working_temp_dir,
             wal_flush_interval_seconds,
         }
     }
@@ -810,6 +819,9 @@ impl State for PersistentState {
     fn shut_down(&mut self) -> ReadySetResult<()> {
         trace!("PersistentState received shutdown, stopping the WAL");
         self.shut_down_wal()
+
+        // DurabilityMode::DeleteOnExit will delete all data when the TempFile instance
+        // is dropped. Thus, we don't need to do anything special here for that data.
     }
 
     fn tear_down(mut self) -> ReadySetResult<()> {
@@ -823,18 +835,14 @@ impl State for PersistentState {
         // We can't implement this logic by implementing the `Drop` trait, because
         // otherwise we would be dropping rocksdb twice, which will make the whole thing
         // panic.
+        // DurabilityMode::DeleteOnExit will delete all data when the TempFile instance
+        // is dropped. Thus, we don't need to do anything special here for that data.
         drop(self);
-        if let Some(temp) = temp_dir {
-            fs::remove_dir_all(temp.path()).map_err(|e| {
-                ReadySetError::IOError(format!(
-                    "Failed to remove temporary rocksdb directory: {}",
-                    e
-                ))
-            })
-        } else {
-            fs::remove_dir_all(full_path).map_err(|e| {
+        match temp_dir {
+            Some(_) => Ok(()),
+            None => fs::remove_dir_all(full_path).map_err(|e| {
                 ReadySetError::IOError(format!("Failed to remove rocksdb directory: {}", e))
-            })
+            }),
         }
     }
 }
@@ -1421,11 +1429,33 @@ impl PersistentState {
                 (None, path)
             }
             _ => {
-                let dir = tempdir()?;
-                let path = dir.path().join(&name);
-                (Some(dir), path)
+                // use what the operator passed in, or default to the storage_dir
+                let base_dir = match &params.working_temp_dir {
+                    Some(s) => s.clone(),
+                    None => params.storage_dir.clone().unwrap_or_else(|| ".".into()),
+                };
+                // canonicalize the path else `tempdir` might get confused with a relative path.
+                let base_dir = base_dir.canonicalize()?;
+
+                // use a "parent" directory to house all the various tmp rocksdb instances
+                let working_dir = base_dir.join(WORKING_DIR);
+                if !working_dir.is_dir() {
+                    fs::create_dir_all(&working_dir)?;
+                }
+
+                // create the subdirectory specific to this node
+                let tempdir = Builder::new().prefix(&name).tempdir_in(working_dir)?;
+                let path = tempdir.path().to_path_buf();
+
+                (Some(tempdir), path)
             }
         };
+
+        trace!(
+            "persistent directories, tempdir: {:?}, full_path: {:?}",
+            &tmpdir,
+            &full_path
+        );
 
         let name = SqlIdentifier::from(name);
 
@@ -2279,7 +2309,7 @@ mod tests {
     }
 
     fn get_tmp_path() -> (TempDir, String) {
-        let dir = tempdir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("readyset");
         (dir, path.to_string_lossy().into())
     }

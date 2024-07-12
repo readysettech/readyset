@@ -126,6 +126,7 @@ impl Builder {
                 n_threads
             }),
             Some(deployment_dir),
+            opts.working_dir,
             builder
                 .config
                 .replicator_config

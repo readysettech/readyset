@@ -723,6 +723,11 @@ pub struct WorkerOptions {
     #[arg(long, env = "DB_DIR", conflicts_with = "storage_dir", hide = true)]
     db_dir: Option<PathBuf>,
 
+    /// Directory in which to store temporary, working data. If not specified, defaults to a
+    /// subdirectory within `storage_dir`.
+    #[arg(long, env = "WORKING_DIR")]
+    working_dir: Option<PathBuf>,
+
     #[command(flatten)]
     pub domain_replication_options: ReplicationOptions,
 
@@ -817,6 +822,14 @@ impl WorkerOptions {
         if self.db_dir.is_some() {
             warn!("Use of \"--db-dir\" is deprecated, please use \"--storage-dir\" instead");
         }
+    }
+
+    pub fn working_dir(&self) -> Option<PathBuf> {
+        if let Some(s) = &self.working_dir {
+            return Some(s.to_path_buf());
+        }
+
+        None
     }
 }
 
