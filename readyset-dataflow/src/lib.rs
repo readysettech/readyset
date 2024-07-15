@@ -12,7 +12,6 @@
     stmt_expr_attributes,
     extract_if,
     hash_extract_if,
-    option_get_or_insert_default,
     box_patterns
 )]
 // Only used in a `debug_assert!` in `ops/grouped/mod.rs` therefore I added it

@@ -142,7 +142,6 @@
     type_alias_impl_trait,
     stmt_expr_attributes,
     bound_as_ref,
-    box_into_inner,
     is_sorted,
     impl_trait_in_assoc_type
 )]
