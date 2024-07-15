@@ -4,7 +4,6 @@ use std::sync::Arc;
 use dataflow_expression::{Expr, PostLookup, PostLookupAggregates};
 use nom_sql::OrderType;
 use readyset_data::DfValue;
-use readyset_util::nonmaxusize::NonMaxUsize;
 use smallvec::SmallVec;
 use streaming_iterator::StreamingIterator;
 use tournament_kway::{Comparator, StreamingTournament};
@@ -91,7 +90,7 @@ struct OwnedResultIterator {
     data: Vec<Results>,
     // Current position in the data vector
     set: usize,
-    row: Option<NonMaxUsize>,
+    row: Option<usize>,
 }
 
 /// An iterator over a single set of cached results
@@ -100,7 +99,7 @@ struct SingleKeyIterator {
     // The underlying data we iterate over
     data: SharedRows,
     // The next row in the current set to return
-    row: Option<NonMaxUsize>,
+    row: Option<usize>,
 }
 
 /// An iterator over a multiple sets of cached results
@@ -111,7 +110,7 @@ struct MultiKeyIterator {
     // The current set of result in the iterator
     set: usize,
     // The next row in the current set to return
-    row: Option<NonMaxUsize>,
+    row: Option<usize>,
 }
 
 /// An iterator over multiple sets of cached results with an order by clause
@@ -366,26 +365,26 @@ impl StreamingIterator for OwnedResultIterator {
 
     #[inline(always)]
     fn advance(&mut self) {
-        let row = match self.row.as_mut() {
-            Some(row) => {
-                row.inc();
+        let row = match self.row {
+            Some(ref mut row) => {
+                *row += 1;
                 row
             }
-            None => self.row.get_or_insert(NonMaxUsize::zero()),
+            None => self.row.get_or_insert(0),
         };
         while let Some(rows) = self.data.get(self.set) {
-            if rows.results.get(**row).is_some() {
+            if rows.results.get(*row).is_some() {
                 break;
             }
             self.set += 1;
-            *row = NonMaxUsize::zero();
+            *row = 0;
         }
     }
 
     #[inline(always)]
     fn get(&self) -> Option<&Self::Item> {
         self.row
-            .and_then(|row| self.data.get(self.set).and_then(|s| s.results.get(*row)))
+            .and_then(|row| self.data.get(self.set).and_then(|s| s.results.get(row)))
             .map(|v| v.as_slice())
     }
 }
@@ -401,15 +400,15 @@ impl StreamingIterator for SingleKeyIterator {
 
     #[inline(always)]
     fn advance(&mut self) {
-        match self.row.as_mut() {
-            None => self.row = Some(NonMaxUsize::zero()),
-            Some(row) => row.inc(),
+        match self.row {
+            None => self.row = Some(0),
+            Some(ref mut row) => *row += 1,
         }
     }
 
     #[inline(always)]
     fn get(&self) -> Option<&Self::Item> {
-        self.row.and_then(|row| self.data.get(*row)).map(|r| &r[..])
+        self.row.and_then(|row| self.data.get(row)).map(|r| &r[..])
     }
 }
 
@@ -428,19 +427,19 @@ impl StreamingIterator for MultiKeyIterator {
 
     #[inline(always)]
     fn advance(&mut self) {
-        let row = match self.row.as_mut() {
-            Some(row) => {
-                row.inc();
+        let row = match self.row {
+            Some(ref mut row) => {
+                *row += 1;
                 row
             }
-            None => self.row.get_or_insert(NonMaxUsize::zero()),
+            None => self.row.get_or_insert(0),
         };
 
         while let Some(results) = self.data.get(self.set) {
-            if results.get(**row).is_none() {
+            if results.get(*row).is_none() {
                 // Skip empty sets
                 self.set += 1;
-                *row = NonMaxUsize::zero();
+                *row = 0;
             } else {
                 break;
             }
@@ -450,7 +449,7 @@ impl StreamingIterator for MultiKeyIterator {
     #[inline(always)]
     fn get(&self) -> Option<&Self::Item> {
         self.row
-            .and_then(|row| self.data.get(self.set).and_then(|s| s.get(*row)))
+            .and_then(|row| self.data.get(self.set).and_then(|s| s.get(row)))
             .map(|r| &r[..])
     }
 }
