@@ -1,6 +1,5 @@
 #![feature(
     box_patterns,
-    result_flattening,
     never_type,
     exhaustive_patterns,
     try_find,

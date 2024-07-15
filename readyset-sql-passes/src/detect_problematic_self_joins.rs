@@ -106,7 +106,9 @@ fn check_select_statement<'a>(
                     })
                     .flatten_ok()
                     .map(
-                        |r: Result<Result<_, _>, _>| -> Result<(Relation, &str), _> { r.flatten() },
+                        |r: Result<Result<_, _>, _>| -> Result<(Relation, &str), _> {
+                            r.and_then(std::convert::identity)
+                        },
                     ))
             }
 
@@ -185,7 +187,7 @@ fn check_select_statement<'a>(
                     }
                 })
                 .flatten_ok()
-                .map(|r| r.flatten()),
+                .map(|r| r.and_then(std::convert::identity)),
             ))
         }
     }
