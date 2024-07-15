@@ -139,7 +139,6 @@
 //! libraries.
 #![allow(incomplete_features)]
 #![feature(
-    result_flattening,
     type_alias_impl_trait,
     stmt_expr_attributes,
     bound_as_ref,

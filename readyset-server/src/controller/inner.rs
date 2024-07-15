@@ -752,7 +752,7 @@ impl Leader {
                 let res = apply_handle
                     .await
                     .map_err(|e| internal_err!("Error during recovery: {e}"))
-                    .flatten();
+                    .and_then(std::convert::identity);
                 debug!(?res, "Recovery finished");
                 let _ = tx.send_replace(res);
             }));

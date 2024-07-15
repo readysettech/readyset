@@ -303,7 +303,7 @@ pub trait AuthorityControl: Send + Sync {
     {
         self.read_modify_write(PERSISTENT_STATS_PATH, f)
             .await
-            .flatten()
+            .and_then(std::convert::identity)
     }
 
     /// Returns the stored schema [`ReplicationOffset`], if present. Wrapper around Self::try_read

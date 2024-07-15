@@ -387,7 +387,6 @@
     let_chains,
     never_type,
     exhaustive_patterns,
-    result_flattening,
     stmt_expr_attributes,
     try_find,
     type_alias_impl_trait,
