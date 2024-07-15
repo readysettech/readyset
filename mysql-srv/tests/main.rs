@@ -1,5 +1,3 @@
-#![feature(async_closure)]
-
 extern crate chrono;
 extern crate mysql;
 extern crate mysql_common as myc;
