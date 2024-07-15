@@ -1,4 +1,4 @@
-#![feature(box_patterns, iter_order_by)]
+#![feature(box_patterns)]
 
 use std::borrow::Cow;
 use std::cmp::Ordering;

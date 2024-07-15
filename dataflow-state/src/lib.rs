@@ -1,4 +1,4 @@
-#![feature(stmt_expr_attributes, iter_order_by, bound_as_ref)]
+#![feature(stmt_expr_attributes, bound_as_ref)]
 
 mod key;
 mod keyed_state;
@@ -25,6 +25,7 @@ use readyset_client::internal::Index;
 use readyset_client::{KeyComparison, PersistencePoint};
 use readyset_data::{Bound, DfValue};
 use readyset_errors::ReadySetResult;
+use readyset_util::iter::eq_by;
 use replication_offset::ReplicationOffset;
 use serde::{Deserialize, Serialize};
 
@@ -625,14 +626,15 @@ impl<'a> PartialEq for RecordResult<'a> {
             (Self::Borrowed(s), Self::Borrowed(o)) => s == o,
             (Self::References(s), Self::References(o)) => s == o,
             (Self::Owned(s), Self::Owned(o)) => s == o,
-            (Self::Borrowed(s), Self::References(o)) => s.iter().eq_by(o.iter(), |x, y| x == *y),
-            (Self::Borrowed(s), Self::Owned(o)) => s.iter().eq_by(o.iter(), |x, y| **x == *y),
-            (Self::References(s), Self::Owned(o)) => s.iter().eq_by(o.iter(), |x, y| ***x == *y),
-            (Self::Owned(s), Self::References(o)) => s.iter().eq_by(o.iter(), |x, y| *x == ***y),
+            (Self::Borrowed(s), Self::References(o)) => eq_by(s.iter(), o.iter(), |x, y| x == *y),
+            (Self::Borrowed(s), Self::Owned(o)) => eq_by(s.iter(), o.iter(), |x, y| **x == *y),
+            (Self::References(s), Self::Owned(o)) => eq_by(s.iter(), o.iter(), |x, y| ***x == *y),
+            (Self::Owned(s), Self::References(o)) => eq_by(s.iter(), o.iter(), |x, y| *x == ***y),
             (s, o) => o == s,
         }
     }
 }
+
 impl<'a> Eq for RecordResult<'a> {}
 
 impl<'a> Debug for RecordResult<'a> {

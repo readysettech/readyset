@@ -3,6 +3,7 @@ use std::cmp::Ordering;
 use std::fmt::Display;
 use std::hash::{Hash, Hasher};
 
+use readyset_util::iter::cmp_by;
 use serde::{Deserialize, Serialize};
 use strum_macros::{EnumCount, FromRepr};
 use test_strategy::Arbitrary;
@@ -83,10 +84,11 @@ impl Collation {
     pub(crate) fn compare_strs(self, s1: &str, s2: &str) -> Ordering {
         match self {
             Collation::Utf8 => s1.cmp(s2),
-            Collation::Citext => s1
-                .chars()
-                .map(|c| c.to_lowercase())
-                .cmp_by(s2.chars().map(|c| c.to_lowercase()), |c1, c2| c1.cmp(c2)),
+            Collation::Citext => cmp_by(
+                s1.chars().map(|c| c.to_lowercase()),
+                s2.chars().map(|c| c.to_lowercase()),
+                |c1, c2| c1.cmp(c2),
+            ),
         }
     }
 

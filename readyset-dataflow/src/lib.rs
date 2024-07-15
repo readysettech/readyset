@@ -5,7 +5,6 @@
     clippy::todo
 )]
 #![feature(
-    iter_order_by,
     btree_extract_if,
     bound_as_ref,
     stmt_expr_attributes,

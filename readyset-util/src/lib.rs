@@ -13,6 +13,7 @@ pub mod fmt;
 pub mod futures;
 pub mod hash;
 pub mod intervals;
+pub mod iter;
 pub mod math;
 pub mod progress;
 pub mod properties;
