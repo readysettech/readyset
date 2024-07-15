@@ -6,7 +6,6 @@
 )]
 #![feature(
     iter_order_by,
-    trait_alias,
     btree_extract_if,
     bound_as_ref,
     stmt_expr_attributes,

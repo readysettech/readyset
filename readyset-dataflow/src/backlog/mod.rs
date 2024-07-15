@@ -23,9 +23,6 @@ pub type ReaderUpdatedNotifier = tokio::sync::broadcast::Receiver<ReaderNotifica
 /// The type we can send reader update notifications
 pub(crate) type ReaderUpdatedSender = tokio::sync::broadcast::Sender<ReaderNotification>;
 
-pub(crate) trait Trigger =
-    Fn(&mut dyn Iterator<Item = KeyComparison>, Relation) -> bool + 'static + Send + Sync;
-
 /// Allocate a new end-user facing result table.
 ///
 /// # Invariants:
@@ -60,7 +57,7 @@ pub(crate) fn new_partial<F>(
     reader_processing: ReaderProcessing,
 ) -> (SingleReadHandle, WriteHandle)
 where
-    F: Trigger,
+    F: Fn(&mut dyn Iterator<Item = KeyComparison>, Relation) -> bool + 'static + Send + Sync,
 {
     new_inner(
         cols,
@@ -74,10 +71,18 @@ where
 // # Invariants:
 //
 // * key must be non-empty, or we hit an unimplemented!
+#[allow(clippy::type_complexity)]
 fn new_inner(
     cols: usize,
     index: Index,
-    trigger: Option<Arc<dyn Trigger>>,
+    trigger: Option<
+        Arc<
+            dyn Fn(&mut dyn Iterator<Item = KeyComparison>, Relation) -> bool
+                + 'static
+                + Send
+                + Sync,
+        >,
+    >,
     eviction_kind: EvictionKind,
     reader_processing: ReaderProcessing,
 ) -> (SingleReadHandle, WriteHandle) {
@@ -461,9 +466,17 @@ impl SizeOf for WriteHandle {
 }
 
 /// Handle to get the state of a single shard of a reader.
+#[allow(clippy::type_complexity)]
 pub struct SingleReadHandle {
     handle: multir::Handle,
-    trigger: Option<Arc<dyn Trigger>>,
+    trigger: Option<
+        Arc<
+            dyn Fn(&mut dyn Iterator<Item = KeyComparison>, Relation) -> bool
+                + 'static
+                + Send
+                + Sync,
+        >,
+    >,
     index: Index,
     pub post_lookup: PostLookup,
     /// Receives a notification whenever the [`WriteHandle`] is updated after filling an upquery
