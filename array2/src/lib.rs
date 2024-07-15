@@ -20,7 +20,6 @@
 //! Internally, values are stored in a single continuous allocation row-first, alongside the length
 //! of the row.
 
-#![feature(int_roundings)]
 use std::fmt::Debug;
 use std::ops::{Index, IndexMut};
 
@@ -223,7 +222,7 @@ impl<T> Array2<T> {
     #[inline]
     pub fn entries(&self) -> impl ExactSizeIterator<Item = ((usize, usize), &T)> + '_ {
         self.cells.iter().enumerate().map(move |(i, v)| {
-            let row = i.div_floor(self.row_size);
+            let row = i / self.row_size;
             let col = i % self.row_size;
             ((row, col), v)
         })
@@ -247,7 +246,7 @@ impl<T> Array2<T> {
     pub fn entries_mut(&mut self) -> impl ExactSizeIterator<Item = ((usize, usize), &mut T)> + '_ {
         let row_size = self.row_size;
         self.cells.iter_mut().enumerate().map(move |(i, v)| {
-            let row = i.div_floor(row_size);
+            let row = i / row_size;
             let col = i % row_size;
             ((row, col), v)
         })
@@ -275,7 +274,7 @@ impl<T> Array2<T> {
             .into_iter()
             .enumerate()
             .map(move |(i, v)| {
-                let row = i.div_floor(self.row_size);
+                let row = i / self.row_size;
                 let col = i % self.row_size;
                 ((row, col), v)
             })
