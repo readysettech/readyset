@@ -1,4 +1,4 @@
-#![feature(never_type, hash_raw_entry, extract_if, let_chains)]
+#![feature(never_type, hash_raw_entry, extract_if)]
 
 pub mod db_util;
 pub(crate) mod mysql_connector;

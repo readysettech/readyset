@@ -175,10 +175,10 @@ impl QueryLogger {
 
                     let metrics = logger.metrics_for_query(query.clone(), event.query_id);
 
-                    if mode.is_verbose() && let Some(duration) = event.parse_duration {
+                    if mode.is_verbose() && event.parse_duration.is_some() {
                         metrics
                             .parse_histogram((event.event, event.sql_type), mode)
-                            .record(duration);
+                            .record(event.parse_duration.unwrap()); // just checked
                     }
 
                     match event.readyset_event {

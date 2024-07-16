@@ -1,4 +1,4 @@
-#![feature(box_patterns, let_chains)]
+#![feature(box_patterns)]
 
 mod binary_operator;
 mod eval;

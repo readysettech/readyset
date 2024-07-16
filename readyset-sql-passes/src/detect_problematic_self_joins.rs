@@ -178,9 +178,7 @@ fn check_select_statement<'a>(
                 })?
                 .map(move |c| {
                     let (tbl, cn) = c?;
-                    if tbl.schema.is_none()
-                        && let Some(cte) = ctes.get(&tbl.name)
-                    {
+                    if let (true, Some(cte)) = (tbl.schema.is_none(), ctes.get(&tbl.name)) {
                         Ok(Either::Right(trace_subquery(cte, tbl, cn, &ctes)?))
                     } else {
                         Ok(once_ok!((tbl, cn)))
