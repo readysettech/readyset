@@ -379,7 +379,6 @@
 //! + [id=1, title=Hello world, votes=43]
 //! ```
 #![feature(
-    bound_as_ref,
     box_patterns,
     extract_if,
     entry_insert,

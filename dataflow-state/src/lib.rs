@@ -1,4 +1,4 @@
-#![feature(stmt_expr_attributes, bound_as_ref)]
+#![feature(stmt_expr_attributes)]
 
 mod key;
 mod keyed_state;
