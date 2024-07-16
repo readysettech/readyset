@@ -138,7 +138,7 @@
 //! that wish to continue to issue ad-hoc MySQL or PostgreSQL queries through existing SQL client
 //! libraries.
 #![allow(incomplete_features)]
-#![feature(type_alias_impl_trait, is_sorted, impl_trait_in_assoc_type)]
+#![feature(type_alias_impl_trait, is_sorted)]
 #![deny(macro_use_extern_crate)]
 #![deny(unused_extern_crates)]
 #![deny(unreachable_pub)]

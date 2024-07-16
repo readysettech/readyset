@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::fmt::Display;
 use std::future::Future;
 use std::net::SocketAddr;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant, SystemTime};
@@ -178,7 +179,7 @@ impl Service<()> for Endpoint {
     type Response = InnerService;
     type Error = tokio::io::Error;
 
-    type Future = impl Future<Output = Result<Self::Response, Self::Error>>;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
     fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
@@ -187,7 +188,7 @@ impl Service<()> for Endpoint {
     fn call(&mut self, _: ()) -> Self::Future {
         let f = tokio::net::TcpStream::connect(self.addr);
         let timeout = self.timeout;
-        async move {
+        Box::pin(async move {
             let mut s = tokio::time::timeout(timeout, f).await??;
             s.set_nodelay(true)?;
             s.write_all(&[CONNECTION_FROM_BASE]).await?;
@@ -198,7 +199,7 @@ impl Service<()> for Endpoint {
                 t,
                 |e| error!(error = %e, "Table server went away"),
             ))
-        }
+        })
     }
 }
 
@@ -663,7 +664,7 @@ impl Service<TableRequest> for Table {
     type Error = ReadySetError;
     type Response = <TableRpc as Service<Tagged<PacketData>>>::Response;
 
-    type Future = impl Future<Output = Result<Tagged<()>, ReadySetError>> + Send;
+    type Future = Pin<Box<dyn Future<Output = Result<Tagged<()>, ReadySetError>> + Send>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         for s in &mut self.shards {
@@ -676,7 +677,7 @@ impl Service<TableRequest> for Table {
     fn call(&mut self, req: TableRequest) -> Self::Future {
         // TODO(eta): error handling impl adds overhead
         let table = self.table_name.clone();
-        match req {
+        Box::pin(match req {
             TableRequest::TableOperations(ops) => match self.prep_records(ops) {
                 Ok(i) => future::Either::Left(future::Either::Left(
                     self.input(i).map_err(|e| table_err(table, e)),
@@ -691,7 +692,7 @@ impl Service<TableRequest> for Table {
                 };
                 future::Either::Right(self.timestamp(p).map_err(|e| table_err(table, e)))
             }
-        }
+        })
     }
 }
 

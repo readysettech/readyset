@@ -385,8 +385,7 @@
     hash_raw_entry,
     never_type,
     exhaustive_patterns,
-    hash_extract_if,
-    impl_trait_in_assoc_type
+    hash_extract_if
 )]
 #![deny(unused_extern_crates)]
 #![deny(macro_use_extern_crate)]

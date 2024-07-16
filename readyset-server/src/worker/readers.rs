@@ -3,6 +3,7 @@
 use core::task::Context;
 use std::collections::hash_map::Entry::Occupied;
 use std::future::Future;
+use std::pin::Pin;
 use std::task::Poll;
 use std::time;
 use std::time::Duration;
@@ -69,7 +70,8 @@ impl ServerReadReplyBatch {
 
         let mut ser = bincode::Serializer::new(&mut v, options);
 
-        usize::MAX.serialize(&mut ser).unwrap(); // Prepend the maximum possible room for length encoding
+        // Prepend the maximum possible room for length encoding
+        usize::MAX.serialize(&mut ser).unwrap();
 
         let mut n = 0usize;
         while let Some(row) = rs.next() {
@@ -303,7 +305,7 @@ impl ReadRequestHandler {
 impl Service<Tagged<ReadQuery>> for ReadRequestHandler {
     type Response = Tagged<ReadReply<ServerReadReplyBatch>>;
     type Error = ReadySetError;
-    type Future = impl Future<Output = Result<Self::Response, Self::Error>>;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
@@ -331,12 +333,12 @@ impl Service<Tagged<ReadQuery>> for ReadRequestHandler {
             }
         };
 
-        async {
+        Box::pin(async {
             match res {
                 CallResult::Immediate(immediate_response) => immediate_response,
                 CallResult::Async(async_response) => async_response.await,
             }
-        }
+        })
     }
 }
 
@@ -349,7 +351,7 @@ pub async fn retry_misses(mut rx: UnboundedReceiver<(BlockingRead, Ack)>) {
     while let Some((mut pending, ack)) = rx.recv().await {
         loop {
             if let Some(recv) = &mut pending.receiver {
-                // If a receiever is available (on miss) then we simply wait for a notification that
+                // If a receiver is available (on miss) then we simply wait for a notification that
                 // a hole has been filled, then recheck
                 let _ = recv.recv().await;
                 while !recv.is_empty() {

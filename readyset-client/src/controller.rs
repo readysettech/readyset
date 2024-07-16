@@ -2,6 +2,7 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::future::Future;
 use std::net::SocketAddr;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
@@ -159,7 +160,7 @@ impl Service<ControllerRequest> for RawController {
     type Response = hyper::body::Bytes;
     type Error = ReadySetError;
 
-    type Future = impl Future<Output = Result<Self::Response, Self::Error>> + Send;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
     fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
@@ -170,11 +171,11 @@ impl Service<ControllerRequest> for RawController {
         let url = self.url.clone();
         let client = self.client.clone();
         let request_timeout = self.request_timeout.unwrap_or(Duration::MAX);
-        async move {
+        Box::pin(async move {
             controller_request(&url, &client, req, request_timeout)
                 .await
                 .map_err(|e| e.error)
-        }
+        })
     }
 }
 
@@ -212,7 +213,7 @@ impl Service<ControllerRequest> for Controller {
     type Response = hyper::body::Bytes;
     type Error = ReadySetError;
 
-    type Future = impl Future<Output = Result<Self::Response, Self::Error>> + Send;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
     fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
@@ -227,7 +228,7 @@ impl Service<ControllerRequest> for Controller {
         let start = Instant::now();
         let mut last_error_desc: Option<String> = None;
 
-        async move {
+        Box::pin(async move {
             let original_url = leader_url.read().clone();
             let mut url = original_url.clone();
 
@@ -285,7 +286,7 @@ impl Service<ControllerRequest> for Controller {
                     }
                 }
             }
-        }
+        })
     }
 }
 

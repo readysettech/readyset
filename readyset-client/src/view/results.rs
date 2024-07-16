@@ -622,11 +622,11 @@ impl StreamingIterator for ResultIterator {
 
 impl IntoIterator for ResultIterator {
     type Item = Vec<DfValue>;
-    type IntoIter = impl Iterator<Item = Vec<DfValue>>;
+    type IntoIter = Box<dyn Iterator<Item = Vec<DfValue>> + Send>;
 
     /// Convert to an iterator over owned rows (rows are cloned)
     fn into_iter(self) -> Self::IntoIter {
-        self.map_deref(|i| i.to_vec())
+        Box::new(self.map_deref(|i| i.to_vec()))
     }
 }
 

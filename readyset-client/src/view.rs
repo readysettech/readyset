@@ -7,6 +7,7 @@ use std::future::Future;
 use std::hash::{Hash, Hasher};
 use std::net::SocketAddr;
 use std::ops::Range;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
@@ -226,7 +227,7 @@ impl Service<()> for Endpoint {
     type Response = InnerService;
     type Error = tokio::io::Error;
 
-    type Future = impl Future<Output = Result<Self::Response, Self::Error>>;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
     fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
@@ -235,7 +236,7 @@ impl Service<()> for Endpoint {
     fn call(&mut self, _: ()) -> Self::Future {
         let f = tokio::net::TcpStream::connect(self.addr);
         let timeout = self.timeout;
-        async move {
+        Box::pin(async move {
             let s = tokio::time::timeout(timeout, f).await??;
             s.set_nodelay(true)?;
             let s = AsyncBincodeStream::from(s).for_async();
@@ -244,7 +245,7 @@ impl Service<()> for Endpoint {
                 t,
                 |e| error!(error = %e, "View server went away"),
             ))
-        }
+        })
     }
 }
 
@@ -1171,7 +1172,7 @@ impl Service<ViewQuery> for ReaderHandle {
     type Response = LookupResult<Results>;
     type Error = ReadySetError;
 
-    type Future = impl Future<Output = Result<Self::Response, Self::Error>> + Send;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         for s in &mut self.shards {
@@ -1206,7 +1207,7 @@ impl Service<ViewQuery> for ReaderHandle {
 
             trace!("submit request");
 
-            return future::Either::Left(
+            return Box::pin(future::Either::<_, Self::Future>::Left(
                 self.shards
                     .first_mut()
                     .call(request)
@@ -1232,7 +1233,7 @@ impl Service<ViewQuery> for ReaderHandle {
                         instrument_if_enabled(future, span)
                     })
                     .map_err(move |e| view_err(ni, e)),
-            );
+            ));
         }
 
         span.in_scope(|| trace!("shard request"));
@@ -1248,7 +1249,7 @@ impl Service<ViewQuery> for ReaderHandle {
 
         let node = self.node;
         let name = self.name.clone();
-        future::Either::Right(
+        Box::pin(future::Either::<Self::Future, _>::Right(
             self.shards
                 .iter_mut()
                 .enumerate()
@@ -1325,7 +1326,7 @@ impl Service<ViewQuery> for ReaderHandle {
                         },
                     )
                 }),
-        )
+        ))
     }
 }
 
