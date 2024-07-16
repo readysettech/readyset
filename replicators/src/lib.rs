@@ -1,10 +1,5 @@
-#![feature(
-    never_type,
-    hash_raw_entry,
-    extract_if,
-    string_remove_matches,
-    let_chains
-)]
+#![feature(never_type, hash_raw_entry, extract_if, let_chains)]
+
 pub mod db_util;
 pub(crate) mod mysql_connector;
 pub(crate) mod noria_adapter;
