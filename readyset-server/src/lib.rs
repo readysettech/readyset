@@ -386,7 +386,6 @@
     let_chains,
     never_type,
     exhaustive_patterns,
-    type_alias_impl_trait,
     hash_extract_if,
     impl_trait_in_assoc_type
 )]

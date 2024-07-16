@@ -85,7 +85,6 @@
 //! }
 //! ```
 #![feature(never_type)]
-#![feature(type_alias_impl_trait)]
 
 pub mod benchmark;
 pub mod graph;
