@@ -590,6 +590,10 @@ pub struct WorkerOptions {
     #[arg(long, env = "ALLOW_FULL_MATERIALIZATION", hide = true)]
     pub allow_full_materialization: bool,
 
+    /// The materialization frontier strategy to use. Defaults to `None`.
+    #[arg(long, env = "MATERIALIZATION_FRONTIER", default_value_t = FrontierStrategy::None, hide = true)]
+    pub materialization_frontier: FrontierStrategy,
+
     /// Enable packet filters in egresses before readers
     #[arg(long, hide = true)]
     pub enable_packet_filters: bool,

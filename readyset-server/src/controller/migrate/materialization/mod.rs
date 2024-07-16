@@ -6,6 +6,7 @@
 //! module).
 
 use std::collections::{HashMap, HashSet};
+use std::fmt::{self, Display};
 
 use bimap::BiHashMap;
 use dataflow::prelude::*;
@@ -33,7 +34,7 @@ pub(crate) struct InvalidEdge {
 ///
 /// Note that no matter what this is set to, all nodes whose name starts with `SHALLOW_` will be
 /// placed beyond the frontier.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, clap::ValueEnum, Default)]
 pub enum FrontierStrategy {
     /// Place no nodes beyond the frontier (this is the default).
     #[default]
@@ -42,8 +43,16 @@ pub enum FrontierStrategy {
     AllPartial,
     /// Place all partial readers beyond the frontier.
     Readers,
-    /// Place all nodes whose name contain the given string beyond the frontier.
-    Match(String),
+}
+
+impl Display for FrontierStrategy {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::None => write!(f, "none"),
+            Self::AllPartial => write!(f, "all-partial"),
+            Self::Readers => write!(f, "readers"),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -695,14 +704,6 @@ impl Materializations {
                 continue;
             }
 
-            // Normally, we only mark things that are materialized as .purge, but when it comes to
-            // name matching, we don't do that since MIR will sometimes place the name of identity
-            // nodes and the like. It's up to the user to make sure they don't match node names
-            // that are, say, above a full materialization.
-            if let FrontierStrategy::Match(ref m) = self.config.frontier_strategy {
-                n.purge = n.purge || n.name().name.contains(m);
-                continue;
-            }
             if n.name().name.starts_with("SHALLOW_") {
                 n.purge = true;
                 continue;
