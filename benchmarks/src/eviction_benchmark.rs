@@ -12,8 +12,9 @@
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::str::FromStr;
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::Relaxed;
-use std::sync::atomic::{AtomicBool, AtomicU64};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -36,14 +37,15 @@ use crate::{benchmark_counter, benchmark_histogram, benchmark_increment_counter}
 
 const REPORT_RESULTS_INTERVAL: Duration = Duration::from_secs(2);
 
-static SCALE: AtomicU64 = AtomicU64::new(1.0f64.to_bits());
+static SCALE: Mutex<f64> = Mutex::new(1.0f64);
 
 fn get_scale() -> f64 {
-    f64::from_bits(SCALE.load(Relaxed))
+    *SCALE.lock().expect("couldn't lock mutex")
 }
 
-fn set_scale(scale: f64) {
-    SCALE.store(scale.to_bits(), Relaxed);
+fn set_scale(s: f64) {
+    let mut scale = SCALE.lock().expect("couldn't lock mutex");
+    *scale = s;
 }
 
 #[derive(Parser, Clone, Default, Serialize, Deserialize)]
