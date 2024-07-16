@@ -133,31 +133,32 @@ impl<'ast, 'schema> VisitorMut<'ast> for ResolveSchemaVisitor<'schema> {
             return Ok(());
         }
 
-        if let Some(schema) = self.search_path.iter().try_find(|schema| {
+        for schema in self.search_path {
             let found = self
                 .tables
                 .get(schema)
                 .into_iter()
                 .find_map(|ts| ts.get(&table.name).copied());
             match found {
-                Some(CanQuery::Yes) => Ok(true),
-                Some(CanQuery::No) => Err(ReadySetError::TableNotReplicated {
-                    name: table.name.clone().into(),
-                    schema: Some((*schema).into()),
-                }),
+                Some(CanQuery::Yes) => {
+                    table.schema = Some(schema.clone());
+                    return Ok(());
+                }
+                Some(CanQuery::No) => {
+                    return Err(ReadySetError::TableNotReplicated {
+                        name: table.name.clone().into(),
+                        schema: Some(schema.into()),
+                    })
+                }
                 None => {
                     if let Some(invalidating) = self.invalidating_tables.as_deref_mut() {
                         invalidating.push(Relation {
-                            schema: Some((**schema).clone()),
+                            schema: Some(schema.clone()),
                             name: table.name.clone(),
                         });
                     }
-
-                    Ok(false)
                 }
-            }
-        })? {
-            table.schema = Some(schema.clone());
+            };
         }
 
         Ok(())

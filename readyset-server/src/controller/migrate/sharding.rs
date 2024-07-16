@@ -92,15 +92,17 @@ pub fn shard(
                 if let Sharding::ByColumn(c, shards) = s {
                     // remap c according to node's semantics
                     let n = &graph[node];
-                    let src = (0..n.columns().len()).try_find(|&col| -> ReadySetResult<bool> {
-                        Ok(if let Some(src) = n.parent_columns(col)[0].1 {
-                            src == c
-                        } else {
-                            false
-                        })
-                    })?;
+                    let mut source = None;
+                    for col in 0..n.columns().len() {
+                        if let Some(src) = n.parent_columns(col)[0].1 {
+                            if src == c {
+                                source = Some(col);
+                                break;
+                            }
+                        }
+                    }
 
-                    if let Some(src) = src {
+                    if let Some(src) = source {
                         s = Sharding::ByColumn(src, shards);
                     } else {
                         // sharding column is not emitted by this node!
@@ -715,13 +717,15 @@ pub fn validate(
             if nd.is_internal() || nd.is_base() {
                 if let Sharding::ByColumn(c, shards) = ps {
                     // remap c according to node's semantics
-                    let src = (0..nd.columns().len()).try_find(|&col| -> ReadySetResult<bool> {
+                    let mut source = None;
+                    'outer: for col in 0..nd.columns().len() {
                         for pc in nd.parent_columns(col) {
                             if let (p, Some(src)) = pc {
                                 // found column c in parent pni
                                 if p == pni && src == c {
                                     // extract *child* column ID that we found a match for
-                                    return Ok(true);
+                                    source = Some(col);
+                                    break 'outer;
                                 } else if !graph[pni].is_internal() {
                                     // need to look transitively for an indirect parent, since
                                     // `parent_columns`'s return values does not take sharder
@@ -733,15 +737,15 @@ pub fn validate(
                                     if petgraph::algo::has_path_connecting(graph, p, pni, None)
                                         && src == c
                                     {
-                                        return Ok(true);
+                                        source = Some(col);
+                                        break 'outer;
                                     }
                                 }
                             }
                         }
-                        Ok(false)
-                    })?;
+                    }
 
-                    if let Some(src) = src {
+                    if let Some(src) = source {
                         return Ok(Sharding::ByColumn(src, shards));
                     } else {
                         return Ok(Sharding::Random(shards));
