@@ -171,7 +171,7 @@ impl fmt::Display for CreateSchema {
 }
 
 fn strip_backticks(table: &mut String) {
-    table.remove_matches("`");
+    table.retain(|c| c != '`');
 }
 
 /// Checks if the passed in ReadySetError is due to the slot slot_name not existing, such as from
