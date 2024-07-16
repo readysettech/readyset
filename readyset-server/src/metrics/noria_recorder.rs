@@ -49,33 +49,19 @@ impl metrics::HistogramFn for NoriaHistogram {
 impl Recorder for NoriaMetricsRecorder {
     fn register_counter(&self, key: &Key, _metadata: &Metadata<'_>) -> Counter {
         let mut counters = self.counters.lock();
-        counters
-            .raw_entry_mut()
-            .from_key(key)
-            .or_insert_with(|| (key.clone(), Default::default()))
-            .1
-            .clone()
-            .into()
+        counters.entry(key.clone()).or_default().clone().into()
     }
 
     fn register_gauge(&self, key: &Key, _metadata: &Metadata<'_>) -> Gauge {
         let mut gauges = self.gauges.lock();
-        gauges
-            .raw_entry_mut()
-            .from_key(key)
-            .or_insert_with(|| (key.clone(), Default::default()))
-            .1
-            .clone()
-            .into()
+        gauges.entry(key.clone()).or_default().clone().into()
     }
 
     fn register_histogram(&self, key: &Key, _metadata: &Metadata<'_>) -> Histogram {
         let mut histograms = self.histograms.lock();
         histograms
-            .raw_entry_mut()
-            .from_key(key)
-            .or_insert_with(|| (key.clone(), Arc::new(NoriaHistogram::new())))
-            .1
+            .entry(key.clone())
+            .or_insert_with(|| Arc::new(NoriaHistogram::new()))
             .clone()
             .into()
     }

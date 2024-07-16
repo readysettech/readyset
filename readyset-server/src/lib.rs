@@ -382,7 +382,6 @@
     box_patterns,
     extract_if,
     entry_insert,
-    hash_raw_entry,
     never_type,
     exhaustive_patterns,
     hash_extract_if

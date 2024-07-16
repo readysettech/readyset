@@ -1140,13 +1140,13 @@ impl NoriaAdapter {
     /// Get a mutator for a noria table from the cache if available, or fetch a new one
     /// from the controller and cache it. Returns None if the table doesn't exist in noria.
     async fn mutator_for_table(&mut self, name: &Relation) -> ReadySetResult<Option<&mut Table>> {
-        match self.mutator_map.raw_entry_mut().from_key(name) {
-            hash_map::RawEntryMut::Occupied(o) => Ok(o.into_mut().as_mut()),
-            hash_map::RawEntryMut::Vacant(v) => match self.noria.table(name.clone()).await {
-                Ok(table) => Ok(v.insert(name.clone(), Some(table)).1.as_mut()),
+        match self.mutator_map.entry(name.clone()) {
+            hash_map::Entry::Occupied(o) => Ok(o.into_mut().as_mut()),
+            hash_map::Entry::Vacant(v) => match self.noria.table(name.clone()).await {
+                Ok(table) => Ok(v.insert(Some(table)).as_mut()),
                 Err(e) if e.caused_by_table_not_found() => {
                     // Cache the not found result as well as the found result
-                    Ok(v.insert(name.clone(), None).1.as_mut())
+                    Ok(v.insert(None).as_mut())
                 }
                 Err(e) => Err(e),
             },
