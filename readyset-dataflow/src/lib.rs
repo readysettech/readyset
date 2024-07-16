@@ -6,7 +6,6 @@
 )]
 #![feature(
     btree_extract_if,
-    bound_as_ref,
     stmt_expr_attributes,
     extract_if,
     hash_extract_if,
