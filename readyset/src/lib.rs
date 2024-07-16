@@ -1,5 +1,4 @@
 #![deny(macro_use_extern_crate)]
-#![feature(let_chains)]
 
 pub mod mysql;
 pub mod psql;

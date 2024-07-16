@@ -55,9 +55,8 @@ impl<B: PsqlBackend> Runner<B, tokio::net::TcpStream> {
         // Connection has closed or is waiting for tls handshake
         let loop_status = runner.main_loop().await;
 
-        if matches!(loop_status, MainLoopStatus::RestartWithTls)
-            && let Some(acceptor) = tls_acceptor
-        {
+        if matches!(loop_status, MainLoopStatus::RestartWithTls) && tls_acceptor.is_some() {
+            let acceptor = tls_acceptor.unwrap(); // just checked
             let backend = runner.backend;
             let stream = runner.channel.into_inner();
             let mut protocol = runner.protocol;

@@ -158,11 +158,12 @@ impl<'ast, 'a> VisitorMut<'ast> for RemoveAliasesVisitor<'a> {
             table_expr.inner = TableExprInner::Table(table);
         } else if let TableExprInner::Table(orig_table @ Relation { schema: None, .. }) =
             &table_expr.inner
-            && let Some(table) = self.col_table_remap.get(&orig_table.name)
         {
-            // No schema, but table name in `col_table_remap`, means we're referencing an aliased
-            // subquery or CTE
-            table_expr.inner = TableExprInner::Table(table.clone());
+            if let Some(table) = self.col_table_remap.get(&orig_table.name) {
+                // No schema, but table name in `col_table_remap`, means we're referencing an
+                // aliased subquery or CTE
+                table_expr.inner = TableExprInner::Table(table.clone());
+            }
         }
 
         if !matches!(&table_expr.inner, TableExprInner::Subquery(_)) {

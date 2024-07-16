@@ -383,7 +383,6 @@
     extract_if,
     entry_insert,
     hash_raw_entry,
-    let_chains,
     never_type,
     exhaustive_patterns,
     type_alias_impl_trait,

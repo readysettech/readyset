@@ -459,6 +459,20 @@ impl BuiltinFunction {
     }
 }
 
+fn max_subsecond_digits(left: &DfType, right: &DfType) -> Option<u16> {
+    match (left, right) {
+        (
+            DfType::Time {
+                subsecond_digits: left,
+            },
+            DfType::Time {
+                subsecond_digits: right,
+            },
+        ) => Some(cmp::max(*left, *right)),
+        (_, _) => None,
+    }
+}
+
 fn mysql_temporal_types_cvt(left: &DfType, right: &DfType) -> Option<DfType> {
     let left_is_date_and_time = left.is_date_and_time();
     let right_is_date_and_time = right.is_date_and_time();
@@ -468,34 +482,28 @@ fn mysql_temporal_types_cvt(left: &DfType, right: &DfType) -> Option<DfType> {
 
     if left_is_temporal && right_is_temporal {
         if left_is_date_and_time && right_is_date_and_time {
-            if let DfType::DateTime { subsecond_digits } = left {
-                Some(DfType::DateTime {
+            match (left, right) {
+                (DfType::DateTime { subsecond_digits }, _) => Some(DfType::DateTime {
                     subsecond_digits: cmp::max(*subsecond_digits, right.subsecond_digits()?),
-                })
-            } else if let DfType::DateTime { subsecond_digits } = right {
-                Some(DfType::DateTime {
+                }),
+                (_, DfType::DateTime { subsecond_digits }) => Some(DfType::DateTime {
                     subsecond_digits: cmp::max(*subsecond_digits, left.subsecond_digits()?),
-                })
-            } else if let DfType::TimestampTz { .. } = left
-                && let DfType::TimestampTz { .. } = right
-            {
-                Some(DfType::TimestampTz {
+                }),
+                (DfType::TimestampTz { .. }, DfType::TimestampTz { .. }) => {
+                    Some(DfType::TimestampTz {
+                        subsecond_digits: cmp::max(
+                            left.subsecond_digits()?,
+                            right.subsecond_digits()?,
+                        ),
+                    })
+                }
+                (left, right) => Some(DfType::Timestamp {
                     subsecond_digits: cmp::max(left.subsecond_digits()?, right.subsecond_digits()?),
-                })
-            } else {
-                Some(DfType::Timestamp {
-                    subsecond_digits: cmp::max(left.subsecond_digits()?, right.subsecond_digits()?),
-                })
+                }),
             }
-        } else if let DfType::Time {
-            subsecond_digits: left_subsec_digs,
-        } = left
-            && let DfType::Time {
-                subsecond_digits: right_subsec_digs,
-            } = right
-        {
+        } else if let Some(max) = max_subsecond_digits(left, right) {
             Some(DfType::Time {
-                subsecond_digits: cmp::max(*left_subsec_digs, *right_subsec_digs),
+                subsecond_digits: max,
             })
         } else if (matches!(left, DfType::Time { .. }) && right.is_any_int())
             || (matches!(right, DfType::Time { .. }) && left.is_any_int())
@@ -537,18 +545,15 @@ fn mysql_text_type_cvt(left: &DfType, right: &DfType) -> Option<DfType> {
         } else {
             let left_len = get_text_type_max_length(left)?;
             let right_len = get_text_type_max_length(right)?;
-            if let DfType::Char(..) = left
-                && let DfType::Char(..) = right
-            {
-                Some(DfType::Char(
+            match (left, right) {
+                (DfType::Char(..), DfType::Char(..)) => Some(DfType::Char(
                     cmp::max(left_len, right_len),
                     Collation::default(),
-                ))
-            } else {
-                Some(DfType::VarChar(
+                )),
+                (_, _) => Some(DfType::VarChar(
                     cmp::max(left_len, right_len),
                     Collation::default(),
-                ))
+                )),
             }
         }
     } else {
