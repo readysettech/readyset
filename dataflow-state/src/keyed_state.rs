@@ -345,11 +345,7 @@ impl KeyedState {
             | KeyedState::QuadHash(_)
             | KeyedState::QuinHash(_)
             | KeyedState::SexHash(_)
-            | KeyedState::MultiHash(_, _) =>
-            #[allow(clippy::panic)] // documented invariant
-            {
-                panic!("insert_range called on a HashMap KeyedState")
-            }
+            | KeyedState::MultiHash(_, _) => panic!("insert_range called on a HashMap KeyedState"),
         };
     }
 
@@ -390,9 +386,7 @@ impl KeyedState {
             | KeyedState::QuadHash(_)
             | KeyedState::QuinHash(_)
             | KeyedState::SexHash(_)
-            | KeyedState::MultiHash(_, _) =>
-            #[allow(clippy::panic)] // documented invariant
-            {
+            | KeyedState::MultiHash(_, _) => {
                 panic!("insert_full_range called on a HashMap KeyedState")
             }
         };
@@ -462,19 +456,11 @@ impl KeyedState {
                 | KeyedState::SexHash(_)
                 | KeyedState::MultiHash(..),
                 _,
-            ) =>
-            #[allow(clippy::panic)] // documented invariant
-            {
-                panic!("lookup_range called on a HashMap KeyedState")
-            }
-            _ =>
-            #[allow(clippy::panic)] // documented invariant
-            {
-                panic!(
-                    "Invalid key type for KeyedState, got key of length {:?}",
-                    key.len()
-                )
-            }
+            ) => panic!("lookup_range called on a HashMap KeyedState"),
+            _ => panic!(
+                "Invalid key type for KeyedState, got key of length {:?}",
+                key.len()
+            ),
         }
     }
 

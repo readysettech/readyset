@@ -1,5 +1,3 @@
-#![feature(stmt_expr_attributes)]
-
 mod key;
 mod keyed_state;
 mod memory_state;

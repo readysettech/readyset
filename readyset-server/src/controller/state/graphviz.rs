@@ -134,12 +134,12 @@ impl<'a> Display for Graphviz<'a> {
             }
 
             indentln(f)?;
+            #[allow(clippy::indexing_slicing)] // just got it out of the graph
             write!(
                 f,
                 "n{} -> n{} [ {} ]",
                 edge.source().index(),
                 edge.target().index(),
-                #[allow(clippy::indexing_slicing)] // just got it out of the graph
                 if self.graph[edge.source()].is_egress() {
                     "color=\"#CCCCCC\""
                 } else if self.graph[edge.source()].is_source() {
