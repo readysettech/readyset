@@ -98,6 +98,7 @@ impl Builder {
 
         builder.set_replication_strategy(opts.domain_replication_options.into());
         builder.set_verbose_domain_metrics(opts.verbose_domain_metrics);
+        builder.set_frontier_strategy(opts.materialization_frontier);
 
         if let Some(volume_id) = opts.volume_id {
             builder.set_volume_id(volume_id);
