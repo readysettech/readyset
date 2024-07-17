@@ -34,13 +34,18 @@ pub(crate) fn convert_filters_to_join_keys(query: &mut MirQuery<'_>) -> ReadySet
         let (mut c1, mut c2) = if let MirNodeInner::Filter {
             conditions:
                 Expr::BinaryOp {
-                    lhs: box Expr::Column(c1),
+                    lhs, //: box Expr::Column(c1),
                     op: BinaryOperator::Equal,
-                    rhs: box Expr::Column(c2),
+                    rhs, //: box Expr::Column(c2),
                 },
         } = &node.inner
         {
-            (Column::from(c1.clone()), Column::from(c2.clone()))
+            match (&**lhs, &**rhs) {
+                (Expr::Column(c1), Expr::Column(c2)) => {
+                    (Column::from(c1.clone()), Column::from(c2.clone()))
+                }
+                _ => continue,
+            }
         } else {
             continue;
         };

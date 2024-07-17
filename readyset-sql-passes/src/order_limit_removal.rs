@@ -95,15 +95,19 @@ fn compares_unique_key_against_literal(
 ) -> ReadySetResult<bool> {
     match expr {
         Expr::BinaryOp {
-            lhs: box Expr::Literal(_),
-            rhs: box Expr::Column(ref c),
+            lhs,
+            rhs,
             op: BinaryOperator::Equal | BinaryOperator::Is,
-        }
-        | Expr::BinaryOp {
-            lhs: box Expr::Column(ref c),
-            rhs: box Expr::Literal(_),
-            op: BinaryOperator::Equal | BinaryOperator::Is,
-        } => Ok(is_unique_or_primary(c, base_schemas, table_exprs)?),
+        } => match (lhs.as_ref(), rhs.as_ref()) {
+            (Expr::Literal(_), Expr::Column(ref c)) | (Expr::Column(ref c), Expr::Literal(_)) => {
+                return Ok(is_unique_or_primary(c, base_schemas, table_exprs)?);
+            }
+            _ => (),
+        },
+        _ => (),
+    };
+
+    match expr {
         Expr::BinaryOp {
             op: BinaryOperator::And,
             ref lhs,

@@ -14,9 +14,15 @@ impl StripPostFilters for Option<Expr> {
         self.and_then(|conds| match conds {
             Expr::BinaryOp {
                 op: BinaryOperator::ILike | BinaryOperator::Like,
-                lhs: box Expr::Column(_),
-                rhs: box Expr::Literal(Literal::Placeholder(_)),
-            } => None,
+                lhs,
+                rhs,
+            } if matches!(
+                (lhs.as_ref(), rhs.as_ref()),
+                (Expr::Column(_), Expr::Literal(Literal::Placeholder(_)))
+            ) =>
+            {
+                None
+            }
             Expr::BinaryOp { op, lhs, rhs } => match (
                 Some(*lhs).strip_post_filters(),
                 Some(*rhs).strip_post_filters(),

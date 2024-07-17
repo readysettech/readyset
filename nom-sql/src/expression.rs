@@ -1143,17 +1143,17 @@ where
             Primary(expr) => expr,
             // unwrap: ok because there are no errors possible
             Group(group) => self.parse(&mut group.into_iter()).unwrap(),
-            PgsqlCast(box expr, ty) => {
-                let tt = self.parse(&mut iter::once(expr)).unwrap();
+            PgsqlCast(expr, ty) => {
+                let tt = self.parse(&mut iter::once(*expr)).unwrap();
                 Expr::Cast {
                     expr: tt.into(),
                     ty,
                     postgres_style: true,
                 }
             }
-            OpSuffix(box lhs, op, suffix, box rhs) => {
-                let lhs = Box::new(self.parse(&mut iter::once(lhs)).unwrap());
-                let rhs = Box::new(self.parse(&mut iter::once(rhs)).unwrap());
+            OpSuffix(lhs, op, suffix, rhs) => {
+                let lhs = Box::new(self.parse(&mut iter::once(*lhs)).unwrap());
+                let rhs = Box::new(self.parse(&mut iter::once(*rhs)).unwrap());
                 match suffix {
                     OperatorSuffix::Any => Expr::OpAny { lhs, op, rhs },
                     OperatorSuffix::Some => Expr::OpSome { lhs, op, rhs },

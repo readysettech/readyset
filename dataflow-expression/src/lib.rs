@@ -1,5 +1,3 @@
-#![feature(box_patterns)]
-
 mod binary_operator;
 mod eval;
 pub mod like;

@@ -171,6 +171,23 @@ fn push_dependent_filter(
 /// errors at runtime basically all the time
 #[instrument(skip_all, fields(query = %query.name().display_unquoted()))]
 pub(crate) fn eliminate_dependent_joins(query: &mut MirQuery<'_>) -> ReadySetResult<()> {
+    fn is_two_columns(left: &Expr, right: &Expr) -> bool {
+        match (left, right) {
+            (Expr::Column(_), Expr::Column(_)) => true,
+            _ => false,
+        }
+    }
+
+    fn get_two_columns<'a>(
+        left: &'a Expr,
+        right: &'a Expr,
+    ) -> (&'a nom_sql::Column, &'a nom_sql::Column) {
+        match (left, right) {
+            (Expr::Column(ref left), Expr::Column(ref right)) => (left, right),
+            _ => unreachable!(),
+        }
+    }
+
     // TODO(aspen): lots of opportunity for memoization here, but the MIR RefCell mess makes that a
     // lot harder
     loop {
@@ -208,10 +225,11 @@ pub(crate) fn eliminate_dependent_joins(query: &mut MirQuery<'_>) -> ReadySetRes
             if let MirNodeInner::Filter { conditions } = inner {
                 match conditions {
                     Expr::BinaryOp {
-                        lhs: box Expr::Column(left_col),
+                        lhs,
                         op: BinaryOperator::Equal,
-                        rhs: box Expr::Column(right_col),
-                    } => {
+                        rhs,
+                    } if is_two_columns(&**lhs, &**rhs) => {
+                        let (left_col, right_col) = get_two_columns(&lhs, &rhs);
                         let matches_left = left_columns.iter().any(|c| *c == *left_col);
                         let matches_right = left_columns.iter().any(|c| *c == *right_col);
                         match (matches_left, matches_right) {

@@ -1,5 +1,3 @@
-#![feature(box_patterns)]
-
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::convert::{TryFrom, TryInto};
