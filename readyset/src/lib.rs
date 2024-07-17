@@ -1076,6 +1076,7 @@ where
         let expr_dialect = self.expr_dialect;
         let parse_dialect = self.parse_dialect;
         while let Some(Ok(s)) = rt.block_on(listener.next()) {
+            println!("EE1000 awww yeee");
             let client_addr = s.peer_addr()?;
             let connection = info_span!("connection", addr = %client_addr);
             connection.in_scope(|| debug!("Accepted new connection"));
