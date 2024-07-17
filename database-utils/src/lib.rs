@@ -64,6 +64,13 @@ pub struct UpstreamConfig {
     #[serde(default)]
     pub disable_setup_ddl_replication: bool,
 
+    /// Disable running CREATE PUBLICATION query for PostgreSQL. If this flag is set
+    /// a publication named readyset should be adced for all tables manually on the
+    /// primary server before streaming replication will start.
+    #[arg(long, env = "DISABLE_CREATE_PUBLICATION", hide = true)]
+    #[serde(default)]
+    pub disable_create_publication: bool,
+
     /// Server ID to use when registering as a replication follower with the upstream db
     ///
     /// This can be used to differentiate different ReadySet deployments connected to the same
@@ -244,6 +251,7 @@ impl Default for UpstreamConfig {
             upstream_db_url: Default::default(),
             disable_upstream_ssl_verification: false,
             disable_setup_ddl_replication: false,
+            disable_create_publication: false,
             replication_server_id: Default::default(),
             replicator_restart_timeout: Duration::from_secs(1),
             replication_tables: Default::default(),

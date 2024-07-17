@@ -167,14 +167,18 @@ impl PostgresWalConnector {
             //
             // Note that later on, this means we'll need to make sure we resnapshot *all* tables!
             connector
-                .create_publication_and_slot(repl_slot_name)
+                .create_publication_and_slot(repl_slot_name, config)
                 .await?;
         }
 
         Ok(connector)
     }
 
-    async fn create_publication_and_slot(&mut self, repl_slot_name: &str) -> ReadySetResult<()> {
+    async fn create_publication_and_slot(
+        &mut self, 
+        repl_slot_name: &str, 
+        config: UpstreamConfig
+    ) -> ReadySetResult<()> {
         let system = self.identify_system().await?;
         debug!(
             id = %system.id,
@@ -183,20 +187,22 @@ impl PostgresWalConnector {
             dbname = ?system.dbname
         );
 
-        match self.create_publication(PUBLICATION_NAME).await {
-            Ok(()) => {
-                // Created a new publication, everything is good
+        if !config.disable_create_publication {
+            match self.create_publication(PUBLICATION_NAME).await {
+                Ok(()) => {
+                    // Created a new publication, everything is good
+                }
+                Err(err)
+                    if err.to_string().contains("publication")
+                        && err.to_string().contains("already exists") =>
+                {
+                    // This is an existing publication we are going to use
+                }
+                Err(err) if err.to_string().contains("permission denied") => {
+                    error!("Insufficient permissions to create publication FOR ALL TABLES");
+                }
+                Err(err) => return Err(err),
             }
-            Err(err)
-                if err.to_string().contains("publication")
-                    && err.to_string().contains("already exists") =>
-            {
-                // This is an existing publication we are going to use
-            }
-            Err(err) if err.to_string().contains("permission denied") => {
-                error!("Insufficient permissions to create publication FOR ALL TABLES");
-            }
-            Err(err) => return Err(err),
         }
 
         // Drop the existing slot if any
