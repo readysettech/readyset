@@ -31,6 +31,7 @@ use readyset_client::get_metric;
 use readyset_client::metrics::{recorded, MetricsDump};
 use readyset_data::DfValue;
 use readyset_psql::AuthenticationMethod;
+use readyset_server::FrontierStrategy;
 use regex::Regex;
 use structopt::StructOpt;
 use tokio::sync::Mutex;
@@ -524,7 +525,7 @@ impl AdapterHandle {
         args: &SystemBenchArgs,
     ) -> anyhow::Result<Self> {
         let (mut sock1, mut sock2) = UnixStream::pair()?;
-        let upstream_url_clone = args.upstream_url_with_db_name();
+        let args_clone = args.clone();
         // A word of warning: DO NOT CREATE A RUNTIME BEFORE FORKING, IT *WILL* MESS WITH TOKIO
         match fork().unwrap() {
             Fork::Child => {
@@ -535,7 +536,7 @@ impl AdapterHandle {
                 set_cpu_affinity(true);
                 drop(sock2);
                 sock1.read_exact(&mut [0u8])?;
-                std::thread::spawn(move || start_adapter(&upstream_url_clone));
+                std::thread::spawn(move || start_adapter(args_clone));
                 sock1.read_exact(&mut [0u8])?;
                 std::process::exit(0);
             }
@@ -601,11 +602,16 @@ async fn prepare_db<P: Into<PathBuf>>(path: P, args: &SystemBenchArgs) -> anyhow
 }
 
 /// Start the ReadySet adapter in standalone mode with options.
-fn start_adapter(upstream_url: &str) -> anyhow::Result<()> {
-    let database_type = DatabaseURL::from_str(upstream_url)?.database_type();
+fn start_adapter(args: SystemBenchArgs) -> anyhow::Result<()> {
+    let upstream_url = args.upstream_url_with_db_name();
+    let database_type = DatabaseURL::from_str(&upstream_url)?.database_type();
     let database_type_flag = format!("--database-type={}", database_type);
     let temp_dir = temp_dir::TempDir::new().unwrap();
     let log_level = env::var("LOG_LEVEL").unwrap_or_else(|_| "error".into());
+    let materialization_frontier = format!(
+        "--materialization-frontier={}",
+        args.materialization_frontier
+    );
     let options = vec![
         "bench", // This is equivalent to the program name in argv, ignored
         "--deployment",
@@ -617,7 +623,7 @@ fn start_adapter(upstream_url: &str) -> anyhow::Result<()> {
         "--enable-experimental-post-lookup",
         "--enable-experimental-straddled-joins",
         "--upstream-db-url",
-        upstream_url,
+        &upstream_url,
         "--durability",
         "ephemeral",
         "--authority",
@@ -630,6 +636,7 @@ fn start_adapter(upstream_url: &str) -> anyhow::Result<()> {
         "lru",
         "--noria-metrics",
         &database_type_flag,
+        &materialization_frontier,
     ];
 
     let adapter_options = Options::parse_from(options);
@@ -765,7 +772,7 @@ impl FromStr for MemoryLimit {
     }
 }
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone)]
 struct SystemBenchArgs {
     /// If specified, only run benches containing this string in their names
     // This argument is the first argument passed by `cargo bench`
@@ -789,6 +796,9 @@ struct SystemBenchArgs {
     /// Names an explicit baseline and enables overwriting the previous results.
     #[arg(long)]
     save_baseline: Option<String>,
+    /// Set the materialization FrontierStrategy; defaults to `None`.
+    #[arg(long, default_value_t = FrontierStrategy::None)]
+    materialization_frontier: FrontierStrategy,
     /// Compare all benchmark results against the upstream database as well
     #[arg(long)]
     compare_upstream: bool,
