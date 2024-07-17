@@ -1,5 +1,3 @@
-#![feature(btree_extract_if)]
-
 extern crate reader_map;
 
 use std::cmp::Ord;
@@ -142,7 +140,7 @@ fn do_ops<K, V, S>(
             }
             RemoveRange(ref range) => {
                 reader_map.remove_range(range.clone());
-                let _: Vec<_> = write_ref.extract_if(|k, _| range.contains(k)).collect();
+                write_ref.retain(|k, _| !range.contains(k));
             }
             Refresh => {
                 reader_map.publish();
