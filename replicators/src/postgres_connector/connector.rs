@@ -175,9 +175,9 @@ impl PostgresWalConnector {
     }
 
     async fn create_publication_and_slot(
-        &mut self, 
-        repl_slot_name: &str, 
-        config: UpstreamConfig
+        &mut self,
+        repl_slot_name: &str,
+        config: UpstreamConfig,
     ) -> ReadySetResult<()> {
         let system = self.identify_system().await?;
         debug!(
