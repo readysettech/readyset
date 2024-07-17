@@ -1,5 +1,3 @@
-#![feature(trace_macros)]
-
 //! This test suite implements the [Vertical Testing Design Doc][doc].
 //!
 //! [doc]: https://docs.google.com/document/d/1rTDzd4Z5jSUDqGmIu2C7R06f2HkNWxEll33-rF4WC-c
