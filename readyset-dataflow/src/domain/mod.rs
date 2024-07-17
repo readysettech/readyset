@@ -2681,42 +2681,40 @@ impl Domain {
         let mut records = Vec::new();
         let mut replay_keys = HashSet::new();
         // Drain misses, and keep the hits
-        let _: Vec<_> = keys
-            .extract_if(|key| match key {
-                KeyComparison::Equal(equal) => {
-                    match state.lookup(cols, &PointKey::from(equal.clone())) {
-                        LookupResult::Some(record) => {
-                            records.push(record);
-                            false
-                        }
-                        LookupResult::Missing => {
-                            replay_keys.insert((key.clone(), key.clone()));
-                            true
-                        }
+        keys.retain(|key| match key {
+            KeyComparison::Equal(equal) => {
+                match state.lookup(cols, &PointKey::from(equal.clone())) {
+                    LookupResult::Some(record) => {
+                        records.push(record);
+                        true
+                    }
+                    LookupResult::Missing => {
+                        replay_keys.insert((key.clone(), key.clone()));
+                        false
                     }
                 }
-                KeyComparison::Range(range) => {
-                    match state.lookup_range(cols, &RangeKey::from(range)) {
-                        RangeLookupResult::Some(record) => {
-                            records.push(record);
-                            false
-                        }
-                        RangeLookupResult::Missing(ms) => {
-                            // FIXME(eta): error handling impl here adds overhead
-                            let ms = ms.into_iter().map(|m| {
-                                // This is the only point where the replay_key and miss_key are
-                                // different.
-                                #[allow(clippy::unwrap_used)]
-                                // keys can't be empty coming from misses
-                                (key.clone(), KeyComparison::try_from(m).unwrap())
-                            });
-                            replay_keys.extend(ms);
-                            true
-                        }
+            }
+            KeyComparison::Range(range) => {
+                match state.lookup_range(cols, &RangeKey::from(range)) {
+                    RangeLookupResult::Some(record) => {
+                        records.push(record);
+                        true
+                    }
+                    RangeLookupResult::Missing(ms) => {
+                        // FIXME(eta): error handling impl here adds overhead
+                        let ms = ms.into_iter().map(|m| {
+                            // This is the only point where the replay_key and miss_key are
+                            // different.
+                            #[allow(clippy::unwrap_used)]
+                            // keys can't be empty coming from misses
+                            (key.clone(), KeyComparison::try_from(m).unwrap())
+                        });
+                        replay_keys.extend(ms);
+                        false
                     }
                 }
-            })
-            .collect();
+            }
+        });
 
         Ok(StateLookupResult {
             records,

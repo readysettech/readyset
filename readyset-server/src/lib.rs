@@ -383,8 +383,7 @@
     extract_if,
     entry_insert,
     never_type,
-    exhaustive_patterns,
-    hash_extract_if
+    exhaustive_patterns
 )]
 #![deny(unused_extern_crates)]
 #![deny(macro_use_extern_crate)]

@@ -253,14 +253,11 @@ impl ExprSkeletons {
     pub fn remove_expressions(&mut self, exprs: &HashSet<Relation>) {
         // For each entry, remove a set of literals if it is associated with one of the given
         // aliases
-        let _: Vec<_> = self
-            .inner
-            .extract_if(|_, v| {
-                let _: Vec<_> = v.extract_if(|(alias, _)| exprs.contains(alias)).collect();
-                // Remove the entire entry if we've removed all associated literals
-                v.is_empty()
-            })
-            .collect();
+        self.inner.retain(|_, v| {
+            let _: Vec<_> = v.extract_if(|(alias, _)| exprs.contains(alias)).collect();
+            // Remove the entire entry if we've removed all associated literals
+            !v.is_empty()
+        });
     }
 
     /// Find caches that match the given query.
@@ -468,30 +465,41 @@ impl ExprRegistry {
     /// Returns the removed [`RecipeExpr`] if it was present, or `None` otherwise.
     pub(super) fn remove_expression(&mut self, name_or_alias: &Relation) -> Option<RecipeExpr> {
         let query_id = *self.aliases.get(name_or_alias)?;
+
         // Remove all aliases for this query
-        let expr_aliases: HashSet<Relation> = self
+        let expr_aliases = self
             .aliases
-            .extract_if(|_, v| *v == query_id)
-            .map(|(k, _)| k)
-            .collect();
+            .iter()
+            .filter(|&(_, &v)| v == query_id)
+            .map(|(k, _)| k.clone())
+            .collect::<Vec<_>>();
+        let expr_aliases = expr_aliases
+            .iter()
+            .map(|k| self.aliases.remove_entry(k).unwrap().0)
+            .collect::<HashSet<_>>();
+
         // Remove any queries that reuse this query's cache, or the query itself if we are removing
         // a query that reuses a cache.
         //
         // Since Vec1::retain will not remove all entries, we filter out any that are left in the
         // DrainFilter so that we don't accidentally use them later.
-        let mut removed_reused_cache = self
-            .reused_caches
-            .extract_if(|k, v| {
-                expr_aliases.contains(k) || {
-                    // We are retaining, not removing elements here, so we retain if the element is
-                    // not in expr_aliases
-                    let res = v.retain(|cache| !expr_aliases.contains(&cache.name));
-                    // If we've removed all `MatchedCache`s, then remove the entire entry.
-                    // Vec1::retain gives an error if all the elements would have been removed.
-                    res.is_err()
-                }
-            })
-            .map(|c| c.0);
+        let mut removed_reused_cache = Vec::new();
+        for (k, v) in self.reused_caches.iter_mut() {
+            if expr_aliases.contains(k) || {
+                // We are retaining, not removing elements here, so we retain if the element is
+                // not in expr_aliases
+                let res = v.retain(|cache| !expr_aliases.contains(&cache.name));
+                // If we've removed all `MatchedCache`s, then remove the entire entry.
+                // Vec1::retain gives an error if all the elements would have been removed.
+                res.is_err()
+            } {
+                removed_reused_cache.push(k.clone());
+            }
+        }
+        for k in &removed_reused_cache {
+            self.reused_caches.remove(k);
+        }
+
         // Remove the entry for this query's skeleton.
         self.skeletons.remove_expressions(&expr_aliases);
         let expression = self.expressions.remove(&query_id)?;
@@ -511,7 +519,10 @@ impl ExprRegistry {
 
         // If we have only removed a reused cache, there is nothing else to clean up because the
         // expression does not exist in the graph.
-        if removed_reused_cache.any(|name| expr_aliases.contains(&name)) {
+        if removed_reused_cache
+            .iter()
+            .any(|name| expr_aliases.contains(name))
+        {
             None
         } else {
             Some(expression)
