@@ -1,7 +1,7 @@
 #![allow(missing_docs)]
 
 use core::task::Context;
-use std::collections::hash_map::Entry::Occupied;
+use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::future::Future;
 use std::pin::Pin;
 use std::task::Poll;
@@ -567,26 +567,26 @@ fn get_reader_from_cache<'a>(
     readers_cache: &'a mut ReaderMap,
     global_readers: &Readers,
 ) -> ReadySetResult<&'a mut SingleReadHandle> {
-    Ok(match readers_cache.entry(target.clone()) {
-        Occupied(v) if !v.get().was_dropped() => v.into_mut(),
-        // If the entry is Vacant _or_ the WriteHandle was dropped out from under us, we need to
-        // refer to the global_readers.
-        entry => {
-            let readers = global_readers.lock().unwrap();
-            #[allow(clippy::significant_drop_in_scrutinee)]
-            match readers.get(target) {
-                None => {
-                    if let Occupied(v) = entry {
-                        // This reader's write handle was dropped, so it will not be usable
-                        // anymore.
-                        v.remove();
-                    }
-                    return Err(ReadySetError::ReaderNotFound);
-                }
-                Some(reader) => entry.insert_entry(reader.clone()).into_mut(),
-            }
+    let mut lookup = true;
+
+    if let Some(v) = readers_cache.get(target) {
+        if !v.was_dropped() {
+            lookup = false;
         }
-    })
+    }
+
+    if lookup {
+        let readers = global_readers.lock().unwrap();
+        match readers.get(target) {
+            None => readers_cache.remove(target),
+            Some(reader) => readers_cache.insert(target.clone(), reader.clone()),
+        };
+    }
+
+    match readers_cache.entry(target.clone()) {
+        Vacant(_) => Err(ReadySetError::ReaderNotFound),
+        Occupied(v) => Ok(v.into_mut()),
+    }
 }
 
 #[cfg(test)]
