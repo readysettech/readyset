@@ -6200,6 +6200,7 @@ dependencies = [
  "readyset-data",
  "readyset-mysql",
  "readyset-psql",
+ "readyset-server",
  "regex",
  "reqwest",
  "serde",
