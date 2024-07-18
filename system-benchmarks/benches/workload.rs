@@ -149,16 +149,23 @@ impl PreparedPool {
                     let next_command = cur.fetch_add(1, Ordering::Relaxed);
                     commands.get(next_command)
                 } {
-                    while conn
-                        .conn
-                        .execute(&conn.statements[command.0], &command.1)
-                        .await
-                        .is_err()
-                    {
-                        // This happens when there is a transaction deadlock
+                    // retry a few times in case of transaction deadlock, but don't loop forever
+                    const MAX_ATTEMPTS: usize = 8;
+                    for i in 0..MAX_ATTEMPTS {
+                        match conn
+                            .conn
+                            .execute(&conn.statements[command.0], &command.1)
+                            .await
+                        {
+                            Ok(_) => break,
+                            Err(_) if i == MAX_ATTEMPTS => {
+                                // log?
+                                break;
+                            }
+                            _ => (),
+                        }
                     }
                 }
-
                 conn
             }));
         }
