@@ -149,16 +149,14 @@ impl PreparedPool {
                     let next_command = cur.fetch_add(1, Ordering::Relaxed);
                     commands.get(next_command)
                 } {
-                    while conn
+                    if let Err(e) = conn
                         .conn
                         .execute(&conn.statements[command.0], &command.1)
                         .await
-                        .is_err()
                     {
-                        // This happens when there is a transaction deadlock
+                        println!("Error executing prepared statement: {:?}", e);
                     }
                 }
-
                 conn
             }));
         }
