@@ -565,7 +565,7 @@ fn mysql_numerical_type_cvt(left: &DfType, right: &DfType) -> Option<DfType> {
     if left.is_any_float() || right.is_any_float() {
         Some(DfType::Double)
     } else if left.is_any_int() && right.is_any_int() {
-        if left.is_any_unsigned_int() && right.is_any_unsigned_int() {
+        if left.is_any_unsigned_int() || right.is_any_unsigned_int() {
             Some(DfType::UnsignedBigInt)
         } else {
             Some(DfType::BigInt)
@@ -781,11 +781,19 @@ impl BinaryOperator {
     /// Returns this operator's output type given its input types, or
     /// [`ReadySetError::InvalidQuery`](readyset_errors::ReadySetError::InvalidQuery) if it could
     /// not be inferred.
-    pub(crate) fn output_type(
+    fn output_type(
         &self,
+        dialect: Dialect,
         left_type: &DfType,
-        _right_type: &DfType,
+        right_type: &DfType,
     ) -> ReadySetResult<DfType> {
+        if let Some(ty) = match dialect.engine() {
+            SqlEngine::MySQL => crate::promotion::mysql::output_type(left_type, self, right_type),
+            _ => None,
+        } {
+            return Ok(ty);
+        }
+
         // TODO: Maybe consider `right_type` in some cases too.
         // TODO: What is the correct return type for `And` and `Or`?
         match self {
@@ -902,32 +910,35 @@ impl Expr {
                     unsupported!("'{op}' operator not implemented yet for MySQL");
                 }
 
-                let ty = op.output_type(left.ty(), right.ty())?;
+                let out = op.output_type(dialect, left.ty(), right.ty())?;
                 let (left_coerce_target, right_coerce_target) =
                     op.argument_type_coercions(left.ty(), right.ty(), dialect)?;
 
                 if let Some(ty) = left_coerce_target {
-                    left = Box::new(Self::Cast {
-                        expr: left,
-                        ty,
-                        null_on_failure: false,
-                    })
+                    if ty != out {
+                        left = Box::new(Self::Cast {
+                            expr: left,
+                            ty,
+                            null_on_failure: false,
+                        });
+                    }
                 }
                 if let Some(ty) = right_coerce_target {
-                    right = Box::new(Self::Cast {
-                        expr: right,
-                        ty,
-                        null_on_failure: false,
-                    })
+                    if ty != out {
+                        right = Box::new(Self::Cast {
+                            expr: right,
+                            ty,
+                            null_on_failure: false,
+                        });
+                    }
                 }
 
                 let op_node = Self::Op {
                     op,
                     left,
                     right,
-                    ty,
+                    ty: out,
                 };
-
                 if negated {
                     Ok(Self::Not {
                         expr: Box::new(op_node),
@@ -1154,7 +1165,7 @@ impl Expr {
             invalid_query!("op ANY/ALL (array) requires an array on the right-hand side")
         };
 
-        let ty = op.output_type(left.ty(), right_member_ty)?;
+        let ty = op.output_type(dialect, left.ty(), right_member_ty)?;
         if !ty.is_bool() {
             // localhost/noria=# select 1 + any('{1,2}');
             // ERROR:  42809: op ANY/ALL (array) requires operator to yield boolean
@@ -1879,7 +1890,12 @@ pub(crate) mod tests {
             #[track_caller]
             fn test_json_extract(op: BinaryOperator, left_type: DfType, output_type: DfType) {
                 assert_eq!(
-                    op.output_type(&left_type, &DfType::DEFAULT_TEXT).unwrap(),
+                    op.output_type(
+                        Dialect::DEFAULT_POSTGRESQL,
+                        &left_type,
+                        &DfType::DEFAULT_TEXT
+                    )
+                    .unwrap(),
                     output_type
                 );
             }
@@ -1891,8 +1907,12 @@ pub(crate) mod tests {
                 output_type: DfType,
             ) {
                 assert_eq!(
-                    op.output_type(&left_type, &DfType::Array(Box::new(DfType::DEFAULT_TEXT)))
-                        .unwrap(),
+                    op.output_type(
+                        Dialect::DEFAULT_POSTGRESQL,
+                        &left_type,
+                        &DfType::Array(Box::new(DfType::DEFAULT_TEXT))
+                    )
+                    .unwrap(),
                     output_type
                 );
             }

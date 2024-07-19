@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 derive_more = { workspace = true }
 futures = { workspace = true }
+mysql = { workspace = true }
 mysql_async = { workspace = true }
 native-tls = { workspace = true }
 thiserror = { workspace = true }

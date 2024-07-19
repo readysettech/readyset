@@ -1211,6 +1211,7 @@ dependencies = [
  "deadpool-postgres",
  "derive_more",
  "futures",
+ "mysql",
  "mysql_async",
  "native-tls",
  "nom-sql",

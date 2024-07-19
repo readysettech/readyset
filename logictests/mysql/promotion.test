@@ -1,0 +1,18 @@
+statement ok
+create table t1 (a int not null default 1, big bigint unsigned);
+
+statement ok
+insert into t1 (big) values (18446744073709551615);
+
+query UI
+select max(big) - 1 from t1;
+----
+18446744073709551614
+
+statement ok
+create cache from select max(big) - 1 from t1;
+
+query UI
+select max(big) - 1 from t1;
+----
+18446744073709551614

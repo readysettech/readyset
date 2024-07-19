@@ -14,7 +14,7 @@ use crate::{Collation, Dialect};
 
 /// Metadata about a postgresql enum type, optionally stored inside of `DfType::Enum` for enum types
 /// that originate in postgres
-#[derive(Clone, Arbitrary, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[derive(Clone, Hash, Arbitrary, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct PgEnumMetadata {
     /// The name of the enum type
     pub name: SqlIdentifier,
@@ -30,7 +30,7 @@ pub struct PgEnumMetadata {
 ///
 /// Time types contain a `subsecond_digits` property, also known as fractional seconds precision
 /// (FSP). It must be between 0 through 6, and defaults to [`Dialect::default_subsecond_digits`].
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, EnumKind)]
+#[derive(Clone, Hash, Serialize, Deserialize, Debug, PartialEq, Eq, EnumKind)]
 #[enum_kind(DfTypeKind)]
 pub enum DfType {
     /// Placeholder for when the type is not known.
@@ -76,7 +76,7 @@ pub enum DfType {
     /// Notionally an `i24`, but really an [`i32`] that we bounds check.
     MediumInt,
 
-    /// Notionally an `u24`, but really an [`u32`] that we bounds check.
+    /// Notionally a `u24`, but really a [`u32`] that we bounds check.
     UnsignedMediumInt,
 
     /// [`f32`]: a IEEE 754 floating-point 32-bit real value.

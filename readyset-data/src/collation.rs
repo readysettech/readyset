@@ -20,6 +20,7 @@ use test_strategy::Arbitrary;
     Clone,
     Copy,
     Default,
+    Hash,
     Serialize,
     Deserialize,
     Debug,

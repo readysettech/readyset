@@ -4,6 +4,7 @@ mod binary_operator;
 mod eval;
 pub mod like;
 mod lower;
+mod promotion;
 mod reader_processing;
 pub mod utils;
 
