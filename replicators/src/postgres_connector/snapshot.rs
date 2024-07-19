@@ -894,14 +894,17 @@ impl<'a> PostgresReplicator<'a> {
         let replication_offsets = self.noria.replication_offsets().await?;
 
         if !full_snapshot {
-            tables
-                .extract_if(|t| replication_offsets.has_table(&t.name))
-                .for_each(|t| {
+            tables.retain(|t| {
+                if replication_offsets.has_table(&t.name) {
                     debug!(
                         table = %t.name.display(Dialect::PostgreSQL),
                         "Replication offset already exists for table, skipping snapshot"
-                    )
-                });
+                    );
+                    false
+                } else {
+                    true
+                }
+            });
         }
 
         // Emit a no-op replication message: If there isn't any traffic since we started
