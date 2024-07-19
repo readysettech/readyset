@@ -1,5 +1,4 @@
 #![deny(macro_use_extern_crate)]
-#![allow(incomplete_features)]
 #![feature(box_patterns)]
 #![allow(macro_use_extern_crate)]
 
