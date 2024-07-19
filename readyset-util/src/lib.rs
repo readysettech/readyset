@@ -1,7 +1,6 @@
 //! This crate provides miscellaneous utilities and extensions to the Rust standard library, for use
 //! in all crates in this workspace.
 #![deny(missing_docs, rustdoc::missing_crate_level_docs)]
-#![feature(step_trait)]
 #![allow(internal_features)]
 use std::borrow::Borrow;
 use std::collections::{BTreeMap, HashMap};
