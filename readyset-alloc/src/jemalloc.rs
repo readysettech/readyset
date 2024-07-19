@@ -4,6 +4,7 @@
 
 use std::collections::HashMap;
 use std::ptr::{self, NonNull};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::{slice, thread};
 
@@ -39,6 +40,12 @@ struct PeekableRemoteStat<T>(Option<NonNull<T>>);
 unsafe impl<T: Send> Send for PeekableRemoteStat<T> {}
 
 impl<T: Copy> PeekableRemoteStat<T> {
+    fn from_raw(ptr: *mut T) -> Self {
+        Self(NonNull::new(ptr))
+    }
+}
+
+impl PeekableRemoteStat<u64> {
     /// Try access the underlying data. When the pointer is `nullptr`, returns
     /// `None`.
     ///
@@ -46,17 +53,11 @@ impl<T: Copy> PeekableRemoteStat<T> {
     ///
     /// The pointer should not be dangling. (i.e. the thread to be traced should
     /// be accessible.)
-    unsafe fn peek(&self) -> Option<T> {
+    unsafe fn peek(&self) -> Option<u64> {
         self.0
-            .map(|nlp| unsafe { core::intrinsics::atomic_load_seqcst(nlp.as_ptr()) })
+            .map(|nlp| unsafe { AtomicU64::from_ptr(nlp.as_ptr()).load(Ordering::SeqCst) })
     }
 
-    fn from_raw(ptr: *mut T) -> Self {
-        Self(NonNull::new(ptr))
-    }
-}
-
-impl PeekableRemoteStat<u64> {
     fn allocated() -> Self {
         // SAFETY: it is transparent.
         // NOTE: perhaps we'd better add something like `as_raw()` for `ThreadLocal`...
