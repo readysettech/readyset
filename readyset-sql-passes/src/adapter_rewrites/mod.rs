@@ -422,7 +422,7 @@ struct ReorderNumberedPlaceholdersVisitor {
 }
 
 impl<'ast> VisitorMut<'ast> for ReorderNumberedPlaceholdersVisitor {
-    type Error = !;
+    type Error = std::convert::Infallible;
 
     fn visit_literal(&mut self, literal: &'ast mut Literal) -> Result<(), Self::Error> {
         if let Literal::Placeholder(ItemPlaceholder::DollarNumber(n)) = literal {

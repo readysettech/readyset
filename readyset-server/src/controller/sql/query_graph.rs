@@ -750,7 +750,7 @@ fn extract_having_aggregates(
     }
 
     impl<'ast> VisitorMut<'ast> for AggregateFinder {
-        type Error = !;
+        type Error = std::convert::Infallible;
 
         fn visit_expr(&mut self, expr: &'ast mut Expr) -> Result<(), Self::Error> {
             if matches!(expr, Expr::Call(fun) if is_aggregate(fun)) {

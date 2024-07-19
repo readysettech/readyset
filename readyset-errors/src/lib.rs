@@ -1,5 +1,5 @@
 //! Error handling, definitions, and utilities
-#![feature(never_type, exhaustive_patterns)]
+#![feature(exhaustive_patterns)]
 
 pub mod rpc;
 

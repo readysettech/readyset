@@ -1,4 +1,3 @@
-#![feature(never_type)]
 //! A deterministic, exhaustive, parametric generator for SQL queries, and associated DDL.
 //!
 //! The intent of this library is to provide a hook for generating SQL queries both
@@ -166,7 +165,7 @@ impl From<&SqlIdentifier> for TableName {
 }
 
 impl FromStr for TableName {
-    type Err = !;
+    type Err = std::convert::Infallible;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(Self::from(s))
     }
@@ -206,7 +205,7 @@ impl From<&SqlIdentifier> for ColumnName {
 }
 
 impl FromStr for ColumnName {
-    type Err = !;
+    type Err = std::convert::Infallible;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(Self::from(s))
     }

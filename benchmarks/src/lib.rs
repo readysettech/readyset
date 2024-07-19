@@ -84,7 +84,6 @@
 //!     }
 //! }
 //! ```
-#![feature(never_type)]
 
 pub mod benchmark;
 pub mod graph;

@@ -18,7 +18,7 @@ struct ScalarOptimizeExpressionsVisitor {
 }
 
 impl<'ast> VisitorMut<'ast> for ScalarOptimizeExpressionsVisitor {
-    type Error = !;
+    type Error = std::convert::Infallible;
 
     fn visit_expr(&mut self, expr: &'ast mut Expr) -> Result<(), Self::Error> {
         scalar_optimize_expr(expr, self.dialect);

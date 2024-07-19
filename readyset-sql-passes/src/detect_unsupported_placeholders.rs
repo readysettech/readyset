@@ -107,7 +107,7 @@ impl UnsupportedPlaceholderVisitor {
 }
 
 impl<'ast> Visitor<'ast> for UnsupportedPlaceholderVisitor {
-    type Error = !;
+    type Error = std::convert::Infallible;
     fn visit_where_clause(&mut self, expr: &'ast nom_sql::Expr) -> Result<(), Self::Error> {
         self.context.in_where_clause = true;
         let Ok(_) = self.visit_expr(expr);

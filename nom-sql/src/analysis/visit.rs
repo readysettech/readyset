@@ -45,8 +45,6 @@ use crate::{
 /// statement.
 ///
 /// ```
-/// #![feature(never_type)]
-///
 /// use nom_sql::analysis::visit::Visitor;
 /// use nom_sql::{parse_query, Dialect, Literal, SqlQuery};
 ///
@@ -55,7 +53,7 @@ use crate::{
 ///     struct PlaceholderCounter(usize);
 ///
 ///     impl<'ast> Visitor<'ast> for PlaceholderCounter {
-///         type Error = !;
+///         type Error = std::convert::Infallible;
 ///
 ///         fn visit_literal(&mut self, literal: &'ast Literal) -> Result<(), Self::Error> {
 ///             if matches!(literal, Literal::Placeholder(_)) {

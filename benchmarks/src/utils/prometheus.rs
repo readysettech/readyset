@@ -86,7 +86,7 @@ pub struct PrometheusEndpoint {
 }
 
 impl FromStr for PrometheusEndpoint {
-    type Err = !;
+    type Err = std::convert::Infallible;
     fn from_str(metrics_url: &str) -> Result<Self, Self::Err> {
         Ok(Self {
             metrics_url: metrics_url.into(),

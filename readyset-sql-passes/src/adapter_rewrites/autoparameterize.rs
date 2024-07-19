@@ -22,7 +22,7 @@ impl AutoParameterizeVisitor {
 }
 
 impl<'ast> VisitorMut<'ast> for AutoParameterizeVisitor {
-    type Error = !;
+    type Error = std::convert::Infallible;
 
     fn visit_literal(&mut self, literal: &'ast mut Literal) -> Result<(), Self::Error> {
         if matches!(literal, Literal::Placeholder(_)) {
@@ -184,7 +184,7 @@ struct AnalyzeLiteralsVisitor {
 }
 
 impl<'ast> VisitorMut<'ast> for AnalyzeLiteralsVisitor {
-    type Error = !;
+    type Error = std::convert::Infallible;
 
     fn visit_select_statement(
         &mut self,

@@ -11,7 +11,7 @@ use crate::{internal_err, ReadySetError};
 pub struct NullSink;
 
 impl<I> Sink<I> for NullSink {
-    type Error = !;
+    type Error = std::convert::Infallible;
 
     fn poll_ready(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Pending
@@ -31,7 +31,7 @@ impl<I> Sink<I> for NullSink {
 }
 
 impl Stream for NullSink {
-    type Item = Result<(), !>;
+    type Item = Result<(), std::convert::Infallible>;
 
     fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         Poll::Pending

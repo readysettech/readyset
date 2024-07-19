@@ -1,5 +1,3 @@
-#![feature(never_type)]
-
 pub mod db_util;
 pub(crate) mod mysql_connector;
 pub(crate) mod noria_adapter;

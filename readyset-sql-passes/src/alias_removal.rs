@@ -46,7 +46,7 @@ struct RemoveAliasesVisitor<'a> {
 }
 
 impl<'ast, 'a> VisitorMut<'ast> for RemoveAliasesVisitor<'a> {
-    type Error = !;
+    type Error = std::convert::Infallible;
 
     fn visit_select_statement(
         &mut self,

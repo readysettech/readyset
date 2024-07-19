@@ -15,7 +15,7 @@ use crate::QUANTILES;
 struct CommaSeparatedString(Vec<String>);
 
 impl FromStr for CommaSeparatedString {
-    type Err = !;
+    type Err = std::convert::Infallible;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(Self(s.split(',').map(Into::into).collect()))

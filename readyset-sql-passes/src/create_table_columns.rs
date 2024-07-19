@@ -7,7 +7,7 @@ struct CreateTableColumnsVisitor {
 }
 
 impl<'ast> VisitorMut<'ast> for CreateTableColumnsVisitor {
-    type Error = !;
+    type Error = std::convert::Infallible;
 
     fn visit_create_table_statement(
         &mut self,

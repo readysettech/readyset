@@ -378,7 +378,7 @@
 //! - [id=1, title=Hello world, votes=42]
 //! + [id=1, title=Hello world, votes=43]
 //! ```
-#![feature(box_patterns, never_type, exhaustive_patterns)]
+#![feature(box_patterns, exhaustive_patterns)]
 #![deny(unused_extern_crates)]
 #![deny(macro_use_extern_crate)]
 //#![deny(unreachable_pub)]

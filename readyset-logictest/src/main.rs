@@ -1,4 +1,4 @@
-#![feature(never_type, exhaustive_patterns)]
+#![feature(exhaustive_patterns)]
 
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{self, Display};

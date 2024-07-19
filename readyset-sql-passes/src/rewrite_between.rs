@@ -46,7 +46,7 @@ fn rewrite_between_condition(operand: Expr, min: Expr, max: Expr) -> Expr {
 struct RewriteBetweenVisitor;
 
 impl<'ast> VisitorMut<'ast> for RewriteBetweenVisitor {
-    type Error = !;
+    type Error = std::convert::Infallible;
 
     fn visit_expr(&mut self, expr: &'ast mut Expr) -> Result<(), Self::Error> {
         match expr {

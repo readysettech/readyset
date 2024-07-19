@@ -187,7 +187,7 @@ impl BinopsParameterColumnsVisitor<'_> {
 }
 
 impl<'ast> Visitor<'ast> for BinopsParameterColumnsVisitor<'ast> {
-    type Error = !;
+    type Error = std::convert::Infallible;
 
     /// Extracts columns and binops when one side of the Expr contains [`Expr::Column`] and the
     /// other side contains [`Expr::Literal(Literal::Placeholder)`]

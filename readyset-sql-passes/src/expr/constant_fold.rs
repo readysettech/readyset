@@ -31,7 +31,7 @@ struct ConstantFoldVisitor {
 }
 
 impl<'ast> VisitorMut<'ast> for ConstantFoldVisitor {
-    type Error = !;
+    type Error = std::convert::Infallible;
 
     fn visit_expr(&mut self, expr: &'ast mut Expr) -> Result<(), Self::Error> {
         if matches!(expr, Expr::Literal(_)) {

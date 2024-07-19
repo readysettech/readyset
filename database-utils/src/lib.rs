@@ -1,5 +1,3 @@
-#![feature(never_type)]
-
 use std::cmp::max;
 use std::fmt::{self, Display};
 use std::num::ParseIntError;

@@ -171,7 +171,7 @@ impl NoriaAdapter {
         telemetry_sender: TelemetrySender,
         server_startup: bool,
         enable_statement_logging: bool,
-    ) -> ReadySetResult<!> {
+    ) -> ReadySetResult<std::convert::Infallible> {
         // Resnapshot when restarting the server to apply changes that may have been made to the
         // replication-tables config parameter.
         let mut resnapshot = server_startup;
@@ -294,7 +294,7 @@ impl NoriaAdapter {
         telemetry_sender: &TelemetrySender,
         enable_statement_logging: bool,
         full_snapshot: bool,
-    ) -> ReadySetResult<!> {
+    ) -> ReadySetResult<std::convert::Infallible> {
         use replication_offset::mysql::MySqlPosition;
 
         if let Some(cert_path) = config.ssl_root_cert.clone() {
@@ -524,7 +524,7 @@ impl NoriaAdapter {
         pool: deadpool_postgres::Pool,
         repl_slot_name: String,
         enable_statement_logging: bool,
-    ) -> ReadySetResult<!> {
+    ) -> ReadySetResult<std::convert::Infallible> {
         set_failpoint_return_err!(failpoints::START_INNER_POSTGRES);
 
         let dbname = pgsql_opts.get_dbname().ok_or_else(|| {
