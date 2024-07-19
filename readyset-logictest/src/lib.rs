@@ -1,4 +1,4 @@
-#![feature(exhaustive_patterns)]
+#![feature(min_exhaustive_patterns)]
 
 pub mod ast;
 pub mod generate;
