@@ -1,5 +1,4 @@
-#![feature(box_patterns)]
-#![feature(exhaustive_patterns)]
+#![feature(box_patterns, min_exhaustive_patterns)]
 #![deny(unreachable_pub)]
 pub mod backend;
 pub mod http_router;
