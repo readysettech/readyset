@@ -2,9 +2,8 @@
 //! [`RangeBounds`][std::ops::RangeBounds]).
 
 use std::cmp::{max_by, min_by, Ordering};
-use std::iter::{self, Step};
-use std::mem;
-use std::ops::{Bound, RangeBounds};
+use std::ops::{Add, Bound, RangeBounds};
+use std::{iter, mem};
 
 use Bound::*;
 use Ordering::*;
@@ -320,16 +319,16 @@ pub struct BoundPairIter<T> {
 
 impl<T> Iterator for BoundPairIter<T>
 where
-    T: Step + Ord + Clone,
+    T: Copy + Add<Output = T> + From<u8> + Ord + Clone,
 {
     type Item = T;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.upper.as_ref().map(|upper| upper.clone()) {
-            Excluded(upper) if self.current >= upper => None,
-            Included(upper) if self.current > upper => None,
+        match self.upper.as_ref().map(|upper| upper) {
+            Excluded(upper) if self.current >= *upper => None,
+            Included(upper) if self.current > *upper => None,
             _ => {
-                let new = Step::forward(self.current.clone(), 1);
+                let new = self.current.add(1u8.into());
                 Some(mem::replace(&mut self.current, new))
             }
         }
@@ -339,7 +338,7 @@ where
 /// Extension trait to provide an `into_iter` method on a pair of [`Bound`]s
 pub trait IterBoundPair<T>
 where
-    T: Step,
+    T: Copy + Add<Output = T> + From<u8>,
 {
     /// Construct an iterator over all the values of `T` between the lower and upper bound of a
     /// [`BoundPair`].
@@ -366,13 +365,13 @@ where
 
 impl<T> IterBoundPair<T> for BoundPair<T>
 where
-    T: Step,
+    T: Copy + Add<Output = T> + From<u8>,
 {
     fn into_iter(self) -> Option<BoundPairIter<T>> {
         Some(BoundPairIter {
             current: match self.0 {
                 Included(x) => x,
-                Excluded(x) => Step::forward(x, 1),
+                Excluded(x) => x.add(1u8.into()),
                 Unbounded => return None,
             },
             upper: self.1,
