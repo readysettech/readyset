@@ -1,5 +1,4 @@
 #![feature(box_patterns)]
-#![feature(extract_if)]
 #![feature(never_type)]
 #![feature(exhaustive_patterns)]
 #![deny(unreachable_pub)]

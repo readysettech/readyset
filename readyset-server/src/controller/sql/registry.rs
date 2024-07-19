@@ -254,7 +254,7 @@ impl ExprSkeletons {
         // For each entry, remove a set of literals if it is associated with one of the given
         // aliases
         self.inner.retain(|_, v| {
-            let _: Vec<_> = v.extract_if(|(alias, _)| exprs.contains(alias)).collect();
+            v.retain(|(alias, _)| !exprs.contains(alias));
             // Remove the entire entry if we've removed all associated literals
             !v.is_empty()
         });
