@@ -67,7 +67,6 @@ criterion = "0.5"
 eui48 = { version = "1.1.0", default-features = false }
 fork = "0.1"
 mysql_async = { git = "https://github.com/readysettech/mysql_async" }
-nperf-core = { git = "https://github.com/readysettech/not-perf.git" }
 postgres = { git = "https://github.com/readysettech/rust-postgres.git" }
 postgres-native-tls = { git = "https://github.com/readysettech/rust-postgres.git" }
 postgres-protocol = { git = "https://github.com/readysettech/rust-postgres.git" }
@@ -204,7 +203,6 @@ sqlparser = "0.41.0"
 strawpoll = "0.2.3"
 streaming-iterator = "0.1"
 stringprep = "0.1.4"
-structopt = "0.2"
 strum = "0.23"
 strum_macros = "0.23"
 syn = { version = "1.0.109", default-features = false }

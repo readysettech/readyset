@@ -1,5 +1,5 @@
 use std::env;
-use std::fs::read_dir;
+use std::fs::{read_dir, File};
 use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::os::unix::net::UnixStream;
@@ -8,7 +8,7 @@ use std::process::Command;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::anyhow;
 use benchmarks::spec::WorkloadSpec;
@@ -23,7 +23,6 @@ use database_utils::{
 use fork::{fork, Fork};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
-use nperf_core::args::{FlamegraphArgs, RecordArgs};
 use readyset::mysql::MySqlHandler;
 use readyset::psql::PsqlHandler;
 use readyset::{NoriaAdapter, Options};
@@ -33,7 +32,7 @@ use readyset_data::DfValue;
 use readyset_psql::AuthenticationMethod;
 use readyset_server::FrontierStrategy;
 use regex::Regex;
-use structopt::StructOpt;
+use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
 /// Subdirectory where the benchmarks are kept
@@ -236,7 +235,7 @@ impl Benchmark {
 
         println!("Preparing benchmark {}", self.name);
 
-        let hdl = AdapterHandle::generate_data_and_start_adapter(&self.schema, args)?;
+        let mut hdl = AdapterHandle::generate_data_and_start_adapter(&self.schema, args)?;
         let upstream_url = args.upstream_url_with_db_name();
         let rt = tokio::runtime::Runtime::new()?;
         let pool_size = num_cpus::get_physical() * 4;
@@ -279,20 +278,11 @@ impl Benchmark {
             }
 
             let mut do_bench = |param: &str, pool: &mut PreparedPool| -> anyhow::Result<()> {
-                // Will collect data until dropped, then report flamegraph for the last
-                // `WORKLOAD_DURATION`
-                let _perf = if args.flamegraph {
-                    Some(hdl.get_flamegraph(
-                        &format!("{workload_name}_{param}"),
-                        WORKLOAD_DURATION,
-                        args.merge_threads,
-                        args.line_granularity,
-                    ))
-                } else {
-                    None
-                };
-
                 reset_metrics()?;
+
+                if args.flamegraph {
+                    AdapterCommand::BeginProfiling.send(&mut hdl.write_hdl)?;
+                };
 
                 group.bench_with_input(
                     BenchmarkId::new(workload_name.clone(), param),
@@ -319,6 +309,19 @@ impl Benchmark {
 
                 println!("Memory usage: {:.2} MiB", get_allocated_mib()?);
                 println!("Cache hit rate {:.2}%", get_cache_hit_ratio()? * 100.);
+
+                if args.flamegraph {
+                    AdapterCommand::EndProfiling(format!("{workload_name}_{param}"))
+                        .send(&mut hdl.write_hdl)?;
+                    loop {
+                        match AdapterCommand::receive(&mut hdl.write_hdl)? {
+                            AdapterCommand::ProfileComplete => break,
+                            msg => {
+                                println!("received unexpected message: {:?}", msg);
+                            }
+                        }
+                    }
+                };
 
                 Ok(())
             };
@@ -421,7 +424,7 @@ impl AdapterHandle {
     fn kill(mut self) -> anyhow::Result<()> {
         const MAX_NUM_ADAPTER_DEATH_CHECKS: usize = 10;
 
-        self.write_hdl.write_all(&[1])?;
+        AdapterCommand::StopReadyset.send(&mut self.write_hdl)?;
 
         // This invokes `ps -o stat= -p <pid>` continuously until either:
         //
@@ -448,82 +451,13 @@ impl AdapterHandle {
     }
 }
 
-struct PerfHandle {
-    join_handle: Option<std::thread::JoinHandle<()>>,
-}
-
 impl AdapterHandle {
-    /// Begin not-perf profiling of the ReadySet adapter, generating a flamegraph of the
-    /// `last_seconds` seconds before profiling is stopped by dropping the handle, thus only
-    /// reporting the benchmarked period.
-    fn get_flamegraph(
-        &self,
-        name: &str,
-        last_seconds: Duration,
-        merge_threads: bool,
-        line_granularity: bool,
-    ) -> PerfHandle {
-        let pid = self.pid;
-        let name = name.to_string();
-        let handle = std::thread::spawn(move || {
-            let nperf_args = RecordArgs::from_iter([
-                "nperf",
-                "-p",
-                &format!("{pid}"),
-                "-o",
-                &format!("{name}.perf"),
-            ]);
-
-            let start_time = Instant::now();
-            if let Ok(()) = nperf_core::cmd_record::main(nperf_args) {
-                let from = start_time
-                    .elapsed()
-                    .checked_sub(last_seconds)
-                    .unwrap_or_default()
-                    .as_secs();
-
-                let mut args = vec![
-                    "flame".to_string(),
-                    format!("{name}.perf"),
-                    "--from".to_string(),
-                    format!("{from}"),
-                    "-o".to_string(),
-                    format!("{name}.svg"),
-                ];
-
-                if merge_threads {
-                    args.push("--merge-threads".to_string());
-                }
-
-                if line_granularity {
-                    args.push("--granularity".to_string());
-                    args.push("line".to_string());
-                }
-
-                let flamegraph_args = FlamegraphArgs::from_iter(args);
-
-                if nperf_core::cmd_flamegraph::main(flamegraph_args).is_err() {
-                    println!("flamegraph failed");
-                }
-
-                drop(std::fs::remove_file(format!("{name}.perf")));
-            } else {
-                println!("nperf failed");
-            }
-        });
-
-        PerfHandle {
-            join_handle: Some(handle),
-        }
-    }
-
     /// Returns a write handle that we can write anything to to indicate benchmarks is done
     fn generate_data_and_start_adapter<P: Into<PathBuf>>(
         schema: P,
         args: &SystemBenchArgs,
     ) -> anyhow::Result<Self> {
         let (mut sock1, mut sock2) = UnixStream::pair()?;
-        let args_clone = args.clone();
         // A word of warning: DO NOT CREATE A RUNTIME BEFORE FORKING, IT *WILL* MESS WITH TOKIO
         match fork().unwrap() {
             Fork::Child => {
@@ -533,10 +467,46 @@ impl AdapterHandle {
                 #[cfg(not(target_os = "macos"))]
                 set_cpu_affinity(true);
                 drop(sock2);
-                sock1.read_exact(&mut [0u8])?;
-                std::thread::spawn(move || start_adapter(args_clone));
-                sock1.read_exact(&mut [0u8])?;
-                std::process::exit(0);
+
+                let mut profiler = None;
+                loop {
+                    match AdapterCommand::receive(&mut sock1)? {
+                        AdapterCommand::StartReadyset => {
+                            let args_clone = args.clone();
+                            std::thread::spawn(move || start_adapter(args_clone));
+                        }
+                        AdapterCommand::StopReadyset => {
+                            std::process::exit(0);
+                        }
+                        AdapterCommand::BeginProfiling => {
+                            profiler = Some(
+                                pprof::ProfilerGuardBuilder::default()
+                                    .frequency(100)
+                                    .build()
+                                    .unwrap(),
+                            );
+                        }
+                        AdapterCommand::EndProfiling(name) => match profiler {
+                            Some(ref prof) => {
+                                println!("Generating flamegraph, this may take a minute ...");
+                                if let Ok(report) = prof.report().build() {
+                                    let file = File::create(format!("{name}.svg")).unwrap();
+                                    report.flamegraph(file).unwrap();
+                                };
+                                // drop the profiler, which stops the profiling.
+                                let _ = profiler.take();
+
+                                AdapterCommand::ProfileComplete.send(&mut sock1)?;
+                            }
+                            None => {
+                                println!("recieved message to stop profiler, but no profiler current running");
+                            }
+                        },
+                        msg => {
+                            println!("received unexpected message: {:?}", msg);
+                        }
+                    }
+                }
             }
             Fork::Parent(child_pid) => {
                 #[cfg(not(target_os = "macos"))]
@@ -546,8 +516,8 @@ impl AdapterHandle {
                 let rt = tokio::runtime::Runtime::new()?;
                 rt.block_on(prepare_db(schema, args))?;
 
-                // Write a byte to indicate database is ready and fork can initiate replication
-                sock2.write_all(&[1u8]).unwrap();
+                // indicate database is ready and fork can initiate replication
+                AdapterCommand::StartReadyset.send(&mut sock2)?;
 
                 let database_type =
                     DatabaseURL::from_str(&args.upstream_url_with_db_name())?.database_type();
@@ -564,11 +534,38 @@ impl AdapterHandle {
     }
 }
 
-impl Drop for PerfHandle {
-    fn drop(&mut self) {
-        // Send SIGINT to self in order to stop the collection
-        unsafe { libc::kill(std::process::id() as _, libc::SIGINT) };
-        self.join_handle.take().unwrap().join().unwrap();
+/// A naive set of IPC commands, to be sent between the driver
+/// benchmark process to the adapter/readyset child process.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+enum AdapterCommand {
+    // sent from driver to adapter
+    StartReadyset,
+    // sent from driver to adapter
+    StopReadyset,
+    // sent from driver to adapter
+    BeginProfiling,
+    // sent from driver to adapter
+    EndProfiling(String),
+    // sent from adapter to driver so indicate profiler has completed
+    ProfileComplete,
+}
+
+impl AdapterCommand {
+    fn send(&self, socket: &mut UnixStream) -> anyhow::Result<()> {
+        let msg = bincode::serialize(self).expect("Serialization failed");
+        socket.write_all(&usize::to_ne_bytes(msg.len()))?;
+        socket.write_all(&msg[..])?;
+        socket.flush()?;
+        Ok(())
+    }
+
+    fn receive(socket: &mut UnixStream) -> anyhow::Result<Self> {
+        let mut len_bytes = [0u8; std::mem::size_of::<usize>()];
+        socket.read_exact(&mut len_bytes)?;
+        let len = usize::from_ne_bytes(len_bytes);
+        let mut buf = vec![0; len];
+        socket.read_exact(&mut buf[..])?;
+        Ok(bincode::deserialize(&buf[..]).expect("asdfasdf"))
     }
 }
 
@@ -779,12 +776,6 @@ struct SystemBenchArgs {
     /// If specified collect a flamegraph for each workload
     #[arg(long)]
     flamegraph: bool,
-    /// If specified will merge flamegraph callstacks from all threads
-    #[arg(long, requires("flamegraph"))]
-    merge_threads: bool,
-    /// If specified will collect the flamegraph with a line granlarity
-    #[arg(long, requires("flamegraph"))]
-    line_granularity: bool,
     /// Repeat each workload again but with the memory limit enabled, multiple memory limits can be
     /// provided, a memory limit is either an absolute value in MiB, or a relative percentage
     /// value, such as 90%, where the benchmark will compute the memory limit based on peak memory

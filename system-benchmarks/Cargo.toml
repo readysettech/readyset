@@ -34,14 +34,10 @@ num_cpus = { workspace = true }
 parking_lot = { workspace = true }
 temp-dir = { workspace = true }
 tikv-jemallocator = { workspace = true }
-
 regex = { workspace = true }
-
 bincode = { workspace = true }
-
-nperf-core = { workspace = true }
-structopt = { workspace = true }
 libc = { workspace = true }
+pprof = { workspace = true, features = ["flamegraph", "criterion"] }
 
 [[bin]]
 name = "regressions"
