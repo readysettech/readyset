@@ -400,6 +400,7 @@ pub struct Options {
     ///
     /// If set, we will create a cache with literals inlined in the unsupported placeholder
     /// positions every time the statement is executed with a new set of parameters.
+    // XXX JCD keep experimental features synchronized with experimental-features.json
     #[arg(long, env = "EXPERIMENTAL_PLACEHOLDER_INLINING", hide = true)]
     experimental_placeholder_inlining: bool,
 
