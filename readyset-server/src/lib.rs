@@ -574,6 +574,7 @@ pub struct WorkerOptions {
     pub no_partial: bool,
 
     /// Allow the creation of fully materialized nodes.
+    // XXX JCD keep experimental features synchronized with experimental-features.json
     #[arg(long, env = "ALLOW_FULL_MATERIALIZATION", hide = true)]
     pub allow_full_materialization: bool,
 
@@ -597,30 +598,35 @@ pub struct WorkerOptions {
     #[arg(long, env = "VOLUME_ID", hide = true)]
     pub volume_id: Option<VolumeId>,
 
-    /// Enable experimental support for TopK in dataflow.
+    /// Enable experimental support for Top K in dataflow.
     ///
-    /// NOTE If enabled, this must be set for all ReadySet processes (both servers and adapters).
+    /// NOTE: If enabled, this must be set for all ReadySet processes (both servers and adapters).
+    // XXX JCD keep experimental features synchronized with experimental-features.json
     #[arg(long, env = "EXPERIMENTAL_TOPK_SUPPORT", hide = true)]
     pub enable_experimental_topk_support: bool,
 
-    /// Enable experimental support for Paginate in dataflow.
+    /// Enable experimental support for Pagination in dataflow.
     ///
-    /// NOTE If enabled, this must be set for all ReadySet processes (both servers and adapters).
+    /// NOTE: If enabled, this must be set for all ReadySet processes (both servers and adapters).
+    // XXX JCD keep experimental features synchronized with experimental-features.json
     #[arg(long, env = "EXPERIMENTAL_PAGINATE_SUPPORT", hide = true)]
     pub enable_experimental_paginate_support: bool,
 
     /// Enable experimental support for mixing equality and inequality comparisons on query
-    /// parameters
+    /// parameters.
+    // XXX JCD keep experimental features synchronized with experimental-features.json
     #[arg(long, env = "EXPERIMENTAL_MIXED_COMPARISONS_SUPPORT", hide = true)]
     pub enable_experimental_mixed_comparisons: bool,
 
     /// Enable experimental support for straddled joins (joins with partial keys traced to both
-    /// parents)
+    /// parents).
+    // XXX JCD keep experimental features synchronized with experimental-features.json
     #[arg(long, env = "EXPERIMENTAL_STRADDLED_JOIN_SUPPORT", hide = true)]
     pub enable_experimental_straddled_joins: bool,
 
-    /// Enable experimental support for post-lookup (queries which do extra work after the lookup
-    /// into the reader)
+    /// Enable experimental support for Post-Lookup (queries which do extra work after the lookup
+    /// into the reader).
+    // XXX JCD keep experimental features synchronized with experimental-features.json
     #[arg(long, env = "EXPERIMENTAL_POST_LOOKUP_SUPPORT", hide = true)]
     pub enable_experimental_post_lookup: bool,
 
