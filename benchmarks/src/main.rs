@@ -472,8 +472,8 @@ impl BenchmarkRunner {
                 .create(true)
                 .append(true)
                 .open(f)?;
-            file.write_all(&serde_yaml::to_vec(&self.benchmark_cmd)?)?;
-            file.write_all(&serde_yaml::to_vec(&self.deployment_params)?)?;
+            file.write_all(&serde_yaml::to_string(&self.benchmark_cmd)?.as_bytes())?;
+            file.write_all(&serde_yaml::to_string(&self.deployment_params)?.as_bytes())?;
             file.write_all(format!("{:?}", results).as_bytes())?;
         }
 
