@@ -109,6 +109,7 @@ fn column_type(i: &[u8]) -> IResult<&[u8], Type> {
     alt((
         map(tag("T"), |_| Type::Text),
         map(tag("I"), |_| Type::Integer),
+        map(tag("UI"), |_| Type::UnsignedInteger),
         map(tag("R"), |_| Type::Real),
         map(tag("D"), |_| Type::Date),
         map(tag("M"), |_| Type::Time),
@@ -177,6 +178,11 @@ fn integer(i: &[u8]) -> IResult<&[u8], i64> {
     Ok((i, if sign.is_some() { -num } else { num }))
 }
 
+fn unsigned_integer(i: &[u8]) -> IResult<&[u8], u64> {
+    let (i, num) = map_parser(digit1, nom::character::complete::u64)(i)?;
+    Ok((i, num))
+}
+
 fn empty_string(i: &[u8]) -> IResult<&[u8], Value> {
     let (i, _) = tag("(empty)")(i)?;
     Ok((i, Value::Text(String::new())))
@@ -188,6 +194,10 @@ fn value(i: &[u8]) -> IResult<&[u8], Value> {
         terminated(empty_string, line_ending),
         terminated(complete(float), line_ending),
         map(terminated(integer, line_ending), Value::Integer),
+        map(
+            terminated(unsigned_integer, line_ending),
+            Value::UnsignedInteger,
+        ),
         terminated(
             map_opt(not_line_ending, |s: &[u8]| {
                 let ts = String::from_utf8_lossy(s);
@@ -322,6 +332,22 @@ fn query(i: &[u8]) -> IResult<&[u8], Query> {
     let (i, _) = tag("----")(i)?;
     let (i, _) = opt(pair(line_ending, comment))(i)?;
     let (i, results) = query_results(i)?;
+
+    let results = match (column_types.as_ref(), results) {
+        (Some(types), QueryResults::Results(res)) => QueryResults::Results(
+            res.iter()
+                .zip(types.iter().cycle())
+                .map(|(v, typ)| {
+                    if let Ok(v) = v.convert_type(typ) {
+                        v.into_owned()
+                    } else {
+                        panic!("can't convert value {} to {}", v, typ);
+                    }
+                })
+                .collect(),
+        ),
+        (_, res) => res,
+    };
 
     Ok((
         i,
@@ -916,6 +942,50 @@ b'00000000000000000'
                     Value::BitVector(BitVec::from_elem(3, true)),
                     Value::BitVector(BitVec::from_elem(17, false)),
                 ]),
+                params: Default::default(),
+            })]
+        )
+    }
+
+    #[test]
+    fn parse_query_with_big_unsigned() {
+        let input = b"query UI
+select x - 1 from t1
+----
+18446744073709551614
+";
+        let result = complete(records)(input);
+        assert_eq!(
+            result.unwrap().1,
+            vec![Record::Query(Query {
+                label: None,
+                column_types: Some(vec![Type::UnsignedInteger]),
+                sort_mode: None,
+                conditionals: vec![],
+                query: "select x - 1 from t1".to_string(),
+                results: QueryResults::Results(vec![Value::UnsignedInteger(18446744073709551614),]),
+                params: Default::default(),
+            })]
+        )
+    }
+
+    #[test]
+    fn parse_query_with_small_unsigned() {
+        let input = b"query UI
+select x - 1 from t1
+----
+1
+";
+        let result = complete(records)(input);
+        assert_eq!(
+            result.unwrap().1,
+            vec![Record::Query(Query {
+                label: None,
+                column_types: Some(vec![Type::UnsignedInteger]),
+                sort_mode: None,
+                conditionals: vec![],
+                query: "select x - 1 from t1".to_string(),
+                results: QueryResults::Results(vec![Value::UnsignedInteger(1),]),
                 params: Default::default(),
             })]
         )

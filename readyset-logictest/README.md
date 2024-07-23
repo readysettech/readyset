@@ -15,6 +15,7 @@ The intent is to keep things as simple as possible for this kind of test.
 We have found that to be mostly sufficient, but we've added support to
 `readyset-logictest` for a few additional data types:
 
+- `UI` - unsigned integer (mysql only)
 - `D` - date, although this is actually a `datetime` or `timestamp`
 - `M` - time, a simple clock time with no date component
 - `Z` - timestamptz, a datetime with timezone information
