@@ -31,6 +31,7 @@ use readyset_client::metrics::{recorded, MetricsDump};
 use readyset_data::DfValue;
 use readyset_psql::AuthenticationMethod;
 use readyset_server::FrontierStrategy;
+use readyset_util::graphviz::FileFormat;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
@@ -358,6 +359,10 @@ impl Benchmark {
                 do_bench(&param, &mut readyset_pool)?;
             }
 
+            if args.graphviz {
+                rt.block_on(dump_graphviz(workload_name.to_string(), database_type))?;
+            }
+
             rt.block_on(drop_cached_queries(database_type))?;
         }
 
@@ -370,6 +375,27 @@ impl Benchmark {
         unset_affinity();
         Ok(())
     }
+}
+
+async fn dump_graphviz(name: String, database_type: DatabaseType) -> anyhow::Result<()> {
+    let mut conn = DatabaseURL::from_str(&readyset_url(database_type))?
+        .connect(None)
+        .await?;
+    match conn.query("explain graphviz").await {
+        Ok(r) => {
+            let rows: Vec<Vec<DfValue>> = r.try_into()?;
+            let gviz = rows.first().unwrap().first().unwrap();
+            readyset_util::graphviz::write_graphviz(
+                format!("{}", gviz),
+                Path::new(format!("{name}.graphviz.png").as_str()),
+                FileFormat::Png,
+            )?;
+        }
+        Err(e) => {
+            println!("failed to get graphviz for dataflow graph: {:?}", e);
+        }
+    }
+    Ok(())
 }
 
 fn get_allocated_bytes() -> anyhow::Result<usize> {
@@ -568,7 +594,7 @@ impl AdapterCommand {
         let len = usize::from_ne_bytes(len_bytes);
         let mut buf = vec![0; len];
         socket.read_exact(&mut buf[..])?;
-        Ok(bincode::deserialize(&buf[..]).expect("asdfasdf"))
+        Ok(bincode::deserialize(&buf[..]).expect("failed to deserialize msg"))
     }
 }
 
@@ -804,6 +830,10 @@ struct SystemBenchArgs {
     /// are executed. The default value is 100, and the minimum is 10.
     #[arg(long)]
     sample_size: Option<usize>,
+    /// If specified, dump a graphviz file of the entire dataflow graph.
+    /// You must have the `dot` binary application installed in order to use this.
+    #[arg(long)]
+    graphviz: bool,
 
     #[arg(long, hide(true))]
     /// Is present when executed with `cargo bench`
