@@ -25,6 +25,7 @@ readyset-client = { path = "../readyset-client" }
 readyset-mysql = { path = "../readyset-mysql" }
 readyset-psql = { path = "../readyset-psql" }
 readyset-server = { path = "../readyset-server" }
+readyset-util = { path = "../readyset-util" }
 readyset = { path = "../readyset" }
 
 criterion = { workspace = true, features = ["async_tokio"] }

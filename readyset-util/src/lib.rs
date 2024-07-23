@@ -9,6 +9,7 @@ pub mod arbitrary;
 pub mod display;
 pub mod fmt;
 pub mod futures;
+pub mod graphviz;
 pub mod hash;
 pub mod intervals;
 pub mod iter;
