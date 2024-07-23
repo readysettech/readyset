@@ -106,6 +106,7 @@ impl Display for Statement {
 pub enum Type {
     Text,
     Integer,
+    UnsignedInteger,
     Real,
     Numeric,
     // note: `Date` currently behaves more like a `DateTime`/`Timestamp`
@@ -121,8 +122,8 @@ impl Type {
         use mysql_async::Value::*;
         match val {
             Bytes(_) => Some(Self::Text),
-            Int(_) => Some(Self::Real),
-            UInt(_) => Some(Self::Real),
+            Int(_) => Some(Self::Integer),
+            UInt(_) => Some(Self::UnsignedInteger),
             Float(_) => Some(Self::Real),
             Double(_) => Some(Self::Real),
             Date(_, _, _, _, _, _, _) => Some(Self::Date),
@@ -137,6 +138,7 @@ impl Display for Type {
         match self {
             Self::Text => write!(f, "T"),
             Self::Integer => write!(f, "I"),
+            Self::UnsignedInteger => write!(f, "UI"),
             Self::Real => write!(f, "R"),
             Self::Numeric => write!(f, "F"), // F, as in fixed-point number
             Self::Date => write!(f, "D"),
@@ -192,6 +194,7 @@ impl Display for SortMode {
 pub enum Value {
     Text(String),
     Integer(i64),
+    UnsignedInteger(u64),
     Real(i64, u64),
     // note: `Date` currently behaves more like a `DateTime`/`Timestamp`
     Date(NaiveDateTime),
@@ -218,10 +221,7 @@ impl TryFrom<mysql_async::Value> for Value {
                 String::from_utf8(bs).map_err(|e| ValueConversionError(e.to_string()))?,
             )),
             Int(i) => Ok(Self::Integer(i)),
-            UInt(i) => Ok(Self::Integer(
-                i.try_into()
-                    .map_err(|e: TryFromIntError| ValueConversionError(e.to_string()))?,
-            )),
+            UInt(i) => Ok(Self::UnsignedInteger(i)),
             Float(f) => Self::try_from(Double(f as f64)),
             Double(f) => {
                 if !f.is_finite() {
@@ -270,8 +270,7 @@ impl TryFrom<Literal> for Value {
             Literal::Null => Value::Null,
             Literal::Boolean(b) => Value::Integer(i64::from(b)),
             Literal::Integer(v) => Value::Integer(v),
-            // TODO: Support Value::UnsignedInteger
-            Literal::UnsignedInteger(v) => Value::Integer(v as i64),
+            Literal::UnsignedInteger(v) => Value::UnsignedInteger(v),
             Literal::Float(float) => real_value!(float.value, float.precision),
             Literal::Double(double) => real_value!(double.value, double.precision),
             Literal::Numeric(mantissa, scale) => Decimal::try_from_i128_with_scale(mantissa, scale)
@@ -302,6 +301,7 @@ impl From<Value> for mysql_async::Value {
         match val {
             Value::Text(x) => x.into(),
             Value::Integer(x) => x.into(),
+            Value::UnsignedInteger(x) => x.into(),
             Value::Real(i, f) => (i as f64 + ((f as f64) / 1_000_000_000.0)).into(),
             Value::Numeric(d) => {
                 // FIXME(fran): This shouldn't be implemented for mysql_async::Value, since
@@ -339,6 +339,7 @@ impl pgsql::types::ToSql for Value {
         match self {
             Value::Text(x) => x.to_sql(ty, out),
             Value::Integer(x) => x.to_sql(ty, out),
+            Value::UnsignedInteger(_) => unimplemented!("psql doesn't have unsigned integers!"),
             Value::Real(i, f) => (*i as f64 + ((*f as f64) / 1_000_000_000.0)).to_sql(ty, out),
             Value::Numeric(d) => d.to_sql(ty, out),
             Value::Date(x) => x.to_sql(ty, out),
@@ -445,7 +446,7 @@ impl TryFrom<DfValue> for Value {
         match value {
             DfValue::None | DfValue::Max => Ok(Value::Null),
             DfValue::Int(i) => Ok(Value::Integer(i)),
-            DfValue::UnsignedInt(u) => Ok(Value::Integer(u.try_into()?)),
+            DfValue::UnsignedInt(u) => Ok(Value::UnsignedInteger(u)),
             DfValue::Float(f) => Ok(f.into()),
             DfValue::Double(f) => Ok(f.into()),
             DfValue::Text(_) | DfValue::TinyText(_) => Ok(Value::Text(value.try_into()?)),
@@ -479,6 +480,7 @@ impl Display for Value {
                 }
             }
             Self::Integer(i) => write!(f, "{}", i),
+            Self::UnsignedInteger(i) => write!(f, "{}", i),
             Self::Real(whole, frac) => {
                 write!(f, "{}.", whole)?;
                 let frac = frac.to_string();
@@ -506,6 +508,12 @@ impl Display for Value {
             }
             Self::TimestampTz(ts) => write!(f, "{}", ts),
         }
+    }
+}
+
+impl From<i32> for Value {
+    fn from(i: i32) -> Self {
+        Self::Integer(i.into())
     }
 }
 
@@ -541,6 +549,7 @@ impl Value {
         match self {
             Self::Text(_) => Some(Type::Text),
             Self::Integer(_) => Some(Type::Integer),
+            Self::UnsignedInteger(_) => Some(Type::UnsignedInteger),
             Self::Real(_, _) => Some(Type::Real),
             Self::Numeric(_) => Some(Type::Numeric),
             Self::Date(_) => Some(Type::Date),
@@ -564,6 +573,11 @@ impl Value {
             Type::Integer => Ok(Self::Integer(
                 mysql_async::from_value_opt(val.clone()).or_else(|_| -> anyhow::Result<i64> {
                     Ok(mysql_async::from_value_opt::<f64>(val)?.trunc() as i64)
+                })?,
+            )),
+            Type::UnsignedInteger => Ok(Self::UnsignedInteger(
+                mysql_async::from_value_opt(val.clone()).or_else(|_| -> anyhow::Result<u64> {
+                    Ok(mysql_async::from_value_opt::<f64>(val)?.trunc() as u64)
                 })?,
             )),
             Type::Real => {
@@ -603,14 +617,24 @@ impl Value {
         match (self, typ) {
             (Self::Text(_), Type::Text)
             | (Self::Integer(_), Type::Integer)
+            | (Self::UnsignedInteger(_), Type::UnsignedInteger)
             | (Self::Real(_, _), Type::Real)
             | (Self::Date(_), Type::Date)
             | (Self::Time(_), Type::Time)
             | (Self::TimestampTz(_), Type::TimestampTz)
             | (Self::BitVector(_), Type::BitVec)
             | (Self::Null, _) => Ok(Cow::Borrowed(self)),
+            (Self::Integer(i), Type::UnsignedInteger) => {
+                Ok(Cow::Owned(Self::UnsignedInteger((*i).try_into()?)))
+            }
+            (Self::UnsignedInteger(u), Type::Integer) => {
+                Ok(Cow::Owned(Self::Integer((*u).try_into()?)))
+            }
             (Self::TimestampTz(ts), Type::Date) => Ok(Cow::Owned(Self::Date(ts.naive_local()))),
             (Self::Text(txt), Type::Integer) => Ok(Cow::Owned(Self::Integer(txt.parse()?))),
+            (Self::Text(txt), Type::UnsignedInteger) => {
+                Ok(Cow::Owned(Self::UnsignedInteger(txt.parse()?)))
+            }
             (Self::Text(txt), Type::Real) => Ok(Cow::Owned(Self::from(txt.parse::<f64>()?))),
             (Self::Text(txt), Type::Date) => Ok(Cow::Owned(Self::Date(
                 NaiveDateTime::parse_from_str(txt, "%Y-%m-%d %H:%M:%S").or_else(|_| {
