@@ -253,6 +253,9 @@ impl Benchmark {
         group.confidence_level(0.995);
         group.measurement_time(WORKLOAD_DURATION);
         group.throughput(Throughput::Elements(BENCH_BATCH_SIZE));
+        if args.sample_size.is_some() {
+            group.sample_size(args.sample_size.unwrap()); //just checked
+        }
 
         for workload in self.workloads.iter() {
             let workload_name = workload.file_stem().unwrap().to_string_lossy();
@@ -797,6 +800,10 @@ struct SystemBenchArgs {
     /// The name of the test database to be created
     #[arg(long, default_value = "rs_bench")]
     database_name: String,
+    /// The number of samples to take. For each "sample", `BENCH_BATCH_SIZE` operations
+    /// are executed. The default value is 100, and the minimum is 10.
+    #[arg(long)]
+    sample_size: Option<usize>,
 
     #[arg(long, hide(true))]
     /// Is present when executed with `cargo bench`
