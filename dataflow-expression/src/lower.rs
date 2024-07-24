@@ -789,7 +789,9 @@ impl BinaryOperator {
     ) -> ReadySetResult<DfType> {
         if let Some(ty) = match dialect.engine() {
             SqlEngine::MySQL => crate::promotion::mysql::output_type(left_type, self, right_type),
-            _ => None,
+            SqlEngine::PostgreSQL => {
+                crate::promotion::psql::output_type(left_type, self, right_type)
+            }
         } {
             return Ok(ty);
         }
