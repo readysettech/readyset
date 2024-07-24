@@ -441,6 +441,7 @@ impl KeyedState {
             (KeyedState::DoubleBTree(m), RangeKey::Double(range)) => range!(m, range),
             (KeyedState::TriBTree(m), RangeKey::Tri(range)) => range!(m, range),
             (KeyedState::QuadBTree(m), RangeKey::Quad(range)) => range!(m, range),
+            (KeyedState::QuinBTree(m), RangeKey::Quin(range)) => range!(m, range),
             (KeyedState::SexBTree(m), RangeKey::Sex(range)) => range!(m, range),
             (KeyedState::MultiBTree(m, _), RangeKey::Multi(range)) => m
                 .range::<_, [DfValue]>(&(
@@ -453,6 +454,7 @@ impl KeyedState {
                 | KeyedState::DoubleHash(_)
                 | KeyedState::TriHash(_)
                 | KeyedState::QuadHash(_)
+                | KeyedState::QuinHash(_)
                 | KeyedState::SexHash(_)
                 | KeyedState::MultiHash(..),
                 _,
@@ -485,6 +487,11 @@ impl KeyedState {
                     .map(|(k, rs)| (rs, k.into_elements().collect()))
             }
             KeyedState::QuadHash(ref mut m) if !m.is_empty() => {
+                let index = seed % m.len();
+                m.swap_remove_index(index)
+                    .map(|(k, rs)| (rs, k.into_elements().collect()))
+            }
+            KeyedState::QuinHash(ref mut m) if !m.is_empty() => {
                 let index = seed % m.len();
                 m.swap_remove_index(index)
                     .map(|(k, rs)| (rs, k.into_elements().collect()))
