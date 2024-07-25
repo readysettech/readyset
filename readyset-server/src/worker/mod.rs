@@ -600,13 +600,16 @@ async fn do_eviction(
                     let mut total_reported = 0;
                     let sizes = state_sizes
                         .iter()
-                        .map(|(replica_addr, size_atom)| {
+                        .filter_map(|(replica_addr, size_atom)| {
                             let size = size_atom.load(Ordering::Acquire);
+                            if size == 0 {
+                                return None;
+                            }
                             span.in_scope(|| {
                                 trace!("domain {} state size is {} bytes", replica_addr, size)
                             });
                             total_reported += size;
-                            (*replica_addr, size)
+                            Some((*replica_addr, size))
                         })
                         .collect::<Vec<_>>();
                     (sizes, total_reported)
