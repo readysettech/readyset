@@ -205,9 +205,9 @@ pub struct Worker {
     /// The current election state, if it exists (see the `WorkerElectionState` docs).
     election_state: Option<WorkerElectionState>,
     /// A timer for doing evictions.
-    evict_interval: Option<Interval>,
+    evict_interval: Interval,
     /// A memory limit for state, in bytes.
-    memory_limit: Option<usize>,
+    memory_limit: usize,
     /// Channel through which worker requests are received.
     rx: Receiver<WorkerRequest>,
     /// Channel coordinator (used by domains to figure out where other domains are).
@@ -232,6 +232,8 @@ pub struct Worker {
 }
 
 impl Worker {
+    const DEFAULT_EVICT_INTERVAL: Duration = Duration::from_secs(1);
+
     pub fn new(
         worker_rx: Receiver<WorkerRequest>,
         listen_addr: IpAddr,
@@ -244,8 +246,10 @@ impl Worker {
         Ok(Self {
             election_state: None,
             // this initial duration doesn't matter; it gets set upon worker registration
-            evict_interval: memory_check_frequency.map(|f| tokio::time::interval(f)),
-            memory_limit,
+            evict_interval: tokio::time::interval(
+                memory_check_frequency.unwrap_or(Self::DEFAULT_EVICT_INTERVAL),
+            ),
+            memory_limit: memory_limit.unwrap_or(usize::MAX),
             rx: worker_rx,
             coord: Arc::new(Default::default()),
             domain_bind: listen_addr,
@@ -262,7 +266,7 @@ impl Worker {
 
     fn process_eviction(&mut self) {
         tokio::spawn(do_eviction(
-            self.memory_limit,
+            Some(self.memory_limit),
             self.coord.clone(),
             self.memory,
             Arc::clone(&self.state_sizes),
@@ -464,8 +468,12 @@ impl Worker {
             }
             WorkerRequestKind::Ping => Ok(None),
             WorkerRequestKind::SetMemoryLimit { period, limit } => {
-                self.evict_interval = period.map(tokio::time::interval);
-                self.memory_limit = limit;
+                if let Some(period) = period {
+                    self.evict_interval = tokio::time::interval(period);
+                }
+                if let Some(limit) = limit {
+                    self.memory_limit = limit;
+                }
                 Ok(None)
             }
         }
@@ -495,15 +503,6 @@ impl Worker {
     /// This function returns if the worker request sender is dropped.
     pub async fn run(mut self) {
         loop {
-            let ei = &mut self.evict_interval;
-            let eviction = async {
-                if let Some(ref mut ei) = ei {
-                    ei.tick().await
-                } else {
-                    futures_util::future::pending().await
-                }
-            };
-
             select! {
                 // We use `biased` here to ensure that our shutdown signal will be received and
                 // acted upon even if the other branches in this `select!` are constantly in a
@@ -532,7 +531,7 @@ impl Worker {
                         return;
                     }
                 }
-                _ = eviction => {
+                _ = self.evict_interval.tick() => {
                     self.process_eviction();
                 }
                 Some((result, replica_address)) = self.domain_wait_queue.next() => {
