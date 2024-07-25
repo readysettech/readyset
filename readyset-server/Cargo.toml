@@ -58,7 +58,6 @@ lazy_static = { workspace = true }
 regex = { workspace = true }
 tracing-futures = { workspace = true }
 parking_lot = { workspace = true }
-scopeguard = { workspace = true }
 fail = { workspace = true }
 sha1 = { workspace = true }
 derive_more = { workspace = true }

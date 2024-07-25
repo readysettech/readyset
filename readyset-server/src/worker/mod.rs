@@ -32,7 +32,7 @@ use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::{oneshot, Mutex};
 use tokio::task::{JoinError, JoinHandle};
 use tokio::time::Interval;
-use tracing::{debug, error, info, info_span, trace, warn};
+use tracing::{debug, error, info, info_span, trace, warn, Instrument};
 use url::Url;
 use vec1::Vec1;
 
@@ -264,9 +264,9 @@ impl Worker {
         })
     }
 
-    fn process_eviction(&mut self) {
-        tokio::spawn(do_eviction(
-            Some(self.memory_limit),
+    fn evict_tick(&mut self) {
+        tokio::spawn(evict_start(
+            self.memory_limit,
             self.coord.clone(),
             self.memory,
             Arc::clone(&self.state_sizes),
@@ -532,7 +532,7 @@ impl Worker {
                     }
                 }
                 _ = self.evict_interval.tick() => {
-                    self.process_eviction();
+                    self.evict_tick();
                 }
                 Some((result, replica_address)) = self.domain_wait_queue.next() => {
                     if let Err(error) = self.handle_domain_future_completion(
@@ -555,6 +555,126 @@ impl Worker {
     }
 }
 
+async fn evict_check(
+    limit: usize,
+    coord: Arc<ChannelCoordinator>,
+    tracker: MemoryTracker,
+    state_sizes: Arc<Mutex<HashMap<ReplicaAddress, Arc<AtomicUsize>>>>,
+) -> ReadySetResult<()> {
+    let start = std::time::Instant::now();
+
+    let used: usize = tracker.allocated_bytes()?;
+    gauge!(recorded::EVICTION_WORKER_HEAP_ALLOCATED_BYTES, used as f64);
+    if used < limit {
+        return Ok(());
+    }
+
+    // add current state sizes (could be out of date, as packet sent below is not
+    // necessarily received immediately)
+    let (mut sizes, total_reported) = {
+        let state_sizes = state_sizes.lock().await;
+        let mut total_reported = 0;
+        let sizes = state_sizes
+            .iter()
+            .filter_map(|(replica_addr, size_atom)| {
+                let size = size_atom.load(Ordering::Acquire);
+                if size == 0 {
+                    return None;
+                }
+                trace!("domain {} state size is {} bytes", replica_addr, size);
+                total_reported += size;
+                Some((*replica_addr, size))
+            })
+            .collect::<Vec<_>>();
+        (sizes, total_reported)
+    };
+
+    // state sizes are under actual memory usage, but roughly proportional to actual
+    // memory usage - let's figure out proportionally how much *reported* memory we
+    // should evict
+    let actual_over = used - limit;
+    let mut proportional_over =
+        ((total_reported as f64 / used as f64) * actual_over as f64).round() as usize;
+
+    // here's how we're going to proceed.
+    // we don't want to _empty_ any views if we can avoid it.
+    // and we also need to be aware that evicting something from one place may cause a
+    // number of downstream evictions.
+
+    // we want to spread the eviction impact across multiple nodes where possible,
+    // so we distribute how much we're over the limit across the 3 largest nodes.
+    // -1* so we sort in descending order
+    // TODO: be smarter than 3 here
+    sizes.sort_unstable_by_key(|&(_, s)| -(s as i64));
+    sizes.truncate(3);
+
+    // don't evict from tiny things (< 10% of max)
+    if let Some(too_small_i) = sizes.iter().position(|&(_, s)| s < sizes[0].1 / 10) {
+        // everything beyond this is smaller, so also too small
+        sizes.truncate(too_small_i);
+    }
+
+    // starting with the smallest of the n domains
+    let mut n = sizes.len();
+    let mut domain_senders = HashMap::new();
+    for &(target, size) in sizes.iter().rev() {
+        // TODO: should this be evenly divided, or weighted by the size of the domains?
+        let share = (proportional_over + n - 1) / n;
+        // we're only willing to evict at most half the state in each domain
+        // unless this is the only domain left to evict from
+        let evict = if n > 1 {
+            cmp::min(size / 2, share)
+        } else {
+            assert_eq!(share, proportional_over);
+            share
+        };
+        proportional_over -= evict;
+        n -= 1;
+
+        debug!(
+            "memory footprint ({} bytes) exceeds limit ({} bytes); evicting from largest domain {}",
+            used, limit, target.domain_index,
+        );
+
+        counter!(recorded::EVICTION_WORKER_EVICTIONS_REQUESTED, 1);
+
+        let tx = match domain_senders.entry(target) {
+            Occupied(entry) => entry.into_mut(),
+            Vacant(entry) => entry.insert(tokio::task::block_in_place(|| {
+                coord.builder_for(&target)?.build_async().map_err(|e| {
+                    internal_err!(
+                        "an error occurred while trying to create a domain connection: '{}'",
+                        e
+                    )
+                })
+            })?),
+        };
+        let r = tx
+            .send(Packet::Evict(EvictRequest::Bytes {
+                node: None,
+                num_bytes: evict,
+            }))
+            .await;
+
+        if let Err(e) = r {
+            // probably exiting?
+            warn!(
+                "failed to evict from {}: {}",
+                target.domain_index.index(),
+                e
+            );
+            // remove sender so we don't try to use it again
+            domain_senders.remove(&target);
+        }
+    }
+
+    histogram!(
+        recorded::EVICTION_WORKER_EVICTION_TIME,
+        start.elapsed().as_micros() as f64,
+    );
+    Ok(())
+}
+
 /// Calculate the total memory used by the process (by querying [`jemalloc_ctl`]), then perform an
 /// eviction if that's over the configured `memory_limit`.
 ///
@@ -565,149 +685,23 @@ impl Worker {
 /// evict, but use the state sizes of individual nodes to decide *where* to evict. This is
 /// imperfect, and should likely be improved in the future, but is a good way to avoid running fully
 /// out of memory and getting OOM-killed before we ever realise it's time to evict.
-#[allow(clippy::type_complexity)]
-async fn do_eviction(
-    memory_limit: Option<usize>,
+async fn evict_start(
+    limit: usize,
     coord: Arc<ChannelCoordinator>,
-    memory_tracker: MemoryTracker,
+    tracker: MemoryTracker,
     state_sizes: Arc<Mutex<HashMap<ReplicaAddress, Arc<AtomicUsize>>>>,
     is_evicting: Arc<AtomicBool>,
 ) -> ReadySetResult<()> {
     if is_evicting.swap(true, Ordering::Relaxed) {
-        // Already evicting, nothing to do
-        return Ok(());
+        return Ok(()); // Already evicting, nothing to do
     }
 
-    let _guard = scopeguard::guard((), move |_| {
-        is_evicting.store(false, Ordering::Relaxed);
-    });
+    let res = evict_check(limit, coord, tracker, state_sizes)
+        .instrument(info_span!("evicting"))
+        .await;
 
-    let span = info_span!("evicting");
-    let start = std::time::Instant::now();
-
-    let used: usize = memory_tracker.allocated_bytes()?;
-    gauge!(recorded::EVICTION_WORKER_HEAP_ALLOCATED_BYTES, used as f64);
-    // Are we over the limit?
-    match memory_limit {
-        None => Ok(()),
-        Some(limit) => {
-            if used >= limit {
-                // we are! time to evict.
-                // add current state sizes (could be out of date, as packet sent below is not
-                // necessarily received immediately)
-                let (mut sizes, total_reported) = {
-                    let state_sizes = state_sizes.lock().await;
-                    let mut total_reported = 0;
-                    let sizes = state_sizes
-                        .iter()
-                        .filter_map(|(replica_addr, size_atom)| {
-                            let size = size_atom.load(Ordering::Acquire);
-                            if size == 0 {
-                                return None;
-                            }
-                            span.in_scope(|| {
-                                trace!("domain {} state size is {} bytes", replica_addr, size)
-                            });
-                            total_reported += size;
-                            Some((*replica_addr, size))
-                        })
-                        .collect::<Vec<_>>();
-                    (sizes, total_reported)
-                };
-
-                // state sizes are under actual memory usage, but roughly proportional to actual
-                // memory usage - let's figure out proportionally how much *reported* memory we
-                // should evict
-                let actual_over = used - limit;
-                let mut proportional_over =
-                    ((total_reported as f64 / used as f64) * actual_over as f64).round() as usize;
-
-                // here's how we're going to proceed.
-                // we don't want to _empty_ any views if we can avoid it.
-                // and we also need to be aware that evicting something from one place may cause a
-                // number of downstream evictions.
-
-                // we want to spread the eviction impact across multiple nodes where possible,
-                // so we distribute how much we're over the limit across the 3 largest nodes.
-                // -1* so we sort in descending order
-                // TODO: be smarter than 3 here
-                sizes.sort_unstable_by_key(|&(_, s)| -(s as i64));
-                sizes.truncate(3);
-
-                // don't evict from tiny things (< 10% of max)
-                if let Some(too_small_i) = sizes.iter().position(|&(_, s)| s < sizes[0].1 / 10) {
-                    // everything beyond this is smaller, so also too small
-                    sizes.truncate(too_small_i);
-                }
-
-                // starting with the smallest of the n domains
-                let mut n = sizes.len();
-                let mut domain_senders = HashMap::new();
-                for &(target, size) in sizes.iter().rev() {
-                    // TODO: should this be evenly divided, or weighted by the size of the domains?
-                    let share = (proportional_over + n - 1) / n;
-                    // we're only willing to evict at most half the state in each domain
-                    // unless this is the only domain left to evict from
-                    let evict = if n > 1 {
-                        cmp::min(size / 2, share)
-                    } else {
-                        assert_eq!(share, proportional_over);
-                        share
-                    };
-                    proportional_over -= evict;
-                    n -= 1;
-
-                    span.in_scope(|| {
-                        debug!(
-                            "memory footprint ({} bytes) exceeds limit ({} bytes); evicting from largest domain {}",
-                            used,
-                            limit,
-                            target.domain_index,
-                        )
-                    });
-
-                    counter!(recorded::EVICTION_WORKER_EVICTIONS_REQUESTED, 1);
-
-                    let tx = match domain_senders.entry(target) {
-                        Occupied(entry) => entry.into_mut(),
-                        Vacant(entry) => entry.insert(tokio::task::block_in_place(|| {
-                            coord.builder_for(&target)?.build_async().map_err(|e| {
-                                internal_err!(
-                                    "an error occurred while trying to create a domain connection: '{}'",
-                                    e
-                                )
-                            })
-                        })?),
-                    };
-                    let r = tx
-                        .send(Packet::Evict(EvictRequest::Bytes {
-                            node: None,
-                            num_bytes: evict,
-                        }))
-                        .await;
-
-                    if let Err(e) = r {
-                        // probably exiting?
-                        span.in_scope(|| {
-                            warn!(
-                                "failed to evict from {}: {}",
-                                target.domain_index.index(),
-                                e
-                            )
-                        });
-                        // remove sender so we don't try to use it again
-                        domain_senders.remove(&target);
-                    }
-                }
-            }
-            histogram!(
-                recorded::EVICTION_WORKER_EVICTION_TIME,
-                start.elapsed().as_micros() as f64,
-            );
-
-            Ok(())
-        }
-    }
+    is_evicting.store(false, Ordering::Relaxed);
+    res
 }
 
 impl Drop for Worker {
