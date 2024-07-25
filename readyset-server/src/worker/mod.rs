@@ -515,7 +515,9 @@ impl Worker {
                     debug!("worker shutting down after shutdown signal received");
                     let keys: Vec<_> = self.domains.keys().cloned().collect();
                     if let Ok(keys) = Vec1::try_from_vec(keys) {
-                        let ret = self.handle_worker_request(WorkerRequestKind::KillDomains(keys)).await;
+                        let ret = self.handle_worker_request(
+                            WorkerRequestKind::KillDomains(keys)
+                        ).await;
                         if let Err(ref e) = ret {
                             warn!(error = %e, "error on shutting down domains");
                         }
@@ -525,8 +527,7 @@ impl Worker {
                 req = self.rx.recv() => {
                     if let Some(req) = req {
                         self.process_worker_request(req).await;
-                    }
-                    else {
+                    } else {
                         debug!("worker shutting down after request handle dropped");
                         return;
                     }
@@ -538,7 +539,8 @@ impl Worker {
                     if let Err(error) = self.handle_domain_future_completion(
                         replica_address,
                         result
-                    ).await {
+                    ).await
+                    {
                         // If we can't notify the controller about the death of a domain, we have to
                         // exit, since the cluster can no longer be considered healthy
                         error!(
