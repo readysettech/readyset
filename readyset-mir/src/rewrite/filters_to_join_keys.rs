@@ -201,18 +201,21 @@ mod tests {
                     ColumnSpecification {
                         column: nom_sql::Column::from("t1.a"),
                         sql_type: SqlType::Int(None),
+                        generated: None,
                         constraints: vec![],
                         comment: None,
                     },
                     ColumnSpecification {
                         column: nom_sql::Column::from("t1.b"),
                         sql_type: SqlType::Int(None),
+                        generated: None,
                         constraints: vec![],
                         comment: None,
                     },
                     ColumnSpecification {
                         column: nom_sql::Column::from("t1.c"),
                         sql_type: SqlType::Int(None),
+                        generated: None,
                         constraints: vec![],
                         comment: None,
                     },
@@ -237,12 +240,14 @@ mod tests {
                     ColumnSpecification {
                         column: nom_sql::Column::from("t2.a"),
                         sql_type: SqlType::Int(None),
+                        generated: None,
                         constraints: vec![],
                         comment: None,
                     },
                     ColumnSpecification {
                         column: nom_sql::Column::from("t2.b"),
                         sql_type: SqlType::Int(None),
+                        generated: None,
                         constraints: vec![],
                         comment: None,
                     },

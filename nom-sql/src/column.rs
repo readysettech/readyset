@@ -5,7 +5,7 @@ use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::{map, opt};
 use nom::multi::many0;
-use nom::sequence::{delimited, preceded, tuple};
+use nom::sequence::{delimited, preceded, terminated, tuple};
 use nom_locate::LocatedSpan;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
@@ -128,6 +128,7 @@ impl DialectDisplay for ColumnConstraint {
 pub struct ColumnSpecification {
     pub column: Column,
     pub sql_type: SqlType,
+    pub generated: Option<GeneratedColumn>,
     pub constraints: Vec<ColumnConstraint>,
     pub comment: Option<String>,
 }
@@ -137,6 +138,7 @@ impl ColumnSpecification {
         ColumnSpecification {
             column,
             sql_type,
+            generated: None,
             constraints: vec![],
             comment: None,
         }
@@ -150,6 +152,7 @@ impl ColumnSpecification {
         ColumnSpecification {
             column,
             sql_type,
+            generated: None,
             constraints,
             comment: None,
         }
@@ -292,15 +295,22 @@ pub fn column_specification(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ColumnSpecification> {
     move |i| {
-        let (i, (column, field_type, constraints)) = tuple((
+        let (i, (column, field_type)) = tuple((
             column_identifier_no_alias(dialect),
             opt(delimited(
                 whitespace1,
                 type_identifier(dialect),
                 whitespace0,
             )),
-            many0(column_constraint(dialect)),
         ))(i)?;
+
+        let (i, generated) = if matches!(dialect, Dialect::MySQL) {
+            opt(preceded(whitespace0, generated_column(dialect)))(i)?
+        } else {
+            (i, None)
+        };
+
+        let (i, constraints) = many0(preceded(whitespace0, column_constraint(dialect)))(i)?;
 
         let (i, comment) = if matches!(dialect, Dialect::MySQL) {
             opt(parse_comment(dialect))(i)?
@@ -318,8 +328,58 @@ pub fn column_specification(
             ColumnSpecification {
                 column,
                 sql_type,
+                generated,
                 constraints,
                 comment,
+            },
+        ))
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
+pub struct GeneratedColumn {
+    pub expr: Expr,
+    pub stored: bool,
+}
+
+impl fmt::Display for GeneratedColumn {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "GENERATED ALWAYS AS ({}) {} ",
+            self.expr.display(Dialect::MySQL),
+            if self.stored { "STORED" } else { "VIRTUAL" }
+        )
+    }
+}
+
+/// Parse rule for a generated column specification
+fn generated_column(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], GeneratedColumn> {
+    move |i| {
+        let (i, _) = opt(terminated(tag_no_case("generated always"), whitespace0))(i)?;
+        let (i, _) = terminated(tag_no_case("as"), whitespace0)(i)?;
+        let (i, expr) = delimited(tag("("), expression(dialect), tag(")"))(i)?;
+        let (i, stored) = preceded(
+            whitespace0,
+            opt(map(
+                alt((tag_no_case("stored"), tag_no_case("virtual"))),
+                |i: LocatedSpan<&[u8]>| {
+                    std::str::from_utf8(i.fragment())
+                        .unwrap()
+                        .to_string()
+                        .to_lowercase()
+                        == "stored"
+                },
+            )),
+        )(i)?;
+
+        Ok((
+            i,
+            GeneratedColumn {
+                expr,
+                stored: stored.unwrap_or(false),
             },
         ))
     }
@@ -331,7 +391,72 @@ mod tests {
 
     mod mysql {
         use super::*;
-        use crate::FunctionExpr;
+        use crate::{BinaryOperator, FunctionExpr};
+
+        #[test]
+        fn multiple_generated_column() {
+            let mut default_gen_col = GeneratedColumn {
+                expr: Expr::BinaryOp {
+                    lhs: Box::new(Expr::Literal(Literal::Integer(1))),
+                    op: BinaryOperator::Add,
+                    rhs: Box::new(Expr::Literal(Literal::Integer(1))),
+                },
+                stored: true,
+            };
+
+            // Without GENERATED ALWAYS
+            let (_, res) =
+                generated_column(Dialect::MySQL)(LocatedSpan::new(b"AS (1 + 1) STORED")).unwrap();
+            assert_eq!(res, default_gen_col);
+
+            // With GENERATED ALWAYS and STORED
+            let (_, res) = generated_column(Dialect::MySQL)(LocatedSpan::new(
+                b"GENERATED ALWAYS AS (1 + 1) STORED",
+            ))
+            .unwrap();
+            assert_eq!(res, default_gen_col);
+
+            // With GENERATED ALWAYS and VIRTUAL
+            default_gen_col.stored = false;
+            let (_, res) = generated_column(Dialect::MySQL)(LocatedSpan::new(
+                b"GENERATED ALWAYS AS (1 + 1) VIRTUAL",
+            ))
+            .unwrap();
+
+            assert_eq!(res, default_gen_col);
+
+            // Without STORED or VIRTUAL (defaults to VIRTUAL)
+            let (_, res) =
+                generated_column(Dialect::MySQL)(LocatedSpan::new(b"GENERATED ALWAYS AS (1 + 1)"))
+                    .unwrap();
+
+            assert_eq!(res, default_gen_col);
+
+            // Column specification with generated column
+            let mut col_spec = ColumnSpecification {
+                column: Column {
+                    name: "col1".into(),
+                    table: None,
+                },
+                sql_type: SqlType::Int(None),
+                generated: Some(default_gen_col),
+                comment: None,
+                constraints: vec![ColumnConstraint::NotNull],
+            };
+            let (_, res) = column_specification(Dialect::MySQL)(LocatedSpan::new(
+                b"`col1` INT GENERATED ALWAYS AS (1 + 1) VIRTUAL NOT NULL",
+            ))
+            .unwrap();
+            assert_eq!(res, col_spec);
+
+            // Column specification with generated column and PK
+            col_spec.constraints.push(ColumnConstraint::PrimaryKey);
+            let (_, res) = column_specification(Dialect::MySQL)(LocatedSpan::new(
+                b"`col1` INT GENERATED ALWAYS AS (1 + 1) VIRTUAL NOT NULL PRIMARY KEY",
+            ))
+            .unwrap();
+            assert_eq!(res, col_spec);
+        }
 
         #[test]
         fn multiple_constraints() {
@@ -347,6 +472,7 @@ mod tests {
                         table: None,
                     },
                     sql_type: SqlType::Timestamp,
+                    generated: None,
                     comment: None,
                     constraints: vec![
                         ColumnConstraint::NotNull,
@@ -402,6 +528,7 @@ mod tests {
                     table: None,
                 },
                 sql_type: SqlType::DateTime(Some(6)),
+                generated: None,
                 comment: None,
                 constraints: vec![
                     ColumnConstraint::NotNull,
@@ -437,6 +564,7 @@ mod tests {
                         table: None,
                     },
                     sql_type: SqlType::DateTime(Some(6)),
+                    generated: None,
                     comment: None,
                     constraints: vec![
                         ColumnConstraint::NotNull,
@@ -472,6 +600,7 @@ mod tests {
                         table: None,
                     },
                     sql_type: SqlType::Timestamp,
+                    generated: None,
                     comment: None,
                     constraints: vec![
                         ColumnConstraint::NotNull,
@@ -499,6 +628,7 @@ mod tests {
                         table: None,
                     },
                     sql_type: SqlType::Timestamp,
+                    generated: None,
                     comment: None,
                     constraints: vec![
                         ColumnConstraint::NotNull,

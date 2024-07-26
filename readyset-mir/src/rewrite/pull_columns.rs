@@ -81,18 +81,21 @@ mod tests {
                     ColumnSpecification {
                         column: nom_sql::Column::from("a"),
                         sql_type: SqlType::Int(None),
+                        generated: None,
                         constraints: vec![],
                         comment: None,
                     },
                     ColumnSpecification {
                         column: nom_sql::Column::from("b"),
                         sql_type: SqlType::Int(None),
+                        generated: None,
                         constraints: vec![],
                         comment: None,
                     },
                     ColumnSpecification {
                         column: nom_sql::Column::from("c"),
                         sql_type: SqlType::Int(None),
+                        generated: None,
                         constraints: vec![],
                         comment: None,
                     },

@@ -137,6 +137,7 @@ mod tests {
                 column_specs: vec![ColumnSpecification {
                     column: "t.x".into(),
                     sql_type: SqlType::Int(None),
+                    generated: None,
                     constraints: vec![],
                     comment: None,
                 }],

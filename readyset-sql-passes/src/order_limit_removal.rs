@@ -166,6 +166,7 @@ mod tests {
                 table: Some("t".into()),
             },
             sql_type: nom_sql::SqlType::Bool,
+            generated: None,
             constraints: vec![],
             comment: None,
         };
@@ -175,6 +176,7 @@ mod tests {
                 table: Some("t".into()),
             },
             sql_type: nom_sql::SqlType::Bool,
+            generated: None,
             constraints: vec![ColumnConstraint::Unique],
             comment: None,
         };
@@ -184,6 +186,7 @@ mod tests {
                 table: Some("t".into()),
             },
             sql_type: nom_sql::SqlType::Bool,
+            generated: None,
             constraints: vec![],
             comment: None,
         };
@@ -193,6 +196,7 @@ mod tests {
                 table: Some("t".into()),
             },
             sql_type: nom_sql::SqlType::Bool,
+            generated: None,
             constraints: vec![],
             comment: None,
         };

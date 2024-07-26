@@ -380,6 +380,7 @@ impl From<TableSpec> for CreateTableStatement {
                     .map(|(col_name, col_type)| ColumnSpecification {
                         column: col_name.into(),
                         sql_type: col_type.sql_type,
+                        generated: None,
                         constraints: vec![],
                         comment: None,
                     })

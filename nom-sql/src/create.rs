@@ -1688,6 +1688,7 @@ mod tests {
                         fields: vec![ColumnSpecification {
                             column: "x".into(),
                             sql_type: SqlType::Double,
+                            generated: None,
                             constraints: vec![],
                             comment: None,
                         }],
@@ -2268,6 +2269,7 @@ mod tests {
                         fields: vec![ColumnSpecification {
                             column: "x".into(),
                             sql_type: SqlType::Double,
+                            generated: None,
                             constraints: vec![],
                             comment: None,
                         }],

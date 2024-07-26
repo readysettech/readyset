@@ -137,12 +137,14 @@ mod tests {
                         ColumnSpecification {
                             column: "base.a".into(),
                             sql_type: SqlType::Int(None),
+                            generated: None,
                             constraints: vec![],
                             comment: None,
                         },
                         ColumnSpecification {
                             column: "base.b".into(),
                             sql_type: SqlType::Int(None),
+                            generated: None,
                             constraints: vec![],
                             comment: None,
                         },
@@ -161,12 +163,14 @@ mod tests {
                         ColumnSpecification {
                             column: "base2.a".into(),
                             sql_type: SqlType::Int(None),
+                            generated: None,
                             constraints: vec![],
                             comment: None,
                         },
                         ColumnSpecification {
                             column: "base2.b".into(),
                             sql_type: SqlType::Int(None),
+                            generated: None,
                             constraints: vec![],
                             comment: None,
                         },
