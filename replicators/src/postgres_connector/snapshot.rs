@@ -456,6 +456,7 @@ impl TableDescription {
                                 },
                                 sql_type: parse_sql_type(Dialect::PostgreSQL, c.sql_type)
                                     .map_err(|e| internal_err!("Could not parse SQL type: {e}"))?,
+                                generated: None,
                                 constraints: if c.not_null {
                                     vec![ColumnConstraint::NotNull]
                                 } else {

@@ -225,6 +225,7 @@ impl DdlEvent {
                                 table: Some(table.clone()),
                             },
                             sql_type: col.column_type?,
+                            generated: None,
                             constraints: if col.not_null {
                                 vec![ColumnConstraint::NotNull]
                             } else {

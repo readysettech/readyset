@@ -115,6 +115,7 @@ mod tests {
                 column_specs: vec![ColumnSpecification {
                     column: nom_sql::Column::from("a"),
                     sql_type: SqlType::Int(None),
+                    generated: None,
                     constraints: vec![],
                     comment: None,
                 }],
@@ -181,6 +182,7 @@ mod tests {
                 column_specs: vec![ColumnSpecification {
                     column: nom_sql::Column::from("a"),
                     sql_type: SqlType::Int(None),
+                    generated: None,
                     constraints: vec![],
                     comment: None,
                 }],
@@ -261,6 +263,7 @@ mod tests {
                 column_specs: vec![ColumnSpecification {
                     column: nom_sql::Column::from("a"),
                     sql_type: SqlType::Int(None),
+                    generated: None,
                     constraints: vec![],
                     comment: None,
                 }],

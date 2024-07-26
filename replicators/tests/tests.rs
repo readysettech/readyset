@@ -3310,3 +3310,86 @@ async fn mysql_dont_enforce_fk_replication() {
     }
     shutdown_tx.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+#[slow]
+async fn mysql_generated_columns() {
+    readyset_tracing::init_test_logging();
+    let url = mysql_url();
+    let mut client = DbConnection::connect(&url).await.unwrap();
+
+    // Test Generated Columns during Snapshot
+    client
+        .query(
+            "DROP TABLE IF EXISTS t_generated CASCADE;
+             CREATE TABLE t_generated (x INT PRIMARY KEY, col1 INT AS (x + 1) VIRTUAL, col2 INT AS (x + 2), col3 INT AS (x + 3) STORED);
+             INSERT INTO t_generated (x) VALUES (1);
+             INSERT INTO t_generated (x) VALUES (2);",
+        )
+        .await
+        .unwrap();
+
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
+        .await
+        .unwrap();
+    ctx.notification_channel
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+
+    ctx.check_results(
+        "t_generated",
+        "test_snapshot",
+        &[
+            &[
+                DfValue::from(1),
+                DfValue::from(2),
+                DfValue::from(3),
+                DfValue::from(4),
+            ],
+            &[
+                DfValue::from(2),
+                DfValue::from(3),
+                DfValue::from(4),
+                DfValue::from(5),
+            ],
+        ],
+    )
+    .await
+    .unwrap();
+
+    // Test Generated Columns during Replication including updating a record and checking the
+    // generated columns reflect the update and deleting a record.
+    client
+        .query(
+            "INSERT INTO t_generated (x) VALUES (10);
+             UPDATE t_generated SET x = 5 WHERE x = 1;
+             DELETE FROM t_generated WHERE x = 2;",
+        )
+        .await
+        .unwrap();
+    ctx.check_results(
+        "t_generated",
+        "test_snapshot",
+        &[
+            &[
+                DfValue::from(5),
+                DfValue::from(6),
+                DfValue::from(7),
+                DfValue::from(8),
+            ],
+            &[
+                DfValue::from(10),
+                DfValue::from(11),
+                DfValue::from(12),
+                DfValue::from(13),
+            ],
+        ],
+    )
+    .await
+    .unwrap();
+    shutdown_tx.shutdown().await;
+}

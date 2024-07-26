@@ -483,6 +483,7 @@ mod tests {
                         table: None,
                     },
                     sql_type: SqlType::VarChar(Some(255)),
+                    generated: None,
                     constraints: vec![],
                     comment: None,
                 }),
@@ -492,6 +493,7 @@ mod tests {
                         table: None,
                     },
                     sql_type: SqlType::Text,
+                    generated: None,
                     constraints: vec![],
                     comment: None,
                 }),
@@ -517,6 +519,7 @@ mod tests {
                         table: None,
                     },
                     sql_type: SqlType::Int(Some(32)),
+                    generated: None,
                     comment: None,
                     constraints: vec![],
                 })]),
@@ -584,6 +587,7 @@ mod tests {
                         table: None,
                     },
                     sql_type: SqlType::Int(None),
+                    generated: None,
                     constraints: vec![],
                     comment: None,
                 })]),
@@ -609,6 +613,7 @@ mod tests {
                             table: None,
                         },
                         sql_type: SqlType::Int(None),
+                        generated: None,
                         constraints: vec![],
                         comment: None,
                     }),
@@ -618,6 +623,7 @@ mod tests {
                             table: None,
                         },
                         sql_type: SqlType::Text,
+                        generated: None,
                         constraints: vec![],
                         comment: None,
                     }),
@@ -720,6 +726,7 @@ mod tests {
                         spec: ColumnSpecification {
                             column: Column::from("created_at"),
                             sql_type: SqlType::DateTime(None),
+                            generated: None,
                             constraints: vec![ColumnConstraint::NotNull],
                             comment: None,
                         }
@@ -742,6 +749,7 @@ mod tests {
                         spec: ColumnSpecification {
                             column: Column::from("f"),
                             sql_type: SqlType::VarChar(Some(255)),
+                            generated: None,
                             constraints: vec![
                                 ColumnConstraint::NotNull,
                                 ColumnConstraint::PrimaryKey
@@ -767,6 +775,7 @@ mod tests {
                         spec: ColumnSpecification {
                             column: Column::from("modify"),
                             sql_type: SqlType::DateTime(None),
+                            generated: None,
                             constraints: vec![],
                             comment: None,
                         }
@@ -852,6 +861,7 @@ mod tests {
                     definitions: Ok(vec![AlterTableDefinition::AddColumn(ColumnSpecification {
                         column: Column::from("subscription"),
                         sql_type: SqlType::from_enum_variants(["follow".into(), "ignore".into(),]),
+                        generated: None,
                         constraints: vec![ColumnConstraint::Null],
                         comment: None,
                     })]),
@@ -879,6 +889,7 @@ mod tests {
                         table: None,
                     },
                     sql_type: SqlType::Int(Some(32)),
+                    generated: None,
                     comment: None,
                     constraints: vec![],
                 })]),
@@ -946,6 +957,7 @@ mod tests {
                         table: None,
                     },
                     sql_type: SqlType::Int(None),
+                    generated: None,
                     constraints: vec![],
                     comment: None,
                 })]),
@@ -971,6 +983,7 @@ mod tests {
                             table: None,
                         },
                         sql_type: SqlType::Int(None),
+                        generated: None,
                         constraints: vec![],
                         comment: None,
                     }),
@@ -980,6 +993,7 @@ mod tests {
                             table: None,
                         },
                         sql_type: SqlType::Text,
+                        generated: None,
                         constraints: vec![],
                         comment: None,
                     }),
