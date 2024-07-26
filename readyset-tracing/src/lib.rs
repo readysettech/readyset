@@ -34,6 +34,7 @@ use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{filter, fmt, EnvFilter, Layer};
 
 mod error;
+pub mod util;
 pub use error::Error;
 mod logformat;
 use logformat::LogFormat;
