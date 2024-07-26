@@ -293,7 +293,7 @@ impl DfType {
             VarBit(len) => Self::VarBit(len),
 
             Json => Self::Json,
-            Jsonb => unsupported!("Unsupported type: Jsonb"),
+            Jsonb => Self::Jsonb,
 
             Date => Self::Date,
             #[allow(clippy::or_fun_call)]
@@ -310,7 +310,7 @@ impl DfType {
                 subsecond_digits: dialect.default_subsecond_digits(),
             },
             Interval { .. } => unsupported!("Unsupported type: INTERVAL"),
-            Uuid => unsupported!("Unsupported type: Uuid"),
+            Uuid => Self::Uuid,
             MacAddr => unsupported!("Unsupported type: MacAddr"),
             Inet => unsupported!("Unsupported type: Inet"),
             Citext => Self::Text(Collation::Citext),
