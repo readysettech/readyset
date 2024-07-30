@@ -1,3 +1,5 @@
+use std::time::{Duration, Instant};
+
 use anyhow::{anyhow, bail, Context, Result};
 use clap::Parser;
 use console::style;
@@ -130,7 +132,7 @@ impl ReplContext {
         })
     }
 
-    fn make_prompt(&self) -> String {
+    fn make_prompt(&self, last_duration: Duration) -> String {
         let mut url = format!(
             "{}://",
             match self.options.database_url.database_type() {
@@ -146,7 +148,7 @@ impl ReplContext {
             url.push_str(&format!("/{}", db_name));
         }
 
-        format!("[{}] ❯ ", style(url).bold())
+        format!("[{}] {:?} ❯ ", style(url).bold(), last_duration)
     }
 
     async fn handle_command(&mut self, cmd: &str) -> Result<()> {
@@ -269,6 +271,7 @@ impl Validator for WaitForSemicolon {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let mut last_start = Instant::now();
     let options: Options = Options::parse();
     let mut context = ReplContext::new(options).await?;
 
@@ -278,8 +281,9 @@ async fn main() -> Result<()> {
     rl.set_helper(Some(WaitForSemicolon));
     let _ = rl.load_history(".readyset-history");
     loop {
-        match rl.readline(&context.make_prompt()) {
+        match rl.readline(&context.make_prompt(Instant::now() - last_start)) {
             Ok(cmd) => {
+                last_start = Instant::now();
                 match context.handle_command(&cmd).await {
                     Err(err) => {
                         eprintln!("Error: {:#}", err);
