@@ -56,14 +56,11 @@
 //! * `BINARY_PATH`: The path to a directory with the readyset-server and readyset binaries,
 //!   defaults to `$CARGO_MANIFEST_DIR/../../target/debug`, `readyset/target/debug`.
 //!
-//! * `PORT`: The host of the upstream database to use as upstream, defaults to
-//! `127.0.0.1`.
+//! * `PORT`: The host of the upstream database to use as upstream, defaults to `127.0.0.1`.
 //!
-//! * `PORT`: The port of the upstream database to use as upstream, defaults to
-//! `3306`.
+//! * `PORT`: The port of the upstream database to use as upstream, defaults to `3306`.
 //!
-//! * `ROOT_PASSWORD`: The password to use for the upstream database,
-//! defaults to `noria`.
+//! * `ROOT_PASSWORD`: The password to use for the upstream database, defaults to `noria`.
 //!
 //! * `RUN_SLOW_TESTS`: Enables running certain tests that are slow.
 //!

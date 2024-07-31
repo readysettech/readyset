@@ -1059,17 +1059,14 @@ fn build_key(row: &[DfValue], columns: &[usize]) -> PointKey {
 
 /// Our RocksDB keys come in three forms, and are encoded as follows:
 ///
-/// * Unique Primary Keys
-/// (size, key), where size is the serialized byte size of `key`
-/// (used in `prefix_transform`).
+/// * Unique Primary Keys (size, key), where size is the serialized byte size of `key` (used in
+///   `prefix_transform`).
 ///
-/// * Non-unique Primary Keys
-/// (size, key, epoch, seq), where epoch is incremented on each recover, and seq is a
-/// monotonically increasing sequence number that starts at 0 for every new epoch.
+/// * Non-unique Primary Keys (size, key, epoch, seq), where epoch is incremented on each recover,
+///   and seq is a monotonically increasing sequence number that starts at 0 for every new epoch.
 ///
-/// * Secondary Index Keys
-/// (size, key, primary_key), where `primary_key` makes sure that each secondary index row is
-/// unique.
+/// * Secondary Index Keys (size, key, primary_key), where `primary_key` makes sure that each
+///   secondary index row is unique.
 ///
 /// `serialize_key` is responsible for serializing the underlying PointKey tuple
 /// directly, plus any extra information as described above.

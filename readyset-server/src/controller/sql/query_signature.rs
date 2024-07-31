@@ -40,8 +40,10 @@ impl Signature for QueryGraph {
     ///
     /// *N.B.:* Equal query signatures do *NOT* imply that queries are identical! Instead, it
     /// merely means that the queries:
-    ///  1) refer to the same relations
-    ///  2) mention the same columns as attributes
+    ///
+    /// 1) refer to the same relations
+    /// 2) mention the same columns as attributes
+    ///
     /// Importantly, this does *NOT* say anything about the operators used in comparisons, literal
     /// values compared against, or even which columns are compared. It is the responsibility of the
     /// caller to do a deeper comparison of the queries.

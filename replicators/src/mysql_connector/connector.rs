@@ -632,8 +632,8 @@ impl MySqlBinlogConnector {
     /// Process binlog events until an actionable event occurs.
     ///
     /// # Arguments
-    ///
     /// * `until` - an optional position in the binlog to stop at, even if no actionable
+    ///
     /// occurred. In that case the action [`ReplicationAction::LogPosition`] is returned.
     pub(crate) async fn next_action_inner(
         &mut self,

@@ -35,10 +35,10 @@ use crate::controller::NodeRestrictionKey;
 ///
 /// ### Sharding enabled
 /// In this situation, the following happens:
-/// 1. We traverse down the graph and gather all the children nodes from the base node,
-/// until we hit a sharder or shard merger.
+/// 1. We traverse down the graph and gather all the children nodes from the base node, until we hit
+///    a sharder or shard merger.
 /// 2. From all of those children, we traverse the graph up until we encounter another base node
-/// without traversing any sharders or shard mergers.
+///    without traversing any sharders or shard mergers.
 ///
 /// The set of those base node will be grouped together in the same domain, as long as their shards
 /// are compatible with each other (based on the [`DfState::node_restrictions`]).

@@ -233,8 +233,8 @@ impl Node {
     ///
     /// # Invariants
     ///
-    /// * self must have a self.inner of NodeType::Internal or this will panic
-    /// We can't know the column_source if we aren't an internal node.
+    /// * self must have a self.inner of NodeType::Internal or this will panic We can't know the
+    ///   column_source if we aren't an internal node.
     pub fn column_source(&self, cols: &[usize]) -> ColumnSource {
         #[allow(clippy::unwrap_used)] // Documented invariant.
         let ret = Ingredient::column_source(self.as_internal().unwrap(), cols);

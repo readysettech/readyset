@@ -72,7 +72,7 @@ enum ScramMessageAttribute {
     ReservedMext,
 
     /// > r: This attribute specifies a sequence of random printable ASCII characters excluding ','
-    /// (which forms the nonce used as input to the hash function).
+    /// > (which forms the nonce used as input to the hash function).
     Nonce,
 
     /// > c: This REQUIRED attribute specifies the base64-encoded GS2 header and channel binding

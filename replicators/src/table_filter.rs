@@ -11,7 +11,7 @@ use readyset_util::redacted::RedactedString;
 /// Tables may be filtered from replication in 2 ways:
 /// 1. All tables will be filtered other than the ones provided to the option --replication_tables,
 ///    if it is used OR All tables will be replicated other than the ones provided to the option
-///   --replication-tables-ignore, if it is used.
+///    --replication-tables-ignore, if it is used.
 /// 2. If we encounter a unrecoverable failure in replication for a table, we can filter out the
 ///    table to keep the process running without that table, which is better than being stuck until
 ///    we fix why that table isn't replicating.

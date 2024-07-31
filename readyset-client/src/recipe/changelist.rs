@@ -8,6 +8,7 @@
 //! - `CREATE VIEW`
 //! - `DROP CACHED QUERY`
 //! - `DROP TABLE`
+//!
 //! Said list of [`Change`]s are sorted in the same order as the queries came in. This guarantees
 //! that within the same request we can have queries like these:
 //! ```SQL

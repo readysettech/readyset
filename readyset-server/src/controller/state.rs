@@ -1845,39 +1845,39 @@ impl DfState {
 /// The choice of using [`tokio::sync::RwLock`] instead of [`std::sync::RwLock`] or
 /// [`parking_lot::RwLock`] was made in order to ensure that:
 /// 1. The read lock does not starve writers attempting to modify the dataflow state, as the lock is
-/// fair and will block reader threads if there are writers waiting for the lock.
+///    fair and will block reader threads if there are writers waiting for the lock.
 /// 2. To ensure that the read lock can be used by multiple threads, since the lock is `Send` and
-/// `Sync`.
+///    `Sync`.
 ///
 /// ## Writes
 /// Writes are performed by following a couple of steps:
 /// 1. A mutex is acquired to ensure that only one write is in progress at any time.
 /// 2. A copy of the current [`DfState`] (being held by the [`DfStateReader`] is made.
-/// 3. A [`DfStateWriter`] is created from the copy and the mutex guard, having the lifetime
-/// of the latter.
+/// 3. A [`DfStateWriter`] is created from the copy and the mutex guard, having the lifetime of the
+///    latter.
 /// 4. All the computations/modifications are performed on the [`DfStateWriter`] (aka, on the
-/// underlying [`DfState`] copy).
+///    underlying [`DfState`] copy).
 /// 5. The [`DfStateWriter`] is then committed to the [`DfState`] by calling
-/// [`DfStateWriter::commit`], which replaces the old state by the new one in the
-/// [`DfStateReader`].
+///    [`DfStateWriter::commit`], which replaces the old state by the new one in the
+///    [`DfStateReader`].
 ///
 /// As previously mentioned for reads, the choice of using [`tokio::sync::RwLock`] ensures writers
 /// fairness and the ability to use the lock by multiple threads.
 ///
 /// Following the three steps to perform a write guarantees that:
-/// 1. Writes don't starve readers: when we start a write operation, we take a read lock
-/// for the [`DfStateReader`] in order to make a copy of a state. In doing so, we ensure that
-/// readers can continue to read the state: no modification has been made yet.
-/// Writers can also perform all their computing/modifications (which can be pretty expensive
-/// time-wise), and only then the changes can be committed by swapping the old state for the new
-/// one, which is the only time readers are forced to wait.
-/// 2. If a write operation fails, the state is not modified.
-/// TODO(fran): Even though the state is not modified here, we might have sent messages to other
-/// workers/domains.   It is worth looking into a better way of handling that (if it's even
-/// necessary).   Such a mechanism was never in place to begin with.
-/// 3. Writes are transactional: if there is an instance of [`DfStateWriter`] in
-/// existence, then all the other writes must wait. This guarantees that the operations performed
-/// to the dataflow state are executed transactionally.
+/// 1. Writes don't starve readers: when we start a write operation, we take a read lock for the
+///    [`DfStateReader`] in order to make a copy of a state. In doing so, we ensure that readers can
+///    continue to read the state: no modification has been made yet. Writers can also perform all
+///    their computing/modifications (which can be pretty expensive time-wise), and only then the
+///    changes can be committed by swapping the old state for the new one, which is the only time
+///    readers are forced to wait.
+/// 2. If a write operation fails, the state is not modified. TODO(fran): Even though the state is
+///    not modified here, we might have sent messages to other workers/domains.   It is worth
+///    looking into a better way of handling that (if it's even necessary).   Such a mechanism was
+///    never in place to begin with.
+/// 3. Writes are transactional: if there is an instance of [`DfStateWriter`] in existence, then all
+///    the other writes must wait. This guarantees that the operations performed to the dataflow
+///    state are executed transactionally.
 ///
 /// # How to use
 /// ## Reading the state

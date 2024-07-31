@@ -29,17 +29,17 @@
 //! When a prepared statement is not immediately available for execution on ReadySet, we will
 //! perform a migration, migrations can happen in one of three ways:
 //!
-//! * Explicit migrations: only `CREATE CACHE` and `CREATE VIEW` will cause migrations.
-//! A `CREATE PREPARED STATEMENT` will not cause a migration, and queries will go to upstream
-//! fallback. Enabled with the `--query-caching=explicit` argument. However if a migration already
-//! happened, we will use it.
-//! * Async migration: prepared statements will be put in a [`QueryStatusCache`] and another
-//! thread will perform migrations in the background. Once a statement finished migration it
-//! will execute on ReadySet, while it is waiting for a migration to happen it will execute on
-//! fallback. Enabled with the `--query-caching=async` flag.
-//! * In request path: migrations will happen when either `CREATE CACHE` or
-//! `CREATE PREPARED STATEMENT` are called. It is also the only available option when a
-//! upstream fallback is not available.
+//! * Explicit migrations: only `CREATE CACHE` and `CREATE VIEW` will cause migrations. A `CREATE
+//!   PREPARED STATEMENT` will not cause a migration, and queries will go to upstream fallback.
+//!   Enabled with the `--query-caching=explicit` argument. However if a migration already happened,
+//!   we will use it.
+//! * Async migration: prepared statements will be put in a [`QueryStatusCache`] and another thread
+//!   will perform migrations in the background. Once a statement finished migration it will execute
+//!   on ReadySet, while it is waiting for a migration to happen it will execute on fallback.
+//!   Enabled with the `--query-caching=async` flag.
+//! * In request path: migrations will happen when either `CREATE CACHE` or `CREATE PREPARED
+//!   STATEMENT` are called. It is also the only available option when a upstream fallback is not
+//!   available.
 //!
 //! ## Caching
 //!
@@ -840,12 +840,12 @@ where
 /// TODO: The ideal approach for query handling is as follows:
 /// 1. If we know we can't support a query, send it to fallback.
 /// 2. If we think we can support a query, try to send it to ReadySet. If that hits an error that
-/// should be retried, retry.    If not, try fallback without dropping the connection inbetween.
+///    should be retried, retry.    If not, try fallback without dropping the connection inbetween.
 /// 3. If that fails and we got a MySQL error code, send that back to the client and keep the
-/// connection open. This is a real correctness bug. 4. If we got another kind of error that is
-/// retryable from fallback, retry. 5. If we got a non-retry related error that's not a MySQL error
-/// code already, convert it to the most appropriate MySQL error code and write    that back to the
-/// caller without dropping the connection.
+///    connection open. This is a real correctness bug. 4. If we got another kind of error that is
+///    retryable from fallback, retry. 5. If we got a non-retry related error that's not a MySQL
+///    error code already, convert it to the most appropriate MySQL error code and write    that
+///    back to the caller without dropping the connection.
 impl<DB, Handler> Backend<DB, Handler>
 where
     DB: 'static + UpstreamDatabase,

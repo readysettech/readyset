@@ -42,6 +42,7 @@ impl SnapshotType {
     /// Get the lower bound for the next query
     /// Returns:
     /// * The lower bound
+    ///
     /// Errors if the snapshot type is FullTableScan or the lower bound is not set
     pub fn get_lower_bound(&mut self) -> ReadySetResult<Vec<mysql::Value>> {
         match self {
