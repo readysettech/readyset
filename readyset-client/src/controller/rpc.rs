@@ -1,10 +1,10 @@
 //! This needs to be its own module to work around the way type-alias-impl-trait gets inferred - see
 //! <https://github.com/mit-pdos/noria/issues/189> for more information
 
+use std::pin::Pin;
 use std::time::Duration;
 
 use futures::Future;
-use futures_util::future::Either;
 use readyset_errors::{rpc_err, rpc_err_no_downcast, ReadySetError, ReadySetResult};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -16,7 +16,7 @@ use crate::ReadySetHandle;
 
 // this alias is needed to work around -> impl Trait capturing _all_ lifetimes by default
 // the A parameter is needed so it gets captured into the impl Trait
-pub type RpcFuture<'a, R: DeserializeOwned + 'a> = impl Future<Output = ReadySetResult<R>> + 'a;
+pub(crate) type RpcFuture<'a, R> = Pin<Box<dyn Future<Output = ReadySetResult<R>> + Send + 'a>>;
 
 impl ReadySetHandle {
     /// Perform a raw RPC request to the HTTP `path` provided, providing a request body `r`.
@@ -54,8 +54,8 @@ impl ReadySetHandle {
         }
 
         match ControllerRequest::new(path, r, timeout) {
-            Ok(req) => Either::Left(rpc_inner(self, req, path)),
-            Err(e) => Either::Right(std::future::ready(Err(e))),
+            Ok(req) => Box::pin(rpc_inner(self, req, path)) as Pin<Box<_>>,
+            Err(e) => Box::pin(std::future::ready(Err(e))) as Pin<Box<_>>,
         }
     }
 }
