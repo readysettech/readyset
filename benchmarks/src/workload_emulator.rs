@@ -1,8 +1,7 @@
 //! This benchmark generates a mixed load of queries and sends them to upstream/upstream adapter.
 //! Further, it allows three different testing modes:
 //! - direct to the upstream database (bypassing readyset completely)
-//! - use a look-aside cache (like memcached or redis) and an upstream database
-//! (no readyset use)
+//! - use a look-aside cache (like memcached or redis) and an upstream database (no readyset use)
 //! - readyset backed by an upstream database (the standard model)
 //!
 //! The benchmark accepts a yaml file describing the workload, with the schema described in

@@ -20,10 +20,12 @@ pub(in crate::controller) enum NodeChanges {
 /// This structure is a simple wrapper of a `Vec<NodeChanges>`, and the primary intention of that is
 /// to maintain "groups" of changes, by clustering as many changes of the same kind as possible
 /// before creating a new `NodeChange` group. For example, if the changes to be made were:
+///
 /// 1. Add node 1
 /// 2. Add node 2
 /// 3. Drop node 1
 /// 4. Add node 3
+///
 /// Then the resulting list of changes would be
 /// `[NodeChanges::Add(1, 2), NodeChanges::Drop(1), NodeChanges::Add(3)]`.
 ///

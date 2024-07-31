@@ -341,7 +341,7 @@ impl Union {
     /// Invariants:
     ///
     /// * `emit` argument's values must be ordered lists already. Union does not support
-    /// re-arranging columns, only omitting them.
+    ///   re-arranging columns, only omitting them.
     pub fn new(
         emit: HashMap<NodeIndex, Vec<usize>>,
         duplicate_mode: DuplicateMode,

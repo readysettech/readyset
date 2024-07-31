@@ -160,7 +160,7 @@ where
     /// * **Error Response:**
     ///
     ///   Returns 404 if adapter is run without `--prometheus-metrics` or if the Prometheus exporter
-    /// runs into any other type of   error.
+    ///   runs into any other type of error.
     ///
     ///     * **Code:** 404 Not Found <br /> **Content:** `"Prometheus metrics were not enabled. To
     ///       fix this, run the adapter with --prometheus-metrics"`
@@ -175,7 +175,7 @@ where
     ///
     /// * **Notes:**
     ///
-    ///   This endpoint is intended to be scraped by Prometheus. For almost all cases you want to
+    /// This endpoint is intended to be scraped by Prometheus. For almost all cases you want to
     /// query Prometheus directly to get metrics data.
     fn call(&mut self, req: Request<Body>) -> Self::Future {
         let res = Response::builder()

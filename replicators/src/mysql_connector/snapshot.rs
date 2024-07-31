@@ -411,8 +411,8 @@ impl MySqlReplicator {
     ///
     /// # Arguments
     /// * `trx` - The transaction to use for snapshotting. This transaction was opened while the
-    /// table were locked, meaning it will see the same data as the binlog position recorded for
-    /// this table.
+    ///   table were locked, meaning it will see the same data as the binlog position recorded for
+    ///   this table.
     /// * `table_mutator` - The table mutator to insert the rows into
     async fn snapshot_table(
         mut trx: Transaction<'static>,
@@ -525,6 +525,7 @@ impl MySqlReplicator {
     ///   the schema
     /// * `extend_recipe`: Replicate and install the recipe (`CREATE TABLE` ...; `CREATE VIEW` ...;)
     ///   in addition to the rows
+    ///
     /// If `full_snapshot` is set to `true`, *all* tables will be snapshotted, even those that
     /// already have replication offsets in ReadySet.
     pub(crate) async fn snapshot_to_noria(

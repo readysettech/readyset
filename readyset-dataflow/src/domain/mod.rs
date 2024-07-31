@@ -636,8 +636,8 @@ pub struct Domain {
     ///
     /// * All nodes mentioned in `self.replay_paths` and `self.not_ready` must exist in
     ///   `self.nodes`
-    /// * All keys of `self.state` and `self.auxiliary_node_states` must also be
-    /// keys in `self.nodes` * `nodes` cannot be empty
+    /// * All keys of `self.state` and `self.auxiliary_node_states` must also be keys in
+    ///   `self.nodes` * `nodes` cannot be empty
     nodes: DomainNodes,
 
     /// State for all materialized non-reader nodes managed by this domain
@@ -4587,8 +4587,8 @@ impl Domain {
     /// makes sure to:
     /// 1. Remove the node from the `not_ready` set.
     /// 2. Set the state for the node
-    /// 3. Process any message that was meant for the node but couldn't be processed
-    /// since the its state was not ready yet.
+    /// 3. Process any message that was meant for the node but couldn't be processed since the its
+    ///    state was not ready yet.
     ///
     /// NOTE: If the node was removed while we were initializing its persistent state, then
     /// we make sure to just tear it down here.
