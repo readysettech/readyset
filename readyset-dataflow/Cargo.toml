@@ -69,3 +69,4 @@ replication-offset = { path = "../replication-offset" }
 [features]
 bench = ["criterion"]
 failure_injection = ["fail/failpoints", "readyset-client/failure_injection"]
+display_literals = []

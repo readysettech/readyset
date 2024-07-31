@@ -161,7 +161,7 @@ impl GroupedOperation for GroupConcat {
                     .iter()
                     .rposition(|x| x == &value)
                     .ok_or_else(|| {
-                        #[cfg(feature = "display literals")]
+                        #[cfg(feature = "display_literals")]
                         {
                             internal_err!(
                                 "group_concat couldn't remove {:?} from {:?}",
@@ -169,7 +169,7 @@ impl GroupedOperation for GroupConcat {
                                 prev_state.data
                             )
                         }
-                        #[cfg(not(feature = "display literals"))]
+                        #[cfg(not(feature = "display_literals"))]
                         internal_err!("group_concat couldn't remove value from data")
                     })?;
                 prev_state.data.remove(item_pos);

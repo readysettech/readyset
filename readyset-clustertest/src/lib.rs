@@ -1753,7 +1753,6 @@ impl PortAllocator {
 // with a stateful external component, the docker daemon, each test is
 // responsible for cleaning up its own external state.
 #[cfg(test)]
-#[cfg(not(feature = "postgres"))]
 mod tests {
     use serial_test::serial;
 
