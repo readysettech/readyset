@@ -151,7 +151,6 @@
 //! ```
 #![deny(missing_docs)]
 #![deny(rust_2018_idioms)]
-#![feature(io_slice_advance)]
 
 // Note to developers: you can find decent overviews of the protocol at
 //
