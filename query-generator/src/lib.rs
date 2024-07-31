@@ -2724,27 +2724,27 @@ impl GenerateOpts {
             operations: Vec<QueryOperation>,
             subqueries: Vec<SubqueryPosition>,
             available_ops: Vec<Vec<QueryOperation>>,
-        ) -> impl Iterator<Item = QuerySeed> {
+        ) -> Box<dyn Iterator<Item = QuerySeed>> {
             if subquery_depth == 0 || subqueries.is_empty() {
-                Either::Left(iter::once(QuerySeed {
+                Box::new(iter::once(QuerySeed {
                     operations,
                     subqueries: vec![],
                 }))
             } else {
-                Either::Right(
+                Box::new(
                     subqueries
                         .iter()
                         .cloned()
                         .map(|position| {
                             if available_ops.is_empty() {
-                                Either::Left(make_seeds(
+                                Box::new(Either::Left(make_seeds(
                                     subquery_depth - 1,
                                     vec![],
                                     subqueries.clone(),
                                     vec![],
-                                ))
+                                )))
                             } else {
-                                Either::Right(
+                                Box::new(Either::Right(
                                     available_ops
                                         .clone()
                                         .into_iter()
@@ -2760,7 +2760,7 @@ impl GenerateOpts {
                                                 available_ops.clone(),
                                             )
                                         }),
-                                )
+                                ))
                             }
                             .map(|seed| Subquery {
                                 position: position.clone(),
