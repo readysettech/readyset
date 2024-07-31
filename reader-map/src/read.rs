@@ -166,7 +166,7 @@ where
     pub fn first<'rh, Q>(&'rh self, key: &'_ Q) -> Result<Option<ReadGuard<'rh, V>>>
     where
         K: Borrow<Q>,
-        Q: Ord + Clone + Hash + ?Sized,
+        Q: Ord + Clone + Hash,
     {
         let vs = if let Some(vs) = self.get_raw(key.borrow())? {
             vs
@@ -192,7 +192,7 @@ where
     pub fn meta_get<Q>(&self, key: &Q) -> Result<(Option<ReadGuard<'_, Values<V>>>, M)>
     where
         K: Borrow<Q>,
-        Q: Ord + Clone + Hash + ?Sized,
+        Q: Ord + Clone + Hash,
     {
         let MapReadRef { guard } = self.enter()?;
         let meta = guard.meta.clone();
