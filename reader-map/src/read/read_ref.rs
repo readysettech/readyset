@@ -133,9 +133,8 @@ where
         K: Borrow<Q> + Ord + Clone,
         Q: ?Sized + Hash + Ord + ToOwned<Owned = K>,
     {
-        self.guard.data.get(key).map(|v| {
+        self.guard.data.get(key).inspect(|v| {
             self.guard.eviction_strategy.on_read(v.eviction_meta());
-            v
         })
     }
 

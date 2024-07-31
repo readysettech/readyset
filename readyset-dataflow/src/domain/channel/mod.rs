@@ -84,11 +84,12 @@ pub struct DomainReceiver {
 
 impl DomainReceiver {
     pub async fn recv(&mut self) -> Option<Packet> {
-        self.rx.recv().await.map(|packet| {
-            let discriminant: PacketDiscriminants = (&packet).into();
+        let packet = self.rx.recv().await;
+        packet.as_ref().inspect(|packet| {
+            let discriminant: PacketDiscriminants = (*packet).into();
             self.packets_queued[discriminant as usize].decrement(1.0);
-            packet
-        })
+        });
+        packet
     }
 }
 
