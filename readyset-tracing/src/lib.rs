@@ -42,10 +42,9 @@ use percent::Percent;
 pub mod presampled;
 pub mod propagation;
 
-pub fn warn_if_debug_build() {
-    if cfg!(debug) {
-        tracing::warn!("Running a debug build")
-    }
+fn warn_if_debug_build() {
+    #[cfg(debug_assertions)]
+    tracing::warn!("Running a debug build")
 }
 
 #[derive(Debug, Args)]
@@ -411,7 +410,6 @@ impl Options {
             },
         );
 
-        #[cfg(debug)]
         warn_if_debug_build();
 
         res
