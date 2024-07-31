@@ -78,16 +78,6 @@ where
     Ok(())
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum DdlEventOperation {
-    CreateTable,
-    DropTable,
-    AlterTable,
-    CreateView,
-    DropView,
-}
-
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 pub(crate) struct DdlCreateTableColumn {
     attnum: i16,
