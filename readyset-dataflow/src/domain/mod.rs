@@ -3315,7 +3315,7 @@ impl Domain {
                     ..
                 } = *m.as_mut().unwrap()
                 {
-                    for backfill_keys in &mut backfill_keys {
+                    if let Some(backfill_keys) = &mut backfill_keys {
                         backfill_keys.retain(|k| for_keys.contains(k));
                     }
                 }

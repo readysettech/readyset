@@ -1557,7 +1557,7 @@ mod tests {
         put_text_value(PsqlValue::Char('d' as i8), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(1); // length
-        exp.extend_from_slice(&[b'd']); // value
+        exp.extend_from_slice(b"d"); // value
         assert_eq!(buf, exp);
     }
 
