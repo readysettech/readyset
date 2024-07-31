@@ -1,4 +1,4 @@
-#![feature(box_patterns, min_exhaustive_patterns, is_sorted)]
+#![feature(box_patterns, min_exhaustive_patterns)]
 
 pub mod adapter_rewrites;
 pub mod alias_removal;

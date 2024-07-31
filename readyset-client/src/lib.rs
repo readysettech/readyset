@@ -137,7 +137,6 @@
 //! binary MySQL and PostgreSQL protocols, which provides a compatibility layer for applications
 //! that wish to continue to issue ad-hoc MySQL or PostgreSQL queries through existing SQL client
 //! libraries.
-#![feature(is_sorted)]
 #![deny(macro_use_extern_crate)]
 #![deny(unused_extern_crates)]
 #![deny(unreachable_pub)]
