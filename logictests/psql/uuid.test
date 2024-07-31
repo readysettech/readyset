@@ -1,0 +1,27 @@
+# tests for readyset's support of the postgres UUID data type.
+# these are based on the tests from postgres's regression tests (located in
+# `//postgres/src/test/regress/expected/`).
+
+statement ok
+CREATE TABLE uuid_test(id int, uid uuid)
+
+statement ok
+INSERT INTO uuid_test values
+(1, '4d862e6a-9966-5550-a209-d539127c33c2'),
+(2, '264d4966-36f0-56c2-bbea-de4032123250'),
+(3, 'ffd7022a-9ece-5a1a-90ad-71981e927371')
+
+query I nosort
+SELECT id from uuid_test where uid = '4d862e6a-9966-5550-a209-d539127c33c2'
+----
+1
+
+query I nosort
+SELECT id from uuid_test where uid = 'ffd7022a-9ece-5a1a-90ad-71981e927371'
+----
+3
+
+query I nosort
+SELECT id from uuid_test where uid = '264d4966-36f0-56c2-bbea-de4032123250'
+----
+2

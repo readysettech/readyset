@@ -1,10 +1,350 @@
-statement ok
-CREATE TABLE t (id int, ts timestamp)
+# tests for readyset's support of the postgres builtin function `extract`.
+# these are based on the tests from postgres's regression tests (located in
+# `//postgres/src/test/regress/expected/`).
 
 statement ok
-INSERT INTO t values(1, '1970-03-20 04:30:00.00000')
+CREATE TABLE extract_test(id int, dt date, ts timestamp, tz timestamptz)
+
+statement ok
+INSERT INTO extract_test (id, dt, ts, tz) values
+(1, '0001-01-01', '2000-12-16 12:21:13', '2001-02-16 20:38:40.12-08'),
+(2, '0001-12-31', '2001-02-16 20:38:40', '2001-02-16 20:38:40+05:30'),
+(3, '2006-01-01', '2006-01-01 12:00:00', '2011-05-15 20:40:40.15-02:45'),
+(4, '2022-11-13', '1997-12-16 12:21:13', '2024-02-16 20:38:40.12+03:30')
 
 query I nosort
-SELECT EXTRACT(CENTURY FROM ts) from t where id = 1 
+SELECT EXTRACT(CENTURY FROM  ts) from extract_test where id = 1
 ----
 20
+
+query I nosort
+SELECT EXTRACT(CENTURY FROM dt) from extract_test where id = 2
+----
+1
+
+query I nosort
+SELECT EXTRACT(CENTURY from tz) from extract_test where id = 3
+----
+21
+
+query I nosort
+SELECT EXTRACT(CENTURY from ts) from extract_test where id = 4
+----
+20
+
+query I nosort
+SELECT EXTRACT(DAY FROM  ts) from extract_test where id = 1
+----
+16
+
+query I nosort
+SELECT EXTRACT(DAY FROM dt) from extract_test where id = 2
+----
+31
+
+query I nosort
+SELECT EXTRACT(DAY from tz) from extract_test where id = 3
+----
+15
+
+query I nosort
+SELECT EXTRACT(DAY from ts) from extract_test where id = 4
+----
+16
+
+query I nosort
+SELECT EXTRACT(DECADE FROM  ts) from extract_test where id = 1
+----
+200
+
+query I nosort
+SELECT EXTRACT(DECADE FROM dt) from extract_test where id = 2
+----
+0
+
+query I nosort
+SELECT EXTRACT(DECADE from tz) from extract_test where id = 3
+----
+201
+
+query I nosort
+SELECT EXTRACT(DECADE from ts) from extract_test where id = 4
+----
+199
+
+query I nosort
+SELECT EXTRACT(DOW FROM  ts) from extract_test where id = 1
+----
+6
+
+query I nosort
+SELECT EXTRACT(DOW FROM dt) from extract_test where id = 2
+----
+1
+
+query I nosort
+SELECT EXTRACT(DOW from tz) from extract_test where id = 3
+----
+0
+
+query I nosort
+SELECT EXTRACT(DOW from ts) from extract_test where id = 4
+----
+2
+
+query I nosort
+SELECT EXTRACT(DOY FROM  ts) from extract_test where id = 1
+----
+351
+
+query I nosort
+SELECT EXTRACT(DOY FROM dt) from extract_test where id = 2
+----
+365
+
+query I nosort
+SELECT EXTRACT(DOY from tz) from extract_test where id = 3
+----
+135
+
+query I nosort
+SELECT EXTRACT(DOY from ts) from extract_test where id = 4
+----
+350
+
+query R nosort
+SELECT EXTRACT(EPOCH FROM  ts) from extract_test where id = 1
+----
+976969273.000000
+
+query R nosort
+SELECT EXTRACT(EPOCH from ts) from extract_test where id = 4
+----
+882274873.000000
+
+query I nosort
+SELECT EXTRACT(HOUR FROM  ts) from extract_test where id = 1
+----
+12
+
+query I nosort
+SELECT EXTRACT(HOUR from tz) from extract_test where id = 3
+----
+23
+
+query I nosort
+SELECT EXTRACT(HOUR from ts) from extract_test where id = 4
+----
+12
+
+query I nosort
+SELECT EXTRACT(ISODOW FROM  ts) from extract_test where id = 1
+----
+6
+
+query I nosort
+SELECT EXTRACT(ISODOW FROM dt) from extract_test where id = 2
+----
+1
+
+query I nosort
+SELECT EXTRACT(ISODOW from tz) from extract_test where id = 3
+----
+7
+
+query I nosort
+SELECT EXTRACT(ISODOW from ts) from extract_test where id = 4
+----
+2
+
+query I nosort
+SELECT EXTRACT(ISOYEAR FROM  ts) from extract_test where id = 1
+----
+2000
+
+query I nosort
+SELECT EXTRACT(ISOYEAR FROM dt) from extract_test where id = 2
+----
+2
+
+query I nosort
+SELECT EXTRACT(ISOYEAR from tz) from extract_test where id = 3
+----
+2011
+
+query I nosort
+SELECT EXTRACT(ISOYEAR from ts) from extract_test where id = 4
+----
+1997
+
+query R nosort
+SELECT EXTRACT(JULIAN FROM  ts) from extract_test where id = 1
+----
+2451895.51473379629629629630
+
+query R nosort
+SELECT EXTRACT(JULIAN FROM dt) from extract_test where id = 2
+----
+1721790
+
+query I nosort
+SELECT EXTRACT(MICROSECONDS FROM  ts) from extract_test where id = 1
+----
+13000000
+
+query I nosort
+SELECT EXTRACT(MICROSECONDS from tz) from extract_test where id = 3
+----
+40150000
+
+query I nosort
+SELECT EXTRACT(MICROSECONDS from ts) from extract_test where id = 4
+----
+13000000
+
+query I nosort
+SELECT EXTRACT(MILLENNIUM FROM  ts) from extract_test where id = 1
+----
+2
+
+query I nosort
+SELECT EXTRACT(MILLENNIUM FROM dt) from extract_test where id = 2
+----
+1
+
+query I nosort
+SELECT EXTRACT(MILLENNIUM from tz) from extract_test where id = 3
+----
+3
+
+query I nosort
+SELECT EXTRACT(MILLENNIUM from ts) from extract_test where id = 4
+----
+2
+
+query R nosort
+SELECT EXTRACT(MILLISECONDS FROM  ts) from extract_test where id = 1
+----
+13000.000
+
+query R nosort
+SELECT EXTRACT(MILLISECONDS from tz) from extract_test where id = 3
+----
+40150.000
+
+query R nosort
+SELECT EXTRACT(MILLISECONDS from ts) from extract_test where id = 4
+----
+13000.000
+
+query I nosort
+SELECT EXTRACT(MINUTE FROM  ts) from extract_test where id = 1
+----
+21
+
+query I nosort
+SELECT EXTRACT(MINUTE from tz) from extract_test where id = 3
+----
+25
+
+query I nosort
+SELECT EXTRACT(MINUTE from ts) from extract_test where id = 4
+----
+21
+
+query I nosort
+SELECT EXTRACT(MONTH FROM  ts) from extract_test where id = 1
+----
+12
+
+query I nosort
+SELECT EXTRACT(MONTH FROM dt) from extract_test where id = 2
+----
+12
+
+query I nosort
+SELECT EXTRACT(MONTH from tz) from extract_test where id = 3
+----
+5
+
+query I nosort
+SELECT EXTRACT(MONTH from ts) from extract_test where id = 4
+----
+12
+
+query I nosort
+SELECT EXTRACT(QUARTER FROM  ts) from extract_test where id = 1
+----
+4
+
+query I nosort
+SELECT EXTRACT(QUARTER FROM dt) from extract_test where id = 2
+----
+4
+
+query I nosort
+SELECT EXTRACT(QUARTER from tz) from extract_test where id = 3
+----
+2
+
+query I nosort
+SELECT EXTRACT(QUARTER from ts) from extract_test where id = 4
+----
+4
+
+query R nosort
+SELECT EXTRACT(SECOND FROM  ts) from extract_test where id = 1
+----
+13.000000
+
+query R nosort
+SELECT EXTRACT(SECOND from tz) from extract_test where id = 3
+----
+40.150000
+
+query R nosort
+SELECT EXTRACT(SECOND from ts) from extract_test where id = 4
+----
+13.000000
+
+query I nosort
+SELECT EXTRACT(WEEK FROM  ts) from extract_test where id = 1
+----
+50
+
+query I nosort
+SELECT EXTRACT(WEEK FROM dt) from extract_test where id = 2
+----
+1
+
+query I nosort
+SELECT EXTRACT(WEEK from tz) from extract_test where id = 3
+----
+19
+
+query I nosort
+SELECT EXTRACT(WEEK from ts) from extract_test where id = 4
+----
+51
+
+query I nosort
+SELECT EXTRACT(YEAR FROM  ts) from extract_test where id = 1
+----
+2000
+
+query I nosort
+SELECT EXTRACT(YEAR FROM dt) from extract_test where id = 2
+----
+1
+
+query I nosort
+SELECT EXTRACT(YEAR from tz) from extract_test where id = 3
+----
+2011
+
+query I nosort
+SELECT EXTRACT(YEAR from ts) from extract_test where id = 4
+----
+1997
+
+
