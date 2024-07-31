@@ -654,6 +654,13 @@ impl Value {
             (Self::Numeric(dec), Type::Integer) => {
                 Ok(Cow::Owned(Self::Integer(dec.to_i64().unwrap())))
             }
+            (Self::Integer(i), Type::Real) => Ok(Cow::Owned(Self::Real(*i, 0))),
+            (Self::Numeric(dec), Type::Real) => Ok(Cow::Owned(Self::Real(
+                dec.to_i64().unwrap(),
+                (dec.fract() * Decimal::from(1_000_000_000))
+                    .to_u64()
+                    .unwrap(),
+            ))),
             (v, t) => {
                 todo!("{v:?} {t:?}")
             }
