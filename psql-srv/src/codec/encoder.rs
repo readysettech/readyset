@@ -83,10 +83,9 @@ impl Encoder<BackendMessage> for Codec {
 
     fn encode(&mut self, message: BackendMessage, dst: &mut BytesMut) -> Result<(), Error> {
         let start_ofs = dst.len();
-        encode(message, dst).map_err(|e| {
+        encode(message, dst).inspect_err(|_| {
             // On an encoding error, remove any partially encoded data.
             dst.truncate(start_ofs);
-            e
         })
     }
 }
