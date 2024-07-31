@@ -286,7 +286,6 @@ impl MySqlTime {
             .num_microseconds()
             .map(|us| (us.abs() % MICROSECS_IN_SECOND) as u32)
             .unwrap_or(0)
-            .max(0)
     }
 
     fn duration(&self) -> Duration {
@@ -1253,8 +1252,7 @@ mod tests {
         let us = duration
             .num_microseconds()
             .map(|us| (us.abs() % MICROSECS_IN_SECOND) as u32)
-            .unwrap_or(0)
-            .max(0);
+            .unwrap_or(0);
         let sign = if total_secs.is_negative() { "-" } else { "" };
         if us != 0 {
             format!("{}{:02}:{:02}:{:02}.{:06}", sign, h, m, s, us)
