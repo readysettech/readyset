@@ -663,7 +663,7 @@ impl Value {
     pub fn hash_results(results: &[Self]) -> md5::Digest {
         let mut context = md5::Context::new();
         for result in results {
-            context.consume(&result.to_string());
+            context.consume(result.to_string());
             context.consume("\n");
         }
         context.compute()

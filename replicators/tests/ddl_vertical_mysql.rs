@@ -839,11 +839,11 @@ impl ModelState for DDLModelState {
             eventually!(run_test: {
                 println!("Checking contents of relation: {}", relation);
                 let rs_rows = rs_conn
-                    .exec(&format!("SELECT * FROM {relation}"), Params::Empty)
+                    .exec(format!("SELECT * FROM {relation}"), Params::Empty)
                     .await
                     .unwrap();
                 let mysql_rows = mysql_conn
-                    .exec(&format!("SELECT * FROM {relation}"), Params::Empty)
+                    .exec(format!("SELECT * FROM {relation}"), Params::Empty)
                     .await
                     .unwrap();
                 // Previously, we would run all the result handling in the run_test block, but
@@ -866,14 +866,14 @@ impl ModelState for DDLModelState {
         // Also make sure all deleted tables were actually deleted:
         for table in &self.deleted_tables {
             rs_conn
-                .query_drop(&format!("DROP TABLE {table}"))
+                .query_drop(format!("DROP TABLE {table}"))
                 .await
                 .unwrap_err();
         }
         // And then do the same for views:
         for view in &self.deleted_views {
             rs_conn
-                .query_drop(&format!("DROP VIEW {view}"))
+                .query_drop(format!("DROP VIEW {view}"))
                 .await
                 .unwrap_err();
         }

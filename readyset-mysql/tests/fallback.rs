@@ -971,7 +971,7 @@ async fn replication_failure_ignores_table() {
 
     for source in ["cats", "cats_view"] {
         let mut results: Vec<i32> = client
-            .query(&format!("SELECT * FROM {source}"))
+            .query(format!("SELECT * FROM {source}"))
             .await
             .unwrap();
         results.sort();
@@ -1026,7 +1026,7 @@ async fn show_proxied_queries_show_caches_query_text_matches() {
         conn.query("SHOW CACHES").await.unwrap();
     let (_, cache_name, cached_query_text, _) = cached_queries.first().unwrap();
 
-    conn.query_drop(&format!("DROP CACHE {}", cache_name))
+    conn.query_drop(format!("DROP CACHE {}", cache_name))
         .await
         .unwrap();
 
