@@ -441,7 +441,7 @@ impl LookAsideCacheConnection {
             Self::Redis(conn, ttl) => {
                 let opts =
                     SetOptions::default().with_expiration(SetExpiry::EX(ttl_jitter(*ttl) as usize));
-                conn.set_options(key, value, opts).await?;
+                let _: () = conn.set_options(key, value, opts).await?;
                 Ok(())
             }
         }
