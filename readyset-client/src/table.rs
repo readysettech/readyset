@@ -14,7 +14,7 @@ use derive_more::TryInto;
 use futures_util::future::TryFutureExt;
 use futures_util::stream::futures_unordered::FuturesUnordered;
 use futures_util::stream::TryStreamExt;
-use futures_util::{future, ready};
+use futures_util::{future, ready, Stream};
 use itertools::Either;
 use nom_sql::{CreateTableBody, NotReplicatedReason, Relation, SqlIdentifier};
 use petgraph::graph::NodeIndex;
@@ -203,31 +203,30 @@ impl Service<()> for Endpoint {
     }
 }
 
-fn make_table_stream(
-    addr: SocketAddr,
-    timeout: Duration,
-) -> impl futures_util::stream::TryStream<
-    Ok = tower::discover::Change<usize, InnerService>,
-    Error = tokio::io::Error,
-> {
+fn make_table_stream(addr: SocketAddr, timeout: Duration) -> Discover {
     // TODO: use whatever comes out of https://github.com/tower-rs/tower/issues/456 instead of
     // creating _all_ the connections every time.
-    (0..crate::TABLE_POOL_SIZE)
-        .map(|i| async move {
-            let svc = Endpoint { addr, timeout }.call(()).await?;
-            Ok(tower::discover::Change::Insert(i, svc))
-        })
-        .collect::<futures_util::stream::FuturesUnordered<_>>()
+    Box::pin(
+        (0..crate::TABLE_POOL_SIZE)
+            .map(|i| async move {
+                let svc = Endpoint { addr, timeout }.call(()).await?;
+                Ok(tower::discover::Change::Insert(i, svc))
+            })
+            .collect::<futures_util::stream::FuturesUnordered<_>>(),
+    ) as Pin<Box<_>>
 }
 
 fn make_table_discover(addr: SocketAddr, timeout: Duration) -> Discover {
     make_table_stream(addr, timeout)
 }
 
-// Unpin + Send bounds are needed due to https://github.com/rust-lang/rust/issues/55997
-pub type Discover = impl tower::discover::Discover<Key = usize, Service = InnerService, Error = tokio::io::Error>
-    + Unpin
-    + Send;
+// Send bounds are needed due to https://github.com/rust-lang/rust/issues/55997
+pub(crate) type Discover = Pin<
+    Box<
+        dyn Stream<Item = Result<tower::discover::Change<usize, InnerService>, tokio::io::Error>>
+            + Send,
+    >,
+>;
 
 pub(crate) type TableRpc =
     Buffer<ConcurrencyLimit<Balance<Discover, Tagged<PacketData>>>, Tagged<PacketData>>;
