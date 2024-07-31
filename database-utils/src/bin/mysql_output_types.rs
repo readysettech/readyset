@@ -24,19 +24,19 @@ async fn test(
         .await
         .unwrap();
 
-    conn.query_drop(&format!(
+    conn.query_drop(format!(
         "create table t1 (a {} {})",
         MYSQL_TYPES[a], MYSQL_SIGNED[a_sign]
     ))
     .await
     .unwrap();
-    conn.query_drop(&format!(
+    conn.query_drop(format!(
         "create table t2 (b {} {})",
         MYSQL_TYPES[b], MYSQL_SIGNED[b_sign]
     ))
     .await
     .unwrap();
-    conn.query_drop(&format!(
+    conn.query_drop(format!(
         "create table t3 as select a {} b as c from t1, t2",
         MYSQL_OPS[op]
     ))

@@ -404,13 +404,13 @@ mod tests {
     fn config() -> tokio_postgres::Config {
         let mut config = tokio_postgres::Config::new();
         config
-            .user(&env::var("PGUSER").unwrap_or_else(|_| "postgres".into()))
+            .user(env::var("PGUSER").unwrap_or_else(|_| "postgres".into()))
             .password(
                 env::var("PGPASSWORD")
                     .unwrap_or_else(|_| "noria".into())
                     .as_bytes(),
             )
-            .host(&env::var("PGHOST").unwrap_or_else(|_| "localhost".into()))
+            .host(env::var("PGHOST").unwrap_or_else(|_| "localhost".into()))
             .port(
                 env::var("PGPORT")
                     .unwrap_or_else(|_| "5432".into())
