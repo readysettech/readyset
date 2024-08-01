@@ -12,22 +12,24 @@ pub trait StripPostFilters {
 impl StripPostFilters for Option<Expr> {
     fn strip_post_filters(self) -> Self {
         self.and_then(|conds| match conds {
-            Expr::BinaryOp {
-                op: BinaryOperator::ILike | BinaryOperator::Like,
-                lhs: box Expr::Column(_),
-                rhs: box Expr::Literal(Literal::Placeholder(_)),
-            } => None,
-            Expr::BinaryOp { op, lhs, rhs } => match (
-                Some(*lhs).strip_post_filters(),
-                Some(*rhs).strip_post_filters(),
-            ) {
-                (None, None) => None,
-                (Some(cond), None) | (None, Some(cond)) => Some(cond),
-                (Some(left), Some(right)) => Some(Expr::BinaryOp {
-                    op,
-                    lhs: Box::new(left),
-                    rhs: Box::new(right),
-                }),
+            Expr::BinaryOp { lhs, op, rhs } => match (lhs.as_ref(), op, rhs.as_ref()) {
+                (
+                    Expr::Column(_),
+                    BinaryOperator::ILike | BinaryOperator::Like,
+                    Expr::Literal(Literal::Placeholder(_)),
+                ) => None,
+                _ => match (
+                    Some(*lhs).strip_post_filters(),
+                    Some(*rhs).strip_post_filters(),
+                ) {
+                    (None, None) => None,
+                    (Some(cond), None) | (None, Some(cond)) => Some(cond),
+                    (Some(left), Some(right)) => Some(Expr::BinaryOp {
+                        op,
+                        lhs: Box::new(left),
+                        rhs: Box::new(right),
+                    }),
+                },
             },
             _ => Some(conds),
         })

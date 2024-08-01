@@ -201,21 +201,24 @@ fn check_select_statement<'a>(
                 Ok(acc
                     || match expr {
                         Expr::BinaryOp {
-                            lhs: box Expr::Column(lhs_col),
+                            lhs,
                             op: BinaryOperator::Equal,
-                            rhs: box Expr::Column(rhs_col),
-                        } => {
-                            let lhs_cols = dependent_columns(lhs_col, stmt, cte_ctx)?
-                                .collect::<Result<HashSet<_>, _>>()?;
-                            let mut problematic = false;
-                            for col in dependent_columns(rhs_col, stmt, cte_ctx)? {
-                                if lhs_cols.contains(&col?) {
-                                    problematic = true;
-                                    break;
+                            rhs,
+                        } => match (lhs.as_ref(), rhs.as_ref()) {
+                            (Expr::Column(lhs), Expr::Column(rhs)) => {
+                                let lhs_cols = dependent_columns(lhs, stmt, cte_ctx)?
+                                    .collect::<Result<HashSet<_>, _>>()?;
+                                let mut problematic = false;
+                                for col in dependent_columns(rhs, stmt, cte_ctx)? {
+                                    if lhs_cols.contains(&col?) {
+                                        problematic = true;
+                                        break;
+                                    }
                                 }
+                                problematic
                             }
-                            problematic
-                        }
+                            _ => false,
+                        },
                         _ => false,
                     })
             })

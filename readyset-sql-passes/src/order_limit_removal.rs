@@ -94,24 +94,21 @@ fn compares_unique_key_against_literal(
     table_exprs: &[TableExpr],
 ) -> ReadySetResult<bool> {
     match expr {
-        Expr::BinaryOp {
-            lhs: box Expr::Literal(_),
-            rhs: box Expr::Column(ref c),
-            op: BinaryOperator::Equal | BinaryOperator::Is,
-        }
-        | Expr::BinaryOp {
-            lhs: box Expr::Column(ref c),
-            rhs: box Expr::Literal(_),
-            op: BinaryOperator::Equal | BinaryOperator::Is,
-        } => Ok(is_unique_or_primary(c, base_schemas, table_exprs)?),
-        Expr::BinaryOp {
-            op: BinaryOperator::And,
-            ref lhs,
-            ref rhs,
-        } => Ok(
-            compares_unique_key_against_literal(lhs, base_schemas, table_exprs)?
-                || compares_unique_key_against_literal(rhs, base_schemas, table_exprs)?,
-        ),
+        Expr::BinaryOp { lhs, op, rhs } => match (lhs.as_ref(), op, rhs.as_ref()) {
+            (Expr::Literal(_), BinaryOperator::Equal, Expr::Column(ref c))
+            | (Expr::Literal(_), BinaryOperator::Is, Expr::Column(ref c))
+            | (Expr::Column(ref c), BinaryOperator::Equal, Expr::Literal(_))
+            | (Expr::Column(ref c), BinaryOperator::Is, Expr::Literal(_)) => {
+                Ok(is_unique_or_primary(c, base_schemas, table_exprs)?)
+            }
+            (lhs, BinaryOperator::And, rhs) => {
+                Ok(
+                    compares_unique_key_against_literal(lhs, base_schemas, table_exprs)?
+                        || compares_unique_key_against_literal(rhs, base_schemas, table_exprs)?,
+                )
+            }
+            _ => Ok(false),
+        },
         // TODO(DAN): it may be possible to determine that a query will return a single (or no)
         // result if it has a nested select in the conditional
         _ => Ok(false),

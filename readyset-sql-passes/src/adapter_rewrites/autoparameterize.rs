@@ -54,103 +54,87 @@ impl<'ast> VisitorMut<'ast> for AutoParameterizeVisitor {
         let was_supported = self.in_supported_position;
         if was_supported {
             match expression {
-                Expr::BinaryOp {
-                    lhs: box Expr::Column(_),
-                    op: BinaryOperator::Equal,
-                    rhs: box Expr::Literal(Literal::Placeholder(_)),
-                } => {}
-                Expr::BinaryOp {
-                    lhs: box Expr::Column(_),
-                    op,
-                    rhs: box Expr::Literal(Literal::Placeholder(_)),
-                } if op.is_ordering_comparison() => {}
-                Expr::BinaryOp {
-                    lhs: box Expr::Column(_),
-                    op: BinaryOperator::Equal,
-                    rhs: box Expr::Literal(lit),
-                } => {
-                    if self.autoparameterize_equals {
-                        self.replace_literal(lit);
+                Expr::BinaryOp { lhs, op, rhs } => match (lhs.as_mut(), op, rhs.as_mut()) {
+                    (
+                        Expr::Column(_),
+                        BinaryOperator::Equal,
+                        Expr::Literal(Literal::Placeholder(_)),
+                    ) => {}
+                    (Expr::Column(_), op, Expr::Literal(Literal::Placeholder(_)))
+                        if op.is_ordering_comparison() => {}
+                    (Expr::Column(_), BinaryOperator::Equal, Expr::Literal(lit)) => {
+                        if self.autoparameterize_equals {
+                            self.replace_literal(lit);
+                        }
+                        return Ok(());
                     }
-
-                    return Ok(());
-                }
-                Expr::BinaryOp {
-                    lhs: box Expr::Column(_),
-                    op,
-                    rhs: box Expr::Literal(lit),
-                } if op.is_ordering_comparison() => {
-                    if self.autoparameterize_ranges {
-                        self.replace_literal(lit);
+                    (Expr::Column(_), op, Expr::Literal(lit)) if op.is_ordering_comparison() => {
+                        if self.autoparameterize_ranges {
+                            self.replace_literal(lit);
+                        }
+                        return Ok(());
                     }
-
-                    return Ok(());
-                }
-                Expr::BinaryOp {
-                    lhs: lhs @ box Expr::Literal(_),
-                    op: BinaryOperator::Equal,
-                    rhs: rhs @ box Expr::Column(_),
-                } => {
-                    // for lit = col, swap the equality first then revisit
-                    mem::swap(lhs, rhs);
-                    return self.visit_expr(expression);
-                }
-                Expr::BinaryOp {
-                    lhs: lhs @ box Expr::Literal(_),
-                    op,
-                    rhs: rhs @ box Expr::Column(_),
-                } if op.is_ordering_comparison() => {
-                    // for lit <ordering op> col, swap operands and flip operator, then revisit
-                    mem::swap(lhs, rhs);
-                    // this shouldn't fail as we just did the `op.is_ordering_comparison()` check
-                    *op = op.flip_ordering_comparison().unwrap();
-                    return self.visit_expr(expression);
-                }
+                    (Expr::Literal(_), BinaryOperator::Equal, Expr::Column(_)) => {
+                        // for lit = col, swap the equality first then revisit
+                        mem::swap(lhs, rhs);
+                        return self.visit_expr(expression);
+                    }
+                    (Expr::Literal(_), op, Expr::Column(_)) if op.is_ordering_comparison() => {
+                        // for lit <ordering op> col, swap operands and flip operator, then revisit
+                        mem::swap(lhs, rhs);
+                        // this shouldn't fail as we just did the `op.is_ordering_comparison()`
+                        // check
+                        *op = op.flip_ordering_comparison().unwrap();
+                        return self.visit_expr(expression);
+                    }
+                    (lhs, BinaryOperator::And, rhs) => {
+                        self.visit_expr(lhs)?;
+                        self.in_supported_position = true;
+                        self.visit_expr(rhs)?;
+                        self.in_supported_position = true;
+                        return Ok(());
+                    }
+                    _ => self.in_supported_position = false,
+                },
                 Expr::In {
-                    lhs: box Expr::Column(_),
+                    lhs,
                     rhs: InValue::List(exprs),
                     negated: false,
-                } if exprs.iter().all(|e| {
-                    matches!(
-                        e,
-                        Expr::Literal(lit) if !matches!(lit, Literal::Placeholder(_))
-                    )
-                }) =>
-                {
-                    if self.autoparameterize_equals {
-                        let exprs = mem::replace(
-                            exprs,
-                            iter::repeat(Expr::Literal(Literal::Placeholder(
-                                ItemPlaceholder::QuestionMark,
-                            )))
-                            .take(exprs.len())
-                            .collect(),
-                        );
-                        let num_exprs = exprs.len();
-                        let start_index = self.param_index;
-                        self.out.extend(exprs.into_iter().enumerate().filter_map(
-                            move |(i, expr)| match expr {
-                                Expr::Literal(lit) => Some((i + start_index, lit)),
-                                // unreachable since we checked everything in the list is a literal
-                                // above, but best not to panic regardless
-                                _ => None,
-                            },
-                        ));
-                        self.param_index += num_exprs;
+                } => match lhs.as_ref() {
+                    Expr::Column(_)
+                        if exprs.iter().all(|e| {
+                            matches!(
+                                e,
+                                Expr::Literal(lit) if !matches!(lit, Literal::Placeholder(_))
+                            )
+                        }) =>
+                    {
+                        if self.autoparameterize_equals {
+                            let exprs = mem::replace(
+                                exprs,
+                                iter::repeat(Expr::Literal(Literal::Placeholder(
+                                    ItemPlaceholder::QuestionMark,
+                                )))
+                                .take(exprs.len())
+                                .collect(),
+                            );
+                            let num_exprs = exprs.len();
+                            let start_index = self.param_index;
+                            self.out.extend(exprs.into_iter().enumerate().filter_map(
+                                move |(i, expr)| match expr {
+                                    Expr::Literal(lit) => Some((i + start_index, lit)),
+                                    // unreachable since we checked everything in the list is a
+                                    // literal above, but best
+                                    // not to panic regardless
+                                    _ => None,
+                                },
+                            ));
+                            self.param_index += num_exprs;
+                        }
+                        return Ok(());
                     }
-                    return Ok(());
-                }
-                Expr::BinaryOp {
-                    lhs,
-                    op: BinaryOperator::And,
-                    rhs,
-                } => {
-                    self.visit_expr(lhs.as_mut())?;
-                    self.in_supported_position = true;
-                    self.visit_expr(rhs.as_mut())?;
-                    self.in_supported_position = true;
-                    return Ok(());
-                }
+                    _ => self.in_supported_position = false,
+                },
                 _ => self.in_supported_position = false,
             }
         }
@@ -209,70 +193,55 @@ impl<'ast> VisitorMut<'ast> for AnalyzeLiteralsVisitor {
         let was_supported = self.in_supported_position;
         if was_supported {
             match expression {
-                Expr::BinaryOp {
-                    lhs: box Expr::Column(_),
-                    op: BinaryOperator::Equal,
-                    rhs: box Expr::Literal(lit),
-                } => {
-                    self.contains_equal = true;
-
-                    if let Literal::Placeholder(_) = lit {
-                        self.contains_equal_placeholder = true;
+                Expr::BinaryOp { lhs, op, rhs } => match (lhs.as_mut(), op, rhs.as_mut()) {
+                    (Expr::Column(_), BinaryOperator::Equal, Expr::Literal(lit)) => {
+                        self.contains_equal = true;
+                        if let Literal::Placeholder(_) = lit {
+                            self.contains_equal_placeholder = true;
+                        }
+                        return Ok(());
                     }
-
-                    return Ok(());
-                }
-                Expr::BinaryOp {
-                    lhs: box Expr::Column(_),
-                    op,
-                    rhs: box Expr::Literal(lit),
-                } if op.is_ordering_comparison() => {
-                    self.contains_range = true;
-
-                    if let Literal::Placeholder(_) = lit {
-                        self.contains_range_placeholder = true;
+                    (Expr::Column(_), _, Expr::Literal(lit)) => {
+                        self.contains_range = true;
+                        if let Literal::Placeholder(_) = lit {
+                            self.contains_range_placeholder = true;
+                        }
+                        return Ok(());
                     }
-
-                    return Ok(());
-                }
-                Expr::Between {
-                    min: box Expr::Literal(lit),
-                    ..
-                }
-                | Expr::Between {
-                    max: box Expr::Literal(lit),
-                    ..
-                } => {
-                    self.contains_range = true;
-
-                    if let Literal::Placeholder(_) = lit {
-                        self.contains_range_placeholder = true;
+                    (Expr::Literal(_), BinaryOperator::Equal, Expr::Column(_)) => {
+                        // for lit = col, swap the equality first then revisit
+                        mem::swap(lhs, rhs);
+                        return self.visit_expr(expression);
                     }
-
-                    return Ok(());
-                }
-                Expr::BinaryOp {
-                    lhs: lhs @ box Expr::Literal(_),
-                    op: BinaryOperator::Equal,
-                    rhs: rhs @ box Expr::Column(_),
-                } => {
-                    // for lit = col, swap the equality first then revisit
-                    mem::swap(lhs, rhs);
-                    return self.visit_expr(expression);
-                }
-                Expr::BinaryOp {
-                    lhs: lhs @ box Expr::Literal(_),
-                    op,
-                    rhs: rhs @ box Expr::Column(_),
-                } if op.is_ordering_comparison() => {
-                    // for lit <ordering op> col, swap operands and flip operator, then revisit
-                    mem::swap(lhs, rhs);
-                    // this shouldn't fail as we just did the `op.is_ordering_comparison()` check
-                    *op = op.flip_ordering_comparison().unwrap();
-                    return self.visit_expr(expression);
-                }
+                    (Expr::Literal(_), op, Expr::Column(_)) => {
+                        // for lit <ordering op> col, swap operands and flip operator, then revisit
+                        mem::swap(lhs, rhs);
+                        // this shouldn't fail as we just did the `op.is_ordering_comparison()`
+                        // check
+                        *op = op.flip_ordering_comparison().unwrap();
+                        return self.visit_expr(expression);
+                    }
+                    (lhs, BinaryOperator::And, rhs) => {
+                        self.visit_expr(lhs)?;
+                        self.in_supported_position = true;
+                        self.visit_expr(rhs)?;
+                        self.in_supported_position = true;
+                        return Ok(());
+                    }
+                    _ => self.in_supported_position = false,
+                },
+                Expr::Between { min, max, .. } => match (min.as_ref(), max.as_ref()) {
+                    (Expr::Literal(lit), _) | (_, Expr::Literal(lit)) => {
+                        self.contains_range = true;
+                        if let Literal::Placeholder(_) = lit {
+                            self.contains_range_placeholder = true;
+                        }
+                        return Ok(());
+                    }
+                    _ => self.in_supported_position = false,
+                },
                 Expr::In {
-                    lhs: box Expr::Column(_),
+                    lhs,
                     rhs: InValue::List(exprs),
                     negated: false,
                 } if exprs.iter().all(|e| {
@@ -282,19 +251,13 @@ impl<'ast> VisitorMut<'ast> for AnalyzeLiteralsVisitor {
                     )
                 }) && !self.has_aggregates =>
                 {
-                    self.contains_equal = true;
-                    return Ok(());
-                }
-                Expr::BinaryOp {
-                    lhs,
-                    op: BinaryOperator::And,
-                    rhs,
-                } => {
-                    self.visit_expr(lhs.as_mut())?;
-                    self.in_supported_position = true;
-                    self.visit_expr(rhs.as_mut())?;
-                    self.in_supported_position = true;
-                    return Ok(());
+                    match lhs.as_ref() {
+                        Expr::Column(_) => {
+                            self.contains_equal = true;
+                            return Ok(());
+                        }
+                        _ => self.in_supported_position = false,
+                    }
                 }
                 _ => self.in_supported_position = false,
             }
