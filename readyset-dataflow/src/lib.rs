@@ -4,7 +4,6 @@
     clippy::panic,
     clippy::todo
 )]
-#![feature(box_patterns)]
 #![deny(unused_extern_crates, macro_use_extern_crate)]
 #![allow(clippy::redundant_closure)]
 
