@@ -504,6 +504,7 @@ impl Default for Config {
                 table_request_timeout: Duration::from_millis(1800000),
                 eviction_kind: dataflow::EvictionKind::Random,
                 verbose_metrics: false,
+                experimental_materialization_persistence: false,
             },
             persistence: Default::default(),
             min_workers: 1,
@@ -591,6 +592,16 @@ pub struct WorkerOptions {
         hide = true
     )]
     allow_full_materialization: bool,
+
+    /// Allow fully materialized nodes to be persisted to disk.
+    // XXX JCD keep experimental features synchronized with experimental-features.json
+    #[arg(
+        long,
+        env = "EXPERIMENTAL_MATERIALIZATION_PERSISTENCE",
+        hide = true,
+        requires = "allow_full_materialization"
+    )]
+    pub experimental_materialization_persistence: bool,
 
     /// The materialization frontier strategy to use. Defaults to `None`.
     #[arg(long, env = "MATERIALIZATION_FRONTIER", default_value_t = FrontierStrategy::None, hide = true)]

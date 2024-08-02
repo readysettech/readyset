@@ -77,6 +77,10 @@ impl Builder {
         }
         if opts.experimental_full_materialization() {
             builder.allow_full_materialization();
+
+            builder.set_experimental_materialization_persistence(
+                opts.experimental_materialization_persistence,
+            );
         }
         if opts.enable_packet_filters {
             builder.enable_packet_filters();
@@ -343,6 +347,14 @@ impl Builder {
     /// that field for more information.
     pub fn set_verbose_domain_metrics(&mut self, value: bool) {
         self.config.domain_config.verbose_metrics = value;
+    }
+
+    /// Sets the value of [`Config::domain_config::verbose_metrics`]. See documentation of
+    /// that field for more information.
+    pub fn set_experimental_materialization_persistence(&mut self, value: bool) {
+        self.config
+            .domain_config
+            .experimental_materialization_persistence = value;
     }
 
     /// Sets the value of [`Config::domain_config::table_request_timeout`]. See documentation of

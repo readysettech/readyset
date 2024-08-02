@@ -82,6 +82,10 @@ pub struct Config {
     /// Whether to emit verbose metrics for the domain.
     #[serde(default)]
     pub verbose_metrics: bool,
+
+    /// Allow fully materialized nodes to be persisted to disk.
+    #[serde(default)]
+    pub experimental_materialization_persistence: bool,
 }
 
 const BATCH_SIZE: usize = 256;
@@ -498,6 +502,9 @@ impl DomainBuilder {
             remapped_keys: Default::default(),
 
             init_state_tx,
+            experimental_materialization_persistence: self
+                .config
+                .experimental_materialization_persistence,
         }
     }
 }
@@ -714,6 +721,8 @@ pub struct Domain {
     /// This allow us to asynchronously run that process, and avoid any bottlenecks on the
     /// initialization of their state.
     init_state_tx: tokio::sync::mpsc::Sender<MaterializedState>,
+
+    experimental_materialization_persistence: bool,
 }
 
 /// Creates the materialized node state for the given node.
@@ -1655,10 +1664,14 @@ impl Domain {
                         weak_indices,
                     } => {
                         if !self.state.contains_key(node) {
-                            self.state.insert(
-                                node,
-                                MaterializedNodeState::Memory(MemoryState::default()),
-                            );
+                            if self.experimental_materialization_persistence {
+                                unsupported!("will be supported in a follow up CL");
+                            } else {
+                                self.state.insert(
+                                    node,
+                                    MaterializedNodeState::Memory(MemoryState::default()),
+                                );
+                            }
                         }
                         let state = self.state.get_mut(node).unwrap();
                         for index in strict_indices {

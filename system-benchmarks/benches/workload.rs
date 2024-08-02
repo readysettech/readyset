@@ -636,7 +636,7 @@ fn start_adapter(args: SystemBenchArgs) -> anyhow::Result<()> {
         "--materialization-frontier={}",
         args.materialization_frontier
     );
-    let options = vec![
+    let mut options = vec![
         "bench", // This is equivalent to the program name in argv, ignored
         "--deployment",
         DB_NAME,
@@ -662,6 +662,10 @@ fn start_adapter(args: SystemBenchArgs) -> anyhow::Result<()> {
         &database_type_flag,
         &materialization_frontier,
     ];
+
+    if args.experimental_materialization_persistence {
+        options.push("--experimental-materialization-persistence");
+    }
 
     let adapter_options = Options::parse_from(options);
 
@@ -834,6 +838,10 @@ struct SystemBenchArgs {
     /// You must have the `dot` binary application installed in order to use this.
     #[arg(long)]
     graphviz: bool,
+    /// If specified, fully materialized nodes will be persisted to disk,
+    /// rather than remain in memory.
+    #[arg(long)]
+    experimental_materialization_persistence: bool,
 
     #[arg(long, hide(true))]
     /// Is present when executed with `cargo bench`
