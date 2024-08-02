@@ -40,5 +40,11 @@
         "command-line": "--experimental-placeholder-inlining",
         "environment-variable": "EXPERIMENTAL_PLACEHOLDER_INLINING",
         "description": "Whether to allow ReadySet to automatically create inlined caches when we receive a CREATE CACHE command for a query with unsupported placeholders.\n\nIf set, we will create a cache with literals inlined in the unsupported placeholder positions every time the statement is executed with a new set of parameters."
+    },
+    {
+        "name": "Full Materialization Persistence",
+        "command-line": "--experimental-materialization-persistence",
+        "environment-variable": "EXPERIMENTAL_MATERIALIZATION_PERSISTENCE",
+        "description": "Allows fully materialized nodes to be persisted to disk."
     }
 ]
