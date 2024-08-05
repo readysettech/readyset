@@ -202,54 +202,67 @@ pub(crate) fn eliminate_dependent_joins(query: &mut MirQuery<'_>) -> ReadySetRes
             .flat_map(|n| query.graph.columns(n))
             .collect::<Vec<_>>();
 
+        fn default_dependence(expr: &Expr, left_columns: &[Column]) -> Option<DependentCondition> {
+            if expr
+                .referred_columns()
+                .any(|expr_col| left_columns.iter().any(|c| *c == *expr_col))
+            {
+                Some(DependentCondition::FullyDependent {
+                    non_dependent_cols: expr
+                        .referred_columns()
+                        .filter(|expr_col| !left_columns.iter().any(|c| *c == **expr_col))
+                        .map(|c| c.into())
+                        .collect(),
+                })
+            } else {
+                None
+            }
+        }
+
         // If a node is a dependent filter, return a description of *how* it's a dependent
         // filter
         let dependent_condition = |inner: &MirNodeInner| {
             if let MirNodeInner::Filter { conditions } = inner {
                 match conditions {
-                    Expr::BinaryOp {
-                        lhs: box Expr::Column(left_col),
+                    outer @ Expr::BinaryOp {
+                        lhs,
                         op: BinaryOperator::Equal,
-                        rhs: box Expr::Column(right_col),
-                    } => {
-                        let matches_left = left_columns.iter().any(|c| *c == *left_col);
-                        let matches_right = left_columns.iter().any(|c| *c == *right_col);
-                        match (matches_left, matches_right) {
-                            // Both sides are dependent
-                            (true, true) => {
-                                return Some(DependentCondition::FullyDependent {
-                                    non_dependent_cols: vec![],
-                                })
-                            }
-                            (true, false) => {
-                                return Some(DependentCondition::JoinKey {
-                                    lhs: left_col.into(),
-                                    rhs: right_col.into(),
-                                });
-                            }
-                            (false, true) => {
-                                return Some(DependentCondition::JoinKey {
-                                    lhs: right_col.into(),
-                                    rhs: left_col.into(),
-                                });
-                            }
-                            (false, false) => {}
-                        }
-                    }
-                    expr => {
-                        if expr
-                            .referred_columns()
-                            .any(|expr_col| left_columns.iter().any(|c| *c == *expr_col))
-                        {
-                            return Some(DependentCondition::FullyDependent {
-                                non_dependent_cols: expr
-                                    .referred_columns()
-                                    .filter(|expr_col| {
-                                        !left_columns.iter().any(|c| *c == **expr_col)
+                        rhs,
+                    } => match (lhs.as_ref(), rhs.as_ref()) {
+                        (Expr::Column(left_col), Expr::Column(right_col)) => {
+                            let matches_left = left_columns.iter().any(|c| *c == *left_col);
+                            let matches_right = left_columns.iter().any(|c| *c == *right_col);
+                            match (matches_left, matches_right) {
+                                // Both sides are dependent
+                                (true, true) => {
+                                    return Some(DependentCondition::FullyDependent {
+                                        non_dependent_cols: vec![],
                                     })
-                                    .map(|c| c.into())
-                                    .collect(),
-                            });
+                                }
+                                (true, false) => {
+                                    return Some(DependentCondition::JoinKey {
+                                        lhs: left_col.into(),
+                                        rhs: right_col.into(),
+                                    });
+                                }
+                                (false, true) => {
+                                    return Some(DependentCondition::JoinKey {
+                                        lhs: right_col.into(),
+                                        rhs: left_col.into(),
+                                    });
+                                }
+                                (false, false) => {}
+                            }
+                        }
+                        _ => {
+                            if let Some(def) = default_dependence(outer, &left_columns) {
+                                return Some(def);
+                            }
+                        }
+                    },
+                    expr => {
+                        if let Some(def) = default_dependence(expr, &left_columns) {
+                            return Some(def);
                         }
                     }
                 }
