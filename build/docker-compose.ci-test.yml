@@ -1,4 +1,3 @@
-version: '3.8'
 # Depends on `docker-compose.yml` from the root of the repository.
 # As such, context is now at root.
 
