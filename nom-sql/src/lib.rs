@@ -1,7 +1,3 @@
-#![deny(macro_use_extern_crate)]
-#![feature(box_patterns)]
-#![allow(macro_use_extern_crate)]
-
 #[cfg(test)]
 #[macro_use]
 extern crate pretty_assertions;
