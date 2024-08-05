@@ -40,20 +40,7 @@ pub async fn recreate_database<N>(dbname: N)
 where
     N: Display,
 {
-    let mut management_db = mysql_async::Conn::new(
-        mysql_async::OptsBuilder::default()
-            .user(Some("root"))
-            .pass(Some("noria"))
-            .ip_or_hostname(env::var("MYSQL_HOST").unwrap_or_else(|_| "127.0.0.1".into()))
-            .tcp_port(
-                env::var("MYSQL_TCP_PORT")
-                    .unwrap_or_else(|_| "3306".into())
-                    .parse()
-                    .unwrap(),
-            ),
-    )
-    .await
-    .unwrap();
+    let mut management_db = mysql_async::Conn::new(upstream_config()).await.unwrap();
     management_db
         .query_drop(format!("DROP DATABASE IF EXISTS {}", dbname))
         .await
