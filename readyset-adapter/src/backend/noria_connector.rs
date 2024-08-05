@@ -602,8 +602,12 @@ impl NoriaConnector {
                         // negative values)
                         Expr::UnaryOp {
                             op: UnaryOperator::Neg,
-                            rhs: box Expr::Literal(lit),
-                        } => {
+                            rhs,
+                        } if matches!(rhs.as_ref(), Expr::Literal(_)) => {
+                            let lit = match rhs.as_ref() {
+                                Expr::Literal(lit) => lit,
+                                _ => unreachable!(),
+                            };
                             let val = DfValue::try_from(lit)?;
                             &val * &(-1).into()
                         }
