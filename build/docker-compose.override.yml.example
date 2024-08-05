@@ -1,7 +1,6 @@
 # Docker-compose override to open up each images ports to the local
 # machine. To use, copy this file to docker-compose.override.yml and
 # use docker-compose as usual to start the dev docker containers.
-version: "3.8"
 services:
   consul-server:
     ports:
