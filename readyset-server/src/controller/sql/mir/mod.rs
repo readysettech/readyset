@@ -846,12 +846,20 @@ impl SqlToMirConverter {
             out_nodes
         };
 
+        fn is_column(expr: &Expr) -> bool {
+            matches!(expr, Expr::Column(_))
+        }
+
+        fn get_column(expr: &Expr) -> &nom_sql::Column {
+            match expr {
+                Expr::Column(ref col) => col,
+                _ => unreachable!(),
+            }
+        }
+
         Ok(match function {
-            Sum {
-                expr: box Expr::Column(col),
-                distinct,
-            } => mknode(
-                Column::from(col),
+            Sum { ref expr, distinct } if is_column(expr) => mknode(
+                Column::from(get_column(expr)),
                 GroupedNodeType::Aggregation(Aggregation::Sum),
                 distinct,
             ),
@@ -866,11 +874,8 @@ impl SqlToMirConverter {
                 distinct,
             ),
             CountStar => internal!("Handled earlier"),
-            Count {
-                expr: box Expr::Column(col),
-                distinct,
-            } => mknode(
-                Column::from(col),
+            Count { ref expr, distinct } if is_column(expr) => mknode(
+                Column::from(get_column(expr)),
                 GroupedNodeType::Aggregation(Aggregation::Count),
                 distinct,
             ),
@@ -884,11 +889,8 @@ impl SqlToMirConverter {
                 GroupedNodeType::Aggregation(Aggregation::Count),
                 distinct,
             ),
-            Avg {
-                expr: box Expr::Column(col),
-                distinct,
-            } => mknode(
-                Column::from(col),
+            Avg { ref expr, distinct } if is_column(expr) => mknode(
+                Column::from(get_column(expr)),
                 GroupedNodeType::Aggregation(Aggregation::Avg),
                 distinct,
             ),
@@ -902,8 +904,8 @@ impl SqlToMirConverter {
                 GroupedNodeType::Aggregation(Aggregation::Avg),
                 distinct,
             ),
-            Max(box Expr::Column(col)) => mknode(
-                Column::from(col),
+            Max(ref expr) if is_column(expr) => mknode(
+                Column::from(get_column(expr)),
                 GroupedNodeType::Extremum(Extremum::Max),
                 false,
             ),
@@ -917,8 +919,8 @@ impl SqlToMirConverter {
                 GroupedNodeType::Extremum(Extremum::Max),
                 false,
             ),
-            Min(box Expr::Column(col)) => mknode(
-                Column::from(col),
+            Min(ref expr) if is_column(expr) => mknode(
+                Column::from(get_column(expr)),
                 GroupedNodeType::Extremum(Extremum::Min),
                 false,
             ),
@@ -933,10 +935,10 @@ impl SqlToMirConverter {
                 false,
             ),
             GroupConcat {
-                expr: box Expr::Column(col),
+                ref expr,
                 separator,
-            } => mknode(
-                Column::from(col),
+            } if is_column(expr) => mknode(
+                Column::from(get_column(expr)),
                 GroupedNodeType::Aggregation(Aggregation::GroupConcat {
                     separator: separator.unwrap_or_else(|| ",".to_owned()),
                 }),
@@ -1377,6 +1379,119 @@ impl SqlToMirConverter {
         Ok(nodes)
     }
 
+    fn handle_exists(
+        &mut self,
+        ce: &Expr,
+        query_name: &Relation,
+        name: &Relation,
+        parent: NodeIndex,
+        subquery: &SelectStatement,
+    ) -> ReadySetResult<NodeIndex> {
+        let negated = matches!(
+            ce,
+            Expr::UnaryOp {
+                op: UnaryOperator::Not,
+                ..
+            }
+        );
+
+        let query_graph = to_query_graph((*subquery).clone())?;
+        let subquery_leaf = self.named_query_to_mir(
+            query_name,
+            &query_graph,
+            &HashMap::new(),
+            LeafBehavior::Anonymous,
+        )?;
+
+        // -> π[lit: 0, lit: 0]
+        let group_proj = self.make_project_node(
+            query_name,
+            format!("{}_prj_hlpr", name.display_unquoted()).into(),
+            subquery_leaf,
+            vec![
+                ProjectExpr::Expr {
+                    alias: "__count_val".into(),
+                    expr: Expr::Literal(0u32.into()),
+                },
+                ProjectExpr::Expr {
+                    alias: "__count_grp".into(),
+                    expr: Expr::Literal(0u32.into()),
+                },
+            ],
+        );
+        // -> [0, 0] for each row
+
+        // -> |0| γ[1]
+        let exists_count_col = Column::named("__exists_count");
+        let exists_count_node = self.make_grouped_node(
+            query_name,
+            format!("{}_count", name.display_unquoted()).into(),
+            exists_count_col,
+            (group_proj, Column::named("__count_val")),
+            vec![Column::named("__count_grp")],
+            GroupedNodeType::Aggregation(Aggregation::Count),
+        );
+        // -> [0, <count>] for each row
+
+        // -> σ[c1 > 0]
+        let gt_0_filter = self.make_filter_node(
+            query_name,
+            format!("{}_count_gt_0", name.display_unquoted()).into(),
+            exists_count_node,
+            Expr::BinaryOp {
+                lhs: Box::new(Expr::Column("__exists_count".into())),
+                op: BinaryOperator::Greater,
+                rhs: Box::new(Expr::Literal(Literal::Integer(0))),
+            },
+        );
+
+        // left -> π[...left, lit: 0]
+        let parent_columns = self.mir_graph.columns(parent);
+        let left_literal_join_key_proj = self.make_project_node(
+            query_name,
+            format!("{}_join_key", name.display_unquoted()).into(),
+            parent,
+            parent_columns
+                .into_iter()
+                .map(ProjectExpr::Column)
+                .chain(iter::once(ProjectExpr::Expr {
+                    alias: "__exists_join_key".into(),
+                    expr: Expr::Literal(0u32.into()),
+                }))
+                .collect(),
+        );
+
+        let join_preds = [JoinPredicate {
+            left: "__exists_join_key".into(),
+            right: "__count_grp".into(),
+        }];
+
+        if negated {
+            self.make_antijoin(
+                query_name,
+                format!("{}_antijoin", name.display_unquoted()).into(),
+                &join_preds,
+                left_literal_join_key_proj,
+                gt_0_filter,
+                /* dependent = */ is_correlated(subquery),
+            )
+        } else {
+            // -> ⋈ on: l.__exists_join_key ≡ r.__count_grp
+            self.make_join_node(
+                query_name,
+                format!("{}_join", name.display_unquoted()).into(),
+                &join_preds,
+                left_literal_join_key_proj,
+                gt_0_filter,
+                if is_correlated(subquery) {
+                    JoinKind::DependentInner
+                } else {
+                    JoinKind::Inner
+                },
+            )
+        }
+    }
+
     fn make_predicate_nodes(
         &mut self,
         query_name: &Relation,
@@ -1439,114 +1554,19 @@ impl SqlToMirConverter {
                 },
             ),
             Expr::Between { .. } => internal!("BETWEEN should have been removed earlier"),
-            Expr::Exists(subquery)
-            | Expr::UnaryOp {
+            Expr::Exists(subquery) => {
+                self.handle_exists(ce, query_name, &name, parent, subquery)?
+            }
+            Expr::UnaryOp {
                 op: UnaryOperator::Not,
-                rhs: box Expr::Exists(subquery),
-            } => {
-                let negated = matches!(
-                    ce,
-                    Expr::UnaryOp {
-                        op: UnaryOperator::Not,
-                        ..
-                    }
-                );
+                rhs,
+            } if matches!(rhs.as_ref(), Expr::Exists(_)) => {
+                let subquery = match rhs.as_ref() {
+                    Expr::Exists(subquery) => subquery,
+                    _ => unreachable!(),
+                };
 
-                let query_graph = to_query_graph((**subquery).clone())?;
-                let subquery_leaf = self.named_query_to_mir(
-                    query_name,
-                    &query_graph,
-                    &HashMap::new(),
-                    LeafBehavior::Anonymous,
-                )?;
-
-                // -> π[lit: 0, lit: 0]
-                let group_proj = self.make_project_node(
-                    query_name,
-                    format!("{}_prj_hlpr", name.display_unquoted()).into(),
-                    subquery_leaf,
-                    vec![
-                        ProjectExpr::Expr {
-                            alias: "__count_val".into(),
-                            expr: Expr::Literal(0u32.into()),
-                        },
-                        ProjectExpr::Expr {
-                            alias: "__count_grp".into(),
-                            expr: Expr::Literal(0u32.into()),
-                        },
-                    ],
-                );
-                // -> [0, 0] for each row
-
-                // -> |0| γ[1]
-                let exists_count_col = Column::named("__exists_count");
-                let exists_count_node = self.make_grouped_node(
-                    query_name,
-                    format!("{}_count", name.display_unquoted()).into(),
-                    exists_count_col,
-                    (group_proj, Column::named("__count_val")),
-                    vec![Column::named("__count_grp")],
-                    GroupedNodeType::Aggregation(Aggregation::Count),
-                );
-                // -> [0, <count>] for each row
-
-                // -> σ[c1 > 0]
-                let gt_0_filter = self.make_filter_node(
-                    query_name,
-                    format!("{}_count_gt_0", name.display_unquoted()).into(),
-                    exists_count_node,
-                    Expr::BinaryOp {
-                        lhs: Box::new(Expr::Column("__exists_count".into())),
-                        op: BinaryOperator::Greater,
-                        rhs: Box::new(Expr::Literal(Literal::Integer(0))),
-                    },
-                );
-
-                // left -> π[...left, lit: 0]
-                let parent_columns = self.mir_graph.columns(parent);
-                let left_literal_join_key_proj = self.make_project_node(
-                    query_name,
-                    format!("{}_join_key", name.display_unquoted()).into(),
-                    parent,
-                    parent_columns
-                        .into_iter()
-                        .map(ProjectExpr::Column)
-                        .chain(iter::once(ProjectExpr::Expr {
-                            alias: "__exists_join_key".into(),
-                            expr: Expr::Literal(0u32.into()),
-                        }))
-                        .collect(),
-                );
-
-                let join_preds = [JoinPredicate {
-                    left: "__exists_join_key".into(),
-                    right: "__count_grp".into(),
-                }];
-
-                if negated {
-                    self.make_antijoin(
-                        query_name,
-                        format!("{}_antijoin", name.display_unquoted()).into(),
-                        &join_preds,
-                        left_literal_join_key_proj,
-                        gt_0_filter,
-                        /* dependent = */ is_correlated(subquery),
-                    )?
-                } else {
-                    // -> ⋈ on: l.__exists_join_key ≡ r.__count_grp
-                    self.make_join_node(
-                        query_name,
-                        format!("{}_join", name.display_unquoted()).into(),
-                        &join_preds,
-                        left_literal_join_key_proj,
-                        gt_0_filter,
-                        if is_correlated(subquery) {
-                            JoinKind::DependentInner
-                        } else {
-                            JoinKind::Inner
-                        },
-                    )?
-                }
+                self.handle_exists(ce, query_name, &name, parent, subquery)?
             }
             Expr::Call(_) => {
                 internal!("Function calls should have been handled by projection earlier")

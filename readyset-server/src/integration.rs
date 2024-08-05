@@ -8790,17 +8790,14 @@ async fn simple_dry_run_unsupported() {
     let res = g
         .dry_run(ChangeList::from_str(unsupported_query, Dialect::DEFAULT_MYSQL).unwrap())
         .await;
-    assert!(matches!(
-        res,
-        Err(RpcFailed {
-            source:
-                box SelectQueryCreationFailed {
-                    source: box ReadySetError::Unsupported(_),
-                    ..
-                },
-            ..
-        })
-    ));
+    assert!(match res {
+        Err(RpcFailed { source, .. }) => match source.as_ref() {
+            SelectQueryCreationFailed { source, .. } =>
+                matches!(source.as_ref(), ReadySetError::Unsupported(_)),
+            _ => false,
+        },
+        _ => false,
+    });
 
     shutdown_tx.shutdown().await;
 }
