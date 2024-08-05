@@ -667,12 +667,12 @@ impl ModelState for DDLModelState {
                     .chain(non_pkey_cols)
                     .collect();
                 let col_defs = col_defs.join(", ");
-                let query = format!("CREATE TABLE {table_name} ({col_defs})");
+                let query = format!("CREATE TABLE `{table_name}` ({col_defs})");
                 println!("Creating table: {}", query);
                 rs_conn.query_drop(&query).await.unwrap();
                 mysql_conn.query_drop(&query).await.unwrap();
 
-                let create_cache = format!("CREATE CACHE ALWAYS FROM SELECT * FROM {table_name}");
+                let create_cache = format!("CREATE CACHE ALWAYS FROM SELECT * FROM `{table_name}`");
                 eventually!(run_test: {
                     let result = rs_conn.query_drop(&create_cache).await;
                     AssertUnwindSafe(move || result)
@@ -681,7 +681,7 @@ impl ModelState for DDLModelState {
                 });
             }
             Operation::DropTable(name) => {
-                let query = format!("DROP TABLE {name} CASCADE");
+                let query = format!("DROP TABLE `{name}` CASCADE");
                 rs_conn.query_drop(&query).await.unwrap();
                 mysql_conn.query_drop(&query).await.unwrap();
             }
@@ -705,13 +705,13 @@ impl ModelState for DDLModelState {
                     .collect();
                 let placeholders: Vec<_> = (1..=params.len()).map(|_| "?".to_string()).collect();
                 let placeholders = placeholders.join(", ");
-                let query = format!("INSERT INTO {table} VALUES ({placeholders})");
+                let query = format!("INSERT INTO `{table}` VALUES ({placeholders})");
                 rs_conn.exec_drop(&query, &params).await.unwrap();
                 mysql_conn.exec_drop(&query, &params).await.unwrap();
             }
             Operation::AddColumn(table_name, col_spec) => {
                 let query = format!(
-                    "ALTER TABLE {} ADD COLUMN {} {}",
+                    "ALTER TABLE `{}` ADD COLUMN `{}` {}",
                     table_name,
                     col_spec.name,
                     col_spec.sql_type.display(nom_sql::Dialect::MySQL)
@@ -720,7 +720,7 @@ impl ModelState for DDLModelState {
                 mysql_conn.query_drop(&query).await.unwrap();
             }
             Operation::DropColumn(table_name, col_name) => {
-                let query = format!("ALTER TABLE {} DROP COLUMN {}", table_name, col_name);
+                let query = format!("ALTER TABLE `{}` DROP COLUMN `{}`", table_name, col_name);
                 rs_conn.query_drop(&query).await.unwrap();
                 mysql_conn.query_drop(&query).await.unwrap();
             }
@@ -737,14 +737,14 @@ impl ModelState for DDLModelState {
                     match def {
                         TestViewDef::Simple(table_source) => {
                             if table == table_source {
-                                let drop_view = format!("DROP VIEW {}", view);
+                                let drop_view = format!("DROP VIEW `{}`", view);
                                 rs_conn.query_drop(&drop_view).await.unwrap();
                                 mysql_conn.query_drop(&drop_view).await.unwrap();
                             }
                         }
                         TestViewDef::Join { table_a, table_b } => {
                             if table == table_a || table == table_b {
-                                let drop_view = format!("DROP VIEW {}", view);
+                                let drop_view = format!("DROP VIEW `{}`", view);
                                 rs_conn.query_drop(&drop_view).await.unwrap();
                                 mysql_conn.query_drop(&drop_view).await.unwrap();
                             }
@@ -755,15 +755,15 @@ impl ModelState for DDLModelState {
                 mysql_conn.query_drop(&query).await.unwrap();
             }
             Operation::DeleteRow(table_name, key) => {
-                let query = format!("DELETE FROM {table_name} WHERE id = ({key})");
+                let query = format!("DELETE FROM `{table_name}` WHERE id = ({key})");
                 rs_conn.query_drop(&query).await.unwrap();
                 mysql_conn.query_drop(&query).await.unwrap();
             }
             Operation::CreateSimpleView { name, table_source } => {
-                let query = format!("CREATE VIEW {name} AS SELECT * FROM {table_source}");
+                let query = format!("CREATE VIEW `{name}` AS SELECT * FROM `{table_source}`");
                 rs_conn.query_drop(&query).await.unwrap();
                 mysql_conn.query_drop(&query).await.unwrap();
-                let create_cache = format!("CREATE CACHE ALWAYS FROM SELECT * FROM {name}");
+                let create_cache = format!("CREATE CACHE ALWAYS FROM SELECT * FROM `{name}`");
                 eventually!(run_test: {
                     let result = rs_conn.query_drop(&create_cache).await;
                     AssertUnwindSafe(move || result)
@@ -793,7 +793,7 @@ impl ModelState for DDLModelState {
                 let query = format!("CREATE VIEW {} AS {}", name, view_def);
                 rs_conn.query_drop(&query).await.unwrap();
                 mysql_conn.query_drop(&query).await.unwrap();
-                let create_cache = format!("CREATE CACHE ALWAYS FROM SELECT * FROM {name}");
+                let create_cache = format!("CREATE CACHE ALWAYS FROM SELECT * FROM `{name}`");
                 eventually!(run_test: {
                     let result = rs_conn.query_drop(&create_cache).await;
                     AssertUnwindSafe(move || result)
@@ -839,11 +839,11 @@ impl ModelState for DDLModelState {
             eventually!(run_test: {
                 println!("Checking contents of relation: {}", relation);
                 let rs_rows = rs_conn
-                    .exec(format!("SELECT * FROM {relation}"), Params::Empty)
+                    .exec(format!("SELECT * FROM `{relation}`"), Params::Empty)
                     .await
                     .unwrap();
                 let mysql_rows = mysql_conn
-                    .exec(format!("SELECT * FROM {relation}"), Params::Empty)
+                    .exec(format!("SELECT * FROM `{relation}`"), Params::Empty)
                     .await
                     .unwrap();
                 // Previously, we would run all the result handling in the run_test block, but
@@ -866,14 +866,14 @@ impl ModelState for DDLModelState {
         // Also make sure all deleted tables were actually deleted:
         for table in &self.deleted_tables {
             rs_conn
-                .query_drop(format!("DROP TABLE {table}"))
+                .query_drop(format!("DROP TABLE `{table}`"))
                 .await
                 .unwrap_err();
         }
         // And then do the same for views:
         for view in &self.deleted_views {
             rs_conn
-                .query_drop(format!("DROP VIEW {view}"))
+                .query_drop(format!("DROP VIEW `{view}`"))
                 .await
                 .unwrap_err();
         }
