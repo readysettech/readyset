@@ -181,13 +181,17 @@ where
     S: Into<String> + Display,
 {
     let table_name: String = table_name.into();
-    match err {
-        Err(ReadySetError::TableNotFound { name, .. })
-        | Err(ReadySetError::RpcFailed {
-            source: box ReadySetError::TableNotFound { name, .. },
-            ..
-        }) => assert_eq!(*name, table_name),
-        _ => panic!("Expected table not found error for table {}", table_name),
+    if let Some(name) = match err {
+        Err(ReadySetError::TableNotFound { name, .. }) => Some(name.clone()),
+        Err(ReadySetError::RpcFailed { source, .. }) => match source.as_ref() {
+            ReadySetError::TableNotFound { name, .. } => Some(name.clone()),
+            _ => None,
+        },
+        _ => None,
+    } {
+        assert_eq!(name, table_name);
+    } else {
+        panic!("Expected table not found error for table {}", table_name);
     }
 }
 
@@ -196,23 +200,22 @@ where
     Relation: From<S>,
 {
     let view_name = Relation::from(view_name);
-    match err {
+    if let Some(name) = match err {
         Err(ReadySetError::ViewNotFound(name))
-        | Err(ReadySetError::ViewNotFoundInWorkers { name, .. })
-        | Err(ReadySetError::RpcFailed {
-            source: box ReadySetError::ViewNotFound(name),
-            ..
-        })
-        | Err(ReadySetError::RpcFailed {
-            source: box ReadySetError::ViewNotFoundInWorkers { name, .. },
-            ..
-        }) => {
-            assert_eq!(*name, view_name.display_unquoted().to_string())
-        }
-        _ => panic!(
+        | Err(ReadySetError::ViewNotFoundInWorkers { name, .. }) => Some(name.clone()),
+        Err(ReadySetError::RpcFailed { source, .. }) => match source.as_ref() {
+            ReadySetError::ViewNotFound(name)
+            | ReadySetError::ViewNotFoundInWorkers { name, .. } => Some(name.clone()),
+            _ => None,
+        },
+        _ => None,
+    } {
+        assert_eq!(name, view_name.display_unquoted().to_string())
+    } else {
+        panic!(
             "Expected view not found error for view {}",
             view_name.display_unquoted()
-        ),
+        );
     }
 }
 

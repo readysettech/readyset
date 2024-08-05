@@ -713,11 +713,15 @@ fn collect_join_predicates(
     match cond {
         Expr::BinaryOp {
             op: BinaryOperator::Equal,
-            lhs: box Expr::Column(left),
-            rhs: box Expr::Column(right),
-        } => {
-            join_preds.push(JoinPredicate { left, right });
-        }
+            ref lhs,
+            ref rhs,
+        } => match (lhs.as_ref(), rhs.as_ref()) {
+            (Expr::Column(left), Expr::Column(right)) => join_preds.push(JoinPredicate {
+                left: left.clone(),
+                right: right.clone(),
+            }),
+            _ => extra_preds.push(cond),
+        },
         Expr::BinaryOp {
             lhs,
             op: BinaryOperator::And,
