@@ -15,6 +15,44 @@ use readyset_errors::{
     unsupported_err, ReadySetResult,
 };
 
+fn flatten_column_literal(
+    pkey: &[&Column],
+    flattened: &mut HashSet<Vec<(String, DfValue)>>,
+    c: &Column,
+    l: &Literal,
+) -> ReadySetResult<bool> {
+    {
+        if !pkey.iter().any(|pk| pk.name == c.name) {
+            unsupported!("UPDATE/DELETE only supports WHERE-clauses on primary keys");
+        }
+        if !c.table.iter().all(|n| n == pkey[0].table.as_ref().unwrap()) {
+            unsupported!("UPDATE/DELETE contains references to another table")
+        }
+
+        let value = DfValue::try_from(l)?;
+        // We want to look through our existing keys and see if any of them
+        // are missing any columns. In that case we'll add the one we're looking
+        // at now there.
+        let with_space = flattened
+            .iter()
+            .find(|key| {
+                key.len() < pkey.len() && !key.iter().any(|(name, _)| name == c.name.as_str())
+            })
+            .cloned();
+
+        if let Some(mut key) = with_space {
+            flattened.remove(&key);
+            key.push((c.name.to_string(), value));
+            flattened.insert(key);
+        } else {
+            // There were no existing keys with space, so let's create a new one:
+            flattened.insert(vec![(c.name.to_string(), value)]);
+        }
+
+        Ok(true)
+    }
+}
+
 /// Helper for flatten_conditional - returns true if the
 /// expression is "valid" (i.e. not something like `a = 1 AND a = 2`.
 /// Goes through the condition tree by gradually filling up primary key slots.
@@ -30,84 +68,43 @@ use readyset_errors::{
 ///    aid = 1     uid = 2
 /// ```
 ///
-///    After processing the left side `flattened` will look something like this: {[(aid, 1)]}
-///    Then we'll check the right side, which will find a "hole" in the first key,
-///    and we'll get {[(aid, 1), (uid, 2)]}.
+/// After processing the left side `flattened` will look something like this: {[(aid, 1)]}
+/// Then we'll check the right side, which will find a "hole" in the first key,
+/// and we'll get {[(aid, 1), (uid, 2)]}.
 fn do_flatten_conditional(
     cond: &Expr,
     pkey: &[&Column],
     flattened: &mut HashSet<Vec<(String, DfValue)>>,
 ) -> ReadySetResult<bool> {
-    Ok(match *cond {
-        Expr::BinaryOp {
-            lhs: box Expr::Literal(ref l),
-            rhs: box Expr::Column(ref c),
-            op: BinaryOperator::Equal | BinaryOperator::Is,
-        }
-        | Expr::BinaryOp {
-            lhs: box Expr::Column(ref c),
-            rhs: box Expr::Literal(ref l),
-            op: BinaryOperator::Equal | BinaryOperator::Is,
-        } => {
-            if !pkey.iter().any(|pk| pk.name == c.name) {
-                unsupported!("UPDATE/DELETE only supports WHERE-clauses on primary keys");
+    Ok(match cond {
+        Expr::BinaryOp { lhs, rhs, op } => match (lhs.as_ref(), op, rhs.as_ref()) {
+            (Expr::Literal(ref l), BinaryOperator::Equal, Expr::Column(ref c))
+            | (Expr::Column(ref c), BinaryOperator::Equal, Expr::Literal(ref l))
+            | (
+                Expr::Column(ref c),
+                BinaryOperator::Is,
+                Expr::Literal(ref l @ Literal::Null | ref l @ Literal::Boolean(_)),
+            ) => flatten_column_literal(pkey, flattened, c, l)?,
+            (Expr::Literal(ref l), BinaryOperator::Equal, Expr::Literal(ref r)) => l == r,
+            (lhs, BinaryOperator::And, rhs) => {
+                // When checking ANDs we want to make sure that both sides refer to the same key,
+                // e.g. WHERE A.a = 1 AND A.a = 1
+                // or for compound primary keys:
+                // WHERE A.a = AND a.b = 2
+                // but also bogus stuff like `WHERE 1 = 1 AND 2 = 2`.
+                let pre_count = flattened.len();
+                do_flatten_conditional(lhs, pkey, flattened)? && {
+                    let count = flattened.len();
+                    let valid = do_flatten_conditional(rhs, pkey, flattened)?;
+                    valid && (pre_count == flattened.len() || count == flattened.len())
+                }
             }
-            if !c.table.iter().all(|n| n == pkey[0].table.as_ref().unwrap()) {
-                unsupported!("UPDATE/DELETE contains references to another table")
+            (lhs, BinaryOperator::Or, rhs) => {
+                do_flatten_conditional(lhs, pkey, flattened)?
+                    && do_flatten_conditional(rhs, pkey, flattened)?
             }
-
-            let value = DfValue::try_from(l)?;
-            // We want to look through our existing keys and see if any of them
-            // are missing any columns. In that case we'll add the one we're looking
-            // at now there.
-            let with_space = flattened
-                .iter()
-                .find(|key| {
-                    key.len() < pkey.len() && !key.iter().any(|(name, _)| name == c.name.as_str())
-                })
-                .cloned();
-
-            if let Some(mut key) = with_space {
-                flattened.remove(&key);
-                key.push((c.name.to_string(), value));
-                flattened.insert(key);
-            } else {
-                // There were no existing keys with space, so let's create a new one:
-                flattened.insert(vec![(c.name.to_string(), value)]);
-            }
-
-            true
-        }
-        Expr::BinaryOp {
-            lhs: box Expr::Literal(ref left),
-            rhs: box Expr::Literal(ref right),
-            op: BinaryOperator::Equal,
-        } if left == right => true,
-        Expr::BinaryOp {
-            op: BinaryOperator::And,
-            ref lhs,
-            ref rhs,
-        } => {
-            // When checking ANDs we want to make sure that both sides refer to the same key,
-            // e.g. WHERE A.a = 1 AND A.a = 1
-            // or for compound primary keys:
-            // WHERE A.a = AND a.b = 2
-            // but also bogus stuff like `WHERE 1 = 1 AND 2 = 2`.
-            let pre_count = flattened.len();
-            do_flatten_conditional(lhs, pkey, flattened)? && {
-                let count = flattened.len();
-                let valid = do_flatten_conditional(rhs, pkey, flattened)?;
-                valid && (pre_count == flattened.len() || count == flattened.len())
-            }
-        }
-        Expr::BinaryOp {
-            op: BinaryOperator::Or,
-            ref lhs,
-            ref rhs,
-        } => {
-            do_flatten_conditional(lhs, pkey, flattened)?
-                && do_flatten_conditional(rhs, pkey, flattened)?
-        }
+            _ => false,
+        },
         _ => false,
     })
 }
@@ -194,77 +191,75 @@ impl<'ast> Visitor<'ast> for BinopsParameterColumnsVisitor<'ast> {
     fn visit_expr(&mut self, expr: &'ast Expr) -> Result<(), Self::Error> {
         match expr {
             Expr::BinaryOp {
-                lhs: box Expr::Column(ref c),
-                rhs: box Expr::Literal(Literal::Placeholder(_)),
+                lhs,
+                rhs,
                 op: binop,
-            } => self.parameter_cols.push((c, *binop)),
-            Expr::BinaryOp {
-                lhs: box Expr::Literal(Literal::Placeholder(_)),
-                rhs: box Expr::Column(ref c),
-                op: binop,
-            } => self
-                .parameter_cols
-                .push((c, binop.flip_ordering_comparison().unwrap_or(*binop))),
+            } => match (lhs.as_ref(), rhs.as_ref()) {
+                (Expr::Column(ref c), Expr::Literal(Literal::Placeholder(_))) => {
+                    self.parameter_cols.push((c, *binop));
+                    return Ok(());
+                }
+                (Expr::Literal(Literal::Placeholder(_)), Expr::Column(ref c)) => {
+                    self.parameter_cols
+                        .push((c, binop.flip_ordering_comparison().unwrap_or(*binop)));
+                    return Ok(());
+                }
+                _ => (),
+            },
             Expr::In {
-                lhs: box Expr::Column(ref c),
+                lhs,
                 rhs: nom_sql::InValue::List(ref exprs),
-                negated: false,
+                negated,
             } if exprs
                 .iter()
                 .all(|expr| matches!(expr, Expr::Literal(Literal::Placeholder(_)))) =>
             {
-                self.parameter_cols
-                    .extend(iter::repeat((c, BinaryOperator::Equal)).take(exprs.len()))
-            }
-            Expr::In {
-                lhs: box Expr::Column(ref c),
-                rhs: nom_sql::InValue::List(ref exprs),
-                negated: true,
-            } if exprs
-                .iter()
-                .all(|expr| matches!(expr, Expr::Literal(Literal::Placeholder(_)))) =>
-            {
-                self.parameter_cols
-                    .extend(iter::repeat((c, BinaryOperator::NotEqual)).take(exprs.len()))
+                if let Expr::Column(ref c) = lhs.as_ref() {
+                    let op = if *negated {
+                        BinaryOperator::NotEqual
+                    } else {
+                        BinaryOperator::Equal
+                    };
+                    self.parameter_cols
+                        .extend(iter::repeat((c, op)).take(exprs.len()));
+                    return Ok(());
+                }
             }
             Expr::Between {
-                operand: box Expr::Column(ref col),
-                min: box Expr::Literal(Literal::Placeholder(_)),
-                max: box Expr::Literal(Literal::Placeholder(_)),
+                operand,
+                min,
+                max,
+                negated,
                 ..
-            } => self.parameter_cols.extend_from_slice(&[
-                (col, BinaryOperator::GreaterOrEqual),
-                (col, BinaryOperator::LessOrEqual),
-            ]),
-
-            Expr::Between {
-                operand: box Expr::Column(ref col),
-                min: box Expr::Literal(Literal::Placeholder(_)),
-                negated: false,
-                ..
-            }
-            | Expr::Between {
-                operand: box Expr::Column(ref col),
-                max: box Expr::Literal(Literal::Placeholder(_)),
-                negated: true,
-                ..
-            } => self
-                .parameter_cols
-                .push((col, BinaryOperator::GreaterOrEqual)),
-            Expr::Between {
-                operand: box Expr::Column(ref col),
-                max: box Expr::Literal(Literal::Placeholder(_)),
-                negated: false,
-                ..
-            }
-            | Expr::Between {
-                operand: box Expr::Column(ref col),
-                min: box Expr::Literal(Literal::Placeholder(_)),
-                negated: true,
-                ..
-            } => self.parameter_cols.push((col, BinaryOperator::LessOrEqual)),
-            _ => visit::walk_expr(self, expr)?,
+            } => match (operand.as_ref(), min.as_ref(), max.as_ref(), negated) {
+                (
+                    Expr::Column(ref col),
+                    Expr::Literal(Literal::Placeholder(_)),
+                    Expr::Literal(Literal::Placeholder(_)),
+                    _,
+                ) => {
+                    self.parameter_cols.extend_from_slice(&[
+                        (col, BinaryOperator::GreaterOrEqual),
+                        (col, BinaryOperator::LessOrEqual),
+                    ]);
+                    return Ok(());
+                }
+                (Expr::Column(ref col), Expr::Literal(Literal::Placeholder(_)), _, false)
+                | (Expr::Column(ref col), _, Expr::Literal(Literal::Placeholder(_)), true) => {
+                    self.parameter_cols
+                        .push((col, BinaryOperator::GreaterOrEqual));
+                    return Ok(());
+                }
+                (Expr::Column(ref col), _, Expr::Literal(Literal::Placeholder(_)), false)
+                | (Expr::Column(ref col), Expr::Literal(Literal::Placeholder(_)), _, true) => {
+                    self.parameter_cols.push((col, BinaryOperator::LessOrEqual));
+                    return Ok(());
+                }
+                _ => (),
+            },
+            _ => (),
         }
+        visit::walk_expr(self, expr)?;
         Ok(())
     }
 }
@@ -364,34 +359,37 @@ where
     match expr {
         Expr::BinaryOp {
             op: BinaryOperator::Equal,
-            lhs: box Expr::Column(c),
-            rhs: box Expr::Literal(l),
+            lhs,
+            rhs,
         } => {
-            let v = match l {
-                Literal::Placeholder(_) => params
-                    .as_mut()
-                    .ok_or_else(|| bad_request_err("Found placeholder in ad-hoc query"))?
-                    .next()
-                    .ok_or_else(|| {
-                        bad_request_err("Not enough parameter values given in EXECUTE")
-                    })?,
-                v => DfValue::try_from(v)?,
-            };
-            let oldv = col2v.insert(c.name.to_string(), v);
-            invariant!(oldv.is_none());
+            if let (Expr::Column(c), Expr::Literal(l)) = (lhs.as_ref(), rhs.as_ref()) {
+                let v = match l {
+                    Literal::Placeholder(_) => params
+                        .as_mut()
+                        .ok_or_else(|| bad_request_err("Found placeholder in ad-hoc query"))?
+                        .next()
+                        .ok_or_else(|| {
+                            bad_request_err("Not enough parameter values given in EXECUTE")
+                        })?,
+                    v => DfValue::try_from(v)?,
+                };
+                let oldv = col2v.insert(c.name.to_string(), v);
+                invariant!(oldv.is_none());
+                return Ok(());
+            }
         }
         Expr::BinaryOp {
             op: BinaryOperator::And,
             lhs,
             rhs,
         } => {
-            // recurse
             walk_pkey_where(col2v, params, *lhs)?;
             walk_pkey_where(col2v, params, *rhs)?;
+            return Ok(());
         }
-        _ => unsupported!("Fancy high-brow UPDATEs are not supported"),
+        _ => (),
     }
-    Ok(())
+    unsupported!("Fancy UPDATEs are not supported");
 }
 
 pub(crate) fn extract_update_params_and_fields<I>(
@@ -432,24 +430,21 @@ where
                         ),
                     ));
                 }
-                Expr::BinaryOp {
-                    lhs: box Expr::Column(ref c),
-                    ref op,
-                    rhs: box Expr::Literal(ref l),
-                } => {
-                    // we only support "column = column +/- literal"
-                    // TODO(ENG-142): Handle nested arithmetic
-                    invariant_eq!(c, &field.column);
-                    match op {
-                        BinaryOperator::Add => {
-                            updates.push((i, Modification::Apply(Operation::Add, l.try_into()?)))
+                Expr::BinaryOp { lhs, op, rhs } => match (lhs.as_ref(), rhs.as_ref()) {
+                    (Expr::Column(ref c), Expr::Literal(ref l)) => {
+                        // we only support "column = column +/- literal"
+                        // TODO(ENG-142): Handle nested arithmetic
+                        invariant_eq!(c, &field.column);
+                        match op {
+                            BinaryOperator::Add => updates
+                                .push((i, Modification::Apply(Operation::Add, l.try_into()?))),
+                            BinaryOperator::Subtract => updates
+                                .push((i, Modification::Apply(Operation::Sub, l.try_into()?))),
+                            _ => unsupported!(),
                         }
-                        BinaryOperator::Subtract => {
-                            updates.push((i, Modification::Apply(Operation::Sub, l.try_into()?)))
-                        }
-                        _ => unsupported!(),
                     }
-                }
+                    _ => unsupported!(),
+                },
                 _ => unsupported!(),
             }
         }
