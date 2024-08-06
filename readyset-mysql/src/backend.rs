@@ -92,14 +92,24 @@ async fn write_column<W: AsyncWrite + Unpin>(
             if ty.is_binary() {
                 rw.write_col(BinaryDisplay(c.as_bytes()?).to_string())
             } else {
-                rw.write_col(t.as_str())
+                let s = if ty.is_char() {
+                    t.as_str().trim_end_matches(' ')
+                } else {
+                    t.as_str()
+                };
+                rw.write_col(s)
             }
         }
         DfValue::TinyText(ref t) => {
             if ty.is_binary() {
                 rw.write_col(BinaryDisplay(c.as_bytes()?).to_string())
             } else {
-                rw.write_col(t.as_str())
+                let s = if ty.is_char() {
+                    t.as_str().trim_end_matches(' ')
+                } else {
+                    t.as_str()
+                };
+                rw.write_col(s)
             }
         }
         ref dt @ (DfValue::Float(..) | DfValue::Double(..)) => match cs.coltype {
