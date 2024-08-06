@@ -36,6 +36,7 @@ members = [
     "readyset-common",
     "readyset-data",
     "readyset-dataflow",
+    "readyset-e2e-tests",
     "readyset-errors",
     "readyset-logictest",
     "readyset-mir",

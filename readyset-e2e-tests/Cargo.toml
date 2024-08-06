@@ -1,0 +1,24 @@
+[package]
+name = "readyset-e2e-tests"
+version = "0.1.0"
+publish = false
+authors = ["Readyset Technology, Inc. <info@readyset.io>"]
+edition = "2021"
+
+[dev-dependencies]
+test-strategy = { workspace = true }
+mysql_async = { workspace = true }
+mysql_common = { workspace = true }
+nom-sql = { path = "../nom-sql" }
+proptest = { workspace = true }
+readyset-client-test-helpers = { path = "../readyset-client-test-helpers", features = [
+    "mysql",
+    "postgres",
+] }
+tokio = { workspace = true, features = ["full"] }
+serial_test = { workspace = true }
+test-utils = { path = "../test-utils" }
+readyset-util = { path = "../readyset-util" }
+readyset-adapter = { path = "../readyset-adapter" }
+readyset-tracing = { path = "../readyset-tracing" }
+futures = { workspace = true }

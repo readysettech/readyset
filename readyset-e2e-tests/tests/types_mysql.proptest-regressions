@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 610e2880b439f1f684e43524f733032c9da4e6b633269c79cbfaa672a96044e0 # shrinks to input = _RoundTripMysqlTypeArgs { sql_type: UnsignedBigInt(None), value: UInt(9225475661790109164) }
+cc b572a87e7b2cdfab1907a93b1200bbcc6b80e57718b4200da0a4f4d12750de1f # shrinks to input = _RoundTripMysqlTypeArgs { sql_type: Char(Some(46)), value: Bytes("\t\u{6381d}�..") }
+cc 4e0f39925c9753c1dcd83621b03c4549ebe26d41f343ae2980fc167e43fbf283 # shrinks to input = _RoundTripMysqlTypeArbitraryArgs { sql_type: MediumInt(None), value: Int(-13526) }
