@@ -12,15 +12,9 @@ pub(crate) fn mysql_value_to_dataflow_value(value: Value) -> ReadySetResult<DfVa
         ValueInner::Int(i) => i.into(),
         ValueInner::UInt(i) => i.into(),
         ValueInner::Double(f) => DfValue::try_from(f)?,
-        ValueInner::Datetime(_) => DfValue::TimestampTz(
-            NaiveDateTime::try_from(value)
-                .map_err(|e| ReadySetError::DfValueConversionError {
-                    src_type: "ValueInner::Datetime".to_string(),
-                    target_type: "DfValue::TimestampTz".to_string(),
-                    details: format!("{:?}", e),
-                })?
-                .into(),
-        ),
+        ValueInner::Datetime(_) => {
+            NaiveDateTime::try_from(value).map_or(DfValue::None, |d| DfValue::TimestampTz(d.into()))
+        }
         ValueInner::Time(_) => {
             DfValue::Time(
                 value

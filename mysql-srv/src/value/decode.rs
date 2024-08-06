@@ -246,7 +246,10 @@ impl<'a> TryFrom<Value<'a>> for NaiveDateTime {
                 u32::from(v.read_u8()?),
                 u32::from(v.read_u8()?),
             )
-            .unwrap();
+            .ok_or_else(|| MsqlSrvError::InvalidConversion {
+                target_type: "NaiveDateTime".to_string(),
+                src_type: format!("{:?}", val),
+            })?;
 
             if v.is_empty() {
                 return Ok(d.and_hms_opt(0, 0, 0).unwrap());
