@@ -208,7 +208,6 @@ fn arbitrary_mysql_value_for_type(sql_type: SqlType) -> impl Strategy<Value = Va
 #[proptest(ProptestConfig::default(), max_shrink_time = 120_000)]
 #[serial]
 #[slow]
-#[ignore = "WIP REA-4598"]
 fn round_trip_mysql_type_arbitrary(
     #[strategy(SqlType::arbitrary_with(SqlTypeArbitraryOptions {
         dialect: Some(Dialect::MySQL),
@@ -300,4 +299,14 @@ fn round_trip_mysql_type_regressions_char_1_length_space() {
 #[ignore = "Failing REA-4590"]
 fn round_trip_mysql_type_regressions_char_46_length_nonempty() {
     round_trip_mysql_type(SqlType::Char(Some(46)), Value::Bytes("d".into()));
+}
+
+#[test]
+#[serial]
+#[slow]
+fn round_trip_mysql_type_regressions_bigint_high() {
+    round_trip_mysql_type(
+        SqlType::UnsignedBigInt(None),
+        Value::UInt(9223372036854775808),
+    )
 }
