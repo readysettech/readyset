@@ -166,6 +166,14 @@ mod tests {
     use indoc::indoc;
     use metrics_exporter_prometheus::*;
 
+    macro_rules! assert_delta {
+        ($x:expr, $y:expr, $d:expr) => {
+            if !($x - $y < $d || $y - $x < $d) {
+                panic!("{} and {} differ by more than {}", $x, $y, $d);
+            }
+        };
+    }
+
     fn setup() -> PrometheusHandle {
         let recorder = Box::leak(Box::new({
             let builder =
@@ -222,20 +230,43 @@ mod tests {
             # TYPE benchmark_three_seconds counter
             benchmark_three_seconds 1
         "}));
-        // TODO: We shouldn't hold test against these exact values. We should instead extract the
-        // values and use `assert_relative_eq!()`.
-        assert!(output.contains(indoc! {r#"
-            # HELP benchmark_percentile_bytes desc
-            # TYPE benchmark_percentile_bytes summary
-            benchmark_percentile_bytes{quantile="0"} 1
-            benchmark_percentile_bytes{quantile="0.5"} 50.00385027884824
-            benchmark_percentile_bytes{quantile="0.9"} 90.00813093751373
-            benchmark_percentile_bytes{quantile="0.95"} 95.00219629040446
-            benchmark_percentile_bytes{quantile="0.99"} 98.99803587754256
-            benchmark_percentile_bytes{quantile="0.999"} 98.99803587754256
-            benchmark_percentile_bytes{quantile="1"} 100
-            benchmark_percentile_bytes_sum 5050
-            benchmark_percentile_bytes_count 100
-        "#}));
+
+        const EXPECT: &[(&str, f64)] = &[
+            (r#"benchmark_percentile_bytes{quantile="0"}"#, 1.0),
+            (
+                r#"benchmark_percentile_bytes{quantile="0.5"}"#,
+                50.00385027884824,
+            ),
+            (
+                r#"benchmark_percentile_bytes{quantile="0.9"}"#,
+                90.00813093751373,
+            ),
+            (
+                r#"benchmark_percentile_bytes{quantile="0.95"}"#,
+                95.00219629040446,
+            ),
+            (
+                r#"benchmark_percentile_bytes{quantile="0.99"}"#,
+                98.99803587754256,
+            ),
+            (
+                r#"benchmark_percentile_bytes{quantile="0.999"}"#,
+                98.99803587754256,
+            ),
+            (r#"benchmark_percentile_bytes{quantile="1"}"#, 100.0),
+            (r#"benchmark_percentile_bytes_sum"#, 5050.0),
+            (r#"benchmark_percentile_bytes_count"#, 100.0),
+        ];
+        for (k, v) in EXPECT {
+            let mut found = false;
+            for ln in output.lines() {
+                if ln.starts_with(k) {
+                    let actual = ln.split(' ').nth(1).unwrap().parse::<f64>().unwrap();
+                    assert_delta!(*v, actual, 0.0000001);
+                    found = true;
+                }
+            }
+            assert!(found, "{} not found!", k);
+        }
     }
 }
