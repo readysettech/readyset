@@ -830,11 +830,8 @@ where
                 .name("Query logger".to_string())
                 .stack_size(2 * 1024 * 1024) // Use the same value tokio is using
                 .spawn_wrapper(move || {
-                    runtime.block_on(query_logger::QueryLogger::run(
-                        qlog_receiver,
-                        shutdown_rx,
-                        query_log_mode,
-                    ));
+                    let mut logger = query_logger::QueryLogger::new(query_log_mode);
+                    runtime.block_on(logger.run(qlog_receiver, shutdown_rx));
                     runtime.shutdown_background();
                 })?;
 

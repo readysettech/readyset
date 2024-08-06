@@ -15,7 +15,7 @@ use readyset_sql_passes::anonymize::anonymize_literals;
 use readyset_util::shutdown::ShutdownReceiver;
 use tokio::select;
 use tokio::sync::mpsc::UnboundedReceiver;
-use tracing::{info, info_span};
+use tracing::{info, instrument};
 
 pub(crate) struct QueryLogger {
     per_query_metrics: HashMap<Arc<SqlQuery>, QueryMetrics>,
@@ -28,6 +28,8 @@ pub(crate) struct QueryLogger {
     query_count: Counter,
     prepare_count: Counter,
     execute_count: Counter,
+
+    log_mode: QueryLogMode,
 }
 
 struct QueryMetrics {
@@ -62,6 +64,30 @@ impl QueryMetrics {
 }
 
 impl QueryLogger {
+    pub fn new(mode: QueryLogMode) -> Self {
+        QueryLogger {
+            per_query_metrics: HashMap::new(),
+            parse_error_count: register_counter!(
+                readyset_client_metrics::recorded::QUERY_LOG_PARSE_ERRORS,
+            ),
+            set_disallowed_count: register_counter!(
+                readyset_client_metrics::recorded::QUERY_LOG_SET_DISALLOWED,
+            ),
+            view_not_found_count: register_counter!(
+                readyset_client_metrics::recorded::QUERY_LOG_VIEW_NOT_FOUND,
+            ),
+            rpc_error_count: register_counter!(
+                readyset_client_metrics::recorded::QUERY_LOG_RPC_ERRORS,
+            ),
+
+            query_count: register_counter!(recorded::QUERY_LOG_EVENT_TYPE, "type" => "query"),
+            prepare_count: register_counter!(recorded::QUERY_LOG_EVENT_TYPE, "type" => "prepare"),
+            execute_count: register_counter!(recorded::QUERY_LOG_EVENT_TYPE, "type" => "execute"),
+
+            log_mode: mode,
+        }
+    }
+
     fn query_string(query: &SqlQuery) -> SharedString {
         const ADAPTER_REWRITE_PARAMS: AdapterRewriteParams = AdapterRewriteParams {
             server_supports_pagination: true,
@@ -101,34 +127,132 @@ impl QueryLogger {
             })
     }
 
-    /// Async task that logs query stats.
-    pub(crate) async fn run(
-        mut receiver: UnboundedReceiver<QueryExecutionEvent>,
-        mut shutdown_recv: ShutdownReceiver,
-        mode: QueryLogMode,
-    ) {
-        let _span = info_span!("query-logger");
-
-        let mut logger = QueryLogger {
-            per_query_metrics: HashMap::new(),
-            parse_error_count: register_counter!(
-                readyset_client_metrics::recorded::QUERY_LOG_PARSE_ERRORS,
-            ),
-            set_disallowed_count: register_counter!(
-                readyset_client_metrics::recorded::QUERY_LOG_SET_DISALLOWED,
-            ),
-            view_not_found_count: register_counter!(
-                readyset_client_metrics::recorded::QUERY_LOG_VIEW_NOT_FOUND,
-            ),
-            rpc_error_count: register_counter!(
-                readyset_client_metrics::recorded::QUERY_LOG_RPC_ERRORS,
-            ),
-
-            query_count: register_counter!(recorded::QUERY_LOG_EVENT_TYPE, "type" => "query"),
-            prepare_count: register_counter!(recorded::QUERY_LOG_EVENT_TYPE, "type" => "prepare"),
-            execute_count: register_counter!(recorded::QUERY_LOG_EVENT_TYPE, "type" => "execute"),
+    fn handle_event(&mut self, event: &QueryExecutionEvent) {
+        if let Some(error) = &event.noria_error {
+            if error.caused_by_unparseable_query() {
+                self.parse_error_count.increment(1);
+            } else if error.is_set_disallowed() {
+                self.set_disallowed_count.increment(1);
+            } else if error.caused_by_view_not_found() {
+                self.view_not_found_count.increment(1);
+            } else if error.is_networking_related() {
+                self.rpc_error_count.increment(1);
+            }
         };
 
+        match event.event {
+            EventType::Query => self.query_count.increment(1),
+            EventType::Prepare => self.prepare_count.increment(1),
+            EventType::Execute => self.execute_count.increment(1),
+        }
+
+        let query = match &event.query {
+            Some(query) => query,
+            None => return,
+        };
+
+        let mode = self.log_mode;
+        let metrics = self.metrics_for_query(query.clone(), event.query_id);
+
+        if mode.is_verbose() && event.parse_duration.is_some() {
+            metrics
+                .parse_histogram((event.event, event.sql_type), mode)
+                .record(event.parse_duration.unwrap()); // just checked
+        }
+
+        match &event.readyset_event {
+            Some(ReadysetExecutionEvent::CacheRead {
+                cache_misses,
+                num_keys,
+                duration,
+                cache_name,
+            }) => {
+                let mut labels = vec![(
+                    "cache_name",
+                    SharedString::from(cache_name.display_unquoted().to_string()),
+                )];
+
+                counter!(recorded::QUERY_LOG_TOTAL_KEYS_READ, *num_keys, &labels);
+                counter!(
+                    recorded::QUERY_LOG_TOTAL_CACHE_MISSES,
+                    *cache_misses,
+                    &labels
+                );
+
+                if *cache_misses != 0 {
+                    counter!(
+                        recorded::QUERY_LOG_QUERY_CACHE_MISSED,
+                        *cache_misses,
+                        &labels
+                    );
+                }
+
+                labels.push(("database_type", SharedString::from(DatabaseType::ReadySet)));
+
+                if mode.is_verbose() {
+                    labels.push(("query", Self::query_string(query)));
+
+                    if let Some(id) = &event.query_id {
+                        labels.push(("query_id", SharedString::from(id.to_string())));
+                    }
+                }
+
+                histogram!(
+                    recorded::QUERY_LOG_EXECUTION_TIME,
+                    duration.as_micros() as f64,
+                    &labels
+                );
+                counter!(recorded::QUERY_LOG_EXECUTION_COUNT, 1, &labels);
+            }
+            Some(ReadysetExecutionEvent::Other { duration }) => {
+                let mut labels =
+                    vec![("database_type", SharedString::from(DatabaseType::ReadySet))];
+
+                if mode.is_verbose() {
+                    labels.push(("query", Self::query_string(query)));
+
+                    if let Some(id) = &event.query_id {
+                        labels.push(("query_id", SharedString::from(id.to_string())));
+                    }
+                }
+
+                histogram!(
+                    recorded::QUERY_LOG_EXECUTION_TIME,
+                    duration.as_micros() as f64,
+                    &labels
+                );
+                counter!(recorded::QUERY_LOG_EXECUTION_COUNT, 1, &labels);
+            }
+            None => (),
+        }
+
+        if let Some(duration) = event.upstream_duration {
+            let mut labels = vec![("database_type", SharedString::from(DatabaseType::MySql))];
+
+            if mode.is_verbose() {
+                labels.push(("query", Self::query_string(query)));
+
+                if let Some(id) = &event.query_id {
+                    labels.push(("query_id", SharedString::from(id.to_string())));
+                }
+            }
+
+            histogram!(
+                recorded::QUERY_LOG_EXECUTION_TIME,
+                duration.as_micros() as f64,
+                &labels
+            );
+            counter!(recorded::QUERY_LOG_EXECUTION_COUNT, 1, &labels);
+        }
+    }
+
+    /// Async task that logs query stats.
+    #[instrument(name = "query_logger", skip_all)]
+    pub(crate) async fn run(
+        &mut self,
+        mut receiver: UnboundedReceiver<QueryExecutionEvent>,
+        mut shutdown_recv: ShutdownReceiver,
+    ) {
         loop {
             select! {
                 // We use `biased` here to ensure that our shutdown signal will be received and
@@ -142,102 +266,14 @@ impl QueryLogger {
                     break;
                 }
                 event = receiver.recv() => {
-                    let event = match event {
-                        Some(event) => event,
+                    match event {
+                        Some(event) => self.handle_event(&event),
                         None => {
                             info!("Metrics task shutting down after request handle dropped.");
                             break;
                         }
                     };
 
-                    if let Some(error) = event.noria_error {
-                        if error.caused_by_unparseable_query() {
-                            logger.parse_error_count.increment(1);
-                        } else if error.is_set_disallowed() {
-                            logger.set_disallowed_count.increment(1);
-                        } else if error.caused_by_view_not_found() {
-                            logger.view_not_found_count.increment(1);
-                        } else if error.is_networking_related() {
-                            logger.rpc_error_count.increment(1);
-                        }
-                    };
-
-                    match event.event {
-                        EventType::Query => logger.query_count.increment(1),
-                        EventType::Prepare => logger.prepare_count.increment(1),
-                        EventType::Execute => logger.execute_count.increment(1),
-                    }
-
-                    let query = match event.query {
-                        Some(query) => query,
-                        None => continue,
-                    };
-
-                    let metrics = logger.metrics_for_query(query.clone(), event.query_id);
-
-                    if mode.is_verbose() && event.parse_duration.is_some() {
-                        metrics
-                            .parse_histogram((event.event, event.sql_type), mode)
-                            .record(event.parse_duration.unwrap()); // just checked
-                    }
-
-                    match event.readyset_event {
-                        Some(ReadysetExecutionEvent::CacheRead { cache_misses, num_keys, duration, cache_name }) => {
-                            let mut labels = vec![("cache_name", SharedString::from(cache_name.display_unquoted().to_string()))];
-
-                            counter!(recorded::QUERY_LOG_TOTAL_KEYS_READ, num_keys, &labels);
-                            counter!(recorded::QUERY_LOG_TOTAL_CACHE_MISSES, cache_misses, &labels);
-
-                            if cache_misses != 0 {
-                                counter!(recorded::QUERY_LOG_QUERY_CACHE_MISSED, cache_misses, &labels);
-                            }
-
-                            labels.push(("database_type", SharedString::from(DatabaseType::ReadySet)));
-
-                            if mode.is_verbose() {
-                                labels.push(("query", Self::query_string(&query)));
-
-                                if let Some(id) = &event.query_id {
-                                    labels.push(("query_id", SharedString::from(id.to_string())));
-                                }
-                            }
-
-                            histogram!(recorded::QUERY_LOG_EXECUTION_TIME, duration.as_micros() as f64, &labels);
-                            counter!(recorded::QUERY_LOG_EXECUTION_COUNT, 1, &labels);
-                        }
-                        Some(ReadysetExecutionEvent::Other { duration }) => {
-                            let mut labels =
-                                vec![("database_type", SharedString::from(DatabaseType::ReadySet))];
-
-                            if mode.is_verbose() {
-                                labels.push(("query", Self::query_string(&query)));
-
-                                if let Some(id) = &event.query_id {
-                                    labels.push(("query_id", SharedString::from(id.to_string())));
-                                }
-                            }
-
-                            histogram!(recorded::QUERY_LOG_EXECUTION_TIME, duration.as_micros() as f64, &labels);
-                            counter!(recorded::QUERY_LOG_EXECUTION_COUNT, 1, &labels);
-                        }
-                        None => (),
-                    }
-
-                    if let Some(duration) = event.upstream_duration {
-                        let mut labels =
-                            vec![("database_type", SharedString::from(DatabaseType::MySql))];
-
-                        if mode.is_verbose() {
-                            labels.push(("query", Self::query_string(&query)));
-
-                            if let Some(id) = &event.query_id {
-                                labels.push(("query_id", SharedString::from(id.to_string())));
-                            }
-                        }
-
-                        histogram!(recorded::QUERY_LOG_EXECUTION_TIME, duration.as_micros() as f64, &labels);
-                        counter!(recorded::QUERY_LOG_EXECUTION_COUNT, 1, &labels);
-                    }
                 }
             }
         }
