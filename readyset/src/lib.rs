@@ -1074,11 +1074,15 @@ where
         let internal_server_handle = if deployment_mode.has_reader_nodes() {
             let authority = options.authority.clone();
             let deployment = options.deployment.clone();
+
             let mut builder = readyset_server::Builder::from_worker_options(
                 options.server_worker_options,
                 &options.deployment,
                 deployment_dir,
             );
+            let persistence = builder.get_persistence();
+            dataflow_state::clean_working_dir(persistence)?;
+
             let r = readers.clone();
 
             if deployment_mode.is_embedded_readers() {

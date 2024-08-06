@@ -126,6 +126,21 @@ const WORKING_DIR: &str = "readyset.tmp";
 // Maximum rows per WriteBatch when building new indices for existing rows.
 const INDEX_BATCH_SIZE: usize = 10_000;
 
+/// Delete any working/temp files from the last process run. Normally, those files
+/// will be cleaned up on process exit, but if readyset crashes or fails, delete them
+/// to prevent any further disk use leakage. This function should be executed once,
+/// preferably at startup.
+pub fn clean_working_dir(params: &PersistenceParameters) -> Result<()> {
+    let working_dir = params.derive_working_dir_base()?;
+
+    if working_dir.is_dir() {
+        debug!("deleting any prior working files from {:?}", &working_dir);
+        fs::remove_dir_all(working_dir)?
+    }
+
+    Ok(())
+}
+
 /// Load the metadata from the database, stored in the `DEFAULT_CF` column family under the
 /// `META_KEY`
 fn get_meta(db: &DB) -> Result<PersistentMeta<'static>> {
@@ -308,6 +323,19 @@ impl PersistenceParameters {
             working_temp_dir,
             wal_flush_interval_seconds,
         }
+    }
+
+    fn derive_working_dir_base(&self) -> Result<PathBuf> {
+        // use what the operator passed in, or default to the storage_dir
+        let base_dir = match &self.working_temp_dir {
+            Some(s) => s.clone(),
+            None => self.storage_dir.clone().unwrap_or_else(|| ".".into()),
+        };
+        // canonicalize the path else `tempdir` might get confused with a relative path.
+        let base_dir = base_dir.canonicalize()?;
+
+        // use a "parent" directory to house all the various tmp rocksdb instances
+        Ok(base_dir.join(WORKING_DIR))
     }
 }
 
@@ -1458,16 +1486,7 @@ impl PersistentState {
                 (None, path)
             }
             _ => {
-                // use what the operator passed in, or default to the storage_dir
-                let base_dir = match &params.working_temp_dir {
-                    Some(s) => s.clone(),
-                    None => params.storage_dir.clone().unwrap_or_else(|| ".".into()),
-                };
-                // canonicalize the path else `tempdir` might get confused with a relative path.
-                let base_dir = base_dir.canonicalize()?;
-
-                // use a "parent" directory to house all the various tmp rocksdb instances
-                let working_dir = base_dir.join(WORKING_DIR);
+                let working_dir = params.derive_working_dir_base()?;
                 if !working_dir.is_dir() {
                     fs::create_dir_all(&working_dir)?;
                 }

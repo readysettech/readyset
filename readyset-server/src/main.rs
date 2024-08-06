@@ -235,6 +235,10 @@ fn main() -> anyhow::Result<()> {
 
     let mut builder =
         Builder::from_worker_options(opts.worker_options, &opts.deployment, deployment_dir);
+
+    let persistence = builder.get_persistence();
+    dataflow_state::clean_working_dir(persistence)?;
+
     builder.set_listen_addr(opts.address);
     builder.set_telemetry_sender(telemetry_sender.clone());
     builder.set_wait_for_failpoint(opts.wait_for_failpoint);

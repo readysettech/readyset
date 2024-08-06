@@ -158,6 +158,10 @@ impl Builder {
         self.config.persistence = p;
     }
 
+    pub fn get_persistence(&self) -> &PersistenceParameters {
+        &self.config.persistence
+    }
+
     /// Disable partial materialization for all subsequent migrations
     pub fn disable_partial(&mut self) {
         self.config.materialization_config.partial_enabled = false;

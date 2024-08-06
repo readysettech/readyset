@@ -30,8 +30,8 @@ use serde::{Deserialize, Serialize};
 pub use crate::key::{PointKey, RangeKey};
 pub use crate::memory_state::MemoryState;
 pub use crate::persistent_state::{
-    DurabilityMode, PersistenceParameters, PersistenceType, PersistentState, PersistentStateHandle,
-    SnapshotMode,
+    clean_working_dir, DurabilityMode, PersistenceParameters, PersistenceType, PersistentState,
+    PersistentStateHandle, SnapshotMode,
 };
 
 /// Information about state evicted via a call to [`State::evict_bytes`]

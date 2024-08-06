@@ -4104,6 +4104,7 @@ dependencies = [
  "clap",
  "crossbeam-skiplist",
  "database-utils",
+ "dataflow-state",
  "fail",
  "failpoint-macros",
  "futures-util",

@@ -11,29 +11,29 @@ A real-time SQL caching engine for Postgres and MySQL."""
 
 [dependencies]
 anyhow = { workspace = true }
+chrono = { workspace = true }
 clap = { workspace = true, features = ["derive","env"] }
+crossbeam-skiplist = { workspace = true }
 futures-util = { workspace = true }
 fail = { workspace = true }
 failpoint-macros = { path = "../failpoint-macros" }
 metrics = { workspace = true }
 metrics-exporter-prometheus = { workspace = true }
+reqwest = { workspace = true, features = ["json"] }
 tokio = { workspace = true, features = ["full"] }
 tokio-native-tls = { workspace = true }
 tokio-stream = { workspace = true, features = ["net"] }
 tracing = { workspace = true, features = ["release_max_level_debug"] }
 tracing-subscriber = { workspace = true }
 tracing-futures = { workspace = true }
-reqwest = { workspace = true, features = ["json"] }
-chrono = { workspace = true }
-crossbeam-skiplist = { workspace = true }
 
 # Local dependencies
-health-reporter = { path = "../health-reporter" }
-readyset-util = { path = "../readyset-util" }
-nom-sql = { path = "../nom-sql" }
-mysql-srv = { path = "../mysql-srv" }
-psql-srv = { path = "../psql-srv" }
 database-utils = { path = "../database-utils" }
+dataflow-state = { path = "../dataflow-state" }
+health-reporter = { path = "../health-reporter" }
+mysql-srv = { path = "../mysql-srv" }
+nom-sql = { path = "../nom-sql" }
+psql-srv = { path = "../psql-srv" }
 readyset-adapter = { path = "../readyset-adapter" }
 readyset-alloc = { path = "../readyset-alloc" }
 readyset-alloc-metrics = { path = "../readyset-alloc-metrics" }
@@ -49,6 +49,7 @@ readyset-server = { path = "../readyset-server/" }
 readyset-sql-passes = { path = "../readyset-sql-passes" }
 readyset-telemetry-reporter = { path = "../readyset-telemetry-reporter" }
 readyset-tracing = { path = "../readyset-tracing" }
+readyset-util = { path = "../readyset-util" }
 readyset-version = { path = "../readyset-version" }
 replicators = { path = "../replicators" }
 serde_json = { workspace = true }
