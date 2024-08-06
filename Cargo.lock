@@ -4523,6 +4523,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "readyset-e2e-tests"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "mysql_async",
+ "mysql_common",
+ "nom-sql",
+ "proptest",
+ "readyset-adapter",
+ "readyset-client-test-helpers",
+ "readyset-tracing",
+ "readyset-util",
+ "serial_test",
+ "test-strategy",
+ "test-utils",
+ "tokio",
+]
+
+[[package]]
 name = "readyset-errors"
 version = "0.0.1"
 dependencies = [
