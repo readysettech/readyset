@@ -826,11 +826,12 @@ where
             let shutdown_rx = shutdown_rx.clone();
             // Spawn the actual thread to run the logger
             let query_log_mode = options.query_log_mode;
+            let rewrite_params = adapter_rewrite_params;
             std::thread::Builder::new()
                 .name("Query logger".to_string())
                 .stack_size(2 * 1024 * 1024) // Use the same value tokio is using
                 .spawn_wrapper(move || {
-                    let mut logger = query_logger::QueryLogger::new(query_log_mode);
+                    let mut logger = query_logger::QueryLogger::new(query_log_mode, rewrite_params);
                     runtime.block_on(logger.run(qlog_receiver, shutdown_rx));
                     runtime.shutdown_background();
                 })?;

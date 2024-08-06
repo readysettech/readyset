@@ -30,6 +30,7 @@ pub(crate) struct QueryLogger {
     execute_count: Counter,
 
     log_mode: QueryLogMode,
+    rewrite_params: AdapterRewriteParams,
 }
 
 struct QueryMetrics {
@@ -64,7 +65,7 @@ impl QueryMetrics {
 }
 
 impl QueryLogger {
-    pub fn new(mode: QueryLogMode) -> Self {
+    pub fn new(mode: QueryLogMode, rewrite_params: AdapterRewriteParams) -> Self {
         QueryLogger {
             per_query_metrics: HashMap::new(),
             parse_error_count: register_counter!(
@@ -85,19 +86,15 @@ impl QueryLogger {
             execute_count: register_counter!(recorded::QUERY_LOG_EVENT_TYPE, "type" => "execute"),
 
             log_mode: mode,
+            rewrite_params,
         }
     }
 
-    fn query_string(query: &SqlQuery) -> SharedString {
-        const ADAPTER_REWRITE_PARAMS: AdapterRewriteParams = AdapterRewriteParams {
-            server_supports_pagination: true,
-            server_supports_mixed_comparisons: true,
-        };
-
+    fn query_string(query: &SqlQuery, rewrite_params: AdapterRewriteParams) -> SharedString {
         SharedString::from(match query {
             SqlQuery::Select(stmt) => {
                 let mut stmt = stmt.clone();
-                if adapter_rewrites::process_query(&mut stmt, ADAPTER_REWRITE_PARAMS).is_ok() {
+                if adapter_rewrites::process_query(&mut stmt, rewrite_params).is_ok() {
                     anonymize_literals(&mut stmt);
                     // FIXME(REA-2168): Use correct dialect.
                     stmt.display(nom_sql::Dialect::MySQL).to_string()
@@ -117,7 +114,7 @@ impl QueryLogger {
         self.per_query_metrics
             .entry(query)
             .or_insert_with_key(|query| {
-                let query_string = Self::query_string(query);
+                let query_string = Self::query_string(query, self.rewrite_params);
 
                 QueryMetrics {
                     query: query_string,
@@ -190,7 +187,7 @@ impl QueryLogger {
                 labels.push(("database_type", SharedString::from(DatabaseType::ReadySet)));
 
                 if mode.is_verbose() {
-                    labels.push(("query", Self::query_string(query)));
+                    labels.push(("query", Self::query_string(query, self.rewrite_params)));
 
                     if let Some(id) = &event.query_id {
                         labels.push(("query_id", SharedString::from(id.to_string())));
@@ -209,7 +206,7 @@ impl QueryLogger {
                     vec![("database_type", SharedString::from(DatabaseType::ReadySet))];
 
                 if mode.is_verbose() {
-                    labels.push(("query", Self::query_string(query)));
+                    labels.push(("query", Self::query_string(query, self.rewrite_params)));
 
                     if let Some(id) = &event.query_id {
                         labels.push(("query_id", SharedString::from(id.to_string())));
@@ -230,7 +227,7 @@ impl QueryLogger {
             let mut labels = vec![("database_type", SharedString::from(DatabaseType::MySql))];
 
             if mode.is_verbose() {
-                labels.push(("query", Self::query_string(query)));
+                labels.push(("query", Self::query_string(query, self.rewrite_params)));
 
                 if let Some(id) = &event.query_id {
                     labels.push(("query_id", SharedString::from(id.to_string())));
