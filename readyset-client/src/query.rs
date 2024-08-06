@@ -28,10 +28,9 @@ use crate::{PlaceholderIdx, ViewCreateRequest};
 /// `s1_query_id == s2_query_id` **only if** `s1 == s2`. This means that the unparsed,
 /// pre-adapter-rewrite version of a SELECT statement will not have the same `QueryId` as the
 /// parsed, rewritten version of the same SELECT statement.
-///
-/// `QueryId`s can be created from any type that implements [`Hash`] via
-/// [`QueryId::new`](struct.QueryId.html#method.new).
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(
+    Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq, Hash, PartialOrd, Ord,
+)]
 #[repr(transparent)]
 pub struct QueryId(u64);
 

@@ -94,7 +94,8 @@ use readyset_client::utils::retry_with_exponential_backoff;
 use readyset_client::{ColumnSchema, PlaceholderIdx, ViewCreateRequest};
 pub use readyset_client_metrics::QueryDestination;
 use readyset_client_metrics::{
-    recorded, EventType, QueryExecutionEvent, QueryLogMode, ReadysetExecutionEvent, SqlQueryType,
+    recorded, EventType, QueryExecutionEvent, QueryIdWrapper, QueryLogMode, ReadysetExecutionEvent,
+    SqlQueryType,
 };
 use readyset_data::{DfType, DfValue};
 use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
@@ -1316,7 +1317,7 @@ where
             }
         }
 
-        query_event.query_id = query_id;
+        query_event.query_id = query_id.into();
 
         let statement_id = self.state.prepared_statements.insert(PreparedStatement {
             query_id,
@@ -1574,7 +1575,7 @@ where
 
         let mut event = QueryExecutionEvent::new(EventType::Execute);
         event.query.clone_from(&cached_statement.parsed_query);
-        event.query_id = cached_statement.query_id;
+        event.query_id = cached_statement.query_id.into();
 
         let upstream = &mut self.upstream;
         let noria = &mut self.noria;
@@ -2994,8 +2995,10 @@ where
                     if let SqlQuery::Select(stmt) = parsed_query {
                         event.sql_type = SqlQueryType::Read;
                         event.query = Some(Arc::new(parsed_query.clone()));
-                        event.query_id =
-                            Some(QueryId::from_select(stmt, self.noria.schema_search_path()));
+                        event.query_id = QueryIdWrapper::Calculated(QueryId::from_select(
+                            stmt,
+                            self.noria.schema_search_path(),
+                        ));
                     }
 
                     // Query requires a fallback and we can send it to fallback
@@ -3018,7 +3021,10 @@ where
                     event.query = Some(Arc::new(SqlQuery::Select(view_request.statement.clone())));
                 }
 
-                event.query_id = Some(QueryId::from(&view_request));
+                // force the QueryLogger to recalculate the query_id, instead of doing it here
+                // on the hot path as it will execute a rewrite pass over the query.
+                event.query_id =
+                    QueryIdWrapper::Uncalculated(self.noria.schema_search_path().into());
 
                 let (noria_should_try, status, processed_query_params) =
                     self.noria_should_try_select(&mut view_request);

@@ -4,11 +4,11 @@ use std::sync::Arc;
 use metrics::{
     counter, histogram, register_counter, register_histogram, Counter, Histogram, SharedString,
 };
-use nom_sql::{DialectDisplay, SqlQuery};
+use nom_sql::{DialectDisplay, SqlIdentifier, SqlQuery};
 use readyset_client::query::QueryId;
 use readyset_client_metrics::{
-    recorded, DatabaseType, EventType, QueryExecutionEvent, QueryLogMode, ReadysetExecutionEvent,
-    SqlQueryType,
+    recorded, DatabaseType, EventType, QueryExecutionEvent, QueryIdWrapper, QueryLogMode,
+    ReadysetExecutionEvent, SqlQueryType,
 };
 use readyset_sql_passes::adapter_rewrites::{self, AdapterRewriteParams};
 use readyset_sql_passes::anonymize::anonymize_literals;
@@ -90,6 +90,22 @@ impl QueryLogger {
         }
     }
 
+    fn query_id(
+        query: &SqlQuery,
+        schema_search_path: &[SqlIdentifier],
+        rewrite_params: AdapterRewriteParams,
+    ) -> QueryId {
+        if let SqlQuery::Select(stmt) = query {
+            let mut stmt = stmt.clone();
+            if adapter_rewrites::process_query(&mut stmt, rewrite_params).is_ok() {
+                anonymize_literals(&mut stmt);
+                return QueryId::from_select(&stmt, schema_search_path);
+            }
+        }
+
+        Default::default()
+    }
+
     fn query_string(query: &SqlQuery, rewrite_params: AdapterRewriteParams) -> SharedString {
         SharedString::from(match query {
             SqlQuery::Select(stmt) => {
@@ -148,8 +164,18 @@ impl QueryLogger {
             None => return,
         };
 
+        let query_id = match &event.query_id {
+            QueryIdWrapper::Uncalculated(schema_search_path) => Some(Self::query_id(
+                query,
+                schema_search_path,
+                self.rewrite_params,
+            )),
+            QueryIdWrapper::Calculated(qid) => Some(*qid),
+            QueryIdWrapper::None => None,
+        };
+
         let mode = self.log_mode;
-        let metrics = self.metrics_for_query(query.clone(), event.query_id);
+        let metrics = self.metrics_for_query(query.clone(), query_id);
 
         if mode.is_verbose() && event.parse_duration.is_some() {
             metrics
@@ -189,7 +215,7 @@ impl QueryLogger {
                 if mode.is_verbose() {
                     labels.push(("query", Self::query_string(query, self.rewrite_params)));
 
-                    if let Some(id) = &event.query_id {
+                    if let Some(id) = query_id {
                         labels.push(("query_id", SharedString::from(id.to_string())));
                     }
                 }
@@ -208,7 +234,7 @@ impl QueryLogger {
                 if mode.is_verbose() {
                     labels.push(("query", Self::query_string(query, self.rewrite_params)));
 
-                    if let Some(id) = &event.query_id {
+                    if let Some(id) = query_id {
                         labels.push(("query_id", SharedString::from(id.to_string())));
                     }
                 }
@@ -229,7 +255,7 @@ impl QueryLogger {
             if mode.is_verbose() {
                 labels.push(("query", Self::query_string(query, self.rewrite_params)));
 
-                if let Some(id) = &event.query_id {
+                if let Some(id) = query_id {
                     labels.push(("query_id", SharedString::from(id.to_string())));
                 }
             }
