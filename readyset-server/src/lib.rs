@@ -635,10 +635,7 @@ pub struct WorkerOptions {
     #[arg(long, env = "STORAGE_DIR", conflicts_with = "db_dir")]
     storage_dir: Option<PathBuf>,
 
-    /// Directory in which to store replicated table data. If not specified, defaults to the
-    /// current working directory.
-    ///
-    /// DEPRECATED: use `storage_dir` instead.
+    /// DEPRECATED: use `--storage-dir` instead.
     #[arg(long, env = "DB_DIR", conflicts_with = "storage_dir", hide = true)]
     db_dir: Option<PathBuf>,
 
@@ -684,13 +681,16 @@ impl WorkerOptions {
         if let Some(s) = &self.storage_dir {
             return Some(s.to_path_buf());
         }
-
         if let Some(s) = &self.db_dir {
-            warn!("Use of db_dir is deprecated, please use storage_dir instead");
             return Some(s.to_path_buf());
         }
-
         None
+    }
+
+    pub fn warn_used_deprecated(&self) {
+        if self.db_dir.is_some() {
+            warn!("Use of \"--db-dir\" is deprecated, please use \"--storage-dir\" instead");
+        }
     }
 }
 
