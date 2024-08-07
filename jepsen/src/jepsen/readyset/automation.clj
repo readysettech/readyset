@@ -114,7 +114,7 @@
     :--external-address (net/ip (name node))
     :--authority-address (authority-address test)
     :--upstream-db-url (upstream-db-url test)
-    :--allow-full-materialization
+    :--experimental-full-materialization
     :--disable-upstream-ssl-verification
     :--no-readers
     :--reader-replicas (str (nodes/num-adapters test)))))

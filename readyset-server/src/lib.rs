@@ -575,8 +575,22 @@ pub struct WorkerOptions {
 
     /// Allow the creation of fully materialized nodes.
     // XXX JCD keep experimental features synchronized with experimental-features.json
-    #[arg(long, env = "ALLOW_FULL_MATERIALIZATION", hide = true)]
-    pub allow_full_materialization: bool,
+    #[arg(
+        long,
+        env = "EXPERIMENTAL_FULL_MATERIALIZATION",
+        conflicts_with = "allow_full_materialization",
+        hide = true
+    )]
+    experimental_full_materialization: bool,
+
+    /// DEPRECATED: use `--experimental-full-materialization` instead.
+    #[arg(
+        long,
+        env = "ALLOW_FULL_MATERIALIZATION",
+        conflicts_with = "experimental_full_materialization",
+        hide = true
+    )]
+    allow_full_materialization: bool,
 
     /// The materialization frontier strategy to use. Defaults to `None`.
     #[arg(long, env = "MATERIALIZATION_FRONTIER", default_value_t = FrontierStrategy::None, hide = true)]
@@ -602,33 +616,103 @@ pub struct WorkerOptions {
     ///
     /// NOTE: If enabled, this must be set for all ReadySet processes (both servers and adapters).
     // XXX JCD keep experimental features synchronized with experimental-features.json
-    #[arg(long, env = "EXPERIMENTAL_TOPK_SUPPORT", hide = true)]
-    pub enable_experimental_topk_support: bool,
+    #[arg(
+        long,
+        env = "EXPERIMENTAL_TOPK",
+        conflicts_with = "enable_experimental_topk_support",
+        hide = true
+    )]
+    experimental_topk: bool,
+
+    /// DEPRECATED: use `--experimental-topk` instead.
+    #[arg(
+        long,
+        env = "EXPERIMENTAL_TOPK_SUPPORT",
+        conflicts_with = "experimental_topk",
+        hide = true
+    )]
+    enable_experimental_topk_support: bool,
 
     /// Enable experimental support for Pagination in dataflow.
     ///
     /// NOTE: If enabled, this must be set for all ReadySet processes (both servers and adapters).
     // XXX JCD keep experimental features synchronized with experimental-features.json
-    #[arg(long, env = "EXPERIMENTAL_PAGINATE_SUPPORT", hide = true)]
-    pub enable_experimental_paginate_support: bool,
+    #[arg(
+        long,
+        env = "EXPERIMENTAL_PAGINATION",
+        conflicts_with = "enable_experimental_paginate_support",
+        hide = true
+    )]
+    experimental_pagination: bool,
+
+    /// DEPRECATED: use `--experimental-pagination` instead.
+    #[arg(
+        long,
+        env = "EXPERIMENTAL_PAGINATE_SUPPORT",
+        conflicts_with = "experimental_pagination",
+        hide = true
+    )]
+    enable_experimental_paginate_support: bool,
 
     /// Enable experimental support for mixing equality and inequality comparisons on query
     /// parameters.
     // XXX JCD keep experimental features synchronized with experimental-features.json
-    #[arg(long, env = "EXPERIMENTAL_MIXED_COMPARISONS_SUPPORT", hide = true)]
-    pub enable_experimental_mixed_comparisons: bool,
+    #[arg(
+        long,
+        env = "EXPERIMENTAL_MIXED_COMPARISONS",
+        conflicts_with = "enable_experimental_mixed_comparisons",
+        hide = true
+    )]
+    experimental_mixed_comparisons: bool,
+
+    /// DEPRECATED: use `--experimental-mixed-comparisons` instead.
+    #[arg(
+        long,
+        env = "EXPERIMENTAL_MIXED_COMPARISONS_SUPPORT",
+        conflicts_with = "experimental_mixed_comparisons",
+        hide = true
+    )]
+    enable_experimental_mixed_comparisons: bool,
 
     /// Enable experimental support for straddled joins (joins with partial keys traced to both
     /// parents).
     // XXX JCD keep experimental features synchronized with experimental-features.json
-    #[arg(long, env = "EXPERIMENTAL_STRADDLED_JOIN_SUPPORT", hide = true)]
-    pub enable_experimental_straddled_joins: bool,
+    #[arg(
+        long,
+        env = "EXPERIMENTAL_STRADDLED_JOINS",
+        conflicts_with = "enable_experimental_straddled_joins",
+        hide = true
+    )]
+    experimental_straddled_joins: bool,
+
+    /// DEPRECATED: use `--experimental-straddled-joins` instead.
+    #[arg(
+        long,
+        env = "EXPERIMENTAL_STRADDLED_JOIN_SUPPORT",
+        conflicts_with = "experimental_straddled_joins",
+        hide = true
+    )]
+    enable_experimental_straddled_joins: bool,
 
     /// Enable experimental support for Post-Lookup (queries which do extra work after the lookup
     /// into the reader).
     // XXX JCD keep experimental features synchronized with experimental-features.json
-    #[arg(long, env = "EXPERIMENTAL_POST_LOOKUP_SUPPORT", hide = true)]
-    pub enable_experimental_post_lookup: bool,
+    #[arg(
+        long,
+        env = "EXPERIMENTAL_POST_LOOKUP",
+        conflicts_with = "enable_experimental_post_lookup",
+        hide = true
+    )]
+    experimental_post_lookup: bool,
+
+    /// DEPRECATED: use `--experimental-post-lookup` instead.
+    #[arg(
+        long,
+        env = "EXPERIMENTAL_POST_LOOKUP_SUPPORT",
+        conflicts_with = "experimental_post_lookup",
+        hide = true
+    )]
+    enable_experimental_post_lookup: bool,
 
     /// Directory in which to store replicated table data. If not specified, defaults to the
     /// current working directory.
@@ -677,6 +761,30 @@ pub struct WorkerOptions {
 }
 
 impl WorkerOptions {
+    fn experimental_full_materialization(&self) -> bool {
+        self.experimental_full_materialization || self.allow_full_materialization
+    }
+
+    pub fn experimental_mixed_comparisons(&self) -> bool {
+        self.experimental_mixed_comparisons || self.enable_experimental_mixed_comparisons
+    }
+
+    pub fn experimental_pagination(&self) -> bool {
+        self.experimental_pagination || self.enable_experimental_paginate_support
+    }
+
+    pub fn experimental_post_lookup(&self) -> bool {
+        self.experimental_post_lookup || self.enable_experimental_post_lookup
+    }
+
+    pub fn experimental_straddled_joins(&self) -> bool {
+        self.experimental_straddled_joins || self.enable_experimental_straddled_joins
+    }
+
+    pub fn experimental_topk(&self) -> bool {
+        self.experimental_topk || self.enable_experimental_topk_support
+    }
+
     pub fn storage_dir(&self) -> Option<PathBuf> {
         if let Some(s) = &self.storage_dir {
             return Some(s.to_path_buf());
@@ -688,6 +796,24 @@ impl WorkerOptions {
     }
 
     pub fn warn_used_deprecated(&self) {
+        if self.allow_full_materialization {
+            warn!("Use of \"--allow-full-materialization\" is deprecated, please use \"--experimental-full-materialization\" instead");
+        }
+        if self.enable_experimental_mixed_comparisons {
+            warn!("Use of \"--enable-experimental-mixed-comparisons\" is deprecated, please use \"--experimental-mixed-comparisons\" instead");
+        }
+        if self.enable_experimental_paginate_support {
+            warn!("Use of \"--enable-experimental-paginate-support\" is deprecated, please use \"--experimental-pagination\" instead");
+        }
+        if self.enable_experimental_post_lookup {
+            warn!("Use of \"--enable-experimental-post-lookup\" is deprecated, please use \"--experimental-post-lookup\" instead");
+        }
+        if self.enable_experimental_straddled_joins {
+            warn!("Use of \"--enable-experimental-straddled-joins\" is deprecated, please use \"--experimental-straddled-joins\" instead");
+        }
+        if self.enable_experimental_topk_support {
+            warn!("Use of \"--enable-experimental-topk-support\" is deprecated, please use \"--experimental-topk\" instead");
+        }
         if self.db_dir.is_some() {
             warn!("Use of \"--db-dir\" is deprecated, please use \"--storage-dir\" instead");
         }

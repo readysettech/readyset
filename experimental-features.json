@@ -1,38 +1,38 @@
 [
     {
         "name": "Full Materialization",
-        "command-line": "--allow-full-materialization",
-        "environment-variable": "ALLOW_FULL_MATERIALIZATION",
+        "command-line": "--experimental-full-materialization",
+        "environment-variable": "EXPERIMENTAL_FULL_MATERIALIZATION",
         "description": "Allow the creation of fully materialized nodes."
     },
     {
         "name": "Mixed Comparisons",
-        "command-line": "--enable-experimental-mixed-comparisons",
-        "environment-variable": "EXPERIMENTAL_MIXED_COMPARISONS_SUPPORT",
+        "command-line": "--experimental-mixed-comparisons",
+        "environment-variable": "EXPERIMENTAL_MIXED_COMPARISONS",
         "description": "Enable experimental support for mixing equality and inequality comparisons on query parameters."
     },
     {
-        "name": "Pagination Support",
-        "command-line": "--enable-experimental-paginate-support",
-        "environment-variable": "EXPERIMENTAL_PAGINATE_SUPPORT",
+        "name": "Pagination",
+        "command-line": "--experimental-pagination",
+        "environment-variable": "EXPERIMENTAL_PAGINATION",
         "description": "Enable experimental support for Pagination in dataflow.\n\nNOTE: If enabled, this must be set for all ReadySet processes (both servers and adapters)."
     },
     {
         "name": "Post-Lookup",
-        "command-line": "--enable-experimental-post-lookup",
-        "environment-variable": "EXPERIMENTAL_POST_LOOKUP_SUPPORT",
+        "command-line": "--experimental-post-lookup",
+        "environment-variable": "EXPERIMENTAL_POST_LOOKUP",
         "description": "Enable experimental support for Post-Lookup (queries which do extra work after the lookup into the reader)."
     },
     {
         "name": "Straddled Joins",
-        "command-line": "--enable-experimental-straddled-joins",
-        "environment-variable": "EXPERIMENTAL_STRADDLED_JOIN_SUPPORT",
+        "command-line": "--experimental-straddled-joins",
+        "environment-variable": "EXPERIMENTAL_STRADDLED_JOINS",
         "description": "Enable experimental support for straddled joins (joins with partial keys traced to both parents)."
     },
     {
-        "name": "Top K Support",
-        "command-line": "--enable-experimental-topk-support",
-        "environment-variable": "EXPERIMENTAL_TOPK_SUPPORT",
+        "name": "Top K",
+        "command-line": "--experimental-topk",
+        "environment-variable": "EXPERIMENTAL_TOPK",
         "description": "Enable experimental support for Top K in dataflow.\n\nNOTE: If enabled, this must be set for all ReadySet processes (both servers and adapters)."
     },
     {
