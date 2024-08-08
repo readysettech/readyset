@@ -4467,7 +4467,6 @@ impl Domain {
                     }
 
                     self.metrics.set_reader_state_size(n.name(), size);
-
                     size
                 } else {
                     // Not a reader, state is with domain

@@ -221,8 +221,6 @@ pub struct Worker {
     /// Read handles.
     readers: Readers,
     /// Handles to domains currently being run by this worker.
-    ///
-    /// These are indexed by (domain index, shard).
     domains: HashMap<ReplicaAddress, DomainHandle>,
 
     memory: MemoryTracker,
@@ -235,32 +233,33 @@ impl Worker {
     const DEFAULT_EVICT_INTERVAL: Duration = Duration::from_secs(1);
 
     pub fn new(
-        worker_rx: Receiver<WorkerRequest>,
+        rx: Receiver<WorkerRequest>,
         listen_addr: IpAddr,
         external_addr: SocketAddr,
         readers: Readers,
         memory_limit: Option<usize>,
-        memory_check_frequency: Option<Duration>,
+        evict_interval: Option<Duration>,
         shutdown_rx: ShutdownReceiver,
     ) -> anyhow::Result<Self> {
+        // this initial duration doesn't matter; it gets set upon worker registration
+        let evict_interval = evict_interval.unwrap_or(Self::DEFAULT_EVICT_INTERVAL);
+        let evict_interval = tokio::time::interval(evict_interval);
+
         Ok(Self {
-            election_state: None,
-            // this initial duration doesn't matter; it gets set upon worker registration
-            evict_interval: tokio::time::interval(
-                memory_check_frequency.unwrap_or(Self::DEFAULT_EVICT_INTERVAL),
-            ),
-            memory_limit: memory_limit.unwrap_or(usize::MAX),
-            rx: worker_rx,
-            coord: Arc::new(Default::default()),
+            rx,
             domain_bind: listen_addr,
             domain_external: external_addr.ip(),
-            state_sizes: Default::default(),
             readers,
-            domains: Default::default(),
+            memory_limit: memory_limit.unwrap_or(usize::MAX),
+            evict_interval,
+            shutdown_rx,
             memory: MemoryTracker::new()?,
+            election_state: Default::default(),
+            coord: Default::default(),
+            state_sizes: Default::default(),
+            domains: Default::default(),
             is_evicting: Default::default(),
             domain_wait_queue: Default::default(),
-            shutdown_rx,
         })
     }
 
@@ -269,8 +268,8 @@ impl Worker {
             self.memory_limit,
             self.coord.clone(),
             self.memory,
-            Arc::clone(&self.state_sizes),
-            Arc::clone(&self.is_evicting),
+            self.state_sizes.clone(),
+            self.is_evicting.clone(),
         ));
     }
 
@@ -649,14 +648,11 @@ async fn evict_check(
                 })
             })?),
         };
-        let r = tx
-            .send(Packet::Evict(EvictRequest::Bytes {
-                node: None,
-                num_bytes: evict,
-            }))
-            .await;
-
-        if let Err(e) = r {
+        let pkt = Packet::Evict(EvictRequest::Bytes {
+            node: None,
+            num_bytes: evict,
+        });
+        if let Err(e) = tx.send(pkt).await {
             // probably exiting?
             warn!(
                 "failed to evict from {}: {}",
