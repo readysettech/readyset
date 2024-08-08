@@ -109,7 +109,7 @@ async fn start_readers(
     Ok(reader_addr)
 }
 
-async fn start_worker(
+fn start_worker(
     worker_rx: Receiver<WorkerRequest>,
     listen_addr: IpAddr,
     external_addr: SocketAddr,
@@ -134,7 +134,7 @@ async fn start_worker(
     Ok(())
 }
 
-async fn start_controller(
+fn start_controller(
     authority: Arc<Authority>,
     http_uri: Url,
     reader_addr: SocketAddr,
@@ -302,8 +302,7 @@ pub(crate) async fn start_instance_inner(
         memory_limit,
         memory_check_frequency,
         shutdown_rx.clone(),
-    )
-    .await?;
+    )?;
 
     let our_descriptor = start_controller(
         authority.clone(),
@@ -318,8 +317,7 @@ pub(crate) async fn start_instance_inner(
         leader_eligible,
         telemetry_sender.clone(),
         shutdown_rx,
-    )
-    .await?;
+    )?;
 
     let _ = telemetry_sender.send_event_with_payload(
         TelemetryEvent::ServerStart,

@@ -279,8 +279,8 @@ impl ChannelCoordinator {
             let mut guard = self.inner.write().expect("poisoned mutex");
             let old = guard.addrs.insert(key, addr);
 
-            old.is_some() // Don't publish if we're inserting a *new* address
-                && old != Some(addr)
+            // Don't publish if we're inserting a *new* address
+            old.is_some() && old != Some(addr)
         };
 
         if changed {

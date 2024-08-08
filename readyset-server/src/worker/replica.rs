@@ -94,7 +94,7 @@ struct Outboxes {
 
 impl Outboxes {
     fn new() -> Self {
-        Outboxes {
+        Self {
             domains: Default::default(),
         }
     }
@@ -113,7 +113,6 @@ fn flatten_request_reader_replay(
     unique_keys: &mut HashSet<KeyComparison>,
     packets: &mut VecDeque<Packet>,
 ) {
-    // Sadly no drain filter for VecDeque yet
     let mut i = 0;
     while i < packets.len() {
         match packets.get_mut(i) {

@@ -186,6 +186,7 @@ impl Worker {
             request_timeout,
         }
     }
+
     pub async fn rpc<T: DeserializeOwned>(&self, req: WorkerRequestKind) -> ReadySetResult<T> {
         let body = hyper::Body::from(bincode::serialize(&req)?);
         let http_req = self.http.post(self.uri.join("worker_request")?).body(body);
@@ -278,9 +279,7 @@ pub(crate) struct LeaderElectionResults {
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
 pub(crate) enum AuthorityUpdate {
-    /// The current leader has changed.
-    ///
-    /// The King is dead; long live the King!
+    /// The current leader has changed. The King is dead; long live the King!
     LeaderChange(ControllerDescriptor),
     /// We are now the new leader.
     WonLeaderElection(LeaderElectionResults),
