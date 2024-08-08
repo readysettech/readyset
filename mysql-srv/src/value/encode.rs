@@ -1,6 +1,7 @@
 use std::io::{self, Write};
 
 use byteorder::{LittleEndian, WriteBytesExt};
+use myc::proto::MySerialize;
 use mysql_time::MySqlTime;
 use readyset_data::TimestampTz;
 
@@ -778,12 +779,10 @@ impl ToMySqlValue for myc::value::Value {
             }
             myc::value::Value::Float(f) => f.to_mysql_bin(w, c),
             myc::value::Value::Double(d) => d.to_mysql_bin(w, c),
-            myc::value::Value::Date(y, mo, d, h, mi, s, us) => {
-                NaiveDate::from_ymd_opt(i32::from(y), u32::from(mo), u32::from(d))
-                    .unwrap()
-                    .and_hms_micro_opt(u32::from(h), u32::from(mi), u32::from(s), us)
-                    .unwrap()
-                    .to_mysql_bin(w, c)
+            myc::value::Value::Date(..) => {
+                let mut buf = Vec::new();
+                self.serialize(&mut buf);
+                w.write_all(buf.as_slice())
             }
             myc::value::Value::Time(neg, d, h, m, s, us) => {
                 if neg {
@@ -1049,6 +1048,36 @@ mod tests {
             String,
             "foobar".to_owned(),
             ColumnType::MYSQL_TYPE_STRING
+        );
+        rt!(
+            mysql_date_zero,
+            myc::value::Value,
+            myc::value::Value::Date(0u16, 0u8, 0u8, 0u8, 0u8, 0u8, 0u32),
+            ColumnType::MYSQL_TYPE_DATE
+        );
+        rt!(
+            mysql_date_only,
+            myc::value::Value,
+            myc::value::Value::Date(2024u16, 1u8, 1u8, 0u8, 0u8, 0u8, 0u32),
+            ColumnType::MYSQL_TYPE_DATE
+        );
+        rt!(
+            mysql_datetime_zero,
+            myc::value::Value,
+            myc::value::Value::Date(0u16, 0u8, 0u8, 0u8, 0u8, 0u8, 0u32),
+            ColumnType::MYSQL_TYPE_DATETIME
+        );
+        rt!(
+            mysql_datetime_date_only,
+            myc::value::Value,
+            myc::value::Value::Date(2024u16, 1u8, 1u8, 0u8, 0u8, 0u8, 0u32),
+            ColumnType::MYSQL_TYPE_DATETIME
+        );
+        rt!(
+            mysql_datetime_date_invalid,
+            myc::value::Value,
+            myc::value::Value::Date(2024u16, 2u8, 31u8, 0u8, 0u8, 0u8, 0u32),
+            ColumnType::MYSQL_TYPE_DATETIME
         );
     }
 }
