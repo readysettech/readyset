@@ -109,6 +109,14 @@ impl<'ast, 'schema> VisitorMut<'ast> for ResolveSchemaVisitor<'schema> {
     }
 
     fn visit_target_table_fk(&mut self, table: &'ast mut Relation) -> Result<(), Self::Error> {
+        if table.schema.is_none() {
+            // If the target table name in the CREATE TABLE statement has no schema,
+            // use the first schema in the search path
+            // (if it isn't empty)
+            if let Some(first_schema) = self.search_path.first() {
+                table.schema = Some(first_schema.clone());
+            }
+        }
         match self.visit_table(table) {
             Ok(()) => Ok(()),
             Err(ReadySetError::TableNotReplicated { name: _, schema: _ }) => {
