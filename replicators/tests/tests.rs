@@ -3393,3 +3393,88 @@ async fn mysql_generated_columns() {
     .unwrap();
     shutdown_tx.shutdown().await;
 }
+
+/// Tests that on encountering an ALTER TABLE statement the replicator does not resnapshot tables
+/// with foreign keys.
+async fn fk_resnapshot_inner(url: &str) -> ReadySetResult<()> {
+    readyset_tracing::init_test_logging();
+    let mut client = DbConnection::connect(url).await.unwrap();
+
+    client
+        .query(
+            "DROP TABLE IF EXISTS fk_table1 CASCADE;
+             CREATE TABLE fk_table1 (x INT PRIMARY KEY, p_id INT, CONSTRAINT fk_table1_id FOREIGN KEY (p_id) REFERENCES fk_table1 (x));
+             INSERT INTO fk_table1 (x, p_id) VALUES (1, 1);
+             CREATE TABLE dummy (ID INT PRIMARY KEY);
+             INSERT INTO dummy (ID) VALUES (1);",
+        )
+        .await
+        .unwrap();
+
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
+        .await
+        .unwrap();
+    ctx.notification_channel
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+
+    ctx.check_results(
+        "fk_table1",
+        "Snapshot1",
+        &[&[DfValue::Int(1), DfValue::Int(1)]],
+    )
+    .await
+    .unwrap();
+    let fk_relation = Relation {
+        schema: Some("public".into()),
+        name: "fk_table1".into(),
+    };
+    let tables = ctx.noria.tables().await.unwrap();
+    let table_index_first_snapshot = tables.get(&fk_relation).unwrap();
+
+    // triggers resnapshot
+    client
+        .query(
+            "ALTER TABLE dummy ADD COLUMN a INT;
+            INSERT INTO fk_table1 (x, p_id) VALUES (2, 1);",
+        )
+        .await
+        .unwrap();
+
+    ctx.check_results(
+        "fk_table1",
+        "Snapshot2",
+        &[
+            &[DfValue::Int(1), DfValue::Int(1)],
+            &[DfValue::Int(2), DfValue::Int(1)],
+        ],
+    )
+    .await
+    .unwrap();
+
+    let tables = ctx.noria.tables().await.unwrap();
+    let table_index_second_snapshot = tables.get(&fk_relation).unwrap();
+
+    // Ensure we did not resnapshot the table by checking the domain index
+    assert_eq!(table_index_first_snapshot, table_index_second_snapshot);
+
+    shutdown_tx.shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+#[slow]
+async fn mysql_fk_tables_resnapshot() {
+    fk_resnapshot_inner(&mysql_url()).await.unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+#[slow]
+async fn postgres_fk_tables_resnapshot() {
+    fk_resnapshot_inner(&pgsql_url()).await.unwrap()
+}
