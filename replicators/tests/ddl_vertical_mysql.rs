@@ -730,7 +730,7 @@ impl ModelState for DDLModelState {
                 new_name,
             } => {
                 let query = format!(
-                    "ALTER TABLE {} RENAME COLUMN {} TO {}",
+                    "ALTER TABLE `{}` RENAME COLUMN `{}` TO `{}`",
                     table, col_name, new_name
                 );
                 for (view, def) in self.views.iter() {
@@ -783,14 +783,14 @@ impl ModelState for DDLModelState {
                     .map(|cs| (table_a, &cs.name))
                     .chain(self.tables[table_b].iter().map(|cs| (table_b, &cs.name)))
                     .enumerate()
-                    .map(|(i, (tab, col))| format!("{tab}.{col} AS c{i}"))
+                    .map(|(i, (tab, col))| format!("`{tab}`.`{col}` AS `c{i}`"))
                     .collect();
                 let select_list = select_list.join(", ");
                 let view_def = format!(
-                    "SELECT {} FROM {} JOIN {} ON {}.id = {}.id",
+                    "SELECT {} FROM `{}` JOIN `{}` ON `{}`.`id` = `{}`.`id`",
                     select_list, table_a, table_b, table_a, table_b
                 );
-                let query = format!("CREATE VIEW {} AS {}", name, view_def);
+                let query = format!("CREATE VIEW `{}` AS {}", name, view_def);
                 rs_conn.query_drop(&query).await.unwrap();
                 mysql_conn.query_drop(&query).await.unwrap();
                 let create_cache = format!("CREATE CACHE ALWAYS FROM SELECT * FROM `{name}`");
@@ -802,7 +802,7 @@ impl ModelState for DDLModelState {
                 });
             }
             Operation::DropView(name) => {
-                let query = format!("DROP VIEW {name}");
+                let query = format!("DROP VIEW `{name}`");
                 rs_conn.query_drop(&query).await.unwrap();
                 mysql_conn.query_drop(&query).await.unwrap();
             }
