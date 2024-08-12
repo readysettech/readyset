@@ -1015,6 +1015,19 @@ fn binlog_val_to_noria_val(
                 ))))
             }
         }
+        (ColumnType::MYSQL_TYPE_INT24, _) => {
+            match val {
+                mysql_common::value::Value::Int(x) => {
+                    // Extend sign from 24 bits to 64 bits.
+                    let missing = size_of::<i64>() as u32 * 8 - 24;
+                    Ok(DfValue::Int(x.wrapping_shl(missing).wrapping_shr(missing)))
+                }
+                mysql_common::value::Value::UInt(x) => Ok(DfValue::UnsignedInt(*x)),
+                _ => Err(mysql_async::Error::Other(Box::new(internal_err!(
+                    "Expected an integer value for mediumint column"
+                )))),
+            }
+        }
         (_, _) => Ok(val.try_into().map_err(|e| {
             mysql_async::Error::Other(Box::new(internal_err!("Unable to coerce value {}", e)))
         })?),
