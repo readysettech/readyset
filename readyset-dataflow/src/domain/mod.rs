@@ -4718,7 +4718,7 @@ impl Domain {
 
     /// If there is a pending timed purge, return the duration until it needs
     /// to happen
-    pub fn next_poll_duration(&mut self) -> Option<time::Duration> {
+    pub fn next_poll_duration(&self) -> Option<time::Duration> {
         // when do we need to be woken up again?
         let now = time::Instant::now();
         self.timed_purges.front().map(|tp| {
