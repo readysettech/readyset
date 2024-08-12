@@ -12,8 +12,9 @@ use mysql_async as mysql;
 use mysql_common::binlog;
 use mysql_common::binlog::row::BinlogRow;
 use mysql_common::binlog::value::BinlogValue;
-use nom_sql::{Relation, SqlIdentifier};
+use nom_sql::{NonReplicatedRelation, Relation, SqlIdentifier};
 use readyset_client::metrics::recorded;
+use readyset_client::recipe::changelist::Change;
 use readyset_client::recipe::ChangeList;
 use readyset_client::TableOperation;
 use readyset_data::{DfValue, Dialect, TimestampTz};
@@ -379,6 +380,36 @@ impl MySqlBinlogConnector {
         });
     }
 
+    /// Add a table to the non-replicated list
+    /// # Arguments
+    /// * `table` - the table to add to the non-replicated list
+    /// * `current_schema` - the current schema from the binlog
+    ///
+    /// # Returns
+    /// This function returns a vector of changes to be applied to the schema.
+    async fn drop_and_add_non_replicated_table(
+        &mut self,
+        mut table: Relation,
+        current_schema: &String,
+    ) -> Vec<Change> {
+        if table.schema.is_none() {
+            table.schema = Some(SqlIdentifier::from(current_schema));
+        }
+        vec![
+            Change::Drop {
+                name: table.clone(),
+                if_exists: true,
+            },
+            Change::AddNonReplicatedRelation(NonReplicatedRelation {
+                name: table,
+                reason: nom_sql::NotReplicatedReason::OtherError(format!(
+                    "Event received as binlog_format=STATEMENT. File: {:} - Pos: {:}",
+                    self.next_position.binlog_file_name(),
+                    self.next_position.position
+                )),
+            }),
+        ]
+    }
     /// Process a single binlog QUERY_EVENT.
     /// This occurs when someone issues a DDL statement or Query using binlog_format = STATEMENT.
     ///
@@ -419,13 +450,32 @@ impl MySqlBinlogConnector {
 
         let changes = match ChangeList::from_str(q_event.query(), Dialect::DEFAULT_MYSQL) {
             Ok(changelist) => changelist.changes,
-            Err(error) => {
-                warn!(%error, "Error extending recipe, DDL statement will not be used");
-                counter!(recorded::REPLICATOR_FAILURE, 1u64);
-                return Err(mysql_async::Error::Other(Box::new(
-                    ReadySetError::SkipEvent,
-                )));
-            }
+            Err(error) => match nom_sql::parse_query(nom_sql::Dialect::MySQL, q_event.query()) {
+                Ok(nom_sql::SqlQuery::Insert(insert)) => {
+                    self.drop_and_add_non_replicated_table(insert.table, &schema)
+                        .await
+                }
+                Ok(nom_sql::SqlQuery::Update(update)) => {
+                    self.drop_and_add_non_replicated_table(update.table, &schema)
+                        .await
+                }
+                Ok(nom_sql::SqlQuery::Delete(delete)) => {
+                    self.drop_and_add_non_replicated_table(delete.table, &schema)
+                        .await
+                }
+                Ok(nom_sql::SqlQuery::StartTransaction(_)) => {
+                    return Err(mysql_async::Error::Other(Box::new(
+                        ReadySetError::SkipEvent,
+                    )));
+                }
+                _ => {
+                    warn!(%error, "Error extending recipe, DDL statement will not be used");
+                    counter!(recorded::REPLICATOR_FAILURE, 1u64);
+                    return Err(mysql_async::Error::Other(Box::new(
+                        ReadySetError::SkipEvent,
+                    )));
+                }
+            },
         };
 
         Ok(ReplicationAction::DdlChange { schema, changes })

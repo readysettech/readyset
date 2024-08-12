@@ -3478,3 +3478,65 @@ async fn mysql_fk_tables_resnapshot() {
 async fn postgres_fk_tables_resnapshot() {
     fk_resnapshot_inner(&pgsql_url()).await.unwrap()
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+#[slow]
+async fn mysql_handle_dml_in_statement_events() {
+    readyset_tracing::init_test_logging();
+    let url = mysql_url();
+    let mut client = DbConnection::connect(&url).await.unwrap();
+
+    client
+        .query(
+            "DROP TABLE IF EXISTS stmt_table CASCADE;
+             CREATE TABLE stmt_table (x INT PRIMARY KEY);
+             INSERT INTO stmt_table (x) VALUES (1);",
+        )
+        .await
+        .unwrap();
+
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
+        .await
+        .unwrap();
+    ctx.notification_channel
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+
+    ctx.check_results("stmt_table", "Snapshot1", &[&[DfValue::Int(1)]])
+        .await
+        .unwrap();
+
+    // Ensure that:
+    // 1. The base table exists
+    // 2. There is a cache created on previous step
+    let tables = ctx.noria.tables().await.unwrap();
+    let caches = ctx.noria.views().await.unwrap();
+    let relation = Relation {
+        schema: Some("public".into()),
+        name: "stmt_table".into(),
+    };
+    assert!(tables.contains_key(&relation));
+    assert_eq!(caches.len(), 1);
+
+    client
+        .query("SET binlog_format=STATEMENT; INSERT INTO stmt_table (x) VALUES (2);")
+        .await
+        .unwrap();
+    sleep(Duration::from_millis(50)).await;
+
+    // Ensure that:
+    // 1. The base table has been dropped
+    // 2. The table is not replicated
+    // 3. The cache has been dropped
+    let tables = ctx.noria.tables().await.unwrap();
+    let non_replicated_tables = ctx.noria.non_replicated_relations().await.unwrap();
+    let caches = ctx.noria.views().await.unwrap();
+    assert!(tables.is_empty());
+    assert!(non_replicated_tables.contains(&NonReplicatedRelation::new(relation)));
+    assert_eq!(caches.len(), 0);
+    shutdown_tx.shutdown().await;
+}
