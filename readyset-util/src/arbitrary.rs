@@ -13,6 +13,7 @@ use chrono::{
 use chrono_tz::Tz;
 use cidr::IpInet;
 use eui48::MacAddress;
+use prop::string::bytes_regex;
 use proptest::prelude::*;
 use proptest::sample::SizeRange;
 use rust_decimal::Decimal;
@@ -70,6 +71,18 @@ pub fn arbitrary_decimal() -> impl Strategy<Value = Decimal> {
         0..28_u32,
     )
         .prop_map(|(i, s)| Decimal::from_i128_with_scale(i, s))
+}
+
+/// Generate an arbitrary `Vec<u8>` which is the string representation of a [`Decimal`] with up to
+/// the given number of digits.
+pub fn arbitrary_decimal_bytes_with_digits(m: u16, d: u8) -> impl Strategy<Value = Vec<u8>> {
+    let left = m - d as u16;
+    let right = d;
+    bytes_regex(&format!("-?[0-9]{{0,{left}}}\\.[0-9]{{0,{right}}}"))
+        .expect("Should not generate an invalid regex")
+        .prop_filter("Should specify at least one digit", |s| {
+            s[..] != b"."[..] && s[..] != b"-."[..]
+        })
 }
 
 /// Strategy to generate an arbitrary [`NaiveDateTime`]

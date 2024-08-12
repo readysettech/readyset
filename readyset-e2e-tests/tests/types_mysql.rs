@@ -12,6 +12,7 @@ use proptest::string::bytes_regex;
 use proptest::test_runner::Config as ProptestConfig;
 use readyset_client_test_helpers::mysql_helpers::MySQLAdapter;
 use readyset_client_test_helpers::{mysql_helpers, TestBuilder};
+use readyset_util::arbitrary::arbitrary_decimal_bytes_with_digits;
 use readyset_util::eventually;
 use serial_test::serial;
 use test_strategy::proptest;
@@ -148,8 +149,6 @@ fn arbitrary_mysql_value_for_type(sql_type: SqlType) -> impl Strategy<Value = Va
         | SqlType::Time
         | SqlType::Timestamp
         | SqlType::TimestampTz
-        | SqlType::Decimal(_, _)
-        | SqlType::Numeric(_)
         | SqlType::Json
         | SqlType::Jsonb => Just(Value::Int(0))
             .prop_filter("not yet implemented", |_| false)
@@ -193,6 +192,16 @@ fn arbitrary_mysql_value_for_type(sql_type: SqlType) -> impl Strategy<Value = Va
         SqlType::UnsignedMediumInt(_) => (0..(1u64 << 24)).prop_map(Value::UInt).boxed(),
         SqlType::UnsignedInt(_) => any::<u32>().prop_map(|i| Value::UInt(i as u64)).boxed(),
         SqlType::UnsignedBigInt(_) => any::<u64>().prop_map(Value::UInt).boxed(),
+        SqlType::Decimal(m, d) => arbitrary_decimal_bytes_with_digits(m.into(), d)
+            .prop_map(Value::Bytes)
+            .boxed(),
+        SqlType::Numeric(maybe_m_d) => {
+            let (m, maybe_d) = maybe_m_d.unwrap_or((10, None));
+            let d = maybe_d.unwrap_or(0);
+            arbitrary_decimal_bytes_with_digits(m, d)
+                .prop_map(Value::Bytes)
+                .boxed()
+        }
     }
 }
 
@@ -245,7 +254,6 @@ fn round_trip_mysql_type_regressions_mediumint_negative() {
 #[test]
 #[serial]
 #[slow]
-#[ignore = "Failing REA-4441"]
 fn round_trip_mysql_type_regressions_decimal() {
     round_trip_mysql_type(SqlType::Decimal(10, 5), Value::Bytes("-0.5".into()));
 }
@@ -253,7 +261,6 @@ fn round_trip_mysql_type_regressions_decimal() {
 #[test]
 #[serial]
 #[slow]
-#[ignore = "Failing REA-4441"]
 fn round_trip_mysql_type_regressions_decimal_no_preceding_digits() {
     round_trip_mysql_type(SqlType::Decimal(10, 5), Value::Bytes(".5".into()));
 }
@@ -261,7 +268,6 @@ fn round_trip_mysql_type_regressions_decimal_no_preceding_digits() {
 #[test]
 #[serial]
 #[slow]
-#[ignore = "Failing REA-4441"]
 fn round_trip_mysql_type_regressions_decimal_no_preceding_digits_negative() {
     round_trip_mysql_type(SqlType::Decimal(10, 5), Value::Bytes("-.5".into()));
 }
