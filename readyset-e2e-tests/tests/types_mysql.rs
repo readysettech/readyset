@@ -246,7 +246,13 @@ fn round_trip_mysql_type_regressions_mediumint_positive() {
 #[test]
 #[serial]
 #[slow]
-#[ignore = "Failing REA-4598"]
+fn round_trip_mysql_type_regressions_mediumint_unsigned_positive() {
+    round_trip_mysql_type(SqlType::UnsignedMediumInt(None), Value::UInt(1));
+}
+
+#[test]
+#[serial]
+#[slow]
 fn round_trip_mysql_type_regressions_mediumint_negative() {
     round_trip_mysql_type(SqlType::MediumInt(None), Value::Int(-1));
 }
