@@ -27,6 +27,17 @@ use super::ChannelCoordinator;
 type Outputs =
     HashMap<ReplicaAddress, Box<dyn Sink<Packet, Error = bincode::Error> + Send + Unpin>>;
 
+// For use in the select loop.  If None, exit, otherwise check for error and continue.
+macro_rules! call {
+    ( $call:expr ) => {{
+        if let Some(res) = $call {
+            res?;
+        } else {
+            return Ok(());
+        }
+    }};
+}
+
 /// Generates a monotonically incrementing u64 value to be used as a token for our connections
 fn next_token() -> u64 {
     static NEXT_TOKEN: atomic::AtomicU64 = atomic::AtomicU64::new(0);
@@ -130,8 +141,8 @@ fn flatten_request_reader_replay(
 impl Replica {
     fn span(&self) -> Span {
         info_span!(
-            // Target readyset_dataflow::domain rather than noria_server::worker::replica so that a log
-            // level of `readyset_dataflow=trace` still logs the domain address
+            // Target readyset_dataflow::domain rather than readyset_server::worker::replica so
+            // that a log level of `readyset_dataflow=trace` still logs the domain address
             target: "readyset_dataflow::domain",
             "domain",
             address = %self.domain.address(),
@@ -313,17 +324,155 @@ impl Replica {
         Ok(())
     }
 
+    async fn handle_address_change(
+        outputs: &Mutex<Outputs>,
+        replica_addr: Result<ReplicaAddress, broadcast::error::RecvError>,
+    ) {
+        match replica_addr {
+            Ok(replica_addr) => {
+                // We've received a notification that the socket address for a replica
+                // has changed - remove its cached connection from `outputs` so that
+                // when we try to send to it later we re-lookup the addr and reconnect
+                if outputs.lock().await.remove(&replica_addr).is_some() {
+                    info!(%replica_addr, "Removed connection for replica");
+                }
+            }
+            Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                // If we've lagged behind, that means we've missed some changes to
+                // replica addresses, so we need to consider all connections invalid
+                warn!(
+                    %skipped,
+                    "Coordinator change broadcast receiver lagged behind; reconnecting \
+                    to all replicas"
+                );
+                outputs.lock().await.clear();
+            }
+            Err(broadcast::error::RecvError::Closed) => {
+                panic!("ChannelCoordinator dropped!");
+            }
+        }
+    }
+
+    fn handle_domain_request(
+        domain: &mut Domain,
+        req: Option<WrappedDomainRequest>,
+        out: &mut Outboxes,
+    ) -> Option<Result<(), anyhow::Error>> {
+        match req {
+            Some(req) => {
+                if req
+                    .done_tx
+                    .send(domain.domain_request(req.req, out))
+                    .is_err()
+                {
+                    warn!("domain request sender hung up");
+                }
+                Some(Ok(()))
+            }
+            None => {
+                warn!("domain request stream ended");
+                None
+            }
+        }
+    }
+
+    fn handle_state_request(
+        domain: &mut Domain,
+        state: Option<MaterializedState>,
+    ) -> Option<ReadySetResult<()>> {
+        match state {
+            Some(MaterializedState { node, state }) => {
+                Some(domain.process_state_for_node(node, *state))
+            }
+            None => {
+                warn!("domain state initialization stream ended");
+                None
+            }
+        }
+    }
+
+    async fn handle_packets(
+        packets: Option<VecDeque<Packet>>,
+        established: &mut tokio_stream::StreamMap<u64, DualTcpStream>,
+        domain: &mut Domain,
+        out: &mut Outboxes,
+    ) -> Option<ReadySetResult<()>> {
+        match packets {
+            None => {
+                warn!("local input stream ended");
+                None
+            }
+            Some(mut packets) => {
+                while let Some(mut packet) = packets.pop_front() {
+                    let ack = match &mut packet {
+                        Packet::Timestamp {
+                            src: SourceChannelIdentifier { token, tag },
+                            ..
+                        }
+                        | Packet::Input {
+                            src: SourceChannelIdentifier { token, tag },
+                            ..
+                        } => {
+                            // After processing we need to ack timestamp and input messages from
+                            // base
+                            established
+                                .iter_mut()
+                                .find(|(t, _)| *t == *token)
+                                .map(|(_, conn)| (*tag, conn))
+                        }
+                        Packet::RequestReaderReplay {
+                            node, cols, keys, ..
+                        } => {
+                            // We want to batch multiple reader replay requests into a single call
+                            // while deduplicating non unique keys
+                            let mut unique_keys = keys.drain(..).collect();
+                            flatten_request_reader_replay(
+                                *node,
+                                cols,
+                                &mut unique_keys,
+                                &mut packets,
+                            );
+                            keys.extend(unique_keys.drain());
+                            None
+                        }
+                        _ => None,
+                    };
+
+                    if let Err(e) = domain.handle_packet(packet, out) {
+                        return Some(Err(e));
+                    }
+
+                    if let Some((tag, conn)) = ack {
+                        if let Err(e) = conn.send(Tagged { tag, v: () }).await {
+                            return Some(Err(e.into()));
+                        }
+                    }
+                }
+                Some(Ok(()))
+            }
+        }
+    }
+
+    fn sleep(domain: &Domain) -> tokio::time::Sleep {
+        tokio::time::sleep(
+            domain
+                .next_poll_duration()
+                .unwrap_or_else(|| Duration::from_secs(3600)),
+        )
+    }
+
     /// Start the event loop for a Replica
     pub async fn run(mut self) -> Result<(), anyhow::Error> {
-        // Accepted TCP connections being upgraded
-        let mut connection_preambles = futures::stream::FuturesUnordered::new();
-        // Every established connection goes here
-        let mut connections: tokio_stream::StreamMap<u64, DualTcpStream> = Default::default();
-        // A cache of established connections to other Replicas we may send messages to
-        // sadly have to use Mutex here to make it possible to pass a mutable reference to outputs
-        // to an async function
+        let mut accepted = futures::stream::FuturesUnordered::new(); // conns being upgraded
+        let mut established = Default::default();
+        let mut channel_changes = self.coord.subscribe();
+        let _ = self.span().enter();
+
+        // A cache of established connections to other Replicas we may send messages to. Sadly
+        // have to use Mutex here to make it possible to pass a mutable reference to outputs
+        // to an async function.
         let outputs = Mutex::new(Outputs::default());
-        let failed = Mutex::new(HashSet::new());
+        let failed = Default::default();
 
         // Will only ever hold a single future that handles sending packets, wrap it for convenience
         // into FuturesUnordered in general we don't want to drop the future for
@@ -333,7 +482,6 @@ impl Replica {
         // instead simply using `FuturesUnordered` with one entry, and adding the next
         // future when it is empty.
         let mut send_packets = futures::stream::FuturesUnordered::new();
-        let span = self.span();
 
         let Replica {
             domain,
@@ -346,113 +494,45 @@ impl Replica {
             init_state_reqs,
         } = &mut self;
 
-        let mut channel_changes = coord.subscribe();
-
         loop {
-            // we have three logical input sources: receives from local domains, receives from
-            // remote domains, and remote mutators.
-
-            // NOTE: If adding new statements, make sure they are cancellation safe according to
-            // https://docs.rs/tokio/1.9.0/tokio/macro.select.html
+            // We have three logical input sources: receives from local domains, receives from
+            // remote domains, and remote mutators. If adding new statements, make sure they
+            // are cancellation safe:
+            // https://docs.rs/tokio/latest/tokio/macro.select.html
             tokio::select! {
                 // Accept incoming connections
                 conn = incoming.accept() => {
                     let (conn, addr) = conn.context("listening")?;
-                    span.in_scope(|| debug!(from = ?addr, "accepted new connection"));
-                    connection_preambles.push(Self::handle_new_connection(conn));
+                    debug!(from = ?addr, "accepted new connection");
+                    accepted.push(Self::handle_new_connection(conn));
                 },
 
-                // Handle any connections that we accepted but still need to preprocess and convert to DualTcpStream
-                Some(established_conn) = connection_preambles.next() => {
+                // Accepted but still converting to DualTcpStream
+                Some(established_conn) = accepted.next() => {
                     let (token, tcp) = match established_conn {
-                        Err(_) => continue, // Ignore the errors on unestablished connections, they don't matter
+                        Err(_) => continue, // errors on unestablished connections don't matter
                         Ok(tcp) => tcp,
                     };
-
-                    connections.insert(token, tcp);
+                    established.insert(token, tcp);
                 },
 
-                // Handle changes to the addresses of individual domain replicas
+                // Changes to the addresses of individual domain replicas
                 replica_addr = channel_changes.recv() => {
-                    match replica_addr {
-                        Ok(replica_addr) => {
-                            // We've received a notification that the socket address for a replica
-                            // has changed - remove its cached connection from `outputs` so that
-                            // when we try to send to it later we re-lookup the addr and reconnect
-                            if outputs.lock().await.remove(&replica_addr).is_some() {
-                                info!(%replica_addr, "Removed connection for replica");
-                            }
-                        }
-                        Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                            // If we've lagged behind, that means we've missed some changes to
-                            // replica addresses, so we need to consider all connections invalid
-                            warn!(
-                                %skipped,
-                                "Coordinator change broadcast receiver lagged behind; reconnecting \
-                                to all replicas"
-                            );
-                            outputs.lock().await.clear();
-                        }
-                        Err(broadcast::error::RecvError::Closed) => {
-                            panic!("ChannelCoordinator dropped!");
-                        }
-                    }
+                    Self::handle_address_change(&outputs, replica_addr).await;
                 }
 
-                // Handle domain requests
-                domain_req = requests.recv() => match domain_req {
-                    Some(req) => {
-                        let _guard = span.enter();
-                        if req.done_tx.send(domain.domain_request(req.req, out)).is_err() {
-                            span.in_scope(|| warn!("domain request sender hung up"));
-                        }
-                    },
-                    None => {
-                        span.in_scope(|| warn!("domain request stream ended"));
-                        return Ok(())
-                    }
+                // Domain requests
+                req = requests.recv() => call! {
+                    Self::handle_domain_request(domain, req, out)
                 },
 
-                init_state = init_state_reqs.recv() => match init_state {
-                    Some(MaterializedState{ node, state }) => domain.process_state_for_node(node, *state)?,
-                    None => {
-                        span.in_scope(|| warn!("domain state initialization stream ended"));
-                        return Ok(())
-                    }
+                state = init_state_reqs.recv() => call! {
+                    Self::handle_state_request(domain, state)
                 },
 
                 // Handle incoming messages
-                packets = Self::receive_packets(locals, &mut connections) => match packets? {
-                    None => {
-                        span.in_scope(|| warn!("local input stream ended"));
-                        return Ok(())
-                    },
-                    Some(mut packets) => {
-                        while let Some(mut packet) = packets.pop_front() {
-                            let ack = match &mut packet {
-                                Packet::Timestamp { src: SourceChannelIdentifier { token, tag }, .. } |
-                                Packet::Input { src: SourceChannelIdentifier { token, tag }, .. } => {
-                                    // After processing we need to ack timestamp and input messages from base
-                                    connections.iter_mut().find(|(t, _)| *t == *token).map(|(_, conn)| (*tag, conn))
-                                }
-                                Packet::RequestReaderReplay { node, cols, keys, .. } => {
-                                    // We want to batch multiple reader replay requests into a single call while
-                                    // deduplicating non unique keys
-                                    let mut unique_keys: HashSet<_> = keys.drain(..).collect();
-                                    flatten_request_reader_replay(*node, cols, &mut unique_keys, &mut packets);
-                                    keys.extend(unique_keys.drain());
-                                    None
-                                }
-                                _ => None,
-                            };
-
-                            span.in_scope(|| domain.handle_packet(packet, out))?;
-
-                            if let Some((tag, conn)) = ack {
-                                conn.send(Tagged { tag, v: () }).await?;
-                            }
-                        }
-                    },
+                packets = Self::receive_packets(locals, &mut established) => call! {
+                    Self::handle_packets(packets?, &mut established, domain, out).await
                 },
 
                 // Poll the send packets future and reissue if outstanding packets are present
@@ -462,12 +542,12 @@ impl Replica {
                 Some(_) = refresh_sizes.next() => domain.update_state_sizes(),
 
                 // Wait for a possible sleep
-                _ = tokio::time::sleep(domain.next_poll_duration().unwrap_or_else(|| Duration::from_secs(3600))) => domain.handle_timeout()?,
+                _ = Self::sleep(domain) => domain.handle_timeout()?,
             }
 
             // Check if the previous batch of send packets is done, and issue a new batch if needed
             if send_packets.is_empty() && !out.domains.is_empty() {
-                let to_send: Vec<_> = out.domains.drain().collect();
+                let to_send = out.domains.drain().collect();
                 send_packets.push(Self::send_packets(to_send, &outputs, coord, &failed));
             }
         }
