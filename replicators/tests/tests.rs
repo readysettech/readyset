@@ -1,3 +1,5 @@
+#![feature(min_exhaustive_patterns)]
+
 use std::env;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -369,7 +371,7 @@ impl TestHandle {
         let (controll_receiver, _controll_sender) = TestControllChannel::new();
         self.notification_channel = Some(receiver);
         runtime.spawn(async move {
-            if let Err(error) = NoriaAdapter::start(
+            let Err(error) = NoriaAdapter::start(
                 controller,
                 Config {
                     upstream_db_url: Some(url),
@@ -381,11 +383,9 @@ impl TestHandle {
                 server_startup,
                 false, // disable statement logging in tests
             )
-            .await
-            {
-                error!(%error, "Error in replicator");
-                let _ = sender.send(ReplicatorMessage::UnrecoverableError(error));
-            }
+            .await;
+            error!(%error, "Error in replicator");
+            let _ = sender.send(ReplicatorMessage::UnrecoverableError(error));
         });
 
         if let Some(rt) = self.replication_rt.replace(runtime) {

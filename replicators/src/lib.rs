@@ -1,3 +1,5 @@
+#![feature(min_exhaustive_patterns)]
+
 pub mod db_util;
 pub(crate) mod mysql_connector;
 pub(crate) mod noria_adapter;
