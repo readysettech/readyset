@@ -23,7 +23,7 @@ use tokio::task::JoinHandle;
 use tracing::{debug, error, info, info_span, warn};
 use tracing_futures::Instrument;
 
-use super::utils::mysql_pad_collation_column;
+use super::utils::{mysql_pad_collation_column, parse_mysql_version};
 use crate::db_util::DatabaseSchemas;
 use crate::mysql_connector::snapshot_type::SnapshotType;
 use crate::mysql_connector::utils::MYSQL_BATCH_SIZE;
@@ -351,11 +351,7 @@ impl MySqlReplicator {
         let mut conn = self.pool.get_conn().await?;
         let version: mysql::Row = conn.query_first("SELECT VERSION()").await?.unwrap();
         let version: String = version.get(0).expect("MySQL version");
-        let version_parts: Vec<&str> = version.split('.').collect();
-        let major = version_parts[0].parse::<u32>().unwrap();
-        let minor = version_parts[1].parse::<u32>().unwrap();
-        let patch = version_parts[2].parse::<u32>().unwrap();
-        Ok(major * 10000 + minor * 100 + patch)
+        parse_mysql_version(&version)
     }
 
     /// Use the SHOW MASTER STATUS or SHOW BINARY LOG STATUS statement to determine

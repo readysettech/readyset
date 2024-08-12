@@ -48,3 +48,32 @@ pub fn mysql_pad_collation_column(
         }
     }
 }
+
+pub fn parse_mysql_version(version: &str) -> mysql_async::Result<u32> {
+    let version_parts: Vec<&str> = version.split('.').collect();
+    let major = version_parts[0].parse::<u32>().unwrap_or(8);
+    let minor = version_parts[1].parse::<u32>().unwrap_or(0);
+    let patch_parts: Vec<&str> = version_parts[2].split('-').collect();
+    let patch = patch_parts[0].parse::<u32>().unwrap_or(0);
+    Ok(major * 10000 + minor * 100 + patch)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_mysql_version() {
+        let version = "8.0.23";
+        let version_number = parse_mysql_version(version).unwrap();
+        assert_eq!(version_number, 80023);
+
+        let version = "8.0.23-0ubuntu0.18.04.1";
+        let version_number = parse_mysql_version(version).unwrap();
+        assert_eq!(version_number, 80023);
+
+        let version = "8.0.23-rds.20240529-log";
+        let version_number = parse_mysql_version(version).unwrap();
+        assert_eq!(version_number, 80023);
+    }
+}
