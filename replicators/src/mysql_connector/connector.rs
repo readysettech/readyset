@@ -1,6 +1,8 @@
+use core::str;
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::io;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use binlog::consts::{BinlogChecksumAlg, EventType};
@@ -21,6 +23,7 @@ use readyset_data::{DfValue, Dialect, TimestampTz};
 use readyset_errors::{internal, internal_err, ReadySetError, ReadySetResult};
 use replication_offset::mysql::MySqlPosition;
 use replication_offset::ReplicationOffset;
+use rust_decimal::Decimal;
 use tracing::{error, info, warn};
 
 use crate::mysql_connector::utils::mysql_pad_collation_column;
@@ -995,7 +998,24 @@ fn binlog_val_to_noria_val(
                 })?;
             Ok(df_val)
         }
-        _ => Ok(val.try_into().map_err(|e| {
+        (ColumnType::MYSQL_TYPE_DECIMAL, _) | (ColumnType::MYSQL_TYPE_NEWDECIMAL, _) => {
+            if let mysql_common::value::Value::Bytes(b) = val {
+                str::from_utf8(b)
+                    .ok()
+                    .and_then(|s| Decimal::from_str_exact(s).ok())
+                    .map(|d| DfValue::Numeric(Arc::new(d)))
+                    .ok_or_else(|| {
+                        mysql_async::Error::Other(Box::new(internal_err!(
+                            "Failed to parse decimal value"
+                        )))
+                    })
+            } else {
+                Err(mysql_async::Error::Other(Box::new(internal_err!(
+                    "Expected a bytes value for decimal column"
+                ))))
+            }
+        }
+        (_, _) => Ok(val.try_into().map_err(|e| {
             mysql_async::Error::Other(Box::new(internal_err!("Unable to coerce value {}", e)))
         })?),
     }

@@ -1,7 +1,9 @@
+use core::str;
 use std::convert::TryFrom;
 use std::error::Error;
 use std::fmt::{self, Display};
 use std::future;
+use std::sync::Arc;
 use std::time::Instant;
 
 use futures::future::TryFutureExt;
@@ -19,6 +21,7 @@ use readyset_data::{DfValue, Dialect};
 use readyset_errors::{internal_err, ReadySetResult};
 use replication_offset::mysql::MySqlPosition;
 use replication_offset::{ReplicationOffset, ReplicationOffsets};
+use rust_decimal::Decimal;
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, info_span, warn};
 use tracing_futures::Instrument;
@@ -826,6 +829,18 @@ fn mysql_row_to_noria_row(row: &mysql::Row) -> ReadySetResult<Vec<readyset_data:
                     })?;
                 noria_row.push(df_val);
             }
+            ColumnType::MYSQL_TYPE_DECIMAL | ColumnType::MYSQL_TYPE_NEWDECIMAL => match val {
+                mysql_common::value::Value::Bytes(b) => {
+                    let df_val = str::from_utf8(&b)
+                        .ok()
+                        .and_then(|s| Decimal::from_str_exact(s).ok())
+                        .map(|d| DfValue::Numeric(Arc::new(d)))
+                        .ok_or_else(|| internal_err!("Failed to parse decimal value"))?;
+                    noria_row.push(df_val)
+                }
+                mysql_common::value::Value::NULL => noria_row.push(DfValue::None),
+                _ => return Err(internal_err!("Expected a bytes value for decimal column")),
+            },
             _ => noria_row.push(readyset_data::DfValue::try_from(val)?),
         }
     }
