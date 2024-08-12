@@ -187,68 +187,70 @@ impl NoriaAdapter {
                 ))
             })?;
 
-        while let Err(err) = match url.clone() {
-            DatabaseURL::MySQL(options) => {
-                let noria = noria.clone();
-                let config = config.clone();
-                NoriaAdapter::start_inner_mysql(
-                    options,
-                    noria,
-                    config,
-                    notification_channel,
-                    controller_channel,
-                    resnapshot,
-                    &telemetry_sender,
-                    enable_statement_logging,
-                    full_snapshot,
-                )
-                .await
-            }
-            DatabaseURL::PostgreSQL(options) => {
-                let noria = noria.clone();
-                let config = config.clone();
-                let connector = {
-                    let mut builder = native_tls::TlsConnector::builder();
-                    if config.disable_upstream_ssl_verification {
-                        builder.danger_accept_invalid_certs(true);
-                    }
-                    if let Some(root_cert) = config.get_root_cert().await {
-                        builder.add_root_certificate(root_cert?);
-                    }
-                    builder.build().unwrap() // Never returns an error
-                };
-                let tls_connector = postgres_native_tls::MakeTlsConnector::new(connector);
-                let pool = pg_pool(
-                    options.clone(),
-                    config.replication_pool_size,
-                    tls_connector.clone(),
-                )
-                .await?;
+        loop {
+            let Err(err) = match url.clone() {
+                DatabaseURL::MySQL(options) => {
+                    let noria = noria.clone();
+                    let config = config.clone();
+                    NoriaAdapter::start_inner_mysql(
+                        options,
+                        noria,
+                        config,
+                        notification_channel,
+                        controller_channel,
+                        resnapshot,
+                        &telemetry_sender,
+                        enable_statement_logging,
+                        full_snapshot,
+                    )
+                    .await
+                }
+                DatabaseURL::PostgreSQL(options) => {
+                    let noria = noria.clone();
+                    let config = config.clone();
+                    let connector = {
+                        let mut builder = native_tls::TlsConnector::builder();
+                        if config.disable_upstream_ssl_verification {
+                            builder.danger_accept_invalid_certs(true);
+                        }
+                        if let Some(root_cert) = config.get_root_cert().await {
+                            builder.add_root_certificate(root_cert?);
+                        }
+                        builder.build().unwrap() // Never returns an error
+                    };
+                    let tls_connector = postgres_native_tls::MakeTlsConnector::new(connector);
+                    let pool = pg_pool(
+                        options.clone(),
+                        config.replication_pool_size,
+                        tls_connector.clone(),
+                    )
+                    .await?;
 
-                let repl_slot_name = match &config.replication_server_id {
-                    Some(server_id) => {
-                        format!("{}_{}", REPLICATION_SLOT, server_id)
-                    }
-                    _ => REPLICATION_SLOT.to_string(),
-                };
+                    let repl_slot_name = match &config.replication_server_id {
+                        Some(server_id) => {
+                            format!("{}_{}", REPLICATION_SLOT, server_id)
+                        }
+                        _ => REPLICATION_SLOT.to_string(),
+                    };
 
-                NoriaAdapter::start_inner_postgres(
-                    options,
-                    noria,
-                    config,
-                    notification_channel,
-                    controller_channel,
-                    resnapshot,
-                    full_snapshot,
-                    &telemetry_sender,
-                    tls_connector,
-                    pool,
-                    repl_slot_name,
-                    enable_statement_logging,
-                )
-                .await
-            }
-        } {
+                    NoriaAdapter::start_inner_postgres(
+                        options,
+                        noria,
+                        config,
+                        notification_channel,
+                        controller_channel,
+                        resnapshot,
+                        full_snapshot,
+                        &telemetry_sender,
+                        tls_connector,
+                        pool,
+                        repl_slot_name,
+                        enable_statement_logging,
+                    )
+                    .await
+                }
+            };
+
             match err {
                 ReadySetError::ResnapshotNeeded => {
                     set_failpoint!(failpoints::POSTGRES_PARTIAL_RESNAPSHOT);
@@ -270,7 +272,6 @@ impl NoriaAdapter {
                 }
             }
         }
-        unreachable!("inner loop will never stop with an Ok status");
     }
 
     /// Finish the build and begin monitoring the binlog for changes
