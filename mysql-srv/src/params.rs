@@ -108,6 +108,15 @@ impl<'a> Iterator for Params<'a> {
             Some(pt) => pt,
             None => return Some(Err(MsqlSrvError::IndexingError)),
         };
+
+        if let Some(data) = self.long_data.get(&self.col) {
+            self.col += 1;
+            return Some(Ok(ParamValue {
+                value: Value::bytes(&data[..]),
+                coltype: pt.0,
+            }));
+        }
+
         // https://web.archive.org/web/20170404144156/https://dev.mysql.com/doc/internals/en/null-bitmap.html
         // NULL-bitmap-byte = ((field-pos + offset) / 8)
         // NULL-bitmap-bit  = ((field-pos + offset) % 8)
@@ -129,18 +138,15 @@ impl<'a> Iterator for Params<'a> {
             return Some(Err(MsqlSrvError::UnreachableError));
         }
 
-        let v = if let Some(data) = self.long_data.get(&self.col) {
-            Value::bytes(&data[..])
-        } else {
-            match Value::parse_from(&mut self.input, pt.0, pt.1) {
-                Ok(v) => v,
-                Err(e) => return Some(Err(MsqlSrvError::from(e))),
+        match Value::parse_from(&mut self.input, pt.0, pt.1) {
+            Ok(v) => {
+                self.col += 1;
+                Some(Ok(ParamValue {
+                    value: v,
+                    coltype: pt.0,
+                }))
             }
-        };
-        self.col += 1;
-        Some(Ok(ParamValue {
-            value: v,
-            coltype: pt.0,
-        }))
+            Err(e) => Some(Err(MsqlSrvError::from(e))),
+        }
     }
 }
