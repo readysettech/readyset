@@ -2617,7 +2617,7 @@ impl Domain {
                 Ok(Some(bincode::serialize(&!self.not_ready.contains(&node))?))
             }
             DomainRequest::AllTablesCompacted => self.handle_all_tables_compacted(),
-            DomainRequest::Evict(req) => self.handle_evict(executor, req),
+            DomainRequest::Evict { req } => self.handle_evict(executor, req),
             DomainRequest::Shutdown => self.handle_shutdown(),
         };
 
@@ -2661,7 +2661,7 @@ impl Domain {
                 self.total_replay_time.stop();
                 self.metrics.rec_replay_time(&cache_name, start.elapsed());
             }
-            Packet::Evict(req) => {
+            Packet::Evict { req } => {
                 self.handle_eviction(req, executor)?;
             }
             Packet::Timestamp { .. } => {

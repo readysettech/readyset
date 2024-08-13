@@ -648,10 +648,12 @@ async fn evict_check(
                 })
             })?),
         };
-        let pkt = Packet::Evict(EvictRequest::Bytes {
-            node: None,
-            num_bytes: evict,
-        });
+        let pkt = Packet::Evict {
+            req: EvictRequest::Bytes {
+                node: None,
+                num_bytes: evict,
+            },
+        };
         if let Err(e) = tx.send(pkt).await {
             // probably exiting?
             warn!(

@@ -430,7 +430,9 @@ pub enum DomainRequest {
     AllTablesCompacted,
 
     /// Requests an eviction from state within this Domain.
-    Evict(EvictRequest),
+    Evict {
+        req: EvictRequest,
+    },
 
     /// Requests a domain to cleanly shut down.
     Shutdown,
@@ -471,7 +473,9 @@ pub enum Packet {
     },
 
     // Trigger an eviction as specified by the to the [`EvictRequest`].
-    Evict(EvictRequest),
+    Evict {
+        req: EvictRequest,
+    },
 
     // Internal control
     Finish {
@@ -562,7 +566,9 @@ impl Packet {
         match *self {
             Packet::Message { ref mut link, .. } => link,
             Packet::ReplayPiece { ref mut link, .. } => link,
-            Packet::Evict(EvictRequest::Keys { ref mut link, .. }) => link,
+            Packet::Evict {
+                req: EvictRequest::Keys { ref mut link, .. },
+            } => link,
             Packet::Timestamp { ref mut link, .. } => link.as_mut().unwrap(),
             _ => unreachable!(),
         }
@@ -606,9 +612,9 @@ impl Packet {
     pub(crate) fn tag(&self) -> Option<Tag> {
         match *self {
             Packet::ReplayPiece { tag, .. }
-            | Packet::Evict(EvictRequest::Keys { tag, .. } | EvictRequest::SingleKey { tag, .. }) => {
-                Some(tag)
-            }
+            | Packet::Evict {
+                req: EvictRequest::Keys { tag, .. } | EvictRequest::SingleKey { tag, .. },
+            } => Some(tag),
             _ => None,
         }
     }

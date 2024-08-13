@@ -281,17 +281,17 @@ impl Sharder {
             for key in keys {
                 for shard in key.shard_keys(self.txs.len()) {
                     let dst = self.txs[shard].node;
-                    let p = self.sharded.entry(shard).or_insert_with(|| {
-                        Packet::Evict(EvictRequest::Keys {
+                    let p = self.sharded.entry(shard).or_insert_with(|| Packet::Evict {
+                        req: EvictRequest::Keys {
                             link: Link { src, dst },
                             keys: Vec::new(),
                             tag,
-                        })
+                        },
                     });
                     match *p {
-                        Packet::Evict(EvictRequest::Keys { ref mut keys, .. }) => {
-                            keys.push(key.clone())
-                        }
+                        Packet::Evict {
+                            req: EvictRequest::Keys { ref mut keys, .. },
+                        } => keys.push(key.clone()),
                         _ => {
                             // TODO: Scoped for a future refactor:
                             // https://readysettech.atlassian.net/browse/ENG-455
@@ -313,11 +313,13 @@ impl Sharder {
             // send to all shards
             for tx in self.txs.values() {
                 tx.send(
-                    Packet::Evict(EvictRequest::Keys {
-                        link: Link { src, dst: tx.node },
-                        keys: keys.to_vec(),
-                        tag,
-                    }),
+                    Packet::Evict {
+                        req: EvictRequest::Keys {
+                            link: Link { src, dst: tx.node },
+                            keys: keys.to_vec(),
+                            tag,
+                        },
+                    },
                     replica,
                     output,
                 )?;

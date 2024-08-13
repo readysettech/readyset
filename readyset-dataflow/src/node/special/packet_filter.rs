@@ -134,11 +134,14 @@ impl PacketFilter {
                 }
                 Ok(true)
             }
-            Packet::Evict(EvictRequest::Keys {
-                link: _,
-                tag: _,
-                keys,
-            }) => {
+            Packet::Evict {
+                req:
+                    EvictRequest::Keys {
+                        link: _,
+                        tag: _,
+                        keys,
+                    },
+            } => {
                 // We iterate through the keys that must be evicted, as
                 // instructed by the packet.
                 for k in keys {
@@ -769,11 +772,13 @@ mod test {
         }
 
         fn create_packet(keys: Vec<KeyComparison>) -> Packet {
-            Packet::Evict(EvictRequest::Keys {
-                link: create_link(),
-                tag: Tag::new(1),
-                keys,
-            })
+            Packet::Evict {
+                req: EvictRequest::Keys {
+                    link: create_link(),
+                    tag: Tag::new(1),
+                    keys,
+                },
+            }
         }
     }
 
