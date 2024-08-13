@@ -4136,6 +4136,473 @@ impl Domain {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn trigger_downstream_evictions(
+        index: &Index,
+        keys: &[KeyComparison],
+        node: LocalNodeIndex,
+        ex: &mut dyn Executor,
+        not_ready: &HashSet<LocalNodeIndex>,
+        replay_paths: &ReplayPaths,
+        shard: Option<usize>,
+        replica: usize,
+        state: &mut StateMap,
+        reader_write_handles: &mut NodeMap<backlog::WriteHandle>,
+        nodes: &DomainNodes,
+        remapped_keys: &mut RemappedKeys,
+    ) -> ReadySetResult<u64> {
+        let mut bytes_freed = 0u64;
+
+        for (tag, path, keys) in
+            replay_paths.downstream_dependent_paths(node, index, keys, remapped_keys)
+        {
+            Self::walk_path(
+                &path.path[..],
+                &keys,
+                tag,
+                shard,
+                replica,
+                nodes,
+                reader_write_handles,
+                ex,
+            )?;
+            match path.trigger {
+                TriggerEndpoint::Local(_) => {
+                    #[allow(clippy::indexing_slicing)] // tag came from replay_paths
+                    let replay_path = &replay_paths[tag];
+
+                    let dest = replay_path.last_segment();
+
+                    #[allow(clippy::indexing_slicing)] // nodes in replay paths must exist
+                    if nodes[dest.node].borrow().is_reader() {
+                        // already evicted from in walk_path
+                        continue;
+                    }
+                    if !state.contains_key(dest.node) {
+                        // this is probably because
+                        if !not_ready.contains(&dest.node) {
+                            debug!(
+                                node = dest.node.id(),
+                                "got eviction for ready but stateless node"
+                            )
+                        }
+                        continue;
+                    }
+
+                    trace!(
+                        local = %dest.node,
+                        ?keys,
+                        ?tag,
+                        target = ?(replay_path.target_node(), &replay_path.target_index),
+                        "Evicting keys"
+                    );
+                    #[allow(clippy::indexing_slicing)] // nodes in replay paths must exist
+                    if let Some(result) = state[dest.node].evict_keys(tag, &keys) {
+                        bytes_freed += result.bytes_freed;
+                        // we can only evict from partial replay paths, so we must have a
+                        // partial key
+                        bytes_freed += Self::trigger_downstream_evictions(
+                            #[allow(clippy::unwrap_used)]
+                            dest.partial_index.as_ref().unwrap(),
+                            &keys,
+                            dest.node,
+                            ex,
+                            not_ready,
+                            replay_paths,
+                            shard,
+                            replica,
+                            state,
+                            reader_write_handles,
+                            nodes,
+                            remapped_keys,
+                        )?;
+                    }
+                }
+                TriggerEndpoint::Start(_) => {
+                    if let Some(result) = state[path.source.unwrap()].evict_keys(tag, &keys) {
+                        bytes_freed += result.bytes_freed;
+                    }
+                }
+                _ => (),
+            }
+        }
+        Ok(bytes_freed)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn walk_path(
+        path: &[ReplayPathSegment],
+        keys: &[KeyComparison],
+        tag: Tag,
+        shard: Option<usize>,
+        replica: usize,
+        nodes: &DomainNodes,
+        reader_write_handles: &mut NodeMap<backlog::WriteHandle>,
+        executor: &mut dyn Executor,
+    ) -> ReadySetResult<()> {
+        #[allow(clippy::indexing_slicing)] // replay paths can't be empty
+        let mut from = path[0].node;
+        for segment in path {
+            #[allow(clippy::indexing_slicing)] // nodes in replay paths must exist
+            #[allow(clippy::unwrap_used)]
+            // partial_key must be Some for partial replay paths
+            nodes[segment.node].borrow_mut().process_eviction(
+                from,
+                &segment.partial_index.as_ref().unwrap().columns,
+                keys,
+                tag,
+                shard,
+                replica,
+                reader_write_handles,
+                executor,
+            )?;
+            from = segment.node;
+        }
+        Ok(())
+    }
+
+    fn eviction_candidates(
+        nodes: &DomainNodes,
+        num_bytes: &mut usize,
+        state: &StateMap,
+        reader_write_handles: &NodeMap<backlog::WriteHandle>,
+    ) -> Vec<(LocalNodeIndex, usize)> {
+        let mut candidates: Vec<_> = nodes
+            .values()
+            .filter_map(|nd| {
+                let n = &*nd.borrow();
+                let local_index = n.local_addr();
+
+                if let Some(wh) = reader_write_handles.get(local_index) {
+                    if wh.is_partial() {
+                        Some(wh.deep_size_of())
+                    } else {
+                        None
+                    }
+                } else {
+                    state
+                        .get(local_index)
+                        .filter(|state| state.is_partial())
+                        .map(|state| state.deep_size_of())
+                }
+                .map(|s| (local_index, s))
+            })
+            .filter(|&(_, s)| s > 0)
+            .map(|(x, s)| (x, s as usize))
+            .collect();
+
+        // we want to spread the eviction across the nodes,
+        // rather than emptying out one node completely.
+        // -1* so we sort in descending order
+        // TODO: be smarter than 3 here
+        candidates.sort_unstable_by_key(|&(_, s)| -(s as i64));
+        candidates.truncate(3);
+
+        // don't evict from tiny things (< 10% of max)
+        #[allow(clippy::indexing_slicing)]
+        // candidates must be at least nodes.len(), and nodes can't be empty
+        if let Some(too_small_i) = candidates
+            .iter()
+            .position(|&(_, s)| s < candidates[0].1 / 10)
+        {
+            // everything beyond this is smaller, so also too small
+            candidates.truncate(too_small_i);
+        }
+
+        let mut n = candidates.len();
+        // rev to start with the smallest of the n domains
+        for (_, size) in candidates.iter_mut().rev() {
+            // TODO: should this be evenly divided, or weighted by the size of the
+            // domains?
+            let share = (*num_bytes + n - 1) / n;
+            // we're only willing to evict at most half the state in each node
+            // unless this is the only node left to evict from
+            *size = if n > 1 {
+                cmp::min(*size / 2, share)
+            } else {
+                assert_eq!(share, *num_bytes);
+                share
+            };
+            *num_bytes -= *size;
+            trace!(bytes = *size, node = ?n, "chose to evict from node");
+            n -= 1;
+        }
+
+        candidates
+    }
+
+    fn handle_eviction_bytes(
+        &mut self,
+        ex: &mut dyn Executor,
+        node: Option<LocalNodeIndex>,
+        mut num_bytes: usize,
+    ) -> ReadySetResult<Option<Vec<DfValue>>> {
+        let start = std::time::Instant::now();
+        self.metrics.inc_eviction_requests();
+
+        let mut total_freed = 0;
+        let nodes = if let Some(node) = node {
+            vec![(node, num_bytes)]
+        } else {
+            Self::eviction_candidates(
+                &self.nodes,
+                &mut num_bytes,
+                &self.state,
+                &self.reader_write_handles,
+            )
+        };
+
+        for (node, num_bytes) in nodes {
+            let mut freed = 0u64;
+            #[allow(clippy::indexing_slicing)] // we got the node from self.nodes
+            let n = self.nodes[node].borrow_mut();
+
+            if n.is_dropped() {
+                continue; // Node was dropped. Skip.
+            } else if let Some(state) = self.reader_write_handles.get_mut(node) {
+                freed += state.evict_bytes(num_bytes);
+                state.swap();
+                state.notify_readers_of_eviction()?;
+            } else if let Some(EvictBytesResult {
+                index,
+                keys_evicted,
+                bytes_freed,
+                ..
+            }) = self.state[node].evict_bytes(num_bytes)
+            {
+                let keys = keys_evicted
+                    .into_iter()
+                    .map(|k| {
+                        KeyComparison::try_from(k).map_err(|_| internal_err!("Empty key evicted"))
+                    })
+                    .collect::<ReadySetResult<Vec<_>>>()?;
+
+                freed += bytes_freed;
+                if !keys.is_empty() {
+                    let index = index.clone();
+                    freed += Self::trigger_downstream_evictions(
+                        &index,
+                        &keys[..],
+                        node,
+                        ex,
+                        &self.not_ready,
+                        &self.replay_paths,
+                        self.shard,
+                        self.replica,
+                        &mut self.state,
+                        &mut self.reader_write_handles,
+                        &self.nodes,
+                        &mut self.remapped_keys,
+                    )?;
+                }
+            } else {
+                // This node was unable to evict any keys
+                continue;
+            }
+
+            debug!(%freed, node = ?n, "evicted from node");
+            self.state_size.fetch_sub(freed as usize, Ordering::AcqRel);
+            total_freed += freed;
+        }
+
+        self.metrics.rec_eviction_time(start.elapsed(), total_freed);
+        Ok(None)
+    }
+
+    fn handle_eviction_keys(
+        &mut self,
+        ex: &mut dyn Executor,
+        dst: LocalNodeIndex,
+        tag: Tag,
+        keys: Vec<KeyComparison>,
+    ) -> ReadySetResult<Option<Vec<DfValue>>> {
+        let (trigger, path) = if let Some(rp) = self.replay_paths.get(tag) {
+            (&rp.trigger, &rp.path)
+        } else {
+            debug!(?tag, "got eviction for tag that has not yet been finalized");
+            return Ok(None);
+        };
+
+        let i = path
+            .iter()
+            .position(|ps| ps.node == dst)
+            .ok_or_else(|| ReadySetError::NoSuchNode(dst.id()))?;
+        #[allow(clippy::indexing_slicing)]
+        // i is definitely in bounds, since it came from a call to position
+        Self::walk_path(
+            &path[i..],
+            &keys,
+            tag,
+            self.shard,
+            self.replica,
+            &self.nodes,
+            &mut self.reader_write_handles,
+            ex,
+        )?;
+
+        match trigger {
+            TriggerEndpoint::End { .. } | TriggerEndpoint::Local(..) => {
+                // This path terminates inside the domain. Find the destination node, evict
+                // from it, and then propagate the eviction further downstream.
+                let destination = path.last().node;
+                // We've already evicted from readers in walk_path
+                #[allow(clippy::indexing_slicing)] // came from replay paths
+                if self.nodes[destination].borrow().is_reader() {
+                    return Ok(None);
+                }
+                // No need to continue if node was dropped.
+                #[allow(clippy::indexing_slicing)] // came from replay paths
+                if self.nodes[destination].borrow().is_dropped() {
+                    return Ok(None);
+                }
+
+                let index = path.last().partial_index.clone().ok_or_else(|| {
+                    internal_err!("Received eviction for non-partial replay path")
+                })?;
+
+                trace!(local = %destination, ?keys, ?tag, "Evicting keys");
+                #[allow(clippy::indexing_slicing)] // came from replay paths
+                if let Some(result) = self.state[destination].evict_keys(tag, &keys) {
+                    let mut freed = result.bytes_freed;
+                    freed += Self::trigger_downstream_evictions(
+                        &index,
+                        &keys[..],
+                        destination,
+                        ex,
+                        &self.not_ready,
+                        &self.replay_paths,
+                        self.shard,
+                        self.replica,
+                        &mut self.state,
+                        &mut self.reader_write_handles,
+                        &self.nodes,
+                        &mut self.remapped_keys,
+                    )?;
+                    self.state_size.fetch_sub(freed as usize, Ordering::AcqRel);
+                }
+            }
+            TriggerEndpoint::None | TriggerEndpoint::Start(_) => {}
+        }
+        Ok(None)
+    }
+
+    fn handle_eviction_single_key(
+        &mut self,
+        ex: &mut dyn Executor,
+        tag: Tag,
+        key: Option<Vec<DfValue>>,
+    ) -> ReadySetResult<Option<Vec<DfValue>>> {
+        let (trigger, path) = if let Some(rp) = self.replay_paths.get(tag) {
+            (&rp.trigger, &rp.path)
+        } else {
+            debug!(?tag, "got eviction for tag that has not yet been finalized");
+            return Ok(None);
+        };
+
+        match trigger {
+            TriggerEndpoint::End { .. } | TriggerEndpoint::Local(..) => {
+                // This path terminates inside the domain. Find the destination node, evict
+                // from it, and then propagate the eviction further downstream.
+                let destination = path.last().node;
+                #[allow(clippy::indexing_slicing)] // we got the node from self.nodes
+                let n = self.nodes[destination].borrow_mut();
+
+                let (freed, eviction) = if n.is_dropped() {
+                    // Node was dropped. Skip.
+                    (0, None)
+                } else if let Some(state) = self.reader_write_handles.get_mut(destination) {
+                    let (bytes_freed, eviction) = match key {
+                        Some(key) => {
+                            let key_comparison = {
+                                let key_comparison = KeyComparison::try_from(key.clone())?;
+                                // We must pass a KeyComparison::Range to a BTreeMap reader
+                                // or it will not update its intervals
+                                match state.index_type() {
+                                    IndexType::HashMap => key_comparison,
+                                    IndexType::BTreeMap => key_comparison.into_range(),
+                                }
+                            };
+                            let freed = state.mark_hole(&key_comparison)?;
+                            // TODO(REA-2682): Should reader evictions be accounted for in
+                            // self.state_size anyways? They're not when we evict during
+                            // walk_path().
+                            //
+                            // Don't return an evicted key if there was no eviction
+                            (freed, if freed > 0 { Some(key) } else { None })
+                        }
+                        None => state.evict_random(),
+                    };
+                    state.swap();
+                    state.notify_readers_of_eviction()?;
+                    (bytes_freed, eviction)
+                } else {
+                    let eviction = match key {
+                        Some(key) => {
+                            // A BTree MemoryState will still update its intervals if passed
+                            // a KeyComparison::Equal.
+                            if let Some(EvictKeysResult { bytes_freed, index }) = self.state
+                                [destination]
+                                .evict_keys(tag, &[KeyComparison::try_from(key.clone())?])
+                            {
+                                if bytes_freed > 0 {
+                                    Some((index, bytes_freed, key))
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            }
+                        }
+                        None => {
+                            if let Some(EvictRandomResult {
+                                index,
+                                key_evicted,
+                                bytes_freed,
+                            }) = {
+                                let mut rng = rand::thread_rng();
+                                self.state[destination].evict_random(tag, &mut rng)
+                            } {
+                                Some((index, bytes_freed, key_evicted))
+                            } else {
+                                None
+                            }
+                        }
+                    };
+                    let Some((index, bytes_freed, key_evicted)) = eviction else {
+                        return Ok(None);
+                    };
+                    let key = KeyComparison::try_from(key_evicted.clone())
+                        .map_err(|_| internal_err!("Empty key evicted"))?;
+
+                    let index = index.clone();
+                    let freed = Self::trigger_downstream_evictions(
+                        &index,
+                        &[key],
+                        destination,
+                        ex,
+                        &self.not_ready,
+                        &self.replay_paths,
+                        self.shard,
+                        self.replica,
+                        &mut self.state,
+                        &mut self.reader_write_handles,
+                        &self.nodes,
+                        &mut self.remapped_keys,
+                    )?;
+                    (bytes_freed + freed, Some(key_evicted))
+                };
+
+                debug!(%freed, node = ?n, "evicted from node");
+                self.state_size.fetch_sub(freed as usize, Ordering::AcqRel);
+                Ok(eviction)
+            }
+            TriggerEndpoint::None | TriggerEndpoint::Start { .. } => {
+                // Node not in domain.
+                Ok(None)
+            }
+        }
+    }
+
     /// Handles an [`EvictRequest`], triggering downstream evictions in this Domain or others as
     /// necessary.
     ///
@@ -4145,466 +4612,17 @@ impl Domain {
         request: EvictRequest,
         ex: &mut dyn Executor,
     ) -> ReadySetResult<Option<Vec<DfValue>>> {
-        #[allow(clippy::too_many_arguments)]
-        fn trigger_downstream_evictions(
-            index: &Index,
-            keys: &[KeyComparison],
-            node: LocalNodeIndex,
-            ex: &mut dyn Executor,
-            not_ready: &HashSet<LocalNodeIndex>,
-            replay_paths: &ReplayPaths,
-            shard: Option<usize>,
-            replica: usize,
-            state: &mut StateMap,
-            reader_write_handles: &mut NodeMap<backlog::WriteHandle>,
-            nodes: &DomainNodes,
-            remapped_keys: &mut RemappedKeys,
-        ) -> ReadySetResult<u64> {
-            let mut bytes_freed = 0u64;
-
-            for (tag, path, keys) in
-                replay_paths.downstream_dependent_paths(node, index, keys, remapped_keys)
-            {
-                walk_path(
-                    &path.path[..],
-                    &keys,
-                    tag,
-                    shard,
-                    replica,
-                    nodes,
-                    reader_write_handles,
-                    ex,
-                )?;
-                match path.trigger {
-                    TriggerEndpoint::Local(_) => {
-                        #[allow(clippy::indexing_slicing)] // tag came from replay_paths
-                        let replay_path = &replay_paths[tag];
-
-                        let dest = replay_path.last_segment();
-
-                        #[allow(clippy::indexing_slicing)] // nodes in replay paths must exist
-                        if nodes[dest.node].borrow().is_reader() {
-                            // already evicted from in walk_path
-                            continue;
-                        }
-                        if !state.contains_key(dest.node) {
-                            // this is probably because
-                            if !not_ready.contains(&dest.node) {
-                                debug!(
-                                    node = dest.node.id(),
-                                    "got eviction for ready but stateless node"
-                                )
-                            }
-                            continue;
-                        }
-
-                        trace!(
-                            local = %dest.node,
-                            ?keys,
-                            ?tag,
-                            target = ?(replay_path.target_node(), &replay_path.target_index),
-                            "Evicting keys"
-                        );
-                        #[allow(clippy::indexing_slicing)] // nodes in replay paths must exist
-                        if let Some(result) = state[dest.node].evict_keys(tag, &keys) {
-                            bytes_freed += result.bytes_freed;
-                            // we can only evict from partial replay paths, so we must have a
-                            // partial key
-                            bytes_freed += trigger_downstream_evictions(
-                                #[allow(clippy::unwrap_used)]
-                                dest.partial_index.as_ref().unwrap(),
-                                &keys,
-                                dest.node,
-                                ex,
-                                not_ready,
-                                replay_paths,
-                                shard,
-                                replica,
-                                state,
-                                reader_write_handles,
-                                nodes,
-                                remapped_keys,
-                            )?;
-                        }
-                    }
-                    TriggerEndpoint::Start(_) => {
-                        if let Some(result) = state[path.source.unwrap()].evict_keys(tag, &keys) {
-                            bytes_freed += result.bytes_freed;
-                        }
-                    }
-                    _ => (),
-                }
-            }
-            Ok(bytes_freed)
-        }
-
-        #[allow(clippy::too_many_arguments)]
-        fn walk_path(
-            path: &[ReplayPathSegment],
-            keys: &[KeyComparison],
-            tag: Tag,
-            shard: Option<usize>,
-            replica: usize,
-            nodes: &DomainNodes,
-            reader_write_handles: &mut NodeMap<backlog::WriteHandle>,
-            executor: &mut dyn Executor,
-        ) -> ReadySetResult<()> {
-            #[allow(clippy::indexing_slicing)] // replay paths can't be empty
-            let mut from = path[0].node;
-            for segment in path {
-                #[allow(clippy::indexing_slicing)] // nodes in replay paths must exist
-                #[allow(clippy::unwrap_used)]
-                // partial_key must be Some for partial replay paths
-                nodes[segment.node].borrow_mut().process_eviction(
-                    from,
-                    &segment.partial_index.as_ref().unwrap().columns,
-                    keys,
-                    tag,
-                    shard,
-                    replica,
-                    reader_write_handles,
-                    executor,
-                )?;
-                from = segment.node;
-            }
-            Ok(())
-        }
-
-        fn eviction_candidates(
-            nodes: &DomainNodes,
-            num_bytes: &mut usize,
-            state: &StateMap,
-            reader_write_handles: &NodeMap<backlog::WriteHandle>,
-        ) -> Vec<(LocalNodeIndex, usize)> {
-            let mut candidates: Vec<_> = nodes
-                .values()
-                .filter_map(|nd| {
-                    let n = &*nd.borrow();
-                    let local_index = n.local_addr();
-
-                    if let Some(wh) = reader_write_handles.get(local_index) {
-                        if wh.is_partial() {
-                            Some(wh.deep_size_of())
-                        } else {
-                            None
-                        }
-                    } else {
-                        state
-                            .get(local_index)
-                            .filter(|state| state.is_partial())
-                            .map(|state| state.deep_size_of())
-                    }
-                    .map(|s| (local_index, s))
-                })
-                .filter(|&(_, s)| s > 0)
-                .map(|(x, s)| (x, s as usize))
-                .collect();
-
-            // we want to spread the eviction across the nodes,
-            // rather than emptying out one node completely.
-            // -1* so we sort in descending order
-            // TODO: be smarter than 3 here
-            candidates.sort_unstable_by_key(|&(_, s)| -(s as i64));
-            candidates.truncate(3);
-
-            // don't evict from tiny things (< 10% of max)
-            #[allow(clippy::indexing_slicing)]
-            // candidates must be at least nodes.len(), and nodes can't be empty
-            if let Some(too_small_i) = candidates
-                .iter()
-                .position(|&(_, s)| s < candidates[0].1 / 10)
-            {
-                // everything beyond this is smaller, so also too small
-                candidates.truncate(too_small_i);
-            }
-
-            let mut n = candidates.len();
-            // rev to start with the smallest of the n domains
-            for (_, size) in candidates.iter_mut().rev() {
-                // TODO: should this be evenly divided, or weighted by the size of the
-                // domains?
-                let share = (*num_bytes + n - 1) / n;
-                // we're only willing to evict at most half the state in each node
-                // unless this is the only node left to evict from
-                *size = if n > 1 {
-                    cmp::min(*size / 2, share)
-                } else {
-                    assert_eq!(share, *num_bytes);
-                    share
-                };
-                *num_bytes -= *size;
-                trace!(bytes = *size, node = ?n, "chose to evict from node");
-                n -= 1;
-            }
-
-            candidates
-        }
-
-        let key = match request {
-            EvictRequest::Bytes {
-                node,
-                mut num_bytes,
-            } => {
-                let start = std::time::Instant::now();
-                self.metrics.inc_eviction_requests();
-
-                let mut total_freed = 0;
-                let nodes = if let Some(node) = node {
-                    vec![(node, num_bytes)]
-                } else {
-                    eviction_candidates(
-                        &self.nodes,
-                        &mut num_bytes,
-                        &self.state,
-                        &self.reader_write_handles,
-                    )
-                };
-
-                for (node, num_bytes) in nodes {
-                    let mut freed = 0u64;
-                    #[allow(clippy::indexing_slicing)] // we got the node from self.nodes
-                    let n = self.nodes[node].borrow_mut();
-
-                    if n.is_dropped() {
-                        continue; // Node was dropped. Skip.
-                    } else if let Some(state) = self.reader_write_handles.get_mut(node) {
-                        freed += state.evict_bytes(num_bytes);
-                        state.swap();
-                        state.notify_readers_of_eviction()?;
-                    } else if let Some(EvictBytesResult {
-                        index,
-                        keys_evicted,
-                        bytes_freed,
-                        ..
-                    }) = self.state[node].evict_bytes(num_bytes)
-                    {
-                        let keys = keys_evicted
-                            .into_iter()
-                            .map(|k| {
-                                KeyComparison::try_from(k)
-                                    .map_err(|_| internal_err!("Empty key evicted"))
-                            })
-                            .collect::<ReadySetResult<Vec<_>>>()?;
-
-                        freed += bytes_freed;
-                        if !keys.is_empty() {
-                            let index = index.clone();
-                            freed += trigger_downstream_evictions(
-                                &index,
-                                &keys[..],
-                                node,
-                                ex,
-                                &self.not_ready,
-                                &self.replay_paths,
-                                self.shard,
-                                self.replica,
-                                &mut self.state,
-                                &mut self.reader_write_handles,
-                                &self.nodes,
-                                &mut self.remapped_keys,
-                            )?;
-                        }
-                    } else {
-                        // This node was unable to evict any keys
-                        continue;
-                    }
-
-                    debug!(%freed, node = ?n, "evicted from node");
-                    self.state_size.fetch_sub(freed as usize, Ordering::AcqRel);
-                    total_freed += freed;
-                }
-
-                self.metrics.rec_eviction_time(start.elapsed(), total_freed);
-                None
+        match request {
+            EvictRequest::Bytes { node, num_bytes } => {
+                self.handle_eviction_bytes(ex, node, num_bytes)
             }
             EvictRequest::Keys {
                 link: Link { dst, .. },
-                keys,
                 tag,
-            } => {
-                let (trigger, path) = if let Some(rp) = self.replay_paths.get(tag) {
-                    (&rp.trigger, &rp.path)
-                } else {
-                    debug!(?tag, "got eviction for tag that has not yet been finalized");
-                    return Ok(None);
-                };
-
-                let i = path
-                    .iter()
-                    .position(|ps| ps.node == dst)
-                    .ok_or_else(|| ReadySetError::NoSuchNode(dst.id()))?;
-                #[allow(clippy::indexing_slicing)]
-                // i is definitely in bounds, since it came from a call to position
-                walk_path(
-                    &path[i..],
-                    &keys,
-                    tag,
-                    self.shard,
-                    self.replica,
-                    &self.nodes,
-                    &mut self.reader_write_handles,
-                    ex,
-                )?;
-
-                match trigger {
-                    TriggerEndpoint::End { .. } | TriggerEndpoint::Local(..) => {
-                        // This path terminates inside the domain. Find the destination node, evict
-                        // from it, and then propagate the eviction further downstream.
-                        let destination = path.last().node;
-                        // We've already evicted from readers in walk_path
-                        #[allow(clippy::indexing_slicing)] // came from replay paths
-                        if self.nodes[destination].borrow().is_reader() {
-                            return Ok(None);
-                        }
-                        // No need to continue if node was dropped.
-                        #[allow(clippy::indexing_slicing)] // came from replay paths
-                        if self.nodes[destination].borrow().is_dropped() {
-                            return Ok(None);
-                        }
-
-                        let index = path.last().partial_index.clone().ok_or_else(|| {
-                            internal_err!("Received eviction for non-partial replay path")
-                        })?;
-
-                        trace!(local = %destination, ?keys, ?tag, "Evicting keys");
-                        #[allow(clippy::indexing_slicing)] // came from replay paths
-                        if let Some(result) = self.state[destination].evict_keys(tag, &keys) {
-                            let mut freed = result.bytes_freed;
-                            freed += trigger_downstream_evictions(
-                                &index,
-                                &keys[..],
-                                destination,
-                                ex,
-                                &self.not_ready,
-                                &self.replay_paths,
-                                self.shard,
-                                self.replica,
-                                &mut self.state,
-                                &mut self.reader_write_handles,
-                                &self.nodes,
-                                &mut self.remapped_keys,
-                            )?;
-                            self.state_size.fetch_sub(freed as usize, Ordering::AcqRel);
-                        }
-                    }
-                    TriggerEndpoint::None | TriggerEndpoint::Start(_) => {}
-                }
-                None
-            }
-            EvictRequest::SingleKey { tag, key } => {
-                let (trigger, path) = if let Some(rp) = self.replay_paths.get(tag) {
-                    (&rp.trigger, &rp.path)
-                } else {
-                    debug!(?tag, "got eviction for tag that has not yet been finalized");
-                    return Ok(None);
-                };
-
-                match trigger {
-                    TriggerEndpoint::End { .. } | TriggerEndpoint::Local(..) => {
-                        // This path terminates inside the domain. Find the destination node, evict
-                        // from it, and then propagate the eviction further downstream.
-                        let destination = path.last().node;
-                        #[allow(clippy::indexing_slicing)] // we got the node from self.nodes
-                        let n = self.nodes[destination].borrow_mut();
-
-                        let (freed, eviction) = if n.is_dropped() {
-                            // Node was dropped. Skip.
-                            (0, None)
-                        } else if let Some(state) = self.reader_write_handles.get_mut(destination) {
-                            let (bytes_freed, eviction) = match key {
-                                Some(key) => {
-                                    let key_comparison = {
-                                        let key_comparison = KeyComparison::try_from(key.clone())?;
-                                        // We must pass a KeyComparison::Range to a BTreeMap reader
-                                        // or it will not update its intervals
-                                        match state.index_type() {
-                                            IndexType::HashMap => key_comparison,
-                                            IndexType::BTreeMap => key_comparison.into_range(),
-                                        }
-                                    };
-                                    let freed = state.mark_hole(&key_comparison)?;
-                                    // TODO(REA-2682): Should reader evictions be accounted for in
-                                    // self.state_size anyways? They're not when we evict during
-                                    // walk_path().
-                                    //
-                                    // Don't return an evicted key if there was no eviction
-                                    (freed, if freed > 0 { Some(key) } else { None })
-                                }
-                                None => state.evict_random(),
-                            };
-                            state.swap();
-                            state.notify_readers_of_eviction()?;
-                            (bytes_freed, eviction)
-                        } else {
-                            let eviction = match key {
-                                Some(key) => {
-                                    // A BTree MemoryState will still update its intervals if passed
-                                    // a KeyComparison::Equal.
-                                    if let Some(EvictKeysResult { bytes_freed, index }) = self.state
-                                        [destination]
-                                        .evict_keys(tag, &[KeyComparison::try_from(key.clone())?])
-                                    {
-                                        if bytes_freed > 0 {
-                                            Some((index, bytes_freed, key))
-                                        } else {
-                                            None
-                                        }
-                                    } else {
-                                        None
-                                    }
-                                }
-                                None => {
-                                    if let Some(EvictRandomResult {
-                                        index,
-                                        key_evicted,
-                                        bytes_freed,
-                                    }) = {
-                                        let mut rng = rand::thread_rng();
-                                        self.state[destination].evict_random(tag, &mut rng)
-                                    } {
-                                        Some((index, bytes_freed, key_evicted))
-                                    } else {
-                                        None
-                                    }
-                                }
-                            };
-                            let Some((index, bytes_freed, key_evicted)) = eviction else {
-                                return Ok(None);
-                            };
-                            let key = KeyComparison::try_from(key_evicted.clone())
-                                .map_err(|_| internal_err!("Empty key evicted"))?;
-
-                            let index = index.clone();
-                            let freed = trigger_downstream_evictions(
-                                &index,
-                                &[key],
-                                destination,
-                                ex,
-                                &self.not_ready,
-                                &self.replay_paths,
-                                self.shard,
-                                self.replica,
-                                &mut self.state,
-                                &mut self.reader_write_handles,
-                                &self.nodes,
-                                &mut self.remapped_keys,
-                            )?;
-                            (bytes_freed + freed, Some(key_evicted))
-                        };
-
-                        debug!(%freed, node = ?n, "evicted from node");
-                        self.state_size.fetch_sub(freed as usize, Ordering::AcqRel);
-                        eviction
-                    }
-                    TriggerEndpoint::None | TriggerEndpoint::Start { .. } => {
-                        // Node not in domain.
-                        None
-                    }
-                }
-            }
-        };
-
-        Ok(key)
+                keys,
+            } => self.handle_eviction_keys(ex, dst, tag, keys),
+            EvictRequest::SingleKey { tag, key } => self.handle_eviction_single_key(ex, tag, key),
+        }
     }
 
     pub fn address(&self) -> ReplicaAddress {
