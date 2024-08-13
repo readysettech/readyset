@@ -1453,10 +1453,12 @@ impl DfState {
                     .get(&di)
                     .unwrap()
                     .send_to_healthy::<()>(
-                        DomainRequest::Packet(Packet::Evict(EvictRequest::Bytes {
-                            node: Some(na),
-                            num_bytes: bytes as usize,
-                        })),
+                        DomainRequest::Packet(Packet::Evict {
+                            req: EvictRequest::Bytes {
+                                node: Some(na),
+                                num_bytes: bytes as usize,
+                            },
+                        }),
                         workers,
                     )
                     .await?;
@@ -1509,7 +1511,7 @@ impl DfState {
             .get(&di)
             .ok_or_else(|| internal_err!())?
             .send_to_healthy::<Option<Vec<DfValue>>>(
-                DomainRequest::Evict(EvictRequest::SingleKey { tag, key }),
+                DomainRequest::Evict { req: EvictRequest::SingleKey { tag, key } },
                 &self.workers,
             )
             .await?

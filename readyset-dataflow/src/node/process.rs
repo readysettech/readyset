@@ -466,14 +466,16 @@ impl Node {
             NodeType::Base(..) => {}
             NodeType::Egress(Some(ref mut e)) => {
                 e.process(
-                    &mut Some(Packet::Evict(EvictRequest::Keys {
-                        link: Link {
-                            src: addr,
-                            dst: addr,
+                    &mut Some(Packet::Evict {
+                        req: EvictRequest::Keys {
+                            link: Link {
+                                src: addr,
+                                dst: addr,
+                            },
+                            tag,
+                            keys: keys.to_vec(),
                         },
-                        tag,
-                        keys: keys.to_vec(),
-                    })),
+                    }),
                     None,
                     on_shard.unwrap_or(0),
                     on_replica,
