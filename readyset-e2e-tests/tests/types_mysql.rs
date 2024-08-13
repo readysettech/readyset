@@ -8,7 +8,7 @@ use proptest::arbitrary::any;
 use proptest::collection::vec;
 use proptest::prop_oneof;
 use proptest::strategy::{Just, Strategy};
-use proptest::string::bytes_regex;
+use proptest::string::string_regex;
 use proptest::test_runner::Config as ProptestConfig;
 use readyset_client_test_helpers::mysql_helpers::MySQLAdapter;
 use readyset_client_test_helpers::{mysql_helpers, TestBuilder};
@@ -50,6 +50,9 @@ async fn round_trip_mysql_type_inner(sql_type: SqlType, value: Value) {
         )
         .await
         .unwrap();
+
+    // We use the value the upstream actually stores for subsequent lookups, in case it trims or
+    // pads the value.
     let upstream_rows: Vec<Row> = upstream_conn
         .exec(
             "SELECT * FROM snapshot WHERE value = ?",
@@ -57,6 +60,11 @@ async fn round_trip_mysql_type_inner(sql_type: SqlType, value: Value) {
         )
         .await
         .unwrap();
+
+    // Not all values work for lookups; e.g. spaces in a CHAR column.
+    if upstream_rows.is_empty() {
+        return;
+    }
 
     // We use the value the upstream actually stores for subsequent lookups, in case it trims or
     // pads the value.
@@ -108,7 +116,7 @@ async fn round_trip_mysql_type_inner(sql_type: SqlType, value: Value) {
         .await
         .unwrap();
 
-    let replicated_upstream_val = replicated_upstream_rows[0].as_ref(0).unwrap();
+    let replicated_upstream_val = &replicated_upstream_rows[0][0];
     assert_eq!(replicated_upstream_val, upstream_val);
 
     // Check the result of streaming replication on Readyset
@@ -157,30 +165,29 @@ fn arbitrary_mysql_value_for_type(sql_type: SqlType) -> impl Strategy<Value = Va
         | SqlType::Jsonb => Just(Value::Int(0))
             .prop_filter("not yet implemented", |_| false)
             .boxed(),
-        SqlType::Binary(len) => vec(any::<u8>(), 0..(len.unwrap_or(64) as usize))
+        SqlType::Binary(len) => vec(any::<u8>(), 0..(len.unwrap_or(255) as usize))
             .prop_map(Value::Bytes)
             .boxed(),
         SqlType::VarBinary(len) => vec(any::<u8>(), 0..(len as usize))
             .prop_map(Value::Bytes)
             .boxed(),
-        SqlType::TinyBlob
-        | SqlType::Blob
-        | SqlType::MediumBlob
-        | SqlType::LongBlob
-        | SqlType::TinyText
-        | SqlType::Text
-        | SqlType::MediumText
-        | SqlType::LongText => vec(any::<u8>(), 0..64).prop_map(Value::Bytes).boxed(),
+        SqlType::TinyBlob | SqlType::Blob | SqlType::MediumBlob | SqlType::LongBlob => {
+            vec(any::<u8>(), 0..255).prop_map(Value::Bytes).boxed()
+        }
+        SqlType::TinyText | SqlType::Text | SqlType::MediumText | SqlType::LongText => {
+            any::<String>()
+                .prop_map(|s| Value::Bytes(s.into_bytes()))
+                .boxed()
+        }
         SqlType::Char(len) | SqlType::VarChar(len) => {
-            // TODO(mvzink): Account for charset encoding (i.e. 3/4 bytes per char)
-            bytes_regex(&format!(".{{0,{}}}", len.unwrap_or(1)))
-                .unwrap()
-                .prop_map(Value::Bytes)
+            string_regex(&format!("\\PC{{0,{}}}", len.unwrap_or(255)))
+                .expect("Should produce valid regex")
+                .prop_map(|s| Value::Bytes(s.into_bytes()))
                 .boxed()
         }
         SqlType::Bit(/* TODO */ len) | SqlType::VarBit(len) => prop_oneof![
             any::<u64>().prop_map(Value::UInt),
-            vec(any::<u8>(), 0..(len.unwrap_or(64) as usize)).prop_map(Value::Bytes)
+            vec(any::<u8>(), 0..(len.unwrap_or(255) as usize)).prop_map(Value::Bytes)
         ]
         .boxed(),
         SqlType::Bool => (0..=1i64).prop_map(Value::Int).boxed(),
@@ -292,7 +299,6 @@ fn round_trip_mysql_type_regressions_char_zero_length() {
 #[test]
 #[serial]
 #[slow]
-#[ignore = "Failing REA-4590"]
 fn round_trip_mysql_type_regressions_char_1_length_empty() {
     round_trip_mysql_type(SqlType::Char(Some(1)), Value::Bytes("".into()));
 }
@@ -300,17 +306,43 @@ fn round_trip_mysql_type_regressions_char_1_length_empty() {
 #[test]
 #[serial]
 #[slow]
-#[ignore = "Failing REA-4590"]
-fn round_trip_mysql_type_regressions_char_1_length_space() {
-    round_trip_mysql_type(SqlType::Char(Some(1)), Value::Bytes(" ".into()));
+fn round_trip_mysql_type_regressions_char_64_length_empty() {
+    round_trip_mysql_type(SqlType::Char(Some(64)), Value::Bytes("".into()))
 }
 
 #[test]
 #[serial]
 #[slow]
-#[ignore = "Failing REA-4590"]
+fn round_trip_mysql_type_regressions_char_63_length_empty() {
+    round_trip_mysql_type(SqlType::Char(Some(63)), Value::Bytes("".into()))
+}
+
+#[test]
+#[serial]
+#[slow]
 fn round_trip_mysql_type_regressions_char_46_length_nonempty() {
     round_trip_mysql_type(SqlType::Char(Some(46)), Value::Bytes("d".into()));
+}
+
+#[test]
+#[serial]
+#[slow]
+fn round_trip_mysql_type_regressions_char_255_length_empty() {
+    round_trip_mysql_type(SqlType::Char(Some(255)), Value::Bytes("".into()))
+}
+
+#[test]
+#[serial]
+#[slow]
+fn round_trip_mysql_type_regressions_char_64_length_nonempty() {
+    round_trip_mysql_type(SqlType::Char(Some(64)), Value::Bytes("d".into()))
+}
+
+#[test]
+#[serial]
+#[slow]
+fn round_trip_mysql_type_regressions_char_255_length_nonempty() {
+    round_trip_mysql_type(SqlType::Char(Some(255)), Value::Bytes("d".into()))
 }
 
 #[test]

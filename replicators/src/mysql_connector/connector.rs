@@ -966,12 +966,14 @@ fn binlog_val_to_noria_val(
                     ))));
                 }
             };
-            match mysql_pad_collation_column(
-                buf,
-                col_kind,
-                collation,
-                meta[1] as usize, // 2nd byte of meta is the length of the string
-            ) {
+            // Check for special encoding when length is greater than 255 (as happens with multibyte
+            // encodings such as utf8mb4). cf https://bugs.mysql.com/bug.php?id=37426
+            let length = if meta[0] & 0x30 != 0x30 {
+                meta[1] as usize | (((meta[0] as usize & 0x30) ^ 0x30) << 4)
+            } else {
+                meta[1] as usize
+            };
+            match mysql_pad_collation_column(buf, col_kind, collation, length) {
                 Ok(s) => Ok(s),
                 Err(e) => Err(mysql_async::Error::Other(Box::new(internal_err!("{e}")))),
             }

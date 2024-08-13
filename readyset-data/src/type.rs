@@ -569,6 +569,12 @@ impl DfType {
         matches!(self, Self::Text(..) | Self::VarChar(..) | Self::Char(..))
     }
 
+    /// Returns `true` if this is a fixed-length char type
+    #[inline]
+    pub fn is_char(&self) -> bool {
+        matches!(self, Self::Char(..))
+    }
+
     /// Returns `true` if this is any MySQL binary type.
     #[inline]
     pub fn is_binary(&self) -> bool {

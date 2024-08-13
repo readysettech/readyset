@@ -774,7 +774,7 @@ async fn test_char_padding_lookup() {
     conn.query_drop(
         "CREATE TABLE `col_pad_lookup` (
         id int NOT NULL PRIMARY KEY,
-        c CHAR(3) 
+        c CHAR(3)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;",
     )
     .await
@@ -799,7 +799,7 @@ async fn test_char_padding_lookup() {
     assert_eq!(row.len(), 1);
     let last_status = last_query_info(&mut conn).await;
     assert_eq!(last_status.destination, QueryDestination::Readyset);
-    assert_eq!(row[0].1, "ࠈࠈ ");
+    assert_eq!(row[0].1, "ࠈࠈ");
 
     let row: Vec<(u32, String)> = conn
         .query("SELECT id, c FROM col_pad_lookup WHERE c = 'A'")
@@ -808,7 +808,7 @@ async fn test_char_padding_lookup() {
     assert_eq!(row.len(), 1);
     let last_status = last_query_info(&mut conn).await;
     assert_eq!(last_status.destination, QueryDestination::Readyset);
-    assert_eq!(row[0].1, "A  ");
+    assert_eq!(row[0].1, "A");
 
     let row: Vec<(u32, String)> = conn
         .query("SELECT id, c FROM col_pad_lookup WHERE c = 'AAA'")
@@ -836,7 +836,7 @@ async fn test_binary_padding_lookup() {
     conn.query_drop(
         "CREATE TABLE `col_pad_bin_lookup` (
         id int NOT NULL PRIMARY KEY,
-        b BINARY(3) 
+        b BINARY(3)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;",
     )
     .await
