@@ -805,7 +805,10 @@ fn mysql_row_to_noria_row(row: &mysql::Row) -> ReadySetResult<Vec<readyset_data:
                     false => noria_row.push(readyset_data::DfValue::try_from(val)?),
                 }
             }
-            ColumnType::MYSQL_TYPE_DATETIME | ColumnType::MYSQL_TYPE_TIMESTAMP => {
+            ColumnType::MYSQL_TYPE_DATETIME
+            | ColumnType::MYSQL_TYPE_TIMESTAMP
+            | ColumnType::MYSQL_TYPE_DATE
+            | ColumnType::MYSQL_TYPE_DATETIME2 => {
                 let df_val: DfValue = readyset_data::DfValue::try_from(val)
                     .map_err(|err| {
                         internal_err!("Error converting MYSQL_TYPE_DATETIME column: {}", err)

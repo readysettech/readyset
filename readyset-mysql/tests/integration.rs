@@ -2127,10 +2127,12 @@ async fn test_proxied_queries_telemetry() {
 #[serial]
 async fn datetime_nanosecond_precision_text_protocol() {
     let mut direct_mysql = mysql_async::Conn::from_url(mysql_url()).await.unwrap();
-    direct_mysql.query_drop("DROP TABLE IF EXISTS dt_nano_text_protocol CASCADE;
+    direct_mysql.query_drop("SET sql_mode='';
+             DROP TABLE IF EXISTS dt_nano_text_protocol CASCADE;
              CREATE TABLE dt_nano_text_protocol (col1 DATETIME, col2 DATETIME(2), col3 DATETIME(4), col4 DATETIME(6));
              INSERT INTO dt_nano_text_protocol VALUES ('2021-01-01 00:00:00', '2021-01-01 00:00:00.00', '2021-01-01 00:00:00.0000', '2021-01-01 00:00:00.000000');
-             INSERT INTO dt_nano_text_protocol VALUES ('2021-01-01 00:00:00', '2021-01-01 00:00:00.01', '2021-01-01 00:00:00.0001', '2021-01-01 00:00:00.000001');")
+             INSERT INTO dt_nano_text_protocol VALUES ('2021-01-01 00:00:00', '2021-01-01 00:00:00.01', '2021-01-01 00:00:00.0001', '2021-01-01 00:00:00.000001');
+             INSERT INTO dt_nano_text_protocol VALUES ('0000-00-00 00:00:00', '0000-00-00 00:00:00.00', '0000-00-00 00:00:00.0000', '0000-00-00 00:00:00.000000');")
         .await
         .unwrap();
     let (opts, _handle, shutdown_tx) = setup_with_mysql(false).await;
@@ -2142,14 +2144,16 @@ async fn datetime_nanosecond_precision_text_protocol() {
         .unwrap();
     sleep().await;
 
-    let my_rows: Vec<(String, String, String, String)> = direct_mysql
+    let mut my_rows: Vec<(String, String, String, String)> = direct_mysql
         .query("SELECT * FROM dt_nano_text_protocol")
         .await
         .unwrap();
-    let rs_rows: Vec<(String, String, String, String)> = conn
+    let mut rs_rows: Vec<(String, String, String, String)> = conn
         .query("SELECT * FROM dt_nano_text_protocol")
         .await
         .unwrap();
+    my_rows.sort();
+    rs_rows.sort();
     assert_eq!(rs_rows, my_rows);
     conn.query_drop("INSERT INTO dt_nano_text_protocol VALUES ('2021-01-02 00:00:00', '2021-01-02 00:00:00.00', '2021-01-02 00:00:00.0000', '2021-01-02 00:00:00.000000');").await.unwrap();
     conn.query_drop("INSERT INTO dt_nano_text_protocol VALUES ('2021-01-02 00:00:00', '2021-01-02 00:00:00.01', '2021-01-02 00:00:00.0001', '2021-01-02 00:00:00.000001');").await.unwrap();
@@ -2157,15 +2161,18 @@ async fn datetime_nanosecond_precision_text_protocol() {
     sleep().await;
 
     eventually!(run_test: {
-        let my_rows: Vec<(String, String, String, String)> = direct_mysql
+        let mut my_rows: Vec<(String, String, String, String)> = direct_mysql
         .query("SELECT * FROM dt_nano_text_protocol")
         .await
         .unwrap();
 
-        let rs_rows: Vec<(String, String, String, String)> = conn
+        let mut rs_rows: Vec<(String, String, String, String)> = conn
             .query("SELECT * FROM dt_nano_text_protocol")
             .await
             .unwrap();
+
+        my_rows.sort();
+        rs_rows.sort();
         AssertUnwindSafe(move || (rs_rows, my_rows))
     },then_assert: |results| {
         let (rs_rows, my_rows) = results();
@@ -2179,10 +2186,12 @@ async fn datetime_nanosecond_precision_text_protocol() {
 #[serial]
 async fn datetime_nanosecond_precision_binary_protocol() {
     let mut direct_mysql = mysql_async::Conn::from_url(mysql_url()).await.unwrap();
-    direct_mysql.query_drop("DROP TABLE IF EXISTS dt_nano_bin_protocol CASCADE;
+    direct_mysql.query_drop("SET sql_mode='';
+             DROP TABLE IF EXISTS dt_nano_bin_protocol CASCADE;
              CREATE TABLE dt_nano_bin_protocol (ID INT PRIMARY KEY, col1 DATETIME, col2 DATETIME(2), col3 DATETIME(4), col4 DATETIME(6));
              INSERT INTO dt_nano_bin_protocol VALUES (1, '2021-01-01 00:00:00', '2021-01-01 00:00:00.00', '2021-01-01 00:00:00.0000', '2021-01-01 00:00:00.000000');
-             INSERT INTO dt_nano_bin_protocol VALUES (2, '2021-01-01 00:00:00', '2021-01-01 00:00:00.01', '2021-01-01 00:00:00.0001', '2021-01-01 00:00:00.000001');")
+             INSERT INTO dt_nano_bin_protocol VALUES (2, '2021-01-01 00:00:00', '2021-01-01 00:00:00.01', '2021-01-01 00:00:00.0001', '2021-01-01 00:00:00.000001');
+             INSERT INTO dt_nano_bin_protocol VALUES (3, '0000-00-00 00:00:00', '0000-00-00 00:00:00.00', '0000-00-00 00:00:00.0000', '0000-00-00 00:00:00.000000');")
         .await
         .unwrap();
     let (opts, _handle, shutdown_tx) = setup_with_mysql(false).await;
@@ -2194,7 +2203,7 @@ async fn datetime_nanosecond_precision_binary_protocol() {
         .unwrap();
     sleep().await;
 
-    for id in 1..=2 {
+    for id in 1..=3 {
         let my_rows: Row = direct_mysql
             .exec_first("SELECT * FROM dt_nano_bin_protocol WHERE ID = ?", (id,))
             .await
@@ -2208,24 +2217,23 @@ async fn datetime_nanosecond_precision_binary_protocol() {
         assert_eq!(rs_rows.unwrap_raw(), my_rows.unwrap_raw())
     }
 
-    conn.query_drop("INSERT INTO dt_nano_bin_protocol VALUES (3, '2021-01-02 00:00:00', '2021-01-02 00:00:00.00', '2021-01-02 00:00:00.0000', '2021-01-02 00:00:00.000000');").await.unwrap();
-    conn.query_drop("INSERT INTO dt_nano_bin_protocol VALUES (4, '2021-01-02 00:00:00', '2021-01-02 00:00:00.01', '2021-01-02 00:00:00.0001', '2021-01-02 00:00:00.000001');").await.unwrap();
+    conn.query_drop("INSERT INTO dt_nano_bin_protocol VALUES (4, '2021-01-02 00:00:00', '2021-01-02 00:00:00.00', '2021-01-02 00:00:00.0000', '2021-01-02 00:00:00.000000');").await.unwrap();
+    conn.query_drop("INSERT INTO dt_nano_bin_protocol VALUES (5, '2021-01-02 00:00:00', '2021-01-02 00:00:00.01', '2021-01-02 00:00:00.0001', '2021-01-02 00:00:00.000001');").await.unwrap();
 
     sleep().await;
 
-    for id in 3..=4 {
+    for id in 4..=5 {
         eventually!(run_test: {
-
             let my_rows: Row = direct_mysql
-            .exec_first("SELECT * FROM dt_nano_bin_protocol WHERE ID = ?", (id,))
-            .await
-            .unwrap()
-            .unwrap();
-        let rs_rows: Row = conn
-            .exec_first("SELECT * FROM dt_nano_bin_protocol WHERE ID = ?", (id,))
-            .await
-            .unwrap()
-            .unwrap();
+                .exec_first("SELECT * FROM dt_nano_bin_protocol WHERE ID = ?", (id,))
+                .await
+                .unwrap()
+                .unwrap();
+            let rs_rows: Row = conn
+                .exec_first("SELECT * FROM dt_nano_bin_protocol WHERE ID = ?", (id,))
+                .await
+                .unwrap()
+                .unwrap();
             AssertUnwindSafe(move || (rs_rows, my_rows))
         },then_assert: |results| {
             let (rs_rows, my_rows) = results();
@@ -2265,7 +2273,7 @@ async fn datetime_binary_protocol() {
         rs_rows.unwrap_raw(),
         vec![
             Some(mysql::Value::Int(1)),
-            Some(mysql::Value::NULL),
+            Some(mysql::Value::Date(0, 0, 0, 0, 0, 0, 0)),
             Some(mysql::Value::Date(2021, 1, 1, 0, 0, 0, 0)),
             Some(mysql::Value::Date(2021, 1, 1, 0, 0, 1, 0)),
             Some(mysql::Value::Date(2021, 1, 1, 0, 0, 1, 1))

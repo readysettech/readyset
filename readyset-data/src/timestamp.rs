@@ -45,7 +45,7 @@ pub const DATE_FORMAT: &str = "%Y-%m-%d";
 /// 3 bits for the subsecond digit count required
 /// 1 bit to signify this is DATE only
 /// 1 bit to signify timezone offset is present (since 0 is a valid offset)
-/// 1 bit unused - available for future use
+/// 1 bit to signify the invalid MySQL zero date (0000-00-00)
 #[derive(Clone, Copy, Serialize, Deserialize)]
 #[repr(C, packed)] // So we can actually fit into the 15 bytes
 pub struct TimestampTz {
@@ -56,8 +56,9 @@ pub struct TimestampTz {
 }
 
 impl TimestampTz {
+    const ZERO_FLAG: u8 = 0b_1000_0000;
     const TIMEZONE_FLAG: u8 = 0b_0100_0000;
-    const DATE_FLAG: u8 = 0b_0010_0000;
+    const DATE_ONLY_FLAG: u8 = 0b_0010_0000;
     const SUBSECOND_DIGITS_BITS: u8 = 0b_0001_1100;
     const NEGATIVE_FLAG: u8 = 0b_0000_0010;
     const TOP_OFFSET_BIT: u8 = 0b_0000_0001;
@@ -94,13 +95,13 @@ impl TimestampTz {
     /// Returns true if should be displayed as date only
     #[inline(always)]
     pub fn has_date_only(&self) -> bool {
-        self.extra[2] & TimestampTz::DATE_FLAG != 0
+        self.extra[2] & TimestampTz::DATE_ONLY_FLAG != 0
     }
 
     /// Mark this timestamp as only containing a date value
     #[inline(always)]
     fn set_date_only(&mut self) {
-        self.extra[2] |= TimestampTz::DATE_FLAG
+        self.extra[2] |= TimestampTz::DATE_ONLY_FLAG
     }
 
     /// Return the timezone offset from UTC in seconds
@@ -152,6 +153,43 @@ impl TimestampTz {
             & TimestampTz::SUBSECOND_DIGITS_BITS)
             | (self.extra[2] & !TimestampTz::SUBSECOND_DIGITS_BITS);
     }
+
+    /// Construct an invalid timestamp representing the invalid MySQL zero date (0000-00-00).
+    pub fn zero() -> Self {
+        let mut extra = [0; 3];
+        extra[2] |= TimestampTz::ZERO_FLAG;
+        Self {
+            extra,
+            datetime: NaiveDateTime::MIN,
+        }
+    }
+
+    /// Check for the flag indicating that this is an invalid MySQL zero date (0000-00-00).
+    #[inline(always)]
+    pub fn is_zero(&self) -> bool {
+        self.extra[2] & TimestampTz::ZERO_FLAG != 0
+    }
+
+    /// From individual components (as found in [`mysql_common::value::Value::Date`]). Basically a
+    /// convenience for constructing zero dates if the date is not valid.
+    pub fn from_components(
+        year: u16,
+        month: u8,
+        day: u8,
+        hour: u8,
+        minutes: u8,
+        seconds: u8,
+        micros: u32,
+    ) -> Self {
+        if let Some(dt) =
+            NaiveDate::from_ymd_opt(year.into(), month.into(), day.into()).and_then(|dt| {
+                dt.and_hms_micro_opt(hour.into(), minutes.into(), seconds.into(), micros)
+            })
+        {
+            return dt.into();
+        }
+        TimestampTz::zero()
+    }
 }
 
 impl From<&TimestampTz> for DateTime<FixedOffset> {
@@ -168,7 +206,11 @@ impl From<&TimestampTz> for DateTime<FixedOffset> {
 
 impl fmt::Debug for TimestampTz {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.to_chrono().fmt(f)
+        if self.is_zero() {
+            write!(f, "0000-00-00")
+        } else {
+            self.to_chrono().fmt(f)
+        }
     }
 }
 
@@ -177,17 +219,28 @@ impl fmt::Display for TimestampTz {
         let ts = self.to_chrono();
 
         if self.has_date_only() {
-            return write!(f, "{}", ts.format(DATE_FORMAT));
+            if self.is_zero() {
+                return write!(f, "0000-00-00");
+            } else {
+                return write!(f, "{}", ts.format(DATE_FORMAT));
+            }
         }
 
         if self.has_timezone() {
+            assert!(!self.is_zero(), "Zero date should not have timezone");
             write!(f, "{}", ts.format(TIMESTAMP_TZ_FORMAT))?;
+        } else if self.is_zero() {
+            write!(f, "0000-00-00 00:00:00")?;
         } else {
             write!(f, "{}", ts.format(TIMESTAMP_FORMAT))?;
         }
 
         if self.subsecond_digits() > 0 {
-            let micros = ts.time().nanosecond() / 1000;
+            let micros = if self.is_zero() {
+                0
+            } else {
+                ts.time().nanosecond() / 1000
+            };
             let micros_str = format!(
                 "{1:.0$}",
                 self.subsecond_digits() as usize,
