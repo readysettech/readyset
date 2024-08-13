@@ -1,6 +1,7 @@
 use std::fmt;
 use std::iter::FusedIterator;
 use std::ops::Deref;
+use std::time::{Duration, Instant};
 
 use smallvec::SmallVec;
 use triomphe::Arc;
@@ -12,6 +13,9 @@ use crate::eviction::EvictionMeta;
 pub struct Values<T> {
     eviction_meta: EvictionMeta,
     values: ValuesInner<T>,
+
+    last_update_timestamp: Option<Instant>,
+    duration_before_last_update: Option<Duration>,
 }
 
 impl<T> Default for Values<T> {
@@ -19,6 +23,8 @@ impl<T> Default for Values<T> {
         Values {
             eviction_meta: Default::default(),
             values: ValuesInner::new(),
+            last_update_timestamp: None,
+            duration_before_last_update: None,
         }
     }
 }
@@ -74,6 +80,8 @@ impl<T> Values<T> {
         Values {
             eviction_meta,
             values: ValuesInner(Arc::new(smallvec::SmallVec::new())),
+            last_update_timestamp: None,
+            duration_before_last_update: None,
         }
     }
 
@@ -112,6 +120,20 @@ impl<T> Values<T> {
         &self.eviction_meta
     }
 
+    fn update_update_meta(&mut self) {
+        let next_ts = Instant::now();
+
+        if let Some(last_ts) = self.last_update_timestamp {
+            self.duration_before_last_update = Some(next_ts - last_ts);
+        }
+
+        self.last_update_timestamp = Some(next_ts);
+    }
+
+    pub(crate) fn duration_before_last_update(&self) -> Option<Duration> {
+        self.duration_before_last_update
+    }
+
     /// Inserts an element at position index within the vector, shifting all elements after it to
     /// the right.
     pub(crate) fn insert(&mut self, index: usize, element: T)
@@ -119,6 +141,7 @@ impl<T> Values<T> {
         T: Clone,
     {
         Arc::make_mut(&mut self.values.0).insert(index, element);
+        self.update_update_meta();
     }
 
     /// Removes the element at position index within the vector, shifting all elements after it to
@@ -131,13 +154,15 @@ impl<T> Values<T> {
         T: PartialEq + Clone,
     {
         Arc::make_mut(&mut self.values.0).remove(index);
+        self.update_update_meta();
     }
 
     pub(crate) fn clear(&mut self)
     where
         T: Clone,
     {
-        Arc::make_mut(&mut self.values.0).clear()
+        Arc::make_mut(&mut self.values.0).clear();
+        self.update_update_meta();
     }
 
     pub(crate) fn retain<F>(&mut self, f: F)
@@ -145,7 +170,8 @@ impl<T> Values<T> {
         T: Clone,
         F: FnMut(&mut T) -> bool,
     {
-        Arc::make_mut(&mut self.values.0).retain(f)
+        Arc::make_mut(&mut self.values.0).retain(f);
+        self.update_update_meta();
     }
 }
 
