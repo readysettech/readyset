@@ -32,6 +32,7 @@ use readyset_client::debug::info::KeyCount;
 use readyset_client::internal::{self, Index};
 use readyset_client::metrics::recorded;
 use readyset_client::{KeyComparison, PersistencePoint, ReaderAddress};
+use readyset_data::DfType;
 use readyset_errors::{internal, internal_err, ReadySetError, ReadySetResult};
 use readyset_util::futures::abort_on_panic;
 use readyset_util::progress::report_progress_with;
@@ -50,10 +51,10 @@ pub(crate) use self::replay_paths::ReplayPath;
 use self::replay_paths::{Destination, ReplayPathSpec, ReplayPaths, Target};
 use crate::domain::channel::{ChannelCoordinator, DomainReceiver, DomainSender};
 use crate::node::special::EgressTx;
-use crate::node::{NodeProcessingResult, ProcessEnv};
+use crate::node::{Column, NodeProcessingResult, ProcessEnv};
 use crate::payload::{
     EvictRequest, MaterializedState, PacketDiscriminants, PrepareStateKind, PrettyReplayPath,
-    ReplayPieceContext, SourceSelection,
+    ReplayPieceContext, SenderReplication, SourceSelection,
 };
 use crate::prelude::*;
 use crate::processing::ColumnMiss;
@@ -1454,6 +1455,1056 @@ impl Domain {
         Ok(())
     }
 
+    #[inline(always)]
+    fn handle_add_node(
+        &mut self,
+        node: Node,
+        parents: Vec<LocalNodeIndex>,
+    ) -> ReadySetResult<Option<Vec<u8>>> {
+        let addr = node.local_addr();
+        let aux_state = node.initial_auxiliary_state();
+        self.not_ready.insert(addr);
+
+        for p in parents {
+            self.nodes
+                .get_mut(p)
+                .unwrap()
+                .borrow_mut()
+                .add_child(node.local_addr());
+        }
+        self.nodes.insert(addr, cell::RefCell::new(node));
+        if let Some(aux_state) = aux_state {
+            self.auxiliary_node_states.insert(addr, aux_state);
+        }
+        trace!(local = addr.id(), "new node incorporated");
+        Ok(None)
+    }
+
+    #[inline(always)]
+    fn handle_remove_nodes(
+        &mut self,
+        nodes: Vec<LocalNodeIndex>,
+    ) -> ReadySetResult<Option<Vec<u8>>> {
+        for &node in &nodes {
+            self.nodes
+                .get(node)
+                .ok_or_else(|| ReadySetError::NoSuchNode(node.id()))?
+                .borrow_mut()
+                .remove();
+            if let Some(state) = self.state.remove(node) {
+                state.tear_down()?;
+            };
+            self.auxiliary_node_states.remove(node);
+            self.reader_write_handles.remove(node);
+            trace!(local = node.id(), "node removed");
+        }
+
+        for node in nodes {
+            for cn in self.nodes.iter_mut() {
+                cn.1.borrow_mut().try_remove_child(node);
+                // NOTE: since nodes are always removed leaves-first, it's not
+                // important to update parent pointers here
+            }
+        }
+        Ok(None)
+    }
+
+    #[inline(always)]
+    fn handle_add_base_column(
+        &mut self,
+        node: LocalNodeIndex,
+        column: Column,
+        default: DfValue,
+    ) -> ReadySetResult<Option<Vec<u8>>> {
+        let mut n = self
+            .nodes
+            .get(node)
+            .ok_or_else(|| ReadySetError::NoSuchNode(node.id()))?
+            .borrow_mut();
+        n.add_column(column);
+        if let Some(b) = n.get_base_mut() {
+            b.add_column(default)?;
+        } else if n.is_ingress() {
+            self.ingress_inject
+                .entry(node)
+                .or_insert_with(|| (n.columns().len(), Vec::new()))
+                .1
+                .push(default);
+        } else {
+            internal!("node unrelated to base got AddBaseColumn");
+        }
+        Ok(None)
+    }
+
+    #[inline(always)]
+    fn handle_drop_base_column(
+        &mut self,
+        node: LocalNodeIndex,
+        column: usize,
+    ) -> ReadySetResult<Option<Vec<u8>>> {
+        let mut n = self
+            .nodes
+            .get(node)
+            .ok_or_else(|| ReadySetError::NoSuchNode(node.id()))?
+            .borrow_mut();
+        n.get_base_mut()
+            .ok_or_else(|| internal_err!("told to drop base column from non-base node"))?
+            .drop_column(column)?;
+        Ok(None)
+    }
+
+    #[inline(always)]
+    fn handle_set_column_type(
+        &mut self,
+        node: LocalNodeIndex,
+        column: usize,
+        new_type: DfType,
+    ) -> ReadySetResult<Option<Vec<u8>>> {
+        trace!(%node, %column, %new_type, "Setting column type");
+        self.nodes
+            .get(node)
+            .ok_or_else(|| ReadySetError::NoSuchNode(node.id()))?
+            .borrow_mut()
+            .set_column_type(column, new_type)?;
+        Ok(None)
+    }
+
+    #[inline(always)]
+    fn handle_add_egress_tx(
+        &mut self,
+        egress_node: LocalNodeIndex,
+        ingress_node_global: NodeIndex,
+        ingress_node_local: LocalNodeIndex,
+        target_domain: DomainIndex,
+        target_shard: usize,
+        replication: SenderReplication,
+    ) -> ReadySetResult<Option<Vec<u8>>> {
+        let mut n = self
+            .nodes
+            .get(egress_node)
+            .ok_or_else(|| ReadySetError::NoSuchNode(egress_node.id()))?
+            .borrow_mut();
+
+        let e = n.as_mut_egress().ok_or(ReadySetError::InvalidNodeType {
+            node_index: egress_node.id(),
+            expected_type: NodeType::Egress,
+        })?;
+
+        e.add_tx(EgressTx::new(
+            ingress_node_global,
+            ingress_node_local,
+            target_domain,
+            target_shard,
+            replication,
+        ));
+
+        Ok(None)
+    }
+
+    #[inline(always)]
+    fn handle_add_egress_tag(
+        &mut self,
+        egress_node: LocalNodeIndex,
+        tag: Tag,
+        ingress_node: NodeIndex,
+    ) -> ReadySetResult<Option<Vec<u8>>> {
+        let mut n = self
+            .nodes
+            .get(egress_node)
+            .ok_or_else(|| ReadySetError::NoSuchNode(egress_node.id()))?
+            .borrow_mut();
+
+        let e = n.as_mut_egress().ok_or(ReadySetError::InvalidNodeType {
+            node_index: egress_node.id(),
+            expected_type: NodeType::Egress,
+        })?;
+
+        e.add_tag(tag, ingress_node);
+        Ok(None)
+    }
+
+    #[inline(always)]
+    fn handle_add_egress_filter(
+        &mut self,
+        egress_node: LocalNodeIndex,
+        target_node: NodeIndex,
+    ) -> ReadySetResult<Option<Vec<u8>>> {
+        let mut n = self
+            .nodes
+            .get(egress_node)
+            .ok_or_else(|| ReadySetError::NoSuchNode(egress_node.id()))?
+            .borrow_mut();
+
+        n.as_mut_egress()
+            .ok_or(ReadySetError::InvalidNodeType {
+                node_index: egress_node.id(),
+                expected_type: NodeType::Egress,
+            })?
+            .add_for_filtering(target_node);
+        Ok(None)
+    }
+
+    #[inline(always)]
+    fn handle_add_sharder_tx(
+        &mut self,
+        sharder_node: LocalNodeIndex,
+        ingress_node: LocalNodeIndex,
+        target_domain: DomainIndex,
+        num_shards: usize,
+        replication: SenderReplication,
+    ) -> ReadySetResult<Option<Vec<u8>>> {
+        self.nodes
+            .get(sharder_node)
+            .ok_or_else(|| ReadySetError::NoSuchNode(sharder_node.id()))?
+            .borrow_mut()
+            .as_mut_sharder()
+            .ok_or(ReadySetError::InvalidNodeType {
+                node_index: sharder_node.id(),
+                expected_type: NodeType::Sharder,
+            })?
+            .add_sharded_child(target_domain, ingress_node, num_shards, replication);
+        Ok(None)
+    }
+
+    #[inline(always)]
+    fn handle_prepare_state(
+        &mut self,
+        node: LocalNodeIndex,
+        state: PrepareStateKind,
+    ) -> ReadySetResult<Option<Vec<u8>>> {
+        match state {
+            PrepareStateKind::Partial {
+                strict_indices,
+                weak_indices,
+            } => {
+                if !self.state.contains_key(node) {
+                    self.state
+                        .insert(node, MaterializedNodeState::Memory(MemoryState::default()));
+                }
+                let state = self.state.get_mut(node).unwrap();
+                for (index, tags) in strict_indices {
+                    debug!(
+                        index = ?index,
+                        tags = ?tags,
+                        weak = ?weak_indices,
+                        local = %node,
+                        "told to prepare partial state"
+                    );
+                    state.add_index(index, Some(tags));
+                }
+
+                for index in weak_indices {
+                    state.add_weak_index(index);
+                }
+            }
+            PrepareStateKind::Full {
+                strict_indices,
+                weak_indices,
+            } => {
+                if !self.state.contains_key(node) {
+                    if self.experimental_materialization_persistence {
+                        let name = format!("full_mat-{}-{}", self.index(), node.id());
+                        // we'll add indices a little further down, so empty keys
+                        // here is fine.
+                        let keys: Vec<Box<[usize]>> = vec![];
+                        let persistence_params = self.persistence_parameters.clone();
+                        self.state.insert(
+                            node,
+                            MaterializedNodeState::Persistent(PersistentState::new(
+                                name,
+                                keys,
+                                &persistence_params,
+                                PersistenceType::FullMaterialization,
+                            )?),
+                        );
+                    } else {
+                        self.state
+                            .insert(node, MaterializedNodeState::Memory(MemoryState::default()));
+                    }
+                }
+                let state = self.state.get_mut(node).unwrap();
+                for index in strict_indices {
+                    debug!(
+                        key = ?index,
+                        %node,
+                        "told to prepare full state"
+                    );
+                    state.add_index(index, None);
+                }
+
+                for index in weak_indices {
+                    state.add_weak_index(index);
+                }
+            }
+            PrepareStateKind::PartialReader {
+                node_index,
+                num_columns,
+                index,
+                trigger_domain,
+                num_shards,
+            } => {
+                if !self
+                    .nodes
+                    .get(node)
+                    .ok_or_else(|| ReadySetError::NoSuchNode(node.id()))?
+                    .borrow()
+                    .is_reader()
+                {
+                    return Err(ReadySetError::InvalidNodeType {
+                        node_index: node.id(),
+                        expected_type: NodeType::Reader,
+                    });
+                }
+
+                let replica = self.replica();
+
+                struct Misses {
+                    misses: Vec<KeyComparison>,
+                    cache_name: Relation,
+                }
+
+                let txs = (0..num_shards)
+                    .map(|shard| -> ReadySetResult<_> {
+                        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<Misses>();
+                        let sender = self
+                            .channel_coordinator
+                            .builder_for(&ReplicaAddress {
+                                domain_index: trigger_domain,
+                                shard,
+                                replica,
+                            })?
+                            .build_async()?;
+
+                        let cols = index.columns.clone();
+                        tokio::spawn(
+                            UnboundedReceiverStream::new(rx)
+                                .map(move |misses| Packet::RequestReaderReplay {
+                                    keys: misses.misses,
+                                    cols: cols.clone(),
+                                    node,
+                                    cache_name: misses.cache_name,
+                                })
+                                .map(Ok)
+                                .forward(sender)
+                                .map(|r| {
+                                    if let Err(e) = r {
+                                        // domain went away?
+                                        error!(error = %e, "replay source went away");
+                                    }
+                                }),
+                        );
+                        Ok(tx)
+                    })
+                    .collect::<ReadySetResult<Vec<_>>>()?;
+
+                #[allow(clippy::indexing_slicing)] // checked node exists above
+                let mut n = self.nodes[node].borrow_mut();
+                let name = n.name().clone();
+                #[allow(clippy::unwrap_used)] // checked it was a reader above
+                let r = n.as_mut_reader().unwrap();
+
+                let (r_part, w_part) = backlog::new_partial(
+                    num_columns,
+                    index,
+                    move |misses: &mut dyn Iterator<Item = KeyComparison>, cache_name| {
+                        if num_shards == 1 {
+                            let misses = misses.collect::<Vec<_>>();
+                            if misses.is_empty() {
+                                return true;
+                            }
+                            #[allow(clippy::indexing_slicing)] // just checked len is 1
+                            txs[0].send(Misses { misses, cache_name }).is_ok()
+                        } else {
+                            let mut per_shard = HashMap::new();
+                            for miss in misses {
+                                assert_eq!(miss.len(), 1);
+                                for shard in miss.shard_keys(num_shards) {
+                                    per_shard
+                                        .entry(shard)
+                                        .or_insert_with(Vec::new)
+                                        .push(miss.clone());
+                                }
+                            }
+                            if per_shard.is_empty() {
+                                return true;
+                            }
+                            per_shard.into_iter().all(|(shard, keys)| {
+                                #[allow(clippy::indexing_slicing)]
+                                // we know txs.len() is equal to num_shards
+                                txs[shard]
+                                    .send(Misses {
+                                        misses: keys,
+                                        cache_name: cache_name.clone(),
+                                    })
+                                    .is_ok()
+                            })
+                        }
+                    },
+                    self.eviction_kind,
+                    r.reader_processing().clone(),
+                );
+
+                let shard = *self.shard.as_ref().unwrap_or(&0);
+                // TODO(ENG-838): Don't recreate every single node on leader failure.
+                // This requires us to overwrite the existing reader.
+                #[allow(clippy::unwrap_used)] // lock poisoning is unrecoverable
+                if self
+                    .readers
+                    .lock()
+                    .unwrap()
+                    .insert(
+                        ReaderAddress {
+                            node: node_index,
+                            name: name.clone(),
+                            shard,
+                        },
+                        r_part,
+                    )
+                    .is_some()
+                {
+                    warn!(
+                        ?node_index,
+                        name = %name.display_unquoted(),
+                        %shard,
+                        "Overwrote existing reader at worker"
+                    );
+                }
+
+                self.reader_write_handles.insert(node, w_part);
+            }
+            PrepareStateKind::FullReader {
+                node_index,
+                num_columns,
+                index,
+            } => {
+                let mut n = self
+                    .nodes
+                    .get(node)
+                    .ok_or_else(|| ReadySetError::NoSuchNode(node.id()))?
+                    .borrow_mut();
+                let name = n.name().clone();
+
+                let r = n
+                    .as_mut_reader()
+                    .ok_or_else(|| ReadySetError::InvalidNodeType {
+                        node_index: node.id(),
+                        expected_type: NodeType::Reader,
+                    })?;
+
+                let (r_part, w_part) =
+                    backlog::new(num_columns, index, r.reader_processing().clone());
+
+                let shard = *self.shard.as_ref().unwrap_or(&0);
+                // TODO(ENG-838): Don't recreate every single node on leader failure.
+                // This requires us to overwrite the existing reader.
+                #[allow(clippy::unwrap_used)] // lock poisoning is unrecoverable
+                if self
+                    .readers
+                    .lock()
+                    .unwrap()
+                    .insert(
+                        ReaderAddress {
+                            node: node_index,
+                            name,
+                            shard,
+                        },
+                        r_part,
+                    )
+                    .is_some()
+                {
+                    warn!(?node_index, ?shard, "Overwrote existing reader at worker");
+                }
+
+                // make sure Reader is actually prepared to receive state
+                self.reader_write_handles.insert(node, w_part);
+            }
+        }
+        Ok(None)
+    }
+
+    #[inline(always)]
+    #[allow(clippy::too_many_arguments)]
+    fn handle_setup_replay_path(
+        &mut self,
+        tag: Tag,
+        source: Option<LocalNodeIndex>,
+        source_index: Option<Index>,
+        path: Vec1<ReplayPathSegment>,
+        partial_unicast_sharder: Option<NodeIndex>,
+        notify_done: bool,
+        trigger: crate::payload::TriggerEndpoint,
+        replica_fanout: bool,
+    ) -> ReadySetResult<Option<Vec<u8>>> {
+        if notify_done {
+            debug!(
+                ?tag,
+                ?source,
+                ?source_index,
+                path = %PrettyReplayPath(&path),
+                "told about terminating replay path",
+            );
+            // NOTE: we set self.replaying_to when we first receive a replay with
+            // this tag
+        } else {
+            debug!(
+                ?tag,
+                ?source,
+                ?source_index,
+                path = %PrettyReplayPath(&path),
+                "told about replay path"
+            );
+        }
+
+        use crate::payload;
+        let trigger = match trigger {
+            payload::TriggerEndpoint::None => TriggerEndpoint::None,
+            payload::TriggerEndpoint::Start(index) => TriggerEndpoint::Start(index),
+            payload::TriggerEndpoint::Local(index) => TriggerEndpoint::Local(index),
+            payload::TriggerEndpoint::End(selection, domain_index) => {
+                // See the documentation for DomainRequest::SetupReplayPath::replica_fanout
+                let replica = if replica_fanout { 0 } else { self.replica() };
+                let shard = |shard| -> ReadySetResult<_> {
+                    // TODO: make async
+                    Ok(self
+                        .channel_coordinator
+                        .builder_for(&ReplicaAddress {
+                            domain_index,
+                            shard,
+                            replica,
+                        })?
+                        .build_sync()?)
+                };
+
+                let options = match selection {
+                    SourceSelection::AllShards(nshards)
+                    | SourceSelection::KeyShard { nshards, .. } => {
+                        // we may need to send to any of these shards
+                        (0..nshards).map(shard).collect::<Result<Vec<_>, _>>()
+                    }
+                    SourceSelection::SameShard => {
+                        Ok(vec![shard(self.shard.ok_or_else(|| {
+                            internal_err!(
+                                "Cannot use SourceSelection::SameShard for a replay path\
+                                             through an unsharded domain",
+                            )
+                        })?)?])
+                    }
+                }?;
+
+                TriggerEndpoint::End {
+                    source: selection,
+                    options,
+                }
+            }
+        };
+
+        self.replay_paths.insert(ReplayPathSpec {
+            tag,
+            source,
+            source_index,
+            path,
+            partial_unicast_sharder,
+            notify_done,
+            trigger,
+        })?;
+        Ok(None)
+    }
+
+    #[inline(always)]
+    fn handle_start_replay(
+        &mut self,
+        executor: &mut dyn Executor,
+        tag: Tag,
+        from: LocalNodeIndex,
+        replicas: Option<Vec<usize>>,
+    ) -> ReadySetResult<Option<Vec<u8>>> {
+        // if the node's state was not initialized yet, then just return and do nothing.
+        // we should only hit this for base nodes which are in the process of having their
+        // persistent state initialized.
+        // it is ok to do nothing as this will cause the reader to keep on retrying later
+        // on, so that will act as a polling mechanism.
+        // this should also rarely happen, since the persistent state is initialized almost
+        // instantly (when opening a table for the first time, likely during runtime), or
+        // might take a huge amount of time but during a period of recovery (where we are
+        // still in a deployment stage).
+        if self.not_ready.contains(&from) {
+            debug!(%from, "attempted to start a replay, but node is not ready yet");
+            return Ok(None);
+        }
+        use std::thread;
+        invariant_eq!(
+            self.replay_paths
+                .get(tag)
+                .ok_or_else(|| ReadySetError::NoSuchReplayPath(tag.into()))?
+                .source,
+            Some(from)
+        );
+
+        let start = time::Instant::now();
+        self.total_replay_time.start();
+        debug!(%from, "starting replay");
+
+        if self
+            .nodes
+            .get(from)
+            .filter(|n| n.borrow().is_dropped())
+            .is_some()
+        {
+            warn!(node = ?from, domain = ?self.index, "replay path started with removed node; ignoring...");
+            return Ok(None);
+        }
+
+        // we know that the node is materialized, as the migration coordinator
+        // picks path that originate with materialized nodes. if this weren't the
+        // case, we wouldn't be able to do the replay, and the entire migration
+        // would fail.
+        //
+        // In the case of memory state, we clone the entire state so that we can continue to
+        // occasionally process incoming updates to the domain without disturbing the state
+        // that is being replayed. For persistent state, we can stream records from a
+        // consistent snapshot and avoid the allocations
+        let state = self
+            .state
+            .get(from)
+            .expect("migration replay path started with non-materialized node");
+        let is_empty = state.is_empty();
+        let mut all_records = state.all_records();
+
+        debug!(
+            μs = %start.elapsed().as_micros(),
+            "current state cloned for replay"
+        );
+
+        #[allow(clippy::indexing_slicing)]
+        // we checked the replay path exists above, and replay paths cannot be empty
+        let link = Link::new(from, self.replay_paths[tag].path[0].node);
+
+        // we're been given an entire state snapshot, but we need to digest it
+        // piece by piece spawn off a thread to do that chunking. however, before
+        // we spin off that thread, we need to send a single Replay message to tell
+        // the target domain to start buffering everything that follows. we can't
+        // do that inside the thread, because by the time that thread is scheduled,
+        // we may already have processed some other messages that are not yet a
+        // part of state.
+        let p = Box::new(Packet::ReplayPiece {
+            tag,
+            link,
+            context: ReplayPieceContext::Full {
+                // NOTE: If we're replaying from persistent state this might be wrong, since
+                // it's backed by an *estimate* of the number of keys in the state
+                last: is_empty,
+                replicas: replicas.clone(),
+            },
+            data: Vec::<Record>::new().into(),
+            cache_name: MIGRATION_CACHE_NAME_STUB.into(),
+        });
+
+        let added_cols = self.ingress_inject.get(from).cloned();
+        let default = {
+            let n = self
+                .nodes
+                .get(from)
+                .ok_or_else(|| ReadySetError::NoSuchNode(from.id()))?
+                .borrow();
+            let mut default = None;
+            if let Some(b) = n.get_base() {
+                let mut row = Vec::new();
+                b.fix(&mut row);
+                default = Some(row);
+            }
+            default
+        };
+        let fix = move |mut r: Vec<DfValue>| -> Vec<DfValue> {
+            if let Some((start, ref added)) = added_cols {
+                let rlen = r.len();
+                r.extend(added.iter().skip(rlen - start).cloned());
+            } else if let Some(ref defaults) = default {
+                let rlen = r.len();
+                r.extend(defaults.iter().skip(rlen).cloned());
+            }
+            r
+        };
+
+        let replay_tx_desc = self.channel_coordinator.builder_for(&self.address())?;
+
+        let address = self.address();
+        thread::Builder::new()
+            .name(format!("replay{}.{}", self.index(), link.src))
+            .spawn_wrapper(move || {
+                let span = info_span!("full_replay", %address, src = %link.src);
+                let _guard = span.enter();
+                use itertools::Itertools;
+
+                // TODO: make async
+                let mut chunked_replay_tx = match replay_tx_desc.build_sync() {
+                    Ok(r) => r,
+                    Err(error) => {
+                        error!(%error, "Error building channel for chunked replay");
+                        return;
+                    }
+                };
+
+                let start = time::Instant::now();
+                debug!(node = %link.dst, "starting state chunker");
+
+                let mut guard = all_records.read();
+                let iter = guard.iter().chunks(BATCH_SIZE);
+                let mut iter = iter
+                    .into_iter()
+                    .map(|chunk| Records::from_iter(chunk.map(&fix)))
+                    .enumerate()
+                    .peekable();
+
+                // process all records in state to completion within domain and then
+                // forward on tx (if there is one)
+                let mut sent_last = is_empty;
+                while let Some((i, chunk)) = iter.next() {
+                    let len = chunk.len();
+                    let last = iter.peek().is_none();
+                    sent_last = last;
+                    let p = Packet::ReplayPiece {
+                        tag,
+                        link, // to is overwritten by receiver
+                        context: ReplayPieceContext::Full {
+                            last,
+                            replicas: replicas.clone(),
+                        },
+                        data: chunk,
+                        cache_name: MIGRATION_CACHE_NAME_STUB.into(),
+                    };
+
+                    trace!(num = i, len, "sending batch");
+                    if let Err(error) = chunked_replay_tx.send(p) {
+                        warn!(%error, "replayer noticed domain shutdown");
+                        break;
+                    }
+                }
+
+                // Since we're using `is_empty` above to send a `last: true` packet
+                // before launching the thread, and that's based on a potentially
+                // inaccurate estimate, it might be the case that we started this thread
+                // with no records - if so, we need to send a `last: true` packet to
+                // tell the target domain we're done
+                if !sent_last {
+                    trace!("Sending empty last batch");
+                    if let Err(error) = chunked_replay_tx.send(Packet::ReplayPiece {
+                        tag,
+                        link,
+                        context: ReplayPieceContext::Full {
+                            last: true,
+                            replicas: replicas.clone(),
+                        },
+                        data: Default::default(),
+                        cache_name: MIGRATION_CACHE_NAME_STUB.into(),
+                    }) {
+                        warn!(%error, "replayer noticed domain shutdown");
+                    }
+                }
+
+                debug!(
+                   node = %link.dst,
+                   μs = %start.elapsed().as_micros(),
+                   "state chunker finished"
+                );
+
+                let time = start.elapsed();
+                counter!(
+                    recorded::DOMAIN_TOTAL_CHUNKED_REPLAY_TIME,
+                    time.as_micros() as u64
+                );
+                histogram!(
+                    recorded::DOMAIN_CHUNKED_REPLAY_TIME,
+                    time.as_micros() as f64
+                );
+            })?;
+        self.handle_replay(*p, executor)?;
+
+        self.total_replay_time.stop();
+        self.metrics.rec_chunked_replay_start_time(start.elapsed());
+        Ok(None)
+    }
+
+    #[inline(always)]
+    fn handle_ready(
+        &mut self,
+        node_idx: LocalNodeIndex,
+        purge: bool,
+        index: HashSet<Index>,
+    ) -> ReadySetResult<Option<Vec<u8>>> {
+        invariant_eq!(self.mode, DomainMode::Forwarding);
+
+        let node_ref = self
+            .nodes
+            .get(node_idx)
+            .ok_or_else(|| ReadySetError::NoSuchNode(node_idx.id()))?;
+
+        node_ref.borrow_mut().purge = purge;
+
+        let is_ready = if !index.is_empty() {
+            match (
+                node_ref.borrow().get_base(),
+                &self.persistence_parameters.mode,
+            ) {
+                (Some(base), &DurabilityMode::DeleteOnExit)
+                | (Some(base), &DurabilityMode::Permanent) => {
+                    let node = node_ref.borrow();
+                    let node_name = node.name();
+                    let base_name = format!(
+                        "{}-{}{}-{}",
+                        &self
+                            .persistence_parameters
+                            .db_filename_prefix
+                            .replace('-', "_"),
+                        match &node_name.schema {
+                            Some(schema) => format!("{schema}-"),
+                            _ => "".into(),
+                        },
+                        node_name.name,
+                        self.shard.unwrap_or(0),
+                    );
+
+                    let persistence_params = self.persistence_parameters.clone();
+                    let init_state_tx = self.init_state_tx.clone();
+                    let unique_keys = base.all_unique_keys();
+
+                    // run the base table initialization in a separate task, as we know
+                    // this might take a lot of time for large
+                    // tables. upon completion, we'll notify the
+                    // domain and set the materialized state for
+                    // this node.
+                    // TODO(fran): Avoid panicking the whole process and instead just fail
+                    //  the domain thread (ENG-2752).
+                    tokio::spawn(abort_on_panic(
+                        initialize_state(
+                            node_idx,
+                            index,
+                            base_name.clone(),
+                            unique_keys,
+                            persistence_params,
+                            init_state_tx,
+                        )
+                        .instrument(tracing::trace_span!(
+                            "initialize_state",
+                            name = %base_name,
+                            node = %node_idx,
+                        ))
+                        .map_err(move |e| {
+                            error!(error = %e, "Domain failed while initializing base table");
+                            process::abort();
+                        }),
+                    ));
+                    false
+                }
+                _ => {
+                    let mut s = MaterializedNodeState::Memory(MemoryState::default());
+                    for idx in index {
+                        s.add_index(idx, None);
+                    }
+                    assert!(self.state.insert(node_idx, s).is_none());
+                    true
+                }
+            }
+        } else {
+            // NOTE: just because index_on is None does *not* mean we're not
+            // materialized
+            true
+        };
+
+        if is_ready && self.not_ready.remove(&node_idx) {
+            trace!(local = node_idx.id(), "readying empty node");
+        }
+
+        // swap replayed reader nodes to expose new state
+        if let Some(state) = self.reader_write_handles.get_mut(node_idx) {
+            trace!(local = %node_idx, "swapping state");
+            state.swap();
+            trace!(local = %node_idx, "state swapped");
+        }
+
+        Ok(Some(bincode::serialize(&is_ready)?))
+    }
+
+    #[inline(always)]
+    fn handle_get_statistics(&mut self) -> ReadySetResult<Option<Vec<u8>>> {
+        let domain_stats = readyset_client::debug::stats::DomainStats {
+            total_time: self.total_time.num_nanoseconds(),
+            total_ptime: self.total_ptime.num_nanoseconds(),
+            total_replay_time: self.total_replay_time.num_nanoseconds(),
+            total_forward_time: self.total_forward_time.num_nanoseconds(),
+            wait_time: self.wait_time.num_nanoseconds(),
+        };
+
+        let node_stats: HashMap<
+            petgraph::graph::NodeIndex,
+            readyset_client::debug::stats::NodeStats,
+        > = self
+            .nodes
+            .values()
+            .filter_map(|nd| {
+                let n = &*nd.borrow();
+                let local_index = n.local_addr();
+                let node_index: NodeIndex = n.global_addr();
+
+                let time = self.process_times.num_nanoseconds(local_index);
+                let ptime = self.process_ptimes.num_nanoseconds(local_index);
+                let mem_size = self
+                    .reader_write_handles
+                    .get(local_index)
+                    .map(|wh| wh.deep_size_of())
+                    .unwrap_or_else(|| {
+                        self.state
+                            .get(local_index)
+                            .map(|s| s.deep_size_of())
+                            .unwrap_or(0)
+                    });
+
+                let mat_state = self
+                    .reader_write_handles
+                    .get(local_index)
+                    .map(|wh| {
+                        if wh.is_partial() {
+                            MaterializationStatus::Partial {
+                                beyond_materialization_frontier: n.purge,
+                            }
+                        } else {
+                            MaterializationStatus::Full
+                        }
+                    })
+                    .unwrap_or_else(|| match self.state.get(local_index) {
+                        Some(s) => {
+                            if s.is_partial() {
+                                MaterializationStatus::Partial {
+                                    beyond_materialization_frontier: n.purge,
+                                }
+                            } else {
+                                MaterializationStatus::Full
+                            }
+                        }
+                        None => MaterializationStatus::Not,
+                    });
+
+                let probe_result = if let Some(n) = n.as_internal() {
+                    n.probe()
+                } else {
+                    Default::default()
+                };
+
+                if let (Some(time), Some(ptime)) = (time, ptime) {
+                    Some((
+                        node_index,
+                        readyset_client::debug::stats::NodeStats {
+                            desc: format!("{:?}", n),
+                            process_time: time,
+                            process_ptime: ptime,
+                            mem_size,
+                            materialized: mat_state,
+                            probe_result,
+                        },
+                    ))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let ret = (domain_stats, node_stats);
+        Ok(Some(bincode::serialize(&ret)?))
+    }
+
+    #[inline(always)]
+    fn handle_request_node_sizes(&mut self) -> ReadySetResult<Option<Vec<u8>>> {
+        let mut res = Vec::new();
+        for (local_index, node_ref) in self.nodes.iter() {
+            let node = node_ref.borrow();
+            if node.is_reader() {
+                if let Some(wh) = self.reader_write_handles.get(local_index) {
+                    res.push((
+                        node.global_addr(),
+                        KeyCount::ExactKeyCount(wh.len()),
+                        wh.deep_size_of(),
+                    ));
+                }
+            } else if let Some(state) = self.state.get(local_index) {
+                // non-reader node with state
+                res.push((node.global_addr(), state.key_count(), state.deep_size_of()))
+            }
+        }
+        Ok(Some(bincode::serialize(&res)?))
+    }
+
+    #[inline(always)]
+    fn handle_query_replay_done(
+        &mut self,
+        node: LocalNodeIndex,
+    ) -> ReadySetResult<Option<Vec<u8>>> {
+        let ret = self
+            .state
+            .get(node)
+            .map(|s| s.replay_done())
+            .or_else(|| {
+                self.reader_write_handles
+                    .get(node)
+                    .map(|rwh| rwh.replay_done())
+            })
+            .unwrap_or_else(|| {
+                error!(%node, "Received QueryReplayDone for non-materialized node");
+                true
+            });
+        Ok(Some(bincode::serialize(&ret)?))
+    }
+
+    #[inline(always)]
+    fn handle_generated_columns(
+        &mut self,
+        node: LocalNodeIndex,
+        index: Index,
+        tag: Tag,
+    ) -> ReadySetResult<Option<Vec<u8>>> {
+        // Record that these columns are generated...
+        self.replay_paths
+            .insert_generated_columns(node, index.columns.clone(), tag);
+        // ...and also make sure we use that tag to index those columns in this node, so we
+        // know what hole to fill when we've satisfied replays to those columns
+        self.state
+            .entry(node)
+            .or_insert_with(|| MaterializedNodeState::Memory(MemoryState::default()))
+            .add_index(index, Some(vec![tag]));
+        Ok(None)
+    }
+
+    #[inline(always)]
+    fn handle_all_tables_compacted(&mut self) -> ReadySetResult<Option<Vec<u8>>> {
+        let finished = self
+            .state
+            .values_mut()
+            .filter_map(|state| state.as_persistent_mut())
+            .all(|state| state.compaction_finished());
+        Ok(Some(bincode::serialize(&finished)?))
+    }
+
+    #[inline(always)]
+    fn handle_evict(
+        &mut self,
+        executor: &mut dyn Executor,
+        req: EvictRequest,
+    ) -> ReadySetResult<Option<Vec<u8>>> {
+        // Handle an external request for an eviction. Returns the evicted key unless no
+        // eviction occurred.
+        let key = self.handle_eviction(req, executor)?;
+        Ok(Some(bincode::serialize(&key)?))
+    }
+
+    #[inline(always)]
+    fn handle_shutdown(&mut self) -> ReadySetResult<Option<Vec<u8>>> {
+        self.state.values_mut().for_each(|s| {
+            let err = s.shut_down();
+            if let Err(e) = err {
+                warn!(error = %e, "error on shutting down domains");
+            }
+        });
+        Ok(None)
+    }
+
     pub fn domain_request(
         &mut self,
         req: DomainRequest,
@@ -1461,435 +2512,58 @@ impl Domain {
     ) -> ReadySetResult<Option<Vec<u8>>> {
         trace!(?req, "processing domain request");
         let ret = match req {
-            DomainRequest::AddNode { node, parents } => {
-                let addr = node.local_addr();
-                let aux_state = node.initial_auxiliary_state();
-                self.not_ready.insert(addr);
-
-                for p in parents {
-                    self.nodes
-                        .get_mut(p)
-                        .unwrap()
-                        .borrow_mut()
-                        .add_child(node.local_addr());
-                }
-                self.nodes.insert(addr, cell::RefCell::new(node));
-                if let Some(aux_state) = aux_state {
-                    self.auxiliary_node_states.insert(addr, aux_state);
-                }
-                trace!(local = addr.id(), "new node incorporated");
-                Ok(None)
-            }
-            DomainRequest::RemoveNodes { nodes } => {
-                for &node in &nodes {
-                    self.nodes
-                        .get(node)
-                        .ok_or_else(|| ReadySetError::NoSuchNode(node.id()))?
-                        .borrow_mut()
-                        .remove();
-                    if let Some(state) = self.state.remove(node) {
-                        state.tear_down()?;
-                    };
-                    self.auxiliary_node_states.remove(node);
-                    self.reader_write_handles.remove(node);
-                    trace!(local = node.id(), "node removed");
-                }
-
-                for node in nodes {
-                    for cn in self.nodes.iter_mut() {
-                        cn.1.borrow_mut().try_remove_child(node);
-                        // NOTE: since nodes are always removed leaves-first, it's not
-                        // important to update parent pointers here
-                    }
-                }
-                Ok(None)
-            }
+            DomainRequest::AddNode { node, parents } => self.handle_add_node(node, parents),
+            DomainRequest::RemoveNodes { nodes } => self.handle_remove_nodes(nodes),
             DomainRequest::AddBaseColumn {
                 node,
                 column,
                 default,
-            } => {
-                let mut n = self
-                    .nodes
-                    .get(node)
-                    .ok_or_else(|| ReadySetError::NoSuchNode(node.id()))?
-                    .borrow_mut();
-                n.add_column(column);
-                if let Some(b) = n.get_base_mut() {
-                    b.add_column(default)?;
-                } else if n.is_ingress() {
-                    self.ingress_inject
-                        .entry(node)
-                        .or_insert_with(|| (n.columns().len(), Vec::new()))
-                        .1
-                        .push(default);
-                } else {
-                    internal!("node unrelated to base got AddBaseColumn");
-                }
-                Ok(None)
-            }
+            } => self.handle_add_base_column(node, column, default),
             DomainRequest::DropBaseColumn { node, column } => {
-                let mut n = self
-                    .nodes
-                    .get(node)
-                    .ok_or_else(|| ReadySetError::NoSuchNode(node.id()))?
-                    .borrow_mut();
-                n.get_base_mut()
-                    .ok_or_else(|| internal_err!("told to drop base column from non-base node"))?
-                    .drop_column(column)?;
-                Ok(None)
+                self.handle_drop_base_column(node, column)
             }
             DomainRequest::SetColumnType {
                 node,
                 column,
                 new_type,
-            } => {
-                trace!(%node, %column, %new_type, "Setting column type");
-                self.nodes
-                    .get(node)
-                    .ok_or_else(|| ReadySetError::NoSuchNode(node.id()))?
-                    .borrow_mut()
-                    .set_column_type(column, new_type)?;
-                Ok(None)
-            }
+            } => self.handle_set_column_type(node, column, new_type),
             DomainRequest::AddEgressTx {
                 egress_node,
                 ingress_node: (ingress_node_global, ingress_node_local),
                 target_domain,
                 target_shard,
                 replication,
-            } => {
-                let mut n = self
-                    .nodes
-                    .get(egress_node)
-                    .ok_or_else(|| ReadySetError::NoSuchNode(egress_node.id()))?
-                    .borrow_mut();
-
-                let e = n.as_mut_egress().ok_or(ReadySetError::InvalidNodeType {
-                    node_index: egress_node.id(),
-                    expected_type: NodeType::Egress,
-                })?;
-
-                e.add_tx(EgressTx::new(
-                    ingress_node_global,
-                    ingress_node_local,
-                    target_domain,
-                    target_shard,
-                    replication,
-                ));
-
-                Ok(None)
-            }
+            } => self.handle_add_egress_tx(
+                egress_node,
+                ingress_node_global,
+                ingress_node_local,
+                target_domain,
+                target_shard,
+                replication,
+            ),
             DomainRequest::AddEgressTag {
                 egress_node,
                 tag,
                 ingress_node,
-            } => {
-                let mut n = self
-                    .nodes
-                    .get(egress_node)
-                    .ok_or_else(|| ReadySetError::NoSuchNode(egress_node.id()))?
-                    .borrow_mut();
-
-                let e = n.as_mut_egress().ok_or(ReadySetError::InvalidNodeType {
-                    node_index: egress_node.id(),
-                    expected_type: NodeType::Egress,
-                })?;
-
-                e.add_tag(tag, ingress_node);
-                Ok(None)
-            }
+            } => self.handle_add_egress_tag(egress_node, tag, ingress_node),
             DomainRequest::AddEgressFilter {
                 egress_node,
                 target_node,
-            } => {
-                let mut n = self
-                    .nodes
-                    .get(egress_node)
-                    .ok_or_else(|| ReadySetError::NoSuchNode(egress_node.id()))?
-                    .borrow_mut();
-
-                n.as_mut_egress()
-                    .ok_or(ReadySetError::InvalidNodeType {
-                        node_index: egress_node.id(),
-                        expected_type: NodeType::Egress,
-                    })?
-                    .add_for_filtering(target_node);
-                Ok(None)
-            }
+            } => self.handle_add_egress_filter(egress_node, target_node),
             DomainRequest::AddSharderTx {
                 sharder_node,
                 ingress_node,
                 target_domain,
                 num_shards,
                 replication,
-            } => {
-                self.nodes
-                    .get(sharder_node)
-                    .ok_or_else(|| ReadySetError::NoSuchNode(sharder_node.id()))?
-                    .borrow_mut()
-                    .as_mut_sharder()
-                    .ok_or(ReadySetError::InvalidNodeType {
-                        node_index: sharder_node.id(),
-                        expected_type: NodeType::Sharder,
-                    })?
-                    .add_sharded_child(target_domain, ingress_node, num_shards, replication);
-                Ok(None)
-            }
-            DomainRequest::PrepareState { node, state } => {
-                match state {
-                    PrepareStateKind::Partial {
-                        strict_indices,
-                        weak_indices,
-                    } => {
-                        if !self.state.contains_key(node) {
-                            self.state.insert(
-                                node,
-                                MaterializedNodeState::Memory(MemoryState::default()),
-                            );
-                        }
-                        let state = self.state.get_mut(node).unwrap();
-                        for (index, tags) in strict_indices {
-                            debug!(
-                                index = ?index,
-                                tags = ?tags,
-                                weak = ?weak_indices,
-                                local = %node,
-                                "told to prepare partial state"
-                            );
-                            state.add_index(index, Some(tags));
-                        }
-
-                        for index in weak_indices {
-                            state.add_weak_index(index);
-                        }
-                    }
-                    PrepareStateKind::Full {
-                        strict_indices,
-                        weak_indices,
-                    } => {
-                        if !self.state.contains_key(node) {
-                            if self.experimental_materialization_persistence {
-                                let name = format!("full_mat-{}-{}", self.index(), node.id());
-                                // we'll add indices a little further down, so empty keys
-                                // here is fine.
-                                let keys: Vec<Box<[usize]>> = vec![];
-                                let persistence_params = self.persistence_parameters.clone();
-                                self.state.insert(
-                                    node,
-                                    MaterializedNodeState::Persistent(PersistentState::new(
-                                        name,
-                                        keys,
-                                        &persistence_params,
-                                        PersistenceType::FullMaterialization,
-                                    )?),
-                                );
-                            } else {
-                                self.state.insert(
-                                    node,
-                                    MaterializedNodeState::Memory(MemoryState::default()),
-                                );
-                            }
-                        }
-                        let state = self.state.get_mut(node).unwrap();
-                        for index in strict_indices {
-                            debug!(
-                                key = ?index,
-                                %node,
-                                "told to prepare full state"
-                            );
-                            state.add_index(index, None);
-                        }
-
-                        for index in weak_indices {
-                            state.add_weak_index(index);
-                        }
-                    }
-                    PrepareStateKind::PartialReader {
-                        node_index,
-                        num_columns,
-                        index,
-                        trigger_domain,
-                        num_shards,
-                    } => {
-                        if !self
-                            .nodes
-                            .get(node)
-                            .ok_or_else(|| ReadySetError::NoSuchNode(node.id()))?
-                            .borrow()
-                            .is_reader()
-                        {
-                            return Err(ReadySetError::InvalidNodeType {
-                                node_index: node.id(),
-                                expected_type: NodeType::Reader,
-                            });
-                        }
-
-                        let replica = self.replica();
-
-                        struct Misses {
-                            misses: Vec<KeyComparison>,
-                            cache_name: Relation,
-                        }
-
-                        let txs = (0..num_shards)
-                            .map(|shard| -> ReadySetResult<_> {
-                                let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<Misses>();
-                                let sender = self
-                                    .channel_coordinator
-                                    .builder_for(&ReplicaAddress {
-                                        domain_index: trigger_domain,
-                                        shard,
-                                        replica,
-                                    })?
-                                    .build_async()?;
-
-                                let cols = index.columns.clone();
-                                tokio::spawn(
-                                    UnboundedReceiverStream::new(rx)
-                                        .map(move |misses| Packet::RequestReaderReplay {
-                                            keys: misses.misses,
-                                            cols: cols.clone(),
-                                            node,
-                                            cache_name: misses.cache_name,
-                                        })
-                                        .map(Ok)
-                                        .forward(sender)
-                                        .map(|r| {
-                                            if let Err(e) = r {
-                                                // domain went away?
-                                                error!(error = %e, "replay source went away");
-                                            }
-                                        }),
-                                );
-                                Ok(tx)
-                            })
-                            .collect::<ReadySetResult<Vec<_>>>()?;
-
-                        #[allow(clippy::indexing_slicing)] // checked node exists above
-                        let mut n = self.nodes[node].borrow_mut();
-                        let name = n.name().clone();
-                        #[allow(clippy::unwrap_used)] // checked it was a reader above
-                        let r = n.as_mut_reader().unwrap();
-
-                        let (r_part, w_part) = backlog::new_partial(
-                            num_columns,
-                            index,
-                            move |misses: &mut dyn Iterator<Item = KeyComparison>, cache_name| {
-                                if num_shards == 1 {
-                                    let misses = misses.collect::<Vec<_>>();
-                                    if misses.is_empty() {
-                                        return true;
-                                    }
-                                    #[allow(clippy::indexing_slicing)] // just checked len is 1
-                                    txs[0].send(Misses { misses, cache_name }).is_ok()
-                                } else {
-                                    let mut per_shard = HashMap::new();
-                                    for miss in misses {
-                                        assert_eq!(miss.len(), 1);
-                                        for shard in miss.shard_keys(num_shards) {
-                                            per_shard
-                                                .entry(shard)
-                                                .or_insert_with(Vec::new)
-                                                .push(miss.clone());
-                                        }
-                                    }
-                                    if per_shard.is_empty() {
-                                        return true;
-                                    }
-                                    per_shard.into_iter().all(|(shard, keys)| {
-                                        #[allow(clippy::indexing_slicing)]
-                                        // we know txs.len() is equal to num_shards
-                                        txs[shard]
-                                            .send(Misses {
-                                                misses: keys,
-                                                cache_name: cache_name.clone(),
-                                            })
-                                            .is_ok()
-                                    })
-                                }
-                            },
-                            self.eviction_kind,
-                            r.reader_processing().clone(),
-                        );
-
-                        let shard = *self.shard.as_ref().unwrap_or(&0);
-                        // TODO(ENG-838): Don't recreate every single node on leader failure.
-                        // This requires us to overwrite the existing reader.
-                        #[allow(clippy::unwrap_used)] // lock poisoning is unrecoverable
-                        if self
-                            .readers
-                            .lock()
-                            .unwrap()
-                            .insert(
-                                ReaderAddress {
-                                    node: node_index,
-                                    name: name.clone(),
-                                    shard,
-                                },
-                                r_part,
-                            )
-                            .is_some()
-                        {
-                            warn!(
-                                ?node_index,
-                                name = %name.display_unquoted(),
-                                %shard,
-                                "Overwrote existing reader at worker"
-                            );
-                        }
-
-                        self.reader_write_handles.insert(node, w_part);
-                    }
-                    PrepareStateKind::FullReader {
-                        node_index,
-                        num_columns,
-                        index,
-                    } => {
-                        let mut n = self
-                            .nodes
-                            .get(node)
-                            .ok_or_else(|| ReadySetError::NoSuchNode(node.id()))?
-                            .borrow_mut();
-                        let name = n.name().clone();
-
-                        let r =
-                            n.as_mut_reader()
-                                .ok_or_else(|| ReadySetError::InvalidNodeType {
-                                    node_index: node.id(),
-                                    expected_type: NodeType::Reader,
-                                })?;
-
-                        let (r_part, w_part) =
-                            backlog::new(num_columns, index, r.reader_processing().clone());
-
-                        let shard = *self.shard.as_ref().unwrap_or(&0);
-                        // TODO(ENG-838): Don't recreate every single node on leader failure.
-                        // This requires us to overwrite the existing reader.
-                        #[allow(clippy::unwrap_used)] // lock poisoning is unrecoverable
-                        if self
-                            .readers
-                            .lock()
-                            .unwrap()
-                            .insert(
-                                ReaderAddress {
-                                    node: node_index,
-                                    name,
-                                    shard,
-                                },
-                                r_part,
-                            )
-                            .is_some()
-                        {
-                            warn!(?node_index, ?shard, "Overwrote existing reader at worker");
-                        }
-
-                        // make sure Reader is actually prepared to receive state
-                        self.reader_write_handles.insert(node, w_part);
-                    }
-                }
-                Ok(None)
-            }
+            } => self.handle_add_sharder_tx(
+                sharder_node,
+                ingress_node,
+                target_domain,
+                num_shards,
+                replication,
+            ),
+            DomainRequest::PrepareState { node, state } => self.handle_prepare_state(node, state),
             DomainRequest::SetupReplayPath {
                 tag,
                 source,
@@ -1899,472 +2573,28 @@ impl Domain {
                 notify_done,
                 trigger,
                 replica_fanout,
-            } => {
-                if notify_done {
-                    debug!(
-                        ?tag,
-                        ?source,
-                        ?source_index,
-                        path = %PrettyReplayPath(&path),
-                        "told about terminating replay path",
-                    );
-                    // NOTE: we set self.replaying_to when we first receive a replay with
-                    // this tag
-                } else {
-                    debug!(
-                        ?tag,
-                        ?source,
-                        ?source_index,
-                        path = %PrettyReplayPath(&path),
-                        "told about replay path"
-                    );
-                }
-
-                use crate::payload;
-                let trigger = match trigger {
-                    payload::TriggerEndpoint::None => TriggerEndpoint::None,
-                    payload::TriggerEndpoint::Start(index) => TriggerEndpoint::Start(index),
-                    payload::TriggerEndpoint::Local(index) => TriggerEndpoint::Local(index),
-                    payload::TriggerEndpoint::End(selection, domain_index) => {
-                        // See the documentation for DomainRequest::SetupReplayPath::replica_fanout
-                        let replica = if replica_fanout { 0 } else { self.replica() };
-                        let shard = |shard| -> ReadySetResult<_> {
-                            // TODO: make async
-                            Ok(self
-                                .channel_coordinator
-                                .builder_for(&ReplicaAddress {
-                                    domain_index,
-                                    shard,
-                                    replica,
-                                })?
-                                .build_sync()?)
-                        };
-
-                        let options = match selection {
-                            SourceSelection::AllShards(nshards)
-                            | SourceSelection::KeyShard { nshards, .. } => {
-                                // we may need to send to any of these shards
-                                (0..nshards).map(shard).collect::<Result<Vec<_>, _>>()
-                            }
-                            SourceSelection::SameShard => {
-                                Ok(vec![shard(self.shard.ok_or_else(|| {
-                                    internal_err!(
-                                        "Cannot use SourceSelection::SameShard for a replay path\
-                                             through an unsharded domain",
-                                    )
-                                })?)?])
-                            }
-                        }?;
-
-                        TriggerEndpoint::End {
-                            source: selection,
-                            options,
-                        }
-                    }
-                };
-
-                self.replay_paths.insert(ReplayPathSpec {
-                    tag,
-                    source,
-                    source_index,
-                    path,
-                    partial_unicast_sharder,
-                    notify_done,
-                    trigger,
-                })?;
-                Ok(None)
-            }
+            } => self.handle_setup_replay_path(
+                tag,
+                source,
+                source_index,
+                path,
+                partial_unicast_sharder,
+                notify_done,
+                trigger,
+                replica_fanout,
+            ),
             DomainRequest::StartReplay {
                 tag,
                 from,
                 replicas,
                 targeting_domain: _,
-            } => {
-                // if the node's state was not initialized yet, then just return and do nothing.
-                // we should only hit this for base nodes which are in the process of having their
-                // persistent state initialized.
-                // it is ok to do nothing as this will cause the reader to keep on retrying later
-                // on, so that will act as a polling mechanism.
-                // this should also rarely happen, since the persistent state is initialized almost
-                // instantly (when opening a table for the first time, likely during runtime), or
-                // might take a huge amount of time but during a period of recovery (where we are
-                // still in a deployment stage).
-                if self.not_ready.contains(&from) {
-                    debug!(%from, "attempted to start a replay, but node is not ready yet");
-                    return Ok(None);
-                }
-                use std::thread;
-                invariant_eq!(
-                    self.replay_paths
-                        .get(tag)
-                        .ok_or_else(|| ReadySetError::NoSuchReplayPath(tag.into()))?
-                        .source,
-                    Some(from)
-                );
-
-                let start = time::Instant::now();
-                self.total_replay_time.start();
-                debug!(%from, "starting replay");
-
-                if self
-                    .nodes
-                    .get(from)
-                    .filter(|n| n.borrow().is_dropped())
-                    .is_some()
-                {
-                    warn!(node = ?from, domain = ?self.index, "replay path started with removed node; ignoring...");
-                    return Ok(None);
-                }
-
-                // we know that the node is materialized, as the migration coordinator
-                // picks path that originate with materialized nodes. if this weren't the
-                // case, we wouldn't be able to do the replay, and the entire migration
-                // would fail.
-                //
-                // In the case of memory state, we clone the entire state so that we can continue to
-                // occasionally process incoming updates to the domain without disturbing the state
-                // that is being replayed. For persistent state, we can stream records from a
-                // consistent snapshot and avoid the allocations
-                let state = self
-                    .state
-                    .get(from)
-                    .expect("migration replay path started with non-materialized node");
-                let is_empty = state.is_empty();
-                let mut all_records = state.all_records();
-
-                debug!(
-                    μs = %start.elapsed().as_micros(),
-                    "current state cloned for replay"
-                );
-
-                #[allow(clippy::indexing_slicing)]
-                // we checked the replay path exists above, and replay paths cannot be empty
-                let link = Link::new(from, self.replay_paths[tag].path[0].node);
-
-                // we're been given an entire state snapshot, but we need to digest it
-                // piece by piece spawn off a thread to do that chunking. however, before
-                // we spin off that thread, we need to send a single Replay message to tell
-                // the target domain to start buffering everything that follows. we can't
-                // do that inside the thread, because by the time that thread is scheduled,
-                // we may already have processed some other messages that are not yet a
-                // part of state.
-                let p = Box::new(Packet::ReplayPiece {
-                    tag,
-                    link,
-                    context: ReplayPieceContext::Full {
-                        // NOTE: If we're replaying from persistent state this might be wrong, since
-                        // it's backed by an *estimate* of the number of keys in the state
-                        last: is_empty,
-                        replicas: replicas.clone(),
-                    },
-                    data: Vec::<Record>::new().into(),
-                    cache_name: MIGRATION_CACHE_NAME_STUB.into(),
-                });
-
-                let added_cols = self.ingress_inject.get(from).cloned();
-                let default = {
-                    let n = self
-                        .nodes
-                        .get(from)
-                        .ok_or_else(|| ReadySetError::NoSuchNode(from.id()))?
-                        .borrow();
-                    let mut default = None;
-                    if let Some(b) = n.get_base() {
-                        let mut row = Vec::new();
-                        b.fix(&mut row);
-                        default = Some(row);
-                    }
-                    default
-                };
-                let fix = move |mut r: Vec<DfValue>| -> Vec<DfValue> {
-                    if let Some((start, ref added)) = added_cols {
-                        let rlen = r.len();
-                        r.extend(added.iter().skip(rlen - start).cloned());
-                    } else if let Some(ref defaults) = default {
-                        let rlen = r.len();
-                        r.extend(defaults.iter().skip(rlen).cloned());
-                    }
-                    r
-                };
-
-                let replay_tx_desc = self.channel_coordinator.builder_for(&self.address())?;
-
-                let address = self.address();
-                thread::Builder::new()
-                    .name(format!("replay{}.{}", self.index(), link.src))
-                    .spawn_wrapper(move || {
-                        let span = info_span!("full_replay", %address, src = %link.src);
-                        let _guard = span.enter();
-                        use itertools::Itertools;
-
-                        // TODO: make async
-                        let mut chunked_replay_tx = match replay_tx_desc.build_sync() {
-                            Ok(r) => r,
-                            Err(error) => {
-                                error!(%error, "Error building channel for chunked replay");
-                                return;
-                            }
-                        };
-
-                        let start = time::Instant::now();
-                        debug!(node = %link.dst, "starting state chunker");
-
-                        let mut guard = all_records.read();
-                        let iter = guard.iter().chunks(BATCH_SIZE);
-                        let mut iter = iter
-                            .into_iter()
-                            .map(|chunk| Records::from_iter(chunk.map(&fix)))
-                            .enumerate()
-                            .peekable();
-
-                        // process all records in state to completion within domain and then
-                        // forward on tx (if there is one)
-                        let mut sent_last = is_empty;
-                        while let Some((i, chunk)) = iter.next() {
-                            let len = chunk.len();
-                            let last = iter.peek().is_none();
-                            sent_last = last;
-                            let p = Packet::ReplayPiece {
-                                tag,
-                                link, // to is overwritten by receiver
-                                context: ReplayPieceContext::Full {
-                                    last,
-                                    replicas: replicas.clone(),
-                                },
-                                data: chunk,
-                                cache_name: MIGRATION_CACHE_NAME_STUB.into(),
-                            };
-
-                            trace!(num = i, len, "sending batch");
-                            if let Err(error) = chunked_replay_tx.send(p) {
-                                warn!(%error, "replayer noticed domain shutdown");
-                                break;
-                            }
-                        }
-
-                        // Since we're using `is_empty` above to send a `last: true` packet
-                        // before launching the thread, and that's based on a potentially
-                        // inaccurate estimate, it might be the case that we started this thread
-                        // with no records - if so, we need to send a `last: true` packet to
-                        // tell the target domain we're done
-                        if !sent_last {
-                            trace!("Sending empty last batch");
-                            if let Err(error) = chunked_replay_tx.send(Packet::ReplayPiece {
-                                tag,
-                                link,
-                                context: ReplayPieceContext::Full {
-                                    last: true,
-                                    replicas: replicas.clone(),
-                                },
-                                data: Default::default(),
-                                cache_name: MIGRATION_CACHE_NAME_STUB.into(),
-                            }) {
-                                warn!(%error, "replayer noticed domain shutdown");
-                            }
-                        }
-
-                        debug!(
-                           node = %link.dst,
-                           μs = %start.elapsed().as_micros(),
-                           "state chunker finished"
-                        );
-
-                        let time = start.elapsed();
-                        counter!(
-                            recorded::DOMAIN_TOTAL_CHUNKED_REPLAY_TIME,
-                            time.as_micros() as u64
-                        );
-                        histogram!(
-                            recorded::DOMAIN_CHUNKED_REPLAY_TIME,
-                            time.as_micros() as f64
-                        );
-                    })?;
-                self.handle_replay(*p, executor)?;
-
-                self.total_replay_time.stop();
-                self.metrics.rec_chunked_replay_start_time(start.elapsed());
-                Ok(None)
-            }
+            } => self.handle_start_replay(executor, tag, from, replicas),
             DomainRequest::Ready {
                 node: node_idx,
                 purge,
                 index,
-            } => {
-                invariant_eq!(self.mode, DomainMode::Forwarding);
-
-                let node_ref = self
-                    .nodes
-                    .get(node_idx)
-                    .ok_or_else(|| ReadySetError::NoSuchNode(node_idx.id()))?;
-
-                node_ref.borrow_mut().purge = purge;
-
-                let is_ready = if !index.is_empty() {
-                    match (
-                        node_ref.borrow().get_base(),
-                        &self.persistence_parameters.mode,
-                    ) {
-                        (Some(base), &DurabilityMode::DeleteOnExit)
-                        | (Some(base), &DurabilityMode::Permanent) => {
-                            let node = node_ref.borrow();
-                            let node_name = node.name();
-                            let base_name = format!(
-                                "{}-{}{}-{}",
-                                &self
-                                    .persistence_parameters
-                                    .db_filename_prefix
-                                    .replace('-', "_"),
-                                match &node_name.schema {
-                                    Some(schema) => format!("{schema}-"),
-                                    _ => "".into(),
-                                },
-                                node_name.name,
-                                self.shard.unwrap_or(0),
-                            );
-
-                            let persistence_params = self.persistence_parameters.clone();
-                            let init_state_tx = self.init_state_tx.clone();
-                            let unique_keys = base.all_unique_keys();
-
-                            // run the base table initialization in a separate task, as we know
-                            // this might take a lot of time for large
-                            // tables. upon completion, we'll notify the
-                            // domain and set the materialized state for
-                            // this node.
-                            // TODO(fran): Avoid panicking the whole process and instead just fail
-                            //  the domain thread (ENG-2752).
-                            tokio::spawn(abort_on_panic(
-                                initialize_state(
-                                    node_idx,
-                                    index,
-                                    base_name.clone(),
-                                    unique_keys,
-                                    persistence_params,
-                                    init_state_tx)
-                                    .instrument(tracing::trace_span!(
-                                        "initialize_state",
-                                        name = %base_name,
-                                        node = %node_idx,
-                                    ))
-                                    .map_err(move |e| {
-                                error!(error = %e, "Domain failed while initializing base table");
-                                process::abort();
-                            })));
-                            false
-                        }
-                        _ => {
-                            let mut s = MaterializedNodeState::Memory(MemoryState::default());
-                            for idx in index {
-                                s.add_index(idx, None);
-                            }
-                            assert!(self.state.insert(node_idx, s).is_none());
-                            true
-                        }
-                    }
-                } else {
-                    // NOTE: just because index_on is None does *not* mean we're not
-                    // materialized
-                    true
-                };
-
-                if is_ready && self.not_ready.remove(&node_idx) {
-                    trace!(local = node_idx.id(), "readying empty node");
-                }
-
-                // swap replayed reader nodes to expose new state
-                if let Some(state) = self.reader_write_handles.get_mut(node_idx) {
-                    trace!(local = %node_idx, "swapping state");
-                    state.swap();
-                    trace!(local = %node_idx, "state swapped");
-                }
-
-                Ok(Some(bincode::serialize(&is_ready)?))
-            }
-            DomainRequest::GetStatistics => {
-                let domain_stats = readyset_client::debug::stats::DomainStats {
-                    total_time: self.total_time.num_nanoseconds(),
-                    total_ptime: self.total_ptime.num_nanoseconds(),
-                    total_replay_time: self.total_replay_time.num_nanoseconds(),
-                    total_forward_time: self.total_forward_time.num_nanoseconds(),
-                    wait_time: self.wait_time.num_nanoseconds(),
-                };
-
-                let node_stats: HashMap<
-                    petgraph::graph::NodeIndex,
-                    readyset_client::debug::stats::NodeStats,
-                > = self
-                    .nodes
-                    .values()
-                    .filter_map(|nd| {
-                        let n = &*nd.borrow();
-                        let local_index = n.local_addr();
-                        let node_index: NodeIndex = n.global_addr();
-
-                        let time = self.process_times.num_nanoseconds(local_index);
-                        let ptime = self.process_ptimes.num_nanoseconds(local_index);
-                        let mem_size = self
-                            .reader_write_handles
-                            .get(local_index)
-                            .map(|wh| wh.deep_size_of())
-                            .unwrap_or_else(|| {
-                                self.state
-                                    .get(local_index)
-                                    .map(|s| s.deep_size_of())
-                                    .unwrap_or(0)
-                            });
-
-                        let mat_state = self
-                            .reader_write_handles
-                            .get(local_index)
-                            .map(|wh| {
-                                if wh.is_partial() {
-                                    MaterializationStatus::Partial {
-                                        beyond_materialization_frontier: n.purge,
-                                    }
-                                } else {
-                                    MaterializationStatus::Full
-                                }
-                            })
-                            .unwrap_or_else(|| match self.state.get(local_index) {
-                                Some(s) => {
-                                    if s.is_partial() {
-                                        MaterializationStatus::Partial {
-                                            beyond_materialization_frontier: n.purge,
-                                        }
-                                    } else {
-                                        MaterializationStatus::Full
-                                    }
-                                }
-                                None => MaterializationStatus::Not,
-                            });
-
-                        let probe_result = if let Some(n) = n.as_internal() {
-                            n.probe()
-                        } else {
-                            Default::default()
-                        };
-
-                        if let (Some(time), Some(ptime)) = (time, ptime) {
-                            Some((
-                                node_index,
-                                readyset_client::debug::stats::NodeStats {
-                                    desc: format!("{:?}", n),
-                                    process_time: time,
-                                    process_ptime: ptime,
-                                    mem_size,
-                                    materialized: mat_state,
-                                    probe_result,
-                                },
-                            ))
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
-
-                let ret = (domain_stats, node_stats);
-                Ok(Some(bincode::serialize(&ret)?))
-            }
+            } => self.handle_ready(node_idx, purge, index),
+            DomainRequest::GetStatistics => self.handle_get_statistics(),
             DomainRequest::RequestMinPersistedReplicationOffset => Ok(Some(bincode::serialize(
                 &self.min_persisted_replication_offset()?,
             )?)),
@@ -2374,83 +2604,21 @@ impl Domain {
             DomainRequest::RequestSnapshottingTables => {
                 Ok(Some(bincode::serialize(&self.snapshotting_base_nodes())?))
             }
-            DomainRequest::RequestNodeSizes => {
-                let mut res = Vec::new();
-                for (local_index, node_ref) in self.nodes.iter() {
-                    let node = node_ref.borrow();
-                    if node.is_reader() {
-                        if let Some(wh) = self.reader_write_handles.get(local_index) {
-                            res.push((
-                                node.global_addr(),
-                                KeyCount::ExactKeyCount(wh.len()),
-                                wh.deep_size_of(),
-                            ));
-                        }
-                    } else if let Some(state) = self.state.get(local_index) {
-                        // non-reader node with state
-                        res.push((node.global_addr(), state.key_count(), state.deep_size_of()))
-                    }
-                }
-                Ok(Some(bincode::serialize(&res)?))
-            }
+            DomainRequest::RequestNodeSizes => self.handle_request_node_sizes(),
             DomainRequest::Packet(pkt) => {
                 self.handle_packet(pkt, executor)?;
                 Ok(None)
             }
-            DomainRequest::QueryReplayDone { node } => {
-                let ret = self
-                    .state
-                    .get(node)
-                    .map(|s| s.replay_done())
-                    .or_else(|| {
-                        self.reader_write_handles
-                            .get(node)
-                            .map(|rwh| rwh.replay_done())
-                    })
-                    .unwrap_or_else(|| {
-                        error!(%node, "Received QueryReplayDone for non-materialized node");
-                        true
-                    });
-                Ok(Some(bincode::serialize(&ret)?))
-            }
+            DomainRequest::QueryReplayDone { node } => self.handle_query_replay_done(node),
             DomainRequest::GeneratedColumns { node, index, tag } => {
-                // Record that these columns are generated...
-                self.replay_paths
-                    .insert_generated_columns(node, index.columns.clone(), tag);
-                // ...and also make sure we use that tag to index those columns in this node, so we
-                // know what hole to fill when we've satisfied replays to those columns
-                self.state
-                    .entry(node)
-                    .or_insert_with(|| MaterializedNodeState::Memory(MemoryState::default()))
-                    .add_index(index, Some(vec![tag]));
-                Ok(None)
+                self.handle_generated_columns(node, index, tag)
             }
             DomainRequest::IsReady { node } => {
                 Ok(Some(bincode::serialize(&!self.not_ready.contains(&node))?))
             }
-            DomainRequest::AllTablesCompacted => {
-                let finished = self
-                    .state
-                    .values_mut()
-                    .filter_map(|state| state.as_persistent_mut())
-                    .all(|state| state.compaction_finished());
-                Ok(Some(bincode::serialize(&finished)?))
-            }
-            // Handle an external request for an eviction. Returns the evicted key unless no
-            // eviction occurred.
-            DomainRequest::Evict(req) => {
-                let key = self.handle_eviction(req, executor)?;
-                Ok(Some(bincode::serialize(&key)?))
-            }
-            DomainRequest::Shutdown => {
-                self.state.values_mut().for_each(|s| {
-                    let err = s.shut_down();
-                    if let Err(e) = err {
-                        warn!(error = %e, "error on shutting down domains");
-                    }
-                });
-                Ok(None)
-            }
+            DomainRequest::AllTablesCompacted => self.handle_all_tables_compacted(),
+            DomainRequest::Evict(req) => self.handle_evict(executor, req),
+            DomainRequest::Shutdown => self.handle_shutdown(),
         };
 
         // What we just did might have done things like insert into `self.delayed_for_self`, so
