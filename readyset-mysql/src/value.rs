@@ -10,7 +10,7 @@ pub(crate) fn mysql_value_to_dataflow_value(value: Value) -> ReadySetResult<DfVa
         ValueInner::Null => DfValue::None,
         ValueInner::Bytes(b) => DfValue::from(b),
         ValueInner::Int(i) => i.into(),
-        ValueInner::UInt(i) => (i as i32).into(),
+        ValueInner::UInt(i) => i.into(),
         ValueInner::Double(f) => DfValue::try_from(f)?,
         ValueInner::Datetime(_) => {
             if let Ok(ndt) = NaiveDateTime::try_from(value) {

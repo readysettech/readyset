@@ -3,6 +3,7 @@ use std::hash::{Hash, Hasher};
 use std::marker::{Send, Sync};
 use std::str;
 
+use ::mysql::consts::ColumnFlags;
 use derive_more::From;
 use futures::TryStreamExt;
 use mysql::prelude::AsQuery;
@@ -445,21 +446,31 @@ impl DatabaseStatement {
             Self::MySql(stmt) => {
                 fn column_to_sqltype(c: &mysql_async::Column) -> SqlType {
                     use mysql_async::consts::ColumnType::*;
-                    match c.column_type() {
-                        MYSQL_TYPE_VAR_STRING => SqlType::VarChar(None),
-                        MYSQL_TYPE_BLOB => SqlType::Text,
-                        MYSQL_TYPE_TINY => SqlType::TinyInt(None),
-                        MYSQL_TYPE_SHORT => SqlType::SmallInt(None),
-                        MYSQL_TYPE_BIT => SqlType::Bool,
-                        MYSQL_TYPE_FLOAT => SqlType::Float,
-                        MYSQL_TYPE_STRING => SqlType::Char(None),
-                        MYSQL_TYPE_LONGLONG | MYSQL_TYPE_LONG => SqlType::UnsignedInt(None),
-                        MYSQL_TYPE_DATETIME => SqlType::DateTime(None),
-                        MYSQL_TYPE_DATE => SqlType::Date,
-                        MYSQL_TYPE_TIMESTAMP => SqlType::Timestamp,
-                        MYSQL_TYPE_TIME => SqlType::Time,
-                        MYSQL_TYPE_JSON => SqlType::Json,
-                        t => unimplemented!("Unsupported type: {:?}", t),
+                    match (
+                        c.column_type(),
+                        c.flags().contains(ColumnFlags::UNSIGNED_FLAG),
+                    ) {
+                        (MYSQL_TYPE_VAR_STRING, _) => SqlType::VarChar(None),
+                        (MYSQL_TYPE_BLOB, _) => SqlType::Text,
+                        (MYSQL_TYPE_TINY, true) => SqlType::UnsignedTinyInt(None),
+                        (MYSQL_TYPE_SHORT, true) => SqlType::UnsignedSmallInt(None),
+                        (MYSQL_TYPE_INT24, true) => SqlType::UnsignedMediumInt(None),
+                        (MYSQL_TYPE_LONG, true) => SqlType::UnsignedInt(None),
+                        (MYSQL_TYPE_LONGLONG, true) => SqlType::UnsignedBigInt(None),
+                        (MYSQL_TYPE_TINY, false) => SqlType::TinyInt(None),
+                        (MYSQL_TYPE_SHORT, false) => SqlType::SmallInt(None),
+                        (MYSQL_TYPE_INT24, false) => SqlType::MediumInt(None),
+                        (MYSQL_TYPE_LONG, false) => SqlType::Int(None),
+                        (MYSQL_TYPE_LONGLONG, false) => SqlType::BigInt(None),
+                        (MYSQL_TYPE_BIT, _) => SqlType::Bool,
+                        (MYSQL_TYPE_FLOAT, _) => SqlType::Float,
+                        (MYSQL_TYPE_STRING, _) => SqlType::Char(None),
+                        (MYSQL_TYPE_DATETIME, _) => SqlType::DateTime(None),
+                        (MYSQL_TYPE_DATE, _) => SqlType::Date,
+                        (MYSQL_TYPE_TIMESTAMP, _) => SqlType::Timestamp,
+                        (MYSQL_TYPE_TIME, _) => SqlType::Time,
+                        (MYSQL_TYPE_JSON, _) => SqlType::Json,
+                        (t, _) => unimplemented!("Unsupported type: {:?}", t),
                     }
                 }
 

@@ -308,3 +308,13 @@ fn round_trip_mysql_type_regressions_char_1_length_space() {
 fn round_trip_mysql_type_regressions_char_46_length_nonempty() {
     round_trip_mysql_type(SqlType::Char(Some(46)), Value::Bytes("d".into()));
 }
+
+#[test]
+#[serial]
+#[slow]
+fn round_trip_mysql_type_regressions_bigint_high() {
+    round_trip_mysql_type(
+        SqlType::UnsignedBigInt(None),
+        Value::UInt(9223372036854775808),
+    )
+}
