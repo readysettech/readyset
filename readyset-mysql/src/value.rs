@@ -2,7 +2,7 @@ use std::convert::{TryFrom, TryInto};
 
 use mysql_common::chrono::{NaiveDate, NaiveDateTime};
 use mysql_srv::{Value, ValueInner};
-use readyset_data::DfValue;
+use readyset_data::{DfValue, TimestampTz};
 use readyset_errors::{ReadySetError, ReadySetResult};
 
 pub(crate) fn mysql_value_to_dataflow_value(value: Value) -> ReadySetResult<DfValue> {
@@ -12,15 +12,13 @@ pub(crate) fn mysql_value_to_dataflow_value(value: Value) -> ReadySetResult<DfVa
         ValueInner::Int(i) => i.into(),
         ValueInner::UInt(i) => (i as i32).into(),
         ValueInner::Double(f) => DfValue::try_from(f)?,
-        ValueInner::Datetime(_) => DfValue::TimestampTz(
-            NaiveDateTime::try_from(value)
-                .map_err(|e| ReadySetError::DfValueConversionError {
-                    src_type: "ValueInner::Datetime".to_string(),
-                    target_type: "DfValue::TimestampTz".to_string(),
-                    details: format!("{:?}", e),
-                })?
-                .into(),
-        ),
+        ValueInner::Datetime(_) => {
+            if let Ok(ndt) = NaiveDateTime::try_from(value) {
+                DfValue::TimestampTz(ndt.into())
+            } else {
+                DfValue::TimestampTz(TimestampTz::zero())
+            }
+        }
         ValueInner::Time(_) => {
             DfValue::Time(
                 value

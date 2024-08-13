@@ -514,17 +514,22 @@ impl ToMySqlValue for TimestampTz {
     }
 
     fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
+        if self.is_zero() {
+            return w.write_u8(0);
+        }
         let ts = self.to_chrono();
         match c.coltype {
             ColumnType::MYSQL_TYPE_DATETIME | ColumnType::MYSQL_TYPE_TIMESTAMP => {
                 // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_binary_resultset.html
                 // To save space the packet can be compressed:
-                // if year, month, day, hour, minutes, seconds and microseconds are all 0, length is
-                // 0 and no other field is sent. if hour, seconds and microseconds
-                // are all 0, length is 4 and no other field is sent.
-                // if microseconds is 0, length is 7 and micro_seconds is not sent.
-                // otherwise the length is 11
-                // TODO(marce): Currently TimestampTZ will produce NULL for zero/invalid dates.
+                //   - If year, month, day, hour, minutes, seconds and microseconds are all 0,
+                //     length is 0 and no other field is sent. This case is handled preemptively for
+                //     values with the zero flag set, but we also handle it here in case we ever get
+                //     a [`NaiveDateTime`] with zeroes.
+                //   - If hour, seconds and microseconds are all 0, length is 4 and no other field
+                //     is sent.
+                //   - If microseconds is 0, length is 7 and micro_seconds is not sent.
+                //   - Otherwise the length is 11
                 let us = ts.nanosecond() / 1_000;
                 let packet_len = if us != 0 {
                     11
@@ -706,11 +711,8 @@ impl ToMySqlValue for myc::value::Value {
             myc::value::Value::UInt(n) => n.to_mysql_text(w),
             myc::value::Value::Float(f) => f.to_mysql_text(w),
             myc::value::Value::Double(d) => d.to_mysql_text(w),
-            myc::value::Value::Date(y, mo, d, h, mi, s, us) => {
-                NaiveDate::from_ymd_opt(i32::from(y), u32::from(mo), u32::from(d))
-                    .unwrap()
-                    .and_hms_micro_opt(u32::from(h), u32::from(mi), u32::from(s), us)
-                    .unwrap()
+            myc::value::Value::Date(year, month, day, hour, minutes, seconds, micros) => {
+                TimestampTz::from_components(year, month, day, hour, minutes, seconds, micros)
                     .to_mysql_text(w)
             }
             myc::value::Value::Time(neg, d, h, m, s, us) => {

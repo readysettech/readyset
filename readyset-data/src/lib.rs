@@ -329,6 +329,7 @@ impl DfValue {
     /// assert!(!DfValue::None.is_truthy());
     /// assert!(!DfValue::Int(0).is_truthy());
     /// assert!(DfValue::Int(1).is_truthy());
+    /// assert!(!DfValue::TimestampTz(readyset_data::TimestampTz::zero()).is_truthy());
     /// ```
     pub fn is_truthy(&self) -> bool {
         match *self {
@@ -339,13 +340,7 @@ impl DfValue {
             DfValue::Double(f) => f != 0.0,
             DfValue::Text(ref t) => !t.as_str().is_empty(),
             DfValue::TinyText(ref tt) => !tt.as_bytes().is_empty(),
-            DfValue::TimestampTz(ref dt) => {
-                dt.to_chrono().naive_local()
-                    != NaiveDate::from_ymd_opt(0, 0, 0)
-                        .unwrap()
-                        .and_hms_opt(0, 0, 0)
-                        .unwrap()
-            }
+            DfValue::TimestampTz(ref dt) => !dt.is_zero(),
             DfValue::Time(ref t) => *t != MySqlTime::from_microseconds(0),
             DfValue::ByteArray(ref array) => !array.is_empty(),
             DfValue::Numeric(ref d) => !d.is_zero(),
@@ -1714,19 +1709,9 @@ impl TryFrom<&mysql_common::value::Value> for DfValue {
             Value::Float(v) => DfValue::try_from(*v),
             Value::Double(v) => DfValue::try_from(*v),
             Value::Date(year, month, day, hour, minutes, seconds, micros) => {
-                if let Some(dt) =
-                    NaiveDate::from_ymd_opt((*year).into(), (*month).into(), (*day).into())
-                {
-                    if let Some(dt) = dt.and_hms_micro_opt(
-                        (*hour).into(),
-                        (*minutes).into(),
-                        (*seconds).into(),
-                        *micros,
-                    ) {
-                        return Ok(DfValue::TimestampTz(dt.into()));
-                    }
-                }
-                Ok(DfValue::None)
+                Ok(DfValue::TimestampTz(TimestampTz::from_components(
+                    *year, *month, *day, *hour, *minutes, *seconds, *micros,
+                )))
             }
             Value::Time(neg, days, hours, minutes, seconds, microseconds) => {
                 Ok(DfValue::Time(MySqlTime::from_hmsus(
@@ -2007,6 +1992,7 @@ impl TryFrom<&DfValue> for mysql_common::value::Value {
             DfValue::Double(val) => Ok(Value::Double(*val)),
             DfValue::Numeric(d) => Ok(Value::from(**d)),
             DfValue::Text(_) | DfValue::TinyText(_) => Ok(Value::Bytes(Vec::<u8>::try_from(dt)?)),
+            DfValue::TimestampTz(val) if val.is_zero() => Ok(Value::Date(0, 0, 0, 0, 0, 0, 0)),
             DfValue::TimestampTz(val) => Ok(val.to_chrono().naive_utc().into()),
             DfValue::Time(val) => Ok(Value::Time(
                 !val.is_positive(),
