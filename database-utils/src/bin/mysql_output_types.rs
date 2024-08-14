@@ -100,7 +100,7 @@ async fn main() {
     conn.query_drop("create database if not exists rstest")
         .await
         .unwrap();
-    conn.query_drop("use test").await.unwrap();
+    conn.query_drop("use rstest").await.unwrap();
 
     // no attempt at formatting; use of cargo fmt is expected
     println!("////////////////////////////////////////////////////////////////////////////////");
