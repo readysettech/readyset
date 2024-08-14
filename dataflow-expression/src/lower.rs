@@ -7,7 +7,7 @@ use nom_sql::{
 use readyset_data::dialect::SqlEngine;
 use readyset_data::{Collation, DfType, DfValue};
 use readyset_errors::{
-    internal, internal_err, invalid_query, invalid_query_err, unsupported, ReadySetError,
+    internal, invalid_query, invalid_query_err, unsupported, unsupported_err, ReadySetError,
     ReadySetResult,
 };
 use readyset_util::redacted::Sensitive;
@@ -587,7 +587,7 @@ fn mysql_numerical_type_cvt(left: &DfType, right: &DfType) -> Option<DfType> {
 }
 
 /// <https://dev.mysql.com/doc/refman/8.0/en/type-conversion.html>
-fn mysql_type_conversion(left_ty: &DfType, right_ty: &DfType) -> DfType {
+fn mysql_type_conversion_body(left_ty: &DfType, right_ty: &DfType) -> DfType {
     if left_ty.is_bool() && right_ty.is_bool() {
         DfType::Bool
     } else if let Some(ty) = mysql_text_type_cvt(left_ty, right_ty) {
@@ -597,7 +597,16 @@ fn mysql_type_conversion(left_ty: &DfType, right_ty: &DfType) -> DfType {
     } else if let Some(ty) = mysql_numerical_type_cvt(left_ty, right_ty) {
         ty
     } else {
+        DfType::Unknown
+    }
+}
+
+fn mysql_type_conversion(left_ty: &DfType, right_ty: &DfType) -> DfType {
+    let ty = mysql_type_conversion_body(left_ty, right_ty);
+    if let DfType::Unknown = ty {
         DfType::Double
+    } else {
+        ty
     }
 }
 
@@ -823,6 +832,42 @@ impl BinaryOperator {
 }
 
 impl Expr {
+    fn infer_case_result_type<'a>(
+        then_types_it: impl Iterator<Item = &'a DfType>,
+        else_type: &DfType,
+    ) -> DfType {
+        //  Create a new iterator for THEN expressions, which ignores NULL ones
+        let mut then_types_it = then_types_it.filter(|ty| !matches!(ty, DfType::Unknown));
+
+        //  Set result_type to either ELSE or THEN expression which is not null, or
+        //  return from here if we don't have it.
+        let mut result_type = if let DfType::Unknown = else_type {
+            if let Some(ty) = then_types_it.next() {
+                ty
+            } else {
+                //  At this point we don't have any not NULL expressions neither in THEN(s) nor in
+                // ELSE.  We can't handle this case.
+                return DfType::Unknown;
+            }
+        } else {
+            else_type
+        }
+        .clone();
+
+        //  At this point result_type can only be not null, so iterate over not null THEN
+        //  expressions, and figure out common type between result_type and each THEN one.
+        for ty in then_types_it {
+            result_type = mysql_type_conversion_body(&result_type, ty);
+            if let DfType::Unknown = result_type {
+                //  At this point we found incompatible data types.
+                //  Let's be compliant with MySQL, and coerce all to TEXT
+                return DfType::DEFAULT_TEXT;
+            }
+        }
+
+        result_type
+    }
+
     /// Lower the given [`nom_sql`] AST expression to a dataflow expression
     ///
     /// Currently, this involves:
@@ -1002,24 +1047,28 @@ impl Expr {
                         Ok(CaseWhenBranch { condition, body })
                     })
                     .collect::<ReadySetResult<Vec<_>>>()?;
-                // TODO: Do case arm types have to match? See if type is inferred at runtime
-                let ty = branches
-                    .first()
-                    .ok_or_else(|| internal_err!("CASE expression cannot have zero branches"))?
-                    .body
-                    .ty()
-                    .clone();
-                Ok(Self::CaseWhen {
-                    branches,
-                    else_expr: match else_expr {
-                        Some(else_expr) => Box::new(Self::lower(*else_expr, dialect, context)?),
-                        None => Box::new(Self::Literal {
-                            val: DfValue::None,
-                            ty: DfType::Unknown,
-                        }),
+                let else_expr = match else_expr {
+                    Some(else_expr) => Self::lower(*else_expr, dialect, context)?,
+                    None => Self::Literal {
+                        val: DfValue::None,
+                        ty: DfType::Unknown,
                     },
-                    ty,
-                })
+                };
+                let ty = Self::infer_case_result_type(
+                    branches.iter().map(|branch| branch.body.ty()),
+                    else_expr.ty(),
+                );
+                if let DfType::Unknown = ty {
+                    Err(unsupported_err!(
+                        "Can not infer result type for CASE expression"
+                    ))
+                } else {
+                    Ok(Self::CaseWhen {
+                        branches,
+                        else_expr: Box::new(else_expr),
+                        ty,
+                    })
+                }
             }
             AstExpr::In {
                 lhs,
@@ -1562,6 +1611,80 @@ pub(crate) mod tests {
         let input = parse_expr(ParserDialect::MySQL, "substring(123 from 2)").unwrap();
         let res = Expr::lower(input, Dialect::DEFAULT_MYSQL, &no_op_lower_context()).unwrap();
         assert_eq!(res.ty(), &DfType::DEFAULT_TEXT);
+    }
+
+    #[test]
+    fn case_when_then() {
+        fn get_case_result_type(stmt: &str) -> ReadySetResult<Expr> {
+            let input = parse_expr(ParserDialect::MySQL, stmt).unwrap();
+            Expr::lower(input, Dialect::DEFAULT_MYSQL, &no_op_lower_context())
+        }
+
+        const ERROR_EXPR: Expr = Expr::Literal {
+            val: DfValue::None,
+            ty: DfType::Unknown,
+        };
+
+        // 1st THEN is NULL and ELSE is missing
+        assert_eq!(
+            get_case_result_type("case when 1=1 then NULL when 2=2 then 'BCD' end")
+                .unwrap()
+                .ty(),
+            &DfType::DEFAULT_TEXT
+        );
+        // 1st THEN is NULL and ELSE is NULL
+        assert_eq!(
+            get_case_result_type("case when 1=1 then NULL when 2=2 then 'BCD' else NULL end")
+                .unwrap()
+                .ty(),
+            &DfType::DEFAULT_TEXT
+        );
+        // The THEN(s) are not NULL and ELSE is missing
+        assert_eq!(
+            get_case_result_type("case when 1=1 then 2 else 2.5 end")
+                .unwrap()
+                .ty(),
+            &DfType::Double
+        );
+        // The THEN(s) are not NULL and ELSE is explicit NULL
+        assert_eq!(
+            get_case_result_type(
+                "case when 1=1 then '01:01:01'::time  when 2=2 then '2024-01-01 12:30:30'::timestamp else NULL end"
+            )
+                .unwrap()
+                .ty(),
+            &DfType::Timestamp {
+                subsecond_digits: 0
+            }
+        );
+        // A middle THEN is NULL and ELSE is not NULL
+        assert_eq!(
+            get_case_result_type("case when 1=1 then 2 when 2=2 then NULL else 5 end")
+                .unwrap()
+                .ty(),
+            &DfType::BigInt
+        );
+        // Negative test: The single THEN is NULL and ELSE is missing
+        assert_eq!(
+            get_case_result_type("case when 1=1 then NULL end")
+                .unwrap_or(ERROR_EXPR)
+                .ty(),
+            &DfType::Unknown
+        );
+        // Incompatible THEN expressions
+        assert_eq!(
+            get_case_result_type("case when 1=1 then 2 when 2=2 then 'ABC' end")
+                .unwrap()
+                .ty(),
+            &DfType::DEFAULT_TEXT
+        );
+        // Incompatible THEN and ELSE expressions
+        assert_eq!(
+            get_case_result_type("case when 1=1 then 2 else 'ABC' end")
+                .unwrap()
+                .ty(),
+            &DfType::DEFAULT_TEXT
+        );
     }
 
     #[test]

@@ -661,6 +661,7 @@ impl Value {
                     .to_u64()
                     .unwrap(),
             ))),
+            (Self::Integer(i), Type::Text) => Ok(Cow::Owned(Self::Text(i.to_string()))),
             (v, t) => {
                 todo!("{v:?} {t:?}")
             }

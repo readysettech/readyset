@@ -1,0 +1,46 @@
+# tests for readyset's support of the CASE statement for MySQL
+
+statement ok
+create table case_test (id int, vf float, txt text, dt date, ts timestamp);
+
+statement ok
+insert into case_test (id, vf, txt, dt, ts) values
+(1, 1.5, 'abcde', '0001-01-01', '2000-12-16 12:21:13'),
+(2, 2.6, 'rfvtb', '0001-12-31', '2001-02-16 20:38:40'),
+(3, 3.7, 'hyuin', '2006-01-01', '2006-01-01 12:00:00'),
+(4, 4.8, 'rtyui', '2022-11-13', '1997-12-16 12:21:13');
+
+query T nosort
+select case when vf > 2 then NULL when txt like 'ab%' then txt end from case_test where id = 1;
+----
+abcde
+
+query T nosort
+select case when vf > 2 then NULL when txt like 'ab%' then txt else NULL end from case_test where id = 1;
+----
+abcde
+
+query T nosort
+select case when vf < 2 then NULL when txt like 'ab%' then txt else id end from case_test where id = 2;
+----
+2
+
+query F nosort
+select case when vf > 3 then 2 else 2.5 end from case_test where id = 3;
+----
+2
+
+query I nosort
+select case when vf = 1.5 then 2 when txt like '%e%' then NULL else 5 end from case_test where id = 1;
+----
+2
+
+query T nosort
+select case when vf < 3 then 2 when vf < 4 then txt end from case_test where id = 3;
+----
+hyuin
+
+query T nosort
+select case when vf < 3 then 2 else txt end from case_test where id = 3;
+----
+hyuin
