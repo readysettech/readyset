@@ -4767,7 +4767,6 @@ dependencies = [
 name = "readyset-server"
 version = "0.7.0"
 dependencies = [
- "ahash",
  "anyhow",
  "array2",
  "assert_approx_eq",

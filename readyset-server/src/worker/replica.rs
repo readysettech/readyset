@@ -1,10 +1,9 @@
 use std::collections::hash_map::Entry::{Occupied, Vacant};
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::SocketAddr;
 use std::sync::{atomic, Arc};
 use std::time;
 
-use ahash::AHashMap;
 use anyhow::{self, Context as AnyhowContext};
 use dataflow::payload::{MaterializedState, SourceChannelIdentifier};
 use dataflow::prelude::Executor;
@@ -26,7 +25,7 @@ use tracing::{debug, error, info, info_span, instrument, trace, warn, Span};
 use super::ChannelCoordinator;
 
 type Outputs =
-    AHashMap<ReplicaAddress, Box<dyn Sink<Packet, Error = bincode::Error> + Send + Unpin>>;
+    HashMap<ReplicaAddress, Box<dyn Sink<Packet, Error = bincode::Error> + Send + Unpin>>;
 
 /// Generates a monotonically incrementing u64 value to be used as a token for our connections
 fn next_token() -> u64 {
@@ -90,7 +89,7 @@ impl Replica {
 
 struct Outboxes {
     /// messages for other domains
-    domains: AHashMap<ReplicaAddress, VecDeque<Packet>>,
+    domains: HashMap<ReplicaAddress, VecDeque<Packet>>,
 }
 
 impl Outboxes {

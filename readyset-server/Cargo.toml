@@ -26,7 +26,6 @@ clap = { workspace = true, features = ["derive","env"] }
 anyhow = { workspace = true }
 bimap = { workspace = true, features = ["serde"] }
 thiserror = { workspace = true }
-ahash = { workspace = true }
 futures = { workspace = true }
 futures-core = { workspace = true }
 futures-util = { workspace = true }
