@@ -808,13 +808,14 @@ fn mysql_row_to_noria_row(row: &mysql::Row) -> ReadySetResult<Vec<readyset_data:
                     false => noria_row.push(readyset_data::DfValue::try_from(val)?),
                 }
             }
-            ColumnType::MYSQL_TYPE_DATETIME
+            ColumnType::MYSQL_TYPE_DATE
             | ColumnType::MYSQL_TYPE_TIMESTAMP
-            | ColumnType::MYSQL_TYPE_DATE
+            | ColumnType::MYSQL_TYPE_TIMESTAMP2
+            | ColumnType::MYSQL_TYPE_DATETIME
             | ColumnType::MYSQL_TYPE_DATETIME2 => {
                 let df_val: DfValue = readyset_data::DfValue::try_from(val)
                     .map_err(|err| {
-                        internal_err!("Error converting MYSQL_TYPE_DATETIME column: {}", err)
+                        internal_err!("Error converting datetime/timestamp column: {}", err)
                     })
                     .and_then(|val| match val {
                         DfValue::TimestampTz(mut ts) => {
@@ -823,7 +824,7 @@ fn mysql_row_to_noria_row(row: &mysql::Row) -> ReadySetResult<Vec<readyset_data:
                         }
                         DfValue::None => Ok(DfValue::None), //NULL
                         _ => Err(internal_err!(
-                            "Expected MYSQL_TYPE_DATETIME column to be of type TimestampTz, got {:?}",
+                            "Expected datetime/timestamp column to be of type TimestampTz, got {:?}",
                             val
                         )),
                     })?;

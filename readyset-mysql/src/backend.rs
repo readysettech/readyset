@@ -138,9 +138,14 @@ async fn write_column<W: AsyncWrite + Unpin>(
         DfValue::TimestampTz(ts) => match cs.coltype {
             mysql_srv::ColumnType::MYSQL_TYPE_DATETIME
             | mysql_srv::ColumnType::MYSQL_TYPE_DATETIME2 => rw.write_col(ts),
-
             mysql_srv::ColumnType::MYSQL_TYPE_TIMESTAMP
-            | mysql_srv::ColumnType::MYSQL_TYPE_TIMESTAMP2 => rw.write_col(ts.to_local()),
+            | mysql_srv::ColumnType::MYSQL_TYPE_TIMESTAMP2 => {
+                if ts.is_zero() {
+                    rw.write_col(ts)
+                } else {
+                    rw.write_col(ts.to_local())
+                }
+            }
             ColumnType::MYSQL_TYPE_DATE => {
                 if ts.is_zero() {
                     rw.write_col(ts)
