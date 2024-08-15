@@ -32,6 +32,10 @@ async fn round_trip_mysql_type_inner(sql_type: SqlType, value: Value) {
     mysql_helpers::recreate_database("round_trip_mysql_types").await;
 
     let mut upstream_conn = mysql_async::Conn::new(upstream_opts).await.unwrap();
+
+    // Allow zero dates, leaving remaining default flags (as of 8.0/8.4).
+    upstream_conn.query_drop("set sql_mode = 'ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION'").await.unwrap();
+
     upstream_conn
         .query_drop(format!(
             "CREATE TABLE snapshot (value {})",
@@ -56,7 +60,7 @@ async fn round_trip_mysql_type_inner(sql_type: SqlType, value: Value) {
 
     // We use the value the upstream actually stores for subsequent lookups, in case it trims or
     // pads the value.
-    let upstream_val = upstream_rows[0].as_ref(0).unwrap();
+    let upstream_val = &upstream_rows[0][0];
 
     // Snapshot & check result
     let (rs_opts, _rs_handle, shutdown_tx) = TestBuilder::default()
@@ -317,4 +321,39 @@ fn round_trip_mysql_type_regressions_bigint_high() {
         SqlType::UnsignedBigInt(None),
         Value::UInt(9223372036854775808),
     )
+}
+
+#[test]
+#[serial]
+#[slow]
+fn round_trip_mysql_type_regressions_date() {
+    round_trip_mysql_type(SqlType::Date, Value::Date(2024, 2, 4, 0, 0, 0, 0))
+}
+
+#[test]
+#[serial]
+#[slow]
+fn round_trip_mysql_type_regressions_date_zero() {
+    round_trip_mysql_type(SqlType::Date, Value::Date(0, 0, 0, 0, 0, 0, 0))
+}
+
+#[test]
+#[serial]
+#[slow]
+fn round_trip_mysql_type_regressions_datetime() {
+    round_trip_mysql_type(SqlType::DateTime(None), Value::Date(2024, 2, 4, 0, 0, 0, 0))
+}
+
+#[test]
+#[serial]
+#[slow]
+fn round_trip_mysql_type_regressions_datetime_zero() {
+    round_trip_mysql_type(SqlType::DateTime(None), Value::Date(0, 0, 0, 0, 0, 0, 0))
+}
+
+#[test]
+#[serial]
+#[slow]
+fn round_trip_mysql_type_regressions_timestamp_zero() {
+    round_trip_mysql_type(SqlType::Timestamp, Value::Date(0, 0, 0, 0, 0, 0, 0))
 }
