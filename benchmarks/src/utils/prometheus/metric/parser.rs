@@ -317,12 +317,12 @@ mod tests {
 
     #[test]
     fn line_type() {
-        let line = "# TYPE controller_rpc_overall_time counter"
+        let line = "# TYPE controller_rpc_overall_time_us counter"
             .parse::<Line>()
             .unwrap();
         assert_eq!(
             line,
-            Line::Type("controller_rpc_overall_time".into(), MetricType::Counter)
+            Line::Type("controller_rpc_overall_time_us".into(), MetricType::Counter)
         );
         let line = "# TYPE controller_migration_in_progress gauge"
             .parse::<Line>()
@@ -359,11 +359,11 @@ mod tests {
                 None
             ))
         );
-        let line = r#"domain_handle_replay_time{shard="0",domain="0",tag="3",quantile="0.99"} 55.99710586500943"#.parse::<Line>().unwrap();
+        let line = r#"domain_handle_replay_time_us{shard="0",domain="0",tag="3",quantile="0.99"} 55.99710586500943"#.parse::<Line>().unwrap();
         assert_eq!(
             line,
             Line::Sample(sample(
-                "domain_handle_replay_time",
+                "domain_handle_replay_time_us",
                 vec![
                     ("shard", "0"),
                     ("domain", "0"),
@@ -390,7 +390,7 @@ mod tests {
             ))
         );
         let line =
-            r#"controller_rpc_request_time_sum{path="/view_builder"} GOTTEM"#.parse::<Line>();
+            r#"controller_rpc_request_time_us_sum{path="/view_builder"} GOTTEM"#.parse::<Line>();
         assert!(matches!(line, Err(Error::InvalidValue(_))));
         let line =
 			r#"replicator_snapshot_status{instance="localhost:9000",job="readyset-server",status="started"} 1 163889938.2418"#.parse::<Line>();
