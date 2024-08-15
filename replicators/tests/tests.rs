@@ -16,7 +16,7 @@ use rand::{Rng, SeedableRng};
 use readyset_client::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use readyset_client::recipe::changelist::{Change, ChangeList, CreateCache};
 use readyset_client::ReadySetHandle;
-use readyset_data::{Collation, DfValue, Dialect, TinyText};
+use readyset_data::{Collation, DfValue, Dialect, TimestampTz, TinyText};
 use readyset_errors::{internal, ReadySetError, ReadySetResult};
 use readyset_server::Builder;
 use readyset_telemetry_reporter::{TelemetryEvent, TelemetryInitializer, TelemetrySender};
@@ -1287,16 +1287,16 @@ async fn mysql_datetime_replication_inner() -> ReadySetResult<()> {
         &[
             &[
                 DfValue::Int(0),
-                DfValue::None,
-                DfValue::None,
-                DfValue::None,
+                DfValue::TimestampTz(TimestampTz::zero()),
+                DfValue::TimestampTz(TimestampTz::zero()),
+                DfValue::TimestampTz(TimestampTz::zero()),
                 DfValue::Time(MySqlTime::from_hmsus(false, 0, 0, 0, 0)),
             ],
             &[
                 DfValue::Int(1),
-                DfValue::None,
-                DfValue::None,
-                DfValue::None,
+                DfValue::TimestampTz(TimestampTz::zero()),
+                DfValue::TimestampTz(TimestampTz::zero()),
+                DfValue::TimestampTz(TimestampTz::zero()),
                 DfValue::Time(MySqlTime::from_hmsus(false, 0, 0, 0, 0)),
             ],
         ],
@@ -1318,30 +1318,30 @@ async fn mysql_datetime_replication_inner() -> ReadySetResult<()> {
         &[
             &[
                 DfValue::Int(0),
-                DfValue::None,
-                DfValue::None,
-                DfValue::None,
+                DfValue::TimestampTz(TimestampTz::zero()),
+                DfValue::TimestampTz(TimestampTz::zero()),
+                DfValue::TimestampTz(TimestampTz::zero()),
                 DfValue::Time(MySqlTime::from_hmsus(false, 0, 0, 0, 0)),
             ],
             &[
                 DfValue::Int(1),
-                DfValue::None,
-                DfValue::None,
-                DfValue::None,
+                DfValue::TimestampTz(TimestampTz::zero()),
+                DfValue::TimestampTz(TimestampTz::zero()),
+                DfValue::TimestampTz(TimestampTz::zero()),
                 DfValue::Time(MySqlTime::from_hmsus(false, 0, 0, 0, 0)),
             ],
             &[
                 DfValue::Int(2),
-                DfValue::None,
-                DfValue::None,
-                DfValue::None,
+                DfValue::TimestampTz(TimestampTz::zero()),
+                DfValue::TimestampTz(TimestampTz::zero()),
+                DfValue::TimestampTz(TimestampTz::zero()),
                 DfValue::Time(MySqlTime::from_hmsus(false, 0, 0, 0, 0)),
             ],
             &[
                 DfValue::Int(3),
-                DfValue::None,
-                DfValue::None,
-                DfValue::None,
+                DfValue::TimestampTz(TimestampTz::zero()),
+                DfValue::TimestampTz(TimestampTz::zero()),
+                DfValue::TimestampTz(TimestampTz::zero()),
                 DfValue::Time(MySqlTime::from_hmsus(false, 0, 0, 0, 0)),
             ],
         ],
