@@ -1,47 +1,55 @@
 [
     {
+        "feature_id": "1",
         "name": "Full Materialization",
         "command-line": "--experimental-full-materialization",
         "environment-variable": "EXPERIMENTAL_FULL_MATERIALIZATION",
         "description": "Allow the creation of fully materialized nodes."
     },
     {
+        "feature_id": "2",
         "name": "Mixed Comparisons",
         "command-line": "--experimental-mixed-comparisons",
         "environment-variable": "EXPERIMENTAL_MIXED_COMPARISONS",
         "description": "Enable experimental support for mixing equality and inequality comparisons on query parameters."
     },
     {
+        "feature_id": "3",
         "name": "Pagination",
         "command-line": "--experimental-pagination",
         "environment-variable": "EXPERIMENTAL_PAGINATION",
         "description": "Enable experimental support for Pagination in dataflow.\n\nNOTE: If enabled, this must be set for all ReadySet processes (both servers and adapters)."
     },
     {
+        "feature_id": "4",
         "name": "Post-Lookup",
         "command-line": "--experimental-post-lookup",
         "environment-variable": "EXPERIMENTAL_POST_LOOKUP",
         "description": "Enable experimental support for Post-Lookup (queries which do extra work after the lookup into the reader)."
     },
     {
+        "feature_id": "5",
         "name": "Straddled Joins",
         "command-line": "--experimental-straddled-joins",
         "environment-variable": "EXPERIMENTAL_STRADDLED_JOINS",
         "description": "Enable experimental support for straddled joins (joins with partial keys traced to both parents)."
     },
     {
+        "feature_id": "6",
         "name": "Top K",
         "command-line": "--experimental-topk",
         "environment-variable": "EXPERIMENTAL_TOPK",
         "description": "Enable experimental support for Top K in dataflow.\n\nNOTE: If enabled, this must be set for all ReadySet processes (both servers and adapters)."
     },
     {
+        "feature_id": "7",
         "name": "Placeholder Inlining",
         "command-line": "--experimental-placeholder-inlining",
         "environment-variable": "EXPERIMENTAL_PLACEHOLDER_INLINING",
         "description": "Whether to allow ReadySet to automatically create inlined caches when we receive a CREATE CACHE command for a query with unsupported placeholders.\n\nIf set, we will create a cache with literals inlined in the unsupported placeholder positions every time the statement is executed with a new set of parameters."
     },
     {
+        "feature_id": "8",
         "name": "Full Materialization Persistence",
         "command-line": "--experimental-materialization-persistence",
         "environment-variable": "EXPERIMENTAL_MATERIALIZATION_PERSISTENCE",
