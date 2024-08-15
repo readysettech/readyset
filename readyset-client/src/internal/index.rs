@@ -10,7 +10,7 @@ use crate::KeyComparison;
 ///
 /// See [the design doc][0] for more information
 ///
-/// [0]: https://www.notion.so/readyset/Index-Selection-f91b2a873dda4b63a4b5d9d14bbee266
+/// [0]: https://docs.google.com/document/d/1QVG8QROH851wu_z5RmMMt7SkUVRFuWw1vjPo2cPXY0k
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize, Hash, Arbitrary)]
 pub enum IndexType {
     /// An index backed by a [`HashMap`](std::collections::HashMap).
