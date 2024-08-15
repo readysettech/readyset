@@ -34,11 +34,19 @@ pub mod recorded {
     /// Histogram: The time in microseconds that a domain spends
     /// handling and forwarding a Message or Input packet. Recorded at
     /// the domain following handling each Message and Input packet.
+    ///
+    /// | Tag | Description |
+    /// | --- | ----------- |
+    /// | packet_type | The type of the packet, either "input" or "message". |
     pub const DOMAIN_FORWARD_TIME: &str = "readyset_forward_time_us";
 
     /// Counter: The total time the domain spends handling and forwarding
     /// a Message or Input packet. Recorded at the domain following handling
     /// each Message and Input packet.
+    ///
+    /// | Tag | Description |
+    /// | --- | ----------- |
+    /// | packet_type | The type of the packet, either "input" or "message". |
     pub const DOMAIN_TOTAL_FORWARD_TIME: &str = "readyset_total_forward_time_us";
 
     /// Histogram: The time in microseconds that a domain spends
@@ -48,7 +56,7 @@ pub mod recorded {
     /// | Tag | Description |
     /// | --- | ----------- |
     /// | cache_name | The name of the cache associated with this replay.
-    pub const DOMAIN_REPLAY_TIME: &str = "readyset_domain.handle_replay_time";
+    pub const DOMAIN_REPLAY_TIME: &str = "readyset_domain.handle_replay_time_us";
 
     /// Counter: The total time in microseconds that a domain spends
     /// handling a ReplayPiece packet. Recorded at the domain following
@@ -57,7 +65,7 @@ pub mod recorded {
     /// | Tag | Description |
     /// | --- | ----------- |
     /// | cache_name | The name of the cache associated with this replay.
-    pub const DOMAIN_TOTAL_REPLAY_TIME: &str = "readyset_domain.total_handle_replay_time";
+    pub const DOMAIN_TOTAL_REPLAY_TIME: &str = "readyset_domain.total_handle_replay_time_us";
 
     /// Histogram: The time in microseconds spent handling a reader replay
     /// request. Recorded at the domain following RequestReaderReplay
@@ -164,8 +172,8 @@ pub mod recorded {
     pub const EVICTION_WORKER_HEAP_ALLOCATED_BYTES: &str =
         "readyset_eviction_worker.heap_allocated_bytes";
 
-    /// Histogram: The amount of time that the eviction worker spends making an eviction
-    /// decision and sending packets.
+    /// Histogram: The amount of time im microseconds that the eviction worker spends
+    /// making an eviction decision and sending packets.
     pub const EVICTION_WORKER_EVICTION_TIME: &str = "readyset_eviction_worker.eviction_time_us";
 
     /// Gauge: The sum of the amount of bytes used to store a node's reader state
@@ -262,7 +270,7 @@ pub mod recorded {
     /// | ntype | The operator node type. |
     pub const NODE_ON_INPUT_INVOCATIONS: &str = "readyset_domain.node_on_input_invocations";
 
-    /// Histogram: The time a snapshot takes to be performed.
+    /// Histogram: The amount of time in microseconds a snapshot takes to be performed.
     pub const REPLICATOR_SNAPSHOT_DURATION: &str = "readyset_replicator.snapshot_duration_us";
 
     /// How the replicator handled a snapshot.
@@ -310,33 +318,33 @@ pub mod recorded {
     /// server is leader, 0 for follower.
     pub const CONTROLLER_IS_LEADER: &str = "readyset_controller.is_leader";
 
-    /// Counter: The total amount of time spent servicing controller RPCs.
+    /// Counter: The total amount of time in microseconds spent servicing controller RPCs.
     ///
     /// | Tag | Description |
     /// | --- | ----------- |
     /// | path | The http path associated with the rpc request. |
-    pub const CONTROLLER_RPC_OVERALL_TIME: &str = "readyset_controller.rpc_overall_time";
+    pub const CONTROLLER_RPC_OVERALL_TIME: &str = "readyset_controller.rpc_overall_time_us";
 
-    /// Histogram: The distribution of time spent servicing controller RPCs
+    /// Histogram: The distribution of time in microseconds spent servicing controller RPCs
     /// for each request.
     ///
     /// | Tag | Description |
     /// | --- | ----------- |
     /// | path | The http path associated with the rpc request. |
-    pub const CONTROLLER_RPC_REQUEST_TIME: &str = "readyset_controller.rpc_request_time";
+    pub const CONTROLLER_RPC_REQUEST_TIME: &str = "readyset_controller.rpc_request_time_us";
 
     /// Gauge: The number of queries sent to the `/view_names` controller RPC.
     pub const CONTROLLER_RPC_VIEW_NAMES_NUM_QUERIES: &str =
         "readyset_controller.rpc_view_names_num_queries";
 
-    /// Histgoram: Write propagation time from binlog to reader node. For each
-    /// input packet, this is recorded for each reader node that the packet
+    /// Histgoram: Write propagation time in microseconds from binlog to reader node.
+    /// For each input packet, this is recorded for each reader node that the packet
     /// propagates to. If the packet does not reach the reader because it hits a
     /// hole, the write propagation time is not recorded.
     pub const PACKET_WRITE_PROPAGATION_TIME: &str = "readyset_packet.write_propagation_time_us";
 
-    /// Histogram: The time it takes to clone the dataflow state graph.
-    pub const DATAFLOW_STATE_CLONE_TIME: &str = "readyset_dataflow_state.clone_time";
+    /// Histogram: The time in microseconds it takes to clone the dataflow state graph.
+    pub const DATAFLOW_STATE_CLONE_TIME: &str = "readyset_dataflow_state.clone_time_us";
 
     /// Gauge: The size of the dataflow state, serialized and compressed, measured when it is
     /// written to the authority. This metric may be recorded even if the state does not

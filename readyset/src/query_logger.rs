@@ -180,7 +180,7 @@ impl QueryLogger {
         if mode.is_verbose() && event.parse_duration.is_some() {
             metrics
                 .parse_histogram((event.event, event.sql_type), mode)
-                .record(event.parse_duration.unwrap()); // just checked
+                .record(event.parse_duration.unwrap().as_micros() as f64); // just checked
         }
 
         match &event.readyset_event {

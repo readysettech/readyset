@@ -1,18 +1,20 @@
 //! Documents the set of metrics that are currently being recorded within
 //! a noria-client.
 
-/// Histogram: The time in seconds that the database spent executing a query.
+/// Histogram: The time in microseconds that the database spent executing a query.
 ///
 /// | Tag | Description |
 /// | --- | ----------- |
 /// | query | The query text being executed. |
 /// | database_type | The database type being executed. Must be a [`DatabaseType`] |
+/// | query_d | The hashed ID of the query. |
+/// | cache_name | Optional. The cache name if the query is cached. |
 ///
 /// [`DatabaseType`]: crate::DatabaseType
-pub const QUERY_LOG_EXECUTION_TIME: &str = "readyset_query_log_execution_time";
+pub const QUERY_LOG_EXECUTION_TIME: &str = "readyset_query_log_execution_time_us";
 pub const QUERY_LOG_EXECUTION_COUNT: &str = "readyset_query_log_execution_count";
 
-/// Histogram: The time in seconds that the database spent executing a
+/// Histogram: The time in microseconds that the database spent executing a
 /// query.
 ///
 /// | Tag | Description |
@@ -20,21 +22,22 @@ pub const QUERY_LOG_EXECUTION_COUNT: &str = "readyset_query_log_execution_count"
 /// | query | The query text being executed. |
 /// | query_type | SqlQueryType, whether the query was a read or write. |
 /// | event_type | EventType, whether the query was a prepare, execute, or query.  |
-pub const QUERY_LOG_PARSE_TIME: &str = "readyset_query_log_parse_time";
+/// | query_d | The hashed ID of the query. |
+pub const QUERY_LOG_PARSE_TIME: &str = "readyset_query_log_parse_time_us";
 
 /// Counter: The number of individual keys read for a query. This will be greater than the number of
 /// times the query was executed in the case of `IN` queries.
 ///
 /// | Tag | Description |
 /// | --- | ----------- |
-/// | query | The query text being executed. |
+/// | cache_name | The name of the cache associated with this key read. |
 pub const QUERY_LOG_TOTAL_KEYS_READ: &str = "readyset_query_log_total_keys_read";
 
 /// Counter: The number of cache misses which occurred, potentially multiple from a single query.
 ///
 /// | Tag | Description |
 /// | --- | ----------- |
-/// | query | The query text being executed. |
+/// | cache_name | The name of the cache associated with this key read. |
 pub const QUERY_LOG_TOTAL_CACHE_MISSES: &str = "readyset_query_log_total_cache_misses";
 
 /// Counter: The number of queries which encountered at least one cache miss.

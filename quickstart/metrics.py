@@ -39,7 +39,7 @@ for family in text_string_to_metric_families(r.data.decode('utf-8')):
 		# Samples for a particular family include the metrics
 		# themselves and aggregates like sums and counts, so we
 		# need to make sure we're looking at the right samples
-		if sample.name == "readyset_query_log_execution_time":
+		if sample.name == "readyset_query_log_execution_time_us":
 			labels = sample.labels
 
 			if not args.filter_queries or labels["query_id"] in query_ids:
@@ -58,7 +58,7 @@ for family in text_string_to_metric_families(r.data.decode('utf-8')):
 						results[query_text] = {}
 
 					results[query_text]["p" + quantile] = latency
-		elif sample.name == "readyset_query_log_execution_time_count":
+		elif sample.name == "readyset_query_log_execution_time_us_count":
 			labels = sample.labels
 
 			if not args.filter_queries or labels["query_id"] in query_ids:
