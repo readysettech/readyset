@@ -1044,6 +1044,54 @@ mod tests {
     }
 
     #[test]
+    fn string_is_null() {
+        let expr = Expr::lower(
+            parse_expr(nom_sql::Dialect::MySQL, "'foobar' is null").unwrap(),
+            Dialect::DEFAULT_MYSQL,
+            &no_op_lower_context(),
+        )
+        .unwrap();
+        let res = expr.eval::<&DfValue>(&[]).unwrap();
+        assert_eq!(res, DfValue::Int(0))
+    }
+
+    #[test]
+    fn string_is_not_null() {
+        let expr = Expr::lower(
+            parse_expr(nom_sql::Dialect::MySQL, "'foobar' is not null").unwrap(),
+            Dialect::DEFAULT_MYSQL,
+            &no_op_lower_context(),
+        )
+        .unwrap();
+        let res = expr.eval::<&DfValue>(&[]).unwrap();
+        assert_eq!(res, DfValue::Int(1))
+    }
+
+    #[test]
+    fn null_is_null() {
+        let expr = Expr::lower(
+            parse_expr(nom_sql::Dialect::MySQL, "null is null").unwrap(),
+            Dialect::DEFAULT_MYSQL,
+            &no_op_lower_context(),
+        )
+        .unwrap();
+        let res = expr.eval::<&DfValue>(&[]).unwrap();
+        assert_eq!(res, DfValue::Int(1))
+    }
+
+    #[test]
+    fn null_is_not_null() {
+        let expr = Expr::lower(
+            parse_expr(nom_sql::Dialect::MySQL, "null is not null").unwrap(),
+            Dialect::DEFAULT_MYSQL,
+            &no_op_lower_context(),
+        )
+        .unwrap();
+        let res = expr.eval::<&DfValue>(&[]).unwrap();
+        assert_eq!(res, DfValue::Int(0))
+    }
+
+    #[test]
     fn enum_eq_string_postgres() {
         let expr = Expr::lower(
             parse_expr(nom_sql::Dialect::PostgreSQL, "a = 'a'").unwrap(),

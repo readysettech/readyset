@@ -586,6 +586,19 @@ fn mysql_numerical_type_cvt(left: &DfType, right: &DfType) -> Option<DfType> {
     }
 }
 
+/// Handle the case where one or the other type is unknown, which occurs when one is a null literal.
+/// In those cases, assuming no other type conversion rules apply, we should use the type of the
+/// non-null operand.
+fn mysql_null_type_cvt(left: &DfType, right: &DfType) -> Option<DfType> {
+    if left.is_unknown() && !right.is_unknown() {
+        Some(right.clone())
+    } else if !left.is_unknown() && right.is_unknown() {
+        Some(left.clone())
+    } else {
+        None
+    }
+}
+
 /// <https://dev.mysql.com/doc/refman/8.0/en/type-conversion.html>
 fn mysql_type_conversion_body(left_ty: &DfType, right_ty: &DfType) -> DfType {
     if left_ty.is_bool() && right_ty.is_bool() {
@@ -595,6 +608,8 @@ fn mysql_type_conversion_body(left_ty: &DfType, right_ty: &DfType) -> DfType {
     } else if let Some(ty) = mysql_temporal_types_cvt(left_ty, right_ty) {
         ty
     } else if let Some(ty) = mysql_numerical_type_cvt(left_ty, right_ty) {
+        ty
+    } else if let Some(ty) = mysql_null_type_cvt(left_ty, right_ty) {
         ty
     } else {
         DfType::Unknown
