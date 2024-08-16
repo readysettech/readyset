@@ -274,7 +274,8 @@ impl Builder {
 
     /// Sets the URL for the database to replicate from
     pub fn set_replication_url(&mut self, url: String) {
-        self.config.replicator_config.upstream_db_url = Some(url.into());
+        self.config.replicator_config.upstream_db_url = Some(url.clone().into());
+        self.config.replicator_config.cdc_db_url = Some(url.into());
     }
 
     /// Sets configuration for the replicator thread

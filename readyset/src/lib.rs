@@ -439,20 +439,64 @@ pub struct Options {
 }
 
 impl Options {
-    /// Return the configured database type, either explicitly set by the user or inferred from the
-    /// upstream DB URL
-    pub fn database_type(&self) -> anyhow::Result<DatabaseType> {
-        let infer_from_db_url = |db_url: &str| Ok(db_url.parse::<DatabaseURL>()?.database_type());
+    /// Extract database type from a URL string
+    ///
+    /// # Input
+    ///
+    /// - `url` - A string representing a database URL
+    ///
+    /// # Output
+    ///
+    /// - A `DatabaseType` representing the database type
+    fn infer_database_type_from_url(&self, url: &str) -> anyhow::Result<DatabaseType> {
+        Ok(url.parse::<DatabaseURL>()?.database_type())
+    }
 
+    /// Check that the user has provided the same database type for both the upstream and cdc URLs
+    ///
+    /// # Output
+    ///
+    /// - An `anyhow::Result` indicating whether the database types match
+    fn check_replication_and_cdc_urls(&self) -> anyhow::Result<()> {
+        if let Some(url) = &self.server_worker_options.replicator_config.upstream_db_url {
+            let inferred = self.infer_database_type_from_url(url)?;
+            if let Some(cdc_url) = &self
+                .server_worker_options
+                .replicator_config
+                .get_cdc_db_url()
+            {
+                let cdc_inferred = self.infer_database_type_from_url(cdc_url)?;
+                if inferred != cdc_inferred {
+                    bail!(
+                        "Database type for --upstream-db-url ({}) does not match \
+                         database type for --cdc-db-url ({})",
+                        inferred,
+                        cdc_inferred
+                    );
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Check that the user has provided a database type or an upstream URL
+    /// If the user has provided both, we will check that the database types match
+    ///
+    /// # Output
+    ///
+    /// - An `anyhow::Result` indicating whether the database types match and the database type
+    pub fn database_type(&self) -> anyhow::Result<DatabaseType> {
+        self.check_replication_and_cdc_urls()?;
         match (
             self.database_type,
             &self.server_worker_options.replicator_config.upstream_db_url,
         ) {
             (None, None) => bail!("One of either --database-type or --upstream-db-url is required"),
-            (None, Some(url)) => infer_from_db_url(url),
+            (None, Some(url)) => self.infer_database_type_from_url(url),
             (Some(dt), None) => Ok(dt),
             (Some(dt), Some(url)) => {
-                let inferred = infer_from_db_url(url)?;
+                let inferred = self.infer_database_type_from_url(url)?;
                 if dt != inferred {
                     bail!(
                         "Provided --database-type {dt} does not match database type {inferred} for \
@@ -1383,6 +1427,61 @@ mod tests {
             "postgresql://root:password@db/readyset",
             "--database-type",
             "mysql",
+        ]);
+        opts.database_type().unwrap_err();
+    }
+
+    #[test]
+    fn upstream_and_cdc_urls() {
+        let opts = Options::parse_from(vec![
+            "readyset",
+            "--upstream-db-url",
+            "mysql://root:password@mysql:3306/readyset",
+        ]);
+        let _ = opts.database_type();
+        assert_eq!(
+            opts.server_worker_options.replicator_config.upstream_db_url,
+            opts.server_worker_options
+                .replicator_config
+                .get_cdc_db_url()
+        );
+
+        let opts = Options::parse_from(vec![
+            "readyset",
+            "--upstream-db-url",
+            "mysql://app_user:app_password@mysql:3306/my_app",
+            "--cdc-db-url",
+            "mysql://replication:rpl_pwd@mysql:3306/my_app",
+        ]);
+
+        let _ = opts.database_type();
+        let upstream = opts
+            .server_worker_options
+            .replicator_config
+            .upstream_db_url
+            .as_ref()
+            .unwrap();
+        let cdc = opts
+            .server_worker_options
+            .replicator_config
+            .get_cdc_db_url()
+            .unwrap();
+
+        let r_upstream: RedactedString = "mysql://app_user:app_password@mysql:3306/my_app"
+            .parse()
+            .unwrap();
+        let r_cdc: RedactedString = "mysql://replication:rpl_pwd@mysql:3306/my_app"
+            .parse()
+            .unwrap();
+        assert_eq!(*upstream, r_upstream);
+        assert_eq!(cdc, r_cdc);
+
+        let opts = Options::parse_from(vec![
+            "readyset",
+            "--upstream-db-url",
+            "mysql://app_user:app_password@mysql:3306/my_app",
+            "--cdc-db-url",
+            "postgresql://replication:rpl_pwd@mysql:3306/my_app",
         ]);
         opts.database_type().unwrap_err();
     }

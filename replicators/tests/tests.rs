@@ -21,6 +21,7 @@ use readyset_errors::{internal, ReadySetError, ReadySetResult};
 use readyset_server::Builder;
 use readyset_telemetry_reporter::{TelemetryEvent, TelemetryInitializer, TelemetrySender};
 use readyset_util::eventually;
+use readyset_util::redacted::RedactedString;
 use readyset_util::shutdown::ShutdownSender;
 use replicators::db_util::error_is_slot_not_found;
 use replicators::{ControllerMessage, NoriaAdapter, ReplicatorMessage};
@@ -366,7 +367,7 @@ impl TestHandle {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let controller = ReadySetHandle::new(Arc::clone(&self.authority)).await;
 
-        let url = self.url.clone().into();
+        let url: RedactedString = self.url.clone().into();
         let (sender, receiver) = TestChannel::new();
         let (controll_receiver, _controll_sender) = TestControllChannel::new();
         self.notification_channel = Some(receiver);
@@ -374,7 +375,8 @@ impl TestHandle {
             let Err(error) = NoriaAdapter::start(
                 controller,
                 Config {
-                    upstream_db_url: Some(url),
+                    upstream_db_url: Some(url.clone()),
+                    cdc_db_url: Some(url),
                     ..config.unwrap_or_default()
                 },
                 sender,
@@ -1854,7 +1856,7 @@ async fn mysql_enum_replication() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
-//#[slow]
+#[slow]
 async fn mysql_binlog_transaction_compression() {
     readyset_tracing::init_test_logging();
     let url = &mysql_url();

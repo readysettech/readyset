@@ -84,8 +84,7 @@ pub(crate) trait Connector {
 /// UpstreamConfig.
 pub async fn cleanup(config: UpstreamConfig) -> ReadySetResult<()> {
     if let DatabaseURL::PostgreSQL(options) = config
-        .upstream_db_url
-        .as_ref()
+        .get_cdc_db_url()
         .ok_or_else(|| internal_err!("Replication URL not supplied"))?
         .parse()
         .map_err(|e| {
@@ -165,7 +164,7 @@ pub struct NoriaAdapter {
 impl NoriaAdapter {
     pub async fn start(
         noria: ReadySetHandle,
-        mut config: UpstreamConfig,
+        config: UpstreamConfig,
         notification_channel: &UnboundedSender<ReplicatorMessage>,
         controller_channel: &UnboundedReceiver<ControllerMessage>,
         telemetry_sender: TelemetrySender,
@@ -177,7 +176,7 @@ impl NoriaAdapter {
         let mut resnapshot = server_startup;
         let mut full_snapshot = false;
         let url: DatabaseURL = config
-            .upstream_db_url
+            .get_cdc_db_url()
             .take()
             .ok_or_else(|| internal_err!("Replication URL not supplied"))?
             .parse()

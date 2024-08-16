@@ -32,10 +32,17 @@ pub use error::DatabaseError;
 #[derive(Debug, Clone, Parser, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UpstreamConfig {
     /// URL for the upstream database to connect to. Should include username and password if
-    /// necessary
+    /// necessary. This is used to proxy queries to the upstream database.
     #[arg(long, env = "UPSTREAM_DB_URL")]
     #[serde(default)]
     pub upstream_db_url: Option<RedactedString>,
+
+    /// URL for the CDC database to connect to. Should include username and password if
+    /// necessary. This is used for replication and snapshotting. Defaults to the same as
+    /// `--upstream-db-url`
+    #[arg(long, env = "CDC_DB_URL")]
+    #[serde(default)]
+    pub cdc_db_url: Option<RedactedString>,
 
     /// Disable verification of SSL certificates supplied by the upstream database (postgres
     /// only, ignored for mysql). Ignored if `--upstream-db-url` is not passed.
@@ -173,9 +180,23 @@ impl UpstreamConfig {
         }
     }
 
+    /// get the cdc db url if it is set, otherwise return the upstream db url
+    ///
+    /// # Output
+    ///
+    /// - An `Option<RedactedString>` representing the cdc db url if it is set, otherwise the
+    ///   upstream db url
+    pub fn get_cdc_db_url(&self) -> Option<RedactedString> {
+        match self.cdc_db_url.as_ref() {
+            Some(url) => Some(url.clone()),
+            None => self.upstream_db_url.clone(),
+        }
+    }
+
     pub fn from_url<S: AsRef<str>>(url: S) -> Self {
         UpstreamConfig {
             upstream_db_url: Some(url.as_ref().to_string().into()),
+            cdc_db_url: Some(url.as_ref().to_string().into()),
             ..Default::default()
         }
     }
@@ -247,6 +268,7 @@ impl Default for UpstreamConfig {
     fn default() -> Self {
         Self {
             upstream_db_url: Default::default(),
+            cdc_db_url: Default::default(),
             disable_upstream_ssl_verification: false,
             disable_setup_ddl_replication: false,
             disable_create_publication: false,
