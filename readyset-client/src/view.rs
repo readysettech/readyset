@@ -1646,29 +1646,29 @@ impl<'a> KeyComparisonBuilder<'a> {
         idx: &PlaceholderIdx,
         key_type: &DfType,
     ) -> ReadySetResult<DfValue> {
-        Ok(match self.key_remap {
+        let key = match self.key_remap {
             Some(remap) => {
                 match remap.get(idx).ok_or_else(|| {
                     internal_err!("Key remapping for ReusedReaderHandle is missing indices")
                 })? {
-                    Literal::Placeholder(ItemPlaceholder::DollarNumber(idx)) => key
-                        .get(*idx as usize - 1)
-                        .ok_or_else(|| {
+                    Literal::Placeholder(ItemPlaceholder::DollarNumber(idx)) => {
+                        key.get(*idx as usize - 1).ok_or_else(|| {
                             internal_err!(
                                 "Key remapping for ReusedReaderHandle contains erroneous index"
                             )
                         })?
-                        .coerce_to(key_type, &DfType::Unknown)?,
+                    }
                     Literal::Placeholder(_) => {
                         internal!(
-                                "Key remapping for ReusedReaderHandle contains non-numbered placeholder"
-                            )
+                            "Key remapping for ReusedReaderHandle contains non-numbered placeholder"
+                        )
                     }
-                    literal => DfValue::try_from(literal)?.coerce_to(key_type, &DfType::Unknown)?,
+                    literal => &DfValue::try_from(literal)?,
                 }
             }
-            None => key[*idx - 1].coerce_to(key_type, &DfType::Unknown)?,
-        })
+            None => &key[*idx - 1],
+        };
+        key.coerce_for_comparison(key_type, self.dialect)
     }
 
     fn build_key(&mut self, raw_key: Cow<'_, [DfValue]>) -> ReadySetResult<Option<KeyComparison>> {

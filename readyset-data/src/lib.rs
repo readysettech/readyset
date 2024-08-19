@@ -12,6 +12,7 @@ use bit_vec::BitVec;
 use bytes::BytesMut;
 use chrono::{self, DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, TimeZone};
 use cidr::IpInet;
+use dialect::SqlEngine;
 use enum_kinds::EnumKind;
 use eui48::{MacAddress, MacAddressFormat};
 use itertools::Itertools;
@@ -25,6 +26,7 @@ use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 use rust_decimal::Decimal;
 use serde_json::Value as JsonValue;
 use test_strategy::Arbitrary;
+use text::TextCoerce;
 use tokio_postgres::types::{to_sql_checked, FromSql, IsNull, Kind, ToSql, Type};
 use uuid::Uuid;
 
@@ -587,6 +589,65 @@ impl DfValue {
                 details: "PassThrough items cannot be coerced".into(),
             }),
         }
+    }
+
+    /// Like [`coerce_to`], but returns an error if the destination type cannot accurately hold the
+    /// original value.
+    pub fn coerce_for_comparison(
+        &self,
+        to_ty: &DfType,
+        dialect: Dialect,
+    ) -> ReadySetResult<DfValue> {
+        let err = || {
+            let src = format!("{:?}", DfValueKind::from(self));
+            let dest = format!("{to_ty:?}");
+            Err(ReadySetError::DfValueConversionError {
+                src_type: src,
+                target_type: dest,
+                details: format!("cannot accurately hold value: {self}"),
+            })
+        };
+        macro_rules! return_error_if_disallowed_float {
+            ($v:expr) => {
+                if $v.fract() != 0.0 {
+                    return err();
+                }
+            };
+        }
+        macro_rules! int_types {
+            () => {
+                DfType::TinyInt
+                    | DfType::MediumInt
+                    | DfType::Int
+                    | DfType::BigInt
+                    | DfType::UnsignedTinyInt
+                    | DfType::UnsignedMediumInt
+                    | DfType::UnsignedInt
+                    | DfType::UnsignedBigInt
+            };
+        }
+        if matches!(dialect.engine(), SqlEngine::MySQL | SqlEngine::PostgreSQL) {
+            match (self, to_ty) {
+                (DfValue::Float(v), int_types!()) => {
+                    return_error_if_disallowed_float!(v);
+                }
+                (DfValue::Double(v), int_types!()) => {
+                    return_error_if_disallowed_float!(v);
+                }
+                (DfValue::TinyText(v), int_types!()) => {
+                    if let DfValue::Double(v) = v.coerce_to(&DfType::Double, &DfType::Unknown)? {
+                        return_error_if_disallowed_float!(v);
+                    }
+                }
+                (DfValue::Text(v), int_types!()) => {
+                    if let DfValue::Double(v) = v.coerce_to(&DfType::Double, &DfType::Unknown)? {
+                        return_error_if_disallowed_float!(v);
+                    }
+                }
+                _ => {}
+            }
+        }
+        self.coerce_to(to_ty, &DfType::Unknown)
     }
 
     /// Mutates the given DfType value to match its underlying database representation for the

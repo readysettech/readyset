@@ -77,3 +77,141 @@ WHERE c1 = ? AND c2 = ? AND c3 = ? AND c4 = ? AND c5 = ? AND c6 = ? AND c7 > ?
 5
 6
 7
+
+statement ok
+CREATE TABLE ints (a TINYINT, b MEDIUMINT, c INT, d BIGINT);
+
+statement ok
+INSERT INTO ints VALUES (42, 42, 42, 42);
+
+statement error
+SELECT * FROM ints WHERE a = 42.1;
+
+statement error
+SELECT * FROM ints WHERE b = 42.1;
+
+statement error
+SELECT * FROM ints WHERE c = 42.1;
+
+statement error
+SELECT * FROM ints WHERE d = 42.1;
+
+statement error
+SELECT * FROM ints WHERE a = '42.1';
+
+statement error
+SELECT * FROM ints WHERE b = '42.1';
+
+statement error
+SELECT * FROM ints WHERE c = '42.1';
+
+statement error
+SELECT * FROM ints WHERE d = '42.1';
+
+statement error
+SELECT * FROM ints WHERE a = '42.100000000000';
+
+statement error
+SELECT * FROM ints WHERE b = '42.100000000000';
+
+statement error
+SELECT * FROM ints WHERE c = '42.100000000000';
+
+statement error
+SELECT * FROM ints WHERE d = '42.100000000000';
+
+query IIII
+SELECT * FROM ints WHERE a = 42.0;
+----
+42
+42
+42
+42
+
+query IIII
+SELECT * FROM ints WHERE b = 42.0;
+----
+42
+42
+42
+42
+
+query IIII
+SELECT * FROM ints WHERE c = 42.0;
+----
+42
+42
+42
+42
+
+query IIII
+SELECT * FROM ints WHERE d = 42.0;
+----
+42
+42
+42
+42
+
+query IIII
+SELECT * FROM ints WHERE a = '42.0';
+----
+42
+42
+42
+42
+
+query IIII
+SELECT * FROM ints WHERE b = '42.0';
+----
+42
+42
+42
+42
+
+query IIII
+SELECT * FROM ints WHERE c = '42.0';
+----
+42
+42
+42
+42
+
+query IIII
+SELECT * FROM ints WHERE d = '42.0';
+----
+42
+42
+42
+42
+
+query IIII
+SELECT * FROM ints WHERE a = '42.000000000000';
+----
+42
+42
+42
+42
+
+query IIII
+SELECT * FROM ints WHERE b = '42.000000000000';
+----
+42
+42
+42
+42
+
+query IIII
+SELECT * FROM ints WHERE c = '42.000000000000';
+----
+42
+42
+42
+42
+
+query IIII
+SELECT * FROM ints WHERE d = '42.000000000000';
+----
+42
+42
+42
+42
