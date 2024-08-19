@@ -93,7 +93,6 @@ pub(crate) fn add_bogokey_if_necessary(query: &mut MirQuery<'_>) -> ReadySetResu
 }
 
 #[cfg(test)]
-#[allow(clippy::panic)]
 mod tests {
     use common::IndexType;
     use nom_sql::{BinaryOperator, ColumnSpecification, Literal, Relation, SqlType};

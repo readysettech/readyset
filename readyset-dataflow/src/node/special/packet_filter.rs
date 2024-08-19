@@ -196,7 +196,6 @@ where
 }
 
 #[cfg(test)]
-#[allow(clippy::panic)]
 mod test {
     use common::{Link, Tag};
     use vec1::vec1;

@@ -1459,7 +1459,6 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
 }
 
 #[allow(clippy::unwrap_used)]
-#[allow(clippy::panic)]
 #[cfg(test)]
 mod tests {
     use assert_unordered::assert_eq_unordered;

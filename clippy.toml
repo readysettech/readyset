@@ -1,3 +1,5 @@
+allow-panic-in-tests = true
+
 disallowed-methods = [
     # These methods are not allowed since they are not secure, because they use `localtime_r` under
     # the hood.

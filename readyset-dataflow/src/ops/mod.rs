@@ -227,7 +227,6 @@ impl Ingredient for NodeOperator {
 }
 
 #[cfg(test)]
-#[allow(clippy::panic, clippy::unreachable)]
 pub mod test {
     use std::cell;
     use std::collections::HashMap;
@@ -492,7 +491,7 @@ pub mod test {
         ) -> ProcessingResult {
             match self.input_raw(src, u, ReplayContext::None, remember) {
                 RawProcessingResult::Regular(res) => res,
-                _ => unreachable!(),
+                _ => panic!(),
             }
         }
 

@@ -1090,7 +1090,6 @@ impl Ingredient for Union {
 }
 
 #[cfg(test)]
-#[allow(clippy::panic, clippy::unreachable)]
 mod tests {
     use super::*;
     use crate::ops;
@@ -1213,7 +1212,7 @@ mod tests {
                     assert_eq!(rows, Records::default());
                     assert_eq!(captured, HashSet::from([key.clone()]));
                 }
-                _ => unreachable!("expected replay piece, got: {:?}", res),
+                _ => panic!("expected replay piece, got: {:?}", res),
             }
 
             // then a point-key replay on the right
@@ -1243,7 +1242,7 @@ mod tests {
                     assert!(captured.is_empty());
                     assert_eq!(keys, HashSet::from([key]));
                 }
-                _ => unreachable!("Expected replay piece, got: {:?}", res),
+                _ => panic!("Expected replay piece, got: {:?}", res),
             }
         }
 
@@ -1278,7 +1277,7 @@ mod tests {
                     assert_eq!(rows, Records::default());
                     assert_eq!(captured, HashSet::from([key.clone()]));
                 }
-                _ => unreachable!("expected replay piece, got: {:?}", res),
+                _ => panic!("expected replay piece, got: {:?}", res),
             }
 
             // then an update from the left
@@ -1323,7 +1322,7 @@ mod tests {
                     assert!(captured.is_empty());
                     assert_eq!(keys, HashSet::from([key]));
                 }
-                _ => unreachable!("Expected replay piece, got: {:?}", res),
+                _ => panic!("Expected replay piece, got: {:?}", res),
             }
         }
 

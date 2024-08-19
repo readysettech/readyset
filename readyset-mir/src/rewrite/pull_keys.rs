@@ -115,7 +115,6 @@ pub(crate) fn pull_view_keys_to_leaf(query: &mut MirQuery<'_>) -> ReadySetResult
 }
 
 #[cfg(test)]
-#[allow(clippy::panic)]
 mod tests {
     use common::IndexType;
     use nom_sql::{ColumnSpecification, Relation, SqlType};
