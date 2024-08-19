@@ -1,40 +1,30 @@
 <!DOCTYPE html>
 <html>
-<body>
-<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
-<script src="//d3js.org/d3.v5.min.js"></script>
-<script src="https://unpkg.com/viz.js@1.8.1/viz.js" type="application/javascript"></script>
-<script src="https://unpkg.com/d3-graphviz@2.6.0/build/d3-graphviz.min.js"></script>
+  <meta charset="utf-8" />
+  <style>
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      height: 100vh;
+      width: 100vw;
+      overflow: hidden;
+    }
+  </style>
+  <body>
+    <script src="https://unpkg.com/d3@5.16.0/dist/d3.min.js"></script>
+    <script src="https://unpkg.com/@hpcc-js/wasm@0.3.11/dist/index.min.js"></script>
+    <script src="https://unpkg.com/d3-graphviz@3.0.5/build/d3-graphviz.js"></script>
+    <div id="graph"></div>
+    <script type="module" read>
+      const params = new URLSearchParams(new URL(window.location).search)
+      const endpoint = params.has('detailed') ? 'graph' : 'simple_graph'
 
-<div id="graph" style="text-align: center; width: 100%;"></div>
-<script>
-	var params = new URLSearchParams(new URL(window.location).search);
-	var endpoint = params.has("detailed") ? "graph" : "simple_graph";
+      const response = await fetch(endpoint)
+      const dot = await response.text()
 
-  var transition = d3.transition("t")
-                     .duration(500)
-                     .ease(d3.easeLinear);
-
-  var graphviz = d3.select("#graph").graphviz(false);
-
-  function render() {
-    var graph_data = $.ajax({
-      url: endpoint,
-      dataType: "text",
-      success: function(data) {
-        graphviz.transition(transition).renderDot(data);
-      },
-      error: function(e) {
-        graphviz.transition(transition).renderDot('digraph {}');
-      }
-    });
-
-  }
-
-  setInterval(function() {
-    render();
-  }, 1000)
-</script>
-
-</body>
+      const { width, height } = window.visualViewport
+      d3.select('#graph').graphviz({ width, height }).renderDot(dot)
+    </script>
+  </body>
 </html>
