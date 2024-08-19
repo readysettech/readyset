@@ -1,0 +1,137 @@
+statement ok
+CREATE TABLE uints (a TINYINT UNSIGNED, b MEDIUMINT UNSIGNED, c INT UNSIGNED, d BIGINT UNSIGNED);
+
+statement ok
+INSERT INTO uints VALUES (42, 42, 42, 42);
+
+statement error
+SELECT * FROM uints WHERE a = 42.1;
+
+statement error
+SELECT * FROM uints WHERE b = 42.1;
+
+statement error
+SELECT * FROM uints WHERE c = 42.1;
+
+statement error
+SELECT * FROM uints WHERE d = 42.1;
+
+statement error
+SELECT * FROM uints WHERE a = '42.1';
+
+statement error
+SELECT * FROM uints WHERE b = '42.1';
+
+statement error
+SELECT * FROM uints WHERE c = '42.1';
+
+statement error
+SELECT * FROM uints WHERE d = '42.1';
+
+statement error
+SELECT * FROM uints WHERE a = '42.100000000000';
+
+statement error
+SELECT * FROM uints WHERE b = '42.100000000000';
+
+statement error
+SELECT * FROM uints WHERE c = '42.100000000000';
+
+statement error
+SELECT * FROM uints WHERE d = '42.100000000000';
+
+query UIUIUIUI
+SELECT * FROM uints WHERE a = 42.0;
+----
+42
+42
+42
+42
+
+query UIUIUIUI
+SELECT * FROM uints WHERE b = 42.0;
+----
+42
+42
+42
+42
+
+query UIUIUIUI
+SELECT * FROM uints WHERE c = 42.0;
+----
+42
+42
+42
+42
+
+query UIUIUIUI
+SELECT * FROM uints WHERE d = 42.0;
+----
+42
+42
+42
+42
+
+query UIUIUIUI
+SELECT * FROM uints WHERE a = '42.0';
+----
+42
+42
+42
+42
+
+query UIUIUIUI
+SELECT * FROM uints WHERE b = '42.0';
+----
+42
+42
+42
+42
+
+query UIUIUIUI
+SELECT * FROM uints WHERE c = '42.0';
+----
+42
+42
+42
+42
+
+query UIUIUIUI
+SELECT * FROM uints WHERE d = '42.0';
+----
+42
+42
+42
+42
+
+query UIUIUIUI
+SELECT * FROM uints WHERE a = '42.000000000000';
+----
+42
+42
+42
+42
+
+query UIUIUIUI
+SELECT * FROM uints WHERE b = '42.000000000000';
+----
+42
+42
+42
+42
+
+query UIUIUIUI
+SELECT * FROM uints WHERE c = '42.000000000000';
+----
+42
+42
+42
+42
+
+query UIUIUIUI
+SELECT * FROM uints WHERE d = '42.000000000000';
+----
+42
+42
+42
+42
