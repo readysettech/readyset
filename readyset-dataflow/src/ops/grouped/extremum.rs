@@ -174,7 +174,6 @@ impl GroupedOperation for ExtremumOperator {
 }
 
 #[cfg(test)]
-#[allow(clippy::panic, clippy::unreachable)]
 mod tests {
     use super::*;
     use crate::{ops, LookupIndex};
@@ -195,7 +194,7 @@ mod tests {
                 assert_eq!(r[0], group.into());
                 assert_eq!(r[1], new.into());
             }
-            _ => unreachable!(),
+            _ => panic!(),
         }
     }
 
@@ -208,14 +207,14 @@ mod tests {
                 assert_eq!(r[0], group.into());
                 assert_eq!(r[1], old);
             }
-            _ => unreachable!(),
+            _ => panic!(),
         }
         match rs.next().unwrap() {
             Record::Positive(r) => {
                 assert_eq!(r[0], group.into());
                 assert_eq!(r[1], new);
             }
-            _ => unreachable!(),
+            _ => panic!(),
         }
     }
 

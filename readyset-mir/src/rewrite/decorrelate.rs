@@ -331,7 +331,6 @@ impl DependentCondition {
 }
 
 #[cfg(test)]
-#[allow(clippy::panic)] // it's a test
 mod tests {
     use std::iter;
 
