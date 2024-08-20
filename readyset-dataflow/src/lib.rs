@@ -20,7 +20,7 @@ pub mod utils;
 mod domain;
 mod node_map;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fmt::{self, Display};
 use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, Mutex};
@@ -48,9 +48,11 @@ pub use dataflow_state::{
 };
 
 pub use crate::domain::channel::{ChannelCoordinator, DomainReceiver, DomainSender, DualTcpStream};
+use crate::domain::ReplicaAddress;
 pub use crate::domain::{Domain, DomainBuilder, DomainIndex};
 pub use crate::node_map::NodeMap;
 pub use crate::payload::{DomainRequest, Packet, PacketDiscriminants};
+use crate::prelude::Executor;
 pub use crate::processing::LookupIndex;
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
@@ -107,5 +109,31 @@ impl DerefMut for ReaderMap {
     #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
+    }
+}
+
+#[derive(Default)]
+pub struct Outboxes {
+    /// messages for other domains
+    domains: HashMap<ReplicaAddress, VecDeque<Packet>>,
+}
+
+impl Outboxes {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn have_messages(&self) -> bool {
+        !self.domains.is_empty()
+    }
+
+    pub fn take_messages(&mut self) -> Vec<(ReplicaAddress, VecDeque<Packet>)> {
+        self.domains.drain().collect()
+    }
+}
+
+impl Executor for Outboxes {
+    fn send(&mut self, dest: ReplicaAddress, m: Packet) {
+        self.domains.entry(dest).or_default().push_back(m);
     }
 }

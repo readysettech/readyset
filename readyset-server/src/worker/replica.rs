@@ -5,8 +5,7 @@ use std::sync::{atomic, Arc};
 use std::time;
 
 use dataflow::payload::{MaterializedState, SourceChannelIdentifier};
-use dataflow::prelude::Executor;
-use dataflow::{Domain, DomainReceiver, DomainRequest, DualTcpStream, Packet};
+use dataflow::{Domain, DomainReceiver, DomainRequest, DualTcpStream, Outboxes, Packet};
 use futures_util::sink::{Sink, SinkExt};
 use futures_util::stream::StreamExt;
 use futures_util::FutureExt;
@@ -94,25 +93,6 @@ impl Replica {
             requests,
             init_state_reqs,
         }
-    }
-}
-
-struct Outboxes {
-    /// messages for other domains
-    domains: HashMap<ReplicaAddress, VecDeque<Packet>>,
-}
-
-impl Outboxes {
-    fn new() -> Self {
-        Self {
-            domains: Default::default(),
-        }
-    }
-}
-
-impl Executor for Outboxes {
-    fn send(&mut self, dest: ReplicaAddress, m: Packet) {
-        self.domains.entry(dest).or_default().push_back(m);
     }
 }
 
@@ -542,9 +522,9 @@ impl Replica {
                 _ = Self::sleep(domain) => domain.handle_timeout()?,
             }
 
-            // Check if the previous batch of send packets is done, and issue a new batch if needed
-            if send_packets.is_empty() && !out.domains.is_empty() {
-                let to_send = out.domains.drain().collect();
+            // If the previous batch of send packets is done, issue a new batch if needed
+            if send_packets.is_empty() && out.have_messages() {
+                let to_send = out.take_messages();
                 send_packets.push(Self::send_packets(to_send, &outputs, coord, &failed));
             }
         }
