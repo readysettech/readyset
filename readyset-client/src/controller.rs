@@ -816,7 +816,7 @@ impl ReadySetHandle {
     simple_request!(
         /// Fetch a simplified graphviz description of the dataflow graph.
         ///
-    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
+        /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
         simple_graphviz() -> String
     );
 

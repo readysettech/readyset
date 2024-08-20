@@ -29,7 +29,7 @@ pub(in crate::controller) enum NodeChanges {
 /// Then the resulting list of changes would be
 /// `[NodeChanges::Add(1, 2), NodeChanges::Drop(1), NodeChanges::Add(3)]`.
 ///
-/// [`Migration`]: noria_server::controller::migrate::Migration
+/// [`Migration`]: readyset_server::controller::migrate::Migration
 #[derive(Default, Debug)]
 pub(in crate::controller) struct MigrationNodeChanges(Vec<NodeChanges>);
 

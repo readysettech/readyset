@@ -275,7 +275,7 @@ impl Ingredient for TopK {
         let mut original_group_len = 0;
         let mut missed = false;
         // The current group being processed
-        let mut current: BinaryHeap<CurrentRecord> = BinaryHeap::new();
+        let mut current = BinaryHeap::new();
         let mut misses = Vec::new();
         let mut lookups = Vec::new();
 

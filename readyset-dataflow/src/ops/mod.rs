@@ -115,36 +115,47 @@ impl Ingredient for NodeOperator {
     fn ancestors(&self) -> Vec<NodeIndex> {
         impl_ingredient_fn_ref!(self, ancestors,)
     }
+
     fn must_replay_among(&self) -> Option<HashSet<NodeIndex>> {
         impl_ingredient_fn_ref!(self, must_replay_among,)
     }
+
     fn suggest_indexes(&self, you: NodeIndex) -> HashMap<NodeIndex, LookupIndex> {
         impl_ingredient_fn_ref!(self, suggest_indexes, you)
     }
+
     fn column_source(&self, cols: &[usize]) -> ColumnSource {
         impl_ingredient_fn_ref!(self, column_source, cols)
     }
+
     fn handle_upquery(&mut self, miss: ColumnMiss) -> ReadySetResult<Vec<ColumnMiss>> {
         impl_ingredient_fn_mut!(self, handle_upquery, miss)
     }
+
     fn is_join(&self) -> bool {
         impl_ingredient_fn_ref!(self, is_join,)
     }
+
     fn description(&self, detailed: bool) -> String {
         impl_ingredient_fn_ref!(self, description, detailed)
     }
+
     fn probe(&self) -> HashMap<String, String> {
         impl_ingredient_fn_ref!(self, probe,)
     }
+
     fn on_connected(&mut self, graph: &Graph) {
         impl_ingredient_fn_mut!(self, on_connected, graph)
     }
+
     fn replace_sibling(&mut self, from_idx: NodeIndex, to_idx: NodeIndex) {
         impl_ingredient_fn_mut!(self, replace_sibling, from_idx, to_idx)
     }
+
     fn on_commit(&mut self, you: NodeIndex, remap: &HashMap<NodeIndex, IndexPair>) {
         impl_ingredient_fn_mut!(self, on_commit, you, remap)
     }
+
     fn on_input(
         &mut self,
         from: LocalNodeIndex,
@@ -172,6 +183,7 @@ impl Ingredient for NodeOperator {
 
         result
     }
+
     fn on_input_raw(
         &mut self,
         from: LocalNodeIndex,
@@ -192,12 +204,15 @@ impl Ingredient for NodeOperator {
             auxiliary_node_states
         )
     }
+
     fn on_eviction(&mut self, from: LocalNodeIndex, tag: Tag, keys: &[KeyComparison]) {
         impl_ingredient_fn_mut!(self, on_eviction, from, tag, keys)
     }
+
     fn can_query_through(&self) -> bool {
         impl_ingredient_fn_ref!(self, can_query_through,)
     }
+
     #[allow(clippy::type_complexity)]
     fn query_through<'a>(
         &self,
@@ -209,6 +224,7 @@ impl Ingredient for NodeOperator {
     ) -> ReadySetResult<IngredientLookupResult<'a>> {
         impl_ingredient_fn_ref!(self, query_through, columns, key, nodes, states, mode)
     }
+
     #[allow(clippy::type_complexity)]
     fn lookup<'a>(
         &self,
@@ -221,6 +237,7 @@ impl Ingredient for NodeOperator {
     ) -> ReadySetResult<IngredientLookupResult<'a>> {
         impl_ingredient_fn_ref!(self, lookup, parent, columns, key, domain, states, mode)
     }
+
     fn requires_full_materialization(&self) -> bool {
         impl_ingredient_fn_ref!(self, requires_full_materialization,)
     }
@@ -510,11 +527,11 @@ pub mod test {
 
         pub fn narrow_one<U: Into<Records>>(&mut self, u: U, remember: bool) -> Records {
             let src = self.narrow_base_id();
-            self.one::<Records>(src, u.into(), remember)
+            self.one(src, u.into(), remember)
         }
 
         pub fn narrow_one_row<R: Into<Record>>(&mut self, d: R, remember: bool) -> Records {
-            self.narrow_one::<Record>(d.into(), remember)
+            self.narrow_one(d.into(), remember)
         }
 
         pub fn node_index(&self) -> IndexPair {

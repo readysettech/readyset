@@ -9,6 +9,7 @@ use crate::prelude::DfValue;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct Order(Vec<(usize, OrderType)>);
+
 impl Order {
     pub(crate) fn cmp(&self, a: &[DfValue], b: &[DfValue]) -> Ordering {
         for &(c, ref order_type) in &self.0 {

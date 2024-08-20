@@ -1,6 +1,7 @@
 use std::collections::hash_map::RandomState;
 use std::hash::Hash;
 use std::sync::mpsc;
+use std::thread;
 use std::time::Duration;
 
 use partial_map::InsertionOrder;
@@ -238,8 +239,6 @@ fn busybusybusy_slow() {
 }
 
 fn busybusybusy_inner(slow: bool) {
-    use std::thread;
-
     let threads = 4;
     let mut n = 1000;
     if !slow {
@@ -289,8 +288,6 @@ fn busybusybusy_inner(slow: bool) {
 #[test]
 #[cfg_attr(miri, ignore)]
 fn busybusybusy_heap() {
-    use std::thread;
-
     let threads = 2;
     let n = 1000;
     let (mut w, r) = reader_map::new::<_, Vec<_>>();
@@ -625,7 +622,6 @@ fn values() {
 #[test]
 #[cfg_attr(miri, ignore)]
 fn clone_churn() {
-    use std::thread;
     let (mut w, r) = reader_map::new();
     let (tx, rx) = mpsc::channel();
 
@@ -653,7 +649,6 @@ fn clone_churn() {
 #[test]
 #[cfg_attr(miri, ignore)]
 fn big() {
-    use std::thread;
     let (mut w, r) = reader_map::new::<usize, Vec<usize>>();
     w.publish();
 

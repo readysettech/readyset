@@ -1808,7 +1808,7 @@ impl Domain {
                 let (r_part, w_part) = backlog::new_partial(
                     num_columns,
                     index,
-                    move |misses: &mut dyn Iterator<Item = KeyComparison>, cache_name| {
+                    move |misses, cache_name| {
                         if num_shards == 1 {
                             let misses = misses.collect::<Vec<_>>();
                             if misses.is_empty() {

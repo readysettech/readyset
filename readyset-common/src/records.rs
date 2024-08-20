@@ -1,4 +1,5 @@
 use std::borrow::Borrow;
+use std::iter::FromIterator;
 use std::ops::{Deref, DerefMut};
 
 use readyset_data::DfValue;
@@ -47,6 +48,7 @@ impl Record {
 
 impl Deref for Record {
     type Target = Vec<DfValue>;
+
     fn deref(&self) -> &Self::Target {
         match *self {
             Record::Positive(ref r) | Record::Negative(ref r) => r,
@@ -84,7 +86,6 @@ impl From<Records> for Vec<Record> {
     }
 }
 
-use std::iter::FromIterator;
 impl FromIterator<Record> for Records {
     fn from_iter<I>(iter: I) -> Self
     where
@@ -93,6 +94,7 @@ impl FromIterator<Record> for Records {
         Records(iter.into_iter().collect())
     }
 }
+
 impl FromIterator<Vec<DfValue>> for Records {
     fn from_iter<I>(iter: I) -> Self
     where
@@ -105,13 +107,16 @@ impl FromIterator<Vec<DfValue>> for Records {
 impl IntoIterator for Records {
     type Item = Record;
     type IntoIter = ::std::vec::IntoIter<Record>;
+
     fn into_iter(self) -> Self::IntoIter {
         self.0.into_iter()
     }
 }
+
 impl<'a> IntoIterator for &'a Records {
     type Item = &'a Record;
     type IntoIter = ::std::slice::Iter<'a, Record>;
+
     fn into_iter(self) -> Self::IntoIter {
         self.0.iter()
     }
@@ -174,6 +179,7 @@ impl Records {
 
 impl Deref for Records {
     type Target = Vec<Record>;
+
     fn deref(&self) -> &Self::Target {
         &self.0
     }
@@ -213,9 +219,8 @@ impl From<Vec<(Vec<DfValue>, bool)>> for Records {
 mod tests {
     use super::*;
 
-    /// Certain operators (see eg [note: topk-record-ordering]) rely on the fact that positive
-    /// records compare less than negative records when the actual record is the same - this checks
-    /// that that is actually the case to prevent us from accidentally changing it.
+    // Certain operators (see e.g. [note: topk-record-ordering]) rely on the fact that positive
+    // records compare less than negative records when the actual record is the same.
     #[test]
     fn positive_less_than_negative() {
         assert!(
