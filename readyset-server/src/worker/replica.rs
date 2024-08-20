@@ -5,6 +5,7 @@ use std::sync::{atomic, Arc};
 use std::time;
 
 use dataflow::payload::{MaterializedState, SourceChannelIdentifier};
+use dataflow::prelude::Upcall;
 use dataflow::{Domain, DomainReceiver, DomainRequest, DualTcpStream, Outboxes, Packet};
 use futures_util::sink::{Sink, SinkExt};
 use futures_util::stream::StreamExt;
@@ -20,7 +21,7 @@ use tokio::sync::{broadcast, mpsc, oneshot, Mutex};
 use tokio_stream::wrappers::IntervalStream;
 use tracing::{debug, error, info, info_span, instrument, trace, warn, Span};
 
-use super::ChannelCoordinator;
+use super::{ChannelCoordinator, WorkerRequestKind};
 
 type Outputs =
     HashMap<ReplicaAddress, Box<dyn Sink<Packet, Error = bincode::Error> + Send + Unpin>>;
@@ -72,6 +73,9 @@ pub struct Replica {
 
     /// Stores pending outgoing messages
     out: Outboxes,
+
+    /// Client for upcalls to worker
+    client: reqwest::Client,
 }
 
 impl Replica {
@@ -92,6 +96,7 @@ impl Replica {
             refresh_sizes: IntervalStream::new(tokio::time::interval(Duration::from_millis(500))),
             requests,
             init_state_reqs,
+            client: reqwest::Client::new(),
         }
     }
 }
@@ -469,6 +474,7 @@ impl Replica {
             requests,
             out,
             init_state_reqs,
+            client,
         } = &mut self;
 
         loop {
@@ -526,6 +532,19 @@ impl Replica {
             if send_packets.is_empty() && out.have_messages() {
                 let to_send = out.take_messages();
                 send_packets.push(Self::send_packets(to_send, &outputs, coord, &failed));
+            }
+
+            // Send rpcs
+            if out.have_rpcs() {
+                for (url, req) in out.take_rpcs() {
+                    const RPC_TIMEOUT: Duration = Duration::from_secs(5);
+                    let req = match req {
+                        Upcall::BarrierCredit { id, credits } => {
+                            WorkerRequestKind::BarrierCredit { id, credits }
+                        }
+                    };
+                    let _: () = common::worker::rpc(client, url, RPC_TIMEOUT, req).await?;
+                }
             }
         }
     }

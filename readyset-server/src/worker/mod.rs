@@ -96,6 +96,14 @@ pub enum WorkerRequestKind {
         /// The limit in bytes
         limit: Option<usize>,
     },
+
+    /// Return barrier credit
+    BarrierCredit {
+        /// The barrier id
+        id: u128,
+        /// The number of credits
+        credits: u128,
+    },
 }
 
 /// A request to a running ReadySet worker, containing a request kind and a completion channel.
@@ -474,6 +482,9 @@ impl Worker {
                     self.memory_limit = limit;
                 }
                 Ok(None)
+            }
+            WorkerRequestKind::BarrierCredit { id: _, credits: _ } => {
+                todo!();
             }
         }
     }

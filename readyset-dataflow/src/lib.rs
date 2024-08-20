@@ -27,6 +27,7 @@ use std::sync::{Arc, Mutex};
 
 use readyset_client::ReaderAddress;
 use serde::{Deserialize, Serialize};
+use url::Url;
 
 pub use crate::backlog::{LookupError, ReaderUpdatedNotifier, SingleReadHandle};
 
@@ -52,7 +53,7 @@ use crate::domain::ReplicaAddress;
 pub use crate::domain::{Domain, DomainBuilder, DomainIndex};
 pub use crate::node_map::NodeMap;
 pub use crate::payload::{DomainRequest, Packet, PacketDiscriminants};
-use crate::prelude::Executor;
+use crate::prelude::{Executor, Upcall};
 pub use crate::processing::LookupIndex;
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
@@ -116,6 +117,10 @@ impl DerefMut for ReaderMap {
 pub struct Outboxes {
     /// messages for other domains
     domains: HashMap<ReplicaAddress, VecDeque<Packet>>,
+    /// rpcs to send
+    rpcs: Vec<(Url, Upcall)>,
+    /// messages held temporarily that we will revise soon
+    corked: Option<Vec<(ReplicaAddress, Packet)>>,
 }
 
 impl Outboxes {
@@ -127,13 +132,37 @@ impl Outboxes {
         !self.domains.is_empty()
     }
 
+    pub fn have_rpcs(&self) -> bool {
+        !self.rpcs.is_empty()
+    }
+
     pub fn take_messages(&mut self) -> Vec<(ReplicaAddress, VecDeque<Packet>)> {
         self.domains.drain().collect()
+    }
+
+    pub fn take_rpcs(&mut self) -> Vec<(Url, Upcall)> {
+        self.rpcs.drain(..).collect()
     }
 }
 
 impl Executor for Outboxes {
     fn send(&mut self, dest: ReplicaAddress, m: Packet) {
-        self.domains.entry(dest).or_default().push_back(m);
+        if let Some(ref mut corked) = self.corked {
+            corked.push((dest, m));
+        } else {
+            self.domains.entry(dest).or_default().push_back(m);
+        }
+    }
+
+    fn rpc(&mut self, url: Url, req: Upcall) {
+        self.rpcs.push((url, req));
+    }
+
+    fn cork(&mut self) {
+        self.corked = Some(Vec::new());
+    }
+
+    fn uncork(&mut self) -> Vec<(ReplicaAddress, Packet)> {
+        self.corked.take().expect("can't uncork when not corked!")
     }
 }
