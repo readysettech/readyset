@@ -581,8 +581,8 @@ async fn evict_check(
     coord: Arc<ChannelCoordinator>,
     tracker: MemoryTracker,
     state_sizes: Arc<Mutex<HashMap<ReplicaAddress, Arc<AtomicUsize>>>>,
-    _url: Url,
-    _bmgr: Arc<BarrierManager>,
+    url: Url,
+    bmgr: Arc<BarrierManager>,
 ) -> ReadySetResult<()> {
     let start = std::time::Instant::now();
 
@@ -639,6 +639,8 @@ async fn evict_check(
 
     // starting with the smallest of the n domains
     let mut n = sizes.len();
+    let mut barrier = bmgr.create(n).await;
+
     let mut domain_senders = HashMap::new();
     for &(target, size) in sizes.iter().rev() {
         // TODO: should this be evenly divided, or weighted by the size of the domains?
@@ -677,9 +679,9 @@ async fn evict_check(
                 node: None,
                 num_bytes: evict,
             },
-            done: None,
-            barrier: 0,
-            credits: 0,
+            done: Some(url.clone()),
+            barrier: barrier.id(),
+            credits: barrier.split(),
         };
         if let Err(e) = tx.send(pkt).await {
             // probably exiting?
@@ -697,6 +699,8 @@ async fn evict_check(
         recorded::EVICTION_WORKER_EVICTION_TIME,
         start.elapsed().as_micros() as f64,
     );
+
+    barrier.await?;
     Ok(())
 }
 
@@ -783,7 +787,6 @@ pub struct BarrierManager {
     barriers: Mutex<HashMap<u128, BarrierInternal>>,
 }
 
-#[allow(dead_code)]
 impl BarrierManager {
     const FULL_CREDIT: u128 = u128::MAX;
 
@@ -840,7 +843,6 @@ pub struct Barrier {
     give: Vec<u128>,
 }
 
-#[allow(dead_code)]
 impl Barrier {
     fn new(id: u128, split: u128, done: oneshot::Receiver<ReadySetResult<()>>) -> Self {
         debug!("creating barrier {:x} with {} splits", id, split);
