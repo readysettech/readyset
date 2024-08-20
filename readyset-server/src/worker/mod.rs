@@ -179,10 +179,10 @@ impl MemoryTracker {
 /// A future for a finished domain. Awaiting this future returns a tuple containing the result of
 /// the domain running and the domain's [`ReplicaAddress`]
 #[pin_project]
-struct FinishedDomain(#[pin] JoinHandle<anyhow::Result<()>>, ReplicaAddress);
+struct FinishedDomain(#[pin] JoinHandle<ReadySetResult<()>>, ReplicaAddress);
 
 impl Future for FinishedDomain {
-    type Output = (Result<anyhow::Result<()>, JoinError>, ReplicaAddress);
+    type Output = (Result<ReadySetResult<()>, JoinError>, ReplicaAddress);
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
@@ -191,7 +191,7 @@ impl Future for FinishedDomain {
     }
 }
 
-fn log_domain_result(domain: ReplicaAddress, result: &Result<anyhow::Result<()>, JoinError>) {
+fn log_domain_result(domain: ReplicaAddress, result: &Result<ReadySetResult<()>, JoinError>) {
     match result {
         Ok(Ok(())) => info!(%domain, "domain exited"),
         Ok(Err(error)) => error!(%domain, %error, "domain failed with an error"),
@@ -481,7 +481,7 @@ impl Worker {
     async fn handle_domain_future_completion(
         &mut self,
         addr: ReplicaAddress,
-        result: Result<anyhow::Result<()>, JoinError>,
+        result: Result<ReadySetResult<()>, JoinError>,
     ) -> ReadySetResult<()> {
         log_domain_result(addr, &result);
 
