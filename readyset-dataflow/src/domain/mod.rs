@@ -4626,11 +4626,13 @@ impl Domain {
         &mut self,
         request: EvictRequest,
         ex: &mut dyn Executor,
-        _done: Option<Url>,
-        _barrier: u128,
-        _credits: u128,
+        done: Option<Url>,
+        barrier: u128,
+        credits: u128,
     ) -> ReadySetResult<Option<Vec<DfValue>>> {
-        match request {
+        let barrier = done.map(|done| Barrier::new(ex, done, barrier, credits));
+
+        let res = match request {
             EvictRequest::Bytes { node, num_bytes } => {
                 self.handle_eviction_bytes(ex, node, num_bytes)
             }
@@ -4640,7 +4642,10 @@ impl Domain {
                 keys,
             } => self.handle_eviction_keys(ex, dst, tag, keys),
             EvictRequest::SingleKey { tag, key } => self.handle_eviction_single_key(ex, tag, key),
-        }
+        };
+
+        barrier.map(|b| b.flush(ex));
+        res
     }
 
     pub fn address(&self) -> ReplicaAddress {
@@ -4856,5 +4861,183 @@ impl Domain {
 
     pub fn channel(&self) -> (DomainSender, DomainReceiver) {
         channel::domain_channel()
+    }
+}
+
+struct Barrier {
+    done: Url,
+    id: u128,
+    credits: u128,
+}
+
+impl Barrier {
+    fn new(ex: &mut dyn Executor, done: Url, id: u128, credits: u128) -> Self {
+        ex.cork();
+        Self { done, id, credits }
+    }
+
+    fn flush(self, ex: &mut dyn Executor) -> ReadySetResult<()> {
+        let mut msgs = ex.uncork().into_iter();
+        let n = msgs.len() as u128;
+
+        if n == 0 {
+            debug!(
+                "flushing barrier {:x} to worker, credits {:x}",
+                self.id, self.credits
+            );
+            self.rpc(ex, self.credits);
+        } else {
+            let each = self.credits / n;
+            let extra = self.credits % n;
+            debug!(
+                "flushing barrier {:x}, split {}, each {:x} + extra {:x}",
+                self.id, n, each, extra
+            );
+            invariant!(each > 0, "barrier split too many times");
+
+            let (rep, msg) = msgs.next().unwrap(); // n > 0
+            self.send(ex, rep, msg, each + extra);
+
+            for (rep, msg) in msgs {
+                self.send(ex, rep, msg, each)
+            }
+        }
+
+        Ok(())
+    }
+
+    fn rpc(&self, ex: &mut dyn Executor, credits: u128) {
+        ex.rpc(
+            self.done.clone(),
+            Upcall::BarrierCredit {
+                id: self.id,
+                credits,
+            },
+        );
+    }
+
+    fn send(&self, ex: &mut dyn Executor, rep: ReplicaAddress, mut msg: Packet, credits: u128) {
+        match msg {
+            Packet::Evict {
+                done: ref mut d,
+                barrier: ref mut b,
+                credits: ref mut c,
+                ..
+            } => {
+                *d = Some(self.done.clone());
+                *b = self.id;
+                *c = credits;
+            }
+            ref pkt => {
+                warn!("unexpected packet type during eviction: {:?}", pkt);
+                self.rpc(ex, credits);
+            }
+        }
+        ex.send(rep, msg);
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    const BID: u128 = 666;
+    const CREDITS: u128 = 0x40000000000000000000000000000000;
+
+    const fn fake_addr() -> ReplicaAddress {
+        ReplicaAddress {
+            domain_index: DomainIndex::new(0),
+            shard: 0,
+            replica: 0,
+        }
+    }
+
+    const fn fake_packet() -> Packet {
+        Packet::Evict {
+            req: EvictRequest::Bytes {
+                node: None,
+                num_bytes: 0,
+            },
+            done: None,
+            barrier: 0,
+            credits: 0,
+        }
+    }
+
+    #[test]
+    fn barrier_upcall() {
+        let mut out = Outboxes::new();
+        let url = Url::parse("http://example.org/foo").unwrap();
+        let b = Barrier::new(&mut out, url.clone(), BID, CREDITS);
+
+        b.flush(&mut out).unwrap();
+
+        let pkts = out.take_messages();
+        assert_eq!(pkts.len(), 0);
+
+        let rpcs = out.take_rpcs();
+        assert_eq!(rpcs.len(), 1);
+        match &rpcs[0] {
+            (up, Upcall::BarrierCredit { id, credits }) => {
+                assert_eq!(*up, url);
+                assert_eq!(*id, BID);
+                assert_eq!(*credits, CREDITS);
+            }
+        }
+    }
+
+    fn barrier_test(send: fn(&mut dyn Executor)) {
+        let mut out = Outboxes::new();
+        let url = Url::parse("http://example.org/foo").unwrap();
+        let b = Barrier::new(&mut out, url.clone(), BID, CREDITS);
+
+        send(&mut out);
+        b.flush(&mut out).unwrap();
+
+        let mut total = 0;
+        for pkt in out.take_messages().pop().unwrap().1 {
+            if let Packet::Evict {
+                done,
+                barrier,
+                credits,
+                ..
+            } = pkt
+            {
+                assert_eq!(done, Some(url.clone()));
+                assert_eq!(barrier, BID);
+                total += credits;
+            }
+        }
+
+        for rpc in out.take_rpcs() {
+            match rpc {
+                (up, Upcall::BarrierCredit { id, credits }) => {
+                    assert_eq!(up, url);
+                    assert_eq!(id, BID);
+                    total += credits;
+                }
+            }
+        }
+
+        assert_eq!(total, CREDITS);
+    }
+
+    #[test]
+    fn barrier_total() {
+        barrier_test(|out| {
+            for _ in 0..3 {
+                out.send(fake_addr(), fake_packet());
+            }
+        });
+    }
+
+    #[test]
+    fn barrier_unexpected_packet() {
+        barrier_test(|out| {
+            for _ in 0..3 {
+                out.send(fake_addr(), fake_packet());
+            }
+            out.send(fake_addr(), Packet::Spin);
+        });
     }
 }
