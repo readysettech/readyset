@@ -4,7 +4,6 @@ use std::net::SocketAddr;
 use std::sync::{atomic, Arc};
 use std::time;
 
-use anyhow::{self, Context as AnyhowContext};
 use dataflow::payload::{MaterializedState, SourceChannelIdentifier};
 use dataflow::prelude::Executor;
 use dataflow::{Domain, DomainReceiver, DomainRequest, DualTcpStream, Packet};
@@ -152,9 +151,7 @@ impl Replica {
     /// Read the first byte of a connection to determine if it is from a base node, and convert
     /// it to a DualTcpStream, returning a unique token for the connection together with the
     /// upgraded connection
-    async fn handle_new_connection(
-        mut stream: TcpStream,
-    ) -> Result<(u64, DualTcpStream), anyhow::Error> {
+    async fn handle_new_connection(mut stream: TcpStream) -> ReadySetResult<(u64, DualTcpStream)> {
         let mut tag: u8 = 0;
         stream.read_exact(std::slice::from_mut(&mut tag)).await?;
         let is_base = tag == CONNECTION_FROM_BASE;
@@ -357,7 +354,7 @@ impl Replica {
         domain: &mut Domain,
         req: Option<WrappedDomainRequest>,
         out: &mut Outboxes,
-    ) -> Option<Result<(), anyhow::Error>> {
+    ) -> Option<ReadySetResult<()>> {
         match req {
             Some(req) => {
                 if req
@@ -462,7 +459,7 @@ impl Replica {
     }
 
     /// Start the event loop for a Replica
-    pub async fn run(mut self) -> Result<(), anyhow::Error> {
+    pub async fn run(mut self) -> ReadySetResult<()> {
         let mut accepted = futures::stream::FuturesUnordered::new(); // conns being upgraded
         let mut established = Default::default();
         let mut channel_changes = self.coord.subscribe();
@@ -501,8 +498,8 @@ impl Replica {
             // https://docs.rs/tokio/latest/tokio/macro.select.html
             tokio::select! {
                 // Accept incoming connections
-                conn = incoming.accept() => {
-                    let (conn, addr) = conn.context("listening")?;
+                res = incoming.accept() => {
+                    let (conn, addr) = res?;
                     debug!(from = ?addr, "accepted new connection");
                     accepted.push(Self::handle_new_connection(conn));
                 },
