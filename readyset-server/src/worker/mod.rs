@@ -653,6 +653,9 @@ async fn evict_check(
                 node: None,
                 num_bytes: evict,
             },
+            done: None,
+            barrier: 0,
+            credits: 0,
         };
         if let Err(e) = tx.send(pkt).await {
             // probably exiting?
