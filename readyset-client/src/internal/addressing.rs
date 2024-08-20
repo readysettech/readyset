@@ -18,6 +18,10 @@ impl From<DomainIndex> for usize {
 }
 
 impl DomainIndex {
+    pub const fn new(i: usize) -> Self {
+        Self(i)
+    }
+
     pub fn index(self) -> usize {
         self.0
     }
