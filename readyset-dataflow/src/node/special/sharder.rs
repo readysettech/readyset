@@ -287,10 +287,16 @@ impl Sharder {
                             keys: Vec::new(),
                             tag,
                         },
+                        done: None,
+                        barrier: 0,
+                        credits: 0,
                     });
                     match *p {
                         Packet::Evict {
                             req: EvictRequest::Keys { ref mut keys, .. },
+                            done: None,
+                            barrier: 0,
+                            credits: 0,
                         } => keys.push(key.clone()),
                         _ => {
                             // TODO: Scoped for a future refactor:
@@ -319,6 +325,9 @@ impl Sharder {
                             keys: keys.to_vec(),
                             tag,
                         },
+                        done: None,
+                        barrier: 0,
+                        credits: 0,
                     },
                     replica,
                     output,

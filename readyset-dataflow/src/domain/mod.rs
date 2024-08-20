@@ -45,6 +45,7 @@ use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
 use tokio::sync::mpsc::Sender;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, error, info, info_span, trace, warn, Instrument};
+use url::Url;
 use vec1::Vec1;
 
 pub(crate) use self::replay_paths::ReplayPath;
@@ -1346,6 +1347,9 @@ impl Domain {
                         tag,
                     },
                     executor,
+                    None,
+                    0,
+                    0,
                 )?;
             }
         }
@@ -2483,14 +2487,14 @@ impl Domain {
     }
 
     #[inline(always)]
-    fn handle_evict(
+    fn handle_external_eviction(
         &mut self,
         executor: &mut dyn Executor,
         req: EvictRequest,
     ) -> ReadySetResult<Option<Vec<u8>>> {
         // Handle an external request for an eviction. Returns the evicted key unless no
         // eviction occurred.
-        let key = self.handle_eviction(req, executor)?;
+        let key = self.handle_eviction(req, executor, None, 0, 0)?;
         Ok(Some(bincode::serialize(&key)?))
     }
 
@@ -2617,7 +2621,7 @@ impl Domain {
                 Ok(Some(bincode::serialize(&!self.not_ready.contains(&node))?))
             }
             DomainRequest::AllTablesCompacted => self.handle_all_tables_compacted(),
-            DomainRequest::Evict { req } => self.handle_evict(executor, req),
+            DomainRequest::Evict { req } => self.handle_external_eviction(executor, req),
             DomainRequest::Shutdown => self.handle_shutdown(),
         };
 
@@ -2661,8 +2665,19 @@ impl Domain {
                 self.total_replay_time.stop();
                 self.metrics.rec_replay_time(&cache_name, start.elapsed());
             }
-            Packet::Evict { req } => {
-                self.handle_eviction(req, executor)?;
+            Packet::Evict {
+                req,
+                done,
+                barrier,
+                credits,
+            } => {
+                debug!(
+                    "{} evicting in barrier {:x}, credits: {:x}",
+                    self.address(),
+                    barrier,
+                    credits
+                );
+                self.handle_eviction(req, executor, done, barrier, credits)?;
             }
             Packet::Timestamp { .. } => {
                 // TODO(justinmiron): Handle timestamp packets at data flow nodes. The
@@ -4611,6 +4626,9 @@ impl Domain {
         &mut self,
         request: EvictRequest,
         ex: &mut dyn Executor,
+        _done: Option<Url>,
+        _barrier: u128,
+        _credits: u128,
     ) -> ReadySetResult<Option<Vec<DfValue>>> {
         match request {
             EvictRequest::Bytes { node, num_bytes } => {
