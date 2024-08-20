@@ -3,7 +3,7 @@ use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::HashMap;
 use std::future::Future;
 use std::net::{IpAddr, SocketAddr};
-use std::pin::Pin;
+use std::pin::{pin, Pin};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::task::{ready, Context, Poll};
@@ -18,6 +18,7 @@ use futures_util::sink::SinkExt;
 use futures_util::stream::StreamExt;
 use metrics::{counter, gauge, histogram};
 use pin_project::pin_project;
+use rand::Rng;
 use readyset_alloc::StdThreadBuildWrapper;
 use readyset_client::internal::ReplicaAddress;
 use readyset_client::metrics::recorded;
@@ -29,7 +30,7 @@ use serde::{Deserialize, Serialize};
 use tikv_jemalloc_ctl::stats::allocated_mib;
 use tikv_jemalloc_ctl::{epoch, epoch_mib, stats};
 use tokio::sync::mpsc::{Receiver, Sender};
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::{oneshot, Mutex, MutexGuard};
 use tokio::task::{JoinError, JoinHandle};
 use tokio::time::Interval;
 use tracing::{debug, error, info, info_span, trace, warn, Instrument};
@@ -224,6 +225,8 @@ pub struct Worker {
     domain_bind: IpAddr,
     /// The IP address to expose to other domains for domain<->domain traffic.
     domain_external: IpAddr,
+    /// URL at which this worker can be contacted.
+    url: Url,
     /// A store of the current state size of each domain, used for eviction purposes.
     state_sizes: Arc<Mutex<HashMap<ReplicaAddress, Arc<AtomicUsize>>>>,
     /// Read handles.
@@ -235,6 +238,7 @@ pub struct Worker {
     is_evicting: Arc<AtomicBool>,
     domain_wait_queue: FuturesUnordered<FinishedDomain>,
     shutdown_rx: ShutdownReceiver,
+    barriers: Arc<BarrierManager>,
 }
 
 impl Worker {
@@ -244,6 +248,7 @@ impl Worker {
         rx: Receiver<WorkerRequest>,
         listen_addr: IpAddr,
         external_addr: SocketAddr,
+        url: Url,
         readers: Readers,
         memory_limit: Option<usize>,
         evict_interval: Option<Duration>,
@@ -257,6 +262,7 @@ impl Worker {
             rx,
             domain_bind: listen_addr,
             domain_external: external_addr.ip(),
+            url,
             readers,
             memory_limit: memory_limit.unwrap_or(usize::MAX),
             evict_interval,
@@ -268,6 +274,7 @@ impl Worker {
             domains: Default::default(),
             is_evicting: Default::default(),
             domain_wait_queue: Default::default(),
+            barriers: Default::default(),
         })
     }
 
@@ -278,6 +285,8 @@ impl Worker {
             self.memory,
             self.state_sizes.clone(),
             self.is_evicting.clone(),
+            self.url.clone(),
+            self.barriers.clone(),
         ));
     }
 
@@ -483,8 +492,10 @@ impl Worker {
                 }
                 Ok(None)
             }
-            WorkerRequestKind::BarrierCredit { id: _, credits: _ } => {
-                todo!();
+            WorkerRequestKind::BarrierCredit { id, credits } => {
+                debug!("received barrier credits: {:x} for id {:x}", credits, id);
+                self.barriers.add(id, credits).await;
+                Ok(None)
             }
         }
     }
@@ -570,10 +581,12 @@ async fn evict_check(
     coord: Arc<ChannelCoordinator>,
     tracker: MemoryTracker,
     state_sizes: Arc<Mutex<HashMap<ReplicaAddress, Arc<AtomicUsize>>>>,
+    _url: Url,
+    _bmgr: Arc<BarrierManager>,
 ) -> ReadySetResult<()> {
     let start = std::time::Instant::now();
 
-    let used: usize = tracker.allocated_bytes()?;
+    let used = tracker.allocated_bytes()?;
     gauge!(recorded::EVICTION_WORKER_HEAP_ALLOCATED_BYTES, used as f64);
     if used < limit {
         return Ok(());
@@ -703,12 +716,14 @@ async fn evict_start(
     tracker: MemoryTracker,
     state_sizes: Arc<Mutex<HashMap<ReplicaAddress, Arc<AtomicUsize>>>>,
     is_evicting: Arc<AtomicBool>,
+    url: Url,
+    barriers: Arc<BarrierManager>,
 ) -> ReadySetResult<()> {
     if is_evicting.swap(true, Ordering::Relaxed) {
         return Ok(()); // Already evicting, nothing to do
     }
 
-    let res = evict_check(limit, coord, tracker, state_sizes)
+    let res = evict_check(limit, coord, tracker, state_sizes, url, barriers)
         .instrument(info_span!("evicting"))
         .await;
 
@@ -755,5 +770,166 @@ impl Drop for Worker {
             .expect("failed to register thread")
             .join()
             .expect("This thread shouldn't panic");
+    }
+}
+
+struct BarrierInternal {
+    credits: u128,
+    done: oneshot::Sender<ReadySetResult<()>>,
+}
+
+#[derive(Default)]
+pub struct BarrierManager {
+    barriers: Mutex<HashMap<u128, BarrierInternal>>,
+}
+
+#[allow(dead_code)]
+impl BarrierManager {
+    const FULL_CREDIT: u128 = u128::MAX;
+
+    async fn create(&self, split: usize) -> Barrier {
+        let mut barriers = self.barriers.lock().await;
+        let id = loop {
+            let id = rand::thread_rng().gen();
+            let None = barriers.get(&id) else {
+                continue;
+            };
+            break id;
+        };
+
+        let (tx, rx) = oneshot::channel();
+        barriers.insert(
+            id,
+            BarrierInternal {
+                credits: 0,
+                done: tx,
+            },
+        );
+        let b = Barrier::new(id, split as _, rx);
+        if split == 0 {
+            Self::notify(barriers, id);
+        }
+        b
+    }
+
+    async fn add(&self, id: u128, credits: u128) {
+        let mut barriers = self.barriers.lock().await;
+        let Some(b) = barriers.get_mut(&id) else {
+            error!("unknown barrier {:x}", id);
+            return;
+        };
+
+        b.credits += credits;
+        if b.credits == Self::FULL_CREDIT {
+            Self::notify(barriers, id);
+        }
+    }
+
+    fn notify(mut barriers: MutexGuard<'_, HashMap<u128, BarrierInternal>>, id: u128) {
+        let b = barriers.remove(&id).unwrap(); // just looked up
+        let _ = b.done.send(Ok(())).inspect_err(|e| {
+            error!("receiver dropped for barrier {:x}: {:?}", id, e);
+        });
+    }
+}
+
+pub struct Barrier {
+    id: u128,
+    done: oneshot::Receiver<ReadySetResult<()>>,
+    complete: bool,
+    give: Vec<u128>,
+}
+
+#[allow(dead_code)]
+impl Barrier {
+    fn new(id: u128, split: u128, done: oneshot::Receiver<ReadySetResult<()>>) -> Self {
+        debug!("creating barrier {:x} with {} splits", id, split);
+        let mut give = Vec::new();
+        if split > 0 {
+            let each = BarrierManager::FULL_CREDIT / split;
+            let extra = BarrierManager::FULL_CREDIT % split;
+            assert!(each > 0, "barrier split too many times");
+            give.push(each + extra);
+            for _ in 1..split {
+                give.push(each);
+            }
+        }
+
+        Self {
+            id,
+            done,
+            complete: false,
+            give,
+        }
+    }
+
+    fn id(&self) -> u128 {
+        self.id
+    }
+
+    fn split(&mut self) -> u128 {
+        self.give
+            .pop()
+            .expect("barrier split more times than declared")
+    }
+}
+
+impl Future for Barrier {
+    type Output = ReadySetResult<()>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        match pin!(&mut self.done).poll(cx) {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(Ok(res)) => {
+                debug!("barrier {:x} complete", self.id);
+                self.complete = true;
+                Poll::Ready(res)
+            }
+            Poll::Ready(Err(e)) => {
+                error!("barrier {:x} errored: {}", self.id, e);
+                self.complete = true;
+                Poll::Ready(Err(internal_err!(
+                    "barrier sender unexpectedly dropped: {:?}",
+                    e
+                )))
+            }
+        }
+    }
+}
+
+impl Drop for Barrier {
+    fn drop(&mut self) {
+        if !self.complete {
+            error!("barrier {:x} dropped before completion", self.id);
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use futures::future::FutureExt;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn barrier_split() {
+        const SPLITS: usize = 5;
+
+        let bm = BarrierManager::default();
+        let mut b = bm.create(SPLITS).await;
+
+        for _ in 0..SPLITS {
+            bm.add(b.id, b.split()).await;
+        }
+
+        // b.await, but require that it resolve immediately
+        assert_eq!(b.now_or_never(), Some(Ok(())));
+    }
+
+    #[tokio::test]
+    async fn barrier_zero() {
+        let bm = BarrierManager::default();
+        let b = bm.create(0).await;
+        assert_eq!(b.now_or_never(), Some(Ok(())));
     }
 }
