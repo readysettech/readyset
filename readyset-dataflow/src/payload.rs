@@ -706,10 +706,10 @@ impl fmt::Debug for Packet {
                 tag,
                 data.len()
             ),
-            ref p => {
-                use std::mem;
-                write!(f, "Packet::Control({:?})", mem::discriminant(p))
-            }
+            Packet::Timestamp { .. } => write!(f, "Packet::Timestamp"),
+            Packet::Finish { .. } => write!(f, "Packet::Finish"),
+            Packet::Spin { .. } => write!(f, "Packet::Spin"),
+            Packet::Evict { .. } => write!(f, "Packet::Evict"),
         }
     }
 }
