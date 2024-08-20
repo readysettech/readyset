@@ -4402,17 +4402,22 @@ name = "readyset-common"
 version = "0.7.0"
 dependencies = [
  "anyhow",
+ "bincode",
  "chrono",
+ "hyper",
  "petgraph",
  "proptest",
  "readyset-client",
  "readyset-data",
+ "readyset-errors",
  "readyset-util",
+ "reqwest",
  "rlimit",
  "serde",
  "test-strategy",
  "tracing",
  "triomphe",
+ "url",
  "vec1",
 ]
 

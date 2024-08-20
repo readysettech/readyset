@@ -51,7 +51,7 @@ const CONTROLLER_REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 /// Some kind of request for a running ReadySet worker.
 ///
 /// Most of these requests return `()`, apart from `DomainRequest`.
-#[derive(Clone, EnumKind, Serialize, Deserialize)]
+#[derive(Clone, Debug, EnumKind, Serialize, Deserialize)]
 #[enum_kind(WorkerRequestType)]
 pub enum WorkerRequestKind {
     /// A new controller has been elected.

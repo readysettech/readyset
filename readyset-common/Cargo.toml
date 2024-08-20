@@ -18,8 +18,13 @@ test-strategy = { workspace = true }
 rlimit = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
+url = { workspace = true }
+hyper = { workspace = true }
+reqwest = { workspace = true }
+bincode = { workspace = true }
 
 # Local deps
 readyset-client = { path = "../readyset-client" }
 readyset-data = { path = "../readyset-data" }
+readyset-errors = { path = "../readyset-errors" }
 readyset-util = { path = "../readyset-util" }
