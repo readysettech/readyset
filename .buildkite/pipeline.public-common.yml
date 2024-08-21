@@ -9,6 +9,18 @@ common_values:
       - exit_status: -1            # agent timed out
         signal_reason: none
         limit: 3
+  # It would be great to avoid duplication here, but yaml apparently does not
+  # support merging lists, only dictionaries:
+  retry_on_kill_or_test_fail: &retry_on_agent_kill_or_test_fail
+    automatic:
+      - signal_reason: agent_stop  # spot instance killed by AWS
+        limit: 3
+      - exit_status: -1            # agent timed out
+        signal_reason: none
+        limit: 3
+      - exit_status: 101  # test failure
+        limit: 3
+
 steps:
 
   - label: ':rust: Check rustfmt'
@@ -136,7 +148,7 @@ steps:
       - ecr#v2.7.0:
           login: true
           retries: 3
-    retry: *retry_on_agent_kill
+    retry: *retry_on_agent_kill_or_test_fail
 
   - label: 'Test benchmark framework'
     key: test-benchmark
