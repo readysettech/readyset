@@ -2679,11 +2679,6 @@ where
     ) -> Result<(), DB::Error> {
         match Handler::handle_set_statement(set) {
             SetBehavior::Unsupported => {
-                warn!(
-                    // FIXME(REA-2168): Use correct dialect.
-                    set = %set.display(nom_sql::Dialect::MySQL),
-                    "received unsupported SET statement"
-                );
                 match settings.unsupported_set_mode {
                     UnsupportedSetMode::Error => {
                         let e = ReadySetError::SetDisallowed {
@@ -2692,9 +2687,19 @@ where
                         if upstream.is_some() {
                             event.set_noria_error(&e);
                         }
+                        error!(
+                            // FIXME(REA-2168): Use correct dialect.
+                            set = %set.display(nom_sql::Dialect::MySQL),
+                            "received unsupported SET statement."
+                        );
                         return Err(e.into());
                     }
                     UnsupportedSetMode::Proxy => {
+                        warn!(
+                            // FIXME(REA-2168): Use correct dialect.
+                            set = %set.display(nom_sql::Dialect::MySQL),
+                            "received unsupported SET statement."
+                        );
                         state.proxy_state = ProxyState::ProxyAlways;
                     }
                     UnsupportedSetMode::Allow => {}

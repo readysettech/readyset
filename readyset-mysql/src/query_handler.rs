@@ -27,7 +27,7 @@ const REQUIRED_SQL_MODES: [SqlMode; 3] = [
 
 /// The list of mysql `SQL_MODE`s that *may* be set by a client (because they don't affect query
 /// semantics)
-const ALLOWED_SQL_MODES: [SqlMode; 11] = [
+const ALLOWED_SQL_MODES: [SqlMode; 12] = [
     SqlMode::ErrorForDivisionByZero, // deprecated
     SqlMode::IgnoreSpace,            // TODO: I think this is fine, but I'm not 100% sure
     SqlMode::NoAutoValueOnZero,
@@ -39,19 +39,24 @@ const ALLOWED_SQL_MODES: [SqlMode; 11] = [
     SqlMode::StrictAllTables,
     SqlMode::StrictTransTables,
     SqlMode::TimeTruncateFractional,
+    SqlMode::Traditional,
 ];
 
 /// Enum representing the various flags that can be set as part of the MySQL `SQL_MODE` parameter.
-/// See [the official mysql documentation][mysql-docs] for more information.
+/// See [the official mysql documentation][mysql-docs] and [source code][mysql-source] for more
+/// information.
 ///
-/// Note that this enum only includes the SQL mode flags that are present as of mysql 8.0 - any SQL
+/// Note that this enum only includes the SQL mode flags that are present as of mysql 8.4 - any SQL
 /// modes that have been removed since earlier versions are omitted here, as they're unsupported
 /// regardless.
 ///
-/// [mysql-docs]: https://dev.mysql.com/doc/refman/8.0/en/sql-mode.html
+/// [mysql-docs]: https://dev.mysql.com/doc/refman/8.4/en/sql-mode.html
+/// [mysql-source]: https://github.com/mysql/mysql-server/blob/mysql-cluster-8.4.2/sql/sys_vars.cc#L4725
 #[derive(PartialEq, Eq, Hash)]
 enum SqlMode {
     AllowInvalidDates,
+    Ansi, /* alias for REAL_AS_FLOAT, PIPES_AS_CONCAT, ANSI_QUOTES, IGNORE_SPACE, and
+           * ONLY_FULL_GROUP_BY. */
     AnsiQuotes,
     ErrorForDivisionByZero,
     HighNotPrecedence,
@@ -71,6 +76,8 @@ enum SqlMode {
     StrictAllTables,
     StrictTransTables,
     TimeTruncateFractional,
+    Traditional, /* alias for STRICT_TRANS_TABLES, STRICT_ALL_TABLES, NO_ZERO_IN_DATE,
+                  * NO_ZERO_DATE, ERROR_FOR_DIVISION_BY_ZERO, and NO_ENGINE_SUBSTITUTION. */
 }
 
 impl FromStr for SqlMode {
@@ -79,6 +86,7 @@ impl FromStr for SqlMode {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match &s.trim().to_ascii_lowercase()[..] {
             "allow_invalid_dates" => Ok(SqlMode::AllowInvalidDates),
+            "ansi" => Ok(SqlMode::Ansi),
             "ansi_quotes" => Ok(SqlMode::AnsiQuotes),
             "error_for_division_by_zero" => Ok(SqlMode::ErrorForDivisionByZero),
             "high_not_precedence" => Ok(SqlMode::HighNotPrecedence),
@@ -98,6 +106,7 @@ impl FromStr for SqlMode {
             "strict_all_tables" => Ok(SqlMode::StrictAllTables),
             "strict_trans_tables" => Ok(SqlMode::StrictTransTables),
             "time_truncate_fractional" => Ok(SqlMode::TimeTruncateFractional),
+            "traditional" => Ok(SqlMode::Traditional),
             _ => Err(ReadySetError::SqlModeParseFailed(s.to_string())),
         }
     }
