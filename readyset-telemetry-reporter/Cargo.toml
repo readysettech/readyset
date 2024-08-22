@@ -22,7 +22,7 @@ readyset-tracing = { path = "../readyset-tracing", optional = true }
 readyset-util = { path = "../readyset-util" }
 uuid = { workspace = true, features = ["v4"] }
 machine-uid = { workspace = true }
-blake2= "0.10"
+blake2 = { workspace = true }
 
 readyset-version = { path = "../readyset-version" }
 
