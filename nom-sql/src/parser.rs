@@ -184,7 +184,7 @@ impl SqlQuery {
                 | ShowStatement::ReadySetStatusAdapter
                 | ShowStatement::ReadySetMigrationStatus(_)
                 | ShowStatement::ReadySetVersion
-                | ShowStatement::ReadySetTables
+                | ShowStatement::ReadySetTables(..)
                 | ShowStatement::Connections => true,
             },
             SqlQuery::CreateDatabase(_)

@@ -2466,7 +2466,9 @@ where
                 self.noria.migration_status(*id).await
             }
             SqlQuery::Show(ShowStatement::ReadySetVersion) => readyset_version(),
-            SqlQuery::Show(ShowStatement::ReadySetTables) => self.noria.table_statuses().await,
+            SqlQuery::Show(ShowStatement::ReadySetTables(options)) => {
+                self.noria.table_statuses(options.all).await
+            }
             SqlQuery::Show(ShowStatement::Connections) => self.show_connections(),
             SqlQuery::Show(ShowStatement::ProxiedQueries(proxied_queries_options)) => {
                 // Log a telemetry event

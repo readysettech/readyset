@@ -337,7 +337,7 @@ pub struct ReadySetHandle {
 }
 
 /// Define a simple RPC request wrapper for the controller, which queries the same RPC endpoint as
-/// the name of the function and takes no arguments.
+/// the name of the function.
 ///
 /// This is a common enough pattern that it's worth defining a macro for, but anything more complex
 /// than this is worth defining as a regular function
@@ -460,10 +460,11 @@ impl ReadySetHandle {
         self.simple_post_request("tables").await
     }
 
-    /// Query the status of all known tables, including those not replicated by ReadySet
-    pub async fn table_statuses(&mut self) -> ReadySetResult<BTreeMap<Relation, TableStatus>> {
-        self.simple_post_request("table_statuses").await?
-    }
+    simple_request!(
+        /// Query the status of all known tables, including those not replicated by ReadySet if
+        /// the `all` parameter is set to `true`.
+        table_statuses(all: bool) -> BTreeMap<Relation, TableStatus>
+    );
 
     /// Return a list of all relations (tables or views) which are known to exist in the upstream
     /// database that we are replicating from, but are not being replicated to ReadySet (which are

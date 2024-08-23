@@ -1753,7 +1753,32 @@ mod tests {
             .await
             .unwrap();
 
-        let res = noria.table_statuses().await.unwrap();
+        let res = noria.table_statuses(false).await.unwrap();
+        assert_eq!(
+            res,
+            BTreeMap::from([
+                (
+                    Relation {
+                        schema: Some("s2".into()),
+                        name: "snapshotting_t".into(),
+                    },
+                    TableStatus {
+                        replication_status: TableReplicationStatus::Snapshotting
+                    }
+                ),
+                (
+                    Relation {
+                        schema: Some("s2".into()),
+                        name: "snapshotted_t".into(),
+                    },
+                    TableStatus {
+                        replication_status: TableReplicationStatus::Snapshotted
+                    }
+                ),
+            ])
+        );
+
+        let res = noria.table_statuses(true).await.unwrap();
         assert_eq!(
             res,
             BTreeMap::from([

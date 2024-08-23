@@ -1033,32 +1033,38 @@ impl DfState {
             .collect()
     }
 
-    /// Query the status of all known tables, including those not replicated by ReadySet
-    pub(super) async fn table_statuses(&self) -> ReadySetResult<BTreeMap<Relation, TableStatus>> {
+    /// Query the status of all known tables, including those not replicated by ReadySet if `all`
+    /// is set to `true`.
+    pub(super) async fn table_statuses(
+        &self,
+        all: bool,
+    ) -> ReadySetResult<BTreeMap<Relation, TableStatus>> {
         let known_tables = self.tables();
         let snapshotting_tables = self.snapshotting_tables().await?;
-        let non_replicated_relations = self.non_replicated_relations();
-        Ok(known_tables
-            .into_keys()
-            .map(|tbl| {
-                let status = TableStatus {
-                    replication_status: if snapshotting_tables.contains(&tbl) {
-                        TableReplicationStatus::Snapshotting
-                    } else {
-                        TableReplicationStatus::Snapshotted
-                    },
-                };
-                (tbl, status)
-            })
-            .chain(non_replicated_relations.iter().cloned().map(|tbl| {
-                (
-                    tbl.name,
-                    TableStatus {
-                        replication_status: TableReplicationStatus::NotReplicated(tbl.reason),
-                    },
-                )
-            }))
-            .collect())
+        let out = known_tables.into_keys().map(|tbl| {
+            let status = TableStatus {
+                replication_status: if snapshotting_tables.contains(&tbl) {
+                    TableReplicationStatus::Snapshotting
+                } else {
+                    TableReplicationStatus::Snapshotted
+                },
+            };
+            (tbl, status)
+        });
+        if all {
+            Ok(out
+                .chain(self.non_replicated_relations().iter().cloned().map(|tbl| {
+                    (
+                        tbl.name,
+                        TableStatus {
+                            replication_status: TableReplicationStatus::NotReplicated(tbl.reason),
+                        },
+                    )
+                }))
+                .collect())
+        } else {
+            Ok(out.collect())
+        }
     }
 
     /// Returns a list of all table names that are currently involved in snapshotting.

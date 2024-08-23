@@ -355,9 +355,10 @@ impl Leader {
                 return_serialized!(ds.tables())
             }
             (&Method::POST, "/table_statuses") => {
+                let all: bool = bincode::deserialize(&body)?;
                 let res = {
                     let ds = self.dataflow_state_handle.read().await;
-                    ds.table_statuses().await
+                    ds.table_statuses(all).await?
                 };
                 return_serialized!(res)
             }

@@ -17,6 +17,11 @@ use crate::expression::expression;
 use crate::whitespace::{whitespace0, whitespace1};
 use crate::{literal, Dialect, DialectDisplay, Expr, Literal, NomSqlResult};
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Arbitrary)]
+pub struct ReadySetTablesOptions {
+    pub all: bool,
+}
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum ShowStatement {
     Events,
@@ -27,7 +32,7 @@ pub enum ShowStatement {
     ReadySetStatusAdapter,
     ReadySetMigrationStatus(u64),
     ReadySetVersion,
-    ReadySetTables,
+    ReadySetTables(ReadySetTablesOptions),
     Connections,
 }
 
@@ -60,7 +65,13 @@ impl DialectDisplay for ShowStatement {
                 Self::ReadySetStatusAdapter => write!(f, "READYSET STATUS ADAPTER"),
                 Self::ReadySetMigrationStatus(id) => write!(f, "READYSET MIGRATION STATUS {}", id),
                 Self::ReadySetVersion => write!(f, "READYSET VERSION"),
-                Self::ReadySetTables => write!(f, "READYSET TABLES"),
+                Self::ReadySetTables(options) => {
+                    if options.all {
+                        write!(f, "READYSET ALL TABLES")
+                    } else {
+                        write!(f, "READYSET TABLES")
+                    }
+                }
                 Self::Connections => write!(f, "CONNECTIONS"),
             }
         })
@@ -171,6 +182,21 @@ pub fn readyset_migration_status(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], S
     Ok((i, ShowStatement::ReadySetMigrationStatus(id)))
 }
 
+fn readyset_tables() -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ShowStatement> {
+    move |i| {
+        let (i, _) = tag_no_case("readyset")(i)?;
+        let (i, all) = map(opt(preceded(whitespace1, tag_no_case("all"))), |all| {
+            all.is_some()
+        })(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("tables")(i)?;
+        Ok((
+            i,
+            ShowStatement::ReadySetTables(ReadySetTablesOptions { all }),
+        ))
+    }
+}
+
 pub fn show(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ShowStatement> {
     move |i| {
         let (i, _) = tag_no_case("show")(i)?;
@@ -184,10 +210,7 @@ pub fn show(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u
                 ShowStatement::ReadySetVersion,
                 tuple((tag_no_case("readyset"), whitespace1, tag_no_case("version"))),
             ),
-            value(
-                ShowStatement::ReadySetTables,
-                tuple((tag_no_case("readyset"), whitespace1, tag_no_case("tables"))),
-            ),
+            readyset_tables(),
             map(show_tables(dialect), ShowStatement::Tables),
             value(ShowStatement::Events, tag_no_case("events")),
             value(ShowStatement::Connections, tag_no_case("connections")),
@@ -504,7 +527,15 @@ mod tests {
     #[test]
     fn show_readyset_tables() {
         let res = test_parse!(show(Dialect::MySQL), b"SHOW READYSET TABLES");
-        assert_eq!(res, ShowStatement::ReadySetTables);
+        assert_eq!(
+            res,
+            ShowStatement::ReadySetTables(ReadySetTablesOptions { all: false })
+        );
+        let res = test_parse!(show(Dialect::MySQL), b"SHOW READYSET ALL TABLES");
+        assert_eq!(
+            res,
+            ShowStatement::ReadySetTables(ReadySetTablesOptions { all: true })
+        );
     }
 
     #[test]

@@ -896,10 +896,13 @@ impl NoriaConnector {
             .into()]))
     }
 
-    pub(crate) async fn table_statuses(&mut self) -> ReadySetResult<QueryResult<'static>> {
+    pub(crate) async fn table_statuses(
+        &mut self,
+        all: bool,
+    ) -> ReadySetResult<QueryResult<'static>> {
         let statuses = noria_await!(
             self.inner.get_mut()?,
-            self.inner.get_mut()?.noria.table_statuses()
+            self.inner.get_mut()?.noria.table_statuses(all)
         )?;
 
         let schema = SelectSchema {
