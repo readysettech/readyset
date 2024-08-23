@@ -18,7 +18,7 @@
     <div id="graph"></div>
     <script type="module" read>
       const params = new URLSearchParams(new URL(window.location).search)
-      const endpoint = params.has('detailed') ? 'graph' : 'simple_graph'
+      const endpoint = params.has('simple') ? 'simple_graph' : 'graph'
 
       const response = await fetch(endpoint)
       const dot = await response.text()
