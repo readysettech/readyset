@@ -902,6 +902,7 @@ fn binlog_val_to_noria_val(
     col_kind: mysql_common::constants::ColumnType,
     meta: &[u8],
     collation: u16,
+    unsigned: bool,
 ) -> mysql::Result<DfValue> {
     // Not all values are coerced to the value expected by ReadySet directly
 
@@ -1020,9 +1021,20 @@ fn binlog_val_to_noria_val(
         (ColumnType::MYSQL_TYPE_INT24, _) => {
             match val {
                 mysql_common::value::Value::Int(x) => {
-                    // Extend sign from 24 bits to 64 bits.
-                    let missing = size_of::<i64>() as u32 * 8 - 24;
-                    Ok(DfValue::Int(x.wrapping_shl(missing).wrapping_shr(missing)))
+                    // MySQL can send signed int values even for unsigned columns, so we have to
+                    // check whether it's actually signed; if so, we need to sign-extend from 24
+                    // bits to 64 bits.
+                    if unsigned {
+                        Ok(DfValue::UnsignedInt((*x).try_into().map_err(|e| {
+                            mysql_async::Error::Other(Box::new(internal_err!(
+                                "Could not convert signed to unsigned mediumint column: {}",
+                                e
+                            )))
+                        })?))
+                    } else {
+                        let missing = size_of::<i64>() as u32 * 8 - 24;
+                        Ok(DfValue::Int(x.wrapping_shl(missing).wrapping_shr(missing)))
+                    }
                 }
                 mysql_common::value::Value::UInt(x) => Ok(DfValue::UnsignedInt(*x)),
                 _ => Err(mysql_async::Error::Other(Box::new(internal_err!(
@@ -1043,6 +1055,7 @@ fn binlog_row_to_noria_row(
     let opt_meta_extractor = OptionalMetaExtractor::new(tme.iter_optional_meta()).unwrap();
     let mut charset_iter = opt_meta_extractor.iter_charset();
     let mut enum_and_set_charset_iter = opt_meta_extractor.iter_enum_and_set_charset();
+    let mut signedness_iter = opt_meta_extractor.iter_signedness();
     (0..binlog_row.len())
         .map(|idx| {
             match binlog_row.as_ref(idx).unwrap() {
@@ -1068,7 +1081,12 @@ fn binlog_row_to_noria_row(
                     } else {
                         Default::default()
                     };
-                    binlog_val_to_noria_val(val, kind, meta, charset)
+                    let unsigned = if kind.is_numeric_type() {
+                        signedness_iter.next().unwrap_or(false)
+                    } else {
+                        false
+                    };
+                    binlog_val_to_noria_val(val, kind, meta, charset, unsigned)
                 }
                 BinlogValue::Jsonb(val) => {
                     let json: Result<serde_json::Value, _> = val.clone().try_into(); // urgh no TryFrom impl
