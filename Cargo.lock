@@ -4532,6 +4532,7 @@ dependencies = [
 name = "readyset-e2e-tests"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "futures",
  "mysql_async",
  "mysql_common",
