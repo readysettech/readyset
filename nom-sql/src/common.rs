@@ -135,6 +135,22 @@ impl TableKey {
         }
     }
 
+    /// Returns the name of the index.
+    ///
+    /// # Returns
+    /// - `Some` if the index has a name and a SqlIdentifier
+    /// - `None` if the index does not have a name
+    pub fn index_name(&self) -> &Option<SqlIdentifier> {
+        match self {
+            TableKey::PrimaryKey { index_name, .. }
+            | TableKey::UniqueKey { index_name, .. }
+            | TableKey::FulltextKey { index_name, .. }
+            | TableKey::Key { index_name, .. }
+            | TableKey::ForeignKey { index_name, .. } => index_name,
+            TableKey::CheckConstraint { .. } => &None,
+        }
+    }
+
     /// Check if the key is a primary key
     pub fn is_primary_key(&self) -> bool {
         matches!(self, TableKey::PrimaryKey { .. })
