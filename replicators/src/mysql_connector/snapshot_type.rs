@@ -1,6 +1,5 @@
-use itertools::Itertools;
-use mysql_async as mysql;
-use nom_sql::{Column, DialectDisplay};
+use mysql_async::{self as mysql, Value};
+use nom_sql::{Column, DialectDisplay, SqlIdentifier};
 use readyset_errors::{internal_err, ReadySetResult};
 
 use super::utils::MYSQL_BATCH_SIZE;
@@ -10,6 +9,7 @@ use super::utils::MYSQL_BATCH_SIZE;
 /// FullTableScan: Snapshot the entire table
 pub enum SnapshotType {
     KeyBased {
+        name: Option<SqlIdentifier>,
         keys: Vec<Column>,
         lower_bound: Option<Vec<mysql::Value>>,
     },
@@ -25,15 +25,16 @@ impl SnapshotType {
             }
         };
 
-        let keys = if let Some(pk) = cts.get_primary_key() {
-            pk.get_columns()
+        let (keys, name) = if let Some(pk) = cts.get_primary_key() {
+            (pk.get_columns(), &Some(SqlIdentifier::from("PRIMARY")))
         } else if let Some(uk) = cts.get_first_unique_key() {
-            uk.get_columns()
+            (uk.get_columns(), uk.index_name())
         } else {
             return Ok(SnapshotType::FullTableScan);
         };
 
         Ok(SnapshotType::KeyBased {
+            name: name.clone(),
             keys: keys.to_vec(),
             lower_bound: None,
         })
@@ -70,10 +71,23 @@ impl SnapshotType {
     /// Returns:
     /// * A tuple containing the count query, the initial query, and the bound based query
     pub fn get_queries(&self, table: &readyset_client::Table) -> (String, String, String) {
-        //TODO(marce): COUNT(1) Or COUNT(PK) might have better performance
+        let force_index = match self {
+            SnapshotType::KeyBased { name, .. } => {
+                if let Some(name) = name {
+                    format!(
+                        "FORCE INDEX ({})",
+                        nom_sql::Dialect::MySQL.quote_identifier(name)
+                    )
+                } else {
+                    "".to_string()
+                }
+            }
+            SnapshotType::FullTableScan => "".to_string(),
+        };
         let count_query = format!(
-            "SELECT COUNT(*) FROM {}",
-            table.table_name().display(nom_sql::Dialect::MySQL)
+            "SELECT COUNT(*) FROM {} {}",
+            table.table_name().display(nom_sql::Dialect::MySQL),
+            force_index
         );
         let (initial_query, bound_based_query) = match self {
             SnapshotType::KeyBased { ref keys, .. } => {
@@ -84,29 +98,32 @@ impl SnapshotType {
                 // ORDER BY col1 ASC, col2 ASC, col3 ASC
                 let order_by = keys.join(" ASC, ") + " ASC";
 
-                // col1 >= ? AND col2 >= ? AND col3 >= ?
-                let next_bound = keys.join(" >= ? AND ").to_string() + " >= ?";
+                // ((col1 > ?) OR (col1 = ? AND col2 > ?) OR ( col1 = ? AND col2 = ? AND col3 > ?))
+                let next_bound = (0..keys.len())
+                    .map(|i| {
+                        let conditions = (0..i).fold(String::new(), |mut acc, j| {
+                            acc.push_str(&format!("{} = ? AND ", keys[j]));
+                            acc
+                        });
+                        format!("({}{} > ?)", conditions, keys[i])
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" OR ");
 
-                // (col1, col2, col3) != (?, ?, ?)
-                let exclude_lower_bound = keys.join(", ").to_string()
-                    + ") != ("
-                    + &keys
-                        .iter()
-                        .map(|_| '?')
-                        .collect::<Vec<_>>()
-                        .iter()
-                        .join(", ");
+                let next_bound = format!("({})", next_bound);
+
                 let initial_query = format!(
-                    "SELECT * FROM {} ORDER BY {} LIMIT {}",
+                    "SELECT * FROM {} {} ORDER BY {} LIMIT {}",
                     table.table_name().display(nom_sql::Dialect::MySQL),
+                    force_index,
                     order_by,
                     MYSQL_BATCH_SIZE
                 );
                 let bound_based_query = format!(
-                    "SELECT * FROM {} WHERE {} AND ({}) ORDER BY {} LIMIT {}",
+                    "SELECT * FROM {} {} WHERE {} ORDER BY {} LIMIT {}",
                     table.table_name().display(nom_sql::Dialect::MySQL),
+                    force_index,
                     next_bound,
-                    exclude_lower_bound,
                     order_by,
                     MYSQL_BATCH_SIZE
                 );
@@ -134,12 +151,28 @@ impl SnapshotType {
             SnapshotType::KeyBased {
                 ref keys,
                 ref mut lower_bound,
+                ..
             } => {
-                let mut new_lower_bound = keys
+                let capacity = match lower_bound {
+                    Some(lower_bound) => lower_bound.len(),
+                    // Calculate the required capacity using the triangular number formula
+                    None => keys.len() * (keys.len() + 1) / 2,
+                };
+
+                let mut new_lower_bound = Vec::with_capacity(capacity);
+
+                // Collect the key values from the row
+                let row_key_values: Vec<Value> = keys
                     .iter()
-                    .map(|key| row.get(key.name.as_str()).unwrap())
-                    .collect::<Vec<mysql::Value>>();
-                new_lower_bound.append(&mut new_lower_bound.clone());
+                    .map(|key| row.get(key.name.as_ref()).unwrap())
+                    .collect();
+
+                // Push the key values into the new_lower_bound vector
+                for i in 0..keys.len() {
+                    new_lower_bound.extend_from_slice(&row_key_values[..=i]);
+                }
+
+                // Update the lower_bound with the new values
                 *lower_bound = Some(new_lower_bound);
             }
             SnapshotType::FullTableScan => {
