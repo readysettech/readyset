@@ -1,5 +1,6 @@
 use std::panic::AssertUnwindSafe;
 
+use chrono::DateTime;
 use mysql_async::prelude::Queryable;
 use mysql_async::Params;
 use mysql_common::{Row, Value};
@@ -12,7 +13,10 @@ use proptest::string::string_regex;
 use proptest::test_runner::Config as ProptestConfig;
 use readyset_client_test_helpers::mysql_helpers::MySQLAdapter;
 use readyset_client_test_helpers::{mysql_helpers, TestBuilder};
-use readyset_util::arbitrary::arbitrary_decimal_bytes_with_digits;
+use readyset_util::arbitrary::{
+    arbitrary_decimal_bytes_with_digits, arbitrary_naive_date_in_range,
+    arbitrary_naive_time_with_seconds_fraction,
+};
 use readyset_util::eventually;
 use serial_test::serial;
 use test_strategy::proptest;
@@ -155,15 +159,34 @@ fn arbitrary_mysql_value_for_type(sql_type: SqlType) -> impl Strategy<Value = Va
         | SqlType::Interval { .. } => {
             panic!("Type not supported by MySQL: {sql_type:?}")
         }
-        SqlType::Enum(_)
-        | SqlType::Date
-        | SqlType::DateTime(_)
-        | SqlType::Time
-        | SqlType::Timestamp
-        | SqlType::TimestampTz
-        | SqlType::Json
-        | SqlType::Jsonb => Just(Value::Int(0))
-            .prop_filter("not yet implemented", |_| false)
+        SqlType::Enum(_) | SqlType::Json | SqlType::TimestampTz | SqlType::Jsonb => {
+            Just(Value::Int(0))
+                .prop_filter("not yet implemented", |_| false)
+                .boxed()
+        }
+        SqlType::Date => arbitrary_naive_date_in_range(1000..=9999)
+            .prop_map(|date| date.into())
+            .boxed(),
+        SqlType::Time => arbitrary_naive_time_with_seconds_fraction()
+            .prop_map(|time| time.into())
+            .boxed(),
+        SqlType::DateTime(_) => (
+            arbitrary_naive_date_in_range(1000..=9999),
+            arbitrary_naive_time_with_seconds_fraction(),
+        )
+            .prop_map(|(date, time)| date.and_time(time).to_string().into())
+            .boxed(),
+        // Max timestamp corresponds to MySQL docs: 2038-01-19 03:14:07
+        // TODO(mvzink): If run on machine with non-UTC TZ/offset, I believe this will error
+        // converting past this bound
+        SqlType::Timestamp => (1..=2147483647i64, 0..=1_000_000_000u32)
+            .prop_map(|(secs, nsecs)| {
+                DateTime::from_timestamp(secs, nsecs)
+                    .unwrap_or_else(|| panic!("out of range ({secs}, {nsecs})"))
+                    .naive_utc()
+                    .to_string()
+                    .into()
+            })
             .boxed(),
         SqlType::Binary(len) => vec(any::<u8>(), 0..(len.unwrap_or(255) as usize))
             .prop_map(Value::Bytes)
