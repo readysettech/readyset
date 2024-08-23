@@ -2047,24 +2047,3 @@ impl<'handle> AsMut<DfState> for DfStateWriter<'handle> {
         &mut self.state
     }
 }
-
-// There is a chain of not thread-safe (not [`Send`] structures at play here:
-// [`Graph`] is not [`Send`] (as it might contain a [`reader_map::WriteHandle`]), which
-// makes [`DfState`] not [`Send`].
-// Because [`DfStateReader`] holds a [`DfState`] instance, the compiler does not
-// automatically implement [`Send`] for it. But here is what the compiler does not know:
-// 1. Only the [`DfStateHandle`] can instantiate and hold an instance of
-// [`DfStateReader`].
-//
-// 2. Only the [`DfStateHandle`] is able to get a mutable reference to the
-// [`DfStateReader`].
-//
-// 3. The [`DfStateReader`] held by the [`DfStateHandle`] is behind a
-// [`tokio::sync::RwLock`], which is only acquired as write in the [`DfStateHandle::commit`]
-// method.
-//
-// Those three conditions guarantee that there are no concurrent modifications to the underlying
-// dataflow state.
-// So, we explicitly tell the compiler that the [`DfStateReader`] is safe to be moved
-// between threads.
-unsafe impl Sync for DfStateReader {}
