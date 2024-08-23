@@ -271,6 +271,20 @@ fn round_trip_mysql_type_regressions_mediumint_negative() {
 #[test]
 #[serial]
 #[slow]
+fn round_trip_mysql_type_regressions_mediumint_unsigned_positive_large_sending_signed() {
+    round_trip_mysql_type(SqlType::UnsignedMediumInt(None), Value::Int(8388608));
+}
+
+#[test]
+#[serial]
+#[slow]
+fn round_trip_mysql_type_regressions_mediumint_unsigned_positive_large_sending_unsigned() {
+    round_trip_mysql_type(SqlType::UnsignedMediumInt(None), Value::UInt(8388608));
+}
+
+#[test]
+#[serial]
+#[slow]
 fn round_trip_mysql_type_regressions_decimal() {
     round_trip_mysql_type(SqlType::Decimal(10, 5), Value::Bytes("-0.5".into()));
 }
