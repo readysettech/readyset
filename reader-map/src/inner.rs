@@ -7,6 +7,7 @@ use iter_enum::{ExactSizeIterator, Iterator};
 use itertools::Either;
 use metrics::{register_histogram, Histogram};
 use partial_map::PartialMap;
+use petgraph::graph::NodeIndex;
 use readyset_client::internal::IndexType;
 use readyset_util::ranges::{Bound, RangeBounds};
 
@@ -321,9 +322,13 @@ pub(crate) struct WriteMetrics {
 }
 
 impl WriteMetrics {
-    fn new() -> Self {
-        let entry_updated = register_histogram!(READER_MAP_UPDATES);
-        let lifetime_evict = register_histogram!(READER_MAP_LIFETIMES);
+    fn new(node_index: Option<NodeIndex>) -> Self {
+        let idx = match node_index {
+            Some(idx) => idx.index().to_string(),
+            None => "-1".to_string(),
+        };
+        let entry_updated = register_histogram!(READER_MAP_UPDATES, "node_idx" => idx.clone());
+        let lifetime_evict = register_histogram!(READER_MAP_LIFETIMES, "node_idx" => idx);
 
         Self {
             entry_updated,
@@ -409,6 +414,7 @@ where
         hasher: S,
         eviction_strategy: EvictionStrategy,
         insertion_order: Option<I>,
+        node_index: Option<NodeIndex>,
     ) -> Self {
         Inner {
             data: Data::with_index_type_and_hasher(index_type, hasher.clone()),
@@ -418,7 +424,7 @@ where
             hasher,
             eviction_strategy,
             insertion_order,
-            metrics: WriteMetrics::new(),
+            metrics: WriteMetrics::new(node_index),
         }
     }
 

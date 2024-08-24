@@ -4084,6 +4084,7 @@ dependencies = [
  "left-right",
  "metrics",
  "partial-map",
+ "petgraph",
  "proptest",
  "rand",
  "readyset-client",

@@ -32,8 +32,16 @@ pub(crate) fn new(
     cols: usize,
     index: Index,
     reader_processing: ReaderProcessing,
+    node_index: NodeIndex,
 ) -> (SingleReadHandle, WriteHandle) {
-    new_inner(cols, index, None, EvictionKind::Random, reader_processing)
+    new_inner(
+        cols,
+        index,
+        None,
+        EvictionKind::Random,
+        reader_processing,
+        node_index,
+    )
 }
 
 /// Allocate a new partially materialized end-user facing result table.
@@ -55,6 +63,7 @@ pub(crate) fn new_partial<F>(
     trigger: F,
     eviction_kind: EvictionKind,
     reader_processing: ReaderProcessing,
+    node_index: NodeIndex,
 ) -> (SingleReadHandle, WriteHandle)
 where
     F: Fn(&mut dyn Iterator<Item = KeyComparison>, Relation) -> bool + 'static + Send + Sync,
@@ -65,6 +74,7 @@ where
         Some(Arc::new(trigger)),
         eviction_kind,
         reader_processing,
+        node_index,
     )
 }
 
@@ -85,6 +95,7 @@ fn new_inner(
     >,
     eviction_kind: EvictionKind,
     reader_processing: ReaderProcessing,
+    node_index: NodeIndex,
 ) -> (SingleReadHandle, WriteHandle) {
     let contiguous = {
         let mut contiguous = true;
@@ -117,6 +128,7 @@ fn new_inner(
             use reader_map;
             let (mut w, r) = reader_map::Options::default()
                 .with_meta(-1)
+                .with_node_index(node_index)
                 .with_timestamp(Timestamp::default())
                 .with_hasher(RandomState::default())
                 .with_index_type(index.index_type)
@@ -615,7 +627,12 @@ mod tests {
     fn store_works() {
         let a = vec![1i32.into(), "a".into()].into_boxed_slice();
 
-        let (r, mut w) = new(2, Index::hash_map(vec![0]), ReaderProcessing::default());
+        let (r, mut w) = new(
+            2,
+            Index::hash_map(vec![0]),
+            ReaderProcessing::default(),
+            Default::default(),
+        );
 
         w.swap();
 
@@ -639,7 +656,12 @@ mod tests {
         use std::thread;
 
         let n = 1_000;
-        let (r, mut w) = new(1, Index::hash_map(vec![0]), ReaderProcessing::default());
+        let (r, mut w) = new(
+            1,
+            Index::hash_map(vec![0]),
+            ReaderProcessing::default(),
+            Default::default(),
+        );
         let jh = thread::spawn(move || {
             for i in 0..n {
                 w.add(vec![Record::Positive(vec![i.into()])]);
@@ -668,7 +690,12 @@ mod tests {
         let a = vec![1i32.into(), "a".into()].into_boxed_slice();
         let b = vec![1i32.into(), "b".into()].into_boxed_slice();
 
-        let (r, mut w) = new(2, Index::hash_map(vec![0]), ReaderProcessing::default());
+        let (r, mut w) = new(
+            2,
+            Index::hash_map(vec![0]),
+            ReaderProcessing::default(),
+            Default::default(),
+        );
         w.add(vec![Record::Positive(a.to_vec())]);
         w.swap();
         w.add(vec![Record::Positive(b.to_vec())]);
@@ -683,7 +710,12 @@ mod tests {
         let b = vec![1i32.into(), "b".into()].into_boxed_slice();
         let c = vec![1i32.into(), "c".into()].into_boxed_slice();
 
-        let (r, mut w) = new(2, Index::hash_map(vec![0]), ReaderProcessing::default());
+        let (r, mut w) = new(
+            2,
+            Index::hash_map(vec![0]),
+            ReaderProcessing::default(),
+            Default::default(),
+        );
         w.add(vec![Record::Positive(a.to_vec())]);
         w.add(vec![Record::Positive(b.to_vec())]);
         w.swap();
@@ -699,7 +731,12 @@ mod tests {
         let a = vec![1i32.into(), "a".into()].into_boxed_slice();
         let b = vec![1i32.into(), "b".into()].into_boxed_slice();
 
-        let (r, mut w) = new(2, Index::hash_map(vec![0]), ReaderProcessing::default());
+        let (r, mut w) = new(
+            2,
+            Index::hash_map(vec![0]),
+            ReaderProcessing::default(),
+            Default::default(),
+        );
         w.add(vec![Record::Positive(a.to_vec())]);
         w.add(vec![Record::Positive(b.to_vec())]);
         w.add(vec![Record::Negative(a.to_vec())]);
@@ -714,7 +751,12 @@ mod tests {
         let a = vec![1i32.into(), "a".into()].into_boxed_slice();
         let b = vec![1i32.into(), "b".into()].into_boxed_slice();
 
-        let (r, mut w) = new(2, Index::hash_map(vec![0]), ReaderProcessing::default());
+        let (r, mut w) = new(
+            2,
+            Index::hash_map(vec![0]),
+            ReaderProcessing::default(),
+            Default::default(),
+        );
         w.add(vec![Record::Positive(a.to_vec())]);
         w.add(vec![Record::Positive(b.to_vec())]);
         w.swap();
@@ -731,7 +773,12 @@ mod tests {
         let b = vec![1i32.into(), "b".into()].into_boxed_slice();
         let c = vec![1i32.into(), "c".into()].into_boxed_slice();
 
-        let (r, mut w) = new(2, Index::hash_map(vec![0]), ReaderProcessing::default());
+        let (r, mut w) = new(
+            2,
+            Index::hash_map(vec![0]),
+            ReaderProcessing::default(),
+            Default::default(),
+        );
         w.add(vec![
             Record::Positive(a.to_vec()),
             Record::Positive(b.to_vec()),
@@ -761,6 +808,7 @@ mod tests {
             |_: &mut dyn Iterator<Item = KeyComparison>, _| true,
             EvictionKind::Random,
             ReaderProcessing::default(),
+            Default::default(),
         );
         w.swap();
 
@@ -786,6 +834,7 @@ mod tests {
                 |_: &mut dyn Iterator<Item = KeyComparison>, _| true,
                 EvictionKind::Random,
                 ReaderProcessing::default(),
+                Default::default(),
             );
             w.swap();
 
@@ -805,6 +854,7 @@ mod tests {
                 |_: &mut dyn Iterator<Item = KeyComparison>, _| true,
                 EvictionKind::Random,
                 ReaderProcessing::default(),
+                Default::default(),
             );
             w.swap();
 
@@ -835,6 +885,7 @@ mod tests {
                 |_: &mut dyn Iterator<Item = KeyComparison>, _| true,
                 EvictionKind::Random,
                 ReaderProcessing::default(),
+                Default::default(),
             );
             w.swap();
 
@@ -856,6 +907,7 @@ mod tests {
                 |_: &mut dyn Iterator<Item = KeyComparison>, _| true,
                 EvictionKind::Random,
                 ReaderProcessing::default(),
+                Default::default(),
             );
             w.swap();
 
