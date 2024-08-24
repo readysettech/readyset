@@ -230,6 +230,7 @@ use std::hash::{BuildHasher, Hash};
 
 pub use eviction::EvictionStrategy;
 use partial_map::InsertionOrder;
+use petgraph::graph::NodeIndex;
 use readyset_client::internal::IndexType;
 
 use crate::inner::Inner;
@@ -277,6 +278,9 @@ pub struct Options<M, T, S, I> {
     capacity: Option<usize>,
     eviction_strategy: EvictionStrategy,
     insertion_order: Option<I>,
+
+    // The global index of the reader node that will hold this `reader-map`.
+    node_index: Option<NodeIndex>,
 }
 
 impl<M, T, S, I> fmt::Debug for Options<M, T, S, I>
@@ -291,6 +295,7 @@ where
             .field("timestamp", &self.timestamp)
             .field("capacity", &self.capacity)
             .field("order", &self.insertion_order)
+            .field("node_index", &self.node_index)
             .finish_non_exhaustive()
     }
 }
@@ -305,6 +310,7 @@ impl Default for Options<(), (), RandomState, DefaultInsertionOrder> {
             capacity: None,
             eviction_strategy: Default::default(),
             insertion_order: None,
+            node_index: None,
         }
     }
 }
@@ -320,6 +326,7 @@ impl<M, T, S, I> Options<M, T, S, I> {
             capacity: self.capacity,
             eviction_strategy: self.eviction_strategy,
             insertion_order: self.insertion_order,
+            node_index: self.node_index,
         }
     }
 
@@ -333,6 +340,7 @@ impl<M, T, S, I> Options<M, T, S, I> {
             capacity: self.capacity,
             eviction_strategy: self.eviction_strategy,
             insertion_order: self.insertion_order,
+            node_index: self.node_index,
         }
     }
 
@@ -346,6 +354,7 @@ impl<M, T, S, I> Options<M, T, S, I> {
             capacity: Some(capacity),
             eviction_strategy: self.eviction_strategy,
             insertion_order: self.insertion_order,
+            node_index: self.node_index,
         }
     }
 
@@ -359,6 +368,7 @@ impl<M, T, S, I> Options<M, T, S, I> {
             capacity: self.capacity,
             eviction_strategy: self.eviction_strategy,
             insertion_order: self.insertion_order,
+            node_index: self.node_index,
         }
     }
 
@@ -372,6 +382,7 @@ impl<M, T, S, I> Options<M, T, S, I> {
             capacity: self.capacity,
             eviction_strategy: self.eviction_strategy,
             insertion_order,
+            node_index: self.node_index,
         }
     }
 
@@ -384,6 +395,12 @@ impl<M, T, S, I> Options<M, T, S, I> {
     /// Sets the eviction strategy for the map.
     pub fn with_eviction_strategy(mut self, eviction_strategy: EvictionStrategy) -> Self {
         self.eviction_strategy = eviction_strategy;
+        self
+    }
+
+    /// Sets the eviction strategy for the map.
+    pub fn with_node_index(mut self, node_index: NodeIndex) -> Self {
+        self.node_index = Some(node_index);
         self
     }
 
@@ -405,6 +422,7 @@ impl<M, T, S, I> Options<M, T, S, I> {
             self.hasher,
             self.eviction_strategy,
             self.insertion_order,
+            self.node_index,
         );
 
         let (mut w, r) = left_right::new_from_empty(inner);

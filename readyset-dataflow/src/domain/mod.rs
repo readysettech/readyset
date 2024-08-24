@@ -1846,6 +1846,7 @@ impl Domain {
                     },
                     self.eviction_kind,
                     r.reader_processing().clone(),
+                    node_index,
                 );
 
                 let shard = *self.shard.as_ref().unwrap_or(&0);
@@ -1895,8 +1896,12 @@ impl Domain {
                         expected_type: NodeType::Reader,
                     })?;
 
-                let (r_part, w_part) =
-                    backlog::new(num_columns, index, r.reader_processing().clone());
+                let (r_part, w_part) = backlog::new(
+                    num_columns,
+                    index,
+                    r.reader_processing().clone(),
+                    node_index,
+                );
 
                 let shard = *self.shard.as_ref().unwrap_or(&0);
                 // TODO(ENG-838): Don't recreate every single node on leader failure.
