@@ -2375,3 +2375,70 @@ async fn timestamp_text_protocol() {
     });
     shutdown_tx.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn date_only_text_protocol() {
+    readyset_tracing::init_test_logging();
+    let mut direct_mysql = mysql_async::Conn::from_url(mysql_url()).await.unwrap();
+    direct_mysql
+        .query_drop(
+            "DROP TABLE IF EXISTS date_text_protocol CASCADE;
+             CREATE TABLE date_text_protocol (col1  DATE);
+             INSERT INTO date_text_protocol VALUES ('2021-01-01');",
+        )
+        .await
+        .unwrap();
+
+    let (rs_opts, _rs_handle, shutdown_tx) = TestBuilder::default()
+        .recreate_database(false)
+        .fallback(true)
+        .durability_mode(readyset_server::DurabilityMode::Permanent)
+        .build::<MySQLAdapter>()
+        .await;
+
+    let mut conn = mysql_async::Conn::new(rs_opts).await.unwrap();
+    sleep().await;
+
+    conn.query_drop("CREATE CACHE FROM SELECT * FROM date_text_protocol WHERE col1 = ?")
+        .await
+        .unwrap();
+    sleep().await;
+
+    eventually!(run_test: {
+        let my_rows: Vec<(String,)> = direct_mysql
+            .query("SELECT * FROM date_text_protocol WHERE col1 = '2021-01-01'")
+            .await
+            .unwrap();
+        let rs_rows: Vec<(String,)> = conn
+            .query("SELECT * FROM date_text_protocol WHERE col1 = '2021-01-01'")
+            .await
+            .unwrap();
+            AssertUnwindSafe(move || (rs_rows, my_rows))
+    }, then_assert: |results| {
+        let (rs_rows, my_rows) = results();
+        assert_eq!(rs_rows, my_rows)
+    });
+
+    direct_mysql
+        .query_drop("INSERT INTO date_text_protocol VALUES ('2021-01-02');")
+        .await
+        .unwrap();
+
+    eventually!(run_test: {
+        let my_rows: Vec<(String,)> = direct_mysql
+            .query("SELECT * FROM date_text_protocol WHERE col1 = '2021-01-02'")
+            .await
+            .unwrap();
+        let rs_rows: Vec<(String,)> = conn
+            .query("SELECT * FROM date_text_protocol WHERE col1 = '2021-01-02'")
+            .await
+            .unwrap();
+            AssertUnwindSafe(move || (rs_rows, my_rows))
+    }, then_assert: |results| {
+        let (rs_rows, my_rows) = results();
+        assert_eq!(rs_rows, my_rows)
+    });
+
+    shutdown_tx.shutdown().await;
+}

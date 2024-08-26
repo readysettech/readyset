@@ -925,8 +925,7 @@ fn binlog_val_to_noria_val(
             // EPOCH)
             let epoch = String::from_utf8_lossy(buf).parse::<i64>().unwrap(); // Can unwrap because we know the format is integer
             if epoch == 0 {
-                // The 0 epoch is reserved for the '0000-00-00 00:00:00' timestamp, which we
-                // currently set to None
+                // The 0 epoch is reserved for the '0000-00-00 00:00:00' timestamp
                 return Ok(DfValue::TimestampTz(TimestampTz::zero()));
             }
             let time = chrono::DateTime::from_timestamp(epoch, 0)
@@ -958,6 +957,49 @@ fn binlog_val_to_noria_val(
             ts.set_subsecond_digits(meta[0]);
             Ok(DfValue::TimestampTz(ts))
         }
+        (ColumnType::MYSQL_TYPE_DATETIME2, meta) => {
+            //meta[0] is the fractional seconds precision
+            let df_val: DfValue = val
+                .try_into()
+                .map_err(|e| {
+                    mysql_async::Error::Other(Box::new(internal_err!(
+                        "Unable to coerce value {}",
+                        e
+                    )))
+                })
+                .and_then(|val| match val {
+                    DfValue::TimestampTz(mut ts) => {
+                        ts.set_subsecond_digits(meta[0]);
+                        Ok(DfValue::TimestampTz(ts))
+                    }
+                    DfValue::None => Ok(DfValue::None), // NULL
+                    _ => Err(mysql_async::Error::Other(Box::new(internal_err!(
+                        "Expected a timestamp"
+                    )))),
+                })?;
+            Ok(df_val)
+        }
+        (ColumnType::MYSQL_TYPE_DATE, _) | (ColumnType::MYSQL_TYPE_NEWDATE, _) => {
+            let df_val: DfValue = val
+                .try_into()
+                .map_err(|e| {
+                    mysql_async::Error::Other(Box::new(internal_err!(
+                        "Unable to coerce value {}",
+                        e
+                    )))
+                })
+                .and_then(|val| match val {
+                    DfValue::TimestampTz(mut ts) => {
+                        ts.set_date_only();
+                        Ok(DfValue::TimestampTz(ts))
+                    }
+                    DfValue::None => Ok(DfValue::None), // NULL
+                    _ => Err(mysql_async::Error::Other(Box::new(internal_err!(
+                        "Expected a timestamp"
+                    )))),
+                })?;
+            Ok(df_val)
+        }
         (ColumnType::MYSQL_TYPE_STRING, meta) => {
             let buf = match val {
                 mysql_common::value::Value::Bytes(b) => b,
@@ -978,28 +1020,6 @@ fn binlog_val_to_noria_val(
                 Ok(s) => Ok(s),
                 Err(e) => Err(mysql_async::Error::Other(Box::new(internal_err!("{e}")))),
             }
-        }
-        (ColumnType::MYSQL_TYPE_DATETIME2, meta) => {
-            //meta[0] is the fractional seconds precision
-            let df_val: DfValue = val
-                .try_into()
-                .map_err(|e| {
-                    mysql_async::Error::Other(Box::new(internal_err!(
-                        "Unable to coerce value {}",
-                        e
-                    )))
-                })
-                .and_then(|val| match val {
-                    DfValue::TimestampTz(mut ts) => {
-                        ts.set_subsecond_digits(meta[0]);
-                        Ok(DfValue::TimestampTz(ts))
-                    }
-                    DfValue::None => Ok(DfValue::None), //NULL
-                    _ => Err(mysql_async::Error::Other(Box::new(internal_err!(
-                        "Expected a timestamp"
-                    )))),
-                })?;
-            Ok(df_val)
         }
         (ColumnType::MYSQL_TYPE_DECIMAL, _) | (ColumnType::MYSQL_TYPE_NEWDECIMAL, _) => {
             if let mysql_common::value::Value::Bytes(b) = val {

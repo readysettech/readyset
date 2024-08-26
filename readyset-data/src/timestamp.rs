@@ -100,7 +100,7 @@ impl TimestampTz {
 
     /// Mark this timestamp as only containing a date value
     #[inline(always)]
-    fn set_date_only(&mut self) {
+    pub fn set_date_only(&mut self) {
         self.extra[2] |= TimestampTz::DATE_ONLY_FLAG
     }
 
@@ -206,11 +206,15 @@ impl From<&TimestampTz> for DateTime<FixedOffset> {
 
 impl fmt::Debug for TimestampTz {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.is_zero() {
-            write!(f, "0000-00-00")
-        } else {
-            self.to_chrono().fmt(f)
-        }
+        f.debug_struct("TimestampTz")
+            .field("is_zero", &self.is_zero())
+            .field("has_negative_offset", &self.has_negative_offset())
+            .field("has_timezone", &self.has_timezone())
+            .field("has_date_only", &self.has_date_only())
+            .field("offset", &self.get_offset())
+            .field("subsecond_digits", &self.subsecond_digits())
+            .field("ts", &self.to_chrono())
+            .finish()
     }
 }
 
