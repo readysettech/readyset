@@ -2025,6 +2025,9 @@ impl SqlToMirConverter {
             )?;
 
             // 9. Add predicate nodes for HAVING after GROUP BY nodes
+            // TODO(mvzink): if there's a placeholder, instead add a global predicate with a
+            // placeholder and a column reference into the group by node (which we maybe
+            // don't know how to reference until some subsequent MIR pass has happened)
             for (i, p) in query_graph.having_predicates.iter().enumerate() {
                 let hp_name = format!(
                     "q_{:x}_h{}_{}",
