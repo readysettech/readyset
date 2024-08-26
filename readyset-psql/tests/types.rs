@@ -26,7 +26,7 @@ mod types {
     use proptest::string::string_regex;
     use readyset_adapter::backend::QueryDestination;
     use readyset_client_test_helpers::psql_helpers::{last_query_info, upstream_config};
-    use readyset_client_test_helpers::sleep;
+    use readyset_client_test_helpers::{sleep, Adapter};
     use readyset_data::DfValue;
     use readyset_util::arbitrary::{
         arbitrary_bitvec, arbitrary_date_time, arbitrary_decimal, arbitrary_ipinet, arbitrary_json,
@@ -36,7 +36,7 @@ mod types {
     use readyset_util::eventually;
     use rust_decimal::Decimal;
     use tokio_postgres::types::{FromSql, ToSql};
-    use tokio_postgres::NoTls;
+    use tokio_postgres::{NoTls, SimpleQueryMessage};
     use uuid::Uuid;
 
     use super::*;
@@ -1017,6 +1017,74 @@ mod types {
                 assert_eq!(dest, QueryDestination::Readyset);
             }
         );
+
+        shutdown_tx.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[serial_test::serial]
+    async fn date_only() {
+        readyset_tracing::init_test_logging();
+        PostgreSQLAdapter::recreate_database("psql_date_only_test").await;
+        let mut psql_config = upstream_config();
+        psql_config.dbname("psql_date_only_test");
+        let psql_client = connect(psql_config).await;
+
+        psql_client
+            .simple_query("CREATE TABLE t (x DATE)")
+            .await
+            .unwrap();
+        psql_client
+            .simple_query("INSERT INTO t VALUES ('2021-01-01')")
+            .await
+            .unwrap();
+
+        let (rs_config, _handle, shutdown_tx) =
+            TestBuilder::new(BackendBuilder::new().require_authentication(false))
+                .fallback_db("psql_date_only_test".to_string())
+                .recreate_database(false)
+                .durability_mode(readyset_server::DurabilityMode::Permanent)
+                .build::<PostgreSQLAdapter>()
+                .await;
+        let rs_client = connect(rs_config.clone()).await;
+
+        rs_client
+            .simple_query("CREATE CACHE FROM SELECT * FROM t WHERE x = $1")
+            .await
+            .unwrap();
+
+        eventually!(run_test: {
+            rs_client.simple_query("SELECT * FROM t WHERE x = '2021-01-01'")
+                .await
+                .unwrap()
+                .iter()
+                .filter_map(|message| match message {
+                    SimpleQueryMessage::Row(row) => Some(row.get(0).unwrap().to_owned()),
+                    _ => None
+                })
+                .collect::<Vec<_>>()
+        }, then_assert: |rs_rows| {
+            assert_eq!(rs_rows, vec!["2021-01-01"]);
+        });
+
+        psql_client
+            .simple_query("INSERT INTO t VALUES ('2021-01-02')")
+            .await
+            .unwrap();
+
+        eventually!(run_test: {
+            rs_client.simple_query("SELECT * FROM t WHERE x = '2021-01-02'")
+                .await
+                .unwrap()
+                .iter()
+                .filter_map(|message| match message {
+                    SimpleQueryMessage::Row(row) => Some(row.get(0).unwrap().to_owned()),
+                    _ => None
+                })
+                .collect::<Vec<_>>()
+        }, then_assert: |rs_rows| {
+            assert_eq!(rs_rows, vec!["2021-01-02"]);
+        });
 
         shutdown_tx.shutdown().await;
     }

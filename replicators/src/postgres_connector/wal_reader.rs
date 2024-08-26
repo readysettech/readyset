@@ -5,7 +5,7 @@ use std::sync::Arc;
 use bit_vec::BitVec;
 use mysql_time::MySqlTime;
 use postgres_types::Kind;
-use readyset_data::{Array, Collation, DfType, DfValue, Dialect};
+use readyset_data::{Array, Collation, DfType, DfValue, Dialect, TimestampTz};
 use readyset_errors::ReadySetError;
 use replication_offset::postgres::{CommitLsn, Lsn};
 use rust_decimal::prelude::FromStr;
@@ -754,13 +754,14 @@ impl wal::TupleData {
                                         .map(|bytes| DfValue::ByteArray(Arc::new(bytes)))?
                                 }
                                 PGType::DATE => {
-                                    DfValue::TimestampTz(str.parse().map_err(|_| {
-                                        WalError::TableError {
+                                    let mut ts: TimestampTz =
+                                        str.parse().map_err(|_| WalError::TableError {
                                             kind: TableErrorKind::DateParseError,
                                             schema: relation.schema_name_lossy(),
                                             table: relation.relation_name_lossy(),
-                                        }
-                                    })?)
+                                        })?;
+                                    ts.set_date_only();
+                                    DfValue::TimestampTz(ts)
                                 }
                                 PGType::TIME => {
                                     let result = MySqlTime::from_str(&str).map_err(|e| {
