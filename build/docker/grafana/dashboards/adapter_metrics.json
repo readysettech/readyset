@@ -18,6 +18,7 @@
     "editable": true,
     "fiscalYearStartMonth": 0,
     "graphTooltip": 0,
+    "id": 6,
     "links": [],
     "panels": [
       {
@@ -134,7 +135,7 @@
             },
             "disableTextWrap": false,
             "editorMode": "builder",
-            "expr": "rate(readyset_query_log_execution_time_us_count{database_type=\"readyset\"}[$__rate_interval])",
+            "expr": "rate(readyset_query_log_execution_time_us_count{database_type=\"readyset\", deployment=~\"$deployment\"}[$__rate_interval])",
             "fullMetaSearch": false,
             "includeNullMetadata": true,
             "instant": false,
@@ -234,7 +235,7 @@
             },
             "disableTextWrap": false,
             "editorMode": "builder",
-            "expr": "readyset_query_log_execution_time_us{quantile=\"0.5\", database_type=\"readyset\"}",
+            "expr": "readyset_query_log_execution_time_us{quantile=\"0.5\", database_type=\"readyset\", deployment=~\"$deployment\"}",
             "fullMetaSearch": false,
             "includeNullMetadata": true,
             "instant": false,
@@ -334,7 +335,7 @@
             },
             "disableTextWrap": false,
             "editorMode": "builder",
-            "expr": "readyset_query_log_execution_time_us{quantile=\"0.99\", database_type=\"readyset\"}",
+            "expr": "readyset_query_log_execution_time_us{quantile=\"0.99\", database_type=\"readyset\", deployment=~\"$deployment\"}",
             "fullMetaSearch": false,
             "includeNullMetadata": true,
             "instant": false,
@@ -461,7 +462,7 @@
             },
             "disableTextWrap": false,
             "editorMode": "builder",
-            "expr": "rate(readyset_query_log_execution_time_us_count{database_type!=\"readyset\"}[$__rate_interval])",
+            "expr": "rate(readyset_query_log_execution_time_us_count{database_type!=\"readyset\", deployment=~\"$deployment\"}[$__rate_interval])",
             "fullMetaSearch": false,
             "includeNullMetadata": true,
             "instant": false,
@@ -561,7 +562,7 @@
             },
             "disableTextWrap": false,
             "editorMode": "builder",
-            "expr": "readyset_query_log_execution_time_us{quantile=\"0.5\", database_type!=\"readyset\"}",
+            "expr": "readyset_query_log_execution_time_us{quantile=\"0.5\", database_type!=\"readyset\", deployment=~\"$deployment\"}",
             "fullMetaSearch": false,
             "includeNullMetadata": true,
             "instant": false,
@@ -661,7 +662,7 @@
             },
             "disableTextWrap": false,
             "editorMode": "builder",
-            "expr": "readyset_query_log_execution_time_us{quantile=\"0.99\", database_type!=\"readyset\"}",
+            "expr": "readyset_query_log_execution_time_us{quantile=\"0.99\", database_type!=\"readyset\", deployment=~\"$deployment\"}",
             "fullMetaSearch": false,
             "includeNullMetadata": true,
             "instant": false,
@@ -784,12 +785,16 @@
               "type": "prometheus",
               "uid": "PBFE396EC0B189D67"
             },
+            "disableTextWrap": false,
             "editorMode": "builder",
-            "expr": "rate(readyset_query_log_parse_errors[$__rate_interval])",
+            "expr": "rate(readyset_query_log_parse_errors{deployment=~\"$deployment\"}[$__rate_interval])",
+            "fullMetaSearch": false,
+            "includeNullMetadata": true,
             "instant": false,
             "legendFormat": "parse fail count",
             "range": true,
-            "refId": "A"
+            "refId": "A",
+            "useBackend": false
           }
         ],
         "title": "Parse failures",
@@ -881,7 +886,7 @@
             },
             "disableTextWrap": false,
             "editorMode": "builder",
-            "expr": "rate(readyset_query_log_set_disallowed[$__rate_interval])",
+            "expr": "rate(readyset_query_log_set_disallowed{deployment=~\"$deployment\"}[$__rate_interval])",
             "fullMetaSearch": false,
             "includeNullMetadata": false,
             "instant": false,
@@ -982,7 +987,7 @@
             "disableTextWrap": false,
             "editorMode": "builder",
             "exemplar": true,
-            "expr": "readyset_query_log_parse_time_us{quantile=\"0.5\"}",
+            "expr": "readyset_query_log_parse_time_us{quantile=\"0.5\", deployment=~\"$deployment\"}",
             "fullMetaSearch": false,
             "includeNullMetadata": true,
             "instant": false,
@@ -1084,7 +1089,7 @@
             "disableTextWrap": false,
             "editorMode": "builder",
             "exemplar": true,
-            "expr": "readyset_query_log_parse_time_us{quantile=\"0.99\"}",
+            "expr": "readyset_query_log_parse_time_us{quantile=\"0.99\", deployment=~\"$deployment\"}",
             "fullMetaSearch": false,
             "includeNullMetadata": true,
             "instant": false,
@@ -1208,25 +1213,33 @@
               "type": "prometheus",
               "uid": "PBFE396EC0B189D67"
             },
+            "disableTextWrap": false,
             "editorMode": "builder",
-            "expr": "readyset_noria_client_connected_clients",
+            "expr": "readyset_noria_client_connected_clients{deployment=~\"$deployment\"}",
+            "fullMetaSearch": false,
+            "includeNullMetadata": true,
             "instant": false,
             "legendFormat": "client count",
             "range": true,
-            "refId": "A"
+            "refId": "A",
+            "useBackend": false
           },
           {
             "datasource": {
               "type": "prometheus",
               "uid": "PBFE396EC0B189D67"
             },
+            "disableTextWrap": false,
             "editorMode": "builder",
-            "expr": "readyset_client_upstream_connections",
+            "expr": "readyset_client_upstream_connections{deployment=~\"$deployment\"}",
+            "fullMetaSearch": false,
             "hide": false,
+            "includeNullMetadata": true,
             "instant": false,
             "legendFormat": "upstream connections",
             "range": true,
-            "refId": "B"
+            "refId": "B",
+            "useBackend": false
           }
         ],
         "title": "Connected clients",
@@ -1316,12 +1329,16 @@
               "type": "prometheus",
               "uid": "PBFE396EC0B189D67"
             },
+            "disableTextWrap": false,
             "editorMode": "builder",
-            "expr": "rate(readyset_query_log_view_not_found[$__rate_interval])",
+            "expr": "rate(readyset_query_log_view_not_found{deployment=~\"$deployment\"}[$__rate_interval])",
+            "fullMetaSearch": false,
+            "includeNullMetadata": true,
             "instant": false,
             "legendFormat": "ViewNotFound count",
             "range": true,
-            "refId": "A"
+            "refId": "A",
+            "useBackend": false
           }
         ],
         "title": "ViewNotFound counts",
@@ -1439,25 +1456,33 @@
               "type": "prometheus",
               "uid": "PBFE396EC0B189D67"
             },
+            "disableTextWrap": false,
             "editorMode": "builder",
-            "expr": "rate(readyset_query_log_total_cache_misses[$__rate_interval])",
+            "expr": "rate(readyset_query_log_total_cache_misses{deployment=~\"$deployment\"}[$__rate_interval])",
+            "fullMetaSearch": false,
+            "includeNullMetadata": true,
             "instant": false,
             "legendFormat": "cache keys miss::{{query}}",
             "range": true,
-            "refId": "A"
+            "refId": "A",
+            "useBackend": false
           },
           {
             "datasource": {
               "type": "prometheus",
               "uid": "PBFE396EC0B189D67"
             },
+            "disableTextWrap": false,
             "editorMode": "builder",
-            "expr": "readyset_query_log_query_cache_missed",
+            "expr": "readyset_query_log_query_cache_missed{deployment=~\"$deployment\"}",
+            "fullMetaSearch": false,
             "hide": false,
+            "includeNullMetadata": true,
             "instant": false,
             "legendFormat": "cache miss::{{query}}",
             "range": true,
-            "refId": "B"
+            "refId": "B",
+            "useBackend": false
           }
         ],
         "title": "ReadySet cache misses",
@@ -1548,12 +1573,16 @@
               "type": "prometheus",
               "uid": "PBFE396EC0B189D67"
             },
+            "disableTextWrap": false,
             "editorMode": "builder",
-            "expr": "rate(readyset_query_log_total_keys_read[$__rate_interval])",
+            "expr": "rate(readyset_query_log_total_keys_read{deployment=~\"$deployment\"}[$__rate_interval])",
+            "fullMetaSearch": false,
+            "includeNullMetadata": true,
             "instant": false,
             "legendFormat": "{{query}}",
             "range": true,
-            "refId": "A"
+            "refId": "A",
+            "useBackend": false
           }
         ],
         "title": "Keys read per second",
@@ -1564,7 +1593,33 @@
     "schemaVersion": 39,
     "tags": [],
     "templating": {
-      "list": []
+      "list": [
+        {
+          "current": {
+            "selected": false
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFE396EC0B189D67"
+          },
+          "definition": "label_values(deployment)",
+          "hide": 0,
+          "includeAll": false,
+          "multi": true,
+          "name": "deployment",
+          "options": [],
+          "query": {
+            "qryType": 1,
+            "query": "label_values(deployment)",
+            "refId": "PrometheusVariableQueryEditor-VariableQuery"
+          },
+          "refresh": 1,
+          "regex": "",
+          "skipUrlSync": false,
+          "sort": 0,
+          "type": "query"
+        }
+      ]
     },
     "time": {
       "from": "now-3h",
@@ -1573,7 +1628,7 @@
     "timepicker": {},
     "timezone": "",
     "title": "Adapter metrics",
-    "uid": "adapter_metrics",
-    "version": 1,
+    "uid": "edvhch5bttpmoc",
+    "version": 2,
     "weekStart": ""
-  }
+}

@@ -24,6 +24,7 @@
     "editable": true,
     "fiscalYearStartMonth": 0,
     "graphTooltip": 1,
+    "id": 5,
     "links": [],
     "liveNow": false,
     "panels": [
@@ -115,7 +116,7 @@
             "disableTextWrap": false,
             "editorMode": "builder",
             "exemplar": true,
-            "expr": "readyset_allocator_active_bytes",
+            "expr": "readyset_allocator_active_bytes{deployment=~\"$deployment\"}",
             "fullMetaSearch": false,
             "includeNullMetadata": true,
             "interval": "",
@@ -132,7 +133,7 @@
             },
             "disableTextWrap": false,
             "editorMode": "builder",
-            "expr": "readyset_allocator_allocated_bytes",
+            "expr": "readyset_allocator_allocated_bytes{deployment=~\"$deployment\"}",
             "fullMetaSearch": false,
             "hide": false,
             "includeNullMetadata": true,
@@ -149,7 +150,7 @@
             },
             "disableTextWrap": false,
             "editorMode": "builder",
-            "expr": "readyset_allocator_resident_bytes",
+            "expr": "readyset_allocator_resident_bytes{deployment=~\"$deployment\"}",
             "fullMetaSearch": false,
             "hide": false,
             "includeNullMetadata": true,
@@ -248,12 +249,18 @@
               "type": "prometheus",
               "uid": "PBFE396EC0B189D67"
             },
+            "disableTextWrap": false,
+            "editorMode": "builder",
             "exemplar": true,
-            "expr": "readyset_server_view_query_upquery_duration_us{}",
+            "expr": "readyset_server_view_query_upquery_duration_us{deployment=~\"$deployment\"}",
+            "fullMetaSearch": false,
+            "includeNullMetadata": true,
             "interval": "",
             "legendFormat": "{{quantile}}",
             "queryType": "randomWalk",
-            "refId": "A"
+            "range": true,
+            "refId": "A",
+            "useBackend": false
           }
         ],
         "title": "Server view upquery duration",
@@ -343,24 +350,36 @@
               "type": "prometheus",
               "uid": "PBFE396EC0B189D67"
             },
+            "disableTextWrap": false,
+            "editorMode": "builder",
             "exemplar": true,
-            "expr": "rate(readyset_server_view_query_result_miss{}[$__rate_interval])",
+            "expr": "rate(readyset_server_view_query_result_miss{deployment=~\"$deployment\"}[$__rate_interval])",
+            "fullMetaSearch": false,
+            "includeNullMetadata": true,
             "interval": "",
             "legendFormat": "miss",
             "queryType": "randomWalk",
-            "refId": "A"
+            "range": true,
+            "refId": "A",
+            "useBackend": false
           },
           {
             "datasource": {
               "type": "prometheus",
               "uid": "PBFE396EC0B189D67"
             },
+            "disableTextWrap": false,
+            "editorMode": "builder",
             "exemplar": true,
-            "expr": "rate(readyset_server_view_query_result_hit{}[$__rate_interval])",
+            "expr": "rate(readyset_server_view_query_result_hit{deployment=~\"$deployment\"}[$__rate_interval])",
+            "fullMetaSearch": false,
             "hide": false,
+            "includeNullMetadata": true,
             "interval": "",
             "legendFormat": "hit",
-            "refId": "B"
+            "range": true,
+            "refId": "B",
+            "useBackend": false
           }
         ],
         "title": "Query result hit + miss",
@@ -451,12 +470,18 @@
               "type": "prometheus",
               "uid": "PBFE396EC0B189D67"
             },
+            "disableTextWrap": false,
+            "editorMode": "builder",
             "exemplar": true,
-            "expr": "sum by (packet_type) (rate(readyset_domain_packet_sent{}[$__rate_interval]))",
+            "expr": "sum by(packet_type) (rate(readyset_domain_packet_sent{deployment=~\"$deployment\"}[$__rate_interval]))",
+            "fullMetaSearch": false,
+            "includeNullMetadata": true,
             "interval": "",
             "legendFormat": "{{packet_type}}",
             "queryType": "randomWalk",
-            "refId": "A"
+            "range": true,
+            "refId": "A",
+            "useBackend": false
           }
         ],
         "title": "Domain Packets",
@@ -551,7 +576,7 @@
             "disableTextWrap": false,
             "editorMode": "builder",
             "exemplar": true,
-            "expr": "readyset_controller_rpc_request_time_us{quantile=\"0.99\"}",
+            "expr": "readyset_controller_rpc_request_time_us{quantile=\"0.99\", deployment=~\"$deployment\"}",
             "format": "time_series",
             "fullMetaSearch": false,
             "includeNullMetadata": true,
@@ -655,7 +680,7 @@
             "disableTextWrap": false,
             "editorMode": "builder",
             "exemplar": true,
-            "expr": "readyset_controller_rpc_request_time_us{quantile=\"1\"}",
+            "expr": "readyset_controller_rpc_request_time_us{quantile=\"1\", deployment=~\"$deployment\"}",
             "format": "time_series",
             "fullMetaSearch": false,
             "includeNullMetadata": true,
@@ -754,12 +779,18 @@
               "type": "prometheus",
               "uid": "PBFE396EC0B189D67"
             },
+            "disableTextWrap": false,
+            "editorMode": "builder",
             "exemplar": true,
-            "expr": "readyset_controller_rpc_view_names_num_queries{}",
+            "expr": "readyset_controller_rpc_view_names_num_queries{deployment=~\"$deployment\"}",
+            "fullMetaSearch": false,
+            "includeNullMetadata": true,
             "interval": "",
             "legendFormat": "",
             "queryType": "randomWalk",
-            "refId": "A"
+            "range": true,
+            "refId": "A",
+            "useBackend": false
           }
         ],
         "title": "ViewStatuses Num Queries",
@@ -872,7 +903,7 @@
             "disableTextWrap": false,
             "editorMode": "builder",
             "exemplar": true,
-            "expr": "quantile(0.75, readyset_input_forward_time_us)",
+            "expr": "quantile(0.75, readyset_forward_time_us{packet_type=\"input\", deployment=~\"$deployment\"})",
             "fullMetaSearch": false,
             "hide": false,
             "includeNullMetadata": true,
@@ -890,7 +921,7 @@
             "disableTextWrap": false,
             "editorMode": "builder",
             "exemplar": true,
-            "expr": "quantile(0.9, readyset_input_forward_time_us)",
+            "expr": "quantile(0.9, readyset_forward_time_us{packet_type=\"input\", deployment=~\"$deployment\"})",
             "fullMetaSearch": false,
             "hide": false,
             "includeNullMetadata": true,
@@ -908,7 +939,7 @@
             "disableTextWrap": false,
             "editorMode": "builder",
             "exemplar": true,
-            "expr": "quantile(0.99, readyset_input_forward_time_us)",
+            "expr": "quantile(0.99, readyset_forward_time_us{packet_type=\"input\", deployment=~\"$deployment\"})",
             "fullMetaSearch": false,
             "hide": false,
             "includeNullMetadata": true,
@@ -1006,24 +1037,36 @@
               "type": "prometheus",
               "uid": "PBFE396EC0B189D67"
             },
+            "disableTextWrap": false,
+            "editorMode": "builder",
             "exemplar": true,
-            "expr": "readyset_client_upstream_connections{}",
+            "expr": "readyset_client_upstream_connections{deployment=~\"$deployment\"}",
+            "fullMetaSearch": false,
+            "includeNullMetadata": true,
             "interval": "",
             "legendFormat": "upstream connections",
             "queryType": "randomWalk",
-            "refId": "A"
+            "range": true,
+            "refId": "A",
+            "useBackend": false
           },
           {
             "datasource": {
               "type": "prometheus",
               "uid": "PBFE396EC0B189D67"
             },
+            "disableTextWrap": false,
+            "editorMode": "builder",
             "exemplar": true,
-            "expr": "readyset_noria_client_connected_clients{}",
+            "expr": "readyset_noria_client_connected_clients{deployment=~\"$deployment\"}",
+            "fullMetaSearch": false,
             "hide": false,
+            "includeNullMetadata": true,
             "interval": "",
             "legendFormat": "connected clients",
-            "refId": "B"
+            "range": true,
+            "refId": "B",
+            "useBackend": false
           }
         ],
         "title": "Upstream + Client Connections",
@@ -1118,7 +1161,7 @@
             "disableTextWrap": false,
             "editorMode": "builder",
             "exemplar": true,
-            "expr": "quantile(0.5, readyset_forward_time_us{packet_type=\"message\"})",
+            "expr": "quantile(0.5, readyset_forward_time_us{packet_type=\"message\", deployment=~\"$deployment\"})",
             "fullMetaSearch": false,
             "includeNullMetadata": true,
             "interval": "",
@@ -1136,7 +1179,7 @@
             "disableTextWrap": false,
             "editorMode": "builder",
             "exemplar": true,
-            "expr": "quantile(0.75, readyset_message_forward_time_us)",
+            "expr": "quantile(0.75, readyset_forward_time_us{packet_type=\"message\", deployment=~\"$deployment\"})",
             "fullMetaSearch": false,
             "hide": false,
             "includeNullMetadata": true,
@@ -1154,7 +1197,7 @@
             "disableTextWrap": false,
             "editorMode": "builder",
             "exemplar": true,
-            "expr": "quantile(0.9, readyset_message_forward_time_us)",
+            "expr": "quantile(0.9, readyset_forward_time_us{packet_type=\"message\", deployment=~\"$deployment\"})",
             "fullMetaSearch": false,
             "hide": false,
             "includeNullMetadata": true,
@@ -1172,7 +1215,7 @@
             "disableTextWrap": false,
             "editorMode": "builder",
             "exemplar": true,
-            "expr": "quantile(0.99, readyset_message_forward_time_us)",
+            "expr": "quantile(0.99, readyset_forward_time_us{packet_type=\"message\", deployment=~\"$deployment\"})",
             "fullMetaSearch": false,
             "hide": false,
             "includeNullMetadata": true,
@@ -1271,12 +1314,18 @@
               "type": "prometheus",
               "uid": "PBFE396EC0B189D67"
             },
+            "disableTextWrap": false,
+            "editorMode": "builder",
             "exemplar": true,
-            "expr": "readyset_metrics_payload_size_bytes{}",
+            "expr": "readyset_metrics_payload_size_bytes{deployment=~\"$deployment\"}",
+            "fullMetaSearch": false,
+            "includeNullMetadata": true,
             "interval": "",
             "legendFormat": "",
             "queryType": "randomWalk",
-            "refId": "A"
+            "range": true,
+            "refId": "A",
+            "useBackend": false
           }
         ],
         "title": "Metrics payload size",
@@ -1366,14 +1415,18 @@
               "type": "prometheus",
               "uid": "PBFE396EC0B189D67"
             },
+            "disableTextWrap": false,
             "editorMode": "builder",
             "exemplar": true,
-            "expr": "rate(readyset_eviction_requests{}[$__rate_interval])",
+            "expr": "rate(readyset_eviction_requests{deployment=~\"$deployment\"}[$__rate_interval])",
+            "fullMetaSearch": false,
+            "includeNullMetadata": true,
             "interval": "",
             "legendFormat": "Eviction Requests",
             "queryType": "randomWalk",
             "range": true,
-            "refId": "A"
+            "refId": "A",
+            "useBackend": false
           }
         ],
         "title": "Eviction requests",
@@ -1384,7 +1437,33 @@
     "schemaVersion": 39,
     "tags": [],
     "templating": {
-      "list": []
+      "list": [
+        {
+          "current": {
+            "selected": false
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFE396EC0B189D67"
+          },
+          "definition": "label_values(deployment)",
+          "hide": 0,
+          "includeAll": false,
+          "multi": true,
+          "name": "deployment",
+          "options": [],
+          "query": {
+            "qryType": 1,
+            "query": "label_values(deployment)",
+            "refId": "PrometheusVariableQueryEditor-VariableQuery"
+          },
+          "refresh": 1,
+          "regex": "",
+          "skipUrlSync": false,
+          "sort": 0,
+          "type": "query"
+        }
+      ]
     },
     "time": {
       "from": "now-3h",
@@ -1394,6 +1473,6 @@
     "timezone": "",
     "title": "Perf Debugging",
     "uid": "perf_debugging",
-    "version": 1,
+    "version": 6,
     "weekStart": ""
-  }
+}
