@@ -159,7 +159,12 @@ where
     /// The updated value-bag will only be visible to readers after the next call to
     /// [`publish`](Self::publish).
     pub fn insert(&mut self, k: K, v: V) -> &mut Self {
-        self.add_op(Operation::Add(k, v, None, None))
+        self.add_op(Operation::Add {
+            key: k,
+            value: v,
+            eviction_meta: None,
+            insertion_index: None,
+        })
     }
 
     /// Add the list of `records` to the value-set, which are assumed to have a key part of the
@@ -199,7 +204,11 @@ where
     /// The updated value-bag will only be visible to readers after the next call to
     /// [`publish`](Self::publish).
     pub fn remove_value(&mut self, k: K, v: V) -> &mut Self {
-        self.add_op(Operation::RemoveValue(k, v, None))
+        self.add_op(Operation::RemoveValue {
+            key: k,
+            value: v,
+            removal_index: None,
+        })
     }
 
     /// Remove the value-bag for the given key.
@@ -364,7 +373,12 @@ where
     /// Apply ops in such a way that no values are dropped, only forgotten
     fn absorb_first(&mut self, op: &mut Operation<K, V, M, T>, other: &Self) {
         match op {
-            Operation::Add(key, value, eviction_meta, idx) => {
+            Operation::Add {
+                key,
+                value,
+                eviction_meta,
+                insertion_index,
+            } => {
                 let values = self.data_entry(key.clone(), eviction_meta);
                 // Always insert values in sorted order, even if no ordering method is provided,
                 // otherwise it will require a linear scan to remove a value
@@ -375,9 +389,13 @@ where
                 }
                 .unwrap_or_else(|i| i);
                 values.insert(insert_idx, value.clone());
-                *idx = Some(insert_idx);
+                *insertion_index = Some(insert_idx);
             }
-            Operation::RemoveValue(key, value, idx) => {
+            Operation::RemoveValue {
+                key,
+                value,
+                removal_index,
+            } => {
                 // Because elements are always in sorted order, it is possible to remove the element
                 // using binary search
                 if let Some(e) = self.data.get_mut(key) {
@@ -388,7 +406,7 @@ where
                     };
                     if let Ok(remove_idx) = remove_idx {
                         e.remove(remove_idx);
-                        *idx = Some(remove_idx);
+                        *removal_index = Some(remove_idx);
                     }
                 }
             }
@@ -427,9 +445,14 @@ where
     /// Apply operations while allowing dropping of values
     fn absorb_second(&mut self, op: Operation<K, V, M, T>, other: &Self) {
         match op {
-            Operation::Add(key, value, mut eviction_meta, idx) => {
+            Operation::Add {
+                key,
+                value,
+                mut eviction_meta,
+                insertion_index,
+            } => {
                 let values = self.data_entry(key, &mut eviction_meta);
-                let insert_idx = match idx {
+                let insert_idx = match insertion_index {
                     // In `absorb_second` there is no need to do binary search again if it was
                     // already passed over by `absorb_first`
                     Some(idx) => idx,
@@ -442,9 +465,13 @@ where
                 };
                 values.insert(insert_idx, value);
             }
-            Operation::RemoveValue(key, value, idx) => {
+            Operation::RemoveValue {
+                key,
+                value,
+                removal_index,
+            } => {
                 if let Some(e) = self.data.get_mut(&key) {
-                    let remove_idx = match idx {
+                    let remove_idx = match removal_index {
                         // In `absorb_second` there is no need to do binary search again if it was
                         // already passed over by `absorb_first`
                         Some(idx) => Ok(idx),
@@ -518,16 +545,25 @@ where
 /// A pending map operation.
 #[non_exhaustive]
 pub(super) enum Operation<K, V, M, T> {
-    /// Add this value to the set of entries for this key. Last element of the tuple is the
-    /// insertion index for [`absorb_second`] and computed in [`absorb_first`]
-    Add(K, V, Option<EvictionMeta>, Option<usize>),
+    /// Add this value to the set of entries for this key.
+    Add {
+        key: K,
+        value: V,
+        eviction_meta: Option<EvictionMeta>,
+        // insertion index for [`absorb_second`] and computed in [`absorb_first`]
+        insertion_index: Option<usize>,
+    },
     /// Add an interval to the list of filled intervals
     AddRange((Bound<K>, Bound<K>)),
     /// Add the full range of keys
     AddFullRange,
-    /// Remove this value from the set of entries for this key. Last element of the tuple is the
-    /// removal index for [`absorb_second`] and computed in [`absorb_first`]
-    RemoveValue(K, V, Option<usize>),
+    /// Remove this value from the set of entries for this key.
+    RemoveValue {
+        key: K,
+        value: V,
+        // removal index for [`absorb_second`] and computed in [`absorb_first`]
+        removal_index: Option<usize>,
+    },
     /// Remove the value set for this key.
     RemoveEntry(K),
     /// Remove all entries in the given range
@@ -557,12 +593,28 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Operation::Add(a, b, c, _) => f.debug_tuple("Add").field(a).field(b).field(c).finish(),
+            Operation::Add {
+                key,
+                value,
+                eviction_meta,
+                insertion_index: _,
+            } => f
+                .debug_tuple("Add")
+                .field(key)
+                .field(value)
+                .field(eviction_meta)
+                .finish(),
             Operation::AddRange(a) => f.debug_tuple("AddRange").field(a).finish(),
             Operation::AddFullRange => f.debug_tuple("AddFullRange").finish(),
-            Operation::RemoveValue(a, b, _) => {
-                f.debug_tuple("RemoveValue").field(a).field(b).finish()
-            }
+            Operation::RemoveValue {
+                key,
+                value,
+                removal_index: _,
+            } => f
+                .debug_tuple("RemoveValue")
+                .field(key)
+                .field(value)
+                .finish(),
             Operation::RemoveRange(range) => f.debug_tuple("RemoveRange").field(range).finish(),
             Operation::RemoveEntry(a) => f.debug_tuple("RemoveEntry").field(a).finish(),
             Operation::Clear(a, _) => f.debug_tuple("Clear").field(a).finish(),
