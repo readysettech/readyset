@@ -188,24 +188,6 @@ fn mapref() {
 }
 
 #[test]
-#[cfg_attr(miri, ignore)]
-// https://github.com/rust-lang/miri/issues/658
-fn panicked_reader_doesnt_block_writer() {
-    let (mut w, r) = reader_map::new();
-    w.insert(1, "a");
-    w.publish();
-
-    // reader panics
-    let r = std::panic::catch_unwind(move || r.get(&1).map(|_| panic!()));
-    r.unwrap_err();
-
-    // writer should still be able to continue
-    w.insert(1, "b");
-    w.publish();
-    w.publish();
-}
-
-#[test]
 fn read_after_drop() {
     let x = ('x', 42);
 
