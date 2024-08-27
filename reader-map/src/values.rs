@@ -1,17 +1,57 @@
 use std::fmt;
 use std::iter::FusedIterator;
 use std::ops::Deref;
+use std::time::{Duration, Instant};
 
 use smallvec::SmallVec;
 use triomphe::Arc;
 
 use crate::eviction::EvictionMeta;
 
+#[derive(Clone, Default)]
+pub(crate) struct Metrics {
+    /// The timestamp when a value was first inserted into this `Values`.
+    created: Option<Instant>,
+    /// The timestamp of the most recent update to this entry.
+    updated: Option<Instant>,
+    /// The previous update timestamp; used to calculate the time interval between the most recent
+    /// updates.
+    prev_updated: Option<Instant>,
+}
+
+impl Metrics {
+    fn update(&mut self, next_ts: Instant) {
+        if self.created.is_none() {
+            self.created = Some(next_ts);
+        }
+
+        self.prev_updated = self.updated;
+        self.updated = Some(next_ts);
+    }
+
+    // The amount of time between the last two updates.
+    #[allow(dead_code)]
+    pub(crate) fn last_update_interval(&self) -> Option<Duration> {
+        if self.prev_updated.is_some() {
+            // just checked `prev_updated`, and it's only set when `updated` has a value
+            return Some(self.updated.unwrap() - self.prev_updated.unwrap());
+        }
+        None
+    }
+
+    // The amount of time since created.
+    #[allow(dead_code)]
+    pub(crate) fn lifetime(&self) -> Option<Duration> {
+        self.created.map(|created| created.elapsed())
+    }
+}
+
 /// A sorted vector of values for a given key in the map with access metadata for eviction
 #[derive(Clone)]
 pub struct Values<T> {
     eviction_meta: EvictionMeta,
     values: ValuesInner<T>,
+    metrics: Metrics,
 }
 
 impl<T> Default for Values<T> {
@@ -19,6 +59,7 @@ impl<T> Default for Values<T> {
         Values {
             eviction_meta: Default::default(),
             values: ValuesInner::new(),
+            metrics: Default::default(),
         }
     }
 }
@@ -74,6 +115,7 @@ impl<T> Values<T> {
         Values {
             eviction_meta,
             values: ValuesInner(Arc::new(smallvec::SmallVec::new())),
+            metrics: Default::default(),
         }
     }
 
@@ -114,11 +156,12 @@ impl<T> Values<T> {
 
     /// Inserts an element at position index within the vector, shifting all elements after it to
     /// the right.
-    pub(crate) fn insert(&mut self, index: usize, element: T)
+    pub(crate) fn insert(&mut self, index: usize, element: T, timestamp: Instant)
     where
         T: Clone,
     {
         Arc::make_mut(&mut self.values.0).insert(index, element);
+        self.metrics.update(timestamp);
     }
 
     /// Removes the element at position index within the vector, shifting all elements after it to
@@ -126,11 +169,12 @@ impl<T> Values<T> {
     ///
     /// Note: Because this shifts over the remaining elements, it has a worst-case
     /// performance of O(n).
-    pub(crate) fn remove(&mut self, index: usize)
+    pub(crate) fn remove(&mut self, index: usize, timestamp: Instant)
     where
         T: PartialEq + Clone,
     {
         Arc::make_mut(&mut self.values.0).remove(index);
+        self.metrics.update(timestamp);
     }
 
     pub(crate) fn clear(&mut self)
@@ -220,7 +264,7 @@ mod tests {
         let values = 0..1000;
         let len = values.clone().count();
         for (i, e) in values.clone().enumerate() {
-            v.insert(i, e);
+            v.insert(i, e, Instant::now());
         }
 
         for i in values.clone() {
