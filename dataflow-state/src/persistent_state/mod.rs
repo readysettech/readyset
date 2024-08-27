@@ -577,7 +577,7 @@ impl WalFlusher {
     fn sync_wal(&self) {
         trace!(%self.table, "syncing WAL");
 
-        let res = self.state_handle.db().sync_wal();
+        let res = self.state_handle.db().flush_wal(true);
 
         // If a sync fails, it's possible that *some* but not *all* of the flushed but unsynced data
         // has been synced to disk. Regardless, we have no way of knowing what data *was*
