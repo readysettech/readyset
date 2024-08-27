@@ -1,6 +1,7 @@
 use std::collections::hash_map::RandomState;
 use std::fmt;
 use std::hash::{BuildHasher, Hash};
+use std::time::Instant;
 
 use left_right::Absorb;
 use partial_map::InsertionOrder;
@@ -164,6 +165,7 @@ where
             value: v,
             eviction_meta: None,
             insertion_index: None,
+            timestamp: Instant::now(),
         })
     }
 
@@ -171,7 +173,8 @@ where
     /// `range`. The `range` is then also inserted to the underlying interval tree, to keep
     /// track of which intervals are covered by the evmap.
     ///
-    /// The update value-set will only be visible to readers after the next call to `refresh()`.
+    /// The update value-set will only be visible to readers after the next call to
+    /// [`publish`](Self::publish).
     pub fn insert_range<R>(&mut self, range: R) -> &mut Self
     where
         R: RangeBounds<K>,
@@ -208,6 +211,7 @@ where
             key: k,
             value: v,
             removal_index: None,
+            timestamp: Instant::now(),
         })
     }
 
@@ -378,6 +382,7 @@ where
                 value,
                 eviction_meta,
                 insertion_index,
+                timestamp,
             } => {
                 let values = self.data_entry(key.clone(), eviction_meta);
                 // Always insert values in sorted order, even if no ordering method is provided,
@@ -388,13 +393,14 @@ where
                     values.binary_search(value)
                 }
                 .unwrap_or_else(|i| i);
-                values.insert(insert_idx, value.clone());
+                values.insert(insert_idx, value.clone(), *timestamp);
                 *insertion_index = Some(insert_idx);
             }
             Operation::RemoveValue {
                 key,
                 value,
                 removal_index,
+                timestamp,
             } => {
                 // Because elements are always in sorted order, it is possible to remove the element
                 // using binary search
@@ -405,7 +411,7 @@ where
                         e.binary_search(value)
                     };
                     if let Ok(remove_idx) = remove_idx {
-                        e.remove(remove_idx);
+                        e.remove(remove_idx, *timestamp);
                         *removal_index = Some(remove_idx);
                     }
                 }
@@ -450,6 +456,7 @@ where
                 value,
                 mut eviction_meta,
                 insertion_index,
+                timestamp,
             } => {
                 let values = self.data_entry(key, &mut eviction_meta);
                 let insert_idx = match insertion_index {
@@ -463,12 +470,13 @@ where
                     }
                     .unwrap_or_else(|i| i),
                 };
-                values.insert(insert_idx, value);
+                values.insert(insert_idx, value, timestamp);
             }
             Operation::RemoveValue {
                 key,
                 value,
                 removal_index,
+                timestamp,
             } => {
                 if let Some(e) = self.data.get_mut(&key) {
                     let remove_idx = match removal_index {
@@ -483,7 +491,7 @@ where
                         },
                     };
                     if let Ok(remove_idx) = remove_idx {
-                        e.remove(remove_idx);
+                        e.remove(remove_idx, timestamp);
                     }
                 }
             }
@@ -552,6 +560,8 @@ pub(super) enum Operation<K, V, M, T> {
         eviction_meta: Option<EvictionMeta>,
         // insertion index for [`absorb_second`] and computed in [`absorb_first`]
         insertion_index: Option<usize>,
+        // timestamp of when the operation occurred
+        timestamp: Instant,
     },
     /// Add an interval to the list of filled intervals
     AddRange((Bound<K>, Bound<K>)),
@@ -563,6 +573,8 @@ pub(super) enum Operation<K, V, M, T> {
         value: V,
         // removal index for [`absorb_second`] and computed in [`absorb_first`]
         removal_index: Option<usize>,
+        // timestamp of when the operation occurred
+        timestamp: Instant,
     },
     /// Remove the value set for this key.
     RemoveEntry(K),
@@ -598,6 +610,7 @@ where
                 value,
                 eviction_meta,
                 insertion_index: _,
+                timestamp: _,
             } => f
                 .debug_tuple("Add")
                 .field(key)
@@ -610,6 +623,7 @@ where
                 key,
                 value,
                 removal_index: _,
+                timestamp: _,
             } => f
                 .debug_tuple("RemoveValue")
                 .field(key)
