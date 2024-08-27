@@ -191,6 +191,10 @@ impl<T> Values<T> {
     {
         Arc::make_mut(&mut self.values.0).retain(f)
     }
+
+    pub(crate) fn metrics(&self) -> &Metrics {
+        &self.metrics
+    }
 }
 
 impl<'a, T: 'a> IntoIterator for &'a Values<T> {

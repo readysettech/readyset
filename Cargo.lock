@@ -4082,6 +4082,7 @@ dependencies = [
  "iter-enum",
  "itertools",
  "left-right",
+ "metrics",
  "partial-map",
  "proptest",
  "rand",

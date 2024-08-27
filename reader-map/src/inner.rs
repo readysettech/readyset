@@ -5,12 +5,14 @@ use std::hash::{BuildHasher, Hash};
 
 use iter_enum::{ExactSizeIterator, Iterator};
 use itertools::Either;
+use metrics::{register_histogram, Histogram};
 use partial_map::PartialMap;
 use readyset_client::internal::IndexType;
 use readyset_util::ranges::{Bound, RangeBounds};
 
 use crate::eviction::{EvictionMeta, EvictionStrategy};
-use crate::values::Values;
+use crate::recorded::{READER_MAP_LIFETIMES, READER_MAP_UPDATES};
+use crate::values::{Metrics, Values};
 
 /// Represents a miss when looking up a range.
 ///
@@ -155,18 +157,15 @@ impl<K, V, S> Data<K, V, S> {
         }
     }
 
-    pub(crate) fn remove_range<R>(&mut self, range: R)
+    pub(crate) fn remove_range<R, F>(&mut self, range: R, f: F)
     where
         R: RangeBounds<K>,
         K: Ord + Clone,
+        F: Fn(&Metrics),
     {
         match self {
             Self::BTreeMap(map, ..) => {
-                // Returns an iterator, but we don't actually care about the elements. Dropping
-                // the iterator does not automatically remove the elements from the BTreeMap (as of
-                // nightly 2023-06-16), so we need to iterate by collect()'ing them
-                // first.
-                let _: Vec<_> = map.remove_range(range).collect();
+                map.remove_range(range).for_each(|(_, v)| f(v.metrics()));
             }
             Self::HashMap(..) => panic!("remove_range called on a HashMap reader_map"),
         }
@@ -312,6 +311,39 @@ where
     }
 }
 
+#[derive(Clone)]
+pub(crate) struct WriteMetrics {
+    // Captures the duration between updates at a given key (entry).
+    entry_updated: Histogram,
+    // Captures the lifetime of an entry, from the time it was first added
+    // until it's eviction.
+    lifetime_evict: Histogram,
+}
+
+impl WriteMetrics {
+    fn new() -> Self {
+        let entry_updated = register_histogram!(READER_MAP_UPDATES);
+        let lifetime_evict = register_histogram!(READER_MAP_LIFETIMES);
+
+        Self {
+            entry_updated,
+            lifetime_evict,
+        }
+    }
+
+    pub(crate) fn record_updated(&self, values: &Metrics) {
+        if let Some(duration) = values.last_update_interval() {
+            self.entry_updated.record(duration.as_millis() as f64);
+        }
+    }
+
+    pub(crate) fn record_evicted(&self, values: &Metrics) {
+        if let Some(lifetime) = values.lifetime() {
+            self.lifetime_evict.record(lifetime.as_millis() as f64);
+        }
+    }
+}
+
 pub(crate) struct Inner<K, V, M, T, S, I> {
     pub(crate) data: Data<K, V, S>,
     pub(crate) meta: M,
@@ -320,6 +352,7 @@ pub(crate) struct Inner<K, V, M, T, S, I> {
     pub(crate) hasher: S,
     pub(crate) eviction_strategy: EvictionStrategy,
     pub(crate) insertion_order: Option<I>,
+    pub(crate) metrics: WriteMetrics,
 }
 
 impl<K, V, M, T, S, I> fmt::Debug for Inner<K, V, M, T, S, I>
@@ -358,6 +391,7 @@ where
             hasher: self.hasher.clone(),
             eviction_strategy: self.eviction_strategy.clone(),
             insertion_order: self.insertion_order.clone(),
+            metrics: self.metrics.clone(),
         }
     }
 }
@@ -384,6 +418,7 @@ where
             hasher,
             eviction_strategy,
             insertion_order,
+            metrics: WriteMetrics::new(),
         }
     }
 

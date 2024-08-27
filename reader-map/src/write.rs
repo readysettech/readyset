@@ -384,6 +384,7 @@ where
                 insertion_index,
                 timestamp,
             } => {
+                let metrics = self.metrics.clone();
                 let values = self.data_entry(key.clone(), eviction_meta);
                 // Always insert values in sorted order, even if no ordering method is provided,
                 // otherwise it will require a linear scan to remove a value
@@ -395,6 +396,7 @@ where
                 .unwrap_or_else(|i| i);
                 values.insert(insert_idx, value.clone(), *timestamp);
                 *insertion_index = Some(insert_idx);
+                metrics.record_updated(values.metrics());
             }
             Operation::RemoveValue {
                 key,
@@ -414,18 +416,33 @@ where
                         e.remove(remove_idx, *timestamp);
                         *removal_index = Some(remove_idx);
                     }
+                    // removing a value from a key is just "updating" that key
+                    self.metrics.record_updated(e.metrics());
                 }
             }
             Operation::AddRange(range) => self.data.add_range(range.clone()),
             Operation::AddFullRange => self.data.add_full_range(),
             Operation::Clear(key, eviction_meta) => {
                 self.data_entry(key.clone(), eviction_meta).clear()
+                // `clear()` is invoked on replay when filling a hole, will be followed
+                // by a call to `add()`. hence don't capture metrics on clear().
             }
             Operation::RemoveEntry(key) => {
-                self.data.remove(key);
+                let v = self.data.remove(key);
+
+                // upstream deletes flow through `RemoveValue`, thus these removes are either
+                // upstream evictions or a call to "mark a hole" (mostly likely an eviction).
+                if let Some(values) = v {
+                    self.metrics.record_evicted(values.metrics());
+                }
             }
             Operation::Purge => self.data.clear(),
-            Operation::RemoveRange(range) => self.data.remove_range(range.clone()),
+            Operation::RemoveRange(range) => {
+                // RemoveRange is only called on evictions (via marking a hole).
+                self.data.remove_range(range.clone(), |metrics| {
+                    self.metrics.record_evicted(metrics);
+                });
+            }
             Operation::Retain(key, predicate) => {
                 if let Some(e) = self.data.get_mut(key) {
                     let mut first = true;
@@ -503,7 +520,7 @@ where
             Operation::RemoveEntry(key) => {
                 self.data.remove(&key);
             }
-            Operation::RemoveRange(range) => self.data.remove_range(range),
+            Operation::RemoveRange(range) => self.data.remove_range(range, |_| {}),
             Operation::Purge => self.data.clear(),
             Operation::Retain(key, mut predicate) => {
                 if let Some(e) = self.data.get_mut(&key) {
