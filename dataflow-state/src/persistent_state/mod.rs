@@ -422,23 +422,9 @@ struct PersistentIndex {
 /// Handle to a manual compaction running in the background
 struct CompactionThreadHandle {
     handle: Option<JoinHandle<()>>,
-    opts: Arc<CompactOptions>,
 }
 
 impl CompactionThreadHandle {
-    /// Cancel the running compaction
-    fn cancel(&self) {
-        if !self.is_finished() {
-            info!("Cancelling compaction before it has finished");
-            self.opts.set_canceled(true);
-        }
-    }
-
-    fn cancel_blocking(&mut self) {
-        self.cancel();
-        self.join();
-    }
-
     fn is_finished(&self) -> bool {
         self.handle.as_ref().map_or(true, |h| h.is_finished())
     }
@@ -452,7 +438,7 @@ impl CompactionThreadHandle {
 
 impl Drop for CompactionThreadHandle {
     fn drop(&mut self) {
-        self.cancel_blocking();
+        self.join();
     }
 }
 
@@ -1402,14 +1388,10 @@ fn compact_cf(table: &str, db: &DB, index: &PersistentIndex, opts: &CompactOptio
 
     db.compact_range_cf_opt(cf, Option::<&[u8]>::None, Option::<&[u8]>::None, opts);
 
-    if opts.canceled() {
-        warn!(%table, cf = %index.column_family, "Compaction was cancelled");
-    } else {
-        info!(%table, cf = %index.column_family, "Compaction finished");
-        // Reenable auto compactions when done
-        if let Err(error) = db.set_options_cf(cf, &[("disable_auto_compactions", "false")]) {
-            error!(%error, %table, "Error setting cf options");
-        }
+    info!(%table, cf = %index.column_family, "Compaction finished");
+    // Reenable auto compactions when done
+    if let Err(error) = db.set_options_cf(cf, &[("disable_auto_compactions", "false")]) {
+        error!(%error, %table, "Error setting cf options");
     }
 }
 
@@ -1941,7 +1923,6 @@ impl PersistentState {
 
             let mut opts = CompactOptions::default();
             opts.set_exclusive_manual_compaction(false);
-            opts.create_cancel_flag();
             let opts = Arc::new(opts);
 
             let table = self.name.clone();
@@ -1967,7 +1948,6 @@ impl PersistentState {
 
             self.compaction_threads.push(CompactionThreadHandle {
                 handle: Some(compaction_thread),
-                opts,
             });
         }
     }
