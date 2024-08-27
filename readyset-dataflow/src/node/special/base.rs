@@ -425,14 +425,7 @@ impl Base {
             self.fix(r);
         }
 
-        // We allow permissive writes if we are running without an upstream.
-        // If we are allowing permissive writes, we treat failed writes as no-ops
-        // instead of errors, using our base tables as a pseudo-upstream
-        // If we are replicating, we don't expect any failed writes, so we treat any
-        // as an error.
-        if self.permissive_writes {
-            failed_log.ensure_no_failed_ops()?;
-        }
+        failed_log.log_errors();
 
         Ok(BaseWrite {
             records: results.into(),
@@ -549,6 +542,7 @@ fn apply_table_op_coercions(
 }
 
 /// A helper to log information about failed table updates without leaking data
+#[derive(Debug)]
 pub(crate) struct FailedOpLogger {
     insert_existing: usize,
     update_non_existing: usize,
@@ -556,7 +550,7 @@ pub(crate) struct FailedOpLogger {
     // Maps from (column index, deleted data type, actual data type) to count for columns with
     // different types
     delete_type_mismatch: HashMap<(usize, Option<DfValueKind>, Option<DfValueKind>), usize>,
-    // Maps from (column inxed, deleted data type) to count for columns with different values
+    // Maps from (column index, deleted data type) to count for columns with different values
     delete_row_data_mismatch: HashMap<(usize, DfValueKind), usize>,
     table: Relation,
 }
@@ -626,6 +620,7 @@ impl FailedOpLogger {
             && self.delete_row_data_mismatch.is_empty())
     }
 
+    #[allow(dead_code, reason = "Unused until we fix how this failure propogates")]
     fn ensure_no_failed_ops(self) -> ReadySetResult<()> {
         if self.has_failed_deletes_or_updates() || self.has_failed_inserts() {
             self.log_errors();
