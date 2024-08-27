@@ -1,6 +1,7 @@
 use std::string::FromUtf8Error;
 use std::sync::Arc;
 
+use itertools::Itertools;
 use mysql_common::collations::{self, Collation, CollationId};
 use mysql_srv::ColumnType;
 use readyset_data::DfValue;
@@ -58,6 +59,39 @@ pub fn parse_mysql_version(version: &str) -> mysql_async::Result<u32> {
     Ok(major * 10000 + minor * 100 + patch)
 }
 
+/// MySQL has its own implementation of json print that deserializes the json and adds a space after
+/// the ":" in between key->value and adds a space after the "," in between key->value pairs.
+/// This function is a re-implementation of that.
+/// More details can be found at [1].
+///
+/// # Arguments
+/// * `json` - the json value to print
+///
+/// # Returns
+/// This function returns a string that represents the printed json
+///
+/// [1]: https://linear.app/readyset/issue/REA-4724/
+pub fn mysql_json_print(json: &serde_json::Value) -> String {
+    match json {
+        serde_json::Value::Object(obj) => {
+            let res = obj
+                .iter()
+                .map(|(key, value)| format!("\"{}\": {}", key, mysql_json_print(value)))
+                .join(", ");
+            format!("{{{}}}", res)
+        }
+        serde_json::Value::Array(arr) => {
+            let res = arr.iter().map(mysql_json_print).join(", ");
+
+            format!("[{}]", res)
+        }
+        serde_json::Value::String(s) => format!("\"{}\"", s),
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::Bool(b) => b.to_string(),
+        serde_json::Value::Null => "null".to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -75,5 +109,29 @@ mod tests {
         let version = "8.0.23-rds.20240529-log";
         let version_number = parse_mysql_version(version).unwrap();
         assert_eq!(version_number, 80023);
+    }
+
+    #[test]
+    fn test_mysql_json_print() {
+        let json = serde_json::json!({
+            "key1": "value1",
+            "key2": {
+                "key3": "value3",
+                "key4": {
+                    "key5": "value5"
+                }
+            },
+            "key6": [
+                "value6",
+                {
+                    "key7": "value7"
+                }
+            ]
+        });
+        let pretty_json = mysql_json_print(&json);
+        assert_eq!(
+            pretty_json,
+            r#"{"key1": "value1", "key2": {"key3": "value3", "key4": {"key5": "value5"}}, "key6": ["value6", {"key7": "value7"}]}"#
+        );
     }
 }

@@ -26,6 +26,7 @@ use replication_offset::ReplicationOffset;
 use rust_decimal::Decimal;
 use tracing::{error, info, warn};
 
+use super::utils::mysql_json_print;
 use crate::mysql_connector::utils::mysql_pad_collation_column;
 use crate::noria_adapter::{Connector, ReplicationAction};
 
@@ -1111,7 +1112,7 @@ fn binlog_row_to_noria_row(
                 BinlogValue::Jsonb(val) => {
                     let json: Result<serde_json::Value, _> = val.clone().try_into(); // urgh no TryFrom impl
                     match json {
-                        Ok(val) => Ok(DfValue::from(val.to_string())),
+                        Ok(val) => Ok(DfValue::from(mysql_json_print(&val))),
                         Err(JsonbToJsonError::Opaque) => match val {
                             jsonb::Value::Opaque(opaque_val) => {
                                 // As far as I can *tell* Opaque is just a raw JSON string, which we

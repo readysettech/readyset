@@ -3542,3 +3542,78 @@ async fn mysql_handle_dml_in_statement_events() {
     assert_eq!(caches.len(), 0);
     shutdown_tx.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+#[slow]
+async fn mysql_replicate_json_field() {
+    readyset_tracing::init_test_logging();
+    let url = mysql_url();
+    let mut client = DbConnection::connect(&url).await.unwrap();
+
+    client
+        .query(
+            "DROP TABLE IF EXISTS j_table;
+            CREATE TABLE j_table (id INT PRIMARY KEY, data JSON, c CHAR(1));
+            INSERT INTO j_table (id, data, c) VALUES (1, '{\"age\":30,\"car\": [\"Ford\", \"BMW\", \"Fiat\"], \"name\": \"John\"}', 'A');
+            INSERT INTO j_table (id, data, c) VALUES (2, NULL, 'A');",
+        )
+        .await
+        .unwrap();
+
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
+        .await
+        .unwrap();
+    ctx.notification_channel
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+
+    // Check that the row is replicated correctly
+    ctx.check_results(
+        "j_table",
+        "Snapshot1",
+        &[
+            &[
+                DfValue::Int(1),
+                DfValue::Text(
+                    "{\"age\": 30, \"car\": [\"Ford\", \"BMW\", \"Fiat\"], \"name\": \"John\"}"
+                        .into(),
+                ),
+                DfValue::Text("A".into()),
+            ],
+            &[DfValue::Int(2), DfValue::None, DfValue::Text("A".into())],
+        ],
+    )
+    .await
+    .unwrap();
+
+    // Update the JSON data
+    client
+        .query("UPDATE j_table SET c = 'B' WHERE id = 1 OR id = 2;")
+        .await
+        .unwrap();
+
+    // Check that the update is replicated correctly
+    ctx.check_results(
+        "j_table",
+        "Replication",
+        &[
+            &[
+                DfValue::Int(1),
+                DfValue::Text(
+                    "{\"age\": 30, \"car\": [\"Ford\", \"BMW\", \"Fiat\"], \"name\": \"John\"}"
+                        .into(),
+                ),
+                DfValue::Text("B".into()),
+            ],
+            &[DfValue::Int(2), DfValue::None, DfValue::Text("B".into())],
+        ],
+    )
+    .await
+    .unwrap();
+
+    shutdown_tx.shutdown().await;
+}
