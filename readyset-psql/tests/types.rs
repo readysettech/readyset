@@ -4,6 +4,8 @@ use readyset_client_test_helpers::TestBuilder;
 use readyset_server::Handle;
 use readyset_util::shutdown::ShutdownSender;
 
+use tracing::warn;
+
 mod common;
 use common::connect;
 
@@ -47,13 +49,18 @@ mod types {
         V: ToSql + Sync + PartialEq + RefUnwindSafe,
         for<'a> V: FromSql<'a>,
     {
+        warn!("test_type_roundtrip - HEAD of {}", type_name);
+        let start = tokio::time::Instant::now();
         let (config, _handle, shutdown_tx) = setup().await;
+        warn!("test_type_roundtrip - set up: {} ms", start.elapsed().as_millis());
         let mut client = connect(config).await;
+        warn!("test_type_roundtrip - create conn: {} ms", start.elapsed().as_millis());
 
         client
             .simple_query(&format!("CREATE TABLE t (id int, x {})", type_name))
             .await
             .unwrap();
+        warn!("test_type_roundtrip - create table: {} ms", start.elapsed().as_millis());
 
         for (i, v) in vals.iter().enumerate() {
             // check writes (going to fallback)
@@ -62,6 +69,7 @@ mod types {
                 .await
                 .unwrap();
         }
+        warn!("test_type_roundtrip - insert data: {} ms", start.elapsed().as_millis());
 
         // check values coming out of noria
         eventually!(run_test: {
@@ -74,6 +82,7 @@ mod types {
         }, then_assert: |results| {
             assert_eq!(results, vals);
         });
+        warn!("test_type_roundtrip - check data 1: {} ms", start.elapsed().as_millis());
 
         // check parameter parsing
         if type_name.to_string().as_str() != "json" {
@@ -90,6 +99,7 @@ mod types {
                 assert!(count_where_result >= 1);
             }
         }
+        warn!("test_type_roundtrip - check data 2: {} ms", start.elapsed().as_millis());
 
         // Can't compare JSON for equality in postgres
         if type_name.to_string() != "json" {
@@ -109,8 +119,10 @@ mod types {
                 assert_eq!(fallback_result, *v);
             }
         }
+        warn!("test_type_roundtrip - check data 3: {} ms", start.elapsed().as_millis());
 
         shutdown_tx.shutdown().await;
+        warn!("test_type_roundtrip - END of {}: {} ms", type_name, start.elapsed().as_millis());
     }
 
     macro_rules! test_types {

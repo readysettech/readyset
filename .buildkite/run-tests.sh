@@ -10,4 +10,4 @@ upload_artifacts() {
 
 echo "+++ :rust: Run tests"
 export DISABLE_TELEMETRY=true
-cargo --locked test --all --features failure_injection --exclude readyset-clustertest --exclude benchmarks -- -Z unstable-options --report-time || upload_artifacts
+LOG_LEVEL=warn cargo --locked test --all --features failure_injection --exclude readyset-clustertest --exclude benchmarks -- -Z unstable-options --report-time --nocapture || upload_artifacts
