@@ -22,6 +22,7 @@ use readyset_errors::{internal_err, ReadySetResult};
 use replication_offset::mysql::MySqlPosition;
 use replication_offset::{ReplicationOffset, ReplicationOffsets};
 use rust_decimal::Decimal;
+use serde_json::Value;
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, info_span, warn};
 use tracing_futures::Instrument;
@@ -857,6 +858,23 @@ fn mysql_row_to_noria_row(row: &mysql::Row) -> ReadySetResult<Vec<readyset_data:
                 mysql_common::value::Value::NULL => noria_row.push(DfValue::None),
                 _ => return Err(internal_err!("Expected a bytes value for decimal column")),
             },
+            ColumnType::MYSQL_TYPE_JSON => {
+                let df_val = match val {
+                    mysql_common::value::Value::Bytes(b) => str::from_utf8(&b)
+                        .ok()
+                        .and_then(|s: &str| serde_json::from_str(s).ok())
+                        .map(|j: Value| DfValue::from(j))
+                        .ok_or_else(|| internal_err!("Failed to parse JSON value"))?,
+                    mysql_common::value::Value::NULL => DfValue::None,
+                    _ => {
+                        return Err(internal_err!(
+                            "Expected a bytes value for JSON column, got {:?}",
+                            val
+                        ));
+                    }
+                };
+                noria_row.push(df_val);
+            }
             _ => noria_row.push(readyset_data::DfValue::try_from(val)?),
         }
     }
