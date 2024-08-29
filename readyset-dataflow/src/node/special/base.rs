@@ -314,7 +314,7 @@ impl Base {
             Inserted(Cow<'a, [DfValue]>),
         }
         let mut touched_keys: HashMap<Vec<DfValue>, TouchedKey> = HashMap::new();
-        let mut failed_log = FailedOpLogger::new(name);
+        let mut failed_log = FailedOpLogger::new(name, &replication_offset);
 
         for (key, ops) in &ops {
             // It is not enough to check the persisted value for the key, as it may have been
@@ -351,15 +351,15 @@ impl Base {
             for op in ops {
                 match op {
                     TableOperation::Insert(row) if value.is_none() => value = Some(Cow::Owned(row)),
-                    TableOperation::Insert(_) => {
-                        failed_log.failed_insert();
+                    TableOperation::Insert(row) => {
+                        failed_log.failed_insert(&row, value.as_deref());
                     }
                     TableOperation::DeleteRow { row } if value == Some(Cow::Borrowed(&row)) => {
                         // Delete the row, but only if it fully matches the current row
                         value = None;
                     }
                     TableOperation::DeleteRow { row } => {
-                        failed_log.failed_delete(row, value.as_deref());
+                        failed_log.failed_delete(&row, value.as_deref());
                     }
                     TableOperation::DeleteByKey { .. } => value = None,
 
@@ -388,8 +388,8 @@ impl Base {
                             }
                         }
                     }
-                    TableOperation::Update { .. } => {
-                        failed_log.failed_update();
+                    TableOperation::Update { update, key } => {
+                        failed_log.failed_update(&update, &key, value.as_deref());
                     }
                     TableOperation::SetSnapshotMode(_)
                     | TableOperation::SetReplicationOffset(_)
@@ -542,36 +542,45 @@ fn apply_table_op_coercions(
 }
 
 /// A helper to log information about failed table updates without leaking data
+// XXX JCD For now, we're logging some diagnostic stuff to ERROR for greater visibility
 #[derive(Debug)]
 pub(crate) struct FailedOpLogger {
-    insert_existing: usize,
-    update_non_existing: usize,
-    delete_non_existing: usize,
-    // Maps from (column index, deleted data type, actual data type) to count for columns with
-    // different types
-    delete_type_mismatch: HashMap<(usize, Option<DfValueKind>, Option<DfValueKind>), usize>,
+    insert_count: usize,
+    update_count: usize,
+    delete_count: usize,
     // Maps from (column index, deleted data type) to count for columns with different values
     delete_row_data_mismatch: HashMap<(usize, DfValueKind), usize>,
     table: Relation,
+    prefix: String,
 }
 
 impl FailedOpLogger {
-    pub(crate) fn new(table: Relation) -> Self {
+    pub(crate) fn new(table: Relation, replication_offset: &Option<ReplicationOffset>) -> Self {
+        let prefix = match replication_offset {
+            Some(offset) => format!("[{}, {}] ", offset, table.display_unquoted()),
+            None => format!("[{}] ", table.display_unquoted()),
+        };
         Self {
-            insert_existing: Default::default(),
-            update_non_existing: Default::default(),
-            delete_non_existing: Default::default(),
-            delete_type_mismatch: Default::default(),
+            insert_count: Default::default(),
+            update_count: Default::default(),
+            delete_count: Default::default(),
             delete_row_data_mismatch: Default::default(),
             table,
+            prefix,
         }
     }
 
-    fn failed_delete(&mut self, deleted_row: Vec<DfValue>, current_row: Option<&[DfValue]>) {
+    fn failed_delete(&mut self, deleted_row: &Vec<DfValue>, current_row: Option<&[DfValue]>) {
         use itertools::EitherOrBoth;
 
+        self.delete_count += 1;
         match current_row {
-            None => self.delete_non_existing += 1,
+            None => {
+                error!(
+                    "{}Attempted to delete non-existing row:\n  {:?}",
+                    self.prefix, deleted_row
+                );
+            }
             Some(row) => {
                 for (col, vals) in deleted_row.iter().zip_longest(row.iter()).enumerate() {
                     let (del, cur) = match vals {
@@ -579,51 +588,85 @@ impl FailedOpLogger {
                         EitherOrBoth::Left(d) => (Some(d), None),
                         EitherOrBoth::Right(c) => (None, Some(c)),
                     };
-
-                    if del.map(DfValueKind::from) != cur.map(DfValueKind::from) {
-                        *self
-                            .delete_type_mismatch
-                            .entry((col, del.map(DfValueKind::from), cur.map(DfValueKind::from)))
-                            .or_default() += 1;
-                        // Only report the first inconsistency in the row
-                        break;
-                    } else if del != cur {
+                    if del.is_some() && del != cur {
+                        error!(
+                            concat!(
+                                "{}Attempted to delete row, but there was a data mismatch in ",
+                                "column {}:\n   stored: {:?}\n  deleted: {:?}"
+                            ),
+                            self.prefix, col, row, deleted_row
+                        );
                         *self
                             .delete_row_data_mismatch
-                            // Unwrap ok because del has to be Some in else statement
                             .entry((col, DfValueKind::from(del.unwrap())))
                             .or_default() += 1;
-                        // Only report the first inconsistency in the row
-                        break;
                     }
                 }
             }
         }
     }
 
-    fn failed_insert(&mut self) {
-        self.insert_existing += 1;
+    fn failed_insert(&mut self, inserted_row: &Vec<DfValue>, current_row: Option<&[DfValue]>) {
+        self.insert_count += 1;
+        match current_row {
+            None => {
+                error!(
+                    "{}Attempted to insert row:\n  {:?}",
+                    self.prefix, inserted_row
+                );
+            }
+            Some(row) => {
+                error!(
+                    "{}Attempted to insert existing row:\n    stored: {:?}\n  inserted: {:?}",
+                    self.prefix, row, inserted_row
+                );
+            }
+        }
     }
 
-    fn failed_update(&mut self) {
-        self.update_non_existing += 1;
+    fn failed_update(
+        &mut self,
+        update: &Vec<Modification>,
+        key: &Vec<DfValue>,
+        current_row: Option<&[DfValue]>,
+    ) {
+        self.update_count += 1;
+        match current_row {
+            None => {
+                error!(
+                    "{}Attempted to update non-existing row:\n     key: {:?}\n  update: {:?}",
+                    self.prefix, key, update
+                );
+            }
+            Some(row) => {
+                error!(
+                    "{}Attempted to update row:\n  stored: {:?}\n     key: {:?}\n  update: {:?}",
+                    self.prefix, row, key, update
+                );
+            }
+        }
     }
 
     fn has_failed_inserts(&self) -> bool {
-        self.insert_existing != 0
+        self.insert_count != 0
     }
 
-    fn has_failed_deletes_or_updates(&self) -> bool {
-        !(self.update_non_existing == 0
-            && self.delete_non_existing == 0
-            && self.delete_type_mismatch.is_empty()
-            && self.delete_row_data_mismatch.is_empty())
+    fn has_failed_deletes(&self) -> bool {
+        self.delete_count > 0
     }
 
-    #[allow(dead_code, reason = "Unused until we fix how this failure propogates")]
+    fn has_failed_updates(&self) -> bool {
+        self.update_count > 0
+    }
+
+    fn has_any_failed(&self) -> bool {
+        self.has_failed_deletes() || self.has_failed_updates() || self.has_failed_inserts()
+    }
+
+    #[allow(dead_code, reason = "Unused until we fix how this failure propagates")]
     fn ensure_no_failed_ops(self) -> ReadySetResult<()> {
-        if self.has_failed_deletes_or_updates() || self.has_failed_inserts() {
-            self.log_errors();
+        self.log_errors();
+        if self.has_any_failed() {
             return Err(ReadySetError::FailedBaseOps { table: self.table });
         }
 
@@ -631,36 +674,27 @@ impl FailedOpLogger {
     }
 
     pub fn log_errors(&self) {
-        if self.has_failed_inserts() {
-            // If we failed to insert an op to the base table, our state is no longer correct, even
-            // if we are allowing permissive writes.
-            error!(
-                node = %self.table.display_unquoted(),
-                insert = %self.insert_existing,
-                "Table failed to apply insert operations"
-            );
+        if !self.has_any_failed() {
+            return;
         }
 
-        // If we are allowing permissive writes, we should have never called this function for
-        // failed deletes or updates, so any we see here we log an error for.
-        if self.has_failed_deletes_or_updates() {
+        if self.delete_row_data_mismatch.is_empty() {
             error!(
-                table = %self.table.display_unquoted(),
-                update = %self.update_non_existing,
-                delete_non_existing = %self.delete_non_existing,
-                delete_type_mismatch = %self.delete_type_mismatch.len(),
-                delete_data_mismatch = %self.delete_row_data_mismatch.len(),
-                "Table failed to apply update or delete operations"
+                insert = %self.insert_count,
+                update = %self.update_count,
+                delete = %self.delete_count,
+                "{}Table failed to apply operations",
+                self.prefix
             );
-
-            if !self.delete_type_mismatch.is_empty() || !self.delete_row_data_mismatch.is_empty() {
-                error!(
-                    table = %self.table.display_unquoted(),
-                    type_mismatch = ?self.delete_type_mismatch,
-                    data_mismatch = ?self.delete_row_data_mismatch,
-                    "Table failed to apply delete operations"
-                );
-            }
+        } else {
+            error!(
+                insert = %self.insert_count,
+                update = %self.update_count,
+                delete = %self.delete_count,
+                delete_data_mismatch = ?self.delete_row_data_mismatch,
+                "{}Table failed to apply operations",
+                self.prefix
+            );
         }
     }
 }
