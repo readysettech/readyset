@@ -426,3 +426,30 @@ fn round_trip_mysql_type_regressions_datetime_zero() {
 fn round_trip_mysql_type_regressions_timestamp_zero() {
     round_trip_mysql_type(SqlType::Timestamp, Value::Date(0, 0, 0, 0, 0, 0, 0))
 }
+
+#[test]
+#[serial]
+#[slow]
+fn round_trip_mysql_type_regressions_bool_one_unsigned() {
+    round_trip_mysql_type(SqlType::Bool, Value::UInt(1))
+}
+
+#[test]
+#[serial]
+#[slow]
+fn round_trip_mysql_type_regressions_bool_one_signed() {
+    round_trip_mysql_type(SqlType::Bool, Value::Int(1))
+}
+
+#[test]
+#[serial]
+#[slow]
+fn round_trip_mysql_type_regressions_bool_zero_unsigned() {
+    round_trip_mysql_type(SqlType::Bool, Value::UInt(0))
+}
+#[test]
+#[serial]
+#[slow]
+fn round_trip_mysql_type_regressions_bool_zero_signed() {
+    round_trip_mysql_type(SqlType::Bool, Value::Int(0))
+}
