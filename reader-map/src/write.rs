@@ -164,7 +164,7 @@ where
             key: k,
             value: v,
             eviction_meta: None,
-            insertion_index: None,
+            index: None,
             timestamp: Instant::now(),
         })
     }
@@ -210,7 +210,7 @@ where
         self.add_op(Operation::RemoveValue {
             key: k,
             value: v,
-            removal_index: None,
+            index: None,
             timestamp: Instant::now(),
         })
     }
@@ -381,7 +381,7 @@ where
                 key,
                 value,
                 eviction_meta,
-                insertion_index,
+                index,
                 timestamp,
             } => {
                 let metrics = self.metrics.clone();
@@ -395,13 +395,13 @@ where
                 }
                 .unwrap_or_else(|i| i);
                 values.insert(insert_idx, value.clone(), *timestamp);
-                *insertion_index = Some(insert_idx);
+                *index = Some(insert_idx);
                 metrics.record_updated(values.metrics());
             }
             Operation::RemoveValue {
                 key,
                 value,
-                removal_index,
+                index,
                 timestamp,
             } => {
                 // Because elements are always in sorted order, it is possible to remove the element
@@ -414,7 +414,7 @@ where
                     };
                     if let Ok(remove_idx) = remove_idx {
                         e.remove(remove_idx, *timestamp);
-                        *removal_index = Some(remove_idx);
+                        *index = Some(remove_idx);
                     }
                     // removing a value from a key is just "updating" that key
                     self.metrics.record_updated(e.metrics());
@@ -472,11 +472,11 @@ where
                 key,
                 value,
                 mut eviction_meta,
-                insertion_index,
+                index,
                 timestamp,
             } => {
                 let values = self.data_entry(key, &mut eviction_meta);
-                let insert_idx = match insertion_index {
+                let insert_idx = match index {
                     // In `absorb_second` there is no need to do binary search again if it was
                     // already passed over by `absorb_first`
                     Some(idx) => idx,
@@ -492,11 +492,11 @@ where
             Operation::RemoveValue {
                 key,
                 value,
-                removal_index,
+                index,
                 timestamp,
             } => {
                 if let Some(e) = self.data.get_mut(&key) {
-                    let remove_idx = match removal_index {
+                    let remove_idx = match index {
                         // In `absorb_second` there is no need to do binary search again if it was
                         // already passed over by `absorb_first`
                         Some(idx) => Ok(idx),
@@ -576,7 +576,7 @@ pub(super) enum Operation<K, V, M, T> {
         value: V,
         eviction_meta: Option<EvictionMeta>,
         // insertion index for [`absorb_second`] and computed in [`absorb_first`]
-        insertion_index: Option<usize>,
+        index: Option<usize>,
         // timestamp of when the operation occurred
         timestamp: Instant,
     },
@@ -589,7 +589,7 @@ pub(super) enum Operation<K, V, M, T> {
         key: K,
         value: V,
         // removal index for [`absorb_second`] and computed in [`absorb_first`]
-        removal_index: Option<usize>,
+        index: Option<usize>,
         // timestamp of when the operation occurred
         timestamp: Instant,
     },
@@ -626,7 +626,7 @@ where
                 key,
                 value,
                 eviction_meta,
-                insertion_index: _,
+                index: _,
                 timestamp: _,
             } => f
                 .debug_tuple("Add")
@@ -639,7 +639,7 @@ where
             Operation::RemoveValue {
                 key,
                 value,
-                removal_index: _,
+                index: _,
                 timestamp: _,
             } => f
                 .debug_tuple("RemoveValue")
