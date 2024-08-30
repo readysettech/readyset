@@ -3,6 +3,7 @@ use std::iter::FusedIterator;
 use std::ops::Deref;
 use std::time::{Duration, Instant};
 
+use partial_map::InsertionOrder;
 use smallvec::SmallVec;
 use triomphe::Arc;
 
@@ -156,11 +157,29 @@ impl<T> Values<T> {
 
     /// Inserts an element at position index within the vector, shifting all elements after it to
     /// the right.
-    pub(crate) fn insert(&mut self, index: usize, element: T, timestamp: Instant)
-    where
-        T: Clone,
+    pub(crate) fn insert<I>(
+        &mut self,
+        element: T,
+        order: &Option<I>,
+        index: &mut Option<usize>,
+        timestamp: Instant,
+    ) where
+        T: Ord + Clone,
+        I: InsertionOrder<T>,
     {
-        Arc::make_mut(&mut self.values.0).insert(index, element);
+        // Always insert values in sorted order, even if no ordering method is provided,
+        // otherwise it will require a linear scan to remove a value
+        let i = if let Some(index) = index {
+            Ok(*index) // cached from first time
+        } else if let Some(order) = order {
+            order.get_insertion_order(self, &element)
+        } else {
+            self.binary_search(&element)
+        }
+        .unwrap_or_else(|i| i);
+
+        Arc::make_mut(&mut self.values.0).insert(i, element);
+        *index = Some(i);
         self.metrics.update(timestamp);
     }
 
@@ -234,6 +253,7 @@ impl<'a, T> FusedIterator for ValuesIter<'a, T> {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::DefaultInsertionOrder;
 
     macro_rules! assert_empty {
         ($x:expr) => {
@@ -268,7 +288,12 @@ mod tests {
         let values = 0..1000;
         let len = values.clone().count();
         for (i, e) in values.clone().enumerate() {
-            v.insert(i, e, Instant::now());
+            v.insert(
+                e,
+                &None::<DefaultInsertionOrder>,
+                &mut Some(i),
+                Instant::now(),
+            );
         }
 
         for i in values.clone() {
