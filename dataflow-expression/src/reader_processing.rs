@@ -194,36 +194,28 @@ pub struct PreInsertion {
 }
 
 impl InsertionOrder<Box<[DfValue]>> for PreInsertion {
-    fn get_insertion_order(
-        &self,
-        values: &[Box<[DfValue]>],
-        elem: &Box<[DfValue]>,
-    ) -> Result<usize, usize> {
+    fn cmp(&self, a: &Box<[DfValue]>, b: &Box<[DfValue]>) -> Ordering {
         if let Some(cols) = &self.group_by {
-            values.binary_search_by(|cur_row| {
-                cols.iter()
-                    .map(|&idx| cur_row[idx].cmp(&elem[idx]))
-                    .try_fold(Ordering::Equal, |acc, next| match acc {
-                        Ordering::Equal => Ok(next),
-                        ord => Err(ord),
-                    })
-                    .unwrap_or_else(|ord| ord)
-                    .then(cur_row.cmp(elem))
-            })
+            cols.iter()
+                .map(|&idx| a[idx].cmp(&b[idx]))
+                .try_fold(Ordering::Equal, |acc, next| match acc {
+                    Ordering::Equal => Ok(next),
+                    ord => Err(ord),
+                })
+                .unwrap_or_else(|ord| ord)
+                .then(a.cmp(b))
         } else if let Some(indices) = self.order_by.as_deref() {
-            values.binary_search_by(|cur_row| {
-                indices
-                    .iter()
-                    .map(|&(idx, order_type)| order_type.apply(cur_row[idx].cmp(&elem[idx])))
-                    .try_fold(Ordering::Equal, |acc, next| match acc {
-                        Ordering::Equal => Ok(next),
-                        ord => Err(ord),
-                    })
-                    .unwrap_or_else(|ord| ord)
-                    .then(cur_row.cmp(elem))
-            })
+            indices
+                .iter()
+                .map(|&(idx, order_type)| order_type.apply(a[idx].cmp(&b[idx])))
+                .try_fold(Ordering::Equal, |acc, next| match acc {
+                    Ordering::Equal => Ok(next),
+                    ord => Err(ord),
+                })
+                .unwrap_or_else(|ord| ord)
+                .then(a.cmp(b))
         } else {
-            values.binary_search(elem)
+            a.cmp(b)
         }
     }
 }
