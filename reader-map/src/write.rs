@@ -395,18 +395,9 @@ where
                 index,
                 timestamp,
             } => {
-                // Because elements are always in sorted order, it is possible to remove the element
-                // using binary search
                 if let Some(e) = self.data.get_mut(key) {
-                    let remove_idx = if let Some(insertion_order) = &other.insertion_order {
-                        insertion_order.get_insertion_order(e, value)
-                    } else {
-                        e.binary_search(value)
-                    };
-                    if let Ok(remove_idx) = remove_idx {
-                        e.remove(remove_idx, *timestamp);
-                        *index = Some(remove_idx);
-                    }
+                    e.remove(value, &other.insertion_order, index, *timestamp);
+
                     // removing a value from a key is just "updating" that key
                     self.metrics.record_updated(e.metrics());
                 }
@@ -472,24 +463,11 @@ where
             Operation::RemoveValue {
                 key,
                 value,
-                index,
+                mut index,
                 timestamp,
             } => {
                 if let Some(e) = self.data.get_mut(&key) {
-                    let remove_idx = match index {
-                        // In `absorb_second` there is no need to do binary search again if it was
-                        // already passed over by `absorb_first`
-                        Some(idx) => Ok(idx),
-                        // This only happens before the initial publish or if value is not present,
-                        // but in real world usage value is always present
-                        None => match &other.insertion_order {
-                            Some(order) => order.get_insertion_order(e, &value),
-                            None => e.binary_search(&value),
-                        },
-                    };
-                    if let Ok(remove_idx) = remove_idx {
-                        e.remove(remove_idx, timestamp);
-                    }
+                    e.remove(&value, &other.insertion_order, &mut index, timestamp);
                 }
             }
             Operation::AddRange(range) => self.data.add_range(range),

@@ -155,11 +155,38 @@ impl<T> Values<T> {
         &self.eviction_meta
     }
 
+    fn find<I>(&self, value: &T, order: &Option<I>, cache: &mut Option<usize>, insert: bool)
+    where
+        T: Ord + Clone,
+        I: InsertionOrder<T>,
+    {
+        let i = if let Some(cache) = cache {
+            Ok(*cache) // cached from first time
+        } else if let Some(order) = order {
+            order.get_insertion_order(self, value)
+        } else {
+            self.binary_search(value)
+        };
+
+        *cache = if insert {
+            Some(i.unwrap_or_else(|x| x))
+        } else if let Ok(x) = i {
+            Some(x)
+        } else {
+            // Option<usize> doesn't permit us to encode for the second side "we searched for
+            // this the first time, but didn't find it," so if the workload deletes non-
+            // existent keys, we will repeat the search in vain the second time.  But since
+            // that's not the workload, we're okay here.  (But proptests do generate deletions
+            // of non-existent values.)
+            None
+        }
+    }
+
     /// Inserts an element at position index within the vector, shifting all elements after it to
     /// the right.
     pub(crate) fn insert<I>(
         &mut self,
-        element: T,
+        value: T,
         order: &Option<I>,
         index: &mut Option<usize>,
         timestamp: Instant,
@@ -169,17 +196,8 @@ impl<T> Values<T> {
     {
         // Always insert values in sorted order, even if no ordering method is provided,
         // otherwise it will require a linear scan to remove a value
-        let i = if let Some(index) = index {
-            Ok(*index) // cached from first time
-        } else if let Some(order) = order {
-            order.get_insertion_order(self, &element)
-        } else {
-            self.binary_search(&element)
-        }
-        .unwrap_or_else(|i| i);
-
-        Arc::make_mut(&mut self.values.0).insert(i, element);
-        *index = Some(i);
+        self.find(&value, order, index, true);
+        Arc::make_mut(&mut self.values.0).insert(index.unwrap(), value);
         self.metrics.update(timestamp);
     }
 
@@ -188,11 +206,20 @@ impl<T> Values<T> {
     ///
     /// Note: Because this shifts over the remaining elements, it has a worst-case
     /// performance of O(n).
-    pub(crate) fn remove(&mut self, index: usize, timestamp: Instant)
-    where
-        T: PartialEq + Clone,
+    pub(crate) fn remove<I>(
+        &mut self,
+        value: &T,
+        order: &Option<I>,
+        index: &mut Option<usize>,
+        timestamp: Instant,
+    ) where
+        T: Ord + Clone,
+        I: InsertionOrder<T>,
     {
-        Arc::make_mut(&mut self.values.0).remove(index);
+        self.find(value, order, index, false);
+        if let Some(index) = *index {
+            Arc::make_mut(&mut self.values.0).remove(index);
+        }
         self.metrics.update(timestamp);
     }
 
