@@ -163,7 +163,7 @@ impl<T> Values<T> {
         let i = if let Some(cache) = cache {
             Ok(*cache) // cached from first time
         } else if let Some(order) = order {
-            order.get_insertion_order(self, value)
+            self.binary_search_by(|x| order.cmp(x, value))
         } else {
             self.binary_search(value)
         };

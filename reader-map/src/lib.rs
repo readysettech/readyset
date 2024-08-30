@@ -441,8 +441,8 @@ impl<V> InsertionOrder<V> for DefaultInsertionOrder
 where
     V: Ord,
 {
-    fn get_insertion_order(&self, values: &[V], elem: &V) -> std::result::Result<usize, usize> {
-        values.binary_search(elem)
+    fn cmp(&self, a: &V, b: &V) -> std::cmp::Ordering {
+        a.cmp(b)
     }
 }
 

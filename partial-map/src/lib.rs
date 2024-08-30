@@ -505,9 +505,9 @@ where
 
 /// A trait that is required to keep the inner values in the correct order
 pub trait InsertionOrder<V> {
-    /// Return the position of the element in the list of elements, or the position where it can be
-    /// inserted in order
-    fn get_insertion_order(&self, values: &[V], elem: &V) -> std::result::Result<usize, usize>;
+    /// Compare two elements, like [`Ord::cmp`], but the comparison can be based on anything,
+    /// not necessarily the same as `a.cmp(b)`.
+    fn cmp(&self, a: &V, b: &V) -> std::cmp::Ordering;
 }
 
 #[cfg(test)]
