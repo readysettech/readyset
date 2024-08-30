@@ -386,16 +386,7 @@ where
             } => {
                 let metrics = self.metrics.clone();
                 let values = self.data_entry(key.clone(), eviction_meta);
-                // Always insert values in sorted order, even if no ordering method is provided,
-                // otherwise it will require a linear scan to remove a value
-                let insert_idx = if let Some(insertion_order) = &other.insertion_order {
-                    insertion_order.get_insertion_order(values, value)
-                } else {
-                    values.binary_search(value)
-                }
-                .unwrap_or_else(|i| i);
-                values.insert(insert_idx, value.clone(), *timestamp);
-                *index = Some(insert_idx);
+                values.insert(value.clone(), &other.insertion_order, index, *timestamp);
                 metrics.record_updated(values.metrics());
             }
             Operation::RemoveValue {
@@ -472,22 +463,11 @@ where
                 key,
                 value,
                 mut eviction_meta,
-                index,
+                mut index,
                 timestamp,
             } => {
                 let values = self.data_entry(key, &mut eviction_meta);
-                let insert_idx = match index {
-                    // In `absorb_second` there is no need to do binary search again if it was
-                    // already passed over by `absorb_first`
-                    Some(idx) => idx,
-                    // This only happens before the initial publish
-                    None => match &other.insertion_order {
-                        Some(order) => order.get_insertion_order(values, &value),
-                        None => values.binary_search(&value),
-                    }
-                    .unwrap_or_else(|i| i),
-                };
-                values.insert(insert_idx, value, timestamp);
+                values.insert(value, &other.insertion_order, &mut index, timestamp);
             }
             Operation::RemoveValue {
                 key,
