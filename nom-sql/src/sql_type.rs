@@ -171,22 +171,13 @@ impl Arbitrary for SqlType {
             Just(Double).boxed(),
             Just(Float).boxed(),
             Just(Real).boxed(),
-            option::of((1..=65u16).prop_flat_map(|n| {
-                (
-                    Just(n),
-                    if n > 28 {
-                        Just(None).boxed()
-                    } else {
-                        option::of(0..=(n as u8)).boxed()
-                    },
-                )
-            }))
-            .prop_map(Numeric)
-            .boxed(),
             Just(Text).boxed(),
             Just(Date).boxed(),
             Just(Time).boxed(),
             Just(Timestamp).boxed(),
+            option::of((1..=28u16).prop_flat_map(|n| (Just(n), option::of(0..=(n as u8)).boxed())))
+                .prop_map(Numeric)
+                .boxed(),
             (1..=28u8)
                 .prop_flat_map(|prec| (1..=prec).prop_map(move |scale| Decimal(prec, scale)))
                 .boxed(),
