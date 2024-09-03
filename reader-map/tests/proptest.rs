@@ -232,7 +232,7 @@ fn keys_values(#[any(size_range(LARGE_VEC_RANGE).lift())] ops: Vec<Op<i8, i8>>) 
                 w_visit.insert(*k, 0);
                 w_visit.remove_value(*k, 0);
             } else {
-                for value in v_set {
+                for value in v_set.iter() {
                     w_visit.insert(*k, *value);
                 }
             }

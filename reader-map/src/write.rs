@@ -1,6 +1,7 @@
 use std::collections::hash_map::RandomState;
 use std::fmt;
 use std::hash::{BuildHasher, Hash};
+use std::ops::Deref;
 use std::time::Instant;
 
 use left_right::Absorb;
@@ -509,7 +510,6 @@ where
 }
 
 // allow using write handle for reads
-use std::ops::Deref;
 impl<K, V, I, M, T, S> Deref for WriteHandle<K, V, I, M, T, S>
 where
     K: Ord + Clone + Hash,
@@ -520,6 +520,7 @@ where
     I: InsertionOrder<V>,
 {
     type Target = ReadHandle<K, V, I, M, T, S>;
+
     fn deref(&self) -> &Self::Target {
         &self.r_handle
     }
