@@ -263,7 +263,6 @@ fn busybusybusy_inner(slow: bool) {
                         match rs {
                             Some(rs) => {
                                 assert_eq!(rs.len(), 1);
-                                assert!(rs.capacity() >= rs.len());
                                 assert_eq!(rs.iter().next().unwrap(), &i);
                                 break;
                             }
@@ -674,7 +673,7 @@ fn big() {
                         assert!(!found);
                     }
                 }
-                assert_eq!(rs.into_iter().count(), rs.len());
+                assert_eq!(rs.iter().count(), rs.len());
                 drop(map);
                 thread::sleep(Duration::from_millis(1));
             }
@@ -862,7 +861,7 @@ fn insert_range_pre_publish() {
         assert_eq!(
             m.range(&(1..=2))
                 .unwrap()
-                .map(|(k, v)| (*k, v.into_iter().cloned().collect::<Vec<_>>()))
+                .map(|(k, v)| (*k, v.iter().cloned().collect::<Vec<_>>()))
                 .collect::<Vec<_>>(),
             vec![(1, vec![2])]
         );

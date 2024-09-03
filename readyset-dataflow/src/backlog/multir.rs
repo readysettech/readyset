@@ -131,7 +131,7 @@ impl Handle {
                     hits.push(Default::default())
                 }
                 KeyComparison::Equal(k) => match map.get(&k[0]) {
-                    Some(v) => hits.push(v.as_ref().clone()),
+                    Some(v) => hits.push(v.to_shared_smallvec()),
                     None => misses.push(Cow::Borrowed(key)),
                 },
                 KeyComparison::Range((start, end)) => {
@@ -144,7 +144,7 @@ impl Handle {
                     let start_bound = start.as_ref().map(|v| &v[0]);
                     let end_bound = end.as_ref().map(|v| &v[0]);
                     match map.range(&(start_bound, end_bound)) {
-                        Ok(hit) => hits.extend(hit.map(|(_, v)| v.as_ref().clone())),
+                        Ok(hit) => hits.extend(hit.map(|(_, v)| v.to_shared_smallvec())),
                         Err(Miss(miss)) => misses.extend(miss.into_iter().map(|(start, end)| {
                             Cow::Owned(KeyComparison::Range((
                                 start.map(|s| vec1![s]),
@@ -185,7 +185,7 @@ impl Handle {
                     hits.push(Default::default())
                 }
                 KeyComparison::Equal(k) => match map.get(k.as_slice()) {
-                    Some(v) => hits.push(v.as_ref().clone()),
+                    Some(v) => hits.push(v.to_shared_smallvec()),
                     None => misses.push(Cow::Borrowed(key)),
                 },
                 KeyComparison::Range((start, end)) => {
@@ -199,7 +199,7 @@ impl Handle {
                         start.as_ref().map(|v| v.as_slice()),
                         end.as_ref().map(|v| v.as_slice()),
                     )) {
-                        Ok(hit) => hits.extend(hit.map(|(_, v)| v.as_ref().clone())),
+                        Ok(hit) => hits.extend(hit.map(|(_, v)| v.to_shared_smallvec())),
                         Err(Miss(miss)) => misses.extend(miss.into_iter().map(|(start, end)| {
                             Cow::Owned(KeyComparison::Range((
                                 start.map(|s| Vec1::try_from_vec(s).unwrap()),
@@ -255,7 +255,7 @@ impl Handle {
                         (),
                     ))
                 })?;
-                Ok(v.as_ref().clone())
+                Ok(v.to_shared_smallvec())
             }
             Handle::Many(h) => {
                 let map = h.enter()?;
@@ -265,7 +265,7 @@ impl Handle {
                         (),
                     ))
                 })?;
-                Ok(v.as_ref().clone())
+                Ok(v.to_shared_smallvec())
             }
         }
     }

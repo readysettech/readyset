@@ -1,6 +1,4 @@
 use std::fmt;
-use std::iter::FusedIterator;
-use std::ops::Deref;
 use std::time::{Duration, Instant};
 
 use partial_map::InsertionOrder;
@@ -65,13 +63,11 @@ impl<T> Default for Values<T> {
     }
 }
 
-/// A sorted vector of values for a given key in the map.
-#[repr(transparent)]
-#[derive(Default, Clone)]
-pub(crate) struct ValuesInner<T>(Arc<SmallVec<[T; 1]>>);
-
-/// An iterator over Values
-pub struct ValuesIter<'a, T>(std::slice::Iter<'a, T>);
+/// Values for a given key in the map.
+#[derive(Clone, Debug)]
+pub(crate) enum ValuesInner<T> {
+    SmallVec(Arc<SmallVec<[T; 1]>>),
+}
 
 impl<T> fmt::Debug for Values<T>
 where
@@ -82,32 +78,9 @@ where
     }
 }
 
-impl<T> fmt::Debug for ValuesInner<T>
-where
-    T: fmt::Debug,
-{
-    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt.debug_set().entries(self.0.iter()).finish()
-    }
-}
-
 impl<T> ValuesInner<T> {
     fn new() -> Self {
-        ValuesInner(Arc::new(SmallVec::new()))
-    }
-}
-
-impl<T> Deref for Values<T> {
-    type Target = [T];
-
-    fn deref(&self) -> &Self::Target {
-        self.values.0.as_slice()
-    }
-}
-
-impl<T> AsRef<Arc<SmallVec<[T; 1]>>> for Values<T> {
-    fn as_ref(&self) -> &Arc<SmallVec<[T; 1]>> {
-        &self.values.0
+        ValuesInner::SmallVec(Arc::new(SmallVec::new()))
     }
 }
 
@@ -115,31 +88,32 @@ impl<T> Values<T> {
     pub(crate) fn new(eviction_meta: EvictionMeta) -> Self {
         Values {
             eviction_meta,
-            values: ValuesInner(Arc::new(smallvec::SmallVec::new())),
+            values: ValuesInner::SmallVec(Arc::new(smallvec::SmallVec::new())),
             metrics: Default::default(),
         }
     }
 
     /// Returns the number of values.
     pub fn len(&self) -> usize {
-        self.values.0.len()
+        match self.values {
+            ValuesInner::SmallVec(ref v) => v.len(),
+        }
     }
 
     /// Returns true if holds no values.
     pub fn is_empty(&self) -> bool {
-        self.values.0.is_empty()
-    }
-
-    /// Returns the number of values that can be held without reallocating.
-    pub fn capacity(&self) -> usize {
-        self.values.0.capacity()
+        match self.values {
+            ValuesInner::SmallVec(ref v) => v.is_empty(),
+        }
     }
 
     /// An iterator visiting all elements in arbitrary order.
     ///
     /// The iterator element type is &T.
-    pub fn iter(&self) -> ValuesIter<'_, T> {
-        ValuesIter(self.values.0.iter())
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = &T> {
+        match self.values {
+            ValuesInner::SmallVec(ref v) => v.iter(),
+        }
     }
 
     /// Returns a guarded reference to _one_ value corresponding to the key.
@@ -147,7 +121,9 @@ impl<T> Values<T> {
     /// This is mostly intended for use when you are working with no more than one value per key.
     /// If there are multiple values stored for this key, the smallest one is returned
     pub fn first(&self) -> Option<&T> {
-        self.values.0.first()
+        match self.values {
+            ValuesInner::SmallVec(ref v) => v.first(),
+        }
     }
 
     /// Get the eviction metadata associated with that value set
@@ -163,9 +139,13 @@ impl<T> Values<T> {
         let i = if let Some(cache) = cache {
             Ok(*cache) // cached from first time
         } else if let Some(order) = order {
-            self.binary_search_by(|x| order.cmp(x, value))
+            match self.values {
+                ValuesInner::SmallVec(ref v) => v.binary_search_by(|x| order.cmp(x, value)),
+            }
         } else {
-            self.binary_search(value)
+            match self.values {
+                ValuesInner::SmallVec(ref v) => v.binary_search(value),
+            }
         };
 
         *cache = if insert {
@@ -179,6 +159,16 @@ impl<T> Values<T> {
             // that's not the workload, we're okay here.  (But proptests do generate deletions
             // of non-existent values.)
             None
+        }
+    }
+
+    /// Checks if the value is present.  Used in tests only.
+    pub fn contains(&self, value: &T) -> bool
+    where
+        T: PartialEq,
+    {
+        match self.values {
+            ValuesInner::SmallVec(ref v) => v.contains(value),
         }
     }
 
@@ -197,7 +187,9 @@ impl<T> Values<T> {
         // Always insert values in sorted order, even if no ordering method is provided,
         // otherwise it will require a linear scan to remove a value
         self.find(&value, order, index, true);
-        Arc::make_mut(&mut self.values.0).insert(index.unwrap(), value);
+        match self.values {
+            ValuesInner::SmallVec(ref mut v) => Arc::make_mut(v).insert(index.unwrap(), value),
+        }
         self.metrics.update(timestamp);
     }
 
@@ -218,7 +210,9 @@ impl<T> Values<T> {
     {
         self.find(value, order, index, false);
         if let Some(index) = *index {
-            Arc::make_mut(&mut self.values.0).remove(index);
+            match self.values {
+                ValuesInner::SmallVec(ref mut v) => Arc::make_mut(v).remove(index),
+            };
         }
         self.metrics.update(timestamp);
     }
@@ -227,7 +221,9 @@ impl<T> Values<T> {
     where
         T: Clone,
     {
-        Arc::make_mut(&mut self.values.0).clear()
+        match self.values {
+            ValuesInner::SmallVec(ref mut v) => Arc::make_mut(v).clear(),
+        }
     }
 
     pub(crate) fn retain<F>(&mut self, f: F)
@@ -235,47 +231,24 @@ impl<T> Values<T> {
         T: Clone,
         F: FnMut(&mut T) -> bool,
     {
-        Arc::make_mut(&mut self.values.0).retain(f)
+        match self.values {
+            ValuesInner::SmallVec(ref mut v) => Arc::make_mut(v).retain(f),
+        }
     }
 
     pub(crate) fn metrics(&self) -> &Metrics {
         &self.metrics
     }
-}
 
-impl<'a, T: 'a> IntoIterator for &'a Values<T> {
-    type IntoIter = ValuesIter<'a, T>;
-    type Item = &'a T;
-    fn into_iter(self) -> Self::IntoIter {
-        self.iter()
+    /// Returns the values as a SmallVec.  If the internal storage is a SmallVec, this merely
+    /// wraps the internal storage in an Arc.  If not, the stored values are copied into a
+    /// new SmallVec.
+    pub fn to_shared_smallvec(&self) -> Arc<SmallVec<[T; 1]>> {
+        match self.values {
+            ValuesInner::SmallVec(ref v) => Arc::clone(v),
+        }
     }
 }
-
-impl<T> ValuesInner<T> {}
-
-impl<'a, T> fmt::Debug for ValuesIter<'a, T>
-where
-    T: fmt::Debug,
-{
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_list().entries(self.0.clone()).finish()
-    }
-}
-
-impl<'a, T> Iterator for ValuesIter<'a, T> {
-    type Item = &'a T;
-    fn next(&mut self) -> Option<Self::Item> {
-        self.0.next()
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.0.size_hint()
-    }
-}
-
-impl<'a, T> ExactSizeIterator for ValuesIter<'a, T> {}
-
-impl<'a, T> FusedIterator for ValuesIter<'a, T> {}
 
 #[cfg(test)]
 mod tests {
@@ -287,7 +260,6 @@ mod tests {
             assert_eq!($x.len(), 0);
             assert!($x.is_empty());
             assert_eq!($x.iter().count(), 0);
-            assert_eq!($x.into_iter().count(), 0);
             assert_eq!($x.first(), None);
         };
     }
@@ -297,14 +269,15 @@ mod tests {
             assert_eq!($x.len(), $n);
             assert!(!$x.is_empty());
             assert_eq!($x.iter().count(), $n);
-            assert_eq!($x.into_iter().count(), $n);
         };
     }
 
     #[test]
     fn sensible_default() {
         let v: Values<i32> = Values::default();
-        assert_eq!(v.capacity(), 1);
+        match v.values {
+            ValuesInner::SmallVec(ref v) => assert_eq!(v.capacity(), 1),
+        }
         assert_empty!(v);
     }
 
@@ -332,8 +305,5 @@ mod tests {
         v.clear();
 
         assert_empty!(v);
-
-        // clear() should not affect capacity or value type!
-        assert!(v.capacity() > 1);
     }
 }

@@ -105,7 +105,7 @@
 //! let to_find = ["Pride and Prejudice", "Alice's Adventure in Wonderland"];
 //! for book in &to_find {
 //!     if let Some(reviews) = book_reviews_r.get(book).unwrap() {
-//!         for review in &*reviews {
+//!         for review in reviews.iter() {
 //!             println!("{}: {}", book, review);
 //!         }
 //!     } else {
@@ -115,7 +115,7 @@
 //!
 //! // iterate over everything.
 //! for (book, reviews) in &book_reviews_r.enter().unwrap() {
-//!     for review in reviews {
+//!     for review in reviews.iter() {
 //!         println!("{}: \"{}\"", book, review);
 //!     }
 //! }
@@ -261,7 +261,7 @@ pub mod refs {
     #[doc(inline)]
     pub use left_right::ReadGuard;
 
-    pub use super::values::{Values, ValuesIter};
+    pub use super::values::Values;
     pub use crate::read::{MapReadRef, Miss, ReadGuardIter};
 }
 
