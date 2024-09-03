@@ -131,8 +131,7 @@ const INDEX_BATCH_SIZE: usize = 10_000;
 /// to prevent any further disk use leakage. This function should be executed once,
 /// preferably at startup.
 pub fn clean_working_dir(params: &PersistenceParameters) -> Result<()> {
-    let working_dir = params.derive_working_dir_base()?;
-
+    let working_dir = params.working_dir_base();
     if working_dir.is_dir() {
         debug!("deleting any prior working files from {:?}", &working_dir);
         fs::remove_dir_all(working_dir)?
@@ -325,17 +324,17 @@ impl PersistenceParameters {
         }
     }
 
-    fn derive_working_dir_base(&self) -> Result<PathBuf> {
-        // use what the operator passed in, or default to the storage_dir
+    fn storage_dir(&self) -> PathBuf {
+        self.storage_dir.clone().unwrap_or_else(|| ".".into())
+    }
+
+    fn working_dir_base(&self) -> PathBuf {
         let base_dir = match &self.working_temp_dir {
             Some(s) => s.clone(),
-            None => self.storage_dir.clone().unwrap_or_else(|| ".".into()),
+            None => self.storage_dir(),
         };
-        // canonicalize the path else `tempdir` might get confused with a relative path.
-        let base_dir = base_dir.canonicalize()?;
 
-        // use a "parent" directory to house all the various tmp rocksdb instances
-        Ok(base_dir.join(WORKING_DIR))
+        base_dir.join(WORKING_DIR)
     }
 }
 
@@ -1477,7 +1476,7 @@ impl PersistentState {
 
         let (tmpdir, full_path) = match params.mode {
             DurabilityMode::Permanent => {
-                let mut path = params.storage_dir.clone().unwrap_or_else(|| ".".into());
+                let mut path = params.storage_dir();
                 if !path.is_dir() {
                     fs::create_dir_all(&path)?;
                 }
@@ -1485,14 +1484,15 @@ impl PersistentState {
 
                 (None, path)
             }
-            _ => {
-                let working_dir = params.derive_working_dir_base()?;
-                if !working_dir.is_dir() {
+            DurabilityMode::DeleteOnExit | DurabilityMode::MemoryOnly => {
+                let working_dir = params.working_dir_base();
+                if !working_dir.exists() {
                     fs::create_dir_all(&working_dir)?;
                 }
+                let canonical_dir = working_dir.canonicalize()?;
 
-                // create the subdirectory specific to this node
-                let tempdir = Builder::new().prefix(&name).tempdir_in(working_dir)?;
+                // create the temp subdirectory specific to this node
+                let tempdir = Builder::new().prefix(&name).tempdir_in(canonical_dir)?;
                 let path = tempdir.path().to_path_buf();
 
                 (Some(tempdir), path)
