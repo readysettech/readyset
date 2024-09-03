@@ -246,7 +246,6 @@ fn arbitrary_mysql_value_for_type(sql_type: SqlType) -> impl Strategy<Value = Va
 #[proptest(ProptestConfig::default(), max_shrink_time = 120_000)]
 #[serial]
 #[slow]
-#[ignore = "WIP REA-4598"]
 fn round_trip_mysql_type_arbitrary(
     #[strategy(SqlType::arbitrary_with(SqlTypeArbitraryOptions {
         dialect: Some(Dialect::MySQL),
