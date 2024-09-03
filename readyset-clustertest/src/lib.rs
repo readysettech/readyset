@@ -1,7 +1,6 @@
-//! A local multi-process deployment test framework for ReadySet. It enables
-//! local blackbox testing on multi-server deployments with support for
-//! programmatically modifying the deployment, i.e. introducing faults,
-//! adding new servers, replicating readers.
+//! A local multi-process deployment test framework for ReadySet. It enables local blackbox testing
+//! on multi-server deployments with support for programmatically modifying the deployment, i.e.
+//! introducing faults, adding new servers, replicating readers.
 //!
 //! This makes this framework well suited for:
 //!   * Testing fault tolerance and failure recovery behavior. Clustertests can easily introduce
@@ -16,10 +15,6 @@
 //! and the default flags for readyset-server and readyset.
 //!
 //! ```bash
-//! # Build the binaries with the failure injection feature for most clustertests. Binaries built
-//! to //target/debug are used by default.
-//! cargo build --bin readyset-server --bin readyset --features failure_injection
-//!
 //! # Spin up the developer docker stack to start MySQL, PostgreSQL, and a consul authority.
 //! cd //readyset/public
 //! cp docker-compose.override.yml.example docker-compose.override.yml
@@ -54,20 +49,30 @@
 //! * `AUTHORITY`: The type of authority, defaults to `consul`.
 //!
 //! * `BINARY_PATH`: The path to a directory with the readyset-server and readyset binaries,
-//!   defaults to `$CARGO_MANIFEST_DIR/../../target/debug`, `readyset/target/debug`.
+//!   defaults to `$CARGO_MANIFEST_DIR/../../target/clustertest/release`.
 //!
-//! * `PORT`: The host of the upstream database to use as upstream, defaults to `127.0.0.1`.
+//! * `MYSQL_HOST`: The host of the upstream database to use as upstream, defaults to `127.0.0.1`.
 //!
-//! * `PORT`: The port of the upstream database to use as upstream, defaults to `3306`.
+//! * `MYSQL_PORT`: The port of the upstream database to use as upstream, defaults to `3306`.
 //!
-//! * `ROOT_PASSWORD`: The password to use for the upstream database, defaults to `noria`.
+//! * `POSTGRESQL_HOST`: The host of the upstream database to use as upstream, defaults to
+//!   `127.0.0.1`.
+//!
+//! * `POSTGRESQL_PORT`: The port of the upstream database to use as upstream, defaults to `5432`.
+//!
+//! * `PGUSER`: The user of the upstream PostgreSQL database, defaults to `postgres`.
+//!
+//! * `PGPASSWORD`: The password of the upstream PostgreSQL database user, defaults to `noria`.
+//!
+//! * `MYSQL_USER`: The user of the upstream MySQL database, defaults to `root`.
+//!
+//! * `MYSQL_PASSWORD`: The password of the upstream MySQL database user, defaults to `noria`.
 //!
 //! * `RUN_SLOW_TESTS`: Enables running certain tests that are slow.
 //!
 //! # Example Clustertest
 //!
-//! Creating a two server deployment, creating a third server, and then killing a
-//! server.
+//! Creating a two server deployment, creating a third server, and then killing a server.
 //!
 //! ```rust
 //! use readyset_clustertest::*;
@@ -130,9 +135,8 @@
 //!
 //! ### `#[clustertest]`
 //!
-//! Clustertests begin with the clustertest attribute: `#[clustertest]`. This
-//! creates clustertests as a multi-threaded tokio test, that is run serially
-//! with other tests (`#[serial]`).
+//! Clustertests begin with the clustertest attribute: `#[clustertest]`. This creates clustertests
+//! as a multi-threaded tokio test, that is run serially with other tests (`#[serial]`).
 //!
 //! ### [`DeploymentBuilder`]
 //!
@@ -165,8 +169,8 @@
 //! }
 //! ```
 //!
-//! Calling [`DeploymentBuilder::start`] creates a [`DeploymentHandle`] that
-//! can be used to modify a deployment
+//! Calling [`DeploymentBuilder::start`] creates a [`DeploymentHandle`] that can be used to modify
+//! a deployment
 //!
 //! ### [`DeploymentHandle`]
 //!
@@ -182,15 +186,14 @@
 //!      [`DeploymentHandle::leader_handle`].
 //!   4. Querying metrics via the [`MetricsClient`] returned by [`DeploymentHandle::metrics`].
 //!
-//! It also provides helper functions to create connections to a ReadySet adapter
-//! and an upstream database, if present. See [`DeploymentHandle::adapter`] and
-//! [`DeploymentHandle::upstream`], both of which return [`mysql_async::Conn`] to
-//! their respective database endpoints.
+//! It also provides helper functions to create connections to a ReadySet adapter and an upstream
+//! database, if present. See [`DeploymentHandle::adapter`] and [`DeploymentHandle::upstream`],
+//! both of which return [`mysql_async::Conn`] to their respective database endpoints.
 //!
 //! ### [`DeploymentHandle::teardown`]
 //!
-//! All tests should end in a call to [`DeploymentHandle::teardown`]. To
-//! kill the deployment processes and remove locally created files.
+//! All tests should end in a call to [`DeploymentHandle::teardown`]. To kill the deployment
+//! processes and remove locally created files.
 
 mod server;
 
@@ -293,10 +296,10 @@ fn default_authority() -> String {
 }
 
 fn default_binary_path() -> PathBuf {
-    // Convert from <dir>/noria/clustertest to <dir>/target/debug.
     let mut path: PathBuf = std::env::var("CARGO_MANIFEST_DIR").unwrap().into();
     path.pop();
-    path.push("target/debug");
+    // The default target path specified in build.rs
+    path.push("target/clustertest/release");
     path
 }
 

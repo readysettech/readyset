@@ -32,7 +32,6 @@ members = [
     "readyset-client-metrics",
     "readyset-client-test-helpers",
     "readyset-clustertest",
-    "readyset-clustertest",
     "readyset-common",
     "readyset-data",
     "readyset-dataflow",
