@@ -14,7 +14,7 @@ use proptest::test_runner::Config as ProptestConfig;
 use readyset_client_test_helpers::mysql_helpers::MySQLAdapter;
 use readyset_client_test_helpers::{mysql_helpers, TestBuilder};
 use readyset_util::arbitrary::{
-    arbitrary_decimal_bytes_with_digits, arbitrary_naive_date_in_range,
+    arbitrary_decimal_bytes_with_digits, arbitrary_json, arbitrary_naive_date_in_range,
     arbitrary_naive_time_with_seconds_fraction,
 };
 use readyset_util::eventually;
@@ -156,14 +156,13 @@ fn arbitrary_mysql_value_for_type(sql_type: SqlType) -> impl Strategy<Value = Va
         | SqlType::Other(..)
         | SqlType::Uuid
         | SqlType::QuotedChar
-        | SqlType::Interval { .. } => {
+        | SqlType::Interval { .. }
+        | SqlType::Jsonb => {
             panic!("Type not supported by MySQL: {sql_type:?}")
         }
-        SqlType::Enum(_) | SqlType::Json | SqlType::TimestampTz | SqlType::Jsonb => {
-            Just(Value::Int(0))
-                .prop_filter("not yet implemented", |_| false)
-                .boxed()
-        }
+        SqlType::TimestampTz | SqlType::Enum(_) => Just(Value::Int(0))
+            .prop_filter("not yet implemented", |_| false)
+            .boxed(),
         SqlType::Date => arbitrary_naive_date_in_range(1000..=9999)
             .prop_map(|date| date.into())
             .boxed(),
@@ -236,6 +235,7 @@ fn arbitrary_mysql_value_for_type(sql_type: SqlType) -> impl Strategy<Value = Va
                 .prop_map(Value::Bytes)
                 .boxed()
         }
+        SqlType::Json => arbitrary_json().prop_map(|json| json.into()).boxed(),
     }
 }
 
@@ -247,7 +247,7 @@ fn round_trip_mysql_type_arbitrary(
     #[strategy(SqlType::arbitrary_with(SqlTypeArbitraryOptions {
         dialect: Some(Dialect::MySQL),
         generate_arrays: false,
-        generate_json: false,
+        generate_json: true,
         generate_other: false,
     }))]
     sql_type: SqlType,
