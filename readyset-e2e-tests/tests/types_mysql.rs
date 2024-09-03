@@ -202,7 +202,7 @@ fn arbitrary_mysql_value_for_type(sql_type: SqlType) -> impl Strategy<Value = Va
                 .boxed()
         }
         SqlType::Char(len) | SqlType::VarChar(len) => {
-            string_regex(&format!("\\PC{{0,{}}}", len.unwrap_or(255)))
+            string_regex(&format!("\\PC{{0,{}}}", len.unwrap_or(1)))
                 .expect("Should produce valid regex")
                 .prop_map(|s| Value::Bytes(s.into_bytes()))
                 .boxed()
