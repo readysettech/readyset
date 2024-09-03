@@ -4,10 +4,11 @@ use chrono::DateTime;
 use mysql_async::prelude::Queryable;
 use mysql_async::Params;
 use mysql_common::{Row, Value};
-use nom_sql::{Dialect, DialectDisplay, SqlType, SqlTypeArbitraryOptions};
+use nom_sql::{Dialect, DialectDisplay, EnumVariants, SqlType, SqlTypeArbitraryOptions};
 use proptest::arbitrary::any;
 use proptest::collection::vec;
 use proptest::prop_oneof;
+use proptest::sample::{select, size_range};
 use proptest::strategy::{Just, Strategy};
 use proptest::string::string_regex;
 use proptest::test_runner::Config as ProptestConfig;
@@ -160,7 +161,7 @@ fn arbitrary_mysql_value_for_type(sql_type: SqlType) -> impl Strategy<Value = Va
         | SqlType::Jsonb => {
             panic!("Type not supported by MySQL: {sql_type:?}")
         }
-        SqlType::TimestampTz | SqlType::Enum(_) => Just(Value::Int(0))
+        SqlType::TimestampTz => Just(Value::Int(0))
             .prop_filter("not yet implemented", |_| false)
             .boxed(),
         SqlType::Date => arbitrary_naive_date_in_range(1000..=9999)
@@ -236,6 +237,9 @@ fn arbitrary_mysql_value_for_type(sql_type: SqlType) -> impl Strategy<Value = Va
                 .boxed()
         }
         SqlType::Json => arbitrary_json().prop_map(|json| json.into()).boxed(),
+        SqlType::Enum(variants) => select(variants.iter().cloned().collect::<Vec<_>>())
+            .prop_map(|variant: String| variant.into())
+            .boxed(),
     }
 }
 
@@ -254,6 +258,28 @@ fn round_trip_mysql_type_arbitrary(
     #[strategy(arbitrary_mysql_value_for_type(#sql_type))] value: Value,
 ) {
     round_trip_mysql_type(sql_type, value)
+}
+
+#[proptest(ProptestConfig::default(), max_shrink_time = 120_000)]
+#[serial]
+#[slow]
+#[ignore = "WIP REA-4598"]
+fn round_trip_mysql_type_arbitrary_enum(
+    #[strategy(EnumVariants::arbitrary_with(("\\PC{0,255}", size_range(1..100))).prop_map(|variants| SqlType::Enum(variants)))]
+    sql_type: SqlType,
+    #[strategy(arbitrary_mysql_value_for_type(#sql_type))] value: Value,
+) {
+    round_trip_mysql_type(sql_type, value)
+}
+
+#[test]
+#[serial]
+#[slow]
+fn round_trip_mysql_type_regressions_enum() {
+    round_trip_mysql_type(
+        SqlType::from_enum_variants(["foo".into(), "bar".into()]),
+        Value::Bytes("foo".as_bytes().to_vec()),
+    );
 }
 
 #[test]
