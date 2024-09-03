@@ -3651,3 +3651,157 @@ async fn mysql_replicate_json_field() {
 
     shutdown_tx.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+#[slow]
+async fn snapshot_rejects_table_with_big_decimal() {
+    readyset_tracing::init_test_logging();
+    let url = mysql_url();
+    let mut client = DbConnection::connect(&url).await.unwrap();
+
+    client
+        .query(
+            "DROP TABLE IF EXISTS big_decimal_snapshot CASCADE;
+             CREATE TABLE big_decimal_snapshot (x DECIMAL(29, 0));",
+        )
+        .await
+        .unwrap();
+
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
+        .await
+        .unwrap();
+    ctx.notification_channel
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+    let non_replicated_tables = ctx.noria.non_replicated_relations().await.unwrap();
+    assert!(
+        non_replicated_tables.contains(&NonReplicatedRelation::new(Relation {
+            schema: Some("public".into()),
+            name: "big_decimal_snapshot".into()
+        }))
+    );
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+#[slow]
+async fn replicate_rejects_table_with_big_decimal() {
+    readyset_tracing::init_test_logging();
+    let url = mysql_url();
+    let mut client = DbConnection::connect(&url).await.unwrap();
+
+    client
+        .query("DROP TABLE IF EXISTS big_decimal_replicate CASCADE;")
+        .await
+        .unwrap();
+
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
+        .await
+        .unwrap();
+    ctx.notification_channel
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+
+    client
+        .query("CREATE TABLE big_decimal_replicate (x DECIMAL(29, 0));")
+        .await
+        .unwrap();
+
+    eventually!(attempts: 5, run_test: {
+        ctx.noria.non_replicated_relations().await.unwrap()
+    }, then_assert: |non_replicated_tables| {
+        assert!(
+            non_replicated_tables.contains(&NonReplicatedRelation::new(Relation {
+                schema: Some("public".into()),
+                name: "big_decimal_replicate".into()
+            }))
+        );
+    });
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+#[slow]
+async fn snapshot_rejects_table_with_big_numeric() {
+    readyset_tracing::init_test_logging();
+    let url = mysql_url();
+    let mut client = DbConnection::connect(&url).await.unwrap();
+
+    client
+        .query(
+            "DROP TABLE IF EXISTS big_decimal_snapshot CASCADE;
+             CREATE TABLE big_decimal_snapshot (x NUMERIC(29, 0));",
+        )
+        .await
+        .unwrap();
+
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
+        .await
+        .unwrap();
+    ctx.notification_channel
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+    let non_replicated_tables = ctx.noria.non_replicated_relations().await.unwrap();
+    assert!(
+        non_replicated_tables.contains(&NonReplicatedRelation::new(Relation {
+            schema: Some("public".into()),
+            name: "big_decimal_snapshot".into()
+        }))
+    );
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+#[slow]
+async fn replicate_rejects_table_with_big_numeric() {
+    readyset_tracing::init_test_logging();
+    let url = mysql_url();
+    let mut client = DbConnection::connect(&url).await.unwrap();
+
+    client
+        .query("DROP TABLE IF EXISTS big_decimal_replicate CASCADE;")
+        .await
+        .unwrap();
+
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
+        .await
+        .unwrap();
+    ctx.notification_channel
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+
+    client
+        .query("CREATE TABLE big_decimal_replicate (x NUMERIC(29, 0));")
+        .await
+        .unwrap();
+
+    eventually!(attempts: 5, run_test: {
+        ctx.noria.non_replicated_relations().await.unwrap()
+    }, then_assert: |non_replicated_tables| {
+        assert!(
+            non_replicated_tables.contains(&NonReplicatedRelation::new(Relation {
+                schema: Some("public".into()),
+                name: "big_decimal_replicate".into()
+            }))
+        );
+    });
+
+    shutdown_tx.shutdown().await;
+}
