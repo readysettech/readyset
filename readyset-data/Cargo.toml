@@ -51,7 +51,7 @@ features = ["with-chrono-0_4", "with-eui48-1", "with-uuid-0_8", "with-serde_json
 [dev-dependencies]
 derive_more = { workspace = true }
 bincode = { workspace = true }
-criterion = { workspace = true, features=['real_blackbox', 'async_tokio']}
+criterion = { workspace = true, features=["async_tokio"]}
 tokio = { workspace = true, features = ["full"] }
 serial_test = { workspace = true }
 

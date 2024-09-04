@@ -43,7 +43,7 @@ proptest-stateful = { path = "../proptest-stateful" }
 async-trait = { workspace = true }
 pretty_assertions = { workspace = true }
 lazy_static = { workspace = true }
-criterion = { workspace = true, features=['real_blackbox', 'async_tokio'] }
+criterion = { workspace = true, features=["async_tokio"] }
 rust_decimal = { workspace = true, features = ["db-tokio-postgres", "serde-str"] }
 
 [[bench]]
