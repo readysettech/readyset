@@ -56,10 +56,6 @@
 //! jemalloc is configured for profiling if you pass
 //! `--features mem-profiling` to cargo build.
 
-#![cfg_attr(test, feature(test))]
-#![cfg_attr(test, feature(custom_test_frameworks))]
-#![cfg_attr(test, test_runner(runner::run_env_conditional_tests))]
-
 #[macro_use]
 extern crate lazy_static;
 
@@ -120,6 +116,14 @@ pub use crate::trace::*;
 #[global_allocator]
 static ALLOC: imp::Allocator = imp::allocator();
 
+/*
+
+// This code requires nightly.  It is left here in case it's useful for testing.
+
+#![cfg_attr(test, feature(test))]
+#![cfg_attr(test, feature(custom_test_frameworks))]
+#![cfg_attr(test, test_runner(runner::run_env_conditional_tests))]
+
 #[cfg(test)]
 mod runner {
     extern crate test;
@@ -155,3 +159,5 @@ mod runner {
         test_main(&args, cases, None)
     }
 }
+
+*/

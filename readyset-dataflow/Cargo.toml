@@ -37,7 +37,7 @@ tempfile = { workspace = true }
 derive_more = { workspace = true }
 tuple = { workspace = true }
 vec1 = { workspace = true }
-criterion = { workspace = true, features=['real_blackbox', 'async_tokio'], optional = true }
+criterion = { workspace = true, features=["async_tokio"], optional = true }
 test-strategy = { workspace = true }
 thiserror = { workspace = true }
 proptest = { workspace = true }
