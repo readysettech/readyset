@@ -1,6 +1,10 @@
 edition = "2021"
-imports_granularity = "Module"
-group_imports = "StdExternalCrate"
-wrap_comments = true
-comment_width = 100
-format_code_in_doc_comments = true
+
+# Below are unstable options we used when on nightly.  If they should stabilize, we might want
+# to use them again.
+
+# imports_granularity = "Module"
+# group_imports = "StdExternalCrate"
+# wrap_comments = true
+# comment_width = 100
+# format_code_in_doc_comments = true

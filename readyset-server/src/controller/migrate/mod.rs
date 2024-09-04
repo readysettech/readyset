@@ -1350,28 +1350,27 @@ fn plan_add_nodes(
 
             // Try to find an existing fully materialized equivalent of that partially materialized
             // parent
-            let (duplicate_index, is_new) = if let Some(idx) =
-                dataflow_state.materializations.get_redundant(&parent)
-            {
-                (*idx, false)
-            } else if let Some(idx) = local_redundant_partial.get(&parent) {
-                (*idx, false)
-            } else {
-                // [remap-nodes]
-                // If we cant find one, create a new node in the same domain as old
+            let (duplicate_index, is_new) =
+                if let Some(idx) = dataflow_state.materializations.get_redundant(&parent) {
+                    (*idx, false)
+                } else if let Some(idx) = local_redundant_partial.get(&parent) {
+                    (*idx, false)
+                } else {
+                    // [remap-nodes]
+                    // If we cant find one, create a new node in the same domain as old
 
-                // we just found the parent in Materializations::validate()
-                #[allow(clippy::indexing_slicing)]
-                let duplicate_node = dataflow_state.ingredients[parent].duplicate();
-                // add to graph
-                let idx = dataflow_state.ingredients.add_node(duplicate_node);
-                local_redundant_partial.insert(parent, idx);
-                // Add the child node to `new_nodes`, so that on the next iteration of the loop we
-                // make sure that any lookup obligations into the duplicated parent are satisfied
-                new_nodes.insert(child);
-                dataflow_state.ingredients[child].replace_sibling(parent, idx);
-                (idx, true)
-            };
+                    // we just found the parent in Materializations::validate()
+                    #[allow(clippy::indexing_slicing)]
+                    let duplicate_node = dataflow_state.ingredients[parent].duplicate();
+                    // add to graph
+                    let idx = dataflow_state.ingredients.add_node(duplicate_node);
+                    local_redundant_partial.insert(parent, idx);
+                    // Add the child node to `new_nodes`, so that on the next iteration of the loop we
+                    // make sure that any lookup obligations into the duplicated parent are satisfied
+                    new_nodes.insert(child);
+                    dataflow_state.ingredients[child].replace_sibling(parent, idx);
+                    (idx, true)
+                };
 
             dataflow_state
                 .ingredients

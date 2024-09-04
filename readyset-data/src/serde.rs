@@ -270,18 +270,18 @@ impl<'de> Deserialize<'de> for DfValue {
                         VariantAccess::newtype_variant::<BitVec>(variant)
                             .map(|bits| DfValue::BitVector(Arc::new(bits)))
                     }
-                    (Variant::TimestampTz, variant) => VariantAccess::newtype_variant::<(
-                        u128,
-                        [u8; 3],
-                    )>(variant)
-                    .map(|(ts, extra)| {
-                        // We deserialize the NaiveDateTime by extracting nsecs from the top 64 bits
-                        // of the encoded i128, and secs from the low 64 bits
-                        let datetime = DateTime::from_timestamp(ts as _, (ts >> 64) as _)
-                            .unwrap()
-                            .naive_utc();
-                        DfValue::TimestampTz(TimestampTz { datetime, extra })
-                    }),
+                    (Variant::TimestampTz, variant) => {
+                        VariantAccess::newtype_variant::<(u128, [u8; 3])>(variant).map(
+                            |(ts, extra)| {
+                                // We deserialize the NaiveDateTime by extracting nsecs from the top 64 bits
+                                // of the encoded i128, and secs from the low 64 bits
+                                let datetime = DateTime::from_timestamp(ts as _, (ts >> 64) as _)
+                                    .unwrap()
+                                    .naive_utc();
+                                DfValue::TimestampTz(TimestampTz { datetime, extra })
+                            },
+                        )
+                    }
                     (Variant::Array, variant) => {
                         VariantAccess::newtype_variant(variant).map(DfValue::Array)
                     }
