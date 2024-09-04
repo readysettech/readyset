@@ -1,5 +1,3 @@
-#![feature(min_exhaustive_patterns)]
-
 use std::env;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};

@@ -42,7 +42,6 @@
 
 #![warn(clippy::panic)]
 #![deny(unused_extern_crates, macro_use_extern_crate)]
-#![feature(min_exhaustive_patterns)]
 
 pub use column::Column;
 use lazy_static::lazy_static;

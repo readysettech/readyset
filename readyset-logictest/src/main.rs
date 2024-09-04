@@ -1,5 +1,3 @@
-#![feature(min_exhaustive_patterns)]
-
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{self, Display};
 use std::fs::{self, File, OpenOptions};

@@ -24,7 +24,7 @@ sudo apt update && sudo apt install -y build-essential libssl-dev pkg-config llv
 
 ### Install Rust
 
-ReadySet is written entirely in Rust. If you don’t already have Rust installed, you can install it via rustup (select the version of ‘nightly’ specified in the `rust-toolchain` file):
+ReadySet is written entirely in Rust. If you don’t already have Rust installed, you can install it via rustup (select the version specified in the `rust-toolchain.toml` file):
 
 ```curl https://sh.rustup.rs -sSf | sh```
 ### Runtime Dependencies: Upstream Database and Consul

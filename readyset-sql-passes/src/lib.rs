@@ -1,5 +1,3 @@
-#![feature(min_exhaustive_patterns)]
-
 pub mod adapter_rewrites;
 pub mod alias_removal;
 pub mod anonymize;

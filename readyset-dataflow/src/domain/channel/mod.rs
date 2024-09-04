@@ -66,6 +66,7 @@ pub struct DomainSender {
 }
 
 impl DomainSender {
+    #[allow(clippy::result_large_err)]
     pub fn send(&self, packet: Packet) -> Result<(), mpsc::error::SendError<Packet>> {
         let discriminant: PacketDiscriminants = (&packet).into();
 

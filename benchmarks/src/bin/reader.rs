@@ -210,6 +210,7 @@ where
 /// Manages execution of queries to a specific backend for a single
 /// thread of execution. Re-uses the same back-end connection for
 /// subsequent queries.
+#[allow(clippy::large_enum_variant)]
 enum QueryExecutor {
     Noria(NoriaExecutor),
     Upstream(UpstreamExecutor),

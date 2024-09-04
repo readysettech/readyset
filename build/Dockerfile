@@ -2,9 +2,9 @@ FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/rustlang/rust:nightly
 
 WORKDIR /tmp
 
-COPY rust-toolchain .
+COPY rust-toolchain.toml .
 
-RUN rustup default "$(cat rust-toolchain)"; rm rust-toolchain
+RUN rustup default "$(cat rust-toolchain.toml | grep channel | sed -e 's/.*"\(.*\)"/\1/')"; rm rust-toolchain.toml
 RUN rustup component add clippy
 RUN rustup component add rustfmt
 
