@@ -224,6 +224,10 @@ impl Protocol {
                     parameter_value: "on".to_owned(),
                 },
                 BackendMessage::ParameterStatus {
+                    parameter_name: "integer_datetimes".to_owned(),
+                    parameter_value: "on".to_owned(),
+                },
+                BackendMessage::ParameterStatus {
                     parameter_name: "server_version".to_owned(),
                     parameter_value: version,
                 },
@@ -1377,6 +1381,7 @@ mod tests {
                 ms.as_ref(),
                 [
                     BackendMessage::AuthenticationOk,
+                    BackendMessage::ParameterStatus { .. },
                     BackendMessage::ParameterStatus { .. },
                     BackendMessage::ParameterStatus { .. },
                     BackendMessage::ParameterStatus { .. },
