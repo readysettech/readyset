@@ -51,7 +51,6 @@
       "https://github.com/readysettech/readyset.git"
       ref
       "/opt/readyset")
-     (c/exec* "~/.cargo/bin/rustup install $(</opt/readyset/rust-toolchain)")
      (info node "compiling" bin)
      (c/cd "/opt/readyset"
            (c/exec "~/.cargo/bin/cargo" "build" "--release" "--bin" bin)
