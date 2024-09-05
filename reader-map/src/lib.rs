@@ -434,7 +434,7 @@ impl<M, T, S, I> Options<M, T, S, I> {
 
 /// The default order of rows in the reader is the default order as defined by
 /// [`slice::binary_search`]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct DefaultInsertionOrder {}
 
 impl<V> InsertionOrder<V> for DefaultInsertionOrder

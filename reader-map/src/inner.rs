@@ -14,6 +14,7 @@ use readyset_util::ranges::{Bound, RangeBounds};
 use crate::eviction::{EvictionMeta, EvictionStrategy};
 use crate::recorded::{READER_MAP_LIFETIMES, READER_MAP_UPDATES};
 use crate::values::{Metrics, Values};
+use crate::InsertionOrder;
 
 /// Represents a miss when looking up a range.
 ///
@@ -35,14 +36,14 @@ impl<K: Clone> Miss<&K> {
 
 /// Data contains the mapping from Keys to sets of Values.
 #[derive(Clone, Iterator, ExactSizeIterator)]
-pub(crate) enum Data<K, V, S> {
+pub(crate) enum Data<K, V, I, S> {
     /// Data is stored in a BTreeMap, both point and range lookups are possible
-    BTreeMap(PartialMap<K, Values<V>>),
+    BTreeMap(PartialMap<K, Values<V, I>>),
     /// Data is stored in a HashMap, only point lookups are possible
-    HashMap(HashMap<K, Values<V>, S>),
+    HashMap(HashMap<K, Values<V, I>, S>),
 }
 
-impl<K, V, S> fmt::Debug for Data<K, V, S>
+impl<K, V, I, S> fmt::Debug for Data<K, V, I, S>
 where
     K: Ord + fmt::Debug,
     V: fmt::Debug,
@@ -64,10 +65,13 @@ macro_rules! with_map {
     };
 }
 
-pub(crate) type Iter<'a, K, V> =
-    Either<partial_map::Iter<'a, K, Values<V>>, hash_map::Iter<'a, K, Values<V>>>;
+pub(crate) type Iter<'a, K, V, I> =
+    Either<partial_map::Iter<'a, K, Values<V, I>>, hash_map::Iter<'a, K, Values<V, I>>>;
 
-impl<K, V, S> Data<K, V, S> {
+impl<K, V, I, S> Data<K, V, I, S>
+where
+    I: InsertionOrder<V>,
+{
     pub(crate) fn with_index_type_and_hasher(index_type: IndexType, hash_builder: S) -> Self {
         match index_type {
             IndexType::HashMap => Self::HashMap(HashMap::with_hasher(hash_builder)),
@@ -106,7 +110,7 @@ impl<K, V, S> Data<K, V, S> {
         }
     }
 
-    pub(crate) fn iter(&self) -> Iter<'_, K, V> {
+    pub(crate) fn iter(&self) -> Iter<'_, K, V, I> {
         match self {
             Self::BTreeMap(map) => Either::Left(map.iter()),
             Self::HashMap(map) => Either::Right(map.iter()),
@@ -127,7 +131,7 @@ impl<K, V, S> Data<K, V, S> {
     pub(crate) fn range<R, Q>(
         &'_ self,
         range: &R,
-    ) -> Result<partial_map::Range<'_, K, Values<V>>, Miss<K>>
+    ) -> Result<partial_map::Range<'_, K, Values<V, I>>, Miss<K>>
     where
         R: RangeBounds<Q>,
         K: Borrow<Q> + Ord + Clone,
@@ -195,12 +199,13 @@ impl<K, V, S> Data<K, V, S> {
     }
 }
 
-impl<K, V, S> Data<K, V, S>
+impl<K, V, I, S> Data<K, V, I, S>
 where
     K: Eq + Hash + Ord,
+    I: InsertionOrder<V>,
     S: BuildHasher,
 {
-    pub(crate) fn get<Q>(&self, k: &Q) -> Option<&Values<V>>
+    pub(crate) fn get<Q>(&self, k: &Q) -> Option<&Values<V, I>>
     where
         K: Borrow<Q> + Clone,
         Q: ?Sized + Hash + Ord,
@@ -208,7 +213,7 @@ where
         with_map!(self, |map| map.get(k))
     }
 
-    pub(crate) fn get_mut<Q>(&mut self, k: &Q) -> Option<&mut Values<V>>
+    pub(crate) fn get_mut<Q>(&mut self, k: &Q) -> Option<&mut Values<V, I>>
     where
         K: Borrow<Q> + Clone,
         Q: ?Sized + Hash + Ord + ToOwned<Owned = K>,
@@ -216,7 +221,7 @@ where
         with_map!(self, |map| map.get_mut(k))
     }
 
-    pub(crate) fn remove<Q>(&mut self, k: &Q) -> Option<Values<V>>
+    pub(crate) fn remove<Q>(&mut self, k: &Q) -> Option<Values<V, I>>
     where
         K: Borrow<Q> + Clone,
         Q: ?Sized + Hash + Ord + ToOwned<Owned = K>,
@@ -232,7 +237,7 @@ where
         with_map!(self, |map| map.contains_key(k))
     }
 
-    pub(crate) fn entry(&mut self, key: K) -> Entry<'_, K, V>
+    pub(crate) fn entry(&mut self, key: K) -> Entry<'_, K, V, I>
     where
         K: Clone,
     {
@@ -249,19 +254,19 @@ where
     }
 }
 
-pub(crate) enum VacantEntry<'a, K, V>
+pub(crate) enum VacantEntry<'a, K, V, I>
 where
     K: Ord,
 {
-    HashMap(hash_map::VacantEntry<'a, K, Values<V>>),
-    BTreeMap(partial_map::VacantEntry<'a, K, Values<V>>),
+    HashMap(hash_map::VacantEntry<'a, K, Values<V, I>>),
+    BTreeMap(partial_map::VacantEntry<'a, K, Values<V, I>>),
 }
 
-impl<'a, K: 'a, V: 'a> VacantEntry<'a, K, V>
+impl<'a, K: 'a, V: 'a, I: 'a> VacantEntry<'a, K, V, I>
 where
     K: Ord + Clone,
 {
-    pub(crate) fn insert(self, value: Values<V>) -> &'a mut Values<V> {
+    pub(crate) fn insert(self, value: Values<V, I>) -> &'a mut Values<V, I> {
         match self {
             Self::HashMap(e) => e.insert(value),
             Self::BTreeMap(e) => e.insert(value),
@@ -269,19 +274,20 @@ where
     }
 }
 
-pub(crate) enum OccupiedEntry<'a, K, V>
+pub(crate) enum OccupiedEntry<'a, K, V, I>
 where
     K: Ord,
 {
-    HashMap(hash_map::OccupiedEntry<'a, K, Values<V>>),
-    BTreeMap(partial_map::OccupiedEntry<'a, K, Values<V>>),
+    HashMap(hash_map::OccupiedEntry<'a, K, Values<V, I>>),
+    BTreeMap(partial_map::OccupiedEntry<'a, K, Values<V, I>>),
 }
 
-impl<'a, K: 'a, V: 'a> OccupiedEntry<'a, K, V>
+impl<'a, K: 'a, V: 'a, I: 'a> OccupiedEntry<'a, K, V, I>
 where
     K: Ord + Clone,
+    I: InsertionOrder<V>,
 {
-    pub(crate) fn into_mut(self) -> &'a mut Values<V> {
+    pub(crate) fn into_mut(self) -> &'a mut Values<V, I> {
         match self {
             Self::HashMap(e) => e.into_mut(),
             Self::BTreeMap(e) => e.into_mut(),
@@ -289,21 +295,22 @@ where
     }
 }
 
-pub(crate) enum Entry<'a, K, V>
+pub(crate) enum Entry<'a, K, V, I>
 where
     K: Ord,
 {
-    Vacant(VacantEntry<'a, K, V>),
-    Occupied(OccupiedEntry<'a, K, V>),
+    Vacant(VacantEntry<'a, K, V, I>),
+    Occupied(OccupiedEntry<'a, K, V, I>),
 }
 
-impl<'a, K: 'a, V: 'a> Entry<'a, K, V>
+impl<'a, K: 'a, V: 'a, I: 'a> Entry<'a, K, V, I>
 where
     K: Ord + Clone,
+    I: InsertionOrder<V>,
 {
-    pub(crate) fn or_insert_with<F>(self, default: F) -> &'a mut Values<V>
+    pub(crate) fn or_insert_with<F>(self, default: F) -> &'a mut Values<V, I>
     where
-        F: FnOnce() -> Values<V>,
+        F: FnOnce() -> Values<V, I>,
     {
         match self {
             Entry::Vacant(e) => e.insert(default()),
@@ -350,13 +357,13 @@ impl WriteMetrics {
 }
 
 pub(crate) struct Inner<K, V, M, T, S, I> {
-    pub(crate) data: Data<K, V, S>,
+    pub(crate) data: Data<K, V, I, S>,
     pub(crate) meta: M,
     pub(crate) timestamp: T,
     pub(crate) ready: bool,
     pub(crate) hasher: S,
     pub(crate) eviction_strategy: EvictionStrategy,
-    pub(crate) insertion_order: Option<I>,
+    pub(crate) order: Option<I>,
     pub(crate) metrics: WriteMetrics,
 }
 
@@ -384,7 +391,7 @@ where
     S: BuildHasher + Clone,
     M: Clone,
     T: Clone,
-    I: Clone,
+    I: InsertionOrder<V>,
 {
     fn clone(&self) -> Self {
         assert!(self.data.is_empty());
@@ -395,7 +402,7 @@ where
             ready: self.ready,
             hasher: self.hasher.clone(),
             eviction_strategy: self.eviction_strategy.clone(),
-            insertion_order: self.insertion_order.clone(),
+            order: self.order.clone(),
             metrics: self.metrics.clone(),
         }
     }
@@ -406,6 +413,7 @@ where
     K: Ord + Clone + Hash,
     S: BuildHasher + Clone,
     T: Clone,
+    I: InsertionOrder<V>,
 {
     pub(crate) fn with_index_type_and_hasher(
         index_type: IndexType,
@@ -413,7 +421,7 @@ where
         timestamp: T,
         hasher: S,
         eviction_strategy: EvictionStrategy,
-        insertion_order: Option<I>,
+        order: Option<I>,
         node_index: Option<NodeIndex>,
     ) -> Self {
         Inner {
@@ -423,7 +431,7 @@ where
             ready: false,
             hasher,
             eviction_strategy,
-            insertion_order,
+            order,
             metrics: WriteMetrics::new(node_index),
         }
     }
@@ -432,14 +440,14 @@ where
         &mut self,
         key: K,
         eviction_meta: &mut Option<EvictionMeta>,
-    ) -> &mut Values<V> {
+    ) -> &mut Values<V, I> {
         self.data.entry(key).or_insert_with(|| {
             if let Some(meta) = eviction_meta.take() {
-                Values::new(meta)
+                Values::new(meta, self.order.clone())
             } else {
                 let meta = self.eviction_strategy.new_meta();
                 eviction_meta.replace(meta.clone());
-                Values::new(meta)
+                Values::new(meta, self.order.clone())
             }
         })
     }

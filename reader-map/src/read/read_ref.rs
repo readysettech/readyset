@@ -10,6 +10,8 @@ use readyset_util::ranges::RangeBounds;
 use crate::inner::{Inner, Miss};
 use crate::values::Values;
 use crate::EvictionStrategy;
+use crate::InsertionOrder;
+
 // To make [`WriteHandle`] and friends work.
 #[cfg(doc)]
 use crate::WriteHandle;
@@ -51,6 +53,7 @@ impl<'rh, K, V, I, M, T, S> MapReadRef<'rh, K, V, I, M, T, S>
 where
     K: Ord + Clone + Hash,
     V: Eq + Hash,
+    I: InsertionOrder<V>,
     S: BuildHasher,
     T: Clone,
 {
@@ -58,7 +61,7 @@ where
     ///
     /// Be careful with this function! While the iteration is ongoing, any writer that tries to
     /// publish changes will block waiting on this reader to finish.
-    pub fn iter(&self) -> ReadGuardIter<'_, K, V> {
+    pub fn iter(&self) -> ReadGuardIter<'_, K, V, I> {
         ReadGuardIter {
             iter: self.guard.data.iter(),
         }
@@ -73,7 +76,7 @@ where
     ///
     /// Panics if the underlying map is not a
     /// [`BTreeMap`](readyset_client::internal::IndexType::BTreeMap).
-    pub fn range<R, Q>(&self, range: &R) -> Result<RangeIter<'_, K, V>, Miss<K>>
+    pub fn range<R, Q>(&self, range: &R) -> Result<RangeIter<'_, K, V, I>, Miss<K>>
     where
         R: RangeBounds<Q>,
         Q: Ord + ToOwned<Owned = K> + ?Sized,
@@ -89,7 +92,7 @@ where
     ///
     /// Be careful with this function! While the iteration is ongoing, any writer that tries to
     /// publish changes will block waiting on this reader to finish.
-    pub fn keys(&self) -> KeysIter<'_, K, V> {
+    pub fn keys(&self) -> KeysIter<'_, K, V, I> {
         KeysIter {
             iter: self.guard.data.iter(),
         }
@@ -99,7 +102,7 @@ where
     ///
     /// Be careful with this function! While the iteration is ongoing, any writer that tries to
     /// publish changes will block waiting on this reader to finish.
-    pub fn values(&self) -> ValuesIter<'_, K, V> {
+    pub fn values(&self) -> ValuesIter<'_, K, V, I> {
         ValuesIter {
             iter: self.guard.data.iter(),
         }
@@ -128,7 +131,7 @@ where
     /// Note that not all writes will be included with this read -- only those that have been
     /// published by the writer. If no publish has happened, or the map has been destroyed, this
     /// function returns `None`.
-    pub fn get<'a, Q>(&'a self, key: &'_ Q) -> Option<&'a Values<V>>
+    pub fn get<'a, Q>(&'a self, key: &'_ Q) -> Option<&'a Values<V, I>>
     where
         K: Borrow<Q> + Ord + Clone,
         Q: ?Sized + Hash + Ord + ToOwned<Owned = K>,
@@ -191,11 +194,13 @@ impl<'rh, K, Q, V, M, T, S, I> std::ops::Index<&'_ Q> for MapReadRef<'rh, K, V, 
 where
     K: Ord + Clone + Borrow<Q> + Hash,
     V: Eq + Hash + Default,
+    I: InsertionOrder<V>,
     Q: Ord + ?Sized + Hash + ToOwned<Owned = K>,
     S: BuildHasher,
     T: Clone,
 {
-    type Output = Values<V>;
+    type Output = Values<V, I>;
+
     fn index(&self, key: &Q) -> &Self::Output {
         self.get(key).unwrap()
     }
@@ -205,26 +210,28 @@ impl<'rg, 'rh, K, V, M, T, S, I> IntoIterator for &'rg MapReadRef<'rh, K, V, I, 
 where
     K: Ord + Clone + Hash,
     V: Eq + Hash,
+    I: InsertionOrder<V>,
     S: BuildHasher,
     T: Clone,
 {
-    type Item = (&'rg K, &'rg Values<V>);
-    type IntoIter = ReadGuardIter<'rg, K, V>;
+    type Item = (&'rg K, &'rg Values<V, I>);
+    type IntoIter = ReadGuardIter<'rg, K, V, I>;
+
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
     }
 }
 
 /// An [`Iterator`] over keys and values in the evmap.
-pub struct ReadGuardIter<'rg, K, V>
+pub struct ReadGuardIter<'rg, K, V, I>
 where
     K: Ord + Clone,
     V: Eq + Hash,
 {
-    iter: crate::inner::Iter<'rg, K, V>,
+    iter: crate::inner::Iter<'rg, K, V, I>,
 }
 
-impl<'rg, K, V> fmt::Debug for ReadGuardIter<'rg, K, V>
+impl<'rg, K, V, I> fmt::Debug for ReadGuardIter<'rg, K, V, I>
 where
     K: Ord + Clone + fmt::Debug,
     V: Eq + Hash,
@@ -235,27 +242,28 @@ where
     }
 }
 
-impl<'rg, K, V> Iterator for ReadGuardIter<'rg, K, V>
+impl<'rg, K, V, I> Iterator for ReadGuardIter<'rg, K, V, I>
 where
     K: Ord + Clone,
     V: Eq + Hash,
 {
-    type Item = (&'rg K, &'rg Values<V>);
+    type Item = (&'rg K, &'rg Values<V, I>);
+
     fn next(&mut self) -> Option<Self::Item> {
         self.iter.next()
     }
 }
 
 /// An [`Iterator`] over keys.
-pub struct KeysIter<'rg, K, V>
+pub struct KeysIter<'rg, K, V, I>
 where
     K: Ord + Clone,
     V: Eq + Hash,
 {
-    iter: crate::inner::Iter<'rg, K, V>,
+    iter: crate::inner::Iter<'rg, K, V, I>,
 }
 
-impl<'rg, K, V> fmt::Debug for KeysIter<'rg, K, V>
+impl<'rg, K, V, I> fmt::Debug for KeysIter<'rg, K, V, I>
 where
     K: Ord + Clone + fmt::Debug,
     V: Eq + Hash,
@@ -266,28 +274,29 @@ where
     }
 }
 
-impl<'rg, K, V> Iterator for KeysIter<'rg, K, V>
+impl<'rg, K, V, I> Iterator for KeysIter<'rg, K, V, I>
 where
     K: Ord + Clone,
     V: Eq + Hash,
 {
     type Item = &'rg K;
+
     fn next(&mut self) -> Option<Self::Item> {
         self.iter.next().map(|(k, _)| k)
     }
 }
 
 /// An [`Iterator`] over a range of keys.
-pub struct RangeIter<'rg, K, V>
+pub struct RangeIter<'rg, K, V, I>
 where
     K: Ord + Clone,
     V: Eq + Hash,
 {
-    iter: btree_map::Range<'rg, K, Values<V>>,
+    iter: btree_map::Range<'rg, K, Values<V, I>>,
     eviction_strategy: &'rg EvictionStrategy,
 }
 
-impl<'rg, K, V> fmt::Debug for RangeIter<'rg, K, V>
+impl<'rg, K, V, I> fmt::Debug for RangeIter<'rg, K, V, I>
 where
     K: Ord + Clone + fmt::Debug,
     V: Eq + Hash,
@@ -298,12 +307,14 @@ where
     }
 }
 
-impl<'rg, K, V> Iterator for RangeIter<'rg, K, V>
+impl<'rg, K, V, I> Iterator for RangeIter<'rg, K, V, I>
 where
     K: Ord + Clone,
     V: Eq + Hash,
+    I: InsertionOrder<V>,
 {
-    type Item = (&'rg K, &'rg Values<V>);
+    type Item = (&'rg K, &'rg Values<V, I>);
+
     fn next(&mut self) -> Option<Self::Item> {
         let next = self.iter.next()?;
         self.eviction_strategy.on_read(next.1.eviction_meta());
@@ -316,15 +327,15 @@ where
 }
 
 /// An [`Iterator`] over value sets.
-pub struct ValuesIter<'rg, K, V>
+pub struct ValuesIter<'rg, K, V, I>
 where
     K: Ord + Clone,
     V: Eq + Hash,
 {
-    iter: crate::inner::Iter<'rg, K, V>,
+    iter: crate::inner::Iter<'rg, K, V, I>,
 }
 
-impl<'rg, K, V> fmt::Debug for ValuesIter<'rg, K, V>
+impl<'rg, K, V, I> fmt::Debug for ValuesIter<'rg, K, V, I>
 where
     K: Ord + Clone + fmt::Debug,
     V: Eq + Hash,
@@ -335,12 +346,13 @@ where
     }
 }
 
-impl<'rg, K, V> Iterator for ValuesIter<'rg, K, V>
+impl<'rg, K, V, I> Iterator for ValuesIter<'rg, K, V, I>
 where
     K: Ord + Clone,
     V: Eq + Hash,
 {
-    type Item = &'rg Values<V>;
+    type Item = &'rg Values<V, I>;
+
     fn next(&mut self) -> Option<Self::Item> {
         self.iter.next().map(|(_, v)| v)
     }

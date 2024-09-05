@@ -113,7 +113,7 @@ where
 
     /// Returns the base size of inner data associated with this write handle.
     pub fn base_value_size(&self) -> usize {
-        std::mem::size_of::<Values<V>>()
+        std::mem::size_of::<Values<V, I>>()
     }
 
     /// Publish all changes since the last call to `publish` to make them visible to readers.
@@ -278,7 +278,7 @@ where
         mut mem_cnt: F,
     ) -> (u64, Option<K>)
     where
-        F: FnMut(&K, &Values<V>) -> u64,
+        F: FnMut(&K, &Values<V, I>) -> u64,
     {
         self.publish();
 
@@ -387,7 +387,7 @@ where
             } => {
                 let metrics = self.metrics.clone();
                 let values = self.data_entry(key.clone(), eviction_meta);
-                values.insert(value.clone(), &other.insertion_order, index, *timestamp);
+                values.insert(value.clone(), &other.order, index, *timestamp);
                 metrics.record_updated(values.metrics());
             }
             Operation::RemoveValue {
@@ -397,7 +397,7 @@ where
                 timestamp,
             } => {
                 if let Some(e) = self.data.get_mut(key) {
-                    e.remove(value, &other.insertion_order, index, *timestamp);
+                    e.remove(value, &other.order, index, *timestamp);
 
                     // removing a value from a key is just "updating" that key
                     self.metrics.record_updated(e.metrics());
@@ -459,7 +459,7 @@ where
                 timestamp,
             } => {
                 let values = self.data_entry(key, &mut eviction_meta);
-                values.insert(value, &other.insertion_order, &mut index, timestamp);
+                values.insert(value, &other.order, &mut index, timestamp);
             }
             Operation::RemoveValue {
                 key,
@@ -468,7 +468,7 @@ where
                 timestamp,
             } => {
                 if let Some(e) = self.data.get_mut(&key) {
-                    e.remove(&value, &other.insertion_order, &mut index, timestamp);
+                    e.remove(&value, &other.order, &mut index, timestamp);
                 }
             }
             Operation::AddRange(range) => self.data.add_range(range),

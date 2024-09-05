@@ -28,6 +28,7 @@ use rand::Rng;
 
 use crate::inner::Data;
 use crate::values::Values;
+use crate::InsertionOrder;
 
 /// Controls the maximum number of generations in Generational eviction.
 /// The value of 100 ensures the granularity will be at least 1%.
@@ -181,13 +182,14 @@ impl EvictionStrategy {
 
     /// Return an iterator over the keys and values the strategy suggests to evict
     /// this cycle. Nothing is actually evicted following this call.
-    pub(crate) fn pick_keys_to_evict<'a, K, V, S>(
+    pub(crate) fn pick_keys_to_evict<'a, K, V, I, S>(
         &self,
-        data: &'a Data<K, V, S>,
+        data: &'a Data<K, V, I, S>,
         nkeys: usize,
-    ) -> impl Iterator<Item = (&'a K, &'a Values<V>)>
+    ) -> impl Iterator<Item = (&'a K, &'a Values<V, I>)>
     where
         K: Ord + Clone,
+        I: InsertionOrder<V>,
         S: std::hash::BuildHasher,
     {
         match self {
@@ -204,17 +206,18 @@ impl EvictionStrategy {
     /// Returns a [`EvictRangeIter`] that iterates over groups of consecutive keys the strategy
     /// would suggest to evict. The first and last element of each group would form a range that
     /// should be evicted.
-    pub(crate) fn pick_ranges_to_evict<'a, K, V, S>(
+    pub(crate) fn pick_ranges_to_evict<'a, K, V, I, S>(
         &self,
-        data: &'a Data<K, V, S>,
+        data: &'a Data<K, V, I, S>,
         nkeys: usize,
     ) -> EvictRangeIter<
-        (&'a K, &'a Values<V>),
-        impl Iterator<Item = (u64, (&'a K, &'a Values<V>))>,
+        (&'a K, &'a Values<V, I>),
+        impl Iterator<Item = (u64, (&'a K, &'a Values<V, I>))>,
         impl FnMut(u64) -> bool,
     >
     where
         K: Ord + Clone,
+        I: InsertionOrder<V>,
         S: std::hash::BuildHasher,
     {
         let mut lru_f = None;
@@ -271,13 +274,14 @@ impl LRUEviction {
         meta.0.store(current_counter, Relaxed);
     }
 
-    fn pick_keys_to_evict<'a, K, V, S>(
+    fn pick_keys_to_evict<'a, K, V, I, S>(
         &self,
-        data: &'a Data<K, V, S>,
+        data: &'a Data<K, V, I, S>,
         nkeys: usize,
-    ) -> impl Iterator<Item = (&'a K, &'a Values<V>)>
+    ) -> impl Iterator<Item = (&'a K, &'a Values<V, I>)>
     where
         K: Ord + Clone,
+        I: InsertionOrder<V>,
         S: std::hash::BuildHasher,
     {
         // First we collect all the meta values into a single vector
@@ -303,16 +307,17 @@ impl LRUEviction {
             .filter_map(move |(ctr, kv)| (ctr <= cutoff).then_some(kv))
     }
 
-    fn pick_ranges_to_evict<'a, K, V, S>(
+    fn pick_ranges_to_evict<'a, K, V, I, S>(
         &self,
-        data: &'a Data<K, V, S>,
+        data: &'a Data<K, V, I, S>,
         nkeys: usize,
     ) -> (
-        impl Iterator<Item = (u64, (&'a K, &'a Values<V>))>,
+        impl Iterator<Item = (u64, (&'a K, &'a Values<V, I>))>,
         impl FnMut(u64) -> bool,
     )
     where
         K: Ord + Clone,
+        I: InsertionOrder<V>,
         S: std::hash::BuildHasher,
     {
         // First we collect all the meta values into a single vector
@@ -339,13 +344,14 @@ impl LRUEviction {
 
 impl RandomEviction {
     /// Selects exactly nkeys keys to evict.
-    fn pick_keys_to_evict<'a, K, V, S>(
+    fn pick_keys_to_evict<'a, K, V, I, S>(
         &self,
-        data: &'a Data<K, V, S>,
+        data: &'a Data<K, V, I, S>,
         nkeys: usize,
-    ) -> impl Iterator<Item = (&'a K, &'a Values<V>)>
+    ) -> impl Iterator<Item = (&'a K, &'a Values<V, I>)>
     where
         K: Ord + Clone,
+        I: InsertionOrder<V>,
         S: std::hash::BuildHasher,
     {
         // Allocate a random shuffling of indices corresponding to keys in data.
@@ -361,16 +367,17 @@ impl RandomEviction {
 
     /// Selects exactly nkeys BTreeMap keys (not ranges) to evict.
     /// nkeys *must* be no more than data.len()
-    fn pick_ranges_to_evict<'a, K, V, S>(
+    fn pick_ranges_to_evict<'a, K, V, I, S>(
         &self,
-        data: &'a Data<K, V, S>,
+        data: &'a Data<K, V, I, S>,
         nkeys: usize,
     ) -> (
-        impl Iterator<Item = (u64, (&'a K, &'a Values<V>))>,
+        impl Iterator<Item = (u64, (&'a K, &'a Values<V, I>))>,
         impl FnMut(u64) -> bool,
     )
     where
         K: Ord + Clone,
+        I: InsertionOrder<V>,
         S: std::hash::BuildHasher,
     {
         // Picking a random range to evict is kinda useless really, there is very little chance it
@@ -400,13 +407,14 @@ impl GenerationalEviction {
         meta.0.store(current_counter, Relaxed);
     }
 
-    fn pick_keys_to_evict<'a, K, V, S>(
+    fn pick_keys_to_evict<'a, K, V, I, S>(
         &self,
-        data: &'a Data<K, V, S>,
+        data: &'a Data<K, V, I, S>,
         mut nkeys: usize,
-    ) -> impl Iterator<Item = (&'a K, &'a Values<V>)>
+    ) -> impl Iterator<Item = (&'a K, &'a Values<V, I>)>
     where
         K: Ord + Clone,
+        I: InsertionOrder<V>,
         S: std::hash::BuildHasher,
     {
         let current_gen = self.0.fetch_add(1, Relaxed);
@@ -462,16 +470,17 @@ impl GenerationalEviction {
             })
     }
 
-    fn pick_ranges_to_evict<'a, K, V, S>(
+    fn pick_ranges_to_evict<'a, K, V, I, S>(
         &self,
-        data: &'a Data<K, V, S>,
+        data: &'a Data<K, V, I, S>,
         mut nkeys: usize,
     ) -> (
-        impl Iterator<Item = (u64, (&'a K, &'a Values<V>))>,
+        impl Iterator<Item = (u64, (&'a K, &'a Values<V, I>))>,
         impl FnMut(u64) -> bool,
     )
     where
         K: Ord + Clone,
+        I: InsertionOrder<V>,
         S: std::hash::BuildHasher,
     {
         let current_gen = self.0.fetch_add(1, Relaxed);

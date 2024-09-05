@@ -9,7 +9,7 @@ use readyset_client::internal::IndexType;
 
 use crate::inner::Inner;
 use crate::values::Values;
-use crate::{Error, Result};
+use crate::{Error, InsertionOrder, Result};
 
 mod read_ref;
 pub use read_ref::{MapReadRef, ReadGuardIter};
@@ -72,6 +72,7 @@ impl<K, V, I, M, T, S> ReadHandle<K, V, I, M, T, S>
 where
     K: Ord + Clone + Hash,
     V: Eq + Hash,
+    I: InsertionOrder<V>,
     S: BuildHasher,
     M: Clone,
     T: Clone,
@@ -113,7 +114,7 @@ where
     }
 
     /// Internal version of `get_and`
-    fn get_raw<Q>(&self, key: &Q) -> Result<Option<ReadGuard<'_, Values<V>>>>
+    fn get_raw<Q>(&self, key: &Q) -> Result<Option<ReadGuard<'_, Values<V, I>>>>
     where
         K: Borrow<Q>,
         Q: Ord + Hash + ?Sized,
@@ -139,7 +140,7 @@ where
     /// published by the writer. If no publish has happened, or the map has been destroyed, this
     /// function returns an [`Error`].
     #[inline]
-    pub fn get<'rh, Q>(&'rh self, key: &'_ Q) -> Result<Option<ReadGuard<'rh, Values<V>>>>
+    pub fn get<'rh, Q>(&'rh self, key: &'_ Q) -> Result<Option<ReadGuard<'rh, Values<V, I>>>>
     where
         K: Borrow<Q>,
         Q: Ord + Hash + ?Sized,
@@ -189,7 +190,7 @@ where
     /// function returns an [`Error`].
     ///
     /// If no values exist for the given key, `Ok(None, _)` is returned.
-    pub fn meta_get<Q>(&self, key: &Q) -> Result<(Option<ReadGuard<'_, Values<V>>>, M)>
+    pub fn meta_get<Q>(&self, key: &Q) -> Result<(Option<ReadGuard<'_, Values<V, I>>>, M)>
     where
         K: Borrow<Q>,
         Q: Ord + Clone + Hash,
@@ -220,7 +221,7 @@ where
     /// Read all values in the map, and transform them into a new collection.
     pub fn map_into<Map, Collector, Target>(&self, mut f: Map) -> Collector
     where
-        Map: FnMut(&K, &Values<V>) -> Target,
+        Map: FnMut(&K, &Values<V, I>) -> Target,
         Collector: FromIterator<Target>,
     {
         self.enter()

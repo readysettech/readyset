@@ -47,17 +47,23 @@ impl Metrics {
 
 /// A sorted vector of values for a given key in the map with access metadata for eviction
 #[derive(Clone)]
-pub struct Values<T> {
-    eviction_meta: EvictionMeta,
+pub struct Values<T, I> {
     values: ValuesInner<T>,
+    #[allow(dead_code)]
+    order: Option<I>,
+    eviction_meta: EvictionMeta,
     metrics: Metrics,
 }
 
-impl<T> Default for Values<T> {
+impl<T, I> Default for Values<T, I>
+where
+    I: InsertionOrder<T>,
+{
     fn default() -> Self {
         Values {
-            eviction_meta: Default::default(),
             values: ValuesInner::new(),
+            order: None,
+            eviction_meta: Default::default(),
             metrics: Default::default(),
         }
     }
@@ -69,7 +75,7 @@ pub(crate) enum ValuesInner<T> {
     SmallVec(Arc<SmallVec<[T; 1]>>),
 }
 
-impl<T> fmt::Debug for Values<T>
+impl<T, I> fmt::Debug for Values<T, I>
 where
     T: fmt::Debug,
 {
@@ -84,11 +90,15 @@ impl<T> ValuesInner<T> {
     }
 }
 
-impl<T> Values<T> {
-    pub(crate) fn new(eviction_meta: EvictionMeta) -> Self {
+impl<T, I> Values<T, I>
+where
+    I: InsertionOrder<T>,
+{
+    pub(crate) fn new(eviction_meta: EvictionMeta, order: Option<I>) -> Self {
         Values {
-            eviction_meta,
             values: ValuesInner::SmallVec(Arc::new(smallvec::SmallVec::new())),
+            order,
+            eviction_meta,
             metrics: Default::default(),
         }
     }
@@ -131,10 +141,9 @@ impl<T> Values<T> {
         &self.eviction_meta
     }
 
-    fn find<I>(&self, value: &T, order: &Option<I>, cache: &mut Option<usize>, insert: bool)
+    fn find(&self, value: &T, order: &Option<I>, cache: &mut Option<usize>, insert: bool)
     where
         T: Ord + Clone,
-        I: InsertionOrder<T>,
     {
         let i = if let Some(cache) = cache {
             Ok(*cache) // cached from first time
@@ -174,7 +183,7 @@ impl<T> Values<T> {
 
     /// Inserts an element at position index within the vector, shifting all elements after it to
     /// the right.
-    pub(crate) fn insert<I>(
+    pub(crate) fn insert(
         &mut self,
         value: T,
         order: &Option<I>,
@@ -182,7 +191,6 @@ impl<T> Values<T> {
         timestamp: Instant,
     ) where
         T: Ord + Clone,
-        I: InsertionOrder<T>,
     {
         // Always insert values in sorted order, even if no ordering method is provided,
         // otherwise it will require a linear scan to remove a value
@@ -198,7 +206,7 @@ impl<T> Values<T> {
     ///
     /// Note: Because this shifts over the remaining elements, it has a worst-case
     /// performance of O(n).
-    pub(crate) fn remove<I>(
+    pub(crate) fn remove(
         &mut self,
         value: &T,
         order: &Option<I>,
@@ -206,7 +214,6 @@ impl<T> Values<T> {
         timestamp: Instant,
     ) where
         T: Ord + Clone,
-        I: InsertionOrder<T>,
     {
         self.find(value, order, index, false);
         if let Some(index) = *index {
@@ -274,7 +281,7 @@ mod tests {
 
     #[test]
     fn sensible_default() {
-        let v: Values<i32> = Values::default();
+        let v: Values<i32, DefaultInsertionOrder> = Values::default();
         match v.values {
             ValuesInner::SmallVec(ref v) => assert_eq!(v.capacity(), 1),
         }
@@ -283,7 +290,7 @@ mod tests {
 
     #[test]
     fn long_values() {
-        let mut v: Values<i32> = Values::default();
+        let mut v: Values<i32, DefaultInsertionOrder> = Values::default();
 
         let values = 0..1000;
         let len = values.clone().count();
