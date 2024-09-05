@@ -2799,7 +2799,7 @@ async fn numeric_snapshot_nan() {
 
     eventually!(run_test: {
         let result = conn
-            .simple_query("SHOW READYSET TABLES")
+            .simple_query("SHOW READYSET ALL TABLES")
             .await
             .unwrap()
             .into_iter()
