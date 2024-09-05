@@ -504,7 +504,7 @@ where
 }
 
 /// A trait that is required to keep the inner values in the correct order
-pub trait InsertionOrder<V> {
+pub trait InsertionOrder<V>: Clone {
     /// Compare two elements, like [`Ord::cmp`], but the comparison can be based on anything,
     /// not necessarily the same as `a.cmp(b)`.
     fn cmp(&self, a: &V, b: &V) -> std::cmp::Ordering;
