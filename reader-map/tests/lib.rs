@@ -1,5 +1,7 @@
 use std::collections::hash_map::RandomState;
 use std::hash::Hash;
+use std::sync::mpsc;
+use std::time::Duration;
 
 use partial_map::InsertionOrder;
 use reader_map::handles::{ReadHandle, WriteHandle};
@@ -236,7 +238,7 @@ fn busybusybusy_slow() {
 }
 
 fn busybusybusy_inner(slow: bool) {
-    use std::{thread, time};
+    use std::thread;
 
     let threads = 4;
     let mut n = 1000;
@@ -256,7 +258,7 @@ fn busybusybusy_inner(slow: bool) {
                         let map = r.enter().unwrap();
                         let rs = map.get(&i);
                         if rs.is_some() && slow {
-                            thread::sleep(time::Duration::from_millis(2));
+                            thread::sleep(Duration::from_millis(2));
                         }
                         match rs {
                             Some(rs) => {
@@ -266,7 +268,7 @@ fn busybusybusy_inner(slow: bool) {
                                 break;
                             }
                             None => {
-                                thread::yield_now();
+                                thread::sleep(Duration::from_millis(1));
                             }
                         }
                     }
@@ -310,7 +312,7 @@ fn busybusybusy_heap() {
                                 break;
                             }
                             None => {
-                                thread::yield_now();
+                                thread::sleep(Duration::from_millis(1));
                             }
                         }
                     }
@@ -626,11 +628,19 @@ fn values() {
 fn clone_churn() {
     use std::thread;
     let (mut w, r) = reader_map::new();
+    let (tx, rx) = mpsc::channel();
+
+    w.insert(1, 0);
+    w.publish();
 
     thread::spawn(move || loop {
         let r = r.clone();
         if r.get(&1).unwrap().is_some() {
-            thread::yield_now();
+            thread::sleep(Duration::from_millis(1));
+        }
+        match rx.try_recv() {
+            Ok(_) | Err(mpsc::TryRecvError::Disconnected) => break,
+            Err(mpsc::TryRecvError::Empty) => (),
         }
     });
 
@@ -638,6 +648,7 @@ fn clone_churn() {
         w.insert(1, i);
         w.publish();
     }
+    tx.send(()).unwrap();
 }
 
 #[test]
@@ -665,7 +676,7 @@ fn big() {
                 }
                 assert_eq!(rs.into_iter().count(), rs.len());
                 drop(map);
-                thread::yield_now();
+                thread::sleep(Duration::from_millis(1));
             }
         }
     });
