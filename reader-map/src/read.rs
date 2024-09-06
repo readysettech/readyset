@@ -167,6 +167,7 @@ where
     pub fn first<'rh, Q>(&'rh self, key: &'_ Q) -> Result<Option<ReadGuard<'rh, V>>>
     where
         K: Borrow<Q>,
+        V: Ord,
         Q: Ord + Clone + Hash,
     {
         let vs = if let Some(vs) = self.get_raw(key.borrow())? {

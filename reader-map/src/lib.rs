@@ -460,3 +460,15 @@ where
 {
     Options::default().construct()
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn default_size() {
+        // By ensuring this type is a ZST, we ensure that BTreeValue is a zero-cost wrapper
+        // around the wrapped value.
+        assert_eq!(std::mem::size_of::<DefaultInsertionOrder>(), 0);
+    }
+}
