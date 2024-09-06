@@ -363,7 +363,7 @@ pub(crate) struct Inner<K, V, M, T, S, I> {
     pub(crate) ready: bool,
     pub(crate) hasher: S,
     pub(crate) eviction_strategy: EvictionStrategy,
-    pub(crate) order: Option<I>,
+    pub(crate) order: I,
     pub(crate) metrics: WriteMetrics,
 }
 
@@ -421,7 +421,7 @@ where
         timestamp: T,
         hasher: S,
         eviction_strategy: EvictionStrategy,
-        order: Option<I>,
+        order: I,
         node_index: Option<NodeIndex>,
     ) -> Self {
         Inner {

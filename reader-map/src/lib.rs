@@ -277,7 +277,7 @@ pub struct Options<M, T, S, I> {
     index_type: IndexType,
     capacity: Option<usize>,
     eviction_strategy: EvictionStrategy,
-    insertion_order: Option<I>,
+    order: Option<I>,
 
     // The global index of the reader node that will hold this `reader-map`.
     node_index: Option<NodeIndex>,
@@ -294,7 +294,7 @@ where
             .field("meta", &self.meta)
             .field("timestamp", &self.timestamp)
             .field("capacity", &self.capacity)
-            .field("order", &self.insertion_order)
+            .field("order", &self.order)
             .field("node_index", &self.node_index)
             .finish_non_exhaustive()
     }
@@ -309,7 +309,7 @@ impl Default for Options<(), (), RandomState, DefaultInsertionOrder> {
             index_type: IndexType::BTreeMap,
             capacity: None,
             eviction_strategy: Default::default(),
-            insertion_order: None,
+            order: None,
             node_index: None,
         }
     }
@@ -325,7 +325,7 @@ impl<M, T, S, I> Options<M, T, S, I> {
             hasher: self.hasher,
             capacity: self.capacity,
             eviction_strategy: self.eviction_strategy,
-            insertion_order: self.insertion_order,
+            order: self.order,
             node_index: self.node_index,
         }
     }
@@ -339,7 +339,7 @@ impl<M, T, S, I> Options<M, T, S, I> {
             hasher: hash_builder,
             capacity: self.capacity,
             eviction_strategy: self.eviction_strategy,
-            insertion_order: self.insertion_order,
+            order: self.order,
             node_index: self.node_index,
         }
     }
@@ -353,7 +353,7 @@ impl<M, T, S, I> Options<M, T, S, I> {
             hasher: self.hasher,
             capacity: Some(capacity),
             eviction_strategy: self.eviction_strategy,
-            insertion_order: self.insertion_order,
+            order: self.order,
             node_index: self.node_index,
         }
     }
@@ -367,13 +367,13 @@ impl<M, T, S, I> Options<M, T, S, I> {
             hasher: self.hasher,
             capacity: self.capacity,
             eviction_strategy: self.eviction_strategy,
-            insertion_order: self.insertion_order,
+            order: self.order,
             node_index: self.node_index,
         }
     }
 
     /// Sets the desired [`InsertionOrder`] for the map
-    pub fn with_insertion_order<I2>(self, insertion_order: Option<I2>) -> Options<M, T, S, I2> {
+    pub fn with_insertion_order<I2>(self, order: Option<I2>) -> Options<M, T, S, I2> {
         Options {
             meta: self.meta,
             timestamp: self.timestamp,
@@ -381,7 +381,7 @@ impl<M, T, S, I> Options<M, T, S, I> {
             hasher: self.hasher,
             capacity: self.capacity,
             eviction_strategy: self.eviction_strategy,
-            insertion_order,
+            order,
             node_index: self.node_index,
         }
     }
@@ -421,7 +421,7 @@ impl<M, T, S, I> Options<M, T, S, I> {
             self.timestamp,
             self.hasher,
             self.eviction_strategy,
-            self.insertion_order,
+            self.order.unwrap_or_default(),
             self.node_index,
         );
 

@@ -49,7 +49,7 @@ impl Metrics {
 #[derive(Clone)]
 pub struct Values<T, I> {
     values: ValuesInner<T>,
-    order: Option<I>,
+    order: I,
     eviction_meta: EvictionMeta,
     metrics: Metrics,
 }
@@ -61,7 +61,7 @@ where
     fn default() -> Self {
         Values {
             values: ValuesInner::new(),
-            order: None,
+            order: Default::default(),
             eviction_meta: Default::default(),
             metrics: Default::default(),
         }
@@ -93,7 +93,7 @@ impl<T, I> Values<T, I>
 where
     I: InsertionOrder<T>,
 {
-    pub(crate) fn new(eviction_meta: EvictionMeta, order: Option<I>) -> Self {
+    pub(crate) fn new(eviction_meta: EvictionMeta, order: I) -> Self {
         Values {
             values: ValuesInner::SmallVec(Arc::new(smallvec::SmallVec::new())),
             order,
@@ -146,13 +146,9 @@ where
     {
         let i = if let Some(cache) = cache {
             Ok(*cache) // cached from first time
-        } else if let Some(order) = &self.order {
-            match self.values {
-                ValuesInner::SmallVec(ref v) => v.binary_search_by(|x| order.cmp(x, value)),
-            }
         } else {
             match self.values {
-                ValuesInner::SmallVec(ref v) => v.binary_search(value),
+                ValuesInner::SmallVec(ref v) => v.binary_search_by(|x| self.order.cmp(x, value)),
             }
         };
 
