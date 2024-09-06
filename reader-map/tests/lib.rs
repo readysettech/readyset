@@ -729,34 +729,6 @@ fn foreach() {
 }
 
 #[test]
-fn retain() {
-    // do same operations on a plain vector
-    // to verify retain implementation
-    let mut v = Vec::new();
-    let (mut w, r) = reader_map::new();
-
-    for i in 0..50 {
-        w.insert(0, i);
-        v.push(i);
-    }
-
-    fn is_even(num: &i32, _: bool) -> bool {
-        num % 2 == 0
-    }
-
-    w.retain(0, is_even).publish();
-    v.retain(|i| is_even(i, false));
-
-    let mut vs = r
-        .get(&0)
-        .unwrap()
-        .map(|nums| nums.iter().cloned().collect::<Vec<_>>())
-        .unwrap();
-    vs.sort_unstable();
-    assert_eq!(v, &*vs);
-}
-
-#[test]
 fn first() {
     let x = ('x', 42);
 

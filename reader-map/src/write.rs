@@ -251,17 +251,6 @@ where
         self.add_op(Operation::Purge)
     }
 
-    /// Retain elements for the given key using the provided predicate function.
-    ///
-    /// The removed  values will only become inaccessible to readers after the next call to
-    /// [`publish`](Self::publish)
-    pub fn retain<F>(&mut self, k: K, f: F) -> &mut Self
-    where
-        F: FnMut(&V, bool) -> bool + 'static + Send,
-    {
-        self.add_op(Operation::Retain(k, Predicate(Box::new(f))))
-    }
-
     /// Remove the value-bag for randomly chosen keys given an `EvictionQuantity` to evict.
     ///
     /// This method immediately calls [`publish`](Self::publish) to ensure that the keys and values
@@ -426,16 +415,6 @@ where
                     self.metrics.record_evicted(metrics);
                 });
             }
-            Operation::Retain(key, predicate) => {
-                if let Some(e) = self.data.get_mut(key) {
-                    let mut first = true;
-                    e.retain(move |v| {
-                        let retain = predicate.eval(v, first);
-                        first = false;
-                        retain
-                    });
-                }
-            }
             Operation::MarkReady => {
                 self.ready = true;
             }
@@ -481,16 +460,6 @@ where
             }
             Operation::RemoveRange(range) => self.data.remove_range(range, |_| {}),
             Operation::Purge => self.data.clear(),
-            Operation::Retain(key, mut predicate) => {
-                if let Some(e) = self.data.get_mut(&key) {
-                    let mut first = true;
-                    e.retain(move |v| {
-                        let retain = predicate.eval(&*v, first);
-                        first = false;
-                        retain
-                    });
-                }
-            }
             Operation::MarkReady => {
                 self.ready = true;
             }
@@ -562,8 +531,6 @@ pub(super) enum Operation<K, V, M, T> {
     ///
     /// Note that this will iterate once over all the keys internally.
     Purge,
-    /// Retains all values matching the given predicate.
-    Retain(K, Predicate<V>),
     /// Mark the map as ready to be consumed for readers.
     MarkReady,
     /// Set the value of the map meta.
@@ -609,43 +576,9 @@ where
             Operation::RemoveEntry(a) => f.debug_tuple("RemoveEntry").field(a).finish(),
             Operation::Clear(a, _) => f.debug_tuple("Clear").field(a).finish(),
             Operation::Purge => f.debug_tuple("Purge").finish(),
-            Operation::Retain(a, b) => f.debug_tuple("Retain").field(a).field(b).finish(),
             Operation::MarkReady => f.debug_tuple("MarkReady").finish(),
             Operation::SetMeta(a) => f.debug_tuple("SetMeta").field(a).finish(),
             Operation::SetTimestamp(a) => f.debug_tuple("SetTimestamp").field(a).finish(),
         }
-    }
-}
-
-/// Unary predicate used to retain elements.
-///
-/// The predicate function is called once for each distinct value, and `true` if this is the
-/// _first_ call to the predicate on the _second_ application of the operation.
-pub(super) struct Predicate<V: ?Sized>(Box<dyn FnMut(&V, bool) -> bool + Send>);
-
-impl<V: ?Sized> Predicate<V> {
-    /// Evaluate the predicate for the given element
-    #[inline]
-    fn eval(&mut self, value: &V, reset: bool) -> bool {
-        (*self.0)(value, reset)
-    }
-}
-
-impl<V: ?Sized> PartialEq for Predicate<V> {
-    #[inline]
-    #[allow(clippy::ptr_eq)]
-    fn eq(&self, other: &Self) -> bool {
-        // only compare data, not vtable: https://stackoverflow.com/q/47489449/472927
-        &*self.0 as *const _ as *const () == &*other.0 as *const _ as *const ()
-    }
-}
-
-impl<V: ?Sized> Eq for Predicate<V> {}
-
-impl<V: ?Sized> fmt::Debug for Predicate<V> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("Predicate")
-            .field(&format_args!("{:p}", &*self.0 as *const _))
-            .finish()
     }
 }

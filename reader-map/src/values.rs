@@ -222,16 +222,6 @@ where
         }
     }
 
-    pub(crate) fn retain<F>(&mut self, f: F)
-    where
-        T: Clone,
-        F: FnMut(&mut T) -> bool,
-    {
-        match self.values {
-            ValuesInner::SmallVec(ref mut v) => Arc::make_mut(v).retain(f),
-        }
-    }
-
     pub(crate) fn metrics(&self) -> &Metrics {
         &self.metrics
     }
