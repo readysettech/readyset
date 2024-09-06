@@ -868,8 +868,8 @@ mod tests {
             test_lots_of_changes_in_same_batch(MaterializedNodeState::Memory(state));
         }
 
-        #[test]
-        fn lots_of_changes_in_same_batch_persistent() {
+        #[tokio::test]
+        async fn lots_of_changes_in_same_batch_persistent() {
             let state = PersistentState::new(
                 String::from("lots_of_changes_in_same_batch_persistent"),
                 Vec::<Box<[usize]>>::new(),
@@ -881,8 +881,8 @@ mod tests {
             test_lots_of_changes_in_same_batch(MaterializedNodeState::Persistent(state));
         }
 
-        #[test]
-        fn delete_row_unkeyed() {
+        #[tokio::test]
+        async fn delete_row_unkeyed() {
             let mut b = Base::new();
 
             let ni = LocalNodeIndex::make(0u32);
@@ -931,8 +931,8 @@ mod tests {
             )
         }
 
-        #[test]
-        fn delete_row_not_in_batch_keyed() {
+        #[tokio::test]
+        async fn delete_row_not_in_batch_keyed() {
             let mut b = Base::new().with_primary_key([0]);
 
             let ni = LocalNodeIndex::make(0u32);
@@ -986,8 +986,8 @@ mod tests {
             )
         }
 
-        #[test]
-        fn delete_after_key_update() {
+        #[tokio::test]
+        async fn delete_after_key_update() {
             let mut b = Base::new().with_primary_key([0]);
 
             let ni = LocalNodeIndex::make(0u32);
@@ -1049,8 +1049,8 @@ mod tests {
             )
         }
 
-        #[test]
-        fn truncate() {
+        #[tokio::test]
+        async fn truncate() {
             let mut b = Base::new().with_primary_key([0]);
             let ni = LocalNodeIndex::make(0u32);
             let mut state = MaterializedNodeState::Persistent(
@@ -1107,8 +1107,8 @@ mod tests {
             );
         }
 
-        #[test]
-        fn truncate_unkeyed() {
+        #[tokio::test]
+        async fn truncate_unkeyed() {
             let mut b = Base::new();
             let ni = LocalNodeIndex::make(0u32);
             let mut state = MaterializedNodeState::Persistent(
@@ -1164,8 +1164,8 @@ mod tests {
             );
         }
 
-        #[test]
-        fn citext_coercion() {
+        #[tokio::test]
+        async fn citext_coercion() {
             use readyset_data::{Collation, TinyText};
 
             let mut b = Base::new();

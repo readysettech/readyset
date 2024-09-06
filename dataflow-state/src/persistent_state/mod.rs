@@ -61,6 +61,8 @@
 //! atomicity, these offsets are stored inside of rocksdb as part of the persisted
 //! [`PersistentMeta`], and updated as part of every write.
 mod handle;
+mod metrics;
+mod recorded;
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
@@ -97,6 +99,7 @@ use test_strategy::Arbitrary;
 use thiserror::Error;
 use tracing::{debug, error, info, info_span, instrument, trace, warn};
 
+use crate::persistent_state::metrics::MetricsReporter;
 use crate::{
     EvictKeysResult, EvictRandomResult, LookupResult, PersistencePoint, PointKey, RangeKey,
     RangeLookupResult, RecordResult, State,
@@ -462,6 +465,7 @@ pub struct PersistentState {
 
     persistence_type: PersistenceType,
     replay_done: bool,
+    metrics_stop_rx: tokio::sync::mpsc::Sender<()>,
 }
 
 /// Things that are shared between read handles and the state itself, that can be locked under a
@@ -847,6 +851,7 @@ impl State for PersistentState {
 
     fn shut_down(&mut self) -> ReadySetResult<()> {
         trace!("PersistentState received shutdown, stopping the WAL");
+        self.shut_down_metrics_reporting();
         self.shut_down_wal()
 
         // DurabilityMode::DeleteOnExit will delete all data when the TempFile instance
@@ -854,6 +859,7 @@ impl State for PersistentState {
     }
 
     fn tear_down(mut self) -> ReadySetResult<()> {
+        self.shut_down_metrics_reporting();
         let _ = &self.shut_down_wal()?;
 
         let temp_dir = self._tmpdir.take();
@@ -1517,6 +1523,14 @@ impl PersistentState {
             Some((tx, jh))
         };
 
+        let metrics_stop_rx = {
+            let (tx, rx) = tokio::sync::mpsc::channel::<()>(1);
+            let metrics_reporter =
+                MetricsReporter::new(name.as_str().to_string(), read_handle.clone());
+            tokio::spawn(metrics_reporter.report(rx));
+            tx
+        };
+
         let mut state = Self {
             name,
             default_options,
@@ -1530,6 +1544,7 @@ impl PersistentState {
             wal_flush_thread_handle,
             persistence_type,
             replay_done: persistence_type == PersistenceType::BaseTable,
+            metrics_stop_rx,
         };
 
         if let Some(pk) = state.unique_keys.first().cloned() {
@@ -2104,6 +2119,13 @@ impl PersistentState {
         Ok(())
     }
 
+    fn shut_down_metrics_reporting(&self) {
+        let handle = self.metrics_stop_rx.clone();
+        tokio::task::spawn(async move {
+            let _ = handle.send(()).await;
+        });
+    }
+
     fn shut_down_wal(&mut self) -> ReadySetResult<()> {
         if let Some((tx, jh)) = self.wal_flush_thread_handle.take() {
             // Stop the thread that periodically flushes the WAL
@@ -2351,14 +2373,14 @@ mod tests {
         }
     }
 
-    #[test]
-    fn persistent_state_is_partial() {
+    #[tokio::test]
+    async fn persistent_state_is_partial() {
         let state = setup_persistent("persistent_state_is_partial", None);
         assert!(!state.is_partial());
     }
 
-    #[test]
-    fn persistent_state_single_key() {
+    #[tokio::test]
+    async fn persistent_state_single_key() {
         let mut state = setup_single_key("persistent_state_single_key");
         let row: Vec<DfValue> = vec![10.into(), "Cat".into()];
         insert(&mut state, row);
@@ -2377,8 +2399,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn persistent_state_multi_key() {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn persistent_state_multi_key() {
         let mut state = setup_persistent("persistent_state_multi_key", None);
         let cols = vec![0, 2];
         let index = Index::new(IndexType::HashMap, cols.clone());
@@ -2399,8 +2421,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn persistent_state_multiple_indices() {
+    #[tokio::test]
+    async fn persistent_state_multiple_indices() {
         let mut state = setup_persistent("persistent_state_multiple_indices", None);
         let first: Vec<DfValue> = vec![10.into(), "Cat".into(), 1.into()];
         let second: Vec<DfValue> = vec![20.into(), "Cat".into(), 1.into()];
@@ -2428,8 +2450,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn persistent_state_add_remove_same_record() {
+    #[tokio::test]
+    async fn persistent_state_add_remove_same_record() {
         let mut state = setup_persistent("persistent_state_multiple_indices", None);
         let first: Vec<DfValue> = vec![10.into(), "Cat".into(), 1.into()];
         let second: Vec<DfValue> = vec![10.into(), "Cat".into(), 1.into()];
@@ -2442,8 +2464,8 @@ mod tests {
         state.process_records(&mut records, None, None).unwrap();
     }
 
-    #[test]
-    fn empty_column_set() {
+    #[tokio::test]
+    async fn empty_column_set() {
         let mut state = setup_persistent("empty_column_set", None);
         state.add_index(Index::hash_map(vec![]), None);
 
@@ -2486,8 +2508,8 @@ mod tests {
         assert_eq!(res, rows);
     }
 
-    #[test]
-    fn lookup_citext() {
+    #[tokio::test]
+    async fn lookup_citext() {
         let mut state = setup_persistent("lookup_citext", None);
         state.add_index(Index::hash_map(vec![0]), None);
 
@@ -2516,8 +2538,8 @@ mod tests {
         assert_eq!(res, abc.into())
     }
 
-    #[test]
-    fn lookup_numeric_with_different_precision() {
+    #[tokio::test]
+    async fn lookup_numeric_with_different_precision() {
         let mut state = setup_persistent("lookup_numeric_with_different_precision", None);
         state.add_index(Index::btree_map(vec![0]), None);
 
@@ -2539,8 +2561,8 @@ mod tests {
         assert_eq!(val.scale(), 1);
     }
 
-    #[test]
-    fn persistent_state_lookup_multi() {
+    #[tokio::test]
+    async fn persistent_state_lookup_multi() {
         for primary in [None, Some(&[0usize][..])] {
             let mut state = setup_persistent("persistent_state_lookup_multi", primary);
             let first: Vec<DfValue> = vec![10.into(), "Cat".into(), 1.into()];
@@ -2618,8 +2640,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn persistent_state_primary_key() {
+    #[tokio::test]
+    async fn persistent_state_primary_key() {
         let pk_cols = vec![0, 1];
         let pk = Index::new(IndexType::HashMap, pk_cols.clone());
         let mut state = PersistentState::new(
@@ -2670,8 +2692,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn persistent_state_primary_key_delete() {
+    #[tokio::test]
+    async fn persistent_state_primary_key_delete() {
         let pk = Index::new(IndexType::HashMap, vec![0]);
         let mut state = PersistentState::new(
             String::from("persistent_state_primary_key_delete"),
@@ -2713,8 +2735,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn persistent_state_not_unique_primary() {
+    #[tokio::test]
+    async fn persistent_state_not_unique_primary() {
         let mut state = setup_persistent("persistent_state_multiple_indices", None);
         let first: Vec<DfValue> = vec![0.into(), 0.into()];
         let second: Vec<DfValue> = vec![0.into(), 1.into()];
@@ -2742,8 +2764,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn persistent_state_different_indices() {
+    #[tokio::test]
+    async fn persistent_state_different_indices() {
         let mut state = setup_persistent("persistent_state_different_indices", None);
         let first: Vec<DfValue> = vec![10.into(), "Cat".into()];
         let second: Vec<DfValue> = vec![20.into(), "Bob".into()];
@@ -2770,8 +2792,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn persistent_state_recover() {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn persistent_state_recover() {
         let (_dir, name) = get_tmp_path();
         let params = PersistenceParameters {
             mode: DurabilityMode::Permanent,
@@ -2818,8 +2840,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn persistent_state_recover_unique_key() {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn persistent_state_recover_unique_key() {
         let (_dir, name) = get_tmp_path();
         let params = PersistenceParameters {
             mode: DurabilityMode::Permanent,
@@ -2861,8 +2883,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn persistent_state_remove() {
+    #[tokio::test]
+    async fn persistent_state_remove() {
         let mut state = setup_persistent("persistent_state_remove", None);
         let first: Vec<DfValue> = vec![10.into(), "Cat".into()];
         let duplicate: Vec<DfValue> = vec![10.into(), "Other Cat".into()];
@@ -2921,8 +2943,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn persistent_state_remove_with_unique_secondary() {
+    #[tokio::test]
+    async fn persistent_state_remove_with_unique_secondary() {
         let mut state = setup_persistent("persistent_state_remove_unique", Some(&[2usize][..]));
         let first: Vec<DfValue> = vec![10.into(), "Cat".into(), DfValue::None];
         let duplicate: Vec<DfValue> = vec![10.into(), "Other Cat".into(), DfValue::None];
@@ -2967,16 +2989,16 @@ mod tests {
         }
     }
 
-    #[test]
-    fn persistent_state_is_useful() {
+    #[tokio::test]
+    async fn persistent_state_is_useful() {
         let mut state = setup_persistent("persistent_state_is_useful", None);
         assert!(!state.is_useful());
         state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
         assert!(state.is_useful());
     }
 
-    #[test]
-    fn persistent_state_rows() {
+    #[tokio::test]
+    async fn persistent_state_rows() {
         let mut state = setup_persistent("persistent_state_rows", None);
         let mut rows = vec![];
         for i in 0..30 {
@@ -3000,8 +3022,8 @@ mod tests {
 
         use super::*;
 
-        #[test]
-        fn simple_case() {
+        #[tokio::test]
+        async fn simple_case() {
             let mut state = setup_persistent("persistent_state_cloned_records", None);
             let first: Vec<DfValue> = vec![10.into(), "Cat".into()];
             let second: Vec<DfValue> = vec![20.into(), "Cat".into()];
@@ -3018,8 +3040,8 @@ mod tests {
             );
         }
 
-        #[test]
-        fn wonky_drop_order() {
+        #[tokio::test]
+        async fn wonky_drop_order() {
             let mut state = setup_persistent("persistent_state_cloned_records", None);
             let first: Vec<DfValue> = vec![10.into(), "Cat".into()];
             let second: Vec<DfValue> = vec![20.into(), "Cat".into()];
@@ -3037,8 +3059,8 @@ mod tests {
             );
         }
 
-        #[test]
-        fn writes_during_iter() {
+        #[tokio::test]
+        async fn writes_during_iter() {
             let mut state = setup_persistent("persistent_state_cloned_records", None);
             let first: Vec<DfValue> = vec![10.into(), "Cat".into()];
             let second: Vec<DfValue> = vec![20.into(), "Cat".into()];
@@ -3059,9 +3081,9 @@ mod tests {
         }
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(not(windows))]
-    fn persistent_state_drop() {
+    async fn persistent_state_drop() {
         let path = {
             let state = PersistentState::new(
                 String::from(".s-o_u#p."),
@@ -3078,8 +3100,8 @@ mod tests {
         assert!(!PathBuf::from(path).exists());
     }
 
-    #[test]
-    fn persistent_state_old_records_new_index() {
+    #[tokio::test]
+    async fn persistent_state_old_records_new_index() {
         let mut state = setup_persistent("persistent_state_old_records_new_index", None);
         let row: Vec<DfValue> = vec![10.into(), "Cat".into()];
         state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
@@ -3092,8 +3114,8 @@ mod tests {
         };
     }
 
-    #[test]
-    fn persistent_state_process_records() {
+    #[tokio::test]
+    async fn persistent_state_process_records() {
         let mut state = setup_persistent("persistent_state_process_records", None);
         let records: Records = vec![
             (vec![1.into(), "A".into()], true),
@@ -3126,8 +3148,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn replication_offset_roundtrip_mysql() {
+    #[tokio::test]
+    async fn replication_offset_roundtrip_mysql() {
         let mut state = setup_persistent("replication_offset_roundtrip_mysql", None);
         state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
         let mut records: Records = vec![(vec![1.into(), "A".into()], true)].into();
@@ -3141,8 +3163,8 @@ mod tests {
         assert_eq!(result, Some(&replication_offset));
     }
 
-    #[test]
-    fn replication_offset_roundtrip_postgres() {
+    #[tokio::test]
+    async fn replication_offset_roundtrip_postgres() {
         let mut state = setup_persistent("replication_offset_roundtrip_postgres", None);
         state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
         let mut records: Records = vec![(vec![1.into(), "A".into()], true)].into();
@@ -3157,9 +3179,9 @@ mod tests {
         assert_eq!(result, Some(&replication_offset));
     }
 
-    #[test]
+    #[tokio::test]
     #[allow(clippy::op_ref)]
-    fn persistent_state_prefix_transform() {
+    async fn persistent_state_prefix_transform() {
         let mut state = setup_persistent("persistent_state_prefix_transform", None);
         state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
         let data = (DfValue::from(1), DfValue::from(10));
@@ -3189,8 +3211,8 @@ mod tests {
         assert_eq!(prefix, prefix_transform(prefix));
     }
 
-    #[test]
-    fn reindex_btree_with_nulls() {
+    #[tokio::test]
+    async fn reindex_btree_with_nulls() {
         let mut state = setup_persistent("reindex_with_nulls", None);
         state.add_index(Index::hash_map(vec![0]), None);
         insert(&mut state, vec![1.into()]);
@@ -3198,11 +3220,11 @@ mod tests {
         state.add_index(Index::btree_map(vec![0]), None);
     }
 
-    #[test]
+    #[tokio::test]
     /// Test that a read handle will miss on lookups unless it was informed of the same binlog
     /// position as the parent handle, this is important to avoid accidental reorder of upqueries
     /// and forward processing in nodes that would use the read handle for upqueries.
-    fn read_handle_misses_on_binlog() {
+    async fn read_handle_misses_on_binlog() {
         let mut state = setup_persistent("read_handle_misses_on_binlog", None);
         state.add_index(Index::hash_map(vec![0]), None);
 
@@ -3278,8 +3300,8 @@ mod tests {
             state
         }
 
-        #[test]
-        fn missing() {
+        #[tokio::test]
+        async fn missing() {
             let state = setup();
             assert_eq!(
                 state.lookup_range(
@@ -3290,8 +3312,8 @@ mod tests {
             );
         }
 
-        #[test]
-        fn inclusive_exclusive() {
+        #[tokio::test]
+        async fn inclusive_exclusive() {
             let state = setup();
             assert_eq!(
                 state.lookup_range(
@@ -3302,8 +3324,8 @@ mod tests {
             );
         }
 
-        #[test]
-        fn inclusive_inclusive() {
+        #[tokio::test]
+        async fn inclusive_inclusive() {
             let state = setup();
             assert_eq!(
                 state.lookup_range(
@@ -3314,8 +3336,8 @@ mod tests {
             );
         }
 
-        #[test]
-        fn exclusive_exclusive() {
+        #[tokio::test]
+        async fn exclusive_exclusive() {
             let state = setup();
             assert_eq!(
                 state.lookup_range(
@@ -3335,8 +3357,8 @@ mod tests {
             );
         }
 
-        #[test]
-        fn exclusive_exclusive_skip_all() {
+        #[tokio::test]
+        async fn exclusive_exclusive_skip_all() {
             let mut state = setup();
             // ENG-1559: If state has more than one key for the exclusive start bound, it has to
             // skip them all
@@ -3361,8 +3383,8 @@ mod tests {
             );
         }
 
-        #[test]
-        fn exclusive_inclusive() {
+        #[tokio::test]
+        async fn exclusive_inclusive() {
             let state = setup();
             assert_eq!(
                 state.lookup_range(
@@ -3382,8 +3404,8 @@ mod tests {
             );
         }
 
-        #[test]
-        fn exclusive_inclusive_missing() {
+        #[tokio::test]
+        async fn exclusive_inclusive_missing() {
             let mut state = setup();
             // ENG-1560: When the upper included bound is not actually in the map, shouldn't read
             // past it anyway
@@ -3413,8 +3435,8 @@ mod tests {
             );
         }
 
-        #[test]
-        fn inclusive_unbounded() {
+        #[tokio::test]
+        async fn inclusive_unbounded() {
             let state = setup();
             assert_eq!(
                 state.lookup_range(
@@ -3425,8 +3447,8 @@ mod tests {
             );
         }
 
-        #[test]
-        fn unbounded_inclusive_multiple_rows_in_upper_bound() {
+        #[tokio::test]
+        async fn unbounded_inclusive_multiple_rows_in_upper_bound() {
             let mut state = setup();
             state
                 .process_records(&mut vec![vec![DfValue::from(3)]].into(), None, None)
@@ -3450,8 +3472,8 @@ mod tests {
             )
         }
 
-        #[test]
-        fn non_unique_then_reindex() {
+        #[tokio::test]
+        async fn non_unique_then_reindex() {
             let mut state = setup_persistent("persistent_state_single_key", Some(&[1][..]));
             state
                 .process_records(
@@ -3481,8 +3503,8 @@ mod tests {
             );
         }
 
-        #[test]
-        fn unbounded_inclusive() {
+        #[tokio::test]
+        async fn unbounded_inclusive() {
             let state = setup();
             assert_eq!(
                 state.lookup_range(
@@ -3493,8 +3515,8 @@ mod tests {
             );
         }
 
-        #[test]
-        fn unbounded_exclusive() {
+        #[tokio::test]
+        async fn unbounded_exclusive() {
             let state = setup();
             assert_eq!(
                 state.lookup_range(&[0], &RangeKey::from(&vec1![DfValue::from(3)].range_to())),
@@ -3522,8 +3544,8 @@ mod tests {
             vec![(k - 1).into(), k.into(), (k + 1).into()]
         }
 
-        #[test]
-        fn inclusive_unbounded_secondary() {
+        #[tokio::test]
+        async fn inclusive_unbounded_secondary() {
             let state = setup_secondary();
             assert_eq!(
                 state.lookup_range(
@@ -3539,8 +3561,8 @@ mod tests {
             );
         }
 
-        #[test]
-        fn exclusive_unbounded_secondary_big_values() {
+        #[tokio::test]
+        async fn exclusive_unbounded_secondary_big_values() {
             let mut state =
                 setup_persistent("exclusive_unbounded_secondary_2", Some(&[0usize][..]));
             state
@@ -3582,8 +3604,8 @@ mod tests {
             );
         }
 
-        #[test]
-        fn exclusive_inclusive_secondary() {
+        #[tokio::test]
+        async fn exclusive_inclusive_secondary() {
             let state = setup_secondary();
             assert_eq!(
                 state.lookup_range(
@@ -3602,8 +3624,8 @@ mod tests {
             );
         }
 
-        #[test]
-        fn exclusive_exclusive_secondary() {
+        #[tokio::test]
+        async fn exclusive_exclusive_secondary() {
             let state = setup_secondary();
             assert_eq!(
                 state.lookup_range(
@@ -3619,8 +3641,8 @@ mod tests {
             );
         }
 
-        #[test]
-        fn inclusive_exclusive_secondary() {
+        #[tokio::test]
+        async fn inclusive_exclusive_secondary() {
             let state = setup_secondary();
             assert_eq!(
                 state.lookup_range(
@@ -3636,8 +3658,8 @@ mod tests {
             );
         }
 
-        #[test]
-        fn inclusive_inclusive_secondary() {
+        #[tokio::test]
+        async fn inclusive_inclusive_secondary() {
             let state = setup_secondary();
             assert_eq!(
                 state.lookup_range(
@@ -3656,8 +3678,8 @@ mod tests {
             );
         }
 
-        #[test]
-        fn unbounded_inclusive_secondary() {
+        #[tokio::test]
+        async fn unbounded_inclusive_secondary() {
             let state = setup_secondary();
             assert_eq!(
                 state.lookup_range(
@@ -3673,8 +3695,8 @@ mod tests {
             );
         }
 
-        #[test]
-        fn unbounded_exclusive_secondary() {
+        #[tokio::test]
+        async fn unbounded_exclusive_secondary() {
             let state = setup_secondary();
             assert_eq!(
                 state.lookup_range(&[1], &RangeKey::from(&vec1![DfValue::from(7)].range_to())),
@@ -3687,8 +3709,8 @@ mod tests {
             );
         }
 
-        #[test]
-        fn inclusive_unbounded_secondary_compound() {
+        #[tokio::test]
+        async fn inclusive_unbounded_secondary_compound() {
             let mut state = setup_secondary();
             state.add_index(Index::btree_map(vec![0, 1]), None);
             assert_eq!(
@@ -3707,8 +3729,8 @@ mod tests {
             );
         }
 
-        #[test]
-        fn inclusive_unbounded_secondary_non_unique() {
+        #[tokio::test]
+        async fn inclusive_unbounded_secondary_non_unique() {
             let mut state = setup_secondary();
             let extra_row_beginning = vec![DfValue::from(11), DfValue::from(3), DfValue::from(3)];
             let extra_row_end = vec![DfValue::from(12), DfValue::from(9), DfValue::from(9)];
@@ -3737,8 +3759,8 @@ mod tests {
             );
         }
 
-        #[test]
-        fn citext() {
+        #[tokio::test]
+        async fn citext() {
             let mut state = setup();
             state.add_index(Index::btree_map(vec![0]), None);
             state

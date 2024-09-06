@@ -443,8 +443,8 @@ mod tests {
         assert_query_through(p, 0, 1.into(), states, expected);
     }
 
-    #[test]
-    fn it_queries_through_all_persistent() {
+    #[tokio::test]
+    async fn it_queries_through_all_persistent() {
         let state = MaterializedNodeState::Persistent(
             PersistentState::new(
                 String::from("it_queries_through_all_persistent"),
@@ -490,8 +490,8 @@ mod tests {
         assert_query_through(p, 0, 2.into(), states, expected);
     }
 
-    #[test]
-    fn it_queries_through_some_persistent() {
+    #[tokio::test]
+    async fn it_queries_through_some_persistent() {
         let state = MaterializedNodeState::Persistent(
             PersistentState::new(
                 String::from("it_queries_through_some_persistent"),
@@ -533,8 +533,8 @@ mod tests {
         assert_query_through(p, 0, 2.into(), states, expected);
     }
 
-    #[test]
-    fn it_queries_through_w_literals_persistent() {
+    #[tokio::test]
+    async fn it_queries_through_w_literals_persistent() {
         let state = MaterializedNodeState::Persistent(
             PersistentState::new(
                 String::from("it_queries_through_w_literals"),
@@ -588,8 +588,8 @@ mod tests {
         assert_query_through(p, 0, 2.into(), states, expected);
     }
 
-    #[test]
-    fn it_queries_through_w_arithmetic_and_literals_persistent() {
+    #[tokio::test]
+    async fn it_queries_through_w_arithmetic_and_literals_persistent() {
         let state = MaterializedNodeState::Persistent(
             PersistentState::new(
                 String::from("it_queries_through_w_arithmetic_and_literals_persistent"),
@@ -623,8 +623,8 @@ mod tests {
         assert_query_through(p, 0, 2.into(), states, expected);
     }
 
-    #[test]
-    fn it_queries_nested_expressions() {
+    #[tokio::test]
+    async fn it_queries_nested_expressions() {
         let expression = Op {
             op: BinaryOperator::Multiply,
             left: Box::new(Op {
