@@ -156,6 +156,7 @@ where
     pub fn first<'a, Q>(&'a self, key: &'_ Q) -> Option<&'a V>
     where
         K: Borrow<Q>,
+        V: Ord,
         Q: Ord + Hash + ?Sized,
     {
         self.guard.data.get(key).and_then(|values| values.first())
