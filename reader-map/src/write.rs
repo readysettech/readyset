@@ -376,7 +376,7 @@ where
     I: InsertionOrder<V>,
 {
     /// Apply ops in such a way that no values are dropped, only forgotten
-    fn absorb_first(&mut self, op: &mut Operation<K, V, M, T>, other: &Self) {
+    fn absorb_first(&mut self, op: &mut Operation<K, V, M, T>, _other: &Self) {
         match op {
             Operation::Add {
                 key,
@@ -387,7 +387,7 @@ where
             } => {
                 let metrics = self.metrics.clone();
                 let values = self.data_entry(key.clone(), eviction_meta);
-                values.insert(value.clone(), &other.order, index, *timestamp);
+                values.insert(value.clone(), index, *timestamp);
                 metrics.record_updated(values.metrics());
             }
             Operation::RemoveValue {
@@ -397,7 +397,7 @@ where
                 timestamp,
             } => {
                 if let Some(e) = self.data.get_mut(key) {
-                    e.remove(value, &other.order, index, *timestamp);
+                    e.remove(value, index, *timestamp);
 
                     // removing a value from a key is just "updating" that key
                     self.metrics.record_updated(e.metrics());
@@ -449,7 +449,7 @@ where
     }
 
     /// Apply operations while allowing dropping of values
-    fn absorb_second(&mut self, op: Operation<K, V, M, T>, other: &Self) {
+    fn absorb_second(&mut self, op: Operation<K, V, M, T>, _other: &Self) {
         match op {
             Operation::Add {
                 key,
@@ -459,7 +459,7 @@ where
                 timestamp,
             } => {
                 let values = self.data_entry(key, &mut eviction_meta);
-                values.insert(value, &other.order, &mut index, timestamp);
+                values.insert(value, &mut index, timestamp);
             }
             Operation::RemoveValue {
                 key,
@@ -468,7 +468,7 @@ where
                 timestamp,
             } => {
                 if let Some(e) = self.data.get_mut(&key) {
-                    e.remove(&value, &other.order, &mut index, timestamp);
+                    e.remove(&value, &mut index, timestamp);
                 }
             }
             Operation::AddRange(range) => self.data.add_range(range),

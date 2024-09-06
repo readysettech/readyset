@@ -49,7 +49,6 @@ impl Metrics {
 #[derive(Clone)]
 pub struct Values<T, I> {
     values: ValuesInner<T>,
-    #[allow(dead_code)]
     order: Option<I>,
     eviction_meta: EvictionMeta,
     metrics: Metrics,
@@ -141,13 +140,13 @@ where
         &self.eviction_meta
     }
 
-    fn find(&self, value: &T, order: &Option<I>, cache: &mut Option<usize>, insert: bool)
+    fn find(&self, value: &T, cache: &mut Option<usize>, insert: bool)
     where
         T: Ord + Clone,
     {
         let i = if let Some(cache) = cache {
             Ok(*cache) // cached from first time
-        } else if let Some(order) = order {
+        } else if let Some(order) = &self.order {
             match self.values {
                 ValuesInner::SmallVec(ref v) => v.binary_search_by(|x| order.cmp(x, value)),
             }
@@ -183,18 +182,13 @@ where
 
     /// Inserts an element at position index within the vector, shifting all elements after it to
     /// the right.
-    pub(crate) fn insert(
-        &mut self,
-        value: T,
-        order: &Option<I>,
-        index: &mut Option<usize>,
-        timestamp: Instant,
-    ) where
+    pub(crate) fn insert(&mut self, value: T, index: &mut Option<usize>, timestamp: Instant)
+    where
         T: Ord + Clone,
     {
         // Always insert values in sorted order, even if no ordering method is provided,
         // otherwise it will require a linear scan to remove a value
-        self.find(&value, order, index, true);
+        self.find(&value, index, true);
         match self.values {
             ValuesInner::SmallVec(ref mut v) => Arc::make_mut(v).insert(index.unwrap(), value),
         }
@@ -206,16 +200,11 @@ where
     ///
     /// Note: Because this shifts over the remaining elements, it has a worst-case
     /// performance of O(n).
-    pub(crate) fn remove(
-        &mut self,
-        value: &T,
-        order: &Option<I>,
-        index: &mut Option<usize>,
-        timestamp: Instant,
-    ) where
+    pub(crate) fn remove(&mut self, value: &T, index: &mut Option<usize>, timestamp: Instant)
+    where
         T: Ord + Clone,
     {
-        self.find(value, order, index, false);
+        self.find(value, index, false);
         if let Some(index) = *index {
             match self.values {
                 ValuesInner::SmallVec(ref mut v) => Arc::make_mut(v).remove(index),
@@ -295,12 +284,7 @@ mod tests {
         let values = 0..1000;
         let len = values.clone().count();
         for (i, e) in values.clone().enumerate() {
-            v.insert(
-                e,
-                &None::<DefaultInsertionOrder>,
-                &mut Some(i),
-                Instant::now(),
-            );
+            v.insert(e, &mut Some(i), Instant::now());
         }
 
         for i in values.clone() {
