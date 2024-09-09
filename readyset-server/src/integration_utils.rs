@@ -109,6 +109,7 @@ pub async fn build_custom(
     builder.set_allow_paginate(true);
     builder.set_allow_mixed_comparisons(true);
     builder.set_allow_straddled_joins(true);
+    builder.set_view_request_timeout(Duration::from_secs(10));
 
     if reader_only {
         builder.as_reader_only();
