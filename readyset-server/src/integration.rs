@@ -7835,7 +7835,7 @@ async fn aggressive_eviction_setup() -> (crate::Handle, ShutdownSender) {
     let (mut g, shutdown_tx) = build(
         "aggressive_eviction",
         None,
-        Some((15000, Duration::from_millis(20))),
+        Some((15000, Duration::from_millis(100))),
     )
     .await;
 
