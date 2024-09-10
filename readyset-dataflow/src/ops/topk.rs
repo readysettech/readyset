@@ -2,8 +2,6 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};
 use std::convert::TryInto;
-use std::mem;
-use std::num::NonZeroUsize;
 
 use dataflow_state::PointKey;
 use itertools::Itertools;
@@ -141,54 +139,47 @@ impl TopK {
         let mut lookup = None;
         let group_start_index = current.len().saturating_sub(self.k);
 
-        if original_group_len == self.k {
-            if let Some(diff) = original_group_len
-                .checked_sub(current.len())
-                .and_then(NonZeroUsize::new)
-            {
-                // there used to be k things in the group, now there are fewer than k.
-                match self.lookup(
-                    *self.src,
-                    &self.group_by,
-                    &PointKey::from(current_group_key.iter().cloned()),
-                    nodes,
-                    state,
-                    LookupMode::Strict,
-                )? {
-                    IngredientLookupResult::Miss => {
-                        internal!(
-                            "We shouldn't have been able to get this record if the parent would miss"
-                        )
-                    }
-                    IngredientLookupResult::Records(rs) => {
-                        let mut rs = rs.collect::<Result<Vec<_>, _>>()?;
-                        rs.sort_unstable_by(|a, b| {
-                            self.order.cmp(a.as_ref(), b.as_ref()).reverse()
-                        });
-                        current.extend(
-                            rs.into_iter()
-                                .map(|row| CurrentRecord {
-                                    row,
-                                    order: &self.order,
-                                    is_new: true,
-                                })
-                                .skip(current.len())
-                                .take(diff.get()),
-                        );
-                        lookup = Some(Lookup {
-                            on: *self.src,
-                            cols: self.group_by.clone(),
-                            key: current_group_key.to_vec().try_into().expect("Empty group"),
-                        })
-                    }
+        if original_group_len >= self.k && current.len() < self.k {
+            let diff = self.k - current.len();
+
+            // there used to be k things in the group, now there are fewer than k.
+            match self.lookup(
+                *self.src,
+                &self.group_by,
+                &PointKey::from(current_group_key.iter().cloned()),
+                nodes,
+                state,
+                LookupMode::Strict,
+            )? {
+                IngredientLookupResult::Miss => {
+                    internal!(
+                        "We shouldn't have been able to get this record if the parent would miss"
+                    )
+                }
+                IngredientLookupResult::Records(rs) => {
+                    let mut rs = rs.collect::<Result<Vec<_>, _>>()?;
+                    rs.sort_unstable_by(|a, b| self.order.cmp(a.as_ref(), b.as_ref()).reverse());
+                    current.extend(
+                        rs.into_iter()
+                            .map(|row| CurrentRecord {
+                                row,
+                                order: &self.order,
+                                is_new: true,
+                            })
+                            .skip(current.len())
+                            .take(diff),
+                    );
+                    lookup = Some(Lookup {
+                        on: *self.src,
+                        cols: self.group_by.clone(),
+                        key: current_group_key.to_vec().try_into().expect("Empty group"),
+                    })
                 }
             }
         }
 
-        let mut current = mem::take(current).into_sorted_vec();
-        // TODO(aspen): it'd be nice to skip this reverse - we could maybe do that with minmaxheap
-        // if they merge my addition of retain (https://github.com/tov/min-max-heap-rs/pull/19)
-        current.reverse();
+        let mut current = current.drain().collect::<Vec<_>>();
+        current.sort_by(|a, b| a.cmp(b).reverse());
 
         // optimization: if we don't *have to* remove something, we don't
         for i in group_start_index..current.len() {
@@ -245,7 +236,7 @@ impl Ingredient for TopK {
     fn on_input(
         &mut self,
         from: LocalNodeIndex,
-        rs: Records,
+        mut rs: Records,
         replay: &ReplayContext,
         nodes: &DomainNodes,
         state: &StateMap,
@@ -263,7 +254,6 @@ impl Ingredient for TopK {
         // First, we want to be smart about multiple added/removed rows with same group.
         // For example, if we get a -, then a +, for the same group, we don't want to
         // execute two queries. We'll do this by sorting the batch by our group by.
-        let mut rs: Vec<_> = rs.into();
         rs.sort_by(|a: &Record, b: &Record| {
             self.project_group(&***a)
                 .unwrap_or_default()
