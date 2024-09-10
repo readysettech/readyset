@@ -23,16 +23,20 @@ use serial_test::serial;
 use test_strategy::proptest;
 use test_utils::slow;
 
-fn round_trip_mysql_type(sql_type: SqlType, value: Value) {
+fn round_trip_mysql_type(sql_type: SqlType, initial_val: Value, updated_val: Value) {
     readyset_tracing::init_test_logging();
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .unwrap()
-        .block_on(round_trip_mysql_type_inner(sql_type, value))
+        .block_on(round_trip_mysql_type_inner(
+            sql_type,
+            initial_val,
+            updated_val,
+        ))
 }
 
-async fn round_trip_mysql_type_inner(sql_type: SqlType, value: Value) {
+async fn round_trip_mysql_type_inner(sql_type: SqlType, initial_val: Value, updated_val: Value) {
     let upstream_opts = mysql_helpers::upstream_config().db_name(Some("round_trip_mysql_types"));
     mysql_helpers::recreate_database("round_trip_mysql_types").await;
 
@@ -51,7 +55,7 @@ async fn round_trip_mysql_type_inner(sql_type: SqlType, value: Value) {
     upstream_conn
         .exec_drop(
             "INSERT INTO snapshot (value) VALUES (?)",
-            Params::from(vec![&value]),
+            Params::from(vec![&initial_val]),
         )
         .await
         .unwrap();
@@ -61,7 +65,7 @@ async fn round_trip_mysql_type_inner(sql_type: SqlType, value: Value) {
     let upstream_rows: Vec<Row> = upstream_conn
         .exec(
             "SELECT * FROM snapshot WHERE value = ?",
-            Params::from(vec![&value]),
+            Params::from(vec![&initial_val]),
         )
         .await
         .unwrap();
@@ -92,10 +96,9 @@ async fn round_trip_mysql_type_inner(sql_type: SqlType, value: Value) {
             )
             .await
             .unwrap();
-        AssertUnwindSafe(move || rs_rows)
-    }, then_assert: |results| {
-        let rs_rows = results();
-        assert_eq!(&rs_rows[0][0], upstream_val);
+        AssertUnwindSafe(move || rs_rows[0][0].clone())
+    }, then_assert: |result| {
+        assert_eq!(result(), *upstream_val);
     });
 
     // Replicate & check result
@@ -109,20 +112,20 @@ async fn round_trip_mysql_type_inner(sql_type: SqlType, value: Value) {
     upstream_conn
         .exec_drop(
             "INSERT INTO replicate (value) VALUES (?)",
-            Params::from(vec![&value]),
+            Params::from(vec![&initial_val]),
         )
         .await
         .unwrap();
     let replicated_upstream_rows: Vec<Row> = upstream_conn
         .exec(
             "SELECT * FROM replicate WHERE value = ?",
-            Params::from(vec![&value]),
+            Params::from(vec![&initial_val]),
         )
         .await
         .unwrap();
 
-    let replicated_upstream_val = &replicated_upstream_rows[0][0];
-    assert_eq!(replicated_upstream_val, upstream_val);
+    // snapshot and replicate should match
+    assert_eq!(&replicated_upstream_rows[0][0], upstream_val);
 
     // Check the result of streaming replication on Readyset
     eventually!(attempts: 5, run_test: {
@@ -133,10 +136,81 @@ async fn round_trip_mysql_type_inner(sql_type: SqlType, value: Value) {
             )
             .await
             .unwrap();
-        AssertUnwindSafe(move || replicated_rs_rows)
-    }, then_assert: |results| {
-        let replicated_rs_rows = results();
-        assert_eq!(&replicated_rs_rows[0][0], upstream_val);
+        AssertUnwindSafe(move || replicated_rs_rows[0][0].clone())
+    }, then_assert: |result| {
+        assert_eq!(result(), *upstream_val);
+    });
+
+    // Check we can match the old row when updating the snapshotted value
+    upstream_conn
+        .exec_drop(
+            "UPDATE snapshot SET value = ? WHERE value = ?",
+            Params::from(vec![&updated_val, &upstream_val]),
+        )
+        .await
+        .unwrap();
+    let updated_upstream_rows: Vec<Row> = upstream_conn
+        .exec(
+            "SELECT * FROM snapshot WHERE value = ?",
+            Params::from(vec![&updated_val]),
+        )
+        .await
+        .unwrap();
+
+    // Not all values work for lookups; e.g. spaces in a CHAR column.
+    if updated_upstream_rows.is_empty() {
+        return;
+    }
+    let updated_upstream_val = &updated_upstream_rows[0][0];
+
+    // Check the update propogated through Readyset
+    eventually!(attempts: 5, run_test: {
+        let updated_rs_rows: Vec<Row> = rs_conn
+            .exec(
+                "SELECT * FROM snapshot WHERE value = ?",
+                Params::from(vec![updated_upstream_val]),
+            )
+            .await
+            .unwrap();
+        AssertUnwindSafe(move || updated_rs_rows[0][0].clone())
+    }, then_assert: |result| {
+        assert_eq!(result(), *updated_upstream_val);
+    });
+
+    // Check we can match the replicated value when updating via streaming replication
+    upstream_conn
+        .exec_drop(
+            "UPDATE replicate SET value = ? WHERE value = ?",
+            Params::from(vec![&updated_val, &upstream_val]),
+        )
+        .await
+        .unwrap();
+    let updated_replicated_upstream_rows: Vec<Row> = upstream_conn
+        .exec(
+            "SELECT * FROM replicate WHERE value = ?",
+            Params::from(vec![&updated_val]),
+        )
+        .await
+        .unwrap();
+
+    // snapshot and replicate should match after updating
+    assert_eq!(
+        &updated_replicated_upstream_rows[0][0],
+        updated_upstream_val
+    );
+
+    // Check the update propogated through Readyset
+    eventually!(attempts: 5, run_test: {
+        let updated_rs_rows: Vec<Row> = rs_conn
+            .exec(
+                "SELECT * FROM replicate WHERE value = ?",
+                Params::from(vec![updated_upstream_val]),
+            )
+            .await
+            .unwrap();
+        AssertUnwindSafe(move || updated_rs_rows[0][0].clone())
+    }, then_assert: |result| {
+        assert_eq!(result(), *updated_upstream_val);
     });
 
     shutdown_tx.shutdown().await;
@@ -254,9 +328,10 @@ fn round_trip_mysql_type_arbitrary(
         generate_other: false,
     }))]
     sql_type: SqlType,
-    #[strategy(arbitrary_mysql_value_for_type(#sql_type))] value: Value,
+    #[strategy(arbitrary_mysql_value_for_type(#sql_type))] initial_val: Value,
+    #[strategy(arbitrary_mysql_value_for_type(#sql_type))] updated_val: Value,
 ) {
-    round_trip_mysql_type(sql_type, value)
+    round_trip_mysql_type(sql_type, initial_val, updated_val)
 }
 
 #[proptest(ProptestConfig::default(), max_shrink_time = 120_000)]
@@ -266,9 +341,10 @@ fn round_trip_mysql_type_arbitrary(
 fn round_trip_mysql_type_arbitrary_enum(
     #[strategy(EnumVariants::arbitrary_with(("\\PC{0,255}", size_range(1..100))).prop_map(|variants| SqlType::Enum(variants)))]
     sql_type: SqlType,
-    #[strategy(arbitrary_mysql_value_for_type(#sql_type))] value: Value,
+    #[strategy(arbitrary_mysql_value_for_type(#sql_type))] initial_val: Value,
+    #[strategy(arbitrary_mysql_value_for_type(#sql_type))] updated_val: Value,
 ) {
-    round_trip_mysql_type(sql_type, value)
+    round_trip_mysql_type(sql_type, initial_val, updated_val)
 }
 
 #[test]
@@ -278,6 +354,7 @@ fn round_trip_mysql_type_regressions_enum() {
     round_trip_mysql_type(
         SqlType::from_enum_variants(["foo".into(), "bar".into()]),
         Value::Bytes("foo".as_bytes().to_vec()),
+        Value::Bytes("bar".as_bytes().to_vec()),
     );
 }
 
@@ -285,126 +362,182 @@ fn round_trip_mysql_type_regressions_enum() {
 #[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_tinyint_positive() {
-    round_trip_mysql_type(SqlType::TinyInt(None), Value::Int(1));
+    round_trip_mysql_type(SqlType::TinyInt(None), Value::Int(1), Value::Int(2));
 }
 
 #[test]
 #[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_tinyint_negative() {
-    round_trip_mysql_type(SqlType::TinyInt(None), Value::Int(-1));
+    round_trip_mysql_type(SqlType::TinyInt(None), Value::Int(-1), Value::Int(-2));
 }
 
 #[test]
 #[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_mediumint_positive() {
-    round_trip_mysql_type(SqlType::MediumInt(None), Value::Int(1));
+    round_trip_mysql_type(SqlType::MediumInt(None), Value::Int(1), Value::Int(2));
 }
 
 #[test]
 #[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_mediumint_unsigned_positive() {
-    round_trip_mysql_type(SqlType::UnsignedMediumInt(None), Value::UInt(1));
+    round_trip_mysql_type(
+        SqlType::UnsignedMediumInt(None),
+        Value::UInt(1),
+        Value::UInt(2),
+    );
 }
 
 #[test]
 #[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_mediumint_negative() {
-    round_trip_mysql_type(SqlType::MediumInt(None), Value::Int(-1));
+    round_trip_mysql_type(SqlType::MediumInt(None), Value::Int(-1), Value::Int(-2));
 }
 
 #[test]
 #[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_mediumint_unsigned_positive_large_sending_signed() {
-    round_trip_mysql_type(SqlType::UnsignedMediumInt(None), Value::Int(8388608));
+    round_trip_mysql_type(
+        SqlType::UnsignedMediumInt(None),
+        Value::Int(8388608),
+        Value::Int(8388609),
+    );
 }
 
 #[test]
 #[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_mediumint_unsigned_positive_large_sending_unsigned() {
-    round_trip_mysql_type(SqlType::UnsignedMediumInt(None), Value::UInt(8388608));
+    round_trip_mysql_type(
+        SqlType::UnsignedMediumInt(None),
+        Value::UInt(8388608),
+        Value::UInt(8388609),
+    );
 }
 
 #[test]
 #[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_decimal() {
-    round_trip_mysql_type(SqlType::Decimal(10, 5), Value::Bytes("-0.5".into()));
+    round_trip_mysql_type(
+        SqlType::Decimal(10, 5),
+        Value::Bytes("-0.5".into()),
+        Value::Bytes("-0.6".into()),
+    );
 }
 
 #[test]
 #[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_decimal_no_preceding_digits() {
-    round_trip_mysql_type(SqlType::Decimal(10, 5), Value::Bytes(".5".into()));
+    round_trip_mysql_type(
+        SqlType::Decimal(10, 5),
+        Value::Bytes(".5".into()),
+        Value::Bytes(".6".into()),
+    );
 }
 
 #[test]
 #[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_decimal_no_preceding_digits_negative() {
-    round_trip_mysql_type(SqlType::Decimal(10, 5), Value::Bytes("-.5".into()));
+    round_trip_mysql_type(
+        SqlType::Decimal(10, 5),
+        Value::Bytes("-.5".into()),
+        Value::Bytes("-.6".into()),
+    );
 }
 
 #[test]
 #[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_char_zero_length() {
-    round_trip_mysql_type(SqlType::Char(Some(0)), Value::Bytes("".into()));
+    round_trip_mysql_type(
+        SqlType::Char(Some(0)),
+        Value::Bytes("".into()),
+        Value::Bytes("".into()),
+    );
 }
 
 #[test]
 #[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_char_1_length_empty() {
-    round_trip_mysql_type(SqlType::Char(Some(1)), Value::Bytes("".into()));
+    round_trip_mysql_type(
+        SqlType::Char(Some(1)),
+        Value::Bytes("".into()),
+        Value::Bytes("".into()),
+    );
 }
 
 #[test]
 #[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_char_64_length_empty() {
-    round_trip_mysql_type(SqlType::Char(Some(64)), Value::Bytes("".into()))
+    round_trip_mysql_type(
+        SqlType::Char(Some(64)),
+        Value::Bytes("".into()),
+        Value::Bytes("".into()),
+    )
 }
 
 #[test]
 #[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_char_63_length_empty() {
-    round_trip_mysql_type(SqlType::Char(Some(63)), Value::Bytes("".into()))
+    round_trip_mysql_type(
+        SqlType::Char(Some(63)),
+        Value::Bytes("".into()),
+        Value::Bytes("".into()),
+    )
 }
 
 #[test]
 #[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_char_46_length_nonempty() {
-    round_trip_mysql_type(SqlType::Char(Some(46)), Value::Bytes("d".into()));
+    round_trip_mysql_type(
+        SqlType::Char(Some(46)),
+        Value::Bytes("d".into()),
+        Value::Bytes("e".into()),
+    );
 }
 
 #[test]
 #[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_char_255_length_empty() {
-    round_trip_mysql_type(SqlType::Char(Some(255)), Value::Bytes("".into()))
+    round_trip_mysql_type(
+        SqlType::Char(Some(255)),
+        Value::Bytes("".into()),
+        Value::Bytes("".into()),
+    )
 }
 
 #[test]
 #[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_char_64_length_nonempty() {
-    round_trip_mysql_type(SqlType::Char(Some(64)), Value::Bytes("d".into()))
+    round_trip_mysql_type(
+        SqlType::Char(Some(64)),
+        Value::Bytes("d".into()),
+        Value::Bytes("e".into()),
+    )
 }
 
 #[test]
 #[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_char_255_length_nonempty() {
-    round_trip_mysql_type(SqlType::Char(Some(255)), Value::Bytes("d".into()))
+    round_trip_mysql_type(
+        SqlType::Char(Some(255)),
+        Value::Bytes("d".into()),
+        Value::Bytes("e".into()),
+    )
 }
 
 #[test]
@@ -414,6 +547,7 @@ fn round_trip_mysql_type_regressions_bigint_high() {
     round_trip_mysql_type(
         SqlType::UnsignedBigInt(None),
         Value::UInt(9223372036854775808),
+        Value::UInt(9223372036854775809),
     )
 }
 
@@ -421,60 +555,92 @@ fn round_trip_mysql_type_regressions_bigint_high() {
 #[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_date() {
-    round_trip_mysql_type(SqlType::Date, Value::Date(2024, 2, 4, 0, 0, 0, 0))
+    round_trip_mysql_type(
+        SqlType::Date,
+        Value::Date(2024, 2, 4, 0, 0, 0, 0),
+        Value::Date(2024, 2, 5, 0, 0, 0, 0),
+    )
 }
 
 #[test]
 #[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_date_zero() {
-    round_trip_mysql_type(SqlType::Date, Value::Date(0, 0, 0, 0, 0, 0, 0))
+    round_trip_mysql_type(
+        SqlType::Date,
+        Value::Date(0, 0, 0, 0, 0, 0, 0),
+        Value::Date(2024, 2, 4, 0, 0, 0, 0),
+    )
 }
 
 #[test]
 #[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_datetime() {
-    round_trip_mysql_type(SqlType::DateTime(None), Value::Date(2024, 2, 4, 0, 0, 0, 0))
+    round_trip_mysql_type(
+        SqlType::DateTime(None),
+        Value::Date(2024, 2, 4, 0, 0, 0, 0),
+        Value::Date(2024, 2, 5, 0, 0, 0, 0),
+    )
 }
 
 #[test]
 #[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_datetime_zero() {
-    round_trip_mysql_type(SqlType::DateTime(None), Value::Date(0, 0, 0, 0, 0, 0, 0))
+    round_trip_mysql_type(
+        SqlType::DateTime(None),
+        Value::Date(0, 0, 0, 0, 0, 0, 0),
+        Value::Date(2024, 2, 4, 0, 0, 0, 0),
+    )
+}
+
+#[test]
+#[serial]
+#[slow]
+fn round_trip_mysql_type_regressions_timestamp() {
+    round_trip_mysql_type(
+        SqlType::Timestamp,
+        Value::Date(0, 0, 0, 0, 0, 0, 0),
+        Value::Date(2024, 2, 4, 0, 0, 0, 0),
+    )
 }
 
 #[test]
 #[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_timestamp_zero() {
-    round_trip_mysql_type(SqlType::Timestamp, Value::Date(0, 0, 0, 0, 0, 0, 0))
+    round_trip_mysql_type(
+        SqlType::Timestamp,
+        Value::Date(2024, 2, 4, 0, 0, 0, 0),
+        Value::Date(2024, 2, 5, 0, 0, 0, 0),
+    )
 }
 
 #[test]
 #[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_bool_one_unsigned() {
-    round_trip_mysql_type(SqlType::Bool, Value::UInt(1))
+    round_trip_mysql_type(SqlType::Bool, Value::UInt(1), Value::UInt(0))
 }
 
 #[test]
 #[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_bool_one_signed() {
-    round_trip_mysql_type(SqlType::Bool, Value::Int(1))
+    round_trip_mysql_type(SqlType::Bool, Value::Int(1), Value::Int(0))
 }
 
 #[test]
 #[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_bool_zero_unsigned() {
-    round_trip_mysql_type(SqlType::Bool, Value::UInt(0))
+    round_trip_mysql_type(SqlType::Bool, Value::UInt(0), Value::UInt(1))
 }
+
 #[test]
 #[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_bool_zero_signed() {
-    round_trip_mysql_type(SqlType::Bool, Value::Int(0))
+    round_trip_mysql_type(SqlType::Bool, Value::Int(0), Value::Int(1))
 }

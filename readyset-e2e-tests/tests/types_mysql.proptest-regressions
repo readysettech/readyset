@@ -8,3 +8,5 @@ cc 610e2880b439f1f684e43524f733032c9da4e6b633269c79cbfaa672a96044e0 # shrinks to
 cc b572a87e7b2cdfab1907a93b1200bbcc6b80e57718b4200da0a4f4d12750de1f # shrinks to input = _RoundTripMysqlTypeArgs { sql_type: Char(Some(46)), value: Bytes("\t\u{6381d}�..") }
 cc 4e0f39925c9753c1dcd83621b03c4549ebe26d41f343ae2980fc167e43fbf283 # shrinks to input = _RoundTripMysqlTypeArbitraryArgs { sql_type: MediumInt(None), value: Int(-13526) }
 cc 60a2be5a4cfbeeb413a85a646f7e5a49efc8167846f5301ec7135038743f54f1 # shrinks to input = _RoundTripMysqlTypeArbitraryArgs { sql_type: UnsignedMediumInt(None), value: UInt(8388608) }
+cc 6c0544dda39e7053c05310fb0ac78a30342bd4b81e2a075f3382804875f9f410 # shrinks to input = _RoundTripMysqlTypeArbitraryArgs { sql_type: DateTime(Some(2)), initial_val: Bytes("1000-01-.."), updated_val: Bytes("1000-01-..") }
+cc b16085b32116e7b4c19ab6cf4aca0d84450a93b6c4342adb38dc1c4ae1603b1f # shrinks to input = _RoundTripMysqlTypeArbitraryArgs { sql_type: Real, initial_val: Double(0.0), updated_val: Double(2.3430450331584184e135) }
