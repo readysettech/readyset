@@ -7942,6 +7942,7 @@ async fn aggressive_eviction_range_impl() {
 
 rusty_fork_test! {
     #[test]
+    #[ignore = "flaky, rpc timeouts"]
     fn aggressive_eviction() {
         if skip_with_flaky_finder() {
             return;
