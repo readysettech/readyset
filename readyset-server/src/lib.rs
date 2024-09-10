@@ -664,8 +664,7 @@ pub struct WorkerOptions {
     )]
     enable_experimental_paginate_support: bool,
 
-    /// Enable experimental support for mixing equality and inequality comparisons on query
-    /// parameters.
+    /// Enable experimental support for mixing equality and range comparisons on query parameters.
     // XXX JCD keep experimental features synchronized with experimental-features.json
     #[arg(
         long,

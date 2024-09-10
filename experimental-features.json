@@ -11,7 +11,7 @@
         "name": "Mixed Comparisons",
         "command-line": "--experimental-mixed-comparisons",
         "environment-variable": "EXPERIMENTAL_MIXED_COMPARISONS",
-        "description": "Enable experimental support for mixing equality and inequality comparisons on query parameters."
+        "description": "Enable experimental support for mixing equality and range comparisons on query parameters."
     },
     {
         "feature_id": "3",
