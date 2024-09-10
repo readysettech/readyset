@@ -340,6 +340,10 @@ impl TimestampTz {
             return self.date_as_int();
         }
 
+        if self.is_zero() {
+            return 0;
+        }
+
         let naive = self.to_chrono().naive_local();
         let date = naive.date();
         let time = naive.time();
@@ -363,6 +367,10 @@ impl TimestampTz {
     // +----------------------------------------------------------+
     // TODO: actually differentiate between date and datetime
     fn date_as_int(&self) -> i64 {
+        if self.is_zero() {
+            return 0;
+        }
+
         let date = self.to_chrono().naive_local().date();
 
         let year = date.year() as i64;
@@ -414,7 +422,11 @@ impl TimestampTz {
         match *to_ty {
             DfType::Timestamp { subsecond_digits } => {
                 // Conversion into timestamp without tz.
-                let mut ts: TimestampTz = self.to_chrono().naive_local().into();
+                let mut ts: TimestampTz = if self.is_zero() {
+                    Self::zero()
+                } else {
+                    self.to_chrono().naive_local().into()
+                };
                 ts.set_subsecond_digits(subsecond_digits as u8);
                 Ok(DfValue::TimestampTz(ts))
             }
@@ -431,19 +443,35 @@ impl TimestampTz {
                 ts.set_subsecond_digits(subsecond_digits as u8);
                 Ok(DfValue::TimestampTz(ts))
             }
-            DfType::Date => Ok(if self.has_timezone() {
-                let datetime = self.to_chrono();
-                let dd = datetime.timezone().from_utc_datetime(&NaiveDateTime::new(
-                    datetime.date_naive(),
-                    NaiveTime::from_hms_opt(0, 0, 0).unwrap(),
-                ));
-                DfValue::TimestampTz(dd.into())
-            } else {
-                DfValue::TimestampTz(self.to_chrono().date_naive().into())
-            }),
+            DfType::Date => {
+                let mut ts = if self.is_zero() {
+                    Self::zero()
+                } else if self.has_timezone() {
+                    let datetime = self.to_chrono();
+                    let dd = datetime.timezone().from_utc_datetime(&NaiveDateTime::new(
+                        datetime.date_naive(),
+                        NaiveTime::from_hms_opt(0, 0, 0).unwrap(),
+                    ));
+                    dd.into()
+                } else {
+                    self.to_chrono().date_naive().into()
+                };
+                ts.set_date_only();
+                Ok(DfValue::TimestampTz(ts))
+            }
 
             // TODO(ENG-1833): Use `subsecond_digits` value.
-            DfType::Time { .. } => Ok(self.to_chrono().naive_local().time().into()),
+            DfType::Time { .. } => Ok(if self.is_zero() {
+                NaiveTime::from_hms_opt(0, 0, 0)
+                    .ok_or_else(|| ReadySetError::DfValueConversionError {
+                        src_type: "DfValue::TimestampTz".to_string(),
+                        target_type: format!("{:?}", to_ty),
+                        details: "Unexpected error constructing 00:00:00 time".to_string(),
+                    })?
+                    .into()
+            } else {
+                self.to_chrono().naive_local().time().into()
+            }),
 
             DfType::BigInt => Ok(DfValue::Int(self.datetime_as_int())),
             DfType::UnsignedBigInt => Ok(DfValue::UnsignedInt(self.datetime_as_int() as _)),
@@ -474,6 +502,7 @@ impl TimestampTz {
             ))),
 
             DfType::Bool => Ok(DfValue::from(
+                // TODO(mvzink): This will never work as chrono does not support zero dates.
                 self.to_chrono().naive_local()
                     != NaiveDate::from_ymd_opt(0, 0, 0)
                         .unwrap()
@@ -528,7 +557,7 @@ impl TimestampTz {
 
 impl PartialEq for TimestampTz {
     fn eq(&self, other: &Self) -> bool {
-        self.to_chrono() == other.to_chrono()
+        (self.is_zero() && other.is_zero()) || self.to_chrono() == other.to_chrono()
     }
 }
 
@@ -548,6 +577,7 @@ impl Ord for TimestampTz {
 
 impl Hash for TimestampTz {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.is_zero().hash(state);
         self.to_chrono().hash(state)
     }
 }

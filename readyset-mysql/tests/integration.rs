@@ -2393,7 +2393,6 @@ async fn date_only_text_protocol() {
     let (rs_opts, _rs_handle, shutdown_tx) = TestBuilder::default()
         .recreate_database(false)
         .fallback(true)
-        .durability_mode(readyset_server::DurabilityMode::Permanent)
         .build::<MySQLAdapter>()
         .await;
 
