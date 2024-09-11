@@ -948,6 +948,7 @@ impl NoriaAdapter {
                 warn!(
                     table_name = %table.display(nom_sql::Dialect::PostgreSQL),
                     num_actions = actions.len(),
+                    position = %pos,
                     "Could not find table, discarding actions"
                 );
             }
