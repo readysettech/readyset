@@ -11,20 +11,26 @@ use mysql::binlog::events::{OptionalMetaExtractor, StatusVarVal};
 use mysql::binlog::jsonb::{self, JsonbToJsonError};
 use mysql::prelude::Queryable;
 use mysql_async as mysql;
-use mysql_common::binlog;
+use mysql_common::binlog::jsonb::{
+    Array, ComplexValue, Large, Object, OpaqueValue, Small, StorageFormat,
+};
 use mysql_common::binlog::row::BinlogRow;
 use mysql_common::binlog::value::BinlogValue;
+use mysql_common::constants::ColumnType;
+use mysql_common::{binlog, Value};
+use rust_decimal::Decimal;
+use serde_json::Map;
+use tracing::{error, info, warn};
+
 use nom_sql::{NonReplicatedRelation, Relation, SqlIdentifier};
 use readyset_client::metrics::recorded;
 use readyset_client::recipe::changelist::Change;
 use readyset_client::recipe::ChangeList;
 use readyset_client::TableOperation;
 use readyset_data::{DfValue, Dialect, TimestampTz};
-use readyset_errors::{internal, internal_err, ReadySetError, ReadySetResult};
+use readyset_errors::{internal, internal_err, unsupported_err, ReadySetError, ReadySetResult};
 use replication_offset::mysql::MySqlPosition;
 use replication_offset::ReplicationOffset;
-use rust_decimal::Decimal;
-use tracing::{error, info, warn};
 
 use crate::mysql_connector::utils::mysql_pad_collation_column;
 use crate::noria_adapter::{Connector, ReplicationAction};
@@ -1068,6 +1074,176 @@ fn binlog_val_to_noria_val(
     }
 }
 
+fn binlog_to_serde_object<T>(v: &ComplexValue<T, Object>) -> mysql::Result<serde_json::Value>
+where
+    T: StorageFormat,
+{
+    let mut serde_map: Map<String, serde_json::value::Value> =
+        Map::with_capacity(v.element_count() as usize);
+    for e in v.iter() {
+        let (key, val) = e?;
+        serde_map.insert(key.value().into(), binlog_to_serde_jsonb_value(&val)?);
+    }
+    Ok(serde_json::Value::Object(serde_map))
+}
+
+fn binlog_to_serde_array<T>(v: &ComplexValue<T, Array>) -> mysql::Result<serde_json::Value>
+where
+    T: StorageFormat,
+{
+    let mut serde_array: Vec<serde_json::value::Value> =
+        Vec::with_capacity(v.element_count() as usize);
+    for e in v.iter() {
+        serde_array.push(binlog_to_serde_jsonb_value(&e?)?);
+    }
+    Ok(serde_json::Value::Array(serde_array))
+}
+
+fn string_to_serde_value(s: &str) -> mysql::Result<serde_json::Value> {
+    serde_json::from_str::<serde_json::Value>(s)
+        .map_err(|e| mysql_async::Error::Other(Box::new(internal_err!("{e}"))))
+}
+
+fn slice_to_8bytes_array(data: &[u8]) -> [u8; 8] {
+    let len = data.len();
+    if len == 8 {
+        data.try_into().unwrap()
+    } else {
+        let mut bytes = [0u8; 8];
+        bytes[..len].copy_from_slice(&data[..len]);
+        bytes
+    }
+}
+
+/*
+ *  This method reads binary opaque value of a temporal type into a packed i64,
+ *  which should be unpacked with appropriate binlog::misc::* function into
+ *  mysql_common::value::Value::{Date, Time}.
+ *
+ *  Note, even there are functions: binlog::misc::{
+ *      my_datetime_packed_from_binary,
+ *      my_timestamp_from_binary,
+ *      my_time_packed_from_binary
+ *  }, we can not use them, b/c actual MySQL code which reads binary
+ *  opaque values for temporal types, DOES NOT MATCH the above functions implementation.
+ *
+ *  The binlog::mics::* functions ALWAYS read the input as BigEndian, no matter what platform is,
+ *  as two blocks of 5 bytes and the residual upto 3 bytes respectively,
+ *  combining the result into i64 value.
+ *
+ *  The MySQL implementation, ALWAYS reads 8 bytes, based on the platform endianness, without
+ *  any post-read modifications. MySQL reads it equally for all temporal data types.
+ *
+ *  TO BE INVESTIGATED:
+ *  Logically, the opaque bytes must be read with the same endianness it were written with,
+ *  and not just according to the reading platform endianness. Though, the MySQL source code
+ *  seems to read it just according to the run-time platform's endianness.
+ *
+ *  MySQL source code github references:
+ *
+ *  Main function "json_binary_to_dom_template", #689:
+ *  https://github.com/mysql/mysql-server/blob/mysql-8.0.39/sql-common/json_dom.cc#L712
+ *
+ *  Function, which reads from binary for all temporal types, #1242:
+ *  https://github.com/mysql/mysql-server/blob/mysql-8.0.39/sql-common/json_dom.cc#L1242
+ *
+ *  void Json_datetime::from_packed(const char *from, enum_field_types ft, MYSQL_TIME *to) {
+ *       TIME_from_longlong_packed(to, ft, sint8korr(from));
+ *  }
+ *
+ *  This function is called for all temporal types, and it always reads full 8 bytes via
+ *  "sint8korr" function.  The further browsing shows, the "sint8korr" function calls either
+ *  BigEndian, or  LittleEndian implementation, based  on the platform config:
+ *  https://github.com/mysql/mysql-server/blob/596f0d238489a9cf9f43ce1ff905984f58d227b6/include/my_byteorder.h#L167
+ */
+fn temporal_packed_from_binary(data: &[u8]) -> i64 {
+    if cfg!(target_endian = "little") {
+        u64::from_le_bytes(slice_to_8bytes_array(data)) as i64
+    } else if cfg!(target_endian = "big") {
+        u64::from_be_bytes(slice_to_8bytes_array(data)) as i64
+    } else {
+        panic!("Unknown endianness.");
+    }
+}
+
+fn mysql_common_value_to_json_string(val: &mysql_common::value::Value) -> String {
+    match *val {
+        Value::Date(y, m, d, 0, 0, 0, 0) => format!("\"{:04}-{:02}-{:02}\"", y, m, d),
+        Value::Date(year, month, day, hour, minute, second, micros) => format!(
+            "\"{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:06}\"",
+            year, month, day, hour, minute, second, micros
+        ),
+        Value::Time(neg, d, h, i, s, u) => {
+            assert_eq!(d, 0);
+            if neg {
+                format!("\"-{:02}:{:02}:{:02}.{:06}\"", u32::from(h), i, s, u)
+            } else {
+                format!("\"{:02}:{:02}:{:02}.{:06}\"", u32::from(h), i, s, u)
+            }
+        }
+        _ => val.as_sql(true),
+    }
+}
+
+fn binary_temporal_to_serde_value(
+    data: &[u8],
+    temporal_from_packed_func: fn(i64) -> mysql_common::value::Value,
+) -> mysql::Result<serde_json::Value> {
+    let packed = temporal_packed_from_binary(data);
+    let val = temporal_from_packed_func(packed);
+    string_to_serde_value(&mysql_common_value_to_json_string(&val)[..])
+}
+
+fn binlog_opaque_to_serde_value(v: &OpaqueValue) -> mysql::Result<serde_json::Value> {
+    match v.value_type() {
+        ColumnType::MYSQL_TYPE_NEWDECIMAL => {
+            let data = v.data_raw();
+            let decimal = binlog::decimal::Decimal::read_bin(
+                &data[2..],
+                data[0] as usize,
+                data[1] as usize,
+                false,
+            )?;
+            string_to_serde_value(&decimal.to_string())
+        }
+
+        ColumnType::MYSQL_TYPE_TIME => {
+            binary_temporal_to_serde_value(v.data_raw(), binlog::misc::time_from_packed)
+        }
+
+        ColumnType::MYSQL_TYPE_DATETIME
+        | ColumnType::MYSQL_TYPE_TIMESTAMP
+        | ColumnType::MYSQL_TYPE_DATE => {
+            binary_temporal_to_serde_value(v.data_raw(), binlog::misc::datetime_from_packed)
+        }
+
+        _ => Err(mysql_async::Error::Other(Box::new(unsupported_err!(
+            "Can not handle opaque value for column type {:?}",
+            v.value_type()
+        )))),
+    }
+}
+
+fn binlog_to_serde_jsonb_value(binlog_val: &jsonb::Value) -> mysql::Result<serde_json::Value> {
+    match binlog_val {
+        jsonb::Value::Null => Ok(serde_json::Value::Null),
+        jsonb::Value::Bool(x) => Ok(serde_json::Value::Bool(*x)),
+        jsonb::Value::I16(x) => Ok((*x).into()),
+        jsonb::Value::U16(x) => Ok((*x).into()),
+        jsonb::Value::I32(x) => Ok((*x).into()),
+        jsonb::Value::U32(x) => Ok((*x).into()),
+        jsonb::Value::I64(x) => Ok((*x).into()),
+        jsonb::Value::U64(x) => Ok((*x).into()),
+        jsonb::Value::F64(x) => Ok((*x).into()),
+        jsonb::Value::String(x) => Ok(serde_json::Value::String(x.str().into())),
+        jsonb::Value::SmallArray(x) => binlog_to_serde_array::<Small>(x),
+        jsonb::Value::LargeArray(x) => binlog_to_serde_array::<Large>(x),
+        jsonb::Value::SmallObject(x) => binlog_to_serde_object::<Small>(x),
+        jsonb::Value::LargeObject(x) => binlog_to_serde_object::<Large>(x),
+        jsonb::Value::Opaque(x) => binlog_opaque_to_serde_value(x),
+    }
+}
+
 fn binlog_row_to_noria_row(
     binlog_row: &BinlogRow,
     tme: &binlog::events::TableMapEvent<'static>,
@@ -1112,20 +1288,9 @@ fn binlog_row_to_noria_row(
                     let json: Result<serde_json::Value, _> = val.clone().try_into(); // urgh no TryFrom impl
                     match json {
                         Ok(val) => Ok(DfValue::from(&val)),
-                        Err(JsonbToJsonError::Opaque) => match val {
-                            jsonb::Value::Opaque(opaque_val) => {
-                                // As far as I can *tell* Opaque is just a raw JSON string, which we
-                                // can just translate into a DfValue as JSON directly without going
-                                // through serde_json::Value first.
-                                Ok(DfValue::from(opaque_val.data().as_ref()))
-                            }
-                            _ => {
-                                #[allow(clippy::unreachable)] // actually unreachable
-                                {
-                                    unreachable!("Opaque error only returned for opaque values")
-                                }
-                            }
-                        },
+                        Err(JsonbToJsonError::Opaque) => {
+                            Ok(DfValue::from(&binlog_to_serde_jsonb_value(val)?))
+                        }
                         Err(JsonbToJsonError::InvalidUtf8(err)) => {
                             Err(mysql_async::Error::Other(Box::new(internal_err!("{err}"))))
                         }
