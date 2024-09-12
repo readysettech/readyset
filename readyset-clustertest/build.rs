@@ -2,6 +2,10 @@ use std::env;
 use std::path::Path;
 
 fn main() {
+    if env::var("CLIPPY_ARGS").is_ok() {
+        // running via cargo clippy; don't bother compiling test dependencies
+        return;
+    }
     env::set_current_dir(Path::new("..")).expect("failed to change path");
     let status = std::process::Command::new("cargo")
         .args([
