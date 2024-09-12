@@ -343,6 +343,7 @@ impl NoriaAdapter {
                 let replicator_opts: mysql_async::Opts =
                     OptsBuilder::from_opts(mysql_options.clone())
                         .pool_opts(pool_opts)
+                        .setup(vec!["SET SESSION sql_mode='ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION'".to_string()])
                         .into();
                 let pool = mysql::Pool::new(replicator_opts);
 
