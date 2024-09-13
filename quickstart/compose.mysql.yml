@@ -12,11 +12,10 @@ services:
     environment:
       RS_API_KEY: ${RS_API_KEY-""}
       DEPLOYMENT_ENV: quickstart_docker
-      DB_DIR: /state
+      STORAGE_DIR: /state
       PROMETHEUS_METRICS: true
       QUERY_LOG_MODE: verbose
       QUERY_CACHING: explicit
-      STANDALONE: true
       DEPLOYMENT: docker_compose_deployment
       LISTEN_ADDRESS: 0.0.0.0:3307
       # We don't have control over whether users are using a password or not for the
