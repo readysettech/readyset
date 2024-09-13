@@ -724,12 +724,8 @@ pub struct WorkerOptions {
 
     /// Directory in which to store replicated table data. If not specified, defaults to the
     /// current working directory.
-    #[arg(long, env = "STORAGE_DIR", conflicts_with = "db_dir")]
+    #[arg(long, env = "STORAGE_DIR")]
     storage_dir: Option<PathBuf>,
-
-    /// DEPRECATED: use `--storage-dir` instead.
-    #[arg(long, env = "DB_DIR", conflicts_with = "storage_dir", hide = true)]
-    db_dir: Option<PathBuf>,
 
     /// Directory in which to store temporary, working data. If not specified, defaults to a
     /// subdirectory within `storage_dir`.
@@ -800,9 +796,6 @@ impl WorkerOptions {
 
     pub fn storage_dir(&self) -> Option<PathBuf> {
         if let Some(s) = &self.storage_dir {
-            return Some(s.to_path_buf());
-        }
-        if let Some(s) = &self.db_dir {
             return Some(s.to_path_buf());
         }
         None
