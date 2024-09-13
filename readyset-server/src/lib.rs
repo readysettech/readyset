@@ -441,7 +441,6 @@ use anyhow::anyhow;
 use clap::Args;
 use dataflow::DomainConfig;
 use serde::{Deserialize, Serialize};
-use tracing::warn;
 
 /// Configuration for a running ReadySet cluster
 // WARNING: if you change this structure or any of the structures used in its fields, make sure to
@@ -807,30 +806,6 @@ impl WorkerOptions {
             return Some(s.to_path_buf());
         }
         None
-    }
-
-    pub fn warn_used_deprecated(&self) {
-        if self.allow_full_materialization {
-            warn!("Use of \"--allow-full-materialization\" is deprecated, please use \"--experimental-full-materialization\" instead");
-        }
-        if self.enable_experimental_mixed_comparisons {
-            warn!("Use of \"--enable-experimental-mixed-comparisons\" is deprecated, please use \"--experimental-mixed-comparisons\" instead");
-        }
-        if self.enable_experimental_paginate_support {
-            warn!("Use of \"--enable-experimental-paginate-support\" is deprecated, please use \"--experimental-pagination\" instead");
-        }
-        if self.enable_experimental_post_lookup {
-            warn!("Use of \"--enable-experimental-post-lookup\" is deprecated, please use \"--experimental-post-lookup\" instead");
-        }
-        if self.enable_experimental_straddled_joins {
-            warn!("Use of \"--enable-experimental-straddled-joins\" is deprecated, please use \"--experimental-straddled-joins\" instead");
-        }
-        if self.enable_experimental_topk_support {
-            warn!("Use of \"--enable-experimental-topk-support\" is deprecated, please use \"--experimental-topk\" instead");
-        }
-        if self.db_dir.is_some() {
-            warn!("Use of \"--db-dir\" is deprecated, please use \"--storage-dir\" instead");
-        }
     }
 
     pub fn working_dir(&self) -> Option<PathBuf> {
