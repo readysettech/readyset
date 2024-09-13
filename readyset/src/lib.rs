@@ -517,16 +517,6 @@ impl Options {
             self.deployment_mode
         }
     }
-
-    fn warn_used_deprecated(&self) {
-        if self.standalone {
-            warn!("Use of \"--standalone\" is deprecated, please use \"--deployment-mode standalone\" instead");
-        }
-        if self.embedded_readers {
-            warn!("Use of \"--embedded-readers\" is deprecated, please use \"--deployment-mode embedded-readers\" instead");
-        }
-        self.server_worker_options.warn_used_deprecated();
-    }
 }
 
 async fn connect_upstream<U>(
@@ -624,7 +614,6 @@ where
         let _guard =
             rt.block_on(async { options.tracing.init("adapter", options.deployment.as_ref()) })?;
         info!(?options, "Starting ReadySet adapter");
-        options.warn_used_deprecated();
 
         let deployment_mode = options.deployment_mode();
         if deployment_mode.is_standalone() {
