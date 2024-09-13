@@ -869,7 +869,7 @@ mod tests {
         assert_eq!(roundtripped, input);
     }
 
-    /// Test the backward compatibiliy of storage dir (latest) vs db dir (old)
+    /// Test setting the storage directory
     #[test]
     fn storage_and_db_dirs() {
         // test the unset variant
@@ -880,10 +880,5 @@ mod tests {
         let storage_dir = "/tmp/cli-flag-storage";
         let worker_opts = Wrapper::parse_from(["test", "--storage-dir", storage_dir]).worker_opts;
         assert_eq!(Some(PathBuf::from(storage_dir)), worker_opts.storage_dir());
-
-        // the test the --db-dir cli flag
-        let db_dir = "/tmp/cli-flag-db";
-        let worker_opts = Wrapper::parse_from(["test", "--db-dir", db_dir]).worker_opts;
-        assert_eq!(Some(PathBuf::from(db_dir)), worker_opts.storage_dir());
     }
 }

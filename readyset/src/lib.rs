@@ -1492,24 +1492,6 @@ mod tests {
 
     #[test]
     fn infer_deployment_mode() {
-        // test --standalone flag
-        let opts = Options::parse_from(vec![
-            "readyset",
-            "--standalone",
-            "--upstream-db-url",
-            "postgresql://root:password@db/readyset",
-        ]);
-        assert_eq!(DeploymentMode::Standalone, opts.deployment_mode());
-
-        // test --embedded-readers flag
-        let opts = Options::parse_from(vec![
-            "readyset",
-            "--embedded-readers",
-            "--upstream-db-url",
-            "postgresql://root:password@db/readyset",
-        ]);
-        assert_eq!(DeploymentMode::EmbeddedReaders, opts.deployment_mode());
-
         // test --deployment-mode flag
         let opts = Options::parse_from(vec![
             "readyset",
