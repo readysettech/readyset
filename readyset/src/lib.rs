@@ -712,11 +712,11 @@ where
         let migration_request_timeout = options.migration_request_timeout_ms;
         let controller_request_timeout = options.controller_request_timeout_ms;
         let adapter_rewrite_params = AdapterRewriteParams {
-            server_supports_pagination: options.server_worker_options.experimental_topk()
-                && options.server_worker_options.experimental_pagination(),
+            server_supports_pagination: options.server_worker_options.experimental_topk
+                && options.server_worker_options.experimental_pagination,
             server_supports_mixed_comparisons: options
                 .server_worker_options
-                .experimental_mixed_comparisons(),
+                .experimental_mixed_comparisons,
         };
         let no_upstream_connections = options.no_upstream_connections;
 

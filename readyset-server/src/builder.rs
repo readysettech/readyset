@@ -75,7 +75,7 @@ impl Builder {
         if opts.no_partial {
             builder.disable_partial();
         }
-        if opts.experimental_full_materialization() {
+        if opts.experimental_full_materialization {
             builder.allow_full_materialization();
 
             builder.set_experimental_materialization_persistence(
@@ -90,11 +90,11 @@ impl Builder {
         // See `noria/server/src/controller/sql/serde.rs` for details.
         builder.set_reuse(None);
 
-        builder.set_allow_topk(opts.experimental_topk());
-        builder.set_allow_paginate(opts.experimental_pagination());
-        builder.set_allow_mixed_comparisons(opts.experimental_mixed_comparisons());
-        builder.set_allow_straddled_joins(opts.experimental_straddled_joins());
-        builder.set_allow_post_lookup(opts.experimental_post_lookup());
+        builder.set_allow_topk(opts.experimental_topk);
+        builder.set_allow_paginate(opts.experimental_pagination);
+        builder.set_allow_mixed_comparisons(opts.experimental_mixed_comparisons);
+        builder.set_allow_straddled_joins(opts.experimental_straddled_joins);
+        builder.set_allow_post_lookup(opts.experimental_post_lookup);
         builder.set_worker_timeout(Duration::from_secs(opts.worker_request_timeout_seconds));
         builder.set_background_recovery_interval(Duration::from_secs(
             opts.background_recovery_interval_seconds,
