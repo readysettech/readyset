@@ -390,8 +390,8 @@ pub struct Options {
     /// If set, we will create a cache with literals inlined in the unsupported placeholder
     /// positions every time the statement is executed with a new set of parameters.
     // XXX JCD keep features synchronized with readyset-features.json
-    #[arg(long, env = "EXPERIMENTAL_PLACEHOLDER_INLINING", hide = true)]
-    experimental_placeholder_inlining: bool,
+    #[arg(long, env = "FEATURE_PLACEHOLDER_INLINING", hide = true)]
+    feature_placeholder_inlining: bool,
 
     /// Don't make connections to the upstream database for new client connections.
     ///
@@ -712,11 +712,11 @@ where
         let migration_request_timeout = options.migration_request_timeout_ms;
         let controller_request_timeout = options.controller_request_timeout_ms;
         let adapter_rewrite_params = AdapterRewriteParams {
-            server_supports_pagination: options.server_worker_options.experimental_topk
-                && options.server_worker_options.experimental_pagination,
+            server_supports_pagination: options.server_worker_options.feature_topk
+                && options.server_worker_options.feature_pagination,
             server_supports_mixed_comparisons: options
                 .server_worker_options
-                .experimental_mixed_comparisons,
+                .feature_mixed_comparisons,
         };
         let no_upstream_connections = options.no_upstream_connections;
 
@@ -868,9 +868,7 @@ where
         let query_status_cache: &'static _ = Box::leak(Box::new(
             QueryStatusCache::with_capacity(options.query_status_capacity)
                 .style(migration_style)
-                .enable_experimental_placeholder_inlining(
-                    options.experimental_placeholder_inlining,
-                ),
+                .set_placeholder_inlining(options.feature_placeholder_inlining),
         ));
 
         let telemetry_sender = rt.block_on(async {
@@ -1131,7 +1129,7 @@ where
                 .query_max_failure_seconds(options.query_max_failure_seconds)
                 .telemetry_sender(telemetry_sender.clone())
                 .fallback_recovery_seconds(options.fallback_recovery_seconds)
-                .enable_experimental_placeholder_inlining(options.experimental_placeholder_inlining)
+                .set_placeholder_inlining(options.feature_placeholder_inlining)
                 .connections(connections.clone())
                 .metrics_handle(prometheus_handle.clone().map(MetricsHandle::new));
             let telemetry_sender = telemetry_sender.clone();

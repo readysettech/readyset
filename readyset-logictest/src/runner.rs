@@ -488,9 +488,9 @@ impl TestScript {
             retry += 1;
 
             let mut builder = Builder::for_tests();
-            builder.set_allow_mixed_comparisons(true);
-            builder.set_allow_straddled_joins(true);
-            builder.set_allow_post_lookup(true);
+            builder.set_mixed_comparisons(true);
+            builder.set_straddled_joins(true);
+            builder.set_post_lookup(true);
 
             if run_opts.enable_reuse {
                 builder.set_reuse(Some(ReuseConfigType::Finkelstein))

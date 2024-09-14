@@ -2621,7 +2621,7 @@ async fn drop_and_recreate_demo_cache() {
     readyset_tracing::init_test_logging();
     let (opts, _handle, shutdown_tx) = TestBuilder::default()
         .fallback(true)
-        .allow_mixed_comparisons(false)
+        .set_mixed_comparisons(false)
         .build::<PostgreSQLAdapter>()
         .await;
 

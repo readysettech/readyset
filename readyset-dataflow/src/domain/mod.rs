@@ -87,7 +87,7 @@ pub struct Config {
 
     /// Allow fully materialized nodes to be persisted to disk.
     #[serde(default)]
-    pub experimental_materialization_persistence: bool,
+    pub materialization_persistence: bool,
 }
 
 const BATCH_SIZE: usize = 256;
@@ -504,9 +504,7 @@ impl DomainBuilder {
             remapped_keys: Default::default(),
 
             init_state_tx,
-            experimental_materialization_persistence: self
-                .config
-                .experimental_materialization_persistence,
+            materialization_persistence: self.config.materialization_persistence,
         }
     }
 }
@@ -724,7 +722,7 @@ pub struct Domain {
     /// initialization of their state.
     init_state_tx: tokio::sync::mpsc::Sender<MaterializedState>,
 
-    experimental_materialization_persistence: bool,
+    materialization_persistence: bool,
 }
 
 /// Creates the materialized node state for the given node.
@@ -1706,7 +1704,7 @@ impl Domain {
                 weak_indices,
             } => {
                 if !self.state.contains_key(node) {
-                    if self.experimental_materialization_persistence {
+                    if self.materialization_persistence {
                         let name = format!("full_mat-{}-{}", self.index(), node.id());
                         // we'll add indices a little further down, so empty keys
                         // here is fine.

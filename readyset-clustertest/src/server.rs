@@ -191,12 +191,12 @@ impl ReadysetServerBuilder {
         self.push_arg("--wait-for-failpoint")
     }
 
-    pub fn allow_full_materialization(self) -> Self {
-        self.push_arg("--experimental-full-materialization")
+    pub fn enable_full_materialization(self) -> Self {
+        self.push_arg("--feature-full-materialization")
     }
 
     pub fn enable_post_lookups(self) -> Self {
-        self.push_arg("--experimental-post-lookup")
+        self.push_arg("--feature-post-lookup")
     }
 }
 
@@ -345,16 +345,16 @@ impl AdapterBuilder {
         self.push_arg_kv("--reader-replicas", &num_replicas.to_string())
     }
 
-    pub fn enable_experimental_placeholder_inlining(self) -> Self {
-        self.push_arg("--experimental-placeholder-inlining")
+    pub fn enable_placeholder_inlining(self) -> Self {
+        self.push_arg("--feature-placeholder-inlining")
     }
 
-    pub fn allow_full_materialization(self) -> Self {
-        self.push_arg("--experimental-full-materialization")
+    pub fn enable_full_materialization(self) -> Self {
+        self.push_arg("--feature-full-materialization")
     }
 
     pub fn enable_post_lookups(self) -> Self {
-        self.push_arg("--experimental-post-lookup")
+        self.push_arg("--feature-post-lookup")
     }
 
     pub fn prometheus_metrics(self) -> Self {

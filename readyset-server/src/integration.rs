@@ -7323,7 +7323,7 @@ async fn mixed_inclusive_range_and_equality() {
         let mut builder = Builder::for_tests();
         builder.set_sharding(Some(DEFAULT_SHARDING));
         builder.set_persistence(get_persistence_params("mixed_inclusive_range_and_equality"));
-        builder.set_allow_mixed_comparisons(true);
+        builder.set_mixed_comparisons(true);
         builder
             .start_local_custom(Arc::new(Authority::from(LocalAuthority::new_with_store(
                 Arc::new(LocalAuthorityStore::new()),

@@ -19,7 +19,7 @@ fn readyset_mysql(name: &str) -> DeploymentBuilder {
     DeploymentBuilder::new(DatabaseType::MySQL, name)
         .deploy_upstream()
         .deploy_adapter()
-        .allow_full_materialization()
+        .enable_full_materialization()
 }
 
 async fn last_statement_destination(conn: &mut mysql_async::Conn) -> QueryDestination {
@@ -682,7 +682,7 @@ async fn cached_queries_filtering() {
 async fn correct_data_after_restart() {
     let mut deployment = readyset_mysql("ct_correct_data_after_restart")
         .min_workers(2)
-        .allow_full_materialization()
+        .enable_full_materialization()
         .add_server(ServerParams::default().with_volume("v1"))
         .add_server(ServerParams::default().with_volume("v2"))
         .start()
@@ -1648,7 +1648,7 @@ async fn enable_experimental_placeholder_inlining() {
     let mut deployment = readyset_mysql("ct_enable_experimental_placeholder_inlining")
         .with_servers(1, ServerParams::default())
         .explicit_migrations(500)
-        .enable_experimental_placeholder_inlining()
+        .enable_placeholder_inlining()
         .enable_post_lookups()
         .start()
         .await

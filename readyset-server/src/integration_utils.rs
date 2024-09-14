@@ -63,9 +63,9 @@ pub async fn start_simple_reuse_unsharded(prefix: &str) -> (Handle, ShutdownSend
     let mut builder = Builder::for_tests();
     builder.set_reuse(Some(ReuseConfigType::Finkelstein));
     builder.set_persistence(get_persistence_params(prefix));
-    builder.set_allow_topk(true);
-    builder.set_allow_paginate(true);
-    builder.set_allow_straddled_joins(true);
+    builder.set_topk(true);
+    builder.set_pagination(true);
+    builder.set_straddled_joins(true);
     builder.set_sharding(None);
     builder.start_local_custom(authority.clone()).await.unwrap()
 }
@@ -105,10 +105,10 @@ pub async fn build_custom(
     builder.set_sharding(sharding);
     builder.set_persistence(get_persistence_params(prefix));
     // don't return unsupported errors for topk in queries
-    builder.set_allow_topk(true);
-    builder.set_allow_paginate(true);
-    builder.set_allow_mixed_comparisons(true);
-    builder.set_allow_straddled_joins(true);
+    builder.set_topk(true);
+    builder.set_pagination(true);
+    builder.set_mixed_comparisons(true);
+    builder.set_straddled_joins(true);
     builder.set_view_request_timeout(Duration::from_secs(10));
 
     if reader_only {

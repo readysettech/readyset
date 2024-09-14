@@ -643,9 +643,9 @@ fn start_adapter(args: SystemBenchArgs) -> anyhow::Result<()> {
         "--deployment-mode",
         "standalone",
         "--allow-unauthenticated-connections",
-        "--experimental-full-materialization",
-        "--experimental-post-lookup",
-        "--experimental-straddled-joins",
+        "--feature-full-materialization",
+        "--feature-post-lookup",
+        "--feature-straddled-joins",
         "--upstream-db-url",
         &upstream_url,
         "--durability",
@@ -663,8 +663,8 @@ fn start_adapter(args: SystemBenchArgs) -> anyhow::Result<()> {
         &materialization_frontier,
     ];
 
-    if args.experimental_materialization_persistence {
-        options.push("--experimental-materialization-persistence");
+    if args.materialization_persistence {
+        options.push("--feature-materialization-persistence");
     }
 
     let adapter_options = Options::parse_from(options);
@@ -841,7 +841,7 @@ struct SystemBenchArgs {
     /// If specified, fully materialized nodes will be persisted to disk,
     /// rather than remain in memory.
     #[arg(long)]
-    experimental_materialization_persistence: bool,
+    materialization_persistence: bool,
 
     #[arg(long, hide(true))]
     /// Is present when executed with `cargo bench`

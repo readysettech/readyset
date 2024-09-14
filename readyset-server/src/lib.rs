@@ -502,7 +502,7 @@ impl Default for Config {
                 table_request_timeout: Duration::from_millis(1800000),
                 eviction_kind: dataflow::EvictionKind::Random,
                 verbose_metrics: false,
-                experimental_materialization_persistence: false,
+                materialization_persistence: false,
             },
             persistence: Default::default(),
             min_workers: 1,
@@ -574,18 +574,18 @@ pub struct WorkerOptions {
 
     /// Allow the creation of fully materialized nodes.
     // XXX JCD keep features synchronized with readyset-features.json
-    #[arg(long, env = "EXPERIMENTAL_FULL_MATERIALIZATION", hide = true)]
-    experimental_full_materialization: bool,
+    #[arg(long, env = "FEATURE_FULL_MATERIALIZATION", hide = true)]
+    feature_full_materialization: bool,
 
     /// Allow fully materialized nodes to be persisted to disk.
     // XXX JCD keep features synchronized with readyset-features.json
     #[arg(
         long,
-        env = "EXPERIMENTAL_MATERIALIZATION_PERSISTENCE",
+        env = "FEATURE_MATERIALIZATION_PERSISTENCE",
         hide = true,
-        requires = "experimental_full_materialization"
+        requires = "feature_full_materialization"
     )]
-    pub experimental_materialization_persistence: bool,
+    pub feature_materialization_persistence: bool,
 
     /// The materialization frontier strategy to use. Defaults to `None`.
     #[arg(long, env = "MATERIALIZATION_FRONTIER", default_value_t = FrontierStrategy::None, hide = true)]
@@ -607,36 +607,36 @@ pub struct WorkerOptions {
     #[arg(long, env = "VOLUME_ID", hide = true)]
     pub volume_id: Option<VolumeId>,
 
-    /// Enable experimental support for Top K in dataflow.
+    /// Enable support for Top K in dataflow.
     ///
     /// NOTE: If enabled, this must be set for all ReadySet processes (both servers and adapters).
     // XXX JCD keep features synchronized with readyset-features.json
-    #[arg(long, env = "EXPERIMENTAL_TOPK", hide = true)]
-    pub experimental_topk: bool,
+    #[arg(long, env = "FEATURE_TOPK", hide = true)]
+    pub feature_topk: bool,
 
-    /// Enable experimental support for Pagination in dataflow.
+    /// Enable support for Pagination in dataflow.
     ///
     /// NOTE: If enabled, this must be set for all ReadySet processes (both servers and adapters).
     // XXX JCD keep features synchronized with readyset-features.json
-    #[arg(long, env = "EXPERIMENTAL_PAGINATION", hide = true)]
-    pub experimental_pagination: bool,
+    #[arg(long, env = "FEATURE_PAGINATION", hide = true)]
+    pub feature_pagination: bool,
 
-    /// Enable experimental support for mixing equality and range comparisons on query parameters.
+    /// Enable support for mixing equality and range comparisons on query parameters.
     // XXX JCD keep features synchronized with readyset-features.json
-    #[arg(long, env = "EXPERIMENTAL_MIXED_COMPARISONS", hide = true)]
-    pub experimental_mixed_comparisons: bool,
+    #[arg(long, env = "FEATURE_MIXED_COMPARISONS", hide = true)]
+    pub feature_mixed_comparisons: bool,
 
-    /// Enable experimental support for straddled joins (joins with partial keys traced to both
+    /// Enable support for straddled joins (joins with partial keys traced to both
     /// parents).
     // XXX JCD keep features synchronized with readyset-features.json
-    #[arg(long, env = "EXPERIMENTAL_STRADDLED_JOINS", hide = true)]
-    experimental_straddled_joins: bool,
+    #[arg(long, env = "FEATURE_STRADDLED_JOINS", hide = true)]
+    feature_straddled_joins: bool,
 
-    /// Enable experimental support for Post-Lookup (queries which do extra work after the lookup
+    /// Enable support for Post-Lookup (queries which do extra work after the lookup
     /// into the reader).
     // XXX JCD keep features synchronized with readyset-features.json
-    #[arg(long, env = "EXPERIMENTAL_POST_LOOKUP", hide = true)]
-    experimental_post_lookup: bool,
+    #[arg(long, env = "FEATURE_POST_LOOKUP", hide = true)]
+    feature_post_lookup: bool,
 
     /// Directory in which to store replicated table data. If not specified, defaults to the
     /// current working directory.
