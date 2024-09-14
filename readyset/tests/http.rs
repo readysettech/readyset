@@ -24,7 +24,6 @@ fn start_adapter(test_db: &str) -> anyhow::Result<()> {
         "--authority-address",
         temp_dir.path().to_str().unwrap(),
         "--allow-unauthenticated-connections",
-        "--feature-full-materialization",
         "--upstream-db-url",
         "postgresql://postgres:noria@postgres:5432/noria",
         "--eviction-policy",
