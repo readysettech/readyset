@@ -17,7 +17,7 @@ use std::time::{Duration, SystemTime};
 
 use anyhow::{anyhow, bail};
 use clap::builder::NonEmptyStringValueParser;
-use clap::{ArgGroup, Parser, ValueEnum};
+use clap::{ArgAction, ArgGroup, Parser, ValueEnum};
 use crossbeam_skiplist::SkipSet;
 use database_utils::{DatabaseType, DatabaseURL, UpstreamConfig};
 use failpoint_macros::set_failpoint;
@@ -390,7 +390,15 @@ pub struct Options {
     /// If set, we will create a cache with literals inlined in the unsupported placeholder
     /// positions every time the statement is executed with a new set of parameters.
     // XXX JCD keep features synchronized with readyset-features.json
-    #[arg(long, env = "FEATURE_PLACEHOLDER_INLINING", hide = true)]
+    #[arg(
+        long,
+        env = "FEATURE_PLACEHOLDER_INLINING",
+        default_value = "false",
+        default_missing_value = "true",
+        num_args = 0..=1,
+        action = ArgAction::Set,
+        hide = true
+    )]
     feature_placeholder_inlining: bool,
 
     /// Don't make connections to the upstream database for new client connections.

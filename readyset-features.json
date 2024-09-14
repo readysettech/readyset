@@ -4,55 +4,63 @@
         "name": "Full Materialization",
         "command-line": "--feature-full-materialization",
         "environment-variable": "FEATURE_FULL_MATERIALIZATION",
-        "description": "Allow the creation of fully materialized nodes."
+        "description": "Allow the creation of fully materialized nodes.",
+        "default": true
     },
     {
         "feature_id": "2",
         "name": "Mixed Comparisons",
         "command-line": "--feature-mixed-comparisons",
         "environment-variable": "FEATURE_MIXED_COMPARISONS",
-        "description": "Enable support for mixing equality and range comparisons on query parameters."
+        "description": "Enable support for mixing equality and range comparisons on query parameters.",
+        "default": true
     },
     {
         "feature_id": "3",
         "name": "Pagination",
         "command-line": "--feature-pagination",
         "environment-variable": "FEATURE_PAGINATION",
-        "description": "Enable support for Pagination in dataflow.\n\nNOTE: If enabled, this must be set for all ReadySet processes (both servers and adapters)."
+        "description": "Enable support for Pagination in dataflow.\n\nNOTE: If enabled, this must be set for all ReadySet processes (both servers and adapters).",
+        "default": false
     },
     {
         "feature_id": "4",
         "name": "Post-Lookup",
         "command-line": "--feature-post-lookup",
         "environment-variable": "FEATURE_POST_LOOKUP",
-        "description": "Enable support for Post-Lookup (queries which do extra work after the lookup into the reader)."
+        "description": "Enable support for Post-Lookup (queries which do extra work after the lookup into the reader).",
+        "default": true
     },
     {
         "feature_id": "5",
         "name": "Straddled Joins",
         "command-line": "--feature-straddled-joins",
         "environment-variable": "FEATURE_STRADDLED_JOINS",
-        "description": "Enable support for straddled joins (joins with partial keys traced to both parents)."
+        "description": "Enable support for straddled joins (joins with partial keys traced to both parents).",
+        "default": true
     },
     {
         "feature_id": "6",
         "name": "Top K",
         "command-line": "--feature-topk",
         "environment-variable": "FEATURE_TOPK",
-        "description": "Enable support for Top K in dataflow.\n\nNOTE: If enabled, this must be set for all ReadySet processes (both servers and adapters)."
+        "description": "Enable support for Top K in dataflow.\n\nNOTE: If enabled, this must be set for all ReadySet processes (both servers and adapters).",
+        "default": false
     },
     {
         "feature_id": "7",
         "name": "Placeholder Inlining",
         "command-line": "--feature-placeholder-inlining",
         "environment-variable": "FEATURE_PLACEHOLDER_INLINING",
-        "description": "Whether to allow ReadySet to automatically create inlined caches when we receive a CREATE CACHE command for a query with unsupported placeholders.\n\nIf set, we will create a cache with literals inlined in the unsupported placeholder positions every time the statement is executed with a new set of parameters."
+        "description": "Whether to allow ReadySet to automatically create inlined caches when we receive a CREATE CACHE command for a query with unsupported placeholders.\n\nIf set, we will create a cache with literals inlined in the unsupported placeholder positions every time the statement is executed with a new set of parameters.",
+        "default": false
     },
     {
         "feature_id": "8",
         "name": "Full Materialization Persistence",
         "command-line": "--feature-materialization-persistence",
         "environment-variable": "FEATURE_MATERIALIZATION_PERSISTENCE",
-        "description": "Allows fully materialized nodes to be persisted to disk."
+        "description": "Allows fully materialized nodes to be persisted to disk.",
+        "default": false
     }
 ]
