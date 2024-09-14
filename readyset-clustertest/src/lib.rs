@@ -378,9 +378,9 @@ pub struct ServerStartParams {
     /// rest of it's startup.
     wait_for_failpoint: bool,
     /// Whether to allow full materialization nodes or not
-    allow_full_materialization: bool,
+    full_materialization: bool,
     /// Whether to allow post-lookup operations
-    enable_post_lookups: bool,
+    post_lookups: bool,
 }
 
 /// Set of parameters defining an entire cluster's topology.
@@ -450,11 +450,11 @@ pub struct DeploymentBuilder {
     cleanup: bool,
     /// Whether to automatically create inlined migrations for a query with unsupported
     /// placeholders.
-    enable_experimental_placeholder_inlining: bool,
+    placeholder_inlining: bool,
     /// Whether to allow fully materialized nodes or not
-    allow_full_materialization: bool,
+    full_materialization: bool,
     /// Whether to enable post-lookup operations
-    enable_post_lookups: bool,
+    post_lookups: bool,
     /// Whether to allow prometheus metrics
     prometheus_metrics: bool,
     /// How to execute the adapter and server processes.
@@ -530,9 +530,9 @@ impl DeploymentBuilder {
             database_type,
             deployment_mode: DeploymentMode::Adapter,
             cleanup: false,
-            enable_experimental_placeholder_inlining: false,
-            allow_full_materialization: false,
-            enable_post_lookups: false,
+            placeholder_inlining: false,
+            full_materialization: false,
+            post_lookups: false,
             prometheus_metrics: true,
         }
     }
@@ -685,21 +685,21 @@ impl DeploymentBuilder {
     }
 
     /// Allows fully materialized nodes
-    pub fn allow_full_materialization(mut self) -> Self {
-        self.allow_full_materialization = true;
+    pub fn enable_full_materialization(mut self) -> Self {
+        self.full_materialization = true;
         self
     }
 
     /// Enable post-lookup operations
     pub fn enable_post_lookups(mut self) -> Self {
-        self.enable_post_lookups = true;
+        self.post_lookups = true;
         self
     }
 
     /// Sets whether or not to automatically create inlined caches for queries with unsupported
     /// placeholders
-    pub fn enable_experimental_placeholder_inlining(mut self) -> Self {
-        self.enable_experimental_placeholder_inlining = true;
+    pub fn enable_placeholder_inlining(mut self) -> Self {
+        self.placeholder_inlining = true;
         self
     }
 
@@ -737,10 +737,10 @@ impl DeploymentBuilder {
             views_polling_interval: self.views_polling_interval,
             wait_for_failpoint,
             cleanup: self.cleanup,
-            enable_experimental_placeholder_inlining: self.enable_experimental_placeholder_inlining,
+            placeholder_inlining: self.placeholder_inlining,
             deployment_mode: self.deployment_mode,
-            allow_full_materialization: self.allow_full_materialization,
-            enable_post_lookups: self.enable_post_lookups,
+            full_materialization: self.full_materialization,
+            post_lookups: self.post_lookups,
             prometheus_metrics: self.prometheus_metrics,
         }
     }
@@ -761,8 +761,8 @@ impl DeploymentBuilder {
             reader_replicas: self.reader_replicas,
             auto_restart: self.auto_restart,
             wait_for_failpoint,
-            allow_full_materialization: self.allow_full_materialization,
-            enable_post_lookups: self.enable_post_lookups,
+            full_materialization: self.full_materialization,
+            post_lookups: self.post_lookups,
         }
     }
 
@@ -1554,13 +1554,13 @@ pub struct AdapterStartParams {
     cleanup: bool,
     /// Whether to automatically create inlined migrations for a query with unsupported
     /// placeholders.
-    enable_experimental_placeholder_inlining: bool,
+    placeholder_inlining: bool,
     /// How to execute the adapter
     deployment_mode: DeploymentMode,
     /// Whether or not to allow full materializations
-    allow_full_materialization: bool,
+    full_materialization: bool,
     /// Whether or not to enable post-lookup operations
-    enable_post_lookups: bool,
+    post_lookups: bool,
     /// Whether to enable prometheus metrics
     prometheus_metrics: bool,
 }
@@ -1604,10 +1604,10 @@ async fn start_server(
     if server_start_params.wait_for_failpoint {
         builder = builder.wait_for_failpoint();
     }
-    if server_start_params.allow_full_materialization {
-        builder = builder.allow_full_materialization();
+    if server_start_params.full_materialization {
+        builder = builder.enable_full_materialization();
     }
-    if server_start_params.enable_post_lookups {
+    if server_start_params.post_lookups {
         builder = builder.enable_post_lookups();
     }
     let addr = Url::parse(&format!("http://127.0.0.1:{}", port)).unwrap();
@@ -1698,15 +1698,15 @@ async fn start_adapter(
         builder = builder.wait_for_failpoint();
     }
 
-    if params.enable_experimental_placeholder_inlining {
-        builder = builder.enable_experimental_placeholder_inlining();
+    if params.placeholder_inlining {
+        builder = builder.enable_placeholder_inlining();
     }
 
-    if params.allow_full_materialization {
-        builder = builder.allow_full_materialization();
+    if params.full_materialization {
+        builder = builder.enable_full_materialization();
     }
 
-    if params.enable_post_lookups {
+    if params.post_lookups {
         builder = builder.enable_post_lookups();
     }
 

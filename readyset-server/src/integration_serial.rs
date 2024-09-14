@@ -56,7 +56,7 @@ async fn it_works_basic_impl() {
         let mut builder = Builder::for_tests();
         builder.set_sharding(None);
         builder.set_persistence(get_persistence_params("it_works_basic"));
-        builder.set_allow_topk(true);
+        builder.set_topk(true);
         builder.enable_packet_filters();
         builder.set_verbose_domain_metrics(true);
         builder.start_local()

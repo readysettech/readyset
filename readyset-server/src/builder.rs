@@ -75,12 +75,10 @@ impl Builder {
         if opts.no_partial {
             builder.disable_partial();
         }
-        if opts.experimental_full_materialization {
-            builder.allow_full_materialization();
+        if opts.feature_full_materialization {
+            builder.enable_full_materialization();
 
-            builder.set_experimental_materialization_persistence(
-                opts.experimental_materialization_persistence,
-            );
+            builder.set_materialization_persistence(opts.feature_materialization_persistence);
         }
         if opts.enable_packet_filters {
             builder.enable_packet_filters();
@@ -90,11 +88,11 @@ impl Builder {
         // See `noria/server/src/controller/sql/serde.rs` for details.
         builder.set_reuse(None);
 
-        builder.set_allow_topk(opts.experimental_topk);
-        builder.set_allow_paginate(opts.experimental_pagination);
-        builder.set_allow_mixed_comparisons(opts.experimental_mixed_comparisons);
-        builder.set_allow_straddled_joins(opts.experimental_straddled_joins);
-        builder.set_allow_post_lookup(opts.experimental_post_lookup);
+        builder.set_topk(opts.feature_topk);
+        builder.set_pagination(opts.feature_pagination);
+        builder.set_mixed_comparisons(opts.feature_mixed_comparisons);
+        builder.set_straddled_joins(opts.feature_straddled_joins);
+        builder.set_post_lookup(opts.feature_post_lookup);
         builder.set_worker_timeout(Duration::from_secs(opts.worker_request_timeout_seconds));
         builder.set_background_recovery_interval(Duration::from_secs(
             opts.background_recovery_interval_seconds,
@@ -148,8 +146,8 @@ impl Builder {
     pub fn for_tests() -> Self {
         let mut builder = Self::default();
         builder.set_abort_on_task_failure(false);
-        builder.allow_full_materialization();
-        builder.set_allow_post_lookup(true);
+        builder.enable_full_materialization();
+        builder.set_post_lookup(true);
         builder
     }
 
@@ -183,7 +181,7 @@ impl Builder {
     ///
     /// Unless this is called, any migrations that add fully materialized nodes will return
     /// [`ReadySetError::Unsupported`]
-    pub fn allow_full_materialization(&mut self) {
+    pub fn enable_full_materialization(&mut self) {
         self.config
             .materialization_config
             .allow_full_materialization = true;
@@ -236,25 +234,25 @@ impl Builder {
     }
 
     /// Set the value of [`controller::sql::Config::allow_topk`]
-    pub fn set_allow_topk(&mut self, allow_topk: bool) {
+    pub fn set_topk(&mut self, allow_topk: bool) {
         self.config.mir_config.allow_topk = allow_topk;
     }
 
     /// Set the value of [`controller::sql::Config::allow_paginate`]
-    pub fn set_allow_paginate(&mut self, allow_paginate: bool) {
+    pub fn set_pagination(&mut self, allow_paginate: bool) {
         self.config.mir_config.allow_paginate = allow_paginate;
     }
 
     /// Set the value of [`controller::sql::Config::allow_mixed_comparisons`]
-    pub fn set_allow_mixed_comparisons(&mut self, allow_mixed_comparisons: bool) {
+    pub fn set_mixed_comparisons(&mut self, allow_mixed_comparisons: bool) {
         self.config.mir_config.allow_mixed_comparisons = allow_mixed_comparisons;
     }
 
-    pub fn set_allow_straddled_joins(&mut self, allow_straddled_joins: bool) {
+    pub fn set_straddled_joins(&mut self, allow_straddled_joins: bool) {
         self.config.materialization_config.allow_straddled_joins = allow_straddled_joins;
     }
 
-    pub fn set_allow_post_lookup(&mut self, allow_post_lookup: bool) {
+    pub fn set_post_lookup(&mut self, allow_post_lookup: bool) {
         self.config.mir_config.allow_post_lookup = allow_post_lookup;
     }
 
@@ -356,10 +354,8 @@ impl Builder {
 
     /// Sets the value of [`Config::domain_config::verbose_metrics`]. See documentation of
     /// that field for more information.
-    pub fn set_experimental_materialization_persistence(&mut self, value: bool) {
-        self.config
-            .domain_config
-            .experimental_materialization_persistence = value;
+    pub fn set_materialization_persistence(&mut self, value: bool) {
+        self.config.domain_config.materialization_persistence = value;
     }
 
     /// Sets the value of [`Config::domain_config::table_request_timeout`]. See documentation of

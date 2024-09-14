@@ -46,7 +46,7 @@ pub struct QueryStatusCache {
     /// literal values inlined into certain placeholder positions in the query.
     ///
     /// Currently unused.
-    enable_experimental_placeholder_inlining: bool,
+    placeholder_inlining: bool,
 }
 
 #[derive(Debug)]
@@ -267,7 +267,7 @@ impl QueryStatusCache {
             id_to_status: Default::default(),
             persistent_handle: Default::default(),
             style: MigrationStyle::InRequestPath,
-            enable_experimental_placeholder_inlining: false,
+            placeholder_inlining: false,
         }
     }
 
@@ -278,7 +278,7 @@ impl QueryStatusCache {
             id_to_status: Default::default(),
             persistent_handle: PersistentStatusCacheHandle::with_capacity(capacity),
             style: MigrationStyle::InRequestPath,
-            enable_experimental_placeholder_inlining: false,
+            placeholder_inlining: false,
         }
     }
 
@@ -288,12 +288,9 @@ impl QueryStatusCache {
         self
     }
 
-    /// Sets [`Self::enable_experimental_placeholder_inlining`]
-    pub fn enable_experimental_placeholder_inlining(
-        mut self,
-        enable_experimental_placeholder_inlining: bool,
-    ) -> Self {
-        self.enable_experimental_placeholder_inlining = enable_experimental_placeholder_inlining;
+    /// Sets [`Self::placeholder_inlining`]
+    pub fn set_placeholder_inlining(mut self, placeholder_inlining: bool) -> Self {
+        self.placeholder_inlining = placeholder_inlining;
         self
     }
 
@@ -711,7 +708,7 @@ impl QueryStatusCache {
     /// exists for the params. Adding the query to `Self::pending_inlined_migrations` indicates that
     /// it should be migrated by the MigrationHandler.
     pub fn inlined_cache_miss(&self, query: &ViewCreateRequest, params: Vec<DfValue>) {
-        if self.enable_experimental_placeholder_inlining {
+        if self.placeholder_inlining {
             self.persistent_handle
                 .pending_inlined_migrations
                 .entry(query.clone())
@@ -1109,7 +1106,7 @@ mod tests {
     fn transition_from_inlined() {
         let cache = QueryStatusCache::new()
             .style(MigrationStyle::Explicit)
-            .enable_experimental_placeholder_inlining(true);
+            .set_placeholder_inlining(true);
         let q = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
         let inlined_state = MigrationState::Inlined(InlinedState {
             inlined_placeholders: Vec1::try_from(vec![1]).unwrap(),
@@ -1133,7 +1130,7 @@ mod tests {
     fn inlined_cache_miss() {
         let cache = QueryStatusCache::new()
             .style(MigrationStyle::Explicit)
-            .enable_experimental_placeholder_inlining(true);
+            .set_placeholder_inlining(true);
         let q = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
         let inlined_state = MigrationState::Inlined(InlinedState {
             inlined_placeholders: Vec1::try_from(vec![1]).unwrap(),
@@ -1161,7 +1158,7 @@ mod tests {
     fn unsupported_inlined_migration() {
         let cache = QueryStatusCache::new()
             .style(MigrationStyle::Explicit)
-            .enable_experimental_placeholder_inlining(true);
+            .set_placeholder_inlining(true);
         let q = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
         let inlined_state = MigrationState::Inlined(InlinedState {
             inlined_placeholders: Vec1::try_from(vec![1]).unwrap(),
@@ -1187,7 +1184,7 @@ mod tests {
     fn created_inlined_query() {
         let cache = QueryStatusCache::new()
             .style(MigrationStyle::Explicit)
-            .enable_experimental_placeholder_inlining(true);
+            .set_placeholder_inlining(true);
         let q = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
         let inlined_state = MigrationState::Inlined(InlinedState {
             inlined_placeholders: Vec1::try_from(vec![1]).unwrap(),
@@ -1231,7 +1228,7 @@ mod tests {
     fn pending_inlined_migration() {
         let cache = QueryStatusCache::new()
             .style(MigrationStyle::Explicit)
-            .enable_experimental_placeholder_inlining(true);
+            .set_placeholder_inlining(true);
         let q = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
         let inlined_state = MigrationState::Inlined(InlinedState {
             inlined_placeholders: Vec1::try_from(vec![1]).unwrap(),

@@ -89,7 +89,7 @@ pub struct TestBuilder {
     storage_dir_path: Option<PathBuf>,
     authority: Option<Arc<Authority>>,
     replication_server_id: Option<ReplicationServerId>,
-    allow_mixed_comparisons: bool,
+    mixed_comparisons: bool,
 }
 
 impl Default for TestBuilder {
@@ -114,7 +114,7 @@ impl TestBuilder {
             storage_dir_path: None,
             authority: None,
             replication_server_id: None,
-            allow_mixed_comparisons: true,
+            mixed_comparisons: true,
         }
     }
 
@@ -187,8 +187,8 @@ impl TestBuilder {
         self
     }
 
-    pub fn allow_mixed_comparisons(mut self, allow_mixed_comparisons: bool) -> Self {
-        self.allow_mixed_comparisons = allow_mixed_comparisons;
+    pub fn set_mixed_comparisons(mut self, mixed_comparisons: bool) -> Self {
+        self.mixed_comparisons = mixed_comparisons;
         self
     }
 
@@ -237,9 +237,9 @@ impl TestBuilder {
             ..Default::default()
         };
         builder.set_persistence(persistence);
-        builder.set_allow_topk(true);
-        builder.set_allow_paginate(true);
-        builder.set_allow_mixed_comparisons(self.allow_mixed_comparisons);
+        builder.set_topk(true);
+        builder.set_pagination(true);
+        builder.set_mixed_comparisons(self.mixed_comparisons);
 
         if !self.partial {
             builder.disable_partial();

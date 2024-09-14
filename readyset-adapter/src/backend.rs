@@ -287,7 +287,7 @@ pub struct BackendBuilder {
     query_max_failure_seconds: u64,
     fallback_recovery_seconds: u64,
     telemetry_sender: Option<TelemetrySender>,
-    enable_experimental_placeholder_inlining: bool,
+    placeholder_inlining: bool,
     metrics_handle: Option<MetricsHandle>,
     connections: Option<Arc<SkipSet<SocketAddr>>>,
     allow_cache_ddl: bool,
@@ -310,7 +310,7 @@ impl Default for BackendBuilder {
             query_max_failure_seconds: (i64::MAX / 1000) as u64,
             fallback_recovery_seconds: 0,
             telemetry_sender: None,
-            enable_experimental_placeholder_inlining: false,
+            placeholder_inlining: false,
             metrics_handle: None,
             connections: None,
             allow_cache_ddl: true,
@@ -369,8 +369,7 @@ impl BackendBuilder {
                 migration_mode: self.migration_mode,
                 query_max_failure_duration: Duration::new(self.query_max_failure_seconds, 0),
                 fallback_recovery_duration: Duration::new(self.fallback_recovery_seconds, 0),
-                enable_experimental_placeholder_inlining: self
-                    .enable_experimental_placeholder_inlining,
+                placeholder_inlining: self.placeholder_inlining,
             },
             telemetry_sender: self.telemetry_sender,
             authority,
@@ -465,11 +464,8 @@ impl BackendBuilder {
         self
     }
 
-    pub fn enable_experimental_placeholder_inlining(
-        mut self,
-        enable_experimental_placeholder_inlining: bool,
-    ) -> Self {
-        self.enable_experimental_placeholder_inlining = enable_experimental_placeholder_inlining;
+    pub fn set_placeholder_inlining(mut self, placeholder_inlining: bool) -> Self {
+        self.placeholder_inlining = placeholder_inlining;
         self
     }
 
@@ -640,7 +636,7 @@ struct BackendSettings {
     fallback_recovery_duration: Duration,
     /// Whether to automatically create inlined migrations for queries with unsupported
     /// placeholders.
-    enable_experimental_placeholder_inlining: bool,
+    placeholder_inlining: bool,
 }
 
 /// QueryInfo holds information regarding the last query that was sent along this connection
@@ -1901,7 +1897,7 @@ where
                             .collect::<Vec<_>>(),
                     )
                     .unwrap();
-                    if self.settings.enable_experimental_placeholder_inlining {
+                    if self.settings.placeholder_inlining {
                         MigrationState::Inlined(InlinedState::from_placeholders(placeholders))
                     } else {
                         return Err(e);
@@ -1925,10 +1921,10 @@ where
     /// Forwards an `EXPLAIN CREATE CACHE` request to ReadySet. Where possible, this method performs
     /// the dry run in the request path so we can return a result to the client immediately. If we
     /// encounter an error we think might be transient or if the query is unsupported and we might
-    /// be able to inline some of its parameters (and experimental parameter inlining is enabled),
-    /// we will set the status of the migration to "pending"/"inlined" and allow the migration to
-    /// proceed in the background. In these cases, it is the responsibility of the client to poll
-    /// for the final status of the query.
+    /// be able to inline some of its parameters (and parameter inlining is enabled), we will set
+    /// the status of the migration to "pending"/"inlined" and allow the migration to proceed in
+    /// the background. In these cases, it is the responsibility of the client to poll for the
+    /// final status of the query.
     #[instrument(skip(self))]
     async fn explain_create_cache(
         &mut self,
