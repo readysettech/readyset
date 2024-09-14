@@ -438,7 +438,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::anyhow;
-use clap::Args;
+use clap::{ArgAction, Args};
 use dataflow::DomainConfig;
 use serde::{Deserialize, Serialize};
 
@@ -574,7 +574,15 @@ pub struct WorkerOptions {
 
     /// Allow the creation of fully materialized nodes.
     // XXX JCD keep features synchronized with readyset-features.json
-    #[arg(long, env = "FEATURE_FULL_MATERIALIZATION", hide = true)]
+    #[arg(
+        long,
+        env = "FEATURE_FULL_MATERIALIZATION",
+        default_value = "true",
+        default_missing_value = "true",
+        num_args = 0..=1,
+        action = ArgAction::Set,
+        hide = true
+    )]
     feature_full_materialization: bool,
 
     /// Allow fully materialized nodes to be persisted to disk.
@@ -582,6 +590,10 @@ pub struct WorkerOptions {
     #[arg(
         long,
         env = "FEATURE_MATERIALIZATION_PERSISTENCE",
+        default_value = "false",
+        default_missing_value = "true",
+        num_args = 0..=1,
+        action = ArgAction::Set,
         hide = true,
         requires = "feature_full_materialization"
     )]
@@ -611,31 +623,71 @@ pub struct WorkerOptions {
     ///
     /// NOTE: If enabled, this must be set for all ReadySet processes (both servers and adapters).
     // XXX JCD keep features synchronized with readyset-features.json
-    #[arg(long, env = "FEATURE_TOPK", hide = true)]
+    #[arg(
+        long,
+        env = "FEATURE_TOPK",
+        default_value = "false",
+        default_missing_value = "true",
+        num_args = 0..=1,
+        action = ArgAction::Set,
+        hide = true
+    )]
     pub feature_topk: bool,
 
     /// Enable support for Pagination in dataflow.
     ///
     /// NOTE: If enabled, this must be set for all ReadySet processes (both servers and adapters).
     // XXX JCD keep features synchronized with readyset-features.json
-    #[arg(long, env = "FEATURE_PAGINATION", hide = true)]
+    #[arg(
+        long,
+        env = "FEATURE_PAGINATION",
+        default_value = "false",
+        default_missing_value = "true",
+        num_args = 0..=1,
+        action = ArgAction::Set,
+        hide = true
+    )]
     pub feature_pagination: bool,
 
     /// Enable support for mixing equality and range comparisons on query parameters.
     // XXX JCD keep features synchronized with readyset-features.json
-    #[arg(long, env = "FEATURE_MIXED_COMPARISONS", hide = true)]
+    #[arg(
+        long,
+        env = "FEATURE_MIXED_COMPARISONS",
+        default_value = "true",
+        default_missing_value = "true",
+        num_args = 0..=1,
+        action = ArgAction::Set,
+        hide = true
+    )]
     pub feature_mixed_comparisons: bool,
 
     /// Enable support for straddled joins (joins with partial keys traced to both
     /// parents).
     // XXX JCD keep features synchronized with readyset-features.json
-    #[arg(long, env = "FEATURE_STRADDLED_JOINS", hide = true)]
+    #[arg(
+        long,
+        env = "FEATURE_STRADDLED_JOINS",
+        default_value = "true",
+        default_missing_value = "true",
+        num_args = 0..=1,
+        action = ArgAction::Set,
+        hide = true
+    )]
     feature_straddled_joins: bool,
 
     /// Enable support for Post-Lookup (queries which do extra work after the lookup
     /// into the reader).
     // XXX JCD keep features synchronized with readyset-features.json
-    #[arg(long, env = "FEATURE_POST_LOOKUP", hide = true)]
+    #[arg(
+        long,
+        env = "FEATURE_POST_LOOKUP",
+        default_value = "true",
+        default_missing_value = "true",
+        num_args = 0..=1,
+        action = ArgAction::Set,
+        hide = true
+    )]
     feature_post_lookup: bool,
 
     /// Directory in which to store replicated table data. If not specified, defaults to the
