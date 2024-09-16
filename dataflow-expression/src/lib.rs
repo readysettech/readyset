@@ -115,6 +115,16 @@ pub enum BuiltinFunction {
 
     /// [`date_trunc`](https://www.postgresql.org/docs/current/functions-datetime.html#FUNCTIONS-DATETIME-TRUNC)
     Extract(TimestampField, Expr),
+
+    /// `length` | `char_length` | `character_length`:
+    /// * [MySQL](https://dev.mysql.com/doc/refman/8.4/en/string-functions.html#function_length)
+    /// * [Postgres](https://www.postgresql.org/docs/current/functions-string.html#FUNCTIONS-LENGTH)
+    ///
+    Length {
+        expr: Expr,
+        in_bytes: bool, // if true, return the length in bytes, otherwise in characters
+        dialect: Dialect,
+    },
 }
 
 impl BuiltinFunction {
@@ -150,6 +160,7 @@ impl BuiltinFunction {
             ArrayToString { .. } => "array_to_string",
             DateTrunc { .. } => "date_trunc",
             Extract { .. } => "extract",
+            Length { .. } => "length",
         }
     }
 }
@@ -250,6 +261,9 @@ impl Display for BuiltinFunction {
             }
             Extract(field, expr) => {
                 write!(f, "({} FROM {})", field, expr)
+            }
+            Length { expr, .. } => {
+                write!(f, "({})", expr)
             }
         }
     }

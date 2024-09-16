@@ -12,6 +12,7 @@ use chrono_tz::Tz;
 use itertools::Either;
 use mysql_time::MySqlTime;
 use nom_sql::TimestampField;
+use readyset_data::dialect::SqlEngine;
 use readyset_data::{DfType, DfValue, TimestampTz};
 use readyset_errors::{internal, invalid_query_err, unsupported, ReadySetError, ReadySetResult};
 use readyset_util::math::integer_rnd;
@@ -1266,6 +1267,52 @@ impl BuiltinFunction {
                     internal!("EXTRACT function input expected to be DfValue::TimestampTz or DfValue::Time. Found {}", ts);
                 }
                 .and_then(|value| value.coerce_to(ty, &DfType::Unknown))
+            }
+            BuiltinFunction::Length {
+                expr,
+                in_bytes,
+                dialect,
+            } => {
+                let s = non_null!(expr.eval(record)?);
+                match dialect.engine() {
+                    SqlEngine::PostgreSQL => {
+                        if !matches!(s, DfValue::Text(_) | DfValue::TinyText(_)) {
+                            return Err(invalid_query_err!("LENGTH() requires a string argument"));
+                        };
+                        let s = s.to_string();
+                        let len = if *in_bytes {
+                            s.len() as i64
+                        } else {
+                            s.chars().count() as i64
+                        };
+                        Ok(DfValue::Int(len))
+                    }
+                    SqlEngine::MySQL => match s {
+                        DfValue::None
+                        | DfValue::Max
+                        | DfValue::PassThrough(_)
+                        | DfValue::BitVector(_)
+                        | DfValue::Array(_)
+                        | DfValue::ByteArray(_) => Ok(DfValue::None),
+                        DfValue::Double(_)
+                        | DfValue::Float(_)
+                        | DfValue::Int(_)
+                        | DfValue::Numeric(_)
+                        | DfValue::Text(_)
+                        | DfValue::Time(_)
+                        | DfValue::TimestampTz(_)
+                        | DfValue::TinyText(_)
+                        | DfValue::UnsignedInt(_) => {
+                            let s = s.to_string();
+                            let len = if *in_bytes {
+                                s.len() as i64
+                            } else {
+                                s.chars().count() as i64
+                            };
+                            Ok(DfValue::Int(len))
+                        }
+                    },
+                }
             }
         }
     }
@@ -3334,5 +3381,51 @@ mod tests {
         test_with_null_string("{1,2,3,null,5}", "1,2,3,*,5");
         test_with_null_string("{null,1,2,3,null,5}", "*,1,2,3,*,5");
         test_with_null_string("{{1,2},{3,4},{null,5}}", "1,2,3,4,*,5");
+    }
+
+    #[test]
+    fn length() {
+        // MySQL
+        let expr = "octet_length('ザ')";
+        assert_eq!(eval_expr(expr, MySQL), 3.into());
+
+        let expr = "length('hello')";
+        assert_eq!(eval_expr(expr, MySQL), 5.into());
+
+        let expr = "length('')";
+        assert_eq!(eval_expr(expr, MySQL), 0.into());
+
+        let expr = "length(null)";
+        assert_eq!(eval_expr(expr, MySQL), DfValue::None);
+
+        let expr = "length('ザ')";
+        assert_eq!(eval_expr(expr, MySQL), 3.into());
+
+        let expr = "char_length('ザ')";
+        assert_eq!(eval_expr(expr, MySQL), 1.into());
+
+        let expr = "character_length('ザ')";
+        assert_eq!(eval_expr(expr, MySQL), 1.into());
+
+        let expr = "length(1)";
+        assert_eq!(eval_expr(expr, MySQL), 1.into());
+
+        let expr = "char_length(1)";
+        assert_eq!(eval_expr(expr, MySQL), 1.into());
+
+        // PostgreSQL
+        let expr = "length('ザ')";
+        assert_eq!(eval_expr(expr, PostgreSQL), 1.into());
+
+        let expr = "char_length('ザ')";
+        assert_eq!(eval_expr(expr, PostgreSQL), 1.into());
+
+        let expr = "octet_length('ザ')";
+        assert_eq!(eval_expr(expr, PostgreSQL), 3.into());
+
+        let expr = "length(1)";
+        if let Ok(value) = try_eval_expr(expr, PostgreSQL) {
+            panic!("Expected error for `{expr}`, got {value:?}");
+        }
     }
 }

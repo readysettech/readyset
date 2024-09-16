@@ -448,6 +448,26 @@ impl BuiltinFunction {
 
                 (Self::DateTrunc(precision, source), ret_type)
             }
+            "length" | "octet_length" | "char_length" | "character_length" => {
+                // MySQL - `LENGTH()`, `OCTET_LENGTH()` = in bytes | `CHAR_LENGTH()`, `CHARACTER_LENGTH()` = in characters
+                // PostgreSQL - `OCTET_LENGTH()` = in bytes | `LENGTH()`, `CHAR_LENGTH()`, `CHARACTER_LENGTH()` = in characters
+                let expr = next_arg()?;
+                let ty = if expr.ty().is_any_text() {
+                    DfType::BigInt
+                } else {
+                    DfType::Int
+                };
+                let in_bytes = (matches!(dialect.engine(), SqlEngine::MySQL) && name == "length")
+                    || name == "octet_length";
+                (
+                    Self::Length {
+                        expr,
+                        in_bytes,
+                        dialect,
+                    },
+                    ty,
+                )
+            }
             _ => unsupported!("Function {name} does not exist"),
         };
 
