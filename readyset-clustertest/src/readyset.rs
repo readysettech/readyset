@@ -196,6 +196,7 @@ async fn replicated_readers() {
     let mut deployment = DeploymentBuilder::new(DatabaseType::MySQL, "ct_replicated_readers")
         .with_servers(2, ServerParams::default())
         .reader_replicas(2)
+        .enable_post_lookups()
         .start()
         .await
         .unwrap();
@@ -292,6 +293,7 @@ async fn replicated_readers_with_unions() {
         DeploymentBuilder::new(DatabaseType::MySQL, "ct_replicated_readers_with_unions")
             .with_servers(2, ServerParams::default())
             .reader_replicas(2)
+            .enable_post_lookups()
             .start()
             .await
             .unwrap();

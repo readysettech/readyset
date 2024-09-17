@@ -377,6 +377,8 @@ pub struct ServerStartParams {
     /// Whether the server should wait to receive a failpoint request before proceeding with the
     /// rest of it's startup.
     wait_for_failpoint: bool,
+    /// Whether to allow post-lookup operations
+    post_lookups: bool,
 }
 
 /// Set of parameters defining an entire cluster's topology.
@@ -447,6 +449,8 @@ pub struct DeploymentBuilder {
     /// Whether to automatically create inlined migrations for a query with unsupported
     /// placeholders.
     placeholder_inlining: bool,
+    /// Whether to enable post-lookup operations
+    post_lookups: bool,
     /// Whether to allow prometheus metrics
     prometheus_metrics: bool,
     /// How to execute the adapter and server processes.
@@ -523,6 +527,7 @@ impl DeploymentBuilder {
             deployment_mode: DeploymentMode::Adapter,
             cleanup: false,
             placeholder_inlining: false,
+            post_lookups: false,
             prometheus_metrics: true,
         }
     }
@@ -674,6 +679,12 @@ impl DeploymentBuilder {
         self
     }
 
+    /// Enable post-lookup operations
+    pub fn enable_post_lookups(mut self) -> Self {
+        self.post_lookups = true;
+        self
+    }
+
     /// Sets whether or not to automatically create inlined caches for queries with unsupported
     /// placeholders
     pub fn enable_placeholder_inlining(mut self) -> Self {
@@ -717,6 +728,7 @@ impl DeploymentBuilder {
             cleanup: self.cleanup,
             placeholder_inlining: self.placeholder_inlining,
             deployment_mode: self.deployment_mode,
+            post_lookups: self.post_lookups,
             prometheus_metrics: self.prometheus_metrics,
         }
     }
@@ -737,6 +749,7 @@ impl DeploymentBuilder {
             reader_replicas: self.reader_replicas,
             auto_restart: self.auto_restart,
             wait_for_failpoint,
+            post_lookups: self.post_lookups,
         }
     }
 
@@ -1531,6 +1544,8 @@ pub struct AdapterStartParams {
     placeholder_inlining: bool,
     /// How to execute the adapter
     deployment_mode: DeploymentMode,
+    /// Whether or not to enable post-lookup operations
+    post_lookups: bool,
     /// Whether to enable prometheus metrics
     prometheus_metrics: bool,
 }
@@ -1573,6 +1588,9 @@ async fn start_server(
     }
     if server_start_params.wait_for_failpoint {
         builder = builder.wait_for_failpoint();
+    }
+    if server_start_params.post_lookups {
+        builder = builder.enable_post_lookups();
     }
     let addr = Url::parse(&format!("http://127.0.0.1:{}", port)).unwrap();
     Ok(ServerHandle {
@@ -1664,6 +1682,10 @@ async fn start_adapter(
 
     if params.placeholder_inlining {
         builder = builder.enable_placeholder_inlining();
+    }
+
+    if params.post_lookups {
+        builder = builder.enable_post_lookups();
     }
 
     if params.prometheus_metrics {

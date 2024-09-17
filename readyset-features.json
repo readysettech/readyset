@@ -29,7 +29,7 @@
         "command-line": "--feature-post-lookup",
         "environment-variable": "FEATURE_POST_LOOKUP",
         "description": "Enable support for Post-Lookup (queries which do extra work after the lookup into the reader).",
-        "default": true
+        "default": false
     },
     {
         "feature_id": "5",

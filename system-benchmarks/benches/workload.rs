@@ -643,6 +643,7 @@ fn start_adapter(args: SystemBenchArgs) -> anyhow::Result<()> {
         "--deployment-mode",
         "standalone",
         "--allow-unauthenticated-connections",
+        "--feature-post-lookup",
         "--upstream-db-url",
         &upstream_url,
         "--durability",

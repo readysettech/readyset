@@ -190,6 +190,10 @@ impl ReadysetServerBuilder {
     pub fn wait_for_failpoint(self) -> Self {
         self.push_arg("--wait-for-failpoint")
     }
+
+    pub fn enable_post_lookups(self) -> Self {
+        self.push_arg("--feature-post-lookup")
+    }
 }
 
 /// Manages running a readyset binary with the correct arguments.
@@ -339,6 +343,10 @@ impl AdapterBuilder {
 
     pub fn enable_placeholder_inlining(self) -> Self {
         self.push_arg("--feature-placeholder-inlining")
+    }
+
+    pub fn enable_post_lookups(self) -> Self {
+        self.push_arg("--feature-post-lookup")
     }
 
     pub fn prometheus_metrics(self) -> Self {
