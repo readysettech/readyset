@@ -115,7 +115,6 @@ fn new_inner(
     let eviction_strategy = match eviction_kind {
         EvictionKind::Random => EvictionStrategy::new_random(),
         EvictionKind::LRU => EvictionStrategy::new_lru(),
-        EvictionKind::Generational => EvictionStrategy::new_generational(),
     };
 
     let ReaderProcessing {

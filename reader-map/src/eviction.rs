@@ -11,12 +11,10 @@
 //! reader exceeds its memory quota. Once called the strategy will return an
 //! iterator over the list of keys it proposes to evict.
 //!
-//! Currently three strategies are implemented:
+//! Currently two strategies are implemented:
 //!
 //! Random: simply sample an rng to evict the required number of keys
 //! LRU: evicts the least recently used keys
-//! Generational: like LRU but the count is inexact, and bucketed into
-//! generations, generation is counted as one eviction cycle.
 
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::Relaxed;
@@ -24,15 +22,10 @@ use std::sync::Arc;
 
 use itertools::Either;
 use rand::seq::SliceRandom;
-use rand::Rng;
 
 use crate::inner::Data;
 use crate::values::Values;
 use crate::InsertionOrder;
-
-/// Controls the maximum number of generations in Generational eviction.
-/// The value of 100 ensures the granularity will be at least 1%.
-const NUM_GENERATIONS: usize = 100;
 
 /// Handles the eviction of keys from the reader map
 #[derive(Clone, Debug)]
@@ -42,9 +35,6 @@ pub enum EvictionStrategy {
     /// Keeps track of how recently an entry was read, and evicts the ones that weren't in use
     /// recently
     LeastRecentlyUsed(LRUEviction),
-    /// Keeps track of how recently an entry was read with a generation accuracy, evicts the ones
-    /// that are oldest
-    Generational(GenerationalEviction),
 }
 
 impl Default for EvictionStrategy {
@@ -69,15 +59,6 @@ pub struct RandomEviction;
 /// When performing an eviction we then simply evict the keys with the smallest counter value.
 #[derive(Clone, Default, Debug)]
 pub struct LRUEviction(Arc<AtomicU64>);
-
-/// Performs an approximate LRU eviction.
-/// The structure keeps track of the total number of evictions that took place. We call that value
-/// a `generation`. When a key is read, we copy the value of the current generation to its metadata.
-/// This way each key tracks the value of the generation when it was last read.
-/// When performing an eviction we sort the metadata into generation buckets, and compute the number
-/// of keys to delete from each generation, where the oldest generations are evicted first.
-#[derive(Clone, Default, Debug)]
-pub struct GenerationalEviction(Arc<AtomicU64>);
 
 /// An iterator of sorts over [`EvictRangeGroup`] that groups together consecutive runs of evicted
 /// keys in a BTreeMap map. Does not actually implement iterator as that would require a lending
@@ -157,17 +138,11 @@ impl EvictionStrategy {
         EvictionStrategy::Random(RandomEviction)
     }
 
-    /// Create a generational eviction strategy
-    pub fn new_generational() -> EvictionStrategy {
-        EvictionStrategy::Generational(Default::default())
-    }
-
     /// Create new `EvictionMeta` for a newly added key
     pub(crate) fn new_meta(&self) -> EvictionMeta {
         match self {
             EvictionStrategy::Random(_) => Default::default(),
             EvictionStrategy::LeastRecentlyUsed(lru) => lru.new_meta(),
-            EvictionStrategy::Generational(gen) => gen.new_meta(),
         }
     }
 
@@ -176,7 +151,6 @@ impl EvictionStrategy {
         match self {
             EvictionStrategy::Random(_) => {}
             EvictionStrategy::LeastRecentlyUsed(lru) => lru.on_read(meta),
-            EvictionStrategy::Generational(gen) => gen.on_read(meta),
         }
     }
 
@@ -195,10 +169,7 @@ impl EvictionStrategy {
         match self {
             EvictionStrategy::Random(rand) => Either::Left(rand.pick_keys_to_evict(data, nkeys)),
             EvictionStrategy::LeastRecentlyUsed(lru) => {
-                Either::Right(Either::Left(lru.pick_keys_to_evict(data, nkeys)))
-            }
-            EvictionStrategy::Generational(gen) => {
-                Either::Right(Either::Right(gen.pick_keys_to_evict(data, nkeys)))
+                Either::Right(lru.pick_keys_to_evict(data, nkeys))
             }
         }
     }
@@ -221,7 +192,6 @@ impl EvictionStrategy {
         S: std::hash::BuildHasher,
     {
         let mut lru_f = None;
-        let mut gen_f = None;
         let mut rand_f = None;
         let iter = match self {
             EvictionStrategy::LeastRecentlyUsed(lru) => {
@@ -229,15 +199,10 @@ impl EvictionStrategy {
                 lru_f = Some(group_by);
                 Either::Left(iter)
             }
-            EvictionStrategy::Generational(gen) => {
-                let (iter, group_by) = gen.pick_ranges_to_evict(data, nkeys);
-                gen_f = Some(group_by);
-                Either::Right(Either::Left(iter))
-            }
             EvictionStrategy::Random(rand) => {
                 let (iter, group_by) = rand.pick_ranges_to_evict(data, nkeys);
                 rand_f = Some(group_by);
-                Either::Right(Either::Right(iter))
+                Either::Right(iter)
             }
         };
 
@@ -246,8 +211,6 @@ impl EvictionStrategy {
             group_by: move |val| {
                 // This freak show is because we don't have an Either equivalent for Fn
                 if let Some(f) = lru_f.as_mut() {
-                    f(val)
-                } else if let Some(f) = gen_f.as_mut() {
                     f(val)
                 } else {
                     (rand_f.as_mut().unwrap())(val)
@@ -392,141 +355,6 @@ impl RandomEviction {
         // than nkeys
         (indices.into_iter().zip(data.iter()), move |v| {
             v < nkeys as u64
-        })
-    }
-}
-
-impl GenerationalEviction {
-    fn new_meta(&self) -> EvictionMeta {
-        EvictionMeta(AtomicU64::new(self.0.load(Relaxed)).into())
-    }
-
-    fn on_read(&self, meta: &EvictionMeta) {
-        // Generational simply assigns the generation counter to the metadata
-        let current_counter = self.0.load(Relaxed);
-        meta.0.store(current_counter, Relaxed);
-    }
-
-    fn pick_keys_to_evict<'a, K, V, I, S>(
-        &self,
-        data: &'a Data<K, V, I, S>,
-        mut nkeys: usize,
-    ) -> impl Iterator<Item = (&'a K, &'a Values<V, I>)>
-    where
-        K: Ord + Clone,
-        I: InsertionOrder<V>,
-        S: std::hash::BuildHasher,
-    {
-        let current_gen = self.0.fetch_add(1, Relaxed);
-
-        let mut buckets = [0usize; NUM_GENERATIONS];
-
-        // Load the atomic values just once
-        let ctrs = data
-            .iter()
-            .map(|(_, v)| v.eviction_meta().value())
-            .collect::<Vec<_>>();
-
-        // We first count how many values are there to evict for each generation (up to
-        // NUM_GENERATIONS generations back)
-        ctrs.iter().for_each(|gen| {
-            let bucket = ((current_gen - *gen) as usize).min(buckets.len() - 1);
-            buckets[bucket] += 1;
-        });
-
-        // At this point at `bucket[0]` we have the count for keys in the current generation
-        // `bucket[1]` for previous etc. We need to free a total of `nkeys`. We start from the
-        // highest bucket, attempting to free an entire generation where possible. Finally if
-        // we don't have sufficient keys from freeing entire generations, we will partially evict
-        // another generation at random to get the required amount of keys
-
-        // Everything before full_gen_to_evict, will be evicted fully
-        // Everything *in* last_gen_to_evict, will be evicted randomly
-        let mut last_bucket_to_evict = buckets.len();
-        for cnt in buckets.iter().rev() {
-            last_bucket_to_evict -= 1;
-            if *cnt <= nkeys {
-                nkeys -= *cnt;
-            } else {
-                break;
-            }
-        }
-
-        // After the loop is finished, `nkeys` is the number of keys we have left
-        // to evict the current bucket (`last_bucket_to_evict`). We will evict as
-        // many keys from that bucket at random.
-        let rand_ratio = nkeys as f64 / buckets[last_bucket_to_evict] as f64;
-        let last_gen_to_evict = current_gen - last_bucket_to_evict as u64;
-
-        let mut rng = rand::thread_rng();
-
-        // We return the iterator over the keys to be evicted according to their generation
-        ctrs.into_iter()
-            .zip(data.iter())
-            .filter_map(move |(gen, kv)| match gen {
-                g if g < last_gen_to_evict => Some(kv),
-                g if g == last_gen_to_evict => rng.gen_bool(rand_ratio).then_some(kv),
-                _ => None,
-            })
-    }
-
-    fn pick_ranges_to_evict<'a, K, V, I, S>(
-        &self,
-        data: &'a Data<K, V, I, S>,
-        mut nkeys: usize,
-    ) -> (
-        impl Iterator<Item = (u64, (&'a K, &'a Values<V, I>))>,
-        impl FnMut(u64) -> bool,
-    )
-    where
-        K: Ord + Clone,
-        I: InsertionOrder<V>,
-        S: std::hash::BuildHasher,
-    {
-        let current_gen = self.0.fetch_add(1, Relaxed);
-
-        let mut buckets = [0usize; NUM_GENERATIONS];
-
-        // Load the atomic values just once
-        let ctrs = data
-            .iter()
-            .map(|(_, v)| v.eviction_meta().value())
-            .collect::<Vec<_>>();
-
-        // We first count how many values are there to evict for each generation (up to
-        // NUM_GENERATIONS generations back)
-        ctrs.iter().for_each(|gen| {
-            let bucket = ((current_gen - *gen) as usize).min(buckets.len() - 1);
-            buckets[bucket] += 1;
-        });
-
-        // At this point at `bucket[0]` we have the count for keys in the current generation
-        // `bucket[1]` for previous etc. We need to free a total of `nkeys`. We start from the
-        // highest bucket, attempting to free an entire generation where possible. Finally if
-        // we don't have sufficient keys from freeing entire generations, we will partially evict
-        // another generation to get the required amount of keys.
-
-        // Everything before full_gen_to_evict, will be evicted fully
-        // Remaining keys *in* last_gen_to_evict, will be evicted as needed
-        let mut last_bucket_to_evict = buckets.len();
-        for cnt in buckets.iter().rev() {
-            last_bucket_to_evict -= 1;
-            if *cnt <= nkeys {
-                nkeys -= *cnt;
-            } else {
-                break;
-            }
-        }
-
-        // After the loop is finished, `nkeys` is the number of keys we have left
-        // to evict from the current bucket (`last_bucket_to_evict`). We will evict as
-        // many keys from that bucket as a single range.
-        let last_gen_to_evict = current_gen - last_bucket_to_evict as u64;
-
-        (ctrs.into_iter().zip(data.iter()), move |gen| match gen {
-            g if g < last_gen_to_evict => true,
-            g if g == last_gen_to_evict && nkeys > 0 => true,
-            _ => false,
         })
     }
 }

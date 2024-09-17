@@ -1766,7 +1766,7 @@ impl Domain {
                 }
 
                 let txs = (0..num_shards)
-                    .map(|shard| -> ReadySetResult<_> {
+                    .map(|shard| {
                         let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<Misses>();
                         let sender = self
                             .channel_coordinator
