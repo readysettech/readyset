@@ -82,7 +82,6 @@ pub enum EvictionKind {
     #[default]
     Random,
     LRU,
-    Generational,
 }
 
 impl Display for EvictionKind {
@@ -90,7 +89,6 @@ impl Display for EvictionKind {
         match self {
             Self::Random => write!(f, "random"),
             Self::LRU => write!(f, "lru"),
-            Self::Generational => write!(f, "generational"),
         }
     }
 }
