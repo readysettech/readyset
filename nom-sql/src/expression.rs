@@ -1414,6 +1414,28 @@ fn cast(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], 
     }
 }
 
+fn date_cast_function(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Expr> {
+    move |i| {
+        let (i, _) = tag_no_case("date")(i)?;
+        let (i, _) = whitespace0(i)?;
+        let (i, arg) = delimited(
+            tag("("),
+            delimited(whitespace0, expression(dialect), whitespace0),
+            tag(")"),
+        )(i)?;
+        Ok((
+            i,
+            Expr::Cast {
+                expr: Box::new(arg),
+                ty: SqlType::Date,
+                postgres_style: false,
+            },
+        ))
+    }
+}
+
 fn nested_select(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Expr> {
     move |i| {
         let (i, _) = char('(')(i)?;
@@ -1545,12 +1567,13 @@ pub(crate) fn simple_expr(
             between_expr(dialect),
             row_expr_explicit(dialect),
             row_expr_implicit(dialect),
+            cast(dialect),
+            date_cast_function(dialect),
             map(function_expr(dialect), Expr::Call),
             map(literal(dialect), Expr::Literal),
             case_when_expr(dialect),
             array_expr(dialect),
             map(column_identifier_no_alias(dialect), Expr::Column),
-            cast(dialect),
             map(scoped_var(dialect), Expr::Variable),
         ))(i)
     }
@@ -1741,6 +1764,28 @@ mod tests {
                 }
             );
         }
+    }
+
+    #[test]
+    fn date_func_cast() {
+        fn expr_cast_to_date(arg: &str) -> Expr {
+            Expr::Cast {
+                expr: Box::new(Expr::Literal(Literal::String(arg.to_string()))),
+                ty: SqlType::Date,
+                postgres_style: false,
+            }
+        }
+        fn from_date_func(dialect: Dialect, arg: &str) -> Expr {
+            expression(dialect)(LocatedSpan::new(format!("DATE('{}')", arg).as_bytes()))
+                .unwrap()
+                .1
+        }
+        static DTM: &str = "2024-01-01 23:59:59";
+        assert_eq!(from_date_func(Dialect::MySQL, DTM), expr_cast_to_date(DTM));
+        assert_eq!(
+            from_date_func(Dialect::PostgreSQL, DTM),
+            expr_cast_to_date(DTM)
+        );
     }
 
     mod conditions {

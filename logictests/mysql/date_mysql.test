@@ -1,0 +1,23 @@
+# tests for readyset's support of the DATE() function for mysql
+
+statement ok
+CREATE TABLE date_test(id int, tm timestamp)
+
+statement ok
+INSERT INTO date_test values
+(1, '2024-01-01 09:31:25')
+
+query D nosort
+SELECT date(tm) from date_test where id = 1
+----
+2024-01-01
+
+query D nosort
+SELECT date(date(tm)) from date_test where id = 1
+----
+2024-01-01
+
+query D nosort
+SELECT date(addtime(tm, 5)) from date_test where id = 1
+----
+2024-01-01
