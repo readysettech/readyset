@@ -654,7 +654,7 @@ pub struct WorkerOptions {
     #[arg(
         long,
         env = "FEATURE_MIXED_COMPARISONS",
-        default_value = "true",
+        default_value = "false",
         default_missing_value = "true",
         num_args = 0..=1,
         action = ArgAction::Set,

@@ -13,7 +13,7 @@
         "command-line": "--feature-mixed-comparisons",
         "environment-variable": "FEATURE_MIXED_COMPARISONS",
         "description": "Enable support for mixing equality and range comparisons on query parameters.",
-        "default": true
+        "default": false
     },
     {
         "feature_id": "3",
