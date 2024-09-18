@@ -668,7 +668,7 @@ pub struct WorkerOptions {
     #[arg(
         long,
         env = "FEATURE_STRADDLED_JOINS",
-        default_value = "true",
+        default_value = "false",
         default_missing_value = "true",
         num_args = 0..=1,
         action = ArgAction::Set,
