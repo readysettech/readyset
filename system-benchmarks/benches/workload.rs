@@ -644,6 +644,7 @@ fn start_adapter(args: SystemBenchArgs) -> anyhow::Result<()> {
         "standalone",
         "--allow-unauthenticated-connections",
         "--feature-post-lookup",
+        "--feature-straddled-joins",
         "--upstream-db-url",
         &upstream_url,
         "--durability",

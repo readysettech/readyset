@@ -37,7 +37,7 @@
         "command-line": "--feature-straddled-joins",
         "environment-variable": "FEATURE_STRADDLED_JOINS",
         "description": "Enable support for straddled joins (joins with partial keys traced to both parents).",
-        "default": true
+        "default": false
     },
     {
         "feature_id": "6",
