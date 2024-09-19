@@ -678,6 +678,9 @@ pub struct WorkerOptions {
 
     /// Enable support for Post-Lookup (queries which do extra work after the lookup
     /// into the reader).
+    ///
+    /// If the Top K feature is disabled, Post-Lookup can still provide support for some queries
+    /// supported by Top K, albeit with lower performance.
     // XXX JCD keep features synchronized with readyset-features.json
     #[arg(
         long,

@@ -28,7 +28,7 @@
         "name": "Post-Lookup",
         "command-line": "--feature-post-lookup",
         "environment-variable": "FEATURE_POST_LOOKUP",
-        "description": "Enable support for Post-Lookup (queries which do extra work after the lookup into the reader).",
+        "description": "Enable support for Post-Lookup (queries which do extra work after the lookup into the reader).\n\nIf the Top K feature is disabled, Post-Lookup can still provide support for some queries supported by Top K, albeit with lower performance.",
         "default": false
     },
     {
