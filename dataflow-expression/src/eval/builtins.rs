@@ -22,7 +22,7 @@ use serde_json::Value as JsonValue;
 use test_strategy::Arbitrary;
 use vec1::Vec1;
 
-use crate::{BuiltinFunction, Expr};
+use crate::{BuiltinFunction, Dialect, Expr};
 
 const MICROS_IN_SECOND: u32 = 1_000_000;
 const MILLIS_IN_SECOND: u32 = 1_000;
@@ -738,6 +738,55 @@ where
     Ok(try_cast_or_none!(res, ty, res_ty))
 }
 
+/// Implementation of the `ascii()` function.
+fn ascii(val: &DfValue, dialect: &Dialect, _ty: &DfType) -> ReadySetResult<DfValue> {
+    match dialect.engine() {
+        SqlEngine::PostgreSQL => match val {
+            DfValue::Text(_) | DfValue::TinyText(_) => {
+                let s = val.to_string();
+                match s.chars().next() {
+                    Some(c) => Ok(DfValue::UnsignedInt(c as u64)),
+                    None => Ok(DfValue::UnsignedInt(0)),
+                }
+            }
+            DfValue::None => Ok(DfValue::None),
+            _ => Err(invalid_query_err!("ASCII() requires a string argument")),
+        },
+        SqlEngine::MySQL => {
+            match val {
+                DfValue::None
+                | DfValue::Max
+                | DfValue::BitVector(_)
+                | DfValue::ByteArray(_)
+                | DfValue::PassThrough(_) => Ok(DfValue::None),
+
+                // note: mysql returns the first byte of the string, not the first code point.
+                // thus, for a multi-byte first char, we get the first byte.
+                // for numbers, mysql will return ascii code point of the first digit.
+                // however, if the value is negative, it returns the code point
+                // for '-'. mysql will treat arrays expressed as '["one", "two"]' as a string,
+                // and return the ascii code point for '['.
+                DfValue::Double(_)
+                | DfValue::Float(_)
+                | DfValue::Int(_)
+                | DfValue::Numeric(_)
+                | DfValue::Time(_)
+                | DfValue::TimestampTz(_)
+                | DfValue::Text(_)
+                | DfValue::TinyText(_)
+                | DfValue::UnsignedInt(_)
+                | DfValue::Array(_) => {
+                    let s = val.to_string();
+                    match s.as_bytes().first() {
+                        Some(c) => Ok(DfValue::UnsignedInt(*c as u64)),
+                        None => Ok(DfValue::UnsignedInt(0)),
+                    }
+                }
+            }
+        }
+    }
+}
+
 impl BuiltinFunction {
     pub(crate) fn eval<D>(&self, ty: &DfType, record: &[D]) -> ReadySetResult<DfValue>
     where
@@ -1313,6 +1362,10 @@ impl BuiltinFunction {
                         }
                     },
                 }
+            }
+            BuiltinFunction::Ascii { expr, dialect } => {
+                let val = non_null!(expr.eval(record)?);
+                ascii(&val, dialect, ty)
             }
         }
     }
@@ -3427,5 +3480,77 @@ mod tests {
         if let Ok(value) = try_eval_expr(expr, PostgreSQL) {
             panic!("Expected error for `{expr}`, got {value:?}");
         }
+    }
+
+    #[test]
+    fn ascii() {
+        macro_rules! digit_to_code_point {
+            ($digit:expr) => {
+                $digit as char as u64
+            };
+        }
+
+        macro_rules! char_to_code_point {
+            ($char:expr) => {
+                $char as u64
+            };
+        }
+
+        // MySQL
+        let expr = "ascii(NULL)";
+        assert_eq!(eval_expr(expr, MySQL), DfValue::None);
+
+        let expr = "ascii('')";
+        assert_eq!(eval_expr(expr, MySQL), digit_to_code_point!(0).into());
+
+        let expr = "ascii(2)";
+        assert_eq!(eval_expr(expr, MySQL), char_to_code_point!('2').into());
+
+        let expr = "ascii('2')";
+        assert_eq!(eval_expr(expr, MySQL), char_to_code_point!('2').into());
+
+        let expr = "ascii(2.5)";
+        assert_eq!(eval_expr(expr, MySQL), char_to_code_point!('2').into());
+
+        let expr = "ascii(-2)";
+        assert_eq!(eval_expr(expr, MySQL), char_to_code_point!('-').into());
+
+        let expr = "ascii('asdf')";
+        assert_eq!(eval_expr(expr, MySQL), char_to_code_point!('a').into());
+
+        let expr = "ascii('[\"hot\", \"cold\"]')";
+        assert_eq!(eval_expr(expr, MySQL), char_to_code_point!('[').into());
+
+        // note: mysql returns the first byte of the string, not the first code point.
+        // thus, for a multi-byte first char, we get the first byte.
+        let expr = "ascii('こんにちは')";
+        let first_byte = "こんにちは"
+            .to_string()
+            .as_bytes()
+            .first()
+            .copied()
+            .unwrap();
+        assert_eq!(eval_expr(expr, MySQL), first_byte.into());
+
+        // Postgres
+        let expr = "ascii(NULL)";
+        assert_eq!(eval_expr(expr, PostgreSQL), DfValue::None);
+
+        let expr = "ascii('')";
+        assert_eq!(eval_expr(expr, PostgreSQL), digit_to_code_point!(0).into());
+
+        let expr = "ascii(1)";
+        if let Ok(value) = try_eval_expr(expr, PostgreSQL) {
+            panic!("Expected error for `{expr}`, got {value:?}");
+        }
+
+        let expr = "ascii('asdf')";
+        assert_eq!(eval_expr(expr, PostgreSQL), char_to_code_point!('a').into());
+
+        let expr = "ascii('こんにちは')";
+        assert_eq!(
+            eval_expr(expr, PostgreSQL),
+            char_to_code_point!('こ').into()
+        );
     }
 }

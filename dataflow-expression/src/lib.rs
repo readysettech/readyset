@@ -64,7 +64,10 @@ pub enum BuiltinFunction {
     /// [`json[b]_strip_nulls`](https://www.postgresql.org/docs/current/functions-json.html)
     JsonStripNulls(Expr),
     /// [`json[b]_extract_path[_text]`](https://www.postgresql.org/docs/current/functions-json.html)
-    JsonExtractPath { json: Expr, keys: Vec1<Expr> },
+    JsonExtractPath {
+        json: Expr,
+        keys: Vec1<Expr>,
+    },
     /// [`jsonb_insert`](https://www.postgresql.org/docs/current/functions-json.html)
     JsonbInsert(Expr, Expr, Expr, Option<Expr>),
     /// [`jsonb_set[_lax]`](https://www.postgresql.org/docs/current/functions-json.html)
@@ -125,6 +128,11 @@ pub enum BuiltinFunction {
         in_bytes: bool, // if true, return the length in bytes, otherwise in characters
         dialect: Dialect,
     },
+
+    Ascii {
+        expr: Expr,
+        dialect: Dialect,
+    },
 }
 
 impl BuiltinFunction {
@@ -161,6 +169,7 @@ impl BuiltinFunction {
             DateTrunc { .. } => "date_trunc",
             Extract { .. } => "extract",
             Length { .. } => "length",
+            Ascii { .. } => "ascii",
         }
     }
 }
@@ -263,6 +272,9 @@ impl Display for BuiltinFunction {
                 write!(f, "({} FROM {})", field, expr)
             }
             Length { expr, .. } => {
+                write!(f, "({})", expr)
+            }
+            Ascii { expr, .. } => {
                 write!(f, "({})", expr)
             }
         }

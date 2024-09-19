@@ -468,6 +468,10 @@ impl BuiltinFunction {
                     ty,
                 )
             }
+            "ascii" => {
+                let expr = next_arg()?;
+                (Self::Ascii { expr, dialect }, DfType::UnsignedInt)
+            }
             _ => unsupported!("Function {name} does not exist"),
         };
 
