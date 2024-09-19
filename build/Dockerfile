@@ -38,4 +38,4 @@ ENV RUSTC_WRAPPER=sccache
 
 # CARGO_HOME is set by the nightly container to be /usr/local/cargo.
 # This is where it reads configs from for cargo and where cargo installs binaries.
-RUN printf '[build]\nrustflags = ["-C", "link-arg=-fuse-ld=lld"]' > ${CARGO_HOME}/config
+RUN printf '[build]\nrustflags = ["-C", "link-arg=-fuse-ld=lld"]' > ${CARGO_HOME}/config.toml
