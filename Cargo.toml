@@ -56,7 +56,7 @@ members = [
     "tinylb",
     "test-utils",
     "timestamp-service",
-    "tournament-kway"
+    "tournament-kway",
 ]
 resolver = "2"
 
@@ -72,9 +72,12 @@ postgres-native-tls = { git = "https://github.com/readysettech/rust-postgres.git
 postgres-protocol = { git = "https://github.com/readysettech/rust-postgres.git" }
 postgres-types = { git = "https://github.com/readysettech/rust-postgres.git" }
 tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git" }
-tokio = { version = "1.37",  features = ["full"] }
+tokio = { version = "1.37", features = ["full"] }
 tokio-test = { version = "0.4.4" }
-rocksdb = { git = "https://github.com/readysettech/rust-rocksdb.git", default-features = false, features = ["lz4", "jemalloc"] }
+rocksdb = { git = "https://github.com/readysettech/rust-rocksdb.git", default-features = false, features = [
+    "lz4",
+    "jemalloc",
+] }
 metrics-exporter-prometheus = { git = "https://github.com/readysettech/metrics.git" }
 metrics = { git = "https://github.com/readysettech/metrics.git" }
 metrics-util = { git = "https://github.com/readysettech/metrics.git" }
@@ -198,7 +201,7 @@ slotmap = "1.0.7"
 smallvec = { version = "1.13.2", default-features = false }
 socket2 = "0.4"
 sqlformat = "0.2.1"
-sqlparser = "0.41.0"
+sqlparser = "0.51.0"
 strawpoll = "0.2.3"
 streaming-iterator = "0.1"
 stringprep = "0.1.4"
@@ -243,12 +246,12 @@ xxhash-rust = { version = "0.8.10", features = ["xxh3"] }
 zipf = "7.0.1"
 
 [profile.release]
-debug=true
-lto="thin"
+debug = true
+lto = "thin"
 
 [profile.release-fat-lto]
 inherits = "release"
-lto="fat"
+lto = "fat"
 
 [profile.release-dist]
 # configs for distro release packages (i.e. deb, rpm, etc.)
