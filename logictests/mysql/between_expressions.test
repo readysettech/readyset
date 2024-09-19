@@ -1,0 +1,41 @@
+statement ok
+create table between_expressions (x int, s varchar(10), d datetime);
+
+statement ok
+insert into between_expressions values (1, '1', '2001-01-01'), (2, '2', '2002-01-01'), (3, '3', '2003-01-01'), (4, '4', '2004-01-01'), (5, '5', '2005-01-01');
+
+query I nosort
+select x from between_expressions where x between 2 and 4;
+----
+2
+3
+4
+
+query T nosort
+select d from between_expressions where extract(year from d) between 2002 and 2004;
+----
+2002-01-01
+2003-01-01
+2004-01-01
+
+query T nosort
+select s from between_expressions where (cast(s as unsigned integer)) between 2 and 4;
+----
+2
+3
+4
+
+query T nosort
+select x from between_expressions where if(x between 2 and 4, x, 100) between 2 and 4;
+----
+2
+3
+4
+
+query T nosort
+select s from between_expressions where cast(s as unsigned integer) between 2 and 4;
+----
+2
+3
+4
+
