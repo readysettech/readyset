@@ -6,10 +6,10 @@ use mysql_async::Value;
 
 const MYSQL_TYPES: &[&str] = &["tinyint", "smallint", "mediumint", "int", "bigint"];
 const MYSQL_SIGNED: &[&str] = &["", "unsigned"];
-const MYSQL_OPS: &[&str] = &["+", "-", "*", "/"];
+const MYSQL_OPS: &[&str] = &["+", "-", "*", "/", "%"];
 const READYSET_TYPES: &[&str] = &["TinyInt", "SmallInt", "MediumInt", "Int", "BigInt"];
 const READYSET_SIGNED: &[&str] = &["", "Unsigned"];
-const READYSET_OPS: &[&str] = &["Add", "Subtract", "Multiply", "Divide"];
+const READYSET_OPS: &[&str] = &["Add", "Subtract", "Multiply", "Divide", "Modulo"];
 
 async fn test(
     conn: &mut mysql_async::Conn,

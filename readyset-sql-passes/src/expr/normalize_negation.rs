@@ -39,6 +39,7 @@ fn negate_expr(expr: &mut Expr) -> bool {
                 | BinaryOperator::HashSubtract
                 | BinaryOperator::Multiply
                 | BinaryOperator::Divide
+                | BinaryOperator::Modulo
                 | BinaryOperator::DoublePipe
                 | BinaryOperator::Arrow1
                 | BinaryOperator::Arrow2

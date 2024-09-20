@@ -825,6 +825,36 @@ fn function_call(
     }
 }
 
+fn modulo(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Expr> {
+    move |i| {
+        let (i, _) = tag_no_case("mod")(i)?;
+        let (i, _) = whitespace0(i)?;
+        let (i, _) = tag("(")(i)?;
+        let (i, _) = whitespace0(i)?;
+        let (i, lhs) = expression(dialect)(i)?;
+        let (i, _) = ws_sep_comma(i)?;
+        let (i, rhs) = expression(dialect)(i)?;
+        let (i, _) = whitespace0(i)?;
+        let (i, _) = tag(")")(i)?;
+
+        Ok((
+            i,
+            Expr::BinaryOp {
+                lhs: Box::new(lhs.clone()),
+                op: crate::BinaryOperator::Modulo,
+                rhs: Box::new(rhs.clone()),
+            },
+        ))
+    }
+}
+
+// Desugar a function into another, simpler expression.
+pub fn function_desugar(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Expr> {
+    move |i| alt((modulo(dialect),))(i)
+}
+
 pub fn function_expr(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], FunctionExpr> {
@@ -1390,6 +1420,25 @@ mod tests {
         assert_eq!(
             test_parse!(function_expr(Dialect::MySQL), b"count ( * )"),
             FunctionExpr::CountStar
+        );
+    }
+
+    #[test]
+    fn modulo() {
+        let op = Expr::BinaryOp {
+            lhs: Box::new(Expr::Literal(Literal::Integer(1))),
+            op: crate::BinaryOperator::Modulo,
+            rhs: Box::new(Expr::Literal(Literal::Integer(2))),
+        };
+
+        assert_eq!(
+            test_parse!(function_desugar(Dialect::MySQL), b"mod(1,2)"),
+            op,
+        );
+
+        assert_eq!(
+            test_parse!(function_desugar(Dialect::MySQL), b"mod (  1 , 2 )"),
+            op,
         );
     }
 

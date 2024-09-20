@@ -10,10 +10,10 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
+use crate::BinaryOperator;
+use crate::DfType;
 use std::collections::HashMap;
 use std::sync::OnceLock;
-
-use crate::{BinaryOperator, DfType};
 
 pub(crate) fn output_type(left: &DfType, op: &BinaryOperator, right: &DfType) -> Option<DfType> {
     static MAP: OnceLock<HashMap<(DfType, BinaryOperator, DfType), DfType>> = OnceLock::new();
@@ -136,6 +136,34 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
         DfType::Numeric { prec: 7, scale: 4 },
     );
     map.insert(
+        (DfType::TinyInt, BinaryOperator::Modulo, DfType::TinyInt),
+        DfType::Int,
+    );
+    map.insert(
+        (
+            DfType::TinyInt,
+            BinaryOperator::Modulo,
+            DfType::UnsignedTinyInt,
+        ),
+        DfType::Int,
+    );
+    map.insert(
+        (
+            DfType::UnsignedTinyInt,
+            BinaryOperator::Modulo,
+            DfType::TinyInt,
+        ),
+        DfType::UnsignedInt,
+    );
+    map.insert(
+        (
+            DfType::UnsignedTinyInt,
+            BinaryOperator::Modulo,
+            DfType::UnsignedTinyInt,
+        ),
+        DfType::UnsignedInt,
+    );
+    map.insert(
         (DfType::TinyInt, BinaryOperator::Add, DfType::SmallInt),
         DfType::Int,
     );
@@ -246,6 +274,34 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
             DfType::UnsignedSmallInt,
         ),
         DfType::Numeric { prec: 7, scale: 4 },
+    );
+    map.insert(
+        (DfType::TinyInt, BinaryOperator::Modulo, DfType::SmallInt),
+        DfType::Int,
+    );
+    map.insert(
+        (
+            DfType::TinyInt,
+            BinaryOperator::Modulo,
+            DfType::UnsignedSmallInt,
+        ),
+        DfType::Int,
+    );
+    map.insert(
+        (
+            DfType::UnsignedTinyInt,
+            BinaryOperator::Modulo,
+            DfType::SmallInt,
+        ),
+        DfType::UnsignedInt,
+    );
+    map.insert(
+        (
+            DfType::UnsignedTinyInt,
+            BinaryOperator::Modulo,
+            DfType::UnsignedSmallInt,
+        ),
+        DfType::UnsignedInt,
     );
     map.insert(
         (DfType::TinyInt, BinaryOperator::Add, DfType::MediumInt),
@@ -360,6 +416,34 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
         DfType::Numeric { prec: 7, scale: 4 },
     );
     map.insert(
+        (DfType::TinyInt, BinaryOperator::Modulo, DfType::MediumInt),
+        DfType::Int,
+    );
+    map.insert(
+        (
+            DfType::TinyInt,
+            BinaryOperator::Modulo,
+            DfType::UnsignedMediumInt,
+        ),
+        DfType::Int,
+    );
+    map.insert(
+        (
+            DfType::UnsignedTinyInt,
+            BinaryOperator::Modulo,
+            DfType::MediumInt,
+        ),
+        DfType::UnsignedInt,
+    );
+    map.insert(
+        (
+            DfType::UnsignedTinyInt,
+            BinaryOperator::Modulo,
+            DfType::UnsignedMediumInt,
+        ),
+        DfType::UnsignedInt,
+    );
+    map.insert(
         (DfType::TinyInt, BinaryOperator::Add, DfType::Int),
         DfType::BigInt,
     );
@@ -454,6 +538,26 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
             DfType::UnsignedInt,
         ),
         DfType::Numeric { prec: 7, scale: 4 },
+    );
+    map.insert(
+        (DfType::TinyInt, BinaryOperator::Modulo, DfType::Int),
+        DfType::Int,
+    );
+    map.insert(
+        (DfType::TinyInt, BinaryOperator::Modulo, DfType::UnsignedInt),
+        DfType::Int,
+    );
+    map.insert(
+        (DfType::UnsignedTinyInt, BinaryOperator::Modulo, DfType::Int),
+        DfType::UnsignedInt,
+    );
+    map.insert(
+        (
+            DfType::UnsignedTinyInt,
+            BinaryOperator::Modulo,
+            DfType::UnsignedInt,
+        ),
+        DfType::UnsignedInt,
     );
     map.insert(
         (DfType::TinyInt, BinaryOperator::Add, DfType::BigInt),
@@ -558,6 +662,34 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
             DfType::UnsignedBigInt,
         ),
         DfType::Numeric { prec: 7, scale: 4 },
+    );
+    map.insert(
+        (DfType::TinyInt, BinaryOperator::Modulo, DfType::BigInt),
+        DfType::BigInt,
+    );
+    map.insert(
+        (
+            DfType::TinyInt,
+            BinaryOperator::Modulo,
+            DfType::UnsignedBigInt,
+        ),
+        DfType::BigInt,
+    );
+    map.insert(
+        (
+            DfType::UnsignedTinyInt,
+            BinaryOperator::Modulo,
+            DfType::BigInt,
+        ),
+        DfType::UnsignedBigInt,
+    );
+    map.insert(
+        (
+            DfType::UnsignedTinyInt,
+            BinaryOperator::Modulo,
+            DfType::UnsignedBigInt,
+        ),
+        DfType::UnsignedBigInt,
     );
     map.insert(
         (DfType::SmallInt, BinaryOperator::Add, DfType::TinyInt),
@@ -672,6 +804,34 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
         DfType::Numeric { prec: 9, scale: 4 },
     );
     map.insert(
+        (DfType::SmallInt, BinaryOperator::Modulo, DfType::TinyInt),
+        DfType::Int,
+    );
+    map.insert(
+        (
+            DfType::SmallInt,
+            BinaryOperator::Modulo,
+            DfType::UnsignedTinyInt,
+        ),
+        DfType::Int,
+    );
+    map.insert(
+        (
+            DfType::UnsignedSmallInt,
+            BinaryOperator::Modulo,
+            DfType::TinyInt,
+        ),
+        DfType::UnsignedInt,
+    );
+    map.insert(
+        (
+            DfType::UnsignedSmallInt,
+            BinaryOperator::Modulo,
+            DfType::UnsignedTinyInt,
+        ),
+        DfType::UnsignedInt,
+    );
+    map.insert(
         (DfType::SmallInt, BinaryOperator::Add, DfType::SmallInt),
         DfType::Int,
     );
@@ -782,6 +942,34 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
             DfType::UnsignedSmallInt,
         ),
         DfType::Numeric { prec: 9, scale: 4 },
+    );
+    map.insert(
+        (DfType::SmallInt, BinaryOperator::Modulo, DfType::SmallInt),
+        DfType::Int,
+    );
+    map.insert(
+        (
+            DfType::SmallInt,
+            BinaryOperator::Modulo,
+            DfType::UnsignedSmallInt,
+        ),
+        DfType::Int,
+    );
+    map.insert(
+        (
+            DfType::UnsignedSmallInt,
+            BinaryOperator::Modulo,
+            DfType::SmallInt,
+        ),
+        DfType::UnsignedInt,
+    );
+    map.insert(
+        (
+            DfType::UnsignedSmallInt,
+            BinaryOperator::Modulo,
+            DfType::UnsignedSmallInt,
+        ),
+        DfType::UnsignedInt,
     );
     map.insert(
         (DfType::SmallInt, BinaryOperator::Add, DfType::MediumInt),
@@ -904,6 +1092,34 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
         DfType::Numeric { prec: 9, scale: 4 },
     );
     map.insert(
+        (DfType::SmallInt, BinaryOperator::Modulo, DfType::MediumInt),
+        DfType::Int,
+    );
+    map.insert(
+        (
+            DfType::SmallInt,
+            BinaryOperator::Modulo,
+            DfType::UnsignedMediumInt,
+        ),
+        DfType::Int,
+    );
+    map.insert(
+        (
+            DfType::UnsignedSmallInt,
+            BinaryOperator::Modulo,
+            DfType::MediumInt,
+        ),
+        DfType::UnsignedInt,
+    );
+    map.insert(
+        (
+            DfType::UnsignedSmallInt,
+            BinaryOperator::Modulo,
+            DfType::UnsignedMediumInt,
+        ),
+        DfType::UnsignedInt,
+    );
+    map.insert(
         (DfType::SmallInt, BinaryOperator::Add, DfType::Int),
         DfType::BigInt,
     );
@@ -1006,6 +1222,34 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
             DfType::UnsignedInt,
         ),
         DfType::Numeric { prec: 9, scale: 4 },
+    );
+    map.insert(
+        (DfType::SmallInt, BinaryOperator::Modulo, DfType::Int),
+        DfType::Int,
+    );
+    map.insert(
+        (
+            DfType::SmallInt,
+            BinaryOperator::Modulo,
+            DfType::UnsignedInt,
+        ),
+        DfType::Int,
+    );
+    map.insert(
+        (
+            DfType::UnsignedSmallInt,
+            BinaryOperator::Modulo,
+            DfType::Int,
+        ),
+        DfType::UnsignedInt,
+    );
+    map.insert(
+        (
+            DfType::UnsignedSmallInt,
+            BinaryOperator::Modulo,
+            DfType::UnsignedInt,
+        ),
+        DfType::UnsignedInt,
     );
     map.insert(
         (DfType::SmallInt, BinaryOperator::Add, DfType::BigInt),
@@ -1120,6 +1364,34 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
         DfType::Numeric { prec: 9, scale: 4 },
     );
     map.insert(
+        (DfType::SmallInt, BinaryOperator::Modulo, DfType::BigInt),
+        DfType::BigInt,
+    );
+    map.insert(
+        (
+            DfType::SmallInt,
+            BinaryOperator::Modulo,
+            DfType::UnsignedBigInt,
+        ),
+        DfType::BigInt,
+    );
+    map.insert(
+        (
+            DfType::UnsignedSmallInt,
+            BinaryOperator::Modulo,
+            DfType::BigInt,
+        ),
+        DfType::UnsignedBigInt,
+    );
+    map.insert(
+        (
+            DfType::UnsignedSmallInt,
+            BinaryOperator::Modulo,
+            DfType::UnsignedBigInt,
+        ),
+        DfType::UnsignedBigInt,
+    );
+    map.insert(
         (DfType::MediumInt, BinaryOperator::Add, DfType::TinyInt),
         DfType::Int,
     );
@@ -1230,6 +1502,34 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
             DfType::UnsignedTinyInt,
         ),
         DfType::Numeric { prec: 12, scale: 4 },
+    );
+    map.insert(
+        (DfType::MediumInt, BinaryOperator::Modulo, DfType::TinyInt),
+        DfType::Int,
+    );
+    map.insert(
+        (
+            DfType::MediumInt,
+            BinaryOperator::Modulo,
+            DfType::UnsignedTinyInt,
+        ),
+        DfType::Int,
+    );
+    map.insert(
+        (
+            DfType::UnsignedMediumInt,
+            BinaryOperator::Modulo,
+            DfType::TinyInt,
+        ),
+        DfType::UnsignedInt,
+    );
+    map.insert(
+        (
+            DfType::UnsignedMediumInt,
+            BinaryOperator::Modulo,
+            DfType::UnsignedTinyInt,
+        ),
+        DfType::UnsignedInt,
     );
     map.insert(
         (DfType::MediumInt, BinaryOperator::Add, DfType::SmallInt),
@@ -1352,6 +1652,34 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
         DfType::Numeric { prec: 12, scale: 4 },
     );
     map.insert(
+        (DfType::MediumInt, BinaryOperator::Modulo, DfType::SmallInt),
+        DfType::Int,
+    );
+    map.insert(
+        (
+            DfType::MediumInt,
+            BinaryOperator::Modulo,
+            DfType::UnsignedSmallInt,
+        ),
+        DfType::Int,
+    );
+    map.insert(
+        (
+            DfType::UnsignedMediumInt,
+            BinaryOperator::Modulo,
+            DfType::SmallInt,
+        ),
+        DfType::UnsignedInt,
+    );
+    map.insert(
+        (
+            DfType::UnsignedMediumInt,
+            BinaryOperator::Modulo,
+            DfType::UnsignedSmallInt,
+        ),
+        DfType::UnsignedInt,
+    );
+    map.insert(
         (DfType::MediumInt, BinaryOperator::Add, DfType::MediumInt),
         DfType::Int,
     );
@@ -1472,6 +1800,34 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
         DfType::Numeric { prec: 12, scale: 4 },
     );
     map.insert(
+        (DfType::MediumInt, BinaryOperator::Modulo, DfType::MediumInt),
+        DfType::Int,
+    );
+    map.insert(
+        (
+            DfType::MediumInt,
+            BinaryOperator::Modulo,
+            DfType::UnsignedMediumInt,
+        ),
+        DfType::Int,
+    );
+    map.insert(
+        (
+            DfType::UnsignedMediumInt,
+            BinaryOperator::Modulo,
+            DfType::MediumInt,
+        ),
+        DfType::UnsignedInt,
+    );
+    map.insert(
+        (
+            DfType::UnsignedMediumInt,
+            BinaryOperator::Modulo,
+            DfType::UnsignedMediumInt,
+        ),
+        DfType::UnsignedInt,
+    );
+    map.insert(
         (DfType::MediumInt, BinaryOperator::Add, DfType::Int),
         DfType::BigInt,
     );
@@ -1574,6 +1930,34 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
             DfType::UnsignedInt,
         ),
         DfType::Numeric { prec: 12, scale: 4 },
+    );
+    map.insert(
+        (DfType::MediumInt, BinaryOperator::Modulo, DfType::Int),
+        DfType::Int,
+    );
+    map.insert(
+        (
+            DfType::MediumInt,
+            BinaryOperator::Modulo,
+            DfType::UnsignedInt,
+        ),
+        DfType::Int,
+    );
+    map.insert(
+        (
+            DfType::UnsignedMediumInt,
+            BinaryOperator::Modulo,
+            DfType::Int,
+        ),
+        DfType::UnsignedInt,
+    );
+    map.insert(
+        (
+            DfType::UnsignedMediumInt,
+            BinaryOperator::Modulo,
+            DfType::UnsignedInt,
+        ),
+        DfType::UnsignedInt,
     );
     map.insert(
         (DfType::MediumInt, BinaryOperator::Add, DfType::BigInt),
@@ -1688,6 +2072,34 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
         DfType::Numeric { prec: 12, scale: 4 },
     );
     map.insert(
+        (DfType::MediumInt, BinaryOperator::Modulo, DfType::BigInt),
+        DfType::BigInt,
+    );
+    map.insert(
+        (
+            DfType::MediumInt,
+            BinaryOperator::Modulo,
+            DfType::UnsignedBigInt,
+        ),
+        DfType::BigInt,
+    );
+    map.insert(
+        (
+            DfType::UnsignedMediumInt,
+            BinaryOperator::Modulo,
+            DfType::BigInt,
+        ),
+        DfType::UnsignedBigInt,
+    );
+    map.insert(
+        (
+            DfType::UnsignedMediumInt,
+            BinaryOperator::Modulo,
+            DfType::UnsignedBigInt,
+        ),
+        DfType::UnsignedBigInt,
+    );
+    map.insert(
         (DfType::Int, BinaryOperator::Add, DfType::TinyInt),
         DfType::BigInt,
     );
@@ -1782,6 +2194,26 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
             DfType::UnsignedTinyInt,
         ),
         DfType::Numeric { prec: 14, scale: 4 },
+    );
+    map.insert(
+        (DfType::Int, BinaryOperator::Modulo, DfType::TinyInt),
+        DfType::Int,
+    );
+    map.insert(
+        (DfType::Int, BinaryOperator::Modulo, DfType::UnsignedTinyInt),
+        DfType::Int,
+    );
+    map.insert(
+        (DfType::UnsignedInt, BinaryOperator::Modulo, DfType::TinyInt),
+        DfType::UnsignedInt,
+    );
+    map.insert(
+        (
+            DfType::UnsignedInt,
+            BinaryOperator::Modulo,
+            DfType::UnsignedTinyInt,
+        ),
+        DfType::UnsignedInt,
     );
     map.insert(
         (DfType::Int, BinaryOperator::Add, DfType::SmallInt),
@@ -1888,6 +2320,34 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
         DfType::Numeric { prec: 14, scale: 4 },
     );
     map.insert(
+        (DfType::Int, BinaryOperator::Modulo, DfType::SmallInt),
+        DfType::Int,
+    );
+    map.insert(
+        (
+            DfType::Int,
+            BinaryOperator::Modulo,
+            DfType::UnsignedSmallInt,
+        ),
+        DfType::Int,
+    );
+    map.insert(
+        (
+            DfType::UnsignedInt,
+            BinaryOperator::Modulo,
+            DfType::SmallInt,
+        ),
+        DfType::UnsignedInt,
+    );
+    map.insert(
+        (
+            DfType::UnsignedInt,
+            BinaryOperator::Modulo,
+            DfType::UnsignedSmallInt,
+        ),
+        DfType::UnsignedInt,
+    );
+    map.insert(
         (DfType::Int, BinaryOperator::Add, DfType::MediumInt),
         DfType::BigInt,
     );
@@ -1992,6 +2452,34 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
         DfType::Numeric { prec: 14, scale: 4 },
     );
     map.insert(
+        (DfType::Int, BinaryOperator::Modulo, DfType::MediumInt),
+        DfType::Int,
+    );
+    map.insert(
+        (
+            DfType::Int,
+            BinaryOperator::Modulo,
+            DfType::UnsignedMediumInt,
+        ),
+        DfType::Int,
+    );
+    map.insert(
+        (
+            DfType::UnsignedInt,
+            BinaryOperator::Modulo,
+            DfType::MediumInt,
+        ),
+        DfType::UnsignedInt,
+    );
+    map.insert(
+        (
+            DfType::UnsignedInt,
+            BinaryOperator::Modulo,
+            DfType::UnsignedMediumInt,
+        ),
+        DfType::UnsignedInt,
+    );
+    map.insert(
         (DfType::Int, BinaryOperator::Add, DfType::Int),
         DfType::BigInt,
     );
@@ -2070,6 +2558,26 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
             DfType::UnsignedInt,
         ),
         DfType::Numeric { prec: 14, scale: 4 },
+    );
+    map.insert(
+        (DfType::Int, BinaryOperator::Modulo, DfType::Int),
+        DfType::Int,
+    );
+    map.insert(
+        (DfType::Int, BinaryOperator::Modulo, DfType::UnsignedInt),
+        DfType::Int,
+    );
+    map.insert(
+        (DfType::UnsignedInt, BinaryOperator::Modulo, DfType::Int),
+        DfType::UnsignedInt,
+    );
+    map.insert(
+        (
+            DfType::UnsignedInt,
+            BinaryOperator::Modulo,
+            DfType::UnsignedInt,
+        ),
+        DfType::UnsignedInt,
     );
     map.insert(
         (DfType::Int, BinaryOperator::Add, DfType::BigInt),
@@ -2166,6 +2674,26 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
             DfType::UnsignedBigInt,
         ),
         DfType::Numeric { prec: 14, scale: 4 },
+    );
+    map.insert(
+        (DfType::Int, BinaryOperator::Modulo, DfType::BigInt),
+        DfType::BigInt,
+    );
+    map.insert(
+        (DfType::Int, BinaryOperator::Modulo, DfType::UnsignedBigInt),
+        DfType::BigInt,
+    );
+    map.insert(
+        (DfType::UnsignedInt, BinaryOperator::Modulo, DfType::BigInt),
+        DfType::UnsignedBigInt,
+    );
+    map.insert(
+        (
+            DfType::UnsignedInt,
+            BinaryOperator::Modulo,
+            DfType::UnsignedBigInt,
+        ),
+        DfType::UnsignedBigInt,
     );
     map.insert(
         (DfType::BigInt, BinaryOperator::Add, DfType::TinyInt),
@@ -2270,6 +2798,34 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
             DfType::UnsignedTinyInt,
         ),
         DfType::Numeric { prec: 24, scale: 4 },
+    );
+    map.insert(
+        (DfType::BigInt, BinaryOperator::Modulo, DfType::TinyInt),
+        DfType::BigInt,
+    );
+    map.insert(
+        (
+            DfType::BigInt,
+            BinaryOperator::Modulo,
+            DfType::UnsignedTinyInt,
+        ),
+        DfType::BigInt,
+    );
+    map.insert(
+        (
+            DfType::UnsignedBigInt,
+            BinaryOperator::Modulo,
+            DfType::TinyInt,
+        ),
+        DfType::UnsignedBigInt,
+    );
+    map.insert(
+        (
+            DfType::UnsignedBigInt,
+            BinaryOperator::Modulo,
+            DfType::UnsignedTinyInt,
+        ),
+        DfType::UnsignedBigInt,
     );
     map.insert(
         (DfType::BigInt, BinaryOperator::Add, DfType::SmallInt),
@@ -2384,6 +2940,34 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
         DfType::Numeric { prec: 24, scale: 4 },
     );
     map.insert(
+        (DfType::BigInt, BinaryOperator::Modulo, DfType::SmallInt),
+        DfType::BigInt,
+    );
+    map.insert(
+        (
+            DfType::BigInt,
+            BinaryOperator::Modulo,
+            DfType::UnsignedSmallInt,
+        ),
+        DfType::BigInt,
+    );
+    map.insert(
+        (
+            DfType::UnsignedBigInt,
+            BinaryOperator::Modulo,
+            DfType::SmallInt,
+        ),
+        DfType::UnsignedBigInt,
+    );
+    map.insert(
+        (
+            DfType::UnsignedBigInt,
+            BinaryOperator::Modulo,
+            DfType::UnsignedSmallInt,
+        ),
+        DfType::UnsignedBigInt,
+    );
+    map.insert(
         (DfType::BigInt, BinaryOperator::Add, DfType::MediumInt),
         DfType::BigInt,
     );
@@ -2496,6 +3080,34 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
         DfType::Numeric { prec: 24, scale: 4 },
     );
     map.insert(
+        (DfType::BigInt, BinaryOperator::Modulo, DfType::MediumInt),
+        DfType::BigInt,
+    );
+    map.insert(
+        (
+            DfType::BigInt,
+            BinaryOperator::Modulo,
+            DfType::UnsignedMediumInt,
+        ),
+        DfType::BigInt,
+    );
+    map.insert(
+        (
+            DfType::UnsignedBigInt,
+            BinaryOperator::Modulo,
+            DfType::MediumInt,
+        ),
+        DfType::UnsignedBigInt,
+    );
+    map.insert(
+        (
+            DfType::UnsignedBigInt,
+            BinaryOperator::Modulo,
+            DfType::UnsignedMediumInt,
+        ),
+        DfType::UnsignedBigInt,
+    );
+    map.insert(
         (DfType::BigInt, BinaryOperator::Add, DfType::Int),
         DfType::BigInt,
     );
@@ -2590,6 +3202,26 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
             DfType::UnsignedInt,
         ),
         DfType::Numeric { prec: 24, scale: 4 },
+    );
+    map.insert(
+        (DfType::BigInt, BinaryOperator::Modulo, DfType::Int),
+        DfType::BigInt,
+    );
+    map.insert(
+        (DfType::BigInt, BinaryOperator::Modulo, DfType::UnsignedInt),
+        DfType::BigInt,
+    );
+    map.insert(
+        (DfType::UnsignedBigInt, BinaryOperator::Modulo, DfType::Int),
+        DfType::UnsignedBigInt,
+    );
+    map.insert(
+        (
+            DfType::UnsignedBigInt,
+            BinaryOperator::Modulo,
+            DfType::UnsignedInt,
+        ),
+        DfType::UnsignedBigInt,
     );
     map.insert(
         (DfType::BigInt, BinaryOperator::Add, DfType::BigInt),
@@ -2694,6 +3326,34 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
             DfType::UnsignedBigInt,
         ),
         DfType::Numeric { prec: 24, scale: 4 },
+    );
+    map.insert(
+        (DfType::BigInt, BinaryOperator::Modulo, DfType::BigInt),
+        DfType::BigInt,
+    );
+    map.insert(
+        (
+            DfType::BigInt,
+            BinaryOperator::Modulo,
+            DfType::UnsignedBigInt,
+        ),
+        DfType::BigInt,
+    );
+    map.insert(
+        (
+            DfType::UnsignedBigInt,
+            BinaryOperator::Modulo,
+            DfType::BigInt,
+        ),
+        DfType::UnsignedBigInt,
+    );
+    map.insert(
+        (
+            DfType::UnsignedBigInt,
+            BinaryOperator::Modulo,
+            DfType::UnsignedBigInt,
+        ),
+        DfType::UnsignedBigInt,
     );
     map
 }

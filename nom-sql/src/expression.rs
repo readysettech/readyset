@@ -1,7 +1,6 @@
 use std::fmt::{self, Display};
 use std::{iter, mem};
 
-use concrete_iter::concrete_iter;
 use derive_more::From;
 use itertools::Itertools;
 use nom::branch::alt;
@@ -15,12 +14,16 @@ use nom_locate::LocatedSpan;
 use pratt::{Affix, Associativity, PrattParser, Precedence};
 use proptest::prelude::Arbitrary;
 use proptest::strategy::BoxedStrategy;
-use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
-use crate::common::{column_identifier_no_alias, function_expr, ws_sep_comma, TimestampField};
+use crate::common::{
+    column_identifier_no_alias, function_desugar, function_expr, ws_sep_comma, TimestampField,
+};
 use crate::create::CollationName;
+use concrete_iter::concrete_iter;
+use readyset_util::fmt::fmt_with;
+
 use crate::literal::{literal, Double, Float};
 use crate::select::nested_selection;
 use crate::set::{variable_scope_prefix, Variable};
@@ -262,6 +265,9 @@ pub enum BinaryOperator {
     /// `/`
     Divide,
 
+    /// `%` `MOD`
+    Modulo,
+
     /// `?`
     ///
     /// Postgres-specific JSONB operator. Looks for the given string as an object key or an array
@@ -368,6 +374,7 @@ impl Display for BinaryOperator {
             Self::HashSubtract => "#-",
             Self::Multiply => "*",
             Self::Divide => "/",
+            Self::Modulo => "%",
             Self::QuestionMark => "?",
             Self::QuestionMarkPipe => "?|",
             Self::QuestionMarkAnd => "?&",
@@ -924,12 +931,16 @@ fn binary_operator_no_and_or(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Binar
             map(char('-'), |_| BinaryOperator::Subtract),
             map(char('*'), |_| BinaryOperator::Multiply),
             map(char('/'), |_| BinaryOperator::Divide),
-            map(tag("?|"), |_| BinaryOperator::QuestionMarkPipe),
-            map(tag("?&"), |_| BinaryOperator::QuestionMarkAnd),
-            map(char('?'), |_| BinaryOperator::QuestionMark),
-            map(tag("||"), |_| BinaryOperator::DoublePipe),
-            map(tag("#>>"), |_| BinaryOperator::HashArrow2),
-            map(tag("#>"), |_| BinaryOperator::HashArrow1),
+            map(char('%'), |_| BinaryOperator::Modulo),
+            map(tag_no_case("mod"), |_| BinaryOperator::Modulo),
+            alt((
+                map(tag("?|"), |_| BinaryOperator::QuestionMarkPipe),
+                map(tag("?&"), |_| BinaryOperator::QuestionMarkAnd),
+                map(char('?'), |_| BinaryOperator::QuestionMark),
+                map(tag("||"), |_| BinaryOperator::DoublePipe),
+                map(tag("#>>"), |_| BinaryOperator::HashArrow2),
+                map(tag("#>"), |_| BinaryOperator::HashArrow1),
+            )),
         )),
         map(tag("#-"), |_| BinaryOperator::HashSubtract),
     ))(i)
@@ -1147,6 +1158,7 @@ where
             Prefix(Neg) => Affix::Prefix(Precedence(14)),
             Infix(Multiply) => Affix::Infix(Precedence(12), Associativity::Right),
             Infix(Divide) => Affix::Infix(Precedence(12), Associativity::Right),
+            Infix(Modulo) => Affix::Infix(Precedence(12), Associativity::Right),
             Infix(Add) => Affix::Infix(Precedence(11), Associativity::Right),
             Infix(Subtract) => Affix::Infix(Precedence(11), Associativity::Right),
             // All JSON operators have the same precedence.
@@ -1610,6 +1622,7 @@ pub(crate) fn simple_expr(
             row_expr_implicit(dialect),
             cast(dialect),
             date_cast_function(dialect),
+            function_desugar(dialect),
             map(function_expr(dialect), Expr::Call),
             map(literal(dialect), Expr::Literal),
             case_when_expr(dialect),
@@ -1637,8 +1650,9 @@ pub(crate) fn expression(
 mod tests {
     use test_strategy::proptest;
 
-    use super::*;
     use crate::{to_nom_result, Relation};
+
+    use super::*;
 
     #[test]
     fn column_then_column() {
@@ -1704,6 +1718,11 @@ mod tests {
         #[test]
         fn plus_times() {
             parses_same(Dialect::MySQL, "1 + 2 * 3", "(1 + (2 * 3))");
+        }
+
+        #[test]
+        fn plus_mod() {
+            parses_same(Dialect::MySQL, "1 + 2 % 3", "(1 + (2 % 3))");
         }
 
         #[test]
@@ -1830,8 +1849,9 @@ mod tests {
     }
 
     mod conditions {
-        use super::*;
         use crate::{to_nom_result, FieldDefinitionExpr, ItemPlaceholder, TableExpr};
+
+        use super::*;
 
         fn columns(cols: &[&str]) -> Vec<FieldDefinitionExpr> {
             cols.iter()
@@ -1881,6 +1901,67 @@ mod tests {
                 op,
                 rhs: Box::new(Expr::Literal(value)),
             }
+        }
+
+        #[test]
+        fn arithmetic_expressions_with_mod() {
+            assert_eq!(
+                expression(Dialect::MySQL)(LocatedSpan::new("x % 3".as_bytes()))
+                    .unwrap()
+                    .1,
+                x_operator_value(BinaryOperator::Modulo, 3.into())
+            );
+
+            assert_eq!(
+                expression(Dialect::MySQL)(LocatedSpan::new("(x %  3)".as_bytes()))
+                    .unwrap()
+                    .1,
+                x_operator_value(BinaryOperator::Modulo, 3.into())
+            );
+
+            assert_eq!(
+                expression(Dialect::MySQL)(LocatedSpan::new("x % 3 = 2".as_bytes()))
+                    .unwrap()
+                    .1,
+                Expr::BinaryOp {
+                    op: BinaryOperator::Equal,
+                    lhs: Box::new(x_operator_value(BinaryOperator::Modulo, 3.into())),
+                    rhs: Box::new(Expr::Literal(2.into()))
+                }
+            );
+
+            assert_eq!(
+                expression(Dialect::MySQL)(LocatedSpan::new("(x % 7 = 3)".as_bytes()))
+                    .unwrap()
+                    .1,
+                Expr::BinaryOp {
+                    op: BinaryOperator::Equal,
+                    lhs: Box::new(x_operator_value(BinaryOperator::Modulo, 7.into())),
+                    rhs: Box::new(Expr::Literal(3.into()))
+                }
+            );
+
+            assert_eq!(
+                expression(Dialect::MySQL)(LocatedSpan::new("(x % 7) = 3".as_bytes()))
+                    .unwrap()
+                    .1,
+                Expr::BinaryOp {
+                    op: BinaryOperator::Equal,
+                    lhs: Box::new(x_operator_value(BinaryOperator::Modulo, 7.into())),
+                    rhs: Box::new(Expr::Literal(3.into()))
+                }
+            );
+
+            assert_eq!(
+                expression(Dialect::MySQL)(LocatedSpan::new("(x % 7) = (x - 3)".as_bytes()))
+                    .unwrap()
+                    .1,
+                Expr::BinaryOp {
+                    op: BinaryOperator::Equal,
+                    lhs: Box::new(x_operator_value(BinaryOperator::Modulo, 7.into())),
+                    rhs: Box::new(x_operator_value(BinaryOperator::Subtract, 3.into()))
+                }
+            );
         }
 
         #[test]
@@ -2380,8 +2461,9 @@ mod tests {
     }
 
     mod negation {
-        use super::*;
         use crate::to_nom_result;
+
+        use super::*;
 
         #[test]
         fn neg_integer() {
@@ -2583,8 +2665,9 @@ mod tests {
         }
 
         mod precedence {
-            use super::tests::precedence::parses_same;
             use crate::Dialect;
+
+            use super::tests::precedence::parses_same;
 
             #[test]
             fn is_and_between() {
@@ -2601,8 +2684,9 @@ mod tests {
         }
 
         mod conditions {
-            use super::*;
             use crate::{to_nom_result, ItemPlaceholder};
+
+            use super::*;
 
             #[test]
             fn complex_bracketing() {
@@ -2922,8 +3006,9 @@ mod tests {
         }
 
         mod precedence {
-            use super::tests::precedence::parses_same;
             use crate::Dialect;
+
+            use super::tests::precedence::parses_same;
 
             #[test]
             fn is_and_between() {
@@ -2992,8 +3077,9 @@ mod tests {
         }
 
         mod conditions {
-            use super::*;
             use crate::{to_nom_result, ItemPlaceholder};
+
+            use super::*;
 
             #[test]
             fn question_mark_operator() {

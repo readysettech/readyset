@@ -3,7 +3,7 @@ use std::cmp::Ordering;
 use std::convert::{TryFrom, TryInto};
 use std::error::Error;
 use std::hash::{Hash, Hasher};
-use std::ops::{Add, Div, Mul, Sub};
+use std::ops::{Add, Div, Mul, Rem, Sub};
 use std::sync::Arc;
 use std::{fmt, io, str};
 
@@ -12,23 +12,36 @@ use bit_vec::BitVec;
 use bytes::BytesMut;
 use chrono::{self, DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, TimeZone};
 use cidr::IpInet;
-use dialect::SqlEngine;
 use enum_kinds::EnumKind;
 use eui48::{MacAddress, MacAddressFormat};
 use itertools::Itertools;
-use mysql_time::MySqlTime;
-use nom_sql::{DialectDisplay, Double, Float, Literal, SqlType};
+pub use ndarray::{ArrayD, IxDyn};
 use postgres_types::Format;
-use readyset_errors::{internal, invalid_query_err, unsupported, ReadySetError, ReadySetResult};
-use readyset_util::arbitrary::{arbitrary_decimal, arbitrary_duration};
-use readyset_util::redacted::Sensitive;
+use proptest::arbitrary::Arbitrary;
+use proptest::prelude::*;
 use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 use rust_decimal::Decimal;
 use serde_json::Value as JsonValue;
 use test_strategy::Arbitrary;
-use text::TextCoerce;
 use tokio_postgres::types::{to_sql_checked, FromSql, IsNull, Kind, ToSql, Type};
 use uuid::Uuid;
+
+use dialect::SqlEngine;
+use mysql_time::MySqlTime;
+use nom_sql::{DialectDisplay, Double, Float, Literal, SqlType};
+use readyset_errors::{internal, invalid_query_err, unsupported, ReadySetError, ReadySetResult};
+use readyset_util::arbitrary::{arbitrary_decimal, arbitrary_duration};
+use readyset_util::redacted::Sensitive;
+use text::TextCoerce;
+
+pub use crate::array::Array;
+pub use crate::collation::Collation;
+pub use crate::dialect::Dialect;
+pub use crate::r#type::{DfType, PgEnumMetadata, PgTypeCategory};
+pub use crate::ranges::{Bound, BoundedRange, IntoBoundedRange, RangeBounds};
+pub use crate::serde::TextRef;
+pub use crate::text::{Text, TinyText};
+pub use crate::timestamp::{TimestampTz, TIMESTAMP_FORMAT, TIMESTAMP_PARSE_FORMAT};
 
 mod array;
 mod collation;
@@ -41,19 +54,6 @@ mod serde;
 mod text;
 mod timestamp;
 mod r#type;
-
-pub use ndarray::{ArrayD, IxDyn};
-use proptest::arbitrary::Arbitrary;
-use proptest::prelude::*;
-
-pub use crate::array::Array;
-pub use crate::collation::Collation;
-pub use crate::dialect::Dialect;
-pub use crate::r#type::{DfType, PgEnumMetadata, PgTypeCategory};
-pub use crate::ranges::{Bound, BoundedRange, IntoBoundedRange, RangeBounds};
-pub use crate::serde::TextRef;
-pub use crate::text::{Text, TinyText};
-pub use crate::timestamp::{TimestampTz, TIMESTAMP_FORMAT, TIMESTAMP_PARSE_FORMAT};
 
 type JsonObject = serde_json::Map<String, JsonValue>;
 
@@ -2206,6 +2206,14 @@ impl<'a> Div<&'a DfValue> for &'_ DfValue {
     }
 }
 
+impl<'a> Rem<&'a DfValue> for &'a DfValue {
+    type Output = ReadySetResult<DfValue>;
+
+    fn rem(self, other: &'a DfValue) -> Self::Output {
+        Ok(arithmetic_operation!(%, checked_rem, self, other))
+    }
+}
+
 impl Arbitrary for DfValue {
     type Parameters = Option<DfValueKind>;
     type Strategy = proptest::strategy::BoxedStrategy<DfValue>;
@@ -2276,10 +2284,11 @@ mod arbitrary {
     use std::sync::Arc;
 
     use bit_vec::BitVec;
-    use mysql_time::MySqlTime;
     use proptest::arbitrary::any;
     use proptest::collection::vec;
     use proptest::strategy::{Just, Strategy};
+
+    use mysql_time::MySqlTime;
     use readyset_util::arbitrary::arbitrary_decimal;
 
     use crate::array::Array;
@@ -2385,8 +2394,9 @@ mod arbitrary {
 #[cfg(test)]
 mod tests {
     use derive_more::{From, Into};
-    use readyset_util::{eq_laws, hash_laws, ord_laws};
     use test_strategy::proptest;
+
+    use readyset_util::{eq_laws, hash_laws, ord_laws};
 
     use super::*;
 
@@ -3549,11 +3559,12 @@ mod tests {
     }
 
     mod coerce_to {
+        use rust_decimal::Decimal;
+        use test_strategy::proptest;
+
         use readyset_util::arbitrary::{
             arbitrary_naive_date, arbitrary_naive_date_time, arbitrary_naive_time,
         };
-        use rust_decimal::Decimal;
-        use test_strategy::proptest;
 
         use super::*;
 
