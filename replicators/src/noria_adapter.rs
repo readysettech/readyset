@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use database_utils::{DatabaseURL, UpstreamConfig};
 use deadpool_postgres::{Manager, ManagerConfig, Pool, RecyclingMethod};
 use failpoint_macros::set_failpoint;
+use futures::FutureExt;
 use metrics::{counter, histogram};
 use mysql::prelude::Queryable;
 use mysql::{OptsBuilder, PoolConstraints, PoolOpts, SslOpts};
@@ -22,6 +23,7 @@ use readyset_client::{ReadySetHandle, Table, TableOperation};
 use readyset_data::Dialect;
 use readyset_errors::{internal_err, set_failpoint_return_err, ReadySetError, ReadySetResult};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
+use readyset_util::select;
 use replication_offset::{ReplicationOffset, ReplicationOffsets};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::{debug, error, info, info_span, trace, warn, Instrument};
@@ -166,7 +168,7 @@ impl NoriaAdapter {
         noria: ReadySetHandle,
         config: UpstreamConfig,
         notification_channel: &UnboundedSender<ReplicatorMessage>,
-        controller_channel: &UnboundedReceiver<ControllerMessage>,
+        controller_channel: &mut UnboundedReceiver<ControllerMessage>,
         telemetry_sender: TelemetrySender,
         server_startup: bool,
         enable_statement_logging: bool,
@@ -289,7 +291,7 @@ impl NoriaAdapter {
         mut noria: ReadySetHandle,
         mut config: UpstreamConfig,
         notification_channel: &UnboundedSender<ReplicatorMessage>,
-        controller_channel: &UnboundedReceiver<ControllerMessage>,
+        controller_channel: &mut UnboundedReceiver<ControllerMessage>,
         resnapshot: bool,
         telemetry_sender: &TelemetrySender,
         enable_statement_logging: bool,
@@ -516,7 +518,7 @@ impl NoriaAdapter {
         mut noria: ReadySetHandle,
         mut config: UpstreamConfig,
         notification_channel: &UnboundedSender<ReplicatorMessage>,
-        controller_channel: &UnboundedReceiver<ControllerMessage>,
+        controller_channel: &mut UnboundedReceiver<ControllerMessage>,
         resnapshot: bool,
         mut full_resnapshot: bool,
         telemetry_sender: &TelemetrySender,
@@ -1072,7 +1074,7 @@ impl NoriaAdapter {
         position: &mut ReplicationOffset,
         until: Option<ReplicationOffset>,
         notification_channel: &UnboundedSender<ReplicatorMessage>,
-        _controller_channel: &UnboundedReceiver<ControllerMessage>,
+        controller_channel: &mut UnboundedReceiver<ControllerMessage>,
     ) -> ReadySetResult<()> {
         // Notify the controller that we've started replication if we've entered the main (not
         // catchup) replication loop.
@@ -1092,43 +1094,51 @@ impl NoriaAdapter {
                 return Ok(());
             }
 
-            let (actions, pos) = match self.connector.next_action(position, until.as_ref()).await {
-                Ok(next_actions) => next_actions,
-                // In some cases, we may fail to replicate because of unsupported operations, stop
-                // replicating a table if we encounter this type of error.
-                Err(ReadySetError::TableError { table, source }) => {
-                    if source.is_networking_related() {
-                        // Don't deny replication of the error is caused by networking
-                        return Err(ReadySetError::TableError { table, source });
+            select! {
+                biased;
+                next_actions = self.connector.next_action(position, until.as_ref()).fuse() => match next_actions {
+                    Ok((actions, pos)) => {
+                        *position = pos.clone();
+                        debug!(%position, "Received replication action");
+
+                        trace!(?actions);
+                        if let Err(err) = self.handle_action(actions, pos, until.is_some()).await {
+                            if matches!(err, ReadySetError::ResnapshotNeeded) {
+                                info!("Change in DDL requires partial resnapshot");
+                            } else {
+                                error!(error = %err, "Aborting replication task on error");
+                                counter!(recorded::REPLICATOR_FAILURE, 1u64,);
+                            }
+                            // In some cases, we may fail to replicate because of unsupported operations, stop
+                            // replicating a table if we encounter this type of error.
+                            if let ReadySetError::TableError { table, source } = err {
+                                self.deny_replication_for_table(table, source).await?;
+                                continue;
+                            }
+                            return Err(err);
+                        };
+                        counter!(recorded::REPLICATOR_SUCCESS, 1u64);
+                        debug!(%position, "Successfully applied replication action");
                     }
-                    self.deny_replication_for_table(table, source).await?;
-                    continue;
-                }
-                Err(e) => return Err(e),
-            };
-            *position = pos.clone();
-            debug!(%position, "Received replication action");
+                    Err(ReadySetError::TableError { table, source }) => {
+                        if source.is_networking_related() {
+                            // Don't deny replication of the error is caused by networking
+                            return Err(ReadySetError::TableError { table, source });
+                        }
+                        self.deny_replication_for_table(table, source).await?;
+                        continue;
+                    }
+                    Err(e) => return Err(e),
 
-            trace!(?actions);
-
-            if let Err(err) = self.handle_action(actions, pos, until.is_some()).await {
-                if matches!(err, ReadySetError::ResnapshotNeeded) {
-                    info!("Change in DDL requires partial resnapshot");
-                } else {
-                    error!(error = %err, "Aborting replication task on error");
-                    counter!(recorded::REPLICATOR_FAILURE, 1u64,);
+                },
+                control_message = controller_channel.recv() => match control_message {
+                    Some(ControllerMessage::ResnapshotTable { table }) => {
+                        self.drop_table_for_resnapshot(table).await?;
+                        return Err(ReadySetError::ResnapshotNeeded);
+                    }
+                    None => {}
                 }
-                // In some cases, we may fail to replicate because of unsupported operations, stop
-                // replicating a table if we encounter this type of error.
-                if let ReadySetError::TableError { table, source } = err {
-                    self.deny_replication_for_table(table, source).await?;
-                    continue;
-                }
-
-                return Err(err);
-            };
-            counter!(recorded::REPLICATOR_SUCCESS, 1u64);
-            debug!(%position, "Successfully applied replication action");
+            }
         }
     }
 
@@ -1152,6 +1162,29 @@ impl NoriaAdapter {
                 Err(e) => Err(e),
             },
         }
+    }
+
+    /// Drop one base table if it exists in ReadySet. This is used to clean up the base table
+    /// and restart replication to trigger a new snapshot.
+    ///
+    /// # Arguments
+    ///
+    /// * `table` - The table to drop
+    ///
+    /// # Returns
+    ///
+    /// A `ReadySetResult` indicating success or failure.
+    async fn drop_table_for_resnapshot(&mut self, table: Relation) -> ReadySetResult<()> {
+        self.replication_offsets.tables.remove(&table);
+        let changelist = ChangeList::from_change(
+            Change::Drop {
+                name: table.clone(),
+                if_exists: true,
+            },
+            self.dialect,
+        );
+        self.noria.extend_recipe(changelist).await?;
+        Ok(())
     }
 
     /// Remove the table referenced by the provided schema and table name from our base table and

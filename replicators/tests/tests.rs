@@ -367,7 +367,7 @@ impl TestHandle {
 
         let url: RedactedString = self.url.clone().into();
         let (sender, receiver) = TestChannel::new();
-        let (controll_receiver, _controll_sender) = TestControllChannel::new();
+        let (controll_receiver, controll_sender) = TestControllChannel::new();
         self.notification_channel = Some(receiver);
         runtime.spawn(async move {
             let Err(error) = NoriaAdapter::start(
@@ -388,6 +388,15 @@ impl TestHandle {
             let _ = sender.send(ReplicatorMessage::UnrecoverableError(error));
         });
 
+        // keep at least one sender open
+        runtime.spawn(async move {
+            loop {
+                sleep(Duration::from_secs(1)).await;
+                if controll_sender.0.is_closed() {
+                    break;
+                }
+            }
+        });
         if let Some(rt) = self.replication_rt.replace(runtime) {
             rt.shutdown_background();
         }

@@ -148,7 +148,7 @@ impl Leader {
     async fn start_replication_task(
         &mut self,
         notification_channel: UnboundedSender<ReplicatorMessage>,
-        controller_channel: UnboundedReceiver<ControllerMessage>,
+        mut controller_channel: UnboundedReceiver<ControllerMessage>,
         telemetry_sender: TelemetrySender,
         mut shutdown_rx: ShutdownReceiver,
     ) {
@@ -185,7 +185,7 @@ impl Leader {
                         noria,
                         config.clone(),
                         &notification_channel,
-                        &controller_channel,
+                        &mut controller_channel,
                         telemetry_sender.clone(),
                         server_startup,
                         replicator_statement_logging,
