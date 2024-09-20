@@ -463,6 +463,58 @@ pub fn alter_table_statement(
     }
 }
 
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
+pub struct ResnapshotTableStatement {
+    pub table: Relation,
+}
+
+pub fn resnapshot_table_statement(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], AlterReadysetStatement> {
+    move |i| {
+        let (i, _) = tag_no_case("resnapshot")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("table")(i)?;
+        let (i, _) = whitespace1(i)?;
+
+        let (i, table) = relation(dialect)(i)?;
+        let (i, _) = statement_terminator(i)?;
+
+        Ok((
+            i,
+            AlterReadysetStatement::ResnapshotTable(ResnapshotTableStatement { table }),
+        ))
+    }
+}
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
+pub enum AlterReadysetStatement {
+    ResnapshotTable(ResnapshotTableStatement),
+}
+
+impl DialectDisplay for AlterReadysetStatement {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| match self {
+            Self::ResnapshotTable(stmt) => {
+                write!(f, "RESNAPSHOT TABLE {}", stmt.table.display(dialect))
+            }
+        })
+    }
+}
+
+pub fn alter_readyset_statement(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], AlterReadysetStatement> {
+    move |i| {
+        let (i, _) = tag_no_case("alter")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("readyset")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, statement) = alt((resnapshot_table_statement(dialect),))(i)?;
+
+        Ok((i, statement))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -871,6 +923,18 @@ mod tests {
             assert_eq!(
                 res.display(Dialect::MySQL).to_string(),
                 "ALTER TABLE `discussion_user` ADD COLUMN `subscription` ENUM('follow', 'ignore') NULL"
+            );
+        }
+
+        #[test]
+        fn alter_table_resnapshot() {
+            let qstring = b"ALTER READYSET RESNAPSHOT TABLE `t`;";
+            let res = test_parse!(alter_readyset_statement(Dialect::MySQL), qstring);
+            assert_eq!(
+                res,
+                AlterReadysetStatement::ResnapshotTable(ResnapshotTableStatement {
+                    table: Relation::from("t")
+                })
             );
         }
     }
@@ -1310,6 +1374,17 @@ mod tests {
                     name: "x".into(),
                     new_name: "y".into()
                 }]
+            );
+        }
+        #[test]
+        fn alter_table_resnapshot() {
+            let qstring = b"ALTER READYSET RESNAPSHOT TABLE t;";
+            let res = test_parse!(alter_readyset_statement(Dialect::PostgreSQL), qstring);
+            assert_eq!(
+                res,
+                AlterReadysetStatement::ResnapshotTable(ResnapshotTableStatement {
+                    table: Relation::from("t")
+                })
             );
         }
     }

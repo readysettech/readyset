@@ -8,7 +8,9 @@ use readyset_util::redacted::Sensitive;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
-use crate::alter::{alter_table_statement, AlterTableStatement};
+use crate::alter::{
+    alter_readyset_statement, alter_table_statement, AlterReadysetStatement, AlterTableStatement,
+};
 use crate::comment::{comment, CommentStatement};
 use crate::common::statement_terminator;
 use crate::compound_select::{simple_or_compound_selection, CompoundSelectStatement};
@@ -54,6 +56,7 @@ pub enum SqlQuery {
     DropAllCaches(DropAllCachesStatement),
     DropAllProxiedQueries(DropAllProxiedQueriesStatement),
     AlterTable(AlterTableStatement),
+    AlterReadySet(AlterReadysetStatement),
     Insert(InsertStatement),
     CompoundSelect(CompoundSelectStatement),
     Select(SelectStatement),
@@ -90,6 +93,7 @@ impl DialectDisplay for SqlQuery {
             Self::Update(update) => write!(f, "{}", update.display(dialect)),
             Self::Set(set) => write!(f, "{}", set.display(dialect)),
             Self::AlterTable(alter) => write!(f, "{}", alter.display(dialect)),
+            Self::AlterReadySet(alter) => write!(f, "{}", alter.display(dialect)),
             Self::CompoundSelect(compound) => write!(f, "{}", compound.display(dialect)),
             Self::StartTransaction(tx) => write!(f, "{}", tx),
             Self::Commit(commit) => write!(f, "{}", commit),
@@ -149,6 +153,7 @@ impl SqlQuery {
             Self::Update(_) => "UPDATE",
             Self::Set(_) => "SET",
             Self::AlterTable(_) => "ALTER TABLE",
+            Self::AlterReadySet(_) => "ALTER READYSET",
             Self::CompoundSelect(_) => "SELECT",
             Self::StartTransaction(_) => "START TRANSACTION",
             Self::Commit(_) => "COMMIT",
@@ -175,6 +180,7 @@ impl SqlQuery {
             | SqlQuery::CreateCache(_)
             | SqlQuery::DropCache(_)
             | SqlQuery::DropAllCaches(_)
+            | SqlQuery::AlterReadySet(_)
             | SqlQuery::DropAllProxiedQueries(_) => true,
             SqlQuery::Show(show_stmt) => match show_stmt {
                 ShowStatement::Events | ShowStatement::Tables(_) => false,
@@ -263,6 +269,7 @@ fn sql_query_part2(
     move |i| {
         alt((
             map(truncate(dialect), SqlQuery::Truncate),
+            map(alter_readyset_statement(dialect), SqlQuery::AlterReadySet),
             // This does a more expensive clone of `i`, so process it last.
             map(create_cached_query(dialect), SqlQuery::CreateCache),
             map(comment(dialect), SqlQuery::Comment),

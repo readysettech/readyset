@@ -10,6 +10,7 @@
 
 #![warn(clippy::todo, clippy::unimplemented)]
 
+use crate::alter::AlterReadysetStatement;
 use crate::create::{CreateDatabaseOption, CreateDatabaseStatement};
 use crate::create_table_options::CreateTableOption;
 use crate::rename::{RenameTableOperation, RenameTableStatement};
@@ -274,6 +275,13 @@ pub trait VisitorMut<'ast>: Sized {
         alter_table_statement: &'ast mut AlterTableStatement,
     ) -> Result<(), Self::Error> {
         walk_alter_table_statement(self, alter_table_statement)
+    }
+
+    fn visit_alter_readyset_statement(
+        &mut self,
+        alter_ready_set_statement: &'ast mut AlterReadysetStatement,
+    ) -> Result<(), Self::Error> {
+        walk_alter_readyset_statement(self, alter_ready_set_statement)
     }
 
     fn visit_alter_table_definition(
@@ -995,6 +1003,17 @@ pub fn walk_alter_table_statement<'a, V: VisitorMut<'a>>(
     Ok(())
 }
 
+pub fn walk_alter_readyset_statement<'a, V: VisitorMut<'a>>(
+    visitor: &mut V,
+    alter_ready_set_statement: &'a mut AlterReadysetStatement,
+) -> Result<(), V::Error> {
+    match alter_ready_set_statement {
+        AlterReadysetStatement::ResnapshotTable(resnapshot_table_stmt) => {
+            visitor.visit_table(&mut resnapshot_table_stmt.table)
+        }
+    }
+}
+
 pub fn walk_alter_table_definition<'a, V: VisitorMut<'a>>(
     visitor: &mut V,
     alter_table_definition: &'a mut AlterTableDefinition,
@@ -1202,6 +1221,7 @@ pub fn walk_sql_query<'a, V: VisitorMut<'a>>(
         SqlQuery::CreateTable(statement) => visitor.visit_create_table_statement(statement),
         SqlQuery::CreateView(statement) => visitor.visit_create_view_statement(statement),
         SqlQuery::AlterTable(statement) => visitor.visit_alter_table_statement(statement),
+        SqlQuery::AlterReadySet(statement) => visitor.visit_alter_readyset_statement(statement),
         SqlQuery::Insert(statement) => visitor.visit_insert_statement(statement),
         SqlQuery::CompoundSelect(statement) => visitor.visit_compound_select_statement(statement),
         SqlQuery::Select(statement) => visitor.visit_select_statement(statement),

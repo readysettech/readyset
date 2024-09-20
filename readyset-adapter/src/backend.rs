@@ -2845,6 +2845,7 @@ where
                     | SqlQuery::DropCache(_)
                     | SqlQuery::DropAllCaches(_)
                     | SqlQuery::DropAllProxiedQueries(_)
+                    | SqlQuery::AlterReadySet(_)
                     | SqlQuery::Explain(_) => {
                         unreachable!("path returns prior")
                     }
