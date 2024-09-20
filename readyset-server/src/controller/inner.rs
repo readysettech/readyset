@@ -96,6 +96,10 @@ pub struct Leader {
     pub(super) background_task_failed: mpsc::Sender<ReadySetError>,
 
     pub(super) running_recovery: Option<watch::Receiver<ReadySetResult<()>>>,
+
+    /// Controller Sender - This channel is a way to communicate between Controller -> Replication
+    /// This lets the replication act on ControllerMessage.
+    pub(super) controller_sender: UnboundedSender<ControllerMessage>,
 }
 
 impl Leader {
@@ -361,6 +365,13 @@ impl Leader {
                     ds.table_statuses(all).await?
                 };
                 return_serialized!(res)
+            }
+            (&Method::POST, "/resnapshot_table") => {
+                let table: Relation = bincode::deserialize(&body)?;
+                let _ = self
+                    .controller_sender
+                    .send(ControllerMessage::ResnapshotTable { table });
+                return_serialized!(());
             }
             (&Method::POST, "/non_replicated_relations") => {
                 let ds = self.dataflow_state_handle.read().await;
@@ -954,6 +965,7 @@ impl Leader {
         replicator_config: UpstreamConfig,
         worker_request_timeout: Duration,
         background_recovery_interval: Duration,
+        controller_sender: UnboundedSender<ControllerMessage>,
     ) -> Self {
         assert_ne!(state.config.min_workers, 0);
 
@@ -974,6 +986,7 @@ impl Leader {
             running_migrations: Default::default(),
             background_task_failed,
             running_recovery: None,
+            controller_sender,
         }
     }
 }

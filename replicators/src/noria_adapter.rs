@@ -1180,7 +1180,7 @@ impl NoriaAdapter {
         let changelist = ChangeList::from_change(
             Change::Drop {
                 name: table.clone(),
-                if_exists: true,
+                if_exists: false,
             },
             self.dialect,
         );
@@ -1195,6 +1195,7 @@ impl NoriaAdapter {
             table = %table.display(nom_sql::Dialect::PostgreSQL),
             "Removing table state from readyset"
         );
+        self.noria.replication_offsets().await?;
         self.replication_offsets.tables.remove(&table);
         self.mutator_map.remove(&table);
         // Dropping the table cleans up any dataflow state that may have been made as well as

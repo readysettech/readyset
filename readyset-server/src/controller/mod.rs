@@ -223,21 +223,25 @@ impl ReplicatorChannel {
 /// Channel used to notify the replication about controller events.
 /// This is the other way around communication from Replicator Channel
 pub struct ControllerChannel {
-    _sender: UnboundedSender<ControllerMessage>,
+    sender: UnboundedSender<ControllerMessage>,
     receiver: Option<UnboundedReceiver<ControllerMessage>>,
 }
 
 impl ControllerChannel {
     fn new() -> Self {
-        let (_sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
         Self {
-            _sender,
+            sender,
             receiver: Some(receiver),
         }
     }
 
     fn receiver(&mut self) -> UnboundedReceiver<ControllerMessage> {
         self.receiver.take().unwrap()
+    }
+
+    fn sender(&self) -> UnboundedSender<ControllerMessage> {
+        self.sender.clone()
     }
 }
 
@@ -531,6 +535,7 @@ impl Controller {
                     self.config.replicator_config.clone(),
                     self.config.worker_request_timeout,
                     self.config.background_recovery_interval,
+                    self.controller_channel.sender(),
                 );
                 self.leader_ready.store(false, Ordering::Release);
 

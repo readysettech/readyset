@@ -961,6 +961,20 @@ impl NoriaConnector {
     pub fn schema_search_path(&self) -> &[SqlIdentifier] {
         self.schema_search_path.as_ref()
     }
+
+    pub(crate) async fn resnapshot_table(
+        &mut self,
+        table: &mut Relation,
+    ) -> ReadySetResult<QueryResult<'static>> {
+        if table.schema.is_none() {
+            let schema = self.schema_search_path().to_vec();
+            table.schema = schema.first().cloned();
+        }
+        // check if table exists in ReadySet
+        let _ = self.inner.get_mut()?.get_noria_table(table).await?;
+        self.inner.get_mut()?.noria.resnapshot_table(table).await?;
+        Ok(QueryResult::Empty)
+    }
 }
 
 impl NoriaConnector {

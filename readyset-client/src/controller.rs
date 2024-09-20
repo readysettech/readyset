@@ -466,6 +466,11 @@ impl ReadySetHandle {
         table_statuses(all: bool) -> BTreeMap<Relation, TableStatus>
     );
 
+    simple_request!(
+        /// Send a resnapshot message to replicators for the given table.
+        resnapshot_table(table: &Relation) -> ()
+    );
+
     /// Return a list of all relations (tables or views) which are known to exist in the upstream
     /// database that we are replicating from, but are not being replicated to ReadySet (which are
     /// recorded via [`Change::AddNonReplicatedRelation`]).

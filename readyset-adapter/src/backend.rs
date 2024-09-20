@@ -81,9 +81,10 @@ use futures::future::{self, OptionFuture};
 use lru::LruCache;
 use mysql_common::row::convert::{FromRow, FromRowError};
 use nom_sql::{
-    CacheInner, CreateCacheStatement, DeallocateStatement, DeleteStatement, Dialect,
-    DialectDisplay, DropCacheStatement, InsertStatement, Relation, SelectStatement, SetStatement,
-    ShowStatement, SqlIdentifier, SqlQuery, StatementIdentifier, UpdateStatement, UseStatement,
+    AlterReadysetStatement, CacheInner, CreateCacheStatement, DeallocateStatement, DeleteStatement,
+    Dialect, DialectDisplay, DropCacheStatement, InsertStatement, Relation, SelectStatement,
+    SetStatement, ShowStatement, SqlIdentifier, SqlQuery, StatementIdentifier, UpdateStatement,
+    UseStatement,
 };
 use readyset_adapter_types::{DeallocateId, ParsedCommand};
 use readyset_client::consensus::{Authority, AuthorityControl, CacheDDLRequest};
@@ -2483,6 +2484,10 @@ where
                     proxied_queries_options.limit,
                 )
                 .await
+            }
+            SqlQuery::AlterReadySet(AlterReadysetStatement::ResnapshotTable(stmt)) => {
+                let mut table = stmt.table.clone();
+                self.noria.resnapshot_table(&mut table).await
             }
             _ => Err(internal_err!("Provided query is not a ReadySet extension")),
         };

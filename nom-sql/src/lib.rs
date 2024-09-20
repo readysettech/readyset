@@ -9,7 +9,8 @@ use nom::{AsBytes, Err, HexDisplay, IResult};
 use nom_locate::LocatedSpan;
 
 pub use self::alter::{
-    AlterColumnOperation, AlterTableDefinition, AlterTableStatement, ReplicaIdentity,
+    AlterColumnOperation, AlterReadysetStatement, AlterTableDefinition, AlterTableStatement,
+    ReplicaIdentity, ResnapshotTableStatement,
 };
 pub use self::column::{Column, ColumnConstraint, ColumnSpecification};
 pub use self::comment::CommentStatement;

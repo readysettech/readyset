@@ -1,5 +1,6 @@
 use mysql_async::prelude::*;
 use mysql_async::ChangeUserOpts;
+use nom_sql::Relation;
 use readyset_adapter::backend::UnsupportedSetMode;
 use readyset_adapter::BackendBuilder;
 use readyset_client::query::QueryId;
@@ -7,6 +8,8 @@ use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::mysql_helpers::{last_query_info, MySQLAdapter};
 use readyset_client_test_helpers::{self, sleep, TestBuilder};
 use readyset_server::Handle;
+use readyset_server::NodeIndex;
+use readyset_util::eventually;
 use readyset_util::shutdown::ShutdownSender;
 use serial_test::serial;
 use test_utils::{skip_flaky_finder, slow};
@@ -1115,5 +1118,42 @@ async fn select_version_comment() {
         .unwrap();
 
     assert_eq!(row, "Readyset");
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn resnapshot_table_command() {
+    async fn get_table_index<T: AsRef<str>>(
+        handle: &mut Handle,
+        schema: T,
+        name: T,
+    ) -> Option<NodeIndex> {
+        let tables = handle.tables().await.unwrap();
+        tables
+            .get(&Relation {
+                schema: Some(schema.as_ref().into()),
+                name: name.as_ref().into(),
+            })
+            .cloned()
+    }
+
+    let (opts, mut handle, shutdown_tx) = setup().await;
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    conn.query_drop("CREATE TABLE t (id INT)").await.unwrap();
+    sleep().await;
+
+    let old_table = get_table_index(&mut handle, "noria", "t").await;
+
+    conn.query_drop("ALTER READYSET RESNAPSHOT TABLE t")
+        .await
+        .unwrap();
+    sleep().await;
+
+    eventually! {
+        let new_table = get_table_index(&mut handle, "noria", "t").await;
+        new_table.is_some() && new_table != old_table
+    }
+
     shutdown_tx.shutdown().await;
 }
