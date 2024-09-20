@@ -1,5 +1,7 @@
 use std::{cmp, iter};
 
+use vec1::Vec1;
+
 use nom_sql::{
     BinaryOperator as SqlBinaryOperator, Column, DialectDisplay, Expr as AstExpr, FunctionExpr,
     InValue, Relation, UnaryOperator,
@@ -11,7 +13,6 @@ use readyset_errors::{
     ReadySetResult,
 };
 use readyset_util::redacted::Sensitive;
-use vec1::Vec1;
 
 use crate::{
     BinaryOperator, BuiltinFunction, CaseWhenBranch, Dialect, Expr, NullValueTreatmentArg,
@@ -677,6 +678,7 @@ impl BinaryOperator {
             HashSubtract => Ok((Self::JsonSubtractPath, false)),
             Multiply => Ok((Self::Multiply, false)),
             Divide => Ok((Self::Divide, false)),
+            Modulo => Ok((Self::Modulo, false)),
             Like => Ok((Self::Like, false)),
             NotLike => Ok((Self::Like, true)),
             ILike => Ok((Self::ILike, false)),
@@ -752,8 +754,8 @@ impl BinaryOperator {
 
         use BinaryOperator::*;
         match self {
-            Add | Subtract | Multiply | Divide | And | Or | Greater | GreaterOrEqual | Less
-            | LessOrEqual | Is => match dialect.engine() {
+            Add | Subtract | Multiply | Divide | Modulo | And | Or | Greater | GreaterOrEqual
+            | Less | LessOrEqual | Is => match dialect.engine() {
                 SqlEngine::PostgreSQL => Ok((None, None)),
                 SqlEngine::MySQL => {
                     let ty = mysql_type_conversion(left_type, right_type);
@@ -841,7 +843,16 @@ impl BinaryOperator {
                 crate::promotion::psql::output_type(left_type, self, right_type)
             }
         } {
-            return Ok(ty);
+            return if let DfType::Unknown = ty {
+                Err(invalid_query_err!(
+                    "operator does not exist: {} {} {}",
+                    left_type,
+                    self,
+                    right_type
+                ))
+            } else {
+                Ok(ty)
+            };
         }
 
         // TODO: Maybe consider `right_type` in some cases too.

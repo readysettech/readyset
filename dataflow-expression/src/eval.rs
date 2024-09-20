@@ -1,8 +1,9 @@
 use std::borrow::Borrow;
 
+use serde_json::Value as JsonValue;
+
 use readyset_data::{Array, ArrayD, DfValue, IxDyn};
 use readyset_errors::{invalid_query_err, unsupported, ReadySetError, ReadySetResult};
-use serde_json::Value as JsonValue;
 
 use crate::like::{CaseInsensitive, CaseSensitive, LikePattern};
 use crate::{utils, BinaryOperator, CaseWhenBranch, Expr};
@@ -41,6 +42,7 @@ fn eval_binary_op(op: BinaryOperator, left: &DfValue, right: &DfValue) -> ReadyS
         Subtract => Ok((non_null!(left) - non_null!(right))?),
         Multiply => Ok((non_null!(left) * non_null!(right))?),
         Divide => Ok((non_null!(left) / non_null!(right))?),
+        Modulo => Ok((non_null!(left) % non_null!(right))?),
         And => Ok((non_null!(left).is_truthy() && non_null!(right).is_truthy()).into()),
         Or => Ok((non_null!(left).is_truthy() || non_null!(right).is_truthy()).into()),
         Equal => Ok((non_null!(left) == non_null!(right)).into()),
@@ -320,16 +322,18 @@ impl Expr {
 #[cfg(test)]
 mod tests {
     use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
+    use serde_json::json;
+
     use nom_sql::parse_expr;
     use nom_sql::Dialect::*;
     use readyset_data::{ArrayD, Collation, DfType, Dialect, IxDyn, PgEnumMetadata};
     use readyset_errors::internal;
-    use serde_json::json;
     use Expr::*;
 
-    use super::*;
     use crate::lower::tests::{no_op_lower_context, resolve_columns};
     use crate::utils::{column_with_type, make_column, make_literal, normalize_json};
+
+    use super::*;
 
     /// Returns the value from evaluating an expression, or `ReadySetError` if evaluation fails.
     ///
@@ -410,6 +414,28 @@ mod tests {
         assert_eq!(
             expr.eval(&[DfValue::from(1), DfValue::from(2)]).unwrap(),
             6.into()
+        );
+    }
+
+    #[test]
+    fn eval_mod() {
+        /*
+         *  (10 % 7) * 3 = 9
+         */
+        let expr = Op {
+            left: Box::new(Op {
+                left: Box::new(make_column(0)),
+                right: Box::new(make_column(1)),
+                op: BinaryOperator::Modulo,
+                ty: DfType::Unknown,
+            }),
+            right: Box::new(make_literal(3.into())),
+            op: BinaryOperator::Multiply,
+            ty: DfType::Unknown,
+        };
+        assert_eq!(
+            expr.eval(&[DfValue::from(10), DfValue::from(7)]).unwrap(),
+            9.into()
         );
     }
 
