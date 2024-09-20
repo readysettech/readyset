@@ -1,10 +1,24 @@
 use std::collections::HashMap;
 use std::iter::zip;
 
-const PSQL_TYPES: &[&str] = &["smallint", "integer", "bigint"];
-const PSQL_OPS: &[&str] = &["+", "-", "*", "/"];
-const READYSET_TYPES: &[&str] = &["SmallInt", "Int", "BigInt"];
-const READYSET_OPS: &[&str] = &["Add", "Subtract", "Multiply", "Divide"];
+const PSQL_TYPES: &[&str] = &[
+    "smallint",
+    "integer",
+    "bigint",
+    "real",
+    "double precision",
+    "numeric",
+];
+const PSQL_OPS: &[&str] = &["+", "-", "*", "/", "%"];
+const READYSET_TYPES: &[&str] = &[
+    "SmallInt",
+    "Int",
+    "BigInt",
+    "Float",
+    "Double",
+    "DEFAULT_NUMERIC",
+];
+const READYSET_OPS: &[&str] = &["Add", "Subtract", "Multiply", "Divide", "Modulo"];
 
 async fn test(
     client: &tokio_postgres::Client,
@@ -12,7 +26,7 @@ async fn test(
     a: usize,
     op: usize,
     b: usize,
-) -> String {
+) -> Option<String> {
     client
         .simple_query("drop table if exists t1, t2, t3")
         .await
@@ -26,35 +40,39 @@ async fn test(
         .simple_query(&format!("create table t2 (b {})", PSQL_TYPES[b],))
         .await
         .unwrap();
-    client
+
+    let out: String = if (client
         .simple_query(&format!(
             "create table t3 as select a {} b as c from t1, t2",
             PSQL_OPS[op]
         ))
-        .await
-        .unwrap();
-
-    let rows = client
-        .query(
-            "select pg_catalog.format_type(a.atttypid, a.atttypmod)
+        .await)
+        .is_ok()
+    {
+        let rows = client
+            .query(
+                "select pg_catalog.format_type(a.atttypid, a.atttypmod)
             from pg_catalog.pg_attribute a
             where a.attrelid = (select oid from pg_class where relname = 't3') and a.attnum > 0",
-            &[],
-        )
-        .await
-        .unwrap();
-    let ty: String = rows[0].get(0);
+                &[],
+            )
+            .await
+            .unwrap();
+        let ty: String = rows[0].get(0);
 
-    let out = if let Some(ty) = map.get(ty.as_str()) {
-        ty.to_string()
+        if let Some(ty) = map.get(ty.as_str()) {
+            ty.to_string()
+        } else {
+            panic!("unknown type: {}", ty);
+        }
     } else {
-        panic!("unknown type: {}", ty);
+        "Unknown".to_string()
     };
 
-    format!(
+    Some(format!(
         "(DfType::{}, BinaryOperator::{}, DfType::{}), DfType::{}",
         READYSET_TYPES[a], READYSET_OPS[op], READYSET_TYPES[b], out,
-    )
+    ))
 }
 
 #[tokio::main]
@@ -116,8 +134,9 @@ async fn main() {
     for a in 0..PSQL_TYPES.len() {
         for b in 0..PSQL_TYPES.len() {
             for op in 0..PSQL_OPS.len() {
-                let args = test(&client2, &map, a, op, b).await;
-                println!("map.insert({});", args);
+                if let Some(args) = test(&client2, &map, a, op, b).await {
+                    println!("map.insert({});", args);
+                }
             }
         }
     }
