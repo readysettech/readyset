@@ -25,6 +25,7 @@ pub enum CreateTableOption {
     Charset(CharsetName),
     Collate(CollationName),
     Comment(String),
+    DataDirectory(String),
     /// Any currently uncotegorized option falls here
     /// TODO: implement other options
     Other,
@@ -40,6 +41,7 @@ impl fmt::Display for CreateTableOption {
             CreateTableOption::Charset(c) => write!(f, "DEFAULT CHARSET={}", c),
             CreateTableOption::Collate(c) => write!(f, "COLLATE={}", c),
             CreateTableOption::Comment(c) => write!(f, "COMMENT='{}'", c),
+            CreateTableOption::DataDirectory(d) => write!(f, "DATA DIRECTORY='{}'", d),
             CreateTableOption::Other => Ok(()),
         }
     }
@@ -70,6 +72,7 @@ fn create_option(
             create_option_default_charset(dialect),
             create_option_collate(dialect),
             create_option_comment(dialect),
+            create_option_data_directory(dialect),
             map(create_option_max_rows, |_| CreateTableOption::Other),
             map(create_option_avg_row_length, |_| CreateTableOption::Other),
             map(create_option_row_format, |_| CreateTableOption::Other),
@@ -232,6 +235,29 @@ fn create_option_collate(
                 CreateTableOption::Collate,
             ),
         ))(i)
+    }
+}
+
+fn create_option_data_directory(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CreateTableOption> {
+    move |i| {
+        map(
+            map_res(
+                alt((
+                    create_option_equals_pair(
+                        tag_no_case("data directory"),
+                        dialect.string_literal(),
+                    ),
+                    create_option_spaced_pair(
+                        tag_no_case("data directory"),
+                        dialect.string_literal(),
+                    ),
+                )),
+                String::from_utf8,
+            ),
+            CreateTableOption::DataDirectory,
+        )(i)
     }
 }
 
@@ -439,6 +465,22 @@ mod tests {
         should_parse_all(
             "COMMENT=\"foo''bar\"",
             vec![CreateTableOption::Comment("foo''bar".to_string())],
+        );
+    }
+
+    #[test]
+    fn create_table_data_directory() {
+        should_parse_all(
+            "DATA DIRECTORY = '/var/lib/mysql/'",
+            vec![CreateTableOption::DataDirectory(
+                "/var/lib/mysql/".to_string(),
+            )],
+        );
+        should_parse_all(
+            "DATA DIRECTORY '/var/lib/mysql/'",
+            vec![CreateTableOption::DataDirectory(
+                "/var/lib/mysql/".to_string(),
+            )],
         );
     }
 }

@@ -174,6 +174,9 @@ impl<'ast> VisitorMut<'ast> for AnonymizeVisitor<'_> {
     ) -> Result<(), Self::Error> {
         match create_table_option {
             CreateTableOption::Comment(ref mut comment) => *comment = "<anonymized>".to_string(),
+            CreateTableOption::DataDirectory(ref mut data_directory) => {
+                *data_directory = "<anonymized>".to_string()
+            }
             // No anonymization needed for any of these
             CreateTableOption::Collate(_)
             | CreateTableOption::AutoIncrement(_)
