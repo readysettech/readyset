@@ -10,6 +10,7 @@
 
 #![warn(clippy::todo, clippy::unimplemented)]
 
+use crate::alter::AlterReadysetStatement;
 use crate::create::{CreateDatabaseOption, CreateDatabaseStatement};
 use crate::create_table_options::CreateTableOption;
 use crate::rename::{RenameTableOperation, RenameTableStatement};
@@ -261,6 +262,12 @@ pub trait Visitor<'ast>: Sized {
         walk_alter_table_statement(self, alter_table_statement)
     }
 
+    fn visit_alter_readyset_statement(
+        &mut self,
+        alter_ready_set_statement: &'ast AlterReadysetStatement,
+    ) -> Result<(), Self::Error> {
+        walk_alter_readyset_statement(self, alter_ready_set_statement)
+    }
     fn visit_alter_table_definition(
         &mut self,
         alter_table_definition: &'ast AlterTableDefinition,
@@ -1004,6 +1011,17 @@ pub fn walk_alter_table_definition<'a, V: Visitor<'a>>(
     }
 }
 
+pub fn walk_alter_readyset_statement<'a, V: Visitor<'a>>(
+    visitor: &mut V,
+    alter_ready_set_statement: &'a AlterReadysetStatement,
+) -> Result<(), V::Error> {
+    match alter_ready_set_statement {
+        AlterReadysetStatement::ResnapshotTable(resnapshot_table_stmt) => {
+            visitor.visit_table(&resnapshot_table_stmt.table)
+        }
+    }
+}
+
 pub fn walk_alter_column_operation<'a, V: Visitor<'a>>(
     visitor: &mut V,
     alter_column_operation: &'a AlterColumnOperation,
@@ -1182,6 +1200,7 @@ pub fn walk_sql_query<'a, V: Visitor<'a>>(
         SqlQuery::CreateTable(statement) => visitor.visit_create_table_statement(statement),
         SqlQuery::CreateView(statement) => visitor.visit_create_view_statement(statement),
         SqlQuery::AlterTable(statement) => visitor.visit_alter_table_statement(statement),
+        SqlQuery::AlterReadySet(statement) => visitor.visit_alter_readyset_statement(statement),
         SqlQuery::Insert(statement) => visitor.visit_insert_statement(statement),
         SqlQuery::CompoundSelect(statement) => visitor.visit_compound_select_statement(statement),
         SqlQuery::Select(statement) => visitor.visit_select_statement(statement),
