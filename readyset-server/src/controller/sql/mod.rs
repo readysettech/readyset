@@ -1162,8 +1162,10 @@ impl SqlIncorporator {
 
         // FIXME(REA-2168): Use correct dialect.
         trace!(rewritten_query = %stmt.display(nom_sql::Dialect::MySQL));
+        trace!("SelectStatement: {:?}", &stmt);
 
         let query_graph = to_query_graph(stmt.clone())?;
+        trace!("QueryGraph: {:?}", &query_graph);
 
         self.mir_converter.named_query_to_mir(
             query_name,
