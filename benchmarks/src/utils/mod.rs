@@ -85,14 +85,15 @@ pub async fn readyset_ready(target: &str) -> anyhow::Result<()> {
             .await;
 
         if let Ok(data) = res {
-            let snapshot_status: String = Vec::<Vec<DfValue>>::try_from(data)
+            let snapshot_status = Vec::<Vec<DfValue>>::try_from(data)
                 .unwrap()
                 .into_iter()
-                .find(|r| r[0] == "Snapshot Status".into())
-                .unwrap()[1]
-                .clone()
-                .try_into()
-                .unwrap();
+                .find(|r| r[0] == "Snapshot Status".into());
+            let snapshot_status: String = if let Some(s) = snapshot_status {
+                s[1].clone().try_into().unwrap()
+            } else {
+                continue;
+            };
 
             if snapshot_status == "Completed" {
                 info!("Database ready!");
