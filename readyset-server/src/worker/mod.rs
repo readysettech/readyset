@@ -612,10 +612,13 @@ async fn evict_check(
         (sizes, total_reported)
     };
 
+    // Evict a little more than necessary to provide some hysteresis.
+    let limit = (limit as f64 * 0.98f64) as usize;
+    let actual_over = 2 * (used - limit);
+
     // state sizes are under actual memory usage, but roughly proportional to actual
     // memory usage - let's figure out proportionally how much *reported* memory we
     // should evict
-    let actual_over = used - limit;
     let mut proportional_over =
         ((total_reported as f64 / used as f64) * actual_over as f64).round() as usize;
 
