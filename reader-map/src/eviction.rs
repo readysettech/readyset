@@ -18,7 +18,8 @@
 
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::Relaxed;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
+use std::time::Instant;
 
 use itertools::Either;
 use rand::seq::SliceRandom;
@@ -26,6 +27,8 @@ use rand::seq::SliceRandom;
 use crate::inner::Data;
 use crate::values::Values;
 use crate::InsertionOrder;
+
+static CLOCK_START: LazyLock<Instant> = LazyLock::new(Instant::now);
 
 /// Handles the eviction of keys from the reader map
 #[derive(Clone, Debug)]
@@ -44,7 +47,7 @@ impl Default for EvictionStrategy {
 }
 
 /// Used to store strategy specific metadata for every key in the reader map
-#[derive(Default, Clone, Debug)]
+#[derive(Clone, Debug)]
 #[repr(transparent)]
 pub struct EvictionMeta(Arc<AtomicU64>);
 
@@ -52,13 +55,15 @@ pub struct EvictionMeta(Arc<AtomicU64>);
 pub struct RandomEviction;
 
 /// Performs Least Recently Used eviction.
-/// The structure keeps track of the total number of reads from the map in an atomic counter that is
-/// incremented each time a read happens. This counter value is copied to the metadata of the key
-/// that triggered the read. This way the metadata for the key that was read last always contains
-/// the greatest counter value, and those values are monotonically increasing.
-/// When performing an eviction we then simply evict the keys with the smallest counter value.
-#[derive(Clone, Default, Debug)]
-pub struct LRUEviction(Arc<AtomicU64>);
+///
+/// On read of a key, the current time in milliseconds is written to the metadata of the key
+/// that triggered the read.  Access to the metadata is unsynchronized, so the timestamp may
+/// may not be exactly accurate, though it should be fairly accurate.
+///
+/// When evicting, we sample some timestamps to establish an (approximately accurate) threshold
+/// and then evict keys with earlier timestamps.
+#[derive(Clone, Debug)]
+pub struct LRUEviction;
 
 /// An iterator of sorts over [`EvictRangeGroup`] that groups together consecutive runs of evicted
 /// keys in a BTreeMap map. Does not actually implement iterator as that would require a lending
@@ -127,10 +132,16 @@ impl EvictionMeta {
     }
 }
 
+impl Default for EvictionMeta {
+    fn default() -> Self {
+        EvictionMeta(AtomicU64::new(now()).into())
+    }
+}
+
 impl EvictionStrategy {
     /// Create an LRU eviction strategy
     pub fn new_lru() -> EvictionStrategy {
-        EvictionStrategy::LeastRecentlyUsed(Default::default())
+        EvictionStrategy::LeastRecentlyUsed(LRUEviction)
     }
 
     /// Create a random eviction strategy
@@ -221,20 +232,17 @@ impl EvictionStrategy {
     }
 }
 
+fn now() -> u64 {
+    (Instant::now() - *CLOCK_START).as_millis() as _
+}
+
 impl LRUEviction {
     fn new_meta(&self) -> EvictionMeta {
-        EvictionMeta(AtomicU64::new(self.0.fetch_add(1, Relaxed)).into())
+        EvictionMeta(AtomicU64::new(now()).into())
     }
 
     fn on_read(&self, meta: &EvictionMeta) {
-        // For least recently used eviction strategy, we store the current value
-        // of the shared counter in the meta, while incrementing its value.
-        let current_counter = self.0.fetch_add(1, Relaxed);
-        // Note: when storing the counter, we don't actually check if its value is
-        // greater than the currently stored one, so it is possible for it to go
-        // backwards, but this sort of accuracy is not our goal here, we prefer to
-        // be (maybe) less accurate, but more performant.
-        meta.0.store(current_counter, Relaxed);
+        meta.0.store(now(), Relaxed);
     }
 
     fn pick_keys_to_evict<'a, K, V, I, S>(
