@@ -1011,6 +1011,10 @@ pub fn walk_alter_readyset_statement<'a, V: VisitorMut<'a>>(
         AlterReadysetStatement::ResnapshotTable(resnapshot_table_stmt) => {
             visitor.visit_table(&mut resnapshot_table_stmt.table)
         }
+        AlterReadysetStatement::AddTables(add_table_stmt) => add_table_stmt
+            .tables
+            .iter_mut()
+            .try_for_each(|table| visitor.visit_table(table)),
     }
 }
 

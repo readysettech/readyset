@@ -23,7 +23,7 @@ use crate::common::{
 };
 use crate::create::key_specification;
 use crate::literal::literal;
-use crate::table::{relation, Relation};
+use crate::table::{relation, table_list, Relation};
 use crate::whitespace::whitespace1;
 use crate::{Dialect, DialectDisplay, Literal, NomSqlResult, SqlIdentifier};
 
@@ -486,9 +486,36 @@ pub fn resnapshot_table_statement(
         ))
     }
 }
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
+pub struct AddTablesStatement {
+    pub tables: Vec<Relation>,
+}
+
+pub fn add_tables_statement(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], AlterReadysetStatement> {
+    move |i| {
+        let (i, _) = tag_no_case("add")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("tables")(i)?;
+        let (i, _) = whitespace1(i)?;
+
+        let (i, tables) = table_list(dialect)(i)?;
+
+        let (i, _) = statement_terminator(i)?;
+
+        Ok((
+            i,
+            AlterReadysetStatement::AddTables(AddTablesStatement { tables }),
+        ))
+    }
+}
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum AlterReadysetStatement {
     ResnapshotTable(ResnapshotTableStatement),
+    AddTables(AddTablesStatement),
 }
 
 impl DialectDisplay for AlterReadysetStatement {
@@ -496,6 +523,13 @@ impl DialectDisplay for AlterReadysetStatement {
         fmt_with(move |f| match self {
             Self::ResnapshotTable(stmt) => {
                 write!(f, "RESNAPSHOT TABLE {}", stmt.table.display(dialect))
+            }
+            Self::AddTables(stmt) => {
+                write!(
+                    f,
+                    "ADD TABLEs {}",
+                    stmt.tables.iter().map(|t| t.display(dialect)).join(", ")
+                )
             }
         })
     }
@@ -509,7 +543,10 @@ pub fn alter_readyset_statement(
         let (i, _) = whitespace1(i)?;
         let (i, _) = tag_no_case("readyset")(i)?;
         let (i, _) = whitespace1(i)?;
-        let (i, statement) = alt((resnapshot_table_statement(dialect),))(i)?;
+        let (i, statement) = alt((
+            resnapshot_table_statement(dialect),
+            add_tables_statement(dialect),
+        ))(i)?;
 
         Ok((i, statement))
     }
@@ -1384,6 +1421,27 @@ mod tests {
                 res,
                 AlterReadysetStatement::ResnapshotTable(ResnapshotTableStatement {
                     table: Relation::from("t")
+                })
+            );
+        }
+
+        #[test]
+        fn alter_readyset_add_table() {
+            let qstring = b"ALTER READYSET ADD TABLES t;";
+            let res = test_parse!(alter_readyset_statement(Dialect::PostgreSQL), qstring);
+            assert_eq!(
+                res,
+                AlterReadysetStatement::AddTables(AddTablesStatement {
+                    tables: vec![Relation::from("t")]
+                })
+            );
+
+            let qstring = b"ALTER READYSET ADD TABLES t1, t2;";
+            let res = test_parse!(alter_readyset_statement(Dialect::PostgreSQL), qstring);
+            assert_eq!(
+                res,
+                AlterReadysetStatement::AddTables(AddTablesStatement {
+                    tables: vec![Relation::from("t1"), Relation::from("t2")]
                 })
             );
         }
