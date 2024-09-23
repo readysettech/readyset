@@ -247,6 +247,16 @@ pub enum EvictRequest {
     SingleKey { tag: Tag, key: Option<Vec<DfValue>> },
 }
 
+impl fmt::Display for EvictRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Bytes { num_bytes, .. } => write!(f, "Bytes {{ num_bytes: {} }}", num_bytes),
+            Self::Keys { keys, .. } => write!(f, "Keys {{ [{} keys] }}", keys.len()),
+            Self::SingleKey { .. } => write!(f, "SingleKey"),
+        }
+    }
+}
+
 /// A request issued to a domain through the worker RPC interface.
 #[derive(Clone, Serialize, Deserialize, Debug, EnumDiscriminants)]
 #[strum_discriminants(derive(EnumIter, EnumCount, IntoStaticStr))]
