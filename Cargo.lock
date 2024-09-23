@@ -4250,6 +4250,7 @@ dependencies = [
  "partial-map",
  "petgraph",
  "proptest",
+ "quanta",
  "rand",
  "readyset-client",
  "readyset-util",

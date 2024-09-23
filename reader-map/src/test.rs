@@ -112,7 +112,7 @@ fn eviction_range_lru() -> Result<()> {
     }
     w.publish();
 
-    let mut last = r.get(&'a').unwrap().unwrap().eviction_meta().value();
+    let mut last = 0;
     let mut now = 0;
     thread::sleep(Duration::from_millis(2));
 
