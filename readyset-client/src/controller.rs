@@ -471,6 +471,11 @@ impl ReadySetHandle {
         resnapshot_table(table: &Relation) -> ()
     );
 
+    simple_request!(
+        /// Add new replication tables
+        add_filter_tables(tables: Vec<&Relation>) -> ()
+    );
+
     /// Return a list of all relations (tables or views) which are known to exist in the upstream
     /// database that we are replicating from, but are not being replicated to ReadySet (which are
     /// recorded via [`Change::AddNonReplicatedRelation`]).
