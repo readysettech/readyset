@@ -13,7 +13,8 @@ use crate::KeyComparison;
 /// [0]: https://docs.google.com/document/d/1QVG8QROH851wu_z5RmMMt7SkUVRFuWw1vjPo2cPXY0k
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize, Hash, Arbitrary)]
 pub enum IndexType {
-    /// An index backed by a [`HashMap`](std::collections::HashMap).
+    /// An index backed by an [`IndexMap`](indexmap::map::IndexMap), a mostly-compatible
+    /// replacement for a ['HashMap'](std::collections::HashMap).
     HashMap,
     /// An index backed by a [`BTreeMap`](std::collections::BTreeMap)
     BTreeMap,

@@ -1,8 +1,8 @@
 use std::borrow::Borrow;
-use std::collections::{hash_map, HashMap};
 use std::fmt;
 use std::hash::{BuildHasher, Hash};
 
+use indexmap::map::{self, IndexMap};
 use iter_enum::{ExactSizeIterator, Iterator};
 use itertools::Either;
 use metrics::{histogram, Histogram};
@@ -34,13 +34,13 @@ impl<K: Clone> Miss<&K> {
     }
 }
 
-/// Data contains the mapping from Keys to sets of Values.
+/// The mapping from Keys to sets of Values.
 #[derive(Clone, Iterator, ExactSizeIterator)]
 pub(crate) enum Data<K, V, I, S> {
-    /// Data is stored in a BTreeMap, both point and range lookups are possible
+    /// Data is stored in a BTreeMap; both point and range lookups are possible
     BTreeMap(PartialMap<K, Values<V, I>>),
-    /// Data is stored in a HashMap, only point lookups are possible
-    HashMap(HashMap<K, Values<V, I>, S>),
+    /// Data is stored in a IndexMap; only point lookups are possible
+    HashMap(IndexMap<K, Values<V, I>, S>),
 }
 
 impl<K, V, I, S> fmt::Debug for Data<K, V, I, S>
@@ -66,7 +66,7 @@ macro_rules! with_map {
 }
 
 pub(crate) type Iter<'a, K, V, I> =
-    Either<partial_map::Iter<'a, K, Values<V, I>>, hash_map::Iter<'a, K, Values<V, I>>>;
+    Either<partial_map::Iter<'a, K, Values<V, I>>, map::Iter<'a, K, Values<V, I>>>;
 
 impl<K, V, I, S> Data<K, V, I, S>
 where
@@ -74,7 +74,7 @@ where
 {
     pub(crate) fn with_index_type_and_hasher(index_type: IndexType, hash_builder: S) -> Self {
         match index_type {
-            IndexType::HashMap => Self::HashMap(HashMap::with_hasher(hash_builder)),
+            IndexType::HashMap => Self::HashMap(IndexMap::with_hasher(hash_builder)),
             IndexType::BTreeMap => Self::BTreeMap(Default::default()),
         }
     }
@@ -226,7 +226,10 @@ where
         K: Borrow<Q> + Clone,
         Q: ?Sized + Hash + Ord + ToOwned<Owned = K>,
     {
-        with_map!(self, |map| map.remove(k))
+        match self {
+            Data::BTreeMap(map) => map.remove(k),
+            Data::HashMap(map) => map.swap_remove(k),
+        }
     }
 
     pub(crate) fn contains_key<Q>(&self, k: &Q) -> bool
@@ -247,8 +250,8 @@ where
                 partial_map::Entry::Occupied(o) => Entry::Occupied(OccupiedEntry::BTreeMap(o)),
             },
             Data::HashMap(map) => match map.entry(key) {
-                hash_map::Entry::Vacant(v) => Entry::Vacant(VacantEntry::HashMap(v)),
-                hash_map::Entry::Occupied(o) => Entry::Occupied(OccupiedEntry::HashMap(o)),
+                map::Entry::Vacant(v) => Entry::Vacant(VacantEntry::HashMap(v)),
+                map::Entry::Occupied(o) => Entry::Occupied(OccupiedEntry::HashMap(o)),
             },
         }
     }
@@ -258,7 +261,7 @@ pub(crate) enum VacantEntry<'a, K, V, I>
 where
     K: Ord,
 {
-    HashMap(hash_map::VacantEntry<'a, K, Values<V, I>>),
+    HashMap(map::VacantEntry<'a, K, Values<V, I>>),
     BTreeMap(partial_map::VacantEntry<'a, K, Values<V, I>>),
 }
 
@@ -278,7 +281,7 @@ pub(crate) enum OccupiedEntry<'a, K, V, I>
 where
     K: Ord,
 {
-    HashMap(hash_map::OccupiedEntry<'a, K, Values<V, I>>),
+    HashMap(map::OccupiedEntry<'a, K, Values<V, I>>),
     BTreeMap(partial_map::OccupiedEntry<'a, K, Values<V, I>>),
 }
 
