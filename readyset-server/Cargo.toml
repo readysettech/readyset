@@ -66,6 +66,9 @@ enum-kinds = { workspace = true }
 slotmap = { workspace = true }
 tikv-jemalloc-ctl = { workspace = true }
 rlimit = { workspace = true }
+indexmap = { workspace = true }
+quanta = { workspace = true }
+base64 = { workspace = true }
 
 timekeeper = { workspace = true }
 vec_map = { workspace = true, features = ["eders"] }

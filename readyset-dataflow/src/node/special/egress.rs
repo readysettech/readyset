@@ -52,11 +52,11 @@ impl EgressTx {
     }
 
     fn inc_sent(&mut self) {
-        metrics::counter!(recorded::EGRESS_NODE_SENT_PACKETS, 1)
+        metrics::counter!(recorded::EGRESS_NODE_SENT_PACKETS).increment(1);
     }
 
     fn inc_dropped(&mut self) {
-        metrics::counter!(recorded::EGRESS_NODE_DROPPED_PACKETS, 1);
+        metrics::counter!(recorded::EGRESS_NODE_DROPPED_PACKETS).increment(1);
     }
 }
 

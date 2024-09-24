@@ -259,33 +259,33 @@ impl SingleState {
                 }
                 KeyedState::MultiHash(ref mut m, len) => {
                     debug_assert_eq!(key.len(), len);
-                    Box::new(m.remove(key.as_vec()).into_iter().flatten())
+                    Box::new(m.swap_remove(key.as_vec()).into_iter().flatten())
                 }
                 KeyedState::SingleHash(ref mut m) => {
-                    Box::new(m.remove(&(key[0])).into_iter().flatten())
+                    Box::new(m.swap_remove(&(key[0])).into_iter().flatten())
                 }
                 KeyedState::DoubleHash(ref mut m) => Box::new(
-                    m.remove::<(DfValue, _)>(&MakeKey::from_key(key))
+                    m.swap_remove::<(DfValue, _)>(&MakeKey::from_key(key))
                         .into_iter()
                         .flatten(),
                 ),
                 KeyedState::TriHash(ref mut m) => Box::new(
-                    m.remove::<(DfValue, _, _)>(&MakeKey::from_key(key))
+                    m.swap_remove::<(DfValue, _, _)>(&MakeKey::from_key(key))
                         .into_iter()
                         .flatten(),
                 ),
                 KeyedState::QuadHash(ref mut m) => Box::new(
-                    m.remove::<(DfValue, _, _, _)>(&MakeKey::from_key(key))
+                    m.swap_remove::<(DfValue, _, _, _)>(&MakeKey::from_key(key))
                         .into_iter()
                         .flatten(),
                 ),
                 KeyedState::QuinHash(ref mut m) => Box::new(
-                    m.remove::<(DfValue, _, _, _, _)>(&MakeKey::from_key(key))
+                    m.swap_remove::<(DfValue, _, _, _, _)>(&MakeKey::from_key(key))
                         .into_iter()
                         .flatten(),
                 ),
                 KeyedState::SexHash(ref mut m) => Box::new(
-                    m.remove::<(DfValue, _, _, _, _, _)>(&MakeKey::from_key(key))
+                    m.swap_remove::<(DfValue, _, _, _, _, _)>(&MakeKey::from_key(key))
                         .into_iter()
                         .flatten(),
                 ),

@@ -218,7 +218,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         let version = format!("{version} ReadySet");
         let _connection_handle = tokio::spawn(connection);
         span.in_scope(|| debug!("Established connection to upstream"));
-        metrics::increment_gauge!(recorded::CLIENT_UPSTREAM_CONNECTIONS, 1.0);
+        metrics::gauge!(recorded::CLIENT_UPSTREAM_CONNECTIONS).increment(1.0);
 
         Ok(Self {
             client,
@@ -456,6 +456,6 @@ impl UpstreamDatabase for PostgreSqlUpstream {
 
 impl Drop for PostgreSqlUpstream {
     fn drop(&mut self) {
-        metrics::decrement_gauge!(recorded::CLIENT_UPSTREAM_CONNECTIONS, 1.0);
+        metrics::gauge!(recorded::CLIENT_UPSTREAM_CONNECTIONS).decrement(1.0);
     }
 }

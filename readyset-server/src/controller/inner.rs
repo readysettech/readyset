@@ -387,10 +387,7 @@ impl Leader {
             }
             (&Method::POST, "/view_names") => {
                 let (queries, dialect): (Vec<ViewCreateRequest>, _) = bincode::deserialize(&body)?;
-                gauge!(
-                    recorded::CONTROLLER_RPC_VIEW_NAMES_NUM_QUERIES,
-                    queries.len() as f64,
-                );
+                gauge!(recorded::CONTROLLER_RPC_VIEW_NAMES_NUM_QUERIES,).set(queries.len() as f64);
                 let ds = self.dataflow_state_handle.read().await;
                 return_serialized!(ds.view_names(queries, dialect))
             }

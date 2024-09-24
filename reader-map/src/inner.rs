@@ -5,7 +5,7 @@ use std::hash::{BuildHasher, Hash};
 
 use iter_enum::{ExactSizeIterator, Iterator};
 use itertools::Either;
-use metrics::{register_histogram, Histogram};
+use metrics::{histogram, Histogram};
 use partial_map::PartialMap;
 use petgraph::graph::NodeIndex;
 use readyset_client::internal::IndexType;
@@ -334,8 +334,8 @@ impl WriteMetrics {
             Some(idx) => idx.index().to_string(),
             None => "-1".to_string(),
         };
-        let entry_updated = register_histogram!(READER_MAP_UPDATES, "node_idx" => idx.clone());
-        let lifetime_evict = register_histogram!(READER_MAP_LIFETIMES, "node_idx" => idx);
+        let entry_updated = histogram!(READER_MAP_UPDATES, "node_idx" => idx.clone());
+        let lifetime_evict = histogram!(READER_MAP_LIFETIMES, "node_idx" => idx);
 
         Self {
             entry_updated,

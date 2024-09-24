@@ -473,7 +473,7 @@ impl MySqlBinlogConnector {
                 }
                 _ => {
                     warn!(%error, "Error extending recipe, DDL statement will not be used");
-                    counter!(recorded::REPLICATOR_FAILURE, 1u64);
+                    counter!(recorded::REPLICATOR_FAILURE).increment(1u64);
                     return Err(mysql_async::Error::Other(Box::new(
                         ReadySetError::SkipEvent,
                     )));

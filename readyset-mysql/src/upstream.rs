@@ -208,7 +208,7 @@ impl MySqlUpstream {
         }
 
         span.in_scope(|| debug!("Established connection to upstream"));
-        metrics::increment_gauge!(recorded::CLIENT_UPSTREAM_CONNECTIONS, 1.0);
+        metrics::gauge!(recorded::CLIENT_UPSTREAM_CONNECTIONS).increment(1.0);
         let prepared_statements = HashMap::new();
         Ok((conn, prepared_statements))
     }
@@ -426,6 +426,6 @@ impl UpstreamDatabase for MySqlUpstream {
 
 impl Drop for MySqlUpstream {
     fn drop(&mut self) {
-        metrics::decrement_gauge!(recorded::CLIENT_UPSTREAM_CONNECTIONS, 1.0);
+        metrics::gauge!(recorded::CLIENT_UPSTREAM_CONNECTIONS).decrement(1.0);
     }
 }

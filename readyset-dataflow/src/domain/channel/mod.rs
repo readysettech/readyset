@@ -11,7 +11,7 @@ use std::task::{Context, Poll};
 
 use async_bincode::{AsyncBincodeWriter, AsyncDestination};
 use futures_util::sink::{Sink, SinkExt};
-use metrics::{register_gauge, Gauge};
+use metrics::{gauge, Gauge};
 use readyset_client::internal::ReplicaAddress;
 use readyset_client::metrics::recorded;
 use readyset_client::{CONNECTION_FROM_BASE, CONNECTION_FROM_DOMAIN};
@@ -41,7 +41,7 @@ pub(crate) fn domain_channel() -> (DomainSender, DomainReceiver) {
     let packets_queued: [Gauge; PacketDiscriminants::COUNT] = PacketDiscriminants::iter()
         .map(|d| {
             let name: &'static str = d.into();
-            register_gauge!(recorded::DOMAIN_PACKETS_QUEUED, "packet_type" => name)
+            gauge!(recorded::DOMAIN_PACKETS_QUEUED, "packet_type" => name)
         })
         .collect::<Vec<Gauge>>()
         .try_into()

@@ -12,8 +12,6 @@ use benchmarks::{benchmark_histogram, QUANTILES};
 use clap::builder::ArgPredicate;
 use clap::{Parser, ValueHint};
 use database_utils::DatabaseType;
-use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
-use metrics_util::MetricKindMask;
 use readyset_adapter::backend::noria_connector::ReadBehavior;
 use readyset_adapter::backend::{MigrationMode, UnsupportedSetMode};
 use readyset_adapter::BackendBuilder;
@@ -21,6 +19,7 @@ use readyset_client_test_helpers::mysql_helpers::MySQLAdapter;
 use readyset_client_test_helpers::psql_helpers::PostgreSQLAdapter;
 use readyset_client_test_helpers::TestBuilder;
 use readyset_server::{DurabilityMode, Handle};
+use readyset_server::{PrometheusBuilder, PrometheusHandle};
 use readyset_util::shutdown::ShutdownSender;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
@@ -142,15 +141,18 @@ impl BenchmarkRunner {
             });
 
         let handle = if let Some(prometheus) = &self.deployment_params.prometheus_push_gateway {
-            let mut builder = PrometheusBuilder::new()
-                .idle_timeout(MetricKindMask::ALL, None)
-                .with_push_gateway(prometheus, PUSH_GATEWAY_PUSH_INTERVAL, None, None)?;
+            let mut builder = PrometheusBuilder::new().with_push_gateway(
+                prometheus,
+                PUSH_GATEWAY_PUSH_INTERVAL,
+                None,
+                None,
+            )?;
             for (key, value) in &self.benchmark_cmd.as_ref().unwrap().labels() {
                 builder = builder.add_global_label(key, value);
             }
             let (recorder, exporter) = builder.build()?;
             let handle = recorder.handle();
-            metrics::set_boxed_recorder(Box::new(recorder))?;
+            metrics::set_global_recorder(recorder)?;
             tokio::spawn(exporter);
             Some(handle)
         } else {

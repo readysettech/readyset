@@ -68,7 +68,7 @@ fn init_metrics_recorder() {
     let rec = CompositeMetricsRecorder::with_recorders(vec![MetricsRecorder::Noria(
         NoriaMetricsRecorder::new(),
     )]);
-    install_global_recorder(rec).unwrap();
+    install_global_recorder(rec);
 }
 
 #[tokio::main]

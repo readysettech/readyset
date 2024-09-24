@@ -1179,12 +1179,12 @@ impl DfState {
         F: FnOnce(&mut Migration<'_>) -> ReadySetResult<T>,
     {
         debug!("starting migration");
-        gauge!(recorded::CONTROLLER_MIGRATION_IN_PROGRESS, 1.0);
+        gauge!(recorded::CONTROLLER_MIGRATION_IN_PROGRESS).set(1.0);
         let mut m = Migration::new(self, dialect);
         let r = f(&mut m)?;
         m.commit(dry_run).await?;
         debug!("finished migration");
-        gauge!(recorded::CONTROLLER_MIGRATION_IN_PROGRESS, 0.0);
+        gauge!(recorded::CONTROLLER_MIGRATION_IN_PROGRESS).set(0.0);
         Ok(r)
     }
 
@@ -1942,10 +1942,8 @@ impl DfStateHandle {
         let start = Instant::now();
         let state_copy = read_guard.state.clone();
         let elapsed = start.elapsed();
-        histogram!(
-            readyset_client::metrics::recorded::DATAFLOW_STATE_CLONE_TIME,
-            elapsed.as_micros() as f64,
-        );
+        histogram!(readyset_client::metrics::recorded::DATAFLOW_STATE_CLONE_TIME,)
+            .record(elapsed.as_micros() as f64);
         DfStateWriter {
             state: state_copy,
             _guard: write_guard,

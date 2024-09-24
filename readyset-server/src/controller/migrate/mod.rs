@@ -980,10 +980,7 @@ impl<'df> Migration<'df> {
             "migration planning completed"
         );
 
-        histogram!(
-            recorded::CONTROLLER_MIGRATION_TIME,
-            start.elapsed().as_micros() as f64
-        );
+        histogram!(recorded::CONTROLLER_MIGRATION_TIME,).record(start.elapsed().as_micros() as f64);
 
         Ok(())
     }
@@ -1170,9 +1167,9 @@ fn plan_add_nodes(
                     );
                     counter!(
                         recorded::NODE_ADDED,
-                        1,
                         "ntype" => dataflow_state.ingredients[ni].node_type_string(),
-                    );
+                    )
+                    .increment(1);
                 }
                 dataflow_state
                     .domain_node_index_pairs

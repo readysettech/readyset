@@ -6,7 +6,7 @@ pub(crate) mod table_filter;
 
 use std::time::Duration;
 
-use metrics::{register_gauge, Gauge};
+use metrics::{gauge, Gauge};
 use nom_sql::Relation;
 pub use noria_adapter::{cleanup, NoriaAdapter};
 use readyset_client::metrics::recorded;
@@ -44,7 +44,7 @@ impl TablesSnapshottingGaugeGuard {
     /// Creates a new handle and increments the gauge by 1. The gauge is automatically decremented
     /// when the handle is dropped.
     fn new() -> Self {
-        let gauge = register_gauge!(recorded::REPLICATOR_TABLES_SNAPSHOTTING);
+        let gauge = gauge!(recorded::REPLICATOR_TABLES_SNAPSHOTTING);
         gauge.increment(1.0);
         Self(gauge)
     }

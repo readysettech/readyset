@@ -557,7 +557,7 @@ impl ConsulAuthority {
         let new_val = rmp_serde::to_vec(&controller_state)?;
         let compressed = super::Compressor::compress(&new_val);
 
-        gauge!(recorded::DATAFLOW_STATE_SERIALIZED, compressed.len() as f64);
+        gauge!(recorded::DATAFLOW_STATE_SERIALIZED).set(compressed.len() as f64);
 
         let chunked = ChunkedState::from(compressed);
 

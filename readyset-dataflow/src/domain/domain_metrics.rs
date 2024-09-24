@@ -27,39 +27,34 @@ impl DomainMetrics {
     }
 
     pub(super) fn inc_eviction_requests(&self) {
-        counter!(recorded::EVICTION_REQUESTS, 1)
+        counter!(recorded::EVICTION_REQUESTS).increment(1);
     }
 
     pub(super) fn rec_eviction_time(&self, time: Duration, total_freed: u64) {
-        histogram!(recorded::EVICTION_TIME, time.as_micros() as f64);
-        histogram!(recorded::EVICTION_FREED_MEMORY, total_freed as f64);
+        histogram!(recorded::EVICTION_TIME).record(time.as_micros() as f64);
+        histogram!(recorded::EVICTION_FREED_MEMORY).record(total_freed as f64);
     }
 
     pub(super) fn rec_chunked_replay_start_time(&mut self, time: Duration) {
-        counter!(
-            recorded::DOMAIN_TOTAL_CHUNKED_REPLAY_START_TIME,
-            time.as_micros() as u64,
-        );
+        counter!(recorded::DOMAIN_TOTAL_CHUNKED_REPLAY_START_TIME)
+            .increment(time.as_micros() as u64);
 
-        histogram!(
-            recorded::DOMAIN_CHUNKED_REPLAY_START_TIME,
-            time.as_micros() as f64,
-        );
+        histogram!(recorded::DOMAIN_CHUNKED_REPLAY_START_TIME,).record(time.as_micros() as f64);
     }
 
     pub(super) fn rec_replay_time(&mut self, cache_name: &Relation, time: Duration) {
         if self.verbose {
             counter!(
                 recorded::DOMAIN_TOTAL_REPLAY_TIME,
-                time.as_micros() as u64,
                 "cache_name" => cache_name_to_string(cache_name)
-            );
+            )
+            .increment(time.as_micros() as u64);
 
             histogram!(
                 recorded::DOMAIN_REPLAY_TIME,
-                time.as_micros() as f64,
                 "cache_name" => cache_name_to_string(cache_name)
-            );
+            )
+            .record(time.as_micros() as f64);
         }
     }
 
@@ -67,15 +62,15 @@ impl DomainMetrics {
         if self.verbose {
             counter!(
                 recorded::DOMAIN_TOTAL_SEED_REPLAY_TIME,
-                time.as_micros() as u64,
                 "cache_name" => cache_name_to_string(cache_name)
-            );
+            )
+            .increment(time.as_micros() as u64);
 
             histogram!(
                 recorded::DOMAIN_SEED_REPLAY_TIME,
-                time.as_micros() as f64,
                 "cache_name" => cache_name_to_string(cache_name)
-            );
+            )
+            .record(time.as_micros() as f64);
         }
     }
 
@@ -83,74 +78,92 @@ impl DomainMetrics {
         if self.verbose {
             counter!(
                 recorded::DOMAIN_TOTAL_FINISH_REPLAY_TIME,
-                time.as_micros() as u64,
                 "cache_name" => cache_name_to_string(cache_name)
-            );
+            )
+            .increment(time.as_micros() as u64);
 
             histogram!(
                 recorded::DOMAIN_FINISH_REPLAY_TIME,
-                time.as_micros() as f64,
                 "cache_name" => cache_name_to_string(cache_name)
-            );
+            )
+            .record(time.as_micros() as f64);
         }
     }
 
     pub(super) fn rec_forward_time_input(&mut self, time: Duration) {
-        counter!(recorded::DOMAIN_TOTAL_FORWARD_TIME, time.as_micros() as u64, "packet_type" => "input");
-        histogram!(recorded::DOMAIN_FORWARD_TIME, time.as_micros() as f64, "packet_type" => "input");
+        counter!(recorded::DOMAIN_TOTAL_FORWARD_TIME,
+            "packet_type" => "input"
+        )
+        .increment(time.as_micros() as u64);
+        histogram!(
+            recorded::DOMAIN_FORWARD_TIME,
+            "packet_type" => "input"
+        )
+        .record(time.as_micros() as f64);
     }
 
     pub(super) fn rec_forward_time_message(&mut self, time: Duration) {
-        counter!(recorded::DOMAIN_TOTAL_FORWARD_TIME, time.as_micros() as u64, "packet_type" => "message");
-        histogram!(recorded::DOMAIN_FORWARD_TIME, time.as_micros() as f64, "packet_type" => "message");
+        counter!(recorded::DOMAIN_TOTAL_FORWARD_TIME,
+            "packet_type" => "message"
+        )
+        .increment(time.as_micros() as u64);
+        histogram!(
+            recorded::DOMAIN_FORWARD_TIME,
+            "packet_type" => "message"
+        )
+        .record(time.as_micros() as f64);
     }
 
     pub(super) fn rec_reader_replay_time(&mut self, cache_name: &Relation, time: Duration) {
         if self.verbose {
             counter!(
                 recorded::DOMAIN_READER_TOTAL_REPLAY_REQUEST_TIME,
-                time.as_micros() as u64,
                 "cache_name" => cache_name_to_string(cache_name)
-            );
+            )
+            .increment(time.as_micros() as u64);
 
             histogram!(
                 recorded::DOMAIN_READER_REPLAY_REQUEST_TIME,
-                time.as_micros() as f64,
                 "cache_name" => cache_name_to_string(cache_name)
-            );
+            )
+            .record(time.as_micros() as f64);
         }
     }
 
     pub(super) fn inc_replay_misses(&mut self, cache_name: &Relation, n: usize) {
         counter!(
             recorded::DOMAIN_REPLAY_MISSES,
-            n as u64,
             "cache_name" => cache_name_to_string(cache_name)
-        );
+        )
+        .increment(n as u64);
     }
 
     pub(super) fn inc_packets_sent(&mut self, packet: &Packet) {
         let discriminant: PacketDiscriminants = packet.into();
         let packet_type: &'static str = discriminant.into();
 
-        counter!(recorded::DOMAIN_PACKET_SENT, 1, "packet_type" => packet_type);
+        counter!(
+            recorded::DOMAIN_PACKET_SENT,
+            "packet_type" => packet_type
+        )
+        .increment(1);
     }
 
     pub(super) fn set_reader_state_size(&self, name: &Relation, size: u64) {
         gauge!(
             recorded::READER_STATE_SIZE_BYTES,
-            size as f64,
             "name" => cache_name_to_string(name),
-        );
+        )
+        .set(size as f64);
     }
 
     pub(super) fn set_base_table_size(&self, name: &Relation, size: u64) {
         if self.verbose {
             gauge!(
                 recorded::ESTIMATED_BASE_TABLE_SIZE_BYTES,
-                size as f64,
                 "table_name" => cache_name_to_string(name),
-            );
+            )
+            .set(size as f64);
         }
     }
 
@@ -158,10 +171,10 @@ impl DomainMetrics {
         if self.verbose {
             counter!(
                 recorded::BASE_TABLE_LOOKUP_REQUESTS,
-                1,
                 "cache_name" => cache_name_to_string(cache_name),
                 "table_name" => cache_name_to_string(table_name)
-            );
+            )
+            .increment(1);
         }
     }
 }

@@ -333,8 +333,8 @@ impl BackendBuilder {
         status_reporter: ReadySetStatusReporter<DB>,
         adapter_start_time: SystemTime,
     ) -> Backend<DB, Handler> {
-        metrics::increment_gauge!(recorded::CONNECTED_CLIENTS, 1.0);
-        metrics::increment_counter!(recorded::CLIENT_CONNECTIONS_OPENED);
+        metrics::gauge!(recorded::CONNECTED_CLIENTS).increment(1.0);
+        metrics::counter!(recorded::CLIENT_CONNECTIONS_OPENED).increment(1);
 
         let proxy_state = if upstream.is_some() {
             ProxyState::Fallback
@@ -3189,8 +3189,8 @@ where
         if let Some(connections) = &self.connections {
             connections.remove(&self.client_addr);
         }
-        metrics::decrement_gauge!(recorded::CONNECTED_CLIENTS, 1.0);
-        metrics::increment_counter!(recorded::CLIENT_CONNECTIONS_CLOSED);
+        metrics::gauge!(recorded::CONNECTED_CLIENTS).decrement(1.0);
+        metrics::counter!(recorded::CLIENT_CONNECTIONS_CLOSED).increment(1);
     }
 }
 

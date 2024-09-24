@@ -587,7 +587,7 @@ async fn evict_check(
     let start = std::time::Instant::now();
 
     let used = tracker.allocated_bytes()?;
-    gauge!(recorded::EVICTION_WORKER_HEAP_ALLOCATED_BYTES, used as f64);
+    gauge!(recorded::EVICTION_WORKER_HEAP_ALLOCATED_BYTES).set(used as f64);
     if used < limit {
         return Ok(());
     }
@@ -661,7 +661,7 @@ async fn evict_check(
             used, limit, target.domain_index,
         );
 
-        counter!(recorded::EVICTION_WORKER_EVICTIONS_REQUESTED, 1);
+        counter!(recorded::EVICTION_WORKER_EVICTIONS_REQUESTED).increment(1);
 
         let tx = match domain_senders.entry(target) {
             Occupied(entry) => entry.into_mut(),
@@ -695,10 +695,7 @@ async fn evict_check(
         }
     }
 
-    histogram!(
-        recorded::EVICTION_WORKER_EVICTION_TIME,
-        start.elapsed().as_micros() as f64,
-    );
+    histogram!(recorded::EVICTION_WORKER_EVICTION_TIME).record(start.elapsed().as_micros() as f64);
 
     barrier.await?;
     Ok(())

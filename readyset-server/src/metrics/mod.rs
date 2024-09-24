@@ -2,11 +2,11 @@
 
 use std::sync::OnceLock;
 
-use thiserror::Error;
-
 pub use crate::metrics::composite_recorder::{CompositeMetricsRecorder, RecorderType};
 pub use crate::metrics::noria_recorder::NoriaMetricsRecorder;
-pub use crate::metrics::recorders::MetricsRecorder;
+pub use crate::metrics::recorders::{
+    MetricsRecorder, PrometheusBuilder, PrometheusHandle, PrometheusRecorder,
+};
 
 mod composite_recorder;
 mod noria_recorder;
@@ -17,22 +17,13 @@ mod recorders;
 type GlobalRecorder = CompositeMetricsRecorder;
 static METRICS_RECORDER: OnceLock<&'static GlobalRecorder> = OnceLock::new();
 
-/// Error value returned from [`install_global_recorder`] if a metrics recorder is already set.
-///
-/// Essentially identical to [`metrics::SetRecorderError`], except that can't be constructed so we
-/// define our own version here.
-#[derive(Debug, Error)]
-#[error("Metrics recorder installed twice!")]
-pub struct RecorderInstalledTwice;
-
 /// Installs a new global recorder
-pub fn install_global_recorder(rec: GlobalRecorder) -> Result<(), RecorderInstalledTwice> {
+pub fn install_global_recorder(rec: GlobalRecorder) {
     let rec = Box::leak(Box::new(rec));
     METRICS_RECORDER
         .set(rec)
-        .map_err(|_| RecorderInstalledTwice)?;
-    metrics::set_recorder(rec).expect("Would fail on OnceCell");
-    Ok(())
+        .expect("metrics already initialized");
+    metrics::set_global_recorder(&*rec).expect("Would fail on OnceCell");
 }
 
 /// Gets an [`Option`] with the static reference to the installed metrics recorder.

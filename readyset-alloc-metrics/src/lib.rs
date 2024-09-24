@@ -38,14 +38,14 @@ struct AllocatorMetricsReporter {
 impl AllocatorMetricsReporter {
     fn new() -> Self {
         Self {
-            allocated: metrics::register_gauge!(ALLOCATED_BYTES),
-            active: metrics::register_gauge!(ACTIVE_BYTES),
-            metadata: metrics::register_gauge!(METADATA_BYTES),
-            resident: metrics::register_gauge!(RESIDENT_BYTES),
-            mapped: metrics::register_gauge!(MAPPED_BYTES),
-            retained: metrics::register_gauge!(RETAINED_BYTES),
-            dirty: metrics::register_gauge!(DIRTY_BYTES),
-            fragmented: metrics::register_gauge!(FRAGMENTED_BYTES),
+            allocated: metrics::gauge!(ALLOCATED_BYTES),
+            active: metrics::gauge!(ACTIVE_BYTES),
+            metadata: metrics::gauge!(METADATA_BYTES),
+            resident: metrics::gauge!(RESIDENT_BYTES),
+            mapped: metrics::gauge!(MAPPED_BYTES),
+            retained: metrics::gauge!(RETAINED_BYTES),
+            dirty: metrics::gauge!(DIRTY_BYTES),
+            fragmented: metrics::gauge!(FRAGMENTED_BYTES),
         }
     }
 

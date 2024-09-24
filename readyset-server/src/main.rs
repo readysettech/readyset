@@ -8,13 +8,13 @@ use clap::builder::NonEmptyStringValueParser;
 use clap::Parser;
 use common::ulimit::maybe_increase_nofile_limit;
 use futures_util::future::{self, Either};
-use metrics_exporter_prometheus::PrometheusBuilder;
 use readyset_alloc::ThreadBuildWrapper;
 use readyset_client::metrics::recorded;
 use readyset_server::consensus::AuthorityType;
 use readyset_server::metrics::{
     install_global_recorder, CompositeMetricsRecorder, MetricsRecorder,
 };
+use readyset_server::PrometheusBuilder;
 use readyset_server::{resolve_addr, Builder, NoriaMetricsRecorder, WorkerOptions};
 use readyset_telemetry_reporter::{TelemetryEvent, TelemetryInitializer};
 use readyset_version::*;
@@ -196,11 +196,10 @@ fn main() -> anyhow::Result<()> {
                 .build_recorder(),
         ));
     }
-    install_global_recorder(CompositeMetricsRecorder::with_recorders(recs)).unwrap();
+    install_global_recorder(CompositeMetricsRecorder::with_recorders(recs));
 
     metrics::gauge!(
         recorded::READYSET_SERVER_VERSION,
-        1.0,
         &[
             ("release_version", READYSET_VERSION.release_version),
             ("commit_id", READYSET_VERSION.commit_id),
@@ -210,8 +209,9 @@ fn main() -> anyhow::Result<()> {
             ("profile", READYSET_VERSION.profile),
             ("opt_level", READYSET_VERSION.opt_level),
         ]
-    );
-    metrics::counter!(recorded::READYSET_SERVER_STARTUPS, 1);
+    )
+    .set(1.0);
+    metrics::counter!(recorded::READYSET_SERVER_STARTUPS).increment(1);
 
     if let Some(volume_id) = &opts.worker_options.volume_id {
         info!(%volume_id);

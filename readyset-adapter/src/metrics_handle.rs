@@ -3,9 +3,10 @@ use std::collections::HashMap;
 use indexmap::IndexMap;
 use metrics::SharedString;
 use metrics_exporter_prometheus::formatting::{sanitize_label_key, sanitize_label_value};
-use metrics_exporter_prometheus::{Distribution, PrometheusHandle};
+use metrics_exporter_prometheus::Distribution;
 use readyset_client_metrics::recorded::QUERY_LOG_EXECUTION_COUNT;
 use readyset_client_metrics::DatabaseType;
+use readyset_server::PrometheusHandle;
 
 #[derive(Debug, Default, Clone)]
 pub struct MetricsSummary {

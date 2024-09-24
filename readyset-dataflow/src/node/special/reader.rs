@@ -127,10 +127,8 @@ impl Reader {
         m.handle_trace(
             |trace| match SystemTime::now().duration_since(trace.start) {
                 Ok(d) => {
-                    histogram!(
-                        recorded::PACKET_WRITE_PROPAGATION_TIME,
-                        d.as_micros() as f64
-                    );
+                    histogram!(recorded::PACKET_WRITE_PROPAGATION_TIME)
+                        .record(d.as_micros() as f64);
                 }
                 Err(e) => {
                     warn!(error = %e, "Write latency trace failed");

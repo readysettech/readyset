@@ -2,12 +2,12 @@
 use std::sync::Arc;
 
 use metrics::{Counter, Gauge, Histogram, KeyName, Metadata, Recorder, SharedString, Unit};
-use metrics_exporter_prometheus::PrometheusRecorder;
 use readyset_client::metrics::Key;
 
 use crate::metrics::recorders::MetricsRecorder;
 use crate::metrics::{Clear, Render};
 use crate::NoriaMetricsRecorder;
+use crate::PrometheusRecorder;
 
 /// A recorder that maintains a set of recorders and notifies all of them of all updates.
 #[derive(Default)]
@@ -100,6 +100,12 @@ impl CompositeMetricsRecorder {
     }
 }
 
+impl std::fmt::Debug for CompositeMetricsRecorder {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        fmt.write_str("CompositeMetricsRecorder")
+    }
+}
+
 impl Clear for CompositeMetricsRecorder {
     fn clear(&self) -> bool {
         let mut clr = true;
@@ -109,7 +115,7 @@ impl Clear for CompositeMetricsRecorder {
     }
 }
 
-impl Recorder for CompositeMetricsRecorder {
+impl Recorder for &CompositeMetricsRecorder {
     fn register_counter(&self, key: &Key, metadata: &Metadata<'_>) -> Counter {
         match (&self.prom_recorder, &self.noria_recorder) {
             (Some(p), None) => p.register_counter(key, metadata),

@@ -101,7 +101,7 @@ impl Service<Request<Body>> for NoriaServerHttpRouter {
             // disable CORS to allow use as API server
             .header(hyper::header::ACCESS_CONTROL_ALLOW_ORIGIN, "*");
 
-        metrics::increment_counter!(recorded::SERVER_EXTERNAL_REQUESTS);
+        metrics::counter!(recorded::SERVER_EXTERNAL_REQUESTS).increment(1);
 
         match (req.method(), req.uri().path()) {
             #[cfg(feature = "failure_injection")]
@@ -193,7 +193,7 @@ impl Service<Request<Body>> for NoriaServerHttpRouter {
                 Box::pin(async move { Ok(res.unwrap()) })
             }
             (&Method::POST, "/worker_request") => {
-                metrics::increment_counter!(recorded::SERVER_WORKER_REQUESTS);
+                metrics::counter!(recorded::SERVER_WORKER_REQUESTS).increment(1);
 
                 let wtx = self.worker_tx.clone();
                 Box::pin(async move {
@@ -272,7 +272,7 @@ impl Service<Request<Body>> for NoriaServerHttpRouter {
                 Box::pin(async move { Ok(res.unwrap()) })
             }
             _ => {
-                metrics::increment_counter!(recorded::SERVER_CONTROLLER_REQUESTS);
+                metrics::counter!(recorded::SERVER_CONTROLLER_REQUESTS).increment(1);
 
                 let method = req.method().clone();
                 let path = req.uri().path().to_string();

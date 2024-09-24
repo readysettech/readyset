@@ -24,7 +24,6 @@ use failpoint_macros::set_failpoint;
 use futures_util::future::FutureExt;
 use futures_util::stream::{SelectAll, StreamExt};
 use health_reporter::{HealthReporter as AdapterHealthReporter, State as AdapterState};
-use metrics_exporter_prometheus::PrometheusBuilder;
 use nom_sql::{Relation, SqlIdentifier};
 use readyset_adapter::backend::noria_connector::{NoriaConnector, ReadBehavior};
 use readyset_adapter::backend::MigrationMode;
@@ -50,6 +49,7 @@ use readyset_dataflow::Readers;
 use readyset_errors::{internal_err, ReadySetError};
 use readyset_server::metrics::{CompositeMetricsRecorder, MetricsRecorder};
 use readyset_server::worker::readers::{retry_misses, Ack, BlockingRead, ReadRequestHandler};
+use readyset_server::PrometheusBuilder;
 use readyset_sql_passes::adapter_rewrites::AdapterRewriteParams;
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetryInitializer};
 use readyset_util::futures::abort_on_panic;
@@ -801,14 +801,13 @@ where
         if !recorders.is_empty() {
             readyset_server::metrics::install_global_recorder(
                 CompositeMetricsRecorder::with_recorders(recorders),
-            )?;
+            );
         }
 
         rs_connect.in_scope(|| info!("PrometheusHandle created"));
 
         metrics::gauge!(
             recorded::READYSET_ADAPTER_VERSION,
-            1.0,
             &[
                 ("release_version", READYSET_VERSION.release_version),
                 ("commit_id", READYSET_VERSION.commit_id),
@@ -818,8 +817,9 @@ where
                 ("profile", READYSET_VERSION.profile),
                 ("opt_level", READYSET_VERSION.opt_level),
             ]
-        );
-        metrics::counter!(recorded::READYSET_ADAPTER_STARTUPS, 1);
+        )
+        .set(1.0);
+        metrics::counter!(recorded::READYSET_ADAPTER_STARTUPS).increment(1);
         let adapter_start_time = SystemTime::now();
 
         let (shutdown_tx, shutdown_rx) = shutdown::channel();

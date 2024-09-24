@@ -1,9 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
-use metrics::{
-    counter, histogram, register_counter, register_histogram, Counter, Histogram, SharedString,
-};
+use metrics::{counter, histogram, Counter, Histogram, SharedString};
 use nom_sql::{DialectDisplay, SqlIdentifier, SqlQuery};
 use readyset_client::query::QueryId;
 use readyset_client_metrics::{
@@ -59,7 +57,7 @@ impl QueryMetrics {
                 }
             }
 
-            register_histogram!(recorded::QUERY_LOG_PARSE_TIME, &labels)
+            histogram!(recorded::QUERY_LOG_PARSE_TIME, &labels)
         })
     }
 }
@@ -68,22 +66,18 @@ impl QueryLogger {
     pub fn new(mode: QueryLogMode, rewrite_params: AdapterRewriteParams) -> Self {
         QueryLogger {
             per_query_metrics: HashMap::new(),
-            parse_error_count: register_counter!(
-                readyset_client_metrics::recorded::QUERY_LOG_PARSE_ERRORS,
-            ),
-            set_disallowed_count: register_counter!(
+            parse_error_count: counter!(readyset_client_metrics::recorded::QUERY_LOG_PARSE_ERRORS,),
+            set_disallowed_count: counter!(
                 readyset_client_metrics::recorded::QUERY_LOG_SET_DISALLOWED,
             ),
-            view_not_found_count: register_counter!(
+            view_not_found_count: counter!(
                 readyset_client_metrics::recorded::QUERY_LOG_VIEW_NOT_FOUND,
             ),
-            rpc_error_count: register_counter!(
-                readyset_client_metrics::recorded::QUERY_LOG_RPC_ERRORS,
-            ),
+            rpc_error_count: counter!(readyset_client_metrics::recorded::QUERY_LOG_RPC_ERRORS,),
 
-            query_count: register_counter!(recorded::QUERY_LOG_EVENT_TYPE, "type" => "query"),
-            prepare_count: register_counter!(recorded::QUERY_LOG_EVENT_TYPE, "type" => "prepare"),
-            execute_count: register_counter!(recorded::QUERY_LOG_EVENT_TYPE, "type" => "execute"),
+            query_count: counter!(recorded::QUERY_LOG_EVENT_TYPE, "type" => "query"),
+            prepare_count: counter!(recorded::QUERY_LOG_EVENT_TYPE, "type" => "prepare"),
+            execute_count: counter!(recorded::QUERY_LOG_EVENT_TYPE, "type" => "execute"),
 
             log_mode: mode,
             rewrite_params,
@@ -195,19 +189,12 @@ impl QueryLogger {
                     SharedString::from(cache_name.display_unquoted().to_string()),
                 )];
 
-                counter!(recorded::QUERY_LOG_TOTAL_KEYS_READ, *num_keys, &labels);
-                counter!(
-                    recorded::QUERY_LOG_TOTAL_CACHE_MISSES,
-                    *cache_misses,
-                    &labels
-                );
+                counter!(recorded::QUERY_LOG_TOTAL_KEYS_READ, &labels).increment(*num_keys);
+                counter!(recorded::QUERY_LOG_TOTAL_CACHE_MISSES, &labels).increment(*cache_misses);
 
                 if *cache_misses != 0 {
-                    counter!(
-                        recorded::QUERY_LOG_QUERY_CACHE_MISSED,
-                        *cache_misses,
-                        &labels
-                    );
+                    counter!(recorded::QUERY_LOG_QUERY_CACHE_MISSED, &labels)
+                        .increment(*cache_misses);
                 }
 
                 labels.push(("database_type", SharedString::from(DatabaseType::ReadySet)));
@@ -220,12 +207,9 @@ impl QueryLogger {
                     }
                 }
 
-                histogram!(
-                    recorded::QUERY_LOG_EXECUTION_TIME,
-                    duration.as_micros() as f64,
-                    &labels
-                );
-                counter!(recorded::QUERY_LOG_EXECUTION_COUNT, 1, &labels);
+                histogram!(recorded::QUERY_LOG_EXECUTION_TIME, &labels)
+                    .record(duration.as_micros() as f64);
+                counter!(recorded::QUERY_LOG_EXECUTION_COUNT, &labels).increment(1);
             }
             Some(ReadysetExecutionEvent::Other { duration }) => {
                 let mut labels =
@@ -239,12 +223,9 @@ impl QueryLogger {
                     }
                 }
 
-                histogram!(
-                    recorded::QUERY_LOG_EXECUTION_TIME,
-                    duration.as_micros() as f64,
-                    &labels
-                );
-                counter!(recorded::QUERY_LOG_EXECUTION_COUNT, 1, &labels);
+                histogram!(recorded::QUERY_LOG_EXECUTION_TIME, &labels)
+                    .record(duration.as_micros() as f64);
+                counter!(recorded::QUERY_LOG_EXECUTION_COUNT, &labels).increment(1);
             }
             None => (),
         }
@@ -260,12 +241,9 @@ impl QueryLogger {
                 }
             }
 
-            histogram!(
-                recorded::QUERY_LOG_EXECUTION_TIME,
-                duration.as_micros() as f64,
-                &labels
-            );
-            counter!(recorded::QUERY_LOG_EXECUTION_COUNT, 1, &labels);
+            histogram!(recorded::QUERY_LOG_EXECUTION_TIME, &labels)
+                .record(duration.as_micros() as f64);
+            counter!(recorded::QUERY_LOG_EXECUTION_COUNT, &labels).increment(1);
         }
     }
 

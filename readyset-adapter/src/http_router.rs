@@ -12,9 +12,9 @@ use hyper::header::CONTENT_TYPE;
 use hyper::service::make_service_fn;
 use hyper::{self, Body, Method, Request, Response};
 use metrics::Gauge;
-use metrics_exporter_prometheus::PrometheusHandle;
 use readyset_alloc::{dump_stats, memory_and_per_thread_stats};
 use readyset_client_metrics::recorded;
+use readyset_server::PrometheusHandle;
 use readyset_util::shutdown::ShutdownReceiver;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc::Sender;
@@ -182,7 +182,7 @@ where
             // disable CORS to allow use as API server
             .header(hyper::header::ACCESS_CONTROL_ALLOW_ORIGIN, "*");
 
-        metrics::increment_counter!(recorded::ADAPTER_EXTERNAL_REQUESTS);
+        metrics::counter!(recorded::ADAPTER_EXTERNAL_REQUESTS).increment(1);
 
         match (req.method(), req.uri().path()) {
             #[cfg(feature = "failure_injection")]
@@ -313,7 +313,7 @@ pub struct HttpRouterMetrics {
 impl Default for HttpRouterMetrics {
     fn default() -> Self {
         Self {
-            metrics_payload_size: metrics::register_gauge!(recorded::METRICS_PAYLOAD_SIZE_BYTES),
+            metrics_payload_size: metrics::gauge!(recorded::METRICS_PAYLOAD_SIZE_BYTES),
         }
     }
 }

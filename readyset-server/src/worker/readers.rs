@@ -159,8 +159,8 @@ impl ReadRequestHandler {
             global_readers: readers,
             readers_cache: Default::default(),
             wait,
-            miss_ctr: metrics::register_counter!(recorded::SERVER_VIEW_QUERY_MISS),
-            hit_ctr: metrics::register_counter!(recorded::SERVER_VIEW_QUERY_HIT),
+            miss_ctr: metrics::counter!(recorded::SERVER_VIEW_QUERY_MISS),
+            hit_ctr: metrics::counter!(recorded::SERVER_VIEW_QUERY_HIT),
             upquery_timeout,
         }
     }
@@ -345,7 +345,7 @@ impl Service<Tagged<ReadQuery>> for ReadRequestHandler {
 /// A spawned task responsible for repeating reads that could not be immediately served from cache,
 /// until they succeed.
 pub async fn retry_misses(mut rx: UnboundedReceiver<(BlockingRead, Ack)>) {
-    let upquery_hist = metrics::register_histogram!(recorded::SERVER_VIEW_UPQUERY_DURATION);
+    let upquery_hist = metrics::histogram!(recorded::SERVER_VIEW_UPQUERY_DURATION);
     let mut reader_cache: ReaderMap = Default::default();
 
     while let Some((mut pending, ack)) = rx.recv().await {

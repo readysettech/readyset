@@ -577,19 +577,23 @@ impl KeyedState {
             // I do wonder what the perf impacts of that are)
             KeyedState::MultiBTree(ref mut m, _) => m.remove(&key.to_owned()),
 
-            KeyedState::SingleHash(ref mut m) => m.remove(&(key[0])),
-            KeyedState::DoubleHash(ref mut m) => m.remove::<(DfValue, _)>(&MakeKey::from_key(key)),
-            KeyedState::TriHash(ref mut m) => m.remove::<(DfValue, _, _)>(&MakeKey::from_key(key)),
+            KeyedState::SingleHash(ref mut m) => m.swap_remove(&(key[0])),
+            KeyedState::DoubleHash(ref mut m) => {
+                m.swap_remove::<(DfValue, _)>(&MakeKey::from_key(key))
+            }
+            KeyedState::TriHash(ref mut m) => {
+                m.swap_remove::<(DfValue, _, _)>(&MakeKey::from_key(key))
+            }
             KeyedState::QuadHash(ref mut m) => {
-                m.remove::<(DfValue, _, _, _)>(&MakeKey::from_key(key))
+                m.swap_remove::<(DfValue, _, _, _)>(&MakeKey::from_key(key))
             }
             KeyedState::QuinHash(ref mut m) => {
-                m.remove::<(DfValue, _, _, _, _)>(&MakeKey::from_key(key))
+                m.swap_remove::<(DfValue, _, _, _, _)>(&MakeKey::from_key(key))
             }
             KeyedState::SexHash(ref mut m) => {
-                m.remove::<(DfValue, _, _, _, _, _)>(&MakeKey::from_key(key))
+                m.swap_remove::<(DfValue, _, _, _, _, _)>(&MakeKey::from_key(key))
             }
-            KeyedState::MultiHash(ref mut m, _) => m.remove(&key.to_owned()),
+            KeyedState::MultiHash(ref mut m, _) => m.swap_remove(&key.to_owned()),
         }
     }
 

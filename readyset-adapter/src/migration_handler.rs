@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use dataflow_expression::Dialect;
-use metrics::{counter, register_counter, Counter};
+use metrics::{counter, Counter};
 use nom_sql::{DialectDisplay, Literal};
 use readyset_client::query::{MigrationState, Query, QueryId};
 use readyset_client::recipe::changelist::{Change, ChangeList};
@@ -192,8 +192,8 @@ impl MigrationHandler {
     #[instrument(level = "warn", name = "migration_handler", skip(self))]
     pub async fn run(&mut self) -> ReadySetResult<()> {
         let mut interval = tokio::time::interval(self.min_poll_interval);
-        let success_counter = register_counter!(recorded::MIGRATION_HANDLER_SUCCESSES);
-        let failure_counter = register_counter!(recorded::MIGRATION_HANDLER_FAILURES);
+        let success_counter = counter!(recorded::MIGRATION_HANDLER_SUCCESSES);
+        let failure_counter = counter!(recorded::MIGRATION_HANDLER_FAILURES);
 
         loop {
             select! {
@@ -234,7 +234,7 @@ impl MigrationHandler {
             .await
         {
             Ok(_) => {
-                counter!(recorded::MIGRATION_HANDLER_ALLOWED, 1);
+                counter!(recorded::MIGRATION_HANDLER_ALLOWED).increment(1);
                 self.start_time.remove(view_request);
                 self.query_status_cache
                     .update_query_migration_state(view_request, MigrationState::Successful);

@@ -513,7 +513,7 @@ impl Controller {
     async fn handle_authority_update(&mut self, msg: AuthorityUpdate) -> ReadySetResult<()> {
         match msg {
             AuthorityUpdate::LeaderChange(descr) => {
-                gauge!(recorded::CONTROLLER_IS_LEADER, 0f64);
+                gauge!(recorded::CONTROLLER_IS_LEADER).set(0f64);
                 self.send_worker_request(WorkerRequestKind::NewController {
                     controller_uri: descr.controller_uri,
                 })
@@ -524,7 +524,7 @@ impl Controller {
                 cache_ddl,
             }) => {
                 info!("won leader election, creating Leader");
-                gauge!(recorded::CONTROLLER_IS_LEADER, 1f64);
+                gauge!(recorded::CONTROLLER_IS_LEADER).set(1f64);
                 let background_task_failed_tx = self.background_task_failed_tx.clone();
                 let mut leader = Leader::new(
                     state,
@@ -1344,15 +1344,15 @@ async fn handle_controller_request(
 
     counter!(
         recorded::CONTROLLER_RPC_OVERALL_TIME,
-        request_start.elapsed().as_micros() as u64,
         "path" => path.clone()
-    );
+    )
+    .increment(request_start.elapsed().as_micros() as u64);
 
     histogram!(
         recorded::CONTROLLER_RPC_REQUEST_TIME,
-        request_start.elapsed().as_micros() as f64,
         "path" => path
-    );
+    )
+    .record(request_start.elapsed().as_micros() as f64);
 
     if reply_tx.send(ret).is_err() {
         warn!("client hung up");

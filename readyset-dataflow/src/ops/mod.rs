@@ -178,8 +178,11 @@ impl Ingredient for NodeOperator {
         );
 
         let elapsed = start.elapsed().as_micros();
-        histogram!(recorded::NODE_ON_INPUT_DURATION, elapsed as f64, "ntype" => self.to_string());
-        counter!(recorded::NODE_ON_INPUT_INVOCATIONS, 1, "ntype" => self.to_string());
+        histogram!(recorded::NODE_ON_INPUT_DURATION,
+            "ntype" => self.to_string()
+        )
+        .record(elapsed as f64);
+        counter!(recorded::NODE_ON_INPUT_INVOCATIONS, "ntype" => self.to_string()).increment(1);
 
         result
     }

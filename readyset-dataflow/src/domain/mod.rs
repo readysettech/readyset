@@ -2215,14 +2215,9 @@ impl Domain {
                 );
 
                 let time = start.elapsed();
-                counter!(
-                    recorded::DOMAIN_TOTAL_CHUNKED_REPLAY_TIME,
-                    time.as_micros() as u64
-                );
-                histogram!(
-                    recorded::DOMAIN_CHUNKED_REPLAY_TIME,
-                    time.as_micros() as f64
-                );
+                counter!(recorded::DOMAIN_TOTAL_CHUNKED_REPLAY_TIME)
+                    .increment(time.as_micros() as u64);
+                histogram!(recorded::DOMAIN_CHUNKED_REPLAY_TIME).record(time.as_micros() as f64);
             })?;
         self.handle_replay(*p, executor)?;
 
