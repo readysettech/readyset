@@ -257,6 +257,18 @@ where
     }
 }
 
+impl<K, V, I, S> Data<K, V, I, S>
+where
+    I: InsertionOrder<V>,
+{
+    pub(crate) fn get_index_value(&self, i: usize) -> Option<&Values<V, I>> {
+        match self {
+            Self::BTreeMap(..) => panic!("get_index_value called on a BTreeMap reader_map"),
+            Self::HashMap(map) => map.get_index(i).map(|(_k, v)| v),
+        }
+    }
+}
+
 pub(crate) enum VacantEntry<'a, K, V, I>
 where
     K: Ord,

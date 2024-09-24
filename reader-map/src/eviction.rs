@@ -23,6 +23,7 @@ use std::time::Instant;
 
 use itertools::Either;
 use rand::seq::SliceRandom;
+use rand::Rng;
 
 use crate::inner::Data;
 use crate::values::Values;
@@ -245,6 +246,24 @@ impl LRUEviction {
         meta.0.store(now(), Relaxed);
     }
 
+    fn step_skip<K, V, I, S>(data: &Data<K, V, I, S>, nkeys: usize) -> (usize, usize)
+    where
+        I: InsertionOrder<V>,
+    {
+        // Instead of iterating over every value in the map, we choose a cutoff value for the
+        // timestamp via a very approximate process.  Choose a sub-linear fraction to sample
+        // and a random starting point.
+        let step = data.len() / ((nkeys as f64).sqrt() as usize).max(1);
+        let skip = rand::thread_rng().gen_range(0..step);
+        (step, skip)
+    }
+
+    fn cutoff(meta: &mut [u64], len: usize, nkeys: usize, step: usize) -> u64 {
+        // Find the cutoff, scaling by the sampling factor.
+        let (_, cutoff, _) = meta.select_nth_unstable((nkeys / step).min(len - 1));
+        *cutoff
+    }
+
     fn pick_keys_to_evict<'a, K, V, I, S>(
         &self,
         data: &'a Data<K, V, I, S>,
@@ -255,27 +274,23 @@ impl LRUEviction {
         I: InsertionOrder<V>,
         S: std::hash::BuildHasher,
     {
-        // First we collect all the meta values into a single vector
-        let mut ctrs = data
-            .iter()
-            .map(|(_, v)| v.eviction_meta().value())
-            .collect::<Vec<_>>();
+        let (step, skip) = Self::step_skip(data, nkeys);
 
-        let ctrs_save = ctrs.clone(); // Save the counters before sorting them to avoid atomic loads for the second time
+        let mut meta = Vec::new();
+        let mut i = skip;
+        while i < data.len() {
+            meta.push(data.get_index_value(i).unwrap().eviction_meta().value());
+            i += step;
+        }
 
-        // We then find the value of the counter with the nkey'th value
-        let cutoff = if nkeys >= ctrs.len() {
-            u64::MAX
-        } else {
-            let (_, val, _) = ctrs.select_nth_unstable(nkeys);
-            *val
-        };
+        let cutoff = Self::cutoff(&mut meta, data.len(), nkeys, step);
 
-        // We return the iterator over the keys whose counter value is lower than that
-        ctrs_save
-            .into_iter()
-            .zip(data.iter())
-            .filter_map(move |(ctr, kv)| (ctr <= cutoff).then_some(kv))
+        // We might return more or fewer keys than requested due to approximation.  In testing,
+        // errors of up to 50% were observed.  But this sampling is very cheap, and if we don't
+        // evict enough, we'll just evict again soon.
+        data.iter()
+            .filter_map(move |(k, v)| (v.eviction_meta().value() <= cutoff).then_some((k, v)))
+            .take(nkeys)
     }
 
     fn pick_ranges_to_evict<'a, K, V, I, S>(
@@ -291,25 +306,24 @@ impl LRUEviction {
         I: InsertionOrder<V>,
         S: std::hash::BuildHasher,
     {
-        // First we collect all the meta values into a single vector
-        let mut ctrs = data
+        let (step, skip) = Self::step_skip(data, nkeys);
+
+        // This is less efficient than the HashMap version above because we have to iterate
+        // over the entire B-tree even though we only want a fractional sample of it.
+        let mut meta = data
             .iter()
+            .skip(skip)
+            .step_by(step)
             .map(|(_, v)| v.eviction_meta().value())
             .collect::<Vec<_>>();
 
-        let ctrs_save = ctrs.clone(); // Save the counters before sorting them to avoid atomic loads for the second time
+        let cutoff = Self::cutoff(&mut meta, data.len(), nkeys, step);
 
-        // We then find the value of the counter with the nkey'th value
-        let cutoff = if nkeys >= ctrs.len() {
-            u64::MAX
-        } else {
-            let (_, val, _) = ctrs.select_nth_unstable(nkeys);
-            *val
-        };
-
-        (ctrs_save.into_iter().zip(data.iter()), move |ctr| {
-            ctr <= cutoff
-        })
+        (
+            data.iter()
+                .map(move |(k, v)| (v.eviction_meta().value(), (k, v))),
+            move |ts| ts <= cutoff,
+        )
     }
 }
 
