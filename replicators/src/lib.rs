@@ -32,6 +32,8 @@ pub enum ReplicatorMessage {
 pub enum ControllerMessage {
     /// Drop the specified table and require a new partial snapshot
     ResnapshotTable { table: Relation },
+    /// Add new tables to the replicator filter
+    AddTables { tables: Vec<Relation> },
 }
 
 /// A handle to the metric we use to track the number of tables currently snapshotting. To use this

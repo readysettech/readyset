@@ -1136,6 +1136,9 @@ impl NoriaAdapter {
                         self.drop_table_for_resnapshot(table).await?;
                         return Err(ReadySetError::ResnapshotNeeded);
                     }
+                    Some(ControllerMessage::AddTables { tables: _ }) => {
+                        unimplemented!("Adding tables to replication is not yet supported");
+                    }
                     None => {}
                 }
             }

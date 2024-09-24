@@ -393,6 +393,13 @@ impl Leader {
                     .send(ControllerMessage::ResnapshotTable { table });
                 return_serialized!(());
             }
+            (&Method::POST, "/add_filter_tables") => {
+                let tables: Vec<Relation> = bincode::deserialize(&body)?;
+                let _ = self
+                    .controller_sender
+                    .send(ControllerMessage::AddTables { tables });
+                return_serialized!(());
+            }
             (&Method::POST, "/non_replicated_relations") => {
                 let ds = self.dataflow_state_handle.read().await;
                 return_serialized!(ds.non_replicated_relations())
