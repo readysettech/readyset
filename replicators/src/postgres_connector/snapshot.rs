@@ -49,7 +49,7 @@ pub struct PostgresReplicator<'a> {
     pub(crate) pool: deadpool_postgres::Pool,
     pub(crate) noria: &'a mut readyset_client::ReadySetHandle,
     /// Filters out tables we are not interested in
-    pub(crate) table_filter: TableFilter,
+    pub(crate) table_filter: &'a mut TableFilter,
 }
 
 #[derive(Debug)]
@@ -610,7 +610,7 @@ impl<'a> PostgresReplicator<'a> {
         client: &'a mut pgsql::Client,
         pool: deadpool_postgres::Pool,
         noria: &'a mut readyset_client::ReadySetHandle,
-        table_filter: TableFilter,
+        table_filter: &'a mut TableFilter,
     ) -> ReadySetResult<PostgresReplicator<'a>> {
         let transaction = Some(
             client
