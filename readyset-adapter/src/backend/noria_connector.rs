@@ -8,7 +8,7 @@ use std::time::Instant;
 use itertools::Itertools;
 use nom_sql::{
     self, ColumnConstraint, DeleteStatement, DialectDisplay, Expr, InsertStatement, Relation,
-    SqlIdentifier, SqlQuery, TruncateStatement, UnaryOperator, UpdateStatement,
+    SetStatement, SqlIdentifier, SqlQuery, TruncateStatement, UnaryOperator, UpdateStatement,
 };
 use readyset_client::consistency::Timestamp;
 use readyset_client::internal::LocalNodeIndex;
@@ -156,6 +156,9 @@ pub enum PrepareResult {
     Delete {
         params: Vec<ColumnSchema>,
         statement: DeleteStatement,
+    },
+    Set {
+        statement: SetStatement,
     },
 }
 

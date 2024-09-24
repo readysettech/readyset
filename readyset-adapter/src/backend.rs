@@ -149,6 +149,8 @@ enum PrepareMeta {
     Select(PrepareSelectMeta),
     /// A transaction boundary (Start, Commit, Rollback)
     Transaction { stmt: SqlQuery },
+    /// A set command
+    Set { stmt: SetStatement },
 }
 
 #[derive(Debug)]
@@ -1096,6 +1098,39 @@ where
         }
     }
 
+    /// Ensure we are allowed to handle the SET statement.
+    async fn prepare_set(
+        &mut self,
+        stmt: &SetStatement,
+        query: &str,
+        data: DB::PrepareData<'_>,
+        event: &mut QueryExecutionEvent,
+    ) -> Result<PrepareResultInner<DB>, DB::Error> {
+        // if `handle_set()` returns an error, we aren't supposed to process
+        // the SET anyway, so propagating the error is expected.
+        // Then we need to determine if we're actually going to proxy to the upstream.
+        Self::handle_set(
+            &mut self.noria,
+            self.upstream.is_some(),
+            &self.settings,
+            &mut self.state,
+            query,
+            stmt,
+            event,
+        )?;
+        let res = if self.state.proxy_state.should_proxy() && self.upstream.is_some() {
+            let upstream = self.upstream.as_mut().unwrap(); // just checked
+            let prep = upstream.prepare(query, data).await?;
+            PrepareResultInner::Upstream(prep)
+        } else {
+            PrepareResultInner::Noria(noria_connector::PrepareResult::Set {
+                statement: stmt.clone(),
+            })
+        };
+
+        Ok(res)
+    }
+
     /// Provides metadata required to prepare a select query
     fn plan_prepare_select(&mut self, stmt: nom_sql::SelectStatement) -> PrepareMeta {
         match self.rewrite_select_and_check_readyset(&stmt) {
@@ -1192,6 +1227,7 @@ where
                 | query @ SqlQuery::Commit(_)
                 | query @ SqlQuery::Rollback(_),
             ) => PrepareMeta::Transaction { stmt: query },
+            Ok(SqlQuery::Set(s)) => PrepareMeta::Set { stmt: s },
             Ok(pq) => {
                 warn!(
                     // FIXME(REA-2168): Use correct dialect.
@@ -1224,6 +1260,11 @@ where
         event: &mut QueryExecutionEvent,
     ) -> Result<PrepareResultInner<DB>, DB::Error> {
         match meta {
+            PrepareMeta::Select(select_meta) => {
+                self.mirror_prepare(select_meta, query, data, event).await
+            }
+            PrepareMeta::Write { stmt } => self.prepare_write(query, stmt, data, event).await,
+            PrepareMeta::Set { stmt } => self.prepare_set(stmt, query, data, event).await,
             PrepareMeta::Proxy
             | PrepareMeta::FailedToParse
             | PrepareMeta::FailedToRewrite(_)
@@ -1244,12 +1285,7 @@ where
 
                 res
             }
-            PrepareMeta::Write { stmt } => self.prepare_write(query, stmt, data, event).await,
-            PrepareMeta::Select(select_meta) => {
-                self.mirror_prepare(select_meta, query, data, event).await
-            }
             PrepareMeta::Proxy => unsupported!("No upstream, so query cannot be proxied"),
-
             PrepareMeta::Transaction { .. } => {
                 unsupported!("No upstream, transactions not supported")
             }
@@ -1285,6 +1321,13 @@ where
                 None,
                 false,
             ),
+            PrepareMeta::Set { stmt } => (
+                None,
+                Some(Arc::new(SqlQuery::Set(stmt))),
+                MigrationState::Successful,
+                None,
+                false,
+            ),
             PrepareMeta::Select(PrepareSelectMeta {
                 stmt,
                 rewritten,
@@ -1305,7 +1348,12 @@ where
                     always,
                 )
             }
-            _ => (None, None, MigrationState::Successful, None, false),
+            PrepareMeta::Proxy
+            | PrepareMeta::FailedToParse
+            | PrepareMeta::FailedToRewrite(..)
+            | PrepareMeta::Unimplemented(..) => {
+                (None, None, MigrationState::Successful, None, false)
+            }
         };
 
         if let Some(QueryLogMode::Verbose) = self.query_log_mode {
@@ -1370,6 +1418,8 @@ where
             Insert { statement, .. } => noria.execute_prepared_insert(statement, params).await,
             Update { statement, .. } => noria.execute_prepared_update(statement, params).await,
             Delete { statement, .. } => noria.execute_prepared_delete(statement, params).await,
+            // we do not (yet) handle SET commands internal to readyset.
+            Set { .. } => Ok(noria_connector::QueryResult::Empty),
         }
         .map(Into::into);
 
@@ -1749,6 +1799,10 @@ where
                 if let Some(statement) = self.state.prepared_statements.try_remove(id as usize) {
                     if let Some(ur) = statement.prep.into_upstream() {
                         dealloc_id = DeallocateId::Numeric(ur.statement_id);
+                    } else {
+                        // this is the case where a prepared statement was created for readyset
+                        // use, and not prepared/executed on the upstream.
+                        return Ok(());
                     }
                 }
             }
@@ -2672,9 +2726,13 @@ where
     /// If we have an upstream then we will pass valid set statements across to that upstream.
     /// If no upstream is present we will ignore the statement
     /// Disallowed set statements always produce an error
+    ///
+    /// Additionally, if the SetStatement changes the schema search path
+    /// (SetBevaior::SetSearchPath), this function has the side effect of updating
+    /// the `noria` instance.
     fn handle_set(
         noria: &mut NoriaConnector,
-        upstream: Option<&mut &mut DB>,
+        has_upstream: bool,
         settings: &BackendSettings,
         state: &mut BackendState<DB>,
         query: &str,
@@ -2688,7 +2746,7 @@ where
                         let e = ReadySetError::SetDisallowed {
                             statement: query.to_string(),
                         };
-                        if upstream.is_some() {
+                        if has_upstream {
                             event.set_noria_error(&e);
                         }
                         error!(
@@ -2724,10 +2782,10 @@ where
                         if enabled {
                             state.proxy_state.set_autocommit(enabled);
                         } else {
-                            let e = ReadySetError::DisableAutocommit {
+                            let e = ReadySetError::SetDisallowed {
                                 statement: query.to_string(),
                             };
-                            if upstream.is_some() {
+                            if has_upstream {
                                 event.set_noria_error(&e);
                             }
                             return Err(e.into());
@@ -2752,7 +2810,7 @@ where
     #[instrument(level = "trace", skip_all)]
     async fn query_adhoc_non_select<'a>(
         noria: &'a mut NoriaConnector,
-        mut upstream: Option<&'a mut DB>,
+        upstream: Option<&'a mut DB>,
         raw_query: &'a str,
         event: &mut QueryExecutionEvent,
         query: SqlQuery,
@@ -2762,7 +2820,7 @@ where
         match &query {
             SqlQuery::Set(s) => Self::handle_set(
                 noria,
-                upstream.as_mut(),
+                upstream.is_some(),
                 settings,
                 state,
                 raw_query,
