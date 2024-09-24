@@ -2553,6 +2553,10 @@ where
                 let mut table = stmt.table.clone();
                 self.noria.resnapshot_table(&mut table).await
             }
+            SqlQuery::AlterReadySet(AlterReadysetStatement::AddTables(stmt)) => {
+                let mut tables = stmt.tables.clone();
+                self.noria.add_filter_tables(&mut tables).await
+            }
             _ => Err(internal_err!("Provided query is not a ReadySet extension")),
         };
 
