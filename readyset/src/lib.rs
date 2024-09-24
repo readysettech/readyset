@@ -10,14 +10,13 @@ use std::io;
 use std::marker::Send;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs};
 use std::path::PathBuf;
-use std::str::FromStr;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 use anyhow::{anyhow, bail};
 use clap::builder::NonEmptyStringValueParser;
-use clap::{ArgAction, ArgGroup, Parser, ValueEnum};
+use clap::{ArgAction, ArgGroup, Parser};
 use crossbeam_skiplist::SkipSet;
 use database_utils::{DatabaseType, DatabaseURL, UpstreamConfig};
 use failpoint_macros::set_failpoint;
@@ -26,7 +25,7 @@ use futures_util::stream::{SelectAll, StreamExt};
 use health_reporter::{HealthReporter as AdapterHealthReporter, State as AdapterState};
 use nom_sql::{Relation, SqlIdentifier};
 use readyset_adapter::backend::noria_connector::{NoriaConnector, ReadBehavior};
-use readyset_adapter::backend::MigrationMode;
+use readyset_adapter::backend::{MigrationMode, UnsupportedSetMode};
 use readyset_adapter::http_router::NoriaAdapterHttpRouter;
 use readyset_adapter::metrics_handle::MetricsHandle;
 use readyset_adapter::migration_handler::MigrationHandler;
@@ -89,47 +88,6 @@ pub trait ConnectionHandler {
         stream: net::TcpStream,
         error_message: String,
     ) -> impl Future<Output = ()> + Send;
-}
-
-/// How to behave when receiving unsupported `SET` statements.
-///
-/// Corresponds to the variants of [`noria_client::backend::UnsupportedSetMode`] that are exposed to
-/// the user.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
-pub enum UnsupportedSetMode {
-    /// Return an error to the client (the default)
-    Error,
-    /// Proxy all subsequent statements to the upstream
-    Proxy,
-}
-
-impl Default for UnsupportedSetMode {
-    fn default() -> Self {
-        Self::Error
-    }
-}
-
-impl FromStr for UnsupportedSetMode {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "error" => Ok(Self::Error),
-            "proxy" => Ok(Self::Proxy),
-            _ => bail!(
-                "Invalid value for unsupoported_set_mode; expected one of \"error\" or \"proxy\""
-            ),
-        }
-    }
-}
-
-impl From<UnsupportedSetMode> for readyset_adapter::backend::UnsupportedSetMode {
-    fn from(mode: UnsupportedSetMode) -> Self {
-        match mode {
-            UnsupportedSetMode::Error => Self::Error,
-            UnsupportedSetMode::Proxy => Self::Proxy,
-        }
-    }
 }
 
 /// Parse and normalize the given string as an [`IpAddr`]
@@ -308,20 +266,13 @@ pub struct Options {
     #[command(flatten)]
     pub psql_options: psql::Options,
 
-    /// Allow executing, but ignore, unsupported `SET` statements.
-    ///
-    /// Takes precedence over any value passed to `--unsupported-set-mode`
-    #[arg(long, hide = true, env = "ALLOW_UNSUPPORTED_SET", hide = true)]
-    allow_unsupported_set: bool,
-
     /// Configure how ReadySet behaves when receiving unsupported SET statements.
     ///
     /// The possible values are:
     ///
     /// * "error" (default) - return an error to the client
     /// * "proxy" - proxy all subsequent statements
-    // NOTE: In order to keep `allow_unsupported_set` hidden, we're keeping these two flags separate
-    // and *not* marking them as conflicting with each other.
+    /// * "allow" - allow and ignore all unsupported set statements
     #[arg(
         long,
         env = "UNSUPPORTED_SET_MODE",
@@ -675,9 +626,9 @@ where
 
         info!(version = %VERSION_STR_ONELINE);
 
-        if options.allow_unsupported_set {
+        if matches!(options.unsupported_set_mode, UnsupportedSetMode::Allow) {
             warn!(
-                "Running with --allow-unsupported-set can cause certain queries to return \
+                "Running with --unsupported-set-mode allow can cause certain queries to return \
                  incorrect results"
             )
         }
@@ -1128,11 +1079,7 @@ where
                 .dialect(self.parse_dialect)
                 .query_log_sender(qlog_sender.clone())
                 .query_log_mode(Some(options.query_log_mode))
-                .unsupported_set_mode(if options.allow_unsupported_set {
-                    readyset_adapter::backend::UnsupportedSetMode::Allow
-                } else {
-                    options.unsupported_set_mode.into()
-                })
+                .unsupported_set_mode(options.unsupported_set_mode)
                 .migration_mode(migration_mode)
                 .query_max_failure_seconds(options.query_max_failure_seconds)
                 .telemetry_sender(telemetry_sender.clone())
