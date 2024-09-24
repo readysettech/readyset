@@ -4216,6 +4216,7 @@ dependencies = [
 name = "reader-map"
 version = "0.1.0"
 dependencies = [
+ "indexmap 2.5.0",
  "iter-enum",
  "itertools",
  "left-right",
