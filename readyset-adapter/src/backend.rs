@@ -76,6 +76,7 @@ use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use clap::ValueEnum;
 use crossbeam_skiplist::SkipSet;
 use futures::future::{self, OptionFuture};
 use lru::LruCache;
@@ -160,7 +161,7 @@ struct PrepareSelectMeta {
 }
 
 /// How to behave when receiving unsupported `SET` statements
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
 pub enum UnsupportedSetMode {
     /// Return an error to the client (the default)
     Error,
