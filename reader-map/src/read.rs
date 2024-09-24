@@ -149,6 +149,24 @@ where
         self.get_raw(key.borrow())
     }
 
+    /// Returns a guarded reference to the values corresponding to the key.
+    ///
+    /// For use in testing only to examine the uncranked read timestamp.
+    #[cfg(test)]
+    pub(crate) fn get_test<'rh, Q>(
+        &'rh self,
+        key: &'_ Q,
+    ) -> Result<Option<ReadGuard<'rh, Values<V, I>>>>
+    where
+        K: Borrow<Q>,
+        Q: Ord + Hash + ?Sized,
+    {
+        let MapReadRef { guard } = self.enter()?;
+        Ok(ReadGuard::try_map(guard, |inner| {
+            inner.data.get(key.borrow())
+        }))
+    }
+
     /// Returns a guarded reference to _one_ value corresponding to the key.
     ///
     /// This is mostly intended for use when you are working with no more than one value per key.
