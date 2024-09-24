@@ -241,7 +241,10 @@ where
     T: Debug,
 {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.values.fmt(fmt)
+        fmt.debug_struct("Values")
+            .field("values", &self.values)
+            .field("eviction_meta", &self.eviction_meta)
+            .finish_non_exhaustive()
     }
 }
 
