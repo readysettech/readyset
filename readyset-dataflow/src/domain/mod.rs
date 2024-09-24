@@ -844,10 +844,8 @@ impl Domain {
         dst: Destination,
         target: Target,
         cache_name: Relation,
-    ) -> Result<(), ReadySetError> {
+    ) -> ReadySetResult<()> {
         let miss_index = Index::new(IndexType::best_for_keys(&miss_keys), miss_columns.to_vec());
-        // the cloned is a bit sad; self.request_partial_replay doesn't use
-        // self.replay_paths_by_dst.
         let tags = self
             .replay_paths
             .tags_for_index(dst, target, &miss_index)
@@ -1161,7 +1159,7 @@ impl Domain {
     /// # Invariants
     ///
     /// * `tag` must be a valid replay tag
-    fn finished_partial_replay(&mut self, tag: Tag, num: usize) -> Result<(), ReadySetError> {
+    fn finished_partial_replay(&mut self, tag: Tag, num: usize) -> ReadySetResult<()> {
         #[allow(clippy::indexing_slicing)] // documented invariant
         match self.replay_paths[tag].trigger {
             TriggerEndpoint::End { .. } => {
@@ -1709,13 +1707,12 @@ impl Domain {
                         // we'll add indices a little further down, so empty keys
                         // here is fine.
                         let keys: Vec<Box<[usize]>> = vec![];
-                        let persistence_params = self.persistence_parameters.clone();
                         self.state.insert(
                             node,
                             MaterializedNodeState::Persistent(PersistentState::new(
                                 name,
                                 keys,
-                                &persistence_params,
+                                &self.persistence_parameters,
                                 PersistenceType::FullMaterialization,
                             )?),
                         );
@@ -1726,11 +1723,7 @@ impl Domain {
                 }
                 let state = self.state.get_mut(node).unwrap();
                 for index in strict_indices {
-                    debug!(
-                        key = ?index,
-                        %node,
-                        "told to prepare full state"
-                    );
+                    debug!(key = ?index, %node, "told to prepare full state");
                     state.add_index(index, None);
                 }
 
@@ -2633,7 +2626,7 @@ impl Domain {
     }
 
     #[allow(clippy::cognitive_complexity)]
-    fn handle(&mut self, m: Packet, executor: &mut dyn Executor) -> Result<(), ReadySetError> {
+    fn handle(&mut self, m: Packet, executor: &mut dyn Executor) -> ReadySetResult<()> {
         // TODO(eta): better error handling here.
         // In particular one dodgy packet can kill the whole domain, which is probably not what we
         // want.
@@ -2733,7 +2726,7 @@ impl Domain {
                 let reader_index_type = r.index_type().ok_or_else(|| {
                     internal_err!("reader replay requested for non-indexed reader")
                 })?;
-                drop(n); // NLL needs a little help. don't we all, sometimes?
+                drop(n);
 
                 // ensure that we haven't already requested a replay of this key
                 let already_requested = self
@@ -2744,7 +2737,7 @@ impl Domain {
                 if !keys.is_empty() {
                     self.find_tags_and_replay(
                         keys,
-                        &cols[..],
+                        &cols,
                         // Destination and target are the same since readers can't generate columns
                         Destination(node),
                         Target(node),
@@ -2868,9 +2861,9 @@ impl Domain {
                     // TODO: aggregate ranges to optimize range lookups too?
                     match state.lookup_range(cols, &RangeKey::from(range)) {
                         RangeLookupResult::Some(res) => range_records.push(res),
-                        #[allow(clippy::unreachable)]
-                        // Can't miss in persistent state
-                        RangeLookupResult::Missing(_) => unreachable!("Persistent state"),
+                        RangeLookupResult::Missing(_) => {
+                            unreachable!("Can't miss in persistent state")
+                        }
                     }
                     None
                 }
@@ -2952,7 +2945,7 @@ impl Domain {
         }
     }
 
-    fn seed_all(&mut self, packet: Packet, ex: &mut dyn Executor) -> Result<(), ReadySetError> {
+    fn seed_all(&mut self, packet: Packet, ex: &mut dyn Executor) -> ReadySetResult<()> {
         let (tag, keys, unishard, requesting_shard, requesting_replica, cache_name) =
             if let Packet::RequestPartialReplay {
                 tag,
@@ -4049,7 +4042,7 @@ impl Domain {
         node: LocalNodeIndex,
         cache_name: &Relation,
         ex: &mut dyn Executor,
-    ) -> Result<(), ReadySetError> {
+    ) -> ReadySetResult<()> {
         let mut was = mem::replace(&mut self.mode, DomainMode::Forwarding);
         let finished = if let DomainMode::Replaying {
             ref to,

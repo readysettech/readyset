@@ -1,9 +1,3 @@
-#![warn(
-    clippy::unimplemented,
-    clippy::unreachable,
-    clippy::panic,
-    clippy::todo
-)]
 #![deny(unused_extern_crates, macro_use_extern_crate)]
 #![allow(clippy::redundant_closure)]
 

@@ -327,7 +327,6 @@ impl GroupedOperation for Aggregator {
 // logic and create test cases more easily.
 
 #[cfg(test)]
-#[allow(clippy::unreachable)]
 mod tests {
     use super::*;
     use crate::{ops, LookupIndex};

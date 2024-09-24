@@ -126,8 +126,8 @@ impl Handle {
             }
             match key {
                 KeyComparison::Equal(k) if k.iter().any(|v| v.is_none()) => {
-                    // NULL can never compare equal to anything, so if the key contains nulls we can
-                    // short-circuit with an empty result set without actually doing a lookup
+                    // NULL can never compare equal to anything, so if the key contains nulls we
+                    // can short-circuit with an empty result set without actually doing a lookup
                     hits.push(Default::default())
                 }
                 KeyComparison::Equal(k) => match map.get(&k[0]) {
@@ -136,7 +136,10 @@ impl Handle {
                 },
                 KeyComparison::Range((start, end)) => {
                     if key.is_reversed_range() {
-                        warn!("Reader received lookup for range with start bound above end bound; returning empty result set");
+                        warn!(
+                            "Reader received lookup for range with start bound above end bound; \
+                             returning empty result set"
+                        );
                         hits.push(Default::default());
                         continue;
                     }
@@ -180,8 +183,8 @@ impl Handle {
             }
             match key {
                 KeyComparison::Equal(k) if k.iter().any(|v| v.is_none()) => {
-                    // NULL can never compare equal to anything, so if the key contains nulls we can
-                    // short-circuit with an empty result set without actually doing a lookup
+                    // NULL can never compare equal to anything, so if the key contains nulls we
+                    // can short-circuit with an empty result set without actually doing a lookup
                     hits.push(Default::default())
                 }
                 KeyComparison::Equal(k) => match map.get(k.as_slice()) {
@@ -190,7 +193,10 @@ impl Handle {
                 },
                 KeyComparison::Range((start, end)) => {
                     if key.is_reversed_range() {
-                        warn!("Reader received lookup for range with start bound above end bound; returning empty result set");
+                        warn!(
+                            "Reader received lookup for range with start bound above end bound; \
+                             returning empty result set"
+                        );
                         hits.push(Default::default());
                         continue;
                     }

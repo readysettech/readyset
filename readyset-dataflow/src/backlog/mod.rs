@@ -146,7 +146,6 @@ fn new_inner(
         }};
     }
 
-    #[allow(clippy::unreachable)] // Documented invariant.
     let (w, r) = match index.len() {
         0 => unreachable!(),
         1 => make!(Single),
@@ -405,7 +404,6 @@ impl WriteHandle {
     pub(crate) fn mark_filled(&mut self, key: KeyComparison) -> ReadySetResult<()> {
         invariant_eq!(key.len(), self.index.len());
 
-        #[allow(clippy::unreachable)] // Documented invariant.
         let range = match (self.index.index_type, &key) {
             (IndexType::HashMap, KeyComparison::Equal(equal)) => {
                 return self.mut_with_key(equal.as_vec()).mark_filled();
@@ -462,9 +460,7 @@ impl WriteHandle {
 
 impl SizeOf for WriteHandle {
     fn size_of(&self) -> u64 {
-        use std::mem::size_of;
-
-        size_of::<Self>() as u64
+        std::mem::size_of::<Self>() as u64
     }
 
     fn deep_size_of(&self) -> u64 {
@@ -548,7 +544,7 @@ impl SingleReadHandle {
         }
     }
 
-    /// Lookup a list of keys under the same reader guard
+    /// Look up a list of keys under the same reader guard
     pub fn get_multi<'a>(
         &self,
         keys: &'a [KeyComparison],
@@ -559,8 +555,8 @@ impl SingleReadHandle {
         }
     }
 
-    /// Lookup a list of keys under the same reader guard. If missed, will include a notifier that
-    /// can tell us when a new hole was filled in the map.
+    /// Look up a list of keys under the same reader guard. If missed, will include a notifier
+    /// that can tell us when a new hole was filled in the map.
     pub fn get_multi_with_notifier<'a>(
         &self,
         keys: &'a [KeyComparison],

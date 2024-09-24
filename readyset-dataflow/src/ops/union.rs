@@ -496,7 +496,6 @@ impl Ingredient for Union {
         })
     }
 
-    #[allow(clippy::unreachable, clippy::unimplemented)]
     fn on_input_raw(
         &mut self,
         from: LocalNodeIndex,

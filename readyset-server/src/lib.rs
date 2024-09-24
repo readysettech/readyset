@@ -1,15 +1,3 @@
-/*
- * Left commented while readyset-server error handling refactor is still in progress
-#![warn(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    clippy::panic,
-    clippy::unimplemented,
-    clippy::unreachable
-)]
-*/
-
 //! # Note to engineers
 //!
 //! For documentation on how the ReadySet server code is structured, please see the module-level

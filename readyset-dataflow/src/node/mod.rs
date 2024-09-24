@@ -575,7 +575,6 @@ impl Node {
     /// Invariants:
     ///
     /// * Must call on_connected prior to using this helper function.
-    #[allow(clippy::unreachable)]
     pub fn domain(&self) -> DomainIndex {
         match self.domain {
             Some(domain) => domain,
@@ -595,7 +594,6 @@ impl Node {
     /// Invariants:
     ///
     /// * Must call on_connected prior to using this helper function.
-    #[allow(clippy::unreachable)]
     pub fn local_addr(&self) -> LocalNodeIndex {
         match self.index {
             Some(idx) if idx.has_local() => *idx,
@@ -615,7 +613,6 @@ impl Node {
     /// Invariants:
     ///
     /// * Must call on_connected prior to using this helper function.
-    #[allow(clippy::unreachable)]
     pub fn global_addr(&self) -> NodeIndex {
         match self.index {
             Some(ref index) => index.as_global(),

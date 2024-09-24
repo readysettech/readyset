@@ -115,7 +115,6 @@ pub(crate) struct ProcessEnv<'domain> {
 }
 
 impl Node {
-    #[allow(clippy::unreachable)]
     pub(crate) fn process(
         &mut self,
         m: &mut Option<Packet>,

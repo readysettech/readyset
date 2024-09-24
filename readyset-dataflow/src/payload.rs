@@ -128,17 +128,17 @@ pub enum TriggerEndpoint {
 pub enum PrepareStateKind {
     /// Setup state for a partially materialized internal node
     Partial {
-        /// List of strict partial incides to create within the new state, alongsidee the list of
+        /// List of strict partial indices to create within the new state, alongside the list of
         /// tags for replay paths that will query those indices
         strict_indices: Vec<(Index, Vec<Tag>)>,
-        /// Set of weak partial incides to create within the new state
+        /// Set of weak partial indices to create within the new state
         weak_indices: HashSet<Index>,
     },
     /// Setup state for a fully materialized internal node
     Full {
-        /// Set of strict partial incides to create within the new state
+        /// Set of strict partial indices to create within the new state
         strict_indices: HashSet<Index>,
-        /// Set of weak partial incides to create within the new state
+        /// Set of weak partial indices to create within the new state
         weak_indices: HashSet<Index>,
     },
     /// Setup state for a partially materialized
@@ -537,7 +537,6 @@ pub enum Packet {
 // refactoring Packet to be an enum-of-enums, and then moving the accessor functions themselves to
 // the smaller enums (or having them return Options). This is scoped for a larger refactor - see
 // https://readysettech.atlassian.net/browse/ENG-455.
-#[allow(clippy::unreachable)]
 impl Packet {
     pub(crate) fn src(&self) -> LocalNodeIndex {
         match *self {

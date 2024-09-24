@@ -535,7 +535,11 @@ impl BlockingRead {
 
         // Check if we reached a warning timeout
         if self.first.elapsed() > WAIT_BEFORE_WARNING && !self.warned {
-            warn!(reader=%target.name.display_unquoted(), keys = ?still_waiting, "Read stuck waiting for keys");
+            warn!(
+                reader = %target.name.display_unquoted(),
+                keys = ?still_waiting,
+                "Read stuck waiting for keys"
+            );
             self.warned = true;
         }
 

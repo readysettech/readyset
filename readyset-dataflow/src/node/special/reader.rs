@@ -115,7 +115,6 @@ impl Reader {
         self.placeholder_map.as_ref()
     }
 
-    #[allow(clippy::unreachable)]
     #[failpoint("reader-handle-packet")]
     pub(in crate::node) fn process(
         &mut self,

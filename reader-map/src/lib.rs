@@ -8,7 +8,7 @@
 //!
 //! The trade-off exposed by this type is one of eventual consistency: writes are not visible to
 //! readers except following explicit synchronization. Specifically, readers only see the
-//! operations that preceded the last call to `WriteHandle::refresh` by a writer. This lets
+//! operations that preceded the last call to `WriteHandle::publish` by a writer. This lets
 //! writers decide how stale they are willing to let reads get. They can refresh the map after
 //! every write to emulate a regular concurrent `HashMap`, or they can refresh only occasionally to
 //! reduce the synchronization overhead at the cost of stale reads.
@@ -138,7 +138,7 @@
 //!                     thread::yield_now();
 //!                 } else {
 //!                     // the reader will either see all the reviews,
-//!                     // or none of them, since refresh() is atomic.
+//!                     // or none of them, since refresh is atomic.
 //!                     assert_eq!(l, 4);
 //!                     break;
 //!                 }

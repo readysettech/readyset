@@ -224,7 +224,6 @@ pub struct GroupConcatState {
 }
 
 #[cfg(test)]
-#[allow(clippy::unreachable)]
 mod tests {
     use super::*;
     use crate::{ops, LookupIndex};

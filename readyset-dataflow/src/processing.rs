@@ -551,10 +551,7 @@ impl<'a> IngredientLookupResult<'a> {
         match self {
             IngredientLookupResult::Records(rs) => rs,
             IngredientLookupResult::Miss => {
-                #[allow(clippy::panic)] // documented
-                {
-                    panic!("unwrap() called on IngredientLookupResult::Miss")
-                }
+                panic!("unwrap() called on IngredientLookupResult::Miss")
             }
         }
     }

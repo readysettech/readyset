@@ -262,7 +262,6 @@ impl Sharder {
         Ok(())
     }
 
-    #[allow(clippy::unreachable)]
     #[allow(clippy::too_many_arguments)]
     pub fn process_eviction(
         &mut self,
