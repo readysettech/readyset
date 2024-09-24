@@ -38,7 +38,7 @@ pub(crate) fn new(
         cols,
         index,
         None,
-        EvictionKind::Random,
+        EvictionKind::default(),
         reader_processing,
         node_index,
     )
@@ -113,7 +113,7 @@ fn new_inner(
     };
 
     let eviction_strategy = match eviction_kind {
-        EvictionKind::Random => EvictionStrategy::new_random(),
+        EvictionKind::Random => EvictionStrategy::new_lru(),
         EvictionKind::LRU => EvictionStrategy::new_lru(),
     };
 
@@ -805,7 +805,7 @@ mod tests {
             1,
             Index::hash_map(vec![0]),
             |_: &mut dyn Iterator<Item = KeyComparison>, _| true,
-            EvictionKind::Random,
+            EvictionKind::default(),
             ReaderProcessing::default(),
             Default::default(),
         );
@@ -831,7 +831,7 @@ mod tests {
                 1,
                 Index::hash_map(vec![0]),
                 |_: &mut dyn Iterator<Item = KeyComparison>, _| true,
-                EvictionKind::Random,
+                EvictionKind::default(),
                 ReaderProcessing::default(),
                 Default::default(),
             );
@@ -851,7 +851,7 @@ mod tests {
                 1,
                 Index::btree_map(vec![0]),
                 |_: &mut dyn Iterator<Item = KeyComparison>, _| true,
-                EvictionKind::Random,
+                EvictionKind::default(),
                 ReaderProcessing::default(),
                 Default::default(),
             );
@@ -882,7 +882,7 @@ mod tests {
                 1,
                 Index::btree_map(vec![0]),
                 |_: &mut dyn Iterator<Item = KeyComparison>, _| true,
-                EvictionKind::Random,
+                EvictionKind::default(),
                 ReaderProcessing::default(),
                 Default::default(),
             );
@@ -904,7 +904,7 @@ mod tests {
                 1,
                 Index::btree_map(vec![0]),
                 |_: &mut dyn Iterator<Item = KeyComparison>, _| true,
-                EvictionKind::Random,
+                EvictionKind::default(),
                 ReaderProcessing::default(),
                 Default::default(),
             );

@@ -11,18 +11,13 @@
 //! reader exceeds its memory quota. Once called the strategy will return an
 //! iterator over the list of keys it proposes to evict.
 //!
-//! Currently two strategies are implemented:
-//!
-//! Random: simply sample an rng to evict the required number of keys
-//! LRU: evicts the least recently used keys
+//! The eviction strategy is approximate LRU.
 
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{Arc, LazyLock};
 use std::time::Instant;
 
-use itertools::Either;
-use rand::seq::SliceRandom;
 use rand::Rng;
 
 use crate::inner::Data;
@@ -34,8 +29,6 @@ static CLOCK_START: LazyLock<Instant> = LazyLock::new(Instant::now);
 /// Handles the eviction of keys from the reader map
 #[derive(Clone, Debug)]
 pub enum EvictionStrategy {
-    /// Evict keys at random
-    Random(RandomEviction),
     /// Keeps track of how recently an entry was read, and evicts the ones that weren't in use
     /// recently
     LeastRecentlyUsed(LRUEviction),
@@ -43,7 +36,7 @@ pub enum EvictionStrategy {
 
 impl Default for EvictionStrategy {
     fn default() -> Self {
-        EvictionStrategy::Random(RandomEviction)
+        EvictionStrategy::LeastRecentlyUsed(LRUEviction)
     }
 }
 
@@ -51,9 +44,6 @@ impl Default for EvictionStrategy {
 #[derive(Clone, Debug)]
 #[repr(transparent)]
 pub struct EvictionMeta(Arc<AtomicU64>);
-
-#[derive(Clone, Debug)]
-pub struct RandomEviction;
 
 /// Performs Least Recently Used eviction.
 ///
@@ -145,15 +135,9 @@ impl EvictionStrategy {
         EvictionStrategy::LeastRecentlyUsed(LRUEviction)
     }
 
-    /// Create a random eviction strategy
-    pub fn new_random() -> EvictionStrategy {
-        EvictionStrategy::Random(RandomEviction)
-    }
-
     /// Create new `EvictionMeta` for a newly added key
     pub(crate) fn new_meta(&self) -> EvictionMeta {
         match self {
-            EvictionStrategy::Random(_) => Default::default(),
             EvictionStrategy::LeastRecentlyUsed(lru) => lru.new_meta(),
         }
     }
@@ -161,7 +145,6 @@ impl EvictionStrategy {
     /// Update the metadata following a read event
     pub(crate) fn on_read(&self, meta: &EvictionMeta) {
         match self {
-            EvictionStrategy::Random(_) => {}
             EvictionStrategy::LeastRecentlyUsed(lru) => lru.on_read(meta),
         }
     }
@@ -179,10 +162,7 @@ impl EvictionStrategy {
         S: std::hash::BuildHasher,
     {
         match self {
-            EvictionStrategy::Random(rand) => Either::Left(rand.pick_keys_to_evict(data, nkeys)),
-            EvictionStrategy::LeastRecentlyUsed(lru) => {
-                Either::Right(lru.pick_keys_to_evict(data, nkeys))
-            }
+            EvictionStrategy::LeastRecentlyUsed(lru) => lru.pick_keys_to_evict(data, nkeys),
         }
     }
 
@@ -203,31 +183,13 @@ impl EvictionStrategy {
         I: InsertionOrder<V>,
         S: std::hash::BuildHasher,
     {
-        let mut lru_f = None;
-        let mut rand_f = None;
-        let iter = match self {
-            EvictionStrategy::LeastRecentlyUsed(lru) => {
-                let (iter, group_by) = lru.pick_ranges_to_evict(data, nkeys);
-                lru_f = Some(group_by);
-                Either::Left(iter)
-            }
-            EvictionStrategy::Random(rand) => {
-                let (iter, group_by) = rand.pick_ranges_to_evict(data, nkeys);
-                rand_f = Some(group_by);
-                Either::Right(iter)
-            }
+        let (iter, group_by) = match self {
+            EvictionStrategy::LeastRecentlyUsed(lru) => lru.pick_ranges_to_evict(data, nkeys),
         };
 
         EvictRangeIter {
             iter,
-            group_by: move |val| {
-                // This freak show is because we don't have an Either equivalent for Fn
-                if let Some(f) = lru_f.as_mut() {
-                    f(val)
-                } else {
-                    (rand_f.as_mut().unwrap())(val)
-                }
-            },
+            group_by,
             next: None,
         }
     }
@@ -324,59 +286,5 @@ impl LRUEviction {
                 .map(move |(k, v)| (v.eviction_meta().value(), (k, v))),
             move |ts| ts <= cutoff,
         )
-    }
-}
-
-impl RandomEviction {
-    /// Selects exactly nkeys keys to evict.
-    fn pick_keys_to_evict<'a, K, V, I, S>(
-        &self,
-        data: &'a Data<K, V, I, S>,
-        nkeys: usize,
-    ) -> impl Iterator<Item = (&'a K, &'a Values<V, I>)>
-    where
-        K: Ord + Clone,
-        I: InsertionOrder<V>,
-        S: std::hash::BuildHasher,
-    {
-        // Allocate a random shuffling of indices corresponding to keys in data.
-        let mut rng = rand::thread_rng();
-        let mut indices = (0..nkeys).collect::<Vec<_>>();
-        indices.shuffle(&mut rng);
-        // Return an iterator yielding elements with idx < nkeys
-        indices
-            .into_iter()
-            .zip(data.iter())
-            .filter_map(move |(idx, entry)| (idx < nkeys).then_some(entry))
-    }
-
-    /// Selects exactly nkeys BTreeMap keys (not ranges) to evict.
-    /// nkeys *must* be no more than data.len()
-    fn pick_ranges_to_evict<'a, K, V, I, S>(
-        &self,
-        data: &'a Data<K, V, I, S>,
-        nkeys: usize,
-    ) -> (
-        impl Iterator<Item = (u64, (&'a K, &'a Values<V, I>))>,
-        impl FnMut(u64) -> bool,
-    )
-    where
-        K: Ord + Clone,
-        I: InsertionOrder<V>,
-        S: std::hash::BuildHasher,
-    {
-        // Picking a random range to evict is kinda useless really, there is very little chance it
-        // will be able to form proper ranges, unless ratio is high, but oh well, don't use random
-        // for ranges I suppose.
-
-        // Allocate a random shuffling of indices corresponding to keys in data.
-        let mut rng = rand::thread_rng();
-        let mut indices = (0..nkeys as u64).collect::<Vec<_>>();
-        indices.shuffle(&mut rng);
-        // Return an iterator over all elements and a cutoff function selecting all indices less
-        // than nkeys
-        (indices.into_iter().zip(data.iter()), move |v| {
-            v < nkeys as u64
-        })
     }
 }
