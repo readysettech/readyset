@@ -982,8 +982,39 @@ impl NoriaConnector {
             table.schema = schema.first().cloned();
         }
         // check if table exists in ReadySet
-        let _ = self.inner.get_mut()?.get_noria_table(table).await?;
+        if (self.inner.get_mut()?.get_noria_table(table).await).is_err() {
+            return Err(ReadySetError::TableNotFound {
+                name: table.name.to_string(),
+                schema: table.schema.clone().map(Into::into),
+            });
+        }
+
         self.inner.get_mut()?.noria.resnapshot_table(table).await?;
+        Ok(QueryResult::Empty)
+    }
+
+    pub(crate) async fn add_filter_tables(
+        &mut self,
+        tables: &mut [Relation],
+    ) -> ReadySetResult<QueryResult<'static>> {
+        for table in tables.iter_mut() {
+            if table.schema.is_none() {
+                let schema = self.schema_search_path().to_vec();
+                table.schema = schema.first().cloned();
+            }
+            // check if table exists in ReadySet
+            if (self.inner.get_mut()?.get_noria_table(table).await).is_ok() {
+                return Err(ReadySetError::TableAlreadyExists {
+                    name: table.name.to_string(),
+                    schema: table.schema.clone().map(Into::into),
+                });
+            }
+        }
+        self.inner
+            .get_mut()?
+            .noria
+            .add_filter_tables(tables.iter().collect::<Vec<_>>())
+            .await?;
         Ok(QueryResult::Empty)
     }
 }

@@ -264,6 +264,15 @@ pub enum ReadySetError {
         position: String,
     },
 
+    /// A table has been found
+    #[error("Table '{}{}' already exists", schema.as_ref().map(|s| format!("{}.", s)).unwrap_or_default(),
+    name)]
+    TableAlreadyExists {
+        /// The name of the table that already exists.
+        name: String,
+        /// The schema of the table that already exists.
+        schema: Option<String>,
+    },
     /// A table couldn't be found.
     ///
     /// FIXME(eta): this is currently slightly overloaded in meaning.
