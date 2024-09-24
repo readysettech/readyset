@@ -54,11 +54,11 @@ pub enum TableKind {
     View,
 }
 
-pub(crate) struct MySqlReplicator {
+pub(crate) struct MySqlReplicator<'a> {
     /// This is the underlying (regular) MySQL connection
     pub(crate) pool: mysql::Pool,
     /// Filters out the desired tables to snapshot and replicate
-    pub(crate) table_filter: TableFilter,
+    pub(crate) table_filter: &'a mut TableFilter,
 }
 
 /// Get the list of tables defined in the database
@@ -137,7 +137,7 @@ fn tx_opts() -> TxOpts {
     tx_opts
 }
 
-impl MySqlReplicator {
+impl<'a> MySqlReplicator<'a> {
     /// Load all the `CREATE TABLE` statements for the tables in the MySQL database. Returns the the
     /// transaction that holds the DDL locks for the tables and the Vector of tables that requires
     /// snapshot.

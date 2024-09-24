@@ -319,7 +319,7 @@ impl NoriaAdapter {
         )
         .await?;
 
-        let table_filter = TableFilter::try_new(
+        let mut table_filter = TableFilter::try_new(
             nom_sql::Dialect::MySQL,
             config.replication_tables.take(),
             config.replication_tables_ignore.take(),
@@ -361,7 +361,7 @@ impl NoriaAdapter {
 
                 let replicator = MySqlReplicator {
                     pool,
-                    table_filter: table_filter.clone(),
+                    table_filter: &mut table_filter,
                 };
 
                 let snapshot_start = Instant::now();
@@ -552,7 +552,7 @@ impl NoriaAdapter {
             .transpose()?;
         let snapshot_report_interval_secs = config.snapshot_report_interval_secs;
 
-        let table_filter = TableFilter::try_new(
+        let mut table_filter = TableFilter::try_new(
             nom_sql::Dialect::PostgreSQL,
             config.replication_tables.take(),
             config.replication_tables_ignore.take(),
@@ -665,8 +665,7 @@ impl NoriaAdapter {
                 .unwrap_or_else(|_| "unknown".to_owned());
 
             let mut replicator =
-                PostgresReplicator::new(&mut client, pool, &mut noria, table_filter.clone())
-                    .await?;
+                PostgresReplicator::new(&mut client, pool, &mut noria, &mut table_filter).await?;
 
             let snapshot_result = replicator
                 .snapshot_to_noria(
