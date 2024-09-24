@@ -54,6 +54,11 @@ impl<'a> PrepareResponse<'a> {
                     row_schema: vec![],
                 })
             }
+            SinglePrepareResult::Noria(Set { .. }) => Ok(ps::PrepareResponse {
+                prepared_statement_id,
+                param_schema: vec![],
+                row_schema: vec![],
+            }),
             SinglePrepareResult::Upstream(UpstreamPrepare {
                 meta: StatementMeta { params, schema },
                 ..

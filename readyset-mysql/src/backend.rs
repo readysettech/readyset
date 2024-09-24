@@ -575,6 +575,10 @@ where
                 schema_cache.remove(&statement_id);
                 info.reply(statement_id, &params, &[]).await
             }
+            Ok((statement_id, SinglePrepareResult::Noria(Set { .. }))) => {
+                schema_cache.remove(&statement_id);
+                info.reply(statement_id, &[], &[]).await
+            }
             Ok((
                 statement_id,
                 SinglePrepareResult::Upstream(UpstreamPrepare {
