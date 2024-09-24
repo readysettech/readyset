@@ -140,7 +140,7 @@ pub fn resnapshot_slot_name(repl_slot_name: &String) -> String {
     format!("{}_{}", RESNAPSHOT_SLOT, repl_slot_name)
 }
 /// An adapter that converts database events into ReadySet API calls
-pub struct NoriaAdapter {
+pub struct NoriaAdapter<'a> {
     /// The ReadySet API handle
     noria: ReadySetHandle,
     /// The binlog reader
@@ -159,15 +159,15 @@ pub struct NoriaAdapter {
     /// come before the offset for that table
     replication_offsets: ReplicationOffsets,
     /// Filters out changes we are not interested in
-    table_filter: TableFilter,
+    table_filter: &'a mut TableFilter,
     /// If the connector can partially resnapshot a database
     supports_resnapshot: bool,
 }
 
-impl NoriaAdapter {
+impl<'a> NoriaAdapter<'a> {
     pub async fn start(
         noria: ReadySetHandle,
-        config: UpstreamConfig,
+        mut config: UpstreamConfig,
         notification_channel: &UnboundedSender<ReplicatorMessage>,
         controller_channel: &mut UnboundedReceiver<ControllerMessage>,
         telemetry_sender: TelemetrySender,
@@ -189,6 +189,14 @@ impl NoriaAdapter {
                 ))
             })?;
 
+        // TODO(marce): We should block access to config.replication_tables and
+        // config.replication_tables_ignore after this point.
+        let mut table_filter = TableFilter::try_new(
+            url.dialect(),
+            config.replication_tables.take(),
+            config.replication_tables_ignore.take(),
+            None,
+        )?;
         loop {
             let Err(err) = match url.clone() {
                 DatabaseURL::MySQL(options) => {
@@ -204,6 +212,7 @@ impl NoriaAdapter {
                         &telemetry_sender,
                         enable_statement_logging,
                         full_snapshot,
+                        &mut table_filter,
                     )
                     .await
                 }
@@ -248,6 +257,7 @@ impl NoriaAdapter {
                         pool,
                         repl_slot_name,
                         enable_statement_logging,
+                        &mut table_filter,
                     )
                     .await
                 }
@@ -290,13 +300,14 @@ impl NoriaAdapter {
     async fn start_inner_mysql(
         mut mysql_options: mysql::Opts,
         mut noria: ReadySetHandle,
-        mut config: UpstreamConfig,
+        config: UpstreamConfig,
         notification_channel: &UnboundedSender<ReplicatorMessage>,
         controller_channel: &mut UnboundedReceiver<ControllerMessage>,
         resnapshot: bool,
         telemetry_sender: &TelemetrySender,
         enable_statement_logging: bool,
         full_snapshot: bool,
+        table_filter: &'a mut TableFilter,
     ) -> ReadySetResult<std::convert::Infallible> {
         use replication_offset::mysql::MySqlPosition;
 
@@ -319,13 +330,6 @@ impl NoriaAdapter {
             Duration::from_millis(250),
         )
         .await?;
-
-        let mut table_filter = TableFilter::try_new(
-            nom_sql::Dialect::MySQL,
-            config.replication_tables.take(),
-            config.replication_tables_ignore.take(),
-            mysql_options.db_name(),
-        )?;
 
         let mut db_schemas = DatabaseSchemas::new();
 
@@ -360,10 +364,7 @@ impl NoriaAdapter {
                     .flatten()
                     .unwrap_or_else(|| "unknown".to_owned());
 
-                let replicator = MySqlReplicator {
-                    pool,
-                    table_filter: &mut table_filter,
-                };
+                let replicator = MySqlReplicator { pool, table_filter };
 
                 let snapshot_start = Instant::now();
                 counter!(
@@ -517,7 +518,7 @@ impl NoriaAdapter {
     async fn start_inner_postgres(
         pgsql_opts: pgsql::Config,
         mut noria: ReadySetHandle,
-        mut config: UpstreamConfig,
+        config: UpstreamConfig,
         notification_channel: &UnboundedSender<ReplicatorMessage>,
         controller_channel: &mut UnboundedReceiver<ControllerMessage>,
         resnapshot: bool,
@@ -527,6 +528,7 @@ impl NoriaAdapter {
         pool: deadpool_postgres::Pool,
         repl_slot_name: String,
         enable_statement_logging: bool,
+        table_filter: &'a mut TableFilter,
     ) -> ReadySetResult<std::convert::Infallible> {
         set_failpoint_return_err!(failpoints::START_INNER_POSTGRES);
 
@@ -553,13 +555,6 @@ impl NoriaAdapter {
             .map(TryInto::try_into)
             .transpose()?;
         let snapshot_report_interval_secs = config.snapshot_report_interval_secs;
-
-        let mut table_filter = TableFilter::try_new(
-            nom_sql::Dialect::PostgreSQL,
-            config.replication_tables.take(),
-            config.replication_tables_ignore.take(),
-            None,
-        )?;
 
         let (mut client, connection) = pgsql_opts.connect(tls_connector.clone()).await?;
         let _connection_handle = tokio::spawn(connection);
@@ -668,7 +663,7 @@ impl NoriaAdapter {
                 .unwrap_or_else(|_| "unknown".to_owned());
 
             let mut replicator =
-                PostgresReplicator::new(&mut client, pool, &mut noria, &mut table_filter).await?;
+                PostgresReplicator::new(&mut client, pool, &mut noria, table_filter).await?;
 
             let snapshot_result = replicator
                 .snapshot_to_noria(
@@ -1136,8 +1131,13 @@ impl NoriaAdapter {
                         self.drop_table_for_resnapshot(table).await?;
                         return Err(ReadySetError::ResnapshotNeeded);
                     }
-                    Some(ControllerMessage::AddTables { tables: _ }) => {
-                        unimplemented!("Adding tables to replication is not yet supported");
+                    Some(ControllerMessage::AddTables { tables }) => {
+                        for table in tables {
+                            if !self.table_filter.should_be_processed(table.schema.as_deref().unwrap(), &table.name) {
+                                self.table_filter.allow_replication(table.schema.as_deref().unwrap(), &table.name);
+                            }
+                        }
+                        return Err(ReadySetError::ResnapshotNeeded);
                     }
                     None => {}
                 }

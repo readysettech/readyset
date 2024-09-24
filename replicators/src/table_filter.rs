@@ -73,7 +73,13 @@ impl ReplicateTableSpec {
     pub(crate) fn remove<S: Into<SqlIdentifier>>(&mut self, t: S) {
         match self {
             Self::AllTablesExcept(tables) => tables.insert(t.into()),
-            Self::Tables(tables) => tables.remove(&t.into()),
+            Self::Tables(tables) => {
+                let ret = tables.remove(&t.into());
+                if tables.is_empty() {
+                    *self = Self::empty();
+                }
+                ret
+            }
         };
     }
 
@@ -85,6 +91,13 @@ impl ReplicateTableSpec {
         match self {
             Self::AllTablesExcept(tables) => !tables.contains(t),
             Self::Tables(tables) => tables.contains(t),
+        }
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        match self {
+            Self::AllTablesExcept(tables) => tables.is_empty(),
+            Self::Tables(tables) => tables.is_empty(),
         }
     }
 }
@@ -240,6 +253,25 @@ impl TableFilter {
             .entry(schema.into())
             .or_insert_with(ReplicateTableSpec::empty);
         tables.insert(table);
+    }
+
+    /// Start replicating the provided table
+    pub(crate) fn allow_replication(&mut self, schema: &str, table: &str) {
+        tracing::info!(%schema, %table, "allowing replication");
+        if let Some(tables) = self.replication_denied.get_mut(schema) {
+            tables.remove(table);
+            if self.replication_denied.get(schema).unwrap().is_empty() {
+                self.replication_denied.remove(schema);
+            }
+        }
+
+        if !self.explicitly_replicated.is_empty() {
+            let tables = self
+                .explicitly_replicated
+                .entry(schema.into())
+                .or_insert_with(ReplicateTableSpec::empty);
+            tables.insert(table);
+        }
     }
 
     /// Check if a given table should be processed
