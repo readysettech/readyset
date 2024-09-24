@@ -79,15 +79,16 @@ impl Sharding {
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, clap::ValueEnum, Default)]
 pub enum EvictionKind {
-    #[default]
+    // unused, kept for backward compatibility, synonym for lru
     Random,
+    #[default]
     LRU,
 }
 
 impl Display for EvictionKind {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Random => write!(f, "random"),
+            Self::Random => write!(f, "lru (was random)"),
             Self::LRU => write!(f, "lru"),
         }
     }
