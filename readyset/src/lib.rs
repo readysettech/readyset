@@ -489,6 +489,11 @@ async fn load_schema_search_path<U>(
 where
     U: UpstreamDatabase,
 {
+    if no_upstream_connections {
+        let default_ssp = upstream_config.default_schema_search_path();
+        return Arc::new(RwLock::new(Ok(default_ssp)));
+    }
+
     let try_load = move |upstream_config: UpstreamConfig| async move {
         let upstream =
             connect_upstream::<U>(upstream_config.clone(), no_upstream_connections).await?;
