@@ -11,7 +11,7 @@ use derive_more::From;
 use error::DatabaseTypeParseError;
 use mysql_async::OptsBuilder;
 use native_tls::TlsConnectorBuilder;
-use nom_sql::Dialect;
+use nom_sql::{Dialect, SqlIdentifier};
 use readyset_errors::{ReadySetError, ReadySetResult};
 use readyset_util::redacted::RedactedString;
 use serde::{Deserialize, Serialize};
@@ -204,6 +204,20 @@ impl UpstreamConfig {
     pub fn max_parallel_snapshot_tables(&self) -> usize {
         self.max_parallel_snapshot_tables
             .unwrap_or_else(|| default_max_parallel_snapshot_tables().expect("always Some"))
+    }
+
+    pub fn default_schema_search_path(&self) -> Vec<SqlIdentifier> {
+        if self.upstream_db_url.is_some() {
+            if let Ok(ref db_url) = self
+                .upstream_db_url
+                .as_ref()
+                .unwrap()
+                .parse::<DatabaseURL>()
+            {
+                return db_url.default_schema_search_path();
+            }
+        }
+        vec![]
     }
 }
 
@@ -622,5 +636,25 @@ impl DatabaseURL {
             Self::PostgreSQL(_) => Dialect::PostgreSQL,
             Self::MySQL(_) => Dialect::MySQL,
         }
+    }
+
+    pub fn default_schema_search_path(&self) -> Vec<SqlIdentifier> {
+        let mut paths = vec![];
+
+        match self {
+            Self::MySQL(_) => {
+                if let Some(db) = self.db_name() {
+                    paths.push(SqlIdentifier::from(db));
+                }
+            }
+            Self::PostgreSQL(_) => {
+                if let Some(u) = self.user() {
+                    paths.push(SqlIdentifier::from(u));
+                }
+                paths.push(SqlIdentifier::from("public"));
+            }
+        }
+
+        paths
     }
 }
