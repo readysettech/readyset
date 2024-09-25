@@ -323,7 +323,15 @@ lazy_static! {
                 PostgresParameterValue::literal("ISO"),
                 PostgresParameterValue::identifier("iso"),
             ])),
-            ("extra_float_digits", AllowedParameterValue::literal(1)),
+            // extra_float_digits accepts a range of -15..3, and as of
+            // pg 12 any value greater than zero is treated the same.
+            // https://www.postgresql.org/docs/current/datatype-numeric.html#DATATYPE-FLOAT,
+            // "shortest-precise format".
+            ("extra_float_digits", AllowedParameterValue::one_of([
+                PostgresParameterValue::literal(1),
+                PostgresParameterValue::literal(2),
+                PostgresParameterValue::literal(3),
+            ])),
             ("TimeZone",  AllowedParameterValue::literal("Etc/UTC")),
             ("bytea_output",  AllowedParameterValue::literal("hex")),
             ("transform_null_equals", AllowedParameterValue::literal(false)),
