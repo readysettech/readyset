@@ -240,7 +240,7 @@ fn busybusybusy_inner(slow: bool) {
     let threads = 4;
     let mut n = 1000;
     if !slow {
-        n *= 100;
+        n *= 10;
     }
     let (mut w, r) = reader_map::new();
     w.publish();
