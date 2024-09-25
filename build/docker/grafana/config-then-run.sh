@@ -19,7 +19,7 @@ RE='(.+):\/\/([^:@]*)(:([^@]*))?@([^:\/]+)(:[0-9]+)?(\/(.+))?'
 # Only parse if UPSTREAM_DB_URL is not empty.
 # Otherwise, these parameters must be passed down from the environment.
 # TODO: Remove UPSTREAM_DB_URL completely when new docker images are in ECR
-if [[! -z "${UPSTREAM_DB_URL}" ]; then
+if [[ -n "${UPSTREAM_DB_URL}" ]]; then
     [[ $UPSTREAM_DB_URL =~ $RE ]]
     RS_DB_TYPE=${BASH_REMATCH[1]}
     RS_USER=${BASH_REMATCH[2]}
