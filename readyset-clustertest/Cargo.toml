@@ -40,6 +40,10 @@ readyset-clustertest-macros = { path = "./macros" }
 readyset-tracing = { path = "../readyset-tracing" }
 rust_decimal = { workspace = true }
 
+[build-dependencies]
+anyhow = { workspace = true }
+jobserver = { workspace = true }
+
 [[bench]]
 name = "clustering"
 harness = false
