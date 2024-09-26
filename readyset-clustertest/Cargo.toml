@@ -42,6 +42,7 @@ rust_decimal = { workspace = true }
 
 [build-dependencies]
 anyhow = { workspace = true }
+jobserver = { workspace = true }
 
 [[bench]]
 name = "clustering"
