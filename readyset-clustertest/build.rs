@@ -1,12 +1,13 @@
+use anyhow::{anyhow, Result};
 use std::env;
 use std::path::Path;
 
-fn main() {
+fn main() -> Result<()> {
     if env::var("CLIPPY_ARGS").is_ok() {
         // running via cargo clippy; don't bother compiling test dependencies
-        return;
+        return Ok(());
     }
-    env::set_current_dir(Path::new("..")).expect("failed to change path");
+    env::set_current_dir(Path::new(".."))?;
     let status = std::process::Command::new("cargo")
         .args([
             "--locked",
@@ -21,10 +22,9 @@ fn main() {
             "--features",
             "failure_injection",
         ])
-        .status()
-        .expect("failed to execute cargo");
-    assert!(
-        status.success(),
-        "cargo exited with nonzero status: {status}"
-    );
+        .status()?;
+    if !status.success() {
+        return Err(anyhow!("cargo exited with nonzero status: {status}"));
+    }
+    Ok(())
 }
