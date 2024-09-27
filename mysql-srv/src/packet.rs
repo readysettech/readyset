@@ -317,8 +317,6 @@ pub fn fullpacket(i: &[u8]) -> nom::IResult<&[u8], (u8, &[u8])> {
     let (i, _) = nom::bytes::complete::tag(&[0xff, 0xff, 0xff])(i)?;
     let (i, seq) = nom::bytes::complete::take(1u8)(i)?;
     let (i, bytes) = nom::bytes::complete::take(U24_MAX)(i)?;
-    // nom::bytes::complete::take ensures that seq has one element
-    #[allow(clippy::indexing_slicing)]
     Ok((i, (seq[0], bytes)))
 }
 
@@ -326,8 +324,6 @@ pub fn onepacket(i: &[u8]) -> nom::IResult<&[u8], (u8, &[u8])> {
     let (i, length) = nom::number::complete::le_u24(i)?;
     let (i, seq) = nom::bytes::complete::take(1u8)(i)?;
     let (i, bytes) = nom::bytes::complete::take(length)(i)?;
-    // nom::bytes::complete::take ensures that seq has one element
-    #[allow(clippy::indexing_slicing)]
     Ok((i, (seq[0], bytes)))
 }
 

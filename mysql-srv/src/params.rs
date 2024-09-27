@@ -68,8 +68,6 @@ impl<'a> Iterator for Params<'a> {
             self.nullmap = Some(nullmap);
             self.input = rest;
 
-            // first if condition guarantees that rest has at least one element
-            #[allow(clippy::indexing_slicing, clippy::unwrap_used)]
             if !rest.is_empty() && rest[0] != 0x00 {
                 let rest = rest.get(1..);
                 let (typmap, rest) = match rest {
@@ -125,8 +123,6 @@ impl<'a> Iterator for Params<'a> {
             if byte >= nullmap.len() {
                 return None;
             }
-            // bound checked before indexing into nullmap
-            #[allow(clippy::indexing_slicing)]
             if (nullmap[byte] & 1u8 << (self.col % 8)) != 0 {
                 self.col += 1;
                 return Some(Ok(ParamValue {

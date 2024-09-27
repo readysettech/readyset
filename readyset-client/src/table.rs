@@ -133,7 +133,6 @@ impl TableOperation {
     /// * the `key`s must have at least one element.
     #[inline]
     pub fn shards(&self, key_col: usize, num_shards: usize) -> impl Iterator<Item = usize> {
-        #[allow(clippy::indexing_slicing)]
         let key = match self {
             TableOperation::Insert(row) => Some(&row[key_col]),
             TableOperation::DeleteByKey { key } => Some(&key[0]),
@@ -541,9 +540,6 @@ impl Table {
                 };
                 for r in ops.drain(..) {
                     for shard in r.shards(key_col, nshards) {
-                        // The `shard` index belongs to the range `0..nshards`,
-                        // so it's not out of bounds.
-                        #[allow(clippy::indexing_slicing)]
                         shard_writes[shard].push(r.clone())
                     }
                 }
@@ -568,22 +564,12 @@ impl Table {
                         let _guard = span.as_ref().map(Span::enter);
                         trace!("submit request shard");
 
-                        // `s` is within the range of `0..nshards`, so it is not out of bounds
-                        // for the `self.shards` vector.
-                        #[allow(clippy::indexing_slicing)]
                         wait_for.push(self.shards[s].call(request));
                     } else {
                         // poll_ready reserves a sender slot which we have to release
                         // we do that by dropping the old handle and replacing it with a clone
                         // https://github.com/tokio-rs/tokio/issues/898
-                        // `s` is within the range of `0..nshards`, so it is not out of bounds
-                        // for the `self.shards` vector.
-                        // This is also inside the block so the annotation applies to both terms
-                        // in the assignment.
-                        #[allow(clippy::indexing_slicing)]
-                        {
-                            self.shards[s] = self.shards[s].clone()
-                        }
+                        self.shards[s] = self.shards[s].clone()
                     }
                 }
 

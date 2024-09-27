@@ -1,7 +1,6 @@
 #![deny(
     clippy::unwrap_used,
     clippy::expect_used,
-    clippy::indexing_slicing,
     clippy::panic,
     clippy::unimplemented,
     clippy::unreachable
@@ -416,7 +415,6 @@ impl Leader {
                 return_serialized!(&nodes
                     .into_iter()
                     .filter_map(|ni| {
-                        #[allow(clippy::indexing_slicing)]
                         let n = &ds.ingredients[ni];
                         if n.is_internal() {
                             Some((ni, n.name(), n.description(true)))
@@ -895,7 +893,6 @@ impl Leader {
 
             // 3. Try to recover all now-non-running domains
             info!(?domains_to_recover, "Recovering domains");
-            #[allow(clippy::indexing_slicing)] // Internal data structure invariant
             let domain_nodes: HashMap<_, HashSet<_>> = domains_to_recover
                 .into_iter()
                 .map(|d| (d, ds.domain_nodes[&d].values().copied().collect()))

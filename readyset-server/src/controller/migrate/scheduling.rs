@@ -117,7 +117,6 @@ impl<'state> Scheduler<'state> {
     ///
     /// * `nodes` cannot be empty
     /// * All the nodes in `nodes` must exist in `self.dataflow_state.ingredients`
-    #[allow(clippy::indexing_slicing)] // documented invariant
     #[instrument(level = "trace", skip(self, nodes))]
     pub(crate) fn schedule_domain(
         &mut self,

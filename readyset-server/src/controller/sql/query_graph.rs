@@ -1038,7 +1038,6 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                     // tables can appear in any order in the join predicate, but
                     // we cannot just rely on that order, since it may lead us to
                     // flip LEFT JOINs by accident (yes, this happened)
-                    #[allow(clippy::indexing_slicing)] // len() == 2
                     if tables_mentioned[1] != rhs_relation {
                         // tables are in the wrong order in join predicate, swap
                         tables_mentioned.swap(0, 1);

@@ -799,7 +799,6 @@ where
             None => {
                 // this is a long-shot.
                 // if our ancestor can be queried *through*, then we just use that state instead
-                #[allow(clippy::indexing_slicing)] // Node must exist to have gotten here.
                 let parent = nodes[parent_index].borrow();
 
                 if let Some(n) = parent.as_internal() {

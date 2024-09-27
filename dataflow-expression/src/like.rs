@@ -28,7 +28,6 @@ impl regex::Replacer for LikeTokenReplacer {
         // According to the docs from `regex::Captures`, the first group always
         // exists and it corresponds to the entire match. So, it's allowed to
         // get the 0th position through index slicing.
-        #[allow(clippy::indexing_slicing)]
         match &caps[0] {
             "%" => dst.push_str(".*"),
             "_" => dst.push('.'),

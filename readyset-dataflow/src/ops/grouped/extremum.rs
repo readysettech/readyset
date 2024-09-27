@@ -83,7 +83,6 @@ impl GroupedOperation for ExtremumOperator {
     }
 
     fn to_diff(&self, r: &[DfValue], pos: bool) -> ReadySetResult<Self::Diff> {
-        #[allow(clippy::indexing_slicing)] // Invariant documented.
         let v = &r[self.over];
         if let DfValue::None = *v {
             Ok(DiffType::None)

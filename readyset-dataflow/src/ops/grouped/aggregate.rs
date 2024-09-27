@@ -156,7 +156,6 @@ impl Aggregator {
     fn group_hash(&self, rec: &[DfValue]) -> GroupHash {
         let mut hasher = DefaultHasher::new();
         for &col in self.group.iter() {
-            #[allow(clippy::indexing_slicing)]
             // When the Aggregator is constructed, it is constructed with a group by that is
             // derived from existing columns. If we lack a column in the record, then something has
             // gone horrible wrong and we should panic.
@@ -195,10 +194,6 @@ impl GroupedOperation for Aggregator {
     fn to_diff(&self, r: &[DfValue], pos: bool) -> ReadySetResult<Self::Diff> {
         let group_hash = self.group_hash(r);
         Ok(NumericalDiff {
-            #[allow(clippy::indexing_slicing)]
-            // When the Aggregator is constructed, it is constructed with an over that is
-            // derived from an existing column, or it is defaulted to 0. We should always have at
-            // least one column in this node, so this index is safe.
             value: r[self.over].clone(),
             positive: pos,
             group_hash,

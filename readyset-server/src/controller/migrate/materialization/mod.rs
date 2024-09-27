@@ -302,7 +302,6 @@ impl Materializations {
 
         // Find indices we need to add.
         for &ni in new {
-            #[allow(clippy::indexing_slicing)] // The graph must contain ni
             let n = &graph[ni];
 
             let mut indices: HashMap<NodeIndex, IndexObligation> = if let Some(r) = n.as_reader() {
@@ -411,7 +410,6 @@ impl Materializations {
             // we want to find the closest materialization that allows lookups (i.e., counting
             // query-through operators).
             let mut mi = ni;
-            #[allow(clippy::indexing_slicing)] // graph must contain mi
             let mut m = &graph[mi];
             loop {
                 if self.have.contains_key(&mi) {
@@ -485,7 +483,6 @@ impl Materializations {
         // the approach we are going to take is to require walking the graph bottom-up:
         let mut ordered = Vec::with_capacity(graph.node_count());
         let mut topo = petgraph::visit::Topo::new(graph as &Graph);
-        #[allow(clippy::indexing_slicing)] // node comes from graph
         while let Some(node) = topo.next(graph as &Graph) {
             if graph[node].is_source() {
                 continue;
@@ -519,12 +516,10 @@ impl Materializations {
             let mut add = HashMap::new();
 
             // bases can't be partial
-            #[allow(clippy::indexing_slicing)] // ordered is built from graph
             if graph[ni].is_base() {
                 able = false;
             }
 
-            #[allow(clippy::indexing_slicing)] // ordered is built from graph
             if graph[ni].is_internal() && graph[ni].requires_full_materialization() {
                 debug!(node = %ni.index(), "full because required");
                 able = false;
@@ -545,7 +540,6 @@ impl Materializations {
                 .neighbors_directed(ni, petgraph::EdgeDirection::Outgoing)
                 .collect();
 
-            #[allow(clippy::indexing_slicing)] // child comes from graph
             while let Some(child) = stack.pop() {
                 // allow views to force full (XXX)
                 if graph[child].name().name.starts_with("FULL_") {
@@ -647,7 +641,6 @@ impl Materializations {
                 }
             }
 
-            #[allow(clippy::indexing_slicing)] // graph must contain ni
             if able {
                 // we can do partial if we add all those indices!
                 self.partial.insert(ni);
@@ -726,7 +719,6 @@ impl Materializations {
             // frontier. however, mir may have named an identity child instead of the node with a
             // materialization, so let's make sure the label gets correctly applied: specifically,
             // if a .prune node doesn't have state, we "move" that .prune to its ancestors.
-            #[allow(clippy::indexing_slicing)] // graph must contain ni
             if graph[ni].purge && !(self.have.contains_key(&ni) || graph[ni].is_reader()) {
                 let mut it = graph
                     .neighbors_directed(ni, petgraph::EdgeDirection::Incoming)
@@ -857,7 +849,6 @@ impl Materializations {
                                 Some(child_index) => {
                                     if self.partial.contains(node) {
                                         // self.partial should be a subset of self.have
-                                        #[allow(clippy::indexing_slicing)]
                                         'outer: for parent_index in &self.have[node] {
                                             // is this node partial over some of the child's partial
                                             // columns, but not others? if so, we run into really

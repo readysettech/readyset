@@ -222,7 +222,6 @@ impl DfState {
         self.ingredients
             .neighbors_directed(self.source, petgraph::EdgeDirection::Outgoing)
             .filter_map(|n| {
-                #[allow(clippy::indexing_slicing)] // just came from self.ingredients
                 let base = &self.ingredients[n];
 
                 if base.is_dropped() {
@@ -249,9 +248,7 @@ impl DfState {
         self.ingredients
             .externals(petgraph::EdgeDirection::Outgoing)
             .filter_map(|n| {
-                #[allow(clippy::indexing_slicing)] // just came from self.ingredients
                 let name = self.ingredients[n].name().clone();
-                #[allow(clippy::indexing_slicing)] // just came from self.ingredients
                 self.ingredients[n].as_reader().map(|r| {
                     // we want to give the the node address that is being materialized not that of
                     // the reader node itself.
@@ -268,9 +265,7 @@ impl DfState {
         self.ingredients
             .externals(petgraph::EdgeDirection::Outgoing)
             .filter_map(|n| {
-                #[allow(clippy::indexing_slicing)] // just came from self.ingredients
                 if self.ingredients[n].is_reader() {
-                    #[allow(clippy::indexing_slicing)] // just came from self.ingredients
                     let name = self.ingredients[n].name().clone();
 
                     // Alias should always resolve to an id and id should always resolve to an
@@ -329,13 +324,11 @@ impl DfState {
         // that the reader must be relatively close, a BFS search is the way to go.
         let mut bfs = Bfs::new(&self.ingredients, node);
         while let Some(child) = bfs.next(&self.ingredients) {
-            #[allow(clippy::indexing_slicing)] // just came from self.ingredients
             if self.ingredients[child].is_reader_for(node) && self.ingredients[child].name() == name
             {
                 // Check for any filter requirements we can satisfy when
                 // traversing the data flow graph, `filter`.
                 if let Some(ViewFilter::Workers(w)) = filter {
-                    #[allow(clippy::indexing_slicing)] // just came from self.ingredients
                     let domain = self.ingredients[child].domain();
                     for worker in w {
                         if self
@@ -373,23 +366,19 @@ impl DfState {
             return Ok(None);
         };
 
-        #[allow(clippy::indexing_slicing)] // `find_reader_for` returns valid indices
         let domain_index = self.ingredients[reader_node].domain();
-        #[allow(clippy::indexing_slicing)] // `find_reader_for` returns valid indices
         let reader = self.ingredients[reader_node].as_reader().ok_or_else(|| {
             ReadySetError::InvalidNodeType {
                 node_index: self.ingredients[reader_node].local_addr().id(),
                 expected_type: NodeType::Reader,
             }
         })?;
-        #[allow(clippy::indexing_slicing)] // `find_readers_for` returns valid indices
         let returned_cols = reader
             .reader_processing()
             .post_processing
             .returned_cols
             .clone()
             .unwrap_or_else(|| (0..self.ingredients[reader_node].columns().len()).collect());
-        #[allow(clippy::indexing_slicing)] // just came from self
         let columns = self.ingredients[reader_node].columns();
         let columns = returned_cols
             .iter()
@@ -843,7 +832,6 @@ impl DfState {
     {
         stream::iter(requests)
             .map(move |(domain, request)| {
-                #[allow(clippy::indexing_slicing)] // came from self.domains
                 self.domains[&domain]
                     .send_to_all::<R>(request, &self.workers)
                     .map(move |r| -> ReadySetResult<_> { Ok((domain, r?)) })
@@ -913,7 +901,6 @@ impl DfState {
             |mut acc, (domain, domain_offs)| async move {
                 for replica in domain_offs.into_cells() {
                     for (lni, offset) in replica {
-                        #[allow(clippy::indexing_slicing)] // came from self.domains
                         let ni = self.domain_nodes[&domain].get(lni).ok_or_else(|| {
                             internal_err!(
                                 "Domain {} returned nonexistent local node {}",
@@ -926,7 +913,6 @@ impl DfState {
                             continue;
                         }
 
-                        #[allow(clippy::indexing_slicing)] // internal invariant
                         let table_name = self.ingredients[*ni].name();
                         match offset {
                             BaseTableState::Initialized(offset) => {
@@ -968,7 +954,6 @@ impl DfState {
     /// Collects a unique list of domains that might contain base tables. Errors out if a domain
     /// retrieved does not appears in self.domains.
     async fn domains_with_base_tables(&self) -> ReadySetResult<HashSet<DomainIndex>> {
-        #[allow(clippy::indexing_slicing)] // tables returns valid node indices
         let domains = self
             .tables()
             .values()
@@ -1092,11 +1077,9 @@ impl DfState {
         table_indices
             .iter()
             .map(|(di, lni)| -> ReadySetResult<Relation> {
-                #[allow(clippy::indexing_slicing)] // just came from self.domains
                 let li = *self.domain_nodes[di].get(*lni).ok_or_else(|| {
                     internal_err!("Domain {} returned nonexistent node {}", di, lni)
                 })?;
-                #[allow(clippy::indexing_slicing)] // internal invariant
                 let node = &self.ingredients[li];
                 debug_assert!(node.is_base());
                 Ok(node.name().clone())
@@ -1135,7 +1118,6 @@ impl DfState {
 
             stream::iter(requests)
                 .map(move |(domain, request)| {
-                    #[allow(clippy::indexing_slicing)] // came from self.domains
                     self.domains[&domain]
                         .send_to_healthy::<Vec<(NodeIndex, NodeSize)>>(request, &self.workers)
                         .map(move |r| -> ReadySetResult<_> { Ok((domain, r?)) })
@@ -1294,7 +1276,6 @@ impl DfState {
                 // Update the domain placement restrictions on nodes in the placed
                 // domain if necessary.
                 for n in &nodes {
-                    #[allow(clippy::indexing_slicing)] // checked above
                     let node = &self.ingredients[*n];
 
                     if node.is_base() && w.domain_scheduling_config.volume_id.is_some() {

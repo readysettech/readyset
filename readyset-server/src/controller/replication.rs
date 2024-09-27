@@ -65,7 +65,6 @@ impl ReplicationStrategy {
     /// # Invariants
     ///
     /// * Each of the nodes in `domain_nodes` must be present in `ingredients`
-    #[allow(clippy::indexing_slicing)] // Invariant
     pub fn replicate_domain(&self, ingredients: &Graph, domain_nodes: &[NodeIndex]) -> usize {
         let has_reader = || domain_nodes.iter().any(|n| ingredients[*n].is_reader());
         let has_base = || domain_nodes.iter().any(|n| ingredients[*n].is_base());

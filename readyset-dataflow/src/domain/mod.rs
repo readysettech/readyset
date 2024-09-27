@@ -836,7 +836,6 @@ impl Domain {
     ///
     /// * `miss_columns` must not be empty
     /// * `dst` and `target` must both be nodes in this domain
-    #[allow(clippy::indexing_slicing)] // Documented invariant
     fn find_tags_and_replay(
         &mut self,
         miss_keys: Vec<KeyComparison>,
@@ -868,7 +867,6 @@ impl Domain {
         for &tag in &tags {
             // send a message to the source domain(s) responsible
             // for the chosen tag so they'll start replay.
-            #[allow(clippy::indexing_slicing)] // Tag must exist
             if self.replay_paths[tag].trigger.is_local() {
                 // *in theory* we could just call self.seed_all, and everything would be good.
                 // however, then we start recursing, which could get us into sad situations where
@@ -1104,7 +1102,6 @@ impl Domain {
             );
 
             if options.len() == 1 {
-                #[allow(clippy::indexing_slicing)] // we just checked len() is 1
                 if options[0]
                     .send(Packet::RequestPartialReplay {
                         tag,
@@ -1129,7 +1126,6 @@ impl Domain {
                     }
                 }
                 for (shard, keys) in shards {
-                    #[allow(clippy::indexing_slicing)] // we know len(options) is num_shards
                     if options[shard]
                         .send(Packet::RequestPartialReplay {
                             tag,
@@ -1160,7 +1156,6 @@ impl Domain {
     ///
     /// * `tag` must be a valid replay tag
     fn finished_partial_replay(&mut self, tag: Tag, num: usize) -> ReadySetResult<()> {
-        #[allow(clippy::indexing_slicing)] // documented invariant
         match self.replay_paths[tag].trigger {
             TriggerEndpoint::End { .. } => {
                 // A backfill request we made to another domain was just satisfied!
@@ -1230,7 +1225,6 @@ impl Domain {
         }
 
         let (mut m, evictions) = {
-            #[allow(clippy::indexing_slicing)] // we checked the node exists already
             let mut n = self.nodes[me].borrow_mut();
             self.process_times.start(me);
             self.process_ptimes.start(me);
@@ -1367,7 +1361,6 @@ impl Domain {
         }
 
         // NOTE: we can't directly iterate over .children due to self.dispatch in the loop
-        #[allow(clippy::indexing_slicing)] // we checked the node exists above
         let nchildren = self.nodes[me].borrow().children().len();
         for i in 0..nchildren {
             // We checked it's Some above, it's only an Option so we can take()
@@ -1379,11 +1372,9 @@ impl Domain {
                 m.as_ref().map(|m| m.clone_data()).unwrap()
             };
 
-            #[allow(clippy::indexing_slicing)] // see NOTE above
             let childi = self.nodes[me].borrow().children()[i];
 
             // we got the node from the children of the other node
-            #[allow(clippy::indexing_slicing)]
             let child_is_merger = self.nodes[childi].borrow().is_shard_merger();
 
             if child_is_merger {
@@ -1427,18 +1418,13 @@ impl Domain {
             return Ok(());
         };
 
-        #[allow(clippy::indexing_slicing)] // Already checked the node exists
         let nchildren = self.nodes[me].borrow().children().len();
         for i in 0..nchildren {
             let mut p = message.clone_data();
 
-            #[allow(clippy::indexing_slicing)]
-            // Already checked the node exists, and we're iterating through nchildren so we know i
-            // is in-bounds
             let childi = self.nodes[me].borrow().children()[i];
 
             // we know the child exists since we got it from the node
-            #[allow(clippy::indexing_slicing)]
             let child_is_merger = self.nodes[childi].borrow().is_shard_merger();
 
             // The packet `m` must have a link by this point as `link_mut` calls
@@ -1792,7 +1778,6 @@ impl Domain {
                     })
                     .collect::<ReadySetResult<Vec<_>>>()?;
 
-                #[allow(clippy::indexing_slicing)] // checked node exists above
                 let mut n = self.nodes[node].borrow_mut();
                 let name = n.name().clone();
                 #[allow(clippy::unwrap_used)] // checked it was a reader above
@@ -1807,7 +1792,6 @@ impl Domain {
                             if misses.is_empty() {
                                 return true;
                             }
-                            #[allow(clippy::indexing_slicing)] // just checked len is 1
                             txs[0].send(Misses { misses, cache_name }).is_ok()
                         } else {
                             let mut per_shard = HashMap::new();
@@ -1824,7 +1808,6 @@ impl Domain {
                                 return true;
                             }
                             per_shard.into_iter().all(|(shard, keys)| {
-                                #[allow(clippy::indexing_slicing)]
                                 // we know txs.len() is equal to num_shards
                                 txs[shard]
                                     .send(Misses {
@@ -2075,8 +2058,6 @@ impl Domain {
             "current state cloned for replay"
         );
 
-        #[allow(clippy::indexing_slicing)]
-        // we checked the replay path exists above, and replay paths cannot be empty
         let link = Link::new(from, self.replay_paths[tag].path[0].node);
 
         // we're been given an entire state snapshot, but we need to digest it
@@ -2794,7 +2775,6 @@ impl Domain {
                 #[allow(clippy::unwrap_used)]
                 // we know it's Some because we check at the head of the while
                 let tp = self.timed_purges.pop_front().unwrap();
-                #[allow(clippy::indexing_slicing)]
                 // nodes in tp.view must reference nodes in self
                 let node = self.nodes[tp.view].borrow_mut();
                 trace!(
@@ -2970,8 +2950,6 @@ impl Domain {
 
         let keys: HashSet<KeyComparison> = keys.into_iter().collect();
 
-        #[allow(clippy::indexing_slicing)]
-        // tag came from an internal data structure that guarantees it's present
         let (source, index, path) = match &self.replay_paths[tag] {
             ReplayPath {
                 source: Some(source),
@@ -3099,7 +3077,6 @@ impl Domain {
             .get(tag)
             .ok_or_else(|| internal_err!("Replay path not found with tag {tag:?}"))?;
 
-        #[allow(clippy::indexing_slicing)] // All nodes in replay paths definitely exist
         if self.nodes[path.last_segment().node].borrow().is_dropped() {
             return Ok(());
         }
@@ -3111,7 +3088,6 @@ impl Domain {
         // this loop is just here so we have a way of giving up the borrow of self.replay_paths
         #[allow(clippy::never_loop)]
         'outer: loop {
-            #[allow(clippy::indexing_slicing)] // Would have errored above if it didn't exist
             let rp = &self.replay_paths[tag];
             let &ReplayPath {
                 ref path,
@@ -3173,7 +3149,6 @@ impl Domain {
                 .find(|s| s.is_target)
                 .map(|s| s.node)
                 .or(*source);
-            #[allow(clippy::indexing_slicing)] // dst came from a replay path
             let dst_is_reader = self.nodes[dst]
                 .borrow()
                 .as_reader()
@@ -3244,7 +3219,6 @@ impl Domain {
                         data.retain(|r| {
                             for_keys.iter().any(|k| {
                                 k.contains(partial_keys.columns.iter().map(|c| {
-                                    #[allow(clippy::indexing_slicing)]
                                     // record came from processing, which means it
                                     // must have the right number of columns
                                     &r[*c]
@@ -3297,7 +3271,6 @@ impl Domain {
                     }
                 }
 
-                #[allow(clippy::indexing_slicing)]
                 // we know replay paths only contain real nodes
                 let mut n = self.nodes[segment.node].borrow_mut();
 
@@ -3582,7 +3555,6 @@ impl Domain {
                         let r = r.rec();
                         !missed_on.iter().any(|miss| {
                             miss.contains(partial_index.columns.iter().map(|&c| {
-                                #[allow(clippy::indexing_slicing)]
                                 // record came from processing, which means it
                                 // must have the right number of columns
                                 &r[c]
@@ -3637,7 +3609,6 @@ impl Domain {
                     if i == path.len() - 1 {
                         // only evict if we own the state where the replay originated
                         if let Some(src) = source {
-                            #[allow(clippy::indexing_slicing)]
                             // src came from a replay path
                             let n = self.nodes[*src].borrow();
                             if n.beyond_mat_frontier() {
@@ -3675,7 +3646,6 @@ impl Domain {
 
                             while let Some(pn) = tmp.pop() {
                                 if self.state.contains_key(pn) {
-                                    #[allow(clippy::indexing_slicing)]
                                     // we know the lookup was into a real node
                                     if self.nodes[pn].borrow().beyond_mat_frontier() {
                                         // we should evict from this!
@@ -3687,7 +3657,6 @@ impl Domain {
                                 }
 
                                 // this parent needs to be resolved further
-                                #[allow(clippy::indexing_slicing)]
                                 // we know the lookup was into a real node
                                 let pn = self.nodes[pn].borrow();
                                 if !pn.can_query_through() {
@@ -3716,12 +3685,7 @@ impl Domain {
                             // this is a node that we were doing lookups into as part of
                             // the replay -- make sure we evict any state we may have added
                             // there.
-                            evict_tags.retain(|tag| {
-                                #[allow(clippy::indexing_slicing)]
-                                // tag came from an internal data structure that guarantees
-                                // it exists
-                                tag_match(&self.replay_paths[*tag], pn)
-                            });
+                            evict_tags.retain(|tag| tag_match(&self.replay_paths[*tag], pn));
 
                             let state = self.state.get_mut(pn).unwrap();
                             assert!(state.is_partial());
@@ -3754,7 +3718,6 @@ impl Domain {
                                 );
                             }
 
-                            #[allow(clippy::indexing_slicing)] // came from self.nodes
                             for tag in &evict_tags {
                                 // NOTE: this assumes that the key order is the same
                                 trace!(
@@ -3790,18 +3753,13 @@ impl Domain {
                 // We would have bailed earlier (break 'outer, above) if m wasn't Some
                 if i + 1 < path.len() {
                     // update link for next iteration
-                    #[allow(clippy::indexing_slicing)] // nodes in replay paths must exist
                     if self.nodes[path[i + 1].node].borrow().is_shard_merger() {
                         // we need to preserve the egress src for shard mergers
                         // (which includes shard identifier)
                     } else {
                         m.as_mut().unwrap().link_mut().src = segment.node;
                     }
-                    m.as_mut().unwrap().link_mut().dst = {
-                        #[allow(clippy::indexing_slicing)]
-                        // we already checked i + 1 isn't out-of-bounds
-                        path[i + 1].node
-                    };
+                    m.as_mut().unwrap().link_mut().dst = path[i + 1].node;
                 }
 
                 // feed forward the updated backfill_keys
@@ -3920,8 +3878,6 @@ impl Domain {
                     "partial replay finished to node with waiting backfills"
                 );
 
-                #[allow(clippy::indexing_slicing)]
-                // tag came from an internal data structure that guarantees it exists
                 #[allow(clippy::unwrap_used)]
                 // We already know this is a partial replay path
                 let key_index = self.replay_paths[tag].target_index.clone().unwrap();
@@ -4111,8 +4067,6 @@ impl Domain {
                 internal!();
             }
 
-            #[allow(clippy::indexing_slicing)]
-            // tag came from an internal data structure that guarantees it exists
             if self.replay_paths[tag].notify_done {
                 // NOTE: this will only be Some for non-partial replays
                 debug!(node = node.id(), "noting replay completed");
@@ -4174,12 +4128,10 @@ impl Domain {
             )?;
             match path.trigger {
                 TriggerEndpoint::Local(_) => {
-                    #[allow(clippy::indexing_slicing)] // tag came from replay_paths
                     let replay_path = &replay_paths[tag];
 
                     let dest = replay_path.last_segment();
 
-                    #[allow(clippy::indexing_slicing)] // nodes in replay paths must exist
                     if nodes[dest.node].borrow().is_reader() {
                         // already evicted from in walk_path
                         continue;
@@ -4202,7 +4154,6 @@ impl Domain {
                         target = ?(replay_path.target_node(), &replay_path.target_index),
                         "Evicting keys"
                     );
-                    #[allow(clippy::indexing_slicing)] // nodes in replay paths must exist
                     if let Some(result) = state[dest.node].evict_keys(tag, &keys) {
                         bytes_freed += result.bytes_freed;
                         // we can only evict from partial replay paths, so we must have a
@@ -4246,10 +4197,8 @@ impl Domain {
         reader_write_handles: &mut NodeMap<backlog::WriteHandle>,
         executor: &mut dyn Executor,
     ) -> ReadySetResult<()> {
-        #[allow(clippy::indexing_slicing)] // replay paths can't be empty
         let mut from = path[0].node;
         for segment in path {
-            #[allow(clippy::indexing_slicing)] // nodes in replay paths must exist
             #[allow(clippy::unwrap_used)]
             // partial_key must be Some for partial replay paths
             nodes[segment.node].borrow_mut().process_eviction(
@@ -4305,8 +4254,6 @@ impl Domain {
         candidates.truncate(3);
 
         // don't evict from tiny things (< 10% of max)
-        #[allow(clippy::indexing_slicing)]
-        // candidates must be at least nodes.len(), and nodes can't be empty
         if let Some(too_small_i) = candidates
             .iter()
             .position(|&(_, s)| s < candidates[0].1 / 10)
@@ -4360,7 +4307,6 @@ impl Domain {
 
         for (node, num_bytes) in nodes {
             let mut freed = 0u64;
-            #[allow(clippy::indexing_slicing)] // we got the node from self.nodes
             let n = self.nodes[node].borrow_mut();
 
             if n.is_dropped() {
@@ -4433,8 +4379,6 @@ impl Domain {
             .iter()
             .position(|ps| ps.node == dst)
             .ok_or_else(|| ReadySetError::NoSuchNode(dst.id()))?;
-        #[allow(clippy::indexing_slicing)]
-        // i is definitely in bounds, since it came from a call to position
         Self::walk_path(
             &path[i..],
             &keys,
@@ -4452,12 +4396,10 @@ impl Domain {
                 // from it, and then propagate the eviction further downstream.
                 let destination = path.last().node;
                 // We've already evicted from readers in walk_path
-                #[allow(clippy::indexing_slicing)] // came from replay paths
                 if self.nodes[destination].borrow().is_reader() {
                     return Ok(None);
                 }
                 // No need to continue if node was dropped.
-                #[allow(clippy::indexing_slicing)] // came from replay paths
                 if self.nodes[destination].borrow().is_dropped() {
                     return Ok(None);
                 }
@@ -4467,7 +4409,6 @@ impl Domain {
                 })?;
 
                 trace!(local = %destination, ?keys, ?tag, "Evicting keys");
-                #[allow(clippy::indexing_slicing)] // came from replay paths
                 if let Some(result) = self.state[destination].evict_keys(tag, &keys) {
                     let mut freed = result.bytes_freed;
                     freed += Self::trigger_downstream_evictions(
@@ -4510,7 +4451,6 @@ impl Domain {
                 // This path terminates inside the domain. Find the destination node, evict
                 // from it, and then propagate the eviction further downstream.
                 let destination = path.last().node;
-                #[allow(clippy::indexing_slicing)] // we got the node from self.nodes
                 let n = self.nodes[destination].borrow_mut();
 
                 let (freed, eviction) = if n.is_dropped() {

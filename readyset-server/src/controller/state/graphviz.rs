@@ -105,7 +105,6 @@ impl<'a> Display for Graphviz<'a> {
                 )?;
             }
             for index in nodes {
-                #[allow(clippy::indexing_slicing)] // just got this out of the graph
                 let node = &self.graph[index];
                 let materialization_status = self.materializations.get_status(index, node);
                 indentln(f)?;
@@ -134,7 +133,6 @@ impl<'a> Display for Graphviz<'a> {
             }
 
             indentln(f)?;
-            #[allow(clippy::indexing_slicing)] // just got it out of the graph
             write!(
                 f,
                 "n{} -> n{} [ {} ]",

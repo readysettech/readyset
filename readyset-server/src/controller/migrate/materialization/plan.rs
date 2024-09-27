@@ -1,7 +1,6 @@
 #![deny(
     clippy::unwrap_used,
     clippy::expect_used,
-    clippy::indexing_slicing,
     clippy::panic,
     clippy::unimplemented,
     clippy::unreachable
@@ -210,12 +209,10 @@ impl<'a> Plan<'a> {
         }
 
         invariant!(
-            paths.iter().skip(1).all(|p| {
-                #[allow(clippy::indexing_slicing)] // just checked paths isn't empty
-                {
-                    p.last_segment().index == paths[0].last_segment().index
-                }
-            }),
+            paths
+                .iter()
+                .skip(1)
+                .all(|p| { p.last_segment().index == paths[0].last_segment().index }),
             "All paths should have the same index"
         );
         #[allow(clippy::unwrap_used)] // paths can't be empty
@@ -315,7 +312,6 @@ impl<'a> Plan<'a> {
                 let graph = &self.graph;
                 path.segments().iter().enumerate().filter_map(
                     move |(at, &IndexRef { node, .. })| {
-                        #[allow(clippy::indexing_slicing)] // replay paths contain valid indices
                         let n = &graph[node];
                         if n.is_union() && !n.is_shard_merger() {
                             let suffix = match path.segments().get((at + 1)..) {
@@ -344,11 +340,6 @@ impl<'a> Plan<'a> {
             .flat_map(|((union, _suffix), paths)| {
                 // at this union, all the given paths share a suffix
                 // make all of the paths use a single identifier from that point on
-
-                // paths contains a set of `pi` from above, which are generated from
-                // `paths.iter().enumerate()` we have one assigned_tag for each `pi`
-                // by construction.
-                #[allow(clippy::indexing_slicing)]
                 let tag_all_as = assigned_tags[paths[0]];
                 paths.into_iter().map(move |pi| ((union, pi), tag_all_as))
             })
@@ -356,10 +347,6 @@ impl<'a> Plan<'a> {
 
         // inform domains about replay paths
         for (pi, path) in paths.into_iter().enumerate() {
-            // paths contains a set of `pi` from above, which are generated from
-            // `paths.iter().enumerate()` we have one assigned_tag for each `pi` by
-            // construction.
-            #[allow(clippy::indexing_slicing)]
             let tag = assigned_tags[pi];
             // TODO(eta): figure out a way to check partial replay path idempotency
             self.paths.insert(
@@ -400,7 +387,6 @@ impl<'a> Plan<'a> {
             // to the requesting shard, as opposed to all shards. in order to do that, that sharder
             // needs to know who it is!
             let mut partial_unicast_sharder = None;
-            #[allow(clippy::indexing_slicing)] // paths contain valid node indices
             if partial.is_some() && !self.graph[path.target().node].sharded_by().is_none() {
                 partial_unicast_sharder = path
                     .segments()
@@ -419,7 +405,6 @@ impl<'a> Plan<'a> {
             for (i, IndexRef { node, index }) in
                 path.segments_with_extension().iter().cloned().enumerate()
             {
-                #[allow(clippy::indexing_slicing)] // paths contain valid node indices
                 let domain = self.graph[node].domain();
 
                 #[allow(clippy::unwrap_used)]
@@ -471,7 +456,6 @@ impl<'a> Plan<'a> {
                     #[allow(clippy::unwrap_used)] // checked by invariant!()
                     let first = nodes.first().unwrap();
                     if let Some(ref index) = first.1 {
-                        #[allow(clippy::indexing_slicing)] // replay paths contain valid nodes
                         if self.graph[first.0].is_internal() {
                             if let ColumnSource::GeneratedFromColumns(generated_from) =
                                 self.graph[first.0].column_source(&index.columns)
@@ -485,8 +469,6 @@ impl<'a> Plan<'a> {
                                     "telling domain about generated columns",
                                 );
 
-                                #[allow(clippy::indexing_slicing)]
-                                // replay paths contain valid nodes
                                 self.dmp.add_message(
                                     domain,
                                     DomainRequest::GeneratedColumns {
@@ -504,7 +486,6 @@ impl<'a> Plan<'a> {
                 let skip_first = usize::from(i == 0);
 
                 // use the local index for each node
-                #[allow(clippy::indexing_slicing)] // replay paths contain valid nodes
                 let locals: Vec<_> = nodes
                     .iter()
                     .skip(skip_first)
@@ -570,8 +551,6 @@ impl<'a> Plan<'a> {
 
                 // the first domain also gets to know source node
                 if i == 0 {
-                    // replay paths contain valid nodes & nodes.len() > 0 checked by invariant!()
-                    #[allow(clippy::indexing_slicing)]
                     if let DomainRequest::SetupReplayPath { ref mut source, .. } = setup {
                         *source = Some(self.graph[nodes[0].0].local_addr());
                     }
@@ -618,17 +597,11 @@ impl<'a> Plan<'a> {
                             //            there, but did not think to be helpful enough to refactor
                             //            it to use a more sane data structure...
                             //
-                            // NOTE(eta): this code is mild copypasta; another copy exists a few
-                            //            lines down
-
-                            #[allow(clippy::indexing_slicing)] // checked by above invariant!()
                             let first_domain_segments = &segments[0].1;
                             invariant!(!first_domain_segments.is_empty());
 
-                            #[allow(clippy::indexing_slicing)] // checked by above invariant!()
                             let first_domain_node_key = &first_domain_segments[0];
 
-                            #[allow(clippy::indexing_slicing)] // replay path node indices are valid
                             let src_sharding = self.graph[first_domain_node_key.0].sharded_by();
                             let shards = src_sharding.shards().unwrap_or(1);
                             let lookup_key_index_to_shard = match src_sharding {
@@ -643,7 +616,6 @@ impl<'a> Plan<'a> {
                                     match key_column_source {
                                         Some(source_index) => {
                                             if source_index.len() == 1 {
-                                                #[allow(clippy::indexing_slicing)] // len == 1
                                                 if source_index[0] == c {
                                                     // the source node is sharded by the key column.
                                                     Some(0)
@@ -714,7 +686,6 @@ impl<'a> Plan<'a> {
                                 //
                                 // note that the no-sharding case is the same as "ask all shards"
                                 // except there is only one (shards == 1).
-                                #[allow(clippy::indexing_slicing)] // replay path node indices valid
                                 if src_sharding.is_none()
                                     || segments
                                         .iter()
@@ -728,7 +699,6 @@ impl<'a> Plan<'a> {
                             };
 
                             debug!(policy = ?selection, %tag, "picked source selection policy");
-                            #[allow(clippy::indexing_slicing)] // checked by invariant!() earlier
                             {
                                 *trigger = TriggerEndpoint::End(selection, segments[0].0);
                             }
@@ -745,17 +715,11 @@ impl<'a> Plan<'a> {
                             *notify_done = true;
                             invariant!(pending.is_none());
 
-                            // NOTE(eta): this code is mild copypasta; another copy exists a few
-                            //            lines above
-                            #[allow(clippy::indexing_slicing)]
-                            // checked by segments.len() > 0 invariant!()
                             let first_domain_segments_data = &segments[0];
                             invariant!(!first_domain_segments_data.1.is_empty());
 
-                            #[allow(clippy::indexing_slicing)] // checked by above invariant!()
                             let first_domain_node_key = &first_domain_segments_data.1[0];
 
-                            #[allow(clippy::indexing_slicing)] // replay path node indices valid
                             {
                                 pending = Some(PendingReplay {
                                     tag,
@@ -777,14 +741,10 @@ impl<'a> Plan<'a> {
                     // to tell it about this replay path so that it knows
                     // what path to forward replay packets on.
                     #[allow(clippy::unwrap_used)] // nodes>0 checked by invariant
-                    // node indices from replay paths valid
-                    #[allow(clippy::indexing_slicing)]
                     let n = &self.graph[nodes.last().unwrap().0];
                     if n.is_egress() {
-                        #[allow(clippy::indexing_slicing)] // checked by enclosing if blocks
                         let later_domain_segments = &segments[i + 1].1;
                         invariant!(!later_domain_segments.is_empty());
-                        #[allow(clippy::indexing_slicing)] // checked by invariant
                         let (ingress_node, _, _) = later_domain_segments[0];
                         self.dmp.add_message(
                             domain,
@@ -803,7 +763,6 @@ impl<'a> Plan<'a> {
                 self.dmp.add_message(domain, setup)?;
             }
 
-            #[allow(clippy::indexing_slicing)] // we know our node is in the graph
             if !self.partial && !self.graph[self.node].is_base() {
                 // this path requires doing a replay and then waiting for the replay to finish
                 if let Some(pending) = pending {
@@ -832,7 +791,6 @@ impl<'a> Plan<'a> {
     ) -> ReadySetResult<(Vec<PendingReplay>, HashMap<Tag, (Index, Vec<NodeIndex>)>)> {
         use dataflow::payload::PrepareStateKind;
 
-        #[allow(clippy::indexing_slicing)] // the node index we were created with is in graph...
         let our_node = &self.graph[self.node];
 
         // NOTE: we cannot use the impl of DerefMut here, since it (reasonably) disallows getting
@@ -846,15 +804,12 @@ impl<'a> Plan<'a> {
             if self.partial {
                 invariant!(r.is_materialized());
 
-                #[allow(clippy::indexing_slicing)]
                 // the node index we were created with is in graph...
                 let last_domain = self.graph[self.node].domain();
                 let num_shards = self.dmp.num_shards(last_domain)?;
 
                 // since we're partially materializing a reader node,
                 // we need to give it a way to trigger replays.
-                #[allow(clippy::indexing_slicing)]
-                // the node index we were created with is in graph...
                 PrepareStateKind::PartialReader {
                     node_index: self.node,
                     num_columns: self.graph[self.node].columns().len(),
@@ -863,8 +818,6 @@ impl<'a> Plan<'a> {
                     num_shards,
                 }
             } else {
-                #[allow(clippy::indexing_slicing)]
-                // the node index we were created with is in graph...
                 PrepareStateKind::FullReader {
                     num_columns: self.graph[self.node].columns().len(),
                     index,
@@ -929,13 +882,11 @@ impl<'a> Plan<'a> {
         // If the node is partial and also a reader, then traverse the
         // graph upwards to notify the egress node that it should filter
         // any packet that was not requested.
-        #[allow(clippy::indexing_slicing)] // the node index we were created with is in graph...
         let our_node = &self.graph[self.node];
         return if self.partial && our_node.is_reader() {
             // Since reader nodes belong to their own domains, their
             // domains should consist only of them + an ingress node.
             // It's fair to assume that the reader node has an ingress node as an ancestor.
-            #[allow(clippy::indexing_slicing)] // neighbors_directed returns valid indices
             let ingress_opt = self
                 .graph
                 .neighbors_directed(self.node, petgraph::Incoming)
@@ -945,7 +896,6 @@ impl<'a> Plan<'a> {
                 Some(i) => i
             };
             // Now we look for the egress node, which should be an ancestor of the ingress node.
-            #[allow(clippy::indexing_slicing)] // neighbors_directed returns valid indices
             let egress_opt = self
                 .graph
                 .neighbors_directed(ingress, petgraph::Incoming)
@@ -959,12 +909,10 @@ impl<'a> Plan<'a> {
                 Some(e) => e,
             };
             // Get the egress node's local address within that domain.
-            #[allow(clippy::indexing_slicing)] // neighbors_directed returns valid indices
             let egress_local_addr = self.graph[egress].local_addr();
             // Communicate the egress node's domain that any packet sent
             // to the reader's domain ingress node should filter any
             // packets not previously requested.
-            #[allow(clippy::indexing_slicing)] // neighbors_directed returns valid indices
             self.dmp.add_message(
                 self.graph[egress].domain(),
                 DomainRequest::AddEgressFilter {

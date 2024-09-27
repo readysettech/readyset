@@ -502,11 +502,7 @@ impl KeyComparison {
     /// * the `key`s should have at least one element.
     pub fn shard_keys_at(&self, key_idx: usize, num_shards: usize) -> Vec<usize> {
         match self {
-            KeyComparison::Equal(key) => vec![crate::shard_by(
-                #[allow(clippy::indexing_slicing)]
-                &key[key_idx],
-                num_shards,
-            )],
+            KeyComparison::Equal(key) => vec![crate::shard_by(&key[key_idx], num_shards)],
             // Since we currently implement hash-based sharding, any non-point query must target all
             // shards. This restriction could be lifted in the future by implementing (perhaps
             // optional) range-based sharding, likely with rebalancing. See Guillote-Blouin, J.
@@ -1239,9 +1235,6 @@ impl Service<ViewQuery> for ReaderHandle {
         let mut shard_queries = vec![Vec::new(); self.shards.len()];
         for comparison in query.key_comparisons.drain(..) {
             for shard in comparison.shard_keys(self.shards.len()) {
-                #[allow(clippy::indexing_slicing)]
-                // We built `shard_queries` to be the correct length, so it's safe to access
-                // it by index in this case.
                 shard_queries[shard].push(comparison.clone());
             }
         }
@@ -1880,7 +1873,6 @@ impl ReusedReaderHandle {
             }
         }
 
-        #[allow(clippy::indexing_slicing)]
         let raw_keys = if !raw_keys.is_empty() && self.required_values.len() == raw_keys[0].len() {
             vec![]
         } else {
