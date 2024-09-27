@@ -795,11 +795,6 @@ async fn initialize_state(
         })
 }
 
-struct Misses {
-    misses: Vec<KeyComparison>,
-    cache_name: Relation,
-}
-
 impl Domain {
     /// Return the unique index for this domain
     pub fn index(&self) -> DomainIndex {
@@ -1658,8 +1653,10 @@ impl Domain {
     }
 
     fn upquery(
+        node: LocalNodeIndex,
+        cols: &[usize],
         num_shards: usize,
-        txs: &[UnboundedSender<Misses>],
+        txs: &[UnboundedSender<Result<Packet, Box<bincode::ErrorKind>>>],
         misses: &mut dyn Iterator<Item = KeyComparison>,
         cache_name: Relation,
     ) -> bool {
@@ -1668,7 +1665,14 @@ impl Domain {
             if misses.is_empty() {
                 return true;
             }
-            txs[0].send(Misses { misses, cache_name }).is_ok()
+            txs[0]
+                .send(Ok(Packet::RequestReaderReplay {
+                    node,
+                    cols: cols.to_vec(),
+                    keys: misses,
+                    cache_name,
+                }))
+                .is_ok()
         } else {
             let mut per_shard = HashMap::new();
             for miss in misses {
@@ -1686,10 +1690,12 @@ impl Domain {
             per_shard.into_iter().all(|(shard, keys)| {
                 // we know txs.len() is equal to num_shards
                 txs[shard]
-                    .send(Misses {
-                        misses: keys,
+                    .send(Ok(Packet::RequestReaderReplay {
+                        node,
+                        cols: cols.to_vec(),
+                        keys,
                         cache_name: cache_name.clone(),
-                    })
+                    }))
                     .is_ok()
             })
         }
@@ -1780,38 +1786,25 @@ impl Domain {
                     });
                 }
 
-                let replica = self.replica();
-
+                let cols = index.columns.clone();
                 let txs = (0..num_shards)
                     .map(|shard| {
-                        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<Misses>();
+                        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
                         let sender = self
                             .channel_coordinator
                             .builder_for(&ReplicaAddress {
                                 domain_index: trigger_domain,
                                 shard,
-                                replica,
+                                replica: self.replica(),
                             })?
                             .build_async()?;
 
-                        let cols = index.columns.clone();
-                        tokio::spawn(
-                            UnboundedReceiverStream::new(rx)
-                                .map(move |misses| Packet::RequestReaderReplay {
-                                    keys: misses.misses,
-                                    cols: cols.clone(),
-                                    node,
-                                    cache_name: misses.cache_name,
-                                })
-                                .map(Ok)
-                                .forward(sender)
-                                .map(|r| {
-                                    if let Err(e) = r {
-                                        // domain went away?
-                                        error!(error = %e, "replay source went away");
-                                    }
-                                }),
-                        );
+                        tokio::spawn(UnboundedReceiverStream::new(rx).forward(sender).map(|r| {
+                            if let Err(e) = r {
+                                // domain went away?
+                                error!(error = %e, "replay source went away");
+                            }
+                        }));
                         Ok(tx)
                     })
                     .collect::<ReadySetResult<Vec<_>>>()?;
@@ -1821,10 +1814,10 @@ impl Domain {
                 #[allow(clippy::unwrap_used)] // checked it was a reader above
                 let r = n.as_mut_reader().unwrap();
 
-                let (r_part, w_part) = backlog::new_partial(
+                let (read, write) = backlog::new_partial(
                     num_columns,
                     index,
-                    move |misses, cache_name| Self::upquery(num_shards, &txs, misses, cache_name),
+                    move |misses, name| Self::upquery(node, &cols, num_shards, &txs, misses, name),
                     self.eviction_kind,
                     r.reader_processing().clone(),
                     node_index,
@@ -1844,7 +1837,7 @@ impl Domain {
                             name: name.clone(),
                             shard,
                         },
-                        r_part,
+                        read,
                     )
                     .is_some()
                 {
@@ -1856,7 +1849,7 @@ impl Domain {
                     );
                 }
 
-                self.reader_write_handles.insert(node, w_part);
+                self.reader_write_handles.insert(node, write);
             }
             PrepareStateKind::FullReader {
                 node_index,
@@ -1877,7 +1870,7 @@ impl Domain {
                         expected_type: NodeType::Reader,
                     })?;
 
-                let (r_part, w_part) = backlog::new(
+                let (read, write) = backlog::new(
                     num_columns,
                     index,
                     r.reader_processing().clone(),
@@ -1898,7 +1891,7 @@ impl Domain {
                             name,
                             shard,
                         },
-                        r_part,
+                        read,
                     )
                     .is_some()
                 {
@@ -1906,7 +1899,7 @@ impl Domain {
                 }
 
                 // make sure Reader is actually prepared to receive state
-                self.reader_write_handles.insert(node, w_part);
+                self.reader_write_handles.insert(node, write);
             }
         }
         Ok(None)
