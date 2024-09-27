@@ -42,7 +42,7 @@ use readyset_util::Indices;
 use replication_offset::ReplicationOffset;
 use serde::{Deserialize, Serialize};
 use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
-use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc::{Sender, UnboundedSender};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, error, info, info_span, trace, warn, Instrument};
 use url::Url;
@@ -793,6 +793,11 @@ async fn initialize_state(
                 "an error occurred while sending materialized state to replica for node {node_idx}"
             )
         })
+}
+
+struct Misses {
+    misses: Vec<KeyComparison>,
+    cache_name: Relation,
 }
 
 impl Domain {
@@ -1652,6 +1657,44 @@ impl Domain {
         Ok(None)
     }
 
+    fn upquery(
+        num_shards: usize,
+        txs: &[UnboundedSender<Misses>],
+        misses: &mut dyn Iterator<Item = KeyComparison>,
+        cache_name: Relation,
+    ) -> bool {
+        if num_shards == 1 {
+            let misses = misses.collect::<Vec<_>>();
+            if misses.is_empty() {
+                return true;
+            }
+            txs[0].send(Misses { misses, cache_name }).is_ok()
+        } else {
+            let mut per_shard = HashMap::new();
+            for miss in misses {
+                assert_eq!(miss.len(), 1);
+                for shard in miss.shard_keys(num_shards) {
+                    per_shard
+                        .entry(shard)
+                        .or_insert_with(Vec::new)
+                        .push(miss.clone());
+                }
+            }
+            if per_shard.is_empty() {
+                return true;
+            }
+            per_shard.into_iter().all(|(shard, keys)| {
+                // we know txs.len() is equal to num_shards
+                txs[shard]
+                    .send(Misses {
+                        misses: keys,
+                        cache_name: cache_name.clone(),
+                    })
+                    .is_ok()
+            })
+        }
+    }
+
     #[inline(always)]
     fn handle_prepare_state(
         &mut self,
@@ -1739,11 +1782,6 @@ impl Domain {
 
                 let replica = self.replica();
 
-                struct Misses {
-                    misses: Vec<KeyComparison>,
-                    cache_name: Relation,
-                }
-
                 let txs = (0..num_shards)
                     .map(|shard| {
                         let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<Misses>();
@@ -1786,38 +1824,7 @@ impl Domain {
                 let (r_part, w_part) = backlog::new_partial(
                     num_columns,
                     index,
-                    move |misses, cache_name| {
-                        if num_shards == 1 {
-                            let misses = misses.collect::<Vec<_>>();
-                            if misses.is_empty() {
-                                return true;
-                            }
-                            txs[0].send(Misses { misses, cache_name }).is_ok()
-                        } else {
-                            let mut per_shard = HashMap::new();
-                            for miss in misses {
-                                assert_eq!(miss.len(), 1);
-                                for shard in miss.shard_keys(num_shards) {
-                                    per_shard
-                                        .entry(shard)
-                                        .or_insert_with(Vec::new)
-                                        .push(miss.clone());
-                                }
-                            }
-                            if per_shard.is_empty() {
-                                return true;
-                            }
-                            per_shard.into_iter().all(|(shard, keys)| {
-                                // we know txs.len() is equal to num_shards
-                                txs[shard]
-                                    .send(Misses {
-                                        misses: keys,
-                                        cache_name: cache_name.clone(),
-                                    })
-                                    .is_ok()
-                            })
-                        }
-                    },
+                    move |misses, cache_name| Self::upquery(num_shards, &txs, misses, cache_name),
                     self.eviction_kind,
                     r.reader_processing().clone(),
                     node_index,

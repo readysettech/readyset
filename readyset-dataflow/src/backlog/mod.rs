@@ -517,23 +517,18 @@ impl std::fmt::Debug for SingleReadHandle {
 
 impl SingleReadHandle {
     /// Trigger a replay of a missing key from a partially materialized view.
-    pub fn trigger<I>(&self, keys: I, name: Relation) -> bool
+    pub fn trigger<I>(&self, mut keys: I, name: Relation) -> bool
     where
         I: Iterator<Item = KeyComparison>,
     {
-        assert!(
-            self.trigger.is_some(),
-            "tried to trigger a replay for a fully materialized view"
-        );
-
-        let mut it = keys;
-
-        // trigger a replay to populate
-        (*self.trigger.as_ref().unwrap())(&mut it, name)
+        let Some(ref t) = self.trigger else {
+            panic!("tried to trigger a replay for a fully materialized view");
+        };
+        t(&mut keys, name)
     }
 
-    /// Returns None if this handle is not ready, Some(true) if this handle fully contains the given
-    /// key comparison, Some(false) if any of the keys miss
+    /// Returns None if this handle is not ready, Some(true) if this handle fully contains the
+    /// given key comparison, Some(false) if any of the keys miss
     pub fn contains(&self, key: &KeyComparison) -> reader_map::Result<bool> {
         match key {
             KeyComparison::Equal(k) => self.handle.contains_key(k),
