@@ -1,0 +1,169 @@
+# Testing scenarios, which found to be the root causes for the Post-Lookup issues.
+# RC #1:
+#   - reader-map is using BTreeMap index. Triggered by range condition ion the WHERE clause;
+#   - reader-map is using HashMap, and the packets associated with each lookup value,
+#     contain multiple rows. Triggered by EQ condition against a column with duplicate values.
+# RC #2:
+#   - query contains both GROUP BY and ORDER BY clauses, along with LIMIT/OFFSET.
+
+# Data sets from Marcelo's simple case on REA-4797
+#
+statement ok
+create table tb1 (ID INT)
+
+statement ok
+create table tb2 (ID INT, val int, tb1_id INT)
+
+statement ok
+insert into tb1 values (1),(2),(3)
+
+statement ok
+insert into tb2 values (1, 10, 1),(2, 10, 2),(3, 10, 2),(4, 10, 3),(5, 10, 3),(6, 10, 3)
+
+# Aggregated query, range condition, lookup column with duplicate values, DESC order
+query I
+SELECT SUM(tb2.val) as total_val FROM tb1 JOIN tb2 ON tb1.ID = tb2.tb1_id WHERE tb1.ID < 10 group by tb1.ID order by total_val DESC LIMIT 1
+----
+30
+
+# Aggregated query, range condition, lookup column with duplicate values, ASC order
+query I
+SELECT SUM(tb2.val) as total_val FROM tb1 JOIN tb2 ON tb1.ID = tb2.tb1_id WHERE tb1.ID < 10 group by tb1.ID order by total_val ASC LIMIT 1
+----
+10
+
+# Detail query, EQ condition, lookup column with duplicate values, DESC order
+query I
+select ID from tb2 where val = 10 order by ID desc limit 1 offset 3
+----
+3
+
+# Detail query, EQ condition, lookup column with duplicate values, ASC order
+query I
+select ID from tb2 where val = 10 order by ID asc limit 1 offset 3
+----
+4
+
+# Another data sets
+#
+statement ok
+create table foo (id int, val int, name text)
+
+statement ok
+insert into foo (id, val, name) values (1, 100, 'A'), (1, 100, 'B'), (3, 200, 'B'), (3, 200, 'C'), (5, 300, 'A')
+
+statement ok
+create table bar (id int, val int, name text)
+
+statement ok
+insert into bar (id, val, name) values (1, 10, 'A'), (2, 10, 'B'), (3, 20, 'B'), (4, 20, 'C'), (5, 30, 'A')
+
+# Aggregated query, range condition, lookup column with duplicate values, DESC order
+query I
+select sum(val) v from foo where id <= 100 group by val order by v desc limit 1
+----
+400
+
+# Aggregated query, range condition, lookup column with duplicate values, ASC order
+query I
+select sum(val) v from foo where id <= 100 group by val order by v asc limit 1
+----
+200
+
+# Aggregated query, range condition, lookup column with duplicate values, DESC order, LIMIT + OFFSET
+query I
+select sum(val) v from foo where id <= 100 group by val order by v desc limit 1 offset 1
+----
+300
+
+# Aggregated query, range condition, lookup column with duplicate values, ASC order, LIMIT + OFFSET
+query I
+select sum(val) v from foo where id <= 100 group by val order by v asc limit 1 offset 2
+----
+400
+
+# Detail query, range condition, lookup column with duplicate values, DESC order
+query T
+select name from foo where id >= 0 order by name desc limit 1
+----
+C
+
+# Detail query, range condition, lookup column with duplicate values, ASC order
+query T
+select name from foo where id >= 0 order by name asc limit 1
+----
+A
+
+# Detail query, range condition, lookup column with duplicate values, DESC order, LIMIT + OFFSET
+query T
+select name from foo where id >= 0 order by name desc limit 1 offset 1
+----
+B
+
+# Detail query, range condition, lookup column with duplicate values, ASC order, LIMIT + OFFSET
+query T
+select name from foo where id >= 0 order by name asc limit 1 offset 1
+----
+A
+
+# Aggregated query, range condition, lookup column with distinct values, DESC order
+query I
+select sum(val) v from bar where id <= 100 group by val order by v desc limit 1
+----
+40
+
+# Aggregated query, range condition, lookup column with distinct values, ASC order
+query I
+select sum(val) v from bar where id <= 100 group by val order by v asc limit 1
+----
+20
+
+# Aggregated query, range condition, lookup column with distinct values, DESC order, LIMIT + OFFSET
+query I
+select sum(val) v from bar where id <= 100 group by val order by v desc limit 1 offset 1
+----
+30
+
+# Aggregated query, range condition, lookup column with distinct values, ASC order, LIMIT + OFFSET
+query I
+select sum(val) v from bar where id <= 100 group by val order by v asc limit 1 offset 2
+----
+40
+
+# Detail query, range condition, lookup column with distinct values, DESC order
+query T
+select name from bar where id >= 0 order by name desc limit 1
+----
+C
+
+# Detail query, range condition, lookup column with distinct values, ASC order, LIMIT + OFFSET
+query T
+select name from bar where id >= 0 order by name asc limit 1 offset 4
+----
+C
+
+# Another data set
+#
+statement ok
+CREATE TABLE foo1 (a INT, b INT)
+
+statement ok
+INSERT INTO foo1 VALUES (1, 10), (1, 20), (2, 100)
+
+# Aggregated query, full materialization, DESC order
+query I
+SELECT SUM(b) FROM foo1 GROUP BY a ORDER BY SUM(b) DESC LIMIT 1
+----
+100
+
+# Aggregated query, full materialization, ASC order
+query I
+SELECT SUM(b) total_b FROM foo1 GROUP BY a ORDER BY total_b ASC LIMIT 1
+----
+30
+
+# Detail query, full materialization, DESC order, LIMIT + OFFSET
+query I
+select b from foo1 order by a asc, b desc limit 1 offset 1
+----
+10

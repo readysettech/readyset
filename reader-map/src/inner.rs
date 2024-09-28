@@ -323,12 +323,25 @@ where
     K: Ord + Clone,
     I: InsertionOrder<V>,
 {
-    pub(crate) fn or_insert_with<F>(self, default: F) -> &'a mut Values<V, I>
+    pub(crate) fn or_insert_with<F>(self, order: &I, default: F) -> &'a mut Values<V, I>
     where
         F: FnOnce() -> Values<V, I>,
     {
         match self {
             Entry::Vacant(e) => e.insert(default()),
+            Entry::Occupied(
+                e @ OccupiedEntry::BTreeMap(partial_map::OccupiedEntry::Default { .. }),
+            ) => {
+                // This variant of Entry<> is returned for a key which was covered by a range previously
+                // inserted by methods like `insert_range`, and the instance of `Values` returned by the
+                // following call to `e.into_mut()` will be `Values::default()` with default pre-insertion order.
+                // Hence, just assign the appropriate `order` here.
+                // For reference see: `public/partial-map/src/lib.rs`:
+                // pub fn entry(&mut self, key: K) -> Entry<'_, K, V> { ... }
+                let values = e.into_mut();
+                values.set_order(order.clone());
+                values
+            }
             Entry::Occupied(e) => e.into_mut(),
         }
     }
@@ -456,7 +469,7 @@ where
         key: K,
         eviction_meta: &mut Option<EvictionMeta>,
     ) -> &mut Values<V, I> {
-        self.data.entry(key).or_insert_with(|| {
+        self.data.entry(key).or_insert_with(&self.order, || {
             if let Some(meta) = eviction_meta.take() {
                 Values::new(meta, self.order.clone())
             } else {

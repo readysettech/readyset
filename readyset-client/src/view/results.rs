@@ -1,3 +1,4 @@
+use std::cmp;
 use std::cmp::Ordering;
 use std::sync::Arc;
 
@@ -262,7 +263,7 @@ impl ResultIterator {
                         aggregate: aggregates.clone(),
                         filter: filter.take(),
                     }),
-                    limit,
+                    limit: None,
                     offset: None,
                     default_row: default_row.clone(),
                     non_empty: false,
@@ -271,6 +272,7 @@ impl ResultIterator {
                 };
 
                 let mut results = temp_iter.into_vec();
+
                 results.sort_by(|a, b| {
                     order_by
                         .iter()
@@ -278,12 +280,26 @@ impl ResultIterator {
                         .fold(Ordering::Equal, |acc, next| acc.then(next))
                 });
 
-                if let Some(offset) = offset {
-                    if offset >= results.len() {
-                        results.clear();
-                    } else {
-                        results.drain(offset..);
+                match (limit, offset) {
+                    (Some(limit), Some(offset)) => {
+                        if offset >= results.len() {
+                            results.clear();
+                        } else {
+                            results.drain(cmp::min(offset + limit, results.len())..);
+                            results.drain(..offset);
+                        }
                     }
+                    (Some(limit), None) => {
+                        results.drain(cmp::min(results.len(), limit)..);
+                    }
+                    (None, Some(offset)) => {
+                        if offset >= results.len() {
+                            results.clear();
+                        } else {
+                            results.drain(..offset);
+                        }
+                    }
+                    (None, None) => (),
                 }
 
                 return ResultIterator::owned(vec![Results {

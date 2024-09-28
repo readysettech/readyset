@@ -289,6 +289,11 @@ where
         }
     }
 
+    /// Assigns new InsertionOrder
+    pub fn set_order(&mut self, order: I) {
+        self.order = order;
+    }
+
     /// An iterator visiting all elements in arbitrary order.
     pub fn iter(&self) -> Either<std::slice::Iter<'_, T>, BTreeUnwrapIterator<'_, T, I>> {
         match self.values {
