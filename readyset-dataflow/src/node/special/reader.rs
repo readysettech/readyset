@@ -119,7 +119,7 @@ impl Reader {
     pub(in crate::node) fn process(
         &mut self,
         m: &mut Option<Packet>,
-        swap: bool,
+        publish: bool,
         state: &mut backlog::WriteHandle,
     ) {
         let m = m.as_mut().unwrap();
@@ -188,7 +188,7 @@ impl Reader {
                         false
                     }
                     Err(_) => {
-                        // state has not yet been swapped, which means it's new,
+                        // state has not yet been published, which means it's new,
                         // which means there are no readers, which means no
                         // requests for replays have been issued by readers, which
                         // means no duplicates can be received.
@@ -200,9 +200,9 @@ impl Reader {
 
         state.add(m.take_data());
 
-        if swap {
-            // TODO: avoid doing the pointer swap if we didn't modify anything (inc. ts)
-            state.swap();
+        if publish {
+            // TODO: skip if we didn't modify anything (inc. ts)
+            state.publish();
         }
     }
 

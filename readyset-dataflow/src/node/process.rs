@@ -120,7 +120,7 @@ impl Node {
         m: &mut Option<Packet>,
         keyed_by: Option<&Vec<usize>>,
         replay_path: Option<&crate::domain::ReplayPath>,
-        swap_reader: bool,
+        publish_reader: bool,
         env: ProcessEnv,
     ) -> ReadySetResult<NodeProcessingResult> {
         let addr = self.local_addr();
@@ -215,7 +215,7 @@ impl Node {
             }
             NodeType::Reader(ref mut r) => {
                 if let Some(state) = env.reader_write_handles.get_mut(addr) {
-                    r.process(m, swap_reader, state);
+                    r.process(m, publish_reader, state);
                 }
             }
             NodeType::Egress(None) => internal!("tried to process through taken egress"),
@@ -509,7 +509,7 @@ impl Node {
                     for k in keys {
                         state.mark_hole(k)?;
                     }
-                    state.swap();
+                    state.publish();
                     state.notify_readers_of_eviction()?;
                 }
             }
@@ -646,7 +646,7 @@ impl Node {
                         state.set_timestamp(timestamp);
 
                         // Ensure the write is published.
-                        state.swap();
+                        state.publish();
                     }
                     return Ok(None);
                 }
