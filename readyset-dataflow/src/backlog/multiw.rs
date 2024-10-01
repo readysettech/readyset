@@ -114,7 +114,7 @@ impl Handle {
         }
     }
 
-    pub fn refresh(&mut self) {
+    pub fn publish(&mut self) {
         match *self {
             Handle::Single(ref mut h) => {
                 h.publish();

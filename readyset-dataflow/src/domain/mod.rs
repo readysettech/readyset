@@ -2297,11 +2297,11 @@ impl Domain {
             trace!(local = node_idx.id(), "readying empty node");
         }
 
-        // swap replayed reader nodes to expose new state
+        // publish replayed reader nodes to expose new state
         if let Some(state) = self.reader_write_handles.get_mut(node_idx) {
-            trace!(local = %node_idx, "swapping state");
-            state.swap();
-            trace!(local = %node_idx, "state swapped");
+            trace!(local = %node_idx, "publishing state");
+            state.publish();
+            trace!(local = %node_idx, "state published");
         }
 
         Ok(Some(bincode::serialize(&is_ready)?))
@@ -2698,7 +2698,7 @@ impl Domain {
                     internal_err!("reader replay requested for non-materialized reader")
                 })?;
                 // ensure that all writes have been applied
-                w.swap();
+                w.publish();
 
                 // don't request keys that have been filled since the request was sent
                 let mut keys = keys
@@ -2775,7 +2775,7 @@ impl Domain {
     /// Timed purges happen when [`FrontierStrategy`] is not None, in which case all keys
     /// are purged from the node after a given amount of time
     fn handle_timed_purges(&mut self) -> ReadySetResult<()> {
-        let mut swap = HashSet::new();
+        let mut publish = HashSet::new();
         while let Some(tp) = self.timed_purges.front() {
             let now = time::Instant::now();
             if tp.time <= now {
@@ -2792,16 +2792,16 @@ impl Domain {
                     for key in tp.keys {
                         wh.mark_hole(&key)?;
                     }
-                    swap.insert(tp.view);
+                    publish.insert(tp.view);
                 }
             } else {
                 break;
             }
         }
 
-        for node in swap {
+        for node in publish {
             if let Some(wh) = self.reader_write_handles.get_mut(node) {
-                wh.swap();
+                wh.publish();
             }
         }
 
@@ -3430,9 +3430,9 @@ impl Domain {
                             }
                         }
                     } else if n.is_reader() {
-                        // we filled a hole! swap the reader.
+                        // we filled a hole! publish the reader.
                         if let Some(wh) = self.reader_write_handles.get_mut(segment.node) {
-                            wh.swap();
+                            wh.publish();
                             wh.notify_readers()?;
                         }
 
@@ -4320,7 +4320,7 @@ impl Domain {
                 continue; // Node was dropped. Skip.
             } else if let Some(state) = self.reader_write_handles.get_mut(node) {
                 freed += state.evict_bytes(num_bytes);
-                state.swap();
+                state.publish();
                 state.notify_readers_of_eviction()?;
             } else if let Some(EvictBytesResult {
                 index,
@@ -4485,7 +4485,7 @@ impl Domain {
                         }
                         None => state.evict_random(),
                     };
-                    state.swap();
+                    state.publish();
                     state.notify_readers_of_eviction()?;
                     (bytes_freed, eviction)
                 } else {

@@ -303,8 +303,8 @@ impl WriteHandle {
         self.handle.read().contains_key(key)
     }
 
-    pub(crate) fn swap(&mut self) {
-        self.handle.refresh();
+    pub(crate) fn publish(&mut self) {
+        self.handle.publish();
     }
 
     pub(crate) fn len(&self) -> usize {
@@ -313,7 +313,7 @@ impl WriteHandle {
 
     /// Add a new set of records to the backlog.
     ///
-    /// These will be made visible to readers after the next call to `swap()`.
+    /// These will be made visible to readers after the next call to `publish()`.
     pub(crate) fn add<I>(&mut self, rs: I)
     where
         I: IntoIterator<Item = Record>,
@@ -624,19 +624,19 @@ mod tests {
             Default::default(),
         );
 
-        w.swap();
+        w.publish();
 
-        // after first swap, it is empty, but ready
+        // after first publish, it is empty, but ready
         assert_eq!(r.get(&a[0..1]).unwrap().len(), 0);
 
         w.add(vec![Record::Positive(a.to_vec())]);
 
-        // it is empty even after an add (we haven't swapped yet)
+        // it is empty even after an add (we haven't published yet)
         assert_eq!(r.get(&a[0..1]).unwrap().len(), 0);
 
-        w.swap();
+        w.publish();
 
-        // but after the swap, the record is there!
+        // but after the publish, the record is there!
         assert_eq!(r.get(&a[0..1]).unwrap().len(), 1);
         assert_eq!(r.get(&a[0..1]).unwrap()[0], a);
     }
@@ -655,7 +655,7 @@ mod tests {
         let jh = thread::spawn(move || {
             for i in 0..n {
                 w.add(vec![Record::Positive(vec![i.into()])]);
-                w.swap();
+                w.publish();
             }
             // important that we don't drop w here, or the loop below never exits
             w
@@ -687,7 +687,7 @@ mod tests {
             Default::default(),
         );
         w.add(vec![Record::Positive(a.to_vec())]);
-        w.swap();
+        w.publish();
         w.add(vec![Record::Positive(b.to_vec())]);
 
         assert_eq!(r.get(&a[0..1]).unwrap().len(), 1);
@@ -708,7 +708,7 @@ mod tests {
         );
         w.add(vec![Record::Positive(a.to_vec())]);
         w.add(vec![Record::Positive(b.to_vec())]);
-        w.swap();
+        w.publish();
         w.add(vec![Record::Positive(c.to_vec())]);
 
         assert_eq!(r.get(&a[0..1]).unwrap().len(), 2);
@@ -730,7 +730,7 @@ mod tests {
         w.add(vec![Record::Positive(a.to_vec())]);
         w.add(vec![Record::Positive(b.to_vec())]);
         w.add(vec![Record::Negative(a.to_vec())]);
-        w.swap();
+        w.publish();
 
         assert_eq!(r.get(&a[0..1]).unwrap().len(), 1);
         assert_eq!(r.get(&a[0..1]).unwrap()[0], b);
@@ -749,9 +749,9 @@ mod tests {
         );
         w.add(vec![Record::Positive(a.to_vec())]);
         w.add(vec![Record::Positive(b.to_vec())]);
-        w.swap();
+        w.publish();
         w.add(vec![Record::Negative(a.to_vec())]);
-        w.swap();
+        w.publish();
 
         assert_eq!(r.get(&a[0..1]).unwrap().len(), 1);
         assert_eq!(r.get(&a[0..1]).unwrap()[0], b);
@@ -773,7 +773,7 @@ mod tests {
             Record::Positive(a.to_vec()),
             Record::Positive(b.to_vec()),
         ]);
-        w.swap();
+        w.publish();
 
         assert_eq!(r.get(&a[0..1]).unwrap().len(), 2);
         assert_eq!(r.get(&a[0..1]).unwrap()[0], a);
@@ -784,7 +784,7 @@ mod tests {
             Record::Positive(c.to_vec()),
             Record::Negative(c.to_vec()),
         ]);
-        w.swap();
+        w.publish();
 
         assert_eq!(r.get(&a[0..1]).unwrap().len(), 1);
         assert_eq!(r.get(&a[0..1]).unwrap()[0], b);
@@ -800,7 +800,7 @@ mod tests {
             ReaderProcessing::default(),
             Default::default(),
         );
-        w.swap();
+        w.publish();
 
         match r.get(&[1.into()]) {
             Err(LookupError::Miss((mut misses, _))) => {
@@ -826,13 +826,13 @@ mod tests {
                 ReaderProcessing::default(),
                 Default::default(),
             );
-            w.swap();
+            w.publish();
 
             let key = vec1![DfValue::from(0)];
             assert!(r.get(&key).err().unwrap().is_miss());
 
             w.mark_filled(key.clone().into()).unwrap();
-            w.swap();
+            w.publish();
             r.get(&key).unwrap();
         }
 
@@ -846,7 +846,7 @@ mod tests {
                 ReaderProcessing::default(),
                 Default::default(),
             );
-            w.swap();
+            w.publish();
 
             let range_key = &[KeyComparison::Range((
                 Bound::Included(vec1![DfValue::from(0)]),
@@ -859,7 +859,7 @@ mod tests {
                 &(vec1![DfValue::from(0)]..vec1![DfValue::from(10)]),
             ))
             .unwrap();
-            w.swap();
+            w.publish();
             r.get_multi(range_key).unwrap();
         }
     }
@@ -877,15 +877,15 @@ mod tests {
                 ReaderProcessing::default(),
                 Default::default(),
             );
-            w.swap();
+            w.publish();
 
             let key = vec1![DfValue::from(0)];
             w.mark_filled(key.clone().into()).unwrap();
-            w.swap();
+            w.publish();
             r.get(&key).unwrap();
 
             w.mark_hole(&key.clone().into()).unwrap();
-            w.swap();
+            w.publish();
             assert!(r.get(&key).err().unwrap().is_miss());
         }
 
@@ -899,7 +899,7 @@ mod tests {
                 ReaderProcessing::default(),
                 Default::default(),
             );
-            w.swap();
+            w.publish();
 
             let range_key = &[KeyComparison::Range((
                 Bound::Included(vec1![DfValue::from(0)]),
@@ -910,14 +910,14 @@ mod tests {
                 &(vec1![DfValue::from(0)]..vec1![DfValue::from(10)]),
             ))
             .unwrap();
-            w.swap();
+            w.publish();
             r.get_multi(range_key).unwrap();
 
             w.mark_hole(&KeyComparison::from_range(
                 &(vec1![DfValue::from(0)]..vec1![DfValue::from(10)]),
             ))
             .unwrap();
-            w.swap();
+            w.publish();
             assert!(r.get_multi(range_key).err().unwrap().is_miss());
         }
     }
