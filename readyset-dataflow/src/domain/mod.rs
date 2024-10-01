@@ -2054,18 +2054,14 @@ impl Domain {
         // do that inside the thread, because by the time that thread is scheduled,
         // we may already have processed some other messages that are not yet a
         // part of state.
-        let p = Box::new(Packet::ReplayPiece {
-            tag,
-            link,
-            context: ReplayPieceContext::Full {
-                // NOTE: If we're replaying from persistent state this might be wrong, since
-                // it's backed by an *estimate* of the number of keys in the state
-                last: is_empty,
-                replicas: replicas.clone(),
-            },
-            data: Vec::<Record>::new().into(),
-            cache_name: MIGRATION_CACHE_NAME_STUB.into(),
-        });
+        let data = Default::default();
+        let cache_name = MIGRATION_CACHE_NAME_STUB.into();
+        let context = ReplayPieceContext::Full {
+            // NOTE: If we're replaying from persistent state this might be wrong, since
+            // it's backed by an *estimate* of the number of keys in the state
+            last: is_empty,
+            replicas: replicas.clone(),
+        };
 
         let added_cols = self.ingress_inject.get(from).cloned();
         let default = {
@@ -2180,7 +2176,7 @@ impl Domain {
                     .increment(time.as_micros() as u64);
                 histogram!(recorded::DOMAIN_CHUNKED_REPLAY_TIME).record(time.as_micros() as f64);
             })?;
-        self.handle_replay(*p, executor)?;
+        self.handle_replay(link, tag, data, context, cache_name, executor)?;
 
         self.total_replay_time.stop();
         self.metrics.rec_chunked_replay_start_time(start.elapsed());
@@ -2616,13 +2612,19 @@ impl Domain {
                     self.metrics.rec_forward_time_input(start.elapsed());
                 }
             }
-            Packet::ReplayPiece { ref cache_name, .. } => {
+            Packet::ReplayPiece {
+                link,
+                tag,
+                data,
+                context,
+                cache_name,
+            } => {
                 let start = time::Instant::now();
-                let cache_name = cache_name.clone();
+                let name = cache_name.clone();
                 self.total_replay_time.start();
-                self.handle_replay(m, executor)?;
+                self.handle_replay(link, tag, data, context, cache_name, executor)?;
                 self.total_replay_time.stop();
-                self.metrics.rec_replay_time(&cache_name, start.elapsed());
+                self.metrics.rec_replay_time(&name, start.elapsed());
             }
             Packet::Evict {
                 req,
@@ -2953,22 +2955,14 @@ impl Domain {
             _ => internal!(),
         };
 
-        if self
-            .nodes
-            .get(*source)
-            .filter(|n| n.borrow().is_dropped())
-            .is_some()
-        {
-            warn!(?tag, node = ?source, domain = ?self.index, "replay path started with removed node; ignoring...");
+        let None = self.nodes.get(*source).filter(|n| n.borrow().is_dropped()) else {
+            warn!(?tag, node = ?source, domain = ?self.index, "ignoring replay from removed node");
             return Ok(());
-        }
+        };
 
-        let state = self.state.get(*source).ok_or_else(|| {
-            internal_err!(
-                "migration replay path (tag {:?}) started with non-materialized node",
-                tag
-            )
-        })?;
+        let Some(state) = self.state.get(*source) else {
+            internal!("migration replay ({:?}) from non-materialized node", tag);
+        };
 
         if let Some(node) = self.nodes.get(*source) {
             if node.borrow().is_base() {
@@ -3029,18 +3023,16 @@ impl Domain {
             );
 
             self.handle_replay(
-                Packet::ReplayPiece {
-                    link: Link::new(src, dst),
-                    tag,
-                    context: ReplayPieceContext::Partial {
-                        for_keys: found_keys,
-                        unishard, // if we are the only source, only one path
-                        requesting_shard,
-                        requesting_replica,
-                    },
-                    data: records.into(),
-                    cache_name,
+                Link::new(src, dst),
+                tag,
+                records.into(),
+                ReplayPieceContext::Partial {
+                    for_keys: found_keys,
+                    unishard, // if we are the only source, only one path
+                    requesting_shard,
+                    requesting_replica,
                 },
+                cache_name,
                 ex,
             )?;
         }
@@ -3049,16 +3041,15 @@ impl Domain {
     }
 
     #[allow(clippy::cognitive_complexity)]
-    fn handle_replay(&mut self, m: Packet, ex: &mut dyn Executor) -> ReadySetResult<()> {
-        let cache_name = if let Packet::ReplayPiece { ref cache_name, .. } = m {
-            cache_name.clone()
-        } else {
-            internal!()
-        };
-
-        let tag = m
-            .tag()
-            .ok_or_else(|| internal_err!("handle_replay called on an invalid message"))?;
+    fn handle_replay(
+        &mut self,
+        link: Link,
+        tag: Tag,
+        mut data: Records,
+        mut context: ReplayPieceContext,
+        cache_name: Relation,
+        ex: &mut dyn Executor,
+    ) -> ReadySetResult<()> {
         let path = self
             .replay_paths
             .get(tag)
@@ -3106,17 +3097,6 @@ impl Domain {
                     // another packet the local state we are constructing
                 }
             }
-
-            let (tag, link, mut data, mut context) = match m {
-                Packet::ReplayPiece {
-                    tag,
-                    link,
-                    data,
-                    context,
-                    ..
-                } => (tag, link, data, context),
-                _ => internal!(),
-            };
 
             if let ReplayPieceContext::Partial { ref for_keys, .. } = context {
                 trace!(
