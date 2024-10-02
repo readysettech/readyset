@@ -2709,26 +2709,34 @@ where
                 }
             }
             SetBehavior::Proxy => { /* Do nothing (the caller will proxy for us) */ }
-            SetBehavior::SetAutocommit(on) => {
-                warn!(
-                    // FIXME(REA-2168): Use correct dialect.
-                    set = %set.display(nom_sql::Dialect::MySQL),
-                    "received unsupported SET statement"
-                );
+            SetBehavior::SetAutocommit(enabled) => {
+                if !enabled {
+                    warn!(
+                        // FIXME(REA-2168): Use correct dialect.
+                        set = %set.display(nom_sql::Dialect::MySQL),
+                        "Disabling autocommit is an anti-pattern for use with Readyset, as all queries would then be proxied upstream."
+                    );
+                }
+
                 match settings.unsupported_set_mode {
-                    UnsupportedSetMode::Error if !on => {
-                        let e = ReadySetError::SetDisallowed {
-                            statement: query.to_string(),
-                        };
-                        if upstream.is_some() {
-                            event.set_noria_error(&e);
+                    UnsupportedSetMode::Error => {
+                        if enabled {
+                            state.proxy_state.set_autocommit(enabled);
+                        } else {
+                            let e = ReadySetError::DisableAutocommit {
+                                statement: query.to_string(),
+                            };
+                            if upstream.is_some() {
+                                event.set_noria_error(&e);
+                            }
+                            return Err(e.into());
                         }
-                        return Err(e.into());
                     }
                     UnsupportedSetMode::Proxy => {
-                        state.proxy_state.set_autocommit(on);
+                        state.proxy_state.set_autocommit(enabled);
                     }
-                    _ => {}
+                    // TODO: I'm not sure this is correct ....
+                    UnsupportedSetMode::Allow => {}
                 }
             }
             SetBehavior::SetSearchPath(search_path) => {
