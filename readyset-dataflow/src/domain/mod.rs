@@ -890,14 +890,14 @@ impl Domain {
 
                 trace!(?tag, keys = ?miss_keys, "sending replay request to self");
                 self.delayed_for_self
-                    .push_back(Packet::RequestPartialReplay {
+                    .push_back(Packet::RequestPartialReplay(RequestPartialReplay {
                         tag,
                         keys: miss_keys.clone(),
                         unishard: true, // local replays are necessarily single-shard
                         requesting_shard: self.shard(),
                         requesting_replica: self.replica(),
                         cache_name: cache_name.clone(),
-                    });
+                    }));
                 continue;
             }
 
@@ -935,8 +935,7 @@ impl Domain {
         // Map of replays we need to do, grouped by the set of columns at the *target* of the replay
         // (which in the case of remapped upqueries might be different than the columns we missed
         // on!)
-        let mut needed_replays: HashMap<(Target, Vec<usize>), Vec<KeyComparison>> =
-            Default::default();
+        let mut needed_replays: HashMap<_, Vec<KeyComparison>> = Default::default();
 
         for (replay_key, miss_key) in missed_keys {
             let miss = ColumnMiss {
@@ -1079,14 +1078,14 @@ impl Domain {
 
                 for trigger in options {
                     if trigger
-                        .send(Packet::RequestPartialReplay {
+                        .send(Packet::RequestPartialReplay(RequestPartialReplay {
                             tag,
                             unishard: false, // ask_all is true, so replay is sharded
                             keys: keys.clone(), // sad to clone here
                             requesting_shard,
                             requesting_replica,
                             cache_name: cache_name.clone(),
-                        })
+                        }))
                         .is_err()
                     {
                         // we're shutting down -- it's fine.
@@ -1103,14 +1102,14 @@ impl Domain {
 
             if options.len() == 1 {
                 if options[0]
-                    .send(Packet::RequestPartialReplay {
+                    .send(Packet::RequestPartialReplay(RequestPartialReplay {
                         tag,
                         keys,
                         unishard: true, // only one option, so only one path
                         requesting_shard,
                         requesting_replica,
                         cache_name,
-                    })
+                    }))
                     .is_err()
                 {
                     // we're shutting down -- it's fine.
@@ -1127,14 +1126,14 @@ impl Domain {
                 }
                 for (shard, keys) in shards {
                     if options[shard]
-                        .send(Packet::RequestPartialReplay {
+                        .send(Packet::RequestPartialReplay(RequestPartialReplay {
                             tag,
                             keys,
                             unishard: true, // !ask_all, so only one path
                             requesting_shard,
                             requesting_replica,
                             cache_name: cache_name.clone(),
-                        })
+                        }))
                         .is_err()
                     {
                         // we're shutting down -- it's fine.
@@ -2719,17 +2718,12 @@ impl Domain {
                 self.metrics
                     .rec_reader_replay_time(&cache_name, start.elapsed());
             }
-            Packet::RequestPartialReplay {
-                tag,
-                ref keys,
-                ref cache_name,
-                ..
-            } => {
-                trace!(%tag, ?keys, "got replay request");
+            Packet::RequestPartialReplay(pkt) => {
+                trace!(%pkt.tag, ?pkt.keys, "got replay request");
                 let start = time::Instant::now();
-                let cache_name = cache_name.clone();
+                let cache_name = pkt.cache_name.clone();
                 self.total_replay_time.start();
-                self.seed_all(m, executor)?;
+                self.seed_all(executor, pkt)?;
                 self.total_replay_time.stop();
                 self.metrics
                     .rec_seed_replay_time(&cache_name, start.elapsed());
@@ -2914,32 +2908,10 @@ impl Domain {
         }
     }
 
-    fn seed_all(&mut self, packet: Packet, ex: &mut dyn Executor) -> ReadySetResult<()> {
-        let (tag, keys, unishard, requesting_shard, requesting_replica, cache_name) =
-            if let Packet::RequestPartialReplay {
-                tag,
-                keys,
-                unishard,
-                requesting_shard,
-                requesting_replica,
-                cache_name,
-            } = packet
-            {
-                (
-                    tag,
-                    keys,
-                    unishard,
-                    requesting_shard,
-                    requesting_replica,
-                    cache_name,
-                )
-            } else {
-                internal!()
-            };
+    fn seed_all(&mut self, ex: &mut dyn Executor, pkt: RequestPartialReplay) -> ReadySetResult<()> {
+        let keys = pkt.keys.into_iter().collect();
 
-        let keys: HashSet<KeyComparison> = keys.into_iter().collect();
-
-        let (source, index, path) = match &self.replay_paths[tag] {
+        let (source, index, path) = match &self.replay_paths[pkt.tag] {
             ReplayPath {
                 source: Some(source),
                 trigger: TriggerEndpoint::Start(index),
@@ -2956,18 +2928,26 @@ impl Domain {
         };
 
         let None = self.nodes.get(*source).filter(|n| n.borrow().is_dropped()) else {
-            warn!(?tag, node = ?source, domain = ?self.index, "ignoring replay from removed node");
+            warn!(
+                ?pkt.tag,
+                node = ?source,
+                domain = ?self.index,
+                "ignoring replay from dropped node"
+            );
             return Ok(());
         };
 
         let Some(state) = self.state.get(*source) else {
-            internal!("migration replay ({:?}) from non-materialized node", tag);
+            internal!(
+                "migration replay ({:?}) from non-materialized node",
+                pkt.tag
+            );
         };
 
         if let Some(node) = self.nodes.get(*source) {
             if node.borrow().is_base() {
                 self.metrics
-                    .inc_base_table_lookups(&cache_name, node.borrow().name());
+                    .inc_base_table_lookups(&pkt.cache_name, node.borrow().name());
             }
         }
 
@@ -2990,7 +2970,7 @@ impl Domain {
             // we have missed in our lookup, so we have a partial replay through a partial replay
             // trigger a replay to source node, and enqueue this request.
             trace!(
-                ?tag,
+                ?pkt.tag,
                 miss_keys = ?replay_keys,
                 "missed during replay request"
             );
@@ -3006,33 +2986,28 @@ impl Domain {
                 // same for range queries was a whole bug that eta had to spend like 2
                 // hours tracking down, only to find it was as simple as this.
                 replay_keys,
-                unishard,
-                requesting_shard,
-                requesting_replica,
-                tag,
-                cache_name.clone(),
+                pkt.unishard,
+                pkt.requesting_shard,
+                pkt.requesting_replica,
+                pkt.tag,
+                pkt.cache_name.clone(),
             )?;
         }
 
         if !found_keys.is_empty() {
-            trace!(
-                %tag,
-                keys = ?found_keys,
-                ?records,
-                "satisfied replay request"
-            );
+            trace!(%pkt.tag, keys = ?found_keys, ?records, "satisfied replay request");
 
             self.handle_replay(
                 Link::new(src, dst),
-                tag,
+                pkt.tag,
                 records.into(),
                 ReplayPieceContext::Partial {
                     for_keys: found_keys,
-                    unishard, // if we are the only source, only one path
-                    requesting_shard,
-                    requesting_replica,
+                    unishard: pkt.unishard, // if we are the only source, only one path
+                    requesting_shard: pkt.requesting_shard,
+                    requesting_replica: pkt.requesting_replica,
                 },
-                cache_name,
+                pkt.cache_name,
                 ex,
             )?;
         }
@@ -3907,14 +3882,14 @@ impl Domain {
                     replay_sets.drain()
                 {
                     self.delayed_for_self
-                        .push_back(Packet::RequestPartialReplay {
+                        .push_back(Packet::RequestPartialReplay(RequestPartialReplay {
                             tag,
                             unishard,
                             keys,
                             requesting_shard,
                             requesting_replica,
                             cache_name: cache_name.clone(),
-                        });
+                        }));
                 }
 
                 if !waiting.holes.is_empty() {

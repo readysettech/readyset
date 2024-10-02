@@ -31,7 +31,7 @@ pub use readyset_client::internal::*;
 
 pub use crate::node::Node;
 pub use crate::ops::NodeOperator;
-pub use crate::payload::Packet;
+pub use crate::payload::{packets::*, Packet};
 pub use crate::Sharding;
 pub type Graph = petgraph::Graph<Node, Edge>;
 use dataflow_state::MaterializedNodeState;

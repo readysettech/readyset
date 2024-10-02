@@ -449,6 +449,21 @@ pub enum DomainRequest {
     Shutdown,
 }
 
+pub mod packets {
+    use super::*;
+
+    #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+    pub struct RequestPartialReplay {
+        pub tag: Tag,
+        pub keys: Vec<KeyComparison>,
+        pub unishard: bool,
+        pub requesting_shard: usize,
+        pub requesting_replica: usize,
+        /// The cache name associated with the replay. Only used for metric labels.
+        pub cache_name: Relation,
+    }
+}
+
 /// The primary unit of communication between nodes in the dataflow graph.
 ///
 /// FIXME(aspen): This should be refactored to be an enum-of-enums so that the various parts of
@@ -503,15 +518,7 @@ pub enum Packet {
 
     // Control messages
     /// Ask domain (nicely) to replay a particular set of keys.
-    RequestPartialReplay {
-        tag: Tag,
-        keys: Vec<KeyComparison>,
-        unishard: bool,
-        requesting_shard: usize,
-        requesting_replica: usize,
-        /// The cache name associated with the replay. Only used for metric labels.
-        cache_name: Relation,
-    },
+    RequestPartialReplay(RequestPartialReplay),
 
     /// Ask domain (nicely) to replay a particular set of keys into a Reader.
     RequestReaderReplay {
@@ -696,7 +703,7 @@ impl fmt::Display for Packet {
             Packet::Input { .. } => write!(f, "Input"),
             Packet::Message { .. } => write!(f, "Message"),
             Packet::RequestReaderReplay { .. } => write!(f, "RequestReaderReplay"),
-            Packet::RequestPartialReplay { .. } => write!(f, "RequestPartialReplay"),
+            Packet::RequestPartialReplay(_) => write!(f, "RequestPartialReplay"),
             Packet::ReplayPiece { .. } => write!(f, "ReplayPiece"),
             Packet::Timestamp { .. } => write!(f, "Timestamp"),
             Packet::Finish { .. } => write!(f, "Finish"),
@@ -708,20 +715,17 @@ impl fmt::Display for Packet {
 
 impl fmt::Debug for Packet {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
+        match self {
             Packet::Input { .. } => write!(f, "Packet::Input"),
-            Packet::Message { ref link, .. } => write!(f, "Packet::Message({:?})", link),
-            Packet::RequestReaderReplay { ref keys, .. } => {
+            Packet::Message { link, .. } => write!(f, "Packet::Message({:?})", link),
+            Packet::RequestReaderReplay { keys, .. } => {
                 write!(f, "Packet::RequestReaderReplay({:?})", keys)
             }
-            Packet::RequestPartialReplay { ref tag, .. } => {
-                write!(f, "Packet::RequestPartialReplay({:?})", tag)
+            Packet::RequestPartialReplay(x) => {
+                write!(f, "Packet::RequestPartialReplay({:?})", x.tag)
             }
             Packet::ReplayPiece {
-                ref link,
-                ref tag,
-                ref data,
-                ..
+                link, tag, data, ..
             } => write!(
                 f,
                 "Packet::ReplayPiece({:?}, tag {}, {} records)",
