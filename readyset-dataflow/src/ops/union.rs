@@ -411,6 +411,7 @@ impl Ingredient for Union {
         hm.insert("captured".into(), self.replay_pieces.len().to_string());
         hm
     }
+
     fn on_connected(&mut self, g: &Graph) {
         if let Emit::Project {
             ref mut cols,

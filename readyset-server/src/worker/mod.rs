@@ -310,7 +310,7 @@ impl Worker {
                 Ok(None)
             }
             WorkerRequestKind::ClearDomains => {
-                info!("controller requested that this worker clears its existing domains");
+                info!("controller requested that this worker clear its existing domains");
                 self.coord.clear();
                 self.domains.clear();
                 while let Some((result, domain)) = self.domain_wait_queue.next().await {

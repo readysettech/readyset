@@ -742,10 +742,7 @@ impl State for PersistentState {
     /// each additional index we add, will contain pointers to the primary index
     /// Panics if partial is Some
     fn add_index(&mut self, index: Index, partial: Option<Vec<Tag>>) {
-        #[allow(clippy::panic)] // This should definitely never happen!
-        {
-            assert!(partial.is_none(), "Bases can't be partial");
-        }
+        assert!(partial.is_none(), "Base tables can't be partial");
         let columns = &index.columns;
         let existing = self
             .db
@@ -2270,7 +2267,6 @@ impl SizeOf for PersistentState {
         mem::size_of::<Self>() as u64
     }
 
-    #[allow(clippy::panic)] // Can't return a result, panicking is the best we can do
     fn deep_size_of(&self) -> u64 {
         let inner = self.db.inner();
         inner
