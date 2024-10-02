@@ -3832,7 +3832,7 @@ impl Domain {
             self.finished_partial_replay(tag, finished_partial)?;
         }
 
-        // While the are still misses, we iterate over the array, each time draining it from
+        // While there are still misses, we iterate over the array, each time draining it from
         // elements that can be batched into a single call to `on_replay_misses`
         while let Some(next_replay) = need_replay.first().cloned() {
             let mut misses = HashSet::new();
@@ -3845,12 +3845,7 @@ impl Domain {
                 }
             });
 
-            trace!(
-                %tag,
-                ?misses,
-                on = %next_replay.idx,
-                "missed during replay processing"
-            );
+            trace!(%tag, ?misses, on = %next_replay.idx, "missed during replay processing");
 
             self.on_replay_misses(
                 next_replay.idx,
@@ -3865,12 +3860,7 @@ impl Domain {
         }
 
         if let Some((tag, dst, target, for_keys)) = finished {
-            trace!(
-                %dst,
-                %target,
-                keys = ?for_keys,
-                "partial replay finished"
-            );
+            trace!(%dst, %target, keys = ?for_keys, "partial replay finished");
             if let Some(mut waiting) = self.waiting.remove(dst) {
                 trace!(
                     keys = ?for_keys,
@@ -3900,33 +3890,35 @@ impl Domain {
                     let replay = match waiting.redos.remove(&hole) {
                         Some(x) => x,
                         None => {
-                            internal!("got backfill for unnecessary hole {:?} via tag {:?} (destined for node {})", Sensitive(&hole), tag, dst);
+                            internal!(
+                                "backfill for unnecessary hole {:?}, tag {:?} (for node {})",
+                                Sensitive(&hole),
+                                tag,
+                                dst
+                            );
                         }
                     };
 
                     // we may need more holes to fill before some replays should be re-attempted
-                    let replay: Vec<_> = replay
-                        .into_iter()
-                        .filter(|tagged_replay_key| {
-                            let left = waiting.holes.get_mut(tagged_replay_key).unwrap();
-                            *left -= 1;
+                    let replay = replay.into_iter().filter(|tagged_replay_key| {
+                        let left = waiting.holes.get_mut(tagged_replay_key).unwrap();
+                        *left -= 1;
 
-                            if *left == 0 {
-                                trace!(k = ?tagged_replay_key, "filled last hole for key, triggering replay");
+                        if *left == 0 {
+                            trace!(k = ?tagged_replay_key, "filled last hole, replaying");
 
-                                // we've filled all holes that prevented the replay previously!
-                                waiting.holes.remove(tagged_replay_key);
-                                true
-                            } else {
-                                trace!(
-                                    k = ?tagged_replay_key,
-                                    left = *left,
-                                    "filled hole for key, not triggering replay"
-                                );
-                                false
-                            }
-                        })
-                        .collect();
+                            // we've filled all holes that prevented the replay previously!
+                            waiting.holes.remove(tagged_replay_key);
+                            true
+                        } else {
+                            trace!(
+                                k = ?tagged_replay_key,
+                                left = *left,
+                                "filled hole for key, not triggering replay"
+                            );
+                            false
+                        }
+                    });
 
                     for Redo {
                         tag,
