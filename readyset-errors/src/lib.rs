@@ -100,6 +100,17 @@ pub enum ReadySetError {
         statement: String,
     },
 
+    /// The adapter will return this error on any set statement that disables
+    /// MySQL autocommit.
+    #[error(
+        "Disabling autocommit is an anti-pattern for use with Readyset, as all queries would then be proxied upstream: {}",
+        Sensitive(statement)
+    )]
+    DisableAutocommit {
+        /// The set statement passed to the mysql adapter
+        statement: String,
+    },
+
     /// Could not connect to the upstream database provided
     #[error("Could not connect to the upstream database provided")]
     InvalidUpstreamDatabase,
