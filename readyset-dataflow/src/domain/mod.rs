@@ -865,43 +865,12 @@ impl Domain {
         );
 
         for &tag in &tags {
-            // send a message to the source domain(s) responsible
-            // for the chosen tag so they'll start replay.
+            let (miss_keys, cache_name) = (miss_keys.clone(), cache_name.clone());
             if self.replay_paths[tag].trigger.is_local() {
-                // *in theory* we could just call self.seed_all, and everything would be good.
-                // however, then we start recursing, which could get us into sad situations where
-                // we break invariants where some piece of code is assuming that it is the only
-                // thing processing at the time (think, e.g., borrow_mut()).
-                //
-                // for example, consider the case where two misses occurred on the same key.
-                // normally, those requests would be deduplicated so that we don't get two replay
-                // responses for the same key later. however, the way we do that is by tracking
-                // keys we have requested in self.waiting.redos (see `redundant` in
-                // `on_replay_miss`). in particular, on_replay_miss is called while looping over
-                // all the misses that need replays, and while the first miss of a given key will
-                // trigger a replay, the second will not. if we call `seed_all` directly here,
-                // that might immediately fill in this key and remove the entry. when the next miss
-                // (for the same key) is then hit in the outer iteration, it will *also* request a
-                // replay of that same key, which gets us into trouble with `State::mark_filled`.
-                //
-                // so instead, we simply keep track of the fact that we have a replay to handle,
-                // and then get back to it after all processing has finished (at the bottom of
-                // `Self::handle()`)
-
-                trace!(?tag, keys = ?miss_keys, "sending replay request to self");
-                self.delayed_for_self
-                    .push_back(Packet::RequestPartialReplay(RequestPartialReplay {
-                        tag,
-                        keys: miss_keys.clone(),
-                        unishard: true, // local replays are necessarily single-shard
-                        requesting_shard: self.shard(),
-                        requesting_replica: self.replica(),
-                        cache_name: cache_name.clone(),
-                    }));
-                continue;
+                self.request_partial_replay_local(tag, miss_keys, cache_name);
+            } else {
+                self.request_partial_replay(tag, miss_keys, cache_name)?;
             }
-
-            self.send_partial_replay_request(tag, miss_keys.clone(), cache_name.clone())?;
         }
 
         Ok(())
@@ -1040,12 +1009,49 @@ impl Domain {
         Ok(())
     }
 
+    /// Send a partial replay request to oneself.
+    ///
+    /// In theory we could just call self.seed_all, and everything would be good.  However,
+    /// then we start recursing, which could get us into sad situations where we break
+    /// invariants where some piece of code is assuming that it is the only thing processing
+    /// at the time (think, e.g., borrow_mut()).
+    ///
+    /// For example, consider the case where two misses occurred on the same key.  Normally,
+    /// those requests would be deduplicated so that we don't get two replay responses for the
+    /// same key later.  However, the way we do that is by tracking keys we have requested in
+    /// self.waiting.redos (see `redundant` in `on_replay_miss`).  In particular, on_replay_miss
+    /// is called while looping over all the misses that need replays, and while the first miss
+    /// of a given key will trigger a replay, the second will not.  If we call `seed_all`
+    /// directly here, that might immediately fill in this key and remove the entry. when the
+    /// next miss (for the same key) is then hit in the outer iteration, it will *also* request
+    /// a replay of that same key, which gets us into trouble with `State::mark_filled`.
+    ///
+    /// So instead, we simply keep track of the fact that we have a replay to handle, and then
+    /// get back to it after all processing has finished (at the bottom of `Self::handle()`).
+    fn request_partial_replay_local(
+        &mut self,
+        tag: Tag,
+        keys: Vec<KeyComparison>,
+        cache_name: Relation,
+    ) {
+        trace!(?tag, ?keys, "sending replay request to self");
+        self.delayed_for_self
+            .push_back(Packet::RequestPartialReplay(RequestPartialReplay {
+                tag,
+                keys,
+                unishard: true, // local replays are necessarily single-shard
+                requesting_shard: self.shard(),
+                requesting_replica: self.replica(),
+                cache_name,
+            }));
+    }
+
     /// Send a partial replay request for keys to the replay path indicated by tag
     ///
     /// # Invariants
     ///
     /// * `tag` must be a tag for a valid replay path
-    fn send_partial_replay_request(
+    fn request_partial_replay(
         &mut self,
         tag: Tag,
         keys: Vec<KeyComparison>,
@@ -1055,96 +1061,64 @@ impl Domain {
         let requesting_replica = self.replica();
 
         #[allow(clippy::unwrap_used)] // documented invariant
-        if let TriggerEndpoint::End {
+        let TriggerEndpoint::End {
             source,
             ref mut options,
         } = self.replay_paths.get_mut(tag).unwrap().trigger
-        {
-            let ask_shard_by_key_i = match source {
-                SourceSelection::AllShards(_) => None,
-                SourceSelection::SameShard => {
-                    // note that we "ask all" here because we're not indexing the vector by the
-                    // key's shard index. unipath will still be set to true though, since
-                    // options.len() == 1.
-                    None
-                }
-                SourceSelection::KeyShard { key_i_to_shard, .. } => Some(key_i_to_shard),
-            };
-
-            if ask_shard_by_key_i.is_none() && options.len() != 1 {
-                // source is sharded by a different key than we are doing lookups for,
-                // so we need to trigger on all the shards.
-                trace!(?tag, ?keys, "sending shuffled shard replay request");
-
-                for trigger in options {
-                    if trigger
-                        .send(Packet::RequestPartialReplay(RequestPartialReplay {
-                            tag,
-                            unishard: false, // ask_all is true, so replay is sharded
-                            keys: keys.clone(), // sad to clone here
-                            requesting_shard,
-                            requesting_replica,
-                            cache_name: cache_name.clone(),
-                        }))
-                        .is_err()
-                    {
-                        // we're shutting down -- it's fine.
-                    }
-                }
-                return Ok(());
-            }
-
-            trace!(
-                tag = ?tag,
-                keys = ?keys,
-                "sending replay request",
-            );
-
-            if options.len() == 1 {
-                if options[0]
-                    .send(Packet::RequestPartialReplay(RequestPartialReplay {
-                        tag,
-                        keys,
-                        unishard: true, // only one option, so only one path
-                        requesting_shard,
-                        requesting_replica,
-                        cache_name,
-                    }))
-                    .is_err()
-                {
-                    // we're shutting down -- it's fine.
-                }
-            } else if let Some(key_shard_i) = ask_shard_by_key_i {
-                let mut shards = HashMap::new();
-                for key in keys {
-                    for shard in key.shard_keys_at(key_shard_i, options.len()) {
-                        shards
-                            .entry(shard)
-                            .or_insert_with(Vec::new)
-                            .push(key.clone());
-                    }
-                }
-                for (shard, keys) in shards {
-                    if options[shard]
-                        .send(Packet::RequestPartialReplay(RequestPartialReplay {
-                            tag,
-                            keys,
-                            unishard: true, // !ask_all, so only one path
-                            requesting_shard,
-                            requesting_replica,
-                            cache_name: cache_name.clone(),
-                        }))
-                        .is_err()
-                    {
-                        // we're shutting down -- it's fine.
-                    }
-                }
-            } else {
-                // would have hit the if further up
-                internal!();
-            };
-        } else {
+        else {
             internal!("asked to replay along non-existing path");
+        };
+
+        let ask_shard_by_key_i = match source {
+            SourceSelection::AllShards(_) => None,
+            SourceSelection::SameShard => {
+                // note that we "ask all" here because we're not indexing the vector by the
+                // key's shard index. unipath will still be set to true though, since
+                // options.len() == 1.
+                None
+            }
+            SourceSelection::KeyShard { key_i_to_shard, .. } => Some(key_i_to_shard),
+        };
+
+        let pkt = |unishard, keys| {
+            Packet::RequestPartialReplay(RequestPartialReplay {
+                tag,
+                unishard,
+                keys,
+                requesting_shard,
+                requesting_replica,
+                cache_name: cache_name.clone(),
+            })
+        };
+
+        if ask_shard_by_key_i.is_none() && options.len() != 1 {
+            // source is sharded by a different key than we are doing lookups for,
+            // so we need to trigger on all the shards.
+            trace!(?tag, ?keys, "sending broadcast shard replay request");
+
+            for trigger in options {
+                let _ = trigger.send(pkt(false, keys.clone())); // ignore error on shutdown
+            }
+        } else if options.len() == 1 {
+            trace!(tag = ?tag, keys = ?keys, "sending single replay request");
+            let _ = options[0].send(pkt(true, keys));
+        } else if let Some(key_shard_i) = ask_shard_by_key_i {
+            trace!(tag = ?tag, keys = ?keys, "sending sharded replay request");
+            let mut shards = HashMap::new();
+            for key in keys {
+                for shard in key.shard_keys_at(key_shard_i, options.len()) {
+                    shards
+                        .entry(shard)
+                        .or_insert_with(Vec::new)
+                        .push(key.clone());
+                }
+            }
+            for (shard, keys) in shards {
+                let _ = options[shard].send(pkt(true, keys));
+            }
+        } else {
+            // would have hit the if further up
+            internal!();
         }
         Ok(())
     }
