@@ -1625,6 +1625,14 @@ impl Domain {
         Ok(None)
     }
 
+    fn upquery_shards(miss: &KeyComparison, num_shards: usize) -> Vec<usize> {
+        if num_shards == 1 {
+            vec![0]
+        } else {
+            miss.shard_keys(num_shards)
+        }
+    }
+
     fn upquery(
         node: LocalNodeIndex,
         cols: &[usize],
@@ -1633,45 +1641,31 @@ impl Domain {
         misses: &mut dyn Iterator<Item = KeyComparison>,
         cache_name: Relation,
     ) -> bool {
-        if num_shards == 1 {
-            let misses = misses.collect::<Vec<_>>();
-            if misses.is_empty() {
-                return true;
+        let mut all = Vec::new();
+        let mut sharded = vec![Vec::new(); num_shards];
+        for (i, m) in misses.enumerate() {
+            assert!(num_shards == 1 || m.len() == 1);
+            for s in Self::upquery_shards(&m, num_shards) {
+                sharded[s].push(i);
             }
-            txs[0]
-                .send(Ok(Packet::RequestReaderReplay {
-                    node,
-                    cols: cols.to_vec(),
-                    keys: misses,
-                    cache_name,
-                }))
-                .is_ok()
-        } else {
-            let mut per_shard = HashMap::new();
-            for miss in misses {
-                assert_eq!(miss.len(), 1);
-                for shard in miss.shard_keys(num_shards) {
-                    per_shard
-                        .entry(shard)
-                        .or_insert_with(Vec::new)
-                        .push(miss.clone());
-                }
-            }
-            if per_shard.is_empty() {
-                return true;
-            }
-            per_shard.into_iter().all(|(shard, keys)| {
-                // we know txs.len() is equal to num_shards
-                txs[shard]
-                    .send(Ok(Packet::RequestReaderReplay {
-                        node,
-                        cols: cols.to_vec(),
-                        keys,
-                        cache_name: cache_name.clone(),
-                    }))
-                    .is_ok()
-            })
+            all.push(m);
         }
+
+        let pkt = |keys| Packet::RequestReaderReplay {
+            node,
+            cols: cols.to_vec(),
+            keys,
+            cache_name: cache_name.clone(),
+        };
+
+        sharded.into_iter().enumerate().all(|(shard, keys)| {
+            if keys.is_empty() {
+                true
+            } else {
+                let pkt = pkt(keys.into_iter().map(|i| all[i].clone()).collect());
+                txs[shard].send(Ok(pkt)).is_ok()
+            }
+        })
     }
 
     #[inline(always)]
