@@ -46,13 +46,13 @@ pub(crate) fn new(
 
 /// Allocate a new partially materialized end-user facing result table.
 ///
-/// Misses in this table will call `trigger` to populate the entry, and retry until successful.
+/// Misses in this table will call `upquery` to populate the entry, and retry until successful.
 ///
 /// # Arguments
 ///
 /// * `cols` - the number of columns in this table
 /// * `index` - the index for the reader
-/// * `trigger` - function to call to trigger an upquery and replay
+/// * `upquery` - function to call to trigger an upquery and replay
 ///
 /// # Invariants:
 ///
@@ -60,7 +60,7 @@ pub(crate) fn new(
 pub(crate) fn new_partial<F>(
     cols: usize,
     index: Index,
-    trigger: F,
+    upquery: F,
     eviction_kind: EvictionKind,
     reader_processing: ReaderProcessing,
     node_index: NodeIndex,
@@ -71,7 +71,7 @@ where
     new_inner(
         cols,
         index,
-        Some(Arc::new(trigger)),
+        Some(Arc::new(upquery)),
         eviction_kind,
         reader_processing,
         node_index,
@@ -85,7 +85,7 @@ where
 fn new_inner(
     cols: usize,
     index: Index,
-    trigger: Option<
+    upquery: Option<
         Arc<
             dyn Fn(&mut dyn Iterator<Item = KeyComparison>, Relation) -> bool
                 + 'static
@@ -139,7 +139,7 @@ fn new_inner(
             // PERF: this is likely not the most efficient way to do this - at some point we likely
             // want to pass whether we're fully materialized down into the reader_map and skip
             // inserting into the interval tree entirely (maybe make it an option?) if so
-            if trigger.is_none() {
+            if upquery.is_none() {
                 w.insert_full_range();
             }
             (multiw::Handle::$variant(w), multir::Handle::$variant(r))
@@ -153,7 +153,7 @@ fn new_inner(
     };
 
     let (notifier, receiver) = tokio::sync::broadcast::channel(1);
-    let partial = trigger.is_some();
+    let partial = upquery.is_some();
     let w = WriteHandle {
         partial,
         replay_done: partial,
@@ -168,7 +168,7 @@ fn new_inner(
 
     let r = SingleReadHandle {
         handle: r,
-        trigger,
+        upquery,
         index,
         post_lookup: post_processing,
         receiver,
@@ -476,7 +476,7 @@ impl SizeOf for WriteHandle {
 #[allow(clippy::type_complexity)]
 pub struct SingleReadHandle {
     handle: multir::Handle,
-    trigger: Option<
+    upquery: Option<
         Arc<
             dyn Fn(&mut dyn Iterator<Item = KeyComparison>, Relation) -> bool
                 + 'static
@@ -496,7 +496,7 @@ impl Clone for SingleReadHandle {
     fn clone(&self) -> Self {
         Self {
             handle: self.handle.clone(),
-            trigger: self.trigger.clone(),
+            upquery: self.upquery.clone(),
             index: self.index.clone(),
             post_lookup: self.post_lookup.clone(),
             receiver: self.receiver.resubscribe(),
@@ -509,7 +509,7 @@ impl std::fmt::Debug for SingleReadHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SingleReadHandle")
             .field("handle", &self.handle)
-            .field("has_trigger", &self.trigger.is_some())
+            .field("has_upquery", &self.upquery.is_some())
             .field("index", &self.index)
             .finish()
     }
@@ -517,11 +517,11 @@ impl std::fmt::Debug for SingleReadHandle {
 
 impl SingleReadHandle {
     /// Trigger a replay of a missing key from a partially materialized view.
-    pub fn trigger<I>(&self, mut keys: I, name: Relation) -> bool
+    pub fn upquery<I>(&self, mut keys: I, name: Relation) -> bool
     where
         I: Iterator<Item = KeyComparison>,
     {
-        let Some(ref t) = self.trigger else {
+        let Some(ref t) = self.upquery else {
             panic!("tried to trigger a replay for a fully materialized view");
         };
         t(&mut keys, name)
@@ -545,7 +545,7 @@ impl SingleReadHandle {
         keys: &'a [KeyComparison],
     ) -> Result<SharedResults, LookupError<'a>> {
         match self.handle.get_multi(keys) {
-            Err(e) if e.is_miss() && self.trigger.is_none() => Ok(SharedResults::default()),
+            Err(e) if e.is_miss() && self.upquery.is_none() => Ok(SharedResults::default()),
             r => r,
         }
     }
@@ -560,7 +560,7 @@ impl SingleReadHandle {
             .handle
             .get_multi_and_map_error(keys, || self.receiver.resubscribe())
         {
-            Err(e) if e.is_miss() && self.trigger.is_none() => Ok(SharedResults::default()),
+            Err(e) if e.is_miss() && self.upquery.is_none() => Ok(SharedResults::default()),
             r => r,
         }
     }
@@ -607,7 +607,7 @@ mod tests {
     impl SingleReadHandle {
         fn get<'a>(&self, key: &'a [DfValue]) -> Result<SharedRows, LookupError<'a>> {
             match self.handle.get(key) {
-                Err(e) if e.is_miss() && self.trigger.is_none() => Ok(SharedRows::default()),
+                Err(e) if e.is_miss() && self.upquery.is_none() => Ok(SharedRows::default()),
                 r => r,
             }
         }
