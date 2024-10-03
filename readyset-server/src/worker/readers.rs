@@ -243,7 +243,7 @@ impl ReadRequestHandler {
 
         // Trigger backfills for all the keys we missed on, regardless of a consistency hit/miss
         if !keys_to_replay.is_empty() {
-            reader.trigger(
+            reader.upquery(
                 keys_to_replay.into_iter().map(|k| k.into_owned()),
                 target.name.clone(),
             );
@@ -549,7 +549,7 @@ impl BlockingRead {
             self.eviction_epoch = cur_eviction_epoch;
             // Retrigger all un-read keys. Its possible they could have been filled and then
             // evicted again without us reading it.
-            if !reader.trigger(
+            if !reader.upquery(
                 still_waiting.into_iter().map(|v| v.into_owned()),
                 self.target.name.clone(),
             ) {
