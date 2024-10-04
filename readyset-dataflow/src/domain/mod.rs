@@ -1364,7 +1364,7 @@ impl Domain {
 
     fn handle_timestamp(
         &mut self,
-        message: Packet,
+        message: Timestamp,
         executor: &mut dyn Executor,
     ) -> ReadySetResult<()> {
         let me = message.dst();
@@ -2613,7 +2613,7 @@ impl Domain {
                 );
                 self.handle_eviction(e.req, executor, e.done, e.barrier, e.credits)?;
             }
-            Packet::Timestamp(_) => {
+            Packet::Timestamp(m) => {
                 // TODO(justinmiron): Handle timestamp packets at data flow nodes. The
                 // ack should be moved to the base table node's handling of the packet.
                 // As the packet is not propagated or mutated before reaching the
