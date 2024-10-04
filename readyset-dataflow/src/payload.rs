@@ -462,6 +462,32 @@ pub mod packets {
         /// The cache name associated with the replay. Only used for metric labels.
         pub cache_name: Relation,
     }
+
+    #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+    pub struct RequestReaderReplay {
+        pub node: LocalNodeIndex,
+        pub cols: Vec<usize>,
+        pub keys: Vec<KeyComparison>,
+        /// The cache name associated with the replay. Only used for metric labels.
+        pub cache_name: Relation,
+    }
+
+    #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+    pub struct Evict {
+        /// The eviction request
+        pub req: EvictRequest,
+        /// If a URL is provided, flush downstream connections using provided barrier credits.
+        pub done: Option<Url>,
+        pub barrier: u128,
+        pub credits: u128,
+    }
+
+    #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+    pub struct Timestamp {
+        pub link: Option<Link>,
+        pub src: SourceChannelIdentifier,
+        pub timestamp: PacketData,
+    }
 }
 
 /// The primary unit of communication between nodes in the dataflow graph.
@@ -498,16 +524,6 @@ pub enum Packet {
         cache_name: Relation,
     },
 
-    /// Trigger an eviction.
-    Evict {
-        /// The eviction request
-        req: EvictRequest,
-        /// If a URL is provided, flush downstream connections using provided barrier credits.
-        done: Option<Url>,
-        barrier: u128,
-        credits: u128,
-    },
-
     // Internal control
     Finish {
         tag: Tag,
@@ -521,23 +537,16 @@ pub enum Packet {
     RequestPartialReplay(RequestPartialReplay),
 
     /// Ask domain (nicely) to replay a particular set of keys into a Reader.
-    RequestReaderReplay {
-        node: LocalNodeIndex,
-        cols: Vec<usize>,
-        keys: Vec<KeyComparison>,
-        /// The cache name associated with the replay. Only used for metric labels.
-        cache_name: Relation,
-    },
+    RequestReaderReplay(RequestReaderReplay),
+
+    /// Trigger an eviction.
+    Evict(Evict),
 
     /// A packet used solely to drive the event loop forward.
     Spin,
 
     /// Propagate updated timestamps for the set of base tables.
-    Timestamp {
-        link: Option<Link>,
-        src: SourceChannelIdentifier,
-        timestamp: PacketData,
-    },
+    Timestamp(Timestamp),
 }
 
 // Getting rid of the various unreachables on the accessor functions in this impl requires
@@ -546,39 +555,31 @@ pub enum Packet {
 // https://readysettech.atlassian.net/browse/ENG-455.
 impl Packet {
     pub(crate) fn src(&self) -> LocalNodeIndex {
-        match *self {
+        match self {
             // inputs come "from" the base table too
-            Packet::Input { ref inner, .. } => inner.dst,
-            Packet::Message { ref link, .. } => link.src,
-            Packet::ReplayPiece { ref link, .. } => link.src,
+            Packet::Input { inner, .. } => inner.dst,
+            Packet::Message { link, .. } => link.src,
+            Packet::ReplayPiece { link, .. } => link.src,
             // If link is not specified, then we are at a base table node. Use the packet data
             // to get the src (which is the base table node).
-            Packet::Timestamp {
-                ref link,
-                ref timestamp,
-                ..
-            } => match link {
+            Packet::Timestamp(x) => match x.link {
                 Some(l) => l.src,
-                None => timestamp.dst,
+                None => x.timestamp.dst,
             },
             _ => unreachable!(),
         }
     }
 
     pub(crate) fn dst(&self) -> LocalNodeIndex {
-        match *self {
-            Packet::Input { ref inner, .. } => inner.dst,
-            Packet::Message { ref link, .. } => link.dst,
-            Packet::ReplayPiece { ref link, .. } => link.dst,
+        match self {
+            Packet::Input { inner, .. } => inner.dst,
+            Packet::Message { link, .. } => link.dst,
+            Packet::ReplayPiece { link, .. } => link.dst,
             // If link is not specified, then we are at a base table node. Use the packet data
             // to get the dst (which is the base table node).
-            Packet::Timestamp {
-                ref link,
-                ref timestamp,
-                ..
-            } => match link {
+            Packet::Timestamp(x) => match x.link {
                 Some(l) => l.dst,
-                None => timestamp.dst,
+                None => x.timestamp.dst,
             },
             _ => unreachable!(),
         }
@@ -588,11 +589,11 @@ impl Packet {
         match *self {
             Packet::Message { ref mut link, .. } => link,
             Packet::ReplayPiece { ref mut link, .. } => link,
-            Packet::Evict {
+            Packet::Evict(Evict {
                 req: EvictRequest::Keys { ref mut link, .. },
                 ..
-            } => link,
-            Packet::Timestamp { ref mut link, .. } => link.as_mut().unwrap(),
+            }) => link,
+            Packet::Timestamp(ref mut x) => x.link.as_mut().unwrap(),
             _ => unreachable!(),
         }
     }
@@ -635,10 +636,10 @@ impl Packet {
     pub(crate) fn tag(&self) -> Option<Tag> {
         match *self {
             Packet::ReplayPiece { tag, .. }
-            | Packet::Evict {
+            | Packet::Evict(Evict {
                 req: EvictRequest::Keys { tag, .. } | EvictRequest::SingleKey { tag, .. },
                 ..
-            } => Some(tag),
+            }) => Some(tag),
             _ => None,
         }
     }
@@ -653,38 +654,30 @@ impl Packet {
     }
 
     pub(crate) fn clone_data(&self) -> Self {
-        match *self {
-            Packet::Message {
-                link,
-                ref data,
-                ref trace,
-            } => Packet::Message {
-                link,
+        match self {
+            Packet::Message { link, data, trace } => Packet::Message {
+                link: *link,
                 data: data.clone(),
                 trace: trace.clone(),
             },
             Packet::ReplayPiece {
                 link,
                 tag,
-                ref data,
-                ref context,
-                ref cache_name,
+                data,
+                context,
+                cache_name,
             } => Packet::ReplayPiece {
-                link,
-                tag,
+                link: *link,
+                tag: *tag,
                 data: data.clone(),
                 context: context.clone(),
                 cache_name: cache_name.clone(),
             },
-            Packet::Timestamp {
-                ref timestamp,
-                link,
-                src,
-            } => Packet::Timestamp {
-                link,
-                src,
-                timestamp: timestamp.clone(),
-            },
+            Packet::Timestamp(x) => Packet::Timestamp(Timestamp {
+                link: x.link,
+                src: x.src,
+                timestamp: x.timestamp.clone(),
+            }),
             _ => unreachable!(),
         }
     }
@@ -702,13 +695,13 @@ impl fmt::Display for Packet {
         match self {
             Packet::Input { .. } => write!(f, "Input"),
             Packet::Message { .. } => write!(f, "Message"),
-            Packet::RequestReaderReplay { .. } => write!(f, "RequestReaderReplay"),
+            Packet::RequestReaderReplay(_) => write!(f, "RequestReaderReplay"),
             Packet::RequestPartialReplay(_) => write!(f, "RequestPartialReplay"),
             Packet::ReplayPiece { .. } => write!(f, "ReplayPiece"),
-            Packet::Timestamp { .. } => write!(f, "Timestamp"),
+            Packet::Timestamp(_) => write!(f, "Timestamp"),
             Packet::Finish { .. } => write!(f, "Finish"),
             Packet::Spin { .. } => write!(f, "Spin"),
-            Packet::Evict { .. } => write!(f, "Evict"),
+            Packet::Evict(_) => write!(f, "Evict"),
         }
     }
 }
@@ -718,8 +711,8 @@ impl fmt::Debug for Packet {
         match self {
             Packet::Input { .. } => write!(f, "Packet::Input"),
             Packet::Message { link, .. } => write!(f, "Packet::Message({:?})", link),
-            Packet::RequestReaderReplay { keys, .. } => {
-                write!(f, "Packet::RequestReaderReplay({:?})", keys)
+            Packet::RequestReaderReplay(x) => {
+                write!(f, "Packet::RequestReaderReplay({:?})", x.keys)
             }
             Packet::RequestPartialReplay(x) => {
                 write!(f, "Packet::RequestPartialReplay({:?})", x.tag)
@@ -733,10 +726,10 @@ impl fmt::Debug for Packet {
                 tag,
                 data.len()
             ),
-            Packet::Timestamp { .. } => write!(f, "Packet::Timestamp"),
+            Packet::Timestamp(_) => write!(f, "Packet::Timestamp"),
             Packet::Finish { .. } => write!(f, "Packet::Finish"),
             Packet::Spin { .. } => write!(f, "Packet::Spin"),
-            Packet::Evict { .. } => write!(f, "Packet::Evict"),
+            Packet::Evict(_) => write!(f, "Packet::Evict"),
         }
     }
 }
