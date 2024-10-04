@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::task::{ready, Context, Poll};
 use std::time::Duration;
 
-use dataflow::payload::EvictRequest;
+use dataflow::payload::{packets::Evict, EvictRequest};
 use dataflow::{ChannelCoordinator, DomainBuilder, DomainRequest, Packet, Readers};
 use enum_kinds::EnumKind;
 use futures::stream::FuturesUnordered;
@@ -677,7 +677,7 @@ async fn evict_check(
                 })
             })?),
         };
-        let pkt = Packet::Evict {
+        let pkt = Packet::Evict(Evict {
             req: EvictRequest::Bytes {
                 node: None,
                 num_bytes: evict,
@@ -685,7 +685,7 @@ async fn evict_check(
             done: Some(url.clone()),
             barrier: barrier.id(),
             credits: barrier.split(),
-        };
+        });
         if let Err(e) = tx.send(pkt).await {
             // probably exiting?
             warn!(

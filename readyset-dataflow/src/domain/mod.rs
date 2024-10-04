@@ -1625,7 +1625,7 @@ impl Domain {
         Ok(None)
     }
 
-    fn upquery_shards(miss: &KeyComparison, num_shards: usize) -> Vec<usize> {
+    fn send_shards(miss: &KeyComparison, num_shards: usize) -> Vec<usize> {
         if num_shards == 1 {
             vec![0]
         } else {
@@ -1633,30 +1633,23 @@ impl Domain {
         }
     }
 
-    fn upquery(
-        node: LocalNodeIndex,
-        cols: &[usize],
-        num_shards: usize,
+    fn send_up<P>(
         txs: &[UnboundedSender<Result<Packet, Box<bincode::ErrorKind>>>],
-        misses: &mut dyn Iterator<Item = KeyComparison>,
-        cache_name: Relation,
-    ) -> bool {
+        keys: &mut dyn Iterator<Item = KeyComparison>,
+        pkt: P,
+    ) -> bool
+    where
+        P: Fn(Vec<KeyComparison>) -> Packet,
+    {
         let mut all = Vec::new();
-        let mut sharded = vec![Vec::new(); num_shards];
-        for (i, m) in misses.enumerate() {
-            assert!(num_shards == 1 || m.len() == 1);
-            for s in Self::upquery_shards(&m, num_shards) {
+        let mut sharded = vec![Vec::new(); txs.len()];
+        for (i, m) in keys.enumerate() {
+            assert!(txs.len() == 1 || m.len() == 1);
+            for s in Self::send_shards(&m, txs.len()) {
                 sharded[s].push(i);
             }
             all.push(m);
         }
-
-        let pkt = |keys| Packet::RequestReaderReplay {
-            node,
-            cols: cols.to_vec(),
-            keys,
-            cache_name: cache_name.clone(),
-        };
 
         sharded.into_iter().enumerate().all(|(shard, keys)| {
             if keys.is_empty() {
@@ -1665,6 +1658,23 @@ impl Domain {
                 let pkt = pkt(keys.into_iter().map(|i| all[i].clone()).collect());
                 txs[shard].send(Ok(pkt)).is_ok()
             }
+        })
+    }
+
+    fn upquery(
+        txs: &[UnboundedSender<Result<Packet, Box<bincode::ErrorKind>>>],
+        node: LocalNodeIndex,
+        cache_name: &Relation,
+        cols: &[usize],
+        misses: &mut dyn Iterator<Item = KeyComparison>,
+    ) -> bool {
+        Self::send_up(txs, misses, |keys| {
+            Packet::RequestReaderReplay(RequestReaderReplay {
+                node,
+                cols: cols.to_vec(),
+                keys,
+                cache_name: cache_name.clone(),
+            })
         })
     }
 
@@ -1768,10 +1778,11 @@ impl Domain {
                 #[allow(clippy::unwrap_used)] // checked it was a reader above
                 let r = n.as_mut_reader().unwrap();
 
+                let name2 = name.clone();
                 let (read, write) = backlog::new_partial(
                     num_columns,
                     index,
-                    move |misses, name| Self::upquery(node, &cols, num_shards, &txs, misses, name),
+                    move |misses| Self::upquery(&txs, node, &name2, &cols, misses),
                     self.eviction_kind,
                     r.reader_processing().clone(),
                     node_index,
@@ -2593,21 +2604,16 @@ impl Domain {
                 self.total_replay_time.stop();
                 self.metrics.rec_replay_time(&name, start.elapsed());
             }
-            Packet::Evict {
-                req,
-                done,
-                barrier,
-                credits,
-            } => {
+            Packet::Evict(e) => {
                 debug!(
                     "{} evicting in barrier {:x}, credits: {:x}",
                     self.address(),
-                    barrier,
-                    credits
+                    e.barrier,
+                    e.credits
                 );
-                self.handle_eviction(req, executor, done, barrier, credits)?;
+                self.handle_eviction(e.req, executor, e.done, e.barrier, e.credits)?;
             }
-            Packet::Timestamp { .. } => {
+            Packet::Timestamp(_) => {
                 // TODO(justinmiron): Handle timestamp packets at data flow nodes. The
                 // ack should be moved to the base table node's handling of the packet.
                 // As the packet is not propagated or mutated before reaching the
@@ -2615,12 +2621,12 @@ impl Domain {
                 // to ack the packet.
                 self.handle_timestamp(m, executor)?;
             }
-            Packet::RequestReaderReplay {
+            Packet::RequestReaderReplay(RequestReaderReplay {
                 mut keys,
                 cols,
                 node,
                 cache_name,
-            } => {
+            }) => {
                 let start = time::Instant::now();
                 self.total_replay_time.start();
 
@@ -4751,15 +4757,10 @@ impl Barrier {
 
     fn send(&self, ex: &mut dyn Executor, rep: ReplicaAddress, mut msg: Packet, credits: u128) {
         match msg {
-            Packet::Evict {
-                done: ref mut d,
-                barrier: ref mut b,
-                credits: ref mut c,
-                ..
-            } => {
-                *d = Some(self.done.clone());
-                *b = self.id;
-                *c = credits;
+            Packet::Evict(ref mut e) => {
+                e.done = Some(self.done.clone());
+                e.barrier = self.id;
+                e.credits = credits;
             }
             ref pkt => {
                 warn!("unexpected packet type during eviction: {:?}", pkt);
@@ -4786,7 +4787,7 @@ mod test {
     }
 
     const fn fake_packet() -> Packet {
-        Packet::Evict {
+        Packet::Evict(Evict {
             req: EvictRequest::Bytes {
                 node: None,
                 num_bytes: 0,
@@ -4794,7 +4795,7 @@ mod test {
             done: None,
             barrier: 0,
             credits: 0,
-        }
+        })
     }
 
     #[test]
@@ -4829,16 +4830,10 @@ mod test {
 
         let mut total = 0;
         for pkt in out.take_messages().pop().unwrap().1 {
-            if let Packet::Evict {
-                done,
-                barrier,
-                credits,
-                ..
-            } = pkt
-            {
-                assert_eq!(done, Some(url.clone()));
-                assert_eq!(barrier, BID);
-                total += credits;
+            if let Packet::Evict(e) = pkt {
+                assert_eq!(e.done, Some(url.clone()));
+                assert_eq!(e.barrier, BID);
+                total += e.credits;
             }
         }
 

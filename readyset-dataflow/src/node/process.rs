@@ -14,7 +14,7 @@ use crate::node::NodeType;
 use crate::payload::EvictRequest;
 use crate::prelude::*;
 use crate::processing::{MissLookupKey, MissReplayKey};
-use crate::{backlog, payload};
+use crate::{backlog, payload, payload::packets};
 
 /// The results of running a forward pass on a node
 #[derive(Debug, PartialEq, Eq, Default)]
@@ -465,7 +465,7 @@ impl Node {
             NodeType::Base(..) => {}
             NodeType::Egress(Some(ref mut e)) => {
                 e.process(
-                    &mut Some(Packet::Evict {
+                    &mut Some(Packet::Evict(Evict {
                         req: EvictRequest::Keys {
                             link: Link {
                                 src: addr,
@@ -477,7 +477,7 @@ impl Node {
                         done: None,
                         barrier: 0,
                         credits: 0,
-                    }),
+                    })),
                     None,
                     on_shard.unwrap_or(0),
                     on_replica,
@@ -594,11 +594,11 @@ impl Node {
         let src_node = m.src();
         let addr = self.local_addr();
         match m {
-            Packet::Timestamp {
+            Packet::Timestamp(packets::Timestamp {
                 link,
                 src,
                 timestamp,
-            } => {
+            }) => {
                 let PacketData { dst, data, .. } = timestamp;
 
                 let timestamp: Timestamp =
@@ -658,7 +658,7 @@ impl Node {
 
                 // We leave the link untouched, the domain will be responsible
                 // for updating it.
-                let p = Packet::Timestamp {
+                let p = Packet::Timestamp(packets::Timestamp {
                     link,
                     src,
                     timestamp: PacketData {
@@ -666,7 +666,7 @@ impl Node {
                         data: PacketPayload::Timestamp(timestamp),
                         trace: None,
                     },
-                };
+                });
 
                 // Some node types require additional packet handling after aggregating
                 // all parent node timestamps.

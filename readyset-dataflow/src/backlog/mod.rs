@@ -5,7 +5,6 @@ use std::sync::Arc;
 use ahash::RandomState;
 use common::SizeOf;
 use dataflow_expression::{PostLookup, ReaderProcessing};
-use nom_sql::Relation;
 use reader_map::{EvictionQuantity, EvictionStrategy};
 use readyset_client::consistency::Timestamp;
 use readyset_client::results::SharedResults;
@@ -66,7 +65,7 @@ pub(crate) fn new_partial<F>(
     node_index: NodeIndex,
 ) -> (SingleReadHandle, WriteHandle)
 where
-    F: Fn(&mut dyn Iterator<Item = KeyComparison>, Relation) -> bool + 'static + Send + Sync,
+    F: Fn(&mut dyn Iterator<Item = KeyComparison>) -> bool + 'static + Send + Sync,
 {
     new_inner(
         cols,
@@ -86,12 +85,7 @@ fn new_inner(
     cols: usize,
     index: Index,
     upquery: Option<
-        Arc<
-            dyn Fn(&mut dyn Iterator<Item = KeyComparison>, Relation) -> bool
-                + 'static
-                + Send
-                + Sync,
-        >,
+        Arc<dyn Fn(&mut dyn Iterator<Item = KeyComparison>) -> bool + 'static + Send + Sync>,
     >,
     eviction_kind: EvictionKind,
     reader_processing: ReaderProcessing,
@@ -477,12 +471,7 @@ impl SizeOf for WriteHandle {
 pub struct SingleReadHandle {
     handle: multir::Handle,
     upquery: Option<
-        Arc<
-            dyn Fn(&mut dyn Iterator<Item = KeyComparison>, Relation) -> bool
-                + 'static
-                + Send
-                + Sync,
-        >,
+        Arc<dyn Fn(&mut dyn Iterator<Item = KeyComparison>) -> bool + 'static + Send + Sync>,
     >,
     index: Index,
     pub post_lookup: PostLookup,
@@ -517,14 +506,14 @@ impl std::fmt::Debug for SingleReadHandle {
 
 impl SingleReadHandle {
     /// Trigger a replay of a missing key from a partially materialized view.
-    pub fn upquery<I>(&self, mut keys: I, name: Relation) -> bool
+    pub fn upquery<I>(&self, mut keys: I) -> bool
     where
         I: Iterator<Item = KeyComparison>,
     {
         let Some(ref t) = self.upquery else {
             panic!("tried to trigger a replay for a fully materialized view");
         };
-        t(&mut keys, name)
+        t(&mut keys)
     }
 
     /// Returns None if this handle is not ready, Some(true) if this handle fully contains the
@@ -795,7 +784,7 @@ mod tests {
         let (r, mut w) = new_partial(
             1,
             Index::hash_map(vec![0]),
-            |_: &mut dyn Iterator<Item = KeyComparison>, _| true,
+            |_: &mut dyn Iterator<Item = KeyComparison>| true,
             EvictionKind::default(),
             ReaderProcessing::default(),
             Default::default(),
@@ -821,7 +810,7 @@ mod tests {
             let (r, mut w) = new_partial(
                 1,
                 Index::hash_map(vec![0]),
-                |_: &mut dyn Iterator<Item = KeyComparison>, _| true,
+                |_: &mut dyn Iterator<Item = KeyComparison>| true,
                 EvictionKind::default(),
                 ReaderProcessing::default(),
                 Default::default(),
@@ -841,7 +830,7 @@ mod tests {
             let (r, mut w) = new_partial(
                 1,
                 Index::btree_map(vec![0]),
-                |_: &mut dyn Iterator<Item = KeyComparison>, _| true,
+                |_: &mut dyn Iterator<Item = KeyComparison>| true,
                 EvictionKind::default(),
                 ReaderProcessing::default(),
                 Default::default(),
@@ -872,7 +861,7 @@ mod tests {
             let (r, mut w) = new_partial(
                 1,
                 Index::btree_map(vec![0]),
-                |_: &mut dyn Iterator<Item = KeyComparison>, _| true,
+                |_: &mut dyn Iterator<Item = KeyComparison>| true,
                 EvictionKind::default(),
                 ReaderProcessing::default(),
                 Default::default(),
@@ -894,7 +883,7 @@ mod tests {
             let (r, mut w) = new_partial(
                 1,
                 Index::btree_map(vec![0]),
-                |_: &mut dyn Iterator<Item = KeyComparison>, _| true,
+                |_: &mut dyn Iterator<Item = KeyComparison>| true,
                 EvictionKind::default(),
                 ReaderProcessing::default(),
                 Default::default(),

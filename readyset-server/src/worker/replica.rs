@@ -4,6 +4,7 @@ use std::net::SocketAddr;
 use std::sync::{atomic, Arc};
 use std::time;
 
+use dataflow::payload::packets::{RequestReaderReplay, Timestamp};
 use dataflow::payload::{MaterializedState, SourceChannelIdentifier};
 use dataflow::prelude::Upcall;
 use dataflow::{Domain, DomainReceiver, DomainRequest, DualTcpStream, Outboxes, Packet};
@@ -111,9 +112,9 @@ fn flatten_request_reader_replay(
     let mut i = 0;
     while i < packets.len() {
         match packets.get_mut(i) {
-            Some(Packet::RequestReaderReplay {
+            Some(Packet::RequestReaderReplay(RequestReaderReplay {
                 node, cols, keys, ..
-            }) if *node == n && *cols == c => {
+            })) if *node == n && *cols == c => {
                 unique_keys.extend(keys.drain(..));
                 packets.remove(i);
             }
@@ -155,12 +156,12 @@ impl Replica {
                         inner: input,
                         src: SourceChannelIdentifier { token, tag },
                     },
-                    PacketPayload::Timestamp(_) => Packet::Timestamp {
+                    PacketPayload::Timestamp(_) => Packet::Timestamp(Timestamp {
                         // The link values propagated to the base table are not used.
                         link: None,
                         src: SourceChannelIdentifier { token, tag },
                         timestamp: input,
-                    },
+                    }),
                 }
             })
         } else {
@@ -387,10 +388,10 @@ impl Replica {
             Some(mut packets) => {
                 while let Some(mut packet) = packets.pop_front() {
                     let ack = match &mut packet {
-                        Packet::Timestamp {
+                        Packet::Timestamp(Timestamp {
                             src: SourceChannelIdentifier { token, tag },
                             ..
-                        }
+                        })
                         | Packet::Input {
                             src: SourceChannelIdentifier { token, tag },
                             ..
@@ -402,9 +403,12 @@ impl Replica {
                                 .find(|(t, _)| *t == *token)
                                 .map(|(_, conn)| (*tag, conn))
                         }
-                        Packet::RequestReaderReplay {
-                            node, cols, keys, ..
-                        } => {
+                        Packet::RequestReaderReplay(RequestReaderReplay {
+                            node,
+                            cols,
+                            keys,
+                            ..
+                        }) => {
                             // We want to batch multiple reader replay requests into a single call
                             // while deduplicating non unique keys
                             let mut unique_keys = keys.drain(..).collect();
