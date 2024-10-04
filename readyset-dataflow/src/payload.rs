@@ -488,6 +488,26 @@ pub mod packets {
         pub src: SourceChannelIdentifier,
         pub timestamp: PacketData,
     }
+
+    impl Timestamp {
+        pub(crate) fn src(&self) -> LocalNodeIndex {
+            // If link is not specified, then we are at a base table node. Use the packet data
+            // to get the src (which is the base table node).
+            match self.link {
+                Some(l) => l.src,
+                None => self.timestamp.dst,
+            }
+        }
+
+        pub(crate) fn dst(&self) -> LocalNodeIndex {
+            // If link is not specified, then we are at a base table node. Use the packet data
+            // to get the dst (which is the base table node).
+            match self.link {
+                Some(l) => l.dst,
+                None => self.timestamp.dst,
+            }
+        }
+    }
 }
 
 /// The primary unit of communication between nodes in the dataflow graph.
@@ -560,12 +580,7 @@ impl Packet {
             Packet::Input { inner, .. } => inner.dst,
             Packet::Message { link, .. } => link.src,
             Packet::ReplayPiece { link, .. } => link.src,
-            // If link is not specified, then we are at a base table node. Use the packet data
-            // to get the src (which is the base table node).
-            Packet::Timestamp(x) => match x.link {
-                Some(l) => l.src,
-                None => x.timestamp.dst,
-            },
+            Packet::Timestamp(x) => x.src(),
             _ => unreachable!(),
         }
     }
@@ -575,12 +590,7 @@ impl Packet {
             Packet::Input { inner, .. } => inner.dst,
             Packet::Message { link, .. } => link.dst,
             Packet::ReplayPiece { link, .. } => link.dst,
-            // If link is not specified, then we are at a base table node. Use the packet data
-            // to get the dst (which is the base table node).
-            Packet::Timestamp(x) => match x.link {
-                Some(l) => l.dst,
-                None => x.timestamp.dst,
-            },
+            Packet::Timestamp(x) => x.dst(),
             _ => unreachable!(),
         }
     }
