@@ -23,7 +23,9 @@ use readyset_client::consensus::{Authority, AuthorityControl};
 use readyset_client::debug::stats::PersistentStats;
 use readyset_client::internal::ReplicaAddress;
 use readyset_client::metrics::recorded;
-use readyset_client::recipe::{ExtendRecipeResult, ExtendRecipeSpec, MigrationStatus};
+use readyset_client::query::QueryId;
+use readyset_client::recipe::changelist::Change;
+use readyset_client::recipe::{ChangeList, ExtendRecipeResult, ExtendRecipeSpec, MigrationStatus};
 use readyset_client::status::{ReadySetControllerStatus, SnapshotStatus};
 use readyset_client::{GraphvizOptions, ViewCreateRequest, WorkerDescriptor};
 use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
@@ -230,6 +232,15 @@ impl Leader {
                 _ = shutdown_rx.recv() => {},
             }
         }));
+    }
+
+    fn log_incoming_create_cache_stmts(&self, changelist: &ChangeList) {
+        changelist.changes().for_each(|c| {
+            if let Change::CreateCache(cc) = c {
+                let qid = QueryId::from_select(&cc.statement, &changelist.schema_search_path);
+                info!("creating cache {}", qid);
+            }
+        });
     }
 
     #[failpoint("controller-request")]
@@ -558,6 +569,7 @@ impl Leader {
                 if body.require_leader_ready {
                     require_leader_ready()?;
                 }
+                self.log_incoming_create_cache_stmts(&body.changes);
                 let concurrently = body.concurrently;
                 let ret = {
                     // Start the migration running in the background
@@ -623,13 +635,15 @@ impl Leader {
             }
             (&Method::POST, "/remove_query") => {
                 require_leader_ready()?;
-                let query_name = bincode::deserialize(&body)?;
+                let query_name: Relation = bincode::deserialize(&body)?;
+                info!("removing cache {}", &query_name.display_unquoted());
                 let mut writer = self.dataflow_state_handle.write().await;
                 let result = writer.as_mut().remove_query(&query_name).await?;
                 self.dataflow_state_handle.commit(writer, authority).await?;
                 return_serialized!(result);
             }
             (&Method::POST, "/remove_all_queries") => {
+                info!("removing all caches");
                 require_leader_ready()?;
                 let mut writer = self.dataflow_state_handle.write().await;
                 writer.as_mut().remove_all_queries().await?;
