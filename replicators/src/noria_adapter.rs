@@ -60,6 +60,7 @@ pub(crate) enum ReplicationAction {
         changes: Vec<Change>,
     },
     LogPosition,
+    Empty,
 }
 
 #[async_trait]
@@ -452,6 +453,7 @@ impl NoriaAdapter {
                 pos.clone(),
                 server_id,
                 enable_statement_logging,
+                table_filter.clone(),
             )
             .await?,
         );
@@ -588,6 +590,7 @@ impl NoriaAdapter {
                 enable_statement_logging,
                 full_resnapshot,
                 noria.clone(),
+                table_filter.clone(),
             )
             .await?,
         );
@@ -1041,6 +1044,7 @@ impl NoriaAdapter {
                         });
                     }
                 }
+                ReplicationAction::Empty => {}
             }
         }
 
@@ -1058,6 +1062,7 @@ impl NoriaAdapter {
                         .await?
                 }
                 ReplicationAction::LogPosition => self.handle_log_position(&pos).await?,
+                ReplicationAction::Empty => unreachable!("Should not have an empty action"),
             }
         }
         Ok(())

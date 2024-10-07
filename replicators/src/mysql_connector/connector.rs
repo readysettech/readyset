@@ -34,6 +34,7 @@ use replication_offset::ReplicationOffset;
 
 use crate::mysql_connector::utils::mysql_pad_collation_column;
 use crate::noria_adapter::{Connector, ReplicationAction};
+use crate::table_filter::TableFilter;
 
 use super::utils::get_mysql_version;
 
@@ -72,6 +73,8 @@ pub(crate) struct MySqlBinlogConnector {
     /// Timestamp of the last reported position. This is use to ensure we keep the distance
     /// between min/max position as short as possible.
     last_reported_pos_ts: std::time::Instant,
+    /// Table filter
+    table_filter: TableFilter,
 }
 
 impl MySqlBinlogConnector {
@@ -154,6 +157,7 @@ impl MySqlBinlogConnector {
         next_position: MySqlPosition,
         server_id: Option<u32>,
         enable_statement_logging: bool,
+        table_filter: TableFilter,
     ) -> ReadySetResult<Self> {
         let mut connector = MySqlBinlogConnector {
             connection: mysql::Conn::new(mysql_opts).await?,
@@ -164,6 +168,7 @@ impl MySqlBinlogConnector {
             enable_statement_logging,
             last_reported_pos_ts: std::time::Instant::now()
                 - std::time::Duration::from_secs(MAX_POSITION_TIME),
+            table_filter,
         };
 
         connector.register_as_replica().await?;
@@ -266,6 +271,13 @@ impl MySqlBinlogConnector {
             )))
         })?;
 
+        if !self
+            .table_filter
+            .should_be_processed(tme.database_name().as_ref(), tme.table_name().as_ref())
+        {
+            return Ok(ReplicationAction::Empty);
+        }
+
         let mut inserted_rows = Vec::new();
 
         for row in wr_event.rows(tme) {
@@ -313,6 +325,13 @@ impl MySqlBinlogConnector {
                 ur_event
             )))
         })?;
+
+        if !self
+            .table_filter
+            .should_be_processed(tme.database_name().as_ref(), tme.table_name().as_ref())
+        {
+            return Ok(ReplicationAction::Empty);
+        }
 
         let mut updated_rows = Vec::new();
 
@@ -376,6 +395,13 @@ impl MySqlBinlogConnector {
                 dr_event
             )))
         })?;
+
+        if !self
+            .table_filter
+            .should_be_processed(tme.database_name().as_ref(), tme.table_name().as_ref())
+        {
+            return Ok(ReplicationAction::Empty);
+        }
 
         let mut deleted_rows = Vec::new();
 
@@ -575,8 +601,9 @@ impl MySqlBinlogConnector {
                         txid: incoming_txid,
                     });
             }
-            _ => {
-                error!("Unexpected action type: {:?}", action);
+            ReplicationAction::Empty => {}
+            ReplicationAction::DdlChange { .. } | ReplicationAction::LogPosition => {
+                warn!("Unexpected action in merge_table_actions: {:?}", action);
             }
         }
     }

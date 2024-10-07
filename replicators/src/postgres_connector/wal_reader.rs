@@ -16,6 +16,18 @@ use tracing::{debug, error, trace};
 use super::ddl_replication::DdlEvent;
 use super::wal::{self, RelationMapping, WalData, WalError, WalRecord};
 use crate::postgres_connector::wal::{NumericParseErrorKind, TableErrorKind, TupleEntry};
+use crate::table_filter::TableFilter;
+
+macro_rules! should_process_relation {
+    ($relation_id:expr, $relations:expr, $table_filter:expr) => {
+        if let Some(relation) = $relations.get(&$relation_id) {
+            if !$table_filter.should_be_processed(relation.schema.as_str(), relation.table.as_str())
+            {
+                continue;
+            }
+        }
+    };
+}
 
 /// The names of the schema table that DDL replication logs will be written to
 pub(crate) const DDL_REPLICATION_LOG_SCHEMA: &str = "readyset";
@@ -34,6 +46,8 @@ pub struct WalReader {
     relations: HashMap<i32, Relation>,
     /// Keeps track of the OIDs of all custom types we've seen
     custom_types: HashSet<u32>,
+    /// Table Filter
+    table_filter: TableFilter,
 }
 
 #[derive(Debug)]
@@ -108,11 +122,12 @@ impl WalEvent {
 }
 
 impl WalReader {
-    pub(crate) fn new(wal: pgsql::client::Responses) -> Self {
+    pub(crate) fn new(wal: pgsql::client::Responses, table_filter: TableFilter) -> Self {
         WalReader {
             relations: Default::default(),
             custom_types: Default::default(),
             wal,
+            table_filter,
         }
     }
 
@@ -142,6 +157,7 @@ impl WalReader {
             wal,
             relations,
             custom_types,
+            table_filter,
         } = self;
 
         loop {
@@ -171,6 +187,29 @@ impl WalReader {
             };
 
             trace!(?lsn, ?record);
+
+            match record {
+                WalRecord::Insert { relation_id, .. }
+                | WalRecord::Update { relation_id, .. }
+                | WalRecord::Delete { relation_id, .. } => {
+                    let relation = relations.get(&relation_id);
+                    if let Some(relation) = relation {
+                        if !table_filter
+                            .should_be_processed(relation.schema.as_str(), relation.table.as_str())
+                        {
+                            continue;
+                        }
+                    }
+                }
+                WalRecord::Begin { .. }
+                | WalRecord::Commit { .. }
+                | WalRecord::Relation { .. }
+                | WalRecord::Type { .. }
+                | WalRecord::Truncate { .. }
+                | WalRecord::Message { .. }
+                | WalRecord::Origin { .. }
+                | WalRecord::Unknown(_) => {}
+            }
 
             match record {
                 WalRecord::Begin { final_lsn, .. } => return Ok(WalEvent::Begin { final_lsn }),
@@ -205,6 +244,7 @@ impl WalReader {
                     relation_id,
                     new_tuple,
                 } => {
+                    should_process_relation!(relation_id, relations, table_filter);
                     if let Some(Relation {
                         schema,
                         table,
@@ -243,6 +283,7 @@ impl WalReader {
                     old_tuple,
                     new_tuple,
                 } => {
+                    should_process_relation!(relation_id, relations, table_filter);
                     let Relation {
                         schema,
                         table,
@@ -385,6 +426,7 @@ impl WalReader {
                     key_tuple,
                     old_tuple,
                 } => {
+                    should_process_relation!(relation_id, relations, table_filter);
                     if let Some(Relation {
                         schema,
                         table,
@@ -468,6 +510,7 @@ impl WalReader {
                 } => {
                     let mut tables = Vec::with_capacity(n_relations as _);
                     for relation_id in relation_ids {
+                        should_process_relation!(relation_id, relations, table_filter);
                         if let Some(Relation { schema, table, .. }) = relations.get(&relation_id) {
                             tables.push((schema.clone(), table.clone()))
                         } else {

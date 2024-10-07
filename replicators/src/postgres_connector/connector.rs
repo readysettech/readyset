@@ -26,6 +26,7 @@ use super::wal_reader::{WalEvent, WalReader};
 use super::PUBLICATION_NAME;
 use crate::db_util::error_is_slot_not_found;
 use crate::noria_adapter::{Connector, ReplicationAction};
+use crate::table_filter::TableFilter;
 
 /// A connector that connects to a PostgreSQL server and starts reading WAL from the "noria"
 /// replication slot with the "noria" publication.
@@ -66,6 +67,8 @@ pub struct PostgresWalConnector {
     /// Whether or not we just processed a table error and need to allow mismatched lsns for the
     /// next commit
     had_table_error: bool,
+    /// Table Filter
+    table_filter: TableFilter,
 }
 
 /// The decoded response to `IDENTIFY_SYSTEM`
@@ -124,6 +127,7 @@ impl PostgresWalConnector {
         enable_statement_logging: bool,
         full_resnapshot: bool,
         controller: ReadySetHandle,
+        table_filter: TableFilter,
     ) -> ReadySetResult<Self> {
         if !config.disable_setup_ddl_replication {
             setup_ddl_replication(pg_config.clone(), tls_connector.clone()).await?;
@@ -159,6 +163,7 @@ impl PostgresWalConnector {
             controller,
             status_update_interval,
             had_table_error: false,
+            table_filter,
         };
 
         if full_resnapshot || next_position.is_none() {
@@ -408,7 +413,7 @@ impl PostgresWalConnector {
             }
         }
 
-        self.reader = Some(WalReader::new(wal));
+        self.reader = Some(WalReader::new(wal, self.table_filter.clone()));
 
         Ok(())
     }
