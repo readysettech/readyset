@@ -1386,9 +1386,10 @@ fn compact_cf(table: &str, db: &DB, index: &PersistentIndex, opts: &CompactOptio
         warn!(%error, %table, "Could not start compaction monitor");
     }
 
+    info!(%table, cf = %index.column_family, "Compaction starting");
     db.compact_range_cf_opt(cf, Option::<&[u8]>::None, Option::<&[u8]>::None, opts);
-
     info!(%table, cf = %index.column_family, "Compaction finished");
+
     // Reenable auto compactions when done
     if let Err(error) = db.set_options_cf(cf, &[("disable_auto_compactions", "false")]) {
         error!(%error, %table, "Error setting cf options");
@@ -1790,15 +1791,17 @@ impl PersistentState {
             inner.db.write_opt(batch, &opts).unwrap();
         }
 
-        info!("Base compacting secondary index");
+        if let Err(err) = iter.status() {
+            // FIXME can't return error from here
+            error!(%err, "Error creating index");
+        }
 
         // Flush just in case
         inner.db.flush_cf(cf).unwrap();
-        // Manually compact the newly created column family
-        let mut opts = CompactOptions::default();
-        opts.set_exclusive_manual_compaction(false);
-        compact_cf(&self.name, &inner.db, &persistent_index, &opts);
-        info!("Base finished compacting secondary index");
+
+        // Compact the newly created column family in the background
+        let thread = self.compact_index(persistent_index);
+        self.compaction_threads.push(thread);
     }
 
     /// Builds a [`PersistentMeta`] from the in-memory metadata information stored in `self`,
@@ -1873,7 +1876,7 @@ impl PersistentState {
         if snapshot.is_enabled() {
             self.enable_snapshot_mode();
         } else {
-            self.disable_snapshot_mode();
+            self.compact_all_indices();
         }
     }
 
@@ -1917,38 +1920,45 @@ impl PersistentState {
         }
     }
 
-    fn disable_snapshot_mode(&mut self) {
+    fn compact_worker(
+        table: SqlIdentifier,
+        index: PersistentIndex,
+        read: PersistentStateHandle,
+        opts: Arc<CompactOptions>,
+    ) {
+        let span = info_span!("Compacting index", %table, column_family = %index.column_family);
+        let _guard = span.enter();
+        compact_cf(&table, &read.inner().db, &index, &opts);
+    }
+
+    /// Perform a manual compaction for a single column family.
+    fn compact_index(&self, index: PersistentIndex) -> CompactionThreadHandle {
+        let mut opts = CompactOptions::default();
+        opts.set_exclusive_manual_compaction(false);
+        let opts = Arc::new(opts);
+
+        let table = self.name.clone();
+        let read = self.read_handle();
+        let opts = Arc::clone(&opts);
+        let name = format!(
+            "Compacting index table={}, cf={}",
+            table, index.column_family
+        );
+        let compaction_thread = std::thread::Builder::new()
+            .name(name)
+            .spawn_wrapper(move || Self::compact_worker(table, index, read, opts))
+            .expect("spawn_wrapper failed");
+
+        CompactionThreadHandle {
+            handle: Some(compaction_thread),
+        }
+    }
+
+    /// Perform a manual compaction for each column family.
+    fn compact_all_indices(&mut self) {
         for index in self.db.inner().shared_state.indices.iter().cloned() {
-            // Perform a manual compaction for each column family
-
-            let mut opts = CompactOptions::default();
-            opts.set_exclusive_manual_compaction(false);
-            let opts = Arc::new(opts);
-
-            let table = self.name.clone();
-            let read_handle = self.read_handle();
-            let thread_opts = Arc::clone(&opts);
-            let s = std::thread::Builder::new();
-            let name = format!(
-                "Compacting index table={}, cf={}",
-                table, index.column_family
-            );
-            let compaction_thread = s
-                .name(name)
-                .spawn_wrapper(move || {
-                    let span = info_span!(
-                        "Compacting index",
-                        %table,
-                        column_family = %index.column_family
-                    );
-                    let _guard = span.enter();
-                    compact_cf(&table, &read_handle.inner().db, &index, &thread_opts);
-                })
-                .expect("spawn_wrapper failure");
-
-            self.compaction_threads.push(CompactionThreadHandle {
-                handle: Some(compaction_thread),
-            });
+            let thread = self.compact_index(index);
+            self.compaction_threads.push(thread);
         }
     }
 
