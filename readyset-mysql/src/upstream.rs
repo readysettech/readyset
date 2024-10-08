@@ -59,6 +59,9 @@ impl<'a> From<ResultSetStream<'a, 'a, 'static, Row, mysql_async::BinaryProtocol>
 pub enum QueryResult<'a> {
     WriteResult {
         num_rows_affected: u64,
+        // This field refers to the auto-increment ID that was generated for the most recent
+        // INSERT operation on a table with an auto-incrementing primary key.
+        // If no auto-increment column was involved, this value will be 0.
         last_inserted_id: u64,
         status_flags: StatusFlags,
     },
@@ -141,7 +144,7 @@ macro_rules! handle_query_result {
 
             Ok(QueryResult::WriteResult {
                 num_rows_affected: resultset.affected_rows(),
-                last_inserted_id: resultset.last_insert_id().unwrap_or(1),
+                last_inserted_id: resultset.last_insert_id().unwrap_or(0),
                 status_flags: resultset
                     .ok_packet()
                     .ok_or_else(|| {
