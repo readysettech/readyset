@@ -1674,6 +1674,42 @@ impl PersistentState {
         self.db.clone()
     }
 
+    fn index_progress(
+        &self,
+        index: &Index,
+        started: Instant,
+        last: &mut Instant,
+        rows: usize,
+        estimated: usize,
+    ) {
+        const PROGRESS_INTERVAL: Duration = Duration::from_secs(10);
+        if last.elapsed() < PROGRESS_INTERVAL {
+            return;
+        }
+        *last += PROGRESS_INTERVAL;
+
+        let progress = ((rows as f64) / (estimated.max(1) as f64)).clamp(0.0, 1.0);
+        let running = started.elapsed().as_secs_f64();
+        let total = running / progress;
+        let left = (total - running) as u64;
+        let hours = left / 60 / 60;
+        let mins = left / 60 % 60;
+        let secs = left % 60;
+
+        let progress = format!("{:.1}%", progress * 100.0);
+        let left = format!("{:02}:{:02}:{:02}", hours, mins, secs);
+
+        info!(
+            base = %self.name,
+            ?index,
+            estimated_rows = %estimated,
+            indexed = %rows,
+            %progress,
+            estimated_remaining_time = %left,
+            "Secondary index progress"
+        );
+    }
+
     /// Adds a new primary index, assuming there are none present
     fn add_primary_index(&mut self, columns: &[usize], is_unique: bool) -> Result<()> {
         if self.db.inner().shared_state.indices.is_empty() {
@@ -1762,8 +1798,14 @@ impl PersistentState {
 
         let mut iter = inner.db.raw_iterator_cf_opt(primary_cf, read_opts);
         iter.seek_to_first();
-        // We operate in batches to improve performance
+
+        let started = Instant::now();
+        let estimated = self.row_count();
+        let mut last_progress = started;
+        let mut indexed = 0;
+
         while iter.valid() {
+            // We operate in batches to improve performance
             let mut batch = WriteBatch::default();
 
             while let (Some(pk), Some(value)) = (iter.key(), iter.value()) {
@@ -1787,7 +1829,9 @@ impl PersistentState {
                 iter.next();
             }
 
+            indexed += batch.len();
             inner.db.write_opt(batch, &opts).unwrap();
+            self.index_progress(index, started, &mut last_progress, indexed, estimated);
         }
 
         info!("Base compacting secondary index");
