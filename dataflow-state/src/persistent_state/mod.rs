@@ -1672,9 +1672,12 @@ impl PersistentState {
         // Flush just in case
         inner.db.flush_cf(cf).unwrap();
 
+        drop(iter);
+        drop(inner);
+
         // Compact the newly created column family in the background
         let thread = self.compact_index(persistent_index);
-        self.compaction_threads.push(thread);
+        self.push_compaction_thread(thread);
     }
 
     /// Builds a [`PersistentMeta`] from the in-memory metadata information stored in `self`,
@@ -1754,7 +1757,7 @@ impl PersistentState {
     }
 
     pub fn compaction_finished(&mut self) -> bool {
-        self.compaction_threads.retain(|thr| !thr.is_finished());
+        self.scrub_compaction_threads();
         self.compaction_threads.is_empty()
     }
 
@@ -1762,10 +1765,21 @@ impl PersistentState {
         for thread in &mut self.compaction_threads {
             thread.join();
         }
+        self.scrub_compaction_threads();
+    }
+
+    fn push_compaction_thread(&mut self, thread: CompactionThreadHandle) {
+        self.scrub_compaction_threads();
+        self.compaction_threads.push(thread);
+    }
+
+    fn scrub_compaction_threads(&mut self) {
+        self.compaction_threads.retain(|thr| !thr.is_finished());
     }
 
     fn enable_snapshot_mode(&mut self) {
-        self.db.replication_offset = None; // Remove any replication offset first (although it should be None already)
+        // Remove any replication offset first (although it should be None already)
+        self.db.replication_offset = None;
         let meta = self.meta();
         let PersistentStateWriteGuard {
             mut db,
@@ -1829,10 +1843,14 @@ impl PersistentState {
 
     /// Perform a manual compaction for each column family.
     fn compact_all_indices(&mut self) {
+        let mut threads = Vec::new();
         for index in self.db.inner().shared_state.indices.iter().cloned() {
-            let thread = self.compact_index(index);
-            self.compaction_threads.push(thread);
+            threads.push(self.compact_index(index));
         }
+        for thread in threads {
+            self.push_compaction_thread(thread);
+        }
+        self.wait_for_compaction();
     }
 
     pub fn set_replay_done(&mut self, replay_done: bool) {
