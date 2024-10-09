@@ -70,7 +70,7 @@ use std::str::FromStr;
 use std::sync::mpsc::RecvTimeoutError;
 use std::sync::{mpsc, Arc};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::{fmt, fs, mem};
 
 use bincode::Options;
