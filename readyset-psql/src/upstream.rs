@@ -239,6 +239,11 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         Ok(!self.client.simple_query("select 1").await?.is_empty())
     }
 
+    async fn ping(&mut self) -> Result<(), Self::Error> {
+        self.client.simple_query("select 1").await?;
+        Ok(())
+    }
+
     async fn change_user(
         &mut self,
         _user: &str,

@@ -91,6 +91,10 @@ where
 
     async fn on_close(&mut self, _: DeallocateId) {}
 
+    async fn on_ping(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+
     async fn on_reset(&mut self) -> io::Result<()> {
         Ok(())
     }

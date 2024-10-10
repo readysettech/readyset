@@ -859,6 +859,14 @@ where
             .unwrap_or_else(|| DB::DEFAULT_DB_VERSION.to_string())
     }
 
+    /// Send ping on the upstream connection, if it exists
+    pub async fn ping(&mut self) -> Result<(), DB::Error> {
+        if let Some(upstream) = &mut self.upstream {
+            upstream.ping().await
+        } else {
+            Ok(())
+        }
+    }
     /// Reset the current upstream connection
     pub async fn reset(&mut self) -> Result<(), DB::Error> {
         if let Some(upstream) = &mut self.upstream {
