@@ -67,7 +67,7 @@ impl<'topk, 'state> Eq for CurrentRecord<'topk, 'state> {}
 /// TopK provides an operator that will produce the top k elements for each group.
 ///
 /// Positives are generally fast to process, while negative records can trigger expensive backwards
-/// queries. It is also worth noting that due the nature of Soup, the results of this operator are
+/// queries. It is also worth noting that due the nature of Readyset, the results of this operator are
 /// unordered.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct TopK {

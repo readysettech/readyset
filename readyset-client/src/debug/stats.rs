@@ -59,7 +59,7 @@ pub struct PersistentStats {
     pub last_replicator_error: Option<String>,
 }
 
-/// Statistics about the Soup data-flow.
+/// Statistics about the dataflow graph.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GraphStats {
     pub domains: DomainMap,

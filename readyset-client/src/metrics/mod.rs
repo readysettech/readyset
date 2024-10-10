@@ -155,7 +155,7 @@ pub mod recorded {
     pub const EVICTION_TIME: &str = "readyset_eviction_time_us";
 
     /// Histogram: The time in microseconds that the controller spent committing
-    /// a migration to the soup graph. Recorded at the controller at the end of
+    /// a migration to the dataflow graph. Recorded at the controller at the end of
     /// the `commit` call.
     pub const CONTROLLER_MIGRATION_TIME: &str = "readyset_controller.migration_time_us";
 

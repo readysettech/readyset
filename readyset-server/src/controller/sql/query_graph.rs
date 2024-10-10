@@ -526,7 +526,7 @@ fn classify_conditionals(
 ) -> ReadySetResult<()> {
     // Handling OR and AND expressions requires some care as there are some corner cases.
     //    a) we don't support OR expressions with predicates with placeholder parameters,
-    //       because these expressions are meaningless in the Soup context.
+    //       because these expressions are meaningless in the Readyset context.
     //    b) we don't support OR expressions with join predicates because they are weird and
     //       too hard.
     //    c) we don't support OR expressions between different tables (e.g table1.x = 1 OR
