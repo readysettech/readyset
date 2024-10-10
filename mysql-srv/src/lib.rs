@@ -48,6 +48,10 @@
 //!     }
 //!     async fn on_close(&mut self, _: DeallocateId) {}
 //!
+//!     async fn on_ping(&mut self) -> io::Result<()> {
+//!         Ok(())
+//!     }
+//!
 //!     async fn on_reset(&mut self) -> io::Result<()> {
 //!         Ok(())
 //!     }
@@ -292,6 +296,9 @@ pub trait MySqlShim<W: AsyncWrite + Unpin + Send> {
         query: &str,
         results: QueryResultWriter<'_, W>,
     ) -> QueryResultsResponse;
+
+    /// Called when the client issue a ping command.
+    async fn on_ping(&mut self) -> io::Result<()>;
 
     /// Called when the client issues a reset command
     async fn on_reset(&mut self) -> io::Result<()>;
@@ -818,6 +825,7 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
                         .await?;
                 }
                 Command::Ping => {
+                    self.shim.on_ping().await?;
                     writers::write_ok_packet(&mut self.writer, 0, 0, StatusFlags::empty()).await?;
                     self.writer.flush().await?;
                 }
