@@ -1080,7 +1080,7 @@ fn make_paginate_or_topk_node(
         Some(ref o) => {
             o.iter()
                 .map(|(c, order_type)| {
-                    // SQL and Soup disagree on what ascending and descending order means, so do the
+                    // SQL and Readyset disagree on what ascending and descending order means, so do the
                     // conversion here.
                     let reversed_order_type = match *order_type {
                         OrderType::OrderAscending => OrderType::OrderDescending,

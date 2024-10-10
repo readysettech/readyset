@@ -1052,7 +1052,7 @@ impl ViewBuilder {
 /// A `ReaderHandle` is used to query previously defined external reader nodes.
 ///
 /// Note that if you create multiple `ReaderHandle`s from a single `ReadySetHandle`, they may
-/// share connections to the Soup workers.
+/// share connections to the Readyset workers.
 #[derive(Clone)]
 pub struct ReaderHandle {
     name: Relation,

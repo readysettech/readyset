@@ -236,27 +236,27 @@ fn generate_target_results(schemas: &BTreeMap<String, Schema>) {
 
 /// Compare two sets of results, returning none if they are the same, and the diff between them
 /// otherwise.
-fn compare_results(mysql: &[Vec<String>], soup: &[Vec<String>]) -> Option<String> {
+fn compare_results(mysql: &[Vec<String>], readyset: &[Vec<String>]) -> Option<String> {
     let mut mysql = mysql.to_vec();
-    let mut soup = soup.to_vec();
+    let mut readyset = readyset.to_vec();
     mysql.sort();
-    soup.sort();
+    readyset.sort();
 
-    // TODO: Remove hack to drop key column from Soup output.
-    if mysql.len() == soup.len()
+    // TODO: Remove hack to drop key column from readyset output.
+    if mysql.len() == readyset.len()
         && mysql
             .iter()
-            .zip(soup.iter())
+            .zip(readyset.iter())
             .all(|(m, s)| m == s || m[..] == s[..(s.len() - 1)])
     {
         return None;
     }
 
     let mysql: Vec<_> = mysql.into_iter().map(|r| format!("{:?}", r)).collect();
-    let soup: Vec<_> = soup.into_iter().map(|r| format!("{:?}", r)).collect();
+    let readyset: Vec<_> = readyset.into_iter().map(|r| format!("{:?}", r)).collect();
 
     let mut output = String::new();
-    for diff in diff::lines(&mysql.join("\n"), &soup.join("\n")) {
+    for diff in diff::lines(&mysql.join("\n"), &readyset.join("\n")) {
         match diff {
             diff::Result::Left(l) => writeln!(&mut output, "-{}", l).unwrap(),
             diff::Result::Both(l, _) => writeln!(&mut output, " {}", l).unwrap(),
@@ -341,7 +341,7 @@ async fn check_query(
 
         if let Some(diff) = compare_results(target_results, &query_results) {
             return Err(format!(
-                "MySQL and Soup results do not match for ? = {:?}\n{}",
+                "MySQL and Readyset results do not match for ? = {:?}\n{}",
                 query_parameter, diff
             ));
         }

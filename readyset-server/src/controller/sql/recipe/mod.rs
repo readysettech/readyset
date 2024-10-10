@@ -67,7 +67,6 @@ impl fmt::Display for ExprId {
     }
 }
 
-/// Represents a Soup recipe.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 // crate viz for tests
 pub(crate) struct Recipe {
