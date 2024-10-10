@@ -746,6 +746,11 @@ where
         let _ = self.noria.remove_statement(statement_id).await;
     }
 
+    async fn on_ping(&mut self) -> std::io::Result<()> {
+        self.ping()
+            .await
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+    }
     async fn on_reset(&mut self) -> io::Result<()> {
         let _ = match self.reset().await {
             Ok(()) => Ok(()),

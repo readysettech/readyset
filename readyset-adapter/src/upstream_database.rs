@@ -110,6 +110,9 @@ pub trait UpstreamDatabase: Sized + Send {
         database: &str,
     ) -> Result<(), Self::Error>;
 
+    /// Ping the upstream connection to see if it is still alive
+    async fn ping(&mut self) -> Result<(), Self::Error>;
+
     /// Reset the connection to the upstream database
     async fn reset(&mut self) -> Result<(), Self::Error>;
 
@@ -278,6 +281,14 @@ where
             .await?
             .change_user(user, password, database)
             .await
+    }
+
+    async fn ping(&mut self) -> Result<(), Self::Error> {
+        if let Some(u) = &mut self.upstream {
+            u.ping().await
+        } else {
+            Ok(())
+        }
     }
 
     async fn reset(&mut self) -> Result<(), Self::Error> {

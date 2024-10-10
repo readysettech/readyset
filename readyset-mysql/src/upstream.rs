@@ -257,6 +257,11 @@ impl UpstreamDatabase for MySqlUpstream {
         Ok(self.conn.ping().await.is_ok())
     }
 
+    async fn ping(&mut self) -> Result<(), Self::Error> {
+        self.conn.ping().await.map_err(Error::MySql)?;
+        Ok(())
+    }
+
     async fn change_user(
         &mut self,
         user: &str,
