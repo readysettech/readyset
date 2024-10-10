@@ -629,11 +629,13 @@ impl PrometheusBuilder {
     }
 
     pub fn build_recorder(self) -> PrometheusRecorder {
+        let quantiles = metrics_util::parse_quantiles(&[0.0, 0.5, 0.9, 0.95, 0.99, 0.999, 1.0]);
+
         PrometheusRecorder::from(Inner {
             registry: Registry::new(GenerationalStorage::new(AtomicStorage)),
             recency: Recency::new(quanta::Clock::new(), MetricKindMask::NONE, None),
             distributions: RwLock::new(HashMap::new()),
-            distribution_builder: DistributionBuilder::new(Vec::new(), None, None, None, None),
+            distribution_builder: DistributionBuilder::new(quantiles, None, None, None, None),
             descriptions: RwLock::new(HashMap::new()),
             global_labels: self.global_labels.unwrap_or_default(),
         })
