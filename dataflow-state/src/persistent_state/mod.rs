@@ -79,7 +79,7 @@ use bincode::Options;
 use clap::ValueEnum;
 use common::{IndexType, Record, Records, SizeOf, Tag};
 pub use handle::PersistentStateHandle;
-use handle::{PersistentStateReadGuard, PersistentStateWriteGuard};
+use handle::PersistentStateReadGuard;
 use rand::Rng;
 use readyset_alloc::thread::StdThreadBuildWrapper;
 use readyset_client::debug::info::KeyCount;
@@ -1627,14 +1627,11 @@ impl PersistentState {
                 is_primary: true,
             };
 
-            self.db
-                .inner_mut()
-                .shared_state
-                .indices
-                .push(persistent_index);
-            let meta = self.meta();
-            self.db.inner().db.save_meta(&meta);
-            self.db.inner_mut().db.create_cf(
+            let mut inner = self.db.inner_mut();
+            inner.shared_state.indices.push(persistent_index);
+            let meta = self.meta(&inner.shared_state);
+            inner.db.save_meta(&meta);
+            inner.db.create_cf(
                 PK_CF,
                 &index_params.make_rocksdb_options(&self.default_options),
             )?;
@@ -1661,21 +1658,18 @@ impl PersistentState {
             index: index.clone(),
         };
 
-        self.db
-            .inner_mut()
-            .shared_state
-            .indices
-            .push(persistent_index.clone());
-        let meta = self.meta();
-        self.db.inner().db.save_meta(&meta);
-        self.db
-            .inner_mut()
+        let mut inner = self.db.inner_mut();
+        inner.shared_state.indices.push(persistent_index.clone());
+        let meta = self.meta(&inner.shared_state);
+        inner.db.save_meta(&meta);
+        inner
             .db
             .create_cf(
                 &cf_name,
                 &index_params.make_rocksdb_options(&self.default_options),
             )
             .unwrap();
+        drop(inner);
 
         let inner = self.db.inner();
         let cf = inner.db.cf_handle(&cf_name).unwrap();
@@ -1757,13 +1751,10 @@ impl PersistentState {
     /// * The columns and index types of the indices
     /// * The epoch
     /// * The replication offset
-    fn meta(&self) -> PersistentMeta<'_> {
+    fn meta(&self, shared_state: &SharedState) -> PersistentMeta<'_> {
         PersistentMeta {
             serde_version: DfValue::SERDE_VERSION,
-            indices: self
-                .db
-                .inner()
-                .shared_state
+            indices: shared_state
                 .indices
                 .iter()
                 .map(|pi| pi.index.clone())
@@ -1780,37 +1771,35 @@ impl PersistentState {
         // be modified by a single thread.
         self.db.replication_offset = Some(offset.clone());
 
-        {
-            let mut inner = self.db.inner_mut();
-            // TODO(ethan) do we want to be updating our in-memory replication offsets here before
-            // the write succeeds?
-            inner.shared_state.replication_offset = Some(offset.clone());
+        let mut inner = self.db.inner_mut();
+        // TODO(ethan) do we want to be updating our in-memory replication offsets here before
+        // the write succeeds?
+        inner.shared_state.replication_offset = Some(offset.clone());
 
-            match inner.shared_state.wal_state {
-                // If snapshot mode is enabled, the WAL is disabled, and we don't have to worry
-                // about setting flushed_up_to or persisted_up_to
-                _ if self.snapshot_mode.is_enabled() => {}
-                // All of the data in this state has been persisted and the batch is empty, which
-                // means we are just updating the offset. We don't want to update either of
-                // flushed_up_to or synced_up_to here because we're not adding any new data
-                _ if batch.is_empty() => {}
-                // If our data is flushed and persisted or our data is flushed but unpersisted,
-                // we need to change our state to `WalState::Unflushed` since we're writing new
-                // unflushed data
-                WalState::FlushedAndPersisted | WalState::FlushedAndUnpersisted { .. } => {
-                    inner.shared_state.wal_state = WalState::Unflushed {
-                        // The new offset marks the start of the unpersisted data in this state
-                        persisted_up_to: offset,
-                    };
-                }
-                // If there is already unflushed data, we don't have to transition the WAL state,
-                // since adding new unflushed data doesn't change the low watermark of all of our
-                // unflushed data
-                WalState::Unflushed { .. } => {}
+        match inner.shared_state.wal_state {
+            // If snapshot mode is enabled, the WAL is disabled, and we don't have to worry
+            // about setting flushed_up_to or persisted_up_to
+            _ if self.snapshot_mode.is_enabled() => {}
+            // All of the data in this state has been persisted and the batch is empty, which
+            // means we are just updating the offset. We don't want to update either of
+            // flushed_up_to or synced_up_to here because we're not adding any new data
+            _ if batch.is_empty() => {}
+            // If our data is flushed and persisted or our data is flushed but unpersisted,
+            // we need to change our state to `WalState::Unflushed` since we're writing new
+            // unflushed data
+            WalState::FlushedAndPersisted | WalState::FlushedAndUnpersisted { .. } => {
+                inner.shared_state.wal_state = WalState::Unflushed {
+                    // The new offset marks the start of the unpersisted data in this state
+                    persisted_up_to: offset,
+                };
             }
+            // If there is already unflushed data, we don't have to transition the WAL state,
+            // since adding new unflushed data doesn't change the low watermark of all of our
+            // unflushed data
+            WalState::Unflushed { .. } => {}
         }
 
-        batch.save_meta(&self.meta());
+        batch.save_meta(&self.meta(&inner.shared_state));
     }
 
     /// Enables or disables the snapshot mode. In snapshot mode auto compactions are
@@ -1851,28 +1840,29 @@ impl PersistentState {
     fn enable_snapshot_mode(&mut self) {
         // Remove any replication offset first (although it should be None already)
         self.db.replication_offset = None;
-        let meta = self.meta();
-        let PersistentStateWriteGuard {
-            mut db,
-            shared_state,
-            ..
-        } = self.db.inner_mut();
-        db.save_meta(&meta);
+        let mut inner = self.db.inner_mut();
+        let meta = self.meta(&inner.shared_state);
+        inner.db.save_meta(&meta);
 
         // Clear the data by dropping each column family and creating it anew
-        for index in shared_state.indices.iter() {
+        for index in inner.shared_state.indices.iter() {
             let cf_name = index.column_family.as_str();
-            db.drop_cf(cf_name).unwrap();
+            inner.db.drop_cf(cf_name).unwrap();
 
-            db.create_cf(
-                cf_name,
-                &IndexParams::from(&index.index).make_rocksdb_options(&self.default_options),
-            )
-            .unwrap();
+            inner
+                .db
+                .create_cf(
+                    cf_name,
+                    &IndexParams::from(&index.index).make_rocksdb_options(&self.default_options),
+                )
+                .unwrap();
 
-            let cf = db.cf_handle(cf_name).expect("just created this cf");
+            let cf = inner.db.cf_handle(cf_name).expect("just created this cf");
 
-            if let Err(err) = db.set_options_cf(cf, &[("disable_auto_compactions", "true")]) {
+            if let Err(err) = inner
+                .db
+                .set_options_cf(cf, &[("disable_auto_compactions", "true")])
+            {
                 error!(%err, "Error setting cf options");
             }
         }
