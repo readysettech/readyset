@@ -207,9 +207,14 @@ impl Recipe {
         query: ViewCreateRequest,
         dialect: Dialect,
     ) -> ReadySetResult<Option<Relation>> {
-        let statement =
-            self.inc
-                .rewrite(query.statement, &query.schema_search_path, dialect, None)?;
+        let statement = self.inc.rewrite(
+            query.statement,
+            None,
+            &query.schema_search_path,
+            dialect,
+            None,
+            None,
+        )?;
         Ok(self.inc.registry.expression_name(&statement))
     }
 

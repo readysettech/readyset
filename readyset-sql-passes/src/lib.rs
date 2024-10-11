@@ -20,6 +20,7 @@ mod util;
 
 use std::collections::{HashMap, HashSet};
 
+use alias_removal::TableAliasRewrite;
 use dataflow_expression::Dialect;
 pub use nom_sql::analysis::{contains_aggregate, is_aggregate};
 use nom_sql::{
@@ -85,6 +86,17 @@ pub struct RewriteContext<'a> {
     ///
     /// [resolve_schemas pass]: crate::resolve_schemas
     pub invalidating_tables: Option<&'a mut Vec<Relation>>,
+
+    /// Optional list of aliases that were removed during a rewrite.
+    ///
+    /// This is (optionally) inserted into during rewriting of certain queries when the
+    /// [alias_removal][] removes aliases to other relations in a query.
+    ///
+    /// [alias_removal]: crate::alias_removal
+    pub table_alias_rewrites: Option<&'a mut Vec<TableAliasRewrite>>,
+
+    /// The name of the cache for a migrated query.
+    pub query_name: Option<&'a str>,
 }
 
 /// Can a particular relation (in the map passed to [`ResolveSchemas::resolve_schemas`]) be queried
@@ -149,6 +161,8 @@ impl Rewrite for CreateTableStatement {
 
 impl Rewrite for SelectStatement {
     fn rewrite(self, context: &mut RewriteContext) -> ReadySetResult<Self> {
+        let query_name = context.query_name.unwrap_or("unknown");
+
         self.rewrite_between()
             .scalar_optimize_expressions(context.dialect)
             .strip_post_filters()
@@ -163,7 +177,8 @@ impl Rewrite for SelectStatement {
             .normalize_topk_with_aggregate()?
             .detect_problematic_self_joins()?
             .remove_numeric_field_references()?
-            .order_limit_removal(&context.base_schemas)
+            .order_limit_removal(&context.base_schemas)?
+            .rewrite_table_aliases(query_name, context.table_alias_rewrites.as_deref_mut())
     }
 }
 

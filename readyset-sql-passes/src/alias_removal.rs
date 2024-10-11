@@ -7,6 +7,7 @@ use nom_sql::{
     Column, CommonTableExpr, JoinRightSide, Relation, SelectStatement, SqlIdentifier, SqlQuery,
     TableExpr, TableExprInner,
 };
+use readyset_errors::ReadySetResult;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum TableAliasRewrite {
@@ -31,11 +32,15 @@ pub enum TableAliasRewrite {
     },
 }
 
-pub trait AliasRemoval {
+pub trait AliasRemoval: Sized {
     /// Remove all table aliases, leaving tables unaliased if possible but rewriting the table name
     /// to a new view name derived from 'query_name' when necessary (ie when a single table is
     /// referenced by more than one alias). Return a list of the rewrites performed.
-    fn rewrite_table_aliases(&mut self, query_name: &str) -> Vec<TableAliasRewrite>;
+    fn rewrite_table_aliases(
+        self,
+        query_name: &str,
+        rewrites: Option<&mut Vec<TableAliasRewrite>>,
+    ) -> ReadySetResult<Self>;
 }
 
 struct RemoveAliasesVisitor<'a> {
@@ -191,7 +196,11 @@ impl<'ast, 'a> VisitorMut<'ast> for RemoveAliasesVisitor<'a> {
 }
 
 impl AliasRemoval for SelectStatement {
-    fn rewrite_table_aliases(&mut self, query_name: &str) -> Vec<TableAliasRewrite> {
+    fn rewrite_table_aliases(
+        mut self,
+        query_name: &str,
+        rewrites: Option<&mut Vec<TableAliasRewrite>>,
+    ) -> ReadySetResult<Self> {
         let mut visitor = RemoveAliasesVisitor {
             query_name,
             table_remap: Default::default(),
@@ -199,19 +208,27 @@ impl AliasRemoval for SelectStatement {
             out: Default::default(),
         };
 
-        let Ok(_) = visitor.visit_select_statement(self);
+        let Ok(_) = visitor.visit_select_statement(&mut self);
 
-        visitor.out
+        if let Some(rewrites) = rewrites {
+            rewrites.extend(visitor.out);
+        }
+
+        Ok(self)
     }
 }
 
 impl AliasRemoval for SqlQuery {
-    fn rewrite_table_aliases(&mut self, query_name: &str) -> Vec<TableAliasRewrite> {
+    fn rewrite_table_aliases(
+        self,
+        query_name: &str,
+        rewrites: Option<&mut Vec<TableAliasRewrite>>,
+    ) -> ReadySetResult<Self> {
         if let SqlQuery::Select(sq) = self {
-            sq.rewrite_table_aliases(query_name)
+            let s = sq.rewrite_table_aliases(query_name, rewrites)?;
+            Ok(SqlQuery::Select(s))
         } else {
-            // nothing to do for other query types, as they cannot have aliases
-            vec![]
+            Ok(self)
         }
     }
 }
@@ -228,9 +245,9 @@ mod tests {
 
     macro_rules! rewrites_to {
         ($before: expr, $after: expr) => {{
-            let mut res = parse_query(Dialect::MySQL, $before).unwrap();
+            let res = parse_query(Dialect::MySQL, $before).unwrap();
             let expected = parse_query(Dialect::MySQL, $after).unwrap();
-            res.rewrite_table_aliases("query");
+            let res = res.rewrite_table_aliases("query", None).unwrap();
             assert_eq!(
                 res,
                 expected,
@@ -266,8 +283,11 @@ mod tests {
             }),
             ..Default::default()
         };
-        let mut res = SqlQuery::Select(q);
-        let rewrites = res.rewrite_table_aliases("query");
+        let res = SqlQuery::Select(q);
+        let mut rewrites = vec![];
+        let res = res
+            .rewrite_table_aliases("query", Some(&mut rewrites))
+            .unwrap();
         // Table alias removed in field list
         match res {
             SqlQuery::Select(tq) => {
@@ -341,8 +361,11 @@ mod tests {
             }),
             ..Default::default()
         };
-        let mut res = SqlQuery::Select(q);
-        let rewrites = res.rewrite_table_aliases("query");
+        let res = SqlQuery::Select(q);
+        let mut rewrites = vec![];
+        let res = res
+            .rewrite_table_aliases("query", Some(&mut rewrites))
+            .unwrap();
         // Table alias removed in field list
         match res {
             SqlQuery::Select(tq) => {
@@ -384,12 +407,15 @@ mod tests {
 
     #[test]
     fn it_rewrites_duplicate_aliases() {
-        let mut res = parser::parse_query(
+        let res = parser::parse_query(
             Dialect::MySQL,
             "SELECT t1.id, t2.name FROM tab t1 JOIN tab t2 ON (t1.other = t2.id)",
         )
         .unwrap();
-        let rewrites = res.rewrite_table_aliases("query_name");
+        let mut rewrites = vec![];
+        let res = res
+            .rewrite_table_aliases("query_name", Some(&mut rewrites))
+            .unwrap();
         match res {
             SqlQuery::Select(tq) => {
                 assert_eq!(
@@ -505,7 +531,7 @@ mod tests {
 
     #[test]
     fn cte() {
-        let mut res = parse_query(
+        let res = parse_query(
             Dialect::MySQL,
             "WITH max_val AS (SELECT max(t1.value) as value FROM t1)
              SELECT t2.name FROM t2 JOIN max_val ON max_val.value = t2.value;",
@@ -516,7 +542,10 @@ mod tests {
             "SELECT t2.name FROM t2 JOIN __query__max_val ON __query__max_val.value = t2.value;",
         )
         .unwrap();
-        let rewritten = res.rewrite_table_aliases("query");
+        let mut rewritten = vec![];
+        let res = res
+            .rewrite_table_aliases("query", Some(&mut rewritten))
+            .unwrap();
         assert_eq!(
             rewritten,
             vec![TableAliasRewrite::Cte {

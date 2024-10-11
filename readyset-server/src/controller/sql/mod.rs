@@ -21,7 +21,7 @@ use readyset_errors::{
     ReadySetResult,
 };
 use readyset_sql_passes::alias_removal::TableAliasRewrite;
-use readyset_sql_passes::{AliasRemoval, DetectUnsupportedPlaceholders, Rewrite, RewriteContext};
+use readyset_sql_passes::{DetectUnsupportedPlaceholders, Rewrite, RewriteContext};
 use readyset_util::redacted::Sensitive;
 use tracing::{debug, error, info, trace, warn};
 use vec1::Vec1;
@@ -178,9 +178,11 @@ impl SqlIncorporator {
     pub(crate) fn rewrite<S>(
         &self,
         stmt: S,
+        query_name: Option<&str>,
         search_path: &[SqlIdentifier],
         dialect: Dialect,
         invalidating_tables: Option<&mut Vec<Relation>>,
+        table_alias_rewrites: Option<&mut Vec<TableAliasRewrite>>,
     ) -> ReadySetResult<S>
     where
         S: Rewrite,
@@ -205,6 +207,8 @@ impl SqlIncorporator {
             search_path,
             dialect,
             invalidating_tables,
+            table_alias_rewrites,
+            query_name,
         })
     }
 
@@ -230,7 +234,7 @@ impl SqlIncorporator {
                     statement: mut cts,
                     pg_meta,
                 } => {
-                    cts = self.rewrite(cts, &schema_search_path, dialect, None)?;
+                    cts = self.rewrite(cts, None, &schema_search_path, dialect, None, None)?;
                     let body = match cts.body {
                         Ok(body) => body,
                         Err(unparsed) => unsupported!(
@@ -674,11 +678,14 @@ impl SqlIncorporator {
             // existing cached query.
             Err(err @ ReadySetError::UnsupportedPlaceholders { .. }) => {
                 // We must rewrite before looking for a query we can reuse.
+                invalidating_tables.clear();
                 let rewritten_stmt = self.rewrite(
                     stmt.clone(),
+                    Some(&name.name),
                     schema_search_path,
                     mig.dialect,
                     Some(&mut invalidating_tables),
+                    None,
                 )?;
                 let caches = self.registry.caches_for_query(rewritten_stmt)?;
                 if caches.is_empty() {
@@ -1111,14 +1118,21 @@ impl SqlIncorporator {
     ) -> ReadySetResult<MirNodeIndex> {
         // FIXME(REA-2168): Use correct dialect.
         trace!(stmt = %stmt.display(nom_sql::Dialect::MySQL), "Adding select query");
-        *stmt = self.rewrite(stmt.clone(), search_path, mig.dialect, invalidating_tables)?;
+        let mut table_alias_rewrites = vec![];
+        *stmt = self.rewrite(
+            stmt.clone(),
+            Some(&query_name.name),
+            search_path,
+            mig.dialect,
+            invalidating_tables,
+            Some(&mut table_alias_rewrites),
+        )?;
 
         self.num_queries += 1;
 
-        // Remove all table aliases from the query. Create named views in cases where the alias must
-        // be replaced with a view rather than the table itself in order to prevent ambiguity. (This
-        // may occur when a single table is referenced using more than one alias).
-        let table_alias_rewrites = stmt.rewrite_table_aliases(&query_name.name);
+        // Create named views in cases where the alias must be replaced with a view rather than
+        // the table itself in order to prevent ambiguity. (This may occur when a single table
+        // is referenced using more than one alias).
         let mut anon_queries = HashMap::new();
         for r in table_alias_rewrites {
             match r {

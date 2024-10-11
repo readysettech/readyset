@@ -1800,3 +1800,60 @@ async fn show_query_metrics() {
     // Assert that we get a non-zero value for the metrics
     assert!(&caches_result[0].3 != "0");
 }
+
+/// Fail the controller once and check if we can query a view which contains table aliases
+/// following a restart.
+#[clustertest]
+#[slow]
+async fn table_aliased_view_survives_restart() {
+    let mut builder = readyset_mysql("ct_table_aliased_view_survives_restarts");
+    builder.dry_run_migration_interval = Some(1000);
+    let mut deployment = builder.standalone().start().await.unwrap();
+
+    let mut adapter = deployment.first_adapter().await;
+    deployment.leader_handle().ready().await.unwrap();
+    adapter
+        .query_drop(
+            r"CREATE TABLE t1 (
+        uid INT NOT NULL,
+        value INT NOT NULL
+    );",
+        )
+        .await
+        .unwrap();
+    adapter
+        .query_drop(r"INSERT INTO t1 VALUES (1, 4);")
+        .await
+        .unwrap();
+    eventually! {
+        adapter
+            .query_drop(r"CREATE CACHE test FROM SELECT alias1.value FROM t1 alias1 WHERE alias1.uid = ?")
+            .await
+            .is_ok()
+    }
+
+    eventually! {
+        deployment.leader_handle().view("test").await.is_ok()
+    }
+    eventually! {
+        adapter.query_drop("SELECT alias1.value FROM t1 alias1 WHERE alias1.uid = 1").await.unwrap();
+        last_statement_destination(adapter.as_mysql_conn().unwrap()).await == QueryDestination::Readyset
+    }
+
+    // stop standalone mode instance, and restart it
+    deployment.kill_all_adapters().await;
+    deployment.start_adapter(true).await.unwrap();
+    let mut adapter = deployment.first_adapter().await;
+    deployment.leader_handle().ready().await.unwrap();
+
+    // Request the view until it exists.
+    eventually! {
+        deployment.leader_handle().view("test").await.is_ok()
+    }
+    eventually! {
+        adapter.query_drop("SELECT alias1.value FROM t1 alias1 WHERE alias1.uid = 1").await.unwrap();
+        last_statement_destination(adapter.as_mysql_conn().unwrap()).await == QueryDestination::Readyset
+    }
+
+    deployment.teardown().await.unwrap();
+}

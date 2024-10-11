@@ -1406,6 +1406,18 @@ impl DeploymentHandle {
         Ok(())
     }
 
+    /// Force adapters to die. Also, this is how standalone mode instances are killed.
+    pub async fn kill_all_adapters(&mut self) {
+        for adapter_handle in &mut self.adapters {
+            let _ = adapter_handle.process.kill().await;
+            while adapter_handle.process.check_alive().await {
+                tokio::time::sleep(Duration::from_millis(200)).await;
+            }
+        }
+
+        self.adapters.clear();
+    }
+
     /// Waits for adapters to die naturally.
     pub async fn wait_for_adapter_death(&mut self) {
         for adapter_handle in &mut self.adapters {
@@ -1413,6 +1425,8 @@ impl DeploymentHandle {
                 tokio::time::sleep(Duration::from_millis(200)).await;
             }
         }
+
+        self.adapters.clear();
     }
 
     /// Tears down any resources associated with the deployment.

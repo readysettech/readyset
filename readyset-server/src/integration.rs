@@ -3674,7 +3674,7 @@ async fn finkelstein1982_queries() {
             match q {
                 SqlQuery::CreateTable(stmt) => {
                     let stmt = inc
-                        .rewrite(stmt, &[], Dialect::DEFAULT_MYSQL, None)
+                        .rewrite(stmt, None, &[], Dialect::DEFAULT_MYSQL, None, None)
                         .unwrap();
                     inc.add_table(stmt.table, stmt.body.unwrap(), None, mig)
                         .unwrap();
