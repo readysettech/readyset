@@ -1229,9 +1229,9 @@ where
             ) => PrepareMeta::Transaction { stmt: query },
             Ok(SqlQuery::Set(s)) => PrepareMeta::Set { stmt: s },
             Ok(pq) => {
-                warn!(
+                debug!(
                     // FIXME(REA-2168): Use correct dialect.
-                    statement = %Sensitive(&pq.display(nom_sql::Dialect::MySQL)),
+                    statement = %pq.display(nom_sql::Dialect::MySQL),
                     "Statement cannot be prepared by ReadySet"
                 );
                 PrepareMeta::Unimplemented(unsupported_err!(
