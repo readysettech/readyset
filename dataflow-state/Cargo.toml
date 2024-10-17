@@ -16,6 +16,8 @@ indexmap = { workspace = true }
 itertools = { workspace = true }
 metrics = { workspace = true }
 notify = { workspace = true }
+num_cpus = { workspace = true }
+parking_lot = { workspace = true }
 proptest = { workspace = true }
 rand = { workspace = true }
 rocksdb.workspace = true
@@ -27,7 +29,6 @@ thiserror = { workspace = true }
 tracing = { workspace = true, features = ["release_max_level_debug"] }
 tuple = { workspace = true }
 vec1 = { workspace = true }
-parking_lot = { workspace = true }
 
 # local deps
 common = { path = "../readyset-common", package = "readyset-common" }

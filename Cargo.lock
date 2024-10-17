@@ -1306,6 +1306,7 @@ dependencies = [
  "lazy_static",
  "metrics",
  "notify",
+ "num_cpus",
  "parking_lot 0.12.1",
  "partial-map",
  "pretty_assertions",
