@@ -1161,21 +1161,12 @@ fn base_options(params: &PersistenceParameters) -> rocksdb::Options {
         opts.set_manual_wal_flush(true);
     }
 
-    // Assigns the number of threads for compactions and flushes in RocksDB.
-    // Optimally we'd like to use env->SetBackgroundThreads(n, Env::HIGH)
-    // and env->SetBackgroundThreads(n, Env::LOW) here, but that would force us to create our
-    // own env instead of relying on the default one that's shared across RocksDB instances
-    // (which isn't supported by rust-rocksdb yet either).
-    if params.persistence_threads > 1 {
-        opts.set_max_background_jobs(params.persistence_threads);
-    }
-
-    // Increase a few default limits:
     opts.set_max_bytes_for_level_base(1024 * 1024 * 1024);
     opts.set_target_file_size_base(256 * 1024 * 1024);
 
-    // Keep up to 4 parallel memtables:
-    opts.set_max_write_buffer_number(4);
+    let cpus = num_cpus::get() as i32;
+    opts.set_max_write_buffer_number(cpus);
+    opts.set_max_background_jobs(cpus * 4); // only 1/4 of these write memtables
 
     opts
 }
