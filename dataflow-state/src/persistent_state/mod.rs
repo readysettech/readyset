@@ -265,8 +265,6 @@ pub struct PersistenceParameters {
     pub mode: DurabilityMode,
     /// Filename prefix for the RocksDB database folder
     pub db_filename_prefix: String,
-    /// Number of background threads PersistentState can use (shared across all worker threads).
-    pub persistence_threads: i32,
     /// An optional path to a directory where to store the DB files, if None will be stored in the
     /// current working directory
     pub storage_dir: Option<PathBuf>,
@@ -284,7 +282,6 @@ impl Default for PersistenceParameters {
         Self {
             mode: DurabilityMode::MemoryOnly,
             db_filename_prefix: String::from("readyset"),
-            persistence_threads: 1,
             storage_dir: None,
             working_temp_dir: None,
             wal_flush_interval_seconds: 0,
@@ -305,7 +302,6 @@ impl PersistenceParameters {
     pub fn new(
         mode: DurabilityMode,
         db_filename_prefix: Option<String>,
-        persistence_threads: i32,
         storage_dir: Option<PathBuf>,
         working_temp_dir: Option<PathBuf>,
         wal_flush_interval_seconds: u64,
@@ -320,7 +316,6 @@ impl PersistenceParameters {
         Self {
             mode,
             db_filename_prefix,
-            persistence_threads,
             storage_dir,
             working_temp_dir,
             wal_flush_interval_seconds,

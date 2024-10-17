@@ -1311,7 +1311,6 @@ async fn it_recovers_persisted_bases() {
     let persistence_params = PersistenceParameters::new(
         DurabilityMode::Permanent,
         Some(path.to_string_lossy().into()),
-        1,
         None,
         None,
         0,
@@ -1393,7 +1392,6 @@ async fn it_recovers_persisted_bases_with_volume_id() {
     let persistence_params = PersistenceParameters::new(
         DurabilityMode::Permanent,
         Some(path.to_string_lossy().into()),
-        1,
         None,
         None,
         0,
@@ -1469,7 +1467,6 @@ async fn it_doesnt_recover_persisted_bases_with_wrong_volume_id() {
     let persistence_params = PersistenceParameters::new(
         DurabilityMode::Permanent,
         Some(path.to_string_lossy().into()),
-        1,
         None,
         None,
         0,
@@ -1715,7 +1712,6 @@ async fn it_recovers_persisted_bases_w_multiple_nodes() {
     let persistence_parameters = PersistenceParameters::new(
         DurabilityMode::Permanent,
         Some(path.to_string_lossy().into()),
-        1,
         None,
         None,
         0,
@@ -1791,7 +1787,6 @@ async fn it_recovers_persisted_bases_w_multiple_nodes_and_volume_id() {
     let persistence_parameters = PersistenceParameters::new(
         DurabilityMode::Permanent,
         Some(path.to_string_lossy().into()),
-        1,
         None,
         None,
         0,
@@ -8414,7 +8409,6 @@ async fn it_recovers_fully_materialized() {
     let persistence_params = PersistenceParameters::new(
         DurabilityMode::Permanent,
         Some("it_recovers_fully_materialized".to_string()),
-        1,
         Some(dir.path().into()),
         None,
         0,
@@ -8641,7 +8635,6 @@ async fn simple_drop_tables_with_persisted_data() {
     builder.set_persistence(PersistenceParameters::new(
         DurabilityMode::Permanent,
         Some("simple_drop_tables_with_persisted_data".to_string()),
-        1,
         Some(path.clone()),
         None,
         0,
