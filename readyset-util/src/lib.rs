@@ -69,7 +69,7 @@ pub trait Indices<'idx, Idx: 'idx> {
         Self::Output: Clone;
 }
 
-impl<'a, A> Indices<'a, usize> for [A] {
+impl<A> Indices<'_, usize> for [A] {
     type Output = A;
 
     fn indices<I>(&self, indices: I) -> Result<Vec<&Self::Output>, IndexOutOfBounds<usize>>

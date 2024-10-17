@@ -120,7 +120,7 @@ pub struct ParallelGroupPermit<'a> {
     permits: &'a AtomicU32,
 }
 
-impl<'a> Drop for ParallelGroupPermit<'a> {
+impl Drop for ParallelGroupPermit<'_> {
     fn drop(&mut self) {
         self.permits.fetch_add(1, Ordering::Release);
     }

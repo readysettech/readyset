@@ -2021,13 +2021,13 @@ pub(super) struct DfStateWriter<'handle> {
     _guard: MutexGuard<'handle, ()>,
 }
 
-impl<'handle> AsRef<DfState> for DfStateWriter<'handle> {
+impl AsRef<DfState> for DfStateWriter<'_> {
     fn as_ref(&self) -> &DfState {
         &self.state
     }
 }
 
-impl<'handle> AsMut<DfState> for DfStateWriter<'handle> {
+impl AsMut<DfState> for DfStateWriter<'_> {
     fn as_mut(&mut self) -> &mut DfState {
         &mut self.state
     }

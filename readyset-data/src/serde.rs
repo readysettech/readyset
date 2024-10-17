@@ -84,7 +84,7 @@ enum TextOrTinyText {
 /// Wrapper struct that allows serializing a reference to a `str` as if it were a text [`DfValue`]
 pub struct TextRef<'a>(pub &'a str);
 
-impl<'a> Serialize for TextRef<'a> {
+impl Serialize for TextRef<'_> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -163,7 +163,7 @@ impl serde::ser::Serialize for DfValue {
 
 struct FieldVisitor;
 
-impl<'de> serde::de::Visitor<'de> for FieldVisitor {
+impl serde::de::Visitor<'_> for FieldVisitor {
     type Value = Variant;
     fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("variant identifier")

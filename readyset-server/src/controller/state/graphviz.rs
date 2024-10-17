@@ -33,7 +33,7 @@ pub(in crate::controller) struct Graphviz<'a> {
 /// For more information, see <http://docs/debugging.html#graphviz>
 ///
 /// [dot]: https://graphviz.org/doc/info/lang.html
-impl<'a> Display for Graphviz<'a> {
+impl Display for Graphviz<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let indentln = |f: &mut fmt::Formatter<'_>| f.write_str("    ");
         let node_sizes = self.node_sizes.clone().unwrap_or_default();

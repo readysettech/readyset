@@ -211,14 +211,14 @@ pub(crate) struct MutWriteHandleEntry<'a> {
     key: Key<'a>,
 }
 
-impl<'a> MutWriteHandleEntry<'a> {
+impl MutWriteHandleEntry<'_> {
     pub(crate) fn key_value_size(&self, key: &Key) -> usize {
         self.handle.handle.base_value_size()
             + key.iter().map(SizeOf::deep_size_of).sum::<u64>() as usize
     }
 }
 
-impl<'a> MutWriteHandleEntry<'a> {
+impl MutWriteHandleEntry<'_> {
     pub(crate) fn mark_filled(self) -> ReadySetResult<()> {
         if self
             .handle

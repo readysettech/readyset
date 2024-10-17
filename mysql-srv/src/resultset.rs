@@ -238,7 +238,7 @@ impl<'a, W: AsyncWrite + Unpin> QueryResultWriter<'a, W> {
     }
 }
 
-impl<'a, W: AsyncWrite + Unpin> Drop for QueryResultWriter<'a, W> {
+impl<W: AsyncWrite + Unpin> Drop for QueryResultWriter<'_, W> {
     fn drop(&mut self) {
         if let Some(x) = self.last_end.take() {
             eprintln!(

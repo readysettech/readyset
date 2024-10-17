@@ -643,7 +643,7 @@ impl fmt::Debug for PersistentState {
     }
 }
 
-impl<'a> PersistentMeta<'a> {
+impl PersistentMeta<'_> {
     fn get_indices(&self, unique_keys: &[Box<[usize]>]) -> Vec<PersistentIndex> {
         self.indices
             .iter()

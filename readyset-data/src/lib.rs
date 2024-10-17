@@ -2174,34 +2174,34 @@ macro_rules! arithmetic_operation (
     );
 );
 
-impl<'a, 'b> Add<&'b DfValue> for &'a DfValue {
+impl<'a> Add<&'a DfValue> for &'_ DfValue {
     type Output = ReadySetResult<DfValue>;
 
-    fn add(self, other: &'b DfValue) -> Self::Output {
+    fn add(self, other: &'a DfValue) -> Self::Output {
         Ok(arithmetic_operation!(+, checked_add, self, other))
     }
 }
 
-impl<'a, 'b> Sub<&'b DfValue> for &'a DfValue {
+impl<'a> Sub<&'a DfValue> for &'_ DfValue {
     type Output = ReadySetResult<DfValue>;
 
-    fn sub(self, other: &'b DfValue) -> Self::Output {
+    fn sub(self, other: &'a DfValue) -> Self::Output {
         Ok(arithmetic_operation!(-, checked_sub, self, other))
     }
 }
 
-impl<'a, 'b> Mul<&'b DfValue> for &'a DfValue {
+impl<'a> Mul<&'a DfValue> for &'_ DfValue {
     type Output = ReadySetResult<DfValue>;
 
-    fn mul(self, other: &'b DfValue) -> Self::Output {
+    fn mul(self, other: &'a DfValue) -> Self::Output {
         Ok(arithmetic_operation!(*, checked_mul, self, other))
     }
 }
 
-impl<'a, 'b> Div<&'b DfValue> for &'a DfValue {
+impl<'a> Div<&'a DfValue> for &'_ DfValue {
     type Output = ReadySetResult<DfValue>;
 
-    fn div(self, other: &'b DfValue) -> Self::Output {
+    fn div(self, other: &'a DfValue) -> Self::Output {
         Ok(arithmetic_operation!(/, checked_div, self, other))
     }
 }

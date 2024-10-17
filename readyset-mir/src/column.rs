@@ -113,7 +113,7 @@ impl<'a> From<&'a nom_sql::Column> for Column {
 }
 
 #[cfg(test)]
-impl<'a> From<&'a str> for Column {
+impl From<&'_ str> for Column {
     fn from(c: &str) -> Column {
         match c.find('.') {
             None => Column {

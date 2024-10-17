@@ -55,7 +55,7 @@ pub enum LookupError<'a, T = ()> {
     Miss((Vec<Cow<'a, KeyComparison>>, T)),
 }
 
-impl<'a, T> From<reader_map::Error> for LookupError<'a, T> {
+impl<T> From<reader_map::Error> for LookupError<'_, T> {
     fn from(e: reader_map::Error) -> Self {
         match e {
             reader_map::Error::NotPublished => Self::NotReady,
@@ -64,7 +64,7 @@ impl<'a, T> From<reader_map::Error> for LookupError<'a, T> {
     }
 }
 
-impl<'a, T> From<ReadySetError> for LookupError<'a, T> {
+impl<T> From<ReadySetError> for LookupError<'_, T> {
     fn from(err: ReadySetError) -> Self {
         Self::Error(err)
     }

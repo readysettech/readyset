@@ -349,7 +349,7 @@ impl<'a> Packet<'a> {
     }
 }
 
-impl<'a> AsRef<[u8]> for Packet<'a> {
+impl AsRef<[u8]> for Packet<'_> {
     fn as_ref(&self) -> &[u8] {
         if self.1.is_empty() {
             self.0
@@ -361,8 +361,9 @@ impl<'a> AsRef<[u8]> for Packet<'a> {
 
 use std::ops::Deref;
 
-impl<'a> Deref for Packet<'a> {
+impl Deref for Packet<'_> {
     type Target = [u8];
+
     fn deref(&self) -> &Self::Target {
         self.as_ref()
     }

@@ -100,7 +100,7 @@ where
     }
 }
 
-impl<'a, K, I, F> Iterator for EvictRangeGroup<'a, K, I, F>
+impl<K, I, F> Iterator for EvictRangeGroup<'_, K, I, F>
 where
     F: FnMut(u64) -> bool,
     I: Iterator<Item = (u64, K)>,

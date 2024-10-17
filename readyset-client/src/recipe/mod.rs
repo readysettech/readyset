@@ -33,7 +33,7 @@ pub struct ExtendRecipeSpec<'a> {
     pub concurrently: bool,
 }
 
-impl<'a> ExtendRecipeSpec<'a> {
+impl ExtendRecipeSpec<'_> {
     /// Sets the `concurrently` flag, requesting that the controller returns immediately with an id
     /// that can be used to query the status of the migration.
     pub fn concurrently(mut self) -> Self {
@@ -42,7 +42,7 @@ impl<'a> ExtendRecipeSpec<'a> {
     }
 }
 
-impl<'a> From<ChangeList> for ExtendRecipeSpec<'a> {
+impl From<ChangeList> for ExtendRecipeSpec<'_> {
     fn from(changes: ChangeList) -> Self {
         Self {
             changes,

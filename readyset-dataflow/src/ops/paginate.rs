@@ -28,7 +28,7 @@ struct CurrentRecord<'op, 'state> {
     order: &'op Order,
 }
 
-impl<'op, 'state> Ord for CurrentRecord<'op, 'state> {
+impl Ord for CurrentRecord<'_, '_> {
     fn cmp(&self, other: &Self) -> Ordering {
         debug_assert_eq!(self.order, other.order);
         self.order
@@ -37,25 +37,25 @@ impl<'op, 'state> Ord for CurrentRecord<'op, 'state> {
     }
 }
 
-impl<'op, 'state> PartialOrd for CurrentRecord<'op, 'state> {
+impl PartialOrd for CurrentRecord<'_, '_> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<'op, 'state> PartialOrd<[DfValue]> for CurrentRecord<'op, 'state> {
+impl PartialOrd<[DfValue]> for CurrentRecord<'_, '_> {
     fn partial_cmp(&self, other: &[DfValue]) -> Option<Ordering> {
         Some(self.order.cmp(self.row.as_ref(), other))
     }
 }
 
-impl<'op, 'state> PartialEq for CurrentRecord<'op, 'state> {
+impl PartialEq for CurrentRecord<'_, '_> {
     fn eq(&self, other: &Self) -> bool {
         self.cmp(other) == Ordering::Equal
     }
 }
 
-impl<'op, 'state> PartialEq<[DfValue]> for CurrentRecord<'op, 'state> {
+impl PartialEq<[DfValue]> for CurrentRecord<'_, '_> {
     fn eq(&self, other: &[DfValue]) -> bool {
         self.partial_cmp(other)
             .iter()
@@ -63,7 +63,7 @@ impl<'op, 'state> PartialEq<[DfValue]> for CurrentRecord<'op, 'state> {
     }
 }
 
-impl<'op, 'state> Eq for CurrentRecord<'op, 'state> {}
+impl Eq for CurrentRecord<'_, '_> {}
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Paginate {

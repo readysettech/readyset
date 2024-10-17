@@ -23,7 +23,7 @@ pub(crate) struct TypedDfValue<'a> {
     pub value: DfValue,
 }
 
-impl<'a> TryFrom<TypedDfValue<'a>> for PsqlValue {
+impl TryFrom<TypedDfValue<'_>> for PsqlValue {
     type Error = ps::Error;
 
     fn try_from(v: TypedDfValue) -> Result<Self, Self::Error> {

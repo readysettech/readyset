@@ -32,7 +32,7 @@ where
     pub(super) guard: ReadGuard<'rh, Inner<K, V, M, T, S, I>>,
 }
 
-impl<'rh, K, V, I, M, T, S> fmt::Debug for MapReadRef<'rh, K, V, I, M, T, S>
+impl<K, V, I, M, T, S> fmt::Debug for MapReadRef<'_, K, V, I, M, T, S>
 where
     K: Ord + Clone,
     V: Eq + Hash,
@@ -49,7 +49,7 @@ where
     }
 }
 
-impl<'rh, K, V, I, M, T, S> MapReadRef<'rh, K, V, I, M, T, S>
+impl<K, V, I, M, T, S> MapReadRef<'_, K, V, I, M, T, S>
 where
     K: Ord + Clone + Hash,
     V: Eq + Hash,
@@ -191,7 +191,7 @@ where
     }
 }
 
-impl<'rh, K, Q, V, M, T, S, I> std::ops::Index<&'_ Q> for MapReadRef<'rh, K, V, I, M, T, S>
+impl<K, Q, V, M, T, S, I> std::ops::Index<&'_ Q> for MapReadRef<'_, K, V, I, M, T, S>
 where
     K: Ord + Clone + Borrow<Q> + Hash,
     V: Eq + Hash + Default,
@@ -207,7 +207,7 @@ where
     }
 }
 
-impl<'rg, 'rh, K, V, M, T, S, I> IntoIterator for &'rg MapReadRef<'rh, K, V, I, M, T, S>
+impl<'rg, K, V, M, T, S, I> IntoIterator for &'rg MapReadRef<'_, K, V, I, M, T, S>
 where
     K: Ord + Clone + Hash,
     V: Eq + Hash,
@@ -232,7 +232,7 @@ where
     iter: crate::inner::Iter<'rg, K, V, I>,
 }
 
-impl<'rg, K, V, I> fmt::Debug for ReadGuardIter<'rg, K, V, I>
+impl<K, V, I> fmt::Debug for ReadGuardIter<'_, K, V, I>
 where
     K: Ord + Clone + fmt::Debug,
     V: Eq + Hash,
@@ -264,7 +264,7 @@ where
     iter: crate::inner::Iter<'rg, K, V, I>,
 }
 
-impl<'rg, K, V, I> fmt::Debug for KeysIter<'rg, K, V, I>
+impl<K, V, I> fmt::Debug for KeysIter<'_, K, V, I>
 where
     K: Ord + Clone + fmt::Debug,
     V: Eq + Hash,
@@ -297,7 +297,7 @@ where
     eviction_strategy: &'rg EvictionStrategy,
 }
 
-impl<'rg, K, V, I> fmt::Debug for RangeIter<'rg, K, V, I>
+impl<K, V, I> fmt::Debug for RangeIter<'_, K, V, I>
 where
     K: Ord + Clone + fmt::Debug,
     V: Eq + Hash,
@@ -336,7 +336,7 @@ where
     iter: crate::inner::Iter<'rg, K, V, I>,
 }
 
-impl<'rg, K, V, I> fmt::Debug for ValuesIter<'rg, K, V, I>
+impl<K, V, I> fmt::Debug for ValuesIter<'_, K, V, I>
 where
     K: Ord + Clone + fmt::Debug,
     V: Eq + Hash,

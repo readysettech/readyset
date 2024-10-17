@@ -12,7 +12,7 @@ use crate::Error;
 /// `psql_srv::Schema`.
 pub struct SelectSchema<'a>(pub cl::SelectSchema<'a>);
 
-impl<'a> TryFrom<SelectSchema<'a>> for Vec<ps::Column> {
+impl TryFrom<SelectSchema<'_>> for Vec<ps::Column> {
     type Error = Error;
     fn try_from(s: SelectSchema) -> Result<Self, Self::Error> {
         NoriaSchema(&s.0.schema).try_into()

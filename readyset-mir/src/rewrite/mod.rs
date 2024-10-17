@@ -10,7 +10,7 @@ mod predicate_pushup;
 mod pull_columns;
 mod pull_keys;
 
-impl<'a> MirQuery<'a> {
+impl MirQuery<'_> {
     /// Run a set of rewrite and optimization passes on this [`MirQuery`], and returns the modified
     /// query.
     pub fn rewrite(mut self) -> ReadySetResult<Self> {

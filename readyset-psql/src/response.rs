@@ -21,7 +21,7 @@ use crate::{upstream, PostgreSqlUpstream};
 /// `psql_srv::PrepareResponse`.
 pub struct PrepareResponse<'a>(pub &'a cl::PrepareResult<LazyUpstream<PostgreSqlUpstream>>);
 
-impl<'a> PrepareResponse<'a> {
+impl PrepareResponse<'_> {
     pub fn try_into_ps(self) -> Result<ps::PrepareResponse, ps::Error> {
         use readyset_adapter::backend::noria_connector::PrepareResult::*;
         use readyset_adapter::backend::noria_connector::{

@@ -22,7 +22,7 @@ pub struct MirBase<'a> {
     pub graph: &'a mut MirGraph,
 }
 
-impl<'a> MirBase<'a> {
+impl MirBase<'_> {
     pub fn get_node_mut(&mut self) -> &mut MirNode {
         self.graph.node_weight_mut(self.mir_node).unwrap()
     }
@@ -41,7 +41,7 @@ pub struct MirQuery<'a> {
     pub graph: &'a mut MirGraph,
 }
 
-impl<'a> MirQuery<'a> {
+impl MirQuery<'_> {
     /// Creates a new [`MirQuery`]
     pub fn new(name: Relation, leaf: NodeIndex, graph: &mut MirGraph) -> MirQuery {
         MirQuery { name, leaf, graph }
@@ -374,7 +374,7 @@ impl<'a> Topo<'a, Ancestors> {
     }
 }
 
-impl<'a> Iterator for Topo<'a, Ancestors> {
+impl Iterator for Topo<'_, Ancestors> {
     type Item = NodeIndex;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -382,7 +382,7 @@ impl<'a> Iterator for Topo<'a, Ancestors> {
     }
 }
 
-impl<'a> Iterator for Topo<'a, Descendants> {
+impl Iterator for Topo<'_, Descendants> {
     type Item = NodeIndex;
 
     fn next(&mut self) -> Option<Self::Item> {

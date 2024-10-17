@@ -702,7 +702,7 @@ pub struct SelectSchema<'a> {
     pub columns: Cow<'a, [SqlIdentifier]>,
 }
 
-impl<'a> SelectSchema<'a> {
+impl SelectSchema<'_> {
     pub fn into_owned(self) -> SelectSchema<'static> {
         SelectSchema {
             schema: Cow::Owned(self.schema.into_owned()),
@@ -822,7 +822,7 @@ impl<'a, DB: UpstreamDatabase> From<noria_connector::QueryResult<'a>> for QueryR
     }
 }
 
-impl<'a, DB> Debug for QueryResult<'a, DB>
+impl<DB> Debug for QueryResult<'_, DB>
 where
     DB: UpstreamDatabase,
 {

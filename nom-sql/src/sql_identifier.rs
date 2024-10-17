@@ -268,7 +268,7 @@ impl From<&SqlIdentifier> for String {
     }
 }
 
-impl<'a> From<Cow<'a, str>> for SqlIdentifier {
+impl From<Cow<'_, str>> for SqlIdentifier {
     #[inline]
     fn from(s: Cow<str>) -> Self {
         match s {
