@@ -296,7 +296,7 @@ impl<'de> Deserialize<'de> for DfValue {
     }
 }
 
-impl<'de: 'a, 'a> Deserialize<'de> for TextOrTinyText {
+impl<'de> Deserialize<'de> for TextOrTinyText {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,

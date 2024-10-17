@@ -375,7 +375,7 @@ impl serde::ser::Serialize for SqlIdentifier {
     }
 }
 
-impl<'de: 'a, 'a> serde::Deserialize<'de> for SqlIdentifier {
+impl<'de> serde::Deserialize<'de> for SqlIdentifier {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
