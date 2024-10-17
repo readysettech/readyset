@@ -71,7 +71,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::mpsc::RecvTimeoutError;
 use std::sync::{mpsc, Arc};
-use std::thread::JoinHandle;
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 use std::{fmt, fs, mem};
 
@@ -79,7 +79,7 @@ use bincode::Options;
 use clap::ValueEnum;
 use common::{IndexType, Record, Records, SizeOf, Tag};
 pub use handle::PersistentStateHandle;
-use handle::PersistentStateReadGuard;
+use handle::{PersistentStateReadGuard, PersistentStateWriteGuard};
 use rand::Rng;
 use readyset_alloc::thread::StdThreadBuildWrapper;
 use readyset_client::debug::info::KeyCount;
@@ -741,32 +741,46 @@ impl State for PersistentState {
     /// Add a new index to the table, the first index we add will contain the data
     /// each additional index we add, will contain pointers to the primary index
     /// Panics if partial is Some
-    fn add_index(&mut self, index: Index, partial: Option<Vec<Tag>>) {
-        assert!(partial.is_none(), "Base tables can't be partial");
-        let columns = &index.columns;
-        let existing = self
-            .db
-            .inner()
-            .shared_state
-            .indices
-            .iter()
-            .any(|pi| pi.index == index);
+    fn add_index(&mut self, index: Index, tags: Option<Vec<Tag>>) {
+        self.add_index_multi(vec![(index, tags)], vec![]);
+    }
 
-        if existing {
-            self.db.add_index(index, partial);
-            return;
-        }
+    fn add_index_multi(&mut self, strict: Vec<(Index, Option<Vec<Tag>>)>, weak: Vec<Index>) {
+        let mut indices = Vec::new();
+        let mut is_unique = Vec::new();
+        let mut inner = self.db.inner_mut();
 
-        let is_unique = check_if_index_is_unique(&self.unique_keys, columns);
-        if self.db.inner().shared_state.indices.is_empty() {
-            self.add_primary_index(&index.columns, is_unique).unwrap();
-            if index.index_type != IndexType::HashMap {
+        for (index, tags) in strict
+            .into_iter()
+            .chain(weak.into_iter().map(|x| (x, None)))
+        {
+            assert!(tags.is_none(), "Base tables can't be partial");
+            let existing = inner
+                .shared_state
+                .indices
+                .iter()
+                .any(|pi| pi.index == index);
+            if existing {
+                continue;
+            }
+
+            let uniq = check_if_index_is_unique(&self.unique_keys, &index.columns);
+            if inner.shared_state.indices.is_empty() {
+                self.add_primary_index(&mut inner, &index.columns, uniq)
+                    .unwrap();
                 // Primary indices can only be HashMaps, so if this is our first index and it's
                 // *not* a HashMap index, add another secondary index of the correct index type
-                self.add_secondary_index(&index, is_unique);
+                if index.index_type == IndexType::HashMap {
+                    continue;
+                }
             }
-        } else {
-            self.add_secondary_index(&index, is_unique)
+            indices.push(index);
+            is_unique.push(uniq);
+        }
+
+        let threads = self.add_secondary(inner, &indices, &is_unique);
+        for t in threads {
+            self.push_compaction_thread(t);
         }
     }
 
@@ -1528,7 +1542,7 @@ impl PersistentState {
             tx
         };
 
-        let mut state = Self {
+        let state = Self {
             name,
             default_options,
             seq: 0,
@@ -1547,7 +1561,7 @@ impl PersistentState {
         if let Some(pk) = state.unique_keys.first().cloned() {
             // This is the first time we're initializing this PersistentState,
             // so persist the primary key index right away.
-            state.add_primary_index(&pk, true)?;
+            state.init_primary_index(&pk, true)?;
         }
 
         Ok(state)
@@ -1560,14 +1574,7 @@ impl PersistentState {
         self.db.clone()
     }
 
-    fn index_progress(
-        &self,
-        index: &Index,
-        started: Instant,
-        last: &mut Instant,
-        rows: usize,
-        estimated: usize,
-    ) {
+    fn index_progress(&self, started: Instant, last: &mut Instant, rows: usize, estimated: usize) {
         const PROGRESS_INTERVAL: Duration = Duration::from_secs(10);
         if last.elapsed() < PROGRESS_INTERVAL {
             return;
@@ -1587,7 +1594,6 @@ impl PersistentState {
 
         info!(
             base = %self.name,
-            ?index,
             estimated_rows = %estimated,
             indexed = %rows,
             %progress,
@@ -1597,137 +1603,162 @@ impl PersistentState {
     }
 
     /// Adds a new primary index, assuming there are none present
-    fn add_primary_index(&mut self, columns: &[usize], is_unique: bool) -> Result<()> {
-        if self.db.inner().shared_state.indices.is_empty() {
-            debug!(base = %self.name, index = ?columns, is_unique, "Base creating primary index");
-
-            let index_params = IndexParams::new(IndexType::HashMap, columns.len());
-
-            // add the index to the meta first so even if we fail before we fully reindex we still
-            // have the information about the column family
-            let persistent_index = PersistentIndex {
-                column_family: PK_CF.to_string(),
-                index: Index::hash_map(columns.to_vec()),
-                is_unique,
-                is_primary: true,
-            };
-
-            let mut inner = self.db.inner_mut();
-            inner.shared_state.indices.push(persistent_index);
-            let meta = self.meta(&inner.shared_state);
-            inner.db.save_meta(&meta);
-            inner.db.create_cf(
-                PK_CF,
-                &index_params.make_rocksdb_options(&self.default_options),
-            )?;
+    fn add_primary_index(
+        &self,
+        inner: &mut PersistentStateWriteGuard<'_>,
+        columns: &[usize],
+        is_unique: bool,
+    ) -> Result<()> {
+        if !inner.shared_state.indices.is_empty() {
+            return Ok(());
         }
+
+        debug!(base = %self.name, index = ?columns, is_unique, "Base creating primary index");
+        let index_params = IndexParams::new(IndexType::HashMap, columns.len());
+
+        // add the index to the meta first so even if we fail before we fully reindex we still
+        // have the information about the column family
+        let persistent_index = PersistentIndex {
+            column_family: PK_CF.to_string(),
+            index: Index::hash_map(columns.to_vec()),
+            is_unique,
+            is_primary: true,
+        };
+
+        inner.shared_state.indices.push(persistent_index);
+        let meta = self.meta(&inner.shared_state);
+        inner.db.save_meta(&meta);
+        inner.db.create_cf(
+            PK_CF,
+            &index_params.make_rocksdb_options(&self.default_options),
+        )?;
 
         Ok(())
     }
 
-    /// Adds a new secondary index, secondary indices point to the primary index
-    /// and don't store values on their own
-    fn add_secondary_index(&mut self, index: &Index, is_unique: bool) {
-        info!(base = %self.name, ?index, is_unique, "Base creating secondary index");
+    fn init_primary_index(&self, columns: &[usize], is_unique: bool) -> Result<()> {
+        self.add_primary_index(&mut self.db.inner_mut(), columns, is_unique)
+    }
 
-        // We'll store all the values for this index in its own column family:
-        let index_params = IndexParams::from(index);
-        let cf_name = self.db.inner().shared_state.indices.len().to_string();
+    /// Adds new secondary indices.  Secondary indices point to the primary index
+    /// and don't store values on their own.
+    fn add_secondary(
+        &self,
+        mut inner: PersistentStateWriteGuard<'_>,
+        indices: &[Index],
+        is_unique: &[bool],
+    ) -> Vec<CompactionThreadHandle> {
+        let mut new = Vec::new();
 
-        // add the index to the meta first so even if we fail before we fully reindex we still have
-        // the information about the column family
-        let persistent_index = PersistentIndex {
-            column_family: cf_name.clone(),
-            is_unique,
-            is_primary: false,
-            index: index.clone(),
-        };
+        for (index, is_unique) in indices.iter().zip(is_unique) {
+            info!(base = %self.name, ?index, is_unique, "Base creating secondary index");
 
-        let mut inner = self.db.inner_mut();
-        inner.shared_state.indices.push(persistent_index.clone());
-        let meta = self.meta(&inner.shared_state);
-        inner.db.save_meta(&meta);
-        inner
-            .db
-            .create_cf(
-                &cf_name,
-                &index_params.make_rocksdb_options(&self.default_options),
-            )
-            .unwrap();
-        drop(inner);
+            let index_params = IndexParams::from(index);
+            let cf_name = inner.shared_state.indices.len().to_string();
+            let persistent = PersistentIndex {
+                column_family: cf_name.clone(),
+                is_unique: *is_unique,
+                is_primary: false,
+                index: index.clone(),
+            };
 
-        let inner = self.db.inner();
-        let cf = inner.db.cf_handle(&cf_name).unwrap();
+            inner.shared_state.indices.push(persistent.clone());
+            new.push(persistent.clone());
 
-        // Prevent autocompactions while we reindex the table
-        if let Err(err) = inner
-            .db
-            .set_options_cf(cf, &[("disable_auto_compactions", "true")])
-        {
-            error!(%err, "Error setting cf options");
+            // Add the index to the meta first so even if we fail before we fully reindex we
+            // still have the information about the column family.
+            inner.db.save_meta(&self.meta(&inner.shared_state));
+            inner
+                .db
+                .create_cf(
+                    &cf_name,
+                    &index_params.make_rocksdb_options(&self.default_options),
+                )
+                .unwrap();
         }
 
-        let mut opts = rocksdb::WriteOptions::default();
-        opts.disable_wal(true);
+        let inner = inner.downgrade();
 
-        // We know a primary index exists, which is why unwrap is fine
-        let primary_cf = inner.db.cf_handle(PK_CF).unwrap();
-        // Because we aren't doing a prefix seek, we must set total order first
-        let mut read_opts = rocksdb::ReadOptions::default();
-        read_opts.set_total_order_seek(true);
+        let mut cfs = Vec::new();
+        for pi in &new {
+            let cf = inner.db.cf_handle(&pi.column_family).unwrap();
 
-        let mut iter = inner.db.raw_iterator_cf_opt(primary_cf, read_opts);
-        iter.seek_to_first();
-
-        let started = Instant::now();
-        let estimated = self.row_count();
-        let mut last_progress = started;
-        let mut indexed = 0;
-
-        while iter.valid() {
-            // We operate in batches to improve performance
-            let mut batch = WriteBatch::default();
-
-            while let (Some(pk), Some(value)) = (iter.key(), iter.value()) {
-                if batch.len() == INDEX_BATCH_SIZE {
-                    break;
-                }
-
-                let row = deserialize_row(value);
-                let index_key = build_key(&row, &index.columns);
-                if is_unique && !index_key.has_null() {
-                    // We know this key to be unique, so we just use it as is
-                    let key = Self::serialize_prefix(&index_key);
-                    batch.put_cf(cf, &key, pk);
-                } else {
-                    let key = Self::serialize_secondary(&index_key, pk);
-                    // TODO: avoid storing pk as the value, since it is already serialized in
-                    // the key, seems wasteful
-                    batch.put_cf(cf, &key, pk);
-                };
-
-                iter.next();
+            // Prevent autocompactions while we reindex the table
+            if let Err(err) = inner
+                .db
+                .set_options_cf(cf, &[("disable_auto_compactions", "true")])
+            {
+                error!(%err, "Error setting cf options");
             }
 
-            indexed += batch.len();
-            inner.db.write_opt(batch, &opts).unwrap();
-            self.index_progress(index, started, &mut last_progress, indexed, estimated);
+            cfs.push(cf);
         }
 
-        if let Err(err) = iter.status() {
-            // FIXME can't return error from here
-            error!(%err, "Error creating index");
+        thread::scope(|scope| {
+            for (index, is_unique, n) in itertools::izip!(indices, is_unique, &new) {
+                scope.spawn(|| {
+                    let cf = inner.db.cf_handle(&n.column_family).unwrap();
+
+                    let mut write_opts = rocksdb::WriteOptions::default();
+                    write_opts.disable_wal(true);
+                    let mut read_opts = rocksdb::ReadOptions::default();
+                    read_opts.set_total_order_seek(true); // because not doing a prefix seek
+
+                    let pk_cf = inner.db.cf_handle(PK_CF).unwrap();
+                    let mut iter = inner.db.raw_iterator_cf_opt(pk_cf, read_opts);
+                    iter.seek_to_first();
+
+                    let started = Instant::now();
+                    let estimated = self.row_count();
+                    let mut last_progress = started;
+                    let mut indexed = 0;
+
+                    while iter.valid() {
+                        let mut batch = WriteBatch::default();
+                        let mut blen = 0;
+
+                        while let (Some(pk), Some(value)) = (iter.key(), iter.value()) {
+                            if blen == INDEX_BATCH_SIZE {
+                                break;
+                            }
+                            blen += 1;
+
+                            let row = deserialize_row(value);
+
+                            //for (index, is_unique, cf) in itertools::izip!(indices, is_unique, &cfs) {
+                            let index_key = build_key(&row, &index.columns);
+                            let key = if *is_unique && !index_key.has_null() {
+                                Self::serialize_prefix(&index_key)
+                            } else {
+                                // TODO avoid storing pk as the value, since it is already in the key
+                                Self::serialize_secondary(&index_key, pk)
+                            };
+                            batch.put_cf(cf, &key, pk);
+                            //}
+
+                            iter.next();
+                        }
+
+                        indexed += blen;
+                        inner.db.write_opt(batch, &write_opts).unwrap();
+                        self.index_progress(started, &mut last_progress, indexed, estimated);
+                    }
+
+                    if let Err(err) = iter.status() {
+                        // FIXME can't return error from here
+                        error!(%err, "Error creating index");
+                    }
+                });
+            }
+        });
+
+        for cf in &cfs {
+            // Flush just in case
+            inner.db.flush_cf(cf).unwrap();
         }
 
-        // Flush just in case
-        inner.db.flush_cf(cf).unwrap();
-
-        drop(iter);
-        drop(inner);
-
-        // Compact the newly created column family in the background
-        let thread = self.compact_index(persistent_index);
-        self.push_compaction_thread(thread);
+        // Compact the newly created column families in the background
+        new.into_iter().map(|p| self.compact_index(p)).collect()
     }
 
     /// Builds a [`PersistentMeta`] from the in-memory metadata information stored in `self`,

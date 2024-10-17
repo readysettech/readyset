@@ -40,6 +40,15 @@ pub(super) struct PersistentStateWriteGuard<'a> {
     pub(super) shared_state: RwLockWriteGuard<'a, SharedState>,
 }
 
+impl<'a> PersistentStateWriteGuard<'a> {
+    pub fn downgrade(self) -> PersistentStateReadGuard<'a> {
+        PersistentStateReadGuard {
+            db: RwLockWriteGuard::downgrade(self.db),
+            shared_state: RwLockWriteGuard::downgrade(self.shared_state),
+        }
+    }
+}
+
 impl PersistentStateHandle {
     pub(super) fn new(
         shared_state: SharedState,
