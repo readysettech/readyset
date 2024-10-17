@@ -137,7 +137,7 @@ impl Join {
         &'a self,
         records: &'a Records,
         key: &[usize],
-    ) -> HashMap<Vec<&DfValue>, Vec<&Record>> {
+    ) -> HashMap<Vec<&'a DfValue>, Vec<&'a Record>> {
         let mut hm = HashMap::new();
         for rec in records {
             let key: Vec<&DfValue> = key.iter().map(|idx| &rec[*idx]).collect();

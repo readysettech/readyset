@@ -83,14 +83,14 @@ impl Deref for Backend {
 }
 
 impl Backend {
-    async fn query<'a>(&'a mut self, query: &'a str) -> Result<QueryResponse<'_>, Error> {
+    async fn query<'a>(&'a mut self, query: &'a str) -> Result<QueryResponse<'a>, Error> {
         Ok(QueryResponse(self.inner.query(query).await?))
     }
 
     async fn simple_query_upstream<'a>(
         &'a mut self,
         query: &'a str,
-    ) -> Result<QueryResponse<'_>, Error> {
+    ) -> Result<QueryResponse<'a>, Error> {
         Ok(QueryResponse(
             self.inner.simple_query_upstream(query).await?,
         ))
