@@ -260,7 +260,6 @@ impl PersistentStateBenchArgs {
             vec![&[0usize][..], &[3][..]],
             &PersistenceParameters {
                 mode: self.durability_mode,
-                persistence_threads: 6,
                 ..PersistenceParameters::default()
             },
             PersistenceType::BaseTable,
@@ -314,7 +313,6 @@ impl PersistentStateBenchArgs {
             vec![&[0usize][..], &[3][..]],
             &PersistenceParameters {
                 mode: self.durability_mode,
-                persistence_threads: 6,
                 ..PersistenceParameters::default()
             },
             PersistenceType::BaseTable,
