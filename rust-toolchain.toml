@@ -1,4 +1,4 @@
 [toolchain]
-channel = "beta-2024-09-05"
+channel = "1.82.0"
 profile = "default"
 components = [ "rust-analyzer" ]
