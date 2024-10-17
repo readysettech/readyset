@@ -4267,7 +4267,7 @@ impl Domain {
         for (_, size) in candidates.iter_mut().rev() {
             // TODO: should this be evenly divided, or weighted by the size of the
             // domains?
-            let share = (*num_bytes + n - 1) / n;
+            let share = (*num_bytes).div_ceil(n);
             // we're only willing to evict at most half the state in each node
             // unless this is the only node left to evict from
             *size = if n > 1 {

@@ -647,7 +647,7 @@ async fn evict_check(
     let mut domain_senders = HashMap::new();
     for &(target, size) in sizes.iter().rev() {
         // TODO: should this be evenly divided, or weighted by the size of the domains?
-        let share = (proportional_over + n - 1) / n;
+        let share = proportional_over.div_ceil(n);
         // we're only willing to evict at most half the state in each domain
         // unless this is the only domain left to evict from
         let evict = if n > 1 {

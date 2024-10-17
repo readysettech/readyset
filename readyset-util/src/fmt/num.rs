@@ -51,11 +51,7 @@ pub fn write_padded_u32(mut value: u32, width: u32, dst: &mut BytesMut) {
         dst.put_slice(Digits::get(value));
     } else {
         let num_digits = value.checked_ilog10().unwrap_or(0) + 1;
-        let padding = if width > num_digits {
-            width - num_digits
-        } else {
-            0
-        };
+        let padding = width.saturating_sub(num_digits);
 
         for _ in 0..padding {
             dst.put_u8(b'0');

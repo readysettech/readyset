@@ -286,11 +286,11 @@ impl State for MemoryState {
         }
 
         self.mem_size = self.mem_size.saturating_sub(bytes_freed);
-        return Some(EvictBytesResult {
+        Some(EvictBytesResult {
             index: self.state[state_index].index(),
             keys_evicted,
             bytes_freed,
-        });
+        })
     }
 
     /// Evicts the given `keys` for the state associated with the target of the given `tag`

@@ -268,14 +268,14 @@ impl MySqlBinlogConnector {
             ));
         }
 
-        return Ok(ReplicationAction::TableAction {
+        Ok(ReplicationAction::TableAction {
             table: Relation {
                 schema: Some(tme.database_name().into()),
                 name: tme.table_name().into(),
             },
             actions: inserted_rows,
             txid: self.current_gtid,
-        });
+        })
     }
 
     /// Process a single binlog UPDATE_ROWS_EVENT.
@@ -331,14 +331,14 @@ impl MySqlBinlogConnector {
             ));
         }
 
-        return Ok(ReplicationAction::TableAction {
+        Ok(ReplicationAction::TableAction {
             table: Relation {
                 schema: Some(tme.database_name().into()),
                 name: tme.table_name().into(),
             },
             actions: updated_rows,
             txid: self.current_gtid,
-        });
+        })
     }
 
     /// Process a single binlog DELETE_ROWS_EVENT.
@@ -379,14 +379,14 @@ impl MySqlBinlogConnector {
             });
         }
 
-        return Ok(ReplicationAction::TableAction {
+        Ok(ReplicationAction::TableAction {
             table: Relation {
                 schema: Some(tme.database_name().into()),
                 name: tme.table_name().into(),
             },
             actions: deleted_rows,
             txid: self.current_gtid,
-        });
+        })
     }
 
     /// Add a table to the non-replicated list
@@ -586,13 +586,7 @@ impl MySqlBinlogConnector {
             info!(target: "replicator_statement", "{:?}", payload_event);
         }
         let mut buff = payload_event.decompressed()?;
-        loop {
-            let binlog_ev = match self.reader.read_decompressed(&mut buff)? {
-                Some(ev) => ev,
-                None => {
-                    break;
-                }
-            };
+        while let Some(binlog_ev) = self.reader.read_decompressed(&mut buff)? {
             match binlog_ev.header().event_type().map_err(|ev| {
                 mysql_async::Error::Other(Box::new(internal_err!(
                     "Unknown binlog event type {}",
