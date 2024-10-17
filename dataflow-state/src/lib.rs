@@ -116,6 +116,15 @@ pub trait State: SizeOf + Send {
     /// See [the section about weak index](trait@State#weak-indexes) for more information
     fn add_weak_index(&mut self, index: Index);
 
+    fn add_index_multi(&mut self, strict: Vec<(Index, Option<Vec<Tag>>)>, weak: Vec<Index>) {
+        for (index, tags) in strict.into_iter() {
+            self.add_index(index, tags);
+        }
+        for index in weak.into_iter() {
+            self.add_weak_index(index);
+        }
+    }
+
     /// Returns whether this state is currently indexed on anything. If not, then it cannot store
     /// any information and is thus "not useful".
     fn is_useful(&self) -> bool;
@@ -316,6 +325,14 @@ impl State for MaterializedNodeState {
             MaterializedNodeState::Memory(ms) => ms.add_weak_index(index),
             MaterializedNodeState::Persistent(ps) => ps.add_weak_index(index),
             MaterializedNodeState::PersistentReadHandle(rh) => rh.add_weak_index(index),
+        }
+    }
+
+    fn add_index_multi(&mut self, strict: Vec<(Index, Option<Vec<Tag>>)>, weak: Vec<Index>) {
+        match self {
+            MaterializedNodeState::Memory(ms) => ms.add_index_multi(strict, weak),
+            MaterializedNodeState::Persistent(ps) => ps.add_index_multi(strict, weak),
+            MaterializedNodeState::PersistentReadHandle(rh) => rh.add_index_multi(strict, weak),
         }
     }
 

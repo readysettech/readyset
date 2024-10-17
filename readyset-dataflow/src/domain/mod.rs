@@ -1717,20 +1717,12 @@ impl Domain {
                         .insert(node, MaterializedNodeState::Memory(MemoryState::default()));
                 }
                 let state = self.state.get_mut(node).unwrap();
-                for (index, tags) in strict_indices {
-                    debug!(
-                        index = ?index,
-                        tags = ?tags,
-                        weak = ?weak_indices,
-                        local = %node,
-                        "told to prepare partial state"
-                    );
-                    state.add_index(index, Some(tags));
-                }
-
-                for index in weak_indices {
-                    state.add_weak_index(index);
-                }
+                let strict = strict_indices
+                    .into_iter()
+                    .map(|(i, t)| (i, Some(t)))
+                    .collect();
+                let weak = weak_indices.into_iter().collect();
+                state.add_index_multi(strict, weak);
             }
             PrepareStateKind::Full {
                 strict_indices,
@@ -1757,14 +1749,9 @@ impl Domain {
                     }
                 }
                 let state = self.state.get_mut(node).unwrap();
-                for index in strict_indices {
-                    debug!(key = ?index, %node, "told to prepare full state");
-                    state.add_index(index, None);
-                }
-
-                for index in weak_indices {
-                    state.add_weak_index(index);
-                }
+                let strict = strict_indices.into_iter().map(|x| (x, None)).collect();
+                let weak = weak_indices.into_iter().collect();
+                state.add_index_multi(strict, weak);
             }
             PrepareStateKind::PartialReader {
                 node_index,
