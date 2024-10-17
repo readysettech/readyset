@@ -1161,22 +1161,16 @@ fn base_options(params: &PersistenceParameters) -> rocksdb::Options {
     opts.set_allow_concurrent_memtable_write(false);
     opts.set_enable_pipelined_write(true);
 
-    // If we have a non-zero WAL flush interval, enable manual WAL flush mode
     if params.wal_flush_interval_seconds > 0 {
         opts.set_manual_wal_flush(true);
     }
 
-    // Assigns the number of threads for compactions and flushes in RocksDB.
-    // Optimally we'd like to use env->SetBackgroundThreads(n, Env::HIGH)
-    // and env->SetBackgroundThreads(n, Env::LOW) here, but that would force us to create our
-    // own env instead of relying on the default one that's shared across RocksDB instances
-    // (which isn't supported by rust-rocksdb yet either).
-    if params.persistence_threads > 1 {
-        opts.set_max_background_jobs(params.persistence_threads);
-    }
+    opts.set_max_bytes_for_level_base(1024 * 1024 * 1024);
+    opts.set_target_file_size_base(256 * 1024 * 1024);
 
-    // Keep up to 4 parallel memtables:
-    opts.set_max_write_buffer_number(4);
+    let cpus = num_cpus::get() as i32;
+    opts.set_max_write_buffer_number(cpus);
+    opts.set_max_background_jobs(cpus * 4); // only 1/4 of these write memtables
 
     opts.set_write_buffer_size(32 * 1024 * 1024);
     opts.set_db_write_buffer_size(128 * 1024 * 1024);
