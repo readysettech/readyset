@@ -43,7 +43,7 @@ use crate::{Error, MySqlQueryHandler};
 //  This is a temporary workaround, since the actual fix might involve a bigger effort.
 struct BinaryDisplay<'a>(&'a [u8]);
 
-impl<'a> fmt::Display for BinaryDisplay<'a> {
+impl fmt::Display for BinaryDisplay<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             f,

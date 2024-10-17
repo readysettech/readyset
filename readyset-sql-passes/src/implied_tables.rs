@@ -37,7 +37,7 @@ struct ExpandImpliedTablesVisitor<'schema> {
     can_reference_aliases: bool,
 }
 
-impl<'schema> ExpandImpliedTablesVisitor<'schema> {
+impl ExpandImpliedTablesVisitor<'_> {
     fn find_table(&self, column_name: &str) -> Option<Relation> {
         let mut matches = self
             .schema
@@ -79,7 +79,7 @@ impl<'schema> ExpandImpliedTablesVisitor<'schema> {
     }
 }
 
-impl<'ast, 'schema> VisitorMut<'ast> for ExpandImpliedTablesVisitor<'schema> {
+impl<'ast> VisitorMut<'ast> for ExpandImpliedTablesVisitor<'_> {
     type Error = ReadySetError;
 
     fn visit_select_statement(

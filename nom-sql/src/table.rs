@@ -49,7 +49,7 @@ impl From<&SqlIdentifier> for Relation {
     }
 }
 
-impl<'a> From<&'a str> for Relation {
+impl From<&'_ str> for Relation {
     fn from(t: &str) -> Relation {
         Relation {
             name: t.into(),

@@ -259,7 +259,7 @@ impl<'a> QueryExecutionTimerHandle<'a> {
     }
 }
 
-impl<'a> Drop for QueryExecutionTimerHandle<'a> {
+impl Drop for QueryExecutionTimerHandle<'_> {
     fn drop(&mut self) {
         self.duration.replace(self.start.elapsed());
     }

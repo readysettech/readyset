@@ -1983,7 +1983,7 @@ impl<'de> Deserialize<'de> for ReadReplyBatch {
     {
         struct Elem;
 
-        impl<'de> Visitor<'de> for Elem {
+        impl Visitor<'_> for Elem {
             type Value = Vec<Vec<DfValue>>;
 
             fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

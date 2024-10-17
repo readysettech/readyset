@@ -74,7 +74,7 @@ pub enum QueryResult<'a> {
     },
 }
 
-impl<'a> UpstreamDestination for QueryResult<'a> {
+impl UpstreamDestination for QueryResult<'_> {
     fn destination(&self) -> QueryDestination {
         QueryDestination::Upstream
     }
@@ -94,7 +94,7 @@ pub struct StatementMeta {
     pub schema: Vec<Column>,
 }
 
-impl<'a> Stream for ReadResultStream<'a> {
+impl Stream for ReadResultStream<'_> {
     type Item = Result<Row, mysql_async::Error>;
 
     fn poll_next(
@@ -108,7 +108,7 @@ impl<'a> Stream for ReadResultStream<'a> {
     }
 }
 
-impl<'a> ReadResultStream<'a> {
+impl ReadResultStream<'_> {
     pub fn status_flags(&self) -> Option<StatusFlags> {
         match self {
             ReadResultStream::Text(s) => s.ok_packet().map(|o| o.status_flags()),

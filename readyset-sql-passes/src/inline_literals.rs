@@ -11,7 +11,7 @@ pub trait InlineLiterals {
     fn inline_literals(self, placeholder_literal_map: &HashMap<usize, Literal>) -> Self;
 }
 
-impl<'ast, 'a> VisitorMut<'ast> for InlineLiteralsVisitor<'a> {
+impl<'ast> VisitorMut<'ast> for InlineLiteralsVisitor<'_> {
     type Error = std::convert::Infallible;
     fn visit_literal(&mut self, literal: &'ast mut Literal) -> Result<(), Self::Error> {
         if let Literal::Placeholder(ItemPlaceholder::DollarNumber(p)) = literal {

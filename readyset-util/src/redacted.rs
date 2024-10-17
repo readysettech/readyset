@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 /// `redact_sensitive` feature is enabled
 pub struct Sensitive<'a, T: ?Sized>(pub &'a T);
 
-impl<'a, T> Display for Sensitive<'a, T>
+impl<T> Display for Sensitive<'_, T>
 where
     T: ?Sized + Display,
 {
@@ -26,7 +26,7 @@ where
     }
 }
 
-impl<'a, T> Debug for Sensitive<'a, T>
+impl<T> Debug for Sensitive<'_, T>
 where
     T: ?Sized + Debug,
 {

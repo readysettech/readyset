@@ -397,7 +397,7 @@ pub struct ArrayView<'v> {
     contents: ArrayViewD<'v, DfValue>,
 }
 
-impl<'v> ArrayView<'v> {
+impl ArrayView<'_> {
     /// Returns an iterator over shared references to all the values in the array view, iterating
     /// the innermost dimension first.
     pub fn values(&self) -> impl Iterator<Item = &DfValue> {

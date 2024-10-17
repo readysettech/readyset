@@ -27,7 +27,7 @@ struct CurrentRecord<'topk, 'state> {
     is_new: bool,
 }
 
-impl<'topk, 'state> Ord for CurrentRecord<'topk, 'state> {
+impl Ord for CurrentRecord<'_, '_> {
     fn cmp(&self, other: &Self) -> Ordering {
         debug_assert_eq!(self.order, other.order);
         self.order
@@ -36,25 +36,25 @@ impl<'topk, 'state> Ord for CurrentRecord<'topk, 'state> {
     }
 }
 
-impl<'topk, 'state> PartialOrd for CurrentRecord<'topk, 'state> {
+impl PartialOrd for CurrentRecord<'_, '_> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<'topk, 'state> PartialOrd<[DfValue]> for CurrentRecord<'topk, 'state> {
+impl PartialOrd<[DfValue]> for CurrentRecord<'_, '_> {
     fn partial_cmp(&self, other: &[DfValue]) -> Option<Ordering> {
         Some(self.order.cmp(self.row.as_ref(), other))
     }
 }
 
-impl<'topk, 'state> PartialEq for CurrentRecord<'topk, 'state> {
+impl PartialEq for CurrentRecord<'_, '_> {
     fn eq(&self, other: &Self) -> bool {
         self.cmp(other) == Ordering::Equal
     }
 }
 
-impl<'topk, 'state> PartialEq<[DfValue]> for CurrentRecord<'topk, 'state> {
+impl PartialEq<[DfValue]> for CurrentRecord<'_, '_> {
     fn eq(&self, other: &[DfValue]) -> bool {
         self.partial_cmp(other)
             .iter()
@@ -62,7 +62,7 @@ impl<'topk, 'state> PartialEq<[DfValue]> for CurrentRecord<'topk, 'state> {
     }
 }
 
-impl<'topk, 'state> Eq for CurrentRecord<'topk, 'state> {}
+impl Eq for CurrentRecord<'_, '_> {}
 
 /// TopK provides an operator that will produce the top k elements for each group.
 ///

@@ -50,7 +50,7 @@ struct RemoveAliasesVisitor<'a> {
     out: Vec<TableAliasRewrite>,
 }
 
-impl<'ast, 'a> VisitorMut<'ast> for RemoveAliasesVisitor<'a> {
+impl<'ast> VisitorMut<'ast> for RemoveAliasesVisitor<'_> {
     type Error = std::convert::Infallible;
 
     fn visit_select_statement(

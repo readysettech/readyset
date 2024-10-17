@@ -621,7 +621,7 @@ pub enum RecordResult<'a> {
     Owned(Vec<Vec<DfValue>>),
 }
 
-impl<'a> PartialEq for RecordResult<'a> {
+impl PartialEq for RecordResult<'_> {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Borrowed(s), Self::Borrowed(o)) => s == o,
@@ -636,9 +636,9 @@ impl<'a> PartialEq for RecordResult<'a> {
     }
 }
 
-impl<'a> Eq for RecordResult<'a> {}
+impl Eq for RecordResult<'_> {}
 
-impl<'a> Debug for RecordResult<'a> {
+impl Debug for RecordResult<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Borrowed(rows) => f
@@ -651,13 +651,13 @@ impl<'a> Debug for RecordResult<'a> {
     }
 }
 
-impl<'a> Default for RecordResult<'a> {
+impl Default for RecordResult<'_> {
     fn default() -> Self {
         Self::Owned(vec![])
     }
 }
 
-impl<'a> RecordResult<'a> {
+impl RecordResult<'_> {
     pub fn len(&self) -> usize {
         match *self {
             RecordResult::Borrowed(rs) => rs.len(),
@@ -690,7 +690,7 @@ impl<'a> RecordResult<'a> {
     }
 }
 
-impl<'a> FromIterator<Vec<DfValue>> for RecordResult<'a> {
+impl FromIterator<Vec<DfValue>> for RecordResult<'_> {
     fn from_iter<T>(iter: T) -> Self
     where
         T: IntoIterator<Item = Vec<DfValue>>,

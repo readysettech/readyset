@@ -147,7 +147,7 @@ impl<T> Deref for OwnedOrPtr<T> {
     }
 }
 
-impl<'a, T, B> Deref for OwnedOrBorrowed<'a, T, B>
+impl<T, B> Deref for OwnedOrBorrowed<'_, T, B>
 where
     T: Borrow<B>,
     B: ?Sized,
@@ -231,7 +231,7 @@ where
     }
 }
 
-impl<'a, T, B> Ord for BorrowedEndpoint<'a, T, B>
+impl<T, B> Ord for BorrowedEndpoint<'_, T, B>
 where
     T: Borrow<B> + Ord,
     B: Ord + ?Sized,
@@ -239,7 +239,7 @@ where
     impl_ord! { BorrowedEndpoint }
 }
 
-impl<'a, T, B> PartialOrd for BorrowedEndpoint<'a, T, B>
+impl<T, B> PartialOrd for BorrowedEndpoint<'_, T, B>
 where
     T: Borrow<B> + Ord,
     B: Ord + ?Sized,

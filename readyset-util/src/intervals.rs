@@ -422,7 +422,7 @@ where
     }
 }
 
-impl<'a, Q, R> ExactSizeIterator for DifferenceIterator<'a, Q, R> where R: RangeBounds<Q> {}
+impl<Q, R> ExactSizeIterator for DifferenceIterator<'_, Q, R> where R: RangeBounds<Q> {}
 
 /// Returns an iterator over the result(s) of removing the second interval from the first.
 ///

@@ -125,7 +125,7 @@ pub enum ClientChannelBindingSupport<'a> {
     SupportedButNotUsed,
 }
 
-impl<'a> ClientChannelBindingSupport<'a> {
+impl ClientChannelBindingSupport<'_> {
     /// Returns `true` if the client channel binding support is [`SupportedButNotUsed`].
     ///
     /// [`SupportedButNotUsed`]: ClientChannelBindingSupport::SupportedButNotUsed

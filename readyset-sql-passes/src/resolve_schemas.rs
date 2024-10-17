@@ -32,13 +32,13 @@ struct ResolveSchemaVisitor<'schema> {
     invalidating_tables: Option<&'schema mut Vec<Relation>>,
 }
 
-impl<'schema> ResolveSchemaVisitor<'schema> {
+impl ResolveSchemaVisitor<'_> {
     fn insert_alias(&mut self, alias: SqlIdentifier) {
         self.alias_stack.last_mut().unwrap().insert(alias);
     }
 }
 
-impl<'ast, 'schema> VisitorMut<'ast> for ResolveSchemaVisitor<'schema> {
+impl<'ast> VisitorMut<'ast> for ResolveSchemaVisitor<'_> {
     type Error = ReadySetError;
 
     fn visit_sql_type(&mut self, sql_type: &'ast mut nom_sql::SqlType) -> Result<(), Self::Error> {

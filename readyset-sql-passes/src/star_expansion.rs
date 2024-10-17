@@ -25,7 +25,7 @@ struct ExpandStarsVisitor<'schema> {
     non_replicated_relations: &'schema HashSet<NonReplicatedRelation>,
 }
 
-impl<'ast, 'schema> VisitorMut<'ast> for ExpandStarsVisitor<'schema> {
+impl<'ast> VisitorMut<'ast> for ExpandStarsVisitor<'_> {
     type Error = ReadySetError;
 
     fn visit_select_statement(

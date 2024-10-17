@@ -849,7 +849,7 @@ struct LowerContext<'a> {
     custom_types: &'a HashMap<Relation, DfType>,
 }
 
-impl<'a> dataflow::LowerContext for LowerContext<'a> {
+impl dataflow::LowerContext for LowerContext<'_> {
     fn resolve_column(&self, col: nom_sql::Column) -> ReadySetResult<(usize, DfType)> {
         let index = self.graph.column_id_for_column(
             self.parent_node_idx,

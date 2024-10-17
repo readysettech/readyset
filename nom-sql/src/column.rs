@@ -31,7 +31,7 @@ impl From<SqlIdentifier> for Column {
     }
 }
 
-impl<'a> From<&'a str> for Column {
+impl From<&'_ str> for Column {
     fn from(c: &str) -> Column {
         match c.split_once('.') {
             None => Column {

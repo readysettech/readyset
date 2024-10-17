@@ -69,7 +69,8 @@ fn fuse_nodes(
 
 fn inline_expr_references(expr: &mut Expr, parent_emit: &[ProjectExpr]) {
     struct InlineParentExprReferencesVisitor<'a>(&'a [ProjectExpr]);
-    impl<'a, 'ast> VisitorMut<'ast> for InlineParentExprReferencesVisitor<'a> {
+
+    impl<'ast> VisitorMut<'ast> for InlineParentExprReferencesVisitor<'_> {
         type Error = std::convert::Infallible;
 
         fn visit_expr(&mut self, expr: &'ast mut Expr) -> Result<(), Self::Error> {

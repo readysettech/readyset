@@ -19,7 +19,7 @@ use crate::NodeIndex;
 
 pub struct GraphVizzed<'a, T: ?Sized>(&'a T);
 
-impl<'a, T> Display for GraphVizzed<'a, T>
+impl<T> Display for GraphVizzed<'_, T>
 where
     T: GraphViz,
 {
@@ -108,7 +108,7 @@ impl GraphViz for MirGraph {
     }
 }
 
-impl<'a> GraphViz for MirQuery<'a> {
+impl GraphViz for MirQuery<'_> {
     fn graphviz_fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         // NOTE(fran): It's true that petgraph has a Graphviz implementation,
         //  but it's not very configurable and the resulting graph is harder
@@ -125,7 +125,7 @@ struct MirNodeRef<'a> {
     graph: &'a MirGraph,
 }
 
-impl<'a> GraphViz for MirNodeRef<'a> {
+impl GraphViz for MirNodeRef<'_> {
     fn graphviz_fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let owners = &self.graph[self.node].owners();
         for (i, owner) in owners.iter().enumerate() {

@@ -100,7 +100,7 @@ struct InputFiles {
     expected_failures: Vec<(PathBuf, Box<dyn io::Read>)>,
 }
 
-impl<'a> TryFrom<&'a InputFileOptions> for InputFiles {
+impl TryFrom<&'_ InputFileOptions> for InputFiles {
     type Error = anyhow::Error;
 
     fn try_from(opts: &InputFileOptions) -> Result<Self, Self::Error> {

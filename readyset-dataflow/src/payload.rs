@@ -55,7 +55,7 @@ pub struct ReplayPathSegment {
 /// human-readable representation
 pub struct PrettyReplayPath<'a>(pub &'a [ReplayPathSegment]);
 
-impl<'a> Display for PrettyReplayPath<'a> {
+impl Display for PrettyReplayPath<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for (
             i,
