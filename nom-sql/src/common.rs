@@ -458,6 +458,7 @@ fn group_concat_fx_helper(
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn group_concat_fx(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], (Expr, Option<String>)> {
@@ -912,6 +913,7 @@ where
     )(i)
 }
 
+#[allow(clippy::type_complexity)]
 pub fn assignment_expr_list(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<(Column, Expr)>> {

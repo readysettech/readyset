@@ -1009,6 +1009,7 @@ fn primary(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn rest(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<(TokenTree, Vec<TokenTree>, TokenTree)>>
@@ -1045,6 +1046,7 @@ fn token_tree(
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn rest_no_and_or(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<(TokenTree, Vec<TokenTree>, TokenTree)>>

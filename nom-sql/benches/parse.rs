@@ -101,7 +101,7 @@ fn transactions_sqlparser(c: &mut Criterion) {
 //
 // [0] https://bheisler.github.io/criterion.rs/book/user_guide/profiling.html
 fn flamegraphs_profiler() -> Criterion {
-    return Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
+    Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)))
 }
 
 criterion_group!(

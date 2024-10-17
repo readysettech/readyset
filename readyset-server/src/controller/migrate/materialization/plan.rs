@@ -883,7 +883,7 @@ impl<'a> Plan<'a> {
         // graph upwards to notify the egress node that it should filter
         // any packet that was not requested.
         let our_node = &self.graph[self.node];
-        return if self.partial && our_node.is_reader() {
+        if self.partial && our_node.is_reader() {
             // Since reader nodes belong to their own domains, their
             // domains should consist only of them + an ingress node.
             // It's fair to assume that the reader node has an ingress node as an ancestor.
@@ -923,6 +923,6 @@ impl<'a> Plan<'a> {
             Ok(())
         } else {
             Ok(())
-        };
+        }
     }
 }

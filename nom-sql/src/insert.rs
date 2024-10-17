@@ -75,6 +75,7 @@ fn data(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], 
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn on_duplicate(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<(Column, Expr)>> {

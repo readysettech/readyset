@@ -3,11 +3,11 @@ use serde::Serialize;
 
 use crate::{BuiltinFunction, Expr};
 
-/** These helpers initialize `Expr` variants with a type field. These are
- * not intended for use outside of tests. A planned implementation of the type
- * inference system will make the type parameter of `Expr` generic, which
- * will allow variants to be constructed without any type information - leaving
- * that to the type inference system. These functions will then be removed */
+// These helpers initialize `Expr` variants with a type field. These are
+// not intended for use outside of tests. A planned implementation of the type
+// inference system will make the type parameter of `Expr` generic, which
+// will allow variants to be constructed without any type information - leaving
+// that to the type inference system. These functions will then be removed
 
 /// Helper to create `Expr::Column`. Type is unknown by default. The correct type may need to
 /// be populated when type is checked at runtime

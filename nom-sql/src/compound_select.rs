@@ -98,6 +98,7 @@ fn compound_op(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CompoundSelectOpera
     ))(i)
 }
 
+#[allow(clippy::type_complexity)]
 fn other_selects(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], (Option<CompoundSelectOperator>, SelectStatement)>

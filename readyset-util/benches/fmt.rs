@@ -97,7 +97,7 @@ fn bench_write_timestamptz(c: &mut Criterion) {
 }
 
 fn flamegraphs_profiler() -> Criterion {
-    return Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
+    Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)))
 }
 
 criterion_group!(
