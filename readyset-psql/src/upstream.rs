@@ -25,7 +25,8 @@ use crate::Error;
 
 /// Indicates the minimum upstream server version that we currently support. Used to error out
 /// during connection phase if the version for the upstream server is too low.
-const MIN_UPSTREAM_VERSION: u16 = 13;
+const MIN_UPSTREAM_MAJOR_VERSION: u16 = 13;
+const MIN_UPSTREAM_MINOR_VERSION: u16 = 0;
 
 /// A connector to an underlying PostgreSQL database
 pub struct PostgreSqlUpstream {
@@ -208,11 +209,22 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         let major = major
             .parse()
             .map_err(|_| Error::ReadySet(ReadySetError::UnparseableServerVersion))?;
-        if major < MIN_UPSTREAM_VERSION {
+        let minor: u16 = minor
+            .chars()
+            .take_while(|c| c.is_ascii_digit())
+            .collect::<String>()
+            .parse()
+            .map_err(|_| Error::ReadySet(ReadySetError::UnparseableServerVersion))?;
+
+        #[allow(clippy::absurd_extreme_comparisons)]
+        if major < MIN_UPSTREAM_MAJOR_VERSION
+            || (major == MIN_UPSTREAM_MAJOR_VERSION && minor < MIN_UPSTREAM_MINOR_VERSION)
+        {
             return Err(Error::ReadySet(ReadySetError::UnsupportedServerVersion {
                 major,
-                minor: minor.to_owned(),
-                min: MIN_UPSTREAM_VERSION,
+                minor: minor.to_string(),
+                min_major: MIN_UPSTREAM_MAJOR_VERSION,
+                min_minor: MIN_UPSTREAM_MINOR_VERSION,
             }));
         }
         let version = format!("{version} ReadySet");

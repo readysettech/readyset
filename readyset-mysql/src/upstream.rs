@@ -26,7 +26,8 @@ type StatementID = u32;
 
 /// Indicates the minimum upstream server version that we currently support. Used to error out
 /// during connection phase if the version for the upstream server is too low.
-const MIN_UPSTREAM_VERSION: u16 = 8;
+const MIN_UPSTREAM_MAJOR_VERSION: u16 = 5;
+const MIN_UPSTREAM_MINOR_VERSION: u16 = 7;
 
 fn dt_to_value_params(dt: &[DfValue]) -> ReadySetResult<Vec<mysql_async::Value>> {
     dt.iter().map(|v| v.try_into()).collect()
@@ -202,11 +203,14 @@ impl MySqlUpstream {
 
         // Check that the server version is supported.
         let (major, minor, _) = conn.server_version();
-        if major < MIN_UPSTREAM_VERSION {
+        if major < MIN_UPSTREAM_MAJOR_VERSION
+            || (major == MIN_UPSTREAM_MAJOR_VERSION && minor < MIN_UPSTREAM_MINOR_VERSION)
+        {
             return Err(Error::ReadySet(ReadySetError::UnsupportedServerVersion {
                 major,
                 minor: minor.to_string(),
-                min: MIN_UPSTREAM_VERSION,
+                min_major: MIN_UPSTREAM_MAJOR_VERSION,
+                min_minor: MIN_UPSTREAM_MINOR_VERSION,
             }));
         }
 

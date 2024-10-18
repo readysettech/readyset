@@ -27,7 +27,7 @@ use tokio::task::JoinHandle;
 use tracing::{debug, error, info, info_span, warn};
 use tracing_futures::Instrument;
 
-use super::utils::{mysql_pad_collation_column, parse_mysql_version};
+use super::utils::{get_mysql_version, mysql_pad_collation_column};
 use crate::db_util::DatabaseSchemas;
 use crate::mysql_connector::snapshot_type::SnapshotType;
 use crate::mysql_connector::utils::MYSQL_BATCH_SIZE;
@@ -350,19 +350,11 @@ impl MySqlReplicator {
         Ok(tx)
     }
 
-    /// Get MySQL Server Version
-    async fn get_mysql_version(&self) -> mysql::Result<u32> {
-        let mut conn = self.pool.get_conn().await?;
-        let version: mysql::Row = conn.query_first("SELECT VERSION()").await?.unwrap();
-        let version: String = version.get(0).expect("MySQL version");
-        parse_mysql_version(&version)
-    }
-
     /// Use the SHOW MASTER STATUS or SHOW BINARY LOG STATUS statement to determine
     /// the current binary log file name and position.
     async fn get_binlog_position(&self) -> mysql::Result<MySqlPosition> {
         let mut conn = self.pool.get_conn().await?;
-        let query = match self.get_mysql_version().await {
+        let query = match get_mysql_version(&mut conn).await {
             Ok(version) => {
                 if version >= 80400 {
                     // MySQL 8.4.0 and above
@@ -581,7 +573,7 @@ impl MySqlReplicator {
             match conn.query_drop("LOCK INSTANCE FOR BACKUP").await {
                 Ok(_) => Some(conn),
                 Err(err) => {
-                    warn!(%err, "Failed to acquire instance lock, DDL changes may cause inconsistency");
+                    warn!(%err, "Failed to acquire instance lock, if new tables are created, we might not detect them.");
                     None
                 }
             }
