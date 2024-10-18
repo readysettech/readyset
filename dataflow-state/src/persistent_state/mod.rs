@@ -1157,7 +1157,6 @@ fn base_options(params: &PersistenceParameters) -> rocksdb::Options {
     }
 
     // Increase a few default limits:
-    opts.set_max_bytes_for_level_base(1024 * 1024 * 1024);
     opts.set_target_file_size_base(256 * 1024 * 1024);
 
     // Keep up to 4 parallel memtables:
