@@ -1172,7 +1172,9 @@ fn block_based_options(set_filter: bool) -> BlockBasedOptions {
     block_opts.set_optimize_filters_for_memory(true);
 
     if set_filter {
-        block_opts.set_bloom_filter(10.0, true);
+        // "9.9" is the recommended value from the rocksdb docs
+        // for the equivalent false positive ratio as bloom filter (10.0)
+        block_opts.set_ribbon_filter(9.9);
     }
 
     block_opts
