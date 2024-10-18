@@ -106,12 +106,6 @@ where
     }
 }
 
-impl<T, I> std::borrow::Borrow<T> for BTreeValue<T, I> {
-    fn borrow(&self) -> &T {
-        &self.value
-    }
-}
-
 #[derive(Debug)]
 pub struct BTreeUnwrapIterator<'a, T, I> {
     inner: std::collections::btree_map::Iter<'a, BTreeValue<T, I>, usize>,
@@ -358,7 +352,10 @@ where
             ValuesInner::InitSmallVec { ref v, .. } | ValuesInner::SmallVec(ref v) => {
                 v.contains(value)
             }
-            ValuesInner::BTreeMap { ref map, .. } => map.contains_key(value),
+            ValuesInner::BTreeMap { ref map, .. } => {
+                let v = BTreeValue::new(value.clone(), self.order.clone());
+                map.contains_key(&v)
+            }
         }
     }
 
@@ -409,9 +406,10 @@ where
                 ref mut len,
                 converted: _,
             } => {
-                match map.get_mut(&value) {
+                let new = BTreeValue::new(value, order.clone());
+                match map.get_mut(&new) {
                     None => {
-                        map.insert(BTreeValue::new(value, self.order.clone()), 1);
+                        map.insert(new, 1);
                     }
                     Some(count) => *count += 1,
                 }
@@ -459,17 +457,20 @@ where
                 ref mut map,
                 ref mut len,
                 converted: _,
-            } => match map.get_mut(value) {
-                None => (),
-                Some(1) => {
-                    map.remove(value);
-                    *len -= 1;
+            } => {
+                let new = BTreeValue::new(value.clone(), order.clone());
+                match map.get_mut(&new) {
+                    None => (),
+                    Some(1) => {
+                        map.remove(&new);
+                        *len -= 1;
+                    }
+                    Some(count) => {
+                        *count -= 1;
+                        *len -= 1;
+                    }
                 }
-                Some(count) => {
-                    *count -= 1;
-                    *len -= 1;
-                }
-            },
+            }
             ValuesInner::SmallVec(ref mut v) => {
                 Self::find(v, order, value, index, false);
                 if let Some(index) = *index {
@@ -623,5 +624,35 @@ mod tests {
         v.insert(1, &mut None, Instant::now());
         assert!(matches!(v.values, ValuesInner::SmallVec(_)));
         assert_eq!(v.to_shared_smallvec().len(), 2);
+    }
+
+    #[derive(Debug, Default, Clone)]
+    struct Backwards {}
+
+    impl<T> InsertionOrder<T> for Backwards
+    where
+        T: Ord,
+    {
+        fn cmp(&self, a: &T, b: &T) -> std::cmp::Ordering {
+            a.cmp(b).reverse()
+        }
+    }
+
+    #[test]
+    fn backwards() {
+        const ROWS: usize = TestValues::VEC_MAX + 2;
+
+        let mut v: Values<u64, Backwards> = Values::default();
+        for i in 0..ROWS {
+            v.insert(i as _, &mut None, Instant::now());
+        }
+
+        let expect = vec![11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0];
+        assert!(matches!(v.values, ValuesInner::BTreeMap { .. }));
+        assert_eq!(v.iter().cloned().collect::<Vec<_>>(), expect);
+
+        v.remove(&11, &mut None, Instant::now());
+        assert!(matches!(v.values, ValuesInner::BTreeMap { .. }));
+        assert_eq!(v.iter().cloned().collect::<Vec<_>>(), &expect[1..]);
     }
 }
