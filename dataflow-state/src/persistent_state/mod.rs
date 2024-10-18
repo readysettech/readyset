@@ -1159,6 +1159,9 @@ fn base_options(params: &PersistenceParameters) -> rocksdb::Options {
     // Keep up to 4 parallel memtables:
     opts.set_max_write_buffer_number(4);
 
+    opts.set_write_buffer_size(32 * 1024 * 1024);
+    opts.set_db_write_buffer_size(128 * 1024 * 1024);
+
     let block_opts = block_based_options(false);
     opts.set_block_based_table_factory(&block_opts);
 
