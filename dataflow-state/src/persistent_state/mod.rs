@@ -1159,7 +1159,22 @@ fn base_options(params: &PersistenceParameters) -> rocksdb::Options {
     // Keep up to 4 parallel memtables:
     opts.set_max_write_buffer_number(4);
 
+    let block_opts = block_based_options(false);
+    opts.set_block_based_table_factory(&block_opts);
+
     opts
+}
+
+/// Creates a standard set of `BlockBasedOptions`.
+fn block_based_options(set_filter: bool) -> BlockBasedOptions {
+    let mut block_opts = BlockBasedOptions::default();
+    block_opts.set_block_size(32 * 1024);
+
+    if set_filter {
+        block_opts.set_bloom_filter(10.0, true);
+    }
+
+    block_opts
 }
 
 /// Representation of the set of parameters for an index in persistent state
@@ -1215,8 +1230,7 @@ impl IndexParams {
             // For hash map indices, optimize for point queries and in-prefix range iteration, but
             // don't allow cross-prefix range iteration.
             IndexType::HashMap => {
-                let mut block_opts = BlockBasedOptions::default();
-                block_opts.set_bloom_filter(10.0, true);
+                let block_opts = block_based_options(true);
                 opts.set_block_based_table_factory(&block_opts);
 
                 // We're either going to be doing direct point lookups, in the case of unique
