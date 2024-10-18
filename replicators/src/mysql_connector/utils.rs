@@ -1,9 +1,9 @@
-use std::string::FromUtf8Error;
-use std::sync::Arc;
-
+use mysql_async::{self as mysql, prelude::Queryable};
 use mysql_common::collations::{self, Collation, CollationId};
 use mysql_srv::ColumnType;
 use readyset_data::DfValue;
+use std::string::FromUtf8Error;
+use std::sync::Arc;
 
 //TODO(marce): Make this a configuration parameter or dynamically adjust based on the table size
 pub const MYSQL_BATCH_SIZE: usize = 100_000; // How many rows to fetch at a time from MySQL
@@ -56,6 +56,13 @@ pub fn parse_mysql_version(version: &str) -> mysql_async::Result<u32> {
     let patch_parts: Vec<&str> = version_parts[2].split('-').collect();
     let patch = patch_parts[0].parse::<u32>().unwrap_or(0);
     Ok(major * 10000 + minor * 100 + patch)
+}
+
+/// Get MySQL Server Version
+pub async fn get_mysql_version(conn: &mut mysql_async::Conn) -> mysql::Result<u32> {
+    let version: mysql::Row = conn.query_first("SELECT VERSION()").await?.unwrap();
+    let version: String = version.get(0).expect("MySQL version");
+    parse_mysql_version(&version)
 }
 
 #[cfg(test)]

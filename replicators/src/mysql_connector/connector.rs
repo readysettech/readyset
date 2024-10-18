@@ -35,7 +35,8 @@ use replication_offset::ReplicationOffset;
 use crate::mysql_connector::utils::mysql_pad_collation_column;
 use crate::noria_adapter::{Connector, ReplicationAction};
 
-const CHECKSUM_QUERY: &str = "SET @source_binlog_checksum='CRC32'";
+use super::utils::get_mysql_version;
+
 const DEFAULT_SERVER_ID: u32 = u32::MAX - 55;
 const MAX_POSITION_TIME: u64 = 10;
 
@@ -84,7 +85,21 @@ impl MySqlBinlogConnector {
     /// know what type of checksum we support (NONE and CRC32 are the options), NONE seems to work
     /// but others use CRC32 🤷‍♂️
     async fn register_as_replica(&mut self) -> mysql::Result<()> {
-        self.connection.query_drop(CHECKSUM_QUERY).await?;
+        let query = match get_mysql_version(&mut self.connection).await {
+            Ok(version) => {
+                if version >= 80400 {
+                    // MySQL 8.4.0 and above
+                    "SET @source_binlog_checksum='CRC32'"
+                } else {
+                    // MySQL 8.3.0 and below
+                    "SET @master_binlog_checksum='CRC32'"
+                }
+            }
+            Err(err) => {
+                return Err(err);
+            }
+        };
+        self.connection.query_drop(query).await?;
 
         let cmd = mysql_common::packets::ComRegisterSlave::new(self.server_id());
         self.connection.write_command(&cmd).await?;
