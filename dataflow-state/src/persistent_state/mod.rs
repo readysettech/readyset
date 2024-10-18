@@ -1156,9 +1156,6 @@ fn base_options(params: &PersistenceParameters) -> rocksdb::Options {
         opts.set_max_background_jobs(params.persistence_threads);
     }
 
-    // Increase a few default limits:
-    opts.set_target_file_size_base(256 * 1024 * 1024);
-
     // Keep up to 4 parallel memtables:
     opts.set_max_write_buffer_number(4);
 
