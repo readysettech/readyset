@@ -9,3 +9,6 @@ pub const READERS_TOTAL: &str = "readyset_rocksdb_readers_total";
 
 /// Gauge: Approximate memory usage by cache.
 pub const CACHE_TOTAL: &str = "readyset_rocksdb_cache_total";
+
+/// Gauge: Total memory used by block index and filter, as loaded from each sstable.
+pub const BLOCK_INDEXES_FILTERS_TOTAL: &str = "readyset_rocksdb_block_index_filters_total";
