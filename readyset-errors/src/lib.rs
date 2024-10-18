@@ -678,8 +678,13 @@ pub enum ReadySetError {
     MirNodeMustHaveDfNodeAssigned { mir_node_index: usize },
 
     /// Error that the upstream database is using an unsupported server version.
-    #[error("Upstream server version {major}-{minor} is too low. Minimum supported major version is {min}")]
-    UnsupportedServerVersion { major: u16, minor: String, min: u16 },
+    #[error("Upstream server version {major}-{minor} is too low. Minimum supported version is {min_major}.{min_minor}")]
+    UnsupportedServerVersion {
+        major: u16,
+        minor: String,
+        min_major: u16,
+        min_minor: u16,
+    },
 
     /// Error that the upstream database reports a server version the ReadySet could not parse.
     #[error("Upstream server version could not be parsed")]
