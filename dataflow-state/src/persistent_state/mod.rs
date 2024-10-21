@@ -630,7 +630,6 @@ impl fmt::Debug for PersistentState {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt.debug_struct("PersistentState")
             .field("name", &self.name)
-            .field("indices", &self.db.inner().shared_state.indices)
             .field("unique_keys", &self.unique_keys)
             .field("seq", &self.seq)
             .field("epoch", &self.epoch)
@@ -1973,12 +1972,10 @@ impl PersistentState {
 
     /// Perform a manual compaction for each column family.
     fn compact_all_indices(&mut self) {
-        let mut threads = Vec::new();
-        for index in self.db.inner().shared_state.indices.iter().cloned() {
-            threads.push(self.compact_index(index));
-        }
-        for thread in threads {
-            self.push_compaction_thread(thread);
+        let indices = self.db.inner().shared_state.indices.to_vec();
+        for index in indices {
+            let thr = self.compact_index(index);
+            self.push_compaction_thread(thr);
         }
         self.wait_for_compaction();
     }
