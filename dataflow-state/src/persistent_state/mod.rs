@@ -66,7 +66,7 @@ mod recorded;
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::io;
+use std::io::{self, Read};
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
@@ -1276,6 +1276,128 @@ impl IndexParams {
     }
 }
 
+// Getting the current compaction progress is as easy as getting the property value
+// for `rocksdb.num-files-at-level<N>` NOT.
+// Essentially we have to implement a huge hack here, since the only way I could find
+// to get accurate progress stats is from reading the DB LOG directly. This is very
+// fragile, as it depends on the LOG format not changing, and if it does the report
+// will be less accurate or not work at all. This is however not critical.
+fn compaction_progress_watcher(table_name: &str, db: &DB) -> anyhow::Result<impl notify::Watcher> {
+    use std::fs::File;
+    use std::io::{Seek, SeekFrom};
+
+    use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
+
+    // We open the LOG file, skip to the end, and begin watching for change events
+    // on it in order to get the latest log entries as they come
+    let log_path = db.path().join("LOG");
+    let (tx, rx) = std::sync::mpsc::channel();
+
+    // note: the Config is ignored in `RecommendedWatcher` :meh:
+    let mut log_watcher = RecommendedWatcher::new(tx, Config::default())?;
+    let table = table_name.to_owned();
+    // Row count, but without a lock
+    let pk_cf = db.cf_handle(PK_CF).unwrap();
+    let row_count = db
+        .property_int_value_cf(pk_cf, "rocksdb.estimate-num-keys")
+        .unwrap()
+        .unwrap() as usize;
+    let mut log_file = File::options().read(true).open(&log_path)?;
+    log_file.seek(SeekFrom::End(0))?;
+
+    log_watcher.watch(log_path.as_ref(), RecursiveMode::NonRecursive)?;
+
+    let mut monitor = move || -> anyhow::Result<()> {
+        const REPORT_INTERVAL: Duration = Duration::from_secs(1);
+        let mut compaction_started = false;
+        let mut buf = String::new();
+        let mut first_stage_keys = 0;
+        let mut second_stage_keys = 0;
+        let mut last_report = Instant::now();
+
+        // The thread will stop once the notifier drops
+        while rx.recv().is_ok() {
+            // When we get notified about changes to LOG, we read its latest contents
+            log_file.read_to_string(&mut buf)?;
+            for line in buf.lines() {
+                if line.contains("compaction_started") && line.contains("ManualCompaction") {
+                    compaction_started = true;
+                }
+                if !compaction_started {
+                    continue;
+                }
+                // As far as I can tell compaction has four stages, first files are created for
+                // the appropriate keys, then are indexed, then moved to the
+                // correct level (zero cost in case of manual compaction),
+                // finally old files are deleted. The final two stages are almost immediate so
+                // we don't care about logging them. We only going to log
+                // progress for the first two stages.
+
+                // In the first stage we have log entries of the form `Generated table #53:
+                // 3314046 keys, 268436084 bytes` we will be looking for the
+                // number of keys in the table, it seems when we have all of the keys processed
+                // is when first stage is done.
+                if line.contains("Generated table") {
+                    // Look for number of keys
+                    let mut fields = line.split(' ').peekable();
+                    while let Some(f) = fields.next() {
+                        if fields.peek() == Some(&"keys,") {
+                            first_stage_keys += f.parse().unwrap_or(0);
+                            break;
+                        }
+                    }
+                }
+                // In the second stage we have log entries of the form
+                // `Number of Keys per prefix Histogram: Count: 1313702 Average: 1.0000  StdDev:
+                // 0.00` Here we are looking for the Count to figure out the
+                // number of keys processed in this stage
+                if line.contains("Number of Keys per prefix Histogram") {
+                    // Look for number of keys
+                    let mut fields = line.split(' ').peekable();
+                    while let Some(f) = fields.next() {
+                        if f == "Count:" {
+                            let count_per_hist =
+                                fields.next().and_then(|f| f.parse().ok()).unwrap_or(0);
+                            let avg_per_hist =
+                                fields.nth(1).and_then(|f| f.parse().ok()).unwrap_or(0f64);
+                            second_stage_keys += (count_per_hist as f64 * avg_per_hist) as u64;
+                            break;
+                        }
+                    }
+                }
+
+                if last_report.elapsed() > REPORT_INTERVAL {
+                    let first_stage = format!(
+                        "{:.2}%",
+                        (first_stage_keys as f64 / row_count as f64) * 100.0
+                    );
+                    let second_stage = format!(
+                        "{:.2}%",
+                        (second_stage_keys as f64 / row_count as f64) * 100.0
+                    );
+                    info!(%table, %first_stage, %second_stage, "Compaction");
+                    last_report = Instant::now();
+                }
+            }
+            buf.clear();
+        }
+
+        Ok(())
+    };
+
+    let table = table_name.to_owned();
+
+    let s = std::thread::Builder::new();
+    s.name("Compaction Monitor".to_string())
+        .spawn_wrapper(move || {
+            if let Err(err) = monitor() {
+                warn!(%err, %table, "Compaction monitor error");
+            }
+        })?;
+
+    Ok(log_watcher)
+}
+
 fn compact_cf(table: &str, db: &DB, index: &PersistentIndex, opts: &CompactOptions) {
     let cf = match db.cf_handle(&index.column_family) {
         Some(cf) => cf,
@@ -1284,6 +1406,11 @@ fn compact_cf(table: &str, db: &DB, index: &PersistentIndex, opts: &CompactOptio
             return;
         }
     };
+
+    let _log_watcher = compaction_progress_watcher(table, db);
+    if let Err(error) = &_log_watcher {
+        warn!(%error, %table, "Could not start compaction monitor");
+    }
 
     info!(%table, cf = %index.column_family, "Compaction starting");
     db.compact_range_cf_opt(cf, Option::<&[u8]>::None, Option::<&[u8]>::None, opts);
