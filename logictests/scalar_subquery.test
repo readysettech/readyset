@@ -1,0 +1,62 @@
+
+statement ok
+create table t1 (a decimal(7,3), b int, c text)
+
+statement ok
+create table t2 (i int, f float, n decimal(10,3), t text, dtm timestamp)
+
+statement ok
+insert into t1 (a, b, c) values
+(100.000, 1, '2024-11-07 03:06:32'),
+(100.000, 2, '2024-11-07 03:06:32'),
+(200.000, 3, '2024-11-08 17:03:37'),
+(115.345, 4, '2024-11-08 17:03:37'),
+(235.539, 5, '2024-11-09 17:21:50')
+
+statement ok
+insert into t2 (i, f, n, t, dtm) values
+(1, 100,     100.000, '100',                '2024-11-07 03:06:32'),
+(2, 100,     100.000, '00100',              '2024-11-07 03:08:54'),
+(3, 115346,  115.345, '115.34500',          '2024-11-08 17:03:37'),
+(4, 23512.3, 235.539, '0000235.5390000000', '2024-11-09 17:21:50'),
+(5, 945679,  513.850, 'AAA',                '2024-11-19 17:21:51')
+
+query I rowsort
+SELECT b FROM t1 WHERE a =  (SELECT min(n) FROM t2 WHERE t1.c = t2.dtm group by t2.dtm)
+----
+1
+2
+4
+5
+
+query I rowsort
+SELECT b FROM t1 WHERE a =  (SELECT min(n) FROM t2 WHERE t1.c = t2.dtm)
+----
+1
+2
+4
+5
+
+query I rowsort
+SELECT b FROM t1 WHERE a =  (SELECT min(n) FROM t2 WHERE t1.c = t2.dtm and t2.t like '%.%' group by t2.dtm)
+----
+4
+5
+
+query I rowsort
+SELECT b FROM t1 WHERE a =  (SELECT min(n) FROM t2 WHERE t1.c = t2.dtm and t2.t like '%.%')
+----
+4
+5
+
+query I rowsort
+SELECT b FROM t1 WHERE a =  (SELECT min(n) FROM t2 WHERE t1.c = t2.dtm and case when t2.n = t2.f then 'ABC' else t2.t end like '%00')
+----
+4
+5
+
+query I rowsort
+SELECT b FROM t1 WHERE c =  (SELECT min(dtm) FROM t2 WHERE t2.n = t1.a and case when t2.n = t2.f then 'ABC' else t2.t end like '%00')
+----
+4
+5
