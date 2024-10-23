@@ -1326,7 +1326,6 @@ dependencies = [
  "tempfile",
  "test-strategy",
  "thiserror",
- "tokio",
  "tracing",
  "tuple",
  "vec1",
