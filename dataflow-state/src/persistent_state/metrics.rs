@@ -1,17 +1,23 @@
+use std::thread::JoinHandle;
 use std::time::Duration;
 
 use metrics::{gauge, Gauge};
 use rocksdb::perf::get_memory_usage_stats;
-use tokio::select;
-use tokio::sync::mpsc::Receiver;
+use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 
 use crate::persistent_state::recorded;
 use crate::persistent_state::PersistentStateHandle;
 
 const REPORTING_INTERVAL: Duration = Duration::from_secs(5);
 
+pub(crate) struct MetricsReporterStop {
+    tx: SyncSender<()>,
+    thread: JoinHandle<()>,
+}
+
 pub(crate) struct MetricsReporter {
     state_handle: PersistentStateHandle,
+    stop_rx: Receiver<()>,
 
     /// Approximate memory usage of all the mem-tables
     mem_table_total: Gauge,
@@ -25,37 +31,50 @@ pub(crate) struct MetricsReporter {
     block_indexes_filters_total: Gauge,
 }
 
+impl MetricsReporterStop {
+    fn new(tx: SyncSender<()>, thread: JoinHandle<()>) -> Self {
+        Self { tx, thread }
+    }
+
+    pub(crate) fn stop(self) {
+        self.tx.send(()).unwrap();
+        self.thread.join().unwrap();
+    }
+}
+
 impl MetricsReporter {
-    pub(crate) fn new(name: String, state_handle: PersistentStateHandle) -> Self {
+    pub(crate) fn start(name: String, state_handle: PersistentStateHandle) -> MetricsReporterStop {
         let mem_table_total = gauge!(recorded::MEM_TABLE_TOTAL, "rocksdb" => name.clone());
         let mem_table_unflushed = gauge!(recorded::MEM_TABLE_UNFLUSHED, "rocksdb" => name.clone());
         let readers_total = gauge!(recorded::READERS_TOTAL, "rocksdb" => name.clone());
         let cache_total = gauge!(recorded::CACHE_TOTAL, "rocksdb" => name.clone());
         let index_filters_total =
             gauge!(recorded::BLOCK_INDEXES_FILTERS_TOTAL, "rocksdb" => name.clone());
+        let (tx, rx) = sync_channel(1);
 
-        MetricsReporter {
+        let new = Self {
             state_handle,
+            stop_rx: rx,
             mem_table_total,
             mem_table_unflushed,
             mem_table_readers_total: readers_total,
             cache_total,
             block_indexes_filters_total: index_filters_total,
-        }
+        };
+
+        MetricsReporterStop::new(tx, new.spawn())
     }
 
-    pub(crate) async fn report(mut self, mut stop_rx: Receiver<()>) {
-        let mut interval = tokio::time::interval(REPORTING_INTERVAL);
-
-        loop {
-            select! {
-                _ = interval.tick() => self.memory_stats(),
-                _ = stop_rx.recv() => break,
+    fn spawn(self) -> JoinHandle<()> {
+        std::thread::spawn(move || loop {
+            if let Ok(()) = self.stop_rx.recv_timeout(REPORTING_INTERVAL) {
+                break;
             }
-        }
+            self.memory_stats();
+        })
     }
 
-    fn memory_stats(&mut self) {
+    fn memory_stats(&self) {
         let inner = self.state_handle.inner();
         let db = inner.db;
         if let Ok(stats) = get_memory_usage_stats(Some(&[&db]), None) {

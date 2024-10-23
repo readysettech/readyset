@@ -99,7 +99,7 @@ use test_strategy::Arbitrary;
 use thiserror::Error;
 use tracing::{debug, error, info, info_span, instrument, trace, warn};
 
-use crate::persistent_state::metrics::MetricsReporter;
+use crate::persistent_state::metrics::{MetricsReporter, MetricsReporterStop};
 use crate::{
     EvictKeysResult, EvictRandomResult, LookupResult, PersistencePoint, PointKey, RangeKey,
     RangeLookupResult, RecordResult, State,
@@ -465,7 +465,7 @@ pub struct PersistentState {
 
     persistence_type: PersistenceType,
     replay_done: bool,
-    metrics_stop_rx: tokio::sync::mpsc::Sender<()>,
+    metrics_stop: Option<MetricsReporterStop>,
 }
 
 /// Things that are shared between read handles and the state itself, that can be locked under a
@@ -848,7 +848,6 @@ impl State for PersistentState {
 
     fn shut_down(&mut self) -> ReadySetResult<()> {
         trace!("PersistentState received shutdown, stopping the WAL");
-        self.shut_down_metrics_reporting();
         self.shut_down_wal()
 
         // DurabilityMode::DeleteOnExit will delete all data when the TempFile instance
@@ -856,7 +855,6 @@ impl State for PersistentState {
     }
 
     fn tear_down(mut self) -> ReadySetResult<()> {
-        self.shut_down_metrics_reporting();
         let _ = &self.shut_down_wal()?;
 
         let temp_dir = self._tmpdir.take();
@@ -876,6 +874,13 @@ impl State for PersistentState {
                 ReadySetError::IOError(format!("Failed to remove rocksdb directory: {}", e))
             }),
         }
+    }
+}
+
+impl Drop for PersistentState {
+    fn drop(&mut self) {
+        // We must stop the metrics thread before dropping the db to avoid a crash.
+        self.shut_down_metrics_reporting();
     }
 }
 
@@ -1389,10 +1394,10 @@ impl PersistentState {
             &params,
             persistence_type,
         ) {
-            Ok(ps) => Ok(Self {
-                _tmpdir: tmpdir,
-                ..ps
-            }),
+            Ok(mut ps) => {
+                ps._tmpdir = tmpdir;
+                Ok(ps)
+            }
             Err(e) if e.is_permanent() => Err(e),
             Err(error) => {
                 warn!(
@@ -1536,13 +1541,7 @@ impl PersistentState {
             Some((tx, jh))
         };
 
-        let metrics_stop_rx = {
-            let (tx, rx) = tokio::sync::mpsc::channel::<()>(1);
-            let metrics_reporter =
-                MetricsReporter::new(name.as_str().to_string(), read_handle.clone());
-            tokio::spawn(metrics_reporter.report(rx));
-            tx
-        };
+        let metrics = MetricsReporter::start(name.as_str().to_string(), read_handle.clone());
 
         let mut state = Self {
             name,
@@ -1557,7 +1556,7 @@ impl PersistentState {
             wal_flush_thread_handle,
             persistence_type,
             replay_done: persistence_type == PersistenceType::BaseTable,
-            metrics_stop_rx,
+            metrics_stop: Some(metrics),
         };
 
         if let Some(pk) = state.unique_keys.first().cloned() {
@@ -2132,11 +2131,10 @@ impl PersistentState {
         Ok(())
     }
 
-    fn shut_down_metrics_reporting(&self) {
-        let handle = self.metrics_stop_rx.clone();
-        tokio::task::spawn(async move {
-            let _ = handle.send(()).await;
-        });
+    fn shut_down_metrics_reporting(&mut self) {
+        if let Some(x) = self.metrics_stop.take() {
+            x.stop();
+        }
     }
 
     fn shut_down_wal(&mut self) -> ReadySetResult<()> {
