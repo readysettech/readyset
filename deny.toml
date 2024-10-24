@@ -144,8 +144,6 @@ skip-tree = [
     { name = "rust_decimal", version = "1.17.0" },
     { name = "mysql_common", version = "0.32" },
     { name = "consulrs", version = "0.1.0" },
-    # https://github.com/crossbeam-rs/crossbeam/pull/926
-    { name = "metrics-util", version = "0.15.0" },
     { name = "mysql", version = "25" },
 ]
 
