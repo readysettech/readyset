@@ -55,14 +55,11 @@ impl<'ast> VisitorMut<'ast> for AutoParameterizeVisitor {
         if was_supported {
             match expression {
                 Expr::BinaryOp { lhs, op, rhs } => match (lhs.as_mut(), op, rhs.as_mut()) {
-                    (
-                        Expr::Column(_),
-                        BinaryOperator::Equal,
-                        Expr::Literal(Literal::Placeholder(_)),
-                    ) => {}
+                    (Expr::Column(_), op, Expr::Literal(Literal::Placeholder(_)))
+                        if op.is_equality_comparison() => {}
                     (Expr::Column(_), op, Expr::Literal(Literal::Placeholder(_)))
                         if op.is_ordering_comparison() => {}
-                    (Expr::Column(_), BinaryOperator::Equal, Expr::Literal(lit)) => {
+                    (Expr::Column(_), op, Expr::Literal(lit)) if op.is_equality_comparison() => {
                         if self.autoparameterize_equals {
                             self.replace_literal(lit);
                         }
@@ -74,8 +71,8 @@ impl<'ast> VisitorMut<'ast> for AutoParameterizeVisitor {
                         }
                         return Ok(());
                     }
-                    (Expr::Literal(_), BinaryOperator::Equal, Expr::Column(_)) => {
-                        // for lit = col, swap the equality first then revisit
+                    (Expr::Literal(_), op, Expr::Column(_)) if op.is_equality_comparison() => {
+                        // for lit <equality op> col, swap the equality first then revisit
                         mem::swap(lhs, rhs);
                         return self.visit_expr(expression);
                     }
@@ -208,8 +205,12 @@ impl<'ast> VisitorMut<'ast> for AnalyzeLiteralsVisitor {
                         }
                         return Ok(());
                     }
-                    (Expr::Literal(_), BinaryOperator::Equal, Expr::Column(_)) => {
-                        // for lit = col, swap the equality first then revisit
+                    (
+                        Expr::Literal(_),
+                        BinaryOperator::Equal | BinaryOperator::NotEqual,
+                        Expr::Column(_),
+                    ) => {
+                        // for lit [=|<>] col, swap the equality first then revisit
                         mem::swap(lhs, rhs);
                         return self.visit_expr(expression);
                     }

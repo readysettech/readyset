@@ -293,6 +293,11 @@ impl BinaryOperator {
         matches!(self, Greater | GreaterOrEqual | Less | LessOrEqual)
     }
 
+    pub fn is_equality_comparison(&self) -> bool {
+        use BinaryOperator::*;
+        matches!(self, Equal | NotEqual)
+    }
+
     /// If this operator is an ordered comparison, invert its meaning. (i.e. Greater becomes
     /// Less)
     pub fn flip_ordering_comparison(self) -> Result<Self, Self> {

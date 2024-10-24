@@ -74,8 +74,8 @@ impl UnsupportedPlaceholderVisitor {
                 (
                     Expr::Column(_),
                     Expr::Literal(Literal::Placeholder(ItemPlaceholder::DollarNumber(n))),
-                    BinaryOperator::Equal,
-                ) => self.context.equality_comparisons.push(*n),
+                    cmp,
+                ) if cmp.is_equality_comparison() => self.context.equality_comparisons.push(*n),
                 (
                     Expr::Column(_),
                     Expr::Literal(Literal::Placeholder(ItemPlaceholder::DollarNumber(n))),
@@ -143,7 +143,7 @@ impl<'ast> Visitor<'ast> for UnsupportedPlaceholderVisitor {
                 // column on the left and placeholder on the right.
                 if !(matches!(**lhs, Expr::Column(_))
                     && matches!(**rhs, Expr::Literal(_)) // no need to walk for any literal
-                    && (matches!(op, BinaryOperator::Equal) || op.is_ordering_comparison()))
+                    && (op.is_equality_comparison() || op.is_ordering_comparison()))
                 {
                     let Ok(_) = walk_expr(self, expr);
                 } else {
