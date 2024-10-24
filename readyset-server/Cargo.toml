@@ -114,7 +114,6 @@ tempfile = { workspace = true }
 mysql = { workspace = true }
 chrono = { workspace = true }
 assert_approx_eq = { workspace = true }
-assert_unordered = { workspace = true }
 criterion = { workspace = true }
 include_dir = { workspace = true }
 rusty-fork = { workspace = true }
