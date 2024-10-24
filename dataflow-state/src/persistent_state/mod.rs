@@ -772,6 +772,10 @@ impl State for PersistentState {
             is_unique.push(uniq);
         }
 
+        if indices.is_empty() {
+            return;
+        }
+
         let threads = self.add_secondary(inner, &indices, &is_unique);
         for t in threads {
             self.push_compaction_thread(t);
