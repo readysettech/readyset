@@ -86,7 +86,6 @@ tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git" }
 ahash = "0.8"
 anyhow = "1.0.82"
 assert_approx_eq = "1.1.0"
-assert_unordered = "0.3"
 async-bincode = "0.6.2"
 async-stream = "0.3.5"
 async-trait = "0.1"

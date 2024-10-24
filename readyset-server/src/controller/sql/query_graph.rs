@@ -1460,7 +1460,6 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
 #[allow(clippy::unwrap_used)]
 #[cfg(test)]
 mod tests {
-    use assert_unordered::assert_eq_unordered;
     use nom_sql::{parse_query, parse_select_statement, Dialect, FunctionExpr, SqlQuery};
 
     use super::*;
@@ -1555,27 +1554,28 @@ mod tests {
         let qg = make_query_graph(
             "select t.x, sum(t.y) from t group by t.x having min(t.y) > 1 and sum(t.y) > 3;",
         );
-        assert_eq_unordered!(
-            qg.having_predicates,
-            vec![
-                Expr::BinaryOp {
-                    lhs: Box::new(Expr::Column(Column {
-                        name: "min(`t`.`y`)".into(),
-                        table: None
-                    })),
-                    op: BinaryOperator::Greater,
-                    rhs: Box::new(Expr::Literal(Literal::Integer(1)))
-                },
-                Expr::BinaryOp {
-                    lhs: Box::new(Expr::Column(Column {
-                        name: "sum(`t`.`y`)".into(),
-                        table: None
-                    })),
-                    op: BinaryOperator::Greater,
-                    rhs: Box::new(Expr::Literal(Literal::Integer(3)))
-                },
-            ]
-        );
+        let mut a = qg.having_predicates.clone();
+        a.sort();
+        let mut b = vec![
+            Expr::BinaryOp {
+                lhs: Box::new(Expr::Column(Column {
+                    name: "min(`t`.`y`)".into(),
+                    table: None,
+                })),
+                op: BinaryOperator::Greater,
+                rhs: Box::new(Expr::Literal(Literal::Integer(1))),
+            },
+            Expr::BinaryOp {
+                lhs: Box::new(Expr::Column(Column {
+                    name: "sum(`t`.`y`)".into(),
+                    table: None,
+                })),
+                op: BinaryOperator::Greater,
+                rhs: Box::new(Expr::Literal(Literal::Integer(3))),
+            },
+        ];
+        b.sort();
+        assert_eq!(a, b);
 
         let expected_aggs = [
             (
