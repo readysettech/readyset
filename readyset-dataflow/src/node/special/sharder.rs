@@ -2,6 +2,7 @@ use readyset_client::KeyComparison;
 use serde::{Deserialize, Serialize};
 use vec_map::VecMap;
 
+use crate::payload::packets::ReplayPiece;
 use crate::payload::{self, EvictRequest, ReplayPieceContext, SenderReplication};
 use crate::prelude::*;
 
@@ -192,21 +193,21 @@ impl Sharder {
         }
 
         let mut dest = Destination::Any;
-        if let Packet::ReplayPiece {
+        if let Packet::ReplayPiece(ReplayPiece {
             context: payload::ReplayPieceContext::Full { last: true, .. },
             ..
-        } = m
+        }) = m
         {
             // this is the last replay piece for a full replay
             // we need to make sure it gets to every shard so they know to ready the node
             dest = Destination::All;
-        } else if let Packet::ReplayPiece {
+        } else if let Packet::ReplayPiece(ReplayPiece {
             context:
                 payload::ReplayPieceContext::Partial {
                     requesting_shard, ..
                 },
             ..
-        } = m
+        }) = m
         {
             if let Some(true) = is_last_sharder_for_tag {
                 // we are the last sharder and the replay target is sharded

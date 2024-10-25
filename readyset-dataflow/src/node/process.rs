@@ -138,7 +138,7 @@ impl Node {
             NodeType::Base(ref mut b) => {
                 // NOTE: bases only accept BaseOperations
                 match m.take() {
-                    Some(Packet::Input { inner, .. }) => {
+                    Some(Packet::Input(Input { inner, .. })) => {
                         let PacketData { dst, data, trace } = inner;
                         let ops = data
                             .try_into()
@@ -195,11 +195,11 @@ impl Node {
                             s.set_snapshot_mode(SnapshotMode::SnapshotModeDisabled);
                         }
 
-                        *m = Some(Packet::Message {
+                        *m = Some(Packet::Update(Update {
                             link: Link::new(dst, dst),
                             data: rs,
                             trace,
-                        });
+                        }));
                     }
                     Some(ref p) => {
                         // TODO: replays?
@@ -249,7 +249,7 @@ impl Node {
                     let from = m.src();
 
                     let (data, replay) = match *m {
-                        Packet::ReplayPiece {
+                        Packet::ReplayPiece(ReplayPiece {
                             tag,
                             ref mut data,
                             context:
@@ -260,7 +260,7 @@ impl Node {
                                     unishard,
                                 },
                             ..
-                        } => {
+                        }) => {
                             invariant!(keyed_by.is_some());
                             trace!(
                                 ?data,
@@ -283,16 +283,17 @@ impl Node {
                                 },
                             )
                         }
-                        Packet::ReplayPiece {
+                        Packet::ReplayPiece(ReplayPiece {
                             ref mut data,
                             context: payload::ReplayPieceContext::Full { last, ref replicas },
                             tag,
                             ..
-                        } => {
+                        }) => {
                             trace!(?data, %tag, last, ?replicas, "received full replay");
                             (data, ReplayContext::Full { last, tag })
                         }
-                        Packet::Message { ref mut data, .. } => {
+                        Packet::Update(ref mut x) => {
+                            let data = x.data_mut();
                             trace!(?data, "received regular message");
                             (data, ReplayContext::None)
                         }
@@ -333,13 +334,13 @@ impl Node {
                             // NOTE: no misses or lookups here since this is a union
                             *data = rows;
                             captured = were_captured;
-                            if let Packet::ReplayPiece {
+                            if let Packet::ReplayPiece(ReplayPiece {
                                 context:
                                     payload::ReplayPieceContext::Partial {
                                         ref mut for_keys, ..
                                     },
                                 ..
-                            } = *m
+                            }) = *m
                             {
                                 *for_keys = emitted_keys;
                             } else {
@@ -357,10 +358,10 @@ impl Node {
                     }
 
                     if let Some(new_last) = set_replay_last {
-                        if let Packet::ReplayPiece {
+                        if let Packet::ReplayPiece(ReplayPiece {
                             context: payload::ReplayPieceContext::Full { ref mut last, .. },
                             ..
-                        } = *m
+                        }) = *m
                         {
                             *last = new_last;
                         } else {
@@ -370,13 +371,13 @@ impl Node {
                         }
                     }
 
-                    if let Packet::ReplayPiece {
+                    if let Packet::ReplayPiece(ReplayPiece {
                         context:
                             payload::ReplayPieceContext::Partial {
                                 ref mut unishard, ..
                             },
                         ..
-                    } = *m
+                    }) = *m
                     {
                         // hello, it's me again.
                         //
@@ -410,11 +411,11 @@ impl Node {
 
                 let m = m.as_mut().unwrap();
                 let tag = match *m {
-                    Packet::ReplayPiece {
+                    Packet::ReplayPiece(ReplayPiece {
                         tag,
                         context: payload::ReplayPieceContext::Partial { .. },
                         ..
-                    } => {
+                    }) => {
                         // NOTE: non-partial replays shouldn't be materialized only for a
                         // particular index, and so the tag shouldn't be forwarded to the
                         // materialization code. this allows us to keep some asserts deeper in

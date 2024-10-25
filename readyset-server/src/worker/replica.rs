@@ -4,7 +4,7 @@ use std::net::SocketAddr;
 use std::sync::{atomic, Arc};
 use std::time;
 
-use dataflow::payload::packets::{RequestReaderReplay, Timestamp};
+use dataflow::payload::packets::*;
 use dataflow::payload::{MaterializedState, SourceChannelIdentifier};
 use dataflow::prelude::Upcall;
 use dataflow::{Domain, DomainReceiver, DomainRequest, DualTcpStream, Outboxes, Packet};
@@ -152,10 +152,10 @@ impl Replica {
                 let input: PacketData = v;
                 // Peek at its type.
                 match input.data {
-                    PacketPayload::Input(_) => Packet::Input {
+                    PacketPayload::Input(_) => Packet::Input(Input {
                         inner: input,
                         src: SourceChannelIdentifier { token, tag },
-                    },
+                    }),
                     PacketPayload::Timestamp(_) => Packet::Timestamp(Timestamp {
                         // The link values propagated to the base table are not used.
                         link: None,
@@ -392,10 +392,10 @@ impl Replica {
                             src: SourceChannelIdentifier { token, tag },
                             ..
                         })
-                        | Packet::Input {
+                        | Packet::Input(Input {
                             src: SourceChannelIdentifier { token, tag },
                             ..
-                        } => {
+                        }) => {
                             // After processing we need to ack timestamp and input messages from
                             // base
                             established

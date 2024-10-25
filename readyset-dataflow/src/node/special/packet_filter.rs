@@ -8,7 +8,7 @@ use readyset_errors::{internal, ReadySetResult};
 use serde::{Deserialize, Serialize};
 use vec1::Vec1;
 
-use crate::payload::packets::Evict;
+use crate::payload::packets::*;
 use crate::payload::{EvictRequest, ReplayPieceContext};
 use crate::prelude::NodeIndex;
 use crate::Packet;
@@ -31,7 +31,7 @@ pub struct NodeKeys {
 /// filter list.
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Default)]
 pub struct PacketFilter {
-    /// Stores the information needed to filter [`Record`]s from [`Packet::Message`]s.
+    /// Stores the information needed to filter [`Record`]s from [`Packet::Update`]s.
     #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
     requested_keys: HashMap<NodeIndex, NodeKeys>,
 }
@@ -55,7 +55,7 @@ impl PacketFilter {
     ///    stored in the filter, along the column indexes they predicate upon.
     /// 2. If the packet is an eviction message ([`Packet::Evict`]), the evicted keys are
     ///    removed from the filter.
-    /// 3. If the packet is an update ([`Packet::Message`]), then the packet is stripped down of any
+    /// 3. If the packet is an update ([`Packet::Update`]), then the packet is stripped down of any
     ///    record that does not comply with the stored keys. If no record survives the filtering,
     ///    then the whole packet should be dropped.
     ///
@@ -85,7 +85,7 @@ impl PacketFilter {
         };
 
         match packet {
-            Packet::Message { data, .. } => {
+            Packet::Update(Update { data, .. }) => {
                 // If the packet is an update, we must check what keys the target node has
                 // previously requested. Based on that, we'll filter the records
                 // from the Packet.
@@ -115,10 +115,10 @@ impl PacketFilter {
                 // dropped.  Otherwise, return the new updated packet with the filtered records.
                 Ok(!data.is_empty())
             }
-            Packet::ReplayPiece {
+            Packet::ReplayPiece(ReplayPiece {
                 context: ReplayPieceContext::Partial { for_keys, .. },
                 ..
-            } => {
+            }) => {
                 // If we are processing a replay piece for a partial replay,
                 // then the "keyed-by" parameter must be present.
                 match keyed_by {
@@ -281,17 +281,19 @@ mod test {
 
         #[test]
         fn multiple_replayed_keys() {
-            let mk_replay = |key, data| Packet::ReplayPiece {
-                link: create_link(),
-                tag: Tag::new(1),
-                data,
-                context: ReplayPieceContext::Partial {
-                    for_keys: HashSet::from([key]),
-                    requesting_shard: 0,
-                    requesting_replica: 0,
-                    unishard: false,
-                },
-                cache_name: "test".into(),
+            let mk_replay = |key, data| {
+                Packet::ReplayPiece(ReplayPiece {
+                    link: create_link(),
+                    tag: Tag::new(1),
+                    data,
+                    context: ReplayPieceContext::Partial {
+                        for_keys: HashSet::from([key]),
+                        requesting_shard: 0,
+                        requesting_replica: 0,
+                        unishard: false,
+                    },
+                    cache_name: "test".into(),
+                })
             };
 
             let mut packet_filter = PacketFilter::default();
@@ -500,11 +502,11 @@ mod test {
         }
 
         fn create_packet(records: Vec<Record>) -> Packet {
-            Packet::Message {
+            Packet::Update(Update {
                 link: create_link(),
                 data: records.into(),
                 trace: None,
-            }
+            })
         }
     }
 
@@ -609,13 +611,13 @@ mod test {
                     replicas: None,
                 }
             };
-            Packet::ReplayPiece {
+            Packet::ReplayPiece(ReplayPiece {
                 link: create_link(),
                 tag: Tag::new(1),
                 data: Default::default(),
                 context,
                 cache_name: "test".into(),
-            }
+            })
         }
     }
 
