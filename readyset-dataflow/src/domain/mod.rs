@@ -3136,47 +3136,23 @@ impl Domain {
             }
 
             // forward the current message through all local nodes.
-            let mut m = Some(Packet::ReplayPiece(ReplayPiece {
+            let mut m = ReplayPiece {
                 link,
                 tag,
                 data,
                 context,
                 cache_name: cache_name.clone(),
-            }));
-
-            macro_rules! replay_context {
-                ($m:ident, $field:ident) => {
-                    if let Some(&mut Packet::ReplayPiece(ReplayPiece {
-                        ref mut context, ..
-                    })) = $m.as_mut()
-                    {
-                        if let ReplayPieceContext::Partial { ref mut $field, .. } = *context {
-                            Some($field)
-                        } else {
-                            None
-                        }
-                    } else {
-                        internal!("asked to fetch replay field on non-replay packet")
-                    }
-                };
-            }
+            };
 
             for (i, segment) in path.iter().enumerate() {
                 if let Some(force_tag) = segment.force_tag_to {
-                    #[allow(clippy::unwrap_used)]
-                    // We would have bailed in a previous iteration (break 'outer, below) if
-                    // it wasn't Some
-                    if let Packet::ReplayPiece(ReplayPiece { ref mut tag, .. }) =
-                        m.as_mut().unwrap()
-                    {
-                        trace!(
-                            %force_tag,
-                            original_tag = %tag,
-                            node = %segment.node,
-                            "Forcing tag",
-                        );
-                        *tag = force_tag;
-                    }
+                    trace!(
+                        %force_tag,
+                        original_tag = %m.tag,
+                        node = %segment.node,
+                        "Forcing tag",
+                    );
+                    m.tag = force_tag;
                 }
 
                 // we know replay paths only contain real nodes
@@ -3188,7 +3164,14 @@ impl Domain {
                 // we need this because n.process may choose to reduce the set of keys
                 // (e.g., because some of them missed), in which case we need to know what
                 // keys to _undo_.
-                let mut backfill_keys = if let Some(for_keys) = replay_context!(m, for_keys) {
+                let mut backfill_keys = if let ReplayPiece {
+                    context:
+                        ReplayPieceContext::Partial {
+                            ref mut for_keys, ..
+                        },
+                    ..
+                } = m
+                {
                     debug_assert!(partial_key_cols.is_some());
                     Some(for_keys.clone())
                 } else {
@@ -3287,8 +3270,9 @@ impl Domain {
                 }
 
                 // process the current message in this node
+                let mut pkt = Some(Packet::ReplayPiece(m));
                 let process_result = n.process(
-                    &mut m,
+                    &mut pkt,
                     cols,
                     Some(rp),
                     false,
@@ -3367,13 +3351,17 @@ impl Domain {
                 // we're done with the node
                 drop(n);
 
-                if m.is_none() {
+                if pkt.is_none() {
                     // eaten full replay
                     assert_eq!(misses.len(), 0);
 
                     // it's been captured, so we need to *not* consider the replay finished
                     // (which the logic below matching on context would do)
                     break 'outer;
+                } else if let Some(Packet::ReplayPiece(left)) = pkt {
+                    m = left;
+                } else {
+                    unreachable!("invalid packet, expecting ReplayPiece: {:?}", pkt);
                 }
 
                 // we need to track how many replays we completed, and we need to do so
@@ -3391,15 +3379,13 @@ impl Domain {
                 }
 
                 // only continue with the keys that weren't captured
-                #[allow(clippy::unwrap_used)]
-                // We would have bailed earlier (break 'outer, above) if m weren't Some
-                if let Packet::ReplayPiece(ReplayPiece {
+                if let ReplayPiece {
                     context:
                         ReplayPieceContext::Partial {
                             ref mut for_keys, ..
                         },
                     ..
-                }) = *m.as_mut().unwrap()
+                } = m
                 {
                     if let Some(backfill_keys) = &mut backfill_keys {
                         backfill_keys.retain(|k| for_keys.contains(k));
@@ -3413,24 +3399,21 @@ impl Domain {
                     // since we only enter this branch in the cases where we have a miss,
                     // it is okay to assume that unishard _hasn't_ changed, and therefore
                     // we can use the value that's in m.
-                    #[allow(clippy::unwrap_used)]
-                    // We would have bailed earlier (break 'outer, above) if m wasn't Some
-                    let (unishard, requesting_shard, requesting_replica) =
-                        if let Packet::ReplayPiece(ReplayPiece {
-                            context:
-                                ReplayPieceContext::Partial {
-                                    unishard,
-                                    requesting_shard,
-                                    requesting_replica,
-                                    ..
-                                },
-                            ..
-                        }) = *m.as_mut().unwrap()
-                        {
-                            (unishard, requesting_shard, requesting_replica)
-                        } else {
-                            internal!("backfill_keys.is_some() implies Context::Partial");
-                        };
+                    let (unishard, requesting_shard, requesting_replica) = if let ReplayPiece {
+                        context:
+                            ReplayPieceContext::Partial {
+                                unishard,
+                                requesting_shard,
+                                requesting_replica,
+                                ..
+                            },
+                        ..
+                    } = m
+                    {
+                        (unishard, requesting_shard, requesting_replica)
+                    } else {
+                        internal!("backfill_keys.is_some() implies Context::Partial");
+                    };
 
                     need_replay.extend(misses.iter().map(|m| {
                         ReplayDescriptor::from_miss(
@@ -3454,9 +3437,7 @@ impl Domain {
                     #[allow(clippy::unwrap_used)]
                     // We know this is a partial replay
                     let partial_index = partial_key_cols.as_ref().unwrap();
-                    #[allow(clippy::unwrap_used)]
-                    // We would have bailed earlier (break 'outer, above) if m wasn't Some
-                    m.as_mut().unwrap().mut_data().retain(|r| {
+                    m.data_mut().retain(|r| {
                         // XXX: don't we technically need to translate the columns a
                         // bunch here? what if two key columns are reordered?
                         // XXX: this clone and collect here is *really* sad
@@ -3640,13 +3621,11 @@ impl Domain {
                 }
 
                 // we're all good -- continue propagating
-                #[allow(clippy::unwrap_used)]
-                // We would have bailed earlier (break 'outer, above) if m wasn't Some
-                if m.as_ref().unwrap().is_empty() {
-                    if let Packet::ReplayPiece(ReplayPiece {
+                if m.is_empty() {
+                    if let ReplayPiece {
                         context: ReplayPieceContext::Full { last: false, .. },
                         ..
-                    }) = m.as_ref().unwrap()
+                    } = m
                     {
                         trace!("dropping empty non-terminal full replay packet");
                         // don't continue processing empty updates, *except* if this is the
@@ -3657,43 +3636,31 @@ impl Domain {
                     }
                 }
 
-                #[allow(clippy::unwrap_used)]
-                // We would have bailed earlier (break 'outer, above) if m wasn't Some
                 if i + 1 < path.len() {
                     // update link for next iteration
                     if self.nodes[path[i + 1].node].borrow().is_shard_merger() {
                         // we need to preserve the egress src for shard mergers
                         // (which includes shard identifier)
                     } else {
-                        m.as_mut().unwrap().link_mut().src = segment.node;
+                        m.link_mut().src = segment.node;
                     }
-                    m.as_mut().unwrap().link_mut().dst = path[i + 1].node;
+                    m.link_mut().dst = path[i + 1].node;
                 }
 
                 // feed forward the updated backfill_keys
-                #[allow(clippy::unwrap_used)]
-                // We would have bailed earlier (break 'outer, above) if m wasn't Some
-                if let Packet::ReplayPiece(ReplayPiece {
+                if let ReplayPiece {
                     context:
                         ReplayPieceContext::Partial {
                             ref mut for_keys, ..
                         },
                     ..
-                }) = m.as_mut().unwrap()
+                } = m
                 {
                     *for_keys = backfill_keys.unwrap();
                 }
             }
 
-            #[allow(clippy::unwrap_used)]
-            // We would have bailed earlier (break 'outer, above) if m wasn't Some
-            let context = if let Packet::ReplayPiece(ReplayPiece { context, .. }) = m.unwrap() {
-                context
-            } else {
-                internal!("started as a replay, now not a replay?");
-            };
-
-            match context {
+            match m.context {
                 ReplayPieceContext::Full { last, .. } if last => {
                     debug!(terminal = notify_done, "last batch processed");
                     if notify_done {

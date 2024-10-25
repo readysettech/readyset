@@ -665,14 +665,6 @@ impl Packet {
         }
     }
 
-    pub(crate) fn is_empty(&self) -> bool {
-        match self {
-            Packet::Update(x) => x.is_empty(),
-            Packet::ReplayPiece(x) => x.is_empty(),
-            _ => unreachable!(),
-        }
-    }
-
     pub(crate) fn mut_data(&mut self) -> &mut Records {
         match self {
             Packet::Update(x) => x.data_mut(),
