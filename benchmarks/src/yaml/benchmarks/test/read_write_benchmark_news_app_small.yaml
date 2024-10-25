@@ -1,8 +1,8 @@
 ---
-ReadWriteBenchmark:
+!ReadWriteBenchmark
   read_query:
     query:
-      file: news_app/news_app_read_query.sql
+      !file news_app/news_app_read_query.sql
     query_spec_file: news_app/news_app_read_query.spec
     query_spec: ~
   target_read_qps: 10

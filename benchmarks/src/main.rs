@@ -321,7 +321,7 @@ impl BenchmarkRunner {
                     f.to_str().unwrap()
                 );
             }
-            self.benchmark_cmd = Some(serde_yaml::from_str(&std::fs::read_to_string(f)?)?);
+            self.benchmark_cmd = Some(serde_yaml_ng::from_str(&std::fs::read_to_string(f)?)?);
         }
 
         Ok(())
@@ -356,7 +356,7 @@ impl BenchmarkRunner {
                 );
             }
 
-            (serde_yaml::from_str(&std::fs::read_to_string(f)?)?, None)
+            (serde_yaml_ng::from_str(&std::fs::read_to_string(f)?)?, None)
         } else {
             // --target-conn-str and --setup-conn-str are required unless one of the other methods
             // are passed. Since these are used in benchmarks and must always have a value, these
@@ -383,14 +383,14 @@ impl BenchmarkRunner {
         // directly, and instead may be passed via YAML or via arguments like `--local`.
         let handle = self.initialize_from_args().await?;
 
-        let cmd_as_yaml = serde_yaml::to_string(&self.benchmark_cmd.as_ref().unwrap())?;
-        let deployment_as_yaml = serde_yaml::to_string(&self.deployment_params)?;
+        let cmd_as_yaml = serde_yaml_ng::to_string(&self.benchmark_cmd.as_ref().unwrap())?;
+        let deployment_as_yaml = serde_yaml_ng::to_string(&self.deployment_params)?;
         let identifier = format!("{}\n{}\n", cmd_as_yaml, deployment_as_yaml);
         println!("{}", identifier);
 
         if let Some(f) = &self.only_to_spec {
             let f = std::fs::File::create(f)?;
-            serde_yaml::to_writer(f, &self.benchmark_cmd.as_ref().unwrap())?;
+            serde_yaml_ng::to_writer(f, &self.benchmark_cmd.as_ref().unwrap())?;
             return Ok(vec![]);
         }
 
@@ -474,8 +474,8 @@ impl BenchmarkRunner {
                 .create(true)
                 .append(true)
                 .open(f)?;
-            file.write_all(&serde_yaml::to_vec(&self.benchmark_cmd)?)?;
-            file.write_all(&serde_yaml::to_vec(&self.deployment_params)?)?;
+            file.write_all(&serde_yaml_ng::to_string(&self.benchmark_cmd)?.into_bytes())?;
+            file.write_all(&serde_yaml_ng::to_string(&self.deployment_params)?.into_bytes())?;
             file.write_all(format!("{:?}", results).as_bytes())?;
         }
 
