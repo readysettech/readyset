@@ -453,6 +453,37 @@ pub mod packets {
     use super::*;
 
     #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+    pub struct Input {
+        pub inner: PacketData,
+        pub src: SourceChannelIdentifier,
+    }
+
+    #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+    pub struct Update {
+        pub link: Link,
+        pub data: Records,
+        pub trace: Option<PacketTrace>,
+    }
+
+    #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+    pub struct ReplayPiece {
+        pub link: Link,
+        pub tag: Tag,
+        pub data: Records,
+        pub context: ReplayPieceContext,
+        /// The cache name associated with the replay. Only used for metric labels.
+        pub cache_name: Relation,
+    }
+
+    #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+    pub struct Finish {
+        pub tag: Tag,
+        pub node: LocalNodeIndex,
+        /// The cache name associated with the replay. Only used for metric labels.
+        pub cache_name: Relation,
+    }
+
+    #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
     pub struct RequestPartialReplay {
         pub tag: Tag,
         pub keys: Vec<KeyComparison>,
@@ -489,6 +520,56 @@ pub mod packets {
         pub timestamp: PacketData,
     }
 
+    impl Input {
+        pub(crate) fn dst(&self) -> LocalNodeIndex {
+            self.inner.dst
+        }
+    }
+
+    impl Update {
+        pub(crate) fn src(&self) -> LocalNodeIndex {
+            self.link.src
+        }
+
+        pub(crate) fn dst(&self) -> LocalNodeIndex {
+            self.link.dst
+        }
+
+        pub(crate) fn link_mut(&mut self) -> &mut Link {
+            &mut self.link
+        }
+
+        pub(crate) fn is_empty(&self) -> bool {
+            self.data.is_empty()
+        }
+
+        pub(crate) fn data_mut(&mut self) -> &mut Records {
+            &mut self.data
+        }
+    }
+
+    impl ReplayPiece {
+        pub(crate) fn src(&self) -> LocalNodeIndex {
+            self.link.src
+        }
+
+        pub(crate) fn dst(&self) -> LocalNodeIndex {
+            self.link.dst
+        }
+
+        pub(crate) fn link_mut(&mut self) -> &mut Link {
+            &mut self.link
+        }
+
+        pub(crate) fn is_empty(&self) -> bool {
+            self.data.is_empty()
+        }
+
+        pub(crate) fn data_mut(&mut self) -> &mut Records {
+            &mut self.data
+        }
+    }
+
     impl Timestamp {
         pub(crate) fn src(&self) -> LocalNodeIndex {
             // If link is not specified, then we are at a base table node. Use the packet data
@@ -511,46 +592,22 @@ pub mod packets {
 }
 
 /// The primary unit of communication between nodes in the dataflow graph.
-///
-/// FIXME(aspen): This should be refactored to be an enum-of-enums so that the various parts of
-/// dataflow code that only know how to handle one kind of packet don't have to panic if they
-/// receive the wrong kind of packet. See
-/// [ENG-455](https://readysettech.atlassian.net/browse/ENG-455)
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq, EnumDiscriminants)]
 #[strum_discriminants(derive(EnumIter, EnumCount, IntoStaticStr))]
 #[allow(clippy::large_enum_variant)]
 pub enum Packet {
     // Data messages
     /// A write received to the base table
-    Input {
-        inner: PacketData,
-        src: SourceChannelIdentifier,
-    },
+    Input(Input),
 
-    /// Regular data-flow update.
-    Message {
-        link: Link,
-        data: Records,
-        trace: Option<PacketTrace>,
-    },
+    /// Regular dataflow update.
+    Update(Update),
 
-    /// Update that is part of a tagged data-flow replay path.
-    ReplayPiece {
-        link: Link,
-        tag: Tag,
-        data: Records,
-        context: ReplayPieceContext,
-        /// The cache name associated with the replay. Only used for metric labels.
-        cache_name: Relation,
-    },
+    /// Update that is part of a tagged dataflow replay path.
+    ReplayPiece(ReplayPiece),
 
     // Internal control
-    Finish {
-        tag: Tag,
-        node: LocalNodeIndex,
-        /// The cache name associated with the replay. Only used for metric labels.
-        cache_name: Relation,
-    },
+    Finish(Finish),
 
     // Control messages
     /// Ask domain (nicely) to replay a particular set of keys.
@@ -577,9 +634,9 @@ impl Packet {
     pub(crate) fn src(&self) -> LocalNodeIndex {
         match self {
             // inputs come "from" the base table too
-            Packet::Input { inner, .. } => inner.dst,
-            Packet::Message { link, .. } => link.src,
-            Packet::ReplayPiece { link, .. } => link.src,
+            Packet::Input(x) => x.dst(),
+            Packet::Update(x) => x.src(),
+            Packet::ReplayPiece(x) => x.src(),
             Packet::Timestamp(x) => x.src(),
             _ => unreachable!(),
         }
@@ -587,38 +644,39 @@ impl Packet {
 
     pub(crate) fn dst(&self) -> LocalNodeIndex {
         match self {
-            Packet::Input { inner, .. } => inner.dst,
-            Packet::Message { link, .. } => link.dst,
-            Packet::ReplayPiece { link, .. } => link.dst,
+            Packet::Input(x) => x.dst(),
+            Packet::Update(x) => x.dst(),
+            Packet::ReplayPiece(x) => x.dst(),
             Packet::Timestamp(x) => x.dst(),
             _ => unreachable!(),
         }
     }
 
     pub(crate) fn link_mut(&mut self) -> &mut Link {
-        match *self {
-            Packet::Message { ref mut link, .. } => link,
-            Packet::ReplayPiece { ref mut link, .. } => link,
+        match self {
+            Packet::Update(x) => x.link_mut(),
+            Packet::ReplayPiece(x) => x.link_mut(),
             Packet::Evict(Evict {
-                req: EvictRequest::Keys { ref mut link, .. },
+                req: EvictRequest::Keys { link, .. },
                 ..
             }) => link,
-            Packet::Timestamp(ref mut x) => x.link.as_mut().unwrap(),
+            Packet::Timestamp(x) => x.link.as_mut().unwrap(),
             _ => unreachable!(),
         }
     }
 
     pub(crate) fn is_empty(&self) -> bool {
-        match *self {
-            Packet::Message { ref data, .. } => data.is_empty(),
-            Packet::ReplayPiece { ref data, .. } => data.is_empty(),
+        match self {
+            Packet::Update(x) => x.is_empty(),
+            Packet::ReplayPiece(x) => x.is_empty(),
             _ => unreachable!(),
         }
     }
 
     pub(crate) fn mut_data(&mut self) -> &mut Records {
-        match *self {
-            Packet::Message { ref mut data, .. } | Packet::ReplayPiece { ref mut data, .. } => data,
+        match self {
+            Packet::Update(x) => x.data_mut(),
+            Packet::ReplayPiece(x) => x.data_mut(),
             _ => {
                 unreachable!();
             }
@@ -626,26 +684,26 @@ impl Packet {
     }
 
     /// Perform a function on a packet's trace info if the packet has trace info and it is not
-    /// None. Otherwise  this is a noop and the function is not called.
+    /// None. Otherwise this is a noop and the function is not called.
     pub(crate) fn handle_trace<F>(&mut self, map: F)
     where
         F: FnOnce(&PacketTrace),
     {
-        if let Packet::Message {
+        if let Packet::Update(Update {
             trace: Some(ref t), ..
-        } = *self
+        }) = *self
         {
             map(t);
         }
     }
 
     pub(crate) fn is_regular(&self) -> bool {
-        matches!(*self, Packet::Message { .. })
+        matches!(*self, Packet::Update(_))
     }
 
     pub(crate) fn tag(&self) -> Option<Tag> {
         match *self {
-            Packet::ReplayPiece { tag, .. }
+            Packet::ReplayPiece(ReplayPiece { tag, .. })
             | Packet::Evict(Evict {
                 req: EvictRequest::Keys { tag, .. } | EvictRequest::SingleKey { tag, .. },
                 ..
@@ -655,9 +713,9 @@ impl Packet {
     }
 
     pub(crate) fn take_data(&mut self) -> Records {
-        let inner = match *self {
-            Packet::Message { ref mut data, .. } => data,
-            Packet::ReplayPiece { ref mut data, .. } => data,
+        let inner = match self {
+            Packet::Update(x) => x.data_mut(),
+            Packet::ReplayPiece(x) => x.data_mut(),
             _ => unreachable!(),
         };
         std::mem::take(inner)
@@ -665,36 +723,16 @@ impl Packet {
 
     pub(crate) fn clone_data(&self) -> Self {
         match self {
-            Packet::Message { link, data, trace } => Packet::Message {
-                link: *link,
-                data: data.clone(),
-                trace: trace.clone(),
-            },
-            Packet::ReplayPiece {
-                link,
-                tag,
-                data,
-                context,
-                cache_name,
-            } => Packet::ReplayPiece {
-                link: *link,
-                tag: *tag,
-                data: data.clone(),
-                context: context.clone(),
-                cache_name: cache_name.clone(),
-            },
-            Packet::Timestamp(x) => Packet::Timestamp(Timestamp {
-                link: x.link,
-                src: x.src,
-                timestamp: x.timestamp.clone(),
-            }),
+            Packet::Update(x) => Packet::Update(x.clone()),
+            Packet::ReplayPiece(x) => Packet::ReplayPiece(x.clone()),
+            Packet::Timestamp(x) => Packet::Timestamp(x.clone()),
             _ => unreachable!(),
         }
     }
 
     pub(crate) fn replay_piece_context(&self) -> Option<&ReplayPieceContext> {
         match self {
-            Packet::ReplayPiece { context, .. } => Some(context),
+            Packet::ReplayPiece(x) => Some(&x.context),
             _ => None,
         }
     }
@@ -703,14 +741,14 @@ impl Packet {
 impl fmt::Display for Packet {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Packet::Input { .. } => write!(f, "Input"),
-            Packet::Message { .. } => write!(f, "Message"),
+            Packet::Input(_) => write!(f, "Input"),
+            Packet::Update(_) => write!(f, "Update"),
             Packet::RequestReaderReplay(_) => write!(f, "RequestReaderReplay"),
             Packet::RequestPartialReplay(_) => write!(f, "RequestPartialReplay"),
-            Packet::ReplayPiece { .. } => write!(f, "ReplayPiece"),
+            Packet::ReplayPiece(_) => write!(f, "ReplayPiece"),
             Packet::Timestamp(_) => write!(f, "Timestamp"),
-            Packet::Finish { .. } => write!(f, "Finish"),
-            Packet::Spin { .. } => write!(f, "Spin"),
+            Packet::Finish(_) => write!(f, "Finish"),
+            Packet::Spin => write!(f, "Spin"),
             Packet::Evict(_) => write!(f, "Evict"),
         }
     }
@@ -719,26 +757,24 @@ impl fmt::Display for Packet {
 impl fmt::Debug for Packet {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Packet::Input { .. } => write!(f, "Packet::Input"),
-            Packet::Message { link, .. } => write!(f, "Packet::Message({:?})", link),
+            Packet::Input(_) => write!(f, "Packet::Input"),
+            Packet::Update(Update { link, .. }) => write!(f, "Packet::Update({:?})", link),
             Packet::RequestReaderReplay(x) => {
                 write!(f, "Packet::RequestReaderReplay({:?})", x.keys)
             }
             Packet::RequestPartialReplay(x) => {
                 write!(f, "Packet::RequestPartialReplay({:?})", x.tag)
             }
-            Packet::ReplayPiece {
-                link, tag, data, ..
-            } => write!(
+            Packet::ReplayPiece(x) => write!(
                 f,
                 "Packet::ReplayPiece({:?}, tag {}, {} records)",
-                link,
-                tag,
-                data.len()
+                x.link,
+                x.tag,
+                x.data.len()
             ),
             Packet::Timestamp(_) => write!(f, "Packet::Timestamp"),
-            Packet::Finish { .. } => write!(f, "Packet::Finish"),
-            Packet::Spin { .. } => write!(f, "Packet::Spin"),
+            Packet::Finish(_) => write!(f, "Packet::Finish"),
+            Packet::Spin => write!(f, "Packet::Spin"),
             Packet::Evict(_) => write!(f, "Packet::Evict"),
         }
     }

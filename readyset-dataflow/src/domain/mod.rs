@@ -1320,12 +1320,12 @@ impl Domain {
         // We checked it's Some above, it's only an Option so we can take()
         #[allow(clippy::unwrap_used)]
         match m.as_ref().unwrap() {
-            m @ &Packet::Message { .. } if m.is_empty() => {
+            Packet::Update(x) if x.is_empty() => {
                 // no need to deal with our children if we're not sending them anything
                 return Ok(());
             }
-            &Packet::Message { .. } => {}
-            &Packet::ReplayPiece { .. } => {
+            Packet::Update(_) => {}
+            Packet::ReplayPiece { .. } => {
                 internal!("Replay should never go through dispatch.");
             }
             m => {
@@ -2104,7 +2104,7 @@ impl Domain {
                     let len = chunk.len();
                     let last = iter.peek().is_none();
                     sent_last = last;
-                    let p = Packet::ReplayPiece {
+                    let p = Packet::ReplayPiece(ReplayPiece {
                         tag,
                         link, // to is overwritten by receiver
                         context: ReplayPieceContext::Full {
@@ -2113,7 +2113,7 @@ impl Domain {
                         },
                         data: chunk,
                         cache_name: MIGRATION_CACHE_NAME_STUB.into(),
-                    };
+                    });
 
                     trace!(num = i, len, "sending batch");
                     if let Err(error) = chunked_replay_tx.send(p) {
@@ -2129,7 +2129,7 @@ impl Domain {
                 // tell the target domain we're done
                 if !sent_last {
                     trace!("Sending empty last batch");
-                    if let Err(error) = chunked_replay_tx.send(Packet::ReplayPiece {
+                    if let Err(error) = chunked_replay_tx.send(Packet::ReplayPiece(ReplayPiece {
                         tag,
                         link,
                         context: ReplayPieceContext::Full {
@@ -2138,7 +2138,7 @@ impl Domain {
                         },
                         data: Default::default(),
                         cache_name: MIGRATION_CACHE_NAME_STUB.into(),
-                    }) {
+                    })) {
                         warn!(%error, "replayer noticed domain shutdown");
                     }
                 }
@@ -2576,7 +2576,7 @@ impl Domain {
         self.metrics.inc_packets_sent(&m);
 
         match m {
-            Packet::Message { .. } | Packet::Input { .. } => {
+            Packet::Update(_) | Packet::Input(_) => {
                 // WO for https://github.com/rust-lang/rfcs/issues/1403
                 let start = time::Instant::now();
                 let d: PacketDiscriminants = (&m).into();
@@ -2584,23 +2584,17 @@ impl Domain {
                 self.dispatch(m, executor)?;
                 self.total_forward_time.stop();
 
-                if matches!(d, PacketDiscriminants::Message) {
+                if matches!(d, PacketDiscriminants::Update) {
                     self.metrics.rec_forward_time_message(start.elapsed());
                 } else {
                     self.metrics.rec_forward_time_input(start.elapsed());
                 }
             }
-            Packet::ReplayPiece {
-                link,
-                tag,
-                data,
-                context,
-                cache_name,
-            } => {
+            Packet::ReplayPiece(x) => {
                 let start = time::Instant::now();
-                let name = cache_name.clone();
+                let name = x.cache_name.clone();
                 self.total_replay_time.start();
-                self.handle_replay(link, tag, data, context, cache_name, executor)?;
+                self.handle_replay(x.link, x.tag, x.data, x.context, x.cache_name, executor)?;
                 self.total_replay_time.stop();
                 self.metrics.rec_replay_time(&name, start.elapsed());
             }
@@ -2702,17 +2696,13 @@ impl Domain {
                 self.metrics
                     .rec_seed_replay_time(&cache_name, start.elapsed());
             }
-            Packet::Finish {
-                tag,
-                node,
-                cache_name,
-            } => {
+            Packet::Finish(pkt) => {
                 let start = time::Instant::now();
                 self.total_replay_time.start();
-                self.finish_replay(tag, node, &cache_name, executor)?;
+                self.finish_replay(pkt.tag, pkt.node, &pkt.cache_name, executor)?;
                 self.total_replay_time.stop();
                 self.metrics
-                    .rec_finish_replay_time(&cache_name, start.elapsed());
+                    .rec_finish_replay_time(&pkt.cache_name, start.elapsed());
             }
             Packet::Spin => {
                 // spinning as instructed
@@ -3146,19 +3136,19 @@ impl Domain {
             }
 
             // forward the current message through all local nodes.
-            let mut m = Some(Packet::ReplayPiece {
+            let mut m = Some(Packet::ReplayPiece(ReplayPiece {
                 link,
                 tag,
                 data,
                 context,
                 cache_name: cache_name.clone(),
-            });
+            }));
 
             macro_rules! replay_context {
                 ($m:ident, $field:ident) => {
-                    if let Some(&mut Packet::ReplayPiece {
+                    if let Some(&mut Packet::ReplayPiece(ReplayPiece {
                         ref mut context, ..
-                    }) = $m.as_mut()
+                    })) = $m.as_mut()
                     {
                         if let ReplayPieceContext::Partial { ref mut $field, .. } = *context {
                             Some($field)
@@ -3176,7 +3166,9 @@ impl Domain {
                     #[allow(clippy::unwrap_used)]
                     // We would have bailed in a previous iteration (break 'outer, below) if
                     // it wasn't Some
-                    if let Packet::ReplayPiece { ref mut tag, .. } = m.as_mut().unwrap() {
+                    if let Packet::ReplayPiece(ReplayPiece { ref mut tag, .. }) =
+                        m.as_mut().unwrap()
+                    {
                         trace!(
                             %force_tag,
                             original_tag = %tag,
@@ -3400,14 +3392,14 @@ impl Domain {
 
                 // only continue with the keys that weren't captured
                 #[allow(clippy::unwrap_used)]
-                // We would have bailed earlier (break 'outer, above) if m wasn't Some
-                if let Packet::ReplayPiece {
+                // We would have bailed earlier (break 'outer, above) if m weren't Some
+                if let Packet::ReplayPiece(ReplayPiece {
                     context:
                         ReplayPieceContext::Partial {
                             ref mut for_keys, ..
                         },
                     ..
-                } = *m.as_mut().unwrap()
+                }) = *m.as_mut().unwrap()
                 {
                     if let Some(backfill_keys) = &mut backfill_keys {
                         backfill_keys.retain(|k| for_keys.contains(k));
@@ -3424,7 +3416,7 @@ impl Domain {
                     #[allow(clippy::unwrap_used)]
                     // We would have bailed earlier (break 'outer, above) if m wasn't Some
                     let (unishard, requesting_shard, requesting_replica) =
-                        if let Packet::ReplayPiece {
+                        if let Packet::ReplayPiece(ReplayPiece {
                             context:
                                 ReplayPieceContext::Partial {
                                     unishard,
@@ -3433,7 +3425,7 @@ impl Domain {
                                     ..
                                 },
                             ..
-                        } = *m.as_mut().unwrap()
+                        }) = *m.as_mut().unwrap()
                         {
                             (unishard, requesting_shard, requesting_replica)
                         } else {
@@ -3651,10 +3643,10 @@ impl Domain {
                 #[allow(clippy::unwrap_used)]
                 // We would have bailed earlier (break 'outer, above) if m wasn't Some
                 if m.as_ref().unwrap().is_empty() {
-                    if let Packet::ReplayPiece {
+                    if let Packet::ReplayPiece(ReplayPiece {
                         context: ReplayPieceContext::Full { last: false, .. },
                         ..
-                    } = m.as_ref().unwrap()
+                    }) = m.as_ref().unwrap()
                     {
                         trace!("dropping empty non-terminal full replay packet");
                         // don't continue processing empty updates, *except* if this is the
@@ -3681,13 +3673,13 @@ impl Domain {
                 // feed forward the updated backfill_keys
                 #[allow(clippy::unwrap_used)]
                 // We would have bailed earlier (break 'outer, above) if m wasn't Some
-                if let Packet::ReplayPiece {
+                if let Packet::ReplayPiece(ReplayPiece {
                     context:
                         ReplayPieceContext::Partial {
                             ref mut for_keys, ..
                         },
                     ..
-                } = m.as_mut().unwrap()
+                }) = m.as_mut().unwrap()
                 {
                     *for_keys = backfill_keys.unwrap();
                 }
@@ -3695,7 +3687,7 @@ impl Domain {
 
             #[allow(clippy::unwrap_used)]
             // We would have bailed earlier (break 'outer, above) if m wasn't Some
-            let context = if let Packet::ReplayPiece { context, .. } = m.unwrap() {
+            let context = if let Packet::ReplayPiece(ReplayPiece { context, .. }) = m.unwrap() {
                 context
             } else {
                 internal!("started as a replay, now not a replay?");
@@ -3890,11 +3882,11 @@ impl Domain {
                 // but this allows finish_replay to dispatch into the node by
                 // overriding replaying_to.
                 self.not_ready.remove(&dst);
-                self.delayed_for_self.push_back(Packet::Finish {
+                self.delayed_for_self.push_back(Packet::Finish(Finish {
                     tag,
                     node: dst,
                     cache_name: cache_name.clone(),
-                });
+                }));
             }
         }
         Ok(())
@@ -3937,7 +3929,7 @@ impl Domain {
                 // completely block the domain data channel, so we only process a few backlogged
                 // updates before yielding to the main loop (which might buffer more things).
 
-                if let Packet::Message { .. } = m {
+                if let Packet::Update(_) = m {
                     // NOTE: we specifically need to override the buffering behavior that our
                     // self.replaying_to = Some above would initiate.
                     self.mode = DomainMode::Forwarding;
@@ -3995,11 +3987,11 @@ impl Domain {
             }
         } else {
             // we're not done -- inject a request to continue handling buffered things
-            self.delayed_for_self.push_back(Packet::Finish {
+            self.delayed_for_self.push_back(Packet::Finish(Finish {
                 tag,
                 node,
                 cache_name: cache_name.clone(),
-            });
+            }));
             Ok(())
         }
     }
