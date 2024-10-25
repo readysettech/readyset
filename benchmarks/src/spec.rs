@@ -181,7 +181,7 @@ fn serialize_sql_type<S: Serializer>(
 
 impl WorkloadSpec {
     pub fn from_yaml(yaml: &str) -> Result<Self, impl std::error::Error> {
-        serde_yaml::from_str(yaml)
+        serde_yaml_ng::from_str(yaml)
     }
 
     pub async fn load_distributions(
@@ -360,7 +360,7 @@ queries:
       migrate: false
 "#;
 
-        let _: WorkloadSpec = serde_yaml::from_str(spec).unwrap();
+        let _: WorkloadSpec = serde_yaml_ng::from_str(spec).unwrap();
     }
 
     #[test]
@@ -404,8 +404,8 @@ queries:
             .into(),
         };
 
-        let s = serde_yaml::to_string(&spec).unwrap();
-        let der: WorkloadSpec = serde_yaml::from_str(&s).unwrap();
+        let s = serde_yaml_ng::to_string(&spec).unwrap();
+        let der: WorkloadSpec = serde_yaml_ng::from_str(&s).unwrap();
         assert_eq!(der, spec);
     }
 }

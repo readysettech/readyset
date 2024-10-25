@@ -1,8 +1,8 @@
 ---
-QueryBenchmark:
+!QueryBenchmark
   query:
     query:
-      file: minimal/sum.sql
+      !file minimal/sum.sql
     query_spec_file: ~
     query_spec: ~
   target_qps: ~

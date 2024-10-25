@@ -1,8 +1,8 @@
 ---
-QueryBenchmark:
+!QueryBenchmark
   query:
     query:
-      file: minimal/point_query_small.sql
+      !file minimal/point_query_small.sql
     query_spec_file: ~
     query_spec: ~
   target_qps: ~
