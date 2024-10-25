@@ -74,8 +74,12 @@ impl<'ast> VisitorMut<'ast> for AutoParameterizeVisitor {
                         }
                         return Ok(());
                     }
-                    (Expr::Literal(_), BinaryOperator::Equal, Expr::Column(_)) => {
-                        // for lit = col, swap the equality first then revisit
+                    (
+                        Expr::Literal(_),
+                        BinaryOperator::Equal | BinaryOperator::NotEqual,
+                        Expr::Column(_),
+                    ) => {
+                        // for lit = col and lit != col, swap the equality first then revisit
                         mem::swap(lhs, rhs);
                         return self.visit_expr(expression);
                     }
@@ -201,19 +205,23 @@ impl<'ast> VisitorMut<'ast> for AnalyzeLiteralsVisitor {
                         }
                         return Ok(());
                     }
-                    (Expr::Column(_), _, Expr::Literal(lit)) => {
+                    (Expr::Column(_), op, Expr::Literal(lit)) if op.is_ordering_comparison() => {
                         self.contains_range = true;
                         if let Literal::Placeholder(_) = lit {
                             self.contains_range_placeholder = true;
                         }
                         return Ok(());
                     }
-                    (Expr::Literal(_), BinaryOperator::Equal, Expr::Column(_)) => {
-                        // for lit = col, swap the equality first then revisit
+                    (
+                        Expr::Literal(_),
+                        BinaryOperator::Equal | BinaryOperator::NotEqual,
+                        Expr::Column(_),
+                    ) => {
+                        // for lit = col and lit != col, swap the equality first then revisit
                         mem::swap(lhs, rhs);
                         return self.visit_expr(expression);
                     }
-                    (Expr::Literal(_), op, Expr::Column(_)) => {
+                    (Expr::Literal(_), op, Expr::Column(_)) if op.is_ordering_comparison() => {
                         // for lit <ordering op> col, swap operands and flip operator, then revisit
                         mem::swap(lhs, rhs);
                         // this shouldn't fail as we just did the `op.is_ordering_comparison()`
@@ -527,6 +535,15 @@ mod tests {
             "SELECT * FROM users WHERE 1 = id",
             "SELECT * FROM users WHERE id = ?",
             vec![(0, 1.into())],
+        );
+    }
+
+    #[test]
+    fn literal_not_equals_column() {
+        test_auto_parameterize_mysql(
+            "SELECT * FROM users WHERE 1 != id",
+            "SELECT * FROM users WHERE id != 1",
+            vec![],
         );
     }
 
