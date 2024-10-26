@@ -112,6 +112,14 @@ impl NoriaBackendInner {
             })
             .await
     }
+
+    async fn invalidate_cache(&mut self, view: &Relation) {
+        self.views.remove(view).await
+    }
+
+    async fn invalidate_all_caches(&mut self) {
+        self.views.clear().await
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1159,6 +1167,7 @@ impl NoriaConnector {
             self.inner.get_mut()?,
             self.inner.get_mut()?.noria.remove_query(name)
         )?;
+        self.inner.get_mut()?.invalidate_cache(name).await;
         self.view_name_cache.remove_val(name).await;
         Ok(result)
     }
@@ -1169,6 +1178,7 @@ impl NoriaConnector {
             self.inner.get_mut()?,
             self.inner.get_mut()?.noria.remove_all_queries()
         )?;
+        self.inner.get_mut()?.invalidate_all_caches().await;
         self.view_name_cache.clear().await;
         Ok(())
     }
