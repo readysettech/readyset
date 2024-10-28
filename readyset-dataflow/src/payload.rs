@@ -628,8 +628,7 @@ pub enum Packet {
 
 // Getting rid of the various unreachables on the accessor functions in this impl requires
 // refactoring Packet to be an enum-of-enums, and then moving the accessor functions themselves to
-// the smaller enums (or having them return Options). This is scoped for a larger refactor - see
-// https://readysettech.atlassian.net/browse/ENG-455.
+// the smaller enums (or having them return Options).
 impl Packet {
     pub(crate) fn src(&self) -> LocalNodeIndex {
         match self {
@@ -665,7 +664,7 @@ impl Packet {
         }
     }
 
-    pub(crate) fn mut_data(&mut self) -> &mut Records {
+    pub(crate) fn data_mut(&mut self) -> &mut Records {
         match self {
             Packet::Update(x) => x.data_mut(),
             Packet::ReplayPiece(x) => x.data_mut(),
@@ -689,10 +688,6 @@ impl Packet {
         }
     }
 
-    pub(crate) fn is_regular(&self) -> bool {
-        matches!(*self, Packet::Update(_))
-    }
-
     pub(crate) fn tag(&self) -> Option<Tag> {
         match *self {
             Packet::ReplayPiece(ReplayPiece { tag, .. })
@@ -711,15 +706,6 @@ impl Packet {
             _ => unreachable!(),
         };
         std::mem::take(inner)
-    }
-
-    pub(crate) fn clone_data(&self) -> Self {
-        match self {
-            Packet::Update(x) => Packet::Update(x.clone()),
-            Packet::ReplayPiece(x) => Packet::ReplayPiece(x.clone()),
-            Packet::Timestamp(x) => Packet::Timestamp(x.clone()),
-            _ => unreachable!(),
-        }
     }
 
     pub(crate) fn replay_piece_context(&self) -> Option<&ReplayPieceContext> {

@@ -133,7 +133,7 @@ impl Node {
             NodeType::Ingress => {
                 let m = m.as_mut().unwrap();
                 let tag = m.tag();
-                materialize(m.mut_data(), None, tag, env.state.get_mut(addr))?;
+                materialize(m.data_mut(), None, tag, env.state.get_mut(addr))?;
             }
             NodeType::Base(ref mut b) => {
                 // NOTE: bases only accept BaseOperations
@@ -208,7 +208,6 @@ impl Node {
                         unreachable!("base received non-input packet {:?}", p);
                     }
                     None => {
-                        // The domain should never pass a None.
                         unreachable!("the domain should never pass a None packet to process")
                     }
                 }
@@ -298,8 +297,6 @@ impl Node {
                             (data, ReplayContext::None)
                         }
                         _ => {
-                            // TODO: Scoped for a future refactor:
-                            // https://readysettech.atlassian.net/browse/ENG-455
                             unreachable!("internal dataflow node received an invalid packet type")
                         }
                     };
@@ -425,7 +422,7 @@ impl Node {
                     }
                     _ => None,
                 };
-                materialize(m.mut_data(), None, tag, env.state.get_mut(addr))?;
+                materialize(m.data_mut(), None, tag, env.state.get_mut(addr))?;
 
                 for miss in misses.iter_mut() {
                     if miss.on != addr {
