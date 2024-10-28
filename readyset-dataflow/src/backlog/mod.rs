@@ -118,7 +118,6 @@ fn new_inner(
 
     macro_rules! make {
         ($variant:tt) => {{
-            use reader_map;
             let (mut w, r) = reader_map::Options::default()
                 .with_meta(-1)
                 .with_node_index(node_index)

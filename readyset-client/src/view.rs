@@ -374,7 +374,6 @@ pub(crate) type ViewRpc = Buffer<
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum KeyComparison {
     /// Look up exactly one key
-    /// TODO(eta): this comment is crap
     Equal(Vec1<DfValue>),
 
     /// Look up all keys within a range

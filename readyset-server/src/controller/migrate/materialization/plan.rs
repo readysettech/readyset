@@ -9,7 +9,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::convert::TryFrom;
 
-use dataflow::payload::{ReplayPathSegment, SourceSelection, TriggerEndpoint};
+use dataflow::payload::{PrepareStateKind, ReplayPathSegment, SourceSelection, TriggerEndpoint};
 use dataflow::prelude::*;
 use dataflow::DomainRequest;
 use readyset_errors::ReadySetError;
@@ -789,12 +789,7 @@ impl<'a> Plan<'a> {
     pub(super) fn finalize(
         mut self,
     ) -> ReadySetResult<(Vec<PendingReplay>, HashMap<Tag, (Index, Vec<NodeIndex>)>)> {
-        use dataflow::payload::PrepareStateKind;
-
         let our_node = &self.graph[self.node];
-
-        // NOTE: we cannot use the impl of DerefMut here, since it (reasonably) disallows getting
-        // mutable references to taken state.
         let s = if let Some(r) = our_node.as_reader() {
             let index = r
                 .index()
@@ -825,8 +820,6 @@ impl<'a> Plan<'a> {
                 }
             }
         } else {
-            // not a reader
-
             let weak_indices = self.m.added_weak.remove(&self.node).unwrap_or_default();
 
             if self.partial {

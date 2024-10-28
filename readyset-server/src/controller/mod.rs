@@ -1331,7 +1331,6 @@ async fn handle_controller_request(
         };
 
         match resp {
-            // returned from `Leader::external_request`:
             Ok(Ok(r)) => Ok(Ok(r)),
             Ok(Err(ReadySetError::NoQuorum)) => Err(StatusCode::SERVICE_UNAVAILABLE),
             Ok(Err(ReadySetError::UnknownEndpoint)) => Err(StatusCode::NOT_FOUND),
@@ -1361,7 +1360,6 @@ async fn handle_controller_request(
 
 #[cfg(test)]
 mod tests {
-
     use std::collections::BTreeMap;
 
     use dataflow::DomainIndex;

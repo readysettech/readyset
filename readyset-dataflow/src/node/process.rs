@@ -681,8 +681,6 @@ impl Node {
     }
 }
 
-#[allow(clippy::borrowed_box)]
-// crate visibility due to use by tests
 pub(crate) fn materialize(
     rs: &mut Records,
     replication_offset: Option<ReplicationOffset>,

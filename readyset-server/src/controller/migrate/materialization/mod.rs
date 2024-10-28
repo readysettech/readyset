@@ -125,7 +125,7 @@ impl Default for Config {
 /// Struct containing (authoritative!) information about which nodes in a graph are materialized
 /// (store their output state either in-memory or on-disk), and in what way those materializations
 /// are indexed.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub(in crate::controller) struct Materializations {
     /// Nodes that are (fully or partially) materialized.
     // Skipping this field as we will rebuild the [`Materializations`] state
@@ -175,24 +175,7 @@ pub(in crate::controller) struct Materializations {
 impl Materializations {
     /// Create a new set of materializations.
     pub(in crate::controller) fn new() -> Self {
-        Materializations {
-            have: HashMap::default(),
-            had: HashSet::default(),
-            added: HashMap::default(),
-            new_readers: HashSet::default(),
-
-            added_weak: HashMap::default(),
-
-            paths: HashMap::default(),
-
-            redundant_partial: HashMap::default(),
-
-            partial: HashSet::default(),
-
-            tag_generator: 0,
-
-            config: Default::default(),
-        }
+        Self::default()
     }
 
     /// Set the config for all future materializations
