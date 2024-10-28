@@ -138,8 +138,8 @@ impl Reader {
         );
         // make sure we don't fill a partial materialization
         // hole with incomplete (i.e., non-replay) state.
-        if m.is_regular() {
-            let data = m.mut_data();
+        if let Packet::Update(m) = m {
+            let data = m.data_mut();
             trace!(?data, "reader received regular message");
             if state.is_partial() {
                 data.retain(|row| {
@@ -176,7 +176,7 @@ impl Reader {
             // it *can* happen that multiple readers miss (and thus request replay for) the
             // same hole at the same time. we need to make sure that we ignore any such
             // duplicated replay.
-            let data = m.mut_data();
+            let data = m.data_mut();
             trace!(?data, "reader received replay");
             data.retain(|row| {
                 match state.contains_record(&row[..]) {

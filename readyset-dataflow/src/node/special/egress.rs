@@ -144,7 +144,7 @@ impl Egress {
             } else {
                 // we know this is a data (not a replay)
                 // because, a replay will force a take
-                message.as_ref().map(|m| m.clone_data()).unwrap()
+                message.as_ref().cloned().unwrap()
             };
 
             // src is usually ignored and overwritten by ingress

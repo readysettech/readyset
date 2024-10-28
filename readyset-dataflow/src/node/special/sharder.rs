@@ -182,8 +182,8 @@ impl Sharder {
         let mut m = m.take().unwrap();
         for record in m.take_data() {
             let shard = self.to_shard(&record);
-            let p = self.sharded.entry(shard).or_insert_with(|| m.clone_data());
-            p.mut_data().push(record);
+            let p = self.sharded.entry(shard).or_insert_with(|| m.clone());
+            p.data_mut().push(record);
         }
 
         enum Destination {
@@ -228,14 +228,14 @@ impl Sharder {
         match dest {
             Destination::All => {
                 // ensure that every shard gets a packet
-                // note that m has no data, so m.clone_data() is empty
+                // note that m has no data, so m.clone() has no data
                 for shard in 0..self.txs.len() {
-                    self.sharded.entry(shard).or_insert_with(|| m.clone_data());
+                    self.sharded.entry(shard).or_insert_with(|| m.clone());
                 }
             }
             Destination::One(shard) => {
                 // ensure that the target shard gets a packet
-                self.sharded.entry(shard).or_insert_with(|| m.clone_data());
+                self.sharded.entry(shard).or_insert_with(|| m.clone());
                 // and that no-one else does
                 self.sharded.retain(|k, _| k == shard);
             }

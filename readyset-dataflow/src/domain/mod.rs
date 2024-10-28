@@ -1346,7 +1346,7 @@ impl Domain {
             let mut m = if i == nchildren - 1 {
                 m.take().unwrap()
             } else {
-                m.as_ref().map(|m| m.clone_data()).unwrap()
+                m.clone().unwrap()
             };
 
             let childi = self.nodes[me].borrow().children()[i];
@@ -1397,7 +1397,7 @@ impl Domain {
 
         let nchildren = self.nodes[me].borrow().children().len();
         for i in 0..nchildren {
-            let mut p = message.clone_data();
+            let mut p = message.clone();
 
             let childi = self.nodes[me].borrow().children()[i];
 
