@@ -58,7 +58,7 @@ steps:
     commands:
       - '[ -d public ] && cd public'
       - export RUST_BACKTRACE=full
-      - cargo --locked clippy --workspace --all-targets --all-features -- -W clippy::disallowed_methods -D warnings -A clippy::too_long_first_doc_paragraph
+      - cargo --locked clippy --workspace --all-targets --all-features -- -D warnings
     depends_on:
     - build-image
     plugins:
