@@ -1684,6 +1684,57 @@ impl Domain {
         })
     }
 
+    fn prepare_partial(
+        &mut self,
+        node: LocalNodeIndex,
+        strict_indices: Vec<(Index, Vec<Tag>)>,
+        weak_indices: HashSet<Index>,
+    ) {
+        if !self.state.contains_key(node) {
+            self.state
+                .insert(node, MaterializedNodeState::Memory(MemoryState::default()));
+        }
+        let state = self.state.get_mut(node).unwrap();
+        let strict = strict_indices
+            .into_iter()
+            .map(|(i, t)| (i, Some(t)))
+            .collect();
+        let weak = weak_indices.into_iter().collect();
+        state.add_index_multi(strict, weak);
+    }
+
+    fn prepare_full(
+        &mut self,
+        node: LocalNodeIndex,
+        strict_indices: HashSet<Index>,
+        weak_indices: HashSet<Index>,
+    ) -> ReadySetResult<()> {
+        if !self.state.contains_key(node) {
+            if self.materialization_persistence {
+                let name = format!("full_mat-{}-{}", self.index(), node.id());
+                // we'll add indices a little further down, so empty keys here is fine.
+                let keys: Vec<Box<[usize]>> = vec![];
+                self.state.insert(
+                    node,
+                    MaterializedNodeState::Persistent(PersistentState::new(
+                        name,
+                        keys,
+                        &self.persistence_parameters,
+                        PersistenceType::FullMaterialization,
+                    )?),
+                );
+            } else {
+                self.state
+                    .insert(node, MaterializedNodeState::Memory(MemoryState::default()));
+            }
+        }
+        let state = self.state.get_mut(node).unwrap();
+        let strict = strict_indices.into_iter().map(|x| (x, None)).collect();
+        let weak = weak_indices.into_iter().collect();
+        state.add_index_multi(strict, weak);
+        Ok(())
+    }
+
     fn upquery(
         txs: &[UnboundedSender<Result<Packet, Box<bincode::ErrorKind>>>],
         node: LocalNodeIndex,
@@ -1701,6 +1752,134 @@ impl Domain {
         })
     }
 
+    fn prepare_partial_reader(
+        &mut self,
+        node: LocalNodeIndex,
+        node_index: petgraph::graph::NodeIndex,
+        num_columns: usize,
+        num_shards: usize,
+        index: Index,
+        trigger_domain: DomainIndex,
+    ) -> ReadySetResult<()> {
+        if !self
+            .nodes
+            .get(node)
+            .ok_or_else(|| ReadySetError::NoSuchNode(node.id()))?
+            .borrow()
+            .is_reader()
+        {
+            return Err(ReadySetError::InvalidNodeType {
+                node_index: node.id(),
+                expected_type: NodeType::Reader,
+            });
+        }
+
+        let cols = index.columns.clone();
+        let txs = (0..num_shards)
+            .map(|shard| {
+                let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+                let sender = self
+                    .channel_coordinator
+                    .builder_for(&ReplicaAddress {
+                        domain_index: trigger_domain,
+                        shard,
+                        replica: self.replica(),
+                    })?
+                    .build_async()?;
+
+                tokio::spawn(UnboundedReceiverStream::new(rx).forward(sender).map(|r| {
+                    if let Err(e) = r {
+                        // domain went away?
+                        error!(error = %e, "replay source went away");
+                    }
+                }));
+                Ok(tx)
+            })
+            .collect::<ReadySetResult<Vec<_>>>()?;
+
+        let mut n = self.nodes[node].borrow_mut();
+        let name = n.name().clone();
+        #[allow(clippy::unwrap_used)] // checked it was a reader above
+        let r = n.as_mut_reader().unwrap();
+
+        let name2 = name.clone();
+        let (read, write) = backlog::new_partial(
+            num_columns,
+            index,
+            move |misses| Self::upquery(&txs, node, &name2, &cols, misses),
+            self.eviction_kind,
+            r.reader_processing().clone(),
+            node_index,
+        );
+
+        let shard = *self.shard.as_ref().unwrap_or(&0);
+        // TODO(ENG-838): Don't recreate every single node on leader failure.
+        // This requires us to overwrite the existing reader.
+        let mut readers = self.readers.lock().unwrap();
+        let addr = ReaderAddress {
+            node: node_index,
+            name: name.clone(),
+            shard,
+        };
+        if readers.insert(addr, read).is_some() {
+            warn!(
+                ?node_index,
+                name = %name.display_unquoted(),
+                %shard,
+                "Overwrote existing reader at worker"
+            );
+        }
+
+        self.reader_write_handles.insert(node, write);
+        Ok(())
+    }
+
+    fn prepare_full_reader(
+        &mut self,
+        node: LocalNodeIndex,
+        node_index: petgraph::graph::NodeIndex,
+        num_columns: usize,
+        index: Index,
+    ) -> ReadySetResult<()> {
+        let mut n = self
+            .nodes
+            .get(node)
+            .ok_or_else(|| ReadySetError::NoSuchNode(node.id()))?
+            .borrow_mut();
+        let name = n.name().clone();
+
+        let r = n
+            .as_mut_reader()
+            .ok_or_else(|| ReadySetError::InvalidNodeType {
+                node_index: node.id(),
+                expected_type: NodeType::Reader,
+            })?;
+
+        let (read, write) = backlog::new(
+            num_columns,
+            index,
+            r.reader_processing().clone(),
+            node_index,
+        );
+
+        let shard = *self.shard.as_ref().unwrap_or(&0);
+        // TODO(ENG-838): Don't recreate every single node on leader failure.
+        // This requires us to overwrite the existing reader.
+        let mut readers = self.readers.lock().unwrap();
+        let addr = ReaderAddress {
+            node: node_index,
+            name,
+            shard,
+        };
+        if readers.insert(addr, read).is_some() {
+            warn!(?node_index, ?shard, "Overwrote existing reader at worker");
+        }
+
+        // make sure Reader is actually prepared to receive state
+        self.reader_write_handles.insert(node, write);
+        Ok(())
+    }
+
     #[inline(always)]
     fn handle_prepare_state(
         &mut self,
@@ -1711,184 +1890,30 @@ impl Domain {
             PrepareStateKind::Partial {
                 strict_indices,
                 weak_indices,
-            } => {
-                if !self.state.contains_key(node) {
-                    self.state
-                        .insert(node, MaterializedNodeState::Memory(MemoryState::default()));
-                }
-                let state = self.state.get_mut(node).unwrap();
-                let strict = strict_indices
-                    .into_iter()
-                    .map(|(i, t)| (i, Some(t)))
-                    .collect();
-                let weak = weak_indices.into_iter().collect();
-                state.add_index_multi(strict, weak);
-            }
+            } => self.prepare_partial(node, strict_indices, weak_indices),
             PrepareStateKind::Full {
                 strict_indices,
                 weak_indices,
-            } => {
-                if !self.state.contains_key(node) {
-                    if self.materialization_persistence {
-                        let name = format!("full_mat-{}-{}", self.index(), node.id());
-                        // we'll add indices a little further down, so empty keys
-                        // here is fine.
-                        let keys: Vec<Box<[usize]>> = vec![];
-                        self.state.insert(
-                            node,
-                            MaterializedNodeState::Persistent(PersistentState::new(
-                                name,
-                                keys,
-                                &self.persistence_parameters,
-                                PersistenceType::FullMaterialization,
-                            )?),
-                        );
-                    } else {
-                        self.state
-                            .insert(node, MaterializedNodeState::Memory(MemoryState::default()));
-                    }
-                }
-                let state = self.state.get_mut(node).unwrap();
-                let strict = strict_indices.into_iter().map(|x| (x, None)).collect();
-                let weak = weak_indices.into_iter().collect();
-                state.add_index_multi(strict, weak);
-            }
+            } => self.prepare_full(node, strict_indices, weak_indices)?,
             PrepareStateKind::PartialReader {
                 node_index,
                 num_columns,
+                num_shards,
                 index,
                 trigger_domain,
+            } => self.prepare_partial_reader(
+                node,
+                node_index,
+                num_columns,
                 num_shards,
-            } => {
-                if !self
-                    .nodes
-                    .get(node)
-                    .ok_or_else(|| ReadySetError::NoSuchNode(node.id()))?
-                    .borrow()
-                    .is_reader()
-                {
-                    return Err(ReadySetError::InvalidNodeType {
-                        node_index: node.id(),
-                        expected_type: NodeType::Reader,
-                    });
-                }
-
-                let cols = index.columns.clone();
-                let txs = (0..num_shards)
-                    .map(|shard| {
-                        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-                        let sender = self
-                            .channel_coordinator
-                            .builder_for(&ReplicaAddress {
-                                domain_index: trigger_domain,
-                                shard,
-                                replica: self.replica(),
-                            })?
-                            .build_async()?;
-
-                        tokio::spawn(UnboundedReceiverStream::new(rx).forward(sender).map(|r| {
-                            if let Err(e) = r {
-                                // domain went away?
-                                error!(error = %e, "replay source went away");
-                            }
-                        }));
-                        Ok(tx)
-                    })
-                    .collect::<ReadySetResult<Vec<_>>>()?;
-
-                let mut n = self.nodes[node].borrow_mut();
-                let name = n.name().clone();
-                #[allow(clippy::unwrap_used)] // checked it was a reader above
-                let r = n.as_mut_reader().unwrap();
-
-                let name2 = name.clone();
-                let (read, write) = backlog::new_partial(
-                    num_columns,
-                    index,
-                    move |misses| Self::upquery(&txs, node, &name2, &cols, misses),
-                    self.eviction_kind,
-                    r.reader_processing().clone(),
-                    node_index,
-                );
-
-                let shard = *self.shard.as_ref().unwrap_or(&0);
-                // TODO(ENG-838): Don't recreate every single node on leader failure.
-                // This requires us to overwrite the existing reader.
-                #[allow(clippy::unwrap_used)] // lock poisoning is unrecoverable
-                if self
-                    .readers
-                    .lock()
-                    .unwrap()
-                    .insert(
-                        ReaderAddress {
-                            node: node_index,
-                            name: name.clone(),
-                            shard,
-                        },
-                        read,
-                    )
-                    .is_some()
-                {
-                    warn!(
-                        ?node_index,
-                        name = %name.display_unquoted(),
-                        %shard,
-                        "Overwrote existing reader at worker"
-                    );
-                }
-
-                self.reader_write_handles.insert(node, write);
-            }
+                index,
+                trigger_domain,
+            )?,
             PrepareStateKind::FullReader {
                 node_index,
                 num_columns,
                 index,
-            } => {
-                let mut n = self
-                    .nodes
-                    .get(node)
-                    .ok_or_else(|| ReadySetError::NoSuchNode(node.id()))?
-                    .borrow_mut();
-                let name = n.name().clone();
-
-                let r = n
-                    .as_mut_reader()
-                    .ok_or_else(|| ReadySetError::InvalidNodeType {
-                        node_index: node.id(),
-                        expected_type: NodeType::Reader,
-                    })?;
-
-                let (read, write) = backlog::new(
-                    num_columns,
-                    index,
-                    r.reader_processing().clone(),
-                    node_index,
-                );
-
-                let shard = *self.shard.as_ref().unwrap_or(&0);
-                // TODO(ENG-838): Don't recreate every single node on leader failure.
-                // This requires us to overwrite the existing reader.
-                #[allow(clippy::unwrap_used)] // lock poisoning is unrecoverable
-                if self
-                    .readers
-                    .lock()
-                    .unwrap()
-                    .insert(
-                        ReaderAddress {
-                            node: node_index,
-                            name,
-                            shard,
-                        },
-                        read,
-                    )
-                    .is_some()
-                {
-                    warn!(?node_index, ?shard, "Overwrote existing reader at worker");
-                }
-
-                // make sure Reader is actually prepared to receive state
-                self.reader_write_handles.insert(node, write);
-            }
+            } => self.prepare_full_reader(node, node_index, num_columns, index)?,
         }
         Ok(None)
     }
