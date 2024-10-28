@@ -131,7 +131,7 @@ impl ReplayPaths {
         self.by_tag.get_mut(&tag)
     }
 
-    /// Look up the list of tags, if any, identifying replay paths targeting the given index in in
+    /// Look up the list of tags, if any, identifying replay paths targeting the given index in
     /// the given target node, and destined for the given destination node.
     ///
     /// The target of a replay path will almost always be the same as the destination, except in the

@@ -220,15 +220,6 @@ where
     ///
     /// The value-bag will only disappear from readers after the next call to
     /// [`publish`](Self::publish).
-    #[deprecated(since = "11.0.0", note = "Renamed to remove_entry")]
-    pub fn empty(&mut self, k: K) -> &mut Self {
-        self.remove_entry(k)
-    }
-
-    /// Remove the value-bag for the given key.
-    ///
-    /// The value-bag will only disappear from readers after the next call to
-    /// [`publish`](Self::publish).
     pub fn remove_entry(&mut self, k: K) -> &mut Self {
         self.add_op(Operation::RemoveEntry(k))
     }

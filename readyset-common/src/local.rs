@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fmt;
+use std::ops::Deref;
 
 use petgraph::graph::NodeIndex;
 use readyset_client::internal::LocalNodeIndex;
@@ -36,9 +37,9 @@ impl fmt::Display for IndexPair {
     }
 }
 
-use std::ops::Deref;
 impl Deref for IndexPair {
     type Target = LocalNodeIndex;
+
     fn deref(&self) -> &Self::Target {
         self.local
             .as_ref()
