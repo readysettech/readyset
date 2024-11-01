@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::task::{ready, Context, Poll, Waker};
 use std::time::{Duration, Instant};
 
-use dataflow::payload::{packets::Evict, EvictRequest};
+use dataflow::payload::{packets::Evict, Eviction};
 use dataflow::{ChannelCoordinator, DomainBuilder, DomainRequest, Packet, Readers};
 use enum_kinds::EnumKind;
 use futures::stream::FuturesUnordered;
@@ -682,7 +682,7 @@ async fn evict_check(
             })?),
         };
         let pkt = Packet::Evict(Evict {
-            req: EvictRequest::Bytes {
+            req: Eviction::Bytes {
                 node: None,
                 num_bytes: evict,
             },

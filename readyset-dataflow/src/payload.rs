@@ -225,7 +225,7 @@ pub enum SenderReplication {
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq, EnumDiscriminants, Debug)]
 /// A request to evict state.
-pub enum EvictRequest {
+pub enum Eviction {
     /// Trigger an eviction from the target node.
     Bytes {
         node: Option<LocalNodeIndex>,
@@ -247,7 +247,7 @@ pub enum EvictRequest {
     SingleKey { tag: Tag, key: Option<Vec<DfValue>> },
 }
 
-impl fmt::Display for EvictRequest {
+impl fmt::Display for Eviction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Bytes { num_bytes, .. } => write!(f, "Bytes {{ num_bytes: {} }}", num_bytes),
@@ -442,7 +442,7 @@ pub enum DomainRequest {
 
     /// Requests an eviction from state within this Domain.
     Evict {
-        req: EvictRequest,
+        req: Eviction,
     },
 
     /// Requests a domain to cleanly shut down.
@@ -506,7 +506,7 @@ pub mod packets {
     #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
     pub struct Evict {
         /// The eviction request
-        pub req: EvictRequest,
+        pub req: Eviction,
         /// If a URL is provided, flush downstream connections using provided barrier credits.
         pub done: Option<Url>,
         pub barrier: u128,
@@ -656,7 +656,7 @@ impl Packet {
             Packet::Update(x) => x.link_mut(),
             Packet::ReplayPiece(x) => x.link_mut(),
             Packet::Evict(Evict {
-                req: EvictRequest::Keys { link, .. },
+                req: Eviction::Keys { link, .. },
                 ..
             }) => link,
             Packet::Timestamp(x) => x.link.as_mut().unwrap(),
@@ -692,7 +692,7 @@ impl Packet {
         match *self {
             Packet::ReplayPiece(ReplayPiece { tag, .. })
             | Packet::Evict(Evict {
-                req: EvictRequest::Keys { tag, .. } | EvictRequest::SingleKey { tag, .. },
+                req: Eviction::Keys { tag, .. } | Eviction::SingleKey { tag, .. },
                 ..
             }) => Some(tag),
             _ => None,

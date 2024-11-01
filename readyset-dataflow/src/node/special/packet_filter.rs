@@ -10,7 +10,7 @@ use serde_with::serde_as;
 use vec1::Vec1;
 
 use crate::payload::packets::*;
-use crate::payload::{EvictRequest, ReplayPieceContext};
+use crate::payload::{Eviction, ReplayPieceContext};
 use crate::prelude::NodeIndex;
 use crate::Packet;
 
@@ -139,7 +139,7 @@ impl PacketFilter {
             }
             Packet::Evict(Evict {
                 req:
-                    EvictRequest::Keys {
+                    Eviction::Keys {
                         link: _,
                         tag: _,
                         keys,
@@ -781,7 +781,7 @@ mod test {
 
         fn create_packet(keys: Vec<KeyComparison>) -> Packet {
             Packet::Evict(Evict {
-                req: EvictRequest::Keys {
+                req: Eviction::Keys {
                     link: create_link(),
                     tag: Tag::new(1),
                     keys,
