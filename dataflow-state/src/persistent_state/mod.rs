@@ -163,6 +163,15 @@ pub struct RocksDbOptions {
         hide = true
     )]
     pub block_size: usize,
+
+    /// Enable (very) verbose logging. Intended for developer-time debugging
+    #[arg(
+        long = "rocksdb-verbose-logging",
+        default_value_t = false,
+        env = "ROCKSDB_VERBOSE_LOGGING",
+        hide = true
+    )]
+    pub verbose_logging: bool,
 }
 
 impl Default for RocksDbOptions {
@@ -171,6 +180,7 @@ impl Default for RocksDbOptions {
             write_buffer_size: DEFAULT_WRITE_BUFFER_SIZE,
             db_write_buffer_size: DEFAULT_DB_WRITE_BUFFER_SIZE,
             block_size: DEFAULT_BLOCK_SIZE,
+            verbose_logging: false,
         }
     }
 }
@@ -1224,6 +1234,14 @@ fn base_options(params: &PersistenceParameters) -> rocksdb::Options {
 
     let block_opts = block_based_options(false, params);
     opts.set_block_based_table_factory(&block_opts);
+
+    if params.rocksdb_options.verbose_logging {
+        opts.enable_statistics();
+        opts.set_dump_malloc_stats(true);
+        opts.set_report_bg_io_stats(true);
+        opts.set_statistics_level(rocksdb::statistics::StatsLevel::All);
+        opts.set_stats_dump_period_sec(10);
+    }
 
     opts
 }
