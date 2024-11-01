@@ -76,7 +76,7 @@ use std::time::{Duration, Instant};
 use std::{fmt, fs, mem};
 
 use bincode::Options;
-use clap::ValueEnum;
+use clap::{Args, ValueEnum};
 use common::{IndexType, Record, Records, SizeOf, Tag};
 pub use handle::PersistentStateHandle;
 use handle::{PersistentStateReadGuard, PersistentStateWriteGuard};
@@ -128,6 +128,52 @@ const WORKING_DIR: &str = "readyset.tmp";
 
 // Maximum rows per WriteBatch when building new indices for existing rows.
 const INDEX_BATCH_SIZE: usize = 10_000;
+
+// Constants for configurable RocksDB settings
+const DEFAULT_WRITE_BUFFER_SIZE: usize = 32 * 1024 * 1024; // 32MB
+const DEFAULT_DB_WRITE_BUFFER_SIZE: usize = 128 * 1024 * 1024; // 128MB
+const DEFAULT_BLOCK_SIZE: usize = 32 * 1024; // 32KB
+
+/// Configuration options for RocksDB instances
+#[derive(Args, Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RocksDbOptions {
+    /// Write buffer size in RocksDB
+    #[arg(
+        long = "rocksdb-write-buffer-size",
+        default_value_t = DEFAULT_WRITE_BUFFER_SIZE,
+        env = "ROCKSDB_WRITE_BUFFER_SIZE",
+        hide = true
+    )]
+    pub write_buffer_size: usize,
+
+    /// DB write buffer size in RocksDB
+    #[arg(
+        long = "rocksdb-db-write-buffer-size",
+        default_value_t = DEFAULT_DB_WRITE_BUFFER_SIZE,
+        env = "ROCKSDB_DB_WRITE_BUFFER_SIZE",
+        hide = true
+    )]
+    pub db_write_buffer_size: usize,
+
+    /// Block size in RocksDB
+    #[arg(
+        long = "rocksdb-block-size",
+        default_value_t = DEFAULT_BLOCK_SIZE,
+        env = "ROCKSDB_BLOCK_SIZE",
+        hide = true
+    )]
+    pub block_size: usize,
+}
+
+impl Default for RocksDbOptions {
+    fn default() -> Self {
+        Self {
+            write_buffer_size: DEFAULT_WRITE_BUFFER_SIZE,
+            db_write_buffer_size: DEFAULT_DB_WRITE_BUFFER_SIZE,
+            block_size: DEFAULT_BLOCK_SIZE,
+        }
+    }
+}
 
 /// Delete any working/temp files from the last process run. Normally, those files
 /// will be cleaned up on process exit, but if readyset crashes or fails, delete them
@@ -275,6 +321,8 @@ pub struct PersistenceParameters {
     /// set to 0, the WAL will be flushed and synced to disk with every write
     #[serde(default)]
     pub wal_flush_interval_seconds: u64,
+    #[serde(default)]
+    pub rocksdb_options: RocksDbOptions,
 }
 
 impl Default for PersistenceParameters {
@@ -285,6 +333,7 @@ impl Default for PersistenceParameters {
             storage_dir: None,
             working_temp_dir: None,
             wal_flush_interval_seconds: 0,
+            rocksdb_options: RocksDbOptions::default(),
         }
     }
 }
@@ -305,6 +354,7 @@ impl PersistenceParameters {
         storage_dir: Option<PathBuf>,
         working_temp_dir: Option<PathBuf>,
         wal_flush_interval_seconds: u64,
+        rocksdb_options: RocksDbOptions,
     ) -> Self {
         // NOTE(fran): DO NOT impose a particular format on `db_filename_prefix`. If you need to,
         // modify it before use, but do not make assertions on it. The reason being, we use
@@ -319,6 +369,7 @@ impl PersistenceParameters {
             storage_dir,
             working_temp_dir,
             wal_flush_interval_seconds,
+            rocksdb_options,
         }
     }
 
@@ -461,6 +512,7 @@ pub struct PersistentState {
     persistence_type: PersistenceType,
     replay_done: bool,
     metrics_stop: Option<MetricsReporterStop>,
+    persistence_parameters: PersistenceParameters,
 }
 
 /// Things that are shared between read handles and the state itself, that can be locked under a
@@ -1167,24 +1219,22 @@ fn base_options(params: &PersistenceParameters) -> rocksdb::Options {
     opts.set_max_write_buffer_number(cpus);
     opts.set_max_background_jobs(cpus * 4); // only 1/4 of these write memtables
 
-    opts.set_write_buffer_size(32 * 1024 * 1024);
-    opts.set_db_write_buffer_size(128 * 1024 * 1024);
+    opts.set_write_buffer_size(params.rocksdb_options.write_buffer_size);
+    opts.set_db_write_buffer_size(params.rocksdb_options.db_write_buffer_size);
 
-    let block_opts = block_based_options(false);
+    let block_opts = block_based_options(false, params);
     opts.set_block_based_table_factory(&block_opts);
 
     opts
 }
 
 /// Creates a standard set of `BlockBasedOptions`.
-fn block_based_options(set_filter: bool) -> BlockBasedOptions {
+fn block_based_options(set_filter: bool, params: &PersistenceParameters) -> BlockBasedOptions {
     let mut block_opts = BlockBasedOptions::default();
-    block_opts.set_block_size(32 * 1024);
+    block_opts.set_block_size(params.rocksdb_options.block_size);
     block_opts.set_optimize_filters_for_memory(true);
 
     if set_filter {
-        // "9.9" is the recommended value from the rocksdb docs
-        // for the equivalent false positive ratio as bloom filter (10.0)
         block_opts.set_ribbon_filter(9.9);
     }
 
@@ -1238,13 +1288,17 @@ impl IndexParams {
     /// Construct a set of rocksdb Options for column families with this set of params, based on the
     /// given set of `base_options`.
     #[allow(clippy::unreachable)] // Checked at construction
-    fn make_rocksdb_options(&self, base_options: &rocksdb::Options) -> rocksdb::Options {
+    fn make_rocksdb_options(
+        &self,
+        base_options: &rocksdb::Options,
+        params: &PersistenceParameters,
+    ) -> rocksdb::Options {
         let mut opts = base_options.clone();
         match self.index_type {
             // For hash map indices, optimize for point queries and in-prefix range iteration, but
             // don't allow cross-prefix range iteration.
             IndexType::HashMap => {
-                let block_opts = block_based_options(true);
+                let block_opts = block_based_options(true, params);
                 opts.set_block_based_table_factory(&block_opts);
 
                 // We're either going to be doing direct point lookups, in the case of unique
@@ -1605,7 +1659,7 @@ impl PersistentState {
                             let cf_id: usize = cf_name.parse().map_err(|_| Error::BadDbFormat)?;
                             let index_params =
                                 cf_index_params.get(cf_id).ok_or(Error::BadDbFormat)?;
-                            index_params.make_rocksdb_options(&default_options)
+                            index_params.make_rocksdb_options(&default_options, params)
                         },
                     ))
                 })
@@ -1649,7 +1703,8 @@ impl PersistentState {
                     // This column family was dropped, but index remains
                     db.create_cf(
                         &index.column_family,
-                        &IndexParams::from(&index.index).make_rocksdb_options(&default_options),
+                        &IndexParams::from(&index.index)
+                            .make_rocksdb_options(&default_options, params),
                     )?;
                 }
             }
@@ -1698,6 +1753,7 @@ impl PersistentState {
             persistence_type,
             replay_done: persistence_type == PersistenceType::BaseTable,
             metrics_stop: Some(metrics),
+            persistence_parameters: params.clone(),
         };
 
         if let Some(pk) = state.unique_keys.first().cloned() {
@@ -1772,7 +1828,7 @@ impl PersistentState {
         inner.db.save_meta(&meta);
         inner.db.create_cf(
             PK_CF,
-            &index_params.make_rocksdb_options(&self.default_options),
+            &index_params.make_rocksdb_options(&self.default_options, &self.persistence_parameters),
         )?;
 
         Ok(())
@@ -1812,7 +1868,10 @@ impl PersistentState {
                     .db
                     .create_cf(
                         &cf_name,
-                        &index_params.make_rocksdb_options(&self.default_options),
+                        &index_params.make_rocksdb_options(
+                            &self.default_options,
+                            &self.persistence_parameters,
+                        ),
                     )
                     .unwrap();
 
@@ -2049,7 +2108,8 @@ impl PersistentState {
                 .db
                 .create_cf(
                     cf_name,
-                    &IndexParams::from(&index.index).make_rocksdb_options(&self.default_options),
+                    &IndexParams::from(&index.index)
+                        .make_rocksdb_options(&self.default_options, &self.persistence_parameters),
                 )
                 .unwrap();
 

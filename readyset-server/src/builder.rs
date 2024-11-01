@@ -114,6 +114,7 @@ impl Builder {
                 .replicator_config
                 .status_update_interval_secs
                 .into(),
+            opts.rocksdb_options,
         );
         builder.set_persistence(persistence_params);
 

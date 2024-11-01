@@ -40,6 +40,7 @@ pub use dataflow_expression::{
 };
 pub use dataflow_state::{
     BaseTableState, DurabilityMode, MaterializedNodeState, PersistenceParameters, PersistentState,
+    RocksDbOptions,
 };
 
 pub use crate::domain::channel::{ChannelCoordinator, DomainReceiver, DomainSender, DualTcpStream};

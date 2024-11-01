@@ -405,7 +405,7 @@ pub use controller::migrate::materialization::FrontierStrategy;
 pub use controller::replication::{ReplicationOptions, ReplicationStrategy};
 use controller::sql;
 use database_utils::UpstreamConfig;
-pub use dataflow::{DurabilityMode, PersistenceParameters};
+pub use dataflow::{DurabilityMode, PersistenceParameters, RocksDbOptions};
 pub use petgraph::graph::NodeIndex;
 pub use readyset_client::consensus::{Authority, LocalAuthority};
 pub use readyset_client::*;
@@ -728,6 +728,9 @@ pub struct WorkerOptions {
         hide = true
     )]
     pub verbose_domain_metrics: bool,
+
+    #[command(flatten)]
+    pub rocksdb_options: RocksDbOptions,
 }
 
 impl WorkerOptions {
