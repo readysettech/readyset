@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use vec_map::VecMap;
 
 use crate::payload::packets::ReplayPiece;
-use crate::payload::{self, EvictRequest, ReplayPieceContext, SenderReplication};
+use crate::payload::{self, Eviction, ReplayPieceContext, SenderReplication};
 use crate::prelude::*;
 
 #[derive(Serialize, Deserialize)]
@@ -283,7 +283,7 @@ impl Sharder {
                     let dst = self.txs[shard].node;
                     let p = self.sharded.entry(shard).or_insert_with(|| {
                         Packet::Evict(Evict {
-                            req: EvictRequest::Keys {
+                            req: Eviction::Keys {
                                 link: Link { src, dst },
                                 keys: Vec::new(),
                                 tag,
@@ -295,7 +295,7 @@ impl Sharder {
                     });
                     match *p {
                         Packet::Evict(Evict {
-                            req: EvictRequest::Keys { ref mut keys, .. },
+                            req: Eviction::Keys { ref mut keys, .. },
                             done: None,
                             barrier: 0,
                             credits: 0,
@@ -322,7 +322,7 @@ impl Sharder {
             for tx in self.txs.values() {
                 tx.send(
                     Packet::Evict(Evict {
-                        req: EvictRequest::Keys {
+                        req: Eviction::Keys {
                             link: Link { src, dst: tx.node },
                             keys: keys.to_vec(),
                             tag,

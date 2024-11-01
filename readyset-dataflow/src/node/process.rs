@@ -11,7 +11,7 @@ use tracing::{debug_span, trace};
 
 use crate::node::special::base::{BaseWrite, SetSnapshotMode};
 use crate::node::NodeType;
-use crate::payload::EvictRequest;
+use crate::payload::Eviction;
 use crate::prelude::*;
 use crate::processing::{MissLookupKey, MissReplayKey};
 use crate::{backlog, payload, payload::packets};
@@ -464,7 +464,7 @@ impl Node {
             NodeType::Egress(Some(ref mut e)) => {
                 e.process(
                     &mut Some(Packet::Evict(Evict {
-                        req: EvictRequest::Keys {
+                        req: Eviction::Keys {
                             link: Link {
                                 src: addr,
                                 dst: addr,

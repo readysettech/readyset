@@ -57,7 +57,7 @@ use crate::domain::channel::{ChannelCoordinator, DomainReceiver, DomainSender};
 use crate::node::special::EgressTx;
 use crate::node::{Column, NodeProcessingResult, ProcessEnv};
 use crate::payload::{
-    EvictRequest, MaterializedState, PacketDiscriminants, PrepareStateKind, PrettyReplayPath,
+    Eviction, MaterializedState, PacketDiscriminants, PrepareStateKind, PrettyReplayPath,
     ReplayPieceContext, SenderReplication, SourceSelection,
 };
 use crate::prelude::*;
@@ -1327,7 +1327,7 @@ impl Domain {
             // now send evictions for all the (tag, [key]) things in evictions
             for (tag, keys) in evictions {
                 self.handle_eviction(
-                    EvictRequest::Keys {
+                    Eviction::Keys {
                         keys: keys.into_iter().collect(),
                         link: Link::new(src, me),
                         tag,
@@ -2471,7 +2471,7 @@ impl Domain {
     fn handle_external_eviction(
         &mut self,
         executor: &mut dyn Executor,
-        req: EvictRequest,
+        req: Eviction,
     ) -> ReadySetResult<Option<Vec<u8>>> {
         // Handle an external request for an eviction. Returns the evicted key unless no
         // eviction occurred.
@@ -4464,13 +4464,13 @@ impl Domain {
         }
     }
 
-    /// Handles an [`EvictRequest`], triggering downstream evictions in this Domain or others as
+    /// Handles an [`Eviction`], triggering downstream evictions in this Domain or others as
     /// necessary.
     ///
-    /// If handling an `EvictRequest::Random`, we return the evicted key.
+    /// If handling an `Eviction::Random`, we return the evicted key.
     pub fn handle_eviction(
         &mut self,
-        request: EvictRequest,
+        request: Eviction,
         ex: &mut dyn Executor,
         done: Option<Url>,
         barrier: u128,
@@ -4479,15 +4479,13 @@ impl Domain {
         let barrier = done.map(|done| Barrier::new(ex, done, barrier, credits));
 
         let res = match request {
-            EvictRequest::Bytes { node, num_bytes } => {
-                self.handle_eviction_bytes(ex, node, num_bytes)
-            }
-            EvictRequest::Keys {
+            Eviction::Bytes { node, num_bytes } => self.handle_eviction_bytes(ex, node, num_bytes),
+            Eviction::Keys {
                 link: Link { dst, .. },
                 tag,
                 keys,
             } => self.handle_eviction_keys(ex, dst, tag, keys),
-            EvictRequest::SingleKey { tag, key } => self.handle_eviction_single_key(ex, tag, key),
+            Eviction::SingleKey { tag, key } => self.handle_eviction_single_key(ex, tag, key),
         };
 
         barrier.map(|b| b.flush(ex));
@@ -4825,7 +4823,7 @@ mod test {
 
     const fn fake_packet() -> Packet {
         Packet::Evict(Evict {
-            req: EvictRequest::Bytes {
+            req: Eviction::Bytes {
                 node: None,
                 num_bytes: 0,
             },
