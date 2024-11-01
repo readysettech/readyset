@@ -231,7 +231,7 @@ impl QueryLogger {
         }
 
         if let Some(duration) = event.upstream_duration {
-            let mut labels = vec![("database_type", SharedString::from(DatabaseType::MySql))];
+            let mut labels = vec![("database_type", SharedString::from("upstream"))];
 
             if mode.is_verbose() {
                 labels.push(("query", Self::query_string(query, self.rewrite_params)));
