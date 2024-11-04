@@ -290,7 +290,7 @@ pub struct Options {
     #[arg(
         long,
         hide = true,
-        env = "MIGRATION_REQUEST_TIMEOUT",
+        env = "MIGRATION_REQUEST_TIMEOUT_MS",
         default_value = "1800000"
     )]
     migration_request_timeout_ms: u64,
