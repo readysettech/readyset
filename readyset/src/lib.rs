@@ -296,7 +296,7 @@ pub struct Options {
     migration_request_timeout_ms: u64,
 
     /// The time to wait before canceling a controller request. Defaults to 5 seconds.
-    #[arg(long, hide = true, env = "CONTROLLER_TIMEOUT", default_value = "5000")]
+    #[arg(long, hide = true, env = "CONTROLLER_REQUEST_TIMEOUT_MS", default_value = "5000")]
     controller_request_timeout_ms: u64,
 
     /// Specifies the maximum continuous failure time for any given query, in seconds, before
