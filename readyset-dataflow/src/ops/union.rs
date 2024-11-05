@@ -11,6 +11,7 @@ use readyset_util::intervals::{cmp_endbound, cmp_startbound};
 use readyset_util::ranges::RangeBounds;
 use readyset_util::Indices;
 use serde::{Deserialize, Serialize};
+use serde_with::serde_as;
 use test_strategy::Arbitrary;
 use tracing::{debug, error, trace};
 use vec1::Vec1;
@@ -40,19 +41,20 @@ pub enum DuplicateMode {
     UnionAll,
 }
 
+#[serde_as]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 enum Emit {
     AllFrom(IndexPair, Sharding),
     Project {
-        #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
+        #[serde_as(as = "Vec<(_, _)>")]
         emit: HashMap<IndexPair, Vec<usize>>,
 
         // generated
-        #[serde(with = "serde_with::rust::btreemap_as_tuple_list")]
+        #[serde_as(as = "Vec<(_, _)>")]
         emit_l: BTreeMap<LocalNodeIndex, Vec<usize>>,
-        #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
+        #[serde_as(as = "Vec<(_, _)>")]
         cols: HashMap<IndexPair, usize>,
-        #[serde(with = "serde_with::rust::btreemap_as_tuple_list")]
+        #[serde_as(as = "Vec<(_, _)>")]
         cols_l: BTreeMap<LocalNodeIndex, usize>,
     },
 }
@@ -71,9 +73,10 @@ struct FullWait {
     bag_union_state: Option<BagUnionState>,
 }
 
+#[serde_as]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct ReplayPieces {
-    #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
+    #[serde_as(as = "Vec<(_, _)>")]
     buffered: HashMap<LocalNodeIndex, Records>,
     evict: bool,
 }
@@ -235,6 +238,7 @@ impl PartialOrd for BufferedReplayKey {
 }
 
 /// A union of a set of views.
+#[serde_as]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Union {
     emit: Emit,
@@ -244,7 +248,7 @@ pub struct Union {
     bag_union_state: Option<BagUnionState>,
 
     /// This is a map from (Tag, LocalNodeIndex) to ColumnList
-    #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
+    #[serde_as(as = "Vec<(_, _)>")]
     replay_key: HashMap<(Tag, usize), Vec<usize>>,
 
     /// Buffered upquery responses that are waiting for more replay pieces.

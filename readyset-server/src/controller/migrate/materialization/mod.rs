@@ -14,6 +14,7 @@ use dataflow::{DomainRequest, LookupIndex};
 use petgraph::graph::NodeIndex;
 use readyset_errors::{internal, internal_err, invariant, ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
+use serde_with::serde_as;
 use tracing::{debug, error, info_span, trace};
 
 use crate::controller::keys::{self, RawReplayPath};
@@ -125,6 +126,7 @@ impl Default for Config {
 /// Struct containing (authoritative!) information about which nodes in a graph are materialized
 /// (store their output state either in-memory or on-disk), and in what way those materializations
 /// are indexed.
+#[serde_as]
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub(in crate::controller) struct Materializations {
     /// Nodes that are (fully or partially) materialized.
@@ -154,12 +156,12 @@ pub(in crate::controller) struct Materializations {
     new_readers: HashSet<NodeIndex>,
 
     /// A list of replay paths for each node, indexed by tag.
-    #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
+    #[serde_as(as = "Vec<(_, _)>")]
     pub(in crate::controller) paths: HashMap<NodeIndex, BiHashMap<Tag, (Index, Vec<NodeIndex>)>>,
 
     /// Map of full nodes that are duplicates of partial nodes. Entries are added when we perform
     /// rerouting of full nodes found below partial nodes in migration planning.
-    #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
+    #[serde_as(as = "Vec<(_, _)>")]
     pub(in crate::controller) redundant_partial: HashMap<NodeIndex, NodeIndex>,
 
     // Skipping this field as we will rebuild the [`Materializations`] state
