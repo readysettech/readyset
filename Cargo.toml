@@ -139,7 +139,7 @@ hex = "0.4.3"
 hmac = "0.12.1"
 humantime = "2.1"
 hyper = "0.14.28"
-include_dir = "0.6.2"
+include_dir = "0.7.4"
 indexmap = { version = "2.5.0", default-features = false }
 indicatif = "0.17"
 indoc = "2.0.5"
