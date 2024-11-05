@@ -3,7 +3,7 @@ use std::ffi::OsStr;
 use include_dir::{include_dir, Dir};
 use readyset_server::Config;
 
-const CONFIG_VERSIONS: Dir = include_dir!("tests/config_versions");
+const CONFIG_VERSIONS: Dir = include_dir!("$CARGO_MANIFEST_DIR/tests/config_versions");
 
 #[test]
 fn deserialize_old_versions() {
@@ -18,7 +18,7 @@ fn deserialize_old_versions() {
         }
 
         let name = file.path().file_name().unwrap();
-        let res = serde_json::from_slice::<Config>(file.contents);
+        let res = serde_json::from_slice::<Config>(file.contents());
         assert!(
             res.is_ok(),
             "Failed to deserialize {}: {:#}",
