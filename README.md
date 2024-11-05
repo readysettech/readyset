@@ -15,6 +15,7 @@ ReadySet is a transparent database cache for Postgres & MySQL that gives you the
 ![Rust](https://img.shields.io/badge/Built%20with%20Rust-grey?logo=rust&logoColor=white)
 [![Slack](https://img.shields.io/badge/Join%20Slack-gray?logo=slack&logoColor=white)](https://join.slack.com/t/readysetcommunity/shared_invite/zt-2272gtiz4-0024xeRJUPGWlRETQrGkFw)
 [![Follow us on X, formerly Twitter](https://img.shields.io/twitter/follow/ReadySet?style=social)](https://twitter.com/readysetio)
+[![Gurubase](https://img.shields.io/badge/Gurubase-Ask%20ReadySet%20Guru-006BFF)](https://gurubase.io/g/readyset)
 
 :star: If you find ReadySet useful, please consider giving us a star on GitHub! Your support helps us continue to innovate and deliver exciting new features.
 
