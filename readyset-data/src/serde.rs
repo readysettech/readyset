@@ -10,7 +10,7 @@ use serde::de::{DeserializeSeed, EnumAccess, VariantAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_bytes::{ByteBuf, Bytes};
 use strum::VariantNames;
-use strum_macros::{EnumString, EnumVariantNames, FromRepr};
+use strum_macros::{EnumString, FromRepr, VariantNames};
 
 use crate::{Array, Collation, DfValue, Text, TimestampTz, TinyText};
 
@@ -60,7 +60,7 @@ impl DfValue {
     }
 }
 
-#[derive(EnumVariantNames, EnumString, FromRepr, Clone, Copy)]
+#[derive(VariantNames, EnumString, FromRepr, Clone, Copy)]
 enum Variant {
     None,
     Int,
