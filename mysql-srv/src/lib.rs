@@ -6,7 +6,7 @@
 //! acting as a MySQL server, and delegating operations such as querying and query execution to
 //! user-defined logic.
 //!
-//! To start, implement `MySqlShim` for your backend, and create a `MySqlIntermediary` over an
+//! To start, implement [`MySqlShim`] for your backend, and create a [`MySqlIntermediary`] over an
 //! instance of your backend and a connection stream. The appropriate methods will be called on
 //! your backend whenever a client issues a `QUERY`, `PREPARE`, or `EXECUTE` command, and you will
 //! have a chance to respond appropriately. For example, to write a shim that always responds to
@@ -200,7 +200,7 @@ mod resultset;
 mod value;
 mod writers;
 
-/// Meta-information abot a single column, used either to describe a prepared statement parameter
+/// Meta-information about a single column, used either to describe a prepared statement parameter
 /// or an output column.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Column {
@@ -220,7 +220,7 @@ pub struct Column {
     pub character_set: u16,
     /// Any flags associated with this column.
     ///
-    /// Of particular interest are `ColumnFlags::UNSIGNED_FLAG` and `ColumnFlags::NOT_NULL_FLAG`.
+    /// Of particular interest are [`ColumnFlags::UNSIGNED_FLAG`] and [`ColumnFlags::NOT_NULL_FLAG`]
     pub colflags: ColumnFlags,
 }
 
@@ -243,9 +243,9 @@ pub use crate::params::{ParamParser, ParamValue, Params};
 pub use crate::resultset::{InitWriter, QueryResultWriter, RowWriter, StatementMetaWriter};
 pub use crate::value::{ToMySqlValue, Value, ValueInner};
 
-/// A simple wrapper response to allow either an io::Result or a ParsedCommand to be returned
+/// A wrapper to allow either an [`io::Result`] or a [`ParsedCommand`] to be returned
 pub enum QueryResultsResponse {
-    /// Variant for an `io::Result`
+    /// Variant for an [`io::Result`]
     IoResult(io::Result<()>),
     /// A parsed SQL command, like `DEALLOCATE`
     Command(ParsedCommand),
@@ -257,9 +257,9 @@ pub enum QueryResultsResponse {
 pub trait MySqlShim<W: AsyncWrite + Unpin + Send> {
     /// Called when the client issues a request to prepare `query` for later execution.
     ///
-    /// The provided [`StatementMetaWriter`](struct.StatementMetaWriter.html) should be used to
-    /// notify the client of the statement id assigned to the prepared statement, as well as to
-    /// give metadata about the types of parameters and returned columns.
+    /// The provided [`StatementMetaWriter`] should be used to notify the client of the statement id
+    /// assigned to the prepared statement, as well as to give metadata about the types of
+    /// parameters and returned columns.
     async fn on_prepare(
         &mut self,
         query: &str,
@@ -267,14 +267,13 @@ pub trait MySqlShim<W: AsyncWrite + Unpin + Send> {
         schema_cache: &mut HashMap<u32, CachedSchema>,
     ) -> io::Result<()>;
 
-    /// Provides the server's version information along with ReadySet indications
+    /// Provides the server's version information along with Readyset indications
     fn version(&self) -> String;
 
     /// Called when the client executes a previously prepared statement.
     ///
-    /// Any parameters included with the client's command is given in `params`.
-    /// A response to the query should be given using the provided
-    /// [`QueryResultWriter`](struct.QueryResultWriter.html).
+    /// Any parameters included with the client's command is given in `params`. A response to the
+    /// query should be given using the provided [`QueryResultWriter`].
     async fn on_execute(
         &mut self,
         id: u32,
@@ -289,8 +288,7 @@ pub trait MySqlShim<W: AsyncWrite + Unpin + Send> {
 
     /// Called when the client issues a query for immediate execution.
     ///
-    /// Results should be returned using the given
-    /// [`QueryResultWriter`](struct.QueryResultWriter.html).
+    /// Results should be returned using the given [`QueryResultWriter`].
     async fn on_query(
         &mut self,
         query: &str,
@@ -324,14 +322,14 @@ pub trait MySqlShim<W: AsyncWrite + Unpin + Send> {
 pub struct CachedSchema {
     /// The MySQL schema
     pub mysql_schema: Vec<Column>,
-    /// Associated ReadySet types
+    /// Associated Readyset types
     pub column_types: Vec<DfType>,
     /// Preencoded schema as a byte dump
     pub preencoded_schema: Arc<[u8]>,
 }
 
 /// A server that speaks the MySQL/MariaDB protocol, and can delegate client commands to a backend
-/// that implements [`MySqlShim`](trait.MySqlShim.html).
+/// that implements [`MySqlShim`].
 pub struct MySqlIntermediary<B, R: AsyncRead + Unpin, W: AsyncWrite + Unpin> {
     shim: B,
     reader: packet::PacketReader<R>,
@@ -350,8 +348,7 @@ impl<B: MySqlShim<net::tcp::OwnedWriteHalf> + Send>
     MySqlIntermediary<B, net::TcpStream, net::TcpStream>
 {
     /// Create a new server over a TCP stream and process client commands until the client
-    /// disconnects or an error occurs. See also
-    /// [`MySqlIntermediary::run_on`](struct.MySqlIntermediary.html#method.run_on).
+    /// disconnects or an error occurs. See also [`MySqlIntermediary::run_on`].
     pub async fn run_on_tcp(
         shim: B,
         stream: net::TcpStream,
@@ -367,8 +364,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncRead + AsyncWrite + Clone + Unpin + Send>
     MySqlIntermediary<B, S, S>
 {
     /// Create a new server over a two-way stream and process client commands until the client
-    /// disconnects or an error occurs. See also
-    /// [`MySqlIntermediary::run_on`](struct.MySqlIntermediary.html#method.run_on).
+    /// disconnects or an error occurs. See also [`MySqlIntermediary::run_on`].
     pub async fn run_on_stream(
         shim: B,
         stream: S,
@@ -830,7 +826,7 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
                     self.writer.flush().await?;
                 }
                 Command::ComSetOption(_) => {
-                    // ReadySet already support multi-statement support for the MySQL protocol, so
+                    // Readyset already has multi-statement support for the MySQL protocol, so
                     // we can simply respond with ok. We parse an incoming query as multiple single
                     // statements, so failure with any one will be forwarded to the underlying
                     // database as a single statement, meaning that the underlying database does
