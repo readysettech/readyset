@@ -8,7 +8,7 @@ use std::task::Poll;
 use std::time;
 use std::time::Duration;
 
-use async_bincode::AsyncBincodeStream;
+use async_bincode::tokio::AsyncBincodeStream;
 use bincode::Options;
 use dataflow::prelude::*;
 use dataflow::{
@@ -759,7 +759,7 @@ mod readreply {
         use futures_util::SinkExt;
 
         let mut z = Vec::new();
-        let mut w = async_bincode::AsyncBincodeWriter::from(&mut z).for_async();
+        let mut w = async_bincode::tokio::AsyncBincodeWriter::from(&mut z).for_async();
 
         for tag in 0..10 {
             w.send(Tagged {
@@ -784,7 +784,7 @@ mod readreply {
             .unwrap();
         }
 
-        let mut r = async_bincode::AsyncBincodeReader::<_, Tagged<ReadReply>>::from(
+        let mut r = async_bincode::tokio::AsyncBincodeReader::<_, Tagged<ReadReply>>::from(
             std::io::Cursor::new(&z[..]),
         );
 

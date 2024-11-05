@@ -9,7 +9,7 @@ use std::pin::Pin;
 use std::sync::RwLock;
 use std::task::{Context, Poll};
 
-use async_bincode::{AsyncBincodeWriter, AsyncDestination};
+use async_bincode::tokio::{AsyncBincodeWriter, AsyncDestination};
 use futures_util::sink::{Sink, SinkExt};
 use metrics::{gauge, Gauge};
 use readyset_client::internal::ReplicaAddress;
