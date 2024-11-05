@@ -286,16 +286,17 @@ pub struct Options {
     #[arg(long, env = "VIEWS_POLLING_INTERVAL", default_value = "5", hide = true)]
     views_polling_interval: u64,
 
-    /// The time to wait before canceling a migration request. Defaults to 30 minutes.
+    /// The time to wait before canceling a migration request. Defaults to 0 (unlimited).
     #[arg(
         long,
         hide = true,
         env = "MIGRATION_REQUEST_TIMEOUT_MS",
-        default_value = "1800000"
+        default_value = "0"
     )]
     migration_request_timeout_ms: u64,
 
-    /// The time to wait before canceling a controller request. Defaults to 5 seconds.
+    /// The time to wait before canceling a controller request. Defaults to 5 seconds (0 specifies
+    /// unlimited).
     #[arg(long, hide = true, env = "CONTROLLER_REQUEST_TIMEOUT_MS", default_value = "5000")]
     controller_request_timeout_ms: u64,
 
@@ -673,8 +674,6 @@ where
         let adapter_authority =
             Arc::new(authority_type.to_authority(&authority_address, &deployment));
 
-        let migration_request_timeout = options.migration_request_timeout_ms;
-        let controller_request_timeout = options.controller_request_timeout_ms;
         let adapter_rewrite_params = AdapterRewriteParams {
             server_supports_pagination: options.server_worker_options.feature_topk
                 && options.server_worker_options.feature_pagination,
@@ -684,12 +683,22 @@ where
         };
         let no_upstream_connections = options.no_upstream_connections;
 
+        let migration_request_timeout = if options.migration_request_timeout_ms > 0 {
+            Some(Duration::from_millis(options.migration_request_timeout_ms))
+        } else {
+            None
+        };
+        let controller_request_timeout = if options.controller_request_timeout_ms > 0 {
+            Some(Duration::from_millis(options.controller_request_timeout_ms))
+        } else {
+            None
+        };
         let rh = rt.block_on(async {
             Ok::<ReadySetHandle, ReadySetError>(
                 ReadySetHandle::with_timeouts(
                     adapter_authority.clone(),
-                    Some(Duration::from_millis(controller_request_timeout)),
-                    Some(Duration::from_millis(migration_request_timeout)),
+                    controller_request_timeout,
+                    migration_request_timeout,
                 )
                 .instrument(rs_connect.clone())
                 .await,
