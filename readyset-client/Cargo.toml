@@ -71,7 +71,7 @@ test-strategy = { workspace = true }
 enum_dispatch = { workspace = true }
 async-trait = { workspace = true }
 consulrs = { workspace = true }
-base64 = "0.13"
+base64 = { workspace = true }
 
 # metrics/
 reqwest = { workspace = true, features = ["json"] }

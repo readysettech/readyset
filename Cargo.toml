@@ -92,7 +92,7 @@ async-trait = "0.1"
 atomic-counter = "1.0.1"
 backoff = "0.4.0"
 backtrace = "=0.3.65"
-base64 = { version = "0.22.0", default-features = false, features = ["std"] }
+base64 = { version = "0.22.1", default-features = false, features = ["std"] }
 bimap = "0.6.3"
 bincode = "1.3.3"
 bit-vec = "0.6"

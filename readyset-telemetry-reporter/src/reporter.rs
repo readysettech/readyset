@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use backoff::ExponentialBackoffBuilder;
+use base64::Engine;
 use blake2::digest::{Update, VariableOutput};
 use blake2::Blake2bVar;
 use lazy_static::lazy_static;
@@ -333,7 +334,7 @@ fn make_client(write_key: &str) -> Result<Client> {
     // See: https://segment.com/docs/connections/sources/catalog/libraries/server/http-api/#authentication
     headers.insert(AUTHORIZATION, {
         // Append a colon and encode as base64
-        let write_key = base64::encode(format!("{write_key}:"));
+        let write_key = base64::prelude::BASE64_STANDARD.encode(format!("{write_key}:"));
         let mut authorization = HeaderValue::from_str(&format!("Basic {write_key}"))
             .map_err(Error::InvalidAPIKeyHeader)?;
         authorization.set_sensitive(true);
