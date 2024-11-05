@@ -1,8 +1,10 @@
+use std::io;
+
 use mysql_srv::MySqlIntermediary;
 use readyset_adapter::upstream_database::LazyUpstream;
 use readyset_mysql::{MySqlQueryHandler, MySqlUpstream};
 use tokio::net::TcpStream;
-use tracing::{error, instrument};
+use tracing::{debug, error, instrument};
 
 use crate::ConnectionHandler;
 
@@ -32,7 +34,11 @@ impl ConnectionHandler for MySqlHandler {
         )
         .await
         {
-            error!(err = %e, "connection lost");
+            if e.kind() == io::ErrorKind::Other {
+                debug!(err = %e, "connection lost, error ignored")
+            } else {
+                error!(err = %e, "connection lost");
+            }
         }
     }
 

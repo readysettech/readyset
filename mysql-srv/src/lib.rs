@@ -467,9 +467,11 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
         self.writer.flush().await?;
 
         let (seq, handshake_bytes) = self.reader.next().await?.ok_or_else(|| {
+            // We use the stdlib's "custom" [`io::ErrorKind`] for this expected/benign error that
+            // occurs during a Layer 4 network health check, to indicate it can be ignored higher up
             io::Error::new(
-                io::ErrorKind::ConnectionAborted,
-                "peer terminated connection",
+                io::ErrorKind::Other,
+                "peer terminated connection before sending bytes",
             )
         })?;
         let handshake = commands::client_handshake(&handshake_bytes)
@@ -546,7 +548,7 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
             let (seq, auth_switch_response) = self.reader.next().await?.ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::ConnectionAborted,
-                    "peer terminated connection",
+                    "peer terminated connection when asked to switch auth plugin",
                 )
             })?;
             self.writer.set_seq(seq + 1);
