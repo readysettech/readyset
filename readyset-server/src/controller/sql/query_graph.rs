@@ -22,6 +22,7 @@ use readyset_errors::{
 };
 use readyset_sql_passes::{is_aggregate, is_correlated, is_predicate, map_aggregates, LogicalOp};
 use serde::{Deserialize, Serialize};
+use serde_with::serde_as;
 
 use super::mir::{self, PAGE_NUMBER_COL};
 
@@ -250,6 +251,7 @@ pub struct ViewKey {
     pub index_type: IndexType,
 }
 
+#[serde_as]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 // NOTE: Keep in mind this struct has a custom Hash impl - when changing it, remember to update that
 // as well!
@@ -258,7 +260,7 @@ pub struct QueryGraph {
     /// Relations mentioned in the query.
     pub relations: HashMap<Relation, QueryGraphNode>,
     /// Joins in the query.
-    #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
+    #[serde_as(as = "Vec<(_, _)>")]
     pub edges: HashMap<(Relation, Relation), QueryGraphEdge>,
     /// Whether the query has a `DISTINCT` in the `SELECT` clause
     pub distinct: bool,

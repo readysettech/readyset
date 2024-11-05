@@ -13,6 +13,7 @@ use readyset_errors::{internal_err, unsupported_err, ReadySetError, ReadySetResu
 use readyset_sql_passes::SelectStatementSkeleton;
 use readyset_util::redacted::Sensitive;
 use serde::{Deserialize, Serialize};
+use serde_with::serde_as;
 use tracing::debug;
 use vec1::Vec1;
 
@@ -317,10 +318,11 @@ impl ExprSkeletons {
 }
 
 /// The set of all [`RecipeExpr`]s installed in a ReadySet server cluster.
+#[serde_as]
 #[derive(Clone, Default, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub(super) struct ExprRegistry {
     /// A map from [`ExprId`] to the [`RecipeExpr`] associated with it.
-    #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
+    #[serde_as(as = "Vec<(_, _)>")]
     expressions: HashMap<ExprId, RecipeExpr>,
 
     /// A map from a hash of a stripped SelectStatement to all sets of stripped literals for each

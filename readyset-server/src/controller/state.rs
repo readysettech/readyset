@@ -58,6 +58,7 @@ use readyset_errors::{
 use replication_offset::{ReplicationOffset, ReplicationOffsets};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use serde_with::serde_as;
 use tokio::sync::{Mutex, MutexGuard, RwLock, RwLockReadGuard};
 use tracing::{debug, error, info, instrument, trace, warn};
 use vec1::{vec1, Vec1};
@@ -89,6 +90,7 @@ const CONCURRENT_REQUESTS: usize = 16;
 /// This structure holds all the dataflow state.
 /// It's meant to be handled exclusively by the [`DfStateHandle`], which is the structure
 /// that guarantees thread-safe access to it.
+#[serde_as]
 #[derive(Clone, Serialize, Deserialize)]
 pub struct DfState {
     pub(super) ingredients: Graph,
@@ -119,14 +121,14 @@ pub struct DfState {
     /// Latest replication position for the schema if from replica or binlog
     schema_replication_offset: Option<ReplicationOffset>,
     /// Placement restrictions for nodes and the domains they are placed into.
-    #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
+    #[serde_as(as = "Vec<(_, _)>")]
     pub(super) node_restrictions: HashMap<NodeRestrictionKey, DomainPlacementRestriction>,
 
-    #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
+    #[serde_as(as = "Vec<(_, _)>")]
     /// Map from local to global node index for each domain
     pub(super) domain_nodes: HashMap<DomainIndex, NodeMap<NodeIndex>>,
     /// Map from global node index to index pair for each domain
-    #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
+    #[serde_as(as = "Vec<(_, _)>")]
     pub(super) domain_node_index_pairs: HashMap<DomainIndex, HashMap<NodeIndex, IndexPair>>,
 
     #[serde(skip)]

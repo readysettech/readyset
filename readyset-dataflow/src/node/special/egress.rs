@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use readyset_client::metrics::recorded;
 use readyset_errors::{internal_err, invariant, ReadySetResult};
 use serde::{Deserialize, Serialize};
+use serde_with::serde_as;
 
 use crate::node::special::packet_filter::PacketFilter;
 use crate::payload::{ReplayPieceContext, SenderReplication};
@@ -60,11 +61,12 @@ impl EgressTx {
     }
 }
 
+#[serde_as]
 #[derive(Serialize, Deserialize, Default)]
 pub struct Egress {
-    #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
+    #[serde_as(as = "Vec<(_, _)>")]
     txs: HashMap<EgressTxKey, EgressTx>,
-    #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
+    #[serde_as(as = "Vec<(_, _)>")]
     tags: HashMap<Tag, NodeIndex>,
     packet_filter: PacketFilter,
 }

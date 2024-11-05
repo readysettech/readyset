@@ -6,6 +6,7 @@ use readyset_client::KeyComparison;
 use readyset_data::Bound;
 use readyset_errors::{internal, ReadySetResult};
 use serde::{Deserialize, Serialize};
+use serde_with::serde_as;
 use vec1::Vec1;
 
 use crate::payload::packets::*;
@@ -29,10 +30,11 @@ pub struct NodeKeys {
 /// internal allowlist, which is then used to filter regular update messages. Filtering is disabled
 /// by default, and can be enabled by adding the desired destination domain's ingress node to the
 /// filter list.
+#[serde_as]
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Default)]
 pub struct PacketFilter {
     /// Stores the information needed to filter [`Record`]s from [`Packet::Update`]s.
-    #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
+    #[serde_as(as = "Vec<(_, _)>")]
     requested_keys: HashMap<NodeIndex, NodeKeys>,
 }
 
