@@ -4,7 +4,7 @@ use std::net::{Ipv4Addr, SocketAddr};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use async_bincode::{AsyncBincodeStream, AsyncDestination};
+use async_bincode::tokio::{AsyncBincodeStream, AsyncDestination};
 use bincode::{ErrorKind, Options};
 use byteorder::{NetworkEndian, WriteBytesExt};
 use futures_util::ready;

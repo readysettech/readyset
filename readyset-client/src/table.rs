@@ -9,7 +9,7 @@ use std::task::{Context, Poll};
 use std::time::{Duration, Instant, SystemTime};
 use std::{fmt, iter};
 
-use async_bincode::{AsyncBincodeStream, AsyncDestination};
+use async_bincode::tokio::{AsyncBincodeStream, AsyncDestination};
 use derive_more::TryInto;
 use futures_util::future::TryFutureExt;
 use futures_util::stream::futures_unordered::FuturesUnordered;

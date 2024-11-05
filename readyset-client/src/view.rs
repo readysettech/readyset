@@ -13,7 +13,7 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 
 use array2::Array2;
-use async_bincode::{AsyncBincodeStream, AsyncDestination};
+use async_bincode::tokio::{AsyncBincodeStream, AsyncDestination};
 use dataflow_expression::{BinaryOperator as DfBinaryOperator, Dialect, Expr as DfExpr};
 use futures_util::future::TryFutureExt;
 use futures_util::stream::futures_unordered::FuturesUnordered;
