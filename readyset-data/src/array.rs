@@ -615,7 +615,7 @@ mod tests {
         let vals = vec![DfValue::from(1), DfValue::from(2), DfValue::from(3)];
         let arr = Array::from(vals.clone());
         assert_eq!(arr.num_dimensions(), 1);
-        assert_eq!(arr.contents.into_raw_vec(), vals)
+        assert_eq!(arr.contents.into_raw_vec_and_offset().0, vals)
     }
 
     #[test]
