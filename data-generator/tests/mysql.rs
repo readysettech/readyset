@@ -5,7 +5,7 @@ use mysql_async::prelude::Queryable;
 use mysql_async::Value;
 use nom_sql::{Dialect, DialectDisplay, SqlType};
 use proptest::prop_assume;
-use rand::rngs::mock::StepRng;
+use rand::{rngs::SmallRng, SeedableRng};
 use serial_test::serial;
 use test_strategy::proptest;
 use test_utils::slow;
@@ -92,13 +92,12 @@ fn unique_value_of_type_always_valid(
 #[slow]
 fn random_value_of_type_always_valid(
     #[any(generate_arrays = false, dialect = Some(Dialect::MySQL))] ty: SqlType,
-    initial: u64,
-    increment: u64,
+    seed: u64,
 ) {
     prop_assume!(!matches!(ty, SqlType::Bool));
 
-    let val = random_value_of_type(&ty, StepRng::new(initial, increment));
-    eprintln!("value: {val:?}");
+    let val = random_value_of_type(&ty, SmallRng::seed_from_u64(seed));
+    eprintln!("type = {ty:?}, value = {val:?}");
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()

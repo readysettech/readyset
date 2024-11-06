@@ -181,7 +181,7 @@ proptest = "1.4.0"
 quanta = { version = "0.12", default-features = false }
 querystring = "1.1.0"
 quote = "1.0.36"
-rand = "0.8.5"
+rand = { version = "0.8.5", features = ["small_rng"] }
 rand_distr = "0.4"
 rand_regex = "0.15.1"
 redis = "0.23.3"
