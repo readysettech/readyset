@@ -563,8 +563,9 @@ mod parse {
     use nom::sequence::{delimited, terminated};
     use nom::InputTake;
     use nom_locate::LocatedSpan;
+    use nom_sql::sqlparser_shim::sql_query_sqlparser;
     use nom_sql::whitespace::whitespace0;
-    use nom_sql::{sql_query, Dialect, NomSqlError, NomSqlResult, SqlQuery};
+    use nom_sql::{Dialect, NomSqlError, NomSqlResult, SqlQuery};
 
     /// The canonical SQL dialect used for central ReadySet server recipes. All direct clients of
     /// readyset-server must use this dialect for their SQL recipes, and all adapters and client
@@ -573,7 +574,7 @@ mod parse {
 
     pub(super) fn query_expr(input: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlQuery> {
         let (input, _) = whitespace0(input)?;
-        sql_query(CANONICAL_DIALECT)(input)
+        sql_query_sqlparser(CANONICAL_DIALECT)(input)
     }
 
     pub(super) fn query_expr_with_dialect(
@@ -581,7 +582,7 @@ mod parse {
         dialect: Dialect,
     ) -> NomSqlResult<&[u8], SqlQuery> {
         let (input, _) = whitespace0(input)?;
-        sql_query(dialect)(input)
+        sql_query_sqlparser(dialect)(input)
     }
 
     pub(super) fn separate_queries(

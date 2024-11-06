@@ -601,23 +601,29 @@ pub fn literal(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<
                 ),
                 |num| Literal::Placeholder(ItemPlaceholder::ColonNumber(num)),
             ),
-            map(
-                preceded(
-                    tag("$"),
-                    map_res(
-                        map_res(digit1, |i: LocatedSpan<&[u8]>| str::from_utf8(&i)),
-                        |s| match u32::from_str(s) {
-                            Ok(0) => Err(ErrorKind::Digit), // Disallow $0 as a placeholder
-                            Ok(i) => Ok(i),
-                            Err(_) => Err(ErrorKind::Digit),
-                        },
-                    ),
-                ),
-                |num| Literal::Placeholder(ItemPlaceholder::DollarNumber(num)),
-            ),
+            map(dollarsign_placeholder, Literal::Placeholder),
             boolean_literal,
         ))(i)
     }
+}
+
+pub(crate) fn dollarsign_placeholder(
+    i: LocatedSpan<&[u8]>,
+) -> NomSqlResult<&[u8], ItemPlaceholder> {
+    map(
+        preceded(
+            tag("$"),
+            map_res(
+                map_res(digit1, |i: LocatedSpan<&[u8]>| str::from_utf8(&i)),
+                |s| match u32::from_str(s) {
+                    Ok(0) => Err(ErrorKind::Digit), // Disallow $0 as a placeholder
+                    Ok(i) => Ok(i),
+                    Err(_) => Err(ErrorKind::Digit),
+                },
+            ),
+        ),
+        ItemPlaceholder::DollarNumber,
+    )(i)
 }
 
 /// Parser for a literal value which may be embedded inside of syntactic constructs within another

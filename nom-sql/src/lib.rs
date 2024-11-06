@@ -48,7 +48,7 @@ pub use self::set::{
     SetPostgresParameter, SetPostgresParameterValue, SetStatement, SetVariables, Variable,
     VariableScope,
 };
-pub use self::show::ShowStatement;
+pub use self::show::{FilterPredicate, ShowStatement};
 pub use self::sql_identifier::SqlIdentifier;
 pub use self::sql_type::{EnumVariants, SqlType, SqlTypeArbitraryOptions};
 pub use self::table::{
@@ -91,6 +91,7 @@ mod set;
 mod show;
 mod sql_identifier;
 mod sql_type;
+pub mod sqlparser_shim;
 mod table;
 mod transaction;
 mod truncate;

@@ -34,6 +34,7 @@ pub enum ShowStatement {
     ReadySetVersion,
     ReadySetTables(ReadySetTablesOptions),
     Connections,
+    Databases,
 }
 
 impl DialectDisplay for ShowStatement {
@@ -73,6 +74,7 @@ impl DialectDisplay for ShowStatement {
                     }
                 }
                 Self::Connections => write!(f, "CONNECTIONS"),
+                Self::Databases => write!(f, "DATABASES"),
             }
         })
     }
@@ -202,6 +204,7 @@ pub fn show(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u
         let (i, _) = tag_no_case("show")(i)?;
         let (i, _) = whitespace1(i)?;
         let (i, statement) = alt((
+            value(ShowStatement::Databases, tag_no_case("databases")),
             cached_queries(dialect),
             proxied_queries(dialect),
             readyset_migration_status,

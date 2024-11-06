@@ -11,27 +11,28 @@ repository = "https://github.com/readysettech/readyset/tree/master/nom-sql"
 description = "A SQL parser written using nom."
 
 [dependencies]
+bit-vec = { workspace = true, features = ["serde"] }
+chrono = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
-serde = { workspace = true, features = ["derive"] }
-nom = { workspace = true }
-itertools = { workspace = true }
 derive_more = { workspace = true }
+eui48 = { workspace = true }
+fail = { workspace = true }
+hex = { workspace = true }
+itertools = { workspace = true }
+lazy_static = { workspace = true }
+nom = { workspace = true }
+nom_locate = { workspace = true }
 pratt = { workspace = true }
 proptest = { workspace = true }
-test-strategy = { workspace = true }
 readyset-util = { path = "../readyset-util" }
-thiserror = { workspace = true }
-hex = { workspace = true }
 rust_decimal = { workspace = true, features = ["db-tokio-postgres"] }
-eui48 = { workspace = true }
-uuid = { workspace = true, features = ["v4"] }
+serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = ["arbitrary_precision"] }
-bit-vec = { workspace = true, features = ["serde"] }
+sqlparser = { workspace = true }
+test-strategy = { workspace = true }
+thiserror = { workspace = true }
 triomphe = { workspace = true }
-lazy_static = { workspace = true }
-nom_locate = { workspace = true }
-fail = { workspace = true }
-chrono = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
 
 concrete-iter = { path = "../concrete-iter" }
 failpoint-macros = { path = "../failpoint-macros" }

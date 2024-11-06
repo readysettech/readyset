@@ -619,6 +619,7 @@ pub fn nested_selection(
     move |i| {
         let (i, ctes) = opt(ctes(dialect))(i)?;
         let (i, _) = tag_no_case("select")(i)?;
+        panic!("oh no");
         let (i, _) = whitespace1(i)?;
         let (i, distinct) = opt(tag_no_case("distinct"))(i)?;
         let (i, _) = whitespace0(i)?;

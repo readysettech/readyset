@@ -1,4 +1,5 @@
-use std::{fmt, str};
+use core::str;
+use std::fmt;
 
 use nom::branch::alt;
 use nom::combinator::{map, opt};
@@ -32,6 +33,7 @@ use crate::select::{selection, SelectStatement};
 use crate::set::{set, SetStatement};
 use crate::show::{show, ShowStatement};
 use crate::sql_type::type_identifier;
+use crate::sqlparser_shim::sql_query_sqlparser;
 use crate::transaction::{
     commit, rollback, start_transaction, CommitStatement, RollbackStatement,
     StartTransactionStatement,
@@ -183,7 +185,9 @@ impl SqlQuery {
             | SqlQuery::AlterReadySet(_)
             | SqlQuery::DropAllProxiedQueries(_) => true,
             SqlQuery::Show(show_stmt) => match show_stmt {
-                ShowStatement::Events | ShowStatement::Tables(_) => false,
+                ShowStatement::Events | ShowStatement::Tables(_) | ShowStatement::Databases => {
+                    false
+                }
                 ShowStatement::CachedQueries(_)
                 | ShowStatement::ProxiedQueries(_)
                 | ShowStatement::ReadySetStatus
@@ -217,7 +221,7 @@ impl SqlQuery {
     }
 }
 
-pub fn sql_query(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlQuery> {
+fn sql_query(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlQuery> {
     move |i| {
         // Ignore preceding whitespace or comments
         let (i, _) = whitespace0(i)?;
@@ -310,6 +314,7 @@ macro_rules! export_parser {
 }
 
 export_parser!(sql_query -> SqlQuery, parse_query_bytes, parse_query);
+export_parser!(sql_query_sqlparser -> SqlQuery, parse_query_sqlparser_bytes, parse_query_sqlparser);
 export_parser!(selection -> SelectStatement, parse_select_statement_bytes, parse_select_statement);
 export_parser!(expression -> Expr, parse_expr_bytes, parse_expr);
 export_parser!(create_table -> CreateTableStatement, parse_create_table_bytes, parse_create_table);
