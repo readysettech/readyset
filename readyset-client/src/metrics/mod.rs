@@ -163,7 +163,16 @@ pub mod recorded {
     /// is in progress, 0 otherwise.
     pub const CONTROLLER_MIGRATION_IN_PROGRESS: &str = "readyset_controller.migration_in_progress";
 
-    /// Counter: The number of evicitons performed at a worker. Incremented each
+    /// Counter: The number of times the eviction task has run.
+    pub const EVICTION_WORKER_EVICTION_TICKS: &str = "readyset_eviction_worker.eviction_ticks";
+
+    /// Counter: The number of times the eviction task has checked whether to evict.
+    pub const EVICTION_WORKER_EVICTION_CHECKS: &str = "readyset_eviction_worker.eviction_checks";
+
+    /// Counter: The number of times the eviction task has tried to free memory.
+    pub const EVICTION_WORKER_EVICTION_RUNS: &str = "readyset_eviction_worker.eviction_runs";
+
+    /// Counter: The number of evictions performed at a worker. Incremented each
     /// time `do_eviction` is called at the worker.
     pub const EVICTION_WORKER_EVICTIONS_REQUESTED: &str =
         "readyset_eviction_worker.evictions_requested";

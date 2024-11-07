@@ -591,6 +591,7 @@ async fn evict_check(
     if used < limit {
         return Ok(());
     }
+    counter!(recorded::EVICTION_WORKER_EVICTION_RUNS).increment(1);
 
     // add current state sizes (could be out of date, as packet sent below is not
     // necessarily received immediately)
@@ -723,10 +724,12 @@ async fn evict_start(
     url: Url,
     barriers: Arc<BarrierManager>,
 ) -> ReadySetResult<()> {
+    counter!(recorded::EVICTION_WORKER_EVICTION_TICKS).increment(1);
     if is_evicting.swap(true, Ordering::Relaxed) {
         return Ok(()); // Already evicting, nothing to do
     }
 
+    counter!(recorded::EVICTION_WORKER_EVICTION_CHECKS).increment(1);
     let res = evict_check(limit, coord, tracker, state_sizes, url, barriers)
         .instrument(info_span!("evicting"))
         .await;
