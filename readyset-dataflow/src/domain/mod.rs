@@ -3,6 +3,7 @@ mod domain_metrics;
 mod replay_paths;
 
 use std::borrow::Cow;
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::convert::{TryFrom, TryInto};
 use std::fmt::Debug;
@@ -24,6 +25,7 @@ use futures_util::future::FutureExt;
 use futures_util::stream::StreamExt;
 use futures_util::TryFutureExt;
 pub use internal::{DomainIndex, ReplicaAddress};
+use itertools::Itertools;
 use merging_interval_tree::IntervalTreeSet;
 use metrics::{counter, histogram};
 use nom_sql::Relation;
@@ -57,7 +59,7 @@ use crate::domain::channel::{ChannelCoordinator, DomainReceiver, DomainSender};
 use crate::node::special::EgressTx;
 use crate::node::{Column, NodeProcessingResult, ProcessEnv};
 use crate::payload::{
-    Eviction, MaterializedState, PacketDiscriminants, PrepareStateKind, PrettyReplayPath,
+    self, Eviction, MaterializedState, PacketDiscriminants, PrepareStateKind, PrettyReplayPath,
     ReplayPieceContext, SenderReplication, SourceSelection,
 };
 use crate::prelude::*;
@@ -163,7 +165,8 @@ struct StateLookupResult<'a> {
     records: Vec<RecordResult<'a>>,
     /// Keys for which records were found
     found_keys: HashSet<KeyComparison>,
-    /// Keys that were missed and need a replay
+    /// Tuples of (replay_key, miss_key) where `replay_key` is the key we're trying to replay
+    /// and `miss_key` is the part of it we missed on.  For non-range queries, they are the same.
     replay_keys: HashSet<(KeyComparison, KeyComparison)>,
 }
 
@@ -910,9 +913,6 @@ impl Domain {
         needed_for: Tag,
         cache_name: Relation,
     ) -> ReadySetResult<()> {
-        use std::collections::hash_map::Entry;
-        use std::ops::AddAssign;
-
         // when the replay eventually succeeds, we want to re-do the replay.
         let mut w = self.waiting.remove(miss_in).unwrap_or_default();
 
@@ -984,6 +984,7 @@ impl Domain {
                 missed_keys,
             } in misses
             {
+                // redo should wait for backfill to complete before redoing
                 let replays = needed_replays
                     .entry((Target(node), column_indices.clone()))
                     .or_default();
@@ -994,20 +995,13 @@ impl Domain {
                         key: miss_key.clone(),
                     }) {
                         Entry::Occupied(e) => {
-                            // we have already requested backfill of this key
-                            // remember to notify this Redo when backfill completes
                             if e.into_mut().insert(redo.clone()) {
-                                // this Redo should wait for this backfill to complete before
-                                // redoing
-                                w.holes.entry(redo.clone()).or_default().add_assign(1);
+                                *w.holes.entry(redo.clone()).or_default() += 1;
                             }
                         }
                         Entry::Vacant(e) => {
-                            // we haven't already requested backfill of this key
-                            // remember to notify this Redo when backfill completes
                             e.insert(HashSet::from([redo.clone()]));
-                            // this Redo should wait for this backfill to complete before redoing
-                            w.holes.entry(redo.clone()).or_default().add_assign(1);
+                            *w.holes.entry(redo.clone()).or_default() += 1;
 
                             replays.push(miss_key);
                         }
@@ -1291,8 +1285,6 @@ impl Domain {
                 // that the first of the two causes outlined above can't happen (by always doing a
                 // lookup on the replay key, even if there are now rows). then we know that the
                 // *only* case where we have to evict is when the replay key != the join key.
-                //
-                // but, for now, here we go:
                 let from = self
                     .nodes
                     .get(src)
@@ -1951,7 +1943,6 @@ impl Domain {
             );
         }
 
-        use crate::payload;
         let trigger = match trigger {
             payload::TriggerEndpoint::None => TriggerEndpoint::None,
             payload::TriggerEndpoint::Start(index) => TriggerEndpoint::Start(index),
@@ -2027,7 +2018,6 @@ impl Domain {
             debug!(%from, "attempted to start a replay, but node is not ready yet");
             return Ok(None);
         }
-        use std::thread;
         invariant_eq!(
             self.replay_paths
                 .get(tag)
@@ -2118,12 +2108,11 @@ impl Domain {
         let replay_tx_desc = self.channel_coordinator.builder_for(&self.address())?;
 
         let address = self.address();
-        thread::Builder::new()
+        std::thread::Builder::new()
             .name(format!("replay{}.{}", self.index(), link.src))
             .spawn_wrapper(move || {
                 let span = info_span!("full_replay", %address, src = %link.src);
                 let _guard = span.enter();
-                use itertools::Itertools;
 
                 // TODO: make async
                 let mut chunked_replay_tx = match replay_tx_desc.build_sync() {
@@ -2753,9 +2742,7 @@ impl Domain {
                 self.metrics
                     .rec_finish_replay_time(&pkt.cache_name, start.elapsed());
             }
-            Packet::Spin => {
-                // spinning as instructed
-            }
+            Packet::Spin => {}
         }
 
         Ok(())
@@ -2802,7 +2789,7 @@ impl Domain {
             let mut v = Vec::with_capacity(start + defaults.len());
             v.extend(row.iter().cloned());
             v.extend(defaults.iter().cloned());
-            return Ok((v, true).into());
+            return Ok(v.into());
         }
 
         let n = self
@@ -2813,7 +2800,7 @@ impl Domain {
         if let Some(b) = n.get_base() {
             let mut row = row.into_owned();
             b.fix(&mut row);
-            return Ok(Record::Positive(row));
+            return Ok(row.into());
         }
 
         Ok(row.into_owned().into())
@@ -2904,100 +2891,82 @@ impl Domain {
         })
     }
 
-    fn do_lookup<'a>(
+    #[allow(clippy::type_complexity)]
+    fn do_lookup(
         &self,
-        state: &'a MaterializedNodeState,
+        state: &MaterializedNodeState,
+        source: LocalNodeIndex,
         cols: &[usize],
         keys: HashSet<KeyComparison>,
-    ) -> ReadySetResult<StateLookupResult<'a>> {
-        if let Some(state) = state.as_persistent() {
-            Ok(StateLookupResult {
-                records: self.do_lookup_multi(state, cols, &keys),
-                found_keys: keys, // PersistentState can't miss
-                replay_keys: HashSet::new(),
-            })
+    ) -> ReadySetResult<(
+        Vec<Record>,
+        HashSet<KeyComparison>,
+        HashSet<(KeyComparison, KeyComparison)>,
+    )> {
+        let (records, found_keys, replay_keys) = if let Some(state) = state.as_persistent() {
+            let records = self.do_lookup_multi(state, cols, &keys);
+            (records, keys, HashSet::new()) // can't miss
         } else {
-            self.do_lookup_iter(state, cols, keys)
-        }
+            let StateLookupResult {
+                records,
+                found_keys,
+                replay_keys,
+            } = self.do_lookup_iter(state, cols, keys)?;
+            (records, found_keys, replay_keys)
+        };
+
+        let records = records
+            .into_iter()
+            .flat_map(|rr| rr.into_iter().map(|r| self.seed_row(source, r)))
+            .collect::<ReadySetResult<Vec<Record>>>()?;
+        Ok((records, found_keys, replay_keys))
     }
 
     fn seed_all(&mut self, ex: &mut dyn Executor, pkt: RequestPartialReplay) -> ReadySetResult<()> {
-        let keys = pkt.keys.into_iter().collect();
-
-        let (source, index, path) = match &self.replay_paths[pkt.tag] {
+        let (src, index, dst) = match &self.replay_paths[pkt.tag] {
             ReplayPath {
-                source: Some(source),
-                trigger: TriggerEndpoint::Start(index),
+                source: Some(src),
+                trigger: TriggerEndpoint::Start(index) | TriggerEndpoint::Local(index),
                 path,
                 ..
-            }
-            | ReplayPath {
-                source: Some(source),
-                trigger: TriggerEndpoint::Local(index),
-                path,
-                ..
-            } => (source, index, path),
+            } => (*src, index.clone(), path[0].node),
             _ => internal!(),
         };
 
-        let None = self.nodes.get(*source).filter(|n| n.borrow().is_dropped()) else {
+        let None = self.nodes.get(src).filter(|n| n.borrow().is_dropped()) else {
             warn!(
                 ?pkt.tag,
-                node = ?source,
+                node = ?src,
                 domain = ?self.index,
                 "ignoring replay from dropped node"
             );
             return Ok(());
         };
 
-        let Some(state) = self.state.get(*source) else {
+        let Some(state) = self.state.get(src) else {
             internal!(
                 "migration replay ({:?}) from non-materialized node",
                 pkt.tag
             );
         };
 
-        if let Some(node) = self.nodes.get(*source) {
+        if let Some(node) = self.nodes.get(src) {
             if node.borrow().is_base() {
                 self.metrics
                     .inc_base_table_lookups(&pkt.cache_name, node.borrow().name());
             }
         }
 
-        let StateLookupResult {
-            records,
-            found_keys,
-            replay_keys,
-        } = self.do_lookup(state, &index.columns, keys)?;
-
-        let records = records
-            .into_iter()
-            .flat_map(|rr| rr.into_iter().map(|r| self.seed_row(*source, r)))
-            .collect::<ReadySetResult<Vec<Record>>>()?;
-
-        let dst = path[0].node;
-        let index = index.clone(); // Clone to free the immutable reference at the top
-        let src = *source;
+        let keys = pkt.keys.into_iter().collect();
+        let (records, found_keys, replay_keys) =
+            self.do_lookup(state, src, &index.columns, keys)?;
 
         if !replay_keys.is_empty() {
-            // we have missed in our lookup, so we have a partial replay through a partial replay
-            // trigger a replay to source node, and enqueue this request.
-            trace!(
-                ?pkt.tag,
-                miss_keys = ?replay_keys,
-                "missed during replay request"
-            );
+            trace!(%pkt.tag, ?replay_keys, "replay request miss");
 
             self.on_replay_misses(
                 src,
                 &index.columns,
-                // NOTE:
-                // `replay_keys` are tuples of (replay_key, miss_key), where `replay_key` is the
-                // key we're trying to replay and `miss_key` is the part of it we
-                // missed on. This is only relevant for range queries; for
-                // non-range queries the two are the same. Assuming they were the
-                // same for range queries was a whole bug that eta had to spend like 2
-                // hours tracking down, only to find it was as simple as this.
                 replay_keys,
                 pkt.unishard,
                 pkt.requesting_shard,
@@ -3008,7 +2977,7 @@ impl Domain {
         }
 
         if !found_keys.is_empty() {
-            trace!(%pkt.tag, keys = ?found_keys, ?records, "satisfied replay request");
+            trace!(%pkt.tag, ?found_keys, ?records, "replay request hit");
 
             self.handle_replay(
                 Link::new(src, dst),
@@ -4053,7 +4022,6 @@ impl Domain {
                         continue;
                     }
                     if !state.contains_key(dest.node) {
-                        // this is probably because
                         if !not_ready.contains(&dest.node) {
                             debug!(
                                 node = dest.node.id(),
