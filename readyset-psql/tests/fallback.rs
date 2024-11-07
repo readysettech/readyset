@@ -671,31 +671,25 @@ async fn deletion_propagation_after_alter() {
         .await
         .unwrap();
 
-    // I'd rather use eventually! but can't use it twice in the same function due to weird
-    // namespacing issues that I haven't figured out yet, so sleep() will have to do here for now.
-    sleep().await;
-
-    let result = client
-        .query_one("SELECT * FROM cats", &[])
-        .await
-        .unwrap()
-        .get::<_, i32>(0);
-
-    assert_eq!(result, 1);
+    eventually!(
+        run_test: {
+            client
+                .query_one("SELECT * FROM cats", &[])
+                .await
+                .unwrap()
+                .get::<_, i32>(0)
+        },
+        then_assert: |result| {
+            assert_eq!(result, 1);
+        }
+    );
 
     client
         .simple_query("DELETE FROM cats WHERE id = 1")
         .await
         .unwrap();
 
-    eventually!(run_test: {
-        let result = client
-            .query_one("SELECT * FROM cats", &[])
-            .await;
-        AssertUnwindSafe(|| result)
-    }, then_assert: |result| {
-        result().unwrap_err();
-    });
+    eventually!(client.query_one("SELECT * FROM cats", &[]).await.is_err());
 
     shutdown_tx.shutdown().await;
 }
@@ -1152,7 +1146,6 @@ async fn next_action_replication_failure_retries_if_failed_to_drop() {
 #[cfg(feature = "failure_injection")]
 async fn replication_failure_retries_if_failed_to_drop(failpoint: &str) {
     readyset_tracing::init_test_logging();
-    use std::time::Duration;
 
     use nom_sql::Relation;
     use readyset_errors::ReadySetError;
@@ -1210,40 +1203,48 @@ async fn replication_failure_retries_if_failed_to_drop(failpoint: &str) {
         .await
         .unwrap();
 
-    // There isn't a great way to assert that we resnapshotted here, so confirmed we did via log
-    // inspection
-
-    // We have to sleep extra here since we have a sleep between resnapshots
-    tokio::time::sleep(Duration::from_secs(5)).await;
-    sleep().await;
-
     let expected = vec![1, 2];
-    let mut result: Vec<u32> = client
-        .simple_query("SELECT * FROM cats")
-        .await
-        .unwrap()
-        .iter()
-        .filter_map(|m| match m {
-            SimpleQueryMessage::Row(r) => Some(r.get(0).unwrap().parse().unwrap()),
-            _ => None,
-        })
-        .collect();
-    // sort because return order isn't guaranteed
-    result.sort();
-    assert_eq!(result, expected);
 
-    // dont sort because cats_view uses order by
-    let result: Vec<u32> = client
-        .simple_query("SELECT * FROM cats_view")
-        .await
-        .unwrap()
-        .iter()
-        .filter_map(|m| match m {
-            SimpleQueryMessage::Row(r) => Some(r.get(0).unwrap().parse().unwrap()),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(result, expected);
+    // There isn't a great way to assert that we resnapshotted here, so just retry
+    eventually!(
+        run_test: {
+            let mut result: Vec<u32> = client
+                .simple_query("SELECT * FROM cats")
+                .await
+                .unwrap()
+                .iter()
+                .filter_map(|m| match m {
+                    SimpleQueryMessage::Row(r) => Some(r.get(0).unwrap().parse().unwrap()),
+                    _ => None,
+                })
+                .collect();
+            // sort because return order isn't guaranteed
+            result.sort();
+            result
+        },
+        then_assert: |result| {
+            assert_eq!(result, expected);
+        }
+    );
+
+    eventually!(
+        run_test: {
+            // dont sort because cats_view uses order by
+            client
+                .simple_query("SELECT * FROM cats_view")
+                .await
+                .unwrap()
+                .iter()
+                .filter_map(|m| match m {
+                    SimpleQueryMessage::Row(r) => Some(r.get(0).unwrap().parse().unwrap()),
+                    _ => None,
+                })
+                .collect::<Vec<u32>>()
+        },
+        then_assert: |result| {
+            assert_eq!(result, expected);
+        }
+    );
 
     shutdown_tx.shutdown().await;
 }
@@ -1253,7 +1254,6 @@ async fn replication_failure_retries_if_failed_to_drop(failpoint: &str) {
 #[slow]
 async fn replication_of_other_tables_succeeds_even_after_error() {
     readyset_tracing::init_test_logging();
-    use std::time::Duration;
 
     let (config, _handle, shutdown_tx) = TestBuilder::default()
         .recreate_database(false)
@@ -1291,20 +1291,23 @@ async fn replication_of_other_tables_succeeds_even_after_error() {
         .await
         .unwrap();
 
-    tokio::time::sleep(Duration::from_secs(5)).await;
-    sleep().await;
-
-    let result: Vec<u32> = client
-        .simple_query("SELECT * FROM cats")
-        .await
-        .unwrap()
-        .iter()
-        .filter_map(|m| match m {
-            SimpleQueryMessage::Row(r) => Some(r.get(0).unwrap().parse().unwrap()),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(result, [1]);
+    eventually!(
+        run_test: {
+            client
+                .simple_query("SELECT * FROM cats")
+                .await
+                .unwrap()
+                .iter()
+                .filter_map(|m| match m {
+                    SimpleQueryMessage::Row(r) => Some(r.get(0).unwrap().parse().unwrap()),
+                    _ => None,
+                })
+                .collect::<Vec<u32>>()
+        },
+        then_assert: |result| {
+            assert_eq!(result, [1]);
+        }
+    );
 
     shutdown_tx.shutdown().await;
 }
