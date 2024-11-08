@@ -10,4 +10,5 @@ upload_artifacts() {
 
 echo "+++ :rust: Run tests"
 export DISABLE_TELEMETRY=true
+export PROPTEST_MAX_SHRINK_TIME=1800000
 cargo --locked test --all --features failure_injection --exclude readyset-clustertest --exclude benchmarks || upload_artifacts
