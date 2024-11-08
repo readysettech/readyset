@@ -128,11 +128,7 @@ deny = [
 ]
 # Certain crates/versions that will be skipped when doing duplicate detection.
 skip = [
-    { name = "heck", version = "0.3.3" },
-    { name = "fixedbitset", version = "0.2.0" },
-    { name = "petgraph", version = "0.5.1" },
     { name = "encode_unicode", version = "0.3.6" },
-    { name = "hashbrown", version = "0.12.3" }
 ]
 # Similarly to `skip` allows you to skip certain crates during duplicate
 # detection. Unlike skip, it also includes the entire tree of transitive
@@ -145,6 +141,7 @@ skip-tree = [
     { name = "mysql_common", version = "0.32" },
     { name = "consulrs", version = "0.1.0" },
     { name = "mysql", version = "25" },
+    { name = "hashbrown", version = "0.12.3" },
 ]
 
 # This section is considered when running `cargo deny check sources`.
