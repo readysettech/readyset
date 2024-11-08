@@ -746,8 +746,8 @@ where
         let prometheus_handle = if options.prometheus_metrics {
             let _guard = rt.enter();
             let database_label = match self.database_type {
-                DatabaseType::MySQL => readyset_client_metrics::DatabaseType::MySql,
-                DatabaseType::PostgreSQL => readyset_client_metrics::DatabaseType::Psql,
+                DatabaseType::MySQL => "mysql",
+                DatabaseType::PostgreSQL => "psql",
             };
 
             let recorder = PrometheusBuilder::new()

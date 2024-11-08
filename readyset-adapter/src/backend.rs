@@ -2113,7 +2113,8 @@ where
 
         let select_schema = if let Some(handle) = self.metrics_handle.as_mut() {
             // Must snapshot to get the latest metrics
-            handle.snapshot_counters(readyset_client_metrics::DatabaseType::MySql);
+            handle.snapshot_counters(readyset_client_metrics::DatabaseType::Upstream);
+
             let mut select_schema =
                 create_dummy_schema!("query id", "proxied query", "readyset supported");
 
