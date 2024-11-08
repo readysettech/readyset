@@ -6,8 +6,8 @@ use std::net::{IpAddr, SocketAddr};
 use std::pin::{pin, Pin};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::task::{ready, Context, Poll};
-use std::time::Duration;
+use std::task::{ready, Context, Poll, Waker};
+use std::time::{Duration, Instant};
 
 use dataflow::payload::EvictRequest;
 use dataflow::{ChannelCoordinator, DomainBuilder, DomainRequest, Packet, Readers};
@@ -584,7 +584,7 @@ async fn evict_check(
     url: Url,
     bmgr: Arc<BarrierManager>,
 ) -> ReadySetResult<()> {
-    let start = std::time::Instant::now();
+    let start = Instant::now();
 
     let used = tracker.allocated_bytes()?;
     gauge!(recorded::EVICTION_WORKER_HEAP_ALLOCATED_BYTES).set(used as f64);
@@ -839,11 +839,39 @@ impl BarrierManager {
     }
 }
 
+#[derive(Default)]
+struct BarrierWait {
+    complete: bool,
+    waker: Option<Waker>,
+}
+
+impl BarrierWait {
+    const BARRIER_WAIT_MAX: Duration = Duration::from_secs(10);
+
+    fn new() -> Arc<std::sync::Mutex<Self>> {
+        let new = Arc::new(Self::default().into());
+        Self::start(Arc::clone(&new));
+        new
+    }
+
+    fn start(wait: Arc<std::sync::Mutex<Self>>) {
+        tokio::task::spawn(async move {
+            tokio::time::sleep(Self::BARRIER_WAIT_MAX).await;
+            let mut wait = wait.lock().unwrap();
+            wait.complete = true;
+            if let Some(waker) = wait.waker.take() {
+                waker.wake();
+            }
+        });
+    }
+}
+
 pub struct Barrier {
     id: u128,
     done: oneshot::Receiver<ReadySetResult<()>>,
     complete: bool,
     give: Vec<u128>,
+    wait: Arc<std::sync::Mutex<BarrierWait>>,
 }
 
 impl Barrier {
@@ -865,6 +893,7 @@ impl Barrier {
             done,
             complete: false,
             give,
+            wait: BarrierWait::new(),
         }
     }
 
@@ -884,7 +913,17 @@ impl Future for Barrier {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match pin!(&mut self.done).poll(cx) {
-            Poll::Pending => Poll::Pending,
+            Poll::Pending => {
+                let mut wait = self.wait.lock().unwrap();
+                if wait.complete {
+                    drop(wait);
+                    self.complete = true;
+                    Poll::Ready(Err(internal_err!("barrier timeout")))
+                } else {
+                    wait.waker = Some(cx.waker().clone());
+                    Poll::Pending
+                }
+            }
             Poll::Ready(Ok(res)) => {
                 debug!("barrier {:x} complete", self.id);
                 self.complete = true;
@@ -936,5 +975,12 @@ mod test {
         let bm = BarrierManager::default();
         let b = bm.create(0).await;
         assert_eq!(b.now_or_never(), Some(Ok(())));
+    }
+
+    #[tokio::test]
+    async fn barrier_timeout() {
+        let bm = BarrierManager::default();
+        let b = bm.create(1).await;
+        assert!(b.await.is_err());
     }
 }
