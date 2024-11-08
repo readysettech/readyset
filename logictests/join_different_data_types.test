@@ -1,0 +1,44 @@
+statement ok
+create table jt1 (a decimal(7, 3), b int, c text);
+
+statement ok
+insert into jt1 (a, b, c) values
+(100,  1, '2024-11-07 03:06:32'),
+(100,  2, '2024-11-07 03:06:32'),
+(200,  3, '2024-11-08 17:03:37'),
+(115,  4, '2024-11-08 17:03:37'),
+(235,  5, '2024-11-09 17:21:50');
+
+statement ok
+create table jt2 (i int, f float, n decimal(10, 3), t text, dtm timestamp);
+
+statement ok
+insert into jt2 (i, f, n, t, dtm) values
+(1, 100,     100,     '100',     '2024-11-07 03:06:32'),
+(2, 100,     100,     '00100',   '2024-11-07 03:08:54'),
+(3, 115346,  115.345, '0115',    '2024-11-08 17:03:37'),
+(4, 23512.3, 235.539, '0000235', '2024-11-09 17:21:50'),
+(5, 945679,  513.850, 'AAA',     '2024-11-19 17:21:51');
+
+query I nosort
+select count(*) from jt2 join jt1 on jt2.t = jt1.a
+----
+6
+
+query I rowsort
+select jt2.i from jt2 join jt1 on jt2.t = jt1.a
+----
+1
+1
+2
+2
+3
+4
+
+query I nosort
+select jt1.b from (select min(t) t from jt2 group by n) t21 join jt1 on t21.t = jt1.a order by jt1.b
+----
+1
+2
+4
+5

@@ -3,10 +3,11 @@ use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
 use std::{iter, mem};
 
+use crate::node::Column;
 use dataflow_state::PointKey;
 use derive_more::From;
 use readyset_client::KeyComparison;
-use readyset_data::Bound;
+use readyset_data::{Bound, DfType};
 use readyset_errors::ReadySetResult;
 use readyset_util::ranges::RangeBounds;
 use readyset_util::Indices;
@@ -589,6 +590,56 @@ macro_rules! impl_replace_sibling {
     };
 }
 
+fn have_to_coerce_value(val: &DfValue, col_type: &DfType) -> bool {
+    (col_type.is_any_int() && !val.is_integer())
+        || (col_type.is_any_float() && !val.is_real())
+        || (col_type.is_numeric() && !matches!(val, DfValue::Numeric(_)))
+        || (col_type.is_date_and_time() && !val.is_datetime())
+        || if let DfType::Time { .. } = col_type {
+            !val.is_time()
+        } else {
+            false
+        }
+        || (col_type.is_any_text() && !val.is_string())
+}
+
+fn coerce_key_if_needed(
+    col_defs: &[Column],
+    columns: &[usize],
+    key: &PointKey,
+) -> ReadySetResult<Option<PointKey>> {
+    debug_assert!(col_defs.len() >= columns.len());
+    debug_assert!(key.len() == columns.len());
+
+    let coerced_key: PointKey;
+    Ok(
+        if columns
+            .iter()
+            .enumerate()
+            .any(|(i, col_idx)| have_to_coerce_value(key.get(i).unwrap(), col_defs[*col_idx].ty()))
+        {
+            let mut result: ReadySetResult<Option<PointKey>> = Ok(None);
+            coerced_key = PointKey::from(columns.iter().enumerate().map(|(i, col_idx)| {
+                let val = key.get(i).unwrap();
+                match val.coerce_to(col_defs[*col_idx].ty(), &val.infer_dataflow_type()) {
+                    Ok(df_val) => df_val,
+                    Err(e) => {
+                        result = Err(e);
+                        DfValue::None
+                    }
+                }
+            }));
+            if let Ok(None) = result {
+                Some(coerced_key)
+            } else {
+                return result;
+            }
+        } else {
+            None
+        },
+    )
+}
+
 pub(crate) trait Ingredient
 where
     Self: Send,
@@ -788,6 +839,24 @@ where
         states: &'a StateMap,
         mode: LookupMode,
     ) -> ReadySetResult<IngredientLookupResult<'a>> {
+        // Verify if the key components should be coerced in order to match the indexed columns types.
+        // Returns coercion result over Some of the coerced key or None.
+        let coerced_key_res = if let Some(node) = nodes.get(parent_index) {
+            coerce_key_if_needed(node.borrow().columns(), columns, key)
+        } else {
+            // `parent_index` is not present in the `nodes`, behave like the coercion not needed.
+            Ok(None)
+        };
+
+        let key = match &coerced_key_res {
+            // Coercion happened and was successful, replace the original key with the coerced one.
+            Ok(Some(coerced_key)) => coerced_key,
+            // Coercion did not happen, use the original key.
+            Ok(None) => key,
+            // Coercion happened, but was not successful, return empty result.
+            Err(_) => return Ok(IngredientLookupResult::Miss),
+        };
+
         match states.get(parent_index) {
             Some(state) => match mode {
                 LookupMode::Weak if state.is_partial() => match state.lookup_weak(columns, key) {
