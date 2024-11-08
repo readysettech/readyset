@@ -94,25 +94,34 @@ async fn it_completes() {
     assert_eq!(muta.columns(), &["a", "b"]);
 
     muta.insert(vec![id.clone(), 2.into()]).await.unwrap();
-    sleep().await;
-    assert_eq!(
-        cq.lookup(&[id.clone()], true).await.unwrap().into_vec(),
-        vec![vec![1.into(), 2.into()]]
+    eventually!(
+        run_test: {
+            cq.lookup(&[id.clone()], true).await.unwrap().into_vec()
+        },
+        then_assert: |results| {
+            assert_eq!(results, vec![vec![1.into(), 2.into()]])
+        }
     );
     mutb.insert(vec![id.clone(), 4.into()]).await.unwrap();
-    sleep().await;
-    let res = cq.lookup(&[id.clone()], true).await.unwrap().into_vec();
-    assert!(res.iter().any(|r| *r == vec![id.clone(), 2.into()]));
-    assert!(res.iter().any(|r| *r == vec![id.clone(), 4.into()]));
+    eventually!(
+        run_test: {
+            cq.lookup(&[id.clone()], true).await.unwrap().into_vec()
+        },
+        then_assert: |res| {
+            assert!(res.iter().any(|r| *r == vec![id.clone(), 2.into()]));
+            assert!(res.iter().any(|r| *r == vec![id.clone(), 4.into()]));
+        }
+    );
     muta.delete(vec![id.clone()]).await.unwrap();
-    sleep().await;
-    assert_eq!(
-        cq.lookup(&[id.clone()], true).await.unwrap().into_vec(),
-        vec![vec![1.into(), 4.into()]]
+    eventually!(
+        run_test: {
+            cq.lookup(&[id.clone()], true).await.unwrap().into_vec()
+        },
+        then_assert: |results| {
+            assert_eq!(results, vec![vec![1.into(), 4.into()]])
+        }
     );
 
-    // wait for exit
-    eprintln!("waiting for completion");
     shutdown_tx.shutdown().await;
 }
 
@@ -321,15 +330,17 @@ async fn sharded_shuffle() {
         .await
         .unwrap();
 
-    sleep().await;
-
-    // moment of truth
-    let rows = view
-        .lookup(&[DfValue::Int(1)], true)
-        .await
-        .unwrap()
-        .into_vec();
-    assert_eq!(rows.len(), 100);
+    eventually!(
+        run_test: {
+            view.lookup(&[DfValue::Int(1)], true)
+                .await
+                .unwrap()
+                .into_vec()
+        },
+        then_assert: |results| {
+            assert_eq!(results.len(), 100, "{results:?}")
+        }
+    );
 
     shutdown_tx.shutdown().await;
 }
@@ -468,10 +479,13 @@ async fn base_mutation() {
 
     // insert a new record
     write.insert(vec![1.into(), 2.into()]).await.unwrap();
-    sleep().await;
-    assert_eq!(
-        read.lookup(&[1.into()], true).await.unwrap().into_vec(),
-        vec![vec![1.into(), 2.into()]]
+    eventually!(
+        run_test: {
+            read.lookup(&[1.into()], true).await.unwrap().into_vec()
+        },
+        then_assert: |results| {
+            assert_eq!(results, vec![vec![1.into(), 2.into()]])
+        }
     );
 
     // update that record in place (set)
@@ -479,10 +493,13 @@ async fn base_mutation() {
         .update(vec![1.into()], vec![(1, Modification::Set(3.into()))])
         .await
         .unwrap();
-    sleep().await;
-    assert_eq!(
-        read.lookup(&[1.into()], true).await.unwrap().into_vec(),
-        vec![vec![1.into(), 3.into()]]
+    eventually!(
+        run_test: {
+            read.lookup(&[1.into()], true).await.unwrap().into_vec()
+        },
+        then_assert: |results| {
+            assert_eq!(results, vec![vec![1.into(), 3.into()]])
+        }
     );
 
     // update that record in place (add)
@@ -493,10 +510,13 @@ async fn base_mutation() {
         )
         .await
         .unwrap();
-    sleep().await;
-    assert_eq!(
-        read.lookup(&[1.into()], true).await.unwrap().into_vec(),
-        vec![vec![1.into(), 4.into()]]
+    eventually!(
+        run_test: {
+            read.lookup(&[1.into()], true).await.unwrap().into_vec()
+        },
+        then_assert: |results| {
+            assert_eq!(results, vec![vec![1.into(), 4.into()]])
+        }
     );
 
     // insert or update should update
@@ -507,16 +527,18 @@ async fn base_mutation() {
         )
         .await
         .unwrap();
-    sleep().await;
-    assert_eq!(
-        read.lookup(&[1.into()], true).await.unwrap().into_vec(),
-        vec![vec![1.into(), 5.into()]]
+    eventually!(
+        run_test: {
+            read.lookup(&[1.into()], true).await.unwrap().into_vec()
+        },
+        then_assert: |results| {
+            assert_eq!(results, vec![vec![1.into(), 5.into()]])
+        }
     );
 
     // delete should, well, delete
     write.delete(vec![1.into()]).await.unwrap();
-    sleep().await;
-    assert!(read
+    eventually!(read
         .lookup(&[1.into()], true)
         .await
         .unwrap()
@@ -531,19 +553,23 @@ async fn base_mutation() {
         )
         .await
         .unwrap();
-    sleep().await;
-    assert_eq!(
-        read.lookup(&[1.into()], true).await.unwrap().into_vec(),
-        vec![vec![1.into(), 2.into()]]
+    eventually!(
+        run_test: {
+            read.lookup(&[1.into()], true).await.unwrap().into_vec()
+        },
+        then_assert: |results| {
+            assert_eq!(results, vec![vec![1.into(), 2.into()]])
+        }
     );
 
     // truncate deletes everything
     write.truncate().await.unwrap();
-    sleep().await;
-    assert_eq!(
-        read.lookup(&[1.into()], true).await.unwrap().into_vec(),
-        Vec::<Vec<DfValue>>::new()
-    );
+    eventually!(read
+        .lookup(&[1.into()], true)
+        .await
+        .unwrap()
+        .into_vec()
+        .is_empty());
 
     shutdown_tx.shutdown().await;
 }
@@ -1643,7 +1669,6 @@ async fn view_connection_churn() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "Flaky test (ENG-1931)"]
 async fn table_connection_churn() {
     let authority_store = Arc::new(LocalAuthorityStore::new());
     let authority = Arc::new(Authority::from(LocalAuthority::new_with_store(
@@ -1654,6 +1679,8 @@ async fn table_connection_churn() {
     builder.set_sharding(Some(DEFAULT_SHARDING));
     builder.set_persistence(get_persistence_params("connection_churn"));
     let (mut g, shutdown_tx) = builder.start(authority.clone()).await.unwrap();
+
+    sleep().await;
 
     g.extend_recipe(
         ChangeList::from_str(
@@ -8745,10 +8772,16 @@ async fn drop_and_recreate_different_columns() {
     table.insert(vec![11.into(), 12.into()]).await.unwrap();
 
     let mut view = g.view("t1").await.unwrap().into_reader_handle().unwrap();
-    let results = view.lookup(&[0.into()], true).await.unwrap().into_vec();
-    assert!(!results.is_empty());
-    assert_eq!(results[0][0], 11.into());
-    assert_eq!(results[0][1], 12.into());
+    eventually!(
+        run_test: {
+            view.lookup(&[0.into()], true).await.unwrap().into_vec()
+        },
+        then_assert: |results| {
+            assert!(!results.is_empty());
+            assert_eq!(results[0][0], 11.into());
+            assert_eq!(results[0][1], 12.into());
+        }
+    );
 
     shutdown_tx.shutdown().await;
 }
@@ -9065,12 +9098,25 @@ async fn double_identical_create_table() {
         .await
         .unwrap();
 
+    // Although `extend_recipe` shouldn't return until the migration is finished and the point is to
+    // make sure it didn't affect the existing cache, let's be a bit more sure everything is
+    // settled. The other possibility we've seen is the inserts above taking a while to propagate;
+    // hence both this preliminary sleep *and* retrying with `eventually!` below.
+    sleep().await;
+
     let mut view = g.view("t1").await.unwrap().into_reader_handle().unwrap();
-    let results = view.lookup(&[0.into()], true).await.unwrap().into_vec();
-    assert!(!results.is_empty());
-    assert_eq!(results[0][0], 1.into());
-    assert_eq!(results[1][0], 2.into());
-    assert_eq!(results[2][0], 3.into());
+
+    eventually!(
+        run_test: {
+            view.lookup(&[0.into()], true).await.unwrap().into_vec()
+        },
+        then_assert: |results| {
+            assert!(!results.is_empty());
+            assert_eq!(results[0][0], 1.into());
+            assert_eq!(results[1][0], 2.into());
+            assert_eq!(results[2][0], 3.into());
+        }
+    );
 
     shutdown_tx.shutdown().await;
 }
@@ -9121,12 +9167,16 @@ async fn multiple_schemas_explicit() {
 
     eprintln!("{}", g.graphviz(Default::default()).await.unwrap());
 
-    sleep().await;
-
-    let res = q.lookup(&[0.into()], true).await.unwrap().into_vec();
-    assert_eq!(
-        res,
-        vec![vec![DfValue::from("schema_1"), DfValue::from("schema_2")]]
+    eventually!(
+        run_test: {
+            q.lookup(&[0.into()], true).await.unwrap().into_vec()
+        },
+        then_assert: |res| {
+            assert_eq!(
+                res,
+                vec![vec![DfValue::from("schema_1"), DfValue::from("schema_2")]]
+            );
+        }
     );
 
     shutdown_tx.shutdown().await;
