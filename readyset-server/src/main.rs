@@ -14,9 +14,11 @@ use readyset_server::consensus::AuthorityType;
 use readyset_server::metrics::{
     install_global_recorder, CompositeMetricsRecorder, MetricsRecorder,
 };
-use readyset_server::PrometheusBuilder;
-use readyset_server::{resolve_addr, Builder, NoriaMetricsRecorder, WorkerOptions};
+use readyset_server::{
+    resolve_addr, Builder, NoriaMetricsRecorder, PrometheusBuilder, WorkerOptions,
+};
 use readyset_telemetry_reporter::{TelemetryEvent, TelemetryInitializer};
+use readyset_tracing::DynamicLogger;
 use readyset_version::*;
 use tracing::{error, info};
 
@@ -147,19 +149,27 @@ struct Options {
     /// impact startup.
     #[arg(long, hide = true)]
     wait_for_failpoint: bool,
+
+    /// The dynamic logger
+    #[arg(skip)]
+    dynamic_logger: Option<Arc<DynamicLogger>>,
 }
 
 fn main() -> anyhow::Result<()> {
-    let opts: Options = Options::parse();
+    let mut opts: Options = Options::parse();
     let rt = tokio::runtime::Builder::new_multi_thread()
         .with_sys_hooks()
         .enable_all()
         .thread_name("Worker Runtime")
         .build()?;
 
-    let _guard = rt.block_on(async {
+    let (_guard, _logger) = rt.block_on(async {
         match opts.tracing.init("readyset", opts.deployment.as_ref()) {
-            Ok(guard) => guard,
+            Ok((guard, logger)) => {
+                // Store logger in Options
+                opts.dynamic_logger = Some(Arc::new(logger.clone()));
+                (guard, logger)
+            }
             Err(error) => {
                 error!(%error, "Error initializing tracing");
                 process::exit(1);

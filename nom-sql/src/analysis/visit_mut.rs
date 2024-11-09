@@ -1011,6 +1011,10 @@ pub fn walk_alter_readyset_statement<'a, V: VisitorMut<'a>>(
         AlterReadysetStatement::ResnapshotTable(resnapshot_table_stmt) => {
             visitor.visit_table(&mut resnapshot_table_stmt.table)
         }
+        AlterReadysetStatement::SetLogging(_) => {
+            // No need to visit anything for logging level changes
+            Ok(())
+        }
     }
 }
 

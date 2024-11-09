@@ -5,8 +5,23 @@
 //! crates, such as the [`#[instrument]`](tracing-attributes::instrument) macro, and simply allow
 //! this crate to deal with configuration.
 //!
-//! Other than configuration, the functionality provided by this crate is primarily useful for
-//! Performance-critical codepaths, such as the hotpath for queries in ReadySet and the adapter.
+//! # Dynamic Log Level Configuration
+//! This crate supports runtime modification of log levels through the [`DynamicLogger`] type.
+//! The dynamic logger is returned from the [`Options::init`] function and can be used to
+//! update log levels without restarting the application:
+//!
+//! ```rust
+//! # use readyset_tracing::Options;
+//! # #[tokio::main]
+//! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let options = Options::default();
+//! let (_guard, logger) = options.init("my-service", "my-deployment")?;
+//!
+//! // Later, update the log level
+//! logger.update_log_level("debug").await?;
+//! # Ok(())
+//! # }
+//! ```
 //!
 //! # Performance-critical codepaths
 //! For performance-critical pieces, the story is a bit more complex.  Because there is a
@@ -18,6 +33,7 @@
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use tokio::sync::RwLock;
 
 use clap::{Args, ValueEnum};
 use opentelemetry::KeyValue;
@@ -30,6 +46,7 @@ use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::registry::LookupSpan;
+use tracing_subscriber::reload::{self, Handle};
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{filter, fmt, EnvFilter, Layer};
 
@@ -258,10 +275,12 @@ macro_rules! log_format_init {
     };
     ($self:expr, $subscriber_builder:expr) => {
         match &$self.log_format {
-            LogFormat::Compact => $subscriber_builder.compact().init(),
-            LogFormat::Full => $subscriber_builder.init(),
-            LogFormat::Pretty => $subscriber_builder.pretty().init(),
-            LogFormat::Json => $subscriber_builder.json().with_current_span(true).init(),
+            LogFormat::Compact => $subscriber_builder.with(fmt::layer().compact()).init(),
+            LogFormat::Full => $subscriber_builder.with(fmt::layer()).init(),
+            LogFormat::Pretty => $subscriber_builder.with(fmt::layer().pretty()).init(),
+            LogFormat::Json => $subscriber_builder
+                .with(fmt::layer().json().with_current_span(true))
+                .init(),
         }
     };
 }
@@ -337,22 +356,57 @@ impl Options {
     /// tracing, statement logging, and the log path are all not configured, it will initialize
     /// logging with static dispatch for the format, saving some performance cost.
     ///
+    /// # Returns
+    /// Returns a tuple containing:
+    /// - An optional [`WorkerGuard`] that must be kept alive for the duration of the program
+    /// - A [`DynamicLogger`] that can be used to modify log levels at runtime
+    ///
+    /// # Worker Guard
+    /// The returned `WorkerGuard` **must** be kept alive for the entire duration of the program.
+    /// If dropped early, any pending logs will not be flushed to disk and may be lost. This is
+    /// particularly important for handling program crashes or early exits - the guard ensures all
+    /// logs are written before shutdown.
+    ///
+    /// # Dynamic Logging
+    /// The returned [`DynamicLogger`] allows runtime modification of log levels. This is useful for
+    /// debugging production issues without requiring a restart. The log level can be changed using
+    /// the same directive syntax as the initial `LOG_LEVEL` configuration:
+    ///
+    /// ```rust
+    /// # use readyset_tracing::Options;
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let options = Options::default();
+    /// let (_guard, logger) = options.init("my-service", "my-deployment")?;
+    ///
+    /// // Change global level to debug
+    /// logger.update_log_level("debug").await?;
+    ///
+    /// // Set specific levels for different modules
+    /// logger.update_log_level("info,my_crate=debug,other_crate=warn").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Tracing Provider
     /// When the `Options` struct itself goes out of scope, it will take care of the call to
     /// [opentelemetry::global::shutdown_tracer_provider] so that, when developing calling code,
     /// you don't need to remember.
     ///
+    /// # Statement Logging
     /// If statement logging is enabled, statement logs will be sent to a separate statement logging
-    /// file, which is <deployment_name>_statments.log by default, or configurable with the
+    /// file, which is <deployment_name>_statements.log by default, or configurable with the
     /// `statement_log_path` option.
     ///
+    /// # Log Rotation
     /// If a log file is configured, it will be rolled over based on the configured rotation, and
     /// when the WorkerGuard is dropped, the logs will be flushed.
     ///
     /// # Panics
     /// This will panic if called with tracing enabled outside the context of a tokio runtime.
     ///
-    /// Example:
-    /// ```
+    /// # Example
+    /// ```rust
     /// use clap::Parser;
     ///
     /// #[derive(Debug, Parser)]
@@ -362,20 +416,35 @@ impl Options {
     /// }
     ///
     /// #[tokio::main]
-    /// async fn main() {
+    /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ///     let options = Options::parse();
-    ///     let _guard = options
+    ///     
+    ///     // Initialize logging with both guard and dynamic logger
+    ///     let (guard, logger) = options
     ///         .tracing
-    ///         .init("tracing-example", "example-deployment")
-    ///         .unwrap();
+    ///         .init("tracing-example", "example-deployment")?;
+    ///     
+    ///     // Store guard in a location that will live for the program duration
+    ///     let _guard = guard;  // Don't drop this!
     ///
-    ///     // Perform work!
+    ///     // Store logger for runtime log level updates
+    ///     let _logger = logger; // Store this if you need to modify log levels later
+    ///
+    ///     Ok(())
     /// }
     /// ```
-    pub fn init(&self, service_name: &str, deployment: &str) -> Result<Option<WorkerGuard>, Error> {
+    pub fn init(
+        &self,
+        service_name: &str,
+        deployment: &str,
+    ) -> Result<(Option<WorkerGuard>, DynamicLogger), Error> {
+        // Create the reloadable filter layer
+        let (filter_layer, reload_handle) =
+            reload::Layer::new(EnvFilter::try_new(&self.log_level)?);
+
         // Note: There isn't a great way to make partial builders here and avoid this match, because
         // the subscriber builder type embeds the layering types.
-        let res = Ok(
+        let res: Result<Option<WorkerGuard>, Error> = Ok(
             match (
                 self.tracing_host.is_some(),
                 self.statement_logging,
@@ -387,32 +456,40 @@ impl Options {
                         log_path,
                         service_name,
                         deployment,
+                        filter_layer,
                     )
                 }
                 (true, true, false) => {
-                    self.setup_tracing_and_statement_logging(service_name, deployment)
+                    self.setup_tracing_and_statement_logging(service_name, deployment, filter_layer)
                 }
                 (true, false, true) => {
                     let log_path = self.log_path.as_ref().expect("is some").as_path();
-                    self.setup_tracing_and_log_file(log_path, service_name, deployment)
+                    self.setup_tracing_and_log_file(
+                        log_path,
+                        service_name,
+                        deployment,
+                        filter_layer,
+                    )
                 }
-                (true, false, false) => self.setup_tracing(service_name, deployment),
+                (true, false, false) => self.setup_tracing(service_name, deployment, filter_layer),
                 (false, true, true) => {
                     let log_path = self.log_path.as_ref().expect("is some").as_path();
-                    self.setup_statement_logging_and_log_file(log_path, deployment)
+                    self.setup_statement_logging_and_log_file(log_path, deployment, filter_layer)
                 }
-                (false, true, false) => self.setup_statement_logging(deployment),
+                (false, true, false) => self.setup_statement_logging(deployment, filter_layer),
                 (false, false, true) => {
                     let log_path = self.log_path.as_ref().expect("is some").as_path();
-                    self.setup_log_file(log_path)
+                    self.setup_log_file(log_path, filter_layer)
                 }
-                (false, false, false) => self.setup_basic(),
+                (false, false, false) => self.setup_basic(filter_layer),
             },
         );
 
         warn_if_debug_build();
 
-        res
+        let dynamic_logger = DynamicLogger::new(reload_handle);
+
+        Ok((res?, dynamic_logger))
     }
 
     // Returns the provided `statement_log_path` or a default filename.
@@ -428,11 +505,11 @@ impl Options {
         log_path: &Path,
         service_name: &str,
         deployment: &str,
+        filter_layer: reload::Layer<EnvFilter, tracing_subscriber::Registry>,
     ) -> Option<WorkerGuard> {
-        let env_filter = tracing_subscriber::EnvFilter::new(&self.log_level);
         let s = tracing_subscriber::registry()
-            .with(self.statement_logging_layer(&self.statement_log_path_or_default(deployment)))
-            .with(env_filter);
+            .with(filter_layer)
+            .with(self.statement_logging_layer(&self.statement_log_path_or_default(deployment)));
 
         let (non_blocking, worker_guard) = self.setup_file_appender(log_path);
         let fmt_layer = fmt::layer()
@@ -449,11 +526,11 @@ impl Options {
         &self,
         service_name: &str,
         deployment: &str,
+        filter_layer: reload::Layer<EnvFilter, tracing_subscriber::Registry>,
     ) -> Option<WorkerGuard> {
-        let env_filter = tracing_subscriber::EnvFilter::new(&self.log_level);
         let s = tracing_subscriber::registry()
-            .with(self.statement_logging_layer(&self.statement_log_path_or_default(deployment)))
-            .with(env_filter);
+            .with(filter_layer)
+            .with(self.statement_logging_layer(&self.statement_log_path_or_default(deployment)));
         let fmt_layer = fmt::layer().with_ansi(!self.no_color);
         let tracing_layer = self.tracing_layer(service_name, deployment);
 
@@ -467,9 +544,13 @@ impl Options {
         log_path: &Path,
         service_name: &str,
         deployment: &str,
+        filter_layer: reload::Layer<EnvFilter, tracing_subscriber::Registry>,
     ) -> Option<WorkerGuard> {
-        let env_filter = tracing_subscriber::EnvFilter::new(&self.log_level);
-        let s = tracing_subscriber::registry().with(env_filter);
+        let s = tracing_subscriber::registry()
+            .with(filter_layer)
+            .with(filter::filter_fn(|metadata| {
+                !is_statement_log(metadata.target())
+            }));
 
         let (non_blocking, worker_guard) = self.setup_file_appender(log_path);
         let fmt_layer = fmt::layer()
@@ -482,9 +563,17 @@ impl Options {
         Some(worker_guard)
     }
 
-    fn setup_tracing(&self, service_name: &str, deployment: &str) -> Option<WorkerGuard> {
-        let env_filter = tracing_subscriber::EnvFilter::new(&self.log_level);
-        let s = tracing_subscriber::registry().with(env_filter);
+    fn setup_tracing(
+        &self,
+        service_name: &str,
+        deployment: &str,
+        filter_layer: reload::Layer<EnvFilter, tracing_subscriber::Registry>,
+    ) -> Option<WorkerGuard> {
+        let s = tracing_subscriber::registry()
+            .with(filter_layer)
+            .with(filter::filter_fn(|metadata| {
+                !is_statement_log(metadata.target())
+            }));
         let fmt_layer = fmt::layer().with_ansi(!self.no_color);
         let tracing_layer = self.tracing_layer(service_name, deployment);
 
@@ -498,11 +587,11 @@ impl Options {
         &self,
         log_path: &Path,
         deployment: &str,
+        filter_layer: reload::Layer<EnvFilter, tracing_subscriber::Registry>,
     ) -> Option<WorkerGuard> {
-        let env_filter = tracing_subscriber::EnvFilter::new(&self.log_level);
         let s = tracing_subscriber::registry()
-            .with(self.statement_logging_layer(&self.statement_log_path_or_default(deployment)))
-            .with(env_filter);
+            .with(filter_layer)
+            .with(self.statement_logging_layer(&self.statement_log_path_or_default(deployment)));
 
         let (non_blocking, worker_guard) = self.setup_file_appender(log_path);
         let fmt_layer = fmt::layer()
@@ -515,11 +604,14 @@ impl Options {
     }
 
     /// Sets up a subscriber with no tracing, statement logging and no log file configured
-    fn setup_statement_logging(&self, deployment: &str) -> Option<WorkerGuard> {
-        let env_filter = tracing_subscriber::EnvFilter::new(&self.log_level);
+    fn setup_statement_logging(
+        &self,
+        deployment: &str,
+        filter_layer: reload::Layer<EnvFilter, tracing_subscriber::Registry>,
+    ) -> Option<WorkerGuard> {
         let s = tracing_subscriber::registry()
-            .with(self.statement_logging_layer(&self.statement_log_path_or_default(deployment)))
-            .with(env_filter);
+            .with(filter_layer)
+            .with(self.statement_logging_layer(&self.statement_log_path_or_default(deployment)));
 
         let fmt_layer = fmt::layer().with_ansi(!self.no_color);
 
@@ -529,13 +621,20 @@ impl Options {
     }
 
     /// Sets up a subscriber with no tracing, no statement logging, but a log file configured
-    fn setup_log_file(&self, log_path: &Path) -> Option<WorkerGuard> {
-        let env_filter = tracing_subscriber::EnvFilter::new(&self.log_level);
+    fn setup_log_file(
+        &self,
+        log_path: &Path,
+        filter_layer: reload::Layer<EnvFilter, tracing_subscriber::Registry>,
+    ) -> Option<WorkerGuard> {
         let (non_blocking, worker_guard) = self.setup_file_appender(log_path);
-        let s = tracing_subscriber::fmt()
-            .with_env_filter(env_filter)
-            .with_ansi(!self.no_color)
-            .with_writer(non_blocking);
+        let s = tracing_subscriber::registry().with(filter_layer).with(
+            fmt::layer()
+                .with_ansi(!self.no_color)
+                .with_writer(non_blocking)
+                .with_filter(filter::filter_fn(|metadata| {
+                    !is_statement_log(metadata.target())
+                })),
+        );
 
         log_format_init!(self, s);
 
@@ -544,11 +643,13 @@ impl Options {
 
     /// Sets up a subscriber with no tracing, no statement logging, and no log file configured
     // In this case we can avoid dynamic dispatch/using the registry
-    fn setup_basic(&self) -> Option<WorkerGuard> {
-        let env_filter = tracing_subscriber::EnvFilter::new(&self.log_level);
-        let s = tracing_subscriber::fmt()
-            .with_env_filter(env_filter)
-            .with_ansi(!self.no_color);
+    fn setup_basic(
+        &self,
+        filter_layer: reload::Layer<EnvFilter, tracing_subscriber::Registry>,
+    ) -> Option<WorkerGuard> {
+        let s = tracing_subscriber::registry()
+            .with(filter_layer)
+            .with(fmt::layer().with_ansi(!self.no_color));
 
         log_format_init!(self, s);
 
@@ -572,4 +673,116 @@ pub fn init_test_logging() {
         .with_env_filter(EnvFilter::from_env("LOG_LEVEL"))
         .with_test_writer()
         .try_init();
+}
+
+#[derive(Debug, Clone)]
+pub struct DynamicLogger {
+    filter_handle: Arc<RwLock<Handle<EnvFilter, tracing_subscriber::Registry>>>,
+}
+
+impl DynamicLogger {
+    pub fn new(handle: Handle<EnvFilter, tracing_subscriber::Registry>) -> Self {
+        Self {
+            filter_handle: Arc::new(RwLock::new(handle)),
+        }
+    }
+
+    pub async fn update_log_level(&self, new_level: &str) -> Result<(), String> {
+        let level = new_level.to_lowercase();
+        // First validate if it's a basic log level or contains directives
+        if !["error", "warn", "info", "debug", "trace"].contains(&level.as_str())
+            && !level.contains(',')
+        {
+            return Err(
+                "Invalid log level. Must be one of: error, warn, info, debug, trace".to_string(),
+            );
+        }
+
+        let new_filter = EnvFilter::try_new(new_level)
+            .map_err(|e| format!("Invalid log level filter: {}", e))?;
+
+        self.filter_handle
+            .write()
+            .await
+            .reload(new_filter)
+            .map_err(|e| format!("Failed to update log level: {}", e))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serial_test::serial;
+    use std::sync::LazyLock;
+    use tokio::sync::Barrier;
+
+    // This is a global logger for testing that can be updated at runtime
+    static TEST_LOGGER: LazyLock<DynamicLogger> = LazyLock::new(|| {
+        let options = Options::default();
+        let (_guard, logger) = options.init("test-service", "test-deployment").unwrap();
+        logger
+    });
+
+    #[tokio::test]
+    #[serial]
+    async fn test_dynamic_logger_basic_updates() {
+        let logger = Arc::new(&*TEST_LOGGER);
+
+        // Test valid log levels
+        assert!(logger.update_log_level("debug").await.is_ok());
+        // Use tracing macros to emit logs
+        tracing::error!("1. error_test, must be emitted");
+        tracing::warn!("1. warn_test, must be emitted");
+        tracing::info!("1. info_test, must be emitted");
+        tracing::debug!("1. debug_test, must be emitted");
+        tracing::trace!("1. trace_test, must NOT be emitted");
+
+        assert!(logger.update_log_level("warn").await.is_ok());
+        // Use tracing macros to emit logs
+        tracing::error!("2. error_test, must be emitted");
+        tracing::warn!("2. warn_test, must be emitted");
+        tracing::info!("2. info_test, must NOT be emitted");
+        tracing::debug!("2. debug_test, must NOT be emitted");
+        tracing::trace!("2. trace_test, must NOT be emitted");
+
+        // Test invalid log level
+        let result = logger.update_log_level("not_a_valid_level").await;
+        assert!(result.is_err(), "Invalid log level should return error");
+
+        // Verify we can still set a valid level after an invalid attempt
+        assert!(logger.update_log_level("info").await.is_ok());
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_dynamic_logger_concurrent_updates() {
+        let logger = Arc::new(&*TEST_LOGGER);
+
+        // Create multiple tasks that will try to update the log level simultaneously
+        let barrier = Arc::new(Barrier::new(3));
+        let mut handles = vec![];
+
+        for level in ["debug", "info", "warn"] {
+            let logger = logger.clone();
+            let barrier = barrier.clone();
+            let handle = tokio::spawn(async move {
+                barrier.wait().await;
+                logger.update_log_level(level).await
+            });
+            handles.push(handle);
+        }
+
+        // Wait for all updates to complete
+        let results: Vec<Result<Result<(), String>, tokio::task::JoinError>> =
+            futures::future::join_all(handles).await;
+
+        // Verify all updates completed successfully
+        for result in results {
+            assert!(result.is_ok(), "Task should complete");
+            assert!(result.unwrap().is_ok(), "Log level update should succeed");
+        }
+
+        // Verify we can still update the log level after concurrent updates
+        assert!(logger.update_log_level("trace").await.is_ok());
+    }
 }

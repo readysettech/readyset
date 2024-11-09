@@ -486,9 +486,11 @@ pub fn resnapshot_table_statement(
         ))
     }
 }
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum AlterReadysetStatement {
     ResnapshotTable(ResnapshotTableStatement),
+    SetLogging(String),
 }
 
 impl DialectDisplay for AlterReadysetStatement {
@@ -497,7 +499,26 @@ impl DialectDisplay for AlterReadysetStatement {
             Self::ResnapshotTable(stmt) => {
                 write!(f, "RESNAPSHOT TABLE {}", stmt.table.display(dialect))
             }
+            Self::SetLogging(level) => {
+                write!(f, "LOGGING {}", level)
+            }
         })
+    }
+}
+
+fn set_logging(
+    _dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], AlterReadysetStatement> {
+    move |i| {
+        let (i, _) = tag_no_case("logging")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, level) = until_statement_terminator(i)?;
+        let (i, _) = statement_terminator(i)?;
+
+        Ok((
+            i,
+            AlterReadysetStatement::SetLogging(String::from_utf8_lossy(level).into()),
+        ))
     }
 }
 
@@ -509,7 +530,7 @@ pub fn alter_readyset_statement(
         let (i, _) = whitespace1(i)?;
         let (i, _) = tag_no_case("readyset")(i)?;
         let (i, _) = whitespace1(i)?;
-        let (i, statement) = alt((resnapshot_table_statement(dialect),))(i)?;
+        let (i, statement) = alt((resnapshot_table_statement(dialect), set_logging(dialect)))(i)?;
 
         Ok((i, statement))
     }
@@ -1386,6 +1407,40 @@ mod tests {
                     table: Relation::from("t")
                 })
             );
+        }
+    }
+
+    #[test]
+    fn alter_readyset_logging() {
+        // Test cases to run against both dialects
+        let test_cases = [
+            (
+                b"ALTER READYSET LOGGING debug;" as &[u8],
+                "debug".to_string(),
+            ),
+            (
+                b"ALTER READYSET LOGGING readyset=debug,readyset_client=info;",
+                "readyset=debug,readyset_client=info".to_string(),
+            ),
+            (
+                b"ALTER   READYSET    LOGGING    trace;",
+                "trace".to_string(),
+            ),
+            (b"alter readyset LOGGING INFO;", "INFO".to_string()),
+        ];
+
+        // Test each case against both MySQL and PostgreSQL dialects
+        for dialect in [Dialect::MySQL, Dialect::PostgreSQL] {
+            for (input, expected_level) in &test_cases {
+                let res = test_parse!(alter_readyset_statement(dialect), input);
+                assert_eq!(
+                    res,
+                    AlterReadysetStatement::SetLogging(expected_level.clone()),
+                    "Failed for dialect {:?} with input {:?}",
+                    dialect,
+                    String::from_utf8_lossy(input)
+                );
+            }
         }
     }
 }
