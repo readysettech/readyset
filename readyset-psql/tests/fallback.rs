@@ -674,13 +674,14 @@ async fn deletion_propagation_after_alter() {
     eventually!(
         run_test: {
             client
-                .query_one("SELECT * FROM cats", &[])
+                .query("SELECT * FROM cats", &[])
                 .await
                 .unwrap()
-                .get::<_, i32>(0)
+                .first()
+                .map(|row| row.get(0))
         },
         then_assert: |result| {
-            assert_eq!(result, 1);
+            assert_eq!(result, Some(1));
         }
     );
 
