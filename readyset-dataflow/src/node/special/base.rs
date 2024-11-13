@@ -304,7 +304,7 @@ impl Base {
         }
 
         // Group the operations by their key, so we can process each group independently
-        let ops = ops.group_by(|op| key_of(key_cols, op).cloned().collect::<Vec<_>>());
+        let ops = ops.chunk_by(|op| key_of(key_cols, op).cloned().collect::<Vec<_>>());
         results.reserve(n_ops);
 
         /// [`TouchedKey`] indicates if the given key was previously deleted or inserted as part of

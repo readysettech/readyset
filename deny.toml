@@ -145,6 +145,7 @@ skip-tree = [
     { name = "hashbrown", version = "0.12.3" },
     { name = "unicode-width", version = "0.1.14" },
     { name = "web-time", version = "0.2.4" },
+    { name = "itertools", version = "0.10.5" },
 ]
 
 # This section is considered when running `cargo deny check sources`.
