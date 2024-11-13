@@ -21,6 +21,9 @@ pub mod redacted;
 pub mod shared_cache;
 pub mod shutdown;
 
+mod time_scope;
+pub use time_scope::time_scope;
+
 /// Error (returned by [`Indices::indices`] and [`Indices::cloned_indices`]) for an out-of-bounds
 /// index access
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
