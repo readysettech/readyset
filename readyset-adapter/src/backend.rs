@@ -3224,7 +3224,7 @@ where
     /// Don't do it for MySQL because the terminal client doesn't handle newlines.
     fn format_query_text(query: String) -> String {
         if DB::SQL_DIALECT != nom_sql::Dialect::MySQL && query.len() > 40 {
-            sqlformat::format(&query, &Default::default(), Default::default())
+            sqlformat::format(&query, &Default::default(), &Default::default())
         } else {
             query
         }
