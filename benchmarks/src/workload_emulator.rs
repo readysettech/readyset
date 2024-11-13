@@ -384,7 +384,7 @@ impl Query {
 
 pub enum LookAsideCacheConnection {
     Memcached(vmemcached::Client, u32),
-    Redis(redis::aio::Connection, u32),
+    Redis(redis::aio::MultiplexedConnection, u32),
 }
 
 impl LookAsideCacheConnection {
@@ -407,7 +407,7 @@ impl LookAsideCacheConnection {
             LookAsideCacheType::Redis => {
                 let client =
                     redis::Client::open(cache_params.cache_url.expect("must provide cache url"))?;
-                let conn = client.get_async_connection().await?;
+                let conn = client.get_multiplexed_async_connection().await?;
                 Ok(Self::Redis(conn, cache_params.ttl_secs))
             }
         }
@@ -440,7 +440,7 @@ impl LookAsideCacheConnection {
             }
             Self::Redis(conn, ttl) => {
                 let opts =
-                    SetOptions::default().with_expiration(SetExpiry::EX(ttl_jitter(*ttl) as usize));
+                    SetOptions::default().with_expiration(SetExpiry::EX(ttl_jitter(*ttl) as u64));
                 let _: () = conn.set_options(key, value, opts).await?;
                 Ok(())
             }
