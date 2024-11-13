@@ -375,7 +375,7 @@ impl Ingredient for Join {
 
         let grouped_records = rs
             .into_iter()
-            .group_by(|rec| from_key.iter().map(|i| rec[*i].clone()).collect::<Vec<_>>());
+            .chunk_by(|rec| from_key.iter().map(|i| rec[*i].clone()).collect::<Vec<_>>());
 
         let is_replay = replay_key_cols.is_some();
 

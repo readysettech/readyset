@@ -369,7 +369,7 @@ dependencies = [
  "hdrhistogram",
  "indicatif",
  "indoc",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "lazy_static",
  "metrics",
  "metrics-exporter-prometheus",
@@ -1229,7 +1229,7 @@ dependencies = [
  "bytes",
  "chrono",
  "chrono-tz",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "lazy_static",
  "mysql-time",
  "mysql_async",
@@ -1263,7 +1263,7 @@ dependencies = [
  "derive_more",
  "hashbag",
  "indexmap 2.6.0",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "lazy_static",
  "metrics",
  "notify",
@@ -2673,6 +2673,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "itertools"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "413ee7dfc52ee1a4949ceeb7dbc8a33f2d6c088194d9f922fb8318faf1f01186"
+dependencies = [
+ "either",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3334,7 +3343,7 @@ dependencies = [
  "fail",
  "failpoint-macros",
  "hex",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "lazy_static",
  "nom",
  "nom_locate",
@@ -4184,7 +4193,7 @@ dependencies = [
  "eui48",
  "futures-util",
  "growable-bloom-filter",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "lazy_static",
  "mysql_async",
  "nom-sql",
@@ -4356,7 +4365,7 @@ version = "0.1.0"
 dependencies = [
  "indexmap 2.6.0",
  "iter-enum",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "left-right",
  "metrics",
  "partial-map",
@@ -4445,7 +4454,7 @@ dependencies = [
  "health-reporter",
  "hyper 0.14.28",
  "indexmap 2.6.0",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "lazy_static",
  "lru",
  "metrics",
@@ -4547,7 +4556,7 @@ dependencies = [
  "futures",
  "futures-util",
  "hyper 0.14.28",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "metrics",
  "metrics-util",
  "mysql-time",
@@ -4647,7 +4656,7 @@ dependencies = [
  "futures",
  "futures-util",
  "hyper 0.14.28",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "jobserver",
  "mysql_async",
  "nom-sql",
@@ -4717,7 +4726,7 @@ dependencies = [
  "enum-kinds",
  "eui48",
  "fallible-iterator",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "lazy_static",
  "mysql-time",
  "mysql_common",
@@ -4770,7 +4779,7 @@ dependencies = [
  "futures-util",
  "hashbag",
  "indexmap 2.6.0",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "lazy_static",
  "merging-interval-tree",
  "metrics",
@@ -4874,7 +4883,7 @@ dependencies = [
  "hex",
  "humantime",
  "indicatif",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "lazy_static",
  "md5",
  "mysql-srv",
@@ -4913,7 +4922,7 @@ version = "0.7.0"
 dependencies = [
  "derive_more",
  "fixedbitset",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "lazy_static",
  "nom-sql",
  "petgraph",
@@ -4944,7 +4953,7 @@ dependencies = [
  "failpoint-macros",
  "futures",
  "futures-util",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "lazy_static",
  "metrics",
  "mysql",
@@ -4995,7 +5004,7 @@ dependencies = [
  "fail",
  "failpoint-macros",
  "futures",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "lazy_static",
  "metrics",
  "native-tls",
@@ -5083,7 +5092,7 @@ dependencies = [
  "hyper 0.14.28",
  "include_dir",
  "indexmap 2.6.0",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "lazy_static",
  "metrics",
  "metrics-exporter-prometheus",
@@ -5153,7 +5162,7 @@ version = "0.0.1"
 dependencies = [
  "criterion",
  "dataflow-expression",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "nom-sql",
  "readyset-data",
  "readyset-errors",
@@ -5377,7 +5386,7 @@ dependencies = [
  "failpoint-macros",
  "futures",
  "hex",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "metrics",
  "mysql-srv",
  "mysql-time",
@@ -6318,7 +6327,7 @@ dependencies = [
  "database-utils",
  "fork",
  "futures",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "libc",
  "nom-sql",
  "num_cpus",
