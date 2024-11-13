@@ -2,7 +2,7 @@ use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::SocketAddr;
 use std::sync::{atomic, Arc};
-use std::time;
+use std::time::Duration;
 
 use dataflow::payload::packets::*;
 use dataflow::payload::{MaterializedState, SourceChannelIdentifier};
@@ -14,8 +14,8 @@ use futures_util::FutureExt;
 use readyset_client::internal::ReplicaAddress;
 use readyset_client::{KeyComparison, PacketData, PacketPayload, Tagged, CONNECTION_FROM_BASE};
 use readyset_errors::ReadySetResult;
+use readyset_util::time_scope;
 use strawpoll::Strawpoll;
-use time::Duration;
 use tokio::io::{AsyncReadExt, BufReader, BufStream, BufWriter};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{broadcast, mpsc, oneshot, Mutex};
@@ -27,9 +27,13 @@ use super::{ChannelCoordinator, WorkerRequestKind};
 type Outputs =
     HashMap<ReplicaAddress, Box<dyn Sink<Packet, Error = bincode::Error> + Send + Unpin>>;
 
+const SLOW_LOOP_THRESHOLD: Duration = Duration::from_secs(1);
+
 // For use in the select loop.  If None, exit, otherwise check for error and continue.
 macro_rules! call {
-    ( $call:expr ) => {{
+    ($name:literal, $op:expr, $call:expr) => {{
+        let span = info_span!(target: "readyset_server::worker::replica", $name);
+        let _time = time_scope(span, $op, SLOW_LOOP_THRESHOLD);
         if let Some(res) = $call {
             res?;
         } else {
@@ -507,18 +511,24 @@ impl Replica {
                 }
 
                 // Domain requests
-                req = requests.recv() => call! {
+                req = requests.recv() => call!(
+                    "handle_domain_request",
+                    req.as_ref().map(|x| x.req.clone()),
                     Self::handle_domain_request(domain, req, out)
-                },
+                ),
 
-                state = init_state_reqs.recv() => call! {
+                state = init_state_reqs.recv() => call!(
+                    "handle_state_request",
+                    state.as_ref().map(|x| x.node),
                     Self::handle_state_request(domain, state)
-                },
+                ),
 
                 // Handle incoming messages
-                packets = Self::receive_packets(locals, &mut established) => call! {
+                packets = Self::receive_packets(locals, &mut established) => call!(
+                    "handle_packets",
+                    packets.as_ref().map_or(None, |x| x.as_ref().map(|x| x.len())),
                     Self::handle_packets(packets?, &mut established, domain, out).await
-                },
+                ),
 
                 // Poll the send packets future and reissue if outstanding packets are present
                 Some(res) = send_packets.next() => res?,
