@@ -32,8 +32,8 @@ const SLOW_LOOP_THRESHOLD: Duration = Duration::from_secs(1);
 // For use in the select loop.  If None, exit, otherwise check for error and continue.
 macro_rules! call {
     ($name:literal, $op:expr, $call:expr) => {{
-        let span = info_span!(target: "readyset_server::worker::replica", $name);
-        let _time = time_scope(span, $op, SLOW_LOOP_THRESHOLD);
+        let span = info_span!(target: "readyset_server::worker::replica", $name, op = ?$op);
+        let _time = time_scope(span, SLOW_LOOP_THRESHOLD);
         if let Some(res) = $call {
             res?;
         } else {
