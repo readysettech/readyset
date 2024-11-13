@@ -1168,6 +1168,7 @@ fn base_options(params: &PersistenceParameters) -> rocksdb::Options {
     opts.set_max_background_jobs(cpus * 4); // only 1/4 of these write memtables
 
     // Increase a few default limits:
+    opts.set_max_bytes_for_level_base(1024 * 1024 * 1024);
     opts.set_target_file_size_base(256 * 1024 * 1024);
     opts
 }
