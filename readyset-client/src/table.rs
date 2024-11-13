@@ -1,4 +1,3 @@
-use core::convert::TryInto;
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::future::Future;
@@ -255,7 +254,7 @@ pub struct PacketData {
 
 /// Wrapper around types that can be propagated to base tables
 /// as packets.
-#[derive(Clone, Serialize, Deserialize, TryInto, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, TryInto, PartialEq, Eq)]
 #[try_into(owned, ref, ref_mut)]
 pub enum PacketPayload {
     /// An input update to a base table.
@@ -418,7 +417,7 @@ impl Table {
     #[allow(clippy::cognitive_complexity)]
     fn input(
         &mut self,
-        mut i: PacketData,
+        i: PacketData,
     ) -> impl Future<Output = Result<Tagged<()>, ReadySetError>> + Send {
         let span = if crate::trace_next_op() {
             Some(trace_span!("table-request", base = self.ni.index()))
@@ -530,7 +529,7 @@ impl Table {
                 let _guard = span.as_ref().map(Span::enter);
                 trace!("shard request");
                 let mut shard_writes = vec![Vec::new(); nshards];
-                let ops: &mut Vec<TableOperation> = match (&mut i.data).try_into() {
+                let mut ops: Vec<TableOperation> = match i.data.clone().try_into() {
                     Ok(v) => v,
                     Err(e) => {
                         return future::Either::Left(future::Either::Right(async move {
