@@ -278,7 +278,7 @@ impl Replica {
 
             // Send the messages to the sink associated with each target domain.
             // If an error occurs when performing `feed` or `flush`, add the address
-            // for the domain to the failed set, remove the channel rom the local
+            // for the domain to the failed set, remove the channel from the local
             // channel coordinator, and skip the remaining packets.
             //
             // The next time a batch of packets is sent to a domain, a new connection
@@ -472,6 +472,11 @@ impl Replica {
         // future when it is empty.
         let mut send_packets = futures::stream::FuturesUnordered::new();
 
+        // Similar to `send_packets`, we push our outbox of `Upcall`s in here and let the `select!`
+        // loop poll it; however, we don't maintain the invariant of only one future being in here
+        // at a time, and instead simply append to it as needed.
+        let mut pending_rpc_requests = futures::stream::FuturesUnordered::new();
+
         let Replica {
             domain,
             coord,
@@ -533,6 +538,9 @@ impl Replica {
                 // Poll the send packets future and reissue if outstanding packets are present
                 Some(res) = send_packets.next() => res?,
 
+                // Poll the pending RPC upcalls
+                Some(res) = pending_rpc_requests.next() => res?,
+
                 // Update domain sizes when `refresh_sizes` expires
                 Some(_) = refresh_sizes.next() => domain.update_state_sizes(),
 
@@ -555,7 +563,7 @@ impl Replica {
                             WorkerRequestKind::BarrierCredit { id, credits }
                         }
                     };
-                    let _: () = common::worker::rpc(client, url, RPC_TIMEOUT, req).await?;
+                    pending_rpc_requests.push(common::worker::rpc(client, url, RPC_TIMEOUT, req))
                 }
             }
         }
