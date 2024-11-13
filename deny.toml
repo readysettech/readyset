@@ -143,6 +143,8 @@ skip-tree = [
     { name = "consulrs", version = "0.1.0" },
     { name = "mysql", version = "25" },
     { name = "hashbrown", version = "0.12.3" },
+    { name = "unicode-width", version = "0.1.14" },
+    { name = "web-time", version = "0.2.4" },
 ]
 
 # This section is considered when running `cargo deny check sources`.
