@@ -20,7 +20,7 @@ use tokio::io::{AsyncReadExt, BufReader, BufStream, BufWriter};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{broadcast, mpsc, oneshot, Mutex};
 use tokio_stream::wrappers::IntervalStream;
-use tracing::{debug, error, info, info_span, instrument, trace, warn, Span};
+use tracing::{debug, error, info, info_span, instrument, trace, warn, Instrument, Span};
 
 use super::{ChannelCoordinator, WorkerRequestKind};
 
@@ -448,11 +448,10 @@ impl Replica {
     }
 
     /// Start the event loop for a Replica
-    pub async fn run(mut self) -> ReadySetResult<()> {
+    pub async fn run_inner(mut self) -> ReadySetResult<()> {
         let mut accepted = futures::stream::FuturesUnordered::new(); // conns being upgraded
         let mut established = Default::default();
         let mut channel_changes = self.coord.subscribe();
-        let _ = self.span().enter();
 
         // A cache of established connections to other Replicas we may send messages to. Sadly
         // have to use Mutex here to make it possible to pass a mutable reference to outputs
@@ -484,8 +483,7 @@ impl Replica {
         loop {
             // We have three logical input sources: receives from local domains, receives from
             // remote domains, and remote mutators. If adding new statements, make sure they
-            // are cancellation safe:
-            // https://docs.rs/tokio/latest/tokio/macro.select.html
+            // are cancellation safe.  https://docs.rs/tokio/latest/tokio/macro.select.html
             tokio::select! {
                 // Accept incoming connections
                 res = incoming.accept() => {
@@ -551,5 +549,10 @@ impl Replica {
                 }
             }
         }
+    }
+
+    pub async fn run(self) -> ReadySetResult<()> {
+        let span = self.span();
+        self.run_inner().instrument(span).await
     }
 }
