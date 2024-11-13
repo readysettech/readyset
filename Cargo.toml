@@ -217,7 +217,7 @@ streaming-iterator = "0.1"
 stringprep = "0.1.4"
 strum = "0.26"
 strum_macros = "0.26"
-syn = { version = "1.0.109", default-features = false }
+syn = { version = "2.0.87", default-features = false }
 temp-dir = "0.1"
 tempfile = "3.10.1"
 test-strategy = "0.2.1"

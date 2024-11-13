@@ -13,7 +13,7 @@ use syn::visit::{self, Visit};
 use syn::visit_mut::{self, VisitMut};
 use syn::{
     parse_macro_input, parse_quote, parse_quote_spanned, Arm, Expr, GenericArgument, GenericParam,
-    Ident, ItemEnum, ItemFn, ItemImpl, Lifetime, LifetimeDef, Path, PathArguments, ReturnType,
+    Ident, ItemEnum, ItemFn, ItemImpl, Lifetime, LifetimeParam, Path, PathArguments, ReturnType,
     Type, TypeParam, TypeParamBound, Variant,
 };
 
@@ -38,7 +38,7 @@ fn impl_iterator_item_type(output: &ReturnType) -> Option<&Type> {
                 })?;
 
                 generic_args.iter().find_map(|arg| match arg {
-                    GenericArgument::Binding(b) if b.ident == "Item" => Some(&b.ty),
+                    GenericArgument::AssocType(b) if b.ident == "Item" => Some(&b.ty),
                     _ => None,
                 })
             }
@@ -173,7 +173,7 @@ fn generate_iterator_impl(
 
     let generic_param_bounds: Punctuated<_, Comma> = lifetime_params
         .into_iter()
-        .map(|lt| GenericParam::from(LifetimeDef::new(lt)))
+        .map(|lt| GenericParam::from(LifetimeParam::new(lt)))
         .chain(type_param_names.iter().map(|tn| -> GenericParam {
             parse_quote!(#tn : ::std::iter::Iterator<Item = #item_ty>)
         }))
