@@ -32,6 +32,7 @@ use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
 use readyset_telemetry_reporter::TelemetrySender;
 use readyset_util::futures::abort_on_panic;
 use readyset_util::shutdown::ShutdownReceiver;
+use readyset_util::time_scope;
 use readyset_version::RELEASE_VERSION;
 use replication_offset::ReplicationOffset;
 use replicators::{ControllerMessage, ReplicatorMessage};
@@ -42,7 +43,7 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{watch, Mutex};
 use tokio::task::JoinHandle;
 use tokio::time::sleep;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, info_span, warn};
 
 use crate::controller::state::{DfState, DfStateHandle};
 use crate::controller::{ControllerState, Worker, WorkerIdentifier};
@@ -51,6 +52,9 @@ use crate::worker::WorkerRequestKind;
 /// Maximum amount of time to wait for an `extend_recipe` request to run synchronously, before we
 /// let it run in the background and return [`ExtendRecipeResult::Pending`].
 const EXTEND_RECIPE_MAX_SYNC_TIME: Duration = Duration::from_secs(5);
+
+/// Timeout for logging slow `external_request` handling
+const SLOW_REQUEST_THRESHOLD: Duration = Duration::from_secs(1);
 
 /// A handle to a migration running in the background. Used as part of
 /// [`Leader::running_migrations`].
@@ -260,6 +264,10 @@ impl Leader {
                 return Ok(::bincode::serialize(&$expr)?);
             }};
         }
+
+        let span =
+            info_span!("readyset_server::controller::inner::external_request", %method, %path);
+        let _time = time_scope(span, SLOW_REQUEST_THRESHOLD);
 
         debug!(%method, %path, "received external HTTP request");
 
