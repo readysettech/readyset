@@ -24,8 +24,8 @@ use readyset_client::internal::ReplicaAddress;
 use readyset_client::metrics::recorded;
 use readyset_client::ReadySetHandle;
 use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
-use readyset_util::select;
 use readyset_util::shutdown::ShutdownReceiver;
+use readyset_util::{select, time_scope};
 use serde::{Deserialize, Serialize};
 use tikv_jemalloc_ctl::stats::allocated_mib;
 use tikv_jemalloc_ctl::{epoch, epoch_mib, stats};
@@ -48,6 +48,9 @@ mod replica;
 
 /// Timeout for requests made from the controller to the server
 const CONTROLLER_REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// Timeout for logging slow `worker_request` handling
+const SLOW_REQUEST_THRESHOLD: Duration = Duration::from_secs(1);
 
 /// Some kind of request for a running ReadySet worker.
 ///
@@ -303,6 +306,8 @@ impl Worker {
         &mut self,
         req: WorkerRequestKind,
     ) -> ReadySetResult<Option<Vec<u8>>> {
+        let span = info_span!("readyset_server::worker::handle_worker_request", ?req);
+        let _time = time_scope(span, SLOW_REQUEST_THRESHOLD);
         match req {
             WorkerRequestKind::NewController { controller_uri } => {
                 info!(%controller_uri, "worker informed of new controller");
