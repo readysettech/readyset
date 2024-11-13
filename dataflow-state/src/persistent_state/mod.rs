@@ -1177,7 +1177,6 @@ fn base_options(params: &PersistenceParameters) -> rocksdb::Options {
 fn block_based_options(set_filter: bool) -> BlockBasedOptions {
     let mut block_opts = BlockBasedOptions::default();
     block_opts.set_block_size(32 * 1024);
-    block_opts.set_optimize_filters_for_memory(true);
 
     if set_filter {
         block_opts.set_bloom_filter(10.0, true);
