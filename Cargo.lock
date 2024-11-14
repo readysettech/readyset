@@ -25,6 +25,17 @@ checksum = "512761e0bb2578dd7380c6baaa0f4ce03e84f95e960231d1dec8bf4d7d6e2627"
 
 [[package]]
 name = "ahash"
+version = "0.7.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "891477e0c6a8957309ee5c45a6368af3ae14bb510732d2684ffa19af310920f9"
+dependencies = [
+ "getrandom",
+ "once_cell",
+ "version_check",
+]
+
+[[package]]
+name = "ahash"
 version = "0.8.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e89da841a80418a9b391ebaea17f5c112ffaaa96f621d2c285b5174da76b9011"
@@ -536,6 +547,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "borsh"
+version = "1.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2506947f73ad44e344215ccd6403ac2ae18cd8e046e581a441bf8d199f257f03"
+dependencies = [
+ "borsh-derive",
+ "cfg_aliases 0.2.1",
+]
+
+[[package]]
+name = "borsh-derive"
+version = "1.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c2593a3b8b938bd68373196c9832f516be11fa487ef4ae745eb282e6a56a7244"
+dependencies = [
+ "once_cell",
+ "proc-macro-crate",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.87",
+]
+
+[[package]]
 name = "btoi"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -555,6 +589,28 @@ name = "bumpalo"
 version = "3.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "79296716171880943b8470b5f8d03aa55eb2e645a4874bdbb28adb49162e012c"
+
+[[package]]
+name = "bytecheck"
+version = "0.6.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "23cdc57ce23ac53c931e88a43d06d070a6fd142f2617be5855eb75efc9beb1c2"
+dependencies = [
+ "bytecheck_derive",
+ "ptr_meta",
+ "simdutf8",
+]
+
+[[package]]
+name = "bytecheck_derive"
+version = "0.6.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3db406d29fbcd95542e92559bed4d8ad92636d1ca8b3b72ede10b4bcc010e659"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
 
 [[package]]
 name = "bytecount"
@@ -635,6 +691,12 @@ name = "cfg_aliases"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fd16c4719339c4530435d38e511904438d07cce7950afa3718a84ac36c10e89e"
+
+[[package]]
+name = "cfg_aliases"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 
 [[package]]
 name = "chrono"
@@ -1244,7 +1306,7 @@ dependencies = [
  "mysql_async",
  "nom-sql",
  "partial-map",
- "postgres 0.19.7 (git+https://github.com/readysettech/rust-postgres.git)",
+ "postgres",
  "proptest",
  "readyset-data",
  "readyset-errors",
@@ -1263,7 +1325,7 @@ dependencies = [
 name = "dataflow-state"
 version = "0.0.1"
 dependencies = [
- "ahash",
+ "ahash 0.8.11",
  "anyhow",
  "async-trait",
  "bincode",
@@ -2064,6 +2126,9 @@ name = "hashbrown"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a9ee70c43aaf417c914396645a0fa852624801b24ebb7ae78fe8272889ac888"
+dependencies = [
+ "ahash 0.7.8",
+]
 
 [[package]]
 name = "hashbrown"
@@ -2589,7 +2654,7 @@ version = "0.11.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "232929e1d75fe899576a3d5c7416ad0d88dbfbb3c3d6aa00873a7408a50ddb88"
 dependencies = [
- "ahash",
+ "ahash 0.8.11",
  "indexmap 2.6.0",
  "is-terminal",
  "itoa",
@@ -2798,7 +2863,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4979f22fdb869068da03c9f7528f8297c6fd2606bc3a4affe42e6a823fdb8da4"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -3012,7 +3077,7 @@ version = "0.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ae428771d17306715c5091d446327d1cfdedc82185c65ba8423ab404e45bf10"
 dependencies = [
- "ahash",
+ "ahash 0.8.11",
  "portable-atomic",
 ]
 
@@ -3342,7 +3407,7 @@ checksum = "ab2156c4fce2f8df6c499cc1c763e4394b7482525bf2a9701c9d79d215f519e4"
 dependencies = [
  "bitflags 2.6.0",
  "cfg-if",
- "cfg_aliases",
+ "cfg_aliases 0.1.1",
  "libc",
 ]
 
@@ -3880,22 +3945,9 @@ dependencies = [
 
 [[package]]
 name = "postgres"
-version = "0.19.7"
+version = "0.19.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7915b33ed60abc46040cbcaa25ffa1c7ec240668e0477c4f3070786f5916d451"
-dependencies = [
- "bytes",
- "fallible-iterator",
- "futures-util",
- "log",
- "tokio",
- "tokio-postgres",
-]
-
-[[package]]
-name = "postgres"
-version = "0.19.7"
-source = "git+https://github.com/readysettech/rust-postgres.git#0662ea1156c031dfac5f97cf7d5d2d2bcc249666"
+checksum = "95c918733159f4d55d2ceb262950f00b0aebd6af4aa97b5a47bb0655120475ed"
 dependencies = [
  "bytes",
  "fallible-iterator",
@@ -3907,8 +3959,8 @@ dependencies = [
 
 [[package]]
 name = "postgres-derive"
-version = "0.4.5"
-source = "git+https://github.com/readysettech/rust-postgres.git#0662ea1156c031dfac5f97cf7d5d2d2bcc249666"
+version = "0.4.6"
+source = "git+https://github.com/readysettech/rust-postgres.git?tag=readyset-20241114#34bf0f569a5a004097e926e6c630510ac3f4beb7"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -3919,8 +3971,10 @@ dependencies = [
 [[package]]
 name = "postgres-native-tls"
 version = "0.5.0"
-source = "git+https://github.com/readysettech/rust-postgres.git#0662ea1156c031dfac5f97cf7d5d2d2bcc249666"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2d442770e2b1e244bb5eb03b31c79b65bb2568f413b899eaba850fa945a65954"
 dependencies = [
+ "futures",
  "native-tls",
  "tokio",
  "tokio-native-tls",
@@ -3929,8 +3983,8 @@ dependencies = [
 
 [[package]]
 name = "postgres-protocol"
-version = "0.6.6"
-source = "git+https://github.com/readysettech/rust-postgres.git#0662ea1156c031dfac5f97cf7d5d2d2bcc249666"
+version = "0.6.7"
+source = "git+https://github.com/readysettech/rust-postgres.git?tag=readyset-20241114#34bf0f569a5a004097e926e6c630510ac3f4beb7"
 dependencies = [
  "base64 0.22.1",
  "byteorder",
@@ -3946,8 +4000,8 @@ dependencies = [
 
 [[package]]
 name = "postgres-types"
-version = "0.2.6"
-source = "git+https://github.com/readysettech/rust-postgres.git#0662ea1156c031dfac5f97cf7d5d2d2bcc249666"
+version = "0.2.8"
+source = "git+https://github.com/readysettech/rust-postgres.git?tag=readyset-20241114#34bf0f569a5a004097e926e6c630510ac3f4beb7"
 dependencies = [
  "bit-vec",
  "bytes",
@@ -4171,7 +4225,7 @@ dependencies = [
  "hmac",
  "nom",
  "nom-sql",
- "postgres 0.19.7 (git+https://github.com/readysettech/rust-postgres.git)",
+ "postgres",
  "postgres-native-tls",
  "postgres-protocol",
  "postgres-types",
@@ -4193,6 +4247,26 @@ dependencies = [
  "tokio-util",
  "tracing",
  "uuid 0.8.2",
+]
+
+[[package]]
+name = "ptr_meta"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0738ccf7ea06b608c10564b31debd4f5bc5e197fc8bfe088f68ae5ce81e7a4f1"
+dependencies = [
+ "ptr_meta_derive",
+]
+
+[[package]]
+name = "ptr_meta_derive"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "16b845dbfca988fa33db069c0e230574d15a3088f147a87b64c7589eb662c9ac"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -4464,7 +4538,7 @@ dependencies = [
 name = "readyset-adapter"
 version = "0.1.0"
 dependencies = [
- "ahash",
+ "ahash 0.8.11",
  "anyhow",
  "async-trait",
  "bincode",
@@ -4563,7 +4637,7 @@ dependencies = [
 name = "readyset-client"
 version = "0.7.0"
 dependencies = [
- "ahash",
+ "ahash 0.8.11",
  "anyhow",
  "array2",
  "async-bincode",
@@ -4792,7 +4866,7 @@ dependencies = [
 name = "readyset-dataflow"
 version = "0.7.0"
 dependencies = [
- "ahash",
+ "ahash 0.8.11",
  "anyhow",
  "async-bincode",
  "backoff",
@@ -5277,7 +5351,7 @@ dependencies = [
  "eui48",
  "fail",
  "futures",
- "postgres 0.19.7 (git+https://github.com/readysettech/rust-postgres.git)",
+ "postgres",
  "pprof",
  "proptest",
  "rand",
@@ -5386,6 +5460,15 @@ name = "regex-syntax"
 version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b15c43186be67a4fd63bee50d0303afffcef381492ebe2c5d87f324e1b8815c"
+
+[[package]]
+name = "rend"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "71fe3824f5629716b1589be05dacd749f6aa084c87e00e016714a8cdfccc997c"
+dependencies = [
+ "bytecheck",
+]
 
 [[package]]
 name = "replication-offset"
@@ -5531,6 +5614,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "rkyv"
+version = "0.7.45"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9008cd6385b9e161d8229e1f6549dd23c3d022f132a2ea37ac3a10ac4935779b"
+dependencies = [
+ "bitvec",
+ "bytecheck",
+ "bytes",
+ "hashbrown 0.12.3",
+ "ptr_meta",
+ "rend",
+ "rkyv_derive",
+ "seahash",
+ "tinyvec",
+ "uuid 1.11.0",
+]
+
+[[package]]
+name = "rkyv_derive"
+version = "0.7.45"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "503d1d27590a2b0a3a4ca4c94755aa2875657196ecbf401a42eff41d7de532c0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "rlimit"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5573,17 +5685,19 @@ dependencies = [
 
 [[package]]
 name = "rust_decimal"
-version = "1.26.1"
+version = "1.36.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ee9164faf726e4f3ece4978b25ca877ddc6802fa77f38cdccb32c7f805ecd70c"
+checksum = "b082d80e3e3cc52b2ed634388d436fe1f4de6af5786cc2de9ba9737527bdf555"
 dependencies = [
  "arrayvec",
- "byteorder",
+ "borsh",
  "bytes",
  "num-traits",
- "postgres 0.19.7 (registry+https://github.com/rust-lang/crates.io-index)",
+ "postgres-types",
+ "rand",
+ "rkyv",
  "serde",
- "tokio-postgres",
+ "serde_json",
 ]
 
 [[package]]
@@ -5813,6 +5927,12 @@ name = "sdd"
 version = "3.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "49c1eeaf4b6a87c7479688c6d52b9f1153cedd3c489300564f932b065c6eab95"
+
+[[package]]
+name = "seahash"
+version = "4.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1c107b6f4780854c8b126e228ea8869f4d7b71260f962fefb57b996b8959ba6b"
 
 [[package]]
 name = "security-framework"
@@ -6061,6 +6181,12 @@ checksum = "a9e9e0b4211b72e7b8b6e85c807d36c212bdb33ea8587f7569562a84df5465b1"
 dependencies = [
  "libc",
 ]
+
+[[package]]
+name = "simdutf8"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
 
 [[package]]
 name = "siphasher"
@@ -6703,8 +6829,8 @@ dependencies = [
 
 [[package]]
 name = "tokio-postgres"
-version = "0.7.10"
-source = "git+https://github.com/readysettech/rust-postgres.git#0662ea1156c031dfac5f97cf7d5d2d2bcc249666"
+version = "0.7.12"
+source = "git+https://github.com/readysettech/rust-postgres.git?tag=readyset-20241114#34bf0f569a5a004097e926e6c630510ac3f4beb7"
 dependencies = [
  "async-trait",
  "byteorder",
