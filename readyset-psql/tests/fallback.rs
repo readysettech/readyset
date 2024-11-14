@@ -11,6 +11,8 @@ use readyset_client_test_helpers::{sleep, Adapter, TestBuilder};
 use readyset_data::DfValue;
 use readyset_server::Handle;
 use readyset_util::eventually;
+#[cfg(feature = "failure_injection")]
+use readyset_util::failpoints;
 use readyset_util::shutdown::ShutdownSender;
 use serial_test::serial;
 use test_utils::slow;
@@ -321,7 +323,7 @@ async fn schema_resolution_with_unreplicated_tables() {
     sleep().await;
 
     handle
-        .set_failpoint("parse-sql-type", "2*return(fail)")
+        .set_failpoint(failpoints::PARSE_SQL_TYPE, "2*return(fail)")
         .await;
 
     // s1 and the insert into it will fail to parse, so it will only exist upstream
@@ -1189,7 +1191,7 @@ async fn replication_failure_retries_if_failed_to_drop(failpoint: &str) {
     // Inject an error in handling the previous error
     handle
         .set_failpoint(
-            "ignore-table-fail-dropping-table",
+            failpoints::IGNORE_TABLE_FAIL_DROPPING_TABLE,
             &format!(
                 "1*return({})",
                 serde_json::ser::to_string(&err_to_inject).expect("failed to serialize error")

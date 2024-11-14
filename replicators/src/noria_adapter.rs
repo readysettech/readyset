@@ -1253,7 +1253,7 @@ impl NoriaAdapter {
         // there is an action we can't handle--but we cannot stop replicating without
         // successfully removing the table from readyset--that would lead to permanently
         // stale results.
-        set_failpoint_return_err!("ignore-table-fail-dropping-table");
+        set_failpoint_return_err!(failpoints::IGNORE_TABLE_FAIL_DROPPING_TABLE);
         self.remove_table_from_readyset(table.clone()).await.map_err(|error| {
             error!(%error, "failed to remove ignored table from readyset, will need to resnapshot it to continue");
             ReadySetError::ResnapshotNeeded

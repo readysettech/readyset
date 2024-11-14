@@ -35,3 +35,19 @@ pub const START_INNER_POSTGRES: &str = "start-inner-postgres";
 pub const LOAD_CONTROLLER_STATE: &str = "load-controller-state";
 /// Injects a failpoint at the beginning of DfState::extend_recipe
 pub const EXTEND_RECIPE: &str = "extend-recipe";
+/// A failpoint at the beginning of the controller's request handling
+pub const CONTROLLER_REQUEST: &str = "controller-request";
+/// A failpoint at the beginning of the domain's packet handling
+pub const HANDLE_PACKET: &str = "handle-packet";
+/// A failpoint at the beginning of the reader's packet handling
+pub const READER_HANDLE_PACKET: &str = "reader-handle-packet";
+/// A failpoint at the beginning of starting the controller
+pub const START_CONTROLLER: &str = "start-controller";
+/// A failpoint at the beginning of starting the worker
+pub const START_WORKER: &str = "start-worker";
+/// A failpoint at the beginning of the adapter's out-of-band migration handling
+pub const ADAPTER_OUT_OF_BAND: &str = "adapter-out-of-band";
+/// A failpoint at the beginning of nom-sql's type identifier parsing
+pub const PARSE_SQL_TYPE: &str = "parse-sql-type";
+/// A failpoint just before dropping tables due to replication errors
+pub const IGNORE_TABLE_FAIL_DROPPING_TABLE: &str = "ignore-table-fail-dropping-table";

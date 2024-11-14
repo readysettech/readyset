@@ -1,7 +1,7 @@
 use database_utils::{QueryableConnection, SimpleQueryResults};
 use readyset_client_metrics::QueryDestination;
 use readyset_data::DfValue;
-use readyset_util::eventually;
+use readyset_util::{eventually, failpoints};
 use serial_test::serial;
 
 use crate::*;
@@ -350,7 +350,7 @@ async fn reader_domain_panic_handling() {
     deployment
         .adapter_handle(0)
         .unwrap()
-        .set_failpoint("handle-packet", "1*panic->off")
+        .set_failpoint(failpoints::HANDLE_PACKET, "1*panic->off")
         .await;
 
     adapter
@@ -386,7 +386,7 @@ async fn reader_domain_panic_handling() {
     deployment
         .adapter_handle(0)
         .unwrap()
-        .set_failpoint("handle-packet", "1*panic->off")
+        .set_failpoint(failpoints::HANDLE_PACKET, "1*panic->off")
         .await;
 
     adapter
@@ -465,7 +465,7 @@ async fn base_domain_panic_handling() {
     let controller_uri = deployment.handle.controller_uri().await.unwrap();
     let server_handle = deployment.server_handle(&controller_uri).unwrap();
     server_handle
-        .set_failpoint("handle-packet", "1*panic->off")
+        .set_failpoint(failpoints::HANDLE_PACKET, "1*panic->off")
         .await;
 
     adapter

@@ -60,6 +60,8 @@ use readyset_alloc_metrics::report_allocator_metrics;
 use readyset_client::consensus::{Authority, WorkerSchedulingConfig};
 use readyset_client::{ControllerDescriptor, WorkerDescriptor};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
+#[cfg(feature = "failure_injection")]
+use readyset_util::failpoints;
 use readyset_util::futures::abort_on_panic;
 use readyset_util::shutdown::{self, ShutdownReceiver, ShutdownSender};
 use tokio::net::TcpListener;
@@ -120,7 +122,7 @@ fn start_worker(
     memory_check_frequency: Option<Duration>,
     shutdown_rx: ShutdownReceiver,
 ) -> Result<(), anyhow::Error> {
-    set_failpoint!("start-worker");
+    set_failpoint!(failpoints::START_WORKER);
     let worker = Worker::new(
         worker_rx,
         listen_addr,
@@ -150,7 +152,7 @@ fn start_controller(
     telemetry_sender: TelemetrySender,
     shutdown_rx: ShutdownReceiver,
 ) -> Result<ControllerDescriptor, anyhow::Error> {
-    set_failpoint!("start-controller");
+    set_failpoint!(failpoints::START_CONTROLLER);
     let our_descriptor = ControllerDescriptor {
         controller_uri: http_uri.clone(),
         nonce: rand::random(),
