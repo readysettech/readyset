@@ -49,7 +49,11 @@ impl Failpoint {
         let client = Client::new();
         let res = client.request(r).await.unwrap();
         let status = res.status();
-        assert!(status == hyper::StatusCode::OK);
+        assert!(
+            status == hyper::StatusCode::OK,
+            "status was: {} (don't forget to compile Readyset with --features failure_injection)",
+            status
+        );
         Ok(())
     }
 }
