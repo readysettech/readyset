@@ -1749,6 +1749,7 @@ impl PortAllocator {
 // responsible for cleaning up its own external state.
 #[cfg(test)]
 mod tests {
+    use readyset_util::failpoints;
     use serial_test::serial;
 
     use super::*;
@@ -1841,7 +1842,7 @@ mod tests {
         let controller_uri = deployment.handle.controller_uri().await.unwrap();
         let server_handle = deployment.server_handle(&controller_uri).unwrap();
         server_handle
-            .set_failpoint("controller-request", "panic")
+            .set_failpoint(failpoints::CONTROLLER_REQUEST, "panic")
             .await;
 
         // Request times out because the server panics.

@@ -4,7 +4,7 @@ use std::mem;
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::parse::Parser;
-use syn::{parse_macro_input, ItemFn, LitStr, Stmt};
+use syn::{parse_macro_input, ItemFn, Stmt};
 
 /// Introduces a failpoint at the beginning of the function this attribute macro
 /// is applied to. This failpoint can use all failpoint actions except `return`.
@@ -34,15 +34,14 @@ use syn::{parse_macro_input, ItemFn, LitStr, Stmt};
 #[proc_macro_attribute]
 pub fn failpoint(attr: TokenStream, input: TokenStream) -> TokenStream {
     let mut input_fn = parse_macro_input!(input as ItemFn);
-    let failpoint_name = parse_macro_input!(attr as LitStr);
 
     // Get the set of statements for the feature and macro invocation.
     let new_stmts_str = format!(
         r#"
         #[cfg(feature = "failure_injection")]
-        fail::fail_point!("{}");
+        fail::fail_point!({});
         "#,
-        failpoint_name.value()
+        attr
     );
 
     let new_stmts: Vec<Stmt> = syn::Block::parse_within.parse_str(&new_stmts_str).unwrap();

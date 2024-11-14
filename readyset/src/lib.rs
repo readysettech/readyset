@@ -922,7 +922,7 @@ where
         ));
 
         if let MigrationMode::OutOfBand = migration_mode {
-            set_failpoint!("adapter-out-of-band");
+            set_failpoint!(failpoints::ADAPTER_OUT_OF_BAND);
             let rh = rh.clone();
             let auto_increments = auto_increments.clone();
             let view_name_cache = view_name_cache.clone();

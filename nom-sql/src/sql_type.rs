@@ -17,6 +17,8 @@ use proptest::arbitrary::Arbitrary;
 use proptest::prelude::any_with;
 use proptest::sample::SizeRange;
 use proptest::strategy::{BoxedStrategy, Strategy};
+#[cfg(feature = "failure_injection")]
+use readyset_util::failpoints;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use triomphe::ThinArc;
@@ -992,7 +994,7 @@ pub fn type_identifier(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlType> {
     move |i| {
-        set_failpoint!("parse-sql-type", |_| fail(i));
+        set_failpoint!(failpoints::PARSE_SQL_TYPE, |_| fail(i));
         // need to pull a bit of a trick here to properly recursive-descent arrays since they're a
         // suffix. First, we parse the type, then we parse any number of `[]` or `[<n>]` suffixes,
         // and use those to construct the multiple levels of `SqlType::Array`

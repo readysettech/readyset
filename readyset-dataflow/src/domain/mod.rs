@@ -34,6 +34,8 @@ use readyset_client::metrics::recorded;
 use readyset_client::{KeyComparison, PersistencePoint, ReaderAddress};
 use readyset_data::DfType;
 use readyset_errors::{internal, internal_err, ReadySetError, ReadySetResult};
+#[cfg(feature = "failure_injection")]
+use readyset_util::failpoints;
 use readyset_util::futures::abort_on_panic;
 use readyset_util::progress::report_progress_with;
 use readyset_util::ranges::RangeBounds;
@@ -4570,7 +4572,7 @@ impl Domain {
     }
 
     /// Handle a single message for this domain
-    #[failpoint("handle-packet")]
+    #[failpoint(failpoints::HANDLE_PACKET)]
     pub fn handle_packet(
         &mut self,
         packet: Packet,

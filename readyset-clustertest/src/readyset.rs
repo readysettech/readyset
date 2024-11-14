@@ -589,15 +589,18 @@ async fn assert_server_failpoint_pause_resume(deployment_name: &str, failpoint: 
 
 #[clustertest]
 async fn server_reports_unhealthy_worker_down() {
-    assert_server_failpoint_pause_resume("ct_server_reports_unhealthy_worker_down", "start-worker")
-        .await
+    assert_server_failpoint_pause_resume(
+        "ct_server_reports_unhealthy_worker_down",
+        failpoints::START_WORKER,
+    )
+    .await
 }
 
 #[clustertest]
 async fn server_reports_unhealthy_controller_down() {
     assert_server_failpoint_pause_resume(
         "ct_server_reports_unhealthy_controller_down",
-        "start-controller",
+        failpoints::START_CONTROLLER,
     )
     .await
 }

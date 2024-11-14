@@ -5,7 +5,7 @@ use database_utils::QueryableConnection;
 use mysql_async::prelude::Queryable;
 use readyset_adapter::backend::QueryInfo;
 use readyset_client_metrics::QueryDestination;
-use readyset_util::eventually;
+use readyset_util::{eventually, failpoints};
 use serial_test::serial;
 use test_utils::slow;
 use tokio::time::{sleep, timeout};
@@ -205,7 +205,7 @@ async fn failure_during_query() {
 
     // Whoever services the read query is going to panic.
     for s in deployment.server_handles().values_mut() {
-        s.set_failpoint("read-query", "panic").await;
+        s.set_failpoint(failpoints::READ_QUERY, "panic").await;
     }
 
     // Should return the correct results from fallback.
@@ -967,7 +967,7 @@ async fn upquery_to_failed_reader_domain() {
 
     // The upquery will fail on the reader that handles it.
     for s in deployment.server_handles().values_mut() {
-        s.set_failpoint("handle-packet", "panic").await;
+        s.set_failpoint(failpoints::HANDLE_PACKET, "panic").await;
     }
 
     // Should return the correct results from fallback.
@@ -1016,7 +1016,7 @@ async fn upquery_through_failed_domain() {
 
     // The upquery will fail on the second domain that handles it.
     for s in deployment.server_handles().values_mut() {
-        s.set_failpoint("handle-packet", "1*off->1*panic->off")
+        s.set_failpoint(failpoints::HANDLE_PACKET, "1*off->1*panic->off")
             .await;
     }
 
@@ -1077,7 +1077,8 @@ async fn update_propagation_through_failed_domain() {
 
     // Fail the reader node when it receives the update.
     for s in deployment.server_handles().values_mut() {
-        s.set_failpoint("reader-handle-packet", "panic").await;
+        s.set_failpoint(failpoints::READER_HANDLE_PACKET, "panic")
+            .await;
     }
 
     upstream
@@ -1092,7 +1093,8 @@ async fn update_propagation_through_failed_domain() {
 
     // Turn off the panic so we don't fail on subsequent updates.
     for s in deployment.server_handles().values_mut() {
-        s.set_failpoint("reader-handle-packet", "off").await;
+        s.set_failpoint(failpoints::READER_HANDLE_PACKET, "off")
+            .await;
     }
 
     upstream

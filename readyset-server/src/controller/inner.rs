@@ -30,6 +30,8 @@ use readyset_client::status::{ReadySetControllerStatus, SnapshotStatus};
 use readyset_client::{GraphvizOptions, ViewCreateRequest, WorkerDescriptor};
 use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
 use readyset_telemetry_reporter::TelemetrySender;
+#[cfg(feature = "failure_injection")]
+use readyset_util::failpoints;
 use readyset_util::futures::abort_on_panic;
 use readyset_util::shutdown::ShutdownReceiver;
 use readyset_util::time_scope;
@@ -247,7 +249,7 @@ impl Leader {
         });
     }
 
-    #[failpoint("controller-request")]
+    #[failpoint(failpoints::CONTROLLER_REQUEST)]
     #[allow(clippy::let_unit_value)]
     pub(super) async fn external_request(
         &self,

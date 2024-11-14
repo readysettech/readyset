@@ -5,6 +5,8 @@ use failpoint_macros::failpoint;
 use metrics::histogram;
 use readyset_client::metrics::recorded;
 use readyset_client::{KeyColumnIdx, ViewPlaceholder};
+#[cfg(feature = "failure_injection")]
+use readyset_util::failpoints;
 use serde::{Deserialize, Serialize};
 use tracing::{trace, warn};
 
@@ -115,7 +117,7 @@ impl Reader {
         self.placeholder_map.as_ref()
     }
 
-    #[failpoint("reader-handle-packet")]
+    #[failpoint(failpoints::READER_HANDLE_PACKET)]
     pub(in crate::node) fn process(
         &mut self,
         m: &mut Option<Packet>,
