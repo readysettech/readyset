@@ -58,8 +58,6 @@ mod state;
 
 /// Time between leader state change checks without thread parking.
 const LEADER_STATE_CHECK_INTERVAL: Duration = Duration::from_secs(1);
-/// Amount of time to wait for watches on the authority.
-const WATCH_DURATION: Duration = Duration::from_secs(5);
 
 /// A set of placement restrictions applied to a domain
 /// that a dataflow node is in. Each base table node can have
@@ -965,10 +963,6 @@ impl AuthorityLeaderElectionState {
         self.is_leader
     }
 
-    async fn watch_leader(&self) -> ReadySetResult<()> {
-        self.authority.watch_leader().await
-    }
-
     async fn update_leader_state(&mut self) -> ReadySetResult<()> {
         let mut should_attempt_leader_election = false;
         match self.authority.try_get_leader().await? {
@@ -1128,10 +1122,6 @@ impl AuthorityWorkerState {
         self.active_workers.clear();
     }
 
-    async fn watch_workers(&self) -> ReadySetResult<()> {
-        self.authority.watch_workers().await
-    }
-
     async fn update_worker_state(&mut self) -> anyhow::Result<()> {
         // Retrieve the worker ids of current workers.
         let workers = self.authority.get_workers().await?;
@@ -1248,23 +1238,7 @@ async fn authority_inner(
                 .context("Updating worker state")?;
         }
 
-        if authority.can_watch() {
-            select! {
-                watch_result = leader_election_state.watch_leader() => {
-                    if let Err(e) = watch_result {
-                        warn!(error = %e, "failure creating worker watch");
-                    }
-                },
-                watch_result = worker_state.watch_workers() => {
-                    if let Err(e) = watch_result {
-                        warn!(error = %e, "failure creating worker watch");
-                    }
-                },
-                () = tokio::time::sleep(WATCH_DURATION) => {}
-            };
-        } else {
-            tokio::time::sleep(LEADER_STATE_CHECK_INTERVAL).await;
-        }
+        tokio::time::sleep(LEADER_STATE_CHECK_INTERVAL).await;
     }
 }
 

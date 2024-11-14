@@ -159,18 +159,6 @@ pub trait AuthorityControl: Send + Sync {
     /// Non-blocking call to retrieve a change in the authorities leader state.
     async fn try_get_leader(&self) -> ReadySetResult<GetLeaderResult>;
 
-    /// Whether the authority can place a watch that can unpark the thread when
-    /// there is a change in authority state.
-    fn can_watch(&self) -> bool;
-
-    /// Waits for a change in the leader, and returns on a change. This should only
-    /// be called if `can_watch` returns True.
-    async fn watch_leader(&self) -> ReadySetResult<()>;
-
-    /// Waits for a change in the workers, and returns on a change. This should only
-    /// be called if `can_watch` returns True.
-    async fn watch_workers(&self) -> ReadySetResult<()>;
-
     /// Do a non-blocking read at the indicated key.
     async fn try_read<P>(&self, path: &str) -> ReadySetResult<Option<P>>
     where

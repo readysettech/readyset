@@ -745,18 +745,6 @@ impl AuthorityControl for ConsulAuthority {
         }
     }
 
-    fn can_watch(&self) -> bool {
-        false
-    }
-
-    async fn watch_leader(&self) -> ReadySetResult<()> {
-        Ok(())
-    }
-
-    async fn watch_workers(&self) -> ReadySetResult<()> {
-        Ok(())
-    }
-
     async fn try_read<P: DeserializeOwned>(&self, path: &str) -> ReadySetResult<Option<P>> {
         Ok(
             match kv::read(&self.consul, &self.prefix_with_deployment(path), None).await {

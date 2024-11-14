@@ -278,18 +278,6 @@ impl AuthorityControl for LocalAuthority {
         }
     }
 
-    fn can_watch(&self) -> bool {
-        false
-    }
-
-    async fn watch_leader(&self) -> ReadySetResult<()> {
-        unreachable!("LocalAuthority does not support `watch_leader`.");
-    }
-
-    async fn watch_workers(&self) -> ReadySetResult<()> {
-        unreachable!("LocalAuthority does not support `watch_workers`.");
-    }
-
     async fn try_read<P>(&self, path: &str) -> ReadySetResult<Option<P>>
     where
         P: DeserializeOwned,

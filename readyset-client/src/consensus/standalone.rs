@@ -22,7 +22,7 @@ use failpoint_macros::set_failpoint;
 use parking_lot::{Mutex, RwLock};
 #[cfg(feature = "failure_injection")]
 use readyset_errors::ReadySetError;
-use readyset_errors::{internal, internal_err, set_failpoint_return_err, ReadySetResult};
+use readyset_errors::{internal_err, set_failpoint_return_err, ReadySetResult};
 use rocksdb::{WriteBatchWithTransaction, DB};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -152,18 +152,6 @@ impl AuthorityControl for StandaloneAuthority {
             }
             None => Ok(GetLeaderResult::NoLeader),
         }
-    }
-
-    fn can_watch(&self) -> bool {
-        false
-    }
-
-    async fn watch_leader(&self) -> ReadySetResult<()> {
-        internal!("StandaloneAuthority does not support `watch_leader`.");
-    }
-
-    async fn watch_workers(&self) -> ReadySetResult<()> {
-        internal!("StandaloneAuthority does not support `watch_workers`.");
     }
 
     /// Do a non-blocking read at the indicated key.
