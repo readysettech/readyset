@@ -97,7 +97,8 @@ use nom_sql::{DialectDisplay, SqlQuery};
 use rand::Rng;
 use rand_distr::{Uniform, WeightedAliasIndex};
 use readyset_data::DfValue;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
+use serde_with::DeserializeAs;
 use tracing::info;
 use zipf::ZipfDistribution;
 
@@ -164,10 +165,19 @@ pub enum WorkloadDistributionKind {
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WorkloadParam {
+    #[serde(deserialize_with = "serde_with::DisplayFromStr::deserialize_as")]
+    #[serde(serialize_with = "serialize_sql_type")]
     pub sql_type: nom_sql::SqlType,
     pub distribution: String,
     #[serde(default)]
     pub col: usize,
+}
+
+fn serialize_sql_type<S: Serializer>(
+    sql_type: &nom_sql::SqlType,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(&sql_type.display(nom_sql::Dialect::MySQL).to_string())
 }
 
 impl WorkloadSpec {
