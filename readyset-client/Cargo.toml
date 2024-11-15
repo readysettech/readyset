@@ -45,7 +45,6 @@ mysql_common = { workspace = true, features = ["chrono"] }
 vec1 = { workspace = true, features = ["serde"] }
 proptest = { workspace = true }
 derive_more = { workspace = true }
-backoff = { workspace = true, features = ["tokio"] }
 url = { workspace = true, features = ["serde"] }
 mysql_async = { workspace = true }
 rand = { workspace = true }

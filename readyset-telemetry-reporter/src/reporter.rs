@@ -11,10 +11,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use backoff::ExponentialBackoffBuilder;
 use base64::Engine;
 use blake2::digest::{Update, VariableOutput};
 use blake2::Blake2bVar;
+use exponential_backoff::Backoff;
 use lazy_static::lazy_static;
 use readyset_util::shutdown::ShutdownReceiver;
 use readyset_version::COMMIT_ID;
@@ -28,6 +28,12 @@ use uuid::Uuid;
 
 use crate::error::{ReporterError as Error, ReporterResult as Result};
 use crate::telemetry::*;
+
+/// Minimum wait time for retrying telemetry send
+const MIN_TIMEOUT: Duration = Duration::from_millis(500);
+
+/// Maximum wait time for retrying telemetry send
+const MAX_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Maximum time to retry sending telemetry payloads before giving up
 const TIMEOUT: Duration = Duration::from_secs(2);
@@ -189,25 +195,28 @@ impl TelemetryReporter {
 
     async fn send_event(&self, event: TelemetryEvent, payload: &Telemetry) {
         tracing::debug!(?event, ?payload, "sending event");
-        let backoff = ExponentialBackoffBuilder::new()
-            .with_max_elapsed_time(Some(TIMEOUT))
-            .build();
-        let res = tokio::time::timeout(
-            TIMEOUT,
-            backoff::future::retry(backoff, move || async move {
-                self.send_event_with_payload_inner(event, payload)
-                    .await
-                    .map_err(|e| match e {
-                        Error::Reqwest(_) | Error::Server(_) => e.into(),
-                        e @ (Error::InvalidAPIKeyHeader(_)
-                        | Error::Unauthorized
-                        | Error::HTTPError { .. }
-                        | Error::Timeout(_)
-                        | Error::Client(_)
-                        | Error::Json(_)) => backoff::Error::Permanent(e),
-                    })
-            }),
-        )
+        let mut backoff = Backoff::new(u32::MAX, MIN_TIMEOUT, Some(MAX_TIMEOUT)).into_iter();
+        let res = tokio::time::timeout(TIMEOUT, async move {
+            loop {
+                let res = self.send_event_with_payload_inner(event, payload).await;
+                if matches!(
+                    res,
+                    Ok(_)
+                        | Err(Error::InvalidAPIKeyHeader(_)
+                            | Error::Unauthorized
+                            | Error::HTTPError { .. }
+                            | Error::Timeout(_)
+                            | Error::Client(_)
+                            | Error::Json(_))
+                ) {
+                    break res;
+                }
+                let Some(Some(wait)) = backoff.next() else {
+                    break res;
+                };
+                tokio::time::sleep(wait).await;
+            }
+        })
         .await;
 
         if res.is_err() {

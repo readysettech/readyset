@@ -13,11 +13,11 @@ use std::time::Duration;
 use std::{cell, cmp, mem, process, time};
 
 use ahash::RandomState;
-use backoff::ExponentialBackoffBuilder;
 use dataflow_state::{
     BaseTableState, EvictBytesResult, EvictKeysResult, EvictRandomResult, MaterializedNodeState,
     PersistenceType, PointKey, RangeKey, RangeLookupResult,
 };
+use exponential_backoff::Backoff;
 use failpoint_macros::{failpoint, set_failpoint};
 use futures_util::future::FutureExt;
 use futures_util::stream::StreamExt;
@@ -746,10 +746,11 @@ async fn initialize_state(
     let reported_once = Arc::new(AtomicBool::new(false));
     let mut s = MaterializedNodeState::Persistent(
         report_progress_with(
-            ExponentialBackoffBuilder::new()
-                .with_initial_interval(Duration::from_secs(15))
-                .with_multiplier(2.0)
-                .build(),
+            Backoff::new(
+                u32::MAX,
+                Duration::from_secs(10),
+                Some(Duration::from_secs(300)),
+            ),
             {
                 let base_name = base_name.clone();
                 let reported_once = Arc::clone(&reported_once);

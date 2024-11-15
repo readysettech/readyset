@@ -88,7 +88,6 @@ async-bincode = "0.7.2"
 async-stream = "0.3.5"
 async-trait = "0.1"
 atomic-counter = "1.0.1"
-backoff = "0.4.0"
 backtrace = "0.3.65"
 base64 = { version = "0.22.1", default-features = false, features = ["std"] }
 bimap = "0.6.3"
@@ -119,6 +118,7 @@ enum-kinds = "0.5.1"
 enum_dispatch = "0.3.13"
 envy = "0.4"
 eui48 = { version = "1.1.0", default-features = false }
+exponential-backoff = "2.0.0"
 fail = "0.5.1"
 fallible-iterator = "0.2.0"
 fixedbitset = { version = "0.4.2", default-features = false }

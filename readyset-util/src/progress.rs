@@ -1,8 +1,7 @@
 //! Utilities for reporting progress of asynchronous tasks
 
-use backoff::backoff::Backoff;
-use futures::future::pending;
-use futures::{select_biased, Future, FutureExt};
+use exponential_backoff::Backoff;
+use futures::{Future, FutureExt};
 use tokio::time::sleep;
 
 /// While `task` is running, periodically calls `report_progress` with delays according to
@@ -16,57 +15,44 @@ use tokio::time::sleep;
 /// # use std::time::Duration;
 /// # use tokio::time::sleep;
 /// # use tracing::info;
-/// # use backoff::ExponentialBackoff;
+/// # use exponential_backoff::Backoff;
 /// async fn do_some_expensive_thing() {
 ///     let expensive_task = sleep(Duration::from_secs(5 * 60));
 ///     tokio::pin!(expensive_task);
 ///
 ///     report_progress_with(
-///         ExponentialBackoff::default(),
+///         Backoff::new(
+///             u32::MAX,
+///             Duration::from_secs(10),
+///             Some(Duration::from_secs(300)),
+///         ),
 ///         || async { info!("still working...") },
 ///         expensive_task,
 ///     )
 ///     .await;
 /// }
 /// ```
-pub async fn report_progress_with<B, F, Progress, T, R>(
-    mut backoff: B,
-    report_progress: F,
-    task: T,
-) -> R
+pub async fn report_progress_with<F, Progress, T, R>(backoff: Backoff, report: F, task: T) -> R
 where
-    B: Backoff + Send + 'static,
     F: Fn() -> Progress + Send + Sync + 'static,
     Progress: Future + Send + 'static,
     T: Future<Output = R> + Unpin,
 {
-    let mut task = task.fuse();
+    let mut backoff = backoff.into_iter();
+    let task = task.fuse();
 
-    let progress_reporter = tokio::spawn(async move {
-        if let Some(dur) = backoff.next_backoff() {
-            sleep(dur).await;
-            let _ = backoff::future::retry::<(), _, _, _, _>(backoff, || async {
-                report_progress().await;
-                Err(backoff::Error::Transient {
-                    err: (),
-                    retry_after: None,
-                })
-            })
-            .await;
+    let progress = tokio::spawn(async move {
+        loop {
+            let Some(Some(wait)) = backoff.next() else {
+                break;
+            };
+            sleep(wait).await;
+            report().await;
         }
-        pending::<()>().await; // If we get here we never want to exit, since we still want `task`
-                               // to finish
     });
-    let abort_progress_reporter = progress_reporter.abort_handle();
 
-    select_biased!(
-        res = task => {
-            abort_progress_reporter.abort();
-            res
-        },
-        progress_res = progress_reporter.fuse() => {
-            progress_res.unwrap();
-            panic!("Progress reporter task should never exit")
-        }
-    )
+    let aborter = progress.abort_handle();
+    let res = task.await;
+    aborter.abort();
+    res
 }

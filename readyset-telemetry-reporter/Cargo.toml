@@ -6,9 +6,9 @@ publish = false
 
 [dependencies]
 async-trait = { workspace = true }
-backoff = { workspace = true, features = ["tokio"] }
 base64 = { workspace = true }
 derive_builder = { workspace = true }
+exponential-backoff = { workspace = true }
 hex = { workspace = true }
 lazy_static = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
@@ -18,7 +18,7 @@ serde_with_macros = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tracing = { workspace = true, features = ["release_max_level_debug"] }
-readyset-tracing = { path = "../readyset-tracing", optional = true }
+readyset-tracing = { path = "../readyset-tracing" }
 readyset-util = { path = "../readyset-util" }
 uuid = { workspace = true, features = ["v4"] }
 machine-uid = { workspace = true }
@@ -30,4 +30,4 @@ readyset-version = { path = "../readyset-version" }
 tokio = { workspace = true, features = ["full", "test-util"] }
 
 [features]
-test-util = ["readyset-tracing"]
+test-util = []

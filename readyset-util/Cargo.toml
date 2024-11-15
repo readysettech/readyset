@@ -7,7 +7,7 @@ edition = "2021"
 description = "Extensions to the Rust standard library"
 
 [dependencies]
-backoff = { workspace = true, features = ["tokio"] }
+exponential-backoff = { workspace = true }
 bytes = { workspace = true }
 proptest = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
