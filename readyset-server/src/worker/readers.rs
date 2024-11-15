@@ -19,8 +19,6 @@ use futures::pin_mut;
 use futures_util::future::TryFutureExt;
 use pin_project::pin_project;
 use readyset_client::consistency::Timestamp;
-#[cfg(feature = "failure_injection")]
-use readyset_client::failpoints;
 use readyset_client::metrics::recorded;
 use readyset_client::results::ResultIterator;
 use readyset_client::{
@@ -28,6 +26,8 @@ use readyset_client::{
     ViewQuery,
 };
 use readyset_errors::internal_err;
+#[cfg(feature = "failure_injection")]
+use readyset_util::failpoints;
 use readyset_util::shutdown::ShutdownReceiver;
 use serde::ser::Serializer;
 use serde::Serialize;

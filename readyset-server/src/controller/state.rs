@@ -41,8 +41,6 @@ use readyset_client::builders::{
 use readyset_client::consensus::{Authority, AuthorityControl};
 use readyset_client::debug::info::{GraphInfo, MaterializationInfo, NodeSize};
 use readyset_client::debug::stats::{DomainStats, GraphStats, NodeStats};
-#[cfg(feature = "failure_injection")]
-use readyset_client::failpoints;
 use readyset_client::internal::{MaterializationStatus, ReplicaAddress};
 use readyset_client::metrics::recorded;
 use readyset_client::recipe::changelist::{Change, ChangeList};
@@ -55,6 +53,8 @@ use readyset_data::{DfValue, Dialect};
 use readyset_errors::{
     internal, internal_err, invariant_eq, NodeType, ReadySetError, ReadySetResult,
 };
+#[cfg(feature = "failure_injection")]
+use readyset_util::failpoints;
 use replication_offset::{ReplicationOffset, ReplicationOffsets};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};

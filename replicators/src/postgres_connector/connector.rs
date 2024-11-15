@@ -9,12 +9,12 @@ use nom_sql::Relation;
 use pgsql::SimpleQueryMessage;
 use postgres_native_tls::MakeTlsConnector;
 use postgres_protocol::escape::escape_literal;
-#[cfg(feature = "failure_injection")]
-use readyset_client::failpoints;
 use readyset_client::{PersistencePoint, ReadySetHandle, TableOperation};
 use readyset_errors::{
     invariant, invariant_eq, set_failpoint_return_err, ReadySetError, ReadySetResult,
 };
+#[cfg(feature = "failure_injection")]
+use readyset_util::failpoints;
 use readyset_util::select;
 use replication_offset::postgres::{CommitLsn, Lsn, PostgresPosition};
 use replication_offset::ReplicationOffset;

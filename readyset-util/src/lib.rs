@@ -5,6 +5,9 @@ use std::borrow::Borrow;
 use std::collections::{BTreeMap, HashMap};
 use std::hash::Hash;
 
+#[cfg(feature = "failure_injection")]
+pub mod failpoints;
+
 pub mod arbitrary;
 pub mod display;
 pub mod fmt;

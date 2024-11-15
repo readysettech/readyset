@@ -63,4 +63,4 @@ harness = false
 [features]
 # Redact the display of strings marked sensitive from logs and error messages
 redact_sensitive = ["readyset-util/redact_sensitive"]
-failure_injection = ["fail/failpoints", "readyset-client/failure_injection", "readyset-server/failure_injection"]
+failure_injection = ["fail/failpoints", "readyset-server/failure_injection", "readyset-util/failure_injection"]

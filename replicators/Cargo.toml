@@ -63,4 +63,4 @@ reqwest = { workspace = true }
 
 [features]
 ddl_vertical_tests = []
-failure_injection = ["fail/failpoints", "nom-sql/failure_injection", "readyset-client/failure_injection"]
+failure_injection = ["fail/failpoints", "nom-sql/failure_injection", "readyset-util/failure_injection"]

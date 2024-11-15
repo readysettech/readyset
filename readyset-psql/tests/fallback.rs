@@ -1040,7 +1040,7 @@ async fn assert_table_ignored(client: &Client) {
 #[serial]
 #[slow]
 async fn handle_action_replication_failure_ignores_table() {
-    replication_failure_ignores_table(readyset_client::failpoints::REPLICATION_HANDLE_ACTION).await;
+    replication_failure_ignores_table(readyset_util::failpoints::REPLICATION_HANDLE_ACTION).await;
 }
 
 #[cfg(feature = "failure_injection")]
@@ -1048,10 +1048,8 @@ async fn handle_action_replication_failure_ignores_table() {
 #[serial]
 #[slow]
 async fn next_action_replication_failure_ignores_table() {
-    replication_failure_ignores_table(
-        readyset_client::failpoints::POSTGRES_REPLICATION_NEXT_ACTION,
-    )
-    .await;
+    replication_failure_ignores_table(readyset_util::failpoints::POSTGRES_REPLICATION_NEXT_ACTION)
+        .await;
 }
 
 #[cfg(feature = "failure_injection")]
@@ -1128,7 +1126,7 @@ async fn replication_failure_ignores_table(failpoint: &str) {
 #[slow]
 async fn handle_action_replication_failure_retries_if_failed_to_drop() {
     replication_failure_retries_if_failed_to_drop(
-        readyset_client::failpoints::REPLICATION_HANDLE_ACTION,
+        readyset_util::failpoints::REPLICATION_HANDLE_ACTION,
     )
     .await;
 }
@@ -1139,7 +1137,7 @@ async fn handle_action_replication_failure_retries_if_failed_to_drop() {
 #[slow]
 async fn next_action_replication_failure_retries_if_failed_to_drop() {
     replication_failure_retries_if_failed_to_drop(
-        readyset_client::failpoints::POSTGRES_REPLICATION_NEXT_ACTION,
+        readyset_util::failpoints::POSTGRES_REPLICATION_NEXT_ACTION,
     )
     .await;
 }
@@ -1534,7 +1532,7 @@ async fn pgsql_test_replication_after_resnapshot() {
     // is paused there will not be present in our initial snapshot
     handle
         .set_failpoint(
-            readyset_client::failpoints::POSTGRES_SNAPSHOT_START,
+            readyset_util::failpoints::POSTGRES_SNAPSHOT_START,
             "sleep(5000)",
         )
         .await;
@@ -1624,7 +1622,7 @@ async fn start_replication_in_middle_of_commit() {
     // Add a delay between our handling of replication actions to ensure that the transaction is
     // only partially applied to the base tables before we are able to trigger an error
     handle
-        .set_failpoint(readyset_client::failpoints::UPSTREAM, "sleep(50)")
+        .set_failpoint(readyset_util::failpoints::UPSTREAM, "sleep(50)")
         .await;
 
     // Execute a transaction with many entries. We alternate inserts between two tables to ensure
@@ -1655,7 +1653,7 @@ async fn start_replication_in_middle_of_commit() {
     // commit, which is exactly what we want to test here
     handle
         .set_failpoint(
-            readyset_client::failpoints::UPSTREAM,
+            readyset_util::failpoints::UPSTREAM,
             &format!(
                 "1*return({})",
                 serde_json::ser::to_string(&ReadySetError::ReplicationFailed("error".into()))
@@ -1772,7 +1770,7 @@ async fn pgsql_test_replication_after_resnapshot_with_catchup() {
     // is paused there will not be present in our initial snapshot
     handle
         .set_failpoint(
-            readyset_client::failpoints::POSTGRES_SNAPSHOT_START,
+            readyset_util::failpoints::POSTGRES_SNAPSHOT_START,
             "sleep(5000)",
         )
         .await;
@@ -1953,7 +1951,7 @@ async fn start_replication_invalidated_replication_slot() {
     let err_to_inject = ReadySetError::ReplicationFailed("err injected".into());
     handle
         .set_failpoint(
-            readyset_client::failpoints::POSTGRES_NEXT_WAL_EVENT,
+            readyset_util::failpoints::POSTGRES_NEXT_WAL_EVENT,
             &format!(
                 "1*return({})",
                 serde_json::ser::to_string(&err_to_inject).expect("failed to serialize error")
@@ -1966,7 +1964,7 @@ async fn start_replication_invalidated_replication_slot() {
     let err_to_inject = ReadySetError::FullResnapshotNeeded;
     handle
         .set_failpoint(
-            readyset_client::failpoints::POSTGRES_START_REPLICATION,
+            readyset_util::failpoints::POSTGRES_START_REPLICATION,
             &format!(
                 "1*return({})",
                 serde_json::ser::to_string(&err_to_inject).expect("failed to serialize error")
@@ -2038,7 +2036,7 @@ async fn recreate_replication_slot() {
     // is disabled
     handle
         .set_failpoint(
-            readyset_client::failpoints::START_INNER_POSTGRES,
+            readyset_util::failpoints::START_INNER_POSTGRES,
             &format!(
                 "return({})",
                 serde_json::ser::to_string(&ReadySetError::ReplicationFailed("error".into()))
@@ -2050,7 +2048,7 @@ async fn recreate_replication_slot() {
     // Add a failpoint to trigger a replicator restart
     handle
         .set_failpoint(
-            readyset_client::failpoints::UPSTREAM,
+            readyset_util::failpoints::UPSTREAM,
             &format!(
                 "1*return({})",
                 serde_json::ser::to_string(&ReadySetError::ReplicationFailed("error".into()))
@@ -2098,7 +2096,7 @@ async fn recreate_replication_slot() {
 
     // Start the replicator back up
     handle
-        .set_failpoint(readyset_client::failpoints::START_INNER_POSTGRES, "off")
+        .set_failpoint(readyset_util::failpoints::START_INNER_POSTGRES, "off")
         .await;
 
     eventually!(run_test: {
@@ -2228,9 +2226,9 @@ mod failure_injection_tests {
     use lazy_static::lazy_static;
     use readyset_adapter::query_status_cache::MigrationStyle;
     use readyset_client::consensus::{Authority, AuthorityControl, CacheDDLRequest};
-    use readyset_client::failpoints;
     use readyset_data::Dialect;
     use readyset_errors::ReadySetError;
+    use readyset_util::failpoints;
     use tokio_postgres::Client;
     use tracing::debug;
 
@@ -2518,7 +2516,7 @@ mod failure_injection_tests {
         // Add a failpoint to trigger a replicator restart
         handle
             .set_failpoint(
-                readyset_client::failpoints::UPSTREAM,
+                readyset_util::failpoints::UPSTREAM,
                 &format!(
                     "1*return({})",
                     serde_json::ser::to_string(&ReadySetError::ReplicationFailed("error".into()))

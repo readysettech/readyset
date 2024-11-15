@@ -5082,6 +5082,7 @@ dependencies = [
  "cidr",
  "criterion",
  "eui48",
+ "fail",
  "futures",
  "postgres 0.19.7 (git+https://github.com/readysettech/rust-postgres.git)",
  "pprof",

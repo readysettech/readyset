@@ -32,7 +32,7 @@ use super::{
     UpdateInPlace, WorkerDescriptor, WorkerId,
 };
 #[cfg(feature = "failure_injection")]
-use crate::failpoints;
+use readyset_util::failpoints;
 
 pub const CONTROLLER_KEY: &str = "/controller";
 pub const WORKER_PATH: &str = "/workers";

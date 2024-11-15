@@ -143,10 +143,10 @@ use super::{
     AuthorityControl, AuthorityWorkerHeartbeatResponse, GetLeaderResult, LeaderPayload,
     WorkerDescriptor, WorkerId, SCHEMA_REPLICATION_OFFSET_PATH,
 };
-#[cfg(feature = "failure_injection")]
-use crate::failpoints;
 use crate::metrics::recorded;
 use crate::{ReadySetError, ReadySetResult};
+#[cfg(feature = "failure_injection")]
+use readyset_util::failpoints;
 
 pub const WORKER_PREFIX: &str = "workers/";
 /// Path to the leader key.

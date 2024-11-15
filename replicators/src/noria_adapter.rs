@@ -14,8 +14,6 @@ use nom_sql::{DialectDisplay, NonReplicatedRelation, NotReplicatedReason, Relati
 use postgres_native_tls::MakeTlsConnector;
 use postgres_protocol::escape::escape_literal;
 use readyset_client::consistency::Timestamp;
-#[cfg(feature = "failure_injection")]
-use readyset_client::failpoints;
 use readyset_client::metrics::recorded::{self, SnapshotStatusTag};
 use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_client::utils::retry_with_exponential_backoff;
@@ -23,6 +21,8 @@ use readyset_client::{ReadySetHandle, Table, TableOperation};
 use readyset_data::Dialect;
 use readyset_errors::{internal_err, set_failpoint_return_err, ReadySetError, ReadySetResult};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
+#[cfg(feature = "failure_injection")]
+use readyset_util::failpoints;
 use readyset_util::select;
 use replication_offset::{ReplicationOffset, ReplicationOffsets};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};

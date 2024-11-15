@@ -60,7 +60,7 @@ serial_test = { workspace = true }
 temp-dir = { workspace = true }
 
 [features]
-failure_injection = ["fail/failpoints", "readyset-client/failure_injection", "readyset-server/failure_injection"]
+failure_injection = ["fail/failpoints", "readyset-server/failure_injection", "readyset-util/failure_injection"]
 
 [package.metadata.generate-rpm]
 assets = [

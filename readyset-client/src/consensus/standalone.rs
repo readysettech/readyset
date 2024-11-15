@@ -32,7 +32,7 @@ use super::{
     WorkerDescriptor, WorkerId, SCHEMA_REPLICATION_OFFSET_PATH,
 };
 #[cfg(feature = "failure_injection")]
-use crate::failpoints;
+use readyset_util::failpoints;
 
 /// Path to the controller state.
 const STATE_KEY: &str = "state";
