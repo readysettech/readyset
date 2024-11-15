@@ -17,8 +17,6 @@ use readyset_client::consensus::{
     Authority, AuthorityControl, AuthorityWorkerHeartbeatResponse, CacheDDLRequest,
     GetLeaderResult, WorkerDescriptor, WorkerId, WorkerSchedulingConfig,
 };
-#[cfg(feature = "failure_injection")]
-use readyset_client::failpoints;
 use readyset_client::metrics::recorded;
 use readyset_client::recipe::changelist::Change;
 use readyset_client::recipe::ChangeList;
@@ -27,6 +25,8 @@ use readyset_client::ControllerDescriptor;
 use readyset_data::Dialect;
 use readyset_errors::{internal, internal_err, ReadySetError, ReadySetResult};
 use readyset_telemetry_reporter::TelemetrySender;
+#[cfg(feature = "failure_injection")]
+use readyset_util::failpoints;
 use readyset_util::select;
 use readyset_util::shutdown::ShutdownReceiver;
 use replicators::{ControllerMessage, ReplicatorMessage};

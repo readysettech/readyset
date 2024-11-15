@@ -15,12 +15,12 @@ use nom_sql::{
     NotReplicatedReason, Relation, SqlIdentifier, TableKey,
 };
 use postgres_types::{accepts, FromSql, Kind, Type};
-#[cfg(feature = "failure_injection")]
-use readyset_client::failpoints;
 use readyset_client::recipe::changelist::{Change, ChangeList, PostgresTableMetadata};
 use readyset_client::TableOperation;
 use readyset_data::{DfType, DfValue, Dialect as DataDialect, PgEnumMetadata};
 use readyset_errors::{internal, internal_err, unsupported, ReadySetError, ReadySetResult};
+#[cfg(feature = "failure_injection")]
+use readyset_util::failpoints;
 use replication_offset::postgres::PostgresPosition;
 use replication_offset::ReplicationOffset;
 use tokio_postgres as pgsql;

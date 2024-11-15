@@ -38,8 +38,6 @@ use readyset_adapter::{
 use readyset_alloc::{StdThreadBuildWrapper, ThreadBuildWrapper};
 use readyset_alloc_metrics::report_allocator_metrics;
 use readyset_client::consensus::AuthorityType;
-#[cfg(feature = "failure_injection")]
-use readyset_client::failpoints;
 use readyset_client::metrics::recorded;
 use readyset_client::ReadySetHandle;
 use readyset_client_metrics::QueryLogMode;
@@ -51,6 +49,8 @@ use readyset_server::worker::readers::{retry_misses, Ack, BlockingRead, ReadRequ
 use readyset_server::PrometheusBuilder;
 use readyset_sql_passes::adapter_rewrites::AdapterRewriteParams;
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetryInitializer};
+#[cfg(feature = "failure_injection")]
+use readyset_util::failpoints;
 use readyset_util::futures::abort_on_panic;
 use readyset_util::redacted::RedactedString;
 use readyset_util::shared_cache::SharedCache;

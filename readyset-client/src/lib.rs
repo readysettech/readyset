@@ -240,9 +240,6 @@ use readyset_tracing::propagation::Instrumented;
 use replication_offset::ReplicationOffset;
 use tokio_tower::multiplex;
 
-#[cfg(feature = "failure_injection")]
-pub mod failpoints;
-
 pub mod consistency;
 mod controller;
 pub mod metrics;

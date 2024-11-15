@@ -24,9 +24,9 @@ tracing = { workspace = true, features = ["release_max_level_debug"] }
 database-utils = { path = "../database-utils" }
 nom-sql = { path = "../nom-sql" }
 readyset-adapter = { path = "../readyset-adapter" }
-readyset-client = { path = "../readyset-client", features = ["failure_injection"] }
+readyset-client = { path = "../readyset-client" }
 readyset-data = { path = "../readyset-data" }
-readyset-util = { path = "../readyset-util" }
+readyset-util = { path = "../readyset-util", features = ["failure_injection"] }
 readyset-tracing = { path = "../readyset-tracing" }
 readyset-errors = { path = "../readyset-errors" }
 
@@ -50,4 +50,4 @@ harness = false
 
 [features]
 slow_bench = []
-failure_injection = ["readyset-client/failure_injection"]
+failure_injection = ["readyset-util/failure_injection"]

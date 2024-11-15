@@ -12,6 +12,7 @@ bytes = { workspace = true }
 proptest = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
 chrono-tz = { workspace = true }
+fail = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 futures = { workspace = true }
 tempfile = { workspace = true }
@@ -36,8 +37,8 @@ postgres = { workspace = true, features = ["with-chrono-0_4", "with-eui48-1", "w
 [features]
 # Redact the display of strings marked sensitive from logs and error messages
 redact_sensitive = []
+failure_injection = ["fail/failpoints"]
 
 [[bench]]
 name = "fmt"
 harness = false
-
