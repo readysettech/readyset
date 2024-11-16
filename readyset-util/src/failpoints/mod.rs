@@ -51,3 +51,7 @@ pub const ADAPTER_OUT_OF_BAND: &str = "adapter-out-of-band";
 pub const PARSE_SQL_TYPE: &str = "parse-sql-type";
 /// A failpoint just before dropping tables due to replication errors
 pub const IGNORE_TABLE_FAIL_DROPPING_TABLE: &str = "ignore-table-fail-dropping-table";
+/// A failpoint just before waiting on a blocking read in the reader
+pub const READER_BEFORE_BLOCKING: &str = "reader-before-blocking";
+/// A failpoint at the beginning of handling a RequestReaderReplay packet
+pub const UPQUERY_START: &str = "upquery-start";

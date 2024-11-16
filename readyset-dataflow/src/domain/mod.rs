@@ -18,7 +18,7 @@ use dataflow_state::{
     BaseTableState, EvictBytesResult, EvictKeysResult, EvictRandomResult, MaterializedNodeState,
     PersistenceType, PointKey, RangeKey, RangeLookupResult,
 };
-use failpoint_macros::failpoint;
+use failpoint_macros::{failpoint, set_failpoint};
 use futures_util::future::FutureExt;
 use futures_util::stream::StreamExt;
 use futures_util::TryFutureExt;
@@ -2625,6 +2625,7 @@ impl Domain {
             }) => {
                 let start = time::Instant::now();
                 self.total_replay_time.start();
+                set_failpoint!(failpoints::UPQUERY_START);
 
                 let mut n = self
                     .nodes

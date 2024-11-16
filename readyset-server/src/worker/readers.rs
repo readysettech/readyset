@@ -267,6 +267,7 @@ impl ReadRequestHandler {
             let _ = self.wait.send((read, None));
             reply_with_ok!(LookupResult::NonBlockingMiss);
         } else {
+            set_failpoint!(failpoints::READER_BEFORE_BLOCKING);
             let (tx, rx) = oneshot::channel();
 
             let r = self.wait.send((read, Some(tx)));
