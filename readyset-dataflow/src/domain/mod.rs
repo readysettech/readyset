@@ -40,7 +40,7 @@ use readyset_util::futures::abort_on_panic;
 use readyset_util::progress::report_progress_with;
 use readyset_util::ranges::RangeBounds;
 use readyset_util::redacted::Sensitive;
-use readyset_util::Indices;
+use readyset_util::{time_scope, Indices};
 use replication_offset::ReplicationOffset;
 use serde::{Deserialize, Serialize};
 use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
@@ -62,6 +62,8 @@ use crate::payload::{
 use crate::prelude::*;
 use crate::processing::ColumnMiss;
 use crate::{backlog, DomainRequest, Readers};
+
+const SLOW_LOOP_THRESHOLD: Duration = Duration::from_secs(1);
 
 /// A stub for the cache name used for domain metrics that are emitted during a migration.
 const MIGRATION_CACHE_NAME_STUB: &str = "migration";
@@ -4579,6 +4581,13 @@ impl Domain {
         packet: Packet,
         executor: &mut dyn Executor,
     ) -> ReadySetResult<()> {
+        let span = info_span!(
+            target: "readyset_dataflow::domain",
+            "domain_handle_packet",
+            op = ?packet,
+        );
+        let _time = time_scope(span, SLOW_LOOP_THRESHOLD);
+
         if self.wait_time.is_running() {
             self.wait_time.stop();
         }

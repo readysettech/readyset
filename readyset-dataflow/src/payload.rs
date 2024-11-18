@@ -749,25 +749,33 @@ impl fmt::Display for Packet {
 impl fmt::Debug for Packet {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Packet::Input(_) => write!(f, "Packet::Input"),
-            Packet::Update(Update { link, .. }) => write!(f, "Packet::Update({:?})", link),
+            Packet::Input(_) => write!(f, "Input"),
+            Packet::Update(x) => write!(f, "Update(link={:?}, {} records)", x.link, x.data.len()),
             Packet::RequestReaderReplay(x) => {
-                write!(f, "Packet::RequestReaderReplay({:?})", x.keys)
+                write!(
+                    f,
+                    "RequestReaderReplay(node={:?}, keys={:?})",
+                    x.node, x.keys
+                )
             }
             Packet::RequestPartialReplay(x) => {
-                write!(f, "Packet::RequestPartialReplay({:?})", x.tag)
+                write!(
+                    f,
+                    "RequestPartialReplay(tag={:?}, keys={:?})",
+                    x.tag, x.keys
+                )
             }
             Packet::ReplayPiece(x) => write!(
                 f,
-                "Packet::ReplayPiece({:?}, tag {}, {} records)",
+                "ReplayPiece(link={:?}, tag={:?}, {} records)",
                 x.link,
                 x.tag,
                 x.data.len()
             ),
-            Packet::Timestamp(_) => write!(f, "Packet::Timestamp"),
-            Packet::Finish(_) => write!(f, "Packet::Finish"),
-            Packet::Spin => write!(f, "Packet::Spin"),
-            Packet::Evict(_) => write!(f, "Packet::Evict"),
+            Packet::Timestamp(_) => write!(f, "Timestamp"),
+            Packet::Finish(_) => write!(f, "Finish"),
+            Packet::Spin => write!(f, "Spin"),
+            Packet::Evict(_) => write!(f, "Evict"),
         }
     }
 }

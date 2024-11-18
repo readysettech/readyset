@@ -31,14 +31,17 @@ const SLOW_LOOP_THRESHOLD: Duration = Duration::from_secs(1);
 
 // For use in the select loop.  If None, exit, otherwise check for error and continue.
 macro_rules! call {
-    ($name:literal, $op:expr, $call:expr) => {{
-        let span = info_span!(target: "readyset_server::worker::replica", $name, op = ?$op);
-        let _time = time_scope(span, SLOW_LOOP_THRESHOLD);
+    ($call:expr) => {{
         if let Some(res) = $call {
             res?;
         } else {
             return Ok(());
         }
+    }};
+    ($name:literal, $op:expr, $call:expr) => {{
+        let span = info_span!(target: "readyset_server::worker::replica", $name, op = ?$op);
+        let _time = time_scope(span, SLOW_LOOP_THRESHOLD);
+        call!($call)
     }};
 }
 
@@ -378,6 +381,62 @@ impl Replica {
         }
     }
 
+    async fn handle_one_packet(
+        packets: &mut VecDeque<Packet>,
+        established: &mut tokio_stream::StreamMap<u64, DualTcpStream>,
+        domain: &mut Domain,
+        out: &mut Outboxes,
+        mut packet: Packet,
+    ) -> Option<ReadySetResult<()>> {
+        let span = info_span!(
+            target: "readyset_server::worker::replica",
+            "handle_one_packet",
+            op = ?packet,
+        );
+        let _time = time_scope(span, SLOW_LOOP_THRESHOLD);
+
+        let ack = match &mut packet {
+            Packet::Timestamp(Timestamp {
+                src: SourceChannelIdentifier { token, tag },
+                ..
+            })
+            | Packet::Input(Input {
+                src: SourceChannelIdentifier { token, tag },
+                ..
+            }) => {
+                // After processing we need to ack timestamp and input messages from
+                // base
+                established
+                    .iter_mut()
+                    .find(|(t, _)| *t == *token)
+                    .map(|(_, conn)| (*tag, conn))
+            }
+            Packet::RequestReaderReplay(RequestReaderReplay {
+                node, cols, keys, ..
+            }) => {
+                // We want to batch multiple reader replay requests into a single call
+                // while deduplicating non unique keys
+                let mut unique_keys = keys.drain(..).collect();
+                flatten_request_reader_replay(*node, cols, &mut unique_keys, packets);
+                keys.extend(unique_keys.drain());
+                None
+            }
+            _ => None,
+        };
+
+        if let Err(e) = domain.handle_packet(packet, out) {
+            return Some(Err(e));
+        }
+
+        if let Some((tag, conn)) = ack {
+            if let Err(e) = conn.send(Tagged { tag, v: () }).await {
+                return Some(Err(e.into()));
+            }
+        }
+
+        Some(Ok(()))
+    }
+
     async fn handle_packets(
         packets: Option<VecDeque<Packet>>,
         established: &mut tokio_stream::StreamMap<u64, DualTcpStream>,
@@ -390,52 +449,11 @@ impl Replica {
                 None
             }
             Some(mut packets) => {
-                while let Some(mut packet) = packets.pop_front() {
-                    let ack = match &mut packet {
-                        Packet::Timestamp(Timestamp {
-                            src: SourceChannelIdentifier { token, tag },
-                            ..
-                        })
-                        | Packet::Input(Input {
-                            src: SourceChannelIdentifier { token, tag },
-                            ..
-                        }) => {
-                            // After processing we need to ack timestamp and input messages from
-                            // base
-                            established
-                                .iter_mut()
-                                .find(|(t, _)| *t == *token)
-                                .map(|(_, conn)| (*tag, conn))
-                        }
-                        Packet::RequestReaderReplay(RequestReaderReplay {
-                            node,
-                            cols,
-                            keys,
-                            ..
-                        }) => {
-                            // We want to batch multiple reader replay requests into a single call
-                            // while deduplicating non unique keys
-                            let mut unique_keys = keys.drain(..).collect();
-                            flatten_request_reader_replay(
-                                *node,
-                                cols,
-                                &mut unique_keys,
-                                &mut packets,
-                            );
-                            keys.extend(unique_keys.drain());
-                            None
-                        }
-                        _ => None,
-                    };
-
-                    if let Err(e) = domain.handle_packet(packet, out) {
-                        return Some(Err(e));
-                    }
-
-                    if let Some((tag, conn)) = ack {
-                        if let Err(e) = conn.send(Tagged { tag, v: () }).await {
-                            return Some(Err(e.into()));
-                        }
+                while let Some(pkt) = packets.pop_front() {
+                    let res =
+                        Self::handle_one_packet(&mut packets, established, domain, out, pkt).await;
+                    if res != Some(Ok(())) {
+                        return res;
                     }
                 }
                 Some(Ok(()))
