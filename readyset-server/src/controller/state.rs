@@ -803,6 +803,18 @@ impl DfState {
             }))
             .map(
                 |(node_index, node_name, node_description, indexes)| MaterializationInfo {
+                    // TODO(marce): This index might be out of sync if we run readyset distributed
+                    domain_index: self
+                        .domain_node_index_pairs
+                        .iter()
+                        .find_map(|(di, nm)| nm.get(&node_index).map(|_| *di))
+                        .unwrap_or_else(|| {
+                            warn!(
+                                "Node {} is not in any domain",
+                                self.ingredients[node_index].name().display_unquoted()
+                            );
+                            DomainIndex::new(usize::MAX)
+                        }),
                     node_index,
                     node_name,
                     node_description,

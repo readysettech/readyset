@@ -62,6 +62,8 @@ pub struct NodeSize {
 /// Information about a single materialization (stateful node) in the graph
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MaterializationInfo {
+    /// The domain the materialization is in
+    pub domain_index: DomainIndex,
     /// The index of the materialized node
     pub node_index: NodeIndex,
     /// The node's name
