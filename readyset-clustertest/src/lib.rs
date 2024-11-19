@@ -77,6 +77,7 @@
 //! ```rust
 //! use readyset_clustertest::*;
 //! use readyset_clustertest_macros::clustertest;
+//! use serial_test::serial;
 //!
 //! #[clustertest]
 //! async fn example_clustertest() {
