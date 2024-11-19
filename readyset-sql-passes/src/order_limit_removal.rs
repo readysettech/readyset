@@ -203,6 +203,7 @@ mod tests {
             TableKey::UniqueKey {
                 index_name: None,
                 constraint_name: None,
+                constraint_timing: None,
                 columns: vec![col4.column],
                 index_type: None,
             },
@@ -345,6 +346,7 @@ mod tests {
         // compound Unique
         let keys = Some(vec![TableKey::UniqueKey {
             constraint_name: None,
+            constraint_timing: None,
             index_name: None,
             columns: vec![col1, col2],
             index_type: None,

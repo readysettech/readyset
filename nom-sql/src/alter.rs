@@ -1312,6 +1312,7 @@ mod tests {
                 qstring,
                 TableKey::UniqueKey {
                     constraint_name: Some("c".into()),
+                    constraint_timing: None,
                     index_name,
                     columns,
                     index_type: None,
@@ -1329,11 +1330,28 @@ mod tests {
                 qstring,
                 TableKey::UniqueKey {
                     constraint_name: Some("c".into()),
+                    constraint_timing: None,
                     index_name,
                     columns,
                     index_type,
                 },
             );
+        }
+
+        #[test]
+        fn parse_alter_add_constraint_unique_key_deferrable() {
+            for q in [
+                r#"ALTER TABLE "t" ADD CONSTRAINT "c" UNIQUE KEY ("a")"#,
+                r#"ALTER TABLE "t" ADD CONSTRAINT "c" UNIQUE KEY ("a") DEFERRABLE"#,
+                r#"ALTER TABLE "t" ADD CONSTRAINT "c" UNIQUE KEY ("a") DEFERRABLE INITIALLY DEFERRED"#,
+                r#"ALTER TABLE "t" ADD CONSTRAINT "c" UNIQUE KEY ("a") DEFERRABLE INITIALLY IMMEDIATE"#,
+                r#"ALTER TABLE "t" ADD CONSTRAINT "c" UNIQUE KEY ("a") NOT DEFERRABLE"#,
+                r#"ALTER TABLE "t" ADD CONSTRAINT "c" UNIQUE KEY ("a") NOT DEFERRABLE INITIALLY IMMEDIATE"#,
+            ] {
+                let r = test_parse!(alter_table_statement(Dialect::PostgreSQL), q.as_bytes());
+                assert_eq!(r.display(Dialect::PostgreSQL).to_string(), q);
+                test_parse_expect_err!(alter_table_statement(Dialect::MySQL), q.as_bytes());
+            }
         }
 
         #[test]
