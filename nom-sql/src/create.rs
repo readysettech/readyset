@@ -19,7 +19,8 @@ use test_strategy::Arbitrary;
 use crate::column::{column_specification, Column, ColumnSpecification};
 use crate::common::{
     column_identifier_no_alias, debug_print, if_not_exists, parse_fallible, statement_terminator,
-    until_statement_terminator, ws_sep_comma, IndexType, ReferentialAction, TableKey,
+    until_statement_terminator, ws_sep_comma, ConstraintTiming, IndexType, ReferentialAction,
+    TableKey,
 };
 use crate::compound_select::{nested_compound_selection, CompoundSelectStatement};
 use crate::create_table_options::{
@@ -608,6 +609,54 @@ fn foreign_key(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<
     }
 }
 
+fn deferrable(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Option<ConstraintTiming>> {
+    move |i| {
+        if dialect != Dialect::PostgreSQL {
+            return Ok((i, None));
+        }
+        alt((
+            move |i| {
+                let (i, _) = tag_no_case("not")(i)?;
+                let (i, _) = whitespace1(i)?;
+                let (i, _) = tag_no_case("deferrable")(i)?;
+                let (i, _) = whitespace1(i)?;
+                let (i, _) = tag_no_case("initially")(i)?;
+                let (i, _) = whitespace1(i)?;
+                let (i, _) = tag_no_case("immediate")(i)?;
+                Ok((i, Some(ConstraintTiming::NotDeferrableInitiallyImmediate)))
+            },
+            move |i| {
+                let (i, _) = tag_no_case("not")(i)?;
+                let (i, _) = whitespace1(i)?;
+                let (i, _) = tag_no_case("deferrable")(i)?;
+                Ok((i, Some(ConstraintTiming::NotDeferrable)))
+            },
+            move |i| {
+                let (i, _) = tag_no_case("deferrable")(i)?;
+                let (i, _) = whitespace1(i)?;
+                let (i, _) = tag_no_case("initially")(i)?;
+                let (i, _) = whitespace1(i)?;
+                let (i, _) = tag_no_case("deferred")(i)?;
+                Ok((i, Some(ConstraintTiming::DeferrableInitiallyDeferred)))
+            },
+            move |i| {
+                let (i, _) = tag_no_case("deferrable")(i)?;
+                let (i, _) = whitespace1(i)?;
+                let (i, _) = tag_no_case("initially")(i)?;
+                let (i, _) = whitespace1(i)?;
+                let (i, _) = tag_no_case("immediate")(i)?;
+                Ok((i, Some(ConstraintTiming::DeferrableInitiallyImmediate)))
+            },
+            move |i| {
+                let (i, _) = tag_no_case("deferrable")(i)?;
+                Ok((i, Some(ConstraintTiming::Deferrable)))
+            },
+        ))(i)
+    }
+}
+
 fn index_type(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], IndexType> {
     alt((
         map(tag_no_case("btree"), |_| IndexType::BTree),
@@ -640,6 +689,8 @@ fn unique(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8]
             delimited(whitespace0, index_col_list(dialect), whitespace0),
             tag(")"),
         )(i)?;
+        let (i, constraint_timing) = opt(preceded(whitespace0, deferrable(dialect)))(i)?;
+        let constraint_timing = constraint_timing.unwrap_or(None);
         let (i, index_type) = opt(using_index)(i)?;
         debug_print("after unique", &i);
 
@@ -647,6 +698,7 @@ fn unique(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8]
             i,
             TableKey::UniqueKey {
                 constraint_name,
+                constraint_timing,
                 index_name,
                 columns,
                 index_type,
@@ -1295,6 +1347,7 @@ mod tests {
                     ],
                     keys: Some(vec![TableKey::UniqueKey {
                         constraint_name: None,
+                        constraint_timing: None,
                         index_name: Some("id_k".into()),
                         columns: vec![Column::from("id")],
                         index_type: None
@@ -2006,6 +2059,7 @@ mod tests {
                             },
                             TableKey::UniqueKey {
                                 constraint_name: None,
+                                constraint_timing: None,
                                 index_name: Some("short_id".into()),
                                 columns: vec![Column::from("short_id")],
                                 index_type: None
@@ -2518,6 +2572,7 @@ mod tests {
                             },
                             TableKey::UniqueKey {
                                 constraint_name: None,
+                                constraint_timing: None,
                                 index_name: Some("short_id".into()),
                                 columns: vec![Column::from("short_id")],
                                 index_type: None,
@@ -2742,6 +2797,7 @@ mod tests {
                         },
                         TableKey::UniqueKey {
                             constraint_name: None,
+                            constraint_timing: None,
                             index_name: Some("access_tokens_token_unique".into()),
                             columns: vec!["token".into()],
                             index_type: None,

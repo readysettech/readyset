@@ -854,6 +854,7 @@ pub fn walk_table_key<'a, V: Visitor<'a>>(
         }
         TableKey::UniqueKey {
             constraint_name,
+            constraint_timing: _,
             index_name,
             columns,
             index_type: _,

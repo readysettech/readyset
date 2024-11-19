@@ -74,6 +74,32 @@ impl fmt::Display for ReferentialAction {
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
+pub enum ConstraintTiming {
+    Deferrable,
+    DeferrableInitiallyDeferred,
+    DeferrableInitiallyImmediate,
+    NotDeferrable,
+    NotDeferrableInitiallyImmediate,
+}
+
+impl Display for ConstraintTiming {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                ConstraintTiming::Deferrable => "DEFERRABLE",
+                ConstraintTiming::DeferrableInitiallyDeferred => "DEFERRABLE INITIALLY DEFERRED",
+                ConstraintTiming::DeferrableInitiallyImmediate => "DEFERRABLE INITIALLY IMMEDIATE",
+                ConstraintTiming::NotDeferrable => "NOT DEFERRABLE",
+                ConstraintTiming::NotDeferrableInitiallyImmediate =>
+                    "NOT DEFERRABLE INITIALLY IMMEDIATE",
+            }
+        )
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum TableKey {
     PrimaryKey {
         constraint_name: Option<SqlIdentifier>,
@@ -82,6 +108,7 @@ pub enum TableKey {
     },
     UniqueKey {
         constraint_name: Option<SqlIdentifier>,
+        constraint_timing: Option<ConstraintTiming>,
         index_name: Option<SqlIdentifier>,
         columns: Vec<Column>,
         index_type: Option<IndexType>,
@@ -202,6 +229,7 @@ impl DialectDisplay for TableKey {
                     )
                 }
                 TableKey::UniqueKey {
+                    constraint_timing,
                     index_name,
                     columns,
                     index_type,
@@ -216,6 +244,9 @@ impl DialectDisplay for TableKey {
                         "({})",
                         columns.iter().map(|c| c.display(dialect)).join(", ")
                     )?;
+                    if let Some(constraint_timing) = constraint_timing {
+                        write!(f, " {}", constraint_timing)?;
+                    }
                     if let Some(index_type) = index_type {
                         write!(f, " USING {}", index_type)?;
                     }

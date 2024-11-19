@@ -556,6 +556,7 @@ mod tests {
                         DdlCreateTableConstraint {
                             definition: Ok(TableKey::UniqueKey {
                                 constraint_name: None,
+                                constraint_timing: None,
                                 index_name: None,
                                 columns: vec!["value".into()],
                                 index_type: None
