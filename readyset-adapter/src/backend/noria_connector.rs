@@ -500,6 +500,7 @@ impl NoriaConnector {
         let mut materializations = self.inner.get_mut()?.noria.materialization_info().await?;
         materializations.sort_unstable_by_key(|mi| Reverse(mi.size.bytes));
         let cols = [
+            ("domain_index", DfType::DEFAULT_TEXT),
             ("node_index", DfType::Int),
             ("node_name", DfType::DEFAULT_TEXT),
             ("node_description", DfType::DEFAULT_TEXT),
@@ -527,6 +528,7 @@ impl NoriaConnector {
             .into_iter()
             .map(|mi| {
                 vec![
+                    mi.domain_index.to_string().into(),
                     mi.node_index.index().into(),
                     mi.node_name.display_unquoted().to_string().into(),
                     mi.node_description.into(),
