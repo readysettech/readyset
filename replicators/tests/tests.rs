@@ -167,6 +167,7 @@ struct TestHandle {
     // connection spawns a background task we can only terminate by dropping the runtime
     replication_rt: Option<tokio::runtime::Runtime>,
     notification_channel: Option<TestChannel>,
+    controll_channel: Option<TestControllChannel>,
 }
 
 impl Drop for TestHandle {
@@ -335,9 +336,9 @@ impl TestHandle {
             authority,
             replication_rt: None,
             notification_channel: None,
+            controll_channel: None,
         };
-
-        handle.start_repl(config, telemetry_sender, true).await?;
+        handle.controll_channel = Some(handle.start_repl(config, telemetry_sender, true).await?);
 
         Ok((handle, shutdown_tx))
     }
@@ -361,7 +362,7 @@ impl TestHandle {
         config: Option<Config>,
         telemetry_sender: TelemetrySender,
         server_startup: bool,
-    ) -> ReadySetResult<()> {
+    ) -> ReadySetResult<TestControllChannel> {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let controller = ReadySetHandle::new(Arc::clone(&self.authority)).await;
 
@@ -388,20 +389,11 @@ impl TestHandle {
             let _ = sender.send(ReplicatorMessage::UnrecoverableError(error));
         });
 
-        // keep at least one sender open
-        runtime.spawn(async move {
-            loop {
-                sleep(Duration::from_secs(1)).await;
-                if controll_sender.0.is_closed() {
-                    break;
-                }
-            }
-        });
         if let Some(rt) = self.replication_rt.replace(runtime) {
             rt.shutdown_background();
         }
 
-        Ok(())
+        Ok(controll_sender)
     }
 
     async fn check_results(
@@ -3809,6 +3801,175 @@ async fn replicate_rejects_table_with_big_numeric() {
             }))
         );
     });
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+#[slow]
+async fn alter_readyset_add_table_replication_tables() {
+    readyset_tracing::init_test_logging();
+    let url = mysql_url();
+    let mut client = DbConnection::connect(&url).await.unwrap();
+
+    let query = "
+    DROP TABLE IF EXISTS filter_t1; CREATE TABLE filter_t1 (id int);
+    DROP TABLE IF EXISTS filter_t2; CREATE TABLE filter_t2 (id int);
+    DROP SCHEMA IF EXISTS noria2; CREATE SCHEMA noria2; CREATE TABLE noria2.filter_t3 (id int);
+    CREATE TABLE noria2.filter_t4 (id int);
+    "
+    .to_string();
+
+    client.query(&query).await.unwrap();
+
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(
+        url.to_string(),
+        Some(Config {
+            replication_tables: Some("public.filter_t1,noria2.filter_t3".to_string().into()),
+            ..Default::default()
+        }),
+    )
+    .await
+    .unwrap();
+
+    ctx.notification_channel
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+    ctx.assert_table_exists("public", "filter_t1").await;
+    ctx.assert_table_exists("noria2", "filter_t3").await;
+    ctx.assert_table_missing("public", "filter_t2").await;
+    ctx.assert_table_missing("noria2", "filter_t4").await;
+
+    let table_2 = Relation {
+        schema: Some("public".into()),
+        name: "filter_t2".into(),
+    };
+    let table_4 = Relation {
+        schema: Some("noria2".into()),
+        name: "filter_t4".into(),
+    };
+    ctx.controll_channel
+        .as_ref()
+        .unwrap()
+        .0
+        .send(ControllerMessage::AddTables {
+            tables: vec![table_2.clone(), table_4.clone()],
+        })
+        .unwrap();
+
+    sleep(Duration::from_secs(4)).await;
+
+    eventually! {
+        ctx.noria.tables().await.unwrap().contains_key(
+            &table_2
+        ) && ctx.noria.tables().await.unwrap().contains_key(
+            &table_4
+        )
+    }
+    let query = "INSERT INTO filter_t1 (id) VALUES (1);
+        INSERT INTO filter_t2 (id) VALUES (2);"
+        .to_string();
+    client.query(&query).await.unwrap();
+    ctx.check_results("filter_t1", "filter_t1", &[&[DfValue::from(1)]])
+        .await
+        .unwrap();
+    ctx.check_results("filter_t2", "filter_t2", &[&[DfValue::from(2)]])
+        .await
+        .unwrap();
+
+    ctx.stop().await;
+    client.stop().await;
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+#[slow]
+async fn alter_readyset_add_table_replication_tables_ignore() {
+    readyset_tracing::init_test_logging();
+    let url = mysql_url();
+    let mut client = DbConnection::connect(&url).await.unwrap();
+
+    let query = "DROP TABLE IF EXISTS filter_t1; CREATE TABLE filter_t1 (id int);
+    DROP TABLE IF EXISTS filter_t2; CREATE TABLE filter_t2 (id int);
+    DROP SCHEMA IF EXISTS noria2; CREATE SCHEMA noria2; CREATE TABLE noria2.filter_t3 (id int);
+    CREATE TABLE noria2.filter_t4 (id int);
+    "
+    .to_string();
+
+    client.query(&query).await.unwrap();
+
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(
+        url.to_string(),
+        Some(Config {
+            replication_tables_ignore: Some("public.*,noria2.filter_t3".to_string().into()),
+            ..Default::default()
+        }),
+    )
+    .await
+    .unwrap();
+
+    ctx.notification_channel
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+    ctx.assert_table_missing("public", "filter_t1").await;
+    ctx.assert_table_missing("public", "filter_t2").await;
+    ctx.assert_table_missing("noria2", "filter_t3").await;
+    ctx.assert_table_exists("noria2", "filter_t4").await;
+
+    let table_1 = Relation {
+        schema: Some("public".into()),
+        name: "filter_t1".into(),
+    };
+    let table_2 = Relation {
+        schema: Some("public".into()),
+        name: "filter_t2".into(),
+    };
+    let table_3 = Relation {
+        schema: Some("noria2".into()),
+        name: "filter_t3".into(),
+    };
+    ctx.controll_channel
+        .as_ref()
+        .unwrap()
+        .0
+        .send(ControllerMessage::AddTables {
+            tables: vec![table_1.clone(), table_2.clone(), table_3.clone()],
+        })
+        .unwrap();
+
+    sleep(Duration::from_secs(4)).await;
+
+    eventually! {
+        ctx.noria.tables().await.unwrap().contains_key(
+            &table_1
+        ) && ctx.noria.tables().await.unwrap().contains_key(
+            &table_2
+        ) && ctx.noria.tables().await.unwrap().contains_key(
+            &table_3
+        )
+    }
+    let query = "INSERT INTO filter_t1 (id) VALUES (1);
+        INSERT INTO filter_t2 (id) VALUES (2);"
+        .to_string();
+    client.query(&query).await.unwrap();
+    ctx.check_results("filter_t1", "filter_t1", &[&[DfValue::from(1)]])
+        .await
+        .unwrap();
+    ctx.check_results("filter_t2", "filter_t2", &[&[DfValue::from(2)]])
+        .await
+        .unwrap();
+
+    ctx.stop().await;
+    client.stop().await;
 
     shutdown_tx.shutdown().await;
 }
