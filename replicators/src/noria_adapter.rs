@@ -10,7 +10,9 @@ use futures::FutureExt;
 use metrics::{counter, histogram};
 use mysql::prelude::Queryable;
 use mysql::{OptsBuilder, PoolConstraints, PoolOpts, SslOpts};
-use nom_sql::{DialectDisplay, NonReplicatedRelation, NotReplicatedReason, Relation};
+use nom_sql::{
+    Dialect as NonSQLDialect, DialectDisplay, NonReplicatedRelation, NotReplicatedReason, Relation,
+};
 use postgres_native_tls::MakeTlsConnector;
 use postgres_protocol::escape::escape_literal;
 use readyset_client::consistency::Timestamp;
@@ -195,7 +197,10 @@ impl<'a> NoriaAdapter<'a> {
             url.dialect(),
             config.replication_tables.take(),
             config.replication_tables_ignore.take(),
-            None,
+            match url.dialect() {
+                NonSQLDialect::MySQL => url.db_name(),
+                NonSQLDialect::PostgreSQL => None,
+            },
         )?;
         loop {
             let Err(err) = match url.clone() {
