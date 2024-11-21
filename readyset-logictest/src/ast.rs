@@ -662,6 +662,7 @@ impl Value {
                     .unwrap(),
             ))),
             (Self::Integer(i), Type::Text) => Ok(Cow::Owned(Self::Text(i.to_string()))),
+            (Self::Date(ndt), Type::Text) => Ok(Cow::Owned(Self::Text(ndt.to_string()))),
             (v, t) => {
                 todo!("{v:?} {t:?}")
             }
