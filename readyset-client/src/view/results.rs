@@ -592,6 +592,10 @@ impl StreamingIterator for ResultIterator {
 
     #[inline(always)]
     fn advance(&mut self) {
+        if self.limit == Some(usize::MAX) {
+            return;
+        }
+
         if let Some(offset) = self.offset.take() {
             for _ in 0..offset {
                 self.advance_filtered();

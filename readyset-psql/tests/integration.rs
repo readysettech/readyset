@@ -2092,3 +2092,79 @@ mod http_tests {
         shutdown_tx.shutdown().await;
     }
 }
+
+/// Tests that we can handle large datasets with a limit clause
+#[tokio::test(flavor = "multi_thread")]
+async fn test_large_dataset_with_limit() {
+    let (opts, _handle, shutdown_tx) = setup().await;
+    let conn = connect(opts).await;
+
+    // Create table
+    conn.simple_query("CREATE TABLE test_limit (id int PRIMARY KEY, value int)")
+        .await
+        .unwrap();
+    sleep().await;
+
+    // Insert 100 rows
+    for i in 0..100 {
+        conn.simple_query(&format!(
+            "INSERT INTO test_limit (id, value) VALUES ({}, {})",
+            i,
+            i * 2
+        ))
+        .await
+        .unwrap();
+    }
+    sleep().await;
+
+    // Query with limit and order
+    let rows: Vec<(i32, i32)> = conn
+        .query("SELECT * FROM test_limit ORDER BY id ASC LIMIT 10", &[])
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| (r.get::<usize, i32>(0), r.get::<usize, i32>(1)))
+        .collect();
+
+    // Verify we got exactly 10 rows
+    assert_eq!(rows.len(), 10, "Should return exactly 10 rows");
+
+    // Verify the rows are the first 10 in order
+    for (i, (id, value)) in rows.iter().enumerate() {
+        assert_eq!(*id, i as i32, "Row {} should have id {}", i, i);
+        assert_eq!(
+            *value,
+            (i * 2) as i32,
+            "Row {} should have value {}",
+            i,
+            i * 2
+        );
+    }
+
+    // Test with different ordering
+    let rows: Vec<(i32, i32)> = conn
+        .query("SELECT * FROM test_limit ORDER BY id DESC LIMIT 10", &[])
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| (r.get::<usize, i32>(0), r.get::<usize, i32>(1)))
+        .collect();
+
+    // Verify we got exactly 10 rows
+    assert_eq!(rows.len(), 10, "Should return exactly 10 rows");
+
+    // Verify the rows are the last 10 in reverse order
+    for (i, (id, value)) in rows.iter().enumerate() {
+        let expected_id = 99_i32 - i as i32;
+        assert_eq!(*id, expected_id, "Row {} should have id {}", i, expected_id);
+        assert_eq!(
+            *value,
+            expected_id * 2,
+            "Row {} should have value {}",
+            i,
+            expected_id * 2
+        );
+    }
+
+    shutdown_tx.shutdown().await;
+}

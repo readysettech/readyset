@@ -437,6 +437,9 @@ impl Options {
         let (non_blocking, worker_guard) = self.setup_file_appender(log_path);
         let fmt_layer = fmt::layer()
             .with_ansi(!self.no_color)
+            .with_file(true)
+            .with_line_number(true)
+            .with_thread_ids(true)
             .with_writer(non_blocking);
         let tracing_layer = self.tracing_layer(service_name, deployment);
 
@@ -454,7 +457,11 @@ impl Options {
         let s = tracing_subscriber::registry()
             .with(self.statement_logging_layer(&self.statement_log_path_or_default(deployment)))
             .with(env_filter);
-        let fmt_layer = fmt::layer().with_ansi(!self.no_color);
+        let fmt_layer = fmt::layer()
+            .with_ansi(!self.no_color)
+            .with_file(true)
+            .with_line_number(true)
+            .with_thread_ids(true);
         let tracing_layer = self.tracing_layer(service_name, deployment);
 
         log_format_init!(self, s, fmt_layer, tracing_layer);
@@ -474,6 +481,9 @@ impl Options {
         let (non_blocking, worker_guard) = self.setup_file_appender(log_path);
         let fmt_layer = fmt::layer()
             .with_ansi(!self.no_color)
+            .with_file(true)
+            .with_line_number(true)
+            .with_thread_ids(true)
             .with_writer(non_blocking);
         let tracing_layer = self.tracing_layer(service_name, deployment);
 
@@ -485,7 +495,11 @@ impl Options {
     fn setup_tracing(&self, service_name: &str, deployment: &str) -> Option<WorkerGuard> {
         let env_filter = tracing_subscriber::EnvFilter::new(&self.log_level);
         let s = tracing_subscriber::registry().with(env_filter);
-        let fmt_layer = fmt::layer().with_ansi(!self.no_color);
+        let fmt_layer = fmt::layer()
+            .with_ansi(!self.no_color)
+            .with_file(true)
+            .with_line_number(true)
+            .with_thread_ids(true);
         let tracing_layer = self.tracing_layer(service_name, deployment);
 
         log_format_init!(self, s, fmt_layer, tracing_layer);
@@ -507,6 +521,9 @@ impl Options {
         let (non_blocking, worker_guard) = self.setup_file_appender(log_path);
         let fmt_layer = fmt::layer()
             .with_ansi(!self.no_color)
+            .with_file(true)
+            .with_line_number(true)
+            .with_thread_ids(true)
             .with_writer(non_blocking);
 
         log_format_init!(self, s, fmt_layer);
@@ -521,7 +538,11 @@ impl Options {
             .with(self.statement_logging_layer(&self.statement_log_path_or_default(deployment)))
             .with(env_filter);
 
-        let fmt_layer = fmt::layer().with_ansi(!self.no_color);
+        let fmt_layer = fmt::layer()
+            .with_ansi(!self.no_color)
+            .with_file(true)
+            .with_line_number(true)
+            .with_thread_ids(true);
 
         log_format_init!(self, s, fmt_layer);
 
@@ -535,6 +556,9 @@ impl Options {
         let s = tracing_subscriber::fmt()
             .with_env_filter(env_filter)
             .with_ansi(!self.no_color)
+            .with_file(true)
+            .with_line_number(true)
+            .with_thread_ids(true)
             .with_writer(non_blocking);
 
         log_format_init!(self, s);
@@ -548,7 +572,10 @@ impl Options {
         let env_filter = tracing_subscriber::EnvFilter::new(&self.log_level);
         let s = tracing_subscriber::fmt()
             .with_env_filter(env_filter)
-            .with_ansi(!self.no_color);
+            .with_ansi(!self.no_color)
+            .with_file(true)
+            .with_line_number(true)
+            .with_thread_ids(true);
 
         log_format_init!(self, s);
 

@@ -5044,6 +5044,7 @@ dependencies = [
  "proptest",
  "psql-srv",
  "rand",
+ "rayon",
  "readyset-adapter",
  "readyset-adapter-types",
  "readyset-client",

@@ -7,9 +7,10 @@ edition = "2021"
 
 
 [dependencies]
-clap = { workspace = true, features = ["derive","env"] }
+clap = { workspace = true, features = ["derive", "env"] }
 async-trait = { workspace = true }
 lazy_static = { workspace = true }
+rayon = { workspace = true }
 readyset-client = { path = "../readyset-client/" }
 readyset-errors = { path = "../readyset-errors/" }
 readyset-data = { path = "../readyset-data/" }
@@ -23,7 +24,13 @@ psql-srv = { path = "../psql-srv" }
 anyhow = { workspace = true }
 fail = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
-tokio-postgres = { workspace = true, features = ["with-chrono-0_4", "with-eui48-1", "with-uuid-0_8", "with-serde_json-1", "with-bit-vec-0_6"] }
+tokio-postgres = { workspace = true, features = [
+    "with-chrono-0_4",
+    "with-eui48-1",
+    "with-uuid-0_8",
+    "with-serde_json-1",
+    "with-bit-vec-0_6",
+] }
 postgres-types = { workspace = true, features = ["derive"] }
 postgres-native-tls = { workspace = true }
 native-tls = { workspace = true }
@@ -51,7 +58,9 @@ proptest = { workspace = true }
 serial_test = { workspace = true }
 test-strategy = { workspace = true }
 readyset-util = { path = "../readyset-util" }
-readyset-client-test-helpers = { path = "../readyset-client-test-helpers", features = ["postgres"] }
+readyset-client-test-helpers = { path = "../readyset-client-test-helpers", features = [
+    "postgres",
+] }
 criterion = { workspace = true, features = ["async_tokio"] }
 readyset-tracing = { path = "../readyset-tracing" }
 test-utils = { path = "../test-utils" }
@@ -63,4 +72,8 @@ harness = false
 [features]
 # Redact the display of strings marked sensitive from logs and error messages
 redact_sensitive = ["readyset-util/redact_sensitive"]
-failure_injection = ["fail/failpoints", "readyset-server/failure_injection", "readyset-util/failure_injection"]
+failure_injection = [
+    "fail/failpoints",
+    "readyset-server/failure_injection",
+    "readyset-util/failure_injection",
+]
