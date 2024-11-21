@@ -4,7 +4,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use nom_locate::LocatedSpan;
 use nom_sql::{replicator_table_list, Dialect, Relation, SqlIdentifier};
 use readyset_errors::{ReadySetError, ReadySetResult};
-use readyset_util::redacted::RedactedString;
 
 /// A [`TableFilter`] keeps lists of all the tables readyset-server is interested in, as well as a
 /// list of tables that we explicitly want to filter out of replication.
@@ -105,8 +104,8 @@ impl ReplicateTableSpec {
 impl TableFilter {
     pub(crate) fn try_new(
         dialect: Dialect,
-        filter_table_list: Option<RedactedString>,
-        filter_table_list_ignore: Option<RedactedString>,
+        filter_table_list: Option<String>,
+        filter_table_list_ignore: Option<String>,
         default_schema: Option<&str>,
     ) -> ReadySetResult<TableFilter> {
         let default_schema = default_schema.map(SqlIdentifier::from);
@@ -122,7 +121,7 @@ impl TableFilter {
 
         let mut filter_list_ignore: Vec<Relation> = Vec::new();
         match filter_table_list_ignore {
-            None => readyset_util::redacted::RedactedString("".to_string()),
+            None => "".to_string(),
             Some(t) => {
                 if t.as_str() == "*.*" {
                     return Err(ReadySetError::ReplicationFailed(
@@ -343,7 +342,7 @@ mod tests {
     fn all_schemas_explicit() {
         let filter = TableFilter::try_new(
             nom_sql::Dialect::MySQL,
-            Some("*.*".to_string().into()),
+            Some("*.*".to_string()),
             None,
             Some("noria"),
         )
@@ -363,7 +362,7 @@ mod tests {
     fn regular_list() {
         let filter = TableFilter::try_new(
             nom_sql::Dialect::MySQL,
-            Some("t1,t2,t3".to_string().into()),
+            Some("t1,t2,t3".to_string()),
             None,
             Some("noria"),
         )
@@ -380,7 +379,7 @@ mod tests {
     fn mixed_list() {
         let filter = TableFilter::try_new(
             nom_sql::Dialect::MySQL,
-            Some("t1,noria.t2,readyset.t4,t3".to_string().into()),
+            Some("t1,noria.t2,readyset.t4,t3".to_string()),
             None,
             Some("noria"),
         )
@@ -397,7 +396,7 @@ mod tests {
     fn wildcard() {
         let filter = TableFilter::try_new(
             nom_sql::Dialect::MySQL,
-            Some("noria.*, readyset.t4, t3".to_string().into()),
+            Some("noria.*, readyset.t4, t3".to_string()),
             None,
             Some("noria"),
         )
@@ -415,7 +414,7 @@ mod tests {
     fn allowed_then_denied() {
         let mut filter = TableFilter::try_new(
             nom_sql::Dialect::MySQL,
-            Some("noria.*, readyset.t4, t3".to_string().into()),
+            Some("noria.*, readyset.t4, t3".to_string()),
             None,
             Some("noria"),
         )
@@ -439,7 +438,7 @@ mod tests {
         let filter = TableFilter::try_new(
             nom_sql::Dialect::MySQL,
             None,
-            Some("t1,t2,t3".to_string().into()),
+            Some("t1,t2,t3".to_string()),
             Some("noria"),
         )
         .unwrap();
@@ -456,7 +455,7 @@ mod tests {
         let filter = TableFilter::try_new(
             nom_sql::Dialect::MySQL,
             None,
-            Some("t1,noria.t2,readyset.t4,t3".to_string().into()),
+            Some("t1,noria.t2,readyset.t4,t3".to_string()),
             Some("noria"),
         )
         .unwrap();
@@ -473,7 +472,7 @@ mod tests {
         let filter = TableFilter::try_new(
             nom_sql::Dialect::MySQL,
             None,
-            Some("noria.*, readyset.t4, t3".to_string().into()),
+            Some("noria.*, readyset.t4, t3".to_string()),
             Some("noria"),
         )
         .unwrap();

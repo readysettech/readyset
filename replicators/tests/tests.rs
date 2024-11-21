@@ -1464,11 +1464,7 @@ async fn replication_filter_inner(url: &str) -> ReadySetResult<()> {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(
         url.to_string(),
         Some(Config {
-            replication_tables: Some(
-                "public.t3, public.t1, noria3.*, noria2.t4"
-                    .to_string()
-                    .into(),
-            ),
+            replication_tables: Some("public.t3, public.t1, noria3.*, noria2.t4".to_string()),
             ..Default::default()
         }),
     )
@@ -1572,7 +1568,7 @@ async fn replication_all_schemas_inner(url: &str) -> ReadySetResult<()> {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(
         url.to_string(),
         Some(Config {
-            replication_tables: Some("*.*".to_string().into()),
+            replication_tables: Some("*.*".to_string()),
             ..Default::default()
         }),
     )
@@ -2245,7 +2241,7 @@ async fn applies_replication_table_updates_on_restart(url: &str) {
         .unwrap();
 
     let config = Config {
-        replication_tables: Some(String::from("public.t1").into()),
+        replication_tables: Some(String::from("public.t1")),
         ..Default::default()
     };
 
@@ -2273,7 +2269,7 @@ async fn applies_replication_table_updates_on_restart(url: &str) {
 
     // Create a new test handle with different replication_tables config
     let config = Config {
-        replication_tables: Some(String::from("public.t1, public.t2").into()),
+        replication_tables: Some(String::from("public.t1, public.t2")),
         ..Default::default()
     };
 
@@ -3266,7 +3262,7 @@ async fn mysql_dont_enforce_fk_replication() {
         .unwrap();
 
     let config = Config {
-        replication_tables: Some(String::from("public.t_child, public.t_child2").into()),
+        replication_tables: Some(String::from("public.t_child, public.t_child2")),
         ..Default::default()
     };
 
@@ -3826,7 +3822,7 @@ async fn alter_readyset_add_table_replication_tables() {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(
         url.to_string(),
         Some(Config {
-            replication_tables: Some("public.filter_t1,noria2.filter_t3".to_string().into()),
+            replication_tables: Some("public.filter_t1,noria2.filter_t3".to_string()),
             ..Default::default()
         }),
     )
@@ -3907,7 +3903,7 @@ async fn alter_readyset_add_table_replication_tables_ignore() {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(
         url.to_string(),
         Some(Config {
-            replication_tables_ignore: Some("public.*,noria2.filter_t3".to_string().into()),
+            replication_tables_ignore: Some("public.*,noria2.filter_t3".to_string()),
             ..Default::default()
         }),
     )
