@@ -470,7 +470,7 @@ fn primary_key(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<
         debug_print("before primary_key", &i);
         let (i, constraint_name) = constraint_identifier(dialect)(i)?;
         let (i, _) = whitespace0(i)?;
-        let (remaining_input, (_, index_name, _, columns, _)) = tuple((
+        let (remaining_input, (_, index_name, _, columns, _, constraint_timing)) = tuple((
             tag_no_case("primary key"),
             opt(preceded(whitespace1, dialect.identifier())),
             whitespace0,
@@ -483,13 +483,16 @@ fn primary_key(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<
                 preceded(whitespace1, tag_no_case("auto_increment")),
                 |_| (),
             )),
+            opt(preceded(whitespace1, deferrable(dialect))),
         ))(i)?;
+        let constraint_timing = constraint_timing.unwrap_or(None);
 
         debug_print("after primary_key", &i);
         Ok((
             remaining_input,
             TableKey::PrimaryKey {
                 constraint_name,
+                constraint_timing,
                 index_name,
                 columns,
             },
@@ -1318,6 +1321,7 @@ mod tests {
                     ],
                     keys: Some(vec![TableKey::PrimaryKey {
                         constraint_name: None,
+                        constraint_timing: None,
                         index_name: None,
                         columns: vec![Column::from("id")]
                     }]),
@@ -1427,6 +1431,7 @@ mod tests {
                     keys: Some(vec![
                         TableKey::PrimaryKey {
                             constraint_name: None,
+                            constraint_timing: None,
                             index_name: None,
                             columns: vec!["id".into()],
                         },
@@ -2792,6 +2797,7 @@ mod tests {
                     keys: Some(vec![
                         TableKey::PrimaryKey {
                             constraint_name: None,
+                            constraint_timing: None,
                             index_name: None,
                             columns: vec!["id".into()]
                         },

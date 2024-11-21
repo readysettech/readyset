@@ -389,6 +389,7 @@ impl From<TableSpec> for CreateTableStatement {
                     vec![TableKey::PrimaryKey {
                         index_name: None,
                         constraint_name: None,
+                        constraint_timing: None,
                         columns: vec![cn.into()],
                     }]
                 }),

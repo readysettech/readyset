@@ -210,6 +210,7 @@ mod tests {
             TableKey::PrimaryKey {
                 index_name: None,
                 constraint_name: None,
+                constraint_timing: None,
                 columns: vec![col1.column],
             },
         ]);
@@ -332,6 +333,7 @@ mod tests {
         // compound Primary
         let keys = Some(vec![TableKey::PrimaryKey {
             constraint_name: None,
+            constraint_timing: None,
             index_name: None,
             columns: vec![col1.clone(), col2.clone()],
         }]);

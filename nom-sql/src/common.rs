@@ -103,6 +103,7 @@ impl Display for ConstraintTiming {
 pub enum TableKey {
     PrimaryKey {
         constraint_name: Option<SqlIdentifier>,
+        constraint_timing: Option<ConstraintTiming>,
         index_name: Option<SqlIdentifier>,
         columns: Vec<Column>,
     },
@@ -214,6 +215,7 @@ impl DialectDisplay for TableKey {
 
             match self {
                 TableKey::PrimaryKey {
+                    constraint_timing,
                     index_name,
                     columns,
                     ..
@@ -226,7 +228,11 @@ impl DialectDisplay for TableKey {
                         f,
                         "({})",
                         columns.iter().map(|c| c.display(dialect)).join(", ")
-                    )
+                    )?;
+                    if let Some(constraint_timing) = constraint_timing {
+                        write!(f, " {}", constraint_timing)?;
+                    }
+                    Ok(())
                 }
                 TableKey::UniqueKey {
                     constraint_timing,

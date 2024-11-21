@@ -889,6 +889,7 @@ mod tests {
                     table: Relation::from("posts_likes"),
                     definitions: Ok(vec![AlterTableDefinition::AddKey(TableKey::PrimaryKey {
                         constraint_name: None,
+                        constraint_timing: None,
                         index_name: Some("posts_likes_post_id_user_id_primary".into()),
                         columns: vec![Column::from("post_id"), Column::from("user_id"),],
                     })]),
@@ -1298,10 +1299,26 @@ mod tests {
                 qstring,
                 TableKey::PrimaryKey {
                     constraint_name: Some("c".into()),
+                    constraint_timing: None,
                     index_name,
                     columns,
                 },
             );
+        }
+
+        #[test]
+        fn parse_alter_add_constraint_primary_key_deferrable() {
+            for q in [
+                r#"ALTER TABLE "t" ADD PRIMARY KEY ("a") DEFERRABLE"#,
+                r#"ALTER TABLE "t" ADD PRIMARY KEY ("a") DEFERRABLE INITIALLY DEFERRED"#,
+                r#"ALTER TABLE "t" ADD PRIMARY KEY ("a") DEFERRABLE INITIALLY IMMEDIATE"#,
+                r#"ALTER TABLE "t" ADD PRIMARY KEY ("a") NOT DEFERRABLE"#,
+                r#"ALTER TABLE "t" ADD PRIMARY KEY ("a") NOT DEFERRABLE INITIALLY IMMEDIATE"#,
+            ] {
+                let r = test_parse!(alter_table_statement(Dialect::PostgreSQL), q.as_bytes());
+                assert_eq!(r.display(Dialect::PostgreSQL).to_string(), q);
+                test_parse_expect_err!(alter_table_statement(Dialect::MySQL), q.as_bytes());
+            }
         }
 
         #[test]
