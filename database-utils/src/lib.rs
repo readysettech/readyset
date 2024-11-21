@@ -105,7 +105,7 @@ pub struct UpstreamConfig {
     /// for MySQL. Only tables specified in the list will be eligible to be used by caches.
     #[arg(long, env = "REPLICATION_TABLES")]
     #[serde(default)]
-    pub replication_tables: Option<RedactedString>,
+    pub replication_tables: Option<String>,
 
     /// By default, ReadySet attempts to snapshot and replicate all tables in the database
     /// specified in --upstream-db-url. However, if you know the queries you want to cache in
@@ -120,7 +120,7 @@ pub struct UpstreamConfig {
     /// Tables specified in the list will not be eligible to be used by caches.
     #[arg(long, env = "REPLICATION_TABLES_IGNORE")]
     #[serde(default)]
-    pub replication_tables_ignore: Option<RedactedString>,
+    pub replication_tables_ignore: Option<String>,
 
     /// Sets the time (in seconds) between reports of progress snapshotting the database. A value
     /// of 0 disables reporting.
