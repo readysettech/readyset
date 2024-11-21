@@ -22,12 +22,14 @@ impl KeyDefinitionCoalescing for CreateTableStatement {
                     None => Some(vec![TableKey::PrimaryKey {
                         index_name: None,
                         constraint_name: None,
+                        constraint_timing: None,
                         columns: pk,
                     }]),
                     Some(mut ks) => {
                         let new_key = TableKey::PrimaryKey {
                             index_name: None,
                             constraint_name: None,
+                            constraint_timing: None,
                             columns: pk,
                         };
                         if !ks.contains(&new_key) {
@@ -92,6 +94,7 @@ mod tests {
             Some(vec![TableKey::PrimaryKey {
                 index_name: None,
                 constraint_name: None,
+                constraint_timing: None,
                 columns: vec![Column::from("t.id")]
             }])
         );

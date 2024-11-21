@@ -858,6 +858,7 @@ pub fn walk_table_key<'a, V: VisitorMut<'a>>(
     match table_key {
         TableKey::PrimaryKey {
             constraint_name,
+            constraint_timing: _,
             index_name,
             columns,
         } => {

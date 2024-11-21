@@ -1194,6 +1194,7 @@ mod tests {
                 name: "ar_internal_metadata_pkey".into(),
                 definition: TableKey::PrimaryKey {
                     constraint_name: None,
+                    constraint_timing: None,
                     index_name: None,
                     columns: vec![Column {
                         name: "key".into(),
@@ -1236,10 +1237,12 @@ mod tests {
         match pkey {
             TableKey::PrimaryKey {
                 constraint_name,
+                constraint_timing,
                 index_name,
                 columns,
             } => {
                 assert!(constraint_name.is_none());
+                assert!(constraint_timing.is_none());
                 assert!(index_name.is_none());
                 assert_eq!(columns.len(), 1);
                 assert_eq!(columns.first().unwrap().name, "key");
