@@ -144,20 +144,6 @@ impl TestChannel {
     }
 }
 
-#[allow(dead_code)]
-/// Channel used to send notifications from the controller to replicator.
-struct TestControllChannel(UnboundedSender<ControllerMessage>);
-
-impl TestControllChannel {
-    /// Creates a new `TestReceiver`. Also returns a static reference to the sender so that it can
-    /// be moved into tokio::spawn.
-    pub fn new() -> (&'static mut UnboundedReceiver<ControllerMessage>, Self) {
-        let (controller_sender, controller_receiver) = tokio::sync::mpsc::unbounded_channel();
-        let controller_receiver = Box::leak(Box::new(controller_receiver));
-        (controller_receiver, Self(controller_sender))
-    }
-}
-
 struct TestHandle {
     url: String,
     dialect: Dialect,
@@ -167,7 +153,7 @@ struct TestHandle {
     // connection spawns a background task we can only terminate by dropping the runtime
     replication_rt: Option<tokio::runtime::Runtime>,
     notification_channel: Option<TestChannel>,
-    controll_channel: Option<TestControllChannel>,
+    controll_channel: Option<UnboundedSender<ControllerMessage>>,
 }
 
 impl Drop for TestHandle {
@@ -362,13 +348,16 @@ impl TestHandle {
         config: Option<Config>,
         telemetry_sender: TelemetrySender,
         server_startup: bool,
-    ) -> ReadySetResult<TestControllChannel> {
+    ) -> ReadySetResult<tokio::sync::mpsc::UnboundedSender<ControllerMessage>> {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let controller = ReadySetHandle::new(Arc::clone(&self.authority)).await;
 
         let url: RedactedString = self.url.clone().into();
         let (sender, receiver) = TestChannel::new();
-        let (controll_receiver, controll_sender) = TestControllChannel::new();
+        let (controll_sender, mut controll_receiver): (
+            UnboundedSender<ControllerMessage>,
+            UnboundedReceiver<ControllerMessage>,
+        ) = tokio::sync::mpsc::unbounded_channel();
         self.notification_channel = Some(receiver);
         runtime.spawn(async move {
             let Err(error) = NoriaAdapter::start(
@@ -379,7 +368,7 @@ impl TestHandle {
                     ..config.unwrap_or_default()
                 },
                 sender,
-                controll_receiver,
+                &mut controll_receiver,
                 telemetry_sender,
                 server_startup,
                 false, // disable statement logging in tests
@@ -387,6 +376,17 @@ impl TestHandle {
             .await;
             error!(%error, "Error in replicator");
             let _ = sender.send(ReplicatorMessage::UnrecoverableError(error));
+        });
+
+        // keep at least one sender open
+        let controll_sender_clone = controll_sender.clone();
+        runtime.spawn(async move {
+            loop {
+                sleep(Duration::from_secs(1)).await;
+                if controll_sender_clone.is_closed() {
+                    break;
+                }
+            }
         });
 
         if let Some(rt) = self.replication_rt.replace(runtime) {
@@ -3855,7 +3855,6 @@ async fn alter_readyset_add_table_replication_tables() {
     ctx.controll_channel
         .as_ref()
         .unwrap()
-        .0
         .send(ControllerMessage::AddTables {
             tables: vec![table_2.clone(), table_4.clone()],
         })
@@ -3940,7 +3939,6 @@ async fn alter_readyset_add_table_replication_tables_ignore() {
     ctx.controll_channel
         .as_ref()
         .unwrap()
-        .0
         .send(ControllerMessage::AddTables {
             tables: vec![table_1.clone(), table_2.clone(), table_3.clone()],
         })
