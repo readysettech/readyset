@@ -220,9 +220,13 @@ impl LRUEviction {
         (step, skip)
     }
 
-    fn cutoff(meta: &mut [u64], len: usize, nkeys: usize, step: usize) -> u64 {
+    fn cutoff(meta: &mut [u64], nkeys: usize, step: usize) -> u64 {
+        if meta.is_empty() {
+            return u64::MAX; // select_nth_unstable panics
+        }
+
         // Find the cutoff, scaling by the sampling factor.
-        let (_, cutoff, _) = meta.select_nth_unstable((nkeys / step).min(len - 1));
+        let (_, cutoff, _) = meta.select_nth_unstable((nkeys / step).min(meta.len() - 1));
         *cutoff
     }
 
@@ -245,7 +249,7 @@ impl LRUEviction {
             i += step;
         }
 
-        let cutoff = Self::cutoff(&mut meta, data.len(), nkeys, step);
+        let cutoff = Self::cutoff(&mut meta, nkeys, step);
 
         // We might return more or fewer keys than requested due to approximation.  In testing,
         // errors of up to 50% were observed.  But this sampling is very cheap, and if we don't
@@ -279,7 +283,7 @@ impl LRUEviction {
             .map(|(_, v)| v.eviction_meta().value())
             .collect::<Vec<_>>();
 
-        let cutoff = Self::cutoff(&mut meta, data.len(), nkeys, step);
+        let cutoff = Self::cutoff(&mut meta, nkeys, step);
 
         (
             data.iter()
