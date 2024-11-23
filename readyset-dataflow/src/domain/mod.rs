@@ -18,7 +18,7 @@ use dataflow_state::{
     PersistenceType, PointKey, RangeKey, RangeLookupResult,
 };
 use exponential_backoff::Backoff;
-use failpoint_macros::{failpoint, set_failpoint};
+use failpoint_macros::set_failpoint;
 use futures_util::future::FutureExt;
 use futures_util::stream::StreamExt;
 use futures_util::TryFutureExt;
@@ -4576,12 +4576,16 @@ impl Domain {
     }
 
     /// Handle a single message for this domain
-    #[failpoint(failpoints::HANDLE_PACKET)]
     pub fn handle_packet(
         &mut self,
         packet: Packet,
         executor: &mut dyn Executor,
     ) -> ReadySetResult<()> {
+        #[cfg(feature = "failure_injection")]
+        if self.check_failpoint() {
+            return Err(ReadySetError::Internal("failpoint".to_string()));
+        }
+
         let span = info_span!(
             target: "readyset_dataflow::domain",
             "domain_handle_packet",
@@ -4672,6 +4676,25 @@ impl Domain {
 
     pub fn channel(&self) -> (DomainSender, DomainReceiver) {
         channel::domain_channel()
+    }
+
+    #[cfg(feature = "failure_injection")]
+    fn check_failpoint(&self) -> bool {
+        use fail::fail_point;
+
+        fail_point!(
+            failpoints::HANDLE_PACKET,
+            |domain| if let Some(s) = domain {
+                if let Ok(index) = s.parse() {
+                    DomainIndex::new(index) == self.index
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        );
+        false
     }
 }
 
