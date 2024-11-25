@@ -1,6 +1,6 @@
 use mysql_async::{self as mysql, Value};
 use nom_sql::{Column, DialectDisplay, SqlIdentifier};
-use readyset_errors::{internal_err, ReadySetResult};
+use readyset_errors::ReadySetResult;
 
 use super::utils::MYSQL_BATCH_SIZE;
 
@@ -11,7 +11,6 @@ pub enum SnapshotType {
     KeyBased {
         name: Option<SqlIdentifier>,
         keys: Vec<Column>,
-        lower_bound: Option<Vec<mysql::Value>>,
     },
     FullTableScan,
 }
@@ -36,31 +35,7 @@ impl SnapshotType {
         Ok(SnapshotType::KeyBased {
             name: name.clone(),
             keys: keys.to_vec(),
-            lower_bound: None,
         })
-    }
-
-    /// Get the lower bound for the next query
-    /// Returns:
-    /// * The lower bound
-    ///
-    /// Errors if the snapshot type is FullTableScan or the lower bound is not set
-    pub fn get_lower_bound(&mut self) -> ReadySetResult<Vec<mysql::Value>> {
-        match self {
-            SnapshotType::KeyBased {
-                ref mut lower_bound,
-                ..
-            } => {
-                if let Some(lb) = lower_bound.take() {
-                    Ok(lb)
-                } else {
-                    Err(internal_err!("Lower bound not set"))
-                }
-            }
-            SnapshotType::FullTableScan => Err(internal_err!(
-                "Full table scan does not require a lower bound"
-            )),
-        }
     }
 
     /// Generate the queries to be used for snapshotting the table, given the snapshot type
@@ -84,10 +59,16 @@ impl SnapshotType {
             }
             SnapshotType::FullTableScan => "".to_string(),
         };
+        let schema = match table.table_name().schema.as_ref() {
+            Some(schema) => {
+                format!("AND TABLE_SCHEMA = '{}'", schema)
+            }
+            None => "".to_string(),
+        };
         let count_query = format!(
-            "SELECT COUNT(*) FROM {} {}",
-            table.table_name().display(nom_sql::Dialect::MySQL),
-            force_index
+            "SELECT TABLE_ROWS FROM information_schema.tables WHERE TABLE_NAME = '{}' {}",
+            table.table_name().name,
+            schema
         );
         let (initial_query, bound_based_query) = match self {
             SnapshotType::KeyBased { ref keys, .. } => {
@@ -140,24 +121,17 @@ impl SnapshotType {
         (count_query, initial_query, bound_based_query)
     }
 
-    /// Given a row, compute the lower bound for the next query based on the keys and update the
-    /// lower bound. Note that the lower bound is used twice. One get all the values greater or
+    /// Given a row, compute the lower bound for the next query based on the keys and return it.
+    /// Note that the lower bound is used twice. One get all the values greater or
     /// equal to the lower bound and the other to exclude the lower bound itself.
     ///
     /// Arguments:
     /// * `row` - The row to compute the lower bound from
-    pub fn set_lower_bound(&mut self, row: &mysql::Row) {
+    pub fn get_lower_bound(&mut self, row: &mysql::Row) -> ReadySetResult<Vec<mysql::Value>> {
         match self {
-            SnapshotType::KeyBased {
-                ref keys,
-                ref mut lower_bound,
-                ..
-            } => {
-                let capacity = match lower_bound {
-                    Some(lower_bound) => lower_bound.len(),
-                    // Calculate the required capacity using the triangular number formula
-                    None => keys.len() * (keys.len() + 1) / 2,
-                };
+            SnapshotType::KeyBased { ref keys, .. } => {
+                // Calculate the required capacity using the triangular number formula
+                let capacity = keys.len() * (keys.len() + 1) / 2;
 
                 let mut new_lower_bound = Vec::with_capacity(capacity);
 
@@ -173,7 +147,7 @@ impl SnapshotType {
                 }
 
                 // Update the lower_bound with the new values
-                *lower_bound = Some(new_lower_bound);
+                Ok(new_lower_bound)
             }
             SnapshotType::FullTableScan => {
                 unreachable!("Full table scan does not require a lower bound")

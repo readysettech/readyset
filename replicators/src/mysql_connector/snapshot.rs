@@ -12,7 +12,7 @@ use futures::StreamExt;
 use itertools::Itertools;
 use mysql::prelude::Queryable;
 use mysql::{Transaction, TxOpts};
-use mysql_async as mysql;
+use mysql_async::{self as mysql, Row};
 use mysql_common::constants::ColumnType;
 use mysql_srv::ColumnFlags;
 use nom_sql::{DialectDisplay, NonReplicatedRelation, NotReplicatedReason, Relation};
@@ -30,7 +30,6 @@ use tracing_futures::Instrument;
 use super::utils::{get_mysql_version, mysql_pad_collation_column};
 use crate::db_util::DatabaseSchemas;
 use crate::mysql_connector::snapshot_type::SnapshotType;
-use crate::mysql_connector::utils::MYSQL_BATCH_SIZE;
 use crate::table_filter::TableFilter;
 use crate::TablesSnapshottingGaugeGuard;
 
@@ -438,63 +437,52 @@ impl<'a> MySqlReplicator<'a> {
         let mut last_report_time = start_time;
         let snapshot_report_interval_secs = snapshot_report_interval_secs as u64;
 
-        // Loop until we have no more batches to process
-        while cnt != nrows {
-            // Still have rows in this batch
-            loop {
-                let row = row_stream.next().await.map_err(log_err)?;
-                let df_row = match row.as_ref().map(mysql_row_to_noria_row).transpose() {
-                    Ok(Some(df_row)) => df_row,
-                    Ok(None) => break,
-                    Err(err) if cnt == nrows => {
-                        info!(error = %err, "Error encountered during snapshot, but all rows replicated successfully");
-                        break;
-                    }
-                    Err(err) => {
-                        return Err(log_err(err));
-                    }
-                };
-                rows.push(df_row);
-                cnt += 1;
-
-                if rows.len() == RS_BATCH_SIZE {
-                    // We aggregate rows into batches and then send them all to noria
-                    let send_rows = std::mem::replace(&mut rows, Vec::with_capacity(RS_BATCH_SIZE));
-                    table_mutator
-                        .insert_many(send_rows)
-                        .await
-                        .map_err(log_err)?;
-                }
-
-                if cnt % MYSQL_BATCH_SIZE == 0 && cnt != nrows && snapshot_type.is_key_based() {
-                    // Last row from batch. Update lower bound with last row.
-                    // It's safe to unwrap here because we will break out of the loop at
-                    // mysql_row_to_noria_row if row was None.
-                    snapshot_type.set_lower_bound(row.as_ref().unwrap());
-                }
-
-                if snapshot_report_interval_secs != 0
-                    && last_report_time.elapsed().as_secs() > snapshot_report_interval_secs
-                {
-                    last_report_time = Instant::now();
-                    crate::log_snapshot_progress(start_time.elapsed(), cnt as i64, nrows as i64);
-                }
-            }
-            if cnt != nrows {
-                // Next batch
+        let mut prev_row: Option<Row> = None;
+        loop {
+            let mut row = row_stream.next().await.map_err(log_err)?;
+            // End of MySQL stream/batch. We should query the next batch. If the new row is None, we
+            // have reached the end of the table and will break out of the loop after getting
+            // and empty df row at mysql_row_to_noria_row.
+            if row.is_none() && snapshot_type.is_key_based() && prev_row.is_some() {
+                // Last row from batch. Get the next batch lower bound with prev row.
+                // It's safe to unwrap here because we will break out of the loop at
+                // mysql_row_to_noria_row if row was None.
                 row_stream = trx
                     .exec_iter(
                         &bound_base_query,
-                        mysql::Params::Positional(snapshot_type.get_lower_bound()?),
+                        mysql::Params::Positional(
+                            snapshot_type.get_lower_bound(prev_row.as_ref().unwrap())?,
+                        ),
                     )
                     .await
                     .map_err(log_err)?;
-                if row_stream.is_empty() {
-                    return Err(internal_err!(
-                        "Snapshotting for table {:?} stopped before all rows were replicated. Next batch query returned no rows.",
-                        table_mutator.table_name()
-                    ));
+                row = row_stream.next().await.map_err(log_err)?;
+            }
+            let df_row = match row.as_ref().map(mysql_row_to_noria_row).transpose() {
+                Ok(Some(df_row)) => df_row,
+                Ok(None) => break,
+                Err(err) => {
+                    return Err(log_err(err));
                 }
+            };
+            prev_row = row;
+            rows.push(df_row);
+            cnt += 1;
+
+            if rows.len() == RS_BATCH_SIZE {
+                // We aggregate rows into batches and then send them all to noria
+                let send_rows = std::mem::replace(&mut rows, Vec::with_capacity(RS_BATCH_SIZE));
+                table_mutator
+                    .insert_many(send_rows)
+                    .await
+                    .map_err(log_err)?;
+            }
+
+            if snapshot_report_interval_secs != 0
+                && last_report_time.elapsed().as_secs() > snapshot_report_interval_secs
+            {
+                last_report_time = Instant::now();
+                crate::log_snapshot_progress(start_time.elapsed(), cnt as i64, nrows as i64);
             }
         }
 
