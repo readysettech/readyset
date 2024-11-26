@@ -32,6 +32,7 @@ use crate::db_util::DatabaseSchemas;
 use crate::mysql_connector::snapshot_type::SnapshotType;
 use crate::table_filter::TableFilter;
 use crate::TablesSnapshottingGaugeGuard;
+use std::collections::HashSet;
 
 const RS_BATCH_SIZE: usize = 1000; // How many queries to buffer before pushing to ReadySet
 
@@ -178,7 +179,7 @@ impl<'a> MySqlReplicator<'a> {
                 self.table_filter
                     .should_be_processed(schema.as_str(), table.as_str())
             });
-
+        self.drop_leftover_tables(noria, &replicated_tables).await?;
         noria
             .extend_recipe_no_leader_ready(ChangeList::from_changes(
                 non_replicated_tables
@@ -747,6 +748,48 @@ impl<'a> MySqlReplicator<'a> {
                 Dialect::DEFAULT_MYSQL,
             ))
             .await?;
+        Ok(())
+    }
+
+    /// This functions drops all tables that we have internally and have not been selected as
+    /// part of snapshot, normally because table filters have been changed.
+    ///
+    /// # Arguments
+    ///
+    /// * `noria`: The target ReadySet deployment
+    /// * `snapshot_tables`: The list of tables that are part of the snapshot
+    async fn drop_leftover_tables(
+        &mut self,
+        noria: &mut readyset_client::ReadySetHandle,
+        snapshot_tables: &[(String, String)],
+    ) -> ReadySetResult<()> {
+        let mut changes = Vec::new();
+        let current_tables = noria.tables().await?;
+        let snapshot_tables_set: HashSet<Relation> = snapshot_tables
+            .iter()
+            .map(|(schema, name)| Relation {
+                schema: Some(schema.clone().into()),
+                name: name.clone().into(),
+            })
+            .collect();
+
+        for table in current_tables.keys() {
+            if !snapshot_tables_set.contains(table) {
+                warn!(table = %table.display(nom_sql::Dialect::MySQL), "Dropping table that is not part of snapshot");
+                changes.push(Change::Drop {
+                    name: table.clone(),
+                    if_exists: false,
+                });
+            }
+        }
+        if !changes.is_empty() {
+            noria
+                .extend_recipe_no_leader_ready(ChangeList::from_changes(
+                    changes,
+                    Dialect::DEFAULT_MYSQL,
+                ))
+                .await?;
+        }
         Ok(())
     }
 }
