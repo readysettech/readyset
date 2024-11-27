@@ -1027,22 +1027,23 @@ impl NoriaConnector {
     ///
     /// Returns Ok(Some(id)) if CREATE CACHE CONCURRENTLY is issued, where id is a unique identifier
     /// that can be used to query the status of the migration. Otherwise, returns Ok(None) on
-    /// success and Err(_) on failure.
+    /// success and Err(_) on failure. The name parameter is always updated with a value of Some.
     pub async fn handle_create_cached_query(
         &mut self,
-        name: Option<&Relation>,
+        name: &mut Option<Relation>,
         statement: &nom_sql::SelectStatement,
         override_schema_search_path: Option<Vec<SqlIdentifier>>,
         always: bool,
         concurrently: bool,
     ) -> ReadySetResult<Option<u64>> {
-        let name = name
-            .cloned()
-            .unwrap_or_else(|| QueryId::from_select(statement, self.schema_search_path()).into());
+        *name =
+            Some(name.clone().unwrap_or_else(|| {
+                QueryId::from_select(statement, self.schema_search_path()).into()
+            }));
         let schema_search_path =
             override_schema_search_path.unwrap_or_else(|| self.schema_search_path.clone());
         let changelist = ChangeList::from_change(
-            Change::create_cache(name.clone(), statement.clone(), always),
+            Change::create_cache(name.clone().unwrap(), statement.clone(), always),
             self.dialect,
         )
         .with_schema_search_path(schema_search_path.clone());
@@ -1065,7 +1066,7 @@ impl NoriaConnector {
             self.view_name_cache
                 .insert(
                     ViewCreateRequest::new(statement.clone(), schema_search_path),
-                    name.clone(),
+                    name.clone().unwrap(),
                 )
                 .await;
 

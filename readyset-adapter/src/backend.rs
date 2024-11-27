@@ -1910,7 +1910,7 @@ where
     #[instrument(skip(self))]
     async fn create_cached_query(
         &mut self,
-        name: Option<&Relation>,
+        name: &mut Option<Relation>,
         mut stmt: SelectStatement,
         override_schema_search_path: Option<Vec<SqlIdentifier>>,
         always: bool,
@@ -2426,8 +2426,9 @@ where
                     None
                 };
 
+                let mut name = name.clone();
                 let res = self
-                    .create_cached_query(name.as_ref(), stmt, search_path, *always, *concurrently)
+                    .create_cached_query(&mut name, stmt, search_path, *always, *concurrently)
                     .await;
                 // The extend_recipe may have failed, in which case we should remove our intention
                 // to create this cache. Extend recipe waits a bit and then returns an
@@ -2448,8 +2449,11 @@ where
                             error!("Failed to remove stored 'create cache' request. It will be re-run if there is a backwards incompatible upgrade.");
                         }
                     }
-
-                    error!("Failed to create cache: {}", Sensitive(e));
+                    error!(
+                        name = %name.unwrap().display_unquoted(),
+                        "Failed to create cache: {}",
+                        e
+                    );
                 }
                 res
             }
