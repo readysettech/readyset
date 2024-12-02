@@ -684,13 +684,14 @@ fn unique(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8]
             whitespace1,
             alt((tag_no_case("key"), tag_no_case("index"))),
         ))(i)?;
-        let (i, _) = whitespace0(i)?;
-        let (i, index_name) = opt(dialect.identifier())(i)?;
-        let (i, _) = whitespace0(i)?;
-        let (i, columns) = delimited(
-            tag("("),
-            delimited(whitespace0, index_col_list(dialect), whitespace0),
-            tag(")"),
+        let (i, index_name) = opt(preceded(whitespace1, dialect.identifier()))(i)?;
+        let (i, columns) = preceded(
+            whitespace0,
+            delimited(
+                tag("("),
+                delimited(whitespace0, index_col_list(dialect), whitespace0),
+                tag(")"),
+            ),
         )(i)?;
         let (i, constraint_timing) = opt(preceded(whitespace0, deferrable(dialect)))(i)?;
         let constraint_timing = constraint_timing.unwrap_or(None);
