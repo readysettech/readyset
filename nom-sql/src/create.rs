@@ -680,11 +680,19 @@ fn unique(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8]
         let (i, constraint_name) = constraint_identifier(dialect)(i)?;
         let (i, _) = whitespace0(i)?;
         let (i, _) = tag_no_case("unique")(i)?;
-        let (i, _) = opt(preceded(
-            whitespace1,
-            alt((tag_no_case("key"), tag_no_case("index"))),
-        ))(i)?;
-        let (i, index_name) = opt(preceded(whitespace1, dialect.identifier()))(i)?;
+        let (i, _) = if dialect == Dialect::MySQL {
+            opt(preceded(
+                whitespace1,
+                alt((tag_no_case("key"), tag_no_case("index"))),
+            ))(i)?
+        } else {
+            (i, None)
+        };
+        let (i, index_name) = if dialect == Dialect::MySQL {
+            opt(preceded(whitespace1, dialect.identifier()))(i)?
+        } else {
+            (i, None)
+        };
         let (i, columns) = preceded(
             whitespace0,
             delimited(
@@ -2541,7 +2549,7 @@ mod tests {
             \"hat_id\" int,
             fulltext INDEX \"index_comments_on_comment\"  (\"comment\"),
             INDEX \"confidence_idx\"  (\"confidence\"),
-            UNIQUE INDEX \"short_id\"  (\"short_id\"),
+            UNIQUE (\"short_id\"),
             INDEX \"story_id_short_id\"  (\"story_id\", \"short_id\"),
             INDEX \"thread_id\"  (\"thread_id\"),
             INDEX \"index_comments_on_user_id\"  (\"user_id\"))
@@ -2579,7 +2587,7 @@ mod tests {
                             TableKey::UniqueKey {
                                 constraint_name: None,
                                 constraint_timing: None,
-                                index_name: Some("short_id".into()),
+                                index_name: None,
                                 columns: vec![Column::from("short_id")],
                                 index_type: None,
                             },

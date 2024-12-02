@@ -1323,14 +1323,14 @@ mod tests {
 
         #[test]
         fn parse_alter_add_constraint_unique_key() {
-            let (index_name, columns) = setup_alter_key();
-            let qstring = "ALTER TABLE t ADD CONSTRAINT c UNIQUE KEY key_name (t1.c1, t2.c2)";
+            let (_, columns) = setup_alter_key();
+            let qstring = "ALTER TABLE t ADD CONSTRAINT c UNIQUE (t1.c1, t2.c2)";
             check_add_constraint(
                 qstring,
                 TableKey::UniqueKey {
                     constraint_name: Some("c".into()),
                     constraint_timing: None,
-                    index_name,
+                    index_name: None,
                     columns,
                     index_type: None,
                 },
@@ -1339,16 +1339,15 @@ mod tests {
 
         #[test]
         fn parse_alter_add_constraint_unique_key_index_type() {
-            let (index_name, columns) = setup_alter_key();
+            let (_, columns) = setup_alter_key();
             let index_type = Some(IndexType::Hash);
-            let qstring =
-                "ALTER TABLE t ADD CONSTRAINT c UNIQUE KEY key_name (t1.c1, t2.c2) USING HASH";
+            let qstring = "ALTER TABLE t ADD CONSTRAINT c UNIQUE (t1.c1, t2.c2) USING HASH";
             check_add_constraint(
                 qstring,
                 TableKey::UniqueKey {
                     constraint_name: Some("c".into()),
                     constraint_timing: None,
-                    index_name,
+                    index_name: None,
                     columns,
                     index_type,
                 },
@@ -1358,12 +1357,12 @@ mod tests {
         #[test]
         fn parse_alter_add_constraint_unique_key_deferrable() {
             for q in [
-                r#"ALTER TABLE "t" ADD CONSTRAINT "c" UNIQUE KEY ("a")"#,
-                r#"ALTER TABLE "t" ADD CONSTRAINT "c" UNIQUE KEY ("a") DEFERRABLE"#,
-                r#"ALTER TABLE "t" ADD CONSTRAINT "c" UNIQUE KEY ("a") DEFERRABLE INITIALLY DEFERRED"#,
-                r#"ALTER TABLE "t" ADD CONSTRAINT "c" UNIQUE KEY ("a") DEFERRABLE INITIALLY IMMEDIATE"#,
-                r#"ALTER TABLE "t" ADD CONSTRAINT "c" UNIQUE KEY ("a") NOT DEFERRABLE"#,
-                r#"ALTER TABLE "t" ADD CONSTRAINT "c" UNIQUE KEY ("a") NOT DEFERRABLE INITIALLY IMMEDIATE"#,
+                r#"ALTER TABLE "t" ADD CONSTRAINT "c" UNIQUE ("a")"#,
+                r#"ALTER TABLE "t" ADD CONSTRAINT "c" UNIQUE ("a") DEFERRABLE"#,
+                r#"ALTER TABLE "t" ADD CONSTRAINT "c" UNIQUE ("a") DEFERRABLE INITIALLY DEFERRED"#,
+                r#"ALTER TABLE "t" ADD CONSTRAINT "c" UNIQUE ("a") DEFERRABLE INITIALLY IMMEDIATE"#,
+                r#"ALTER TABLE "t" ADD CONSTRAINT "c" UNIQUE ("a") NOT DEFERRABLE"#,
+                r#"ALTER TABLE "t" ADD CONSTRAINT "c" UNIQUE ("a") NOT DEFERRABLE INITIALLY IMMEDIATE"#,
             ] {
                 let r = test_parse!(alter_table_statement(Dialect::PostgreSQL), q.as_bytes());
                 assert_eq!(r.display(Dialect::PostgreSQL).to_string(), q);

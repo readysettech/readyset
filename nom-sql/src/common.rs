@@ -241,7 +241,11 @@ impl DialectDisplay for TableKey {
                     index_type,
                     ..
                 } => {
-                    write!(f, "UNIQUE KEY ")?;
+                    if dialect == Dialect::MySQL {
+                        write!(f, "UNIQUE KEY ")?;
+                    } else {
+                        write!(f, "UNIQUE ")?;
+                    }
                     if let Some(index_name) = index_name {
                         write!(f, "{} ", dialect.quote_identifier(index_name))?;
                     }
