@@ -238,7 +238,7 @@ impl MySqlBinlogConnector {
             info!(target: "replicator_statement", "{:?}", rotate_event);
         }
 
-        self.next_position = MySqlPosition::from_file_name_and_position(
+        let rotate_position = MySqlPosition::from_file_name_and_position(
             rotate_event.name().to_string(),
             rotate_event.position(),
         )
@@ -247,6 +247,15 @@ impl MySqlBinlogConnector {
                 "Failed to create MySqlPosition: {e}"
             )))
         })?;
+
+        // We are on this binlog already, no need to do anything
+        if self.next_position.binlog_file_suffix == rotate_position.binlog_file_suffix
+            && self.next_position.position == 0
+        {
+            return Ok(ReplicationAction::Empty);
+        }
+
+        self.next_position = rotate_position;
 
         Ok(ReplicationAction::LogPosition)
     }

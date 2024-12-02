@@ -17,7 +17,7 @@ pub struct MySqlPosition {
     /// The suffix of the binlog file name. This suffix is a sequence number that is used to order
     /// the binlog files chronologically. We store this suffx as an integer to implement
     /// [`PartialOrd`] for [`MySqlPosition`].
-    binlog_file_suffix: u32,
+    pub binlog_file_suffix: u32,
     /// The length of the binlog file name suffix in the original file name. Because we convert the
     /// file name from a string to an integer and because the suffix in that filename is padded
     /// with zeroes, we need to store the length of the suffix in order to reproduce the exact
