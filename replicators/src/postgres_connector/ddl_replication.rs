@@ -560,7 +560,8 @@ mod tests {
                                 constraint_timing: None,
                                 index_name: None,
                                 columns: vec!["value".into()],
-                                index_type: None
+                                index_type: None,
+                                nulls_distinct: None,
                             })
                         }
                     ]

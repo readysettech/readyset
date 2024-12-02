@@ -19,8 +19,8 @@ use test_strategy::Arbitrary;
 use crate::column::{column_specification, Column, ColumnSpecification};
 use crate::common::{
     column_identifier_no_alias, debug_print, if_not_exists, parse_fallible, statement_terminator,
-    until_statement_terminator, ws_sep_comma, ConstraintTiming, IndexType, ReferentialAction,
-    TableKey,
+    until_statement_terminator, ws_sep_comma, ConstraintTiming, IndexType, NullsDistinct,
+    ReferentialAction, TableKey,
 };
 use crate::compound_select::{nested_compound_selection, CompoundSelectStatement};
 use crate::create_table_options::{
@@ -612,6 +612,32 @@ fn foreign_key(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<
     }
 }
 
+fn nulls_distinct(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Option<NullsDistinct>> {
+    move |i| {
+        if dialect != Dialect::PostgreSQL {
+            return Ok((i, None));
+        }
+        alt((
+            move |i| {
+                let (i, _) = tag_no_case("nulls")(i)?;
+                let (i, _) = whitespace1(i)?;
+                let (i, _) = tag_no_case("distinct")(i)?;
+                Ok((i, Some(NullsDistinct::Distinct)))
+            },
+            move |i| {
+                let (i, _) = tag_no_case("nulls")(i)?;
+                let (i, _) = whitespace1(i)?;
+                let (i, _) = tag_no_case("not")(i)?;
+                let (i, _) = whitespace1(i)?;
+                let (i, _) = tag_no_case("distinct")(i)?;
+                Ok((i, Some(NullsDistinct::NotDistinct)))
+            },
+        ))(i)
+    }
+}
+
 fn deferrable(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Option<ConstraintTiming>> {
@@ -693,6 +719,8 @@ fn unique(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8]
         } else {
             (i, None)
         };
+        let (i, nulls_distinct) = opt(preceded(whitespace1, nulls_distinct(dialect)))(i)?;
+        let nulls_distinct = nulls_distinct.unwrap_or(None);
         let (i, columns) = preceded(
             whitespace0,
             delimited(
@@ -714,6 +742,7 @@ fn unique(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8]
                 index_name,
                 columns,
                 index_type,
+                nulls_distinct,
             },
         ))
     }
@@ -1363,7 +1392,8 @@ mod tests {
                         constraint_timing: None,
                         index_name: Some("id_k".into()),
                         columns: vec![Column::from("id")],
-                        index_type: None
+                        index_type: None,
+                        nulls_distinct: None,
                     },]),
                 }),
                 options: Ok(vec![])
@@ -2076,7 +2106,8 @@ mod tests {
                                 constraint_timing: None,
                                 index_name: Some("short_id".into()),
                                 columns: vec![Column::from("short_id")],
-                                index_type: None
+                                index_type: None,
+                                nulls_distinct: None,
                             },
                             TableKey::Key {
                                 constraint_name: None,
@@ -2590,6 +2621,7 @@ mod tests {
                                 index_name: None,
                                 columns: vec![Column::from("short_id")],
                                 index_type: None,
+                                nulls_distinct: None,
                             },
                             TableKey::Key {
                                 constraint_name: None,
@@ -2816,6 +2848,7 @@ mod tests {
                             index_name: Some("access_tokens_token_unique".into()),
                             columns: vec!["token".into()],
                             index_type: None,
+                            nulls_distinct: None,
                         },
                         TableKey::Key {
                             constraint_name: None,

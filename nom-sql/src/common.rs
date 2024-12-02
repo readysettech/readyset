@@ -100,6 +100,25 @@ impl Display for ConstraintTiming {
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
+pub enum NullsDistinct {
+    Distinct,
+    NotDistinct,
+}
+
+impl Display for NullsDistinct {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                NullsDistinct::Distinct => "NULLS DISTINCT",
+                NullsDistinct::NotDistinct => "NULLS NOT DISTINCT",
+            }
+        )
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum TableKey {
     PrimaryKey {
         constraint_name: Option<SqlIdentifier>,
@@ -113,6 +132,7 @@ pub enum TableKey {
         index_name: Option<SqlIdentifier>,
         columns: Vec<Column>,
         index_type: Option<IndexType>,
+        nulls_distinct: Option<NullsDistinct>,
     },
     FulltextKey {
         index_name: Option<SqlIdentifier>,
@@ -239,6 +259,7 @@ impl DialectDisplay for TableKey {
                     index_name,
                     columns,
                     index_type,
+                    nulls_distinct,
                     ..
                 } => {
                     if dialect == Dialect::MySQL {
@@ -248,6 +269,9 @@ impl DialectDisplay for TableKey {
                     }
                     if let Some(index_name) = index_name {
                         write!(f, "{} ", dialect.quote_identifier(index_name))?;
+                    }
+                    if let Some(nulls_distinct) = nulls_distinct {
+                        write!(f, "{} ", nulls_distinct)?;
                     }
                     write!(
                         f,

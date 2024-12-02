@@ -880,6 +880,7 @@ pub fn walk_table_key<'a, V: VisitorMut<'a>>(
             index_name,
             columns,
             index_type: _,
+            nulls_distinct: _,
         } => {
             if let Some(constraint_name) = constraint_name {
                 visitor.visit_sql_identifier(constraint_name)?;

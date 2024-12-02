@@ -206,6 +206,7 @@ mod tests {
                 constraint_timing: None,
                 columns: vec![col4.column],
                 index_type: None,
+                nulls_distinct: None,
             },
             TableKey::PrimaryKey {
                 index_name: None,
@@ -352,6 +353,7 @@ mod tests {
             index_name: None,
             columns: vec![col1, col2],
             index_type: None,
+            nulls_distinct: None,
         }]);
         base_schema.get_mut(&Relation::from("t")).unwrap().keys = keys;
         assert_eq!(

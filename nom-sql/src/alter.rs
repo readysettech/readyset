@@ -1333,6 +1333,7 @@ mod tests {
                     index_name: None,
                     columns,
                     index_type: None,
+                    nulls_distinct: None,
                 },
             );
         }
@@ -1350,8 +1351,22 @@ mod tests {
                     index_name: None,
                     columns,
                     index_type,
+                    nulls_distinct: None,
                 },
             );
+        }
+
+        #[test]
+        fn parse_alter_add_constraint_unique_key_nulls_distinct() {
+            for q in [
+                r#"ALTER TABLE "t" ADD CONSTRAINT "c" UNIQUE ("a")"#,
+                r#"ALTER TABLE "t" ADD CONSTRAINT "c" UNIQUE NULLS DISTINCT ("a")"#,
+                r#"ALTER TABLE "t" ADD CONSTRAINT "c" UNIQUE NULLS NOT DISTINCT ("a")"#,
+            ] {
+                let r = test_parse!(alter_table_statement(Dialect::PostgreSQL), q.as_bytes());
+                assert_eq!(r.display(Dialect::PostgreSQL).to_string(), q);
+                test_parse_expect_err!(alter_table_statement(Dialect::MySQL), q.as_bytes());
+            }
         }
 
         #[test]
