@@ -18,3 +18,4 @@ docker-compose.override.yml
 *.auth
 .readyset-history
 readyset-compose.yml
+readyset.tmp/
