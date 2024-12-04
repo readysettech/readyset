@@ -466,6 +466,20 @@ mod tests {
                     .prop_map(|(date, time)| NaiveDateTime::new(date, time))
             }
 
+            // We set a lower bound on the year to avoid generating timestamps that are
+            // before every(?) timezone moved off the LocalMeanTime (LMT) standard, which seems to
+            // have been around 1929 (according to tzdata). LMT has rather "esoteric" offsets,
+            // so we filter out any timestamps that don't have an unambiguous local time.
+            fn arbitrary_naive_date_time_non_lmt() -> impl Strategy<Value = NaiveDateTime> {
+                (
+                    // We limit to the year 2099 because of a standing bug in chrono-tz. See this
+                    // Github issue for more info: https://github.com/chronotope/chrono-tz/issues/155
+                    arbitrary_naive_date_in_range(1929..=2099),
+                    arbitrary_naive_time(),
+                )
+                    .prop_map(|(date, time)| NaiveDateTime::new(date, time))
+            }
+
             #[test]
             fn test_write_date() {
                 let client = RefCell::new(config().connect(NoTls).unwrap());
@@ -666,10 +680,14 @@ mod tests {
 
                 fn arbitrary_naive_date_time_and_timezone(
                 ) -> impl Strategy<Value = (NaiveDateTime, Tz)> {
-                    (arbitrary_naive_date_time(), arbitrary_stable_timezone()).prop_filter(
-                        "the time must be representable in the generated timezone",
-                        |(ts, tz)| matches!(ts.and_local_timezone(*tz), LocalResult::Single(_)),
+                    (
+                        arbitrary_naive_date_time_non_lmt(),
+                        arbitrary_stable_timezone(),
                     )
+                        .prop_filter(
+                            "the time must be representable in the generated timezone",
+                            |(ts, tz)| matches!(ts.and_local_timezone(*tz), LocalResult::Single(_)),
+                        )
                 }
 
                 let client = RefCell::new(config().connect(NoTls).unwrap());
