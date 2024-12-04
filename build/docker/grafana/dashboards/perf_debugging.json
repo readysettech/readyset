@@ -680,7 +680,7 @@
             "disableTextWrap": false,
             "editorMode": "builder",
             "exemplar": true,
-            "expr": "readyset_controller_rpc_request_time_us{quantile=\"1\", deployment=~\"$deployment\"}",
+            "expr": "readyset_controller_rpc_request_time_us{quantile=~\"1|1.0\", deployment=~\"$deployment\"}",
             "format": "time_series",
             "fullMetaSearch": false,
             "includeNullMetadata": true,
@@ -1473,6 +1473,6 @@
     "timezone": "",
     "title": "Perf Debugging",
     "uid": "perf_debugging",
-    "version": 6,
+    "version": 7,
     "weekStart": ""
 }
