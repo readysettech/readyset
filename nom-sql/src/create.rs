@@ -31,7 +31,7 @@ use crate::order::{order_type, OrderType};
 use crate::select::{selection, SelectStatement};
 use crate::table::{relation, Relation};
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, DialectDisplay, NomSqlError, NomSqlResult, SqlIdentifier};
+use crate::{ColumnConstraint, Dialect, DialectDisplay, NomSqlError, NomSqlResult, SqlIdentifier};
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, Arbitrary)]
 pub enum CharsetName {
@@ -856,7 +856,7 @@ pub fn create_table(
         let (i, _) = whitespace0(i)?;
 
         let (i, _) = tag("(")(i)?;
-        let (i, body) = parse_fallible(
+        let (i, mut body) = parse_fallible(
             create_table_body(dialect),
             map(is_not(")"), |r: LocatedSpan<&[u8]>| *r),
         )(i)?;
@@ -865,6 +865,7 @@ pub fn create_table(
         let (i, options) = parse_fallible(table_options(dialect), until_statement_terminator)(i)?;
         let (i, _) = statement_terminator(i)?;
 
+        propagate_default_charset(dialect, &mut body, &options);
         Ok((
             i,
             CreateTableStatement {
@@ -874,6 +875,50 @@ pub fn create_table(
                 options,
             },
         ))
+    }
+}
+
+fn propagate_default_charset(
+    dialect: Dialect,
+    body: &mut Result<CreateTableBody, String>,
+    options: &Result<Vec<CreateTableOption>, String>,
+) {
+    if let Dialect::MySQL = dialect {
+        // MySQL omits column collation if they are default. Now that we have parsed it, propagate them back to the columns
+        let default_charset = options.as_ref().ok().and_then(|opts| {
+            opts.iter().find_map(|opt| match opt {
+                CreateTableOption::Charset(cs) => Some(cs),
+                _ => None,
+            })
+        });
+        let default_collation = options.as_ref().ok().and_then(|opts| {
+            opts.iter().find_map(|opt| match opt {
+                CreateTableOption::Collate(cs) => Some(cs),
+                _ => None,
+            })
+        });
+
+        if let Ok(ref mut body) = body {
+            for field in &mut body.fields {
+                if !field.sql_type.is_any_text() {
+                    continue;
+                }
+                if field.get_charset().is_none() {
+                    if let Some(charset) = default_charset {
+                        field
+                            .constraints
+                            .push(ColumnConstraint::CharacterSet(charset.clone().to_string()));
+                    }
+                }
+                if field.get_collation().is_none() {
+                    if let Some(collation) = default_collation {
+                        field
+                            .constraints
+                            .push(ColumnConstraint::Collation(collation.clone().to_string()));
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1902,7 +1947,7 @@ mod tests {
             // TODO(malte): INTEGER isn't quite reflected right here, perhaps
             let expected = "CREATE TABLE `auth_group` (\
                         `id` INT AUTO_INCREMENT NOT NULL PRIMARY KEY, \
-                        `name` VARCHAR(80) NOT NULL UNIQUE) \
+                        `name` VARCHAR(80) NOT NULL UNIQUE CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci) \
                         ENGINE=InnoDB, AUTO_INCREMENT=495209, DEFAULT CHARSET=utf8mb4, COLLATE=utf8mb4_unicode_ci";
             let res = create_table(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(res.unwrap().1.display(Dialect::MySQL).to_string(), expected);
@@ -2784,7 +2829,8 @@ mod tests {
                             SqlType::VarChar(Some(40)),
                             vec![
                                 ColumnConstraint::Collation("utf8mb4_unicode_ci".into()),
-                                ColumnConstraint::NotNull
+                                ColumnConstraint::NotNull,
+                                ColumnConstraint::CharacterSet("utf8mb4".into())
                             ]
                         ),
                         ColumnSpecification::with_constraints(
@@ -2808,6 +2854,7 @@ mod tests {
                             vec![
                                 ColumnConstraint::Collation("utf8mb4_unicode_ci".into()),
                                 ColumnConstraint::NotNull,
+                                ColumnConstraint::CharacterSet("utf8mb4".into())
                             ]
                         ),
                         ColumnSpecification::with_constraints(
@@ -2816,6 +2863,7 @@ mod tests {
                             vec![
                                 ColumnConstraint::Collation("utf8mb4_unicode_ci".into()),
                                 ColumnConstraint::DefaultValue(Expr::Literal(Literal::Null)),
+                                ColumnConstraint::CharacterSet("utf8mb4".into())
                             ]
                         ),
                         ColumnSpecification::with_constraints(
@@ -2824,6 +2872,7 @@ mod tests {
                             vec![
                                 ColumnConstraint::Collation("utf8mb4_unicode_ci".into()),
                                 ColumnConstraint::DefaultValue(Expr::Literal(Literal::Null)),
+                                ColumnConstraint::CharacterSet("utf8mb4".into())
                             ]
                         ),
                         ColumnSpecification::with_constraints(
@@ -2832,6 +2881,7 @@ mod tests {
                             vec![
                                 ColumnConstraint::Collation("utf8mb4_unicode_ci".into()),
                                 ColumnConstraint::DefaultValue(Expr::Literal(Literal::Null)),
+                                ColumnConstraint::CharacterSet("utf8mb4".into())
                             ]
                         ),
                     ],
@@ -3049,5 +3099,59 @@ PRIMARY KEY (`id`));";
                 options: Ok(vec![]),
             }
         )
+    }
+
+    #[test]
+    fn propagate_charset() {
+        let qstring = b"CREATE TABLE `t` (
+  `id` int,
+  `name` varchar(20),
+  `name2` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci";
+
+        let res = test_parse!(create_table(Dialect::MySQL), qstring);
+
+        assert_eq!(
+            res,
+            CreateTableStatement {
+                if_not_exists: false,
+                table: "t".into(),
+                body: Ok(CreateTableBody {
+                    fields: vec![
+                        ColumnSpecification::new("id".into(), SqlType::Int(None)),
+                        ColumnSpecification::with_constraints(
+                            "name".into(),
+                            SqlType::VarChar(Some(20)),
+                            vec![
+                                ColumnConstraint::CharacterSet("utf8mb4".into()),
+                                ColumnConstraint::Collation("utf8mb4_0900_ai_ci".into()),
+                            ],
+                        ),
+                        ColumnSpecification::with_constraints(
+                            "name2".into(),
+                            SqlType::VarChar(Some(20)),
+                            vec![
+                                ColumnConstraint::CharacterSet("utf8mb4".into()),
+                                ColumnConstraint::Collation("utf8mb4_0900_as_cs".into()),
+                            ],
+                        ),
+                    ],
+                    keys: Some(vec![TableKey::PrimaryKey {
+                        constraint_name: None,
+                        constraint_timing: None,
+                        index_name: None,
+                        columns: vec!["id".into()]
+                    }]),
+                }),
+                options: Ok(vec![
+                    CreateTableOption::Engine(Some("InnoDB".to_string())),
+                    CreateTableOption::Charset(CharsetName::Unquoted("utf8mb4".into())),
+                    CreateTableOption::Collate(CollationName::Unquoted(
+                        "utf8mb4_0900_ai_ci".into()
+                    ))
+                ]),
+            }
+        );
     }
 }
