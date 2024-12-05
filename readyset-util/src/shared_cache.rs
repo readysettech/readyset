@@ -227,7 +227,7 @@ where
 
     /// Return the *key* associated with the given value within either the local, or the shared
     /// versions of this cache. O(size), and performs no memoization
-    pub async fn key_for_val<'a, U>(&'a self, val: &U) -> Option<K>
+    pub async fn key_for_val<U>(&self, val: &U) -> Option<K>
     where
         V: PartialEq<U>,
         K: Clone,

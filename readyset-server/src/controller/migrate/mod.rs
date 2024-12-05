@@ -342,7 +342,7 @@ pub struct MigrationPlan<'df> {
     dmp: DomainMigrationPlan,
 }
 
-impl<'df> MigrationPlan<'df> {
+impl MigrationPlan<'_> {
     /// Apply the migration plan to the provided `Leader`.
     ///
     /// If the plan fails, the `Leader`'s state is left unchanged; however, no attempt

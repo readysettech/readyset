@@ -28,8 +28,8 @@ impl PostgresStorage {
         Ok(PostgresStorage { client })
     }
 
-    async fn write_session<'a>(
-        client: &Transaction<'a>,
+    async fn write_session(
+        client: &Transaction<'_>,
         session: &BenchSession,
     ) -> anyhow::Result<BenchSessionId> {
         let query = r#"
@@ -53,8 +53,8 @@ impl PostgresStorage {
         Ok(session_id)
     }
 
-    async fn write_aggregate<'a>(
-        client: &Transaction<'a>,
+    async fn write_aggregate(
+        client: &Transaction<'_>,
         session_id: BenchSessionId,
         metric: &str,
         unit: &str,
