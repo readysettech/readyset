@@ -71,7 +71,7 @@ mod column;
 mod comment;
 mod common;
 mod compound_select;
-mod create;
+pub mod create;
 mod create_table_options;
 mod deallocate;
 mod delete;
