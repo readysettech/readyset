@@ -251,7 +251,10 @@ impl<U> UpstreamDatabase for LazyUpstream<U>
 where
     U: UpstreamDatabase,
 {
-    type QueryResult<'a> = U::QueryResult<'a> where U: 'a;
+    type QueryResult<'a>
+        = U::QueryResult<'a>
+    where
+        U: 'a;
     type StatementMeta = U::StatementMeta;
     type PrepareData<'a> = U::PrepareData<'a>;
     type ExecMeta<'a> = U::ExecMeta<'a>;
