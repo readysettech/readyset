@@ -78,7 +78,7 @@ impl<'a> Plan<'a> {
         dmp: &'a mut DomainMigrationPlan,
     ) -> Plan<'a> {
         let partial = m.partial.contains(&node);
-        let has_paths = m.paths.get(&node).map_or(false, |paths| !paths.is_empty());
+        let has_paths = m.paths.get(&node).is_some_and(|paths| !paths.is_empty());
         Plan {
             m,
             graph,

@@ -682,7 +682,7 @@ impl Value {
         match other.typ() {
             None => *self == Value::Null,
             Some(typ) => Self::from_mysql_value_with_type(mysql_async::Value::from(self), &typ)
-                .map_or(false, |v| v == *other),
+                .is_ok_and(|v| v == *other),
         }
     }
 }

@@ -774,8 +774,8 @@ impl ModelState for DDLModelState {
                 // row that we're trying to write:
                 self.pkeys
                     .get(table)
-                    .map_or(false, |table_keys| !table_keys.contains(pkey))
-                    && self.tables.get(table).map_or(false, |table_cols| {
+                    .is_some_and(|table_keys| !table_keys.contains(pkey))
+                    && self.tables.get(table).is_some_and(|table_cols| {
                         // Must compare lengths before zipping and comparing individual types
                         // because zip will drop elements if the Vec lengths don't match up:
                         table_cols.len() == col_types.len()
@@ -789,7 +789,7 @@ impl ModelState for DDLModelState {
                                 SqlType::Other(enum_name) => self
                                     .enum_types
                                     .get(&enum_name.name.to_string())
-                                    .map_or(false, |enum_values| {
+                                    .is_some_and(|enum_values| {
                                         enum_values.contains(&cv.as_str().unwrap().to_string())
                                     }),
                                 _ => true,
@@ -799,20 +799,20 @@ impl ModelState for DDLModelState {
             Operation::DeleteRow(table, key) => self
                 .pkeys
                 .get(table)
-                .map_or(false, |table_keys| table_keys.contains(key)),
+                .is_some_and(|table_keys| table_keys.contains(key)),
             Operation::AddColumn(table, column_spec) => self
                 .tables
                 .get(table)
-                .map_or(false, |t| t.iter().all(|cs| cs.name != *column_spec.name)),
+                .is_some_and(|t| t.iter().all(|cs| cs.name != *column_spec.name)),
             Operation::DropColumn(table, col_name) => self
                 .tables
                 .get(table)
-                .map_or(false, |t| t.iter().any(|cs| cs.name == *col_name)),
+                .is_some_and(|t| t.iter().any(|cs| cs.name == *col_name)),
             Operation::AlterColumnName {
                 table,
                 col_name,
                 new_name,
-            } => self.tables.get(table).map_or(false, |t| {
+            } => self.tables.get(table).is_some_and(|t| {
                 t.iter().any(|cs| cs.name == *col_name) && t.iter().all(|cs| cs.name != *new_name)
             }),
             Operation::CreateSimpleView { name, table_source } => {
@@ -837,15 +837,16 @@ impl ModelState for DDLModelState {
             } => self
                 .enum_types
                 .get(type_name)
-                .map_or(false, |t| !t.contains(value_name)),
+                .is_some_and(|t| !t.contains(value_name)),
             Operation::InsertEnumValue {
                 type_name,
                 value_name,
                 next_to_value,
                 ..
-            } => self.enum_types.get(type_name).map_or(false, |t| {
-                t.contains(next_to_value) && !t.contains(value_name)
-            }),
+            } => self
+                .enum_types
+                .get(type_name)
+                .is_some_and(|t| t.contains(next_to_value) && !t.contains(value_name)),
             Operation::RenameEnumValue {
                 type_name,
                 value_name,
@@ -853,7 +854,7 @@ impl ModelState for DDLModelState {
             } => self
                 .enum_types
                 .get(type_name)
-                .map_or(false, |t| t.contains(value_name) && !t.contains(new_name)),
+                .is_some_and(|t| t.contains(value_name) && !t.contains(new_name)),
             // Even if the key is shrunk out, evicting it is a no-op, so we don't need to worry
             // about preconditions at all for evictions:
             Operation::Evict { .. } => true,

@@ -233,7 +233,7 @@ impl ReplayPaths {
     {
         self.generated_columns
             .get(node)
-            .map_or(false, |by_cols| by_cols.contains_key(columns))
+            .is_some_and(|by_cols| by_cols.contains_key(columns))
     }
 
     /// Return a list of all replay paths that pass through `from` into `node`, represented as the

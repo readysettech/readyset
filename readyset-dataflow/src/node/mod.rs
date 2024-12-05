@@ -318,12 +318,12 @@ impl Node {
     /// Returns true if this operator requires a full materialization
     pub fn requires_full_materialization(&self) -> bool {
         self.as_internal()
-            .map_or(false, Ingredient::requires_full_materialization)
+            .is_some_and(Ingredient::requires_full_materialization)
     }
 
     pub fn can_query_through(&self) -> bool {
         self.as_internal()
-            .map_or(false, Ingredient::can_query_through)
+            .is_some_and(Ingredient::can_query_through)
     }
 
     pub fn is_join(&self) -> ReadySetResult<bool> {
@@ -669,7 +669,7 @@ impl Node {
     }
 
     pub fn is_reader_for(&self, ni: NodeIndex) -> bool {
-        self.as_reader().map_or(false, |r| r.is_for() == ni)
+        self.as_reader().is_some_and(|r| r.is_for() == ni)
     }
 
     pub fn is_ingress(&self) -> bool {

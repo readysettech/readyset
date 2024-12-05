@@ -234,7 +234,7 @@ where
         K: Borrow<Q>,
         Q: Ord + Hash + ?Sized,
     {
-        self.enter().map_or(false, |x| x.contains_key(key))
+        self.enter().is_ok_and(|x| x.contains_key(key))
     }
 
     /// Read all values in the map, and transform them into a new collection.

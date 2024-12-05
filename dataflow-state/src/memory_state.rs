@@ -1213,11 +1213,11 @@ mod tests {
                         // Make sure we have a strict index with this tag, and then make sure that
                         // the hole hasn't already been filled, since we would never trigger a
                         // replay to a filled hole:
-                        self.strict_indexes.get(tag).map_or(false, |index| {
+                        self.strict_indexes.get(tag).is_some_and(|index| {
                             !self
                                 .filled_holes
                                 .get(index)
-                                .map_or(false, |filled| filled.contains(key))
+                                .is_some_and(|filled| filled.contains(key))
                         })
                     }
                     Operation::DeleteRow(row) => self.rows.contains(row),

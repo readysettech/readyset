@@ -293,7 +293,7 @@ where
                     if deps.iter().all(|dep| {
                         self.rows
                             .get(dep)
-                            .map_or(false, |dep_rows| !dep_rows.is_empty())
+                            .is_some_and(|dep_rows| !dep_rows.is_empty())
                     }) {
                         Some(*table)
                     } else {
@@ -367,7 +367,7 @@ where
             | Operation::Delete { table, row } => self
                 .rows
                 .get(table)
-                .map_or(false, |table_rows| table_rows.contains(row)),
+                .is_some_and(|table_rows| table_rows.contains(row)),
             // Can always insert any row or query any key or request an eviction and we shouldn't
             // error out
             Operation::Insert { .. } | Operation::Query { .. } | Operation::Evict { .. } => true,

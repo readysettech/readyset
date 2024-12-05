@@ -569,8 +569,8 @@ impl ModelState for DDLModelState {
                 // row that we're trying to write:
                 self.pkeys
                     .get(table)
-                    .map_or(false, |table_keys| !table_keys.contains(pkey))
-                    && self.tables.get(table).map_or(false, |table_cols| {
+                    .is_some_and(|table_keys| !table_keys.contains(pkey))
+                    && self.tables.get(table).is_some_and(|table_cols| {
                         // Must compare lengths before zipping and comparing individual types
                         // because zip will drop elements if the Vec lengths don't match up:
                         table_cols.len() == col_types.len()
@@ -584,20 +584,20 @@ impl ModelState for DDLModelState {
             Operation::DeleteRow(table, key) => self
                 .pkeys
                 .get(table)
-                .map_or(false, |table_keys| table_keys.contains(key)),
+                .is_some_and(|table_keys| table_keys.contains(key)),
             Operation::AddColumn(table, column_spec) => self
                 .tables
                 .get(table)
-                .map_or(false, |t| t.iter().all(|cs| cs.name != *column_spec.name)),
+                .is_some_and(|t| t.iter().all(|cs| cs.name != *column_spec.name)),
             Operation::DropColumn(table, col_name) => self
                 .tables
                 .get(table)
-                .map_or(false, |t| t.iter().any(|cs| cs.name == *col_name)),
+                .is_some_and(|t| t.iter().any(|cs| cs.name == *col_name)),
             Operation::AlterColumnName {
                 table,
                 col_name,
                 new_name,
-            } => self.tables.get(table).map_or(false, |t| {
+            } => self.tables.get(table).is_some_and(|t| {
                 t.iter().any(|cs| cs.name == *col_name) && t.iter().all(|cs| cs.name != *new_name)
             }),
             Operation::CreateSimpleView { name, table_source } => {

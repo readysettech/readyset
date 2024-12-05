@@ -562,7 +562,7 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
             || self
                 .shim
                 .password_for_username(&username)
-                .map_or(false, |password| {
+                .is_some_and(|password| {
                     let expected = hash_password(&password, &auth_data);
                     let actual = handshake_password.as_slice();
                     trace!(?expected, ?actual);
@@ -641,7 +641,7 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
                     }
                     let plain_password = self.shim.password_for_username(&username);
                     let auth_success = !self.shim.require_authentication()
-                        || plain_password.as_ref().map_or(false, |password| {
+                        || plain_password.as_ref().is_some_and(|password| {
                             let expected = hash_password(password, &self.auth_data);
                             let actual = authpassword.as_slice();
                             trace!(?expected, ?actual);
