@@ -164,6 +164,30 @@ impl ColumnSpecification {
             _ => None,
         })
     }
+
+    /// Returns the character set for the column, if one is set.
+    pub fn get_charset(&self) -> Option<&str> {
+        // Character set is a constraint in Text fields only
+        if !self.sql_type.is_any_text() {
+            return None;
+        }
+        self.constraints.iter().find_map(|c| match c {
+            ColumnConstraint::CharacterSet(ref charset) => Some(charset.as_str()),
+            _ => None,
+        })
+    }
+
+    /// Returns the collation for the column, if one is set.
+    pub fn get_collation(&self) -> Option<&str> {
+        // Collation is a constraint in Text fields only
+        if !self.sql_type.is_any_text() {
+            return None;
+        }
+        self.constraints.iter().find_map(|c| match c {
+            ColumnConstraint::Collation(ref collation) => Some(collation.as_str()),
+            _ => None,
+        })
+    }
 }
 
 impl DialectDisplay for ColumnSpecification {
