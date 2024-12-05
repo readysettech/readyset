@@ -47,7 +47,7 @@ where
     }
 }
 
-impl<'a, T> DialectDisplay for CommaSeparatedList<'a, T>
+impl<T> DialectDisplay for CommaSeparatedList<'_, T>
 where
     T: DialectDisplay,
 {

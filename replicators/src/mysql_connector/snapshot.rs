@@ -137,7 +137,7 @@ fn tx_opts() -> TxOpts {
     tx_opts
 }
 
-impl<'a> MySqlReplicator<'a> {
+impl MySqlReplicator<'_> {
     /// Load all the `CREATE TABLE` statements for the tables in the MySQL database. Returns the the
     /// transaction that holds the DDL locks for the tables and the Vector of tables that requires
     /// snapshot.

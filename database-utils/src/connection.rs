@@ -679,7 +679,7 @@ pub enum Transaction<'a> {
     PostgresPool(deadpool_postgres::Transaction<'a>),
 }
 
-impl<'a> QueryableConnection for Transaction<'a> {
+impl QueryableConnection for Transaction<'_> {
     async fn query_drop<Q>(&mut self, stmt: Q) -> Result<(), DatabaseError>
     where
         Q: AsQuery + AsRef<str> + Send + Sync,
@@ -785,7 +785,7 @@ impl<'a> QueryableConnection for Transaction<'a> {
     }
 }
 
-impl<'a> Transaction<'a> {
+impl Transaction<'_> {
     /// Consumes the transaction, committing the operations.
     pub async fn commit(self) -> Result<(), DatabaseError> {
         match self {

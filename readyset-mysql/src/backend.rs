@@ -378,8 +378,8 @@ macro_rules! handle_error {
     };
 }
 
-async fn handle_readyset_result<'a, W>(
-    result: noria_connector::QueryResult<'a>,
+async fn handle_readyset_result<W>(
+    result: noria_connector::QueryResult<'_>,
     writer: QueryResultWriter<'_, W>,
 ) -> io::Result<()>
 where
@@ -427,8 +427,8 @@ where
     }
 }
 
-async fn handle_upstream_result<'a, W>(
-    result: upstream::QueryResult<'a>,
+async fn handle_upstream_result<W>(
+    result: upstream::QueryResult<'_>,
     writer: QueryResultWriter<'_, W>,
 ) -> io::Result<()>
 where
@@ -478,8 +478,8 @@ where
     }
 }
 
-async fn handle_execute_result<'a, W>(
-    result: Result<QueryResult<'a, LazyUpstream<MySqlUpstream>>, Error>,
+async fn handle_execute_result<W>(
+    result: Result<QueryResult<'_, LazyUpstream<MySqlUpstream>>, Error>,
     writer: QueryResultWriter<'_, W>,
 ) -> io::Result<()>
 where
@@ -504,8 +504,8 @@ where
     }
 }
 
-async fn handle_query_result<'a, W>(
-    result: Result<QueryResult<'a, LazyUpstream<MySqlUpstream>>, Error>,
+async fn handle_query_result<W>(
+    result: Result<QueryResult<'_, LazyUpstream<MySqlUpstream>>, Error>,
     writer: QueryResultWriter<'_, W>,
 ) -> QueryResultsResponse
 where
