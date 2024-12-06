@@ -359,7 +359,7 @@ impl BackendBuilder {
             last_query: None,
             state: BackendState {
                 proxy_state,
-                parsed_query_cache: LruCache::new(10_000.try_into().expect("10000 is not 0")),
+                parsed_query_cache: LruCache::new(1000.try_into().expect("1000 is not 0")),
                 prepared_statements: Default::default(),
                 query_status_cache,
                 ticket: self.ticket,
