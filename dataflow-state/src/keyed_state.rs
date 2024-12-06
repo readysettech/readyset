@@ -10,6 +10,7 @@ use vec1::Vec1;
 
 use crate::mk_key::MakeKey;
 use crate::{Misses, PointKey, RangeKey, Row, Rows};
+use readyset_util::maybe_shrink;
 
 /// A map containing a single index into the state of a node.
 ///
@@ -471,39 +472,37 @@ impl KeyedState {
     // For correct eviction we care about the number of elements present in the map, not intervals,
     // therefore have to compare len to 0
     pub(super) fn evict_with_seed(&mut self, seed: usize) -> Option<(Rows, Vec<DfValue>)> {
+        macro_rules! evict_hash {
+            ($m: expr, $seed: expr) => {{
+                if $m.is_empty() {
+                    return None;
+                }
+                let index = $seed % $m.len();
+                let rows = $m
+                    .swap_remove_index(index)
+                    .map(|(k, rs)| (rs, k.into_elements().collect()));
+                maybe_shrink!($m);
+                rows
+            }};
+        }
+
         let (rs, key) = match *self {
             KeyedState::SingleHash(ref mut m) if !m.is_empty() => {
                 let index = seed % m.len();
-                m.swap_remove_index(index).map(|(k, rs)| (rs, vec![k]))
+                let rows = m.swap_remove_index(index).map(|(k, rs)| (rs, vec![k]));
+                maybe_shrink!(m);
+                rows
             }
-            KeyedState::DoubleHash(ref mut m) if !m.is_empty() => {
-                let index = seed % m.len();
-                m.swap_remove_index(index)
-                    .map(|(k, rs)| (rs, k.into_elements().collect()))
-            }
-            KeyedState::TriHash(ref mut m) if !m.is_empty() => {
-                let index = seed % m.len();
-                m.swap_remove_index(index)
-                    .map(|(k, rs)| (rs, k.into_elements().collect()))
-            }
-            KeyedState::QuadHash(ref mut m) if !m.is_empty() => {
-                let index = seed % m.len();
-                m.swap_remove_index(index)
-                    .map(|(k, rs)| (rs, k.into_elements().collect()))
-            }
-            KeyedState::QuinHash(ref mut m) if !m.is_empty() => {
-                let index = seed % m.len();
-                m.swap_remove_index(index)
-                    .map(|(k, rs)| (rs, k.into_elements().collect()))
-            }
-            KeyedState::SexHash(ref mut m) if !m.is_empty() => {
-                let index = seed % m.len();
-                m.swap_remove_index(index)
-                    .map(|(k, rs)| (rs, k.into_elements().collect()))
-            }
+            KeyedState::DoubleHash(ref mut m) => evict_hash!(m, seed),
+            KeyedState::TriHash(ref mut m) => evict_hash!(m, seed),
+            KeyedState::QuadHash(ref mut m) => evict_hash!(m, seed),
+            KeyedState::QuinHash(ref mut m) => evict_hash!(m, seed),
+            KeyedState::SexHash(ref mut m) => evict_hash!(m, seed),
             KeyedState::MultiHash(ref mut m, _) if !m.is_empty() => {
                 let index = seed % m.len();
-                m.swap_remove_index(index).map(|(k, rs)| (rs, k))
+                let rows = m.swap_remove_index(index).map(|(k, rs)| (rs, k));
+                maybe_shrink!(m);
+                rows
             }
 
             // TODO(aspen): This way of evicting (which also happens in reader_map) is pretty icky -
@@ -563,6 +562,14 @@ impl KeyedState {
     ///
     /// * Panics if `self` is [`KeyedState::AllRows`], which cannot be partial
     pub(super) fn evict(&mut self, key: &[DfValue]) -> Option<Rows> {
+        macro_rules! evict_hash {
+            ($m: expr, $ty:ty, $k: expr) => {{
+                let rows = $m.swap_remove::<$ty>(&MakeKey::from_key($k));
+                maybe_shrink!($m);
+                rows
+            }};
+        }
+
         match *self {
             KeyedState::AllRows(_) => panic!("Empty-column index cannot be partial"),
             KeyedState::SingleBTree(ref mut m) => m.remove(&(key[0])),
@@ -577,23 +584,21 @@ impl KeyedState {
             // I do wonder what the perf impacts of that are)
             KeyedState::MultiBTree(ref mut m, _) => m.remove(&key.to_owned()),
 
-            KeyedState::SingleHash(ref mut m) => m.swap_remove(&(key[0])),
-            KeyedState::DoubleHash(ref mut m) => {
-                m.swap_remove::<(DfValue, _)>(&MakeKey::from_key(key))
+            KeyedState::SingleHash(ref mut m) => {
+                let rows = m.swap_remove(&(key[0]));
+                maybe_shrink!(m);
+                rows
             }
-            KeyedState::TriHash(ref mut m) => {
-                m.swap_remove::<(DfValue, _, _)>(&MakeKey::from_key(key))
+            KeyedState::DoubleHash(ref mut m) => evict_hash!(m, (DfValue, _), key),
+            KeyedState::TriHash(ref mut m) => evict_hash!(m, (DfValue, _, _), key),
+            KeyedState::QuadHash(ref mut m) => evict_hash!(m, (DfValue, _, _, _), key),
+            KeyedState::QuinHash(ref mut m) => evict_hash!(m, (DfValue, _, _, _, _), key),
+            KeyedState::SexHash(ref mut m) => evict_hash!(m, (DfValue, _, _, _, _, _), key),
+            KeyedState::MultiHash(ref mut m, _) => {
+                let rows = m.swap_remove(&key.to_owned());
+                maybe_shrink!(m);
+                rows
             }
-            KeyedState::QuadHash(ref mut m) => {
-                m.swap_remove::<(DfValue, _, _, _)>(&MakeKey::from_key(key))
-            }
-            KeyedState::QuinHash(ref mut m) => {
-                m.swap_remove::<(DfValue, _, _, _, _)>(&MakeKey::from_key(key))
-            }
-            KeyedState::SexHash(ref mut m) => {
-                m.swap_remove::<(DfValue, _, _, _, _, _)>(&MakeKey::from_key(key))
-            }
-            KeyedState::MultiHash(ref mut m, _) => m.swap_remove(&key.to_owned()),
         }
     }
 

@@ -14,6 +14,7 @@ pub mod fmt;
 pub mod futures;
 pub mod graphviz;
 pub mod hash;
+pub mod indexmap;
 pub mod intervals;
 pub mod iter;
 pub mod math;
