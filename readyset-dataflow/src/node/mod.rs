@@ -66,6 +66,14 @@ impl Column {
         ))
     }
 
+    pub fn full_name_unquoted(&self) -> String {
+        if let Some(rel) = self.source() {
+            format!("{}.{}", rel.display_unquoted(), self.name())
+        } else {
+            self.name().to_string()
+        }
+    }
+
     /// Column name
     pub fn name(&self) -> &str {
         self.name.as_str()

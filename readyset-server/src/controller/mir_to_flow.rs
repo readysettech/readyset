@@ -30,7 +30,7 @@ use readyset_client::internal::{Index, IndexType};
 use readyset_client::ViewPlaceholder;
 use readyset_data::{Collation, DfType, Dialect};
 use readyset_errors::{
-    internal, internal_err, invariant, invariant_eq, ReadySetError, ReadySetResult,
+    internal, internal_err, invariant, invariant_eq, unsupported, ReadySetError, ReadySetResult,
 };
 
 use crate::controller::Migration;
@@ -666,6 +666,23 @@ fn make_join_node(
             ))
         })
         .collect::<ReadySetResult<Vec<_>>>()?;
+
+    for (l_idx, r_idx) in &on_idxs {
+        let l_col = &left_cols[*l_idx];
+        let r_col = &right_cols[*r_idx];
+        if !l_col.ty().is_any_text() && r_col.ty().is_any_text() {
+            let mut err_text = format!(
+                "Join condition {} = {} requires converting the left side to text, \
+                which might not match afterwards.",
+                l_col.full_name_unquoted(),
+                r_col.full_name_unquoted()
+            );
+            if kind == JoinType::Inner {
+                err_text.push_str(" Try swapping the joining sides.");
+            }
+            unsupported!("{err_text}");
+        }
+    }
 
     let mut emit = Vec::with_capacity(proj_cols.len());
     let mut cols = Vec::with_capacity(proj_cols.len());
