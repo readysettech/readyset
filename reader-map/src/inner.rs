@@ -228,7 +228,11 @@ where
     {
         match self {
             Data::BTreeMap(map) => map.remove(k),
-            Data::HashMap(map) => map.swap_remove(k),
+            Data::HashMap(map) => {
+                let v = map.swap_remove(k);
+                readyset_util::maybe_shrink!(map);
+                v
+            }
         }
     }
 
