@@ -44,8 +44,9 @@ impl SnapshotType {
     /// * `table` - The table to snapshot
     ///
     /// Returns:
-    /// * A tuple containing the count query, the initial query, and the bound based query
-    pub fn get_queries(&self, table: &readyset_client::Table) -> (String, String, String) {
+    /// * A tuple containing the count query, the initial query, the bound based query
+    ///   and the collation query
+    pub fn get_queries(&self, table: &readyset_client::Table) -> (String, String, String, String) {
         let force_index = match self {
             SnapshotType::KeyBased { name, .. } => {
                 if let Some(name) = name {
@@ -65,6 +66,11 @@ impl SnapshotType {
             }
             None => "".to_string(),
         };
+        let collation_query = format!(
+            "SELECT cl.ID FROM information_schema.COLUMNS c LEFT JOIN information_schema.COLLATIONS cl USING (COLLATION_NAME) WHERE c.TABLE_NAME = '{}' {} ORDER BY c.ORDINAL_POSITION",
+            table.table_name().name,
+            schema
+        );
         let count_query = format!(
             "SELECT TABLE_ROWS FROM information_schema.tables WHERE TABLE_NAME = '{}' {}",
             table.table_name().name,
@@ -118,7 +124,12 @@ impl SnapshotType {
                 (initial_query.clone(), initial_query)
             }
         };
-        (count_query, initial_query, bound_based_query)
+        (
+            count_query,
+            initial_query,
+            bound_based_query,
+            collation_query,
+        )
     }
 
     /// Given a row, compute the lower bound for the next query based on the keys and return it.

@@ -16,6 +16,7 @@ use mysql_common::binlog::jsonb::{
 };
 use mysql_common::binlog::row::BinlogRow;
 use mysql_common::binlog::value::BinlogValue;
+use mysql_common::collations::{Collation, CollationId};
 use mysql_common::constants::ColumnType;
 use mysql_common::{binlog, Value};
 use rust_decimal::Decimal;
@@ -27,7 +28,7 @@ use readyset_client::metrics::recorded;
 use readyset_client::recipe::changelist::Change;
 use readyset_client::recipe::ChangeList;
 use readyset_client::TableOperation;
-use readyset_data::{DfValue, Dialect, TimestampTz};
+use readyset_data::{Collation as RsCollation, DfValue, Dialect, TimestampTz};
 use readyset_errors::{internal, internal_err, unsupported_err, ReadySetError, ReadySetResult};
 use replication_offset::mysql::MySqlPosition;
 use replication_offset::ReplicationOffset;
@@ -1071,6 +1072,26 @@ fn binlog_val_to_noria_val(
                 Ok(s) => Ok(s),
                 Err(e) => Err(mysql_async::Error::Other(Box::new(internal_err!("{e}")))),
             }
+        }
+        (ColumnType::MYSQL_TYPE_VAR_STRING, _) | (ColumnType::MYSQL_TYPE_VARCHAR, _) => {
+            let buf = match val {
+                mysql_common::value::Value::Bytes(b) => str::from_utf8(b).map_err(|e| {
+                    mysql_async::Error::Other(Box::new(internal_err!(
+                        "Failed to parse string value: {}",
+                        e
+                    )))
+                })?,
+                _ => {
+                    return Err(mysql_async::Error::Other(Box::new(internal_err!(
+                        "Expected a byte array for string"
+                    ))));
+                }
+            };
+            let rs_collation = RsCollation::from_mysql_collation(
+                Collation::resolve(CollationId::from(collation)).collation(),
+            )
+            .unwrap_or_default();
+            Ok(DfValue::from_str_and_collation(buf, rs_collation))
         }
         (ColumnType::MYSQL_TYPE_DECIMAL, _) | (ColumnType::MYSQL_TYPE_NEWDECIMAL, _) => {
             if let mysql_common::value::Value::Bytes(b) = val {
