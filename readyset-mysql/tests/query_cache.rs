@@ -1,5 +1,6 @@
 use mysql_async::prelude::*;
 use mysql_async::{Conn, Result, Row, Statement};
+use nom_sql::Relation;
 use readyset_adapter::backend::{MigrationMode, QueryInfo, UnsupportedSetMode};
 use readyset_adapter::query_status_cache::QueryStatusCache;
 use readyset_adapter::BackendBuilder;
@@ -7,6 +8,7 @@ use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::mysql_helpers::{last_query_info, MySQLAdapter};
 use readyset_client_test_helpers::{sleep, TestBuilder};
 use readyset_server::Handle;
+use readyset_util::eventually;
 use readyset_util::shutdown::ShutdownSender;
 use serial_test::serial;
 
@@ -893,5 +895,169 @@ async fn test_binary_padding_lookup() {
     let last_status = last_query_info(&mut conn).await;
     assert_eq!(last_status.destination, QueryDestination::Readyset);
     assert_eq!(row[0].1, "0x41c2a5");
+    shutdown_tx.shutdown().await;
+}
+
+async fn resnapshot_table(table: Relation, handle: &mut Handle, conn: &mut Conn) {
+    let tables = handle.tables().await.unwrap();
+    let current_table_id = tables.get(&table).unwrap();
+    conn.query_drop(format!(
+        "ALTER READYSET RESNAPSHOT TABLE {}",
+        table.display_unquoted()
+    ))
+    .await
+    .unwrap();
+    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+    eventually!(
+        let new_tables = handle.tables().await.unwrap();
+        let new_table_id = new_tables.get(&table);
+        new_table_id.is_some() && new_table_id.unwrap() != current_table_id
+    )
+}
+
+async fn test_sensitiveness_lookup_inner(conn: &mut Conn, key_upper: &str, key_lower: &str) {
+    let row: Vec<(u32, String)> = conn
+        .query(format!(
+            "SELECT id, varchar_ci FROM col_sensitiveness_lookup WHERE varchar_ci = '{}'",
+            key_lower
+        ))
+        .await
+        .unwrap();
+    assert_eq!(row.len(), 1);
+    let last_status = last_query_info(conn).await;
+    assert_eq!(last_status.destination, QueryDestination::Readyset);
+    assert_eq!(row[0].1, key_upper);
+    let row: Vec<(u32, String)> = conn
+        .query(format!(
+            "SELECT id, varchar_ci FROM col_sensitiveness_lookup WHERE varchar_ci = '{}'",
+            key_upper
+        ))
+        .await
+        .unwrap();
+    assert_eq!(row.len(), 1);
+    let last_status = last_query_info(conn).await;
+    assert_eq!(last_status.destination, QueryDestination::Readyset);
+    assert_eq!(row[0].1, key_upper);
+
+    let row: Vec<(u32, String)> = conn
+        .query(format!(
+            "SELECT id, varchar_cs FROM col_sensitiveness_lookup WHERE varchar_cs = '{}'",
+            key_lower
+        ))
+        .await
+        .unwrap();
+    assert_eq!(row.len(), 0);
+    let last_status = last_query_info(conn).await;
+    assert_eq!(last_status.destination, QueryDestination::Readyset);
+
+    let row: Vec<(u32, String)> = conn
+        .query(format!(
+            "SELECT id, varchar_cs FROM col_sensitiveness_lookup WHERE varchar_cs = '{}'",
+            key_upper
+        ))
+        .await
+        .unwrap();
+    assert_eq!(row.len(), 1);
+    let last_status = last_query_info(conn).await;
+    assert_eq!(last_status.destination, QueryDestination::Readyset);
+    assert_eq!(row[0].1, key_upper);
+
+    let row: Vec<(u32, String)> = conn
+        .query(format!(
+            "SELECT id, char_ci FROM col_sensitiveness_lookup WHERE char_ci = '{}'",
+            key_lower
+        ))
+        .await
+        .unwrap();
+    assert_eq!(row.len(), 1);
+    let last_status = last_query_info(conn).await;
+    assert_eq!(last_status.destination, QueryDestination::Readyset);
+    assert_eq!(row[0].1, key_upper);
+
+    let row: Vec<(u32, String)> = conn
+        .query(format!(
+            "SELECT id, char_ci FROM col_sensitiveness_lookup WHERE char_ci = '{}'",
+            key_upper
+        ))
+        .await
+        .unwrap();
+    assert_eq!(row.len(), 1);
+    let last_status = last_query_info(conn).await;
+    assert_eq!(last_status.destination, QueryDestination::Readyset);
+    assert_eq!(row[0].1, key_upper);
+
+    let row: Vec<(u32, String)> = conn
+        .query(format!(
+            "SELECT id, char_cs FROM col_sensitiveness_lookup WHERE char_cs = '{}'",
+            key_lower
+        ))
+        .await
+        .unwrap();
+    assert_eq!(row.len(), 0);
+    let last_status = last_query_info(conn).await;
+    assert_eq!(last_status.destination, QueryDestination::Readyset);
+
+    let row: Vec<(u32, String)> = conn
+        .query(format!(
+            "SELECT id, char_cs FROM col_sensitiveness_lookup WHERE char_cs = '{}'",
+            key_upper
+        ))
+        .await
+        .unwrap();
+    assert_eq!(row.len(), 1);
+    let last_status = last_query_info(conn).await;
+    assert_eq!(last_status.destination, QueryDestination::Readyset);
+    assert_eq!(row[0].1, key_upper);
+}
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn test_sensitiveness_lookup() {
+    let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
+    let (opts, mut handle, shutdown_tx) = setup(
+        query_status_cache,
+        true, // fallback enabled
+        MigrationMode::OutOfBand,
+        UnsupportedSetMode::Error,
+    )
+    .await;
+    let mut conn = Conn::new(opts).await.unwrap();
+    conn.query_drop(
+        "CREATE TABLE `col_sensitiveness_lookup` (
+        id int NOT NULL PRIMARY KEY,
+        varchar_ci VARCHAR(255) COLLATE utf8mb4_0900_ai_ci,
+        varchar_cs VARCHAR(255) COLLATE utf8mb4_0900_as_cs,
+        char_ci CHAR(4) COLLATE utf8mb4_0900_ai_ci,
+        char_cs CHAR(4) COLLATE utf8mb4_0900_as_cs
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;",
+    )
+    .await
+    .unwrap();
+
+    conn.query_drop("INSERT INTO `col_sensitiveness_lookup` VALUES (1, 'A', 'A', 'A', 'A');")
+        .await
+        .unwrap();
+    sleep().await;
+    let table = Relation {
+        schema: Some("noria".into()),
+        name: "col_sensitiveness_lookup".into(),
+    };
+
+    // we want to test the code path during the snapshot. Force a snapshot here.
+    resnapshot_table(table, &mut handle, &mut conn).await;
+    conn.query_drop("CREATE CACHE c_varchar_ci FROM SELECT id, varchar_ci FROM col_sensitiveness_lookup WHERE varchar_ci = ?;")
+        .await
+        .unwrap();
+    conn.query_drop("CREATE CACHE c_varchar_cs FROM SELECT id, varchar_cs FROM col_sensitiveness_lookup WHERE varchar_cs = ?;").await.unwrap();
+    conn.query_drop("CREATE CACHE c_char_ci FROM SELECT id, char_ci FROM col_sensitiveness_lookup WHERE char_ci = ?;").await.unwrap();
+    conn.query_drop("CREATE CACHE c_char_cs FROM SELECT id, char_cs FROM col_sensitiveness_lookup WHERE char_cs = ?;").await.unwrap();
+
+    test_sensitiveness_lookup_inner(&mut conn, "A", "a").await;
+
+    conn.query_drop("INSERT INTO `col_sensitiveness_lookup` VALUES (2, 'B', 'B', 'B', 'B');")
+        .await
+        .unwrap();
+    sleep().await;
+    test_sensitiveness_lookup_inner(&mut conn, "B", "b").await;
+
     shutdown_tx.shutdown().await;
 }

@@ -329,7 +329,7 @@ impl Query {
             }
 
             let target_type =
-                DfType::from_sql_type(sql_type, Dialect::DEFAULT_MYSQL, |_| None).unwrap();
+                DfType::from_sql_type(sql_type, Dialect::DEFAULT_MYSQL, |_| None, None).unwrap();
 
             ret.push(
                 last_row[*col]
@@ -365,7 +365,7 @@ impl Query {
             }
 
             let target_type =
-                DfType::from_sql_type(sql_type, Dialect::DEFAULT_MYSQL, |_| None).unwrap();
+                DfType::from_sql_type(sql_type, Dialect::DEFAULT_MYSQL, |_| None, None).unwrap();
 
             ret.push(
                 last_row[*col]

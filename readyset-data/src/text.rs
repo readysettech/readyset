@@ -404,31 +404,37 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
                 Ok(DfValue::from_str_and_collation(self.try_str()?, collation))
             }
 
-            DfType::VarChar(l, ..) if l as usize >= str.chars().count() => {
+            DfType::VarChar(l, collation) if l as usize >= str.chars().count() => {
                 // VarChar, but length is sufficient to store current string
-                Ok(self.clone().into())
+                Ok(DfValue::from_str_and_collation(self.try_str()?, collation))
             }
 
-            DfType::Char(l, ..) if l as usize == str.chars().count() => {
+            DfType::Char(l, collation) if l as usize == str.chars().count() => {
                 // Char, but length is same as current string
-                Ok(self.clone().into())
+                Ok(DfValue::from_str_and_collation(self.try_str()?, collation))
             }
 
-            DfType::Char(l, ..) if l as usize > str.chars().count() => {
+            DfType::Char(l, collation) if l as usize > str.chars().count() => {
                 // Char, but length is greater than the current string, have to pad with whitespace
                 let mut new_string = String::with_capacity(l as usize);
                 new_string += str;
                 new_string.extend(std::iter::repeat(' ').take(l as usize - str.chars().count()));
-                Ok(DfValue::from(new_string))
+                Ok(DfValue::from_str_and_collation(
+                    new_string.as_str(),
+                    collation,
+                ))
             }
 
-            DfType::VarChar(l, ..) | DfType::Char(l, ..) => {
+            DfType::VarChar(l, collation) | DfType::Char(l, collation) => {
                 // String is too long, so have to truncate and allocate a new one
                 // TODO: can we do something smarter, like keep a len field, and clone the existing
                 // Arc?
                 // TODO: avoiding the extra String allocation here would be *nice*, but it's
                 // annoying
-                Ok(DfValue::from(str.chars().take(l as _).collect::<String>()))
+                Ok(DfValue::from_str_and_collation(
+                    str.chars().take(l as _).collect::<String>().as_str(),
+                    collation,
+                ))
             }
 
             DfType::Blob => Ok(DfValue::ByteArray(str.as_bytes().to_vec().into())),

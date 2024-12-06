@@ -100,6 +100,14 @@ impl Collation {
     pub fn is_utf8(&self) -> bool {
         matches!(self, Self::Utf8)
     }
+
+    /// Create a Readyset collation from a MySQL collation.
+    pub fn from_mysql_collation(database_collation: &str) -> Option<Self> {
+        match database_collation.ends_with("_ci") {
+            true => Some(Self::Citext),
+            false => Some(Self::Utf8),
+        }
+    }
 }
 
 #[cfg(test)]

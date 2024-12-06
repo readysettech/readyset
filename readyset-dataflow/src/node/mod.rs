@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use nom_sql::{ColumnSpecification, Relation, SqlIdentifier};
 use readyset_client::consistency::Timestamp;
-use readyset_data::{DfType, Dialect};
+use readyset_data::{Collation, DfType, Dialect};
 use serde::{Deserialize, Serialize};
 
 use crate::ops::grouped::aggregate::AggregatorState;
@@ -60,8 +60,13 @@ impl Column {
         F: Fn(Relation) -> Option<DfType>,
     {
         Ok(Self::new(
-            spec.column.name,
-            DfType::from_sql_type(&spec.sql_type, dialect, resolve_type)?,
+            spec.column.name.clone(),
+            DfType::from_sql_type(
+                &spec.sql_type,
+                dialect,
+                resolve_type,
+                Collation::from_mysql_collation(spec.get_collation().unwrap_or("")),
+            )?,
             spec.column.table,
         ))
     }

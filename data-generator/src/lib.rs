@@ -92,7 +92,8 @@ impl ColumnGenerationSpec {
             }
             ColumnGenerationSpec::Constant(val) => {
                 let col_type =
-                    DfType::from_sql_type(&col_type, Dialect::DEFAULT_MYSQL, |_| None).unwrap();
+                    DfType::from_sql_type(&col_type, Dialect::DEFAULT_MYSQL, |_| None, None)
+                        .unwrap();
                 let val = val.coerce_to(&col_type, &DfType::Unknown).unwrap();
                 ColumnGenerator::Constant(val.into())
             }

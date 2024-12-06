@@ -20,7 +20,7 @@ use readyset_client::{
     ColumnSchema, GraphvizOptions, ReadQuery, ReaderAddress, ReaderHandle, ReadySetHandle,
     SchemaType, Table, TableOperation, View, ViewCreateRequest, ViewQuery,
 };
-use readyset_data::{DfType, DfValue, Dialect};
+use readyset_data::{Collation, DfType, DfValue, Dialect};
 use readyset_errors::{
     internal_err, invariant_eq, table_err, unsupported, unsupported_err, ReadySetError,
     ReadySetResult,
@@ -1350,8 +1350,10 @@ impl NoriaConnector {
                             ReadySetError::NoSuchColumn(c.name.to_string()),
                         )
                     })?;
-
-                let target_type = DfType::from_sql_type(&field.sql_type, self.dialect, |_| None)?;
+                let collation =
+                    Collation::from_mysql_collation(field.get_collation().unwrap_or(""));
+                let target_type =
+                    DfType::from_sql_type(&field.sql_type, self.dialect, |_| None, collation)?;
 
                 let value = row
                     .get(ci)

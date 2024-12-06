@@ -9,7 +9,7 @@ use nom_sql::{
     InsertStatement, Literal, SelectStatement, SqlQuery, TableKey, UpdateStatement,
 };
 use readyset_client::{ColumnSchema, Modification, Operation};
-use readyset_data::{DfType, DfValue, Dialect, TimestampTz};
+use readyset_data::{Collation, DfType, DfValue, Dialect, TimestampTz};
 use readyset_errors::{
     bad_request_err, invalid_query, invalid_query_err, invariant, invariant_eq, unsupported,
     unsupported_err, ReadySetResult,
@@ -420,7 +420,10 @@ where
                     updates.push((i, Modification::Set(v)));
                 }
                 Expr::Literal(ref v) => {
-                    let target_type = DfType::from_sql_type(&field.sql_type, dialect, |_| None)?;
+                    let collation =
+                        Collation::from_mysql_collation(field.get_collation().unwrap_or(""));
+                    let target_type =
+                        DfType::from_sql_type(&field.sql_type, dialect, |_| None, collation)?;
 
                     updates.push((
                         i,
@@ -540,7 +543,10 @@ pub(crate) fn extract_insert(
                                 col.display_unquoted()
                             )
                         })?;
-                    let target_type = DfType::from_sql_type(&field.sql_type, dialect, |_| None)?;
+                    let collation =
+                        Collation::from_mysql_collation(field.get_collation().unwrap_or(""));
+                    let target_type =
+                        DfType::from_sql_type(&field.sql_type, dialect, |_| None, collation)?;
                     val.coerce_to(
                         &target_type,
                         // Coercing from the raw parameters, so no prior type to use.
@@ -568,7 +574,10 @@ pub(crate) fn coerce_params(
         for (i, col) in get_parameter_columns(q).iter().enumerate() {
             for field in &schema.fields {
                 if col.name == field.column.name {
-                    let target_type = DfType::from_sql_type(&field.sql_type, dialect, |_| None)?;
+                    let collation =
+                        Collation::from_mysql_collation(field.get_collation().unwrap_or(""));
+                    let target_type =
+                        DfType::from_sql_type(&field.sql_type, dialect, |_| None, collation)?;
 
                     coerced_params.push(DfValue::coerce_to(
                         &prms[i],

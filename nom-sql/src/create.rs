@@ -285,7 +285,6 @@ impl CreateTableStatement {
             // MySQL omits column collation if they are default. Now that we have parsed it, propagate them back to the columns
             let default_charset = self.get_charset().cloned();
             let default_collation = self.get_collation().cloned();
-
             if let Ok(ref mut body) = self.body {
                 for field in &mut body.fields {
                     if !field.sql_type.is_any_text() {

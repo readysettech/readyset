@@ -1067,7 +1067,8 @@ impl Expr {
             AstExpr::Cast {
                 expr, ty: to_type, ..
             } => {
-                let ty = DfType::from_sql_type(&to_type, dialect, |t| context.resolve_type(t))?;
+                let ty =
+                    DfType::from_sql_type(&to_type, dialect, |t| context.resolve_type(t), None)?;
                 Ok(Self::Cast {
                     expr: Box::new(Self::lower(*expr, dialect, context)?),
                     ty,

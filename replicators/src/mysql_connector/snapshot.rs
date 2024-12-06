@@ -12,7 +12,8 @@ use futures::StreamExt;
 use itertools::Itertools;
 use mysql::prelude::Queryable;
 use mysql::{Transaction, TxOpts};
-use mysql_async::{self as mysql, Row};
+use mysql_async::{self as mysql, Row, Value as MysqlValue};
+use mysql_common::collations::{Collation, CollationId};
 use mysql_common::constants::ColumnType;
 use mysql_srv::ColumnFlags;
 use nom_sql::{DialectDisplay, NonReplicatedRelation, NotReplicatedReason, Relation};
@@ -412,10 +413,34 @@ impl MySqlReplicator<'_> {
         snapshot_report_interval_secs: u16,
     ) -> ReadySetResult<()> {
         let mut cnt = 0;
-
         let mut snapshot_type = SnapshotType::new(&table_mutator)?;
-        let (count_query, initial_query, bound_base_query) =
+        // During snapshot, on each row object, we get the collation of connection,
+        // and not the collation of the columns. We have the collation of the columns
+        // in the table_mutator.schema().fields, but current version of mysql_common
+        // don't have support to lookup a collation from its name. Temporally get the
+        // collation ID from querying IS. Later we can avoid the extra query.
+        let (count_query, initial_query, bound_base_query, collation_query) =
             snapshot_type.get_queries(&table_mutator);
+
+        let collations = trx
+            .query(collation_query)
+            .await
+            .map_err(log_err)?
+            .into_iter()
+            .map(
+                |row: mysql::Row| match value_to_value(row.as_ref(0).unwrap()) {
+                    MysqlValue::Bytes(bytes) => {
+                        let collation = str::from_utf8(&bytes)
+                            .unwrap_or("0")
+                            .parse::<u16>()
+                            .unwrap_or(0);
+                        collation
+                    }
+                    _ => CollationId::UTF8MB4_GENERAL_CI as u16,
+                },
+            )
+            .collect::<Vec<_>>();
+
         // Query for number of rows first
         let nrows: usize = trx
             .query_first(count_query)
@@ -459,7 +484,12 @@ impl MySqlReplicator<'_> {
                     .map_err(log_err)?;
                 row = row_stream.next().await.map_err(log_err)?;
             }
-            let df_row = match row.as_ref().map(mysql_row_to_noria_row).transpose() {
+
+            let df_row = match row
+                .as_ref()
+                .map(|r| mysql_row_to_noria_row(r, &collations))
+                .transpose()
+            {
                 Ok(Some(df_row)) => df_row,
                 Ok(None) => break,
                 Err(err) => {
@@ -795,9 +825,12 @@ impl MySqlReplicator<'_> {
 }
 
 /// Convert each entry in a row to a ReadySet type that can be inserted into the base tables
-fn mysql_row_to_noria_row(row: &mysql::Row) -> ReadySetResult<Vec<readyset_data::DfValue>> {
+fn mysql_row_to_noria_row(
+    row: &mysql::Row,
+    collations: &[u16],
+) -> ReadySetResult<Vec<readyset_data::DfValue>> {
     let mut noria_row = Vec::with_capacity(row.len());
-    for idx in 0..row.len() {
+    for (idx, collation) in collations.iter().enumerate().take(row.len()) {
         let val = value_to_value(row.as_ref(idx).unwrap());
         let col = row.columns_ref().get(idx).unwrap();
         let flags = col.flags();
@@ -808,28 +841,42 @@ fn mysql_row_to_noria_row(row: &mysql::Row) -> ReadySetResult<Vec<readyset_data:
                 let require_padding = val != mysql_common::value::Value::NULL
                     && !flags.contains(ColumnFlags::ENUM_FLAG)
                     && !flags.contains(ColumnFlags::SET_FLAG);
+                let bytes = match val.clone() {
+                    mysql_common::value::Value::Bytes(b) => b,
+                    mysql_common::value::Value::NULL => {
+                        noria_row.push(DfValue::None);
+                        continue;
+                    }
+                    _ => {
+                        return Err(internal_err!(
+                            "Expected MYSQL_TYPE_STRING column to be of value Bytes, got {:?}",
+                            val
+                        ));
+                    }
+                };
                 match require_padding {
                     true => {
-                        let bytes = match val.clone() {
-                            mysql_common::value::Value::Bytes(b) => b,
-                            _ => {
-                                return Err(internal_err!(
-                                    "Expected MYSQL_TYPE_STRING column to be of value Bytes, got {:?}",
-                                    val
-                                ));
-                            }
+                        let collation = match flags.contains(ColumnFlags::BINARY_FLAG) {
+                            true => CollationId::BINARY as u16,
+                            false => CollationId::from(*collation) as u16,
                         };
                         match mysql_pad_collation_column(
                             &bytes,
                             col.column_type(),
-                            col.character_set(),
+                            collation,
                             col.column_length() as usize,
                         ) {
                             Ok(padded) => noria_row.push(padded),
                             Err(err) => return Err(internal_err!("Error padding column: {}", err)),
                         }
                     }
-                    false => noria_row.push(readyset_data::DfValue::try_from(val)?),
+                    false => noria_row.push(DfValue::from_str_and_collation(
+                        String::from_utf8_lossy(&bytes).to_string().as_str(),
+                        readyset_data::Collation::from_mysql_collation(
+                            Collation::resolve(CollationId::from(*collation)).collation(),
+                        )
+                        .unwrap_or_default(),
+                    )),
                 }
             }
             ColumnType::MYSQL_TYPE_TIMESTAMP
@@ -892,6 +939,25 @@ fn mysql_row_to_noria_row(row: &mysql::Row) -> ReadySetResult<Vec<readyset_data:
                     _ => {
                         return Err(internal_err!(
                             "Expected a bytes value for JSON column, got {:?}",
+                            val
+                        ));
+                    }
+                };
+                noria_row.push(df_val);
+            }
+            ColumnType::MYSQL_TYPE_VAR_STRING => {
+                let df_val = match val {
+                    mysql_common::value::Value::Bytes(b) => DfValue::from_str_and_collation(
+                        String::from_utf8_lossy(&b).to_string().as_str(),
+                        readyset_data::Collation::from_mysql_collation(
+                            Collation::resolve(CollationId::from(*collation)).collation(),
+                        )
+                        .unwrap_or_default(),
+                    ),
+                    mysql_common::value::Value::NULL => DfValue::None,
+                    _ => {
+                        return Err(internal_err!(
+                            "Expected a bytes value for VAR_STRING column, got {:?}",
                             val
                         ));
                     }

@@ -1,8 +1,8 @@
 use core::str;
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
-use std::io;
 use std::sync::Arc;
+use std::{io, vec};
 
 use async_trait::async_trait;
 use binlog::consts::{BinlogChecksumAlg, EventType};
@@ -16,6 +16,7 @@ use mysql_common::binlog::jsonb::{
 };
 use mysql_common::binlog::row::BinlogRow;
 use mysql_common::binlog::value::BinlogValue;
+use mysql_common::collations::{Collation, CollationId};
 use mysql_common::constants::ColumnType;
 use mysql_common::{binlog, Value};
 use rust_decimal::Decimal;
@@ -27,7 +28,7 @@ use readyset_client::metrics::recorded;
 use readyset_client::recipe::changelist::Change;
 use readyset_client::recipe::ChangeList;
 use readyset_client::TableOperation;
-use readyset_data::{DfValue, Dialect, TimestampTz};
+use readyset_data::{Collation as RsCollation, DfValue, Dialect, TimestampTz};
 use readyset_errors::{internal, internal_err, unsupported_err, ReadySetError, ReadySetResult};
 use replication_offset::mysql::MySqlPosition;
 use replication_offset::ReplicationOffset;
@@ -508,7 +509,45 @@ impl MySqlBinlogConnector {
         };
 
         let changes = match ChangeList::from_str(q_event.query(), Dialect::DEFAULT_MYSQL) {
-            Ok(changelist) => changelist.changes,
+            Ok(mut changelist) => {
+                // During replication of DDL, we don't necessarily have the default charset/collation as part of the
+                // query event.
+                let charset = q_event
+                    .status_vars()
+                    .get_status_var(binlog::consts::StatusVarKey::Charset);
+
+                if charset.is_some() {
+                    let default_server_charset = match charset.unwrap().get_value().unwrap() {
+                        StatusVarVal::Charset {
+                            charset_client: _,
+                            collation_connection: _,
+                            collation_server,
+                        } => collation_server,
+                        _ => unreachable!(),
+                    };
+
+                    for change in changelist.changes_mut() {
+                        if let Change::CreateTable { statement, .. } = change {
+                            let default_table_collation = statement.get_collation();
+                            if default_table_collation.is_none() {
+                                let collation =
+                                    Collation::resolve(CollationId::from(default_server_charset));
+                                let options = match statement.options.as_mut() {
+                                    Ok(opts) => opts,
+                                    Err(_) => &mut Vec::new(),
+                                };
+                                options.push(nom_sql::CreateTableOption::Collate(
+                                    nom_sql::create::CollationName::Quoted(
+                                        nom_sql::SqlIdentifier::from(collation.collation()),
+                                    ),
+                                ));
+                            }
+                            statement.propagate_default_charset(nom_sql::Dialect::MySQL);
+                        }
+                    }
+                }
+                changelist.changes
+            }
             Err(error) => match nom_sql::parse_query(nom_sql::Dialect::MySQL, q_event.query()) {
                 Ok(nom_sql::SqlQuery::Insert(insert)) => {
                     self.drop_and_add_non_replicated_table(insert.table, &schema)
@@ -1071,6 +1110,26 @@ fn binlog_val_to_noria_val(
                 Ok(s) => Ok(s),
                 Err(e) => Err(mysql_async::Error::Other(Box::new(internal_err!("{e}")))),
             }
+        }
+        (ColumnType::MYSQL_TYPE_VAR_STRING, _) | (ColumnType::MYSQL_TYPE_VARCHAR, _) => {
+            let buf = match val {
+                mysql_common::value::Value::Bytes(b) => str::from_utf8(b).map_err(|e| {
+                    mysql_async::Error::Other(Box::new(internal_err!(
+                        "Failed to parse string value: {}",
+                        e
+                    )))
+                })?,
+                _ => {
+                    return Err(mysql_async::Error::Other(Box::new(internal_err!(
+                        "Expected a byte array for string"
+                    ))));
+                }
+            };
+            let rs_collation = RsCollation::from_mysql_collation(
+                Collation::resolve(CollationId::from(collation)).collation(),
+            )
+            .unwrap_or_default();
+            Ok(DfValue::from_str_and_collation(buf, rs_collation))
         }
         (ColumnType::MYSQL_TYPE_DECIMAL, _) | (ColumnType::MYSQL_TYPE_NEWDECIMAL, _) => {
             if let mysql_common::value::Value::Bytes(b) = val {

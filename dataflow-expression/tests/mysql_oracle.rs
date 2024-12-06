@@ -59,6 +59,7 @@ async fn mysql_eval(expr: &str, conn: &mut Conn) -> DfValue {
         &sql_type,
         dataflow_expression::Dialect::DEFAULT_MYSQL,
         |_| None,
+        None,
     )
     .unwrap();
 

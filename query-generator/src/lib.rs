@@ -93,7 +93,7 @@ use proptest::arbitrary::{any, any_with, Arbitrary};
 use proptest::sample::Select;
 use proptest::strategy::{BoxedStrategy, Strategy};
 use rand::thread_rng;
-use readyset_data::{DfType, DfValue, Dialect};
+use readyset_data::{Collation, DfType, DfValue, Dialect};
 use readyset_sql_passes::outermost_table_exprs;
 use readyset_util::intervals::{BoundPair, IterBoundPair};
 use serde::{Deserialize, Serialize};
@@ -287,8 +287,16 @@ impl From<CreateTableStatement> for TableSpec {
                 .iter()
                 .map(|field| {
                     let sql_type = field.sql_type.clone();
-                    let df_type =
-                        DfType::from_sql_type(&sql_type, Dialect::DEFAULT_MYSQL, |_| None).unwrap();
+                    let collation = Collation::from_mysql_collation(
+                        field.clone().get_collation().unwrap_or(""),
+                    );
+                    let df_type = DfType::from_sql_type(
+                        &sql_type,
+                        Dialect::DEFAULT_MYSQL,
+                        |_| None,
+                        collation,
+                    )
+                    .unwrap();
 
                     let generator = if let Some(d) =
                         field.has_default().and_then(|l| DfValue::try_from(l).ok())

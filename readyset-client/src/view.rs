@@ -27,7 +27,9 @@ use petgraph::graph::NodeIndex;
 use proptest::arbitrary::Arbitrary;
 use rand::prelude::IteratorRandom;
 use rand::thread_rng;
-use readyset_data::{Bound, BoundedRange, DfType, DfValue, IntoBoundedRange, RangeBounds};
+use readyset_data::{
+    Bound, BoundedRange, Collation, DfType, DfValue, IntoBoundedRange, RangeBounds,
+};
 use readyset_errors::{
     internal, internal_err, rpc_err, unsupported, view_err, ReadySetError, ReadySetResult,
 };
@@ -175,6 +177,7 @@ impl ColumnSchema {
         table: Relation,
         dialect: Dialect,
     ) -> ReadySetResult<Self> {
+        let collation = Collation::from_mysql_collation(spec.clone().get_collation().unwrap_or(""));
         Ok(Self {
             base: Some(ColumnBase {
                 column: spec.column.name.clone(),
@@ -188,6 +191,7 @@ impl ColumnSchema {
                 &spec.sql_type,
                 dialect,
                 |_| None, /* Custom types not allowed for inserts via the adapter */
+                collation,
             )?,
         })
     }

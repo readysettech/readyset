@@ -41,10 +41,14 @@ pub fn mysql_pad_collation_column(
             let column_length_characters = col_len / collation.max_len() as usize;
             let mut str = String::from_utf8(val.to_vec())?;
             let str_len = str.chars().count();
+            let rs_collation = readyset_data::Collation::from_mysql_collation(
+                Collation::resolve(collation.id()).collation(),
+            )
+            .unwrap_or_default();
             if str_len < column_length_characters {
                 str.extend(std::iter::repeat(' ').take(column_length_characters - str_len));
             }
-            Ok(DfValue::from(str))
+            Ok(DfValue::from_str_and_collation(str.as_str(), rs_collation))
         }
     }
 }

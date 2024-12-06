@@ -220,6 +220,7 @@ impl DfType {
         ty: T,
         dialect: Dialect,
         resolve_custom_type: R,
+        collation: Option<Collation>,
     ) -> ReadySetResult<Self>
     where
         T: Into<Option<&'a SqlType>>,
@@ -237,6 +238,7 @@ impl DfType {
                 Some(ty.as_ref()),
                 dialect,
                 resolve_custom_type,
+                collation,
             )?)),
 
             Enum(ref variants) => Self::Enum {
@@ -280,9 +282,11 @@ impl DfType {
             // Character string types.
             //
             // `varchar` by itself is an error in MySQL but synonymous with `text` in PostgreSQL.
-            Text | TinyText | MediumText | LongText | VarChar(None) => Self::DEFAULT_TEXT,
-            VarChar(Some(len)) => Self::VarChar(len, Collation::default()),
-            Char(len) => Self::Char(len.unwrap_or(1), Collation::default()),
+            Text | TinyText | MediumText | LongText | VarChar(None) => {
+                Self::Text(collation.unwrap_or_default())
+            }
+            VarChar(Some(len)) => Self::VarChar(len, collation.unwrap_or_default()),
+            Char(len) => Self::Char(len.unwrap_or(1), collation.unwrap_or_default()),
             QuotedChar => Self::TinyInt,
 
             Blob | TinyBlob | MediumBlob | LongBlob | ByteArray => Self::Blob,
