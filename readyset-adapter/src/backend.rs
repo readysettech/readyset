@@ -869,7 +869,9 @@ where
     }
     /// Reset the current upstream connection
     pub async fn reset(&mut self) -> Result<(), DB::Error> {
+        self.state.parsed_query_cache.clear();
         if let Some(upstream) = &mut self.upstream {
+            self.state.proxy_state = ProxyState::Fallback;
             upstream.reset().await
         } else {
             Ok(())
@@ -892,6 +894,7 @@ where
                 .await?;
         }
         self.noria.set_schema_search_path(vec![db.into()]);
+        self.state.parsed_query_cache.clear();
         Ok(())
     }
 
