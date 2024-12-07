@@ -3,10 +3,13 @@ use std::time::Duration;
 
 use metrics::{gauge, Gauge};
 use rocksdb::perf::get_memory_usage_stats;
+use rocksdb::ColumnFamily;
+use rocksdb::DB;
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 
 use crate::persistent_state::recorded;
 use crate::persistent_state::PersistentStateHandle;
+use crate::persistent_state::DEFAULT_CF;
 
 const REPORTING_INTERVAL: Duration = Duration::from_secs(5);
 
@@ -58,6 +61,21 @@ impl MetricsReporterStop {
         self.tx.send(()).unwrap();
         self.thread.join().unwrap();
     }
+}
+
+/// A simple collector for metrics used on each iteration of the metrics reporter loop.
+#[derive(Default)]
+struct MetricsCollector {
+    block_indexes_filters_count: u64,
+    compaction_pending: u64,
+    estimate_pending_compaction_bytes: u64,
+    num_running_compactions: u64,
+    num_running_flushes: u64,
+    total_sst_files_size: u64,
+    live_sst_files_size: u64,
+    block_cache_capacity: u64,
+    block_cache_usage: u64,
+    block_cache_pinned_usage: u64,
 }
 
 impl MetricsReporter {
@@ -128,7 +146,41 @@ impl MetricsReporter {
         }
 
         // sum up the values across each column family to derive a meaningful value for a metric.
+        let mut collector = MetricsCollector::default();
 
+        // we need to iterate over each column family as, if we don't do this, we will only get
+        // the value for the default column family. This is not obvious from the docs.
+        if let Some(cf) = db.cf_handle(DEFAULT_CF) {
+            self.capture_metrics(&db, cf, &mut collector);
+        }
+        for index in &inner.shared_state.indices {
+            if let Some(cf) = db.cf_handle(&index.column_family) {
+                self.capture_metrics(&db, cf, &mut collector);
+            }
+        }
+        self.block_indexes_filters_total
+            .set(collector.block_indexes_filters_count as f64);
+        self.compaction_pending
+            .set(collector.compaction_pending as f64);
+        self.estimate_pending_compaction_bytes
+            .set(collector.estimate_pending_compaction_bytes as f64);
+        self.num_running_compactions
+            .set(collector.num_running_compactions as f64);
+        self.num_running_flushes
+            .set(collector.num_running_flushes as f64);
+        self.total_sst_files_size
+            .set(collector.total_sst_files_size as f64);
+        self.live_sst_files_size
+            .set(collector.live_sst_files_size as f64);
+        self.block_cache_capacity
+            .set(collector.block_cache_capacity as f64);
+        self.block_cache_usage
+            .set(collector.block_cache_usage as f64);
+        self.block_cache_pinned_usage
+            .set(collector.block_cache_pinned_usage as f64);
+    }
+
+    fn capture_metrics(&self, db: &DB, cf: &ColumnFamily, collector: &mut MetricsCollector) {
         // macro to add the value of a property to a target variable.
         macro_rules! add_property_value {
             ($cf:expr, $property:expr, $target:expr) => {
@@ -138,71 +190,64 @@ impl MetricsReporter {
             };
         }
 
-        let mut block_indexes_filters_count = 0;
-        let mut compaction_pending = 0;
-        let mut estimate_pending_compaction_bytes = 0;
-        let mut num_running_compactions = 0;
-        let mut num_running_flushes = 0;
-        let mut total_sst_files_size = 0;
-        let mut live_sst_files_size = 0;
-        let mut block_cache_capacity = 0;
-        let mut block_cache_usage = 0;
-        let mut block_cache_pinned_usage = 0;
+        // readers-related metrics
+        add_property_value!(
+            &cf,
+            "rocksdb.estimate-table-readers-mem",
+            collector.block_indexes_filters_count
+        );
 
-        // we need to iterate over each column family as, if we don't do this, we will only get
-        // the value for the default column family. This is not obvious from the docs.
-        for index in &inner.shared_state.indices {
-            if let Some(cf) = db.cf_handle(&index.column_family) {
-                // readers-related metrics
-                add_property_value!(
-                    &cf,
-                    "rocksdb.estimate-table-readers-mem",
-                    block_indexes_filters_count
-                );
+        // compaction-related metrics
+        add_property_value!(
+            &cf,
+            "rocksdb.compaction-pending",
+            collector.compaction_pending
+        );
+        add_property_value!(
+            &cf,
+            "rocksdb.estimate-pending-compaction-bytes",
+            collector.estimate_pending_compaction_bytes
+        );
+        add_property_value!(
+            &cf,
+            "rocksdb.num-running-compactions",
+            collector.num_running_compactions
+        );
 
-                // compaction-related metrics
-                add_property_value!(&cf, "rocksdb.compaction-pending", compaction_pending);
-                add_property_value!(
-                    &cf,
-                    "rocksdb.estimate-pending-compaction-bytes",
-                    estimate_pending_compaction_bytes
-                );
-                add_property_value!(
-                    &cf,
-                    "rocksdb.num-running-compactions",
-                    num_running_compactions
-                );
+        // flush-related metrics
+        add_property_value!(
+            &cf,
+            "rocksdb.num-running-flushes",
+            collector.num_running_flushes
+        );
 
-                // flush-related metrics
-                add_property_value!(&cf, "rocksdb.num-running-flushes", num_running_flushes);
+        // sst-file-related metrics
+        add_property_value!(
+            &cf,
+            "rocksdb.total-sst-files-size",
+            collector.total_sst_files_size
+        );
+        add_property_value!(
+            &cf,
+            "rocksdb.live-sst-files-size",
+            collector.live_sst_files_size
+        );
 
-                // sst-file-related metrics
-                add_property_value!(&cf, "rocksdb.total-sst-files-size", total_sst_files_size);
-                add_property_value!(&cf, "rocksdb.live-sst-files-size", live_sst_files_size);
-
-                // block-cache-related metrics
-                add_property_value!(&cf, "rocksdb.block-cache-capacity", block_cache_capacity);
-                add_property_value!(&cf, "rocksdb.block-cache-usage", block_cache_usage);
-                add_property_value!(
-                    &cf,
-                    "rocksdb.block-cache-pinned-usage",
-                    block_cache_pinned_usage
-                );
-            }
-        }
-        self.block_indexes_filters_total
-            .set(block_indexes_filters_count as f64);
-        self.compaction_pending.set(compaction_pending as f64);
-        self.estimate_pending_compaction_bytes
-            .set(estimate_pending_compaction_bytes as f64);
-        self.num_running_compactions
-            .set(num_running_compactions as f64);
-        self.num_running_flushes.set(num_running_flushes as f64);
-        self.total_sst_files_size.set(total_sst_files_size as f64);
-        self.live_sst_files_size.set(live_sst_files_size as f64);
-        self.block_cache_capacity.set(block_cache_capacity as f64);
-        self.block_cache_usage.set(block_cache_usage as f64);
-        self.block_cache_pinned_usage
-            .set(block_cache_pinned_usage as f64);
+        // block-cache-related metrics
+        add_property_value!(
+            &cf,
+            "rocksdb.block-cache-capacity",
+            collector.block_cache_capacity
+        );
+        add_property_value!(
+            &cf,
+            "rocksdb.block-cache-usage",
+            collector.block_cache_usage
+        );
+        add_property_value!(
+            &cf,
+            "rocksdb.block-cache-pinned-usage",
+            collector.block_cache_pinned_usage
+        );
     }
 }
