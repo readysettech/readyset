@@ -1,0 +1,76 @@
+
+
+statement ok
+CREATE TABLE t1 (
+  a decimal(7,3),
+  b int,
+  c text
+);
+
+statement ok
+CREATE TABLE t2 (
+  i int,
+  f float,
+  n decimal(10,3),
+  t text,
+  dtm timestamp
+);
+
+statement ok
+CREATE TABLE t3 (
+  i int,
+  f float,
+  n decimal(10,3),
+  t text,
+  dtm timestamp
+);
+
+statement ok
+insert into t1 (a, b, c) values
+(100.000, 1, '2024-11-07 03:06:32'),
+(100.000, 2, '2024-11-07 03:06:32'),
+(200.000, 3, '2024-11-08 17:03:37'),
+(115.345, 4, '2024-11-08 17:03:37'),
+(235.539, 5, '2024-11-09 17:21:50');
+
+statement ok
+insert into t2 (i, f, n, t, dtm) values
+(1, 100,     100.000, '100',                '2024-11-07 03:06:32'),
+(2, 100,     100.000, '00100',              '2024-11-07 03:08:54'),
+(3, 115346,  115.345, '115.34500',          '2024-11-08 17:03:37'),
+(4, 23512.3, 235.539, '0000235.5390000000', '2024-11-09 17:21:50'),
+(5, 945679,  513.850, 'AAA',                '2024-11-19 17:21:51');
+
+statement ok
+insert into t3 (i, f, n, t, dtm) values
+(1, 10,      100.000, '100',                '2024-11-07 03:06:32'),
+(2, 10,      100.000, '00100',              '2024-11-07 03:08:54'),
+(3, 11534.6, 115.345, '115.34500',          '2024-11-08 17:03:37'),
+(4, 2351.23, 235.539, '0000235.5390000000', '2024-11-09 17:21:50'),
+(5, 94567.9, 513.850, 'AAA',                '2024-11-19 17:21:51');
+
+# query T rowsort
+# SELECT MAX(t3.t) FROM t3 JOIN t2 ON t2.n = t3.t GROUP BY t2.t
+# ----
+# '0000235.5390000000'
+# '100'
+# '100'
+# '115.34500'
+
+# query T rowsort
+# SELECT t2.t FROM t2 WHERE t2.t = (SELECT MAX(t3.n) FROM t3 WHERE t2.n = t3.n GROUP BY t3.n)
+# ----
+# '0000235.5390000000'
+# '00100'
+# '100'
+# '115.34500'
+
+# query I rowsort
+# SELECT t2.i FROM t2 JOIN t3 ON t2.n = t3.t
+# ----
+# 1
+# 1
+# 2
+# 2
+# 3
+# 4
