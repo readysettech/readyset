@@ -1,0 +1,59 @@
+
+statement ok
+CREATE TABLE t2 (
+  i int,
+  f float,
+  n decimal(10,3),
+  t text,
+  dtm timestamp
+);
+
+statement ok
+CREATE TABLE t3 (
+  i int,
+  f float,
+  n decimal(10,3),
+  t text,
+  dtm timestamp
+);
+
+statement ok
+insert into t2 (i, f, n, t, dtm) values
+(1, 100,     100,    '100',          '2024-11-07 03:06:32'),
+(2, 100,     100,    '00100',        '2024-11-07 03:08:54'),
+(3, 115346,  115345, '00115345',     '2024-11-08 17:03:37'),
+(4, 23512.3, 235539, '000000235539', '2024-11-09 17:21:50'),
+(5, 945679,  513850, 'AAA',          '2024-11-19 17:21:51');
+
+statement ok
+insert into t3 (i, f, n, t, dtm) values
+(1, 10,      100,    '100',          '2024-11-07 03:06:32'),
+(2, 10,      100,    '00100',        '2024-11-07 03:08:54'),
+(3, 11534.6, 115345, '0115345',      '2024-11-08 17:03:37'),
+(4, 2351.23, 235539, '0000235539',   '2024-11-09 17:21:50'),
+(5, 94567.9, 513850, 'AAA',          '2024-11-19 17:21:51');
+
+query I rowsort
+SELECT DISTINCT t3.n FROM t2 JOIN t3 ON t2.n = t3.t
+----
+100
+115345
+235539
+
+query I rowsort
+SELECT t2.n FROM t2 WHERE t2.t = (SELECT MAX(t3.n) FROM t3 WHERE t2.n = t3.n GROUP BY t3.n)
+----
+100
+100
+115345
+235539
+
+query I rowsort
+SELECT t2.i FROM t2 JOIN t3 ON t2.n = t3.t
+----
+1
+1
+2
+2
+3
+4
