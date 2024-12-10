@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 use std::convert::TryInto;
-use std::iter;
+use std::{iter, mem};
 
 use common::DfValue;
 use dataflow::node::Column as DfColumn;
@@ -30,7 +30,7 @@ use readyset_client::internal::{Index, IndexType};
 use readyset_client::ViewPlaceholder;
 use readyset_data::{Collation, DfType, Dialect};
 use readyset_errors::{
-    internal, internal_err, invariant, invariant_eq, ReadySetError, ReadySetResult,
+    internal, internal_err, invariant, invariant_eq, unsupported, ReadySetError, ReadySetResult,
 };
 
 use crate::controller::Migration;
@@ -627,6 +627,41 @@ fn make_identity_node(
     Ok(DfNodeIndex::new(node))
 }
 
+fn should_swap_join_sides(
+    left_cols: &[DfColumn],
+    right_cols: &[DfColumn],
+    on_idxs: &[(usize, usize)],
+) -> ReadySetResult<bool> {
+    let mut side_opt = None;
+    if on_idxs.iter().all(|(l_idx, r_idx)| {
+        match (
+            left_cols[*l_idx].ty().is_any_text(),
+            right_cols[*r_idx].ty().is_any_text(),
+        ) {
+            (true, false) => {
+                if side_opt.is_none() {
+                    side_opt = Some(Side::Left);
+                } else if matches!(side_opt, Some(Side::Right)) {
+                    return false;
+                }
+            }
+            (false, true) => {
+                if side_opt.is_none() {
+                    side_opt = Some(Side::Right);
+                } else if matches!(side_opt, Some(Side::Left)) {
+                    return false;
+                }
+            }
+            _ => {}
+        }
+        true
+    }) {
+        Ok(side_opt == Some(Side::Right))
+    } else {
+        Err(internal_err!("Can not swap join sides"))
+    }
+}
+
 /// Lower a join MIR node to dataflow
 ///
 /// See [`MirNodeInner::Join`] for documentation on what `on_left`, `on_right`, and `project` mean
@@ -654,8 +689,8 @@ fn make_join_node(
         }
     })?;
 
-    let left_cols = mig.dataflow_state.ingredients[left_na.address()].columns();
-    let right_cols = mig.dataflow_state.ingredients[right_na.address()].columns();
+    let mut left_cols = mig.dataflow_state.ingredients[left_na.address()].columns();
+    let mut right_cols = mig.dataflow_state.ingredients[right_na.address()].columns();
 
     let mut on_idxs = on
         .iter()
@@ -666,6 +701,25 @@ fn make_join_node(
             ))
         })
         .collect::<ReadySetResult<Vec<_>>>()?;
+
+    let (left, right) = match should_swap_join_sides(left_cols, right_cols, &on_idxs) {
+        Ok(true) => {
+            if kind == JoinType::Inner {
+                mem::swap(&mut left_na, &mut right_na);
+                mem::swap(&mut left_cols, &mut right_cols);
+                for item in on_idxs.iter_mut() {
+                    *item = (item.1, item.0);
+                }
+                (right, left)
+            } else {
+                unsupported!("Swapping join sides is currently only supported for inner joins.");
+            }
+        }
+        Err(e) => {
+            return Err(e);
+        }
+        _ => (left, right),
+    };
 
     let mut emit = Vec::with_capacity(proj_cols.len());
     let mut cols = Vec::with_capacity(proj_cols.len());
@@ -757,18 +811,18 @@ fn make_join_aggregates_node(
     columns: &[Column],
     mig: &mut Migration<'_>,
 ) -> ReadySetResult<DfNodeIndex> {
-    let left_na = graph.resolve_dataflow_node(left).ok_or_else(|| {
+    let mut left_na = graph.resolve_dataflow_node(left).ok_or_else(|| {
         ReadySetError::MirNodeMustHaveDfNodeAssigned {
             mir_node_index: left.index(),
         }
     })?;
-    let right_na = graph.resolve_dataflow_node(right).ok_or_else(|| {
+    let mut right_na = graph.resolve_dataflow_node(right).ok_or_else(|| {
         ReadySetError::MirNodeMustHaveDfNodeAssigned {
             mir_node_index: right.index(),
         }
     })?;
-    let left_cols = mig.dataflow_state.ingredients[left_na.address()].columns();
-    let right_cols = mig.dataflow_state.ingredients[right_na.address()].columns();
+    let mut left_cols = mig.dataflow_state.ingredients[left_na.address()].columns();
+    let mut right_cols = mig.dataflow_state.ingredients[right_na.address()].columns();
 
     let mut on = vec![];
     // We gather up all of the columns from each respective parent. If a column is in both parents,
@@ -777,7 +831,7 @@ fn make_join_aggregates_node(
     // with the left parent index. We finally iterate through the right parent and add the columns
     // that were exclusively in the right parent as Side::Right with the right parent index for
     // each given unique column.
-    let project = graph
+    let mut project = graph
         .columns(left)
         .iter()
         .enumerate()
@@ -810,6 +864,27 @@ fn make_join_aggregates_node(
                 }),
         )
         .collect::<Vec<_>>();
+
+    match should_swap_join_sides(left_cols, right_cols, &on) {
+        Ok(true) => {
+            mem::swap(&mut left_na, &mut right_na);
+            mem::swap(&mut left_cols, &mut right_cols);
+            for item in on.iter_mut() {
+                *item = (item.1, item.0);
+            }
+            for item in project.iter_mut() {
+                item.0 = if item.0 == Side::Left {
+                    Side::Right
+                } else {
+                    Side::Left
+                };
+            }
+        }
+        Err(e) => {
+            return Err(e);
+        }
+        _ => {}
+    };
 
     let mut cols = project
         .iter()
