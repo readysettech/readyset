@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use dataflow_expression::Dialect;
 use metrics::{counter, Counter};
+use metrics::{gauge, Gauge};
 use nom_sql::{DialectDisplay, Relation};
 use readyset_client::query::MigrationState;
 use readyset_client::{ReadySetHandle, ViewCreateRequest};
@@ -14,6 +15,41 @@ use tracing::{debug, info, instrument, trace, warn};
 use xxhash_rust::xxh3;
 
 use crate::query_status_cache::QueryStatusCache;
+
+struct Metrics {
+    /// The number of queries we've checked for views
+    queries_checked: Counter,
+    query_status_cache_id_to_status_size: Gauge,
+    query_status_cache_statuses_size: Gauge,
+    query_status_cache_pending_inline_migrations: Gauge,
+    view_name_cache_size_local: Gauge,
+    view_name_cache_size_shared: Gauge,
+    views_checked_size: Gauge,
+}
+
+impl Default for Metrics {
+    fn default() -> Self {
+        Self {
+            queries_checked: counter!(recorded::VIEWS_SYNCHRONIZER_QUERIES_CHECKED),
+            query_status_cache_id_to_status_size: gauge!(
+                recorded::QUERY_STATUS_CACHE_ID_TO_STATUS_SIZE
+            ),
+            query_status_cache_statuses_size: gauge!(recorded::QUERY_STATUS_CACHE_STATUSES_SIZE),
+            query_status_cache_pending_inline_migrations: gauge!(
+                recorded::QUERY_STATUS_CACHE_PENDING_INLINE_MIGRATIONS
+            ),
+            view_name_cache_size_local: gauge!(
+                recorded::VIEWS_SYNCHRONIZER_VIEW_NAME_CACHE_SIZE,
+                &[("cache", "local")]
+            ),
+            view_name_cache_size_shared: gauge!(
+                recorded::VIEWS_SYNCHRONIZER_VIEW_NAME_CACHE_SIZE,
+                &[("cache", "shared")]
+            ),
+            views_checked_size: gauge!(recorded::VIEWS_SYNCHRONIZER_VIEWS_CHECKED_SIZE),
+        }
+    }
+}
 
 pub struct ViewsSynchronizer {
     /// The noria connector used to query
@@ -31,10 +67,10 @@ pub struct ViewsSynchronizer {
     /// "dry run succeeded" query is migrated.
     ///
     /// This HashSet stores 128-bit hashes computed via xxHash in an attempt to minimize the amount
-    /// of data we need to store to keep track of the queries we've already seen.
+    /// of data we need to store to keep track of the queries we've already seen.2
     views_checked: HashSet<u128>,
-    /// The number of queries we've checked for views
-    queries_checked: Counter,
+    /// Simple struct for storing references to metrics.
+    metrics: Metrics,
 }
 
 impl ViewsSynchronizer {
@@ -52,7 +88,7 @@ impl ViewsSynchronizer {
             dialect,
             view_name_cache,
             views_checked: HashSet::new(),
-            queries_checked: counter!(recorded::VIEWS_SYNCHRONIZER_QUERIES_CHECKED),
+            metrics: Metrics::default(),
         }
     }
 
@@ -82,8 +118,33 @@ impl ViewsSynchronizer {
         }
     }
 
+    async fn report_metrics(&self) {
+        let metrics = self.query_status_cache.reportable_metrics();
+        self.metrics
+            .query_status_cache_id_to_status_size
+            .set(metrics.id_to_status_size as f64);
+        self.metrics
+            .query_status_cache_statuses_size
+            .set(metrics.statuses_size as f64);
+        self.metrics
+            .query_status_cache_pending_inline_migrations
+            .set(metrics.pending_inlined_migrations_size as f64);
+        let view_name_cache_metrics = self.view_name_cache.metrics().await;
+        self.metrics
+            .view_name_cache_size_local
+            .set(view_name_cache_metrics.local_cache_size as f64);
+        self.metrics
+            .view_name_cache_size_shared
+            .set(view_name_cache_metrics.shared_cache_size as f64);
+
+        self.metrics
+            .views_checked_size
+            .set(self.views_checked.len() as f64);
+    }
+
     async fn poll(&mut self) {
         debug!("Views synchronizer polling");
+        self.report_metrics().await;
         let (queries, hashes): (Vec<_>, Vec<_>) = self
             .query_status_cache
             .queries_with_statuses(&[MigrationState::DryRunSucceeded, MigrationState::Pending])
@@ -130,7 +191,7 @@ impl ViewsSynchronizer {
                 }
                 Err(error) => warn!(%error, "Could not get view statuses from leader"),
             }
-            self.queries_checked.increment(chunk.len() as u64);
+            self.metrics.queries_checked.increment(chunk.len() as u64);
         }
     }
 }
