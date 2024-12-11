@@ -61,6 +61,12 @@ pub struct PersistentStatusCacheHandle {
     pending_inlined_migrations: DashMap<ViewCreateRequest, HashSet<Vec<DfValue>>>,
 }
 
+pub struct ReportableMetrics {
+    pub id_to_status_size: u64,
+    pub statuses_size: u64,
+    pub pending_inlined_migrations_size: u64,
+}
+
 impl Default for PersistentStatusCacheHandle {
     fn default() -> Self {
         Self {
@@ -826,6 +832,15 @@ impl QueryStatusCache {
         let id = id.parse::<QueryId>().ok()?;
         let statuses = self.persistent_handle.statuses.read();
         statuses.peek(&id).map(|(query, _status)| query.clone())
+    }
+
+    pub fn reportable_metrics(&self) -> ReportableMetrics {
+        ReportableMetrics {
+            id_to_status_size: self.id_to_status.len() as u64,
+            statuses_size: self.persistent_handle.statuses.read().len() as u64,
+            pending_inlined_migrations_size: self.persistent_handle.pending_inlined_migrations.len()
+                as u64,
+        }
     }
 }
 

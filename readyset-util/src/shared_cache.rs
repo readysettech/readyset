@@ -164,6 +164,14 @@ pub struct LocalCache<K, V, S = RandomState> {
     local: HashMap<K, V, S>,
 }
 
+/// Metrics for the local cache
+pub struct LocalCacheMetrics {
+    /// The size of the shared cache
+    pub shared_cache_size: u64,
+    /// The size of the local cache
+    pub local_cache_size: u64,
+}
+
 impl<K, V, S> LocalCache<K, V, S>
 where
     K: Hash + Eq,
@@ -293,6 +301,14 @@ where
         }
 
         Ok(self.local.get_mut(key).unwrap())
+    }
+
+    /// Get the metrics for the cache
+    pub async fn metrics(&self) -> LocalCacheMetrics {
+        LocalCacheMetrics {
+            shared_cache_size: self.shared.inner.read().await.len() as u64,
+            local_cache_size: self.local.len() as u64,
+        }
     }
 }
 

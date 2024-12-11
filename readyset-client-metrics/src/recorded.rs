@@ -98,3 +98,22 @@ pub const QUERY_LOG_BACKLOG_SIZE: &str = "readyset_query_log_backlog_size";
 
 /// Counter: The number of queries checked for views.
 pub const VIEWS_SYNCHRONIZER_QUERIES_CHECKED: &str = "readyset_views_synchronizer_queries_checked";
+
+/// Gauge: The size of the query status cache's id-to-status mapping
+pub const QUERY_STATUS_CACHE_ID_TO_STATUS_SIZE: &str =
+    "readyset_query_status_cache_id_to_status_size";
+
+/// Gauge: The size of the query status cache's statuses collection
+pub const QUERY_STATUS_CACHE_STATUSES_SIZE: &str = "readyset_query_status_cache_statuses_size";
+
+/// Gauge: The size of the views synchronizer's view name cache (local and shared variants)
+pub const VIEWS_SYNCHRONIZER_VIEW_NAME_CACHE_SIZE: &str =
+    "readyset_views_synchronizer_view_name_cache_size";
+
+/// Gauge: The number of views that have been checked by the views synchronizer
+pub const VIEWS_SYNCHRONIZER_VIEWS_CHECKED_SIZE: &str =
+    "readyset_views_synchronizer_views_checked_size";
+
+/// Gauge: The size of the query status cache's pending inlined migrations
+pub const QUERY_STATUS_CACHE_PENDING_INLINE_MIGRATIONS: &str =
+    "readyset_query_status_cache_pending_inline_migrations";
