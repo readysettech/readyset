@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
-use metrics::{counter, histogram, Counter, Histogram, SharedString};
+use metrics::{counter, gauge, histogram, Counter, Histogram, SharedString};
 use nom_sql::{DialectDisplay, SqlIdentifier, SqlQuery};
 use readyset_client::query::QueryId;
 use readyset_client_metrics::{
@@ -254,6 +254,7 @@ impl QueryLogger {
         mut receiver: UnboundedReceiver<QueryExecutionEvent>,
         mut shutdown_recv: ShutdownReceiver,
     ) {
+        let backlog_size = gauge!(recorded::QUERY_LOG_BACKLOG_SIZE);
         loop {
             select! {
                 // We use `biased` here to ensure that our shutdown signal will be received and
@@ -267,6 +268,7 @@ impl QueryLogger {
                     break;
                 }
                 event = receiver.recv() => {
+                    backlog_size.set(receiver.len() as f64);
                     match event {
                         Some(event) => self.handle_event(&event),
                         None => {
