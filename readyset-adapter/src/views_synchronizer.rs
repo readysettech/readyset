@@ -2,9 +2,11 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use dataflow_expression::Dialect;
+use metrics::{counter, Counter};
 use nom_sql::{DialectDisplay, Relation};
 use readyset_client::query::MigrationState;
 use readyset_client::{ReadySetHandle, ViewCreateRequest};
+use readyset_client_metrics::recorded;
 use readyset_util::shared_cache::LocalCache;
 use readyset_util::shutdown::ShutdownReceiver;
 use tokio::select;
@@ -31,6 +33,8 @@ pub struct ViewsSynchronizer {
     /// This HashSet stores 128-bit hashes computed via xxHash in an attempt to minimize the amount
     /// of data we need to store to keep track of the queries we've already seen.
     views_checked: HashSet<u128>,
+    /// The number of queries we've checked for views
+    queries_checked: Counter,
 }
 
 impl ViewsSynchronizer {
@@ -48,6 +52,7 @@ impl ViewsSynchronizer {
             dialect,
             view_name_cache,
             views_checked: HashSet::new(),
+            queries_checked: counter!(recorded::VIEWS_SYNCHRONIZER_QUERIES_CHECKED),
         }
     }
 
@@ -100,28 +105,32 @@ impl ViewsSynchronizer {
             })
             .unzip();
 
-        match self
-            .controller
-            .view_names(queries.clone(), self.dialect)
-            .await
-        {
-            Ok(statuses) => {
-                for ((query, name), hash) in queries.into_iter().zip(statuses).zip(hashes) {
-                    trace!(
-                        // FIXME(REA-2168): Use correct dialect.
-                        query = %query.statement.display(nom_sql::Dialect::MySQL),
-                        name = ?name,
-                        "Loaded query status from controller"
-                    );
-                    if let Some(name) = name {
-                        self.view_name_cache.insert(query.clone(), name).await;
-                        self.query_status_cache
-                            .update_query_migration_state(&query, MigrationState::Successful);
-                        self.views_checked.insert(hash);
+        for chunk in queries.chunks(128) {
+            match self
+                .controller
+                .view_names(chunk.to_vec(), self.dialect)
+                .await
+            {
+                Ok(statuses) => {
+                    let chunk_hashes = hashes.iter().take(chunk.len());
+                    for ((query, name), hash) in chunk.iter().zip(statuses).zip(chunk_hashes) {
+                        trace!(
+                            // FIXME(REA-2168): Use correct dialect.
+                            query = %query.statement.display(nom_sql::Dialect::MySQL),
+                            name = ?name,
+                            "Loaded query status from controller"
+                        );
+                        if let Some(name) = name {
+                            self.view_name_cache.insert(query.clone(), name).await;
+                            self.query_status_cache
+                                .update_query_migration_state(query, MigrationState::Successful);
+                            self.views_checked.insert(*hash);
+                        }
                     }
                 }
+                Err(error) => warn!(%error, "Could not get view statuses from leader"),
             }
-            Err(error) => warn!(%error, "Could not get view statuses from leader"),
+            self.queries_checked.increment(chunk.len() as u64);
         }
     }
 }
