@@ -210,6 +210,7 @@ impl MigrationHandler {
                 _ = interval.tick() => {
                     self.process_pending_migrations(&success_counter, &failure_counter).await;
                     self.process_inlined_migrations().await;
+                    self.purge_expired_migrations();
                 }
             }
         }
@@ -364,5 +365,14 @@ impl MigrationHandler {
             }
             _ => {} // Leave it as pending.
         }
+    }
+
+    /// Purge migrations that have exceeded the max retry time. Entries in the `start_time` map
+    /// may have been removed by the QueryStatusCache due to it's `LruCache` eviction policy, and we
+    /// might get stuck with orphan entries in the our map. Hence, we need to purge them here.
+    fn purge_expired_migrations(&mut self) {
+        let now = Instant::now();
+        self.start_time
+            .retain(|_, start_time| now - *start_time <= self.max_retry);
     }
 }
