@@ -446,6 +446,7 @@ impl Clear for PrometheusRecorder {
         false
     }
 }
+
 /// Handle for accessing metrics stored via [`PrometheusRecorder`].
 ///
 /// In certain scenarios, it may be necessary to directly handle requests that would otherwise be
@@ -628,17 +629,30 @@ impl PrometheusBuilder {
         Ok(self)
     }
 
+    async fn run_upkeep(handle: PrometheusHandle) {
+        let mut interval = tokio::time::interval(Duration::from_secs(5));
+        loop {
+            interval.tick().await;
+            handle.run_upkeep();
+        }
+    }
+
     pub fn build_recorder(self) -> PrometheusRecorder {
         let quantiles = metrics_util::parse_quantiles(&[0.0, 0.5, 0.9, 0.95, 0.99, 0.999, 1.0]);
 
-        PrometheusRecorder::from(Inner {
+        let rec = PrometheusRecorder::from(Inner {
             registry: Registry::new(GenerationalStorage::new(AtomicStorage)),
             recency: Recency::new(quanta::Clock::new(), MetricKindMask::NONE, None),
             distributions: RwLock::new(HashMap::new()),
             distribution_builder: DistributionBuilder::new(quantiles, None, None, None, None),
             descriptions: RwLock::new(HashMap::new()),
             global_labels: self.global_labels.unwrap_or_default(),
-        })
+        });
+
+        let handle = rec.handle().clone();
+        tokio::spawn(Self::run_upkeep(handle));
+
+        rec
     }
 
     pub fn build(self) -> Result<(PrometheusRecorder, ExporterFuture), BuildError> {
