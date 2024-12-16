@@ -940,17 +940,14 @@ impl Domain {
                 trace!(?misses, "Remapped misses on generated columns");
 
                 // Record that we remapped these keys, so that any evictions on the upstream keys
-                // can be translated into the original keys
+                // can be translated into the original keys.  If the node we missed in is fully
+                // materialized, we don't need to record the remaps, since we're guaranteed not
+                // to get any evictions on the upstream keys
                 for upstream_miss in &misses {
-                    if self
-                        .state
-                        .get(upstream_miss.node)
-                        .iter()
-                        // If the node we missed in is fully materialized, we don't need to record
-                        // the remaps, since we're guaranteed not to get any evictions on the
-                        // upstream keys
-                        .any(|state| state.is_partial())
-                    {
+                    let Some(state) = self.state.get(upstream_miss.node) else {
+                        continue;
+                    };
+                    if state.is_partial() {
                         self.remapped_keys.insert(
                             miss_in,
                             upstream_miss.clone(),
@@ -4434,8 +4431,6 @@ impl Domain {
 
     /// Handles an [`Eviction`], triggering downstream evictions in this Domain or others as
     /// necessary.
-    ///
-    /// If handling an `Eviction::Random`, we return the evicted key.
     pub fn handle_eviction(
         &mut self,
         request: Eviction,

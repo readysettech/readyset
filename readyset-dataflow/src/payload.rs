@@ -738,11 +738,7 @@ impl fmt::Debug for Packet {
             Packet::Input(_) => write!(f, "Input"),
             Packet::Update(x) => write!(f, "Update(link={:?}, {} records)", x.link, x.data.len()),
             Packet::RequestReaderReplay(x) => {
-                write!(
-                    f,
-                    "RequestReaderReplay(node={:?}, keys={:?})",
-                    x.node, x.keys
-                )
+                write!(f, "RequestReaderReplay(node={}, keys={:?})", x.node, x.keys)
             }
             Packet::RequestPartialReplay(x) => {
                 write!(

@@ -33,36 +33,36 @@ pub(super) enum Handle {
 
 impl Handle {
     pub fn base_value_size(&self) -> usize {
-        match *self {
-            Handle::Single(ref h) => h.base_value_size(),
-            Handle::Many(ref h) => h.base_value_size(),
+        match self {
+            Handle::Single(h) => h.base_value_size(),
+            Handle::Many(h) => h.base_value_size(),
         }
     }
 
     pub fn is_empty(&self) -> bool {
-        match *self {
-            Handle::Single(ref h) => h.is_empty(),
-            Handle::Many(ref h) => h.is_empty(),
+        match self {
+            Handle::Single(h) => h.is_empty(),
+            Handle::Many(h) => h.is_empty(),
         }
     }
 
     pub fn clear(&mut self, k: Key) {
-        match *self {
-            Handle::Single(ref mut h) => {
+        match self {
+            Handle::Single(h) => {
                 h.clear(key_to_single(k).into_owned());
             }
-            Handle::Many(ref mut h) => {
+            Handle::Many(h) => {
                 h.clear(k.into_owned());
             }
         }
     }
 
     pub fn empty(&mut self, k: Key) {
-        match *self {
-            Handle::Single(ref mut h) => {
+        match self {
+            Handle::Single(h) => {
                 h.remove_entry(key_to_single(k).into_owned());
             }
-            Handle::Many(ref mut h) => {
+            Handle::Many(h) => {
                 h.remove_entry(k.into_owned());
             }
         }
@@ -95,7 +95,7 @@ impl Handle {
     /// the key that was evicted.
     pub fn evict(&mut self, keys_to_evict: EvictionQuantity) -> (usize, Option<Vec<DfValue>>) {
         let base_value_size = self.base_value_size();
-        match *self {
+        match self {
             Handle::Single(ref mut h) => {
                 let (bytes, key) = h.evict_keys(keys_to_evict, |k, v| {
                     // Each row's state is composed of: The key, the set of Values in the row
@@ -117,7 +117,7 @@ impl Handle {
     }
 
     pub fn publish(&mut self) {
-        match *self {
+        match self {
             Handle::Single(ref mut h) => {
                 h.publish();
             }
@@ -132,7 +132,7 @@ impl Handle {
         I: IntoIterator<Item = Record>,
     {
         let mut memory_delta = 0isize;
-        match *self {
+        match self {
             Handle::Single(ref mut h) => {
                 assert_eq!(key.len(), 1);
                 for r in rs {
@@ -174,7 +174,7 @@ impl Handle {
     }
 
     pub fn set_timestamp(&mut self, t: Timestamp) {
-        match *self {
+        match self {
             Handle::Single(ref mut h) => h.set_timestamp(t),
             Handle::Many(ref mut h) => h.set_timestamp(t),
         }

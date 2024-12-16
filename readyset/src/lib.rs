@@ -1109,7 +1109,7 @@ where
             let telemetry_sender = telemetry_sender.clone();
 
             // Initialize the reader layer for the adapter.
-            let r = (options.deployment_mode.has_reader_nodes()).then(|| {
+            let r = options.deployment_mode.has_reader_nodes().then(|| {
                 // Create a task that repeatedly polls BlockingRead's every `RETRY_TIMEOUT`.
                 // When the `BlockingRead` completes, tell the future to resolve with ack.
                 let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<(BlockingRead, Ack)>();
