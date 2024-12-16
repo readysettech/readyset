@@ -688,7 +688,6 @@ impl From<&Index> for KeyedState {
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
 
     #[test]

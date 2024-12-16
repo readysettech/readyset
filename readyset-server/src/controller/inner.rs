@@ -577,7 +577,6 @@ impl Leader {
                 let key = ds.evict_single(body).await?;
                 return_serialized!(key);
             }
-
             (&Method::GET, "/flush_partial") => {
                 let ret = {
                     let mut writer = self.dataflow_state_handle.write().await;
