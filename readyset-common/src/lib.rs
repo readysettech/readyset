@@ -5,6 +5,8 @@ mod records;
 pub mod ulimit;
 pub mod worker;
 
+use std::mem::{size_of, size_of_val};
+
 use petgraph::prelude::*;
 pub use readyset_client::internal::{Index, IndexType};
 pub use readyset_data::DfValue;
@@ -15,29 +17,19 @@ pub use self::records::*;
 
 pub trait SizeOf {
     fn deep_size_of(&self) -> u64;
-    fn size_of(&self) -> u64;
     fn is_empty(&self) -> bool;
 }
 
 impl SizeOf for DfValue {
     fn deep_size_of(&self) -> u64 {
-        use std::mem::size_of_val;
-
-        let inner = match *self {
-            DfValue::Text(ref t) => size_of_val(t) as u64 + t.as_bytes().len() as u64,
-            DfValue::BitVector(ref t) => size_of_val(t) as u64 + (t.len() as u64 + 7) / 8,
-            DfValue::ByteArray(ref t) => size_of_val(t) as u64 + t.len() as u64,
-            _ => 0u64,
+        let inner = match self {
+            DfValue::Text(t) => size_of_val(t) + t.as_bytes().len(),
+            DfValue::BitVector(t) => size_of_val(t) + (t.len() + 7) / 8,
+            DfValue::ByteArray(t) => size_of_val(t) + t.len(),
+            _ => 0,
         };
 
-        self.size_of() + inner
-    }
-
-    fn size_of(&self) -> u64 {
-        use std::mem::size_of;
-
-        // doesn't include data if stored externally
-        size_of::<DfValue>() as u64
+        (size_of::<Self>() + inner) as _
     }
 
     fn is_empty(&self) -> bool {
@@ -47,15 +39,7 @@ impl SizeOf for DfValue {
 
 impl SizeOf for Vec<DfValue> {
     fn deep_size_of(&self) -> u64 {
-        use std::mem::size_of_val;
-
-        size_of_val(self) as u64 + self.iter().fold(0u64, |acc, d| acc + d.deep_size_of())
-    }
-
-    fn size_of(&self) -> u64 {
-        use std::mem::{size_of, size_of_val};
-
-        size_of_val(self) as u64 + size_of::<DfValue>() as u64 * self.len() as u64
+        size_of_val(self) as u64 + self.iter().map(|x| x.deep_size_of()).sum::<u64>()
     }
 
     fn is_empty(&self) -> bool {
@@ -65,15 +49,7 @@ impl SizeOf for Vec<DfValue> {
 
 impl SizeOf for Box<[DfValue]> {
     fn deep_size_of(&self) -> u64 {
-        use std::mem::size_of_val;
-
-        size_of_val(self) as u64 + self.iter().fold(0u64, |acc, d| acc + d.deep_size_of()) + 8
-    }
-
-    fn size_of(&self) -> u64 {
-        use std::mem::{size_of, size_of_val};
-
-        size_of_val(self) as u64 + size_of::<DfValue>() as u64 * self.len() as u64
+        size_of_val(self) as u64 + self.iter().map(|x| x.deep_size_of()).sum::<u64>() + 8
     }
 
     fn is_empty(&self) -> bool {
@@ -115,12 +91,10 @@ mod tests {
 
     #[test]
     fn data_type_mem_size() {
-        use std::mem::{size_of, size_of_val};
-
         use chrono::DateTime;
 
         let s = "this needs to be longer than 14 chars to make it be a Text";
-        let txt: DfValue = DfValue::from(s);
+        let txt = DfValue::from(s);
         let shrt = DfValue::Int(5);
         let time = DfValue::TimestampTz(
             DateTime::from_timestamp(0, 42_000_000)
@@ -134,19 +108,16 @@ mod tests {
         // DfValue should always use 16 bytes itself
         assert_eq!(size_of::<DfValue>(), 16);
         assert_eq!(size_of_val(&txt), 16);
-        assert_eq!(size_of_val(&txt) as u64, txt.size_of());
         assert_eq!(
             txt.deep_size_of(),
             // DfValue + Arc's ptr + string
-            txt.size_of() + 8 + (s.len() as u64)
+            16 + 8 + (s.len() as u64)
         );
         assert_eq!(size_of_val(&shrt), 16);
         assert_eq!(size_of_val(&time), 16);
-        assert_eq!(size_of_val(&time) as u64, time.size_of());
-        assert_eq!(time.deep_size_of(), 16); // DfValue + inline NaiveDateTime
+        assert_eq!(size_of_val(&time) as u64, time.deep_size_of());
 
         assert_eq!(size_of_val(&rec), 24);
-        assert_eq!(rec.size_of(), 24 + 3 * 16);
         assert_eq!(rec.deep_size_of(), 24 + 3 * 16 + (8 + 16));
     }
 }
