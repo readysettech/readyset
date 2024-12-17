@@ -104,6 +104,13 @@ pub struct AllocStats {
     pub fragmentation: usize,
 }
 
+#[derive(Debug)]
+pub struct AllocThreadStats {
+    pub thread_name: String,
+    pub allocated: u64,
+    pub deallocated: u64,
+}
+
 #[path = "jemalloc.rs"]
 mod imp;
 

@@ -24,3 +24,9 @@ pub const DIRTY_BYTES: &str = "readyset_allocator_dirty_bytes";
 /// Gauge: Total number of bytes that are in active pages but are not "allocated"
 /// by the process.
 pub const FRAGMENTED_BYTES: &str = "readyset_allocator_fragmented_bytes";
+
+/// Counter: Total number of bytes allocated by a particular thread (thread name is the label)
+pub const ALLOCATED_BYTES_PER_THREAD: &str = "readyset_allocator_allocated_bytes_per_thread";
+
+/// Counter: Total number of bytes deallocated by a particular thread (thread name is the label)
+pub const DEALLOCATED_BYTES_PER_THREAD: &str = "readyset_allocator_deallocated_bytes_per_thread";
