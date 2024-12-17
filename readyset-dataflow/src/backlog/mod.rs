@@ -452,12 +452,8 @@ impl WriteHandle {
 }
 
 impl SizeOf for WriteHandle {
-    fn size_of(&self) -> u64 {
-        std::mem::size_of::<Self>() as u64
-    }
-
     fn deep_size_of(&self) -> u64 {
-        self.mem_size as u64
+        self.mem_size as _
     }
 
     fn is_empty(&self) -> bool {

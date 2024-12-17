@@ -294,14 +294,6 @@ impl SizeOf for MaterializedNodeState {
         }
     }
 
-    fn size_of(&self) -> u64 {
-        match self {
-            MaterializedNodeState::Memory(ms) => ms.size_of(),
-            MaterializedNodeState::Persistent(ps) => ps.size_of(),
-            MaterializedNodeState::PersistentReadHandle(rh) => rh.size_of(),
-        }
-    }
-
     fn is_empty(&self) -> bool {
         match self {
             MaterializedNodeState::Memory(ms) => ms.is_empty(),
@@ -611,19 +603,17 @@ impl std::borrow::Borrow<[DfValue]> for Row {
 
 impl Deref for Row {
     type Target = Vec<DfValue>;
+
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
 impl SizeOf for Row {
-    fn size_of(&self) -> u64 {
-        use std::mem::size_of;
-        size_of::<Self>() as u64
-    }
     fn deep_size_of(&self) -> u64 {
         (*self.0).deep_size_of()
     }
+
     fn is_empty(&self) -> bool {
         false
     }

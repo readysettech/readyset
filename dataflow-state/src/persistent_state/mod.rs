@@ -73,7 +73,7 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::sync::{mpsc, Arc};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
-use std::{fmt, fs, mem};
+use std::{fmt, fs};
 
 use bincode::Options;
 use clap::ValueEnum;
@@ -2446,10 +2446,6 @@ impl SizeOf for PersistentStateHandle {
         0
     }
 
-    fn size_of(&self) -> u64 {
-        mem::size_of::<Self>() as u64
-    }
-
     fn is_empty(&self) -> bool {
         self.inner()
             .db
@@ -2461,10 +2457,6 @@ impl SizeOf for PersistentStateHandle {
 }
 
 impl SizeOf for PersistentState {
-    fn size_of(&self) -> u64 {
-        mem::size_of::<Self>() as u64
-    }
-
     fn deep_size_of(&self) -> u64 {
         let inner = self.db.inner();
         inner

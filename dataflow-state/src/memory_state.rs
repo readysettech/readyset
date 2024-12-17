@@ -33,12 +33,6 @@ pub struct MemoryState {
 }
 
 impl SizeOf for MemoryState {
-    fn size_of(&self) -> u64 {
-        use std::mem::size_of;
-
-        size_of::<Self>() as u64
-    }
-
     fn deep_size_of(&self) -> u64 {
         self.mem_size
     }
