@@ -1,9 +1,12 @@
 pub(crate) mod recorded;
 
-use std::time::Duration;
+use std::{
+    collections::{hash_map::Entry, HashMap, HashSet},
+    time::Duration,
+};
 
-use metrics::Gauge;
-use readyset_alloc::fetch_stats;
+use metrics::{Counter, Gauge};
+use readyset_alloc::{fetch_all_memory_stats, AllocThreadStats};
 use readyset_util::shutdown::ShutdownReceiver;
 use tokio::select;
 use tracing::info;
@@ -33,6 +36,7 @@ struct AllocatorMetricsReporter {
     retained: Gauge,
     dirty: Gauge,
     fragmented: Gauge,
+    per_thread_bytes: HashMap<String, (Counter, Counter)>,
 }
 
 impl AllocatorMetricsReporter {
@@ -46,25 +50,57 @@ impl AllocatorMetricsReporter {
             retained: metrics::gauge!(RETAINED_BYTES),
             dirty: metrics::gauge!(DIRTY_BYTES),
             fragmented: metrics::gauge!(FRAGMENTED_BYTES),
+            per_thread_bytes: HashMap::new(),
         }
     }
 
     fn report_metrics(&mut self) {
-        // Note: we could call alloc::jemalloc::iterate_thread_allocation_stats() to get the
-        // per-thread dump. `fetch_stats` is sufficient for now.
-        // Additional note: iterate_thread_allocation_stats() doesn't automatically bump the
-        // it's epoch, so you'll need to do that (just read the code if you are interested).
-
-        match fetch_stats() {
-            Ok(stats) => {
-                self.allocated.set(stats.allocated as f64);
-                self.active.set(stats.active as f64);
-                self.metadata.set(stats.metadata as f64);
-                self.resident.set(stats.resident as f64);
-                self.mapped.set(stats.mapped as f64);
-                self.retained.set(stats.retained as f64);
-                self.dirty.set(stats.dirty as f64);
-                self.fragmented.set(stats.fragmentation as f64);
+        match fetch_all_memory_stats() {
+            Ok((alloc_stats, thread_memory_stats)) => {
+                self.allocated.set(alloc_stats.allocated as f64);
+                self.active.set(alloc_stats.active as f64);
+                self.metadata.set(alloc_stats.metadata as f64);
+                self.resident.set(alloc_stats.resident as f64);
+                self.mapped.set(alloc_stats.mapped as f64);
+                self.retained.set(alloc_stats.retained as f64);
+                self.dirty.set(alloc_stats.dirty as f64);
+                self.fragmented.set(alloc_stats.fragmentation as f64);
+                let seen_threads = thread_memory_stats
+                    .iter()
+                    .map(|stats| &stats.thread_name)
+                    .collect::<HashSet<_>>();
+                self.per_thread_bytes
+                    .retain(|thread_name, _| seen_threads.contains(thread_name));
+                let mut thread_totals: HashMap<String, (u64, u64)> = HashMap::new();
+                for AllocThreadStats {
+                    thread_name,
+                    allocated,
+                    deallocated,
+                } in thread_memory_stats
+                {
+                    thread_totals
+                        .entry(thread_name)
+                        .and_modify(|(a, d)| {
+                            *a += allocated;
+                            *d += deallocated;
+                        })
+                        .or_insert((allocated, deallocated));
+                }
+                for (thread_name, (allocated, deallocated)) in thread_totals {
+                    let mut entry = self.per_thread_bytes.entry(thread_name);
+                    let (allocated_counter, deallocated_counter) = match entry {
+                        Entry::Occupied(ref mut entry) => entry.get_mut(),
+                        Entry::Vacant(entry) => {
+                            let labels = [("thread_name", entry.key().clone())];
+                            entry.insert((
+                                metrics::counter!(ALLOCATED_BYTES_PER_THREAD, &labels),
+                                metrics::counter!(DEALLOCATED_BYTES_PER_THREAD, &labels),
+                            ))
+                        }
+                    };
+                    allocated_counter.absolute(allocated);
+                    deallocated_counter.absolute(deallocated);
+                }
             }
             Err(e) => {
                 // not sure what else to do but log, at a low level :shrug:

@@ -11,7 +11,7 @@ use health_reporter::{HealthReporter, State};
 use hyper::header::CONTENT_TYPE;
 use hyper::service::make_service_fn;
 use hyper::{self, Body, Method, Request, Response, StatusCode};
-use readyset_alloc::{dump_stats, memory_and_per_thread_stats};
+use readyset_alloc::{dump_stats, print_memory_and_per_thread_stats};
 use readyset_client::metrics::recorded;
 use readyset_errors::ReadySetError;
 use readyset_util::shutdown::ShutdownReceiver;
@@ -243,7 +243,7 @@ impl Service<Request<Body>> for NoriaServerHttpRouter {
             // Returns a summary of memory usage for the entire process and per-thread memory usage
             (&Method::POST, "/memory_stats") => {
                 let res =
-                    match memory_and_per_thread_stats() {
+                    match print_memory_and_per_thread_stats() {
                         Ok(stats) => res
                             .status(200)
                             .header(CONTENT_TYPE, "text/plain")
