@@ -1317,6 +1317,20 @@ impl BuiltinFunction {
                 }
                 .and_then(|value| value.coerce_to(ty, &DfType::Unknown))
             }
+            BuiltinFunction::Lower {
+                expr, collation, ..
+            } => {
+                let df_val = non_null!(expr.eval(record)?);
+                let txt = <&str>::try_from(&df_val)?.to_lowercase();
+                Ok(DfValue::from_str_and_collation(txt.as_str(), *collation))
+            }
+            BuiltinFunction::Upper {
+                expr, collation, ..
+            } => {
+                let df_val = non_null!(expr.eval(record)?);
+                let txt = <&str>::try_from(&df_val)?.to_uppercase();
+                Ok(DfValue::from_str_and_collation(txt.as_str(), *collation))
+            }
             BuiltinFunction::Length {
                 expr,
                 in_bytes,

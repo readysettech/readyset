@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
 use crate::common::{column_identifier_no_alias, function_expr, ws_sep_comma, TimestampField};
+use crate::create::CollationName;
 use crate::literal::{literal, Double, Float};
 use crate::select::nested_selection;
 use crate::set::{variable_scope_prefix, Variable};
@@ -44,6 +45,28 @@ pub enum FunctionExpr {
     Extract {
         field: TimestampField,
         expr: Box<Expr>,
+    },
+
+    /// The SQL `LOWER`/`UPPER` functions.
+    ///
+    /// The supported syntax for MySQL dialect is:
+    ///
+    /// `LOWER(string)`
+    /// `UPPER(string)`
+    /// Note, `collation` will always be None for MySQL dialect
+    ///
+    /// The supported syntax for Postgres dialect is:
+    ///
+    /// `LOWER(string [COLLATE collation_name])`
+    /// `UPPER(string [COLLATE collation_name])`
+    ///
+    Lower {
+        expr: Box<Expr>,
+        collation: Option<CollationName>,
+    },
+    Upper {
+        expr: Box<Expr>,
+        collation: Option<CollationName>,
     },
 
     /// `SUM` aggregation
@@ -95,7 +118,9 @@ impl FunctionExpr {
             | FunctionExpr::Max(arg)
             | FunctionExpr::Min(arg)
             | FunctionExpr::GroupConcat { expr: arg, .. }
-            | FunctionExpr::Extract { expr: arg, .. } => {
+            | FunctionExpr::Extract { expr: arg, .. }
+            | FunctionExpr::Lower { expr: arg, .. }
+            | FunctionExpr::Upper { expr: arg, .. } => {
                 concrete_iter!(iter::once(arg.as_ref()))
             }
             FunctionExpr::CountStar => concrete_iter!(iter::empty()),
@@ -164,6 +189,20 @@ impl DialectDisplay for FunctionExpr {
             }
             FunctionExpr::Extract { field, expr } => {
                 write!(f, "EXTRACT({field} FROM {})", expr.display(dialect))
+            }
+            FunctionExpr::Lower { expr, collation } => {
+                write!(f, "LOWER({}", expr.display(dialect))?;
+                if let Some(c) = collation {
+                    write!(f, " COLLATE \"{}\"", c)?;
+                }
+                write!(f, ")")
+            }
+            FunctionExpr::Upper { expr, collation } => {
+                write!(f, "UPPER({}", expr.display(dialect))?;
+                if let Some(c) = collation {
+                    write!(f, " COLLATE \"{}\"", c)?;
+                }
+                write!(f, ")")
             }
         })
     }

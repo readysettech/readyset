@@ -1,0 +1,17 @@
+statement ok
+create table test (txt text)
+
+statement ok
+insert into test (txt) values ('AbCddEFGklmN')
+
+query T rowsort
+select * from test where lower(txt) = 'abcddefgklmn'
+----
+AbCddEFGklmN
+
+query T rowsort
+select * from test where upper(txt) = 'ABCDDEFGKLMN'
+----
+AbCddEFGklmN
+
+
