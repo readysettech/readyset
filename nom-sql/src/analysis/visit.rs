@@ -541,6 +541,8 @@ pub fn walk_function_expr<'ast, V: Visitor<'ast>>(
         FunctionExpr::Min(expr) => visitor.visit_expr(expr.as_ref()),
         FunctionExpr::GroupConcat { expr, .. } => visitor.visit_expr(expr.as_ref()),
         FunctionExpr::Extract { expr, .. } => visitor.visit_expr(expr.as_ref()),
+        FunctionExpr::Lower { expr, .. } => visitor.visit_expr(expr.as_ref()),
+        FunctionExpr::Upper { expr, .. } => visitor.visit_expr(expr.as_ref()),
         FunctionExpr::Call { arguments, .. } => {
             for arg in arguments {
                 visitor.visit_expr(arg)?;

@@ -11,8 +11,8 @@ use std::fmt::{self, Display, Formatter};
 pub use eval::builtins::DateTruncPrecision;
 use itertools::Itertools;
 use nom_sql::TimestampField;
-pub use readyset_data::Dialect;
-use readyset_data::{DfType, DfValue};
+pub use readyset_data::{dialect::SqlEngine, Dialect};
+use readyset_data::{Collation, DfType, DfValue};
 use serde::{Deserialize, Serialize};
 use vec1::Vec1;
 
@@ -133,6 +133,18 @@ pub enum BuiltinFunction {
         expr: Expr,
         dialect: Dialect,
     },
+
+    Lower {
+        expr: Expr,
+        collation: Collation,
+        dialect: Dialect,
+    },
+
+    Upper {
+        expr: Expr,
+        collation: Collation,
+        dialect: Dialect,
+    },
 }
 
 impl BuiltinFunction {
@@ -170,6 +182,8 @@ impl BuiltinFunction {
             Extract { .. } => "extract",
             Length { .. } => "length",
             Ascii { .. } => "ascii",
+            Lower { .. } => "lower",
+            Upper { .. } => "upper",
         }
     }
 }
@@ -276,6 +290,28 @@ impl Display for BuiltinFunction {
             }
             Ascii { expr, .. } => {
                 write!(f, "({})", expr)
+            }
+            Lower {
+                expr,
+                collation,
+                dialect,
+            } => {
+                write!(f, "({}", expr)?;
+                if dialect.engine() == SqlEngine::PostgreSQL {
+                    write!(f, " COLLATE \"{collation}\"")?;
+                }
+                write!(f, ")")
+            }
+            Upper {
+                expr,
+                collation,
+                dialect,
+            } => {
+                write!(f, "({}", expr)?;
+                if dialect.engine() == SqlEngine::PostgreSQL {
+                    write!(f, " COLLATE \"{collation}\"")?;
+                }
+                write!(f, ")")
             }
         }
     }

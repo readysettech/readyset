@@ -1,5 +1,6 @@
 use std::{cmp, iter};
 
+use nom_sql::create::CollationName;
 use nom_sql::{
     BinaryOperator as SqlBinaryOperator, Column, DialectDisplay, Expr as AstExpr, FunctionExpr,
     InValue, Relation, UnaryOperator,
@@ -870,6 +871,24 @@ impl BinaryOperator {
     }
 }
 
+fn infer_collation(name_opt: Option<CollationName>, ty: &DfType) -> ReadySetResult<Collation> {
+    let collation = match name_opt {
+        Some(c) => {
+            let s_name = c.to_string().to_lowercase();
+            if s_name.starts_with("utf8") || s_name.ends_with("utf8") {
+                Collation::Utf8
+            } else {
+                unsupported!("Only Utf-8 collation supported for string operations");
+            }
+        }
+        None => match ty {
+            DfType::Text(c) | DfType::Char(.., c) | DfType::VarChar(.., c) => *c,
+            _ => unreachable!("Cannot infer collation for type {ty}"),
+        },
+    };
+    Ok(collation)
+}
+
 impl Expr {
     fn infer_case_result_type<'a>(
         then_types_it: impl Iterator<Item = &'a DfType>,
@@ -960,6 +979,30 @@ impl Expr {
                 let expr = Self::lower(*expr, dialect, context)?;
                 let ty = DfType::Numeric { prec: 20, scale: 6 };
                 let func = Box::new(BuiltinFunction::Extract(field, expr));
+
+                Ok(Self::Call { func, ty })
+            }
+            AstExpr::Call(FunctionExpr::Lower { expr, collation }) => {
+                let expr = Self::lower(*expr, dialect, context)?;
+                let collation = infer_collation(collation, expr.ty())?;
+                let ty = expr.ty().clone();
+                let func = Box::new(BuiltinFunction::Lower {
+                    expr,
+                    collation,
+                    dialect,
+                });
+
+                Ok(Self::Call { func, ty })
+            }
+            AstExpr::Call(FunctionExpr::Upper { expr, collation }) => {
+                let expr = Self::lower(*expr, dialect, context)?;
+                let collation = infer_collation(collation, expr.ty())?;
+                let ty = expr.ty().clone();
+                let func = Box::new(BuiltinFunction::Upper {
+                    expr,
+                    collation,
+                    dialect,
+                });
 
                 Ok(Self::Call { func, ty })
             }

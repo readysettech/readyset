@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
 use crate::column::Column;
+use crate::create::{collation_name, CollationName};
 use crate::dialect::{Dialect, DialectDisplay};
 use crate::expression::expression;
 use crate::table::Relation;
@@ -729,6 +730,56 @@ fn extract(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8
     }
 }
 
+fn parse_lower_upper_func_body(
+    func_name: String,
+    i: LocatedSpan<&[u8]>,
+    dialect: Dialect,
+) -> NomSqlResult<&[u8], (Expr, Option<CollationName>)> {
+    let (i, _) = tag_no_case(func_name.as_str())(i)?;
+    let (i, _) = whitespace0(i)?;
+    let (i, _) = char('(')(i)?;
+    let (i, _) = whitespace0(i)?;
+    let (i, expr) = expression(dialect)(i)?;
+    let (i, _) = whitespace0(i)?;
+    let (i, collation) = if dialect == Dialect::PostgreSQL {
+        opt(preceded(
+            tuple((tag_no_case("COLLATE"), whitespace0)),
+            collation_name(dialect),
+        ))(i)?
+    } else {
+        (i, None)
+    };
+    let (i, _) = char(')')(i)?;
+
+    Ok((i, (expr, collation)))
+}
+
+fn lower(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], FunctionExpr> {
+    move |i| {
+        let (i, (expr, collation)) = parse_lower_upper_func_body("lower".to_string(), i, dialect)?;
+        Ok((
+            i,
+            FunctionExpr::Lower {
+                expr: Box::new(expr),
+                collation,
+            },
+        ))
+    }
+}
+
+fn upper(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], FunctionExpr> {
+    move |i| {
+        let (i, (expr, collation)) = parse_lower_upper_func_body("upper".to_string(), i, dialect)?;
+        Ok((
+            i,
+            FunctionExpr::Upper {
+                expr: Box::new(expr),
+                collation,
+            },
+        ))
+    }
+}
+
 fn substring(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], FunctionExpr> {
     move |i| {
         let (i, _) = alt((tag_no_case("substring"), tag_no_case("substr")))(i)?;
@@ -834,6 +885,8 @@ pub fn function_expr(
                 },
             ),
             extract(dialect),
+            lower(dialect),
+            upper(dialect),
             substring(dialect),
             function_call(dialect),
             function_call_without_parens,
@@ -1606,5 +1659,41 @@ mod tests {
         extract_test!(timezone, Timezone, "TIMEZONE");
         extract_test!(week, Week, "WEEK");
         extract_test!(year, Year, "YEAR");
+    }
+
+    mod lower_upper {
+        use super::*;
+        #[test]
+        fn test_lower() {
+            fn test(dialect: Dialect, func_name: &str, val: &str, collate: Option<&str>) {
+                let expected = format!(
+                    "{}(\'{}\'{})",
+                    func_name.to_uppercase(),
+                    val,
+                    if let Some(collation_name) = collate {
+                        format!(" COLLATE \"{}\"", collation_name)
+                    } else {
+                        "".to_string()
+                    }
+                );
+                let actual = if func_name.eq_ignore_ascii_case("lower") {
+                    test_parse!(lower(dialect), expected.as_bytes())
+                } else {
+                    test_parse!(upper(dialect), expected.as_bytes())
+                }
+                .display(dialect)
+                .to_string();
+                assert_eq!(expected, actual);
+            }
+
+            test(Dialect::PostgreSQL, "lower", "AbC", Some("es_ES"));
+            test(Dialect::PostgreSQL, "lower", "AbC", None);
+
+            test(Dialect::PostgreSQL, "upper", "AbC", Some("es_ES"));
+            test(Dialect::PostgreSQL, "upper", "AbC", None);
+
+            test(Dialect::MySQL, "lower", "AbC", None);
+            test(Dialect::MySQL, "upper", "AbC", None);
+        }
     }
 }

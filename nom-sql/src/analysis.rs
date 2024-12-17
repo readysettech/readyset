@@ -96,6 +96,8 @@ impl<'a> ReferredColumnsIter<'a> {
             Count { expr, .. } => self.visit_expr(expr),
             CountStar => None,
             Extract { expr, .. } => self.visit_expr(expr),
+            Lower { expr, .. } => self.visit_expr(expr),
+            Upper { expr, .. } => self.visit_expr(expr),
             Sum { expr, .. } => self.visit_expr(expr),
             Max(arg) => self.visit_expr(arg),
             Min(arg) => self.visit_expr(arg),
@@ -208,6 +210,8 @@ impl<'a> ReferredColumnsMut<'a> {
             Count { expr, .. } => self.visit_expr(expr),
             CountStar => None,
             Extract { expr, .. } => self.visit_expr(expr),
+            Lower { expr, .. } => self.visit_expr(expr),
+            Upper { expr, .. } => self.visit_expr(expr),
             Sum { expr, .. } => self.visit_expr(expr),
             Max(arg) => self.visit_expr(arg),
             Min(arg) => self.visit_expr(arg),
@@ -349,6 +353,8 @@ pub fn is_aggregate(function: &FunctionExpr) -> bool {
         | FunctionExpr::GroupConcat { .. } => true,
         FunctionExpr::Extract { .. }
         | FunctionExpr::Substring { .. }
+        | FunctionExpr::Lower { .. }
+        | FunctionExpr::Upper { .. }
         // For now, assume all "generic" function calls are not aggregates
         | FunctionExpr::Call { .. } => false,
     }

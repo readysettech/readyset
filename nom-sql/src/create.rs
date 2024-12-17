@@ -47,7 +47,7 @@ impl fmt::Display for CharsetName {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, Arbitrary)]
+#[derive(Debug, PartialEq, PartialOrd, Ord, Eq, Hash, Clone, Serialize, Deserialize, Arbitrary)]
 pub enum CollationName {
     Quoted(SqlIdentifier),
     Unquoted(SqlIdentifier),
