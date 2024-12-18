@@ -145,57 +145,65 @@ impl Stream for Resultset {
         let project_field_types = Arc::clone(&this.project_field_types);
         let next = match &mut this.results {
             ResultsetInner::Empty => None,
-            ResultsetInner::ReadySet(i) => {
-                // Calculate estimated row size based on column types
-                let estimated_row_size: usize =
-                    project_field_types.iter().map(approximate_type_size).sum();
+           // ResultsetInner::ReadySet(i) => {
+            //     // Calculate estimated row size based on column types
+            //     let estimated_row_size: usize =
+            //         project_field_types.iter().map(approximate_type_size).sum();
 
-                // Calculate batch size based on estimated memory usage
-                let batch_size = if estimated_row_size > 0 {
-                    (TARGET_BATCH_BYTES / estimated_row_size).clamp(MIN_BATCH_SIZE, MAX_BATCH_SIZE)
-                } else {
-                    MAX_BATCH_SIZE
-                };
+            //     // Calculate batch size based on estimated memory usage
+            //     let batch_size = if estimated_row_size > 0 {
+            //         (TARGET_BATCH_BYTES / estimated_row_size).clamp(MIN_BATCH_SIZE, MAX_BATCH_SIZE)
+            //     } else {
+            //         MAX_BATCH_SIZE
+            //     };
 
-                let batch: Vec<_> = i.take(batch_size).collect();
-                if batch.is_empty() {
-                    None
-                } else {
-                    // Process the batch in parallel while maintaining order
-                    let results: Result<Vec<_>, _> = batch
-                        .into_par_iter()
-                        .enumerate() // Add indices to track original order
-                        .map(|(idx, values)| {
-                            let mut converted_values =
-                                Vec::with_capacity(project_field_types.len());
-                            for (value, col_type) in
-                                values.into_iter().zip(project_field_types.iter())
-                            {
-                                let converted =
-                                    PsqlValue::try_from(TypedDfValue { value, col_type })?;
-                                converted_values.push(converted);
-                            }
-                            Ok((idx, PsqlSrvRow::ValueVec(converted_values)))
-                        })
-                        .collect::<Result<Vec<_>, _>>()
-                        .map(|v| {
-                            let mut v = v;
-                            v.sort_by_key(|(idx, _)| *idx); // Sort by original index
-                            v.into_iter().map(|(_, row)| row).collect()
-                        });
+            //     let batch: Vec<_> = i.take(batch_size).collect();
+            //     if batch.is_empty() {
+            //         None
+            //     } else {
+            //         // Process the batch in parallel while maintaining order
+            //         let results: Result<Vec<_>, _> = batch
+            //             .into_par_iter()
+            //             .enumerate() // Add indices to track original order
+            //             .map(|(idx, values)| {
+            //                 let mut converted_values =
+            //                     Vec::with_capacity(project_field_types.len());
+            //                 for (value, col_type) in
+            //                     values.into_iter().zip(project_field_types.iter())
+            //                 {
+            //                     let converted =
+            //                         PsqlValue::try_from(TypedDfValue { value, col_type })?;
+            //                     converted_values.push(converted);
+            //                 }
+            //                 Ok((idx, PsqlSrvRow::ValueVec(converted_values)))
+            //             })
+            //             .collect::<Result<Vec<_>, _>>()
+            //             .map(|v| {
+            //                 let mut v = v;
+            //                 v.sort_by_key(|(idx, _)| *idx); // Sort by original index
+            //                 v.into_iter().map(|(_, row)| row).collect()
+            //             });
 
-                    match results {
-                        Ok(mut rows) => {
-                            // Store all but the first row in the buffer
-                            this.processed_buffer = rows.drain(1..).map(Ok).collect();
-                            // Return the first row
-                            let first_row = rows.into_iter().next().unwrap();
-                            Some(Ok(first_row))
-                        }
-                        Err(e) => Some(Err(e)),
-                    }
+            //         match results {
+            //             Ok(mut rows) => {
+            //                 // Store all but the first row in the buffer
+            //                 this.processed_buffer = rows.drain(1..).map(Ok).collect();
+            //                 // Return the first row
+            //                 let first_row = rows.into_iter().next().unwrap();
+            //                 Some(Ok(first_row))
+            //             }
+            //             Err(e) => Some(Err(e)),
+            //         }
+            //     }
+            // }
+            ResultsetInner::ReadySet(i) => i.next().map(|values| {
+                let mut converted_values = Vec::with_capacity(project_field_types.len());
+                for (value, col_type) in values.into_iter().zip(project_field_types.iter()) {
+                    let converted = PsqlValue::try_from(TypedDfValue { value, col_type })?;
+                    converted_values.push(converted);
                 }
-            }
+                Ok(PsqlSrvRow::ValueVec(converted_values))
+            }),
             ResultsetInner::Stream { first_row, stream } => {
                 let row = match first_row.take() {
                     Some(row) => Some(Ok(row)),
