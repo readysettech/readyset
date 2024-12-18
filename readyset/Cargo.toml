@@ -56,9 +56,15 @@ serde_json = { workspace = true }
 
 
 [dev-dependencies]
+criterion = { workspace = true, features = ["html_reports"] }
+pprof = { workspace = true, features = ["flamegraph", "criterion"] }
 serial_test = { workspace = true }
 temp-dir = { workspace = true }
 test-utils = { path = "../test-utils" }
+
+[[bench]]
+name = "query_logger"
+harness = false
 
 [features]
 failure_injection = [

@@ -2,7 +2,7 @@
 
 pub mod mysql;
 pub mod psql;
-mod query_logger;
+pub mod query_logger;
 use std::collections::HashMap;
 use std::fs::remove_dir_all;
 use std::future::Future;
