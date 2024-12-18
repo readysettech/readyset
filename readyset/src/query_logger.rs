@@ -213,6 +213,7 @@ impl QueryLogger {
         mut shutdown_recv: ShutdownReceiver,
     ) {
         let backlog_size = gauge!(recorded::QUERY_LOG_BACKLOG_SIZE);
+        let processed_events = counter!(recorded::QUERY_LOG_PROCESSED_EVENTS);
         loop {
             select! {
                 // We use `biased` here to ensure that our shutdown signal will be received and
@@ -228,7 +229,10 @@ impl QueryLogger {
                 event = receiver.recv() => {
                     backlog_size.set(receiver.len() as f64);
                     match event {
-                        Some(event) => self.handle_event(&event),
+                        Some(event) => {
+                            self.handle_event(&event);
+                            processed_events.increment(1);
+                        }
                         None => {
                             info!("Metrics task shutting down after request handle dropped.");
                             break;

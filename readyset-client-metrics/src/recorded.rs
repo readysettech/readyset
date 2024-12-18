@@ -96,6 +96,9 @@ pub const METRICS_PAYLOAD_SIZE_BYTES: &str = "readyset_metrics_payload_size_byte
 /// Gauge: The number of queries in the query logger backlog.
 pub const QUERY_LOG_BACKLOG_SIZE: &str = "readyset_query_log_backlog_size";
 
+/// Counter: The number of queries processed by the query logger.
+pub const QUERY_LOG_PROCESSED_EVENTS: &str = "readyset_query_log_processed_events";
+
 /// Counter: The number of queries checked for views.
 pub const VIEWS_SYNCHRONIZER_QUERIES_CHECKED: &str = "readyset_views_synchronizer_queries_checked";
 
