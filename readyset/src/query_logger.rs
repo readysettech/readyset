@@ -12,7 +12,7 @@ use tokio::select;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tracing::{info, instrument};
 
-pub(crate) struct QueryLogger {
+pub struct QueryLogger {
     parse_error_count: Counter,
     set_disallowed_count: Counter,
     view_not_found_count: Counter,
@@ -99,7 +99,7 @@ impl QueryLogger {
         labels
     }
 
-    fn handle_event(&mut self, event: &QueryExecutionEvent) {
+    pub fn handle_event(&mut self, event: &QueryExecutionEvent) {
         if let Some(error) = &event.noria_error {
             if error.caused_by_unparseable_query() {
                 self.parse_error_count.increment(1);
