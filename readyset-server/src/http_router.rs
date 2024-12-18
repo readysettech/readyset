@@ -278,6 +278,11 @@ impl Service<Request<Body>> for NoriaServerHttpRouter {
 
                 Box::pin(async move { Ok(res.unwrap()) })
             }
+            // XXX: jemalloc profiling routes are duplicated across server and adapter so that they
+            // are usable in distributed deployments, but in standalone deployments they will both
+            // poke the same shared jemalloc allocator: there is no way to enable or disable
+            // profiling on a crate-by-crate basis or anything like that.
+            //
             // Turns on jemalloc's profiler
             (&Method::POST, "/jemalloc/profiling/activate") => {
                 let res = match activate_prof() {

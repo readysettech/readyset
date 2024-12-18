@@ -10,9 +10,12 @@ use futures::TryFutureExt;
 use health_reporter::{HealthReporter as AdapterHealthReporter, State};
 use hyper::header::CONTENT_TYPE;
 use hyper::service::make_service_fn;
-use hyper::{self, Body, Method, Request, Response};
+use hyper::{self, Body, Method, Request, Response, StatusCode};
 use metrics::Gauge;
-use readyset_alloc::{dump_stats, print_memory_and_per_thread_stats};
+use readyset_alloc::{
+    activate_prof, deactivate_prof, dump_prof_to_string, dump_stats,
+    print_memory_and_per_thread_stats,
+};
 use readyset_client_metrics::recorded;
 use readyset_server::PrometheusHandle;
 use readyset_util::shutdown::ShutdownReceiver;
@@ -204,7 +207,7 @@ where
                     };
                     let (name, action): (String, String) = contents;
                     let resp = res
-                        .status(200)
+                        .status(StatusCode::OK)
                         .header(CONTENT_TYPE, "text/plain")
                         .body(hyper::Body::from(
                             ::bincode::serialize(&fail::cfg(name, &action)).unwrap(),
@@ -222,11 +225,11 @@ where
                     let body = format!("Adapter is in {} state", &state).into();
                     let res = match state {
                         State::Healthy | State::ShuttingDown => res
-                            .status(200)
+                            .status(StatusCode::OK)
                             .header(CONTENT_TYPE, "text/plain")
                             .body(body),
                         _ => res
-                            .status(500)
+                            .status(StatusCode::INTERNAL_SERVER_ERROR)
                             .header(CONTENT_TYPE, "text/plain")
                             .body(body),
                     };
@@ -243,7 +246,7 @@ where
                         res.body(hyper::Body::from(metrics))
                     }
                     None => res
-                        .status(404)
+                        .status(StatusCode::NOT_FOUND)
                         .body(hyper::Body::from("Prometheus metrics were not enabled. To fix this, run the adapter with --prometheus-metrics".to_string())),
                 };
                 Box::pin(async move { Ok(res.unwrap()) })
@@ -254,7 +257,7 @@ where
                     let body = status_reporter.report_status().await.into_json().into();
 
                     let res = res
-                        .status(200)
+                        .status(StatusCode::OK)
                         .header(CONTENT_TYPE, "text/plain")
                         .body(body);
 
@@ -263,38 +266,95 @@ where
             }
             // Returns a summary of memory usage for the entire process and per-thread memory usage
             (&Method::POST, "/memory_stats") => {
-                let res =
-                    match print_memory_and_per_thread_stats() {
-                        Ok(stats) => res
-                            .status(200)
-                            .header(CONTENT_TYPE, "text/plain")
-                            .body(hyper::Body::from(stats)),
-                        Err(e) => res.status(500).header(CONTENT_TYPE, "text/plain").body(
-                            hyper::Body::from(format!("Error fetching memory stats: {e}")),
-                        ),
-                    };
+                let res = match print_memory_and_per_thread_stats() {
+                    Ok(stats) => res
+                        .status(StatusCode::OK)
+                        .header(CONTENT_TYPE, "text/plain")
+                        .body(hyper::Body::from(stats)),
+                    Err(e) => res
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                        .header(CONTENT_TYPE, "text/plain")
+                        .body(hyper::Body::from(format!(
+                            "Error fetching memory stats: {e}"
+                        ))),
+                };
 
                 Box::pin(async move { Ok(res.unwrap()) })
             }
             // Returns a large dump of jemalloc debugging information along with per-thread
             // memory stats
             (&Method::POST, "/memory_stats_verbose") => {
-                let res =
-                    match dump_stats() {
-                        Ok(stats) => res
-                            .status(200)
-                            .header(CONTENT_TYPE, "text/plain")
-                            .body(hyper::Body::from(stats)),
-                        Err(e) => res.status(500).header(CONTENT_TYPE, "text/plain").body(
-                            hyper::Body::from(format!("Error fetching memory stats: {e}")),
-                        ),
-                    };
+                let res = match dump_stats() {
+                    Ok(stats) => res
+                        .status(StatusCode::OK)
+                        .header(CONTENT_TYPE, "text/plain")
+                        .body(hyper::Body::from(stats)),
+                    Err(e) => res
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                        .header(CONTENT_TYPE, "text/plain")
+                        .body(hyper::Body::from(format!(
+                            "Error fetching memory stats: {e}"
+                        ))),
+                };
 
                 Box::pin(async move { Ok(res.unwrap()) })
             }
+            // XXX: jemalloc profiling routes are duplicated across server and adapter so that they
+            // are usable in distributed deployments, but in standalone deployments they will both
+            // poke the same shared jemalloc allocator: there is no way to enable or disable
+            // profiling on a crate-by-crate basis or anything like that.
+            //
+            // Turns on jemalloc's profiler
+            (&Method::POST, "/jemalloc/profiling/activate") => {
+                let res = match activate_prof() {
+                    Ok(_) => res
+                        .status(StatusCode::OK)
+                        .header(CONTENT_TYPE, "text/plain")
+                        .body(hyper::Body::from("Memory profiling activated")),
+                    Err(e) => res
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                        .header(CONTENT_TYPE, "text/plain")
+                        .body(hyper::Body::from(format!(
+                            "Error activating memory profiling: {e}"
+                        ))),
+                };
+                Box::pin(async move { Ok(res.unwrap()) })
+            }
+            // Disables jemalloc's profiler
+            (&Method::POST, "/jemalloc/profiling/deactivate") => {
+                let res = match deactivate_prof() {
+                    Ok(_) => res
+                        .status(StatusCode::OK)
+                        .header(CONTENT_TYPE, "text/plain")
+                        .body(hyper::Body::from("Memory profiling deactivated")),
+                    Err(e) => res
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                        .header(CONTENT_TYPE, "text/plain")
+                        .body(hyper::Body::from(format!(
+                            "Error deactivating memory profiling: {e}"
+                        ))),
+                };
+                Box::pin(async move { Ok(res.unwrap()) })
+            }
+            // Returns the current jemalloc profiler output
+            (&Method::GET, "/jemalloc/profiling/dump") => Box::pin(async move {
+                let res = match dump_prof_to_string().await {
+                    Ok(dump) => res
+                        .status(StatusCode::OK)
+                        .header(CONTENT_TYPE, "text/plain")
+                        .body(hyper::Body::from(dump)),
+                    Err(e) => res
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                        .header(CONTENT_TYPE, "text/plain")
+                        .body(hyper::Body::from(format!(
+                            "Error dumping profiling output: {e}"
+                        ))),
+                };
+                Ok(res.unwrap())
+            }),
             _ => Box::pin(async move {
                 let res = res
-                    .status(404)
+                    .status(StatusCode::NOT_FOUND)
                     .header(CONTENT_TYPE, "text/plain")
                     .body(hyper::Body::empty());
 
