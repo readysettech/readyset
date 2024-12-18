@@ -8,6 +8,7 @@ use ps::{PsqlSrvRow, PsqlValue};
 use psql_srv as ps;
 use rayon::prelude::*;
 use readyset_client::results::ResultIterator;
+use readyset_data::DfValue;
 use tokio_postgres::types::Type;
 use tokio_postgres::{GenericResult, ResultStream, SimpleQueryMessage, SimpleQueryStream};
 
@@ -16,26 +17,35 @@ use crate::value::TypedDfValue;
 
 /// Approximate memory sizes for different PostgreSQL types (in bytes)
 const fn approximate_type_size(ty: &Type) -> usize {
-    match *ty {
-        // Fixed-size types
-        Type::BOOL => 1,
-        Type::INT2 => 2,
-        Type::INT4 => 4,
-        Type::INT8 => 8,
-        Type::FLOAT4 => 4,
-        Type::FLOAT8 => 8,
-        Type::DATE => 4,
-        Type::TIMESTAMP => 8,
-        Type::TIMESTAMPTZ => 8,
+    let base_size = std::mem::size_of::<PsqlValue>();
+    let additional_size = match *ty {
+        // Fixed-size types are already accounted for in `PsqlValue`'s enum size
+        Type::BOOL |
+        Type::CHAR |
+        Type::DATE |
+        Type::FLOAT4 |
+        Type::FLOAT8 |
+        Type::INET |
+        Type::INT2 |
+        Type::INT4 |
+        Type::INT8 |
+        Type::MACADDR |
+        Type::NUMERIC |
+        Type::OID |
+        Type::TIME |
+        Type::TIMESTAMP |
+        Type::TIMESTAMPTZ |
+        Type::UUID => 0,
 
         // Variable-size types - use conservative estimates
-        Type::TEXT | Type::VARCHAR => 64, // Assume average string length
+        Type::BPCHAR | Type::TEXT | Type::VARCHAR => 64, // Assume average string length
         Type::BYTEA => 256,               // Assume moderate binary data
         Type::JSON | Type::JSONB => 128,  // Assume moderate JSON
+        Type::BIT | Type::VARBIT => 16,
 
-        // Default for unknown types
         _ => 32,
-    }
+    };
+    base_size + additional_size
 }
 
 /// The target batch size in bytes
@@ -129,6 +139,42 @@ impl Resultset {
             processed_buffer: VecDeque::new(),
         }
     }
+
+    /// Process the batch in parallel while maintaining order
+    async fn process_batch(
+        batch: Vec<Vec<DfValue>>,
+        project_field_types: &Arc<Vec<Type>>,
+    ) -> Result<Vec<PsqlSrvRow>, psql_srv::Error> {
+        let (send, recv) = tokio::sync::oneshot::channel();
+        let types = Arc::clone(project_field_types);
+
+        rayon::spawn(move || {
+            let results = batch
+                .into_par_iter()
+                .enumerate() // Add indices to track original order
+                .map(|(idx, values)| {
+                let mut converted_values =
+                    Vec::with_capacity(types.len());
+                for (value, col_type) in
+                    values.into_iter().zip(types.iter())
+                {
+                    let converted =
+                        PsqlValue::try_from(TypedDfValue { value, col_type })?;
+                    converted_values.push(converted);
+                }
+                Ok((idx, PsqlSrvRow::ValueVec(converted_values)))
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map(|v| {
+                let mut v = v;
+                    v.sort_by_key(|(idx, _)| *idx); // Sort by original index
+                    v.into_iter().map(|(_, row)| row).collect()
+                });
+            send.send(results).unwrap();
+        });
+
+        recv.await.expect("Panic in rayon::spawn")
+    }
 }
 
 impl Stream for Resultset {
@@ -201,6 +247,35 @@ impl Stream for Resultset {
                 for (value, col_type) in values.into_iter().zip(project_field_types.iter()) {
                     let converted = PsqlValue::try_from(TypedDfValue { value, col_type })?;
                     converted_values.push(converted);
+
+                    // ResultsetInner::ReadySet(i) => {
+            //     // Calculate estimated row size based on column types
+            //     let estimated_row_size: usize =
+            //         project_field_types.iter().map(approximate_type_size).sum();
+
+            //     // Calculate batch size based on estimated memory usage
+            //     let batch_size = if estimated_row_size > 0 {
+            //         (TARGET_BATCH_BYTES / estimated_row_size).clamp(MIN_BATCH_SIZE, MAX_BATCH_SIZE)
+            //     } else {
+            //         MAX_BATCH_SIZE
+            //     };
+
+            //     let batch: Vec<_> = i.take(batch_size).collect();
+            //     if batch.is_empty() {
+            //         None
+            //     } else {
+            //         let results = Self::process_batch(batch, &project_field_types).await;
+
+            //         match results {
+            //             Ok(mut rows) => {
+            //                 // Store all but the first row in the buffer
+            //                 this.processed_buffer = rows.drain(1..).map(Ok).collect();
+            //                 // Return the first row
+            //                 let first_row = rows.into_iter().next().unwrap();
+            //                 Some(Ok(first_row))
+            //             }
+            //             Err(e) => Some(Err(e)),
+            //         }
                 }
                 Ok(PsqlSrvRow::ValueVec(converted_values))
             }),
