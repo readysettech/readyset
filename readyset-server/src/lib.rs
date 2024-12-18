@@ -545,10 +545,10 @@ pub struct WorkerOptions {
     pub memory_limit: usize,
 
     /// Frequency at which to check the process heap allocation against the memory limit (in
-    /// seconds)
+    /// milliseconds)
     #[arg(
         long = "memory-check-every",
-        default_value = "1",
+        default_value = "100",
         env = "MEMORY_CHECK_EVERY",
         hide = true
     )]

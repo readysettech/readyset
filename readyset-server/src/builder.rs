@@ -60,7 +60,7 @@ impl Builder {
         if opts.memory_limit > 0 {
             builder.set_memory_limit(
                 opts.memory_limit,
-                Duration::from_secs(opts.memory_check_freq),
+                Duration::from_millis(opts.memory_check_freq),
             );
         }
         builder.set_eviction_kind(opts.eviction_kind);

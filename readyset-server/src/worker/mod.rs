@@ -245,7 +245,7 @@ pub struct Worker {
 }
 
 impl Worker {
-    const DEFAULT_EVICT_INTERVAL: Duration = Duration::from_secs(1);
+    const DEFAULT_EVICT_INTERVAL: Duration = Duration::from_millis(100);
 
     pub fn new(
         rx: Receiver<WorkerRequest>,
@@ -618,9 +618,7 @@ async fn evict_check(
         (sizes, total_reported)
     };
 
-    // Evict a little more than necessary to provide some hysteresis.
-    let limit = (limit as f64 * 0.98f64) as usize;
-    let actual_over = 2 * (used - limit);
+    let actual_over = used - limit;
 
     // state sizes are under actual memory usage, but roughly proportional to actual
     // memory usage - let's figure out proportionally how much *reported* memory we
