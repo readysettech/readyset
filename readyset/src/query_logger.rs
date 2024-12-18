@@ -1,5 +1,5 @@
 use metrics::{counter, gauge, histogram, Counter, SharedString};
-use nom_sql::{DialectDisplay, SqlIdentifier, SqlQuery};
+use nom_sql::{DialectDisplay, SqlQuery};
 use readyset_client::query::QueryId;
 use readyset_client_metrics::{
     recorded, DatabaseType, EventType, QueryExecutionEvent, QueryIdWrapper, QueryLogMode,
@@ -48,55 +48,94 @@ impl QueryLogger {
         }
     }
 
-    fn query_id(
+    fn process_query(
         query: &SqlQuery,
-        schema_search_path: &[SqlIdentifier],
+        query_id_wrapper: &QueryIdWrapper,
         rewrite_params: AdapterRewriteParams,
-    ) -> QueryId {
-        if let SqlQuery::Select(stmt) = query {
-            let mut stmt = stmt.clone();
-            if adapter_rewrites::process_query(&mut stmt, rewrite_params).is_ok() {
-                anonymize_literals(&mut stmt);
-                return QueryId::from_select(&stmt, schema_search_path);
-            }
-        }
-
-        Default::default()
-    }
-
-    fn query_string(query: &SqlQuery, rewrite_params: AdapterRewriteParams) -> SharedString {
-        SharedString::from(match query {
+    ) -> (SharedString, Option<QueryId>) {
+        match query {
             SqlQuery::Select(stmt) => {
                 let mut stmt = stmt.clone();
                 if adapter_rewrites::process_query(&mut stmt, rewrite_params).is_ok() {
                     anonymize_literals(&mut stmt);
                     // FIXME(REA-2168): Use correct dialect.
-                    stmt.display(nom_sql::Dialect::MySQL).to_string()
+                    let query_string = stmt.display(nom_sql::Dialect::MySQL).to_string();
+
+                    let query_id = match query_id_wrapper {
+                        QueryIdWrapper::Uncalculated(schema_search_path) => {
+                            Some(QueryId::from_select(&stmt, schema_search_path))
+                        }
+                        QueryIdWrapper::Calculated(qid) => Some(*qid),
+                        QueryIdWrapper::None => None,
+                    };
+
+                    (SharedString::from(query_string), query_id)
                 } else {
-                    "".to_string()
+                    (SharedString::from(""), None)
                 }
             }
-            _ => "".to_string(),
-        })
+            _ => (SharedString::from(""), None),
+        }
     }
 
     fn create_labels(
-        &self,
         database_type: DatabaseType,
         query_string: Option<SharedString>,
         query_id: Option<QueryId>,
     ) -> Vec<(&'static str, SharedString)> {
         let mut labels = vec![("database_type", SharedString::from(database_type))];
-
-        if self.log_mode.is_verbose() {
-            if let Some(query) = query_string {
-                labels.push(("query", query));
-            }
-            if let Some(id) = query_id {
-                labels.push(("query_id", SharedString::from(id.to_string())));
-            }
+        if let Some(query) = query_string {
+            labels.push(("query", query));
+        }
+        if let Some(id) = query_id {
+            labels.push(("query_id", SharedString::from(id.to_string())));
         }
         labels
+    }
+
+    fn record_query_metrics(
+        &self,
+        event: &QueryExecutionEvent,
+        labels: &[(&'static str, SharedString)],
+    ) {
+        if let Some(duration) = event.upstream_duration {
+            histogram!(recorded::QUERY_LOG_EXECUTION_TIME, labels)
+                .record(duration.as_micros() as f64);
+            counter!(recorded::QUERY_LOG_EXECUTION_COUNT, labels).increment(1);
+        }
+
+        match &event.readyset_event {
+            Some(ReadysetExecutionEvent::CacheRead {
+                cache_misses,
+                num_keys,
+                duration,
+                cache_name,
+            }) => {
+                let cache_name = SharedString::from(cache_name.display_unquoted().to_string());
+                let mut cached_labels = vec![("cache_name", cache_name.clone())];
+
+                counter!(recorded::QUERY_LOG_TOTAL_KEYS_READ, &cached_labels).increment(*num_keys);
+                counter!(recorded::QUERY_LOG_TOTAL_CACHE_MISSES, &cached_labels)
+                    .increment(*cache_misses);
+
+                if *cache_misses != 0 {
+                    counter!(recorded::QUERY_LOG_QUERY_CACHE_MISSED, &cached_labels)
+                        .increment(*cache_misses);
+                }
+
+                cached_labels.extend_from_slice(labels);
+
+                histogram!(recorded::QUERY_LOG_EXECUTION_TIME, &cached_labels)
+                    .record(duration.as_micros() as f64);
+                counter!(recorded::QUERY_LOG_EXECUTION_COUNT, &cached_labels).increment(1);
+            }
+            Some(ReadysetExecutionEvent::Other { duration }) => {
+                histogram!(recorded::QUERY_LOG_EXECUTION_TIME, labels)
+                    .record(duration.as_micros() as f64);
+                counter!(recorded::QUERY_LOG_EXECUTION_COUNT, labels).increment(1);
+            }
+            None => (),
+        }
     }
 
     pub fn handle_event(&mut self, event: &QueryExecutionEvent) {
@@ -118,90 +157,27 @@ impl QueryLogger {
             EventType::Execute => self.execute_count.increment(1),
         }
 
+        if !self.log_mode.is_verbose() {
+            let labels = Self::create_labels(DatabaseType::Upstream, None, None);
+            self.record_query_metrics(event, &labels);
+            return;
+        }
+
         let query = match &event.query {
             Some(query) => query,
             None => return,
         };
 
-        let query_string = Self::query_string(query, self.rewrite_params);
-        let query_id = match &event.query_id {
-            QueryIdWrapper::Uncalculated(schema_search_path) => Some(Self::query_id(
-                query,
-                schema_search_path,
-                self.rewrite_params,
-            )),
-            QueryIdWrapper::Calculated(qid) => Some(*qid),
-            QueryIdWrapper::None => None,
-        };
+        let (query_string, query_id) =
+            Self::process_query(query, &event.query_id, self.rewrite_params);
 
-        if self.log_mode.is_verbose() && event.parse_duration.is_some() {
-            let mut labels = vec![
-                ("event_type", SharedString::from(event.event)),
-                ("query_type", SharedString::from(event.sql_type)),
-            ];
+        let mut labels = Self::create_labels(DatabaseType::Upstream, Some(query_string), query_id);
+        self.record_query_metrics(event, &labels);
 
-            if self.log_mode.is_verbose() {
-                labels.push(("query", query_string.clone()));
-
-                if let Some(id) = &query_id {
-                    labels.push(("query_id", SharedString::from(id.to_string())));
-                }
-
-                histogram!(recorded::QUERY_LOG_PARSE_TIME, &labels)
-                    .record(event.parse_duration.unwrap().as_micros() as f64);
-            }
-        }
-
-        match &event.readyset_event {
-            Some(ReadysetExecutionEvent::CacheRead {
-                cache_misses,
-                num_keys,
-                duration,
-                cache_name,
-            }) => {
-                let cache_name = SharedString::from(cache_name.display_unquoted().to_string());
-                let labels = vec![("cache_name", cache_name.clone())];
-
-                counter!(recorded::QUERY_LOG_TOTAL_KEYS_READ, &labels).increment(*num_keys);
-                counter!(recorded::QUERY_LOG_TOTAL_CACHE_MISSES, &labels).increment(*cache_misses);
-
-                if *cache_misses != 0 {
-                    counter!(recorded::QUERY_LOG_QUERY_CACHE_MISSED, &labels)
-                        .increment(*cache_misses);
-                }
-
-                let mut labels = self.create_labels(
-                    DatabaseType::ReadySet,
-                    Some(query_string.clone()),
-                    query_id,
-                );
-                labels.push(("cache_name", cache_name));
-
-                histogram!(recorded::QUERY_LOG_EXECUTION_TIME, &labels)
-                    .record(duration.as_micros() as f64);
-                counter!(recorded::QUERY_LOG_EXECUTION_COUNT, &labels).increment(1);
-            }
-            Some(ReadysetExecutionEvent::Other { duration }) => {
-                let labels = self.create_labels(
-                    DatabaseType::ReadySet,
-                    Some(query_string.clone()),
-                    query_id,
-                );
-
-                histogram!(recorded::QUERY_LOG_EXECUTION_TIME, &labels)
-                    .record(duration.as_micros() as f64);
-                counter!(recorded::QUERY_LOG_EXECUTION_COUNT, &labels).increment(1);
-            }
-            None => (),
-        }
-
-        if let Some(duration) = event.upstream_duration {
-            let labels =
-                self.create_labels(DatabaseType::Upstream, Some(query_string.clone()), query_id);
-
-            histogram!(recorded::QUERY_LOG_EXECUTION_TIME, &labels)
-                .record(duration.as_micros() as f64);
-            counter!(recorded::QUERY_LOG_EXECUTION_COUNT, &labels).increment(1);
+        if let Some(duration) = event.parse_duration {
+            labels.push(("event_type", SharedString::from(event.event)));
+            labels.push(("query_type", SharedString::from(event.sql_type)));
+            histogram!(recorded::QUERY_LOG_PARSE_TIME, &labels).record(duration.as_micros() as f64);
         }
     }
 
