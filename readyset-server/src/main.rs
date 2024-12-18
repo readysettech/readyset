@@ -190,11 +190,15 @@ fn main() -> anyhow::Result<()> {
         recs.push(MetricsRecorder::Noria(NoriaMetricsRecorder::new()));
     }
     if opts.prometheus_metrics {
-        recs.push(MetricsRecorder::Prometheus(
-            PrometheusBuilder::new()
-                .add_global_label("deployment", &opts.deployment)
-                .build_recorder(),
-        ));
+        // `PrometheusBuilder::build_recorder` spawns an upkeep task, so we need to execute it in
+        // the context of the runtime
+        rt.block_on(async {
+            recs.push(MetricsRecorder::Prometheus(
+                PrometheusBuilder::new()
+                    .add_global_label("deployment", &opts.deployment)
+                    .build_recorder(),
+            ));
+        })
     }
     install_global_recorder(CompositeMetricsRecorder::with_recorders(recs));
 
