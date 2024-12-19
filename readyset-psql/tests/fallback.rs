@@ -2142,7 +2142,9 @@ async fn named_cache_queryable_after_being_cleared() {
 
         let conn = connect(config).await;
 
-        conn.simple_query("DROP TABLE IF EXISTS t").await.unwrap();
+        conn.simple_query("DROP TABLE IF EXISTS t CASCADE")
+            .await
+            .unwrap();
         conn.simple_query("CREATE TABLE t (x int)").await.unwrap();
         eventually!(conn
             .simple_query("CREATE CACHE test FROM SELECT * FROM t WHERE x = 1")
@@ -2688,7 +2690,9 @@ async fn drop_all_proxied_queries() {
         .await;
     let conn = connect(opts).await;
 
-    conn.simple_query("DROP TABLE IF EXISTS t").await.unwrap();
+    conn.simple_query("DROP TABLE IF EXISTS t CASCADE")
+        .await
+        .unwrap();
     conn.simple_query("CREATE TABLE t (x int, y int)")
         .await
         .unwrap();
@@ -2837,7 +2841,9 @@ async fn real_type() {
     let (opts, _handle, shutdown_tx) = setup().await;
     let conn = connect(opts).await;
 
-    conn.simple_query("DROP TABLE IF EXISTS t").await.unwrap();
+    conn.simple_query("DROP TABLE IF EXISTS t CASCADE")
+        .await
+        .unwrap();
     conn.simple_query("CREATE TABLE t (f1 real)").await.unwrap();
     conn.simple_query("INSERT INTO t (f1) VALUES (1004.3)")
         .await
