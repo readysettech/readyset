@@ -19,6 +19,7 @@ futures = { workspace = true, features = ["executor", "thread-pool"] }
 fxhash = { workspace = true }
 lazy_static = { workspace = true }
 libc = { workspace = true }
+tempfile = { workspace = true }
 tikv-jemalloc-ctl = { workspace = true }
 tikv-jemalloc-sys = { workspace = true, features = ["stats"] }
 tikv-jemallocator = { workspace = true, features = [
