@@ -123,6 +123,38 @@ pub use crate::trace::*;
 #[global_allocator]
 static ALLOC: imp::Allocator = imp::allocator();
 
+// Enable profiling by default, but leave it inactive until enabled by an API call. We use the
+// following defaults which we expect suit our needs for field investigations for now:
+//
+// * prof:true = Enable profiling.
+// * prof_active:false = Don't actively profile.
+// * lg_prof_sample:22 = Sample every 4 MiB of allocations. Log base 2 number of bytes specifying
+//   average amount of allocation activity between samples. Default is 19, which is every 512 KiB.
+// * lg_prof_interval:33 = Automatically dump profile data every 8 GiB of allocation activity. Log
+//   base 2 number of bytes specifying average amount of allocation activity between dumps. Default
+//   is -1, which disables automatic dumps.
+// * prof_prefix:/tmp/jeprof = Write automatic dumps to `/tmp/jeprof.<pid>.<seq>.u<useq>.heap`.
+//   Empty string disables automatic dumps. Default is `jeprof` which stores dumps in the working
+//   directory.
+//
+// This can be overridden at startup with the `MALLOC_CONF` environment variable on Linux or
+// `_RJEM_MALLOC_CONF` on macOS.
+//
+// *NOTE*: Only `prof_active` can be modified at runtime via the `prof.active` mallctl. Everything
+// else must be set at startup via the environment variable. (The sample rate can also be changed,
+// but only by resetting the profiling data using `prof.reset`, which accepts an optional new sample
+// rate. We don't provide an API endpoint for this at the moment.)
+//
+// If this is configured with `prof:false` (the default if it's not specified), then trying to use
+// the profiling-related APIs will return the following rather confusing error: "`name` or `mib`
+// specifies an unknown/invalid value"
+#[cfg(feature = "mem-profiling")]
+#[allow(non_upper_case_globals)]
+#[cfg_attr(target_os = "macos", export_name = "_rjem_malloc_conf")]
+#[cfg_attr(not(target_os = "macos"), export_name = "malloc_conf")]
+pub static malloc_conf: &[u8] =
+    b"prof:true,prof_active:false,lg_prof_sample:22,lg_prof_interval:33,prof_prefix:/tmp/jeprof\0";
+
 /*
 
 // This code requires nightly.  It is left here in case it's useful for testing.
