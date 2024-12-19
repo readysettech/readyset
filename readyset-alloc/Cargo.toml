@@ -6,6 +6,8 @@ authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
 [features]
+# Compile in jemalloc profiling support by default. Not active by default.
+default = ["mem-profiling"]
 # Build jemalloc's profiling features. Without this
 # certain profile functions will return nothing.
 mem-profiling = ["tikv-jemallocator/profiling"]
@@ -19,9 +21,11 @@ lazy_static = { workspace = true }
 libc = { workspace = true }
 tikv-jemalloc-ctl = { workspace = true }
 tikv-jemalloc-sys = { workspace = true, features = ["stats"] }
-tikv-jemallocator = { workspace = true, features = ["unprefixed_malloc_on_supported_platforms", "stats"] }
+tikv-jemallocator = { workspace = true, features = [
+    "unprefixed_malloc_on_supported_platforms",
+    "stats",
+] }
 tokio = { workspace = true, features = ["full"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }
-
