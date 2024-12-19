@@ -131,7 +131,7 @@ pub fn remove_thread_memory_accessor() {
 
 use std::thread::ThreadId;
 
-pub use self::profiling::{activate_prof, deactivate_prof, dump_prof};
+pub use self::profiling::{activate_prof, deactivate_prof, dump_prof, dump_prof_to_string};
 
 /// Returns a very verbose output of jemalloc stats as well as per-thread stats
 pub fn dump_stats() -> Result<String, Error> {
@@ -325,7 +325,7 @@ mod tests {
 
 #[cfg(feature = "mem-profiling")]
 mod profiling {
-    use std::ffi::CString;
+    use std::{ffi::CString, os::unix::ffi::OsStrExt, path::Path};
 
     use libc::c_char;
 
@@ -360,25 +360,31 @@ mod profiling {
     }
 
     /// Dump the profile to the `path`.
-    pub fn dump_prof(path: &str) -> ProfResult<()> {
-        let mut bytes = CString::new(path)?.into_bytes_with_nul();
+    pub fn dump_prof(path: impl AsRef<Path>) -> ProfResult<()> {
+        let mut bytes = CString::new(path.as_ref().as_os_str().as_bytes())?.into_bytes_with_nul();
         let ptr = bytes.as_mut_ptr() as *mut c_char;
         unsafe {
             if let Err(e) = tikv_jemalloc_ctl::raw::write(PROF_DUMP, ptr) {
                 return Err(ProfError::JemallocError(format!(
                     "failed to dump the profile to {:?}: {}",
-                    path, e
+                    path.as_ref(),
+                    e
                 )));
             }
         }
         Ok(())
     }
 
+    pub async fn dump_prof_to_string() -> ProfResult<String> {
+        let tempdir = tempfile::Builder::new().prefix("jeprof").tempdir()?;
+        let path = tempdir.path().join("jeprof.out");
+        dump_prof(&path)?;
+        Ok(tokio::fs::read_to_string(path).await?)
+    }
+
     #[cfg(test)]
     mod tests {
         use std::fs;
-
-        use tempfile::Builder;
 
         const OPT_PROF: &[u8] = b"opt.prof\0";
 
@@ -407,17 +413,15 @@ mod profiling {
             // Make sure somebody has turned on profiling
             assert!(is_profiling_on(), "set MALLOC_CONF=prof:true");
 
-            let dir = Builder::new()
+            let dir = tempfile::Builder::new()
                 .prefix("test_profiling_memory")
                 .tempdir()
                 .unwrap();
 
-            let os_path = dir.path().to_path_buf().join("test1.dump").into_os_string();
-            let path = os_path.into_string().unwrap();
+            let path = dir.path().join("test1.dump");
             super::dump_prof(&path).unwrap();
 
-            let os_path = dir.path().to_path_buf().join("test2.dump").into_os_string();
-            let path = os_path.into_string().unwrap();
+            let path = dir.path().join("test2.dump");
             super::dump_prof(&path).unwrap();
 
             let files = fs::read_dir(dir.path()).unwrap().count();
@@ -445,13 +449,16 @@ mod profiling {
 mod profiling {
     use super::{ProfError, ProfResult};
 
-    pub fn dump_prof(_path: &str) -> ProfResult<()> {
-        Err(ProfError::MemProfilingNotEnabled)
-    }
     pub fn activate_prof() -> ProfResult<()> {
         Err(ProfError::MemProfilingNotEnabled)
     }
     pub fn deactivate_prof() -> ProfResult<()> {
+        Err(ProfError::MemProfilingNotEnabled)
+    }
+    pub fn dump_prof(path: impl AsRef<Path>) -> ProfResult<()> {
+        Err(ProfError::MemProfilingNotEnabled)
+    }
+    pub async fn dump_prof_to_string() -> ProfResult<String> {
         Err(ProfError::MemProfilingNotEnabled)
     }
 }
