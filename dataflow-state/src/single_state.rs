@@ -231,7 +231,7 @@ impl SingleState {
     ///
     /// * Panics if the `key` is a range, but the underlying KeyedState is backed by a HashMap
     /// * Panics if the underlying index has no columns
-    pub(super) fn mark_hole(&mut self, key: &KeyComparison) -> u64 {
+    pub(super) fn mark_hole(&mut self, key: &KeyComparison) -> usize {
         let removed: Box<dyn Iterator<Item = (Row, usize)>> = match key {
             KeyComparison::Equal(key) => match self.state {
                 KeyedState::AllRows(_) => panic!("Empty-column index cannot be partial"),
@@ -332,8 +332,8 @@ impl SingleState {
 
         removed
             .filter(|(r, _)| Rc::strong_count(&r.0) == 1)
-            .map(|(r, count)| SizeOf::deep_size_of(&r) * (count as u64))
-            .sum::<u64>()
+            .map(|(r, count)| r.deep_size_of() * count)
+            .sum()
     }
 
     pub(super) fn clear(&mut self) {

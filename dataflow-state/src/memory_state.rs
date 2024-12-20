@@ -24,7 +24,7 @@ pub struct MemoryState {
     state: Vec<SingleState>,
     weak_indices: HashMap<Vec<usize>, KeyedState>,
     by_tag: HashMap<Tag, usize>,
-    mem_size: u64,
+    mem_size: usize,
     /// The latest replication offset that has been written to the base table backed by this
     /// [`MemoryState`], it is only used when [`LocalAuthority`] is the ReadySet authority.
     replication_offset: Option<ReplicationOffset>,
@@ -33,7 +33,7 @@ pub struct MemoryState {
 }
 
 impl SizeOf for MemoryState {
-    fn deep_size_of(&self) -> u64 {
+    fn deep_size_of(&self) -> usize {
         self.mem_size
     }
 
@@ -42,7 +42,7 @@ impl SizeOf for MemoryState {
     }
 }
 
-fn base_row_bytes_from_comparison(keys: &KeyComparison) -> u64 {
+fn base_row_bytes_from_comparison(keys: &KeyComparison) -> usize {
     if let KeyComparison::Equal(keys) = keys {
         base_row_bytes(keys)
     } else {
@@ -51,8 +51,8 @@ fn base_row_bytes_from_comparison(keys: &KeyComparison) -> u64 {
     }
 }
 
-fn base_row_bytes(keys: &[DfValue]) -> u64 {
-    keys.iter().map(SizeOf::deep_size_of).sum::<u64>() + std::mem::size_of::<Row>() as u64
+fn base_row_bytes(keys: &[DfValue]) -> usize {
+    keys.iter().map(SizeOf::deep_size_of).sum::<usize>() + std::mem::size_of::<Row>()
 }
 
 impl State for MemoryState {
@@ -257,10 +257,10 @@ impl State for MemoryState {
     fn evict_bytes(&mut self, bytes: usize) -> Option<EvictBytesResult> {
         let mut rng = rand::thread_rng();
         let state_index = rng.gen_range(0..self.state.len());
-        let mut bytes_freed = 0u64;
+        let mut bytes_freed = 0;
         let mut keys_evicted = Vec::new();
 
-        while bytes_freed < bytes as u64 {
+        while bytes_freed < bytes {
             let evicted = self.state[state_index].evict_random(&mut rng);
 
             if evicted.is_none() {
@@ -300,7 +300,10 @@ impl State for MemoryState {
                 .iter()
                 .for_each(|row| bytes_freed += self.handle_evicted_row(row));
 
-            let key_bytes = keys.iter().map(base_row_bytes_from_comparison).sum::<u64>();
+            let key_bytes = keys
+                .iter()
+                .map(base_row_bytes_from_comparison)
+                .sum::<usize>();
 
             self.mem_size = self.mem_size.saturating_sub(bytes_freed + key_bytes);
 
@@ -475,7 +478,7 @@ impl MemoryState {
 
     /// Removes a `Row` that was evicted from `self::state` from `self::weak_indices`, and returns
     /// the number of bytes freed if the last reference to the `Row` was dropped.
-    fn handle_evicted_row(&mut self, row: &Row) -> u64 {
+    fn handle_evicted_row(&mut self, row: &Row) -> usize {
         // TODO(ENG-3062): Possibly consider duplicate rows when removing from
         // self.weak_indices
         for (key, weak_index) in self.weak_indices.iter_mut() {
