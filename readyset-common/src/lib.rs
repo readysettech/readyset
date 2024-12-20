@@ -16,12 +16,12 @@ pub use self::local::*;
 pub use self::records::*;
 
 pub trait SizeOf {
-    fn deep_size_of(&self) -> u64;
+    fn deep_size_of(&self) -> usize;
     fn is_empty(&self) -> bool;
 }
 
 impl SizeOf for DfValue {
-    fn deep_size_of(&self) -> u64 {
+    fn deep_size_of(&self) -> usize {
         let inner = match self {
             DfValue::Text(t) => size_of_val(t) + t.as_bytes().len(),
             DfValue::BitVector(t) => size_of_val(t) + (t.len() + 7) / 8,
@@ -29,7 +29,7 @@ impl SizeOf for DfValue {
             _ => 0,
         };
 
-        (size_of::<Self>() + inner) as _
+        size_of::<Self>() + inner
     }
 
     fn is_empty(&self) -> bool {
@@ -38,8 +38,8 @@ impl SizeOf for DfValue {
 }
 
 impl SizeOf for Vec<DfValue> {
-    fn deep_size_of(&self) -> u64 {
-        size_of_val(self) as u64 + self.iter().map(|x| x.deep_size_of()).sum::<u64>()
+    fn deep_size_of(&self) -> usize {
+        size_of_val(self) + self.iter().map(|x| x.deep_size_of()).sum::<usize>()
     }
 
     fn is_empty(&self) -> bool {
@@ -48,8 +48,8 @@ impl SizeOf for Vec<DfValue> {
 }
 
 impl SizeOf for Box<[DfValue]> {
-    fn deep_size_of(&self) -> u64 {
-        size_of_val(self) as u64 + self.iter().map(|x| x.deep_size_of()).sum::<u64>() + 8
+    fn deep_size_of(&self) -> usize {
+        size_of_val(self) + self.iter().map(|x| x.deep_size_of()).sum::<usize>() + 8
     }
 
     fn is_empty(&self) -> bool {
@@ -111,11 +111,11 @@ mod tests {
         assert_eq!(
             txt.deep_size_of(),
             // DfValue + Arc's ptr + string
-            16 + 8 + (s.len() as u64)
+            16 + 8 + s.len()
         );
         assert_eq!(size_of_val(&shrt), 16);
         assert_eq!(size_of_val(&time), 16);
-        assert_eq!(size_of_val(&time) as u64, time.deep_size_of());
+        assert_eq!(size_of_val(&time), time.deep_size_of());
 
         assert_eq!(size_of_val(&rec), 24);
         assert_eq!(rec.deep_size_of(), 24 + 3 * 16 + (8 + 16));

@@ -30,7 +30,7 @@ impl DomainMetrics {
         counter!(recorded::EVICTION_REQUESTS).increment(1);
     }
 
-    pub(super) fn rec_eviction_time(&self, time: Duration, total_freed: u64) {
+    pub(super) fn rec_eviction_time(&self, time: Duration, total_freed: usize) {
         histogram!(recorded::EVICTION_TIME).record(time.as_micros() as f64);
         histogram!(recorded::EVICTION_FREED_MEMORY).record(total_freed as f64);
     }
@@ -149,7 +149,7 @@ impl DomainMetrics {
         .increment(1);
     }
 
-    pub(super) fn set_reader_state_size(&self, name: &Relation, size: u64) {
+    pub(super) fn set_reader_state_size(&self, name: &Relation, size: usize) {
         gauge!(
             recorded::READER_STATE_SIZE_BYTES,
             "name" => cache_name_to_string(name),
@@ -157,7 +157,7 @@ impl DomainMetrics {
         .set(size as f64);
     }
 
-    pub(super) fn set_base_table_size(&self, name: &Relation, size: u64) {
+    pub(super) fn set_base_table_size(&self, name: &Relation, size: usize) {
         if self.verbose {
             gauge!(
                 recorded::ESTIMATED_BASE_TABLE_SIZE_BYTES,

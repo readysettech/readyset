@@ -93,8 +93,8 @@ impl Handle {
     ///
     /// Returns the number of bytes evicted, and if passed an EvictionQuantity::SingleKey, returns
     /// the key that was evicted.
-    pub fn evict(&mut self, keys_to_evict: EvictionQuantity) -> (u64, Option<Vec<DfValue>>) {
-        let base_value_size = self.base_value_size() as u64;
+    pub fn evict(&mut self, keys_to_evict: EvictionQuantity) -> (usize, Option<Vec<DfValue>>) {
+        let base_value_size = self.base_value_size();
         match *self {
             Handle::Single(ref mut h) => {
                 let (bytes, key) = h.evict_keys(keys_to_evict, |k, v| {
@@ -102,14 +102,16 @@ impl Handle {
                     // (DfValues) and the bytes required to hold the Row data
                     // structure.
                     k.deep_size_of()
-                        + v.iter().map(|r| r.deep_size_of()).sum::<u64>()
+                        + v.iter().map(|r| r.deep_size_of()).sum::<usize>()
                         + base_value_size
                 });
                 // Convert the DfValue key to a Vec<DfValue>
                 (bytes, key.map(|k| vec![k]))
             }
             Handle::Many(ref mut h) => h.evict_keys(keys_to_evict, |k, v| {
-                k.deep_size_of() + v.iter().map(|r| r.deep_size_of()).sum::<u64>() + base_value_size
+                k.deep_size_of()
+                    + v.iter().map(|r| r.deep_size_of()).sum::<usize>()
+                    + base_value_size
             }),
         }
     }

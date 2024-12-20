@@ -41,7 +41,7 @@ pub struct EvictBytesResult<'a> {
     /// The keys that were evicted
     pub keys_evicted: Vec<Vec<DfValue>>,
     /// The number of bytes removed from the state
-    pub bytes_freed: u64,
+    pub bytes_freed: usize,
 }
 
 /// Information about state evicted via a call to [`State::evict_keys`]
@@ -49,7 +49,7 @@ pub struct EvictKeysResult<'a> {
     /// The index that was evicted from
     pub index: &'a Index,
     /// The number of bytes removed from the state
-    pub bytes_freed: u64,
+    pub bytes_freed: usize,
 }
 
 /// Information about state evicted via a call to [`State::evict_random`]
@@ -59,7 +59,7 @@ pub struct EvictRandomResult<'a> {
     /// The evicted key
     pub key_evicted: Vec<DfValue>,
     /// The number of bytes removed from the state
-    pub bytes_freed: u64,
+    pub bytes_freed: usize,
 }
 
 /// The state of an individual, non-reader node in the graph
@@ -286,7 +286,7 @@ impl MaterializedNodeState {
 }
 
 impl SizeOf for MaterializedNodeState {
-    fn deep_size_of(&self) -> u64 {
+    fn deep_size_of(&self) -> usize {
         match self {
             MaterializedNodeState::Memory(ms) => ms.deep_size_of(),
             MaterializedNodeState::Persistent(ps) => ps.deep_size_of(),
@@ -610,7 +610,7 @@ impl Deref for Row {
 }
 
 impl SizeOf for Row {
-    fn deep_size_of(&self) -> u64 {
+    fn deep_size_of(&self) -> usize {
         (*self.0).deep_size_of()
     }
 

@@ -206,8 +206,7 @@ pub(crate) struct MutWriteHandleEntry<'a> {
 
 impl MutWriteHandleEntry<'_> {
     pub(crate) fn key_value_size(&self, key: &Key) -> usize {
-        self.handle.handle.base_value_size()
-            + key.iter().map(SizeOf::deep_size_of).sum::<u64>() as usize
+        self.handle.handle.base_value_size() + key.iter().map(SizeOf::deep_size_of).sum::<usize>()
     }
 }
 
@@ -235,7 +234,7 @@ impl MutWriteHandleEntry<'_> {
     }
 
     /// Clear this entry and return the number of bytes freed
-    pub(crate) fn mark_hole(self) -> u64 {
+    pub(crate) fn mark_hole(self) -> usize {
         // Do not account for the key if we miss on the lookup
         let size = self
             .handle
@@ -243,13 +242,12 @@ impl MutWriteHandleEntry<'_> {
             .read()
             .get(&self.key)
             .map(|rs| {
-                rs.iter().map(SizeOf::deep_size_of).sum::<u64>() as usize
-                    + self.key_value_size(&self.key)
+                rs.iter().map(SizeOf::deep_size_of).sum::<usize>() + self.key_value_size(&self.key)
             })
             .unwrap_or(0);
         self.handle.mem_size = self.handle.mem_size.saturating_sub(size);
         self.handle.handle.empty(self.key);
-        size as u64
+        size
     }
 }
 
@@ -332,7 +330,7 @@ impl WriteHandle {
 
     /// Evict from state according to the [`EvictionQuantity`]. Returns the number of bytes freed
     /// and if the request is EvictionQuantity::SingleKey, returns the key that was evicted.
-    fn evict_inner(&mut self, request: EvictionQuantity) -> (u64, Option<Vec<DfValue>>) {
+    fn evict_inner(&mut self, request: EvictionQuantity) -> (usize, Option<Vec<DfValue>>) {
         let (bytes_to_be_freed, eviction) = if self.mem_size > 0 {
             debug_assert!(
                 !self.handle.is_empty(),
@@ -345,24 +343,24 @@ impl WriteHandle {
             (0, None)
         };
 
-        self.mem_size = self.mem_size.saturating_sub(bytes_to_be_freed as usize);
+        self.mem_size = self.mem_size.saturating_sub(bytes_to_be_freed);
         (bytes_to_be_freed, eviction)
     }
 
     /// Attempt to evict `bytes` from state. This approximates the number of keys to evict,
     /// these keys may not have exactly `bytes` worth of state.
-    pub(crate) fn evict_bytes(&mut self, bytes: usize) -> u64 {
+    pub(crate) fn evict_bytes(&mut self, bytes: usize) -> usize {
         let request = EvictionQuantity::Ratio(bytes as f64 / self.mem_size as f64);
         self.evict_inner(request).0
     }
 
     /// Evict a single key from state
-    pub(crate) fn evict_random(&mut self) -> (u64, Option<Vec<DfValue>>) {
+    pub(crate) fn evict_random(&mut self) -> (usize, Option<Vec<DfValue>>) {
         let request = EvictionQuantity::SingleKey;
         self.evict_inner(request)
     }
 
-    pub(crate) fn mark_hole(&mut self, key: &KeyComparison) -> ReadySetResult<u64> {
+    pub(crate) fn mark_hole(&mut self, key: &KeyComparison) -> ReadySetResult<usize> {
         invariant_eq!(key.len(), self.index.len());
 
         match key {
@@ -380,11 +378,11 @@ impl WriteHandle {
                     .map(|rs| {
                         rs.iter()
                             .flat_map(|rs| rs.iter().map(SizeOf::deep_size_of))
-                            .sum::<u64>()
+                            .sum::<usize>()
                     })
                     .unwrap_or(0);
 
-                self.mem_size = self.mem_size.saturating_sub(size as usize);
+                self.mem_size = self.mem_size.saturating_sub(size);
                 if let KeyComparison::Range(range) = range_key {
                     self.handle
                         .empty_range((range.0.map(Vec1::into_vec), range.1.map(Vec1::into_vec)));
@@ -452,8 +450,8 @@ impl WriteHandle {
 }
 
 impl SizeOf for WriteHandle {
-    fn deep_size_of(&self) -> u64 {
-        self.mem_size as _
+    fn deep_size_of(&self) -> usize {
+        self.mem_size
     }
 
     fn is_empty(&self) -> bool {

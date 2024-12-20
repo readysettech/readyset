@@ -2442,7 +2442,7 @@ fn in_domain(key: &[u8]) -> bool {
 }
 
 impl SizeOf for PersistentStateHandle {
-    fn deep_size_of(&self) -> u64 {
+    fn deep_size_of(&self) -> usize {
         0
     }
 
@@ -2457,7 +2457,7 @@ impl SizeOf for PersistentStateHandle {
 }
 
 impl SizeOf for PersistentState {
-    fn deep_size_of(&self) -> u64 {
+    fn deep_size_of(&self) -> usize {
         let inner = self.db.inner();
         inner
             .shared_state
@@ -2478,7 +2478,7 @@ impl SizeOf for PersistentState {
                     .property_int_value_cf(cf, "rocksdb.size-all-mem-tables")
                     .unwrap()
                     .unwrap();
-                sstable_size + memtable_size
+                (sstable_size + memtable_size) as usize
             })
             .sum()
     }

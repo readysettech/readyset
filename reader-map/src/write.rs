@@ -256,9 +256,9 @@ where
         &'a mut self,
         request: EvictionQuantity,
         mut mem_cnt: F,
-    ) -> (u64, Option<K>)
+    ) -> (usize, Option<K>)
     where
-        F: FnMut(&K, &Values<V, I>) -> u64,
+        F: FnMut(&K, &Values<V, I>) -> usize,
     {
         self.publish();
 

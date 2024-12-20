@@ -2338,7 +2338,7 @@ impl Domain {
                             desc: format!("{:?}", n),
                             process_time: time,
                             process_ptime: ptime,
-                            mem_size,
+                            mem_size: mem_size as _,
                             materialized: mat_state,
                             probe_result,
                         },
@@ -3983,8 +3983,8 @@ impl Domain {
         reader_write_handles: &mut NodeMap<backlog::WriteHandle>,
         nodes: &DomainNodes,
         remapped_keys: &mut RemappedKeys,
-    ) -> ReadySetResult<u64> {
-        let mut bytes_freed = 0u64;
+    ) -> ReadySetResult<usize> {
+        let mut bytes_freed = 0;
 
         for (tag, path, keys) in
             replay_paths.downstream_dependent_paths(node, index, keys, remapped_keys)
@@ -4116,7 +4116,6 @@ impl Domain {
                 .map(|s| (local_index, s))
             })
             .filter(|&(_, s)| s > 0)
-            .map(|(x, s)| (x, s as usize))
             .collect();
 
         // we want to spread the eviction across the nodes,
@@ -4179,7 +4178,7 @@ impl Domain {
         };
 
         for (node, num_bytes) in nodes {
-            let mut freed = 0u64;
+            let mut freed = 0;
             let n = self.nodes[node].borrow_mut();
 
             if n.is_dropped() {
@@ -4226,7 +4225,7 @@ impl Domain {
             }
 
             debug!(%freed, node = ?n, "evicted from node");
-            self.state_size.fetch_sub(freed as usize, Ordering::AcqRel);
+            self.state_size.fetch_sub(freed, Ordering::AcqRel);
             total_freed += freed;
         }
 
@@ -4298,7 +4297,7 @@ impl Domain {
                         &self.nodes,
                         &mut self.remapped_keys,
                     )?;
-                    self.state_size.fetch_sub(freed as usize, Ordering::AcqRel);
+                    self.state_size.fetch_sub(freed, Ordering::AcqRel);
                 }
             }
             TriggerEndpoint::None | TriggerEndpoint::Start(_) => {}
@@ -4412,7 +4411,7 @@ impl Domain {
                 };
 
                 debug!(%freed, node = ?n, "evicted from node");
-                self.state_size.fetch_sub(freed as usize, Ordering::AcqRel);
+                self.state_size.fetch_sub(freed, Ordering::AcqRel);
                 Ok(eviction)
             }
             TriggerEndpoint::None | TriggerEndpoint::Start { .. } => {
@@ -4461,8 +4460,8 @@ impl Domain {
     }
 
     pub fn update_state_sizes(&mut self) {
-        let mut reader_size: u64 = 0;
-        let total: u64 = self
+        let mut reader_size = 0;
+        let total = self
             .nodes
             .values()
             .map(|nd| {
@@ -4492,11 +4491,11 @@ impl Domain {
             })
             .sum();
 
-        self.state_size.store(total as usize, Ordering::Release);
+        self.state_size.store(total, Ordering::Release);
         // no response sent, as worker will read the atomic
     }
 
-    pub fn estimated_base_tables_size(&self) -> u64 {
+    pub fn estimated_base_tables_size(&self) -> usize {
         self.state
             .iter()
             .filter_map(|(ni, state)| {
