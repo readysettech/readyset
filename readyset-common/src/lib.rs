@@ -37,7 +37,10 @@ impl SizeOf for DfValue {
     }
 }
 
-impl SizeOf for Vec<DfValue> {
+impl<T> SizeOf for Vec<T>
+where
+    T: SizeOf,
+{
     fn deep_size_of(&self) -> usize {
         size_of_val(self) + self.iter().map(|x| x.deep_size_of()).sum::<usize>()
     }
@@ -47,7 +50,10 @@ impl SizeOf for Vec<DfValue> {
     }
 }
 
-impl SizeOf for Box<[DfValue]> {
+impl<T> SizeOf for Box<[T]>
+where
+    T: SizeOf,
+{
     fn deep_size_of(&self) -> usize {
         size_of_val(self) + self.iter().map(|x| x.deep_size_of()).sum::<usize>() + 8
     }
