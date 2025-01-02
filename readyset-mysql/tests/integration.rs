@@ -21,7 +21,7 @@ use readyset_telemetry_reporter::{TelemetryEvent, TelemetryInitializer, Telemetr
 use readyset_util::eventually;
 use readyset_util::shutdown::ShutdownSender;
 use regex::Regex;
-use serial_test::serial;
+use test_utils::serial;
 use test_utils::skip_flaky_finder;
 
 async fn setup_with_mysql(recreate_db: bool) -> (mysql_async::Opts, Handle, ShutdownSender) {
@@ -1856,7 +1856,7 @@ async fn show_caches_with_always() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial]
+#[serial(mysql)]
 async fn show_readyset_status() {
     let (opts, _handle, shutdown_tx) = setup_with_mysql(true).await;
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();
@@ -2124,7 +2124,7 @@ async fn test_proxied_queries_telemetry() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial]
+#[serial(mysql)]
 async fn datetime_nanosecond_precision_text_protocol() {
     let mut direct_mysql = mysql_async::Conn::from_url(mysql_url()).await.unwrap();
     direct_mysql.query_drop("SET sql_mode='';
@@ -2183,7 +2183,7 @@ async fn datetime_nanosecond_precision_text_protocol() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial]
+#[serial(mysql)]
 async fn datetime_nanosecond_precision_binary_protocol() {
     let mut direct_mysql = mysql_async::Conn::from_url(mysql_url()).await.unwrap();
     direct_mysql.query_drop("SET sql_mode='';
@@ -2244,7 +2244,7 @@ async fn datetime_nanosecond_precision_binary_protocol() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial]
+#[serial(mysql)]
 async fn datetime_binary_protocol() {
     let (opts, _handle, shutdown_tx) = setup_with_mysql(false).await;
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();
@@ -2283,7 +2283,7 @@ async fn datetime_binary_protocol() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial]
+#[serial(mysql)]
 async fn timestamp_binary_protocol() {
     let mut direct_mysql = mysql_async::Conn::from_url(mysql_url()).await.unwrap();
     direct_mysql.query_drop("
@@ -2332,7 +2332,7 @@ async fn timestamp_binary_protocol() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial]
+#[serial(mysql)]
 async fn timestamp_text_protocol() {
     let mut direct_mysql = mysql_async::Conn::from_url(mysql_url()).await.unwrap();
     direct_mysql.query_drop("
@@ -2377,7 +2377,7 @@ async fn timestamp_text_protocol() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial]
+#[serial(mysql)]
 async fn date_only_text_protocol() {
     readyset_tracing::init_test_logging();
     let mut direct_mysql = mysql_async::Conn::from_url(mysql_url()).await.unwrap();

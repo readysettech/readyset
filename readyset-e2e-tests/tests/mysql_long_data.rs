@@ -3,11 +3,11 @@ use mysql_async::prelude::Queryable;
 use mysql_common::Value;
 use readyset_client_test_helpers::mysql_helpers::MySQLAdapter;
 use readyset_client_test_helpers::TestBuilder;
-use serial_test::serial;
+use test_utils::serial;
 use test_utils::slow;
 
+#[serial(mysql)]
 #[test]
-#[serial]
 #[slow]
 fn mysql_send_long_data() {
     readyset_tracing::init_test_logging();

@@ -23,7 +23,7 @@ use readyset_util::redacted::RedactedString;
 use readyset_util::shutdown::ShutdownSender;
 use replicators::db_util::error_is_slot_not_found;
 use replicators::{ControllerMessage, NoriaAdapter, ReplicatorMessage};
-use test_utils::slow;
+use test_utils::{serial, slow};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::time::sleep;
 use tokio_postgres::error::SqlState;
@@ -606,7 +606,7 @@ fn mysql_url() -> String {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(postgres)]
 #[slow]
 async fn pgsql_replication() {
     replication_test_inner(&pgsql_url()).await
@@ -615,7 +615,7 @@ async fn pgsql_replication() {
 /// Tests multiple readyset instances pointed at the same postgres upstream to verify that multiple
 /// readyset instances can replicate off the same upstream.
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(postgres)]
 #[slow]
 #[ignore = "Flaky test (REA-3061)"]
 async fn pgsql_replication_multiple() {
@@ -623,63 +623,63 @@ async fn pgsql_replication_multiple() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(mysql)]
 #[slow]
 async fn mysql_replication_multiple() {
     replication_test_multiple(&mysql_url()).await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(mysql)]
 #[slow]
 async fn mysql_replication() {
     replication_test_inner(&mysql_url()).await
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(postgres)]
 #[slow]
 async fn pgsql_replication_catch_up() {
     replication_catch_up_inner(&pgsql_url()).await.unwrap()
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(mysql)]
 #[slow]
 async fn mysql_replication_catch_up() {
     replication_catch_up_inner(&mysql_url()).await.unwrap()
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(postgres)]
 #[slow]
 async fn pgsql_replication_many_tables() {
     replication_many_tables_inner(&pgsql_url()).await.unwrap()
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(mysql)]
 #[slow]
 async fn mysql_replication_many_tables() {
     replication_many_tables_inner(&mysql_url()).await.unwrap()
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(postgres)]
 #[slow]
 async fn pgsql_replication_big_tables() {
     replication_big_tables_inner(&pgsql_url()).await.unwrap()
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(mysql)]
 #[slow]
 async fn mysql_replication_big_tables() {
     replication_big_tables_inner(&mysql_url()).await.unwrap()
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(mysql)]
 #[slow]
 async fn mysql_datetime_replication() {
     mysql_datetime_replication_inner().await.unwrap();
@@ -909,21 +909,21 @@ async fn mysql_char_collation_padding_inner() -> ReadySetResult<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(mysql)]
 #[slow]
 async fn mysql_binary_collation_padding() {
     mysql_binary_collation_padding_inner().await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(mysql)]
 #[slow]
 async fn mysql_char_collation_padding() {
     mysql_char_collation_padding_inner().await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(postgres)]
 #[slow]
 async fn pgsql_skip_unparsable() {
     replication_skip_unparsable_inner(&pgsql_url())
@@ -932,7 +932,7 @@ async fn pgsql_skip_unparsable() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(mysql)]
 #[slow]
 async fn mysql_skip_unparsable() {
     replication_skip_unparsable_inner(&mysql_url())
@@ -941,98 +941,98 @@ async fn mysql_skip_unparsable() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(postgres)]
 #[slow]
 async fn pgsql_replication_filter() {
     replication_filter_inner(&pgsql_url()).await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(mysql)]
 #[slow]
 async fn mysql_replication_filter() {
     replication_filter_inner(&mysql_url()).await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(postgres)]
 #[slow]
 async fn pgsql_replication_all_schemas() {
     replication_all_schemas_inner(&pgsql_url()).await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(mysql)]
 #[slow]
 async fn mysql_replication_all_schemas() {
     replication_all_schemas_inner(&mysql_url()).await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(postgres)]
 #[slow]
 async fn pgsql_replication_resnapshot() {
     resnapshot_inner(&pgsql_url()).await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(mysql)]
 #[slow]
 async fn mysql_replication_resnapshot() {
     resnapshot_inner(&mysql_url()).await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(postgres)]
 #[slow]
 async fn psql14_ddl_replicate_drop_table() {
     postgresql_ddl_replicate_drop_table_internal(&pgsql_url()).await
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(postgres13)]
 #[slow]
 async fn psql13_ddl_replicate_drop_table() {
     postgresql_ddl_replicate_drop_table_internal(&pgsql13_url()).await
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(postgres)]
 #[slow]
 async fn psql14_ddl_replicate_create_table() {
     postgresql_ddl_replicate_create_table_internal(&pgsql_url()).await
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(postgres13)]
 #[slow]
 async fn psql13_ddl_replicate_create_table() {
     postgresql_ddl_replicate_create_table_internal(&pgsql13_url()).await
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(postgres)]
 #[slow]
 async fn psql14_ddl_replicate_drop_view() {
     postgresql_ddl_replicate_drop_view_internal(&pgsql_url()).await
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(postgres13)]
 #[slow]
 async fn psql13_ddl_replicate_drop_view() {
     postgresql_ddl_replicate_drop_view_internal(&pgsql13_url()).await
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(postgres)]
 #[slow]
 async fn psql14_ddl_replicate_create_view() {
     postgresql_ddl_replicate_create_view_internal(&pgsql_url()).await
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(postgres13)]
 #[slow]
 async fn psql13_ddl_replicate_create_view() {
     postgresql_ddl_replicate_create_view_internal(&pgsql13_url()).await
@@ -1764,7 +1764,7 @@ async fn resnapshot_inner(url: &str) -> ReadySetResult<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(mysql)]
 #[slow]
 async fn mysql_enum_replication() {
     readyset_tracing::init_test_logging();
@@ -1850,7 +1850,7 @@ async fn mysql_enum_replication() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(mysql)]
 #[slow]
 async fn mysql_binlog_transaction_compression() {
     readyset_tracing::init_test_logging();
@@ -2148,14 +2148,14 @@ async fn postgresql_ddl_replicate_create_view_internal(url: &str) {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(mysql)]
 #[slow]
 async fn snapshot_telemetry_mysql() {
     snapshot_telemetry_inner(&mysql_url()).await
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(postgres)]
 #[slow]
 async fn snapshot_telemetry_postgresql() {
     snapshot_telemetry_inner(&pgsql_url()).await
@@ -2213,14 +2213,14 @@ async fn snapshot_telemetry_inner(url: &String) {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(mysql)]
 #[slow]
 async fn replication_tables_updates_mysql() {
     applies_replication_table_updates_on_restart(&mysql_url()).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(postgres)]
 #[slow]
 async fn replication_tables_updates_postgresql() {
     applies_replication_table_updates_on_restart(&pgsql_url()).await;
@@ -2310,7 +2310,7 @@ async fn applies_replication_table_updates_on_restart(url: &str) {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(postgres)]
 #[slow]
 async fn postgresql_replicate_copy_from() {
     // Replication of data inserted via COPY is tricky due to it triggering the creation of
@@ -2377,7 +2377,7 @@ async fn postgresql_replicate_copy_from() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(postgres)]
 #[slow]
 async fn postgresql_non_base_offsets() {
     // This test reproduces the panic described in ENG-2204.
@@ -2418,7 +2418,7 @@ async fn postgresql_non_base_offsets() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(postgres)]
 #[slow]
 async fn postgresql_orphaned_nodes() {
     // This test checks for the error described in ENG-2190.
@@ -2464,7 +2464,7 @@ async fn postgresql_orphaned_nodes() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(postgres)]
 #[slow]
 async fn postgresql_replicate_citext() {
     readyset_tracing::init_test_logging();
@@ -2509,7 +2509,7 @@ async fn postgresql_replicate_citext() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(postgres)]
 #[slow]
 async fn postgresql_replicate_citext_array() {
     readyset_tracing::init_test_logging();
@@ -2560,7 +2560,7 @@ async fn postgresql_replicate_citext_array() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(postgres)]
 #[slow]
 async fn postgresql_replicate_custom_type() {
     let url = pgsql_url();
@@ -2612,7 +2612,7 @@ async fn postgresql_replicate_custom_type() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(postgres)]
 #[slow]
 async fn postgresql_replicate_truncate() {
     let url = pgsql_url();
@@ -2676,7 +2676,7 @@ async fn postgresql_replicate_truncate() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(postgres)]
 #[slow]
 async fn postgresql_drop_nonexistent_replication_slot() {
     let connector = native_tls::TlsConnector::builder()
@@ -2730,7 +2730,7 @@ async fn postgresql_is_toasty(client: &tokio_postgres::client::Client, table: &s
 /// replicate correctly.
 /// Case 1: The table is unkeyed.
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(postgres)]
 #[slow]
 async fn postgresql_toast_update_unkeyed() {
     readyset_tracing::init_test_logging();
@@ -2806,7 +2806,7 @@ async fn postgresql_toast_update_unkeyed() {
 /// replicate correctly.
 /// Case 2: The table is keyed, and one or more key columns is modified.
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(postgres)]
 #[slow]
 async fn postgresql_toast_update_key() {
     readyset_tracing::init_test_logging();
@@ -2879,7 +2879,7 @@ async fn postgresql_toast_update_key() {
 /// replicate correctly.
 /// Case 3: The table is keyed, but no key columns are modified.
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(postgres)]
 #[slow]
 async fn postgresql_toast_update_not_key() {
     readyset_tracing::init_test_logging();
@@ -2950,7 +2950,7 @@ async fn postgresql_toast_update_not_key() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(postgres)]
 #[slow]
 async fn pgsql_unsupported() {
     readyset_tracing::init_test_logging();
@@ -3001,7 +3001,7 @@ async fn pgsql_unsupported() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(postgres)]
 #[slow]
 async fn pgsql_delete_from_table_without_pk() {
     readyset_tracing::init_test_logging();
@@ -3077,6 +3077,7 @@ async fn pgsql_delete_from_table_without_pk() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[serial(postgres)]
 async fn pgsql_dont_replicate_partitioned_table() {
     readyset_tracing::init_test_logging();
     let url = pgsql_url();
@@ -3181,7 +3182,7 @@ async fn pgsql_dont_replicate_partitioned_table() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(mysql)]
 async fn mysql_dont_replicate_unsupported_storage_engine() {
     readyset_tracing::init_test_logging();
     let url = mysql_url();
@@ -3243,7 +3244,7 @@ async fn mysql_dont_replicate_unsupported_storage_engine() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(mysql)]
 #[slow]
 async fn mysql_dont_enforce_fk_replication() {
     readyset_tracing::init_test_logging();
@@ -3309,7 +3310,7 @@ async fn mysql_dont_enforce_fk_replication() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(mysql)]
 #[slow]
 async fn mysql_generated_columns() {
     readyset_tracing::init_test_logging();
@@ -3463,21 +3464,21 @@ async fn fk_resnapshot_inner(url: &str) -> ReadySetResult<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(mysql)]
 #[slow]
 async fn mysql_fk_tables_resnapshot() {
     fk_resnapshot_inner(&mysql_url()).await.unwrap()
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(postgres)]
 #[slow]
 async fn postgres_fk_tables_resnapshot() {
     fk_resnapshot_inner(&pgsql_url()).await.unwrap()
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(mysql)]
 #[slow]
 async fn mysql_handle_dml_in_statement_events() {
     readyset_tracing::init_test_logging();
@@ -3539,7 +3540,7 @@ async fn mysql_handle_dml_in_statement_events() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(mysql)]
 #[slow]
 async fn mysql_replicate_json_field() {
     readyset_tracing::init_test_logging();
@@ -3648,7 +3649,7 @@ async fn mysql_replicate_json_field() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(mysql)]
 #[slow]
 async fn snapshot_rejects_table_with_big_decimal() {
     readyset_tracing::init_test_logging();
@@ -3683,7 +3684,7 @@ async fn snapshot_rejects_table_with_big_decimal() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(mysql)]
 #[slow]
 async fn replicate_rejects_table_with_big_decimal() {
     readyset_tracing::init_test_logging();
@@ -3725,7 +3726,7 @@ async fn replicate_rejects_table_with_big_decimal() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(mysql)]
 #[slow]
 async fn snapshot_rejects_table_with_big_numeric() {
     readyset_tracing::init_test_logging();
@@ -3760,7 +3761,7 @@ async fn snapshot_rejects_table_with_big_numeric() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(mysql)]
 #[slow]
 async fn replicate_rejects_table_with_big_numeric() {
     readyset_tracing::init_test_logging();
@@ -3802,7 +3803,7 @@ async fn replicate_rejects_table_with_big_numeric() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(mysql)]
 #[slow]
 async fn alter_readyset_add_table_replication_tables() {
     readyset_tracing::init_test_logging();
@@ -3883,7 +3884,7 @@ async fn alter_readyset_add_table_replication_tables() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[serial(mysql)]
 #[slow]
 async fn alter_readyset_add_table_replication_tables_ignore() {
     readyset_tracing::init_test_logging();

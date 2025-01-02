@@ -1,10 +1,7 @@
 //! Inspired by the crate of the same name in rust-analyzer.
 //! https://github.com/rust-analyzer/rust-analyzer/blob/master/crates/test_utils/src/lib.rs
 
-mod parallel_group;
-
-pub use parallel_group::{AsyncParallelGroup, ParallelGroup};
-pub use test_utils_proc_macros::{parallel_group, skip_flaky_finder, slow};
+pub use test_utils_proc_macros::{serial, skip_flaky_finder, slow};
 
 /// Returns `false` if slow tests should not run, otherwise returns `true`.
 pub fn skip_slow_tests() -> bool {

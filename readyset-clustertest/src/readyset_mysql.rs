@@ -6,7 +6,7 @@ use mysql_async::prelude::Queryable;
 use readyset_adapter::backend::QueryInfo;
 use readyset_client_metrics::QueryDestination;
 use readyset_util::{eventually, failpoints};
-use serial_test::serial;
+use test_utils::serial;
 use test_utils::slow;
 use tokio::time::{sleep, timeout};
 
@@ -29,7 +29,7 @@ async fn last_statement_destination(conn: &mut mysql_async::Conn) -> QueryDestin
         .destination
 }
 
-#[clustertest]
+#[clustertest(mysql)]
 async fn create_table_insert_test() {
     let mut deployment = readyset_mysql("ct_create_table_insert")
         .with_servers(2, ServerParams::default())
@@ -67,7 +67,7 @@ async fn create_table_insert_test() {
 
 /// This test verifies that a prepared statement can be executed
 /// on both noria and mysql.
-#[clustertest]
+#[clustertest(mysql)]
 #[ignore = "ENG-2045: flaky test"]
 async fn mirror_prepare_exec_test() {
     let mut deployment = readyset_mysql("ct_mirror_prepare_exec")
@@ -122,7 +122,7 @@ async fn mirror_prepare_exec_test() {
     deployment.teardown().await.unwrap();
 }
 
-#[clustertest]
+#[clustertest(mysql)]
 async fn async_migrations_confidence_check() {
     let mut deployment = readyset_mysql("ct_async_migrations_confidence_check")
         .add_server(ServerParams::default())
@@ -177,7 +177,7 @@ async fn async_migrations_confidence_check() {
     deployment.teardown().await.unwrap();
 }
 
-#[clustertest]
+#[clustertest(mysql)]
 #[ignore = "Flaky test (ENG-1929)"]
 async fn failure_during_query() {
     let mut deployment = readyset_mysql("ct_failure_during_query")
@@ -220,7 +220,7 @@ async fn failure_during_query() {
     deployment.teardown().await.unwrap();
 }
 
-#[clustertest]
+#[clustertest(mysql)]
 #[ignore = "Flaky test (ENG-1930)"]
 async fn query_cached_view_after_failure() {
     let mut deployment = readyset_mysql("ct_query_view_after_failure")
@@ -297,7 +297,7 @@ async fn query_cached_view_after_failure() {
     deployment.teardown().await.unwrap();
 }
 
-#[clustertest]
+#[clustertest(mysql)]
 async fn test_fallback_recovery_period() {
     let mut deployment = readyset_mysql("test_fallback_recovery_period")
         .with_servers(1, ServerParams::default())
@@ -446,7 +446,7 @@ async fn test_fallback_recovery_period() {
     deployment.teardown().await.unwrap();
 }
 
-#[clustertest]
+#[clustertest(mysql)]
 async fn dry_run_evaluates_support() {
     let mut deployment = readyset_mysql("dry_run_evaluates_support")
         .add_server(ServerParams::default())
@@ -527,7 +527,7 @@ async fn dry_run_evaluates_support() {
     deployment.teardown().await.unwrap();
 }
 
-#[clustertest]
+#[clustertest(mysql)]
 async fn proxied_queries_filtering() {
     let mut deployment = readyset_mysql("proxied_queries_filtering")
         .add_server(ServerParams::default())
@@ -620,7 +620,7 @@ async fn proxied_queries_filtering() {
     deployment.teardown().await.unwrap();
 }
 
-#[clustertest]
+#[clustertest(mysql)]
 async fn cached_queries_filtering() {
     let mut deployment = readyset_mysql("cached_queries_filtering")
         .add_server(ServerParams::default())
@@ -676,7 +676,7 @@ async fn cached_queries_filtering() {
 /// Creates a two servers deployment and performs a failure and recovery on one
 /// of the servers. After the failure, we verify that we can still perform the
 /// query on ReadySet and we return the correct results.
-#[clustertest]
+#[clustertest(mysql)]
 #[ignore = "Flaky test (REA-3107)"]
 async fn correct_data_after_restart() {
     let mut deployment = readyset_mysql("ct_correct_data_after_restart")
@@ -759,7 +759,7 @@ async fn correct_data_after_restart() {
 }
 
 /// This test verifies that following a worker failure we can create new views.
-#[clustertest]
+#[clustertest(mysql)]
 #[ignore = "Flaky test (ENG-1694)"]
 async fn create_view_after_worker_failure() {
     let mut deployment = readyset_mysql("ct_create_view_after_worker_failure")
@@ -833,7 +833,7 @@ async fn create_view_after_worker_failure() {
 
 /// Fail the non-leader worker 10 times while issuing writes.
 // This test currently fails because we drop writes to failed workers.
-#[clustertest]
+#[clustertest(mysql)]
 async fn update_during_failure() {
     let mut deployment = readyset_mysql("ct_update_during_failure")
         .min_workers(2)
@@ -940,7 +940,7 @@ async fn update_during_failure() {
     deployment.teardown().await.unwrap();
 }
 
-#[clustertest]
+#[clustertest(mysql)]
 async fn upquery_to_failed_reader_domain() {
     let mut deployment = readyset_mysql("ct_upquery_failed_domain_immediately")
         .with_servers(1, ServerParams::default())
@@ -989,7 +989,7 @@ async fn upquery_to_failed_reader_domain() {
 /// upquery hangs until the view query timeout.
 // This test introduces a 5 second query timeout that fails due to the upquery hanging
 // until RPC timeout.
-#[clustertest]
+#[clustertest(mysql)]
 async fn upquery_through_failed_domain() {
     let mut deployment = readyset_mysql("ct_failure_during_query")
         .with_servers(1, ServerParams::default())
@@ -1035,7 +1035,7 @@ async fn upquery_through_failed_domain() {
     deployment.teardown().await.unwrap();
 }
 
-#[clustertest]
+#[clustertest(mysql)]
 #[ignore] // TODO(ENG-1029): Investigate whether this requires revert
 async fn update_propagation_through_failed_domain() {
     let mut deployment = readyset_mysql("ct_update_propagation_through_failed_domain")
@@ -1124,7 +1124,7 @@ async fn update_propagation_through_failed_domain() {
 
 /// Fail the controller 10 times and check if we can execute the query. This
 /// test will pass if we correctly execute queries against fallback.
-#[clustertest]
+#[clustertest(mysql)]
 #[slow]
 async fn end_to_end_with_restarts() {
     let mut deployment = readyset_mysql("ct_end_to_end_with_restarts")
@@ -1203,7 +1203,7 @@ async fn end_to_end_with_restarts() {
 
 /// Fail the controller 10 times and check if we can query a view following
 /// a restart.
-#[clustertest]
+#[clustertest(mysql)]
 #[slow]
 async fn view_survives_restart() {
     let mut deployment = readyset_mysql("ct_view_survives_restarts")
@@ -1270,7 +1270,7 @@ async fn view_survives_restart() {
 
 /// Fail the non-leader worker 10 times while issuing writes.
 // This test currently fails because we drop writes to failed workers.
-#[clustertest]
+#[clustertest(mysql)]
 #[ignore]
 #[slow]
 async fn writes_survive_restarts() {
@@ -1369,7 +1369,7 @@ async fn writes_survive_restarts() {
 // Perform an operation on the upstream MySQL DB that ReadySet should be able to
 // successfully handle the replication for, and validate that the relevant
 // metric records the success
-#[clustertest]
+#[clustertest(mysql)]
 async fn replication_success_metrics() {
     replication_test_inner(
         "ct_replication_success_metrics",
@@ -1428,7 +1428,7 @@ async fn replication_test_inner(test: &str, query: &str, metric_label: &str) {
     deployment.teardown().await.unwrap();
 }
 
-#[clustertest]
+#[clustertest(mysql)]
 async fn correct_deployment_permissions() {
     let mut deployment = readyset_mysql("ct_correct_deployment_permissions")
         .with_servers(1, ServerParams::default())
@@ -1464,7 +1464,7 @@ async fn correct_deployment_permissions() {
     deployment.teardown().await.unwrap();
 }
 
-#[clustertest]
+#[clustertest(mysql)]
 #[slow]
 async fn post_deployment_permissions_lock_table() {
     let mut deployment = readyset_mysql("ct_post_deployment_permissions_lock_table")
@@ -1510,7 +1510,7 @@ async fn post_deployment_permissions_lock_table() {
     deployment.teardown().await.unwrap();
 }
 
-#[clustertest]
+#[clustertest(mysql)]
 #[ignore = "ENG-2067: flaky test"]
 #[slow]
 async fn post_deployment_permissions_replication() {
@@ -1557,7 +1557,7 @@ async fn post_deployment_permissions_replication() {
     deployment.teardown().await.unwrap();
 }
 
-#[clustertest]
+#[clustertest(mysql)]
 async fn views_synchronize_between_deployments() {
     let mut deployment = readyset_mysql("views_synchronize_between_deployments")
         .with_servers(1, ServerParams::default())
@@ -1606,7 +1606,7 @@ async fn views_synchronize_between_deployments() {
     deployment.teardown().await.unwrap();
 }
 
-#[clustertest]
+#[clustertest(mysql)]
 async fn standalone_create_table_insert_test() {
     readyset_tracing::init_test_logging();
     let mut deployment = readyset_mysql("ct_standalone_create_table_insert")
@@ -1643,7 +1643,7 @@ async fn standalone_create_table_insert_test() {
     deployment.teardown().await.unwrap();
 }
 
-#[clustertest]
+#[clustertest(mysql)]
 async fn enable_experimental_placeholder_inlining() {
     let mut deployment = readyset_mysql("ct_enable_experimental_placeholder_inlining")
         .with_servers(1, ServerParams::default())
@@ -1750,7 +1750,7 @@ async fn enable_experimental_placeholder_inlining() {
     deployment.teardown().await.unwrap();
 }
 
-#[clustertest]
+#[clustertest(mysql)]
 async fn show_query_metrics() {
     readyset_tracing::init_test_logging();
     let mut deployment = readyset_mysql("show_query_metrics")
@@ -1805,7 +1805,7 @@ async fn show_query_metrics() {
 
 /// Fail the controller once and check if we can query a view which contains table aliases
 /// following a restart.
-#[clustertest]
+#[clustertest(mysql)]
 #[slow]
 async fn table_aliased_view_survives_restart() {
     let mut builder = readyset_mysql("ct_table_aliased_view_survives_restarts");

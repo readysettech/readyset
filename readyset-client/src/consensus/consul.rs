@@ -984,7 +984,7 @@ mod tests {
     use rand::{thread_rng, Rng};
     use readyset_data::Dialect;
     use reqwest::Url;
-    use serial_test::serial;
+    use test_utils::serial;
 
     use super::*;
     use crate::consensus::CacheDDLRequest;

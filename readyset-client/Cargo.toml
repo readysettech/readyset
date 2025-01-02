@@ -14,7 +14,7 @@ categories = ["api-bindings", "database"]
 [dependencies]
 anyhow = { workspace = true }
 async-bincode = { workspace = true }
-clap = { workspace = true, features = ["derive","env"] }
+clap = { workspace = true, features = ["derive", "env"] }
 fail = { workspace = true }
 thiserror = { workspace = true }
 hyper = { workspace = true, features = ["stream", "client", "http2"] }
@@ -35,7 +35,14 @@ time = { workspace = true, features = ["local-offset"] }
 tower-service = { workspace = true }
 tower-layer = { workspace = true }
 tokio-tower = { workspace = true }
-tower = { workspace = true, features = ["limit", "balance", "buffer", "discover", "util", "timeout"] }
+tower = { workspace = true, features = [
+    "limit",
+    "balance",
+    "buffer",
+    "discover",
+    "util",
+    "timeout",
+] }
 tracing = { workspace = true, features = ["release_max_level_debug"] }
 tracing-futures = { workspace = true }
 slab = { workspace = true }
@@ -53,12 +60,21 @@ cloudflare-zlib = { workspace = true, features = ["arm-always"] }
 smallvec = { workspace = true }
 rocksdb.workspace = true
 
-tokio-postgres = { workspace = true, features = ["with-chrono-0_4", "with-eui48-1", "with-uuid-0_8", "with-serde_json-1", "with-bit-vec-0_6"] }
+tokio-postgres = { workspace = true, features = [
+    "with-chrono-0_4",
+    "with-eui48-1",
+    "with-uuid-0_8",
+    "with-serde_json-1",
+    "with-bit-vec-0_6",
+] }
 metrics = { workspace = true }
 metrics-util = { workspace = true }
 itertools = { workspace = true }
 bytes = { workspace = true }
-rust_decimal = { workspace = true, features = ["db-tokio-postgres", "serde-str"] }
+rust_decimal = { workspace = true, features = [
+    "db-tokio-postgres",
+    "serde-str",
+] }
 eui48 = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 bit-vec = { workspace = true, features = ["serde"] }
@@ -92,6 +108,7 @@ replication-offset = { path = "../replication-offset" }
 [dev-dependencies]
 serial_test = { workspace = true }
 tempfile = { workspace = true }
+test-utils = { path = "../test-utils" }
 
 [features]
 failure_injection = ["fail/failpoints"]

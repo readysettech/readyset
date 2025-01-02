@@ -6,7 +6,7 @@ use readyset_data::{DfValue, Dialect};
 use readyset_util::{eventually, failpoints};
 use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
-use serial_test::serial;
+use test_utils::serial;
 use tracing::{debug, info};
 
 use crate::readyset_mysql::PROPAGATION_DELAY_TIMEOUT;
@@ -15,7 +15,7 @@ use crate::*;
 
 // Ignored as this test cannot issue RPCs after killing the worker as it
 // will get into a failing state and will not accept RPCs.
-#[clustertest]
+#[clustertest(mysql)]
 #[ignore]
 async fn query_failure_recovery_with_volume_id() {
     let mut deployment =
@@ -67,7 +67,7 @@ async fn query_failure_recovery_with_volume_id() {
     deployment.teardown().await.unwrap();
 }
 
-#[clustertest]
+#[clustertest(mysql)]
 async fn new_leader_worker_set() {
     let mut deployment = DeploymentBuilder::new(DatabaseType::MySQL, "ct_new_leader_worker_set")
         .with_servers(3, ServerParams::default())
@@ -94,7 +94,7 @@ async fn new_leader_worker_set() {
     deployment.teardown().await.unwrap();
 }
 
-#[clustertest]
+#[clustertest(mysql)]
 async fn balance_base_table_domains() {
     let mut deployment =
         DeploymentBuilder::new(DatabaseType::MySQL, "ct_balance_base_table_domains")
@@ -145,7 +145,7 @@ async fn get_metric(
 
 // Validate that, on promotion of a follower to leader, its
 // `CONTROLLER_IS_LEADER` metric changes from 0 (not leader) to 1 (leader)
-#[clustertest]
+#[clustertest(mysql)]
 async fn new_leader_metrics() {
     let mut deployment = DeploymentBuilder::new(DatabaseType::MySQL, "ct_new_leader_metrics")
         .add_server(ServerParams::default())
@@ -191,7 +191,7 @@ async fn new_leader_metrics() {
     deployment.teardown().await.unwrap();
 }
 
-#[clustertest]
+#[clustertest(mysql)]
 async fn replicated_readers() {
     let mut deployment = DeploymentBuilder::new(DatabaseType::MySQL, "ct_replicated_readers")
         .with_servers(2, ServerParams::default())
@@ -287,7 +287,7 @@ async fn replicated_readers() {
     deployment.teardown().await.unwrap();
 }
 
-#[clustertest]
+#[clustertest(mysql)]
 async fn replicated_readers_with_unions() {
     let mut deployment =
         DeploymentBuilder::new(DatabaseType::MySQL, "ct_replicated_readers_with_unions")
@@ -361,7 +361,7 @@ async fn replicated_readers_with_unions() {
     deployment.teardown().await.unwrap();
 }
 
-#[clustertest]
+#[clustertest(mysql)]
 async fn no_readers_worker_doesnt_get_readers() {
     let mut deployment = DeploymentBuilder::new(
         DatabaseType::MySQL,
@@ -405,7 +405,7 @@ async fn no_readers_worker_doesnt_get_readers() {
     deployment.teardown().await.unwrap();
 }
 
-#[clustertest]
+#[clustertest(mysql)]
 async fn server_and_adapter_auto_restart() {
     let mut deployment = DeploymentBuilder::new(DatabaseType::MySQL, "ct_adapter_restart")
         .add_server(ServerParams::default())
@@ -428,7 +428,7 @@ async fn server_and_adapter_auto_restart() {
     deployment.teardown().await.unwrap();
 }
 
-#[clustertest]
+#[clustertest(mysql)]
 async fn server_auto_restarts() {
     let mut deployment = DeploymentBuilder::new(DatabaseType::MySQL, "ct_server_restart")
         .add_server(ServerParams::default())
@@ -505,7 +505,7 @@ async fn assert_deployment_health(mut dh: DeploymentHandle) {
     );
 }
 
-#[clustertest]
+#[clustertest(mysql)]
 async fn server_ready_before_adapter() {
     let mut deployment = DeploymentBuilder::new(DatabaseType::MySQL, "ct_server_before_adapter")
         .auto_restart(true)
@@ -525,7 +525,7 @@ async fn server_ready_before_adapter() {
     assert_deployment_health(deployment).await;
 }
 
-#[clustertest]
+#[clustertest(mysql)]
 async fn adapter_ready_before_server() {
     let mut deployment = DeploymentBuilder::new(DatabaseType::MySQL, "ct_adapter_before_server")
         .auto_restart(true)
@@ -587,7 +587,7 @@ async fn assert_server_failpoint_pause_resume(deployment_name: &str, failpoint: 
     wait_for_server_startup(port, timeout).await.unwrap();
 }
 
-#[clustertest]
+#[clustertest(mysql)]
 async fn server_reports_unhealthy_worker_down() {
     assert_server_failpoint_pause_resume(
         "ct_server_reports_unhealthy_worker_down",
@@ -596,7 +596,7 @@ async fn server_reports_unhealthy_worker_down() {
     .await
 }
 
-#[clustertest]
+#[clustertest(mysql)]
 async fn server_reports_unhealthy_controller_down() {
     assert_server_failpoint_pause_resume(
         "ct_server_reports_unhealthy_controller_down",
@@ -747,7 +747,7 @@ async fn test_deployment_startup_order(startup_order: Vec<ClusterComponent>) {
     assert_deployment_health(deployment).await;
 }
 
-#[clustertest]
+#[clustertest(mysql)]
 #[ignore = "ENG-1668: fix flakiness as well as known failures"]
 async fn startup_permutations() {
     use itertools::Itertools;
@@ -776,7 +776,7 @@ async fn startup_permutations() {
     }
 }
 
-#[clustertest]
+#[clustertest(mysql)]
 #[ignore = "FIXME ENG-1668: convenience test for debugging"]
 async fn startup_permutations_failures() {
     // Delete this test once these are passing and just use startup_permutations above

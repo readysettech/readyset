@@ -31,14 +31,14 @@ readyset-tracing = { path = "../readyset-tracing" }
 readyset-errors = { path = "../readyset-errors" }
 
 [dev-dependencies]
-serial_test = { workspace = true }
-criterion = { workspace = true, features=["async_tokio"]}
+criterion = { workspace = true, features = ["async_tokio"] }
 itertools = { workspace = true }
 readyset-client-metrics = { path = "../readyset-client-metrics" }
-test-utils = { path = "../test-utils" }
 readyset-clustertest-macros = { path = "./macros" }
 readyset-tracing = { path = "../readyset-tracing" }
 rust_decimal = { workspace = true }
+serial_test = { workspace = true }
+test-utils = { path = "../test-utils" }
 
 [build-dependencies]
 anyhow = { workspace = true }

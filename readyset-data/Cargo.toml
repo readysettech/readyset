@@ -16,10 +16,16 @@ lazy_static = { workspace = true }
 mysql_common = { workspace = true, features = ["chrono"] }
 proptest = { workspace = true }
 regex = { workspace = true }
-rust_decimal = { workspace = true, features = ["db-tokio-postgres", "serde-str"] }
+rust_decimal = { workspace = true, features = [
+    "db-tokio-postgres",
+    "serde-str",
+] }
 serde = { workspace = true, features = ["rc", "derive"] }
 serde_bytes = { workspace = true }
-serde_json = { workspace = true, features = ["arbitrary_precision", "unbounded_depth"] }
+serde_json = { workspace = true, features = [
+    "arbitrary_precision",
+    "unbounded_depth",
+] }
 serde_stacker = { workspace = true }
 strum = { workspace = true }
 strum_macros = { workspace = true }
@@ -46,14 +52,21 @@ smallvec = { workspace = true, features = ["union", "const_generics", "serde"] }
 
 [dependencies.tokio-postgres]
 workspace = true
-features = ["with-chrono-0_4", "with-eui48-1", "with-uuid-0_8", "with-serde_json-1", "with-bit-vec-0_6"]
+features = [
+    "with-chrono-0_4",
+    "with-eui48-1",
+    "with-uuid-0_8",
+    "with-serde_json-1",
+    "with-bit-vec-0_6",
+]
 
 [dev-dependencies]
 derive_more = { workspace = true }
 bincode = { workspace = true }
-criterion = { workspace = true, features=["async_tokio"]}
-tokio = { workspace = true, features = ["full"] }
+criterion = { workspace = true, features = ["async_tokio"] }
 serial_test = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+test-utils = { path = "../test-utils" }
 
 [[bench]]
 name = "serde"

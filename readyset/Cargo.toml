@@ -12,7 +12,7 @@ A real-time SQL caching engine for Postgres and MySQL."""
 [dependencies]
 anyhow = { workspace = true }
 chrono = { workspace = true }
-clap = { workspace = true, features = ["derive","env"] }
+clap = { workspace = true, features = ["derive", "env"] }
 crossbeam-skiplist = { workspace = true }
 futures-util = { workspace = true }
 fail = { workspace = true }
@@ -58,9 +58,14 @@ serde_json = { workspace = true }
 [dev-dependencies]
 serial_test = { workspace = true }
 temp-dir = { workspace = true }
+test-utils = { path = "../test-utils" }
 
 [features]
-failure_injection = ["fail/failpoints", "readyset-server/failure_injection", "readyset-util/failure_injection"]
+failure_injection = [
+    "fail/failpoints",
+    "readyset-server/failure_injection",
+    "readyset-util/failure_injection",
+]
 
 [package.metadata.generate-rpm]
 assets = [
@@ -82,9 +87,21 @@ depends = "$auto"
 section = "Databases"
 priority = "optional"
 assets = [
-    ["target/release/readyset", "usr/bin/", "755"],
-    ["pkg/common/readyset.conf", "/etc/readyset/readyset.conf", "600"],
-    ["pkg/common/readyset.service", "/lib/systemd/system/readyset.service", "644"],
+    [
+        "target/release/readyset",
+        "usr/bin/",
+        "755",
+    ],
+    [
+        "pkg/common/readyset.conf",
+        "/etc/readyset/readyset.conf",
+        "600",
+    ],
+    [
+        "pkg/common/readyset.service",
+        "/lib/systemd/system/readyset.service",
+        "644",
+    ],
 ]
 maintainer-scripts = "pkg/debian"
 conf-files = ["/etc/readyset/readyset.conf"]

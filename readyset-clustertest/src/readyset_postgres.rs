@@ -2,7 +2,7 @@ use database_utils::{QueryableConnection, SimpleQueryResults};
 use readyset_client_metrics::QueryDestination;
 use readyset_data::DfValue;
 use readyset_util::{eventually, failpoints};
-use serial_test::serial;
+use test_utils::serial;
 
 use crate::*;
 
@@ -74,7 +74,7 @@ async fn publication_exists(conn: &mut DatabaseConnection) -> bool {
     }
 }
 
-#[clustertest]
+#[clustertest(postgres)]
 async fn cleanup_works() {
     let repl_slot_name = "readyset";
     let resnapshot_repl_slot_name = "readyset_resnapshot_readyset";
@@ -129,7 +129,7 @@ async fn cleanup_works() {
 
 /// Test that a deployment with embedded readers, configured to replicate readers n times, continues
 /// to work with a number of adapters < n.
-#[clustertest]
+#[clustertest(postgres)]
 async fn embedded_readers_adapters_lt_replicas() {
     let deployment_name = "embedded_readers_adapters_lt_replicas";
     let mut deployment = DeploymentBuilder::new(DatabaseType::PostgreSQL, deployment_name)
@@ -298,7 +298,7 @@ async fn embedded_readers_adapters_lt_replicas() {
 }
 
 /// Test that a (partial or full) reader domain panicking in a deployment eventually recovers
-#[clustertest]
+#[clustertest(postgres)]
 async fn reader_domain_panic_handling() {
     let deployment_name = "reader_domain_panic_handling";
     let mut deployment = DeploymentBuilder::new(DatabaseType::PostgreSQL, deployment_name)
@@ -415,7 +415,7 @@ async fn reader_domain_panic_handling() {
 }
 
 /// Test that a base table domain panicking in a deployment eventually recovers
-#[clustertest]
+#[clustertest(postgres)]
 async fn base_domain_panic_handling() {
     let deployment_name = "base_domain_panic_handling";
     let mut deployment = DeploymentBuilder::new(DatabaseType::PostgreSQL, deployment_name)

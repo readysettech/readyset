@@ -4125,6 +4125,7 @@ dependencies = [
  "strum",
  "strum_macros",
  "test-strategy",
+ "test-utils",
  "thiserror",
  "tokio",
  "tokio-postgres",
@@ -4335,6 +4336,7 @@ dependencies = [
  "serde_json",
  "serial_test",
  "temp-dir",
+ "test-utils",
  "tokio",
  "tokio-native-tls",
  "tokio-stream",
@@ -4501,6 +4503,7 @@ dependencies = [
  "streaming-iterator",
  "tempfile",
  "test-strategy",
+ "test-utils",
  "thiserror",
  "time",
  "tokio",
@@ -4662,6 +4665,7 @@ dependencies = [
  "strum",
  "strum_macros",
  "test-strategy",
+ "test-utils",
  "time",
  "tokio",
  "tokio-postgres",
@@ -5652,9 +5656,9 @@ checksum = "ece8e78b2f38ec51c51f5d475df0a7187ba5111b2a28bdc761ee05b075d40a71"
 
 [[package]]
 name = "scc"
-version = "2.2.4"
+version = "2.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d8d25269dd3a12467afe2e510f69fb0b46b698e5afb296b59f2145259deaf8e8"
+checksum = "94b13f8ea6177672c49d12ed964cca44836f59621981b04a3e26b87e675181de"
 dependencies = [
  "sdd",
 ]
@@ -5682,9 +5686,9 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "sdd"
-version = "3.0.4"
+version = "3.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "49c1eeaf4b6a87c7479688c6d52b9f1153cedd3c489300564f932b065c6eab95"
+checksum = "478f121bb72bbf63c52c93011ea1791dca40140dfe13f8336c4c5ac952c33aa9"
 
 [[package]]
 name = "security-framework"

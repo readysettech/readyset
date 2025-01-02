@@ -52,6 +52,7 @@ use readyset_data::DfValue;
 use readyset_server::Handle;
 use readyset_util::eventually;
 use readyset_util::shutdown::ShutdownSender;
+use test_utils::serial;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Operation {
@@ -713,8 +714,8 @@ macro_rules! vertical_tests {
                 }
             }
 
+            #[serial(mysql)]
             #[test]
-            #[serial_test::serial]
             #[cfg_attr(not(feature = "vertical_tests"), ignore)]
             fn $name() {
                 let config = ProptestStatefulConfig {

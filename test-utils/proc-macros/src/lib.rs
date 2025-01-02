@@ -1,9 +1,10 @@
 extern crate proc_macro;
 
 use proc_macro::TokenStream;
-use quote::{quote, ToTokens};
-use syn::parse::Parse;
-use syn::{parse_macro_input, parse_quote, Ident, ItemFn};
+use quote::{format_ident, ToTokens};
+use syn::punctuated::Punctuated;
+use syn::spanned::Spanned;
+use syn::{parse_macro_input, parse_quote, Attribute, Ident, ItemFn, Path};
 
 /// Mark the given test as a "slow" test, meaning it won't be run if slow tests should not be run.
 ///
@@ -73,44 +74,41 @@ pub fn skip_flaky_finder(_args: TokenStream, item: TokenStream) -> TokenStream {
     result.into_token_stream().into()
 }
 
-#[derive(Clone, Debug)]
-struct ParallelGroupArgs {
-    group: Ident,
-}
-
-impl Parse for ParallelGroupArgs {
-    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-        let group = input.parse()?;
-        Ok(ParallelGroupArgs { group })
-    }
-}
-
-/// Mark the given test as belonging to the given parallelism group
+// XXX `quote::ToTokens` turns the output into `proc_macro2::TokenStream`, which requires a further
+// conversion to `proc_macro::TokenStream`. Unfortunately, clippy thinks these are the same thing
+// and complains that there's a reduntant `.into()` call, so we ignore it.
+#[allow(clippy::useless_conversion)]
 #[proc_macro_attribute]
-pub fn parallel_group(args: TokenStream, item: TokenStream) -> TokenStream {
-    let ParallelGroupArgs { group } = parse_macro_input!(args as ParallelGroupArgs);
-    let item = parse_macro_input!(item as ItemFn);
-
-    let acquire = if item.sig.asyncness.is_some() {
-        quote! {
-            #group.acquire_async().await
-        }
+pub fn serial(args: TokenStream, item: TokenStream) -> TokenStream {
+    let group = parse_macro_input!(args as Option<Ident>);
+    let mut item = parse_macro_input!(item as ItemFn);
+    let name = item.sig.ident;
+    item.sig.ident = if let Some(ref group) = group {
+        format_ident!("{}_serial_{}", name, group)
     } else {
-        quote! {
-            #group.acquire()
-        }
+        format_ident!("{}_serial", name)
     };
-
-    let inner_body = item.block;
-    let body = parse_quote! {{
-        let _permit = #acquire;
-        #inner_body
-    }};
-
-    let result = ItemFn {
-        block: Box::new(body),
-        ..item
-    };
-
-    quote!(#result).into()
+    item.attrs.push(Attribute {
+        pound_token: syn::token::Pound(group.span()),
+        style: syn::AttrStyle::Outer,
+        bracket_token: syn::token::Bracket(group.span()),
+        meta: syn::Meta::List(syn::MetaList {
+            path: Path {
+                leading_colon: None,
+                segments: Punctuated::from_iter(vec![
+                    syn::PathSegment {
+                        ident: Ident::new("serial_test", group.span()),
+                        arguments: syn::PathArguments::None,
+                    },
+                    syn::PathSegment {
+                        ident: Ident::new("serial", group.span()),
+                        arguments: syn::PathArguments::None,
+                    },
+                ]),
+            },
+            delimiter: syn::MacroDelimiter::Paren(syn::token::Paren(group.span())),
+            tokens: group.into_token_stream().into(),
+        }),
+    });
+    item.into_token_stream().into()
 }
