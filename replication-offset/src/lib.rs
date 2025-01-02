@@ -210,7 +210,7 @@ impl ReplicationOffsets {
         self.tables.get(table).iter().any(|o| o.is_some())
     }
 
-    /// If all replication offsets are present (the schema and all tables), returns the minimum of
+    /// If all replication offsets are present (the schema and all tables), returns the max of
     /// all replication offsets, from which streaming replication can successfully continue.
     /// Otherwise, returns `Ok(None)`.
     ///

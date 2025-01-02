@@ -338,7 +338,7 @@ impl<'a> NoriaAdapter<'a> {
 
         let mut db_schemas = DatabaseSchemas::new();
 
-        let pos = match (replication_offsets.max_offset()?, resnapshot) {
+        let pos = match (replication_offsets.min_present_offset()?, resnapshot) {
             (None, _) | (_, true) => {
                 let span = info_span!("taking database snapshot");
                 // The default min is already 10, so we keep that the same to reduce complexity
@@ -556,7 +556,7 @@ impl<'a> NoriaAdapter<'a> {
         .await?;
 
         let pos = replication_offsets
-            .max_offset()?
+            .min_present_offset()?
             .map(TryInto::try_into)
             .transpose()?;
         let snapshot_report_interval_secs = config.snapshot_report_interval_secs;
