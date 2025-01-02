@@ -1,3 +1,6 @@
+[term]
+verbose = true
+
 [alias]
 lint = "clippy --all-targets"
 
