@@ -4,8 +4,8 @@ use mysql_async::prelude::Queryable;
 use mysql_async::{OptsBuilder, Params};
 use nom_sql::{CreateTableStatement, Dialect, DialectDisplay};
 use query_generator::{GeneratorState, QuerySeed};
-use serial_test::serial;
 use test_strategy::proptest;
+use test_utils::serial;
 
 async fn mysql_connection() -> mysql_async::Conn {
     let db_name = env::var("MYSQL_DB").unwrap_or_else(|_| "test".to_owned());
@@ -42,8 +42,8 @@ async fn mysql_connection() -> mysql_async::Conn {
     conn
 }
 
+#[serial(mysql)]
 #[proptest]
-#[serial]
 #[ignore = "Currently failing"]
 fn queries_work_in_mysql(seed: QuerySeed) {
     let rt = tokio::runtime::Builder::new_multi_thread()

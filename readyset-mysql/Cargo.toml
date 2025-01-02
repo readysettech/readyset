@@ -6,7 +6,7 @@ authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
 [dependencies]
-clap = { workspace = true, features = ["derive","env"] }
+clap = { workspace = true, features = ["derive", "env"] }
 async-trait = { workspace = true }
 fail = { workspace = true }
 metrics = { workspace = true }
@@ -38,17 +38,21 @@ itertools = { workspace = true }
 readyset-util = { path = "../readyset-util" }
 
 [dev-dependencies]
-readyset-client-test-helpers = { path = "../readyset-client-test-helpers", features = ["mysql"] }
+readyset-client-test-helpers = { path = "../readyset-client-test-helpers", features = [
+    "mysql",
+] }
 readyset-client-metrics = { path = "../readyset-client-metrics" }
-readyset-telemetry-reporter = { path = "../readyset-telemetry-reporter", features = ["test-util"] }
+readyset-telemetry-reporter = { path = "../readyset-telemetry-reporter", features = [
+    "test-util",
+] }
 readyset-server = { path = "../readyset-server" }
+serial_test = { workspace = true }
 test-utils = { path = "../test-utils" }
 chrono = { workspace = true }
 futures = { workspace = true }
 mysql = { workspace = true }
 paste = { workspace = true }
 proptest = { workspace = true }
-serial_test = { workspace = true }
 proptest-stateful = { path = "../proptest-stateful" }
 test-strategy = { workspace = true }
 readyset-tracing = { path = "../readyset-tracing" }
@@ -59,5 +63,9 @@ regex = { workspace = true }
 vertical_tests = []
 # Redact the display of strings marked sensitive from logs and error messages
 redact_sensitive = ["readyset-util/redact_sensitive"]
-failure_injection = ["fail/failpoints", "readyset-server/failure_injection", "readyset-util/failure_injection"]
+failure_injection = [
+    "fail/failpoints",
+    "readyset-server/failure_injection",
+    "readyset-util/failure_injection",
+]
 ryw = []

@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 anyhow = { workspace = true }
 async-trait = { workspace = true }
-clap = { workspace = true, features = ["derive","env"] }
+clap = { workspace = true, features = ["derive", "env"] }
 native-tls = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 futures = { workspace = true }
@@ -28,8 +28,14 @@ nom_locate = { workspace = true }
 deadpool-postgres = { workspace = true }
 mysql_common = { workspace = true }
 
-tokio-postgres = { workspace = true, features = ["with-chrono-0_4", "with-serde_json-1"] }
-postgres-types = { workspace = true, features = ["with-chrono-0_4", "with-serde_json-1"] }
+tokio-postgres = { workspace = true, features = [
+    "with-chrono-0_4",
+    "with-serde_json-1",
+] }
+postgres-types = { workspace = true, features = [
+    "with-chrono-0_4",
+    "with-serde_json-1",
+] }
 postgres-native-tls = { workspace = true }
 postgres-protocol = { workspace = true }
 mysql_async = { workspace = true }
@@ -49,12 +55,17 @@ readyset-telemetry-reporter = { path = "../readyset-telemetry-reporter" }
 replication-offset = { path = "../replication-offset" }
 
 [dev-dependencies]
+serial_test = { workspace = true }
 test-utils = { path = "../test-utils" }
 readyset-server = { path = "../readyset-server" }
-readyset-telemetry-reporter = { path = "../readyset-telemetry-reporter", features = ["test-util"] }
-readyset-client-test-helpers = { path = "../readyset-client-test-helpers", features = ["mysql", "postgres"] }
+readyset-telemetry-reporter = { path = "../readyset-telemetry-reporter", features = [
+    "test-util",
+] }
+readyset-client-test-helpers = { path = "../readyset-client-test-helpers", features = [
+    "mysql",
+    "postgres",
+] }
 proptest-stateful = { path = "../proptest-stateful" }
-serial_test = { workspace = true }
 rand = { workspace = true }
 proptest = { workspace = true }
 test-strategy = { workspace = true }
@@ -63,4 +74,8 @@ reqwest = { workspace = true }
 
 [features]
 ddl_vertical_tests = []
-failure_injection = ["fail/failpoints", "nom-sql/failure_injection", "readyset-util/failure_injection"]
+failure_injection = [
+    "fail/failpoints",
+    "nom-sql/failure_injection",
+    "readyset-util/failure_injection",
+]

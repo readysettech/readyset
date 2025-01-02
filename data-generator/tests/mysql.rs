@@ -6,8 +6,8 @@ use mysql_async::Value;
 use nom_sql::{Dialect, DialectDisplay, SqlType};
 use proptest::prop_assume;
 use rand::{rngs::SmallRng, SeedableRng};
-use serial_test::serial;
 use test_strategy::proptest;
+use test_utils::serial;
 use test_utils::slow;
 
 async fn mysql_connection() -> mysql_async::Conn {
@@ -28,8 +28,8 @@ async fn mysql_connection() -> mysql_async::Conn {
     .unwrap()
 }
 
+#[serial(mysql)]
 #[proptest]
-#[serial]
 #[slow]
 fn value_of_type_always_valid(
     #[any(generate_arrays = false, dialect = Some(Dialect::MySQL))] ty: SqlType,
@@ -56,8 +56,8 @@ fn value_of_type_always_valid(
     .unwrap();
 }
 
+#[serial(mysql)]
 #[proptest]
-#[serial]
 #[slow]
 fn unique_value_of_type_always_valid(
     #[any(generate_arrays = false, dialect = Some(Dialect::MySQL))] ty: SqlType,
@@ -87,8 +87,8 @@ fn unique_value_of_type_always_valid(
     .unwrap();
 }
 
+#[serial(mysql)]
 #[proptest]
-#[serial]
 #[slow]
 fn random_value_of_type_always_valid(
     #[any(generate_arrays = false, dialect = Some(Dialect::MySQL))] ty: SqlType,

@@ -19,8 +19,8 @@ use readyset_util::arbitrary::{
     arbitrary_naive_time_with_seconds_fraction,
 };
 use readyset_util::eventually;
-use serial_test::serial;
 use test_strategy::proptest;
+use test_utils::serial;
 use test_utils::slow;
 
 fn round_trip_mysql_type(sql_type: SqlType, initial_val: Value, updated_val: Value) {
@@ -317,8 +317,8 @@ fn arbitrary_mysql_value_for_type(sql_type: SqlType) -> impl Strategy<Value = Va
     }
 }
 
+#[serial(mysql)]
 #[proptest(ProptestConfig::default(), max_shrink_time = 120_000)]
-#[serial]
 #[slow]
 fn round_trip_mysql_type_arbitrary(
     #[strategy(SqlType::arbitrary_with(SqlTypeArbitraryOptions {
@@ -334,8 +334,8 @@ fn round_trip_mysql_type_arbitrary(
     round_trip_mysql_type(sql_type, initial_val, updated_val)
 }
 
+#[serial(mysql)]
 #[proptest(ProptestConfig::default(), max_shrink_time = 120_000)]
-#[serial]
 #[slow]
 #[ignore = "WIP REA-4598"]
 fn round_trip_mysql_type_arbitrary_enum(
@@ -347,8 +347,8 @@ fn round_trip_mysql_type_arbitrary_enum(
     round_trip_mysql_type(sql_type, initial_val, updated_val)
 }
 
+#[serial(mysql)]
 #[test]
-#[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_enum() {
     round_trip_mysql_type(
@@ -358,29 +358,29 @@ fn round_trip_mysql_type_regressions_enum() {
     );
 }
 
+#[serial(mysql)]
 #[test]
-#[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_tinyint_positive() {
     round_trip_mysql_type(SqlType::TinyInt(None), Value::Int(1), Value::Int(2));
 }
 
+#[serial(mysql)]
 #[test]
-#[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_tinyint_negative() {
     round_trip_mysql_type(SqlType::TinyInt(None), Value::Int(-1), Value::Int(-2));
 }
 
+#[serial(mysql)]
 #[test]
-#[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_mediumint_positive() {
     round_trip_mysql_type(SqlType::MediumInt(None), Value::Int(1), Value::Int(2));
 }
 
+#[serial(mysql)]
 #[test]
-#[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_mediumint_unsigned_positive() {
     round_trip_mysql_type(
@@ -390,15 +390,15 @@ fn round_trip_mysql_type_regressions_mediumint_unsigned_positive() {
     );
 }
 
+#[serial(mysql)]
 #[test]
-#[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_mediumint_negative() {
     round_trip_mysql_type(SqlType::MediumInt(None), Value::Int(-1), Value::Int(-2));
 }
 
+#[serial(mysql)]
 #[test]
-#[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_mediumint_unsigned_positive_large_sending_signed() {
     round_trip_mysql_type(
@@ -408,8 +408,8 @@ fn round_trip_mysql_type_regressions_mediumint_unsigned_positive_large_sending_s
     );
 }
 
+#[serial(mysql)]
 #[test]
-#[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_mediumint_unsigned_positive_large_sending_unsigned() {
     round_trip_mysql_type(
@@ -419,8 +419,8 @@ fn round_trip_mysql_type_regressions_mediumint_unsigned_positive_large_sending_u
     );
 }
 
+#[serial(mysql)]
 #[test]
-#[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_decimal() {
     round_trip_mysql_type(
@@ -430,8 +430,8 @@ fn round_trip_mysql_type_regressions_decimal() {
     );
 }
 
+#[serial(mysql)]
 #[test]
-#[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_decimal_no_preceding_digits() {
     round_trip_mysql_type(
@@ -441,8 +441,8 @@ fn round_trip_mysql_type_regressions_decimal_no_preceding_digits() {
     );
 }
 
+#[serial(mysql)]
 #[test]
-#[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_decimal_no_preceding_digits_negative() {
     round_trip_mysql_type(
@@ -452,8 +452,8 @@ fn round_trip_mysql_type_regressions_decimal_no_preceding_digits_negative() {
     );
 }
 
+#[serial(mysql)]
 #[test]
-#[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_char_zero_length() {
     round_trip_mysql_type(
@@ -463,8 +463,8 @@ fn round_trip_mysql_type_regressions_char_zero_length() {
     );
 }
 
+#[serial(mysql)]
 #[test]
-#[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_char_1_length_empty() {
     round_trip_mysql_type(
@@ -474,8 +474,8 @@ fn round_trip_mysql_type_regressions_char_1_length_empty() {
     );
 }
 
+#[serial(mysql)]
 #[test]
-#[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_char_64_length_empty() {
     round_trip_mysql_type(
@@ -485,8 +485,8 @@ fn round_trip_mysql_type_regressions_char_64_length_empty() {
     )
 }
 
+#[serial(mysql)]
 #[test]
-#[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_char_63_length_empty() {
     round_trip_mysql_type(
@@ -496,8 +496,8 @@ fn round_trip_mysql_type_regressions_char_63_length_empty() {
     )
 }
 
+#[serial(mysql)]
 #[test]
-#[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_char_46_length_nonempty() {
     round_trip_mysql_type(
@@ -507,8 +507,8 @@ fn round_trip_mysql_type_regressions_char_46_length_nonempty() {
     );
 }
 
+#[serial(mysql)]
 #[test]
-#[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_char_255_length_empty() {
     round_trip_mysql_type(
@@ -518,8 +518,8 @@ fn round_trip_mysql_type_regressions_char_255_length_empty() {
     )
 }
 
+#[serial(mysql)]
 #[test]
-#[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_char_64_length_nonempty() {
     round_trip_mysql_type(
@@ -529,8 +529,8 @@ fn round_trip_mysql_type_regressions_char_64_length_nonempty() {
     )
 }
 
+#[serial(mysql)]
 #[test]
-#[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_char_255_length_nonempty() {
     round_trip_mysql_type(
@@ -540,8 +540,8 @@ fn round_trip_mysql_type_regressions_char_255_length_nonempty() {
     )
 }
 
+#[serial(mysql)]
 #[test]
-#[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_bigint_high() {
     round_trip_mysql_type(
@@ -551,8 +551,8 @@ fn round_trip_mysql_type_regressions_bigint_high() {
     )
 }
 
+#[serial(mysql)]
 #[test]
-#[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_date() {
     round_trip_mysql_type(
@@ -562,8 +562,8 @@ fn round_trip_mysql_type_regressions_date() {
     )
 }
 
+#[serial(mysql)]
 #[test]
-#[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_date_zero() {
     round_trip_mysql_type(
@@ -573,8 +573,8 @@ fn round_trip_mysql_type_regressions_date_zero() {
     )
 }
 
+#[serial(mysql)]
 #[test]
-#[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_datetime() {
     round_trip_mysql_type(
@@ -584,8 +584,8 @@ fn round_trip_mysql_type_regressions_datetime() {
     )
 }
 
+#[serial(mysql)]
 #[test]
-#[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_datetime_zero() {
     round_trip_mysql_type(
@@ -595,8 +595,8 @@ fn round_trip_mysql_type_regressions_datetime_zero() {
     )
 }
 
+#[serial(mysql)]
 #[test]
-#[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_timestamp() {
     round_trip_mysql_type(
@@ -606,8 +606,8 @@ fn round_trip_mysql_type_regressions_timestamp() {
     )
 }
 
+#[serial(mysql)]
 #[test]
-#[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_timestamp_zero() {
     round_trip_mysql_type(
@@ -617,29 +617,29 @@ fn round_trip_mysql_type_regressions_timestamp_zero() {
     )
 }
 
+#[serial(mysql)]
 #[test]
-#[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_bool_one_unsigned() {
     round_trip_mysql_type(SqlType::Bool, Value::UInt(1), Value::UInt(0))
 }
 
+#[serial(mysql)]
 #[test]
-#[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_bool_one_signed() {
     round_trip_mysql_type(SqlType::Bool, Value::Int(1), Value::Int(0))
 }
 
+#[serial(mysql)]
 #[test]
-#[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_bool_zero_unsigned() {
     round_trip_mysql_type(SqlType::Bool, Value::UInt(0), Value::UInt(1))
 }
 
+#[serial(mysql)]
 #[test]
-#[serial]
 #[slow]
 fn round_trip_mysql_type_regressions_bool_zero_signed() {
     round_trip_mysql_type(SqlType::Bool, Value::Int(0), Value::Int(1))

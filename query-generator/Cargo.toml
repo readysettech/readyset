@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 anyhow = { workspace = true }
 chrono = { workspace = true }
-clap = { workspace = true, features = ["derive","env"] }
+clap = { workspace = true, features = ["derive", "env"] }
 derive_more = { workspace = true }
 futures-util = { workspace = true }
 itertools = { workspace = true }
@@ -42,3 +42,4 @@ mysql_async.workspace = true
 serial_test = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tokio-postgres.workspace = true
+test-utils = { path = "../test-utils" }

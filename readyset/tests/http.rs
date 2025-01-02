@@ -7,6 +7,7 @@ use readyset::psql::PsqlHandler;
 use readyset::{NoriaAdapter, Options};
 use readyset_adapter::ReadySetStatus;
 use readyset_psql::AuthenticationMethod;
+use test_utils::serial;
 
 /// Start a test instance of the ReadySet adapter in standalone mode
 fn start_adapter(test_db: &str) -> anyhow::Result<()> {
@@ -49,8 +50,6 @@ fn start_adapter(test_db: &str) -> anyhow::Result<()> {
     adapter.run(adapter_options).unwrap();
     Ok(())
 }
-
-use serial_test::serial;
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]

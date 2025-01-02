@@ -1,10 +1,11 @@
 extern crate proc_macro;
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, parse_quote, ItemFn};
+use syn::{parse_macro_input, parse_quote, Ident, ItemFn};
 
 #[proc_macro_attribute]
-pub fn clustertest(_attr: TokenStream, input: TokenStream) -> TokenStream {
+pub fn clustertest(args: TokenStream, input: TokenStream) -> TokenStream {
+    let group = parse_macro_input!(args as Option<Ident>);
     let input_fn = parse_macro_input!(input as ItemFn);
 
     let fn_block = *input_fn.block;
@@ -25,7 +26,7 @@ pub fn clustertest(_attr: TokenStream, input: TokenStream) -> TokenStream {
 
     let result = quote! {
         #[tokio::test(flavor = "multi_thread")]
-        #[serial]
+        #[serial(#group)]
         #test_with_tracing
     };
     result.into()
