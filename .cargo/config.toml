@@ -2,7 +2,7 @@
 lint = "clippy --all-targets"
 
 [build]
-rustflags = ["-C", "link-args=-llz4"]
+rustflags = ["-C", "link-args=-llz4", "-C", "force-frame-pointers=yes"]
 
 [target.'cfg(feature = "cargo-clippy")']
 rustflags = [
