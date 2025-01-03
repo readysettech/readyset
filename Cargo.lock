@@ -4610,6 +4610,7 @@ dependencies = [
  "bincode",
  "chrono",
  "hyper 0.14.28",
+ "metrics",
  "petgraph",
  "proptest",
  "readyset-client",
