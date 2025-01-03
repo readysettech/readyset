@@ -1,5 +1,6 @@
 #![deny(macro_use_extern_crate)]
 
+mod collections;
 mod local;
 mod records;
 pub mod ulimit;
@@ -18,6 +19,14 @@ pub use self::records::*;
 pub trait SizeOf {
     fn deep_size_of(&self) -> usize;
     fn is_empty(&self) -> bool;
+}
+
+pub trait Len {
+    fn len(&self) -> usize;
+
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 impl SizeOf for DfValue {
