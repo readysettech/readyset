@@ -13,6 +13,7 @@ use std::time::Duration;
 use std::{cell, cmp, mem, process, time};
 
 use ahash::RandomState;
+use common::{Len, LenMetric};
 use dataflow_state::{
     BaseTableState, EvictBytesResult, EvictKeysResult, EvictRandomResult, MaterializedNodeState,
     PersistenceType, PointKey, RangeKey, RangeLookupResult,
@@ -453,7 +454,13 @@ impl DomainBuilder {
             .nodes
             .values()
             .map(|n| n.borrow().local_addr())
-            .collect();
+            .collect::<HashSet<_>>();
+
+        let meta = vec![
+            ("index", self.index.to_string()),
+            ("shard", self.shard.unwrap_or_default().to_string()),
+            ("replica", self.replica.to_string()),
+        ];
 
         Domain {
             index: self.index,
@@ -462,33 +469,36 @@ impl DomainBuilder {
             _nshards: self.nshards,
 
             persistence_parameters: self.persistence_parameters,
-            state: StateMap::default(),
-            auxiliary_node_states: self
-                .nodes
-                .iter()
-                .filter_map(|(n, node)| {
-                    node.borrow()
-                        .initial_auxiliary_state()
-                        .map(|state| (n, state))
-                })
-                .collect(),
-            nodes: self.nodes,
+            state: LenMetric::new_meta("state", &meta),
+            auxiliary_node_states: LenMetric::new_from(
+                self.nodes
+                    .iter()
+                    .filter_map(|(n, node)| {
+                        node.borrow()
+                            .initial_auxiliary_state()
+                            .map(|state| (n, state))
+                    })
+                    .collect(),
+                "auxillary_node_states",
+                &meta,
+            ),
+            nodes: LenMetric::new_from(self.nodes, "nodes", &meta),
 
-            reader_write_handles: Default::default(),
-            not_ready,
+            reader_write_handles: LenMetric::new_meta("reader_write_handles", &meta),
+            not_ready: LenMetric::new_from(not_ready, "not_ready", &meta),
             mode: DomainMode::Forwarding,
-            waiting: Default::default(),
-            reader_triggered: Default::default(),
+            waiting: LenMetric::new_meta("waiting", &meta),
+            reader_triggered: LenMetric::new_meta("reader_triggered", &meta),
             replay_paths: Default::default(),
 
-            ingress_inject: Default::default(),
+            ingress_inject: LenMetric::new_meta("ingress_inject", &meta),
 
             readers,
             channel_coordinator,
 
-            timed_purges: Default::default(),
+            timed_purges: LenMetric::new_meta("timed_purges", &meta),
 
-            delayed_for_self: Default::default(),
+            delayed_for_self: LenMetric::new_meta("delayed_for_self", &meta),
 
             state_size,
             total_time: Timer::new(),
@@ -505,7 +515,7 @@ impl DomainBuilder {
             metrics: domain_metrics::DomainMetrics::new(self.config.verbose_metrics),
 
             eviction_kind: self.config.eviction_kind,
-            remapped_keys: Default::default(),
+            remapped_keys: LenMetric::new_meta("remapped_keys", &meta),
 
             init_state_tx,
             materialization_persistence: self.config.materialization_persistence,
@@ -561,12 +571,9 @@ struct TimedPurge {
 /// [straddled join]: http://docs/dataflow/replay_paths.html#straddled-joins
 #[derive(Debug, Clone, Default)]
 #[allow(clippy::type_complexity)]
-struct RemappedKeys(
-    // Strap in, this is a heck of a type.
-    // This is a mapping:
-    //
-    // from nodes which generate columns...
-    NodeMap<
+struct RemappedKeys {
+    // map from nodes which generate columns...
+    map: NodeMap<
         // ...to nodes which are the source of those columns (which might be the same node)...
         NodeMap<
             // ...to the column indices within the source node which those columns are generated
@@ -583,7 +590,8 @@ struct RemappedKeys(
             >,
         >,
     >,
-);
+    len: usize,
+}
 
 impl RemappedKeys {
     /// Record that some downstream key was rewritten by `miss_in` into an `upstream_miss`.
@@ -594,7 +602,8 @@ impl RemappedKeys {
         downstream_key: KeyComparison,
         downstream_tag: Tag,
     ) {
-        self.0
+        self.len += 1;
+        self.map
             .entry(miss_in)
             .or_default()
             .entry(upstream_miss.node)
@@ -605,7 +614,7 @@ impl RemappedKeys {
             .or_default()
             .entry(downstream_tag)
             .or_default()
-            .push(downstream_key)
+            .push(downstream_key);
     }
 
     /// If `node` rewrites some of its downstream keys into upstream upqueries to `column` in a
@@ -617,16 +626,24 @@ impl RemappedKeys {
         target: LocalNodeIndex,
         columns: &[usize],
         keys: &[KeyComparison],
-    ) -> Option<impl Iterator<Item = (Tag, Vec<KeyComparison>)>> {
+    ) -> Option<impl ExactSizeIterator<Item = (Tag, Vec<KeyComparison>)>> {
         // NOTE: we consciously don't remove nested maps here; the idea is that the only thing
         // that's actually a large state-space is the keys, which are the leaves, so we can leave
         // empty maps in up to the keys if we want (and that greatly simplifies this method)
-        self.0
+        let iter = self
+            .map
             .get_mut(node)
             .and_then(|m| m.get_mut(target))
             .and_then(|m| m.get_mut(columns))
             .and_then(|m| m.remove(keys))
-            .map(|m| m.into_iter())
+            .map(|m| m.into_iter());
+        iter.inspect(|i| self.len -= i.len())
+    }
+}
+
+impl Len for RemappedKeys {
+    fn len(&self) -> usize {
+        self.len
     }
 }
 
@@ -649,41 +666,41 @@ pub struct Domain {
     ///   `self.nodes`
     /// * All keys of `self.state` and `self.auxiliary_node_states` must also be keys in
     ///   `self.nodes` * `nodes` cannot be empty
-    nodes: DomainNodes,
+    nodes: LenMetric<DomainNodes>,
 
     /// State for all materialized non-reader nodes managed by this domain
     ///
     /// Invariant: All keys of `self.state` must also be keys in `self.nodes`
-    state: StateMap,
+    state: LenMetric<StateMap>,
 
     /// State for internal nodes managed by this domain
     ///
     /// Invariant: All keys of `self.auxiliary_node_states` must also be keys in
     /// `self.nodes`
-    auxiliary_node_states: AuxiliaryNodeStateMap,
+    auxiliary_node_states: LenMetric<AuxiliaryNodeStateMap>,
 
     /// State for all reader nodes managed by this domain
     ///
     /// Invariant: All keys of `self.reader_write_handles` must also be keys in `self.nodes`
-    reader_write_handles: NodeMap<backlog::WriteHandle>,
+    reader_write_handles: LenMetric<NodeMap<backlog::WriteHandle>>,
 
-    not_ready: HashSet<LocalNodeIndex>,
+    not_ready: LenMetric<HashSet<LocalNodeIndex>>,
 
-    ingress_inject: NodeMap<(usize, Vec<DfValue>)>,
+    ingress_inject: LenMetric<NodeMap<(usize, Vec<DfValue>)>>,
 
     persistence_parameters: PersistenceParameters,
 
     mode: DomainMode,
-    waiting: NodeMap<Waiting>,
+    waiting: LenMetric<NodeMap<Waiting>>,
 
-    remapped_keys: RemappedKeys,
+    remapped_keys: LenMetric<RemappedKeys>,
 
     /// Replay paths that go through this domain
     replay_paths: ReplayPaths,
 
     /// Map from node ID to an interval tree of the keys of all current pending upqueries to that
     /// node
-    reader_triggered: NodeMap<RequestedKeys>,
+    reader_triggered: LenMetric<NodeMap<RequestedKeys>>,
 
     /// Queue of purge operations to be performed on reader nodes at some point in the future, used
     /// as part of the implementation of materialization frontiers
@@ -692,12 +709,12 @@ pub struct Domain {
     ///
     /// * Each node referenced by a `view` of a TimedPurge must be in `self.nodes`
     /// * Each node referenced by a `view` of a TimedPurge must be a reader node
-    timed_purges: VecDeque<TimedPurge>,
+    timed_purges: LenMetric<VecDeque<TimedPurge>>,
 
     readers: Readers,
     channel_coordinator: Arc<ChannelCoordinator>,
 
-    delayed_for_self: VecDeque<Packet>,
+    delayed_for_self: LenMetric<VecDeque<Packet>>,
 
     state_size: Arc<AtomicUsize>,
     total_time: Timer<SimpleTracker, RealTime>,
@@ -1040,13 +1057,14 @@ impl Domain {
         cache_name: Relation,
     ) {
         trace!(?tag, ?keys, "sending replay request to self");
+        let (shard, replica) = (self.shard(), self.replica());
         self.delayed_for_self
             .push_back(Packet::RequestPartialReplay(RequestPartialReplay {
                 tag,
                 keys,
                 unishard: true, // local replays are necessarily single-shard
-                requesting_shard: self.shard(),
-                requesting_replica: self.replica(),
+                requesting_shard: shard,
+                requesting_replica: replica,
                 cache_name,
             }));
     }

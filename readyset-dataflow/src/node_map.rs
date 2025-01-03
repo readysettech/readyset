@@ -3,6 +3,7 @@ use std::iter::{Enumerate, FromIterator};
 use std::ops::{Index, IndexMut};
 use std::{mem, slice};
 
+use common::Len;
 use readyset_client::internal::LocalNodeIndex;
 use serde::{Deserialize, Serialize};
 
@@ -370,5 +371,11 @@ impl<'a, T: 'a> IntoIterator for &'a mut NodeMap<T> {
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter_mut()
+    }
+}
+
+impl<T> Len for NodeMap<T> {
+    fn len(&self) -> usize {
+        self.len
     }
 }
