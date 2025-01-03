@@ -2,6 +2,7 @@
 
 mod collections;
 mod local;
+mod metrics;
 mod records;
 pub mod ulimit;
 pub mod worker;
@@ -14,6 +15,7 @@ pub use readyset_data::DfValue;
 use serde::{Deserialize, Serialize};
 
 pub use self::local::*;
+pub use self::metrics::LenMetric;
 pub use self::records::*;
 
 pub trait SizeOf {
