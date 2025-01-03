@@ -38,4 +38,6 @@ ENV RUSTC_WRAPPER=sccache
 
 # CARGO_HOME is set by the nightly container to be /usr/local/cargo.
 # This is where it reads configs from for cargo and where cargo installs binaries.
+RUN curl -LsSf https://get.nexte.st/0.9.87/linux | tar zxf - -C ${CARGO_HOME}/bin
+
 RUN printf '[build]\nrustflags = ["-C", "link-arg=-fuse-ld=lld"]' > ${CARGO_HOME}/config.toml
