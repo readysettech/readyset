@@ -78,6 +78,7 @@ steps:
 
   - label: ':rust: Run tests'
     key: rust-tests
+    parallelism: 2
     commands:
       - '[ -d public ] && cd public'
       - '.buildkite/run-tests.sh'
@@ -88,6 +89,7 @@ steps:
       - docker-compose#v3.7.0:
           run: app
           env:
+          - BUILDKITE_PARALLEL_JOB
           - SCCACHE_BUCKET=readysettech-build-sccache-us-east-2
           - SCCACHE_REGION=us-east-2
           - CARGO_INCREMENTAL=0
