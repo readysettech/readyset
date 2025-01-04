@@ -158,6 +158,134 @@ impl<'a> Plan<'a> {
         Ok(paths)
     }
 
+    /// Find the groupings of any unions for the given paths. This optimizes upqueries in queries
+    /// that contain complex unions.
+    ///
+    /// A classical comment follows ...
+    ///
+    /// all right, story time!
+    ///
+    /// imagine you have this graph:
+    ///
+    /// ```text
+    ///     a     b
+    ///     +--+--+
+    ///        |
+    ///       u_1
+    ///        |
+    ///     +--+--+
+    ///     c     d
+    ///     +--+--+
+    ///        |
+    ///       u_2
+    ///        |
+    ///     +--+--+
+    ///     e     f
+    ///     +--+--+
+    ///        |
+    ///       u_3
+    ///        |
+    ///        v
+    /// ```
+    ///
+    /// where c-f are all stateless. you will end up with 8 paths for replays to v.
+    /// a and b will both appear as the root of 4 paths, and will be upqueried that many times.
+    /// while inefficient (TODO), that is not in and of itself a problem. the issue arises at
+    /// the unions, which need to do union buffering (that is, they need to forward _one_
+    /// upquery response for each set of upquery responses they get). specifically, u_1 should
+    /// forward 4 responses, even though it receives 8. u_2 should forward 2 responses, even
+    /// though it gets 4, etc. we may later optimize that (in theory u_1 should be able to only
+    /// forward _one_ response to multiple children, and a and b should only be upqueried
+    /// _once_), but for now we need to deal with the correctness issue that arises if the
+    /// unions do not buffer correctly.
+    ///
+    /// the issue, ultimately, is what the unions "group" upquery responses by. they can't group
+    /// by tag (like shard mergers do), since there are 8 tags here, so there'd be 8 groups each
+    /// with one response. here are the replay paths for u_1:
+    ///
+    ///  1. a -> c -> e
+    ///  2. a -> c -> f
+    ///  3. a -> d -> e
+    ///  4. a -> d -> f
+    ///  5. b -> c -> e
+    ///  6. b -> c -> f
+    ///  7. b -> d -> e
+    ///  8. b -> d -> f
+    ///
+    /// we want to merge 1 with 5 since they're "going the same way". similarly, we want to
+    /// merge 2 and 6, 3 and 7, and 4 and 8. the "grouping" here then is really the suffix of
+    /// the replay's path beyond the union we're looking at. for u_2:
+    ///
+    ///  1/5. a/b -> c -> e
+    ///  2/6. a/b -> c -> f
+    ///  3/7. a/b -> d -> e
+    ///  4/8. a/b -> d -> f
+    ///
+    /// we want to merge 1/5 and 3/7, again since they are going the same way _from here_.
+    /// and similarly, we want to merge 2/6 and 4/8.
+    ///
+    /// so, how do we communicate this grouping to each of the unions?
+    /// well, most of the infrastructure is actually already there in the domains.
+    /// for each tag, each domain keeps some per-node state (`ReplayPathSegment`).
+    /// we can inject the information there!
+    ///
+    /// we're actually going to play an additional trick here, as it allows us to simplify the
+    /// implementation a fair amount. since we know that tags 1 and 5 are identical beyond u_1
+    /// (that's what we're grouping by after all!), why don't we just rewrite all 1 tags to 5s?
+    /// and all 2s to 6s, and so on. that way, at u_2, there will be no replays with tag 1 or 3,
+    /// only 5 and 7. then we can pull the same trick there -- rewrite all 5s to 7s, so that at
+    /// u_3 we only need to deal with 7s (and 8s). this simplifies the implementation since
+    /// unions can now _always_ just group by tags, and it'll just magically work.
+    ///
+    /// this approach also gives us the property that we have a deterministic subset of the tags
+    /// (and of strictly decreasing cardinality!) tags downstream of unions. this may (?)
+    /// improve cache locality, but could perhaps also allow further optimizations later (?).
+    fn find_union_groupings(
+        &self,
+        paths: &[RawReplayPath],
+        assigned_tags: &[Tag],
+    ) -> HashMap<(NodeIndex, usize), Tag> {
+        let union_suffixes = paths
+            .iter()
+            .enumerate()
+            .flat_map(|(pi, path)| {
+                let graph = &self.graph;
+                path.segments().iter().enumerate().filter_map(
+                    move |(at, &IndexRef { node, .. })| {
+                        let n = &graph[node];
+                        if n.is_union() && !n.is_shard_merger() {
+                            let suffix = match path.segments().get((at + 1)..) {
+                                Some(x) => x,
+                                None => {
+                                    // FIXME(eta): would like to return a proper internal!() here
+                                    return None;
+                                }
+                            };
+                            Some(((node, suffix), pi))
+                        } else {
+                            None
+                        }
+                    },
+                )
+            })
+            .fold(BTreeMap::new(), |mut map, (key, pi)| {
+                #[allow(clippy::unwrap_or_default)]
+                map.entry(key).or_insert_with(Vec::new).push(pi);
+                map
+            });
+
+        // map each suffix-sharing group of paths at each union to one tag at that union
+        union_suffixes
+            .into_iter()
+            .flat_map(|((union, _suffix), paths)| {
+                // at this union, all the given paths share a suffix
+                // make all of the paths use a single identifier from that point on
+                let tag_all_as = assigned_tags[paths[0]];
+                paths.into_iter().map(move |pi| ((union, pi), tag_all_as))
+            })
+            .collect()
+    }
+
     /// Finds the appropriate replay paths for the given index, and inform all domains on those
     /// paths about them. It also notes if any data backfills will need to be run, which is
     /// eventually reported back by `finalize`.
@@ -223,126 +351,12 @@ impl<'a> Plan<'a> {
             index_on.clone()
         };
 
-        // all right, story time!
-        //
-        // image you have this graph:
-        //
-        //     a     b
-        //     +--+--+
-        //        |
-        //       u_1
-        //        |
-        //     +--+--+
-        //     c     d
-        //     +--+--+
-        //        |
-        //       u_2
-        //        |
-        //     +--+--+
-        //     e     f
-        //     +--+--+
-        //        |
-        //       u_3
-        //        |
-        //        v
-        //
-        // where c-f are all stateless. you will end up with 8 paths for replays to v.
-        // a and b will both appear as the root of 4 paths, and will be upqueried that many times.
-        // while inefficient (TODO), that is not in and of itself a problem. the issue arises at
-        // the unions, which need to do union buffering (that is, they need to forward _one_
-        // upquery response for each set of upquery responses they get). specifically, u_1 should
-        // forward 4 responses, even though it receives 8. u_2 should forward 2 responses, even
-        // though it gets 4, etc. we may later optimize that (in theory u_1 should be able to only
-        // forward _one_ response to multiple children, and a and b should only be upqueried
-        // _once_), but for now we need to deal with the correctness issue that arises if the
-        // unions do not buffer correctly.
-        //
-        // the issue, ultimately, is what the unions "group" upquery responses by. they can't group
-        // by tag (like shard mergers do), since there are 8 tags here, so there'd be 8 groups each
-        // with one response. here are the replay paths for u_1:
-        //
-        //  1. a -> c -> e
-        //  2. a -> c -> f
-        //  3. a -> d -> e
-        //  4. a -> d -> f
-        //  5. b -> c -> e
-        //  6. b -> c -> f
-        //  7. b -> d -> e
-        //  8. b -> d -> f
-        //
-        // we want to merge 1 with 5 since they're "going the same way". similarly, we want to
-        // merge 2 and 6, 3 and 7, and 4 and 8. the "grouping" here then is really the suffix of
-        // the replay's path beyond the union we're looking at. for u_2:
-        //
-        //  1/5. a/b -> c -> e
-        //  2/6. a/b -> c -> f
-        //  3/7. a/b -> d -> e
-        //  4/8. a/b -> d -> f
-        //
-        // we want to merge 1/5 and 3/7, again since they are going the same way _from here_.
-        // and similarly, we want to merge 2/6 and 4/8.
-        //
-        // so, how do we communicate this grouping to each of the unions?
-        // well, most of the infrastructure is actually already there in the domains.
-        // for each tag, each domain keeps some per-node state (`ReplayPathSegment`).
-        // we can inject the information there!
-        //
-        // we're actually going to play an additional trick here, as it allows us to simplify the
-        // implementation a fair amount. since we know that tags 1 and 5 are identical beyond u_1
-        // (that's what we're grouping by after all!), why don't we just rewrite all 1 tags to 5s?
-        // and all 2s to 6s, and so on. that way, at u_2, there will be no replays with tag 1 or 3,
-        // only 5 and 7. then we can pull the same trick there -- rewrite all 5s to 7s, so that at
-        // u_3 we only need to deal with 7s (and 8s). this simplifies the implementation since
-        // unions can now _always_ just group by tags, and it'll just magically work.
-        //
-        // this approach also gives us the property that we have a deterministic subset of the tags
-        // (and of strictly decreasing cardinality!) tags downstream of unions. this may (?)
-        // improve cache locality, but could perhaps also allow further optimizations later (?).
-
-        // find all paths through each union with the same suffix
         let assigned_tags: Vec<_> = paths
             .iter()
             .map(|path| self.m.tag_for_path(&index_on, path))
             .collect();
-        let union_suffixes = paths
-            .iter()
-            .enumerate()
-            .flat_map(|(pi, path)| {
-                let graph = &self.graph;
-                path.segments().iter().enumerate().filter_map(
-                    move |(at, &IndexRef { node, .. })| {
-                        let n = &graph[node];
-                        if n.is_union() && !n.is_shard_merger() {
-                            let suffix = match path.segments().get((at + 1)..) {
-                                Some(x) => x,
-                                None => {
-                                    // FIXME(eta): would like to return a proper internal!() here
-                                    return None;
-                                }
-                            };
-                            Some(((node, suffix), pi))
-                        } else {
-                            None
-                        }
-                    },
-                )
-            })
-            .fold(BTreeMap::new(), |mut map, (key, pi)| {
-                #[allow(clippy::unwrap_or_default)]
-                map.entry(key).or_insert_with(Vec::new).push(pi);
-                map
-            });
-
-        // map each suffix-sharing group of paths at each union to one tag at that union
-        let path_grouping: HashMap<_, _> = union_suffixes
-            .into_iter()
-            .flat_map(|((union, _suffix), paths)| {
-                // at this union, all the given paths share a suffix
-                // make all of the paths use a single identifier from that point on
-                let tag_all_as = assigned_tags[paths[0]];
-                paths.into_iter().map(move |pi| ((union, pi), tag_all_as))
-            })
-            .collect();
+        // find all paths through each union with the same suffix
+        let path_grouping = self.find_union_groupings(&paths, &assigned_tags);
 
         // inform domains about replay paths
         for (pi, path) in paths.into_iter().enumerate() {
