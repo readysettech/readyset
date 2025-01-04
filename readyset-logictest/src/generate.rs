@@ -230,6 +230,11 @@ impl Seed {
             .await
             .context("Connecting to comparison database")?;
 
+        // Avoid any timeout issues
+        if matches!(opts.compare_to, DatabaseURL::MySQL(_)) {
+            conn.query_drop("SET SESSION MAX_EXECUTION_TIME=0").await?;
+        }
+
         let tables_in_order = self
             .tables
             .iter()
