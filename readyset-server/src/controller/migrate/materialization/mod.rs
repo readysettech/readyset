@@ -1325,6 +1325,11 @@ impl Materializations {
                         },
                     )?;
                 }
+                for (domain, node) in pending.additional_ancestors {
+                    if non_ready_nodes.remove(&(domain, node)) {
+                        dmp.add_message(domain, DomainRequest::IsReady { node })?;
+                    }
+                }
 
                 dmp.add_message(
                     pending.source_domain,

@@ -68,6 +68,12 @@ pub(super) struct PendingReplay {
     pub(super) source: LocalNodeIndex,
     pub(super) source_domain: DomainIndex,
     pub(super) target_domain: DomainIndex,
+
+    // If the segment contained a join, we need to ensure any fully materialized
+    // nodes in all ancestors are `Ready` before we start the replay. Else on restart, we have a
+    // race condition between the replay hitting the join node and doing a lookup on the other
+    // parent, and the other parent actually having it's base tables opened.
+    pub(super) additional_ancestors: HashSet<(DomainIndex, LocalNodeIndex)>,
 }
 
 impl<'a> Plan<'a> {
@@ -284,6 +290,45 @@ impl<'a> Plan<'a> {
                 paths.into_iter().map(move |pi| ((union, pi), tag_all_as))
             })
             .collect()
+    }
+
+    /// Find the ancestors of any joins for the given path. This is to ensure that all parents
+    /// are `Ready` (and will have been sent an `IsReady` message) before we start a replay.
+    ///
+    /// We assume that since the node traversal is topologically sorted (see
+    /// `Materializations::commit()`), any parent node would have been sent a `Ready` message.
+    ///
+    /// To do this, we look for all join nodes in the provided `path`, and walk the tree of
+    /// the each parent. We then find all fully materialized nodes in all ancestors.
+    fn find_additional_ancestors(
+        &self,
+        path: &RawReplayPath,
+    ) -> HashSet<(DomainIndex, LocalNodeIndex)> {
+        let mut additional_ancestors = HashSet::new();
+
+        let mut seen = HashSet::new();
+        for segment in path.segments() {
+            let n = &self.graph[segment.node];
+            if n.is_join().is_ok_and(|b| b) {
+                // as the `path.segments()` iterator traverses downward through the graph,
+                // we can skip ancestors of the current segment we've already looked at.
+                let mut queue = n.ancestors().unwrap_or_default();
+                queue.retain(|a| !seen.contains(a));
+
+                while let Some(parent) = queue.pop() {
+                    let node = &self.graph[parent];
+                    if node.is_base() || node.requires_full_materialization() {
+                        additional_ancestors.insert((node.domain(), node.local_addr()));
+                    } else {
+                        queue.extend(node.ancestors().unwrap_or_default());
+                    }
+
+                    seen.insert(segment.node);
+                }
+            }
+        }
+
+        additional_ancestors
     }
 
     /// Finds the appropriate replay paths for the given index, and inform all domains on those
@@ -718,6 +763,10 @@ impl<'a> Plan<'a> {
                         }
                     }
                 } else {
+                    // for full materializations, we need to identifiy the parents that
+                    // are also fully materialized, and make sure to wait for them to be `Ready`.
+                    let additional_ancestors = self.find_additional_ancestors(&path);
+
                     // for full materializations, the last domain should report when it's done
                     if i == segments.len() - 1 {
                         if let DomainRequest::SetupReplayPath {
@@ -742,6 +791,7 @@ impl<'a> Plan<'a> {
                                         .last()
                                         .ok_or_else(|| internal_err!())?
                                         .0,
+                                    additional_ancestors,
                                 });
                             }
                         }
