@@ -23,6 +23,7 @@ use tokio::net::TcpListener;
 use tokio::sync::mpsc::Sender;
 use tokio_stream::wrappers::TcpListenerStream;
 use tower::Service;
+use tracing::info;
 
 use crate::status_reporter::ReadySetStatusReporter;
 use crate::UpstreamDatabase;
@@ -78,6 +79,9 @@ where
     /// Creates a listener object to be used to route requests.
     pub async fn create_listener(&self) -> anyhow::Result<TcpListener> {
         let http_listener = TcpListener::bind(self.listen_addr).await?;
+        let _ = http_listener
+            .local_addr()
+            .inspect(|addr| info!(%addr, "Adapter listening for HTTP connections"));
         Ok(http_listener)
     }
 

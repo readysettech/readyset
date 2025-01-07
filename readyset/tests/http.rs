@@ -9,6 +9,8 @@ use readyset_adapter::ReadySetStatus;
 use readyset_psql::AuthenticationMethod;
 use test_utils::serial;
 
+const TEST_METRICS_ADDRESS: &str = "127.0.0.1:6035";
+
 /// Start a test instance of the ReadySet adapter in standalone mode
 fn start_adapter(test_db: &str) -> anyhow::Result<()> {
     let temp_dir = temp_dir::TempDir::new().unwrap();
@@ -30,6 +32,8 @@ fn start_adapter(test_db: &str) -> anyhow::Result<()> {
         "--eviction-policy",
         "lru",
         "--noria-metrics",
+        "--metrics-address",
+        TEST_METRICS_ADDRESS,
     ];
 
     let adapter_options = Options::parse_from(options);
@@ -52,20 +56,22 @@ fn start_adapter(test_db: &str) -> anyhow::Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial]
+#[serial(postgres)]
 async fn http_tests() {
     let _jh = std::thread::spawn(|| start_adapter("http_tests"));
     // Wait for startup
     tokio::time::sleep(Duration::from_secs(1)).await;
 
-    let response = reqwest::get("http://localhost:6034/health").await.unwrap();
+    let response = reqwest::get(format!("http://{TEST_METRICS_ADDRESS}/health"))
+        .await
+        .unwrap();
     assert!(response.status().is_success(), "Health check failed");
 
     let payload = response.text().await.unwrap();
     let expected_payload = "Adapter is in healthy state";
     assert_eq!(payload, expected_payload, "Payload did not match expected");
 
-    let response = reqwest::get("http://localhost:6034/readyset_status")
+    let response = reqwest::get(format!("http://{TEST_METRICS_ADDRESS}/readyset_status"))
         .await
         .unwrap();
     assert!(

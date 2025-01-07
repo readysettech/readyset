@@ -22,7 +22,7 @@ use tokio::net::TcpListener;
 use tokio::sync::mpsc::Sender;
 use tokio_stream::wrappers::TcpListenerStream;
 use tower::Service;
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::controller::ControllerRequest;
 use crate::metrics::{get_global_recorder, Clear, RecorderType};
@@ -57,11 +57,14 @@ impl NoriaServerHttpRouter {
     pub async fn create_listener(&self) -> anyhow::Result<TcpListener> {
         let http_listener = TcpListener::bind(SocketAddr::new(self.listen_addr, self.port))
             .or_else(|_| {
-                warn!("Could not bind to provided external port; using a random port instead!");
+                warn!(listen_addr = %self.listen_addr, port = self.port, "Could not bind to provided external port; using a random port instead");
 
                 TcpListener::bind(SocketAddr::new(self.listen_addr, 0))
             })
             .await?;
+        let _ = http_listener
+            .local_addr()
+            .inspect(|addr| info!(%addr, "Server listening for HTTP connections"));
         Ok(http_listener)
     }
 
