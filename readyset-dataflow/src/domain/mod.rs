@@ -59,6 +59,7 @@ use self::replay_paths::{Destination, ReplayPathSpec, ReplayPaths, Target};
 use crate::domain::channel::{ChannelCoordinator, DomainReceiver, DomainSender};
 use crate::node::special::EgressTx;
 use crate::node::{Column, NodeProcessingResult, ProcessEnv};
+use crate::ops::Side;
 use crate::payload::{
     self, Eviction, MaterializedState, PacketDiscriminants, PrepareStateKind, PrettyReplayPath,
     ReplayPieceContext, SenderReplication, SourceSelection,
@@ -951,15 +952,43 @@ impl Domain {
                 missed_keys: vec1![miss_key],
             };
             let misses = if is_generated {
-                // If these columns were generated, ask the node to remap them for us
-                let misses = self.nodes[miss_in].borrow_mut().handle_upquery(miss)?;
-                trace!(?misses, "Remapped misses on generated columns");
+                // If these columns were generated, ask the node to remap them for us. Can happen on paginate or join
+                let remapped = self.nodes[miss_in].borrow_mut().handle_upquery(miss)?;
 
+                // For straddled joins, handle_upquery return a pair of misses. One from left and one for right.
+                // We only take the first miss/upquery path (left) and the other side will be triggered in on_input
+                // when we have the join conditions.
+                let misses = if let NodeOperator::Join(join) =
+                    self.nodes[miss_in].borrow_mut().as_mut_internal().unwrap()
+                {
+                    debug_assert!(remapped.len() == 2);
+                    // at the moment, we always query left side first and on_input will trigger the right side.
+                    // Once we have some planner logic, based on stats, we can adjust side to dynamically
+                    // choose which side to query first.
+                    let side = Side::Left;
+                    let this_side_index = if side == Side::Left { 0 } else { 1 };
+                    let other_side_index = if side == Side::Left { 1 } else { 0 };
+                    // add the other key into join missing upqueries
+                    let this_side_missed_keys = remapped[this_side_index].missed_keys.clone();
+                    // Handle the case where multiple entries for the same column may exist in an IN(?, ?, ?)
+                    join.missing_upqueries
+                        .entry((this_side_missed_keys.to_vec(), side))
+                        .and_modify(|entry| {
+                            // Ensure all existing entries have the same column indices as the new one
+                            assert!(entry.iter().all(|miss| miss.column_indices
+                                == remapped[other_side_index].column_indices));
+                            entry.push(remapped[other_side_index].clone());
+                        })
+                        .or_insert_with(|| vec![remapped[other_side_index].clone()]);
+                    vec![remapped[this_side_index].clone()]
+                } else {
+                    remapped.clone()
+                };
                 // Record that we remapped these keys, so that any evictions on the upstream keys
                 // can be translated into the original keys.  If the node we missed in is fully
                 // materialized, we don't need to record the remaps, since we're guaranteed not
                 // to get any evictions on the upstream keys
-                for upstream_miss in &misses {
+                for upstream_miss in &remapped {
                     let Some(state) = self.state.get(upstream_miss.node) else {
                         continue;
                     };

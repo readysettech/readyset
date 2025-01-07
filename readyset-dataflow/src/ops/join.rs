@@ -41,11 +41,11 @@ pub struct Join {
     in_place_left_emit: Vec<(Side, usize)>,
     in_place_right_emit: Vec<(Side, usize)>,
 
-    /// Buffered records from one half of a remapped upquery. The key is (column index,
+    /// Missing upqueries for the other side of the join. The key is (column index,
     /// side).
     // We skip serde since we don't want the state of the node, just the configuration.
     #[serde(skip)]
-    generated_column_buffer: HashMap<(Vec<usize>, Side), Records>,
+    pub missing_upqueries: HashMap<(Vec<KeyComparison>, Side), Vec<ColumnMiss>>,
 
     kind: JoinType,
 }
@@ -109,7 +109,7 @@ impl Join {
             emit,
             in_place_left_emit,
             in_place_right_emit,
-            generated_column_buffer: Default::default(),
+            missing_upqueries: Default::default(),
             kind,
         }
     }
@@ -130,76 +130,6 @@ impl Join {
                 Side::Right => right[col].clone(),
             })
             .collect()
-    }
-
-    /// Build a hash map from one of the sides of the join.
-    fn build_join_hash_map<'a>(
-        &'a self,
-        records: &'a Records,
-        key: &[usize],
-    ) -> HashMap<Vec<&'a DfValue>, Vec<&'a Record>> {
-        let mut hm = HashMap::new();
-        for rec in records {
-            let key: Vec<&DfValue> = key.iter().map(|idx| &rec[*idx]).collect();
-            hm.entry(key)
-                .and_modify(|entry: &mut Vec<&Record>| entry.push(rec))
-                .or_insert(vec![rec]);
-        }
-        hm
-    }
-
-    /// Perform a hash join between two sets of records.
-    fn hash_join(&self, left: Records, right: Records) -> ReadySetResult<Records> {
-        let mut probe_keys = vec![];
-        let mut build_keys = vec![];
-        let mut ret: Vec<Record> = vec![];
-        let probe_is_left = left.len() > right.len();
-        for (left_key, right_key) in &self.on {
-            match probe_is_left {
-                true => {
-                    probe_keys.push(*left_key);
-                    build_keys.push(*right_key);
-                }
-                false => {
-                    probe_keys.push(*right_key);
-                    build_keys.push(*left_key);
-                }
-            }
-        }
-        let (probe_side, build_side) = match probe_is_left {
-            true => (&left, &right),
-            false => (&right, &left),
-        };
-        let hm = self.build_join_hash_map(build_side, &build_keys);
-
-        let mut key: Vec<&DfValue> = vec![&DfValue::None; probe_keys.len()];
-        for prob_rec in probe_side {
-            for i in 0..probe_keys.len() {
-                key[i] = &prob_rec[probe_keys[i]];
-            }
-            if let Some(build_recs) = hm.get(&key) {
-                invariant!(
-                    prob_rec.is_positive(),
-                    "replays should only include positive records"
-                );
-                for build_rec in build_recs {
-                    invariant!(
-                        build_rec.is_positive(),
-                        "replays should only include positive records"
-                    );
-
-                    match probe_is_left {
-                        true => ret.push(Record::Positive(
-                            self.generate_row(prob_rec.row(), build_rec.row()),
-                        )),
-                        false => ret.push(Record::Positive(
-                            self.generate_row(build_rec.row(), prob_rec.row()),
-                        )),
-                    }
-                }
-            };
-        }
-        Ok(ret.into())
     }
 
     // TODO: make non-allocating
@@ -282,18 +212,17 @@ impl Ingredient for Join {
 
         let other = if from_left { *self.right } else { *self.left };
 
-        let (from_key, other_key): (Vec<usize>, Vec<usize>) = if from_left {
+        // On clause columns from this side (ts) and other side (os)
+        let (on_cols_ts, on_cols_os): (Vec<usize>, Vec<usize>) = if from_left {
             self.on.iter().copied().unzip()
         } else {
-            let (other_key, from_key) = self.on.iter().copied().unzip();
-            (from_key, other_key)
+            let (on_cols_os, on_cols_ts) = self.on.iter().copied().unzip();
+            (on_cols_ts, on_cols_os)
         };
-
-        let orkc = replay.key();
 
         let replay_key_cols: Result<Option<Vec<usize>>, ()> =
             replay
-                .key()
+                .cols()
                 .map(|cols| {
                     cols.iter()
                         .map(|&col| -> Result<usize, ()> {
@@ -332,37 +261,122 @@ impl Ingredient for Join {
                         .collect()
                 })
                 .transpose();
-
-        let replay_key_cols = match replay_key_cols {
-            Ok(v) => v,
-            Err(_) => {
-                // columns generated!
-                let orkc = orkc.unwrap();
-                let is_left = from == *self.left;
-                return if let Some(other) = self.generated_column_buffer.remove(&(
-                    orkc.to_vec(),
-                    if is_left { Side::Right } else { Side::Left },
-                )) {
-                    // we have both sides now
-                    let (left, right) = if is_left { (rs, other) } else { (other, rs) };
-                    let ret = self.hash_join(left, right)?;
-                    Ok(ProcessingResult {
-                        results: ret,
-                        ..Default::default()
-                    })
-                } else {
-                    // store the records for when we get the other upquery response
-                    self.generated_column_buffer.insert(
-                        (
-                            orkc.to_vec(),
-                            if is_left { Side::Left } else { Side::Right },
-                        ),
-                        rs,
-                    );
-                    Ok(Default::default())
-                };
-            }
+        let is_generated = replay_key_cols.is_err();
+        // Only do a lookup into a weak index if we're processing regular updates,
+        // not if we're processing a replay, since regular updates should represent
+        // all rows that won't hit holes downstream but replays need to have *all*
+        // rows
+        let replay_key_cols = if is_generated {
+            None
+        } else {
+            replay_key_cols.unwrap()
         };
+        let is_replay = replay_key_cols.is_some();
+        let lookup_mode = if is_replay {
+            LookupMode::Strict
+        } else {
+            LookupMode::Weak
+        };
+
+        if is_generated {
+            // columns generated!
+            let replay_keys = replay.keys().unwrap();
+
+            // Get predicate and set up columns
+            let other_predicate = self
+                .missing_upqueries
+                .remove(&(
+                    replay_keys.iter().cloned().collect(),
+                    if from_left { Side::Left } else { Side::Right },
+                ))
+                .unwrap();
+
+            let mut other_cols = on_cols_os;
+
+            // We have an invariant that the columns we are missing on are the same for all
+            // entries in the missing_upqueries map. Safe to extract columns from first entry
+            other_cols.extend(other_predicate[0].column_indices.clone());
+
+            let mut results = Records::default();
+            // Chunk_by might create a multiple chunks over the same keys if the data interleaves.
+            // If the nearest materialized node happens to be a base node, we will be reading the same data from disk multiple times.
+            // To avoid this, we cache lookup results in a stack hashmap.
+            // TODO: We might optimize this by using HashMap::with_capacity(capacity)
+            let mut lookup_cache: HashMap<Vec<DfValue>, Records> = HashMap::new();
+
+            // Process each group of records with the same join key
+            for (join_key, group) in rs
+                .into_iter()
+                .chunk_by(|rec| {
+                    on_cols_ts
+                        .iter()
+                        .map(|i| rec[*i].clone())
+                        .collect::<Vec<_>>()
+                })
+                .into_iter()
+            {
+                let group_records: Vec<_> = group.collect();
+
+                // Process each predicate key
+                for missing_key in &other_predicate {
+                    let mut other_keys = join_key.clone();
+                    other_keys.extend(missing_key.missed_keys.iter().flat_map(|k| match k {
+                        KeyComparison::Equal(values) => values.iter().cloned().collect::<Vec<_>>(),
+                        KeyComparison::Range(_) => vec![], // Skip ranges
+                    }));
+                    // Try to find matching records
+                    let lookup_key = PointKey::from(other_keys.clone());
+                    let other_side_records = if let Some(cached) = lookup_cache.get(&other_keys) {
+                        cached
+                    } else {
+                        let lookup = self.lookup(
+                            other,
+                            &other_cols,
+                            &lookup_key,
+                            nodes,
+                            state,
+                            lookup_mode,
+                        )?;
+                        match lookup {
+                            IngredientLookupResult::Records(records) => {
+                                let records: Records = records
+                                    .map(|r| r.map(|row| Record::Positive(row.to_vec())))
+                                    .collect::<Result<Vec<_>, ReadySetError>>()?
+                                    .into();
+                                lookup_cache.insert(other_keys.clone(), records);
+                                lookups.push(Lookup {
+                                    on: other,
+                                    cols: other_cols.clone(),
+                                    key: KeyComparison::from(
+                                        Vec1::try_from(other_keys.clone()).unwrap(),
+                                    ),
+                                });
+                                lookup_cache.get(&other_keys).unwrap()
+                            }
+                            IngredientLookupResult::Miss => {
+                                // TODO: Should we handle misses for straddled joins?
+                                continue;
+                            }
+                        }
+                    };
+
+                    if !other_side_records.is_empty() {
+                        for row in &group_records {
+                            for other_row in other_side_records {
+                                results.push(
+                                    (self.generate_row(row.row(), other_row.row()), true).into(),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            return Ok(ProcessingResult {
+                results,
+                lookups,
+                misses,
+            });
+        }
 
         if rs.is_empty() {
             return Ok(ProcessingResult {
@@ -373,21 +387,12 @@ impl Ingredient for Join {
 
         let mut ret: Vec<Record> = Vec::with_capacity(rs.len());
 
-        let grouped_records = rs
-            .into_iter()
-            .chunk_by(|rec| from_key.iter().map(|i| rec[*i].clone()).collect::<Vec<_>>());
-
-        let is_replay = replay_key_cols.is_some();
-
-        // Only do a lookup into a weak index if we're processing regular updates,
-        // not if we're processing a replay, since regular updates should represent
-        // all rows that won't hit holes downstream but replays need to have *all*
-        // rows
-        let lookup_mode = if is_replay {
-            LookupMode::Strict
-        } else {
-            LookupMode::Weak
-        };
+        let grouped_records = rs.into_iter().chunk_by(|rec| {
+            on_cols_ts
+                .iter()
+                .map(|i| rec[*i].clone())
+                .collect::<Vec<_>>()
+        });
 
         for (join_key, group) in grouped_records.into_iter() {
             // [note: null-join-keys]
@@ -445,27 +450,25 @@ impl Ingredient for Join {
                     }
                 }
             }
-
             let mut other_lookup = match nulls {
                 true => IngredientLookupResult::empty(),
                 false => self.lookup(
                     other,
-                    &other_key,
+                    &on_cols_os,
                     &PointKey::from(join_key.iter().cloned()),
                     nodes,
                     state,
                     lookup_mode,
                 )?,
             };
-
             let other_records = match other_lookup.take() {
                 IngredientLookupResult::Records(recs) => recs,
                 IngredientLookupResult::Miss => {
                     misses.extend(group.map(|record| {
                         Miss::builder()
                             .on(other)
-                            .lookup_idx(other_key.clone())
-                            .lookup_key(from_key.clone())
+                            .lookup_idx(on_cols_os.clone())
+                            .lookup_key(on_cols_ts.clone())
                             .replay(replay)
                             .replay_key_cols(replay_key_cols.as_deref())
                             .record(record.into_row())
@@ -474,11 +477,10 @@ impl Ingredient for Join {
                     continue;
                 }
             };
-
             if is_replay && !nulls {
                 lookups.push(Lookup {
                     on: other,
-                    cols: other_key.clone(),
+                    cols: on_cols_os.clone(),
                     key: join_key
                         .try_into()
                         .map_err(|_| internal_err!("Empty join key"))?,
