@@ -57,6 +57,7 @@ serde_json = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true, features = ["html_reports"] }
+futures = { workspace = true }
 pprof = { workspace = true, features = ["flamegraph", "criterion"] }
 serial_test = { workspace = true }
 temp-dir = { workspace = true }

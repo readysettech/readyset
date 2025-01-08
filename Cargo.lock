@@ -4308,6 +4308,7 @@ dependencies = [
  "dataflow-state",
  "fail",
  "failpoint-macros",
+ "futures",
  "futures-util",
  "health-reporter",
  "metrics",

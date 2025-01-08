@@ -7,6 +7,7 @@ use readyset::psql::PsqlHandler;
 use readyset::{NoriaAdapter, Options};
 use readyset_adapter::ReadySetStatus;
 use readyset_psql::AuthenticationMethod;
+use readyset_util::eventually;
 use test_utils::serial;
 
 const TEST_METRICS_ADDRESS: &str = "127.0.0.1:6035";
@@ -59,17 +60,20 @@ fn start_adapter(test_db: &str) -> anyhow::Result<()> {
 #[serial(postgres)]
 async fn http_tests() {
     let _jh = std::thread::spawn(|| start_adapter("http_tests"));
-    // Wait for startup
-    tokio::time::sleep(Duration::from_secs(1)).await;
 
-    let response = reqwest::get(format!("http://{TEST_METRICS_ADDRESS}/health"))
-        .await
-        .unwrap();
-    assert!(response.status().is_success(), "Health check failed");
-
-    let payload = response.text().await.unwrap();
-    let expected_payload = "Adapter is in healthy state";
-    assert_eq!(payload, expected_payload, "Payload did not match expected");
+    eventually!(attempts: 5, sleep: Duration::from_millis(500), run_test: {
+        if let Ok(response) = reqwest::get(format!("http://{TEST_METRICS_ADDRESS}/health")).await {
+            Some((response.status(), response.text().await.ok()))
+        } else {
+            None
+        }
+    }, then_assert: |result| {
+        let (status, text) = result.expect("Could not perform health check");
+        assert!(status.is_success(), "Health check failed");
+        let payload = text.expect("Could not read health check response text");
+        let expected_payload = "Adapter is in healthy state";
+        assert_eq!(payload, expected_payload, "Health check succeeded but returned unexpected payload");
+    });
 
     let response = reqwest::get(format!("http://{TEST_METRICS_ADDRESS}/readyset_status"))
         .await
