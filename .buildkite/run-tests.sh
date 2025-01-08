@@ -18,16 +18,18 @@ export PROPTEST_MAX_SHRINK_TIME=1800000
 if [[ "$BUILDKITE_PARALLEL_JOB" == "0" ]]; then
     # Run nextest
     echo "+++ :rust: Run tests (nextest)"
-    cargo --locked nextest run --workspace --features failure_injection \
-        --exclude readyset-clustertest \
-        --exclude benchmarks --ignore-default-filter \
+    cargo --locked nextest run --workspace \
+        --ignore-default-filter --hide-progress-bar \
+        --features failure_injection \
+        --exclude readyset-clustertest --exclude benchmarks \
         || upload_artifacts
 elif [[ "$BUILDKITE_PARALLEL_JOB" == "1" ]]; then
     # Run doctests, because at this time nextest does not support doctests
     echo "+++ :rust: Run tests (doctest)"
-    cargo --locked test --workspace --features failure_injection \
-        --exclude readyset-clustertest \
-        --exclude benchmarks --doc \
+    cargo --locked test --workspace \
+        --features failure_injection \
+        --exclude readyset-clustertest --exclude benchmarks \
+        --doc \
         || upload_artifacts
 else
     echo "No command defined for this parallel job."
