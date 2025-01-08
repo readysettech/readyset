@@ -67,6 +67,12 @@ impl<'ast> VisitorMut<'ast> for ResolveSchemaVisitor<'_> {
         let table_expr_aliases = select_statement
             .tables
             .iter()
+            .chain(
+                select_statement
+                    .join
+                    .iter()
+                    .flat_map(|j| j.right.table_exprs()),
+            )
             .filter_map(|te| te.alias.clone())
             .collect();
         self.alias_stack.push(table_expr_aliases);
@@ -243,6 +249,7 @@ impl ResolveSchemas for CreateTableStatement {
 
 #[cfg(test)]
 mod tests {
+    use pretty_assertions::assert_eq;
     use std::fmt::Debug;
 
     use nom_sql::{parse_create_table, Dialect, DialectDisplay};
@@ -269,6 +276,7 @@ mod tests {
                         HashMap::from([
                             (&"t1".into(), CanQuery::Yes),
                             (&"t2".into(), CanQuery::Yes),
+                            (&"t_ignored".into(), CanQuery::No),
                         ]),
                     ),
                     (
@@ -477,5 +485,13 @@ mod tests {
             )
             .unwrap();
         assert_eq!(result, parse_select_statement("select * from s1.t"));
+    }
+
+    #[test]
+    fn doesnt_rewrite_join_alias_reference_shadowing_ignored_table() {
+        select_rewrites_to(
+            "SELECT foo.x, t_ignored.y FROM t1 AS foo JOIN t2 AS t_ignored ON foo.id = t_ignored.id",
+            "SELECT foo.x, t_ignored.y FROM s1.t1 AS foo JOIN s1.t2 AS t_ignored ON foo.id = t_ignored.id",
+        );
     }
 }

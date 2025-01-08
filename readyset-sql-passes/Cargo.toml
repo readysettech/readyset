@@ -19,8 +19,8 @@ dataflow-expression = { path = "../dataflow-expression" }
 
 [dev-dependencies]
 criterion = { workspace = true }
+pretty_assertions = { workspace = true }
 
 [[bench]]
 name = "adapter_rewrites"
 harness = false
-

@@ -5084,6 +5084,7 @@ dependencies = [
  "dataflow-expression",
  "itertools 0.13.0",
  "nom-sql",
+ "pretty_assertions",
  "readyset-data",
  "readyset-errors",
  "serde",
