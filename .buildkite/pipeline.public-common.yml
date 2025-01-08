@@ -94,6 +94,7 @@ steps:
     plugins:
       - docker-compose#${DOCKER_COMPOSE_PLUGIN_VERSION}:
           run: app
+          tty: true
           env:
           - BUILDKITE_PARALLEL_JOB
           - SCCACHE_BUCKET=readysettech-build-sccache-us-east-2
