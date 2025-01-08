@@ -12,6 +12,9 @@ common_values:
         signal_reason: none
         limit: 3
 
+env:
+  ECR_PLUGIN_VERSION: "v2.9.0"
+
 steps:
   # TODO: ronh: decide what kind of linting we want in the OSS pipeline
   # - label: ':git: Lint commits'
@@ -27,7 +30,7 @@ steps:
     commands:
       - '.buildkite/build-image.sh build/Dockerfile readyset-build .'
     plugins:
-      ecr#v2.7.0:
+      ecr#${ECR_PLUGIN_VERSION}:
         login: true
         retries: 3
     retry: *retry_on_agent_kill
@@ -39,7 +42,7 @@ steps:
     env:
       VERSION: "${BUILDKITE_COMMIT}"
     plugins:
-      ecr#v2.7.0:
+      ecr#${ECR_PLUGIN_VERSION}:
         login: true
         retries: 3
     retry: *retry_on_agent_kill
