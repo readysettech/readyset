@@ -8,6 +8,9 @@ common_values:
         signal_reason: none
         limit: 3
 
+env:
+  ECR_PLUGIN_VERSION: "v2.9.0"
+
 steps:
   - label: ':clojure: Run jepsen test with --help'
     key: lein-run-test-help
@@ -18,7 +21,7 @@ steps:
     plugins:
       docker#v3.8.0:
         image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/ecr-public/docker/library/clojure:temurin-20-lein-2.10.0-jammy
-      ecr#v2.7.0:
+      ecr#${ECR_PLUGIN_VERSION}:
         login: true
         retries: 3
     retry: *retry_on_agent_kill
@@ -32,7 +35,7 @@ steps:
     plugins:
       docker#v3.8.0:
         image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/ecr-public/docker/library/clojure:temurin-20-lein-2.10.0-jammy
-      ecr#v2.7.0:
+      ecr#${ECR_PLUGIN_VERSION}:
         login: true
         retries: 3
     retry: *retry_on_agent_kill
@@ -46,7 +49,7 @@ steps:
     plugins:
       docker#v3.8.0:
         image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/ecr-public/docker/library/clojure:temurin-20-lein-2.10.0-jammy
-      ecr#v2.7.0:
+      ecr#${ECR_PLUGIN_VERSION}:
         login: true
         retries: 3
     retry: *retry_on_agent_kill
