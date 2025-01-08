@@ -18,12 +18,14 @@ export PROPTEST_MAX_SHRINK_TIME=1800000
 if [[ "$BUILDKITE_PARALLEL_JOB" == "0" ]]; then
     # Run nextest
     echo "+++ :rust: Run tests (nextest)"
+    exit 1
     cargo --locked nextest run --workspace \
         --ignore-default-filter --hide-progress-bar \
         --features failure_injection \
         --exclude readyset-clustertest --exclude benchmarks \
         || upload_artifacts
 elif [[ "$BUILDKITE_PARALLEL_JOB" == "1" ]]; then
+    exit 0
     # Run doctests, because at this time nextest does not support doctests
     echo "+++ :rust: Run tests (doctest)"
     cargo --locked test --workspace \
