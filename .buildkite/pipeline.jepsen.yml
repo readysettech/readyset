@@ -10,6 +10,8 @@ common_values:
 
 env:
   ECR_PLUGIN_VERSION: "v2.9.0"
+  DOCKER_PLUGIN_VERSION: "v5.12.0"
+  DOCKER_COMPOSE_PLUGIN_VERSION: "v5.5.0"
 
 steps:
   - label: ':clojure: Run jepsen test with --help'
@@ -19,7 +21,7 @@ steps:
       - cd jepsen
       - lein run test --help
     plugins:
-      docker#v3.8.0:
+      docker#${DOCKER_PLUGIN_VERSION}:
         image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/ecr-public/docker/library/clojure:temurin-20-lein-2.10.0-jammy
       ecr#${ECR_PLUGIN_VERSION}:
         login: true
@@ -33,7 +35,7 @@ steps:
       - cd jepsen
       - lein test
     plugins:
-      docker#v3.8.0:
+      docker#${DOCKER_PLUGIN_VERSION}:
         image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/ecr-public/docker/library/clojure:temurin-20-lein-2.10.0-jammy
       ecr#${ECR_PLUGIN_VERSION}:
         login: true
@@ -47,7 +49,7 @@ steps:
       - cd jepsen
       - lein clj-kondo
     plugins:
-      docker#v3.8.0:
+      docker#${DOCKER_PLUGIN_VERSION}:
         image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/ecr-public/docker/library/clojure:temurin-20-lein-2.10.0-jammy
       ecr#${ECR_PLUGIN_VERSION}:
         login: true
