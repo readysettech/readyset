@@ -12,6 +12,8 @@ common_values:
 
 env:
   ECR_PLUGIN_VERSION: "v2.9.0"
+  DOCKER_PLUGIN_VERSION: "v5.12.0"
+  DOCKER_COMPOSE_PLUGIN_VERSION: "v5.5.0"
 
 steps:
 
@@ -23,7 +25,7 @@ steps:
     depends_on:
     - build-image
     plugins:
-      - docker#v3.8.0:
+      - docker#${DOCKER_PLUGIN_VERSION}:
           image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
           volumes:
           - 'target:/workdir/target'
@@ -45,7 +47,7 @@ steps:
     depends_on:
     - cargo-deny-image
     plugins:
-      - docker#v3.8.0:
+      - docker#${DOCKER_PLUGIN_VERSION}:
           image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/cargo-deny:${BUILDKITE_COMMIT}'
           environment:
           - SCCACHE_BUCKET=readysettech-build-sccache-us-east-2
@@ -66,7 +68,7 @@ steps:
     depends_on:
     - build-image
     plugins:
-      - docker#v3.8.0:
+      - docker#${DOCKER_PLUGIN_VERSION}:
           image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
           volumes:
           - 'target:/workdir/target'
@@ -90,7 +92,7 @@ steps:
     depends_on:
     - build-image
     plugins:
-      - docker-compose#v3.7.0:
+      - docker-compose#${DOCKER_COMPOSE_PLUGIN_VERSION}:
           run: app
           env:
           - BUILDKITE_PARALLEL_JOB
@@ -128,7 +130,7 @@ steps:
     depends_on:
     - build-image
     plugins:
-      - docker-compose#v3.7.0:
+      - docker-compose#${DOCKER_COMPOSE_PLUGIN_VERSION}:
           run: app
           env:
           - SCCACHE_BUCKET=readysettech-build-sccache-us-east-2
@@ -156,7 +158,7 @@ steps:
     depends_on:
     - build-image
     plugins:
-      - docker-compose#v3.7.0:
+      - docker-compose#${DOCKER_COMPOSE_PLUGIN_VERSION}:
           image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
           run: app
           environment:
