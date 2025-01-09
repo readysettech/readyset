@@ -409,16 +409,41 @@ where
             let mysql_schema = convert_columns!(schema.schema, writer);
             let mut rw = writer.start(&mysql_schema).await?;
             while let Some(row) = rows.next() {
-                for (coli, (val, c)) in row.iter().zip(&mysql_schema).enumerate() {
-                    let ty = schema
-                        .schema
-                        .get(coli)
-                        .map(|cs| cs.column_type.clone())
-                        .unwrap_or_default();
+                let mut i = 0;
+                loop {
+                    let val = row.get(i);
+                    let c = mysql_schema.get(i);
 
-                    if let Err(e) = write_column(&mut rw, val, c, &ty).await {
-                        return handle_column_write_err(e, rw).await;
+                    match (val, c) {
+                        (Some(val), Some(c)) => {
+                            let s = schema.schema.get(i);
+                            let ty = match s {
+                                Some(cs) => &cs.column_type,
+                                None => &DfType::Unknown,
+                            };
+
+                            if let Err(e) = write_column(&mut rw, val, c, ty).await {
+                                return handle_column_write_err(e, rw).await;
+                            }
+                        }
+                        (None, None) | (Some(_), None) => {
+                            // at the end of the row ...
+                            // if there are more values than types, those are bogokeys,
+                            // which we can ignore
+                            break;
+                        }
+                        (None, Some(_)) => {
+                            return handle_column_write_err(
+                                Error::ReadySet(readyset_errors::ReadySetError::WrongColumnCount(
+                                    mysql_schema.len(),
+                                    row.len(),
+                                )),
+                                rw,
+                            )
+                            .await
+                        }
                     }
+                    i += 1;
                 }
                 rw.end_row().await?;
             }
