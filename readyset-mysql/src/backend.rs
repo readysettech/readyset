@@ -409,14 +409,32 @@ where
             let mysql_schema = convert_columns!(schema.schema, writer);
             let mut rw = writer.start(&mysql_schema).await?;
             while let Some(row) = rows.next() {
-                for (coli, (val, c)) in row.iter().zip(&mysql_schema).enumerate() {
-                    let ty = schema
-                        .schema
-                        .get(coli)
-                        .map(|cs| cs.column_type.clone())
-                        .unwrap_or_default();
+                // make sure we have at least as many row columns as schema types.
+                // if there are more row columns than schema types, those are bogokeys,
+                // which we can ignore as we do not send those back to callers.
+                let len = mysql_schema.len();
+                if row.len() < len {
+                    return handle_column_write_err(
+                        Error::ReadySet(readyset_errors::ReadySetError::WrongColumnCount(
+                            len,
+                            row.len(),
+                        )),
+                        rw,
+                    )
+                    .await;
+                }
 
-                    if let Err(e) = write_column(&mut rw, val, c, &ty).await {
+                for i in 0..len {
+                    let val = row.get(i).unwrap();
+                    let c = mysql_schema.get(i).unwrap();
+
+                    let s = schema.schema.get(i);
+                    let ty = match s {
+                        Some(cs) => &cs.column_type,
+                        None => &DfType::Unknown,
+                    };
+
+                    if let Err(e) = write_column(&mut rw, val, c, ty).await {
                         return handle_column_write_err(e, rw).await;
                     }
                 }
