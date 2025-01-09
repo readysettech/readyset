@@ -691,7 +691,7 @@ where
                     // `or_insert_with` would be cleaner but we need an async closure here
                     Entry::Occupied(schema) => schema.into_mut(),
                     Entry::Vacant(entry) => {
-                        let mysql_schema = convert_columns!(schema.schema, results);
+                        let mysql_schema = convert_columns!(&schema.schema, results);
                         let column_types = schema
                             .schema
                             .iter()

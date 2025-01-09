@@ -13,7 +13,7 @@ pub(crate) async fn write_eof_packet<W: AsyncWrite + Unpin>(
     w: &mut PacketWriter<W>,
     s: StatusFlags,
 ) -> io::Result<()> {
-    let mut buf = w.get_buffer();
+    let mut buf = w.get_buffer(8, true);
     buf.extend([0xFE, 0x00, 0x00, s.bits() as u8, (s.bits() >> 8) as u8]);
     w.enqueue_packet(buf);
     Ok(())
@@ -26,8 +26,7 @@ pub(crate) async fn write_ok_packet<W: AsyncWrite + Unpin>(
     s: StatusFlags,
 ) -> io::Result<()> {
     const MAX_OK_PACKET_LEN: usize = 1 + 9 + 9 + 2 + 2;
-    let mut buf = w.get_buffer();
-    buf.reserve(MAX_OK_PACKET_LEN);
+    let mut buf = w.get_buffer(MAX_OK_PACKET_LEN, true);
     buf.write_u8(0x00)?; // OK packet type
     buf.write_lenenc_int(rows)?;
     buf.write_lenenc_int(last_insert_id)?;
@@ -42,8 +41,7 @@ pub async fn write_err<W: AsyncWrite + Unpin>(
     msg: &[u8],
     w: &mut PacketWriter<W>,
 ) -> io::Result<()> {
-    let mut buf = w.get_buffer();
-    buf.reserve(4 + 5 + msg.len());
+    let mut buf = w.get_buffer(4 + 5 + msg.len(), true);
     buf.write_u8(0xFF)?;
     buf.write_u16::<LittleEndian>(err as u16)?;
     buf.write_u8(b'#')?;
@@ -71,8 +69,7 @@ where
     let ci = columns.into_iter();
 
     // first, write out COM_STMT_PREPARE_OK
-    let mut buf = w.get_buffer();
-    buf.reserve(MAX_PREPARE_OK_PACKET_LEN);
+    let mut buf = w.get_buffer(MAX_PREPARE_OK_PACKET_LEN, true);
     buf.write_u8(0x00)?;
     buf.write_u32::<LittleEndian>(id)?;
     buf.write_u16::<LittleEndian>(ci.len() as u16)?;
@@ -173,8 +170,7 @@ where
 {
     let mut empty = true;
     for c in i {
-        let mut buf = w.get_buffer();
-        buf.reserve(col_enc_len(c));
+        let mut buf = w.get_buffer(col_enc_len(c), true);
         write_column_definition(c, &mut buf);
         w.enqueue_packet(buf);
         empty = false;
@@ -194,7 +190,7 @@ where
     W: AsyncWrite + Unpin,
 {
     let i = i.into_iter();
-    let mut buf = w.get_buffer();
+    let mut buf = w.get_buffer(lenc_int_len(i.len() as u64) + 1, true);
     buf.write_lenenc_int(i.len() as u64)?;
     w.enqueue_packet(buf);
     write_column_definitions(i, w, false).await

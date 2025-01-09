@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::error::{other_error, OtherErrorKind};
-use crate::resultset::{MAX_POOL_ROWS, MAX_POOL_ROW_CAPACITY};
+use crate::resultset::MAX_POOL_ROWS;
 
 const U24_MAX: usize = 16_777_215;
 
@@ -21,8 +21,9 @@ pub struct PacketWriter<W> {
 enum QueuedPacket {
     /// Raw queued packets are written as-is, these packets include header chunks.
     Raw(Arc<[u8]>),
-    /// Packets constructed with headers are written as two IoSlices, the header and the body.
-    WithHeader([u8; 4], Vec<u8>),
+    RawRaw(Vec<u8>),
+    // /// Packets constructed with headers are written as two IoSlices, the header and the body.
+    //WithHeader([u8; 4], Vec<u8>),
 }
 
 /// A helper function that performes a vector write to completion, since
@@ -63,11 +64,14 @@ fn queued_packet_slices(queue: &[QueuedPacket]) -> Vec<IoSlice<'_>> {
 
     let mut slices = Vec::with_capacity(queue.len() * 2);
     queue.iter().for_each(|packet| match packet {
-        QueuedPacket::WithHeader(hdr, pack) => {
-            slices.push(IoSlice::new(hdr));
-            slices.push(IoSlice::new(pack));
-        }
+        // QueuedPacket::WithHeader(hdr, pack) => {
+        //     slices.push(IoSlice::new(hdr));
+        //     slices.push(IoSlice::new(pack));
+        // }
         QueuedPacket::Raw(r) => {
+            slices.push(IoSlice::new(r));
+        }
+        QueuedPacket::RawRaw(r) => {
             slices.push(IoSlice::new(r));
         }
     });
@@ -89,6 +93,12 @@ impl<W: AsyncWrite + Unpin> PacketWriter<W> {
         self.seq = seq;
     }
 
+    pub fn next_seq(&mut self) -> u8 {
+        let val = self.seq;
+        self.seq = self.seq.wrapping_add(1);
+        val
+    }
+
     /// Flushes the writer. This function *must* be called before dropping the internal writer
     /// or writes may be lossed.
     pub async fn flush(&mut self) -> Result<(), tokio::io::Error> {
@@ -100,21 +110,26 @@ impl<W: AsyncWrite + Unpin> PacketWriter<W> {
     pub fn enqueue_packet(&mut self, mut packet: Vec<u8>) {
         // Lazily shrink large buffers before processing them further, as after that they will go to
         // the buffer pool
-        packet.shrink_to(MAX_POOL_ROW_CAPACITY);
+        //packet.shrink_to(MAX_POOL_ROW_CAPACITY);
 
-        while packet.len() >= U24_MAX {
-            let rest = packet.split_off(U24_MAX);
-            let mut hdr = (U24_MAX as u32).to_le_bytes();
-            hdr[3] = self.seq;
-            self.seq = self.seq.wrapping_add(1);
-            self.queue.push(QueuedPacket::WithHeader(hdr, packet));
-            packet = rest;
-        }
+        // TODO: fix this
+        // while packet.len() >= U24_MAX {
+        //     let rest = packet.split_off(U24_MAX);
+        //     let mut hdr = (U24_MAX as u32).to_le_bytes();
+        //     hdr[3] = self.seq;
+        //     self.seq = self.seq.wrapping_add(1);
+        //     self.queue.push(QueuedPacket::WithHeader(hdr, packet));
+        //     packet = rest;
+        // }
 
-        let mut hdr = (packet.len() as u32).to_le_bytes();
-        hdr[3] = self.seq;
+        let packet_len = packet.len() - 4;
+        let packet_len_bytes = (packet_len as u32).to_le_bytes();
+        packet[0] = packet_len_bytes[0];
+        packet[1] = packet_len_bytes[1];
+        packet[2] = packet_len_bytes[2];
+        packet[3] = self.seq;
         self.seq = self.seq.wrapping_add(1);
-        self.queue.push(QueuedPacket::WithHeader(hdr, packet));
+        self.queue.push(QueuedPacket::RawRaw(packet));
     }
 
     /// Enqueues raw bytes to be written on the wire.
@@ -123,9 +138,15 @@ impl<W: AsyncWrite + Unpin> PacketWriter<W> {
         Ok(())
     }
 
-    pub fn queue_len(&self) -> usize {
-        self.queue.len()
+    /// Enqueues raw bytes to be written on the wire.
+    pub async fn enqueue_raw_raw(&mut self, packet: Vec<u8>) -> Result<(), tokio::io::Error> {
+        self.queue.push(QueuedPacket::RawRaw(packet));
+        Ok(())
     }
+
+    // pub fn queue_len(&self) -> usize {
+    //     self.queue.len()
+    // }
 
     /// Send all the currently queued packets. Does not flush the writer.
     pub async fn write_queued_packets(&mut self) -> Result<(), tokio::io::Error> {
@@ -213,17 +234,26 @@ impl<W: AsyncWrite + Unpin> PacketWriter<W> {
         Ok(())
     }
 
-    pub fn get_buffer(&mut self) -> Vec<u8> {
+    pub fn get_buffer(&mut self, size: usize, requires_header: bool) -> Vec<u8> {
+        let target_size = if requires_header { size + 4 } else { size };
         while let Some(p) = self.preallocated.pop() {
             match p {
                 QueuedPacket::Raw(_) => {}
-                QueuedPacket::WithHeader(_, mut vec) => {
+                QueuedPacket::RawRaw(mut vec) => {
                     vec.clear();
+                    vec.reserve(target_size);
+                    if requires_header {
+                        vec.extend_from_slice(&[0xff, 0xff, 0xff, 0]);
+                    }
                     return vec;
                 }
             }
         }
-        Vec::new()
+        let mut vec = Vec::with_capacity(target_size);
+        if requires_header {
+            vec.extend_from_slice(&[0xff, 0xff, 0xff, 0]);
+        }
+        vec
     }
 }
 

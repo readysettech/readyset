@@ -11,7 +11,7 @@ use crate::value::ToMySqlValue;
 use crate::{writers, Column, ErrorKind, StatementData};
 
 pub(crate) const DEFAULT_ROW_CAPACITY: usize = 4096;
-pub(crate) const MAX_POOL_ROW_CAPACITY: usize = DEFAULT_ROW_CAPACITY * 4;
+pub(crate) const MAX_POOL_ROW_CAPACITY: usize = DEFAULT_ROW_CAPACITY * 8;
 pub(crate) const MAX_POOL_ROWS: usize = 4096;
 
 /// Convenience type for responding to a client `USE <db>` command.
@@ -281,6 +281,10 @@ pub struct RowWriter<'a, W: AsyncWrite + Unpin> {
     last_status_flags: Option<StatusFlags>,
     /// A buffer to hold row data
     row_data: Option<Vec<u8>>,
+
+    // the offset of the current row header, so that we can go back and update it
+    // after we've written the row data.
+    cur_row_header: usize,
 }
 
 impl<'a, W> RowWriter<'a, W>
@@ -306,6 +310,7 @@ where
             last_status_flags: None,
 
             row_data: None,
+            cur_row_header: 0,
         };
         rw.start().await?;
         Ok(rw)
@@ -345,14 +350,22 @@ where
         }
 
         let row_data = self.row_data.get_or_insert_with(|| {
-            let mut row_data = self.result.writer.get_buffer();
-            // We want to preallocate at least *some* capacity for the row, otherwise the
-            // incremental writes cause a whole lot of reallocations. Since Vec usually
-            // reallocates with exponential growth even small responses require at least
-            // a few reallocs unless we reserve some capacity.
-            row_data.reserve(DEFAULT_ROW_CAPACITY);
-            row_data
+            // allocate a little more than the max row capacity to avoid reallocations.
+            self.result
+                .writer
+                .get_buffer(MAX_POOL_ROW_CAPACITY * 12 / 10, false)
         });
+
+        // set the packet header. the header is the first 4 bytes of the packet: 3 bytes for size
+        // and 1 byte for sequence number. We don't know the size yet, so we'll set it later.
+        if self.col == 0 {
+            self.cur_row_header = row_data.len();
+            let seq = self.result.writer.next_seq();
+            // first three byte of header are the packet length, last byte is the sequence number
+            // use big endian to retain the seq in the last byte.
+            let hdr = (seq as u32).to_be_bytes();
+            row_data.extend_from_slice(&hdr);
+        }
 
         if self.result.is_bin {
             if self.col == 0 {
@@ -407,15 +420,26 @@ where
             ));
         }
 
-        if let Some(packet) = self.row_data.take() {
-            self.result.writer.enqueue_packet(packet);
+        // always set the packet length in the row header
+        if let Some(packet) = self.row_data.as_mut() {
+            let packet_len = packet.len() - (self.cur_row_header + 4);
+            let packet_len_bytes = (packet_len as u32).to_le_bytes();
+            packet[self.cur_row_header] = packet_len_bytes[0];
+            packet[self.cur_row_header + 1] = packet_len_bytes[1];
+            packet[self.cur_row_header + 2] = packet_len_bytes[2];
+            self.cur_row_header = packet.len();
+
+            if packet.len() > MAX_POOL_ROW_CAPACITY {
+                // Only take ownership when we need to enqueue
+                self.result
+                    .writer
+                    .enqueue_raw_raw(self.row_data.take().unwrap())
+                    .await?;
+                self.result.writer.flush().await?;
+            }
         }
 
         self.col = 0;
-
-        if self.result.writer.queue_len() > MAX_POOL_ROWS {
-            self.result.writer.flush().await?;
-        }
 
         Ok(())
     }
@@ -491,6 +515,15 @@ impl<'a, W: AsyncWrite + Unpin + 'a> RowWriter<'a, W> {
         if !self.columns.is_empty() && self.col != 0 {
             self.end_row().await?;
         }
+
+        // if there's any row data left, enqueue it.
+        if let Some(packet) = self.row_data.take() {
+            self.result.writer.enqueue_raw_raw(packet).await?;
+
+            // as we will have at least an EOF/OK packet that follows the last row packet,
+            // we don't need to flush here.
+        }
+
         self.finish_inner()?;
         Ok(self.result)
     }
