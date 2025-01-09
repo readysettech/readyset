@@ -244,6 +244,7 @@ impl TryFrom<ParamRef<'_>> for DfValue {
             PsqlValue::TimestampTz(v) => Ok(DfValue::from(*v)),
             PsqlValue::Date(v) => Ok((*v).into()),
             PsqlValue::Time(v) => Ok((*v).into()),
+            PsqlValue::TinyText(v) => Ok(v.as_str().into()),
             PsqlValue::ByteArray(b) => Ok(DfValue::ByteArray(Arc::new(b.clone()))),
             PsqlValue::MacAddress(m) => Ok(DfValue::from(m.to_string(MacAddressFormat::HexString))),
             PsqlValue::Inet(ip) => Ok(DfValue::from(ip.to_string())),

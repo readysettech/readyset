@@ -43,7 +43,7 @@ impl TryFrom<TypedDfValue<'_>> for PsqlValue {
             (_, DfValue::None) => Ok(PsqlValue::Null),
             (&Type::CHAR, DfValue::Int(v)) => Ok(PsqlValue::Char(v.try_into()?)),
             (&Type::VARCHAR, DfValue::Text(v)) => Ok(PsqlValue::VarChar(v)),
-            (&Type::VARCHAR, DfValue::TinyText(t)) => Ok(PsqlValue::VarChar(t.as_str().into())),
+            (&Type::VARCHAR, DfValue::TinyText(t)) => Ok(PsqlValue::TinyText(t)),
             (&Type::NAME, DfValue::Text(t)) => Ok(PsqlValue::Name(t)),
             (&Type::NAME, DfValue::TinyText(t)) => Ok(PsqlValue::Name(t.as_str().into())),
             (&Type::BPCHAR, DfValue::Text(v)) => Ok(PsqlValue::BpChar(v)),
@@ -67,7 +67,7 @@ impl TryFrom<TypedDfValue<'_>> for PsqlValue {
             )),
             (&Type::NUMERIC, DfValue::Numeric(ref d)) => Ok(PsqlValue::Numeric(*d.as_ref())),
             (&Type::TEXT, DfValue::Text(v)) => Ok(PsqlValue::Text(v)),
-            (&Type::TEXT, DfValue::TinyText(t)) => Ok(PsqlValue::Text(t.as_str().into())),
+            (&Type::TEXT, DfValue::TinyText(t)) => Ok(PsqlValue::TinyText(t)),
             (ty, DfValue::Text(v)) if ty.name() == "citext" => Ok(PsqlValue::Text(v)),
             (ty, DfValue::TinyText(t)) if ty.name() == "citext" => {
                 Ok(PsqlValue::Text(t.as_str().into()))
@@ -181,7 +181,7 @@ mod tests {
         };
         assert_eq!(
             PsqlValue::try_from(val).unwrap(),
-            PsqlValue::VarChar("aaaaaaaaaaaaaa".into())
+            PsqlValue::TinyText(TinyText::from_arr(b"aaaaaaaaaaaaaa"))
         );
     }
 
@@ -193,7 +193,7 @@ mod tests {
         };
         assert_eq!(
             PsqlValue::try_from(val).unwrap(),
-            PsqlValue::Text("aaaaaaaaaaaaaa".into())
+            PsqlValue::TinyText(TinyText::from_arr(b"aaaaaaaaaaaaaa"))
         );
     }
 }

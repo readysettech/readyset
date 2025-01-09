@@ -539,6 +539,9 @@ fn put_binary_value(val: &PsqlValue, dst: &mut BytesMut) -> Result<(), Error> {
         PsqlValue::Text(v) => {
             v.as_bytes().to_sql(&Type::TEXT, dst)?;
         }
+        PsqlValue::TinyText(v) => {
+            v.as_bytes().to_sql(&Type::TEXT, dst)?;
+        }
         PsqlValue::Timestamp(v) => {
             v.to_sql(&Type::TIMESTAMP, dst)?;
         }
@@ -616,6 +619,9 @@ fn put_text_value(val: &PsqlValue, dst: &mut BytesMut) -> Result<(), Error> {
             write!(dst, "{}", text)?;
         }
         PsqlValue::BpChar(v) | PsqlValue::VarChar(v) | PsqlValue::Name(v) | PsqlValue::Text(v) => {
+            dst.extend_from_slice(v.as_bytes());
+        }
+        PsqlValue::TinyText(v) => {
             dst.extend_from_slice(v.as_bytes());
         }
         PsqlValue::Char(v) => {
