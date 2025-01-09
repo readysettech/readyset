@@ -105,7 +105,7 @@ mod types {
                     .await
                     .unwrap()
                     .first()
-                    .expect("Should have at least one value equal to {v:?}")
+                    .unwrap_or_else(|| panic!("Should have at least one value equal to {v:?}"))
                     .get::<_, V>(0);
                 assert_eq!(fallback_result, *v);
             }

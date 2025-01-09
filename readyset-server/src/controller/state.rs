@@ -1024,7 +1024,7 @@ impl DfState {
             .filter(|(d, _)| {
                 self.domains
                     .get(d)
-                    .map_or(true, |dh| !dh.all_replicas_placed())
+                    .is_none_or(|dh| !dh.all_replicas_placed())
             })
             .map(|(k, v)| (*k, v.values().copied().collect()))
             .collect()
