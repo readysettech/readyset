@@ -5,7 +5,7 @@ use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime};
 use cidr::IpInet;
 use eui48::MacAddress;
 use postgres_types::{FromSql, Kind, Type};
-use readyset_data::{Array, PassThroughFormat, Text};
+use readyset_data::{Array, PassThroughFormat, Text, TinyText};
 use rust_decimal::Decimal;
 use uuid::Uuid;
 
@@ -26,6 +26,7 @@ pub enum PsqlValue {
     Float(f32),
     Numeric(Decimal),
     Text(Text),
+    TinyText(TinyText),
     Timestamp(NaiveDateTime),
     TimestampTz(DateTime<FixedOffset>),
     Date(NaiveDate),
