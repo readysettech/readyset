@@ -182,7 +182,6 @@ impl<'a> NoriaAdapter<'a> {
         let mut full_snapshot = false;
         let url: DatabaseURL = config
             .get_cdc_db_url()
-            .take()
             .ok_or_else(|| internal_err!("Replication URL not supplied"))?
             .parse()
             .map_err(|e| {

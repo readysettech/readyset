@@ -176,7 +176,7 @@ impl<'state> Scheduler<'state> {
                     .filter(|(wi, _)| {
                         self.scheduled_shards
                             .get(wi)
-                            .map_or(true, |shards| !shards.contains(&(domain_index, shard)))
+                            .is_none_or(|shards| !shards.contains(&(domain_index, shard)))
                     })
                     .collect::<Vec<_>>();
 

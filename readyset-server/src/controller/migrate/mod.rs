@@ -863,7 +863,7 @@ impl<'df> Migration<'df> {
                 debug_assert!(
                     {
                         let node = &self.dataflow_state.ingredients[ni];
-                        let name_matches = name.map_or(true, |n| *node.name() == n);
+                        let name_matches = name.is_none_or(|n| *node.name() == n);
                         name_matches
                             && *node
                                 .as_reader()

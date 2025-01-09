@@ -135,7 +135,7 @@ impl TimestampTz {
             offset[2] & TimestampTz::TOP_OFFSET_BIT | self.extra[2] & !TimestampTz::TOP_OFFSET_BIT;
         self.extra[2] &= !TimestampTz::NEGATIVE_FLAG;
         self.extra[2] |=
-            sign << TimestampTz::NEGATIVE_FLAG.trailing_zeros() & TimestampTz::NEGATIVE_FLAG;
+            (sign << TimestampTz::NEGATIVE_FLAG.trailing_zeros()) & TimestampTz::NEGATIVE_FLAG;
         self.extra[2] |= TimestampTz::TIMEZONE_FLAG;
     }
 

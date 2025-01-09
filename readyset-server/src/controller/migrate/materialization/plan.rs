@@ -187,7 +187,7 @@ impl<'a> Plan<'a> {
                 p.target().index.iter().all(|idx| {
                     self.parent_indexes
                         .get(&p.target().node)
-                        .map_or(true, |idxs| !idxs.contains(idx))
+                        .is_none_or(|idxs| !idxs.contains(idx))
                 })
             } else {
                 p.target()

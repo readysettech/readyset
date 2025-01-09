@@ -424,7 +424,7 @@ struct CompactionThreadHandle {
 
 impl CompactionThreadHandle {
     fn is_finished(&self) -> bool {
-        self.handle.as_ref().map_or(true, |h| h.is_finished())
+        self.handle.as_ref().is_none_or(|h| h.is_finished())
     }
 
     fn join(&mut self) {

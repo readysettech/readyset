@@ -1145,7 +1145,7 @@ mod tests {
         fn col_vec_from_int(key: usize) -> Vec<usize> {
             let mut v = Vec::with_capacity(NUM_COLS);
             for i in 0..NUM_COLS {
-                if key & 1 << i != 0 {
+                if key & (1 << i) != 0 {
                     v.push(i);
                 }
             }

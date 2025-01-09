@@ -241,7 +241,7 @@ impl PostgresWalConnector {
 
         if let Some(reader) = reader.as_mut() {
             select! {
-                ev = reader.next_event().fuse() => ev.map_err(Into::into),
+                ev = reader.next_event().fuse() => ev,
                 err = connection_handle.fuse() => match err {
                     Err(e) => Err(ReadySetError::UpstreamConnectionLost(e.to_string())),
                     Ok(Ok(_)) => unreachable!(), // Unreachable because it runs in infinite loop unless errors

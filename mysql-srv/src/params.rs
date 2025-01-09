@@ -123,7 +123,7 @@ impl<'a> Iterator for Params<'a> {
             if byte >= nullmap.len() {
                 return None;
             }
-            if (nullmap[byte] & 1u8 << (self.col % 8)) != 0 {
+            if nullmap[byte] & (1u8 << (self.col % 8)) != 0 {
                 self.col += 1;
                 return Some(Ok(ParamValue {
                     value: Value::null(),
