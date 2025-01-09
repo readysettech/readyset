@@ -9,6 +9,10 @@ common_values:
       - exit_status: -1            # agent timed out
         signal_reason: none
         limit: 3
+
+env:
+  ECR_PLUGIN_VERSION: "v2.9.0"
+
 steps:
 
   - label: ':rust: Check rustfmt'
@@ -28,7 +32,7 @@ steps:
           - SCCACHE_REGION=us-east-2
           - CARGO_INCREMENTAL=0
           - RUST_BACKTRACE=full
-      - ecr#v2.7.0:
+      - ecr#${ECR_PLUGIN_VERSION}:
           login: true
           retries: 3
     retry: *retry_on_agent_kill
@@ -48,7 +52,7 @@ steps:
           - SCCACHE_REGION=us-east-2
           - CARGO_INCREMENTAL=0
           - RUST_BACKTRACE=full
-      - ecr#v2.7.0:
+      - ecr#${ECR_PLUGIN_VERSION}:
           login: true
           retries: 3
     retry: *retry_on_agent_kill
@@ -71,7 +75,7 @@ steps:
           - SCCACHE_REGION=us-east-2
           - CARGO_INCREMENTAL=0
           - RUST_BACKTRACE=full
-      - ecr#v2.7.0:
+      - ecr#${ECR_PLUGIN_VERSION}:
           login: true
           retries: 3
     retry: *retry_on_agent_kill
@@ -104,7 +108,7 @@ steps:
             - "${GIT_PUBLIC_ROOT}build/docker-compose.ci-test.yml"
           mount-buildkite-agent: true
           pull-retries: 3
-      - ecr#v2.7.0:
+      - ecr#${ECR_PLUGIN_VERSION}:
           login: true
           retries: 3
     agents:
@@ -135,7 +139,7 @@ steps:
             - "${GIT_PUBLIC_ROOT}build/docker-compose.yml"
             - "${GIT_PUBLIC_ROOT}build/docker-compose.ci-test.yml"
           pull-retries: 3
-      - ecr#v2.7.0:
+      - ecr#${ECR_PLUGIN_VERSION}:
           login: true
           retries: 3
     retry: *retry_on_agent_kill
@@ -164,7 +168,7 @@ steps:
             - "${GIT_PUBLIC_ROOT}build/docker-compose.yml"
             - "${GIT_PUBLIC_ROOT}build/docker-compose.ci-test.yml"
           pull-retries: 3
-      - ecr#v2.7.0:
+      - ecr#${ECR_PLUGIN_VERSION}:
           login: true
           retries: 3
     retry: *retry_on_agent_kill
