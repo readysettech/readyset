@@ -14,6 +14,7 @@ common_values:
 
 env:
   ECR_PLUGIN_VERSION: "v2.9.0"
+  BUILDKIT_PROGRESS: "plain"
 
 steps:
   # TODO: ronh: decide what kind of linting we want in the OSS pipeline
