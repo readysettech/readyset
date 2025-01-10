@@ -66,7 +66,7 @@ if [ -n "${SKIP_IF_UNCHANGED+1}" ]; then
 fi
 
 echo "--- :docker: Pulling $image:latest"
-if docker pull "$image:latest"; then
+if docker pull --quiet "$image:latest"; then
     cache_from="--cache-from=$image:latest"
 else
     echo "Failed to pull previous build of image"
@@ -77,6 +77,7 @@ build_cmd_prefix=(
     "docker" "build" \
     "-f" "$dockerfile" \
     "-t" "$image:$VERSION" \
+    "--progress" "plain" \
     "--build-arg" "BUILDKIT_INLINE_CACHE=1" \
 )
 build_cmd_suffix=(
