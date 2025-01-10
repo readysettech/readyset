@@ -16,6 +16,7 @@ byteorder = { workspace = true }
 bytes = { workspace = true }
 chrono = { workspace = true }
 getrandom = { workspace = true }
+itoa = { workspace = true }
 mysql-time = { path = "../mysql-time" }
 mysql_async = { workspace = true }
 mysql_common = { workspace = true, features = ["chrono"] }

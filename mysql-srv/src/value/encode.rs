@@ -32,6 +32,16 @@ macro_rules! mysql_text_trivial {
     };
 }
 
+macro_rules! mysql_text_numeric {
+    () => {
+        fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()> {
+            let mut buffer = itoa::Buffer::new();
+            let s = buffer.format(*self);
+            w.write_lenenc_str(s.as_bytes()).map(|_| ())
+        }
+    };
+}
+
 use std::fmt;
 fn bad<V: fmt::Debug>(v: V, c: &Column) -> io::Error {
     io::Error::new(
@@ -95,7 +105,7 @@ macro_rules! like_try_into {
 macro_rules! forgiving_numeric {
     ($t:ty) => {
         impl ToMySqlValue for $t {
-            mysql_text_trivial!();
+            mysql_text_numeric!();
             fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
                 let signed = !c.colflags.contains(ColumnFlags::UNSIGNED_FLAG);
                 match c.coltype {
@@ -138,7 +148,7 @@ forgiving_numeric!(usize);
 forgiving_numeric!(isize);
 
 impl ToMySqlValue for u8 {
-    mysql_text_trivial!();
+    mysql_text_numeric!();
     fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
         let signed = !c.colflags.contains(ColumnFlags::UNSIGNED_FLAG);
         match c.coltype {
@@ -173,7 +183,7 @@ impl ToMySqlValue for u8 {
 }
 
 impl ToMySqlValue for i8 {
-    mysql_text_trivial!();
+    mysql_text_numeric!();
     fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
         let signed = !c.colflags.contains(ColumnFlags::UNSIGNED_FLAG);
         match c.coltype {
@@ -208,7 +218,7 @@ impl ToMySqlValue for i8 {
 }
 
 impl ToMySqlValue for u16 {
-    mysql_text_trivial!();
+    mysql_text_numeric!();
     fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
         let signed = !c.colflags.contains(ColumnFlags::UNSIGNED_FLAG);
         match c.coltype {
@@ -236,7 +246,7 @@ impl ToMySqlValue for u16 {
 }
 
 impl ToMySqlValue for i16 {
-    mysql_text_trivial!();
+    mysql_text_numeric!();
     fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
         let signed = !c.colflags.contains(ColumnFlags::UNSIGNED_FLAG);
         match c.coltype {
@@ -264,7 +274,7 @@ impl ToMySqlValue for i16 {
 }
 
 impl ToMySqlValue for u32 {
-    mysql_text_trivial!();
+    mysql_text_numeric!();
     fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
         let signed = !c.colflags.contains(ColumnFlags::UNSIGNED_FLAG);
         match c.coltype {
@@ -285,7 +295,7 @@ impl ToMySqlValue for u32 {
 }
 
 impl ToMySqlValue for i32 {
-    mysql_text_trivial!();
+    mysql_text_numeric!();
     fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
         let signed = !c.colflags.contains(ColumnFlags::UNSIGNED_FLAG);
         match c.coltype {
@@ -306,7 +316,7 @@ impl ToMySqlValue for i32 {
 }
 
 impl ToMySqlValue for u64 {
-    mysql_text_trivial!();
+    mysql_text_numeric!();
     fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
         let signed = !c.colflags.contains(ColumnFlags::UNSIGNED_FLAG);
         match c.coltype {
@@ -320,7 +330,7 @@ impl ToMySqlValue for u64 {
 }
 
 impl ToMySqlValue for i64 {
-    mysql_text_trivial!();
+    mysql_text_numeric!();
     fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
         let signed = !c.colflags.contains(ColumnFlags::UNSIGNED_FLAG);
         match c.coltype {
