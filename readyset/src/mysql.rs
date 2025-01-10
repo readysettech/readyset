@@ -4,14 +4,17 @@ use mysql_srv::MySqlIntermediary;
 use readyset_adapter::upstream_database::LazyUpstream;
 use readyset_mysql::{MySqlQueryHandler, MySqlUpstream};
 use tokio::net::TcpStream;
+use tokio_native_tls::TlsAcceptor;
 use tracing::{debug, error, instrument};
+use std::sync::Arc;
 
 use crate::ConnectionHandler;
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct MySqlHandler {
     /// Whether to log statements received by the client
     pub enable_statement_logging: bool,
+    pub tls_acceptor: Option<Arc<TlsAcceptor>>,
 }
 
 impl ConnectionHandler for MySqlHandler {
@@ -31,6 +34,7 @@ impl ConnectionHandler for MySqlHandler {
             },
             stream,
             self.enable_statement_logging,
+            self.tls_acceptor.clone(),
         )
         .await
         {

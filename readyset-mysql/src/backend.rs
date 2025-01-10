@@ -25,7 +25,7 @@ use readyset_data::{DfType, DfValue, DfValueKind};
 use readyset_errors::{internal, ReadySetError};
 use readyset_util::redacted::Sensitive;
 use streaming_iterator::StreamingIterator;
-use tokio::io::{self, AsyncWrite};
+use tokio::io::{self, AsyncRead, AsyncWrite};
 use tracing::{error, info, trace};
 use upstream::StatementMeta;
 
@@ -519,7 +519,7 @@ where
 
 impl<W> MySqlShim<W> for Backend
 where
-    W: AsyncWrite + Unpin + Send + 'static,
+    W: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     async fn on_prepare(
         &mut self,

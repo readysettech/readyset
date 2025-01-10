@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tokio::io::AsyncWrite;
 
 use crate::myc::constants::{ColumnFlags, StatusFlags};
-use crate::packet::PacketWriter;
+use crate::packet::PacketConn;
 use crate::value::ToMySqlValue;
 use crate::{writers, Column, ErrorKind, StatementData};
 
@@ -16,7 +16,7 @@ pub(crate) const MAX_POOL_ROWS: usize = 4096;
 
 /// Convenience type for responding to a client `USE <db>` command.
 pub struct InitWriter<'a, W: AsyncWrite + Unpin> {
-    pub(crate) writer: &'a mut PacketWriter<W>,
+    pub(crate) writer: &'a mut PacketConn<W>,
 }
 
 impl<'a, W: AsyncWrite + Unpin + 'a> InitWriter<'a, W> {
@@ -44,7 +44,7 @@ impl<'a, W: AsyncWrite + Unpin + 'a> InitWriter<'a, W> {
 /// [`error`](struct.StatementMetaWriter.html#method.error).
 #[must_use]
 pub struct StatementMetaWriter<'a, W: AsyncWrite + Unpin> {
-    pub(crate) writer: &'a mut PacketWriter<W>,
+    pub(crate) writer: &'a mut PacketConn<W>,
     pub(crate) stmts: &'a mut HashMap<u32, StatementData>,
 }
 
@@ -116,12 +116,12 @@ enum Finalizer {
 pub struct QueryResultWriter<'a, W: AsyncWrite + Unpin> {
     // XXX: specialization instead?
     pub(crate) is_bin: bool,
-    pub(crate) writer: &'a mut PacketWriter<W>,
+    pub(crate) writer: &'a mut PacketConn<W>,
     last_end: Option<Finalizer>,
 }
 
 impl<'a, W: AsyncWrite + Unpin> QueryResultWriter<'a, W> {
-    pub(crate) fn new(writer: &'a mut PacketWriter<W>, is_bin: bool) -> Self {
+    pub(crate) fn new(writer: &'a mut PacketConn<W>, is_bin: bool) -> Self {
         QueryResultWriter {
             is_bin,
             writer,

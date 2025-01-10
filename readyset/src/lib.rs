@@ -63,6 +63,10 @@ use tokio_stream::wrappers::TcpListenerStream;
 use tracing::{debug, debug_span, error, info, info_span, span, warn, Level};
 use tracing_futures::Instrument;
 
+use tokio_native_tls::{native_tls, TlsAcceptor};
+use readyset_dataflow::prelude::ReadySetResult;
+use std::io::Read;
+
 // readyset_alloc initializes the global allocator
 extern crate readyset_alloc;
 
@@ -390,6 +394,22 @@ pub struct Options {
     /// If set, `address` will reject cache ddl statements.
     #[arg(long, env = "CACHE_DDL_ADDRESS", hide = true)]
     cache_ddl_address: Option<SocketAddr>,
+
+    /// The pkcs12 identity file (certificate and key) used by ReadySet for establishing TLS
+    /// connections as the server.
+    ///
+    /// ReadySet will not accept TLS connections if there is no identity file specified.
+    #[arg(long, env = "READYSET_IDENTITY_FILE")]
+    readyset_identity_file: Option<String>,
+
+    /// Password for the pkcs12 identity file used by ReadySet for establishing TLS connections as
+    /// the server.
+    ///
+    /// If password is not provided, ReadySet will try using an empty string to unlock the identity
+    /// file.
+    #[arg(long, requires = "readyset_identity_file")]
+    readyset_identity_file_password: Option<String>,
+
 }
 
 impl Options {
@@ -459,6 +479,35 @@ impl Options {
                 }
                 Ok(dt)
             }
+        }
+    }
+
+    /// Load the `native_tls::Identity` from user provided `Options`.
+    fn load_pkcs12_identity(&self) -> ReadySetResult<Option<native_tls::Identity>> {
+        let Some(ref path) = self.readyset_identity_file else {
+            return Ok(None);
+        };
+
+        let mut identity_file = std::fs::File::open(path)?;
+        let mut identity = vec![];
+        identity_file.read_to_end(&mut identity)?;
+
+        let password = self
+            .readyset_identity_file_password
+            .clone()
+            .unwrap_or_default();
+
+        Ok(Some(native_tls::Identity::from_pkcs12(
+            &identity, &password,
+        )?))
+    }
+
+    pub fn tls_acceptor(&self) -> Option<Arc<TlsAcceptor>> {
+        match self.load_pkcs12_identity().ok()? {
+            Some(identity) => Some(Arc::new(TlsAcceptor::from(native_tls::TlsAcceptor::new(
+                identity,
+            ).ok()?))),
+            None => None,
         }
     }
 }

@@ -27,6 +27,7 @@ tracing = { workspace = true }
 
 readyset-adapter-types = { path = "../readyset-adapter-types" }
 readyset-data = { path = "../readyset-data" }
+tokio-native-tls.workspace = true
 
 [dev-dependencies]
 tokio-postgres = { workspace = true }

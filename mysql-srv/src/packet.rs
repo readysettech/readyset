@@ -6,11 +6,19 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use crate::error::{other_error, OtherErrorKind};
 use crate::resultset::{MAX_POOL_ROWS, MAX_POOL_ROW_CAPACITY};
 
+use crate::tls::StreamType;
+
 const U24_MAX: usize = 16_777_215;
 
-pub struct PacketWriter<W> {
+pub struct PacketConn<S> {
+    // read variables
+    bytes: Vec<u8>,
+    start: usize,
+    remaining: usize,
+    
+    // write variables
     pub seq: u8,
-    w: W,
+    pub stream: StreamType<S>,
     queue: Vec<QueuedPacket>,
 
     /// Reusable packets
@@ -75,16 +83,23 @@ fn queued_packet_slices(queue: &[QueuedPacket]) -> Vec<IoSlice<'_>> {
     slices
 }
 
-impl<W: AsyncWrite + Unpin> PacketWriter<W> {
-    pub fn new(w: W) -> Self {
-        PacketWriter {
+impl<S: AsyncRead + AsyncWrite + Unpin> PacketConn<S> {
+    pub fn new(s: S) -> Self {
+        let s = StreamType::Plain(s);
+        PacketConn {
+            bytes: Vec::new(),
+            start: 0,
+            remaining: 0,
             seq: 0,
-            w,
+            stream: s,
             queue: Vec::new(),
             preallocated: Vec::new(),
         }
     }
+    
+}
 
+impl<S: AsyncWrite + Unpin> PacketConn<S> {
     pub fn set_seq(&mut self, seq: u8) {
         self.seq = seq;
     }
@@ -93,7 +108,7 @@ impl<W: AsyncWrite + Unpin> PacketWriter<W> {
     /// or writes may be lossed.
     pub async fn flush(&mut self) -> Result<(), tokio::io::Error> {
         self.write_queued_packets().await?;
-        self.w.flush().await
+        self.stream.flush().await
     }
 
     /// Push a new packet to the outgoing packet list
@@ -131,7 +146,7 @@ impl<W: AsyncWrite + Unpin> PacketWriter<W> {
     pub async fn write_queued_packets(&mut self) -> Result<(), tokio::io::Error> {
         let mut slices = queued_packet_slices(&self.queue);
         if !slices.is_empty() {
-            write_all_vectored(&mut self.w, &mut slices).await?;
+            write_all_vectored(&mut self.stream, &mut slices).await?;
             self.return_queued_to_pool();
         }
 
@@ -172,7 +187,7 @@ impl<W: AsyncWrite + Unpin> PacketWriter<W> {
             }
         }
 
-        write_all_vectored(&mut self.w, &mut slices).await?;
+        write_all_vectored(&mut self.stream, &mut slices).await?;
         self.return_queued_to_pool();
 
         Ok(())
@@ -207,7 +222,7 @@ impl<W: AsyncWrite + Unpin> PacketWriter<W> {
             IoSlice::new(packet),
         ]);
 
-        write_all_vectored(&mut self.w, &mut slices).await?;
+        write_all_vectored(&mut self.stream, &mut slices).await?;
 
         self.seq = self.seq.wrapping_add(1);
         Ok(())
@@ -227,26 +242,9 @@ impl<W: AsyncWrite + Unpin> PacketWriter<W> {
     }
 }
 
-pub struct PacketReader<R> {
-    bytes: Vec<u8>,
-    start: usize,
-    remaining: usize,
-    r: R,
-}
 
-impl<R> PacketReader<R> {
-    pub fn new(r: R) -> Self {
-        PacketReader {
-            bytes: Vec::new(),
-            start: 0,
-            remaining: 0,
-            r,
-        }
-    }
-}
-
-impl<R: AsyncRead + Unpin> PacketReader<R> {
-    pub async fn next(&mut self) -> io::Result<Option<(u8, Packet<'_>)>> {
+impl<S: AsyncRead + Unpin> PacketConn<S> {
+    pub async fn next(&mut self) -> io::Result<Option<(u8, Packet)>> {
         self.start = self.bytes.len() - self.remaining;
 
         loop {
@@ -294,7 +292,7 @@ impl<R: AsyncRead + Unpin> PacketReader<R> {
                         length: new_len,
                     })
                 })?;
-                self.r.read(buf).await?
+                self.stream.read(buf).await?
             };
             self.bytes.truncate(end + read);
             self.remaining = self.bytes.len();
@@ -327,41 +325,23 @@ pub fn onepacket(i: &[u8]) -> nom::IResult<&[u8], (u8, &[u8])> {
     Ok((i, (seq[0], bytes)))
 }
 
-pub struct Packet<'a>(&'a [u8], Vec<u8>);
+pub struct Packet(Vec<u8>);
 
-impl<'a> Packet<'a> {
-    fn extend(&mut self, bytes: &'a [u8]) {
-        if self.0.is_empty() {
-            if self.1.is_empty() {
-                // first extend
-                self.0 = bytes;
-            } else {
-                // later extend
-                self.1.extend(bytes);
-            }
-        } else {
-            assert!(self.1.is_empty());
-            let mut v = self.0.to_vec();
-            v.extend(bytes);
-            self.1 = v;
-            self.0 = &[];
-        }
+impl Packet {
+    fn extend(&mut self, bytes: &[u8]) {
+        self.0.extend(bytes);
     }
 }
 
-impl AsRef<[u8]> for Packet<'_> {
+impl AsRef<[u8]> for Packet {
     fn as_ref(&self) -> &[u8] {
-        if self.1.is_empty() {
-            self.0
-        } else {
-            &self.1
-        }
+        &self.0
     }
 }
 
 use std::ops::Deref;
 
-impl Deref for Packet<'_> {
+impl Deref for Packet {
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
@@ -369,19 +349,19 @@ impl Deref for Packet<'_> {
     }
 }
 
-fn packet(i: &[u8]) -> nom::IResult<&[u8], (u8, Packet<'_>)> {
+fn packet(i: &[u8]) -> nom::IResult<&[u8], (u8, Packet)> {
     nom::combinator::map(
         nom::sequence::pair(
             nom::multi::fold_many0(
                 fullpacket,
                 || (0, None),
-                |(seq, pkt): (_, Option<Packet<'_>>), (nseq, p)| {
+                |(seq, pkt): (_, Option<Packet>), (nseq, p)| {
                     let pkt = if let Some(mut pkt) = pkt {
                         assert_eq!(nseq, seq + 1);
                         pkt.extend(p);
                         Some(pkt)
                     } else {
-                        Some(Packet(p, Vec::new()))
+                        Some(Packet(Vec::from(p)))
                     };
                     (nseq, pkt)
                 },
@@ -395,7 +375,7 @@ fn packet(i: &[u8]) -> nom::IResult<&[u8], (u8, Packet<'_>)> {
                 pkt.extend(last.1);
                 pkt
             } else {
-                Packet(last.1, Vec::new())
+                Packet(Vec::from(last.1))
             };
             (seq, pkt)
         },
