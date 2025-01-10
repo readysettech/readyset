@@ -3,6 +3,12 @@
 # valuable unless you're working on related code. In which case, run with --ignore-default-filter.
 default-filter = 'not test(test_large_packet_write)'
 
+[profile.ci]
+default-filter = 'all()'
+fail-fast = false
+retries = 1
+failure-output = "immediate-final"
+
 [test-groups]
 serial = { max-threads = 1 }
 serial-postgres = { max-threads = 1 }

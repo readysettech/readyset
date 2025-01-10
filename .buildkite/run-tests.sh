@@ -10,6 +10,7 @@ upload_artifacts() {
 
 export DISABLE_TELEMETRY=true
 export PROPTEST_MAX_SHRINK_TIME=1800000
+export CARGO_TERM_PROGRESS_WHEN=never
 
 # If we aren't actually running run-tests.sh as a parallel job, just follow the
 # "job 0" path.
@@ -18,18 +19,16 @@ export PROPTEST_MAX_SHRINK_TIME=1800000
 if [[ "$BUILDKITE_PARALLEL_JOB" == "0" ]]; then
     # Run nextest
     echo "+++ :rust: Run tests (nextest)"
-    cargo --locked nextest run --workspace \
-        --ignore-default-filter --hide-progress-bar \
-        --features failure_injection \
+    cargo --locked nextest run --profile ci --hide-progress-bar \
+        --workspace --features failure_injection \
         --exclude readyset-clustertest --exclude benchmarks \
         || upload_artifacts
 elif [[ "$BUILDKITE_PARALLEL_JOB" == "1" ]]; then
     # Run doctests, because at this time nextest does not support doctests
     echo "+++ :rust: Run tests (doctest)"
-    cargo --locked test --workspace \
-        --features failure_injection \
+    cargo --locked test --doc \
+        --workspace --features failure_injection \
         --exclude readyset-clustertest --exclude benchmarks \
-        --doc \
         || upload_artifacts
 else
     echo "No command defined for this parallel job."
