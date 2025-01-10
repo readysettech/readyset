@@ -3042,6 +3042,7 @@ dependencies = [
  "chrono",
  "futures",
  "getrandom",
+ "itoa",
  "mysql",
  "mysql-time",
  "mysql_async",
