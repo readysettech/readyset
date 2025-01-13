@@ -208,9 +208,12 @@ fn encode(message: BackendMessage, dst: &mut BytesMut) -> Result<(), Error> {
             put_i32(LENGTH_PLACEHOLDER, dst);
             put_i16(COUNT_PLACEHOLDER, dst);
             let mut n_values = 0;
-            for (i, v) in values.into_iter().enumerate() {
+            loop {
+                let Some(v) = values.get(n_values) else {
+                    break;
+                };
                 let format = match explicit_transfer_formats {
-                    Some(ref fs) => *fs.get(i).ok_or_else(|| {
+                    Some(ref fs) => *fs.get(n_values).ok_or_else(|| {
                         Error::InternalError("incorrect DataRow transfer format length".to_string())
                     })?,
                     None => Text,
@@ -220,6 +223,7 @@ fn encode(message: BackendMessage, dst: &mut BytesMut) -> Result<(), Error> {
                     Binary => put_binary_value(v, dst)?,
                     Text => put_text_value(v, dst)?,
                 };
+
                 n_values += 1;
             }
             // Update the value count field to match the number of values just serialized.
@@ -483,8 +487,8 @@ fn put_type(val: Type, dst: &mut BytesMut) -> Result<(), Error> {
     Ok(())
 }
 
-fn put_binary_value(val: PsqlValue, dst: &mut BytesMut) -> Result<(), Error> {
-    if val == PsqlValue::Null {
+fn put_binary_value(val: &PsqlValue, dst: &mut BytesMut) -> Result<(), Error> {
+    if val == &PsqlValue::Null {
         put_i32(LENGTH_NULL_SENTINEL, dst);
         return Ok(());
     }
@@ -572,7 +576,7 @@ fn put_binary_value(val: PsqlValue, dst: &mut BytesMut) -> Result<(), Error> {
             bits.to_sql(&Type::VARBIT, dst)?;
         }
         PsqlValue::Array(arr, ty) => {
-            arr.to_sql(&ty, dst)?;
+            arr.to_sql(ty, dst)?;
         }
         PsqlValue::PassThrough(p) => {
             dst.put(&p.data[..]);
@@ -585,12 +589,12 @@ fn put_binary_value(val: PsqlValue, dst: &mut BytesMut) -> Result<(), Error> {
     Ok(())
 }
 
-fn put_text_value(val: PsqlValue, dst: &mut BytesMut) -> Result<(), Error> {
+fn put_text_value(val: &PsqlValue, dst: &mut BytesMut) -> Result<(), Error> {
     use std::fmt::Write;
 
     // A void type (OID 2278) indicates that the called function returns no value. This is handled
     // as a special case since we don't support PassThrough values in the Text protocol
-    if val == PsqlValue::Null || matches!(val, PsqlValue::PassThrough(ref p) if p.ty.oid() == 2278)
+    if val == &PsqlValue::Null || matches!(val, PsqlValue::PassThrough(ref p) if p.ty.oid() == 2278)
     {
         put_i32(LENGTH_NULL_SENTINEL, dst);
         return Ok(());
@@ -604,7 +608,7 @@ fn put_text_value(val: PsqlValue, dst: &mut BytesMut) -> Result<(), Error> {
             unreachable!("Null is handled as a special case above.");
         }
         PsqlValue::Bool(v) => {
-            let text = if v {
+            let text = if *v {
                 BOOL_TRUE_TEXT_REP
             } else {
                 BOOL_FALSE_TEXT_REP
@@ -615,7 +619,7 @@ fn put_text_value(val: PsqlValue, dst: &mut BytesMut) -> Result<(), Error> {
             dst.extend_from_slice(v.as_bytes());
         }
         PsqlValue::Char(v) => {
-            dst.put_i8(v);
+            dst.put_i8(*v);
         }
         PsqlValue::Int(v) => {
             write!(dst, "{}", v)?;
@@ -627,18 +631,18 @@ fn put_text_value(val: PsqlValue, dst: &mut BytesMut) -> Result<(), Error> {
             write!(dst, "{}", v)?;
         }
         PsqlValue::Oid(v) => {
-            write!(dst, "{}", v)?;
+            write!(dst, "{}", *v)?;
         }
         PsqlValue::Double(v) => {
             // TODO: Ensure all values are properly serialized, including +/-0 and +/-inf.
-            write!(dst, "{}", v)?;
+            write!(dst, "{}", *v)?;
         }
         PsqlValue::Float(v) => {
             // TODO: Ensure all values are properly serialized, including +/-0 and +/-inf.
-            write!(dst, "{}", v)?;
+            write!(dst, "{}", *v)?;
         }
         PsqlValue::Numeric(v) => {
-            write!(dst, "{}", v)?;
+            write!(dst, "{}", *v)?;
         }
         PsqlValue::Timestamp(v) => {
             // TODO: Does not correctly handle all valid timestamp representations. For example,
@@ -1277,7 +1281,7 @@ mod tests {
     #[test]
     fn test_encode_binary_null() {
         let mut buf = BytesMut::new();
-        put_binary_value(PsqlValue::Null, &mut buf).unwrap();
+        put_binary_value(&PsqlValue::Null, &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(-1); // null sentinel
         assert_eq!(buf, exp);
@@ -1286,7 +1290,7 @@ mod tests {
     #[test]
     fn test_encode_binary_bool() {
         let mut buf = BytesMut::new();
-        put_binary_value(PsqlValue::Bool(true), &mut buf).unwrap();
+        put_binary_value(&PsqlValue::Bool(true), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(1); // length
         exp.put_u8(1); // value
@@ -1296,7 +1300,7 @@ mod tests {
     #[test]
     fn test_encode_binary_char() {
         let mut buf = BytesMut::new();
-        put_binary_value(PsqlValue::Char(8), &mut buf).unwrap();
+        put_binary_value(&PsqlValue::Char(8), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(1); // length
         exp.put_i8(8); // value
@@ -1306,7 +1310,7 @@ mod tests {
     #[test]
     fn test_encode_binary_varchar() {
         let mut buf = BytesMut::new();
-        put_binary_value(PsqlValue::VarChar("some stuff".into()), &mut buf).unwrap();
+        put_binary_value(&PsqlValue::VarChar("some stuff".into()), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(10); // length
         exp.extend_from_slice(b"some stuff"); // value
@@ -1316,7 +1320,7 @@ mod tests {
     #[test]
     fn test_encode_binary_bpchar() {
         let mut buf = BytesMut::new();
-        put_binary_value(PsqlValue::BpChar("some stuff".into()), &mut buf).unwrap();
+        put_binary_value(&PsqlValue::BpChar("some stuff".into()), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(10); // length
         exp.extend_from_slice(b"some stuff"); // value
@@ -1326,7 +1330,7 @@ mod tests {
     #[test]
     fn test_encode_binary_int() {
         let mut buf = BytesMut::new();
-        put_binary_value(PsqlValue::Int(0x1234567), &mut buf).unwrap();
+        put_binary_value(&PsqlValue::Int(0x1234567), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(4); // length
         exp.put_i32(0x1234567); // value
@@ -1336,7 +1340,7 @@ mod tests {
     #[test]
     fn test_encode_binary_big_int() {
         let mut buf = BytesMut::new();
-        put_binary_value(PsqlValue::BigInt(0x1234567890abcdef), &mut buf).unwrap();
+        put_binary_value(&PsqlValue::BigInt(0x1234567890abcdef), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(8); // length
         exp.put_i64(0x1234567890abcdef); // value
@@ -1346,7 +1350,7 @@ mod tests {
     #[test]
     fn test_encode_binary_small_int() {
         let mut buf = BytesMut::new();
-        put_binary_value(PsqlValue::SmallInt(0x1234), &mut buf).unwrap();
+        put_binary_value(&PsqlValue::SmallInt(0x1234), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(2); // length
         exp.put_i16(0x1234); // value
@@ -1356,7 +1360,7 @@ mod tests {
     #[test]
     fn test_encode_binary_double() {
         let mut buf = BytesMut::new();
-        put_binary_value(PsqlValue::Double(0.1234567890123456), &mut buf).unwrap();
+        put_binary_value(&PsqlValue::Double(0.1234567890123456), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(8); // length
         exp.put_f64(0.1234567890123456); // value
@@ -1366,7 +1370,7 @@ mod tests {
     #[test]
     fn test_encode_binary_real() {
         let mut buf = BytesMut::new();
-        put_binary_value(PsqlValue::Float(0.12345678), &mut buf).unwrap();
+        put_binary_value(&PsqlValue::Float(0.12345678), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(4); // length
         exp.put_f32(0.12345678); // value
@@ -1377,7 +1381,7 @@ mod tests {
     fn test_encode_binary_numeric() {
         let mut buf = BytesMut::new();
         let decimal = Decimal::new(1234567890123456, 16);
-        put_binary_value(PsqlValue::Numeric(decimal), &mut buf).unwrap();
+        put_binary_value(&PsqlValue::Numeric(decimal), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(-1); // length (placeholder)
         decimal.to_sql(&Type::NUMERIC, &mut exp).unwrap(); // add value
@@ -1393,7 +1397,7 @@ mod tests {
     #[test]
     fn test_encode_binary_text() {
         let mut buf = BytesMut::new();
-        put_binary_value(PsqlValue::Text("some text".into()), &mut buf).unwrap();
+        put_binary_value(&PsqlValue::Text("some text".into()), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(9); // length
         exp.extend_from_slice(b"some text"); // value
@@ -1406,7 +1410,7 @@ mod tests {
             .unwrap()
             .naive_utc();
         let mut buf = BytesMut::new();
-        put_binary_value(PsqlValue::Timestamp(dt), &mut buf).unwrap();
+        put_binary_value(&PsqlValue::Timestamp(dt), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(8); // length
         dt.to_sql(&Type::TIMESTAMP, &mut exp).unwrap(); // value
@@ -1417,7 +1421,7 @@ mod tests {
     fn test_encode_binary_bytea() {
         let mut buf = BytesMut::new();
         let bytes = vec![0, 8, 39, 92, 100, 128];
-        put_binary_value(PsqlValue::ByteArray(bytes.clone()), &mut buf).unwrap();
+        put_binary_value(&PsqlValue::ByteArray(bytes.clone()), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(-1); // length (placeholder)
         bytes.to_sql(&Type::BYTEA, &mut exp).unwrap(); // add value
@@ -1435,7 +1439,7 @@ mod tests {
         // bits = 000000000000100000100111010111000110010010000000
         let bits = BitVec::from_bytes(&[0, 8, 39, 92, 100, 128]);
         let mut buf = BytesMut::new();
-        put_binary_value(PsqlValue::Bit(bits.clone()), &mut buf).unwrap();
+        put_binary_value(&PsqlValue::Bit(bits.clone()), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         // 48 bits divided into groups of 8 (a byte) = 6 bytes, plus one u32 (4 bytes) to hold the
         // size = 10 bytes
@@ -1449,7 +1453,7 @@ mod tests {
         exp.put_i32(10); // size
         bits.to_sql(&Type::VARBIT, &mut exp).unwrap(); // add value
         let mut buf = BytesMut::new();
-        put_binary_value(PsqlValue::VarBit(bits.clone()), &mut buf).unwrap();
+        put_binary_value(&PsqlValue::VarBit(bits.clone()), &mut buf).unwrap();
         assert_eq!(buf, exp);
     }
 
@@ -1457,7 +1461,7 @@ mod tests {
     fn test_encode_binary_macaddr() {
         let mut buf = BytesMut::new();
         let macaddr = MacAddress::new([18, 52, 86, 171, 205, 239]);
-        put_binary_value(PsqlValue::MacAddress(macaddr), &mut buf).unwrap();
+        put_binary_value(&PsqlValue::MacAddress(macaddr), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(6);
         macaddr.to_sql(&Type::MACADDR, &mut exp).unwrap(); // add value
@@ -1470,7 +1474,7 @@ mod tests {
         let uuid = Uuid::from_bytes([
             85, 14, 132, 0, 226, 155, 65, 212, 167, 22, 68, 102, 85, 68, 0, 0,
         ]);
-        put_binary_value(PsqlValue::Uuid(uuid), &mut buf).unwrap();
+        put_binary_value(&PsqlValue::Uuid(uuid), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(16);
         uuid.to_sql(&Type::UUID, &mut exp).unwrap(); // add value
@@ -1484,7 +1488,7 @@ mod tests {
             "{\"name\":\"John Doe\",\"age\":43,\"phones\":[\"+44 1234567\",\"+44 2345678\"]}",
         )
         .unwrap();
-        put_binary_value(PsqlValue::Json(json.clone()), &mut buf).unwrap();
+        put_binary_value(&PsqlValue::Json(json.clone()), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(-1); // size placeholder
         json.to_sql(&Type::JSON, &mut exp).unwrap(); // add value
@@ -1497,7 +1501,7 @@ mod tests {
         assert_eq!(buf, exp);
 
         let mut buf = BytesMut::new();
-        put_binary_value(PsqlValue::Jsonb(json.clone()), &mut buf).unwrap();
+        put_binary_value(&PsqlValue::Jsonb(json.clone()), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(-1); // size placeholder
         json.to_sql(&Type::JSONB, &mut exp).unwrap(); // add value
@@ -1519,7 +1523,7 @@ mod tests {
                 NaiveTime::from_hms_milli_opt(3, 4, 5, 660).unwrap(),
             ));
         let mut buf = BytesMut::new();
-        put_binary_value(PsqlValue::TimestampTz(dt), &mut buf).unwrap();
+        put_binary_value(&PsqlValue::TimestampTz(dt), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(-1); // size (placeholder)
         dt.to_sql(&Type::TIMESTAMPTZ, &mut exp).unwrap(); // add value
@@ -1535,7 +1539,7 @@ mod tests {
     #[test]
     fn test_encode_text_null() {
         let mut buf = BytesMut::new();
-        put_text_value(PsqlValue::Null, &mut buf).unwrap();
+        put_text_value(&PsqlValue::Null, &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(-1); // null sentinel
         assert_eq!(buf, exp);
@@ -1544,7 +1548,7 @@ mod tests {
     #[test]
     fn test_encode_text_bool() {
         let mut buf = BytesMut::new();
-        put_text_value(PsqlValue::Bool(true), &mut buf).unwrap();
+        put_text_value(&PsqlValue::Bool(true), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(1); // length
         exp.extend_from_slice(b"t"); // value
@@ -1554,7 +1558,7 @@ mod tests {
     #[test]
     fn test_encode_text_char() {
         let mut buf = BytesMut::new();
-        put_text_value(PsqlValue::Char('d' as i8), &mut buf).unwrap();
+        put_text_value(&PsqlValue::Char('d' as i8), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(1); // length
         exp.extend_from_slice(b"d"); // value
@@ -1564,7 +1568,7 @@ mod tests {
     #[test]
     fn test_encode_text_varchar() {
         let mut buf = BytesMut::new();
-        put_text_value(PsqlValue::VarChar("some stuff".into()), &mut buf).unwrap();
+        put_text_value(&PsqlValue::VarChar("some stuff".into()), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(10); // length
         exp.extend_from_slice(b"some stuff"); // value
@@ -1574,7 +1578,7 @@ mod tests {
     #[test]
     fn test_encode_text_int() {
         let mut buf = BytesMut::new();
-        put_text_value(PsqlValue::Int(0x1234567), &mut buf).unwrap();
+        put_text_value(&PsqlValue::Int(0x1234567), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(8); // length
         exp.extend_from_slice(b"19088743"); // value
@@ -1584,7 +1588,7 @@ mod tests {
     #[test]
     fn test_encode_text_big_int() {
         let mut buf = BytesMut::new();
-        put_text_value(PsqlValue::BigInt(0x1234567890abcdef), &mut buf).unwrap();
+        put_text_value(&PsqlValue::BigInt(0x1234567890abcdef), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(19); // length
         exp.extend_from_slice(b"1311768467294899695"); // value
@@ -1594,7 +1598,7 @@ mod tests {
     #[test]
     fn test_encode_text_small_int() {
         let mut buf = BytesMut::new();
-        put_text_value(PsqlValue::SmallInt(0x1234), &mut buf).unwrap();
+        put_text_value(&PsqlValue::SmallInt(0x1234), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(4); // length
         exp.extend_from_slice(b"4660"); // value
@@ -1604,7 +1608,7 @@ mod tests {
     #[test]
     fn test_encode_text_double() {
         let mut buf = BytesMut::new();
-        put_text_value(PsqlValue::Double(0.1234567890123456), &mut buf).unwrap();
+        put_text_value(&PsqlValue::Double(0.1234567890123456), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(18); // size
         exp.extend_from_slice(b"0.1234567890123456"); // value
@@ -1614,7 +1618,7 @@ mod tests {
     #[test]
     fn test_encode_text_real() {
         let mut buf = BytesMut::new();
-        put_text_value(PsqlValue::Float(0.12345678), &mut buf).unwrap();
+        put_text_value(&PsqlValue::Float(0.12345678), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(10); // size
         exp.extend_from_slice(b"0.12345678"); // value
@@ -1625,7 +1629,7 @@ mod tests {
     fn test_encode_text_numeric() {
         let mut buf = BytesMut::new();
         let decimal = Decimal::new(1234567890123456, 16);
-        put_text_value(PsqlValue::Numeric(decimal), &mut buf).unwrap();
+        put_text_value(&PsqlValue::Numeric(decimal), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(18); // size
         exp.extend_from_slice(b"0.1234567890123456");
@@ -1635,7 +1639,7 @@ mod tests {
     #[test]
     fn test_encode_text_text() {
         let mut buf = BytesMut::new();
-        put_text_value(PsqlValue::Text("some text".into()), &mut buf).unwrap();
+        put_text_value(&PsqlValue::Text("some text".into()), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(9); // length
         exp.extend_from_slice(b"some text"); // value
@@ -1646,7 +1650,7 @@ mod tests {
     fn test_encode_text_bytea() {
         let mut buf = BytesMut::new();
         let bytes = vec![0, 8, 39, 92, 100, 128];
-        put_text_value(PsqlValue::ByteArray(bytes), &mut buf).unwrap();
+        put_text_value(&PsqlValue::ByteArray(bytes), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(12); // length (placeholder)
         exp.extend_from_slice(b"0008275c6480");
@@ -1657,7 +1661,7 @@ mod tests {
     fn test_encode_text_macaddr() {
         let mut buf = BytesMut::new();
         let macaddr = MacAddress::new([18, 52, 86, 171, 205, 239]);
-        put_text_value(PsqlValue::MacAddress(macaddr), &mut buf).unwrap();
+        put_text_value(&PsqlValue::MacAddress(macaddr), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(17); // length (placeholder)
         exp.extend_from_slice(b"12:34:56:ab:cd:ef");
@@ -1670,7 +1674,7 @@ mod tests {
         let uuid = Uuid::from_bytes([
             85, 14, 132, 0, 226, 155, 65, 212, 167, 22, 68, 102, 85, 68, 0, 0,
         ]);
-        put_text_value(PsqlValue::Uuid(uuid), &mut buf).unwrap();
+        put_text_value(&PsqlValue::Uuid(uuid), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(36); // length (placeholder)
         exp.extend_from_slice(b"550e8400-e29b-41d4-a716-446655440000");
@@ -1684,7 +1688,7 @@ mod tests {
             "{\"name\":\"John Doe\",\"age\":43,\"phones\":[\"+44 1234567\",\"+44 2345678\"]}",
         )
         .unwrap();
-        put_text_value(PsqlValue::Json(json.clone()), &mut buf).unwrap();
+        put_text_value(&PsqlValue::Json(json.clone()), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(67); // length (placeholder)
         exp.extend_from_slice(
@@ -1693,7 +1697,7 @@ mod tests {
         assert_eq!(buf, exp);
 
         let mut buf = BytesMut::new();
-        put_text_value(PsqlValue::Jsonb(json), &mut buf).unwrap();
+        put_text_value(&PsqlValue::Jsonb(json.clone()), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(67); // length (placeholder)
         exp.extend_from_slice(
@@ -1707,14 +1711,14 @@ mod tests {
         let mut buf = BytesMut::new();
         // bits = 000000000000100000100111010111000110010010000000
         let bits = BitVec::from_bytes(&[0, 8, 39, 92, 100, 128]);
-        put_text_value(PsqlValue::Bit(bits.clone()), &mut buf).unwrap();
+        put_text_value(&PsqlValue::Bit(bits.clone()), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(48); // size = 48 bit characters
         exp.extend_from_slice(b"000000000000100000100111010111000110010010000000"); // add value
         assert_eq!(buf, exp);
 
         let mut buf = BytesMut::new();
-        put_text_value(PsqlValue::Bit(bits), &mut buf).unwrap();
+        put_text_value(&PsqlValue::Bit(bits), &mut buf).unwrap();
         assert_eq!(buf, exp);
     }
 }
