@@ -99,14 +99,40 @@ impl Stream for Resultset {
         let project_field_types = &s.project_field_types;
         let next = match &mut s.results {
             ResultsetInner::Empty => None,
-            ResultsetInner::ReadySet(i) => i.next().map(|values| {
-                values
-                    .into_iter()
-                    .zip(project_field_types.iter())
-                    .map(|(value, col_type)| PsqlValue::try_from(TypedDfValue { value, col_type }))
-                    .collect::<Result<Vec<_>, _>>()
-                    .map(PsqlSrvRow::ValueVec)
-            }),
+            ResultsetInner::ReadySet(i) => {
+                let next_values = i.next();
+                if let Some(mut values) = next_values {
+                    // make sure we have at least as many values as types. if there are more values than types, those are bogokeys,
+                    // which we can ignore as we do not send those back to callers.
+                    let len = project_field_types.len();
+                    if values.len() < len {
+                        return Poll::Ready(Some(Err(psql_srv::Error::IncorrectFormatCount(len))));
+                    }
+
+                    let mut converted_values = Vec::with_capacity(len);
+                    let spare = converted_values.spare_capacity_mut();
+
+                    for i in 0..len {
+                        let col_type = project_field_types.get(i).unwrap();
+                        let value = values.get_mut(i).unwrap();
+                        // as we are on the super hot path, we do an `unsafe` operation here:
+                        // it's more efficient to directly allocate into the converted_values
+                        // vector, rather than allocate locally and `push` into the vector.
+                        spare[i].write(PsqlValue::try_from(TypedDfValue {
+                            value: std::mem::take(value),
+                            col_type,
+                        })?);
+                    }
+                    unsafe {
+                        converted_values.set_len(len);
+                    }
+
+                    Some(Ok(PsqlSrvRow::ValueVec(converted_values)))
+                } else {
+                    // at the end of all rows in the resultset ...
+                    None
+                }
+            }
             ResultsetInner::Stream { first_row, stream } => {
                 let row = match first_row.take() {
                     Some(row) => Some(Ok(row)),
