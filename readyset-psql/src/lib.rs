@@ -1,3 +1,4 @@
+#![allow(clippy::needless_range_loop)]
 mod backend;
 mod error;
 mod query_handler;
