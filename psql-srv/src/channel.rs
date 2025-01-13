@@ -27,11 +27,9 @@ where
 {
     pub fn new(inner: C) -> Channel<C> {
         let codec = Codec::new();
-        Channel(Framed::with_capacity(
-            inner,
-            codec,
-            CHANNEL_INITIAL_CAPACITY,
-        ))
+        let mut framed = Framed::with_capacity(inner, codec, CHANNEL_INITIAL_CAPACITY);
+        framed.set_backpressure_boundary(64 * 1024);
+        Channel(framed)
     }
 
     /// Set when the connection start up phase is complete. Indicates that regular mode messages
