@@ -4,7 +4,7 @@ use mysql_srv::MySqlIntermediary;
 use readyset_adapter::upstream_database::LazyUpstream;
 use readyset_mysql::{MySqlQueryHandler, MySqlUpstream};
 use tokio::net::TcpStream;
-use tracing::{debug, error, instrument};
+use tracing::{debug, error};
 
 use crate::ConnectionHandler;
 
@@ -18,7 +18,6 @@ impl ConnectionHandler for MySqlHandler {
     type UpstreamDatabase = LazyUpstream<MySqlUpstream>;
     type Handler = MySqlQueryHandler;
 
-    #[instrument(level = "debug", "connection", skip_all, fields(addr = ?stream.peer_addr().unwrap()))]
     async fn process_connection(
         &mut self,
         stream: TcpStream,

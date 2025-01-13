@@ -7,7 +7,7 @@ use readyset_errors::ReadySetResult;
 use readyset_psql::{AuthenticationMethod, PostgreSqlQueryHandler, PostgreSqlUpstream};
 use tokio::net;
 use tokio_native_tls::{native_tls, TlsAcceptor};
-use tracing::{error, instrument};
+use tracing::error;
 
 use crate::ConnectionHandler;
 
@@ -95,7 +95,6 @@ impl ConnectionHandler for PsqlHandler {
     type UpstreamDatabase = LazyUpstream<PostgreSqlUpstream>;
     type Handler = PostgreSqlQueryHandler;
 
-    #[instrument(level = "debug", "connection", skip_all, fields(addr = ?stream.peer_addr().unwrap()))]
     async fn process_connection(
         &mut self,
         stream: net::TcpStream,

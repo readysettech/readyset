@@ -45,7 +45,7 @@ use readyset_client::{KeyColumnIdx, ViewPlaceholder};
 use readyset_data::{DfType, Dialect};
 use tokio::time::sleep;
 use tokio_retry::strategy::ExponentialBackoff;
-use tracing::{debug, debug_span, error, info, info_span, instrument, trace};
+use tracing::{debug, debug_span, error, info, info_span, trace};
 
 use crate::controller::migrate::materialization::InvalidEdge;
 use crate::controller::migrate::node_changes::{MigrationNodeChanges, NodeChanges};
@@ -348,7 +348,6 @@ impl MigrationPlan<'_> {
     /// If the plan fails, the `Leader`'s state is left unchanged; however, no attempt
     /// is made to roll back any destructive changes that may have occurred before the plan failed
     /// to apply.
-    #[instrument(level = "info", name = "apply", skip(self))]
     pub async fn apply(self) -> ReadySetResult<()> {
         let MigrationPlan {
             dataflow_state,

@@ -1,7 +1,7 @@
 use nom_sql::BinaryOperator;
 use readyset_client::ViewPlaceholder;
 use readyset_errors::{internal, invariant_eq, unsupported, ReadySetResult};
-use tracing::{instrument, trace};
+use tracing::trace;
 
 use crate::node::{MirNodeInner, ViewKeyColumn};
 use crate::query::MirQuery;
@@ -100,7 +100,6 @@ fn push_view_key(query: &mut MirQuery<'_>, node_idx: NodeIndex) -> ReadySetResul
     Ok(())
 }
 
-#[instrument(level = "trace", skip_all, fields(query = %query.name().display_unquoted()))]
 pub(crate) fn pull_view_keys_to_leaf(query: &mut MirQuery<'_>) -> ReadySetResult<()> {
     while let Some(view_key) = query
         .topo_nodes()

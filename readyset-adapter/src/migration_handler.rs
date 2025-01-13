@@ -21,7 +21,7 @@ use readyset_sql_passes::InlineLiterals;
 use readyset_util::redacted::Sensitive;
 use readyset_util::shutdown::ShutdownReceiver;
 use tokio::select;
-use tracing::{debug, error, info, instrument};
+use tracing::{debug, error, info};
 
 use crate::backend::NoriaConnector;
 use crate::query_status_cache::QueryStatusCache;
@@ -189,7 +189,6 @@ impl MigrationHandler {
         }
     }
 
-    #[instrument(level = "warn", name = "migration_handler", skip(self))]
     pub async fn run(&mut self) -> ReadySetResult<()> {
         let mut interval = tokio::time::interval(self.min_poll_interval);
         let success_counter = counter!(recorded::MIGRATION_HANDLER_SUCCESSES);

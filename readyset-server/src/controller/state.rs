@@ -60,7 +60,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use tokio::sync::{Mutex, MutexGuard, RwLock, RwLockReadGuard};
-use tracing::{debug, error, info, instrument, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 use vec1::{vec1, Vec1};
 
 use super::migrate::DomainSettings;
@@ -1162,7 +1162,6 @@ impl DfState {
     // ** Modify operations **
 
     /// Perform a new query schema migration.
-    #[instrument(level = "info", name = "migrate", skip(self, f, dialect))]
     pub(crate) async fn migrate<F, T>(
         &mut self,
         dry_run: bool,
@@ -1739,16 +1738,15 @@ impl DfState {
     /// # Invariants
     /// The following invariants must hold:
     /// - `self.ingredients` must be a valid [`Graph`]. This means it has to be a description of
-    /// a valid dataflow graph.
+    ///   a valid dataflow graph.
     /// - Each node must have a Domain associated with it (and thus also have a [`LocalNodeIndex`]
-    /// and any other associated information).
+    ///   and any other associated information).
     /// - `self.domain_nodes` must be valid. This means that all the nodes in `self.ingredients`
-    /// (except for `self.source`) must belong to a domain; and there must not be any overlap
-    /// between the nodes owned by each domain. All the invariants for Domain assignment from
-    /// [`crate::controller::migrate::assignment::assign`] must hold as well.
+    ///   (except for `self.source`) must belong to a domain; and there must not be any overlap
+    ///   between the nodes owned by each domain. All the invariants for Domain assignment from
+    ///   [`crate::controller::migrate::assignment::assign`] must hold as well.
     ///  - `self.remap` and `self.node_restrictions` must be valid.
     /// - All the other fields should be empty or `[Default::default()]`.
-    #[instrument(level = "info", skip_all)]
     pub(super) async fn plan_recovery(
         &mut self,
         domain_nodes: &HashMap<DomainIndex, HashSet<NodeIndex>>,

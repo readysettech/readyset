@@ -20,7 +20,7 @@ use tokio::io::{AsyncReadExt, BufReader, BufStream, BufWriter};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{broadcast, mpsc, oneshot, Mutex};
 use tokio_stream::wrappers::IntervalStream;
-use tracing::{debug, error, info, info_span, instrument, trace, warn, Instrument, Span};
+use tracing::{debug, error, info, info_span, trace, warn, Instrument, Span};
 
 use super::{ChannelCoordinator, WorkerRequestKind};
 
@@ -235,7 +235,6 @@ impl Replica {
     /// Sends response packets asynchronously, the future takes ownership of a set of packets and
     /// their destination, therefore it can't be dropped before completion without risking some
     /// packets being lost
-    #[instrument(level = "debug", name = "send_packets", skip_all)]
     async fn send_packets(
         to_send: Vec<(ReplicaAddress, VecDeque<Packet>)>,
         connections: &tokio::sync::Mutex<Outputs>,

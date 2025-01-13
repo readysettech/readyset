@@ -97,7 +97,7 @@ use serde::{Deserialize, Serialize};
 use tempfile::{Builder, TempDir};
 use test_strategy::Arbitrary;
 use thiserror::Error;
-use tracing::{debug, error, info, info_span, instrument, trace, warn};
+use tracing::{debug, error, info, info_span, trace, warn};
 
 use crate::persistent_state::metrics::{MetricsReporter, MetricsReporterStop};
 use crate::{
@@ -1469,7 +1469,6 @@ impl IndexKeyValue {
 }
 
 impl PersistentState {
-    #[instrument(name = "Creating persistent state", skip_all, fields(name))]
     pub fn new<C: AsRef<[usize]>, K: IntoIterator<Item = C>>(
         mut name: String,
         unique_keys: K,

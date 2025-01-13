@@ -10,7 +10,7 @@ use readyset_sql_passes::anonymize::anonymize_literals;
 use readyset_util::shutdown::ShutdownReceiver;
 use tokio::select;
 use tokio::sync::mpsc::UnboundedReceiver;
-use tracing::{info, instrument};
+use tracing::info;
 
 pub struct QueryLogger {
     parse_error_count: Counter,
@@ -182,7 +182,6 @@ impl QueryLogger {
     }
 
     /// Async task that logs query stats.
-    #[instrument(name = "query_logger", skip_all)]
     pub(crate) async fn run(
         &mut self,
         mut receiver: UnboundedReceiver<QueryExecutionEvent>,

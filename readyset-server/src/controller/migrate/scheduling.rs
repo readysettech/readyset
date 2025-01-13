@@ -25,7 +25,7 @@ use array2::Array2;
 use dataflow::prelude::*;
 use readyset_client::consensus::NodeTypeSchedulingRestriction;
 use readyset_client::internal::DomainIndex;
-use tracing::{instrument, trace};
+use tracing::trace;
 
 use crate::controller::state::DfState;
 use crate::controller::{DomainPlacementRestriction, NodeRestrictionKey, Worker, WorkerIdentifier};
@@ -117,7 +117,6 @@ impl<'state> Scheduler<'state> {
     ///
     /// * `nodes` cannot be empty
     /// * All the nodes in `nodes` must exist in `self.dataflow_state.ingredients`
-    #[instrument(level = "trace", skip(self, nodes))]
     pub(crate) fn schedule_domain(
         &mut self,
         domain_index: DomainIndex,

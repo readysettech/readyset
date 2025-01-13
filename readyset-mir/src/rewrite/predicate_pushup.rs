@@ -4,7 +4,7 @@ use nom_sql::analysis::{ReferredColumns, ReferredColumnsMut};
 use nom_sql::{Expr, SqlIdentifier};
 use petgraph::Direction;
 use readyset_errors::{invariant_eq, unsupported_err, ReadySetResult};
-use tracing::{instrument, trace};
+use tracing::trace;
 
 use crate::node::MirNodeInner;
 use crate::query::MirQuery;
@@ -194,7 +194,6 @@ fn map_columns_above_alias_table(
 
 /// Push as many filter nodes as high as possible up the graph, to keep the inputs to expensive
 /// nodes like joins as small as possible
-#[instrument(level = "trace", skip_all)]
 pub(crate) fn push_filters_up(query: &mut MirQuery<'_>) -> ReadySetResult<()> {
     for filter_idx in query.topo_nodes() {
         let node = query.get_node(filter_idx).unwrap();

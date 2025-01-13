@@ -13,7 +13,7 @@ use dataflow::payload::{PrepareStateKind, ReplayPathSegment, SourceSelection, Tr
 use dataflow::prelude::*;
 use dataflow::DomainRequest;
 use readyset_errors::ReadySetError;
-use tracing::{debug, instrument, trace};
+use tracing::{debug, trace};
 use vec1::Vec1;
 
 use crate::controller::keys::{self, IndexRef, RawReplayPath};
@@ -162,7 +162,6 @@ impl<'a> Plan<'a> {
     /// paths about them. It also notes if any data backfills will need to be run, which is
     /// eventually reported back by `finalize`.
     #[allow(clippy::cognitive_complexity, clippy::unreachable)]
-    #[instrument(level = "debug", "index", skip(self), fields(node = ?self.node))]
     pub(super) fn add(&mut self, index_on: Index) -> Result<(), ReadySetError> {
         // if we are recovering, we must build the paths again. Otherwise
         // if we're full and we already have some paths added... (either this run, or from previous

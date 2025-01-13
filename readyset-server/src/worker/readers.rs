@@ -38,7 +38,7 @@ use tokio_stream::wrappers::TcpListenerStream;
 use tokio_stream::StreamExt;
 use tokio_tower::multiplex::server;
 use tower::Service;
-use tracing::{error, instrument, warn};
+use tracing::{error, warn};
 
 /// Retry consistency missed reads every this often.
 const RETRY_TIMEOUT: Duration = Duration::from_micros(100);
@@ -309,7 +309,6 @@ impl Service<Tagged<ReadQuery>> for ReadRequestHandler {
         Poll::Ready(Ok(()))
     }
 
-    #[instrument(level = "info", skip_all)]
     #[inline]
     fn call(&mut self, m: Tagged<ReadQuery>) -> Self::Future {
         let tag = m.tag;

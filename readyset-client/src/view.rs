@@ -47,7 +47,7 @@ use tower::buffer::Buffer;
 use tower::limit::concurrency::ConcurrencyLimit;
 use tower::timeout::Timeout;
 use tower_service::Service;
-use tracing::{debug_span, error, instrument, trace};
+use tracing::{debug_span, error, trace};
 use tracing_futures::Instrument;
 use vec1::{vec1, Vec1};
 
@@ -1368,7 +1368,6 @@ impl ReaderHandle {
     /// Get the current size of this view.
     ///
     /// Note that you must also continue to poll this `View` for the returned future to resolve.
-    #[instrument(level = "info", skip(self))]
     pub async fn len(&mut self) -> ReadySetResult<usize> {
         future::poll_fn(|cx| self.poll_ready(cx)).await?;
 
@@ -1413,7 +1412,6 @@ impl ReaderHandle {
     }
 
     /// Get the current keys of this view. For debugging only.
-    #[instrument(level = "info", skip(self))]
     pub async fn keys(&mut self) -> ReadySetResult<Vec<Vec<DfValue>>> {
         future::poll_fn(|cx| self.poll_ready(cx)).await?;
 

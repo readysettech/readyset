@@ -30,7 +30,7 @@ use readyset_sql_passes::adapter_rewrites::{self, AdapterRewriteParams, Processe
 use readyset_util::redacted::Sensitive;
 use readyset_util::shared_cache::{self, LocalCache};
 use tokio::sync::RwLock;
-use tracing::{error, info, instrument, trace, warn};
+use tracing::{error, info, trace, warn};
 
 use crate::backend::SelectSchema;
 use crate::utils;
@@ -1474,7 +1474,6 @@ impl NoriaConnector {
         })
     }
 
-    #[instrument(level = "info", skip(self, statement))]
     pub(crate) async fn prepare_select(
         &mut self,
         mut statement: nom_sql::SelectStatement,
@@ -1562,7 +1561,6 @@ impl NoriaConnector {
         Ok(PrepareResult::Select { types, statement })
     }
 
-    #[instrument(level = "debug", skip(self, event))]
     pub(crate) async fn execute_select(
         &mut self,
         ctx: ExecuteSelectContext<'_>,

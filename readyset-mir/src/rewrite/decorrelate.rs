@@ -4,7 +4,7 @@ use itertools::{Either, Itertools};
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::{BinaryOperator, Expr};
 use readyset_errors::{internal, invariant, unsupported, ReadySetResult};
-use tracing::{instrument, trace};
+use tracing::trace;
 
 use crate::node::MirNodeInner;
 use crate::query::MirQuery;
@@ -169,7 +169,6 @@ fn push_dependent_filter(
 /// coefficients here are usually quite small). There's a lot of stuff that would likely be a lot
 /// easier to memoize if it weren't for the way MIR is structured, with [`RefCell`]s throwing borrow
 /// errors at runtime basically all the time
-#[instrument(skip_all, fields(query = %query.name().display_unquoted()))]
 pub(crate) fn eliminate_dependent_joins(query: &mut MirQuery<'_>) -> ReadySetResult<()> {
     // TODO(aspen): lots of opportunity for memoization here, but the MIR RefCell mess makes that a
     // lot harder

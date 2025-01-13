@@ -11,7 +11,7 @@ use readyset_client_metrics::recorded;
 use readyset_util::shared_cache::LocalCache;
 use readyset_util::shutdown::ShutdownReceiver;
 use tokio::select;
-use tracing::{debug, info, instrument, trace, warn};
+use tracing::{debug, info, trace, warn};
 use xxhash_rust::xxh3;
 
 use crate::query_status_cache::QueryStatusCache;
@@ -92,9 +92,6 @@ impl ViewsSynchronizer {
         }
     }
 
-    //TODO(DAN): add metrics on views synchronizer performance (e.g., number of queries polled,
-    //time spent processing)
-    #[instrument(level = "info", name = "views_synchronizer", skip(self))]
     pub async fn run(&mut self, mut shutdown_recv: ShutdownReceiver) {
         let mut interval = tokio::time::interval(self.poll_interval);
 
