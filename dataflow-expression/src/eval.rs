@@ -1,7 +1,9 @@
 use std::borrow::Borrow;
 
-use readyset_data::{Array, ArrayD, DfValue, IxDyn};
-use readyset_errors::{invalid_query_err, unsupported, ReadySetError, ReadySetResult};
+use readyset_data::{Array, ArrayD, DfValue, IxDyn, TimestampTz};
+use readyset_errors::{
+    internal_err, invalid_query_err, unsupported, ReadySetError, ReadySetResult,
+};
 use serde_json::Value as JsonValue;
 
 use crate::like::{CaseInsensitive, CaseSensitive, LikePattern};
@@ -51,6 +53,10 @@ fn eval_binary_op(op: BinaryOperator, left: &DfValue, right: &DfValue) -> ReadyS
         Is => Ok((left == right).into()),
         Like => like(CaseSensitive),
         ILike => like(CaseInsensitive),
+
+        AtTimeZone => Err(internal_err!(
+            "AT TIME ZONE has not been lowered to expression"
+        )),
 
         // JSON operators:
         JsonExists => {
@@ -312,6 +318,46 @@ impl Expr {
                         invalid_query_err!("Mismatched array lengths in array expression: {e}")
                     })?,
                 )))
+            }
+            Expr::AtTimeZone {
+                expr,
+                at_time_zone,
+                default_time_zone,
+                ..
+            } => {
+                let val = expr.eval(record)?;
+                match val {
+                    DfValue::TimestampTz(tmz) => {
+                        if tmz.has_timezone() {
+                            // Shift the existing timezone to `at_time_zone`, and drop it.
+                            let dt = tmz.to_chrono().with_timezone(at_time_zone).naive_local();
+                            // Return TimestampTz w/o timezone
+                            Ok(DfValue::TimestampTz(TimestampTz::from(dt)))
+                        } else {
+                            // Take the DateTime content and combine it with `at_time_zone`.
+                            let dt_at_timezone = tmz
+                                .to_chrono()
+                                .naive_local()
+                                .and_local_timezone(*at_time_zone)
+                                .single()
+                                .ok_or(invalid_query_err!(
+                                    "Timestamp value '{}' is not valid for time zone '{}'",
+                                    tmz.to_chrono(),
+                                    at_time_zone.name()
+                                ))?;
+                            // Shift the timestamp with `at_time_zone` to `default_time_zone`.
+                            let dt_local = dt_at_timezone
+                                .with_timezone(default_time_zone)
+                                .fixed_offset();
+                            // Return TimestampTz with timezone
+                            Ok(DfValue::TimestampTz(TimestampTz::from(dt_local)))
+                        }
+                    }
+                    _ => Err(internal_err!(
+                        "Expected timestamp or timestamp with timezone, got {}",
+                        val
+                    )),
+                }
             }
         }
     }

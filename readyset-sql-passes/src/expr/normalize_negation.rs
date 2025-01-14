@@ -43,7 +43,8 @@ fn negate_expr(expr: &mut Expr) -> bool {
                 | BinaryOperator::Arrow1
                 | BinaryOperator::Arrow2
                 | BinaryOperator::HashArrow1
-                | BinaryOperator::HashArrow2 => return false,
+                | BinaryOperator::HashArrow2
+                | BinaryOperator::AtTimeZone => return false,
                 BinaryOperator::QuestionMark
                 | BinaryOperator::QuestionMarkPipe
                 | BinaryOperator::QuestionMarkAnd
