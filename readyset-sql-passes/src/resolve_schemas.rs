@@ -4,8 +4,10 @@
 
 use std::collections::{HashMap, HashSet};
 
-use nom_sql::analysis::visit_mut::{self, walk_select_statement, VisitorMut};
-use nom_sql::{CreateTableStatement, Relation, SelectStatement, SqlIdentifier, SqlType, TableExpr};
+use nom_sql::analysis::visit_mut::{self, VisitorMut};
+use nom_sql::{
+    CreateTableStatement, JoinRightSide, Relation, SelectStatement, SqlIdentifier, SqlType,
+};
 use readyset_errors::{ReadySetError, ReadySetResult};
 
 use crate::CanQuery;
@@ -33,8 +35,65 @@ struct ResolveSchemaVisitor<'schema> {
 }
 
 impl ResolveSchemaVisitor<'_> {
-    fn insert_alias(&mut self, alias: SqlIdentifier) {
-        self.alias_stack.last_mut().unwrap().insert(alias);
+    fn table_is_aliased(&self, table: &Relation) -> bool {
+        self.alias_stack
+            .iter()
+            .any(|frame| frame.contains(&table.name))
+    }
+
+    fn resolve_schema(&mut self, table: &mut Relation) -> Result<(), ReadySetError> {
+        for schema in self.search_path {
+            let found = self
+                .tables
+                .get(schema)
+                .into_iter()
+                .find_map(|ts| ts.get(&table.name).copied());
+            match found {
+                Some(CanQuery::Yes) => {
+                    table.schema = Some(schema.clone());
+                    return Ok(());
+                }
+                Some(CanQuery::No) => {
+                    return Err(ReadySetError::TableNotReplicated {
+                        name: table.name.clone().into(),
+                        schema: Some(schema.into()),
+                    });
+                }
+                None => {
+                    if let Some(invalidating) = self.invalidating_tables.as_deref_mut() {
+                        invalidating.push(Relation {
+                            schema: Some(schema.clone()),
+                            name: table.name.clone(),
+                        });
+                    }
+                }
+            };
+        }
+        Ok(())
+    }
+
+    /// Visit a join clause with an extra set of aliases which should be available for the `ON`
+    /// condition but *not* for the table factor or subquery. We take ownership of it and return it
+    /// at the end to avoid cloning it in the loop in `visit_select_statement`.
+    fn visit_join_clause_with_extra_aliases(
+        &mut self,
+        join: &mut nom_sql::JoinClause,
+        extra_aliases: HashSet<SqlIdentifier>,
+    ) -> Result<HashSet<SqlIdentifier>, ReadySetError> {
+        match &mut join.right {
+            JoinRightSide::Table(table_expr) => self.visit_table_expr(table_expr)?,
+            JoinRightSide::Tables(table_exprs) => {
+                for table_expr in table_exprs {
+                    self.visit_table_expr(table_expr)?;
+                }
+            }
+        }
+
+        self.alias_stack.push(extra_aliases);
+        self.visit_join_constraint(&mut join.constraint)?;
+        self.alias_stack
+            .pop()
+            .ok_or_else(|| ReadySetError::Internal("Alias stack underflow".to_string()))
     }
 }
 
@@ -62,9 +121,29 @@ impl<'ast> VisitorMut<'ast> for ResolveSchemaVisitor<'_> {
         &mut self,
         select_statement: &'ast mut SelectStatement,
     ) -> Result<(), Self::Error> {
-        // We need to gather aliases from the table exprs here (not in `visit_table_expr`) since
-        // normally they get walked after field exprs
-        let table_expr_aliases = select_statement
+        for cte in &mut select_statement.ctes {
+            self.visit_common_table_expr(cte)?;
+        }
+
+        // CTE aliases should be available everywhere except the CTE definitions (unless we have
+        // `WITH RECURSIVE`, which we don't support)
+        self.alias_stack.push(
+            select_statement
+                .ctes
+                .iter()
+                .map(|cte| cte.name.clone())
+                .collect(),
+        );
+
+        for table_expr in &mut select_statement.tables {
+            self.visit_table_expr(table_expr)?;
+        }
+
+        // These aliases will be available in `JOIN ON` conditions, the field list, `WHERE`
+        // conditions, and subqueries within those clauses. They will not be available in CTEs, the
+        // table list, or table expressions in `JOIN` clauses (specifically, subqueries in the table
+        // factors themselves, and CTE definitions, should not see these aliases).
+        let mut pending_aliases: HashSet<_> = select_statement
             .tables
             .iter()
             .chain(
@@ -75,9 +154,31 @@ impl<'ast> VisitorMut<'ast> for ResolveSchemaVisitor<'_> {
             )
             .filter_map(|te| te.alias.clone())
             .collect();
-        self.alias_stack.push(table_expr_aliases);
 
-        walk_select_statement(self, select_statement)?;
+        for join in &mut select_statement.join {
+            pending_aliases = self.visit_join_clause_with_extra_aliases(join, pending_aliases)?;
+        }
+
+        // Now the pending aliases are available to subqueries
+        self.alias_stack.last_mut().unwrap().extend(pending_aliases);
+
+        for field in &mut select_statement.fields {
+            self.visit_field_definition_expr(field)?;
+        }
+        if let Some(where_clause) = &mut select_statement.where_clause {
+            self.visit_where_clause(where_clause)?;
+        }
+        if let Some(having_clause) = &mut select_statement.having {
+            self.visit_having_clause(having_clause)?;
+        }
+        if let Some(group_by_clause) = &mut select_statement.group_by {
+            self.visit_group_by_clause(group_by_clause)?;
+        }
+        if let Some(order_clause) = &mut select_statement.order {
+            self.visit_order_clause(order_clause)?;
+        }
+        self.visit_limit_clause(&mut select_statement.limit_clause)?;
+
         self.alias_stack.pop();
         Ok(())
     }
@@ -94,24 +195,6 @@ impl<'ast> VisitorMut<'ast> for ResolveSchemaVisitor<'_> {
             }
         }
         visit_mut::walk_create_table_statement(self, create_table_statement)
-    }
-
-    fn visit_common_table_expr(
-        &mut self,
-        cte: &'ast mut nom_sql::CommonTableExpr,
-    ) -> Result<(), Self::Error> {
-        // Walk first, since the alias for the CTE is not visible inside the CTE itself (TODO:
-        // except in the case of `WITH RECURSIVE`, which we don't even parse yet).
-        visit_mut::walk_common_table_expr(self, cte)?;
-        self.insert_alias(cte.name.clone());
-        Ok(())
-    }
-
-    fn visit_table_expr(&mut self, table_expr: &'ast mut TableExpr) -> Result<(), Self::Error> {
-        if let Some(alias) = &table_expr.alias {
-            self.insert_alias(alias.clone())
-        }
-        visit_mut::walk_table_expr(self, table_expr)
     }
 
     fn visit_target_table_fk(&mut self, table: &'ast mut Relation) -> Result<(), Self::Error> {
@@ -138,44 +221,11 @@ impl<'ast> VisitorMut<'ast> for ResolveSchemaVisitor<'_> {
             return Ok(());
         }
 
-        if self
-            .alias_stack
-            .iter()
-            .any(|frame| frame.contains(&table.name))
-        {
-            // Reference to aliased table expression; remove
+        if self.table_is_aliased(table) {
             return Ok(());
         }
 
-        for schema in self.search_path {
-            let found = self
-                .tables
-                .get(schema)
-                .into_iter()
-                .find_map(|ts| ts.get(&table.name).copied());
-            match found {
-                Some(CanQuery::Yes) => {
-                    table.schema = Some(schema.clone());
-                    return Ok(());
-                }
-                Some(CanQuery::No) => {
-                    return Err(ReadySetError::TableNotReplicated {
-                        name: table.name.clone().into(),
-                        schema: Some(schema.into()),
-                    })
-                }
-                None => {
-                    if let Some(invalidating) = self.invalidating_tables.as_deref_mut() {
-                        invalidating.push(Relation {
-                            schema: Some(schema.clone()),
-                            name: table.name.clone(),
-                        });
-                    }
-                }
-            };
-        }
-
-        Ok(())
+        self.resolve_schema(table)
     }
 }
 
@@ -340,6 +390,14 @@ mod tests {
     }
 
     #[test]
+    fn ignores_shadowing_cte_alias() {
+        select_rewrites_to(
+            "with t2 as (select * from t1) select t2.* from t2",
+            "with t2 as (select * from s1.t1) select t2.* from t2",
+        );
+    }
+
+    #[test]
     fn ignores_table_expr_alias_reference() {
         select_rewrites_to("select t2.* from t1 as t2", "select t2.* from s1.t1 as t2");
     }
@@ -488,10 +546,39 @@ mod tests {
     }
 
     #[test]
-    fn doesnt_rewrite_join_alias_reference_shadowing_ignored_table() {
+    fn ignores_join_alias_shadowing_ignored_table() {
         select_rewrites_to(
             "SELECT foo.x, t_ignored.y FROM t1 AS foo JOIN t2 AS t_ignored ON foo.id = t_ignored.id",
             "SELECT foo.x, t_ignored.y FROM s1.t1 AS foo JOIN s1.t2 AS t_ignored ON foo.id = t_ignored.id",
+        );
+    }
+
+    #[test]
+    fn resolves_self_shadowing_alias() {
+        select_rewrites_to("SELECT * FROM t1 AS t1", "SELECT * FROM s1.t1 AS t1");
+    }
+
+    #[test]
+    fn resolves_other_shadowing_alias() {
+        select_rewrites_to(
+            "SELECT t1.id, t3.id FROM t1 AS t3 JOIN t3 AS t1 ON t1.id = t3.id",
+            "SELECT t1.id, t3.id FROM s1.t1 AS t3 JOIN s2.t3 AS t1 ON t1.id = t3.id",
+        );
+    }
+
+    #[test]
+    fn resolves_subquery_referencing_outer_aliased_table() {
+        select_rewrites_to(
+            "SELECT * FROM t1 AS t2, (SELECT t2.id FROM t2) AS foo",
+            "SELECT * FROM s1.t1 AS t2, (SELECT s1.t2.id FROM s1.t2) AS foo",
+        );
+    }
+    #[test]
+
+    fn resolves_join_subquery_referencing_outer_aliased_table() {
+        select_rewrites_to(
+            "SELECT * FROM t1 AS t2 JOIN (SELECT t2.id FROM t2) AS foo",
+            "SELECT * FROM s1.t1 AS t2 JOIN (SELECT s1.t2.id FROM s1.t2) AS foo",
         );
     }
 }
