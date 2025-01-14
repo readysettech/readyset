@@ -466,7 +466,7 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
         self.writer.write_packet(&init_packet).await?;
         self.writer.flush().await?;
 
-        let (seq, handshake_bytes) = self.reader.next().await?.ok_or_else(|| {
+        let packet = self.reader.next().await?.ok_or_else(|| {
             // We use the stdlib's "custom" [`io::ErrorKind`] for this expected/benign error that
             // occurs during a Layer 4 network health check, to indicate it can be ignored higher up
             io::Error::new(
@@ -474,7 +474,7 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
                 "peer terminated connection before sending bytes",
             )
         })?;
-        let handshake = commands::client_handshake(&handshake_bytes)
+        let handshake = commands::client_handshake(&packet.data)
             .map_err(|e| match e {
                 nom::Err::Incomplete(_) => io::Error::new(
                     io::ErrorKind::UnexpectedEof,
@@ -497,7 +497,7 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
             })?
             .1;
 
-        self.writer.set_seq(seq + 1);
+        self.writer.set_seq(packet.seq + 1);
 
         self.client_capabilities = handshake.capabilities;
         let username = handshake.username.to_owned();
@@ -545,15 +545,15 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
                 .await?;
             self.writer.flush().await?;
 
-            let (seq, auth_switch_response) = self.reader.next().await?.ok_or_else(|| {
+            let packet = self.reader.next().await?.ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::ConnectionAborted,
                     "peer terminated connection when asked to switch auth plugin",
                 )
             })?;
-            self.writer.set_seq(seq + 1);
+            self.writer.set_seq(packet.seq + 1);
 
-            auth_switch_response.to_vec()
+            packet.data.to_vec()
         } else {
             password
         };
@@ -590,8 +590,8 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
         use crate::commands::Command;
 
         let mut stmts: HashMap<u32, _> = HashMap::new();
-        while let Some((seq, packet)) = self.reader.next().await? {
-            self.writer.set_seq(seq + 1);
+        while let Some(packet) = self.reader.next().await? {
+            self.writer.set_seq(packet.seq + 1);
             let cmd = commands::parse(&packet)
                 .map_err(|e| {
                     other_error(OtherErrorKind::GenericErr {

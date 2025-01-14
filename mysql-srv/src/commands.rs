@@ -263,8 +263,8 @@ mod tests {
         ];
         let r = Cursor::new(&data[..]);
         let mut pr = PacketReader::new(r);
-        let (_, p) = pr.next().await.unwrap().unwrap();
-        let (_, handshake) = client_handshake(&p).unwrap();
+        let packet = pr.next().await.unwrap().unwrap();
+        let (_, handshake) = client_handshake(&packet.data).unwrap();
         println!("{:?}", handshake);
         assert!(handshake
             .capabilities
@@ -292,8 +292,8 @@ mod tests {
         ];
         let r = Cursor::new(&data[..]);
         let mut pr = PacketReader::new(r);
-        let (_, p) = pr.next().await.unwrap().unwrap();
-        let (_, cmd) = parse(&p).unwrap();
+        let packet = pr.next().await.unwrap().unwrap();
+        let (_, cmd) = parse(&packet.data).unwrap();
         assert_eq!(
             cmd,
             Command::Query(&b"select @@version_comment limit 1"[..])
@@ -312,8 +312,8 @@ mod tests {
         ];
         let r = Cursor::new(&data[..]);
         let mut pr = PacketReader::new(r);
-        let (_, p) = pr.next().await.unwrap().unwrap();
-        let (_, cmd) = parse(&p).unwrap();
+        let packet = pr.next().await.unwrap().unwrap();
+        let (_, cmd) = parse(&packet.data).unwrap();
         assert_eq!(
             cmd,
             Command::ListFields(&b"select @@version_comment limit 1"[..])
@@ -329,11 +329,11 @@ mod tests {
         ];
         let r = Cursor::new(&data[..]);
         let mut pr = PacketReader::new(r);
-        let (_, p) = pr.next().await.unwrap().unwrap();
+        let packet = pr.next().await.unwrap().unwrap();
         let capability_flags = CapabilityFlags::CLIENT_PROTOCOL_41
             | CapabilityFlags::CLIENT_SECURE_CONNECTION
             | CapabilityFlags::CLIENT_PLUGIN_AUTH;
-        let (_, changeuser) = change_user(&p, capability_flags).unwrap();
+        let (_, changeuser) = change_user(&packet.data, capability_flags).unwrap();
         assert_eq!(changeuser.username, "root");
         assert_eq!(changeuser.password, b"");
         assert_eq!(changeuser.database, Some("test"));
@@ -349,8 +349,8 @@ mod tests {
         ];
         let r = Cursor::new(&data[..]);
         let mut pr = PacketReader::new(r);
-        let (_, p) = pr.next().await.unwrap().unwrap();
-        let (_, changeuser) = change_user(&p, capability_flags).unwrap();
+        let packet = pr.next().await.unwrap().unwrap();
+        let (_, changeuser) = change_user(&packet.data, capability_flags).unwrap();
         assert_eq!(changeuser.username, "root");
         assert_eq!(
             changeuser.password,

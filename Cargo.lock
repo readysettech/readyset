@@ -3038,6 +3038,7 @@ name = "mysql-srv"
 version = "0.8.8"
 dependencies = [
  "byteorder",
+ "bytes",
  "chrono",
  "futures",
  "getrandom",

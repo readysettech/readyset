@@ -1,9 +1,10 @@
 use std::io::{self, IoSlice};
+use std::ops::Deref;
 use std::sync::Arc;
 
+use bytes::{Buf, BytesMut};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-use crate::error::{other_error, OtherErrorKind};
 use crate::resultset::{MAX_POOL_ROWS, MAX_POOL_ROW_CAPACITY};
 
 const U24_MAX: usize = 16_777_215;
@@ -228,140 +229,51 @@ impl<W: AsyncWrite + Unpin> PacketWriter<W> {
 }
 
 pub struct PacketReader<R> {
-    bytes: Vec<u8>,
-    start: usize,
-    remaining: usize,
+    // A buffer to hold incoming socket bytes, while building up for a complete packet.
+    buffer: BytesMut,
     r: R,
 }
 
 impl<R> PacketReader<R> {
     pub fn new(r: R) -> Self {
         PacketReader {
-            bytes: Vec::new(),
-            start: 0,
-            remaining: 0,
+            buffer: BytesMut::with_capacity(4096),
             r,
         }
     }
 }
 
-impl<R: AsyncRead + Unpin> PacketReader<R> {
-    pub async fn next(&mut self) -> io::Result<Option<(u8, Packet<'_>)>> {
-        self.start = self.bytes.len() - self.remaining;
+pub struct Packet {
+    // The actual data of the packet, without the header.
+    pub data: BytesMut,
+    // The sequence number of the packet.
+    pub seq: u8,
+    // The number of segments in the packet
+    segments: u8,
+}
 
-        loop {
-            if self.remaining != 0 {
-                let bytes = {
-                    // NOTE: this is all sorts of unfortunate. what we really want to do is to give
-                    // &self.bytes[self.start..] to `packet()`, and the lifetimes should all work
-                    // out. however, without NLL, borrowck doesn't realize that self.bytes is no
-                    // longer borrowed after the match, and so can be mutated.
-                    let bytes = &self.bytes.get(self.start..).ok_or_else(|| {
-                        other_error(OtherErrorKind::IndexErr {
-                            data: "self.bytes".to_string(),
-                            index: self.start,
-                            length: self.bytes.len(),
-                        })
-                    })?;
-                    unsafe { ::std::slice::from_raw_parts(bytes.as_ptr(), bytes.len()) }
-                };
-                match packet(bytes) {
-                    Ok((rest, p)) => {
-                        self.remaining = rest.len();
-                        return Ok(Some(p));
-                    }
-                    Err(nom::Err::Incomplete(_)) | Err(nom::Err::Error(_)) => {}
-                    Err(nom::Err::Failure(ctx)) => {
-                        return Err(io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            format!("{:?}", ctx),
-                        ))
-                    }
-                }
-            }
-
-            // we need to read some more
-            self.bytes.drain(0..self.start);
-            self.start = 0;
-            let end = self.bytes.len();
-            let new_len = std::cmp::max(4096, end * 2);
-            self.bytes.resize(new_len, 0);
-            let read = {
-                let buf = self.bytes.get_mut(end..).ok_or_else(|| {
-                    other_error(OtherErrorKind::IndexErr {
-                        data: "self.bytes".to_string(),
-                        index: end,
-                        length: new_len,
-                    })
-                })?;
-                self.r.read(buf).await?
-            };
-            self.bytes.truncate(end + read);
-            self.remaining = self.bytes.len();
-
-            if read == 0 {
-                if self.bytes.is_empty() {
-                    return Ok(None);
-                } else {
-                    return Err(io::Error::new(
-                        io::ErrorKind::UnexpectedEof,
-                        format!("{} unhandled bytes", self.bytes.len()),
-                    ));
-                }
-            }
+impl Packet {
+    pub fn new(data: BytesMut, seq: u8) -> Self {
+        Packet {
+            data,
+            seq,
+            segments: 1,
         }
+    }
+
+    fn append(&mut self, segment: BytesMut) {
+        self.data.unsplit(segment);
+        self.segments += 1;
     }
 }
 
-pub fn fullpacket(i: &[u8]) -> nom::IResult<&[u8], (u8, &[u8])> {
-    let (i, _) = nom::bytes::complete::tag(&[0xff, 0xff, 0xff])(i)?;
-    let (i, seq) = nom::bytes::complete::take(1u8)(i)?;
-    let (i, bytes) = nom::bytes::complete::take(U24_MAX)(i)?;
-    Ok((i, (seq[0], bytes)))
-}
-
-pub fn onepacket(i: &[u8]) -> nom::IResult<&[u8], (u8, &[u8])> {
-    let (i, length) = nom::number::complete::le_u24(i)?;
-    let (i, seq) = nom::bytes::complete::take(1u8)(i)?;
-    let (i, bytes) = nom::bytes::complete::take(length)(i)?;
-    Ok((i, (seq[0], bytes)))
-}
-
-pub struct Packet<'a>(&'a [u8], Vec<u8>);
-
-impl<'a> Packet<'a> {
-    fn extend(&mut self, bytes: &'a [u8]) {
-        if self.0.is_empty() {
-            if self.1.is_empty() {
-                // first extend
-                self.0 = bytes;
-            } else {
-                // later extend
-                self.1.extend(bytes);
-            }
-        } else {
-            assert!(self.1.is_empty());
-            let mut v = self.0.to_vec();
-            v.extend(bytes);
-            self.1 = v;
-            self.0 = &[];
-        }
-    }
-}
-
-impl AsRef<[u8]> for Packet<'_> {
+impl AsRef<[u8]> for Packet {
     fn as_ref(&self) -> &[u8] {
-        if self.1.is_empty() {
-            self.0
-        } else {
-            &self.1
-        }
+        &self.data
     }
 }
 
-use std::ops::Deref;
-
-impl Deref for Packet<'_> {
+impl Deref for Packet {
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
@@ -369,132 +281,262 @@ impl Deref for Packet<'_> {
     }
 }
 
-fn packet(i: &[u8]) -> nom::IResult<&[u8], (u8, Packet<'_>)> {
-    nom::combinator::map(
-        nom::sequence::pair(
-            nom::multi::fold_many0(
-                fullpacket,
-                || (0, None),
-                |(seq, pkt): (_, Option<Packet<'_>>), (nseq, p)| {
-                    let pkt = if let Some(mut pkt) = pkt {
-                        assert_eq!(nseq, seq + 1);
-                        pkt.extend(p);
-                        Some(pkt)
-                    } else {
-                        Some(Packet(p, Vec::new()))
-                    };
-                    (nseq, pkt)
-                },
-            ),
-            onepacket,
-        ),
-        move |(full, last)| {
-            let seq = last.0;
-            let pkt = if let Some(mut pkt) = full.1 {
-                assert_eq!(last.0, full.0 + 1);
-                pkt.extend(last.1);
-                pkt
-            } else {
-                Packet(last.1, Vec::new())
-            };
-            (seq, pkt)
-        },
-    )(i)
+// Helper enum to properly handle incomplete reads
+enum ParseResult {
+    Complete { packet: Packet },
+    // If a read is incomplete, and we need to read more bytes, we need to keep track of the already read bytes.
+    Incomplete { packet: Option<Packet> },
+}
+
+macro_rules! parse_packet_header {
+    ($buffer:expr) => {{
+        let length = $buffer[0] as usize | ($buffer[1] as usize) << 8 | ($buffer[2] as usize) << 16;
+        let seq = $buffer[3];
+        (length, seq)
+    }};
+}
+
+impl<R: AsyncRead + Unpin> PacketReader<R> {
+    pub async fn next(&mut self) -> io::Result<Option<Packet>> {
+        let mut in_progress = None;
+
+        loop {
+            match self.parse_packet(in_progress.take())? {
+                ParseResult::Complete { packet } => return Ok(Some(packet)),
+                ParseResult::Incomplete { packet } => {
+                    in_progress = packet;
+                    let bytes_read = self.r.read_buf(&mut self.buffer).await?;
+                    if bytes_read == 0 {
+                        return if self.buffer.is_empty() && in_progress.is_none() {
+                            Ok(None)
+                        } else {
+                            Err(io::Error::new(
+                                io::ErrorKind::UnexpectedEof,
+                                format!("{} unhandled bytes", self.buffer.len()),
+                            ))
+                        };
+                    }
+                }
+            }
+        }
+    }
+
+    fn parse_packet(&mut self, in_progress: Option<Packet>) -> io::Result<ParseResult> {
+        // If we have an in-progress packet, continue with that. This is generally the case when
+        // we are in the middle of reading a huge payload that spans multiple packets (_not_ the common case, at all).
+        if let Some(packet) = in_progress {
+            return self.handle_in_progress_packet(packet);
+        }
+
+        // Need at least 4 bytes to parse the header of the packet
+        if self.buffer.len() < 4 {
+            return Ok(ParseResult::Incomplete { packet: None });
+        }
+
+        let (length, seq) = parse_packet_header!(self.buffer);
+
+        if self.buffer.len() < length + 4 {
+            return Ok(ParseResult::Incomplete { packet: None });
+        }
+
+        // Remove header
+        self.buffer.advance(4);
+
+        // Handle large packets (>=16MB) as mysql treats those specially
+        if length == U24_MAX {
+            let packet = Packet::new(self.buffer.split_to(U24_MAX), seq);
+            self.handle_in_progress_packet(packet)
+        } else {
+            // Regular packet - split off exactly what we need
+            let data = self.buffer.split_to(length);
+            Ok(ParseResult::Complete {
+                packet: Packet::new(data, seq),
+            })
+        }
+    }
+
+    fn handle_in_progress_packet(&mut self, mut packet: Packet) -> io::Result<ParseResult> {
+        loop {
+            match self.parse_next_segment()? {
+                Some(segment) => {
+                    if segment.seq != packet.seq + packet.segments {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidInput,
+                            format!(
+                                "expected seq {}, got {}",
+                                packet.seq + packet.segments,
+                                segment.seq
+                            ),
+                        ));
+                    }
+
+                    let segment_len = segment.len();
+                    packet.append(segment.data);
+
+                    if segment_len < U24_MAX {
+                        break;
+                    }
+                }
+                None => {
+                    return Ok(ParseResult::Incomplete {
+                        packet: Some(packet),
+                    })
+                }
+            }
+        }
+        Ok(ParseResult::Complete { packet })
+    }
+
+    fn parse_next_segment(&mut self) -> io::Result<Option<Packet>> {
+        if self.buffer.len() < 4 {
+            return Ok(None);
+        }
+
+        let (length, seq) = parse_packet_header!(self.buffer);
+
+        if self.buffer.len() < length + 4 {
+            return Ok(None);
+        }
+
+        // Remove header
+        self.buffer.advance(4);
+
+        // Split off the segment
+        Ok(Some(Packet::new(self.buffer.split_to(length), seq)))
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use test_utils::slow;
-
     use super::*;
 
-    #[test]
-    fn test_one_ping() {
-        assert_eq!(
-            onepacket(&[0x01, 0, 0, 0, 0x10]).unwrap().1,
-            (0, &[0x10][..])
-        );
-    }
-
-    #[test]
-    fn test_ping() {
-        let p = packet(&[0x01, 0, 0, 0, 0x10]).unwrap().1;
-        assert_eq!(p.0, 0);
-        assert_eq!(&*p.1, &[0x10][..]);
-    }
-
-    #[test]
-    fn test_long_exact() {
-        let mut data = vec![0xff, 0xff, 0xff, 0];
-        data.extend(&[0; U24_MAX][..]);
-        data.push(0x00);
-        data.push(0x00);
-        data.push(0x00);
-        data.push(1);
-
-        let (rest, p) = packet(&data[..]).unwrap();
-        assert!(rest.is_empty());
-        assert_eq!(p.0, 1);
-        assert_eq!(p.1.len(), U24_MAX);
-        assert_eq!(&*p.1, &[0; U24_MAX][..]);
-    }
-
-    #[test]
-    fn test_long_more() {
-        let mut data = vec![0xff, 0xff, 0xff, 0];
-        data.extend(&[0; U24_MAX][..]);
-        data.push(0x01);
-        data.push(0x00);
-        data.push(0x00);
-        data.push(1);
-        data.push(0x10);
-
-        let (rest, p) = packet(&data[..]).unwrap();
-        assert!(rest.is_empty());
-        assert_eq!(p.0, 1);
-        assert_eq!(p.1.len(), U24_MAX + 1);
-        assert_eq!(&p.1[..U24_MAX], &[0; U24_MAX][..]);
-        assert_eq!(&p.1[U24_MAX..], &[0x10]);
-    }
-
     #[tokio::test]
-    #[slow]
-    async fn test_large_packet_write() {
+    async fn test_simple_packet() {
         let (u_out, u_in) = tokio::net::UnixStream::pair().unwrap();
 
-        let packets = vec![
-            vec![0u8; 245],
-            vec![1u8; U24_MAX * 2],
-            vec![2u8; U24_MAX + 100],
-            vec![3u8; 100],
-            vec![4u8; U24_MAX - 1],
-            vec![5u8; U24_MAX],
-        ];
-
-        let p = packets.clone();
         tokio::spawn(async move {
             let mut writer = PacketWriter::new(u_out);
-
-            for packet in &p {
-                writer.enqueue_packet(packet.clone());
-            }
-            writer.write_queued_packets().await.unwrap();
-
-            for packet in &p {
-                writer.write_packet(&packet[..]).await.unwrap();
-            }
+            writer.write_packet(&[0x10]).await.unwrap();
             writer.flush().await.unwrap();
         });
 
         let mut reader = PacketReader::new(u_in);
+        let packet = reader.next().await.unwrap().unwrap();
 
-        for _ in 0..2 {
-            for encoded in &packets {
-                let decoded = reader.next().await.unwrap().unwrap();
-                assert_eq!(&decoded.1[..], encoded);
-            }
+        assert_eq!(packet.seq, 0);
+        assert_eq!(&*packet, &[0x10]);
+        assert_eq!(packet.segments, 1);
+
+        assert!(reader.next().await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_exact_size_packet() {
+        let (u_out, u_in) = tokio::net::UnixStream::pair().unwrap();
+        let data = vec![0; U24_MAX];
+        let data_clone = data.clone();
+
+        tokio::spawn(async move {
+            let mut writer = PacketWriter::new(u_out);
+            writer.write_packet(&data_clone).await.unwrap();
+            writer.flush().await.unwrap();
+        });
+
+        let mut reader = PacketReader::new(u_in);
+        let packet = reader.next().await.unwrap().unwrap();
+
+        assert_eq!(packet.seq, 0);
+        assert_eq!(packet.len(), U24_MAX);
+        assert_eq!(&*packet, &data);
+        assert_eq!(packet.segments, 2); // One full segment + empty final segment
+
+        assert!(reader.next().await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_large_packet() {
+        let (u_out, u_in) = tokio::net::UnixStream::pair().unwrap();
+        let mut data = vec![0; U24_MAX];
+        data.extend_from_slice(&[0x10]);
+
+        tokio::spawn(async move {
+            let mut writer = PacketWriter::new(u_out);
+            writer.write_packet(&data).await.unwrap();
+            writer.flush().await.unwrap();
+        });
+
+        let mut reader = PacketReader::new(u_in);
+        let packet = reader.next().await.unwrap().unwrap();
+
+        assert_eq!(packet.seq, 0);
+        assert_eq!(packet.len(), U24_MAX + 1);
+        assert_eq!(&packet[..U24_MAX], &[0; U24_MAX]);
+        assert_eq!(&packet[U24_MAX..], &[0x10]);
+        //assert_eq!(packet.segments, 2);
+
+        assert!(reader.next().await.unwrap().is_none());
+    }
+
+    async fn test_large_packet_write_helper<F, Fut>(write_strategy: F)
+    where
+        F: FnOnce(PacketWriter<tokio::net::UnixStream>, Vec<Vec<u8>>) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = io::Result<()>> + Send,
+    {
+        let (u_out, u_in) = tokio::net::UnixStream::pair().unwrap();
+
+        // send multiple packets, of varying sizes.
+        let packets = vec![
+            vec![0u8; 245],           // 1 packet
+            vec![1u8; U24_MAX * 2],   // 3 packets (2 full + 1 empty)
+            vec![2u8; U24_MAX + 100], // 2 packets
+            vec![3u8; 100],           // 1 packet
+            vec![4u8; U24_MAX - 1],   // 1 packet
+            vec![5u8; U24_MAX],       // 2 packets (1 full + 1 empty)
+        ];
+
+        let p = packets.clone();
+        tokio::spawn(async move {
+            let writer = PacketWriter::new(u_out);
+            write_strategy(writer, p).await.unwrap();
+        });
+
+        let mut reader = PacketReader::new(u_in);
+
+        // Verify all packets were received correctly
+        for expected in &packets {
+            let packet = reader.next().await.unwrap().unwrap();
+            assert_eq!(&*packet, expected.as_slice());
+
+            // Verify segment count
+            let needs_empty_segment = expected.len() % U24_MAX == 0;
+            let expected_segments =
+                expected.len().div_ceil(U24_MAX) + usize::from(needs_empty_segment);
+            assert_eq!(packet.segments as usize, expected_segments);
         }
 
         assert!(reader.next().await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_large_packet_write_queued() {
+        test_large_packet_write_helper(|mut writer, packets| async move {
+            for packet in packets {
+                writer.enqueue_packet(packet);
+            }
+            writer.write_queued_packets().await?;
+            writer.flush().await
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_large_packet_write_direct() {
+        test_large_packet_write_helper(|mut writer, packets| async move {
+            for packet in packets {
+                writer.write_packet(&packet).await?;
+            }
+            writer.flush().await
+        })
+        .await;
     }
 }
