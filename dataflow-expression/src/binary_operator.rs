@@ -22,6 +22,9 @@ pub enum BinaryOperator {
     /// `ILIKE`
     ILike,
 
+    /// `AT TIME ZONE`
+    AtTimeZone,
+
     /// `=`
     Equal,
 
@@ -115,6 +118,7 @@ impl fmt::Display for BinaryOperator {
             Self::Or => "OR",
             Self::Like => "LIKE",
             Self::ILike => "ILIKE",
+            Self::AtTimeZone => "AT TIME ZONE",
             Self::Equal => "=",
             Self::Greater => ">",
             Self::GreaterOrEqual => ">=",

@@ -8,6 +8,7 @@ pub mod utils;
 
 use std::fmt::{self, Display, Formatter};
 
+use chrono_tz::Tz;
 pub use eval::builtins::DateTruncPrecision;
 use itertools::Itertools;
 use nom_sql::TimestampField;
@@ -415,6 +416,14 @@ pub enum Expr {
         null_on_failure: bool,
     },
 
+    /// expr `AT TIME ZONE`
+    AtTimeZone {
+        expr: Box<Expr>,
+        at_time_zone: Tz,
+        default_time_zone: Tz,
+        ty: DfType,
+    },
+
     Call {
         func: Box<BuiltinFunction>,
         ty: DfType,
@@ -479,6 +488,11 @@ impl Display for Expr {
             Array { elements, .. } => {
                 write!(f, "ARRAY[{}]", elements.iter().join(","))
             }
+            AtTimeZone {
+                expr, at_time_zone, ..
+            } => {
+                write!(f, "{} AT TIME ZONE '{}'", expr, at_time_zone.name())
+            }
         }
     }
 }
@@ -495,7 +509,8 @@ impl Expr {
             | Expr::Call { ty, .. }
             | Expr::CaseWhen { ty, .. }
             | Expr::Cast { ty, .. }
-            | Expr::Array { ty, .. } => ty,
+            | Expr::Array { ty, .. }
+            | Expr::AtTimeZone { ty, .. } => ty,
         }
     }
 }

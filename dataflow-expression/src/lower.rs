@@ -1,5 +1,6 @@
 use std::{cmp, iter};
 
+use chrono_tz::Tz;
 use nom_sql::create::CollationName;
 use nom_sql::{
     BinaryOperator as SqlBinaryOperator, Column, DialectDisplay, Expr as AstExpr, FunctionExpr,
@@ -8,8 +9,8 @@ use nom_sql::{
 use readyset_data::dialect::SqlEngine;
 use readyset_data::{Collation, DfType, DfValue};
 use readyset_errors::{
-    internal, invalid_query, invalid_query_err, unsupported, unsupported_err, ReadySetError,
-    ReadySetResult,
+    internal, internal_err, invalid_query, invalid_query_err, unsupported, unsupported_err,
+    ReadySetError, ReadySetResult,
 };
 use readyset_util::redacted::Sensitive;
 use vec1::Vec1;
@@ -682,6 +683,7 @@ impl BinaryOperator {
             NotLike => Ok((Self::Like, true)),
             ILike => Ok((Self::ILike, false)),
             NotILike => Ok((Self::ILike, true)),
+            AtTimeZone => Ok((Self::AtTimeZone, false)),
             Equal => Ok((Self::Equal, false)),
             NotEqual => Ok((Self::Equal, true)),
             Is => Ok((Self::Is, false)),
@@ -765,6 +767,21 @@ impl BinaryOperator {
             Like | ILike => Ok((
                 coerce_to_text_type(left_type),
                 coerce_to_text_type(right_type),
+            )),
+
+            AtTimeZone => Ok((
+                if left_type.is_date_and_time() {
+                    None
+                } else if matches!(left_type, DfType::Unknown) || left_type.is_any_text() {
+                    // This is kinda a hack against lowering string literals to DfType::Unknown type for the PG dialect.
+                    // PG assumes the string literals w/o explicit cast are `TIMESTAMP WITH TIME ZONE`
+                    Some(DfType::TimestampTz {
+                        subsecond_digits: 0,
+                    })
+                } else {
+                    return error(Left, "String literal, timestamp or timestamptz");
+                },
+                None,
             )),
 
             Equal => match dialect.engine() {
@@ -862,6 +879,35 @@ impl BinaryOperator {
             | Self::JsonContains
             | Self::JsonContainedIn => Ok(DfType::Bool),
 
+            Self::AtTimeZone => {
+                if dialect.engine() == SqlEngine::PostgreSQL {
+                    match left_type {
+                        // This is kinda a hack against lowering string literals to DfType::Unknown type for the PG dialect.
+                        DfType::Unknown
+                        // For string w/o explicit cast, PG assumes they are WITH TIME ZONE, hence the output
+                        // should be WITHOUT TIME ZONE
+                        | DfType::Text(..)
+                        | DfType::Char(..)
+                        | DfType::VarChar(..) => Ok(DfType::Timestamp {
+                            subsecond_digits: 0,
+                        }),
+                        DfType::Timestamp { subsecond_digits } => Ok(DfType::TimestampTz {
+                            subsecond_digits: *subsecond_digits,
+                        }),
+                        DfType::TimestampTz { subsecond_digits } => Ok(DfType::Timestamp {
+                            subsecond_digits: *subsecond_digits,
+                        }),
+                        _ => Err(invalid_query_err!(
+                            "'AT TIME ZONE' is not defined for {left_type}"
+                        )),
+                    }
+                } else {
+                    Err(unsupported_err!(
+                        "'AT TIME ZONE' is only supported in PostgreSQL"
+                    ))
+                }
+            }
+
             Self::JsonPathExtractUnquote
             | Self::JsonKeyExtractText
             | Self::JsonKeyPathExtractText => Ok(DfType::DEFAULT_TEXT),
@@ -887,6 +933,10 @@ fn infer_collation(name_opt: Option<CollationName>, ty: &DfType) -> ReadySetResu
         },
     };
     Ok(collation)
+}
+
+fn get_default_time_zone_name() -> String {
+    "Etc/UTC".to_string()
 }
 
 impl Expr {
@@ -1060,6 +1110,30 @@ impl Expr {
                             null_on_failure: false,
                         });
                     }
+                }
+
+                if matches!(op, BinaryOperator::AtTimeZone) {
+                    let at_time_zone = match *right {
+                        Expr::Literal { val, .. } if val.is_string() => {
+                            val.as_str().unwrap().parse::<Tz>().map_err(|_| {
+                                internal_err!("Could not parse time zone name '{}'", val)
+                            })?
+                        }
+                        _ => {
+                            return Err(invalid_query_err!("time zone name should be text literal"))
+                        }
+                    };
+
+                    let default_time_zone = get_default_time_zone_name()
+                        .parse::<Tz>()
+                        .map_err(|_| internal_err!("Could not parse default time zone name"))?;
+
+                    return Ok(Self::AtTimeZone {
+                        expr: left,
+                        at_time_zone,
+                        default_time_zone,
+                        ty: out,
+                    });
                 }
 
                 let op_node = Self::Op {

@@ -59,7 +59,6 @@ pub enum FunctionExpr {
     ///
     /// `LOWER(string [COLLATE collation_name])`
     /// `UPPER(string [COLLATE collation_name])`
-    ///
     Lower {
         expr: Box<Expr>,
         collation: Option<CollationName>,
@@ -251,6 +250,9 @@ pub enum BinaryOperator {
     /// `-`
     Subtract,
 
+    /// Postgres-specific `AT TIME ZONE` operator.
+    AtTimeZone,
+
     /// `#-`
     ///
     /// Postgres-specific JSONB operator that takes JSONB and returns JSONB with the value at a
@@ -378,6 +380,7 @@ impl Display for BinaryOperator {
             Self::HashArrow2 => "#>>",
             Self::AtArrowRight => "@>",
             Self::AtArrowLeft => "<@",
+            Self::AtTimeZone => "AT TIME ZONE",
         };
         f.write_str(op)
     }
@@ -636,6 +639,7 @@ impl DialectDisplay for Expr {
                 expr.display(dialect),
                 ty.display(dialect)
             ),
+
             Expr::Array(exprs) => {
                 fn write_value(
                     expr: &Expr,
@@ -903,6 +907,16 @@ fn binary_operator_no_and_or(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Binar
 
             Ok((i, BinaryOperator::IsNot))
         },
+        move |i| {
+            let (i, _) = tag_no_case("at")(i)?;
+            let (i, _) = whitespace1(i)?;
+            let (i, _) = tag_no_case("time")(i)?;
+            let (i, _) = whitespace1(i)?;
+            let (i, _) = tag_no_case("zone")(i)?;
+            let (i, _) = whitespace1(i)?;
+
+            Ok((i, BinaryOperator::AtTimeZone))
+        },
         map(pair(tag_no_case("is"), whitespace1), |_| BinaryOperator::Is),
         // Sigils are separated due to `alt` limit.
         //
@@ -1166,6 +1180,7 @@ where
             Infix(AtArrowLeft) => Affix::Infix(Precedence(8), Associativity::Left),
             Infix(HashSubtract) => Affix::Infix(Precedence(8), Associativity::Left),
 
+            Infix(AtTimeZone) => Affix::Infix(Precedence(7), Associativity::Left),
             Infix(Like) => Affix::Infix(Precedence(7), Associativity::Right),
             Infix(NotLike) => Affix::Infix(Precedence(7), Associativity::Right),
             Infix(ILike) => Affix::Infix(Precedence(7), Associativity::Right),

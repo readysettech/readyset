@@ -663,6 +663,9 @@ impl Value {
             ))),
             (Self::Integer(i), Type::Text) => Ok(Cow::Owned(Self::Text(i.to_string()))),
             (Self::Date(ndt), Type::Text) => Ok(Cow::Owned(Self::Text(ndt.to_string()))),
+            (Self::Date(ndt), Type::TimestampTz) => Ok(Cow::Owned(Self::TimestampTz(
+                FixedOffset::east_opt(0).unwrap().from_utc_datetime(ndt),
+            ))),
             (v, t) => {
                 todo!("{v:?} {t:?}")
             }
