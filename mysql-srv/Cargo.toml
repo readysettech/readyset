@@ -12,17 +12,18 @@ keywords = ["api-bindings", "database", "sql", "mock"]
 categories = ["api-bindings", "network-programming", "database-implementations"]
 
 [dependencies]
-nom = { workspace = true }
+byteorder = { workspace = true }
+bytes = { workspace = true }
+chrono = { workspace = true }
+getrandom = { workspace = true }
+mysql-time = { path = "../mysql-time" }
 mysql_async = { workspace = true }
 mysql_common = { workspace = true, features = ["chrono"] }
-byteorder = { workspace = true }
-chrono = { workspace = true }
-time = { workspace = true }
-getrandom = { workspace = true }
-tokio = { workspace = true, features = ["full"] }
-thiserror = { workspace = true }
+nom = { workspace = true }
 sha-1 = { workspace = true }
-mysql-time = { path = "../mysql-time" }
+thiserror = { workspace = true }
+time = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
 tracing = { workspace = true }
 
 readyset-adapter-types = { path = "../readyset-adapter-types" }
