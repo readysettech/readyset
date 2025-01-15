@@ -194,9 +194,6 @@ impl DbConnection {
             // Then switch to the test db
             client.query_drop(format!("USE {test_db_name};")).await?;
 
-            // Set very low execution time, to make sure we override it later on
-            client.query_drop("SET GLOBAL MAX_EXECUTION_TIME=1").await?;
-
             Ok(DbConnection::MySQL(client))
         } else if url.starts_with("postgresql") {
             let opts = tokio_postgres::Config::from_str(url)?;
