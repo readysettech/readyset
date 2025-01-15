@@ -103,6 +103,7 @@ fn example_exprs_eval_same_as_postgres() {
         "split_part('a.b.c', '.', 4)",
         "split_part('a.b.c', '.', -1)",
         "split_part('a.b.c', '.', -4)",
+        r"'foo\bar'",
     ] {
         compare_eval(expr, &mut client);
     }

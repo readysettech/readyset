@@ -494,7 +494,7 @@ fn raw_string_quoted(
                     map(is_not(escape_quote), |i: LocatedSpan<&[u8]>| *i),
                     map(pair(tag(quote), tag(quote)), |_| quote),
                     map(tag("\\\\"), |_| &b"\\"[..]),
-                    map(tag("\\b"), |_| &b"\x7f"[..]),
+                    map(tag("\\b"), |_| &b"\x08"[..]),
                     map(tag("\\r"), |_| &b"\r"[..]),
                     map(tag("\\n"), |_| &b"\n"[..]),
                     map(tag("\\t"), |_| &b"\t"[..]),

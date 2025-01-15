@@ -152,6 +152,7 @@ async fn example_exprs_eval_same_as_mysql() {
         "concat('one',2,'three')",
         "concat('a','b')",
         "concat('a')",
+        r"'foo\bar'",
     ] {
         compare_eval(expr, &mut conn).await;
     }
