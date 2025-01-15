@@ -166,7 +166,7 @@ native-tls = "0.2.11"
 ndarray = "0.16.1"
 nom = "7.1.3"
 nom_locate = "4.2.0"
-notify = { version = "7.0.0", default-features = false, features = [
+notify = { version = "8.0.0", default-features = false, features = [
     "macos_kqueue",
 ] }
 num-integer = "0.1.46"
