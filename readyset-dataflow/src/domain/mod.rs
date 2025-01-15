@@ -123,7 +123,7 @@ enum TriggerEndpoint {
     Start(Index),
     End {
         source: SourceSelection,
-        options: Vec<Box<dyn channel::Sender + Send>>,
+        options: Vec<ReplicaAddress>,
     },
     Local(Index),
 }
@@ -846,6 +846,36 @@ impl Domain {
             .collect()
     }
 
+    fn find_tags(
+        &self,
+        keys: &[KeyComparison],
+        cols: &[usize],
+        dst: Destination,
+        target: Target,
+    ) -> ReadySetResult<HashSet<Tag>> {
+        let index = Index::new(IndexType::best_for_keys(keys), cols.to_vec());
+        let tags = self
+            .replay_paths
+            .tags_for_index(dst, target, &index)
+            .cloned()
+            .unwrap_or_default();
+
+        invariant!(
+            !tags.is_empty(),
+            "no tag found for value {:?} in {}.{:?}{}",
+            Sensitive(&keys),
+            dst.0,
+            index,
+            if dst.0 == target.0 {
+                "".to_owned()
+            } else {
+                format!(" (targeting {})", target.0)
+            }
+        );
+
+        Ok(tags)
+    }
+
     /// Initiate a replay for a miss represented by the given keys and column indices in the given
     /// node.
     ///
@@ -863,38 +893,21 @@ impl Domain {
     /// * `dst` and `target` must both be nodes in this domain
     fn find_tags_and_replay(
         &mut self,
+        ex: &mut dyn Executor,
         miss_keys: Vec<KeyComparison>,
         miss_columns: &[usize],
         dst: Destination,
         target: Target,
         cache_name: Relation,
     ) -> ReadySetResult<()> {
-        let miss_index = Index::new(IndexType::best_for_keys(&miss_keys), miss_columns.to_vec());
-        let tags = self
-            .replay_paths
-            .tags_for_index(dst, target, &miss_index)
-            .cloned()
-            .unwrap_or_default();
-
-        invariant!(
-            !tags.is_empty(),
-            "no tag found to fill missing value {:?} in {}.{:?}{}",
-            Sensitive(&miss_keys),
-            dst.0,
-            miss_index,
-            if dst.0 == target.0 {
-                "".to_owned()
-            } else {
-                format!(" (targeting {})", target.0)
-            }
-        );
+        let tags = self.find_tags(&miss_keys, miss_columns, dst, target)?;
 
         for &tag in &tags {
             let (miss_keys, cache_name) = (miss_keys.clone(), cache_name.clone());
             if self.replay_paths[tag].trigger.is_local() {
                 self.request_partial_replay_local(tag, miss_keys, cache_name);
             } else {
-                self.request_partial_replay(tag, miss_keys, cache_name)?;
+                self.request_partial_replay(ex, tag, miss_keys, cache_name)?;
             }
         }
 
@@ -904,6 +917,7 @@ impl Domain {
     #[allow(clippy::too_many_arguments)]
     fn on_replay_misses(
         &mut self,
+        ex: &mut dyn Executor,
         miss_in: LocalNodeIndex,
         miss_columns: &[usize],
         missed_keys: HashSet<(KeyComparison, KeyComparison)>,
@@ -1011,6 +1025,7 @@ impl Domain {
 
         for ((target, columns), keys) in needed_replays {
             self.find_tags_and_replay(
+                ex,
                 keys,
                 &columns,
                 Destination(miss_in),
@@ -1067,6 +1082,7 @@ impl Domain {
     /// * `tag` must be a tag for a valid replay path
     fn request_partial_replay(
         &mut self,
+        ex: &mut dyn Executor,
         tag: Tag,
         keys: Vec<KeyComparison>,
         cache_name: Relation,
@@ -1074,6 +1090,30 @@ impl Domain {
         let requesting_shard = self.shard();
         let requesting_replica = self.replica();
 
+        let pkt = |unishard, keys| {
+            Packet::RequestPartialReplay(RequestPartialReplay {
+                tag,
+                unishard,
+                keys,
+                requesting_shard,
+                requesting_replica,
+                cache_name: cache_name.clone(),
+            })
+        };
+
+        self.send_to_tag(ex, tag, keys, pkt)
+    }
+
+    fn send_to_tag<P>(
+        &mut self,
+        ex: &mut dyn Executor,
+        tag: Tag,
+        keys: Vec<KeyComparison>,
+        pkt: P,
+    ) -> ReadySetResult<()>
+    where
+        P: Fn(bool, Vec<KeyComparison>) -> Packet,
+    {
         #[allow(clippy::unwrap_used)] // documented invariant
         let TriggerEndpoint::End {
             source,
@@ -1094,30 +1134,19 @@ impl Domain {
             SourceSelection::KeyShard { key_i_to_shard, .. } => Some(key_i_to_shard),
         };
 
-        let pkt = |unishard, keys| {
-            Packet::RequestPartialReplay(RequestPartialReplay {
-                tag,
-                unishard,
-                keys,
-                requesting_shard,
-                requesting_replica,
-                cache_name: cache_name.clone(),
-            })
-        };
-
         if ask_shard_by_key_i.is_none() && options.len() != 1 {
             // source is sharded by a different key than we are doing lookups for,
             // so we need to trigger on all the shards.
             trace!(?tag, ?keys, "sending broadcast shard replay request");
 
-            for trigger in options {
-                let _ = trigger.send(pkt(false, keys.clone())); // ignore error on shutdown
+            for addr in options {
+                ex.send(*addr, pkt(false, keys.clone())); // ignore error on shutdown
             }
         } else if options.len() == 1 {
-            trace!(tag = ?tag, keys = ?keys, "sending single replay request");
-            let _ = options[0].send(pkt(true, keys));
+            trace!(?tag, ?keys, "sending single replay request");
+            ex.send(options[0], pkt(true, keys));
         } else if let Some(key_shard_i) = ask_shard_by_key_i {
-            trace!(tag = ?tag, keys = ?keys, "sending sharded replay request");
+            trace!(?tag, ?keys, "sending sharded replay request");
             let mut shards = HashMap::new();
             for key in keys {
                 for shard in key.shard_keys_at(key_shard_i, options.len()) {
@@ -1128,12 +1157,13 @@ impl Domain {
                 }
             }
             for (shard, keys) in shards {
-                let _ = options[shard].send(pkt(true, keys));
+                ex.send(options[shard], pkt(true, keys));
             }
         } else {
             // would have hit the if further up
             internal!();
         }
+
         Ok(())
     }
 
@@ -1947,33 +1977,27 @@ impl Domain {
             payload::TriggerEndpoint::End(selection, domain_index) => {
                 // See the documentation for DomainRequest::SetupReplayPath::replica_fanout
                 let replica = if replica_fanout { 0 } else { self.replica() };
-                let shard = |shard| -> ReadySetResult<_> {
-                    // TODO: make async
-                    Ok(self
-                        .channel_coordinator
-                        .builder_for(&ReplicaAddress {
-                            domain_index,
-                            shard,
-                            replica,
-                        })?
-                        .build_sync()?)
+                let addr = |shard| ReplicaAddress {
+                    domain_index,
+                    shard,
+                    replica,
                 };
 
                 let options = match selection {
                     SourceSelection::AllShards(nshards)
                     | SourceSelection::KeyShard { nshards, .. } => {
                         // we may need to send to any of these shards
-                        (0..nshards).map(shard).collect::<Result<Vec<_>, _>>()
+                        (0..nshards).map(addr).collect::<Vec<_>>()
                     }
                     SourceSelection::SameShard => {
-                        Ok(vec![shard(self.shard.ok_or_else(|| {
+                        vec![addr(self.shard.ok_or_else(|| {
                             internal_err!(
                                 "Cannot use SourceSelection::SameShard for a replay path\
                                              through an unsharded domain",
                             )
-                        })?)?])
+                        })?)]
                     }
-                }?;
+                };
 
                 TriggerEndpoint::End {
                     source: selection,
@@ -2708,6 +2732,7 @@ impl Domain {
                 already_requested.extend(&mut keys);
                 if !keys.is_empty() {
                     self.find_tags_and_replay(
+                        executor,
                         keys,
                         &cols,
                         // Destination and target are the same since readers can't generate columns
@@ -2962,6 +2987,7 @@ impl Domain {
             trace!(%pkt.tag, ?replay_keys, "replay request miss");
 
             self.on_replay_misses(
+                ex,
                 src,
                 &index.columns,
                 replay_keys,
@@ -3738,6 +3764,7 @@ impl Domain {
             trace!(%tag, ?misses, on = %next_replay.idx, "missed during replay processing");
 
             self.on_replay_misses(
+                ex,
                 next_replay.idx,
                 &next_replay.lookup_columns,
                 misses,
