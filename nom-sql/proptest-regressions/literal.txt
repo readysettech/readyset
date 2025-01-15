@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 0c0fea23dee5f322dfcdca9ef021a72e2c1d1309c497b1d154bdaabd85458301 # shrinks to input = _LiteralToStringParseRoundTripArgs { lit: String("'") }
+cc 7fc9ed79b062e0865b88b96e13fce9c56b54f1b3dedda08165f81ea8a96b30a2 # shrinks to input = _RtLiteralArgs { s: String("\\") }

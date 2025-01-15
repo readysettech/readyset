@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::keywords::{sql_keyword, sql_keyword_or_builtin_function, POSTGRES_NOT_RESERVED};
-use crate::literal::{raw_string_literal, QuotingStyle};
+use crate::literal::{raw_string_literal, raw_string_single_quoted_unescaped, QuotingStyle};
 use crate::select::{LimitClause, LimitValue};
 use crate::whitespace::whitespace0;
 use crate::{literal, Literal, NomSqlError, NomSqlResult, SqlIdentifier};
@@ -253,13 +253,14 @@ impl Dialect {
     /// Parse the raw (byte) content of a string literal using this Dialect
     pub fn string_literal(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<u8>> {
         move |i| match self {
-            // Currently we allow escape sequences in all string constants. If we support postgres'
-            // standard_conforming_strings setting, then the below should be changed to check for
-            // the presence of a preceding 'E' instead of matching and discarding the match result.
-            Dialect::PostgreSQL => preceded(
-                opt(tag_no_case("E")),
-                raw_string_literal(self.quoting_style()),
-            )(i),
+            Dialect::PostgreSQL => {
+                let (i, escape) = opt(tag_no_case("E"))(i)?;
+                if escape.is_some() {
+                    raw_string_literal(self.quoting_style())(i)
+                } else {
+                    raw_string_single_quoted_unescaped(i)
+                }
+            }
             Dialect::MySQL => preceded(
                 opt(alt((tag("_utf8mb4"), tag("_utf8"), tag("_binary")))),
                 raw_string_literal(self.quoting_style()),
@@ -565,10 +566,23 @@ mod tests {
         }
 
         #[test]
-        fn literal_string_single_backslash_escape() {
-            let all_escaped = br#"\0\'\"\b\n\r\t\Z\\\%\_"#;
+        fn literal_string_single_backslash_no_escape() {
+            let all_escaped = br#"\0\"\b\n\r\t\Z\\\%\_"#;
             let quote = &b"'"[..];
             let quoted = &[quote, &all_escaped[..], quote].concat();
+            let res = to_nom_result(Dialect::PostgreSQL.string_literal()(LocatedSpan::new(
+                quoted,
+            )));
+            let expected = all_escaped.to_vec();
+            assert_eq!(res, Ok((&b""[..], expected)));
+        }
+
+        #[test]
+        fn literal_string_single_backslash_escape() {
+            let all_escaped = br#"\0\'\"\b\n\r\t\Z\\\%\_"#;
+            let start_quote = &b"E'"[..];
+            let end_quote = &b"'"[..];
+            let quoted = &[start_quote, &all_escaped[..], end_quote].concat();
             let res = to_nom_result(Dialect::PostgreSQL.string_literal()(LocatedSpan::new(
                 quoted,
             )));
