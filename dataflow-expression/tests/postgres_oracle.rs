@@ -76,6 +76,13 @@ fn example_exprs_eval_same_as_postgres() {
         "'a' ilike 'A'",
         "'a' not like 'a'",
         "'a' not ilike 'b'",
+        r"'a_b' like 'a\_b'",
+        r"'a%b' like 'a\%b'",
+        r"'a\b' like E'a\\b'",
+        r"E'a\b' like E'a\b'",
+        r"E'a\b' like 'a\b'",
+        r"'a\b' like E'a\\\\b'",
+        r"'a\b' like 'a\\b'",
         "'a' ilike all ('{a,A}')",
         "'a' ilike all ('{a,A,b}')",
         "'a'::abc = 'a'",
@@ -103,7 +110,6 @@ fn example_exprs_eval_same_as_postgres() {
         "split_part('a.b.c', '.', 4)",
         "split_part('a.b.c', '.', -1)",
         "split_part('a.b.c', '.', -4)",
-        r"'foo\bar'",
     ] {
         compare_eval(expr, &mut client);
     }

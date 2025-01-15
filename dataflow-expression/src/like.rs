@@ -25,18 +25,32 @@ pub use CaseSensitivityMode::*;
 struct LikeTokenReplacer;
 impl regex::Replacer for LikeTokenReplacer {
     fn replace_append(&mut self, caps: &regex::Captures<'_>, dst: &mut String) {
-        // According to the docs from `regex::Captures`, the first group always
-        // exists and it corresponds to the entire match. So, it's allowed to
-        // get the 0th position through index slicing.
+        // According to the docs from `regex::Replacer::replace_append`, the current match to be
+        // replaced always exists in `caps[0]`.
         match &caps[0] {
+            // Handle unescaped LIKE pattern characters
             "%" => dst.push_str(".*"),
             "_" => dst.push('.'),
-            r"\%" => dst.push('%'),
-            r"\_" => dst.push('_'),
-            s @ ("{" | "}" | "." | "*" | "+" | "?" | "|" | "(" | ")" | "[" | "]" | "$" | "^"
-            | r"\") => {
+            // Handle regex metacharacters
+            s @ ("{" | "}" | "." | "*" | "+" | "?" | "|" | "(" | ")" | "[" | "]" | "$" | "^") => {
                 dst.push('\\');
                 dst.push_str(s);
+            }
+            // Handle escaped characters
+            s if s.starts_with('\\') => {
+                let c = s.chars().nth(1).unwrap(); // Guaranteed by `TOKEN` regex: `\\.`
+                match c {
+                    '\\' => dst.push_str(r"\\"),
+                    // Re-handle regex metacharacters
+                    '{' | '}' | '.' | '*' | '+' | '?' | '|' | '(' | ')' | '[' | ']' | '$' | '^' => {
+                        dst.push('\\');
+                        dst.push(c);
+                    }
+                    // For any other escaped character (including _ and %), treat it literally
+                    _ => {
+                        dst.push(c);
+                    }
+                }
             }
             s => dst.push_str(s),
         }
@@ -45,13 +59,13 @@ impl regex::Replacer for LikeTokenReplacer {
 
 fn like_to_regex(like_pattern: &str, mode: CaseSensitivityMode) -> Regex {
     lazy_static! {
-
         static ref TOKEN: Regex = {
             #[allow(clippy::unwrap_used)]
-            // Regex is hardcoded. As a meta-note, this whole expression
-            // is behind curly braces so that clippy can correctly pick
-            // up the annotation.
-            Regex::new(r"(\\?[%_])|[{}.*+?|()\[\]\\$^]").unwrap()
+            // Regex is hardcoded. This pattern matches:
+            // 1. Special LIKE characters (% or _)
+            // 2. Special regex metacharacters that need escaping
+            // 3. An escaped character (\\.)
+            Regex::new(r"[%_]|[{}.*+?|()\[\]$^]|\\.").unwrap()
         };
     }
     let mut re = if mode == CaseInsensitive {
@@ -131,19 +145,34 @@ mod tests {
 
     #[test]
     fn escapes() {
+        assert!(LikePattern::new(r"foo\bar", CaseSensitive).matches(r"foobar"));
+        assert!(LikePattern::new(r"foo\\bar", CaseSensitive).matches(r"foo\bar"));
         assert!(LikePattern::new(r"\%", CaseSensitive).matches("%"));
         assert!(!LikePattern::new(r"\%", CaseSensitive).matches(r"\foo"));
         assert!(LikePattern::new(r"\_", CaseSensitive).matches("_"));
         assert!(!LikePattern::new(r"\_", CaseSensitive).matches(r"\a"));
+        assert!(LikePattern::new(r"\\", CaseSensitive).matches(r"\"));
+        assert!(LikePattern::new(r"\a", CaseSensitive).matches("a"));
+        assert!(LikePattern::new(r"\\%", CaseSensitive).matches(r"\foo"));
+        assert!(LikePattern::new(r"\\\%", CaseSensitive).matches(r"\%"));
+        assert!(!LikePattern::new(r"\a", CaseSensitive).matches("b"));
+        for c in r"{}.*+?|()[]$^".chars() {
+            assert!(LikePattern::new(&c.to_string(), CaseSensitive).matches(&c.to_string()));
+        }
+        for c in r"%_\{}.*+?|()[]$^".chars() {
+            assert!(LikePattern::new(&format!(r"\{c}"), CaseSensitive).matches(&c.to_string()));
+        }
+        assert!(LikePattern::new(r"\\", CaseSensitive).matches(r"\"));
     }
 
     #[proptest]
     fn pattern_matches_itself(pat: String) {
         lazy_static! {
-            static ref ESCAPER: Regex = Regex::new(r"(\\)+(?P<tok>[%_])").unwrap();
+            static ref SPECIAL_CHARS: Regex = Regex::new(r"[%_\\]").unwrap();
         }
-        let pat = ESCAPER.replace_all(&pat, "$tok");
-        let pattern = LikePattern::new(&pat, CaseSensitive);
+
+        let escaped_pat = SPECIAL_CHARS.replace_all(&pat, r"\$0");
+        let pattern = LikePattern::new(&escaped_pat, CaseSensitive);
         assert!(pattern.matches(&pat));
     }
 }
