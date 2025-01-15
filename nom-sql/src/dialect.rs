@@ -448,7 +448,7 @@ mod tests {
             for quote in [&b"'"[..], &b"\""[..]].iter() {
                 let quoted = &[quote, &all_escaped[..], quote].concat();
                 let res = to_nom_result(Dialect::MySQL.string_literal()(LocatedSpan::new(quoted)));
-                let expected = "\0\'\"\x7F\n\r\t\x1a\\%_".as_bytes().to_vec();
+                let expected = "\0\'\"\x08\n\r\t\x1a\\%_".as_bytes().to_vec();
                 assert_eq!(res, Ok((&b""[..], expected)));
             }
         }
@@ -586,7 +586,7 @@ mod tests {
             let res = to_nom_result(Dialect::PostgreSQL.string_literal()(LocatedSpan::new(
                 quoted,
             )));
-            let expected = "\0\'\"\x7F\n\r\t\x1a\\%_".as_bytes().to_vec();
+            let expected = "\0\'\"\x08\n\r\t\x1a\\%_".as_bytes().to_vec();
             assert_eq!(res, Ok((&b""[..], expected)));
         }
 
