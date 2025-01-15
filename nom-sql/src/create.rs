@@ -536,7 +536,7 @@ fn primary_key(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<
                 preceded(whitespace1, tag_no_case("auto_increment")),
                 |_| (),
             )),
-            opt(preceded(whitespace1, deferrable(dialect))),
+            opt(deferrable(dialect, true)),
         ))(i)?;
         let constraint_timing = constraint_timing.unwrap_or(None);
 
@@ -693,11 +693,17 @@ fn nulls_distinct(
 
 fn deferrable(
     dialect: Dialect,
+    require_whitespace: bool,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Option<ConstraintTiming>> {
     move |i| {
         if dialect != Dialect::PostgreSQL {
             return Ok((i, None));
         }
+        let (i, _) = if require_whitespace {
+            whitespace1(i)?
+        } else {
+            whitespace0(i)?
+        };
         alt((
             move |i| {
                 let (i, _) = tag_no_case("not")(i)?;
@@ -782,7 +788,7 @@ fn unique(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8]
                 tag(")"),
             ),
         )(i)?;
-        let (i, constraint_timing) = opt(preceded(whitespace0, deferrable(dialect)))(i)?;
+        let (i, constraint_timing) = opt(deferrable(dialect, false))(i)?;
         let constraint_timing = constraint_timing.unwrap_or(None);
         let (i, index_type) = opt(using_index)(i)?;
         debug_print("after unique", &i);
@@ -1717,7 +1723,38 @@ mod tests {
                 }),
                 options: Ok(vec![CreateTableOption::AutoIncrement(1001)],)
             }
-        )
+        );
+        // index type
+        let qstring = "CREATE TABLE users (id bigint(20), name varchar(255), email varchar(255), \
+                       UNIQUE KEY id_k (id) USING HASH);";
+
+        let res = create_table(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
+        assert_eq!(
+            res.unwrap().1,
+            CreateTableStatement {
+                if_not_exists: false,
+                table: Relation::from("users"),
+                body: Ok(CreateTableBody {
+                    fields: vec![
+                        ColumnSpecification::new(Column::from("id"), SqlType::BigInt(Some(20))),
+                        ColumnSpecification::new(Column::from("name"), SqlType::VarChar(Some(255))),
+                        ColumnSpecification::new(
+                            Column::from("email"),
+                            SqlType::VarChar(Some(255))
+                        ),
+                    ],
+                    keys: Some(vec![TableKey::UniqueKey {
+                        constraint_name: None,
+                        constraint_timing: None,
+                        index_name: Some("id_k".into()),
+                        columns: vec![Column::from("id")],
+                        index_type: Some(IndexType::Hash),
+                        nulls_distinct: None,
+                    }]),
+                }),
+                options: Ok(vec![]),
+            }
+        );
     }
 
     #[test]
