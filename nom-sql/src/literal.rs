@@ -242,7 +242,17 @@ impl DialectDisplay for Literal {
                 Literal::Numeric(val, scale) => {
                     write!(f, "{}", Decimal::from_i128_with_scale(*val, *scale))
                 }
-                Literal::String(ref s) => display_string_literal(f, s),
+                Literal::String(ref s) => match dialect {
+                    Dialect::MySQL => display_string_literal(f, s),
+                    Dialect::PostgreSQL => {
+                        let escaped = escape_string_literal(s);
+                        if s.len() != escaped.len() {
+                            write!(f, "E'{}'", escaped)
+                        } else {
+                            write!(f, "'{}'", escaped)
+                        }
+                    }
+                },
                 Literal::Blob(ref bv) => write!(
                     f,
                     "{}",
@@ -273,7 +283,11 @@ impl DialectDisplay for Literal {
 }
 
 pub(crate) fn display_string_literal(f: &mut fmt::Formatter<'_>, s: &str) -> fmt::Result {
-    write!(f, "'{}'", s.replace('\'', "''").replace('\\', "\\\\"))
+    write!(f, "'{}'", escape_string_literal(s))
+}
+
+fn escape_string_literal(s: &str) -> String {
+    s.replace('\'', "''").replace('\\', "\\\\")
 }
 
 impl Literal {
@@ -497,6 +511,14 @@ fn raw_string_quoted(
             tag(quote),
         )(i)
     }
+}
+
+/// Unescaped string literal value (single-quotes only as this is Postgres-only)
+pub fn raw_string_single_quoted_unescaped(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<u8>> {
+    map(
+        delimited(tag(b"\'"), opt(is_not(b"\'" as &'static [u8])), tag(b"\'")),
+        |i: Option<LocatedSpan<&[u8]>>| i.map(|i| i.to_vec()).unwrap_or_default(),
+    )(i)
 }
 
 fn raw_string_single_quoted(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<u8>> {
@@ -732,9 +754,26 @@ mod tests {
                     Literal::Integer(i as i64)
                 )
             }
+            // Can't test cross-dialect round-tripping for strings due to Postgres escaping
+            Literal::String(_) => {
+                for &dialect in Dialect::ALL {
+                    let s = lit.display(dialect).to_string();
+                    assert_eq!(
+                        literal(dialect)(LocatedSpan::new(s.as_bytes())).unwrap().1,
+                        lit
+                    )
+                }
+            }
             _ => {
                 for &dialect in Dialect::ALL {
                     let s = lit.display(Dialect::MySQL).to_string();
+                    assert_eq!(
+                        literal(dialect)(LocatedSpan::new(s.as_bytes())).unwrap().1,
+                        lit
+                    )
+                }
+                for &dialect in Dialect::ALL {
+                    let s = lit.display(Dialect::PostgreSQL).to_string();
                     assert_eq!(
                         literal(dialect)(LocatedSpan::new(s.as_bytes())).unwrap().1,
                         lit
