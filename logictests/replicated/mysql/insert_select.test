@@ -1,0 +1,17 @@
+statement ok
+create table insert_select_test_original (id int auto_increment primary key, x text);
+
+statement ok
+insert into insert_select_test_original (x) values ('a'), ('b'), ('c'), ('d'), ('e');
+
+statement ok
+create table insert_select_test_new (id int auto_increment primary key, x text);
+
+statement ok
+insert into insert_select_test_new (x) select x from insert_select_test_original;
+
+query I nosort
+select id from insert_select_test_new where x = ?
+? = e
+----
+5
