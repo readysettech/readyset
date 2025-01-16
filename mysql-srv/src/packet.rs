@@ -7,7 +7,16 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::resultset::{MAX_POOL_ROWS, MAX_POOL_ROW_CAPACITY};
 
-const U24_MAX: usize = 16_777_215;
+/// The maximum size of data we can be sent in a single mysql packet.
+///
+/// The limit is 24 bits as the mysql header protocol uses 24 bits to encode the length of the packet.
+/// If you have a row that is larger than this, it needs to be split up into multiple packets.
+///
+/// Note that this is slightly different than the mysql variable `max_allowed_packet` [0],
+/// as that is the max size of a given row (which might be chunked over several packets).
+///
+/// [0] https://dev.mysql.com/doc/refman/8.4/en/server-system-variables.html#sysvar_max_allowed_packet
+const MAX_PACKET_CHUNK_SIZE: usize = 16_777_215;
 
 pub struct PacketWriter<W> {
     pub seq: u8,
@@ -90,6 +99,12 @@ impl<W: AsyncWrite + Unpin> PacketWriter<W> {
         self.seq = seq;
     }
 
+    pub fn next_seq(&mut self) -> u8 {
+        let val = self.seq;
+        self.seq = self.seq.wrapping_add(1);
+        val
+    }
+
     /// Flushes the writer. This function *must* be called before dropping the internal writer
     /// or writes may be lossed.
     pub async fn flush(&mut self) -> Result<(), tokio::io::Error> {
@@ -97,31 +112,48 @@ impl<W: AsyncWrite + Unpin> PacketWriter<W> {
         self.w.flush().await
     }
 
-    /// Push a new packet to the outgoing packet list
+    #[inline]
+    pub fn packet_header_bytes(&mut self, len: usize) -> [u8; 4] {
+        let mut hdr = (len as u32).to_le_bytes();
+        hdr[3] = self.next_seq();
+        hdr
+    }
+
+    /// Push a new mysql packet to the outgoing packet list.
     pub fn enqueue_packet(&mut self, mut packet: Vec<u8>) {
         // Lazily shrink large buffers before processing them further, as after that they will go to
-        // the buffer pool
+        // the buffer pool. This would occur if the buffer was reused, and the previous use was
+        // greater than `MAX_POOL_ROW_CAPACITY`, and this use is less than `MAX_POOL_ROW_CAPACITY`.
         packet.shrink_to(MAX_POOL_ROW_CAPACITY);
 
-        while packet.len() >= U24_MAX {
-            let rest = packet.split_off(U24_MAX);
-            let mut hdr = (U24_MAX as u32).to_le_bytes();
-            hdr[3] = self.seq;
-            self.seq = self.seq.wrapping_add(1);
-            self.queue.push(QueuedPacket::WithHeader(hdr, packet));
+        if packet.len() < MAX_PACKET_CHUNK_SIZE {
+            let header = self.packet_header_bytes(packet.len());
+            self.queue.push(QueuedPacket::WithHeader(header, packet));
+        } else {
+            self.enqueue_large_packet(packet);
+        }
+    }
+
+    /// Push a new, very large mysql packet to the outgoing packet list. This function will appropriately
+    /// split the packet into multiple packets, and enqueue them.
+    pub(crate) fn enqueue_large_packet(&mut self, mut packet: Vec<u8>) {
+        let mut remaining_len = packet.len();
+
+        while remaining_len >= MAX_PACKET_CHUNK_SIZE {
+            let rest = packet.split_off(MAX_PACKET_CHUNK_SIZE);
+            let header = self.packet_header_bytes(MAX_PACKET_CHUNK_SIZE);
+            self.queue.push(QueuedPacket::WithHeader(header, packet));
+            remaining_len -= MAX_PACKET_CHUNK_SIZE;
             packet = rest;
         }
 
-        let mut hdr = (packet.len() as u32).to_le_bytes();
-        hdr[3] = self.seq;
-        self.seq = self.seq.wrapping_add(1);
-        self.queue.push(QueuedPacket::WithHeader(hdr, packet));
+        let header = self.packet_header_bytes(remaining_len);
+        self.queue.push(QueuedPacket::WithHeader(header, packet));
     }
 
-    /// Enqueues raw bytes to be written on the wire.
-    pub async fn enqueue_raw(&mut self, packet: Arc<[u8]>) -> Result<(), tokio::io::Error> {
+    /// Enqueues raw, reference counted bytes to be written on the wire. It is assumed the `packet` is already a valid mysql packet(s).
+    pub fn enqueue_raw(&mut self, packet: Arc<[u8]>) {
         self.queue.push(QueuedPacket::Raw(packet));
-        Ok(())
     }
 
     pub fn queue_len(&self) -> usize {
@@ -139,46 +171,6 @@ impl<W: AsyncWrite + Unpin> PacketWriter<W> {
         Ok(())
     }
 
-    /// Handles split packet write (packets of 16MB and greater)
-    async fn write_large_packet(&mut self, mut packet: &[u8]) -> Result<(), tokio::io::Error> {
-        let mut slices = queued_packet_slices(&self.queue);
-
-        // We need to prepare the headers in advance so we can borrow them later
-        let mut total_len = packet.len();
-        let mut headers = Vec::new();
-        while total_len >= U24_MAX {
-            let mut hdr = (U24_MAX as u32).to_le_bytes();
-            hdr[3] = self.seq;
-            self.seq = self.seq.wrapping_add(1);
-            headers.push(hdr);
-            total_len -= U24_MAX;
-        }
-
-        let mut hdr = (total_len as u32).to_le_bytes();
-        hdr[3] = self.seq;
-        self.seq = self.seq.wrapping_add(1);
-        headers.push(hdr);
-
-        // After the headers where computed we can issue a vectored write that references
-        // both the headers and the packet slice, with no extra copying
-        slices.reserve(headers.len() * 2);
-        for header in &headers {
-            slices.push(IoSlice::new(&header[..]));
-            if packet.len() >= U24_MAX {
-                let (first, rest) = packet.split_at(U24_MAX);
-                slices.push(IoSlice::new(first));
-                packet = rest;
-            } else {
-                slices.push(IoSlice::new(packet));
-            }
-        }
-
-        write_all_vectored(&mut self.w, &mut slices).await?;
-        self.return_queued_to_pool();
-
-        Ok(())
-    }
-
     /// Clear the queued packets and return them to the pool of preallocated packets
     fn return_queued_to_pool(&mut self) {
         // Prefer to merge the shorter vector into the longer vector, thus minimizing the amount of
@@ -191,27 +183,6 @@ impl<W: AsyncWrite + Unpin> PacketWriter<W> {
         self.preallocated.truncate(MAX_POOL_ROWS);
         self.queue.truncate(MAX_POOL_ROWS - self.preallocated.len());
         self.preallocated.append(&mut self.queue);
-    }
-
-    /// Send a packet without queueing, flushes any queued packets beforehand
-    pub async fn write_packet(&mut self, packet: &[u8]) -> Result<(), tokio::io::Error> {
-        if packet.len() >= U24_MAX {
-            return self.write_large_packet(packet).await;
-        }
-
-        let mut slices = queued_packet_slices(&self.queue);
-        let packet_len = &packet.len().to_le_bytes()[0..3];
-        let seq = &[self.seq];
-        slices.extend([
-            IoSlice::new(packet_len),
-            IoSlice::new(seq),
-            IoSlice::new(packet),
-        ]);
-
-        write_all_vectored(&mut self.w, &mut slices).await?;
-
-        self.seq = self.seq.wrapping_add(1);
-        Ok(())
     }
 
     pub fn get_buffer(&mut self) -> Vec<u8> {
@@ -343,8 +314,8 @@ impl<R: AsyncRead + Unpin> PacketReader<R> {
         self.buffer.advance(4);
 
         // Handle large packets (>=16MB) as mysql treats those specially
-        if length == U24_MAX {
-            let packet = Packet::new(self.buffer.split_to(U24_MAX), seq);
+        if length == MAX_PACKET_CHUNK_SIZE {
+            let packet = Packet::new(self.buffer.split_to(MAX_PACKET_CHUNK_SIZE), seq);
             self.handle_in_progress_packet(packet)
         } else {
             // Regular packet - split off exactly what we need
@@ -373,7 +344,7 @@ impl<R: AsyncRead + Unpin> PacketReader<R> {
                     let segment_len = segment.len();
                     packet.append(segment.data);
 
-                    if segment_len < U24_MAX {
+                    if segment_len < MAX_PACKET_CHUNK_SIZE {
                         break;
                     }
                 }
@@ -416,7 +387,7 @@ mod tests {
 
         tokio::spawn(async move {
             let mut writer = PacketWriter::new(u_out);
-            writer.write_packet(&[0x10]).await.unwrap();
+            writer.enqueue_packet(vec![0x10]);
             writer.flush().await.unwrap();
         });
 
@@ -433,12 +404,12 @@ mod tests {
     #[tokio::test]
     async fn test_exact_size_packet() {
         let (u_out, u_in) = tokio::net::UnixStream::pair().unwrap();
-        let data = vec![0; U24_MAX];
+        let data = vec![0; MAX_PACKET_CHUNK_SIZE];
         let data_clone = data.clone();
 
         tokio::spawn(async move {
             let mut writer = PacketWriter::new(u_out);
-            writer.write_packet(&data_clone).await.unwrap();
+            writer.enqueue_packet(data_clone);
             writer.flush().await.unwrap();
         });
 
@@ -446,7 +417,7 @@ mod tests {
         let packet = reader.next().await.unwrap().unwrap();
 
         assert_eq!(packet.seq, 0);
-        assert_eq!(packet.len(), U24_MAX);
+        assert_eq!(packet.len(), MAX_PACKET_CHUNK_SIZE);
         assert_eq!(&*packet, &data);
         assert_eq!(packet.segments, 2); // One full segment + empty final segment
 
@@ -456,12 +427,12 @@ mod tests {
     #[tokio::test]
     async fn test_large_packet() {
         let (u_out, u_in) = tokio::net::UnixStream::pair().unwrap();
-        let mut data = vec![0; U24_MAX];
+        let mut data = vec![0; MAX_PACKET_CHUNK_SIZE];
         data.extend_from_slice(&[0x10]);
 
         tokio::spawn(async move {
             let mut writer = PacketWriter::new(u_out);
-            writer.write_packet(&data).await.unwrap();
+            writer.enqueue_packet(data);
             writer.flush().await.unwrap();
         });
 
@@ -469,9 +440,12 @@ mod tests {
         let packet = reader.next().await.unwrap().unwrap();
 
         assert_eq!(packet.seq, 0);
-        assert_eq!(packet.len(), U24_MAX + 1);
-        assert_eq!(&packet[..U24_MAX], &[0; U24_MAX]);
-        assert_eq!(&packet[U24_MAX..], &[0x10]);
+        assert_eq!(packet.len(), MAX_PACKET_CHUNK_SIZE + 1);
+        assert_eq!(
+            &packet[..MAX_PACKET_CHUNK_SIZE],
+            &[0; MAX_PACKET_CHUNK_SIZE]
+        );
+        assert_eq!(&packet[MAX_PACKET_CHUNK_SIZE..], &[0x10]);
         //assert_eq!(packet.segments, 2);
 
         assert!(reader.next().await.unwrap().is_none());
@@ -486,12 +460,12 @@ mod tests {
 
         // send multiple packets, of varying sizes.
         let packets = vec![
-            vec![0u8; 245],           // 1 packet
-            vec![1u8; U24_MAX * 2],   // 3 packets (2 full + 1 empty)
-            vec![2u8; U24_MAX + 100], // 2 packets
-            vec![3u8; 100],           // 1 packet
-            vec![4u8; U24_MAX - 1],   // 1 packet
-            vec![5u8; U24_MAX],       // 2 packets (1 full + 1 empty)
+            vec![0u8; 245],                         // 1 packet
+            vec![1u8; MAX_PACKET_CHUNK_SIZE * 2],   // 3 packets (2 full + 1 empty)
+            vec![2u8; MAX_PACKET_CHUNK_SIZE + 100], // 2 packets
+            vec![3u8; 100],                         // 1 packet
+            vec![4u8; MAX_PACKET_CHUNK_SIZE - 1],   // 1 packet
+            vec![5u8; MAX_PACKET_CHUNK_SIZE],       // 2 packets (1 full + 1 empty)
         ];
 
         let p = packets.clone();
@@ -508,9 +482,9 @@ mod tests {
             assert_eq!(&*packet, expected.as_slice());
 
             // Verify segment count
-            let needs_empty_segment = expected.len() % U24_MAX == 0;
+            let needs_empty_segment = expected.len() % MAX_PACKET_CHUNK_SIZE == 0;
             let expected_segments =
-                expected.len().div_ceil(U24_MAX) + usize::from(needs_empty_segment);
+                expected.len().div_ceil(MAX_PACKET_CHUNK_SIZE) + usize::from(needs_empty_segment);
             assert_eq!(packet.segments as usize, expected_segments);
         }
 
@@ -524,17 +498,6 @@ mod tests {
                 writer.enqueue_packet(packet);
             }
             writer.write_queued_packets().await?;
-            writer.flush().await
-        })
-        .await;
-    }
-
-    #[tokio::test]
-    async fn test_large_packet_write_direct() {
-        test_large_packet_write_helper(|mut writer, packets| async move {
-            for packet in packets {
-                writer.write_packet(&packet).await?;
-            }
             writer.flush().await
         })
         .await;
