@@ -139,46 +139,6 @@ impl<W: AsyncWrite + Unpin> PacketWriter<W> {
         Ok(())
     }
 
-    /// Handles split packet write (packets of 16MB and greater)
-    async fn write_large_packet(&mut self, mut packet: &[u8]) -> Result<(), tokio::io::Error> {
-        let mut slices = queued_packet_slices(&self.queue);
-
-        // We need to prepare the headers in advance so we can borrow them later
-        let mut total_len = packet.len();
-        let mut headers = Vec::new();
-        while total_len >= U24_MAX {
-            let mut hdr = (U24_MAX as u32).to_le_bytes();
-            hdr[3] = self.seq;
-            self.seq = self.seq.wrapping_add(1);
-            headers.push(hdr);
-            total_len -= U24_MAX;
-        }
-
-        let mut hdr = (total_len as u32).to_le_bytes();
-        hdr[3] = self.seq;
-        self.seq = self.seq.wrapping_add(1);
-        headers.push(hdr);
-
-        // After the headers where computed we can issue a vectored write that references
-        // both the headers and the packet slice, with no extra copying
-        slices.reserve(headers.len() * 2);
-        for header in &headers {
-            slices.push(IoSlice::new(&header[..]));
-            if packet.len() >= U24_MAX {
-                let (first, rest) = packet.split_at(U24_MAX);
-                slices.push(IoSlice::new(first));
-                packet = rest;
-            } else {
-                slices.push(IoSlice::new(packet));
-            }
-        }
-
-        write_all_vectored(&mut self.w, &mut slices).await?;
-        self.return_queued_to_pool();
-
-        Ok(())
-    }
-
     /// Clear the queued packets and return them to the pool of preallocated packets
     fn return_queued_to_pool(&mut self) {
         // Prefer to merge the shorter vector into the longer vector, thus minimizing the amount of
@@ -191,27 +151,6 @@ impl<W: AsyncWrite + Unpin> PacketWriter<W> {
         self.preallocated.truncate(MAX_POOL_ROWS);
         self.queue.truncate(MAX_POOL_ROWS - self.preallocated.len());
         self.preallocated.append(&mut self.queue);
-    }
-
-    /// Send a packet without queueing, flushes any queued packets beforehand
-    pub async fn write_packet(&mut self, packet: &[u8]) -> Result<(), tokio::io::Error> {
-        if packet.len() >= U24_MAX {
-            return self.write_large_packet(packet).await;
-        }
-
-        let mut slices = queued_packet_slices(&self.queue);
-        let packet_len = &packet.len().to_le_bytes()[0..3];
-        let seq = &[self.seq];
-        slices.extend([
-            IoSlice::new(packet_len),
-            IoSlice::new(seq),
-            IoSlice::new(packet),
-        ]);
-
-        write_all_vectored(&mut self.w, &mut slices).await?;
-
-        self.seq = self.seq.wrapping_add(1);
-        Ok(())
     }
 
     pub fn get_buffer(&mut self) -> Vec<u8> {
@@ -416,7 +355,7 @@ mod tests {
 
         tokio::spawn(async move {
             let mut writer = PacketWriter::new(u_out);
-            writer.write_packet(&[0x10]).await.unwrap();
+            writer.enqueue_packet(vec![0x10]);
             writer.flush().await.unwrap();
         });
 
@@ -438,7 +377,7 @@ mod tests {
 
         tokio::spawn(async move {
             let mut writer = PacketWriter::new(u_out);
-            writer.write_packet(&data_clone).await.unwrap();
+            writer.enqueue_packet(data_clone);
             writer.flush().await.unwrap();
         });
 
@@ -461,7 +400,7 @@ mod tests {
 
         tokio::spawn(async move {
             let mut writer = PacketWriter::new(u_out);
-            writer.write_packet(&data).await.unwrap();
+            writer.enqueue_packet(data);
             writer.flush().await.unwrap();
         });
 
@@ -524,17 +463,6 @@ mod tests {
                 writer.enqueue_packet(packet);
             }
             writer.write_queued_packets().await?;
-            writer.flush().await
-        })
-        .await;
-    }
-
-    #[tokio::test]
-    async fn test_large_packet_write_direct() {
-        test_large_packet_write_helper(|mut writer, packets| async move {
-            for packet in packets {
-                writer.write_packet(&packet).await?;
-            }
             writer.flush().await
         })
         .await;

@@ -463,7 +463,7 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
         init_packet.extend_from_slice(AUTH_PLUGIN_NAME.as_bytes());
         init_packet.push(0);
 
-        self.writer.write_packet(&init_packet).await?;
+        self.writer.enqueue_packet(init_packet);
         self.writer.flush().await?;
 
         let packet = self.reader.next().await?.ok_or_else(|| {
@@ -540,9 +540,7 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
             auth_switch_request_packet.push(0);
             auth_switch_request_packet.extend_from_slice(&auth_data);
             auth_switch_request_packet.push(0);
-            self.writer
-                .write_packet(&auth_switch_request_packet)
-                .await?;
+            self.writer.enqueue_packet(auth_switch_request_packet);
             self.writer.flush().await?;
 
             let packet = self.reader.next().await?.ok_or_else(|| {

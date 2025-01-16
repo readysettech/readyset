@@ -49,7 +49,8 @@ pub async fn write_err<W: AsyncWrite + Unpin>(
     buf.write_u8(b'#')?;
     buf.write_all(err.sqlstate())?;
     buf.write_all(msg)?;
-    w.write_packet(&buf).await
+    w.enqueue_packet(buf);
+    Ok(())
 }
 
 pub(crate) async fn write_prepare_ok<'a, PI, CI, W>(
