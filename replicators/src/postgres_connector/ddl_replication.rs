@@ -280,6 +280,8 @@ impl DdlEvent {
                             },
                             definitions: Err(unparseable),
                             only: false,
+                            algorithm: None,
+                            lock: None,
                         }
                     }
                 };
