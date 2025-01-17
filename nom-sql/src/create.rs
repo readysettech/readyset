@@ -572,6 +572,24 @@ fn referential_action(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ReferentialA
     ))(i)
 }
 
+fn on_delete(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ReferentialAction> {
+    let (i, _) = whitespace0(i)?;
+    let (i, _) = tag_no_case("on")(i)?;
+    let (i, _) = whitespace1(i)?;
+    let (i, _) = tag_no_case("delete")(i)?;
+    let (i, _) = whitespace1(i)?;
+    referential_action(i)
+}
+
+fn on_update(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ReferentialAction> {
+    let (i, _) = whitespace0(i)?;
+    let (i, _) = tag_no_case("on")(i)?;
+    let (i, _) = whitespace1(i)?;
+    let (i, _) = tag_no_case("update")(i)?;
+    let (i, _) = whitespace1(i)?;
+    referential_action(i)
+}
+
 fn constraint_identifier(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Option<SqlIdentifier>> {
@@ -627,27 +645,31 @@ fn foreign_key(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<
             separated_list0(ws_sep_comma, column_identifier_no_alias(dialect))(i)?;
         let (i, _) = tag(")")(i)?;
 
-        // ON DELETE
-        let (i, on_delete) = opt(move |i| {
-            let (i, _) = whitespace0(i)?;
-            let (i, _) = tag_no_case("on")(i)?;
-            let (i, _) = whitespace1(i)?;
-            let (i, _) = tag_no_case("delete")(i)?;
-            let (i, _) = whitespace1(i)?;
-
-            referential_action(i)
-        })(i)?;
-
-        // ON UPDATE
-        let (i, on_update) = opt(move |i| {
-            let (i, _) = whitespace0(i)?;
-            let (i, _) = tag_no_case("on")(i)?;
-            let (i, _) = whitespace1(i)?;
-            let (i, _) = tag_no_case("update")(i)?;
-            let (i, _) = whitespace1(i)?;
-
-            referential_action(i)
-        })(i)?;
+        // ON DELETE & ON UPDATE
+        let (i, on_modified) = opt(alt((
+            move |i| {
+                let (i, on_delete) = on_delete(i)?;
+                let (i, on_update) = on_update(i)?;
+                Ok((i, (Some(on_delete), Some(on_update))))
+            },
+            move |i| {
+                let (i, on_delete) = on_delete(i)?;
+                Ok((i, (Some(on_delete), None)))
+            },
+            move |i| {
+                let (i, on_update) = on_update(i)?;
+                let (i, on_delete) = on_delete(i)?;
+                Ok((i, (Some(on_delete), Some(on_update))))
+            },
+            move |i| {
+                let (i, on_update) = on_update(i)?;
+                Ok((i, (None, Some(on_update))))
+            },
+        )))(i)?;
+        let (on_delete, on_update) = match on_modified {
+            Some((on_delete, on_update)) => (on_delete, on_update),
+            None => (None, None),
+        };
         debug_print("after foreign_key", &i);
 
         Ok((

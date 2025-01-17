@@ -1555,6 +1555,90 @@ mod tests {
         }
 
         #[test]
+        fn parse_alter_add_constraint_foreign_key_on_update_psql() {
+            for q in [
+                r#"ALTER TABLE "t" ADD CONSTRAINT "c" FOREIGN KEY "fk" ("a") REFERENCES "t" ("a") ON UPDATE CASCADE"#,
+                r#"ALTER TABLE "t" ADD CONSTRAINT "c" FOREIGN KEY "fk" ("a") REFERENCES "t" ("a") ON UPDATE SET NULL"#,
+                r#"ALTER TABLE "t" ADD CONSTRAINT "c" FOREIGN KEY "fk" ("a") REFERENCES "t" ("a") ON UPDATE RESTRICT"#,
+                r#"ALTER TABLE "t" ADD CONSTRAINT "c" FOREIGN KEY "fk" ("a") REFERENCES "t" ("a") ON UPDATE NO ACTION"#,
+                r#"ALTER TABLE "t" ADD CONSTRAINT "c" FOREIGN KEY "fk" ("a") REFERENCES "t" ("a") ON UPDATE SET DEFAULT"#,
+            ] {
+                let r = test_parse!(alter_table_statement(Dialect::PostgreSQL), q.as_bytes());
+                assert_eq!(r.display(Dialect::PostgreSQL).to_string(), q);
+            }
+        }
+
+        #[test]
+        fn parse_alter_add_constraint_foreign_key_on_update_mysql() {
+            for q in [
+                r#"ALTER TABLE `t` ADD CONSTRAINT `c` FOREIGN KEY `fk` (`a`) REFERENCES `t` (`a`) ON UPDATE CASCADE"#,
+                r#"ALTER TABLE `t` ADD CONSTRAINT `c` FOREIGN KEY `fk` (`a`) REFERENCES `t` (`a`) ON UPDATE SET NULL"#,
+                r#"ALTER TABLE `t` ADD CONSTRAINT `c` FOREIGN KEY `fk` (`a`) REFERENCES `t` (`a`) ON UPDATE RESTRICT"#,
+                r#"ALTER TABLE `t` ADD CONSTRAINT `c` FOREIGN KEY `fk` (`a`) REFERENCES `t` (`a`) ON UPDATE NO ACTION"#,
+                r#"ALTER TABLE `t` ADD CONSTRAINT `c` FOREIGN KEY `fk` (`a`) REFERENCES `t` (`a`) ON UPDATE SET DEFAULT"#,
+            ] {
+                let r = test_parse!(alter_table_statement(Dialect::MySQL), q.as_bytes());
+                assert_eq!(r.display(Dialect::MySQL).to_string(), q);
+            }
+        }
+
+        #[test]
+        fn parse_alter_add_constraint_foreign_key_on_delete_psql() {
+            for q in [
+                r#"ALTER TABLE "t" ADD CONSTRAINT "c" FOREIGN KEY "fk" ("a") REFERENCES "t" ("a") ON DELETE CASCADE"#,
+                r#"ALTER TABLE "t" ADD CONSTRAINT "c" FOREIGN KEY "fk" ("a") REFERENCES "t" ("a") ON DELETE SET NULL"#,
+                r#"ALTER TABLE "t" ADD CONSTRAINT "c" FOREIGN KEY "fk" ("a") REFERENCES "t" ("a") ON DELETE RESTRICT"#,
+                r#"ALTER TABLE "t" ADD CONSTRAINT "c" FOREIGN KEY "fk" ("a") REFERENCES "t" ("a") ON DELETE NO ACTION"#,
+                r#"ALTER TABLE "t" ADD CONSTRAINT "c" FOREIGN KEY "fk" ("a") REFERENCES "t" ("a") ON DELETE SET DEFAULT"#,
+            ] {
+                let r = test_parse!(alter_table_statement(Dialect::PostgreSQL), q.as_bytes());
+                assert_eq!(r.display(Dialect::PostgreSQL).to_string(), q);
+            }
+        }
+
+        #[test]
+        fn parse_alter_add_constraint_foreign_key_on_delete_mysql() {
+            for q in [
+                r#"ALTER TABLE `t` ADD CONSTRAINT `c` FOREIGN KEY `fk` (`a`) REFERENCES `t` (`a`) ON DELETE CASCADE"#,
+                r#"ALTER TABLE `t` ADD CONSTRAINT `c` FOREIGN KEY `fk` (`a`) REFERENCES `t` (`a`) ON DELETE SET NULL"#,
+                r#"ALTER TABLE `t` ADD CONSTRAINT `c` FOREIGN KEY `fk` (`a`) REFERENCES `t` (`a`) ON DELETE RESTRICT"#,
+                r#"ALTER TABLE `t` ADD CONSTRAINT `c` FOREIGN KEY `fk` (`a`) REFERENCES `t` (`a`) ON DELETE NO ACTION"#,
+                r#"ALTER TABLE `t` ADD CONSTRAINT `c` FOREIGN KEY `fk` (`a`) REFERENCES `t` (`a`) ON DELETE SET DEFAULT"#,
+            ] {
+                let r = test_parse!(alter_table_statement(Dialect::MySQL), q.as_bytes());
+                assert_eq!(r.display(Dialect::MySQL).to_string(), q);
+            }
+        }
+
+        #[test]
+        fn parse_alter_add_constraint_foreign_key_on_delete_on_update_psql() {
+            for q in [
+                r#"ALTER TABLE "t" ADD CONSTRAINT "c" FOREIGN KEY "fk" ("a") REFERENCES "t" ("a") ON DELETE CASCADE ON UPDATE CASCADE"#,
+                r#"ALTER TABLE "t" ADD CONSTRAINT "c" FOREIGN KEY "fk" ("a") REFERENCES "t" ("a") ON UPDATE CASCADE ON DELETE CASCADE"#,
+            ] {
+                let r = test_parse!(alter_table_statement(Dialect::PostgreSQL), q.as_bytes());
+                assert_eq!(
+                    r.display(Dialect::PostgreSQL).to_string(),
+                    r#"ALTER TABLE "t" ADD CONSTRAINT "c" FOREIGN KEY "fk" ("a") REFERENCES "t" ("a") ON DELETE CASCADE ON UPDATE CASCADE"#
+                );
+            }
+        }
+
+        #[test]
+        fn parse_alter_add_constraint_foreign_key_on_delete_on_update_mysql() {
+            for q in [
+                r#"ALTER TABLE `t` ADD CONSTRAINT `c` FOREIGN KEY `fk` (`a`) REFERENCES `t` (`a`) ON DELETE CASCADE ON UPDATE CASCADE"#,
+                r#"ALTER TABLE `t` ADD CONSTRAINT `c` FOREIGN KEY `fk` (`a`) REFERENCES `t` (`a`) ON UPDATE CASCADE ON DELETE CASCADE"#,
+            ] {
+                let r = test_parse!(alter_table_statement(Dialect::MySQL), q.as_bytes());
+                assert_eq!(
+                    r.display(Dialect::MySQL).to_string(),
+                    r#"ALTER TABLE `t` ADD CONSTRAINT `c` FOREIGN KEY `fk` (`a`) REFERENCES `t` (`a`) ON DELETE CASCADE ON UPDATE CASCADE"#
+                );
+            }
+        }
+
+        #[test]
         fn alter_table_replica_identity() {
             let res = test_parse!(
                 alter_table_statement(Dialect::MySQL),
