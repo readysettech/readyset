@@ -177,6 +177,7 @@ use constants::{
 };
 use error::{other_error, OtherErrorKind};
 use mysql_common::constants::CapabilityFlags;
+use packet::PacketHeaderFlag;
 use readyset_adapter_types::{DeallocateId, ParsedCommand};
 use readyset_data::DfType;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -442,9 +443,11 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
         let auth_data =
             generate_auth_data().map_err(|_| other_error(OtherErrorKind::AuthDataErr))?;
         self.auth_data = auth_data;
-        let mut init_packet = Vec::with_capacity(
+        let mut init_packet = self.writer.get_buffer(
             1 + 16 + 4 + 8 + 1 + 2 + 1 + 2 + 2 + 1 + 6 + 4 + 12 + 1 + AUTH_PLUGIN_NAME.len() + 1,
+            PacketHeaderFlag::IncludeHeader,
         );
+
         init_packet.extend_from_slice(&[10]); // protocol 10
         init_packet.extend_from_slice(self.shim.version().as_bytes());
         init_packet.extend_from_slice(&[0x08, 0x00, 0x00, 0x00]); // TODO: connection ID
@@ -533,8 +536,10 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
                 "Client offered incorrect authentication plugin, sending switch request",
             );
 
-            let mut auth_switch_request_packet =
-                Vec::with_capacity(1 + AUTH_PLUGIN_NAME.len() + 1 + auth_data.len() + 1);
+            let mut auth_switch_request_packet = self.writer.get_buffer(
+                1 + AUTH_PLUGIN_NAME.len() + 1 + auth_data.len() + 1,
+                PacketHeaderFlag::IncludeHeader,
+            );
             auth_switch_request_packet.push(0xfe);
             auth_switch_request_packet.extend_from_slice(AUTH_PLUGIN_NAME.as_bytes());
             auth_switch_request_packet.push(0);

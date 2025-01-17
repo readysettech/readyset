@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tokio::io::AsyncWrite;
 
 use crate::myc::constants::{ColumnFlags, StatusFlags};
-use crate::packet::PacketWriter;
+use crate::packet::{PacketHeaderFlag, PacketWriter};
 use crate::value::ToMySqlValue;
 use crate::{writers, Column, ErrorKind, StatementData};
 
@@ -345,13 +345,13 @@ where
         }
 
         let row_data = self.row_data.get_or_insert_with(|| {
-            let mut row_data = self.result.writer.get_buffer();
             // We want to preallocate at least *some* capacity for the row, otherwise the
             // incremental writes cause a whole lot of reallocations. Since Vec usually
             // reallocates with exponential growth even small responses require at least
             // a few reallocs unless we reserve some capacity.
-            row_data.reserve(DEFAULT_ROW_CAPACITY);
-            row_data
+            self.result
+                .writer
+                .get_buffer(DEFAULT_ROW_CAPACITY, PacketHeaderFlag::IncludeHeader)
         });
 
         if self.result.is_bin {

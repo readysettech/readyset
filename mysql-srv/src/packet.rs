@@ -7,6 +7,11 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::resultset::{MAX_POOL_ROWS, MAX_POOL_ROW_CAPACITY};
 
+/// The maximum length of a mysql packet, in bytes.
+///
+/// Note: this value is a similar function to mysql's `max_allowed_packet`.
+/// In mysql 5.7, this value defaults to 4 MiB. In 8.0+, it defaults to 64 MiB.
+/// mysql allows this to be set at the global and session levels, but YOLO ...
 const U24_MAX: usize = 16_777_215;
 
 pub struct PacketWriter<W> {
@@ -18,11 +23,25 @@ pub struct PacketWriter<W> {
     preallocated: Vec<QueuedPacket>,
 }
 
+/// Flags for the `PacketWriter::get_buffer` method, to indicate if the to-be-allocated buffer
+/// should include space for the packet header.
+pub enum PacketHeaderFlag {
+    /// Include the space for the packet header in the to-be-allocated buffer.
+    /// Header will be written to the buffer when submitted to the writer.
+    IncludeHeader,
+    /// Skip the header in the packet
+    #[allow(unused)] // will be enabled in a followup patch
+    SkipHeader,
+}
+
 /// Type for packets being enqueued in the packet writer.
 enum QueuedPacket {
-    /// Raw queued packets are written as-is, these packets include header chunks.
+    /// Raw, reference-counted queued packets are written as-is; these packets include header chunks.
     Raw(Arc<[u8]>),
-    /// Packets constructed with headers are written as two IoSlices, the header and the body.
+    /// Raw, non-reference-counted queued packets are written as-is; these packets include header chunks.
+    Plain(Vec<u8>),
+    /// Packets which do not include their headers are written as two IoSlices:
+    /// one for the header and one for the body.
     WithHeader([u8; 4], Vec<u8>),
 }
 
@@ -71,9 +90,22 @@ fn queued_packet_slices(queue: &[QueuedPacket]) -> Vec<IoSlice<'_>> {
         QueuedPacket::Raw(r) => {
             slices.push(IoSlice::new(r));
         }
+        QueuedPacket::Plain(buf) => {
+            slices.push(IoSlice::new(buf));
+        }
     });
 
     slices
+}
+
+macro_rules! write_packet_header {
+    ($packet:expr, $len:expr, $seq:expr) => {
+        let len_bytes = ($len as u32).to_le_bytes();
+        $packet[0] = len_bytes[0];
+        $packet[1] = len_bytes[1];
+        $packet[2] = len_bytes[2];
+        $packet[3] = $seq;
+    };
 }
 
 impl<W: AsyncWrite + Unpin> PacketWriter<W> {
@@ -90,6 +122,12 @@ impl<W: AsyncWrite + Unpin> PacketWriter<W> {
         self.seq = seq;
     }
 
+    pub fn next_seq(&mut self) -> u8 {
+        let val = self.seq;
+        self.seq = self.seq.wrapping_add(1);
+        val
+    }
+
     /// Flushes the writer. This function *must* be called before dropping the internal writer
     /// or writes may be lossed.
     pub async fn flush(&mut self) -> Result<(), tokio::io::Error> {
@@ -97,25 +135,53 @@ impl<W: AsyncWrite + Unpin> PacketWriter<W> {
         self.w.flush().await
     }
 
-    /// Push a new packet to the outgoing packet list
+    /// Push a new mysql packet to the outgoing packet list.
+    ///
+    /// This function assumes that there is space for the packet header at the beginning of the packet;
+    /// those bytes will be overwritten for the packet header.
+    ///
+    /// If you are going to call this function, it is highly recommended to use `get_buffer` with
+    /// `PacketHeaderFlag::IncludeHeader` to get a buffer that includes space for the packet header.
     pub fn enqueue_packet(&mut self, mut packet: Vec<u8>) {
         // Lazily shrink large buffers before processing them further, as after that they will go to
-        // the buffer pool
+        // the buffer pool. This would occur if the buffer was resued, and the previous use was
+        // greater than `MAX_POOL_ROW_CAPACITY`, and this use is less than `MAX_POOL_ROW_CAPACITY`.
         packet.shrink_to(MAX_POOL_ROW_CAPACITY);
 
-        while packet.len() >= U24_MAX {
+        if packet.len() < U24_MAX {
+            let packet_len = packet.len() - 4;
+            write_packet_header!(packet, packet_len, self.next_seq());
+            self.queue.push(QueuedPacket::Plain(packet));
+        } else {
+            self.enqueue_large_packet(packet);
+        }
+    }
+
+    /// Push a new, very large mysql packet to the outgoing packet list.
+    ///
+    /// This function assumes that there is space for the packet header at the beginning of the packet;
+    /// meaning, the caller allocated the buffer from `get_buffer` (with `PacketHeaderFlag::IncludeHeader`).
+    pub(crate) fn enqueue_large_packet(&mut self, mut packet: Vec<u8>) {
+        macro_rules! write_packet_with_header {
+            ($packet:expr, $len:expr) => {
+                let mut hdr = (U24_MAX as u32).to_le_bytes();
+                hdr[3] = self.next_seq();
+                self.queue.push(QueuedPacket::WithHeader(hdr, $packet));
+            };
+        }
+
+        let mut remaining_len = packet.len();
+        let _ = packet.drain(0..4);
+        remaining_len -= 4;
+
+        while remaining_len >= U24_MAX {
             let rest = packet.split_off(U24_MAX);
-            let mut hdr = (U24_MAX as u32).to_le_bytes();
-            hdr[3] = self.seq;
-            self.seq = self.seq.wrapping_add(1);
-            self.queue.push(QueuedPacket::WithHeader(hdr, packet));
+            write_packet_with_header!(packet, U24_MAX);
+            remaining_len -= U24_MAX;
             packet = rest;
         }
 
-        let mut hdr = (packet.len() as u32).to_le_bytes();
-        hdr[3] = self.seq;
-        self.seq = self.seq.wrapping_add(1);
-        self.queue.push(QueuedPacket::WithHeader(hdr, packet));
+        write_packet_with_header!(packet, remaining_len);
     }
 
     /// Enqueues raw bytes to be written on the wire.
@@ -153,17 +219,33 @@ impl<W: AsyncWrite + Unpin> PacketWriter<W> {
         self.preallocated.append(&mut self.queue);
     }
 
-    pub fn get_buffer(&mut self) -> Vec<u8> {
-        while let Some(p) = self.preallocated.pop() {
-            match p {
-                QueuedPacket::Raw(_) => {}
-                QueuedPacket::WithHeader(_, mut vec) => {
+    /// Get a buffer of the specified size. If the `header_flag` is `IncludeHeader`,
+    /// the buffer will include space for the packet header. The caller is _not_
+    /// responsible for writing the header, it will be written by the writer when
+    /// the buffer is submitted to this writer.
+    pub fn get_buffer(&mut self, size: usize, header_flag: PacketHeaderFlag) -> Vec<u8> {
+        let target_size = size
+            + match header_flag {
+                PacketHeaderFlag::IncludeHeader => 4,
+                PacketHeaderFlag::SkipHeader => 0,
+            };
+
+        let mut vec = loop {
+            match self.preallocated.pop() {
+                Some(QueuedPacket::Raw(_)) => continue,
+                Some(QueuedPacket::Plain(mut vec)) | Some(QueuedPacket::WithHeader(_, mut vec)) => {
                     vec.clear();
-                    return vec;
+                    vec.reserve(target_size);
+                    break vec;
                 }
+                None => break Vec::with_capacity(target_size),
             }
+        };
+
+        if matches!(header_flag, PacketHeaderFlag::IncludeHeader) {
+            vec.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]);
         }
-        Vec::new()
+        vec
     }
 }
 
@@ -352,10 +434,23 @@ mod tests {
     #[tokio::test]
     async fn test_simple_packet() {
         let (u_out, u_in) = tokio::net::UnixStream::pair().unwrap();
+        let mut writer = PacketWriter::new(u_out);
 
+        let packets = vec![
+            writer.get_buffer(245, PacketHeaderFlag::IncludeHeader),
+            writer.get_buffer(U24_MAX * 2, PacketHeaderFlag::IncludeHeader),
+            writer.get_buffer(U24_MAX + 100, PacketHeaderFlag::IncludeHeader),
+            writer.get_buffer(100, PacketHeaderFlag::IncludeHeader),
+            writer.get_buffer(U24_MAX - 1, PacketHeaderFlag::IncludeHeader),
+            writer.get_buffer(U24_MAX, PacketHeaderFlag::IncludeHeader),
+        ];
+
+        let p = packets.clone();
         tokio::spawn(async move {
-            let mut writer = PacketWriter::new(u_out);
-            writer.enqueue_packet(vec![0x10]);
+            for packet in &p {
+                writer.enqueue_packet(packet.clone());
+            }
+
             writer.flush().await.unwrap();
         });
 
