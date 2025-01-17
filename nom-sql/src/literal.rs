@@ -483,6 +483,7 @@ fn boolean_literal(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Literal> {
 
 /// String literal value
 fn raw_string_quoted(
+    dialect: Dialect,
     quote: &'static [u8],
     escape_quote: &'static [u8],
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<u8>> {
@@ -493,13 +494,8 @@ fn raw_string_quoted(
                 alt((
                     map(is_not(escape_quote), |i: LocatedSpan<&[u8]>| *i),
                     map(pair(tag(quote), tag(quote)), |_| quote),
-                    map(tag("\\\\"), |_| &b"\\"[..]),
-                    map(tag("\\b"), |_| &b"\x08"[..]),
-                    map(tag("\\r"), |_| &b"\r"[..]),
-                    map(tag("\\n"), |_| &b"\n"[..]),
-                    map(tag("\\t"), |_| &b"\t"[..]),
-                    map(tag("\\0"), |_| &b"\0"[..]),
-                    map(tag("\\Z"), |_| &b"\x1A"[..]),
+                    dialect.escapes(),
+                    // default for unhandled escape is to drop the backslash
                     preceded(tag("\\"), map(take(1usize), |i: LocatedSpan<&[u8]>| *i)),
                 )),
                 Vec::new,
@@ -521,12 +517,16 @@ pub fn raw_string_single_quoted_unescaped(i: LocatedSpan<&[u8]>) -> NomSqlResult
     )(i)
 }
 
-fn raw_string_single_quoted(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<u8>> {
-    raw_string_quoted(b"'", b"\\'")(i)
+fn raw_string_single_quoted(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<u8>> {
+    move |i| raw_string_quoted(dialect, b"'", b"\\'")(i)
 }
 
-fn raw_string_double_quoted(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<u8>> {
-    raw_string_quoted(b"\"", b"\\\"")(i)
+fn raw_string_double_quoted(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<u8>> {
+    move |i| raw_string_quoted(dialect, b"\"", b"\\\"")(i)
 }
 
 /// Specification for how string literals may be quoted
@@ -542,23 +542,26 @@ pub enum QuotingStyle {
 
 /// Parse a raw (binary) string literal using the given [`QuotingStyle`]
 pub fn raw_string_literal(
+    dialect: Dialect,
     quoting_style: QuotingStyle,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<u8>> {
     move |i| match quoting_style {
-        QuotingStyle::Single => raw_string_single_quoted(i),
-        QuotingStyle::Double => raw_string_double_quoted(i),
-        QuotingStyle::SingleOrDouble => {
-            alt((raw_string_single_quoted, raw_string_double_quoted))(i)
-        }
+        QuotingStyle::Single => raw_string_single_quoted(dialect)(i),
+        QuotingStyle::Double => raw_string_double_quoted(dialect)(i),
+        QuotingStyle::SingleOrDouble => alt((
+            raw_string_single_quoted(dialect),
+            raw_string_double_quoted(dialect),
+        ))(i),
     }
 }
 
 /// Parse a utf8 string literal using the given [`QuotingStyle`]
 pub fn utf8_string_literal(
+    dialect: Dialect,
     quoting_style: QuotingStyle,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], String> {
     move |i| {
-        map_res(raw_string_literal(quoting_style), |bytes| {
+        map_res(raw_string_literal(dialect, quoting_style), |bytes| {
             String::from_utf8(bytes)
         })(i)
     }
@@ -653,7 +656,7 @@ pub fn embedded_literal(
         alt((
             simple_literal(dialect),
             map(
-                raw_string_literal(quoting_style),
+                raw_string_literal(dialect, quoting_style),
                 |bytes| match String::from_utf8(bytes) {
                     Ok(s) => Literal::String(s),
                     Err(err) => Literal::Blob(err.into_bytes()),

@@ -1,0 +1,86 @@
+statement ok
+create table like_test (x text);
+
+statement ok
+insert into like_test (x) values
+(E'foo\bar'),
+('foo\bar'),
+('foo|bar'),
+('foo%bar'),
+('foo_bar'),
+('foobar');
+
+query T nosort
+select * from like_test where x like 'foo\bar';
+----
+foobar
+
+query T nosort
+select * from like_test where x like 'foo\\bar';
+----
+foo\bar
+
+query T nosort
+select * from like_test where x like 'foo|bar';
+----
+foo|bar
+
+query T rowsort
+select * from like_test where x like 'foo%bar';
+----
+foo%bar
+foo\bar
+foo_bar
+foobar
+foo|bar
+
+query T rowsort
+select * from like_test where x like 'foo_bar';
+----
+foo%bar
+foo\bar
+foo_bar
+foo|bar
+
+query T nosort
+select * from like_test where x like concat('foo', '\%bar');
+----
+foo%bar
+
+query T rowsort
+select * from like_test where x like concat(E'foo', E'\%bar');
+----
+foo%bar
+foo\bar
+foo_bar
+foobar
+foo|bar
+
+query T rowsort
+select * from like_test where x like E'foo\%bar';
+----
+foo%bar
+foo\bar
+foo_bar
+foobar
+foo|bar
+
+query T nosort
+select * from like_test where x like 'foo\%bar';
+----
+foo%bar
+
+query T nosort
+select * from like_test where x like 'foo\_bar';
+----
+foo_bar
+
+query T nosort
+select * from like_test where x like 'foo\\%bar';
+----
+foo\bar
+
+query T nosort
+select * from like_test where x like 'foo\\_bar';
+----
+

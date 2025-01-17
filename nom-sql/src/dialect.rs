@@ -256,14 +256,14 @@ impl Dialect {
             Dialect::PostgreSQL => {
                 let (i, escape) = opt(tag_no_case("E"))(i)?;
                 if escape.is_some() {
-                    raw_string_literal(self.quoting_style())(i)
+                    raw_string_literal(self, self.quoting_style())(i)
                 } else {
                     raw_string_single_quoted_unescaped(i)
                 }
             }
             Dialect::MySQL => preceded(
                 opt(alt((tag("_utf8mb4"), tag("_utf8"), tag("_binary")))),
-                raw_string_literal(self.quoting_style()),
+                raw_string_literal(self, self.quoting_style()),
             )(i),
         }
     }
@@ -405,6 +405,38 @@ impl Dialect {
             }
         }
     }
+
+    /// Parse and remap escape sequences. The difference between Postgres and MySQL is the handling
+    /// of `LIKE` pattern wildcards (% and _). From the [MySQL docs]: "If you use \% or \_ outside
+    /// of pattern-matching contexts, they evaluate to the strings \% and \_, not to % and _."
+    ///
+    /// This effectively means the escape character (backslash) is ignored for MySQL when it
+    /// precedes % or _, and it's handled in [`dataflow_expression::like::LikePattern`].
+    ///
+    /// [MySQL docs]: https://dev.mysql.com/doc/refman/8.4/en/string-literals.html
+    pub fn escapes(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], &[u8]> {
+        move |i| {
+            let common_escapes = move |i| {
+                alt((
+                    map(tag("\\\\"), |_| &b"\\"[..]),
+                    map(tag("\\b"), |_| &b"\x08"[..]),
+                    map(tag("\\r"), |_| &b"\r"[..]),
+                    map(tag("\\n"), |_| &b"\n"[..]),
+                    map(tag("\\t"), |_| &b"\t"[..]),
+                    map(tag("\\0"), |_| &b"\0"[..]),
+                    map(tag("\\Z"), |_| &b"\x1A"[..]),
+                ))(i)
+            };
+            match self {
+                Self::PostgreSQL => common_escapes(i),
+                Self::MySQL => alt((
+                    common_escapes,
+                    map(tag("\\%"), |_| &b"\\%"[..]),
+                    map(tag("\\_"), |_| &b"\\_"[..]),
+                ))(i),
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -448,7 +480,7 @@ mod tests {
             for quote in [&b"'"[..], &b"\""[..]].iter() {
                 let quoted = &[quote, &all_escaped[..], quote].concat();
                 let res = to_nom_result(Dialect::MySQL.string_literal()(LocatedSpan::new(quoted)));
-                let expected = "\0\'\"\x08\n\r\t\x1a\\%_".as_bytes().to_vec();
+                let expected = "\0\'\"\x08\n\r\t\x1a\\\\%\\_".as_bytes().to_vec();
                 assert_eq!(res, Ok((&b""[..], expected)));
             }
         }

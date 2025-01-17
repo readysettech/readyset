@@ -153,6 +153,15 @@ async fn example_exprs_eval_same_as_mysql() {
         "concat('a','b')",
         "concat('a')",
         r"'foo\bar'",
+        r"'foo\%bar'",
+        r"'foo\_bar'",
+        r"'a_b' like 'a\_b'",
+        r"'a_b' like 'a\%b'",
+        r"'a%b' like 'a\_b'",
+        r"'a%b' like 'a\%b'",
+        r"'a%b' like 'a\\_b'",
+        r"'a%b' like 'a\\%b'",
+        r"'a\b' like 'a\\b'",
     ] {
         compare_eval(expr, &mut conn).await;
     }
