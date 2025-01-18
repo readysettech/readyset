@@ -17,8 +17,6 @@ use crate::values::Values;
 /// A representation of how many keys to evict from the map.
 #[derive(Debug)]
 pub enum EvictionQuantity {
-    /// The number of keys to evict
-    Quantity(usize),
     /// The ratio of keys to evict on [0, 1]
     Ratio(f64),
     /// Evict a single key.
@@ -274,7 +272,6 @@ where
 
         let keys_to_evict = match request {
             EvictionQuantity::Ratio(ratio) => (inner.data.len() as f64 * ratio) as usize,
-            EvictionQuantity::Quantity(keys) => keys,
             EvictionQuantity::SingleKey => 1,
         }
         .min(inner.data.len());
