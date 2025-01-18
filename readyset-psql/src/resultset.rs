@@ -95,8 +95,9 @@ impl Stream for Resultset {
     type Item = Result<PsqlSrvRow, psql_srv::Error>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let project_field_types = self.project_field_types.clone();
-        let next = match &mut self.get_mut().results {
+        let s = self.get_mut();
+        let project_field_types = &s.project_field_types;
+        let next = match &mut s.results {
             ResultsetInner::Empty => None,
             ResultsetInner::ReadySet(i) => i.next().map(|values| {
                 values
