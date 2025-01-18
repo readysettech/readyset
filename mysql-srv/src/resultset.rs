@@ -6,13 +6,12 @@ use std::sync::Arc;
 use tokio::io::AsyncWrite;
 
 use crate::myc::constants::{ColumnFlags, StatusFlags};
-use crate::packet::PacketWriter;
+use crate::packet::{PacketWriter, MAX_PACKET_CHUNK_SIZE};
 use crate::value::ToMySqlValue;
 use crate::{writers, Column, ErrorKind, StatementData};
 
 pub(crate) const DEFAULT_ROW_CAPACITY: usize = 4096;
 pub(crate) const MAX_POOL_ROW_CAPACITY: usize = DEFAULT_ROW_CAPACITY * 4;
-pub(crate) const MAX_POOL_ROWS: usize = 4096;
 
 /// Convenience type for responding to a client `USE <db>` command.
 pub struct InitWriter<'a, W: AsyncWrite + Unpin> {
@@ -281,6 +280,10 @@ pub struct RowWriter<'a, W: AsyncWrite + Unpin> {
     last_status_flags: Option<StatusFlags>,
     /// A buffer to hold row data
     row_data: Option<Vec<u8>>,
+
+    // the index of the current row header, so that we can go back and update it
+    // after we've written the row data.
+    cur_row_header_idx: usize,
 }
 
 impl<'a, W> RowWriter<'a, W>
@@ -306,6 +309,7 @@ where
             last_status_flags: None,
 
             row_data: None,
+            cur_row_header_idx: 0,
         };
         rw.start().await?;
         Ok(rw)
@@ -354,6 +358,15 @@ where
             row_data
         });
 
+        // set the packet header. the header is the first 4 bytes of the packet: 3 bytes for size
+        // and 1 byte for sequence number. We don't know the size yet, so we'll set it later.
+        if self.col == 0 {
+            self.cur_row_header_idx = row_data.len();
+            // The mysql header is 4 bytes. We insert a placeholder for now, until we know the size (which will be set in `end_row()`).
+            let hdr = 0_u32.to_be_bytes();
+            row_data.extend_from_slice(&hdr);
+        }
+
         if self.result.is_bin {
             if self.col == 0 {
                 row_data.push(0x00);
@@ -393,6 +406,52 @@ where
         Ok(())
     }
 
+    /// Write the packet header and enqueue the packet if it exceeds the max pool row capacity.
+    #[inline]
+    async fn finish_normal_packet(&mut self, packet_len: usize) -> io::Result<()> {
+        let packet = self.row_data.as_mut().unwrap();
+        let header_bytes = self.result.writer.packet_header_bytes(packet_len);
+        packet[self.cur_row_header_idx..self.cur_row_header_idx + 4].copy_from_slice(&header_bytes);
+
+        if packet.len() > MAX_POOL_ROW_CAPACITY {
+            // Only take ownership when we need to enqueue
+            self.result
+                .writer
+                .enqueue_plain(self.row_data.take().unwrap());
+            self.result.writer.flush().await?;
+        }
+        Ok(())
+    }
+
+    /// Write the packet header and enqueue the packet if it exceeds the max pool row capacity.
+    ///
+    /// This is a bit tricky as we don't know if smaller rows have already been added to the buffer.
+    /// If this is the first row inserted into the buffer, we can just send the packet (mostly) as-is
+    /// to `enqueue_large_packet()`. If it's not the first row, we need to send the earlier rows
+    /// first as they do not need to be chunked, then we send the rest of the buffer to
+    /// `enqueue_large_packet()`.
+    #[inline]
+    async fn finish_large_packet(&mut self) -> io::Result<()> {
+        // Take ownership as we need to enqueue
+        let mut payload = self.row_data.take().unwrap();
+
+        // this large packet is not the first row, so we need to send the earlier rows first as they do
+        // not need to be chunked.
+        if self.cur_row_header_idx > 0 {
+            // we make the assumption that the first section, before the large packet, is smaller than the large packet.
+            // thus, we copy that out to a new vector and enqueue it separately. Yes, the copy sucks, but this is a rare case.
+            let first_part: Vec<u8> = payload.drain(..self.cur_row_header_idx).collect();
+            self.result.writer.enqueue_plain(first_part);
+            // payload now contains only the remaining (larger) part
+        }
+
+        // enqueue the rest of the packet, but we need to drop the first 4 bytes as they are the row header.
+        payload.drain(..4);
+        self.result.writer.enqueue_large_packet(payload);
+
+        self.result.writer.flush().await
+    }
+
     /// Indicate that no more column data will be written for the current row.
     pub async fn end_row(&mut self) -> io::Result<()> {
         if self.columns.is_empty() {
@@ -407,15 +466,18 @@ where
             ));
         }
 
-        if let Some(packet) = self.row_data.take() {
-            self.result.writer.enqueue_packet(packet);
+        if let Some(packet) = self.row_data.as_mut() {
+            let packet_len = packet.len() - (self.cur_row_header_idx + 4);
+
+            // if the packet is larger than the max packet size, we need to chunk it
+            if packet_len < MAX_PACKET_CHUNK_SIZE {
+                self.finish_normal_packet(packet_len).await?;
+            } else {
+                self.finish_large_packet().await?;
+            }
         }
 
         self.col = 0;
-
-        if self.result.writer.queue_len() > MAX_POOL_ROWS {
-            self.result.writer.flush().await?;
-        }
 
         Ok(())
     }
@@ -491,6 +553,15 @@ impl<'a, W: AsyncWrite + Unpin + 'a> RowWriter<'a, W> {
         if !self.columns.is_empty() && self.col != 0 {
             self.end_row().await?;
         }
+
+        // if there's any row data left, enqueue it.
+        if let Some(packet) = self.row_data.take() {
+            self.result.writer.enqueue_plain(packet);
+
+            // as we will have at least an EOF/OK packet that follows the last row packet,
+            // we don't need to flush here.
+        }
+
         self.finish_inner()?;
         Ok(self.result)
     }

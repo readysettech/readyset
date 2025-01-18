@@ -5,7 +5,7 @@ use std::sync::Arc;
 use bytes::{Buf, BytesMut};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-use crate::resultset::{MAX_POOL_ROWS, MAX_POOL_ROW_CAPACITY};
+use crate::resultset::MAX_POOL_ROW_CAPACITY;
 
 /// The maximum size of data we can be sent in a single mysql packet.
 ///
@@ -16,7 +16,9 @@ use crate::resultset::{MAX_POOL_ROWS, MAX_POOL_ROW_CAPACITY};
 /// as that is the max size of a given row (which might be chunked over several packets).
 ///
 /// [0] https://dev.mysql.com/doc/refman/8.4/en/server-system-variables.html#sysvar_max_allowed_packet
-const MAX_PACKET_CHUNK_SIZE: usize = 16_777_215;
+pub const MAX_PACKET_CHUNK_SIZE: usize = 16_777_215;
+
+const MAX_POOL_BUFFERS: usize = 64;
 
 pub struct PacketWriter<W> {
     pub seq: u8,
@@ -29,10 +31,39 @@ pub struct PacketWriter<W> {
 
 /// Type for packets being enqueued in the packet writer.
 enum QueuedPacket {
-    /// Raw queued packets are written as-is, these packets include header chunks.
+    /// Raw, reference counted queued packets are written as-is; these packets include header chunks.
     Raw(Arc<[u8]>),
-    /// Packets constructed with headers are written as two IoSlices, the header and the body.
+    /// Raw, non-reference-counted queued packets are written as-is; these packets include header chunks.
+    Plain(Vec<u8>),
+    /// Packets which do not include their headers are written as two IoSlices:
+    /// one for the header and one for the body.
     WithHeader([u8; 4], Vec<u8>),
+    /// Packets which are larger than MAX_PACKET_CHUNK_SIZE are split into multiple packets.
+    /// The `data` field contains the actual packet data _no header bytes_, and the `headers`
+    /// field contains the packet headers.
+    LargePacket {
+        headers: Vec<[u8; 4]>,
+        data: Vec<u8>,
+    },
+}
+
+impl QueuedPacket {
+    // Should this packet be reused
+    fn poolable(&self) -> bool {
+        !matches!(self, QueuedPacket::Raw(_))
+    }
+
+    fn len(&self) -> usize {
+        match self {
+            QueuedPacket::Raw(r) => r.len(),
+            QueuedPacket::Plain(p) => p.len(),
+            QueuedPacket::WithHeader(_, p) => p.len(),
+            QueuedPacket::LargePacket {
+                headers: _,
+                data: p,
+            } => p.len(),
+        }
+    }
 }
 
 /// A helper function that performes a vector write to completion, since
@@ -80,11 +111,25 @@ fn queued_packet_slices(queue: &[QueuedPacket]) -> Vec<IoSlice<'_>> {
         QueuedPacket::Raw(r) => {
             slices.push(IoSlice::new(r));
         }
-    });
+        QueuedPacket::Plain(p) => {
+            slices.push(IoSlice::new(p));
+        }
+        QueuedPacket::LargePacket { headers, data } => {
+            let mut remaining = data.len();
+            let mut offset = 0;
 
+            for header in headers {
+                let chunk_size = remaining.min(MAX_PACKET_CHUNK_SIZE);
+                slices.push(IoSlice::new(header));
+                slices.push(IoSlice::new(&data[offset..offset + chunk_size]));
+
+                offset += chunk_size;
+                remaining -= chunk_size;
+            }
+        }
+    });
     slices
 }
-
 impl<W: AsyncWrite + Unpin> PacketWriter<W> {
     pub fn new(w: W) -> Self {
         PacketWriter {
@@ -113,10 +158,15 @@ impl<W: AsyncWrite + Unpin> PacketWriter<W> {
     }
 
     #[inline]
-    pub fn packet_header_bytes(&mut self, len: usize) -> [u8; 4] {
+    fn make_header_bytes(len: usize, seq: u8) -> [u8; 4] {
         let mut hdr = (len as u32).to_le_bytes();
-        hdr[3] = self.next_seq();
+        hdr[3] = seq;
         hdr
+    }
+
+    #[inline]
+    pub fn packet_header_bytes(&mut self, len: usize) -> [u8; 4] {
+        Self::make_header_bytes(len, self.next_seq())
     }
 
     /// Push a new mysql packet to the outgoing packet list.
@@ -134,30 +184,37 @@ impl<W: AsyncWrite + Unpin> PacketWriter<W> {
         }
     }
 
-    /// Push a new, very large mysql packet to the outgoing packet list. This function will appropriately
-    /// split the packet into multiple packets, and enqueue them.
-    pub(crate) fn enqueue_large_packet(&mut self, mut packet: Vec<u8>) {
+    /// Push a new, very large mysql packet to the outgoing packet list. This function expects no
+    /// packet header at the front of the buffer; in other words, just the packet payload data.
+    pub(crate) fn enqueue_large_packet(&mut self, packet: Vec<u8>) {
+        let mut headers = Vec::new();
         let mut remaining_len = packet.len();
 
+        // build up the packet headers and keep with the data
         while remaining_len >= MAX_PACKET_CHUNK_SIZE {
-            let rest = packet.split_off(MAX_PACKET_CHUNK_SIZE);
             let header = self.packet_header_bytes(MAX_PACKET_CHUNK_SIZE);
-            self.queue.push(QueuedPacket::WithHeader(header, packet));
+            headers.push(header);
             remaining_len -= MAX_PACKET_CHUNK_SIZE;
-            packet = rest;
         }
 
+        // add the last header, even if the remaining length is 0 (as per mysql protocol)
         let header = self.packet_header_bytes(remaining_len);
-        self.queue.push(QueuedPacket::WithHeader(header, packet));
+        headers.push(header);
+
+        self.queue.push(QueuedPacket::LargePacket {
+            headers,
+            data: packet,
+        });
+    }
+
+    /// Enqueues raw, non-reference counted bytes to be written on the wire. It is assumed the `packet` is already a valid mysql packet(s).
+    pub fn enqueue_plain(&mut self, packet: Vec<u8>) {
+        self.queue.push(QueuedPacket::Plain(packet));
     }
 
     /// Enqueues raw, reference counted bytes to be written on the wire. It is assumed the `packet` is already a valid mysql packet(s).
     pub fn enqueue_raw(&mut self, packet: Arc<[u8]>) {
         self.queue.push(QueuedPacket::Raw(packet));
-    }
-
-    pub fn queue_len(&self) -> usize {
-        self.queue.len()
     }
 
     /// Send all the currently queued packets. Does not flush the writer.
@@ -173,23 +230,22 @@ impl<W: AsyncWrite + Unpin> PacketWriter<W> {
 
     /// Clear the queued packets and return them to the pool of preallocated packets
     fn return_queued_to_pool(&mut self) {
-        // Prefer to merge the shorter vector into the longer vector, thus minimizing the amount of
-        // copying necessary. i.e. if `queue` already contains all the allocated vectors, no action
-        // is needed.
-        if self.queue.len() > self.preallocated.len() {
-            std::mem::swap(&mut self.queue, &mut self.preallocated);
-        }
-        // Limit the number of pre allocated buffers to `MAX_POOL_ROWS`
-        self.preallocated.truncate(MAX_POOL_ROWS);
-        self.queue.truncate(MAX_POOL_ROWS - self.preallocated.len());
+        self.queue.retain(|p| p.poolable());
         self.preallocated.append(&mut self.queue);
+        self.preallocated.sort_by_key(|p| p.len());
+        self.preallocated.truncate(MAX_POOL_BUFFERS);
     }
 
     pub fn get_buffer(&mut self) -> Vec<u8> {
         while let Some(p) = self.preallocated.pop() {
             match p {
                 QueuedPacket::Raw(_) => {}
-                QueuedPacket::WithHeader(_, mut vec) => {
+                QueuedPacket::WithHeader(_, mut vec)
+                | QueuedPacket::Plain(mut vec)
+                | QueuedPacket::LargePacket {
+                    headers: _,
+                    data: mut vec,
+                } => {
                     vec.clear();
                     return vec;
                 }
