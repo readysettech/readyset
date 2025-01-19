@@ -43,7 +43,6 @@ indicatif = { workspace = true }
 prometheus-parse = { workspace = true }
 walkdir = { workspace = true }
 tokio-postgres = { workspace = true }
-redis = { workspace = true, features = ["tokio-comp", "aio"] }
 
 # local dependencies
 database-utils = { path = "../database-utils" }

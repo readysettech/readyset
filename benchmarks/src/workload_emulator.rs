@@ -1,29 +1,24 @@
 //! This benchmark generates a mixed load of queries and sends them to upstream/upstream adapter.
 //! Further, it allows three different testing modes:
 //! - direct to the upstream database (bypassing readyset completely)
-//! - use a look-aside cache (like redis) and an upstream database (no readyset use)
 //! - readyset backed by an upstream database (the standard model)
 //!
 //! The benchmark accepts a yaml file describing the workload, with the schema described in
 //! [`crate::spec`].
 use std::collections::HashMap;
-use std::convert::TryFrom;
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use anyhow::Result;
 use clap::{Parser, ValueEnum};
 use database_utils::{DatabaseConnection, DatabaseStatement, QueryableConnection};
 use metrics::Unit;
-use nom_sql::parse_query;
 use rand::distributions::Uniform;
 use rand_distr::weighted_alias::WeightedAliasIndex;
 use rand_distr::Distribution;
 use readyset_data::{DfType, DfValue, Dialect};
-use readyset_sql::ast::{SqlQuery, SqlType};
-use redis::{AsyncCommands, SetExpiry, SetOptions};
+use readyset_sql::ast::SqlType;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::info;
@@ -43,11 +38,6 @@ pub type Distributions = HashMap<String, Arc<(Vec<Vec<DfValue>>, Sampler)>>;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]
 pub enum BenchmarkType {
-    /// Use a look-aside cache, like memcached, and query the upstream database
-    /// on cache misses (no readyset).
-    #[value(name = "cache")]
-    Cache,
-
     /// Send all queries to the ReadySet instance, but do not migrate them.
     /// This will force ReadySet to proxy queries to the upstream.
     #[value(name = "proxy")]
@@ -58,29 +48,9 @@ pub enum BenchmarkType {
     #[default]
     ReadySet,
 
-    /// Only execute statements against the upstream database (no cache nor readyset).
+    /// Only execute statements against the upstream database.
     #[value(name = "upstream")]
     Upstream,
-}
-
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]
-pub enum LookAsideCacheType {
-    #[value(name = "redis")]
-    #[default]
-    Redis,
-}
-
-#[derive(Debug, Parser, Clone, Default, Serialize, Deserialize)]
-pub struct LookAsideCache {
-    #[arg(long, requires = "cache_url")]
-    cache_type: Option<LookAsideCacheType>,
-
-    #[arg(long)]
-    cache_url: Option<String>,
-
-    /// Time-To-Live, in seconds, for items in the cache.
-    #[arg(long, default_value = "10")]
-    ttl_secs: u32,
 }
 
 #[derive(Parser, Clone, Default, Serialize, Deserialize)]
@@ -96,10 +66,6 @@ pub struct WorkloadEmulator {
     /// The type of benchmark to run.
     #[arg(long, value_enum)]
     benchmark_type: BenchmarkType,
-
-    /// Parameters to any look-aside cache, if used.
-    #[command(flatten)]
-    look_aside_cache: LookAsideCache,
 
     /// Number of worker connections
     #[arg(long, short)]
@@ -133,7 +99,6 @@ pub(crate) struct WorkloadThreadParams {
     deployment: DeploymentParameters,
     query_set: Arc<QuerySet>,
     benchmark_type: BenchmarkType,
-    look_aside_cache: LookAsideCache,
 }
 
 pub enum Sampler {
@@ -217,7 +182,6 @@ impl BenchmarkControl for WorkloadEmulator {
             deployment: deployment.clone(),
             query_set: Arc::clone(self.query_set.lock().unwrap().deref().as_ref().unwrap()),
             benchmark_type: self.benchmark_type,
-            look_aside_cache: self.look_aside_cache.clone(),
         };
 
         benchmark_counter!(
@@ -379,64 +343,6 @@ impl Query {
     }
 }
 
-pub enum LookAsideCacheConnection {
-    Redis(redis::aio::MultiplexedConnection, u32),
-}
-
-impl LookAsideCacheConnection {
-    async fn new(cache_params: LookAsideCache) -> Result<Self> {
-        match cache_params.cache_type.expect("must provide cache type") {
-            LookAsideCacheType::Redis => {
-                let client =
-                    redis::Client::open(cache_params.cache_url.expect("must provide cache url"))?;
-                let conn = client.get_multiplexed_async_connection().await?;
-                Ok(Self::Redis(conn, cache_params.ttl_secs))
-            }
-        }
-    }
-
-    async fn get(&mut self, key: &str) -> Result<Option<Vec<u8>>> {
-        match self {
-            Self::Redis(conn, _) => {
-                let data = conn.get(key).await?;
-                Ok(data)
-            }
-        }
-    }
-
-    async fn set(&mut self, key: &str, value: &str) -> Result<()> {
-        match self {
-            Self::Redis(conn, ttl) => {
-                let opts =
-                    SetOptions::default().with_expiration(SetExpiry::EX(ttl_jitter(*ttl) as u64));
-                let _: () = conn.set_options(key, value, opts).await?;
-                Ok(())
-            }
-        }
-    }
-
-    /// Generate a unique key for this entry by concatenating the parameters,
-    /// which are in the `[DfValue]`.
-    fn munge_key(&self, parts: &[DfValue]) -> String {
-        if parts.is_empty() {
-            String::from("<empty_key>")
-        } else {
-            parts
-                .iter()
-                .map(|d| format!("{d}"))
-                .collect::<Vec<String>>()
-                .join("-")
-        }
-    }
-}
-
-/// Add some slight jitter to the ttl value else everything
-/// will expire around the same time.
-fn ttl_jitter(ttl_secs: u32) -> u32 {
-    let variance: f32 = rand::random();
-    ttl_secs + (ttl_secs as f32 * variance) as u32
-}
-
 impl MultithreadBenchmark for WorkloadEmulator {
     type BenchmarkResult = WorkloadResultBatch;
     type Parameters = WorkloadThreadParams;
@@ -542,31 +448,8 @@ impl MultithreadBenchmark for WorkloadEmulator {
         // Generate a prepared version for all of the statements
         let prepared = query_set.prepare_all(&mut conn).await?;
 
-        let mut cache_conn = match params.benchmark_type {
-            BenchmarkType::Cache => {
-                Some(LookAsideCacheConnection::new(params.look_aside_cache).await?)
-            }
-            _ => None,
-        };
-
         let mut last_report = Instant::now();
         let mut result_batch = WorkloadResultBatch::new(query_set.queries.len());
-
-        // a simple cache to know if a given query is a SELECT so we don't need to call parse()
-        // on each loop iteration. this implementation is barely sufficient, but serviceable
-        // nonetheless. WorkloadSpec.load_queries() does give us the queries in a
-        // consistent order, and the index is the index of an enumeration, and thus monotonic.
-        let is_select: Vec<bool> = params
-            .query_set
-            .queries
-            .iter()
-            .map(|query| {
-                matches!(
-                    parse_query(readyset_sql::Dialect::MySQL, &query.spec),
-                    Ok(SqlQuery::Select(_))
-                )
-            })
-            .collect();
 
         loop {
             // Report results every REPORT_RESULTS_INTERVAL.
@@ -579,52 +462,10 @@ impl MultithreadBenchmark for WorkloadEmulator {
 
             let query = params.query_set.get_query();
             let params = query.get_params();
-            let use_cache = cache_conn.is_some() && is_select[query.idx];
             let start = Instant::now();
 
-            // if using a cache, see if it's already got the data and bail early
-            let cache_key = if use_cache {
-                let conn = cache_conn.as_mut().expect("must be a cache connection");
-                let key = conn.munge_key(&params);
-                let cache_data = conn.get(&key).await?;
-                if cache_data.is_some() {
-                    result_batch.queries.push(WorkloadResult {
-                        query_id: query.idx as _,
-                        latency_us: start.elapsed().as_micros() as _,
-                    });
-                    continue;
-                }
-                Some(key)
-            } else {
-                None
-            };
-
             // Execute the prepared statement, with the generated params
-            let results = conn.execute(&prepared[query.idx], params).await?;
-
-            // if using a cache, put the select'ed data into it
-            if use_cache {
-                let data = if !results.is_empty() {
-                    // naively concat all the resultant column values
-                    let rows = Vec::<Vec<DfValue>>::try_from(results).unwrap();
-                    // guesstimate some number of bytes per row
-                    let mut s = String::with_capacity(rows.len() * 64);
-
-                    for row in rows {
-                        s += &row
-                            .into_iter()
-                            .map(|d| format!("{d}"))
-                            .collect::<Vec<String>>()
-                            .join("-");
-                    }
-                    s
-                } else {
-                    String::from("placeholder data")
-                };
-
-                let conn = cache_conn.as_mut().expect("must be a cache connection");
-                conn.set(&cache_key.expect("must have"), &data).await?;
-            };
+            conn.execute(&prepared[query.idx], params).await?;
 
             result_batch.queries.push(WorkloadResult {
                 query_id: query.idx as _,
