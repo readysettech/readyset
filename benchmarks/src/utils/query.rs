@@ -10,6 +10,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
+use std::fmt::Display;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -17,7 +18,9 @@ use std::str::FromStr;
 use anyhow::{anyhow, Result};
 use clap::Parser;
 use data_generator::{ColumnGenerator, DistributionAnnotation};
-use database_utils::{DatabaseConnection, DatabaseStatement, QueryableConnection};
+use database_utils::{
+    DatabaseConnection, DatabaseError, DatabaseStatement, DatabaseType, QueryableConnection,
+};
 use readyset_data::DfValue;
 use readyset_sql::ast::{CacheInner, CreateCacheStatement, Literal, SqlQuery, SqlType};
 use readyset_sql::{Dialect, DialectDisplay};
@@ -467,8 +470,96 @@ impl CachingQueryGenerator {
     }
 }
 
+/// Helper function to interpolate parameters into a query string.
+///
+/// This is a "good enough" implementation that works for most cases.
+/// Uses MySQL-style (?) or PostgreSQL-style ($n) placeholders based on the database type.
+pub fn interpolate_params(
+    query: &str,
+    params: Vec<DfValue>,
+    db_type: DatabaseType,
+) -> Result<String, DatabaseError> {
+    let mut result = query.to_string();
+
+    match db_type {
+        DatabaseType::MySQL => {
+            let mut params_iter = params.iter();
+
+            while let Some(pos) = result.find('?') {
+                let param = params_iter.next().ok_or_else(|| {
+                    DatabaseError::Interpolation("Not enough parameters provided for query".into())
+                })?;
+
+                let formatted_param = format_param_value(param)?;
+                result.replace_range(pos..pos + 1, &formatted_param);
+            }
+
+            if params_iter.next().is_some() {
+                return Err(DatabaseError::Interpolation(
+                    "Too many parameters provided for query".into(),
+                ));
+            }
+        }
+        DatabaseType::PostgreSQL => {
+            // Replace each $n with the corresponding parameter
+            let mut i = 0;
+            for param in params {
+                let placeholder = format!("${}", i + 1);
+                if !result.contains(&placeholder) {
+                    return Err(DatabaseError::Interpolation(
+                        format!("Parameter placeholder {} not found in query", placeholder).into(),
+                    ));
+                }
+
+                let formatted_param = format_param_value(&param)?;
+                result = result.replace(&placeholder, &formatted_param);
+                i += 1;
+            }
+
+            // Check for unused placeholders
+            let placeholder = format!("${}", i + 1);
+            if result.contains(&placeholder) {
+                return Err(DatabaseError::Interpolation(
+                    format!(
+                        "Parameter placeholder {} found but not enough parameters provided",
+                        placeholder
+                    )
+                    .into(),
+                ));
+            }
+        }
+    }
+
+    Ok(result)
+}
+
+/// Helper function to format parameter values consistently
+fn format_param_value<T: Display>(param: &T) -> Result<String, DatabaseError> {
+    // Convert parameter to string with proper escaping
+    let param_str = match param.to_string() {
+        s if s.contains('\'') => s.replace('\'', "''"), // Basic SQL string escaping
+        s => s,
+    };
+
+    // Wrap strings in quotes
+    Ok(
+        if param_str.parse::<f64>().is_err()
+            && param_str.parse::<i64>().is_err()
+            && param_str != "NULL"
+            && param_str != "TRUE"
+            && param_str != "FALSE"
+        {
+            format!("'{}'", param_str)
+        } else {
+            param_str
+        },
+    )
+}
+
 #[cfg(test)]
 mod tests {
+    use database_utils::DatabaseType;
+
     use super::*;
 
     #[test]
@@ -479,5 +570,44 @@ mod tests {
             .to_string();
         let s = DistributionAnnotations::try_from(q).unwrap();
         assert_eq!(s.0.len(), 2);
+    }
+
+    #[test]
+    fn test_mysql_interpolation() {
+        let query = "SELECT * FROM users WHERE id = ? AND name = ?";
+        let params = vec![DfValue::Int(1), DfValue::Text("John".into())];
+        let result = interpolate_params(query, params, DatabaseType::MySQL).unwrap();
+        assert_eq!(result, "SELECT * FROM users WHERE id = 1 AND name = 'John'");
+    }
+
+    #[test]
+    fn test_postgres_interpolation() {
+        let query = "SELECT * FROM users WHERE id = $1 AND name = $2";
+        let params = vec![DfValue::Int(1), DfValue::Text("John".into())];
+        let result = interpolate_params(query, params, DatabaseType::PostgreSQL).unwrap();
+        assert_eq!(result, "SELECT * FROM users WHERE id = 1 AND name = 'John'");
+    }
+
+    #[test]
+    fn test_error_cases() {
+        // MySQL: Too many parameters
+        let result = interpolate_params("SELECT ?", vec![1.into(), 2.into()], DatabaseType::MySQL);
+        assert!(result.is_err());
+
+        // MySQL: Not enough parameters
+        let result = interpolate_params("SELECT ?, ?", vec![1.into()], DatabaseType::MySQL);
+        assert!(result.is_err());
+
+        // PostgreSQL: Missing placeholder
+        let result = interpolate_params(
+            "SELECT $1",
+            vec![1.into(), 2.into()],
+            DatabaseType::PostgreSQL,
+        );
+        assert!(result.is_err());
+
+        // PostgreSQL: Not enough parameters
+        let result = interpolate_params("SELECT $1, $2", vec![1.into()], DatabaseType::PostgreSQL);
+        assert!(result.is_err());
     }
 }

@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use clap::{Parser, ValueEnum};
-use database_utils::{DatabaseConnection, DatabaseStatement, QueryableConnection};
+use database_utils::{DatabaseConnection, DatabaseStatement, DatabaseType, QueryableConnection};
 use metrics::Unit;
 use rand::distributions::Uniform;
 use rand_distr::weighted_alias::WeightedAliasIndex;
@@ -29,6 +29,7 @@ use crate::spec::WorkloadSpec;
 use crate::utils::generate::DataGenerator;
 use crate::utils::multi_thread::{self, MultithreadBenchmark};
 use crate::utils::prometheus::ForwardPrometheusMetrics;
+use crate::utils::query::interpolate_params;
 use crate::utils::us_to_ms;
 use crate::{benchmark_counter, benchmark_histogram, benchmark_increment_counter};
 
@@ -53,6 +54,20 @@ pub enum BenchmarkType {
     Upstream,
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]
+pub enum QueryExecutionMode {
+    /// Use prepared statements and reuse them (current behavior)
+    #[default]
+    #[value(name = "prepared")]
+    PreparedReuse,
+    /// Use extended query protocol with unnamed prepared statements (like many ORMs)
+    #[value(name = "unnamed")]
+    ExtendedUnnamed,
+    /// Use simple text protocol (no preparation)
+    #[value(name = "text")]
+    SimpleText,
+}
+
 #[derive(Parser, Clone, Default, Serialize, Deserialize)]
 pub struct WorkloadEmulator {
     /// Path to the workload yaml schema
@@ -74,6 +89,10 @@ pub struct WorkloadEmulator {
     /// Duration of the benchmark in seconds
     #[arg(long, short, value_parser = crate::utils::seconds_as_str_to_duration)]
     run_for: Option<Duration>,
+
+    /// How to execute queries against the database
+    #[arg(long, value_enum, default_value_t = QueryExecutionMode::PreparedReuse)]
+    query_execution_mode: QueryExecutionMode,
 
     #[arg(skip)]
     #[serde(skip)]
@@ -99,6 +118,7 @@ pub(crate) struct WorkloadThreadParams {
     deployment: DeploymentParameters,
     query_set: Arc<QuerySet>,
     benchmark_type: BenchmarkType,
+    query_execution_mode: QueryExecutionMode,
 }
 
 pub enum Sampler {
@@ -140,6 +160,14 @@ impl WorkloadResultBatch {
 
 impl BenchmarkControl for WorkloadEmulator {
     async fn setup(&self, deployment: &DeploymentParameters) -> anyhow::Result<()> {
+        if self.query_execution_mode == QueryExecutionMode::ExtendedUnnamed
+            && deployment.database_type != DatabaseType::PostgreSQL
+        {
+            return Err(anyhow::anyhow!(
+                "Extended unnamed queries are only supported for PostgreSQL"
+            ));
+        }
+
         if let Some(ref data_generator) = self.data_generator {
             // assume the target database exists, so create schema and insert data
             data_generator.install(&deployment.setup_conn_str).await?;
@@ -172,7 +200,7 @@ impl BenchmarkControl for WorkloadEmulator {
             BenchmarkType::ReadySet | BenchmarkType::Proxy => {
                 deployment.connect_to_target().await?
             }
-            _ => deployment.connect_to_setup().await?,
+            BenchmarkType::Upstream => deployment.connect_to_setup().await?,
         };
 
         let queries = spec.load_queries(&distributions, &mut conn).await?;
@@ -182,6 +210,7 @@ impl BenchmarkControl for WorkloadEmulator {
             deployment: deployment.clone(),
             query_set: Arc::clone(self.query_set.lock().unwrap().deref().as_ref().unwrap()),
             benchmark_type: self.benchmark_type,
+            query_execution_mode: self.query_execution_mode,
         };
 
         benchmark_counter!(
@@ -257,6 +286,10 @@ impl QuerySet {
     }
 
     pub fn get_query(&self) -> &Query {
+        if self.queries.len() == 1 {
+            return &self.queries[0];
+        }
+
         let mut rng = rand::thread_rng();
         &self.queries[self.weights.sample(&mut rng)]
     }
@@ -440,13 +473,15 @@ impl MultithreadBenchmark for WorkloadEmulator {
         };
         let query_set = &params.query_set;
 
-        // Only some upstream databases support interrogating the number of cached statements
-        if let Some(stmt_cache_size) = conn.cached_statements() {
-            assert!(stmt_cache_size >= params.query_set.queries.len());
-        }
-
-        // Generate a prepared version for all of the statements
-        let prepared = query_set.prepare_all(&mut conn).await?;
+        // Only prepare statements if we're in prepared reuse mode
+        let prepared = if params.query_execution_mode == QueryExecutionMode::PreparedReuse {
+            if let Some(stmt_cache_size) = conn.cached_statements() {
+                assert!(stmt_cache_size >= params.query_set.queries.len());
+            }
+            Some(query_set.prepare_all(&mut conn).await?)
+        } else {
+            None
+        };
 
         let mut last_report = Instant::now();
         let mut result_batch = WorkloadResultBatch::new(query_set.queries.len());
@@ -461,16 +496,72 @@ impl MultithreadBenchmark for WorkloadEmulator {
             }
 
             let query = params.query_set.get_query();
-            let params = query.get_params();
-            let start = Instant::now();
+            let query_params = query.get_params();
 
-            // Execute the prepared statement, with the generated params
-            conn.execute(&prepared[query.idx], params).await?;
+            // allow the specific execution mode to set up the query/params before starting the timer.
+            let duration = match params.query_execution_mode {
+                QueryExecutionMode::SimpleText => {
+                    let interpolated_query = interpolate_params(
+                        &query.spec,
+                        query_params,
+                        params.deployment.database_type,
+                    )?;
+                    let start = Instant::now();
+                    // use `conn.simple_query()` to avoid the overhead of creating prepared statements
+                    // (which happens in `conn.query()`, under the covers)
+                    conn.simple_query(&interpolated_query).await?;
+                    start.elapsed()
+                }
+                QueryExecutionMode::ExtendedUnnamed => {
+                    let typed_params = derive_typed_params(query_params);
+                    let start = Instant::now();
+                    conn.query_typed(&query.spec, typed_params).await?;
+                    start.elapsed()
+                }
+                QueryExecutionMode::PreparedReuse => {
+                    let start = Instant::now();
+                    conn.execute(&prepared.as_ref().unwrap()[query.idx], query_params)
+                        .await?;
+                    start.elapsed()
+                }
+            };
 
             result_batch.queries.push(WorkloadResult {
                 query_id: query.idx as _,
-                latency_us: start.elapsed().as_micros() as _,
+                latency_us: duration.as_micros() as _,
             });
         }
     }
+}
+
+/// Derive typed params from a list of DfValues.
+///
+/// This is a "good enough" implementation that will work for the workload emulator,
+/// for testing out postgres unnamed prepared statements.
+fn derive_typed_params(
+    query_params: Vec<DfValue>,
+) -> Vec<(
+    Box<dyn tokio_postgres::types::ToSql + Send + Sync>,
+    tokio_postgres::types::Type,
+)> {
+    let mut typed_params = Vec::with_capacity(query_params.len());
+    for p in query_params {
+        let pg_type = match p {
+            DfValue::Int(_) => tokio_postgres::types::Type::INT4,
+            DfValue::Float(_) => tokio_postgres::types::Type::FLOAT4,
+            DfValue::Double(_) => tokio_postgres::types::Type::FLOAT8,
+            DfValue::Text(_) => tokio_postgres::types::Type::TEXT,
+            DfValue::TinyText(_) => tokio_postgres::types::Type::TEXT,
+            DfValue::TimestampTz(_) => tokio_postgres::types::Type::TIMESTAMP,
+            DfValue::Time(_) => tokio_postgres::types::Type::TIME,
+            DfValue::Numeric(_) => tokio_postgres::types::Type::NUMERIC,
+            DfValue::None => tokio_postgres::types::Type::TEXT,
+            _ => tokio_postgres::types::Type::TEXT, // fallback
+        };
+        typed_params.push((
+            Box::new(p.clone()) as Box<dyn tokio_postgres::types::ToSql + Send + Sync>,
+            pg_type,
+        ));
+    }
+    typed_params
 }

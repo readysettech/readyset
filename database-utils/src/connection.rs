@@ -37,6 +37,22 @@ pub trait QueryableConnection: Send {
     where
         Q: AsQuery + AsRef<str> + Send + Sync;
 
+    /// Executes an unnamed prepared statement. This is only supported for PostgreSQL.
+    async fn query_typed<Q, P>(
+        &mut self,
+        query: Q,
+        params: P,
+    ) -> Result<QueryResults, DatabaseError>
+    where
+        Q: AsQuery + AsRef<str> + Send + Sync,
+        P: IntoIterator<
+                Item = (
+                    Box<dyn pgsql::types::ToSql + Send + Sync>,
+                    pgsql::types::Type,
+                ),
+            > + Send,
+        P::IntoIter: ExactSizeIterator;
+
     /// Executes a prepared statement for either mysql or postgres.
     async fn execute<S, P>(&mut self, stmt: &S, params: P) -> Result<QueryResults, DatabaseError>
     where
@@ -183,6 +199,38 @@ impl QueryableConnection for DatabaseConnection {
             )),
             DatabaseConnection::PostgreSQLPool(client) => Ok(SimpleQueryResults::Postgres(
                 extract_simple_query_rows(client.simple_query(query.as_ref()).await?),
+            )),
+        }
+    }
+
+    async fn query_typed<Q, P>(
+        &mut self,
+        query: Q,
+        params: P,
+    ) -> Result<QueryResults, DatabaseError>
+    where
+        Q: AsQuery + AsRef<str> + Send + Sync,
+        P: IntoIterator<
+                Item = (
+                    Box<dyn pgsql::types::ToSql + Send + Sync>,
+                    pgsql::types::Type,
+                ),
+            > + Send,
+        P::IntoIter: ExactSizeIterator,
+    {
+        match self {
+            Self::MySQL(_) => Err(DatabaseError::WrongConnection(ConnectionType::PostgreSQL)),
+            Self::PostgreSQL(conn, _) => Ok(QueryResults::Postgres(
+                conn.query_typed_raw(query.as_ref(), params)
+                    .await?
+                    .try_collect()
+                    .await?,
+            )),
+            Self::PostgreSQLPool(conn) => Ok(QueryResults::Postgres(
+                conn.query_typed_raw(query.as_ref(), params)
+                    .await?
+                    .try_collect()
+                    .await?,
             )),
         }
     }
@@ -351,6 +399,24 @@ impl QueryableConnection for DatabaseConnectionPool {
         Q: AsQuery + AsRef<str> + Send + Sync,
     {
         self.get_conn().await?.simple_query(query).await
+    }
+
+    async fn query_typed<Q, P>(
+        &mut self,
+        query: Q,
+        params: P,
+    ) -> Result<QueryResults, DatabaseError>
+    where
+        Q: AsQuery + AsRef<str> + Send + Sync,
+        P: IntoIterator<
+                Item = (
+                    Box<dyn pgsql::types::ToSql + Send + Sync>,
+                    pgsql::types::Type,
+                ),
+            > + Send,
+        P::IntoIter: ExactSizeIterator,
+    {
+        self.get_conn().await?.query_typed(query, params).await
     }
 }
 
@@ -739,6 +805,42 @@ impl QueryableConnection for Transaction<'_> {
             )),
             Transaction::PostgresPool(transaction) => Ok(SimpleQueryResults::Postgres(
                 extract_simple_query_rows(transaction.simple_query(query.as_ref()).await?),
+            )),
+        }
+    }
+
+    async fn query_typed<Q, P>(
+        &mut self,
+        query: Q,
+        params: P,
+    ) -> Result<QueryResults, DatabaseError>
+    where
+        Q: AsQuery + AsRef<str> + Send + Sync,
+        P: IntoIterator<
+                Item = (
+                    Box<dyn pgsql::types::ToSql + Send + Sync>,
+                    pgsql::types::Type,
+                ),
+            > + Send,
+        P::IntoIter: ExactSizeIterator,
+    {
+        match self {
+            Transaction::MySql(_) => {
+                Err(DatabaseError::WrongConnection(ConnectionType::PostgreSQL))
+            }
+            Transaction::Postgres(transaction) => Ok(QueryResults::Postgres(
+                transaction
+                    .query_typed_raw(query.as_ref(), params)
+                    .await?
+                    .try_collect()
+                    .await?,
+            )),
+            Transaction::PostgresPool(transaction) => Ok(QueryResults::Postgres(
+                transaction
+                    .query_typed_raw(query.as_ref(), params)
+                    .await?
+                    .try_collect()
+                    .await?,
             )),
         }
     }
