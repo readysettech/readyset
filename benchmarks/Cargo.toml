@@ -64,34 +64,6 @@ readyset-util = { path = "../readyset-util" }
 [lib]
 path = "src/lib.rs"
 
-[[bin]]
-name = "data_generator"
-path = "src/bin/data_generator.rs"
-
-[[bin]]
-name = "reader"
-path = "src/bin/reader.rs"
-
-[[bin]]
-name = "writer"
-path = "src/bin/writer.rs"
-
-[[bin]]
-name = "extend_recipe"
-path = "src/bin/extend_recipe.rs"
-
-[[bin]]
-name = "extend_recipe_write_prop"
-path = "src/bin/extend_recipe_write_prop.rs"
-
-[[bin]]
-name = "write_propagation"
-path = "src/bin/write_propagation.rs"
-
-[[bin]]
-name = "snapshot_time"
-path = "src/bin/snapshot_time.rs"
-
 [features]
 
 [dev-dependencies]

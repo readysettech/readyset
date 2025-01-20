@@ -29,9 +29,6 @@ A concrete (strawman) example can be found in the top comment block in `src/lib.
 
 ## Testing
 
-For local testing `xtask mock-prometheus-push-gateway` is provided, e.g.
-`cargo run --bin xtask -- mock-prometheus-push-gateway`.  When you run the
-`benchmark` binary, you can pass `--prometheus http://localhost:9091`, e.g.
+When you run the `benchmark` binary, you can pass `--prometheus http://localhost:9091`, e.g.
 `cargo run --bin benchmark -- --job-name manual --prometheus
-http://localhost:9091 my-benchmark`.  This will print any metrics that are sent
-to it to stdout for easy manual verification.
+http://localhost:9091 my-benchmark`.
