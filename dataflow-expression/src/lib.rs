@@ -146,6 +146,8 @@ pub enum BuiltinFunction {
         collation: Collation,
         dialect: Dialect,
     },
+
+    Hex(Expr),
 }
 
 impl BuiltinFunction {
@@ -185,6 +187,7 @@ impl BuiltinFunction {
             Ascii { .. } => "ascii",
             Lower { .. } => "lower",
             Upper { .. } => "upper",
+            Hex { .. } => "hex",
         }
     }
 }
@@ -313,6 +316,9 @@ impl Display for BuiltinFunction {
                     write!(f, " COLLATE \"{collation}\"")?;
                 }
                 write!(f, ")")
+            }
+            Hex(expr) => {
+                write!(f, "({})", expr)
             }
         }
     }

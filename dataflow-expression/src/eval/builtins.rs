@@ -1381,6 +1381,26 @@ impl BuiltinFunction {
                 let val = non_null!(expr.eval(record)?);
                 ascii(&val, dialect, ty)
             }
+            BuiltinFunction::Hex(expr) => {
+                let input = non_null!(expr.eval(record)?);
+                match input {
+                    DfValue::Int(n) => Ok(format!("{:X}", n).into()),
+                    DfValue::UnsignedInt(n) => Ok(format!("{:X}", n).into()),
+                    DfValue::Text(_) | DfValue::TinyText(_) => {
+                        let bytes = input.as_bytes()?;
+                        let hex = bytes.iter().fold(String::new(), |mut output, b| {
+                            // Discard `Result` because the `impl fmt::Write for String` can't fail,
+                            // so let's not bother converting an error that will never occur.
+                            let _ = write!(output, "{b:02X}");
+                            output
+                        });
+                        Ok(hex.into())
+                    }
+                    _ => Err(invalid_query_err!(
+                        "HEX function requires a numeric or string argument"
+                    )),
+                }
+            }
         }
     }
 }
@@ -2382,7 +2402,7 @@ mod tests {
                 assert_eq!(
                     eval_expr(&expr, MySQL),
                     expected.into(),
-                    "incorrect result for for `{expr}`"
+                    "incorrect result for `{expr}`"
                 )
             }
 
@@ -2482,7 +2502,7 @@ mod tests {
                     assert_eq!(
                         eval_expr(&expr, PostgreSQL),
                         expected,
-                        "incorrect result for for `{expr}`"
+                        "incorrect result for `{expr}`"
                     );
                 }
             }
@@ -2668,7 +2688,7 @@ mod tests {
                     assert_eq!(
                         eval_expr(&expr, PostgreSQL),
                         expected_json,
-                        "incorrect result for for `{expr}`"
+                        "incorrect result for `{expr}`"
                     );
                 }
             }
