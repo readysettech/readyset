@@ -493,6 +493,7 @@ impl Default for Config {
                 eviction_kind: dataflow::EvictionKind::default(),
                 verbose_metrics: false,
                 materialization_persistence: false,
+                unquery: true,
             },
             persistence: Default::default(),
             min_workers: 1,
@@ -557,6 +558,10 @@ pub struct WorkerOptions {
     /// The strategy to use when memory is freed from reader nodes
     #[arg(long = "eviction-policy", default_value_t = dataflow::EvictionKind::LRU, hide = true)]
     pub eviction_kind: dataflow::EvictionKind,
+
+    /// Disable unqueries after a reader eviction
+    #[arg(long = "no-unquery", hide = true)]
+    pub no_unquery: bool,
 
     /// Disable partial
     #[arg(long = "nopartial", hide = true)]

@@ -64,6 +64,7 @@ impl Builder {
             );
         }
         builder.set_eviction_kind(opts.eviction_kind);
+        builder.set_unquery(!opts.no_unquery);
 
         builder.set_sharding(match opts.shards {
             0 | 1 => None,
@@ -354,6 +355,11 @@ impl Builder {
     /// that field for more information.
     pub fn set_eviction_kind(&mut self, value: dataflow::EvictionKind) {
         self.config.domain_config.eviction_kind = value;
+    }
+
+    /// Sets the value of [`Config::domain_config::unquery`].
+    pub fn set_unquery(&mut self, value: bool) {
+        self.config.domain_config.unquery = value;
     }
 
     /// Assigns a telemetry reporter to this ReadySet server
