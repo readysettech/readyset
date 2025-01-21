@@ -494,6 +494,7 @@ impl DomainBuilder {
             waiting: LenMetric::new_meta("waiting", &meta),
             reader_triggered: LenMetric::new_meta("reader_triggered", &meta),
             replay_paths: Default::default(),
+            trigger_addresses: Default::default(),
 
             ingress_inject: LenMetric::new_meta("ingress_inject", &meta),
 
@@ -689,15 +690,12 @@ pub struct Domain {
     reader_write_handles: LenMetric<NodeMap<backlog::WriteHandle>>,
 
     not_ready: LenMetric<HashSet<LocalNodeIndex>>,
-
     ingress_inject: LenMetric<NodeMap<(usize, Vec<DfValue>)>>,
-
     persistence_parameters: PersistenceParameters,
-
     mode: DomainMode,
     waiting: LenMetric<NodeMap<Waiting>>,
-
     remapped_keys: LenMetric<RemappedKeys>,
+    trigger_addresses: NodeMap<Vec<ReplicaAddress>>,
 
     /// Replay paths that go through this domain
     replay_paths: ReplayPaths,
@@ -1798,18 +1796,18 @@ impl Domain {
             });
         }
 
-        let cols = index.columns.clone();
-        let txs = (0..num_shards)
-            .map(|shard| {
+        let addrs = (0..num_shards)
+            .map(|shard| ReplicaAddress {
+                domain_index: trigger_domain,
+                shard,
+                replica: self.replica,
+            })
+            .collect_vec();
+        let txs = addrs
+            .iter()
+            .map(|addr| {
                 let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-                let sender = self
-                    .channel_coordinator
-                    .builder_for(&ReplicaAddress {
-                        domain_index: trigger_domain,
-                        shard,
-                        replica: self.replica(),
-                    })?
-                    .build_async()?;
+                let sender = self.channel_coordinator.builder_for(addr)?.build_async()?;
 
                 tokio::spawn(UnboundedReceiverStream::new(rx).forward(sender).map(|r| {
                     if let Err(e) = r {
@@ -1820,9 +1818,11 @@ impl Domain {
                 Ok(tx)
             })
             .collect::<ReadySetResult<Vec<_>>>()?;
+        self.trigger_addresses.insert(node, addrs);
 
         let mut n = self.nodes[node].borrow_mut();
         let name = n.name().clone();
+        let cols = index.columns.clone();
         #[allow(clippy::unwrap_used)] // checked it was a reader above
         let r = n.as_mut_reader().unwrap();
 
