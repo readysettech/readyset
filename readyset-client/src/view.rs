@@ -6,7 +6,7 @@ use std::fmt;
 use std::future::Future;
 use std::hash::{Hash, Hasher};
 use std::net::SocketAddr;
-use std::ops::Range;
+use std::ops::{Range, RangeInclusive};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -659,6 +659,18 @@ impl From<Vec1<DfValue>> for KeyComparison {
     /// Converts to a [`KeyComparison::Equal`]
     fn from(key: Vec1<DfValue>) -> Self {
         KeyComparison::Equal(key)
+    }
+}
+
+impl TryFrom<RangeInclusive<Vec<DfValue>>> for KeyComparison {
+    type Error = vec1::Size0Error;
+
+    fn try_from(range: RangeInclusive<Vec<DfValue>>) -> Result<Self, Self::Error> {
+        let (start, end) = range.into_inner();
+        Ok(KeyComparison::Range((
+            Bound::Included(Vec1::try_from(start)?),
+            Bound::Included(Vec1::try_from(end)?),
+        )))
     }
 }
 

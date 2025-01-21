@@ -4228,7 +4228,8 @@ impl Domain {
             if n.is_dropped() {
                 continue; // Node was dropped. Skip.
             } else if let Some(state) = self.reader_write_handles.get_mut(node) {
-                freed += state.evict_bytes(num_bytes);
+                let (bytes, _keys) = state.evict_bytes(num_bytes);
+                freed += bytes;
                 state.publish();
                 state.notify_readers_of_eviction()?;
             } else if let Some(EvictBytesResult {

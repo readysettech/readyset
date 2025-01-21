@@ -923,13 +923,13 @@ fn contains_key_respects_ranges() {
 /// returns them
 fn evict<K, V, I>(w: &mut WriteHandle<K, V, I>, ratio: f64) -> Vec<K>
 where
-    K: Ord + Hash + Clone,
+    K: Ord + Hash + Clone + 'static,
     V: Ord + Clone,
     I: InsertionOrder<V>,
 {
     let mut evicted = Vec::new();
 
-    w.evict_keys(EvictionQuantity::Ratio(ratio), |k, _| {
+    let _ = w.evict_keys(EvictionQuantity::Ratio(ratio), |k, _| {
         evicted.push(k.clone());
         0
     });
