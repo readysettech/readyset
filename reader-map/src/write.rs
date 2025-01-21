@@ -248,15 +248,15 @@ where
     /// only be visible to all readers after a following call to publish is made. The method returns
     /// the amount of memory freed, computed using the provided closure on each (K,V) pair.
     ///
-    /// Returns the number of bytes evicted calculated by `mem_cnt`. If passed an
-    /// [`EvictionQuantity::SingleKey`], also returns the key evicted.
+    /// Returns the number of bytes evicted and the keys/ranges evicted.
     pub fn evict_keys<'a, F>(
         &'a mut self,
         request: EvictionQuantity,
         mut mem_cnt: F,
-    ) -> (usize, Option<K>)
+    ) -> (usize, Box<dyn Iterator<Item = (K, Option<K>)>>)
     where
         F: FnMut(&K, &Values<V, I>) -> usize,
+        K: 'static,
     {
         self.publish();
 
@@ -276,7 +276,8 @@ where
         }
         .min(inner.data.len());
 
-        let mut mem_freed = 0;
+        let mut mem = 0;
+        let mut keys = Vec::new();
 
         match inner.data.index_type() {
             IndexType::BTreeMap => {
@@ -288,7 +289,7 @@ where
                 if matches!(request, EvictionQuantity::SingleKey) {
                     // It's possible that we had nothing to evict
                     let Some(mut subrange_iter) = range_iterator.next_range() else {
-                        return (0, None);
+                        return (0, Box::new(std::iter::empty()));
                     };
                     let (k, v) = subrange_iter.next().expect("Subrange can't be empty");
 
@@ -296,13 +297,12 @@ where
                     debug_assert!(subrange_iter.last().is_none());
                     debug_assert!(range_iterator.next_range().is_none());
 
-                    return (mem_cnt(k, v), Some(k.clone()));
+                    return (mem_cnt(k, v), Box::new(vec![(k.clone(), None)].into_iter()));
                 }
 
                 while let Some(subrange_iter) = range_iterator.next_range() {
-                    let mut subrange_iter = subrange_iter.map(|(k, v)| {
-                        mem_freed += mem_cnt(k, v);
-                        (k, v)
+                    let mut subrange_iter = subrange_iter.inspect(|(k, v)| {
+                        mem += mem_cnt(k, v);
                     });
 
                     let (start, _) = subrange_iter.next().expect("Subrange can't be empty");
@@ -315,31 +315,25 @@ where
                         Bound::Included(start.clone()),
                         Bound::Included(end.clone()),
                     )));
+                    keys.push((start.clone(), Some(end.clone())));
                 }
             }
             IndexType::HashMap => {
-                let mut kvs = inner
+                let kvs = inner
                     .eviction_strategy
                     .pick_keys_to_evict(&inner.data, keys_to_evict);
-
-                // If we received an `EvictionQuantity::SingleKey` request, we return the evicted
-                // key
-                if matches!(request, EvictionQuantity::SingleKey) {
-                    let Some((k, v)) = kvs.next() else {
-                        return (0, None); // possible we had nothing to evict
-                    };
-                    self.add_op(Operation::RemoveEntry(k.clone()));
-                    return (mem_cnt(k, v), Some(k.clone()));
-                };
-
                 for (k, v) in kvs {
                     self.add_op(Operation::RemoveEntry(k.clone()));
-                    mem_freed += mem_cnt(k, v);
+                    keys.push((k.clone(), None));
+                    mem += mem_cnt(k, v);
+                    if matches!(request, EvictionQuantity::SingleKey) {
+                        return (mem, Box::new(keys.into_iter()));
+                    }
                 }
             }
         };
 
-        (mem_freed, None)
+        (mem, Box::new(keys.into_iter()))
     }
 }
 

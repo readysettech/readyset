@@ -91,13 +91,19 @@ impl Handle {
     /// Evict keys that were selected by the assigned eviction strategy from the state. The amount
     /// of keys evicted will be ceil(len() * ratio).
     ///
-    /// Returns the number of bytes evicted, and if passed an EvictionQuantity::SingleKey, returns
-    /// the key that was evicted.
-    pub fn evict(&mut self, keys_to_evict: EvictionQuantity) -> (usize, Option<Vec<DfValue>>) {
+    /// Returns the number of bytes evicted and the keys that were evicted.
+    #[allow(clippy::type_complexity)]
+    pub fn evict(
+        &mut self,
+        keys_to_evict: EvictionQuantity,
+    ) -> (
+        usize,
+        Box<dyn Iterator<Item = (Vec<DfValue>, Option<Vec<DfValue>>)>>,
+    ) {
         let base_value_size = self.base_value_size();
         match self {
             Handle::Single(ref mut h) => {
-                let (bytes, key) = h.evict_keys(keys_to_evict, |k, v| {
+                let (bytes, keys) = h.evict_keys(keys_to_evict, |k, v| {
                     // Each row's state is composed of: The key, the set of Values in the row
                     // (DfValues) and the bytes required to hold the Row data
                     // structure.
@@ -105,8 +111,8 @@ impl Handle {
                         + v.iter().map(|r| r.deep_size_of()).sum::<usize>()
                         + base_value_size
                 });
-                // Convert the DfValue key to a Vec<DfValue>
-                (bytes, key.map(|k| vec![k]))
+                let keys = keys.map(|(x, y)| (vec![x], y.map(|y| vec![y])));
+                (bytes, Box::new(keys))
             }
             Handle::Many(ref mut h) => h.evict_keys(keys_to_evict, |k, v| {
                 k.deep_size_of()

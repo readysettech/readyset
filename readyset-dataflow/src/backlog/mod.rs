@@ -330,7 +330,14 @@ impl WriteHandle {
 
     /// Evict from state according to the [`EvictionQuantity`]. Returns the number of bytes freed
     /// and if the request is EvictionQuantity::SingleKey, returns the key that was evicted.
-    fn evict_inner(&mut self, request: EvictionQuantity) -> (usize, Option<Vec<DfValue>>) {
+    #[allow(clippy::type_complexity)]
+    fn evict_inner(
+        &mut self,
+        request: EvictionQuantity,
+    ) -> (
+        usize,
+        Box<dyn Iterator<Item = (Vec<DfValue>, Option<Vec<DfValue>>)>>,
+    ) {
         let (bytes_to_be_freed, eviction) = if self.mem_size > 0 {
             debug_assert!(
                 !self.handle.is_empty(),
@@ -340,7 +347,7 @@ impl WriteHandle {
 
             self.handle.evict(request)
         } else {
-            (0, None)
+            (0, Box::new(std::iter::empty()) as _)
         };
 
         self.mem_size = self.mem_size.saturating_sub(bytes_to_be_freed);
@@ -349,15 +356,23 @@ impl WriteHandle {
 
     /// Attempt to evict `bytes` from state. This approximates the number of keys to evict,
     /// these keys may not have exactly `bytes` worth of state.
-    pub(crate) fn evict_bytes(&mut self, bytes: usize) -> usize {
+    pub(crate) fn evict_bytes(
+        &mut self,
+        bytes: usize,
+    ) -> (usize, Box<dyn Iterator<Item = KeyComparison>>) {
         let request = EvictionQuantity::Ratio(bytes as f64 / self.mem_size as f64);
-        self.evict_inner(request).0
+        let (bytes, keys) = self.evict_inner(request);
+        let keys = keys.into_iter().map(|(x, y)| match y {
+            None => x.try_into().unwrap(),
+            Some(y) => (x..=y).try_into().unwrap(),
+        });
+        (bytes, Box::new(keys))
     }
 
     /// Evict a single key from state
     pub(crate) fn evict_random(&mut self) -> (usize, Option<Vec<DfValue>>) {
-        let request = EvictionQuantity::SingleKey;
-        self.evict_inner(request)
+        let (bytes, mut keys) = self.evict_inner(EvictionQuantity::SingleKey);
+        (bytes, keys.next().map(|x| x.0))
     }
 
     pub(crate) fn mark_hole(&mut self, key: &KeyComparison) -> ReadySetResult<usize> {
