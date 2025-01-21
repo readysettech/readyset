@@ -513,6 +513,56 @@ pub mod packets {
         pub credits: u128,
     }
 
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    pub struct RequestEvictionFromReader {
+        pub node: LocalNodeIndex,
+        pub cols: Vec<usize>,
+        pub keys: Vec<KeyComparison>,
+        /// If a URL is provided, evict keys within the specified barrier.
+        pub done: Option<Url>,
+        pub barrier: u128,
+        pub credits: u128,
+    }
+
+    impl RequestEvictionFromReader {
+        pub(crate) fn new(
+            node: LocalNodeIndex,
+            cols: Vec<usize>,
+            keys: Vec<KeyComparison>,
+        ) -> Self {
+            Self {
+                node,
+                cols,
+                keys,
+                done: Default::default(),
+                barrier: Default::default(),
+                credits: Default::default(),
+            }
+        }
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    pub struct RequestEviction {
+        pub tag: Tag,
+        pub keys: Vec<KeyComparison>,
+        /// If a URL is provided, evict keys within the specified barrier.
+        pub done: Option<Url>,
+        pub barrier: u128,
+        pub credits: u128,
+    }
+
+    impl RequestEviction {
+        pub(crate) fn new(tag: Tag, keys: Vec<KeyComparison>) -> Self {
+            Self {
+                tag,
+                keys,
+                done: Default::default(),
+                barrier: Default::default(),
+                credits: Default::default(),
+            }
+        }
+    }
+
     #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
     pub struct Timestamp {
         pub link: Option<Link>,
@@ -618,6 +668,12 @@ pub enum Packet {
 
     /// Trigger an eviction.
     Evict(Evict),
+
+    /// Upward request that the source of a key start a downward eviction.
+    RequestEvictionFromReader(RequestEvictionFromReader),
+
+    /// Interdomain Upward request that the source of a key start a downward eviction.
+    RequestEviction(RequestEviction),
 
     /// A packet used solely to drive the event loop forward.
     Spin,
@@ -728,6 +784,8 @@ impl fmt::Display for Packet {
             Packet::Finish(_) => write!(f, "Finish"),
             Packet::Spin => write!(f, "Spin"),
             Packet::Evict(_) => write!(f, "Evict"),
+            Packet::RequestEvictionFromReader(_) => write!(f, "RequestEvictionFromReader"),
+            Packet::RequestEviction(_) => write!(f, "RequestEviction"),
         }
     }
 }
@@ -758,6 +816,8 @@ impl fmt::Debug for Packet {
             Packet::Finish(_) => write!(f, "Finish"),
             Packet::Spin => write!(f, "Spin"),
             Packet::Evict(_) => write!(f, "Evict"),
+            Packet::RequestEvictionFromReader(_) => write!(f, "RequestEvictionFromReader"),
+            Packet::RequestEviction(_) => write!(f, "RequestEviction"),
         }
     }
 }

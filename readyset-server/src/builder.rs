@@ -30,6 +30,7 @@ pub struct Builder {
     /// The telelemetry sender
     pub telemetry: TelemetrySender,
     wait_for_failpoint: bool,
+    unquery: bool,
 }
 
 impl Default for Builder {
@@ -45,6 +46,7 @@ impl Default for Builder {
             domain_scheduling_config: Default::default(),
             telemetry: TelemetrySender::new_no_op(),
             wait_for_failpoint: false,
+            unquery: true,
         }
     }
 }
@@ -64,6 +66,7 @@ impl Builder {
             );
         }
         builder.set_eviction_kind(opts.eviction_kind);
+        builder.set_unquery(!opts.no_unquery);
 
         builder.set_sharding(match opts.shards {
             0 | 1 => None,
@@ -356,6 +359,11 @@ impl Builder {
         self.config.domain_config.eviction_kind = value;
     }
 
+    /// Sets the value of [`Config::unquery`].
+    pub fn set_unquery(&mut self, value: bool) {
+        self.unquery = value;
+    }
+
     /// Assigns a telemetry reporter to this ReadySet server
     pub fn set_telemetry_sender(&mut self, value: TelemetrySender) {
         self.telemetry = value;
@@ -388,6 +396,7 @@ impl Builder {
             leader_eligible,
             telemetry,
             wait_for_failpoint,
+            unquery,
         } = self;
 
         let config = config.clone();
@@ -403,6 +412,7 @@ impl Builder {
             leader_eligible,
             telemetry,
             wait_for_failpoint,
+            unquery,
         )
     }
 
@@ -425,6 +435,7 @@ impl Builder {
             leader_eligible,
             telemetry,
             wait_for_failpoint,
+            unquery,
         } = self;
 
         let config = config.clone();
@@ -444,6 +455,7 @@ impl Builder {
             telemetry,
             wait_for_failpoint,
             shutdown_rx,
+            unquery,
         )
         .await?;
 

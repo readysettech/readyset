@@ -454,6 +454,10 @@ impl WriteHandle {
         self.index.index_type
     }
 
+    pub(crate) fn index_columns(&self) -> &[usize] {
+        &self.index.columns
+    }
+
     pub(crate) fn set_replay_done(&mut self, replay_done: bool) {
         debug_assert!(!self.is_partial());
         self.replay_done = replay_done;

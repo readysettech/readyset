@@ -558,6 +558,10 @@ pub struct WorkerOptions {
     #[arg(long = "eviction-policy", default_value_t = dataflow::EvictionKind::LRU, hide = true)]
     pub eviction_kind: dataflow::EvictionKind,
 
+    /// Disable unqueries after a reader eviction
+    #[arg(long = "no-unquery", hide = true)]
+    pub no_unquery: bool,
+
     /// Disable partial
     #[arg(long = "nopartial", hide = true)]
     pub no_partial: bool,

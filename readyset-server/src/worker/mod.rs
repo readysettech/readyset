@@ -236,6 +236,8 @@ pub struct Worker {
     readers: Readers,
     /// Handles to domains currently being run by this worker.
     domains: HashMap<ReplicaAddress, DomainHandle>,
+    /// Run unqueries after a reader eviction.
+    unquery: bool,
 
     memory: MemoryTracker,
     is_evicting: Arc<AtomicBool>,
@@ -256,6 +258,7 @@ impl Worker {
         memory_limit: Option<usize>,
         evict_interval: Option<Duration>,
         shutdown_rx: ShutdownReceiver,
+        unquery: bool,
     ) -> anyhow::Result<Self> {
         // this initial duration doesn't matter; it gets set upon worker registration
         let evict_interval = evict_interval.unwrap_or(Self::DEFAULT_EVICT_INTERVAL);
@@ -270,6 +273,7 @@ impl Worker {
             memory_limit: memory_limit.unwrap_or(usize::MAX),
             evict_interval,
             shutdown_rx,
+            unquery,
             memory: MemoryTracker::new()?,
             election_state: Default::default(),
             coord: Default::default(),
@@ -357,6 +361,7 @@ impl Worker {
                     self.coord.clone(),
                     state_size.clone(),
                     init_state_tx,
+                    self.unquery,
                 );
 
                 // this channel is used for in-process domain traffic, to avoid going through the

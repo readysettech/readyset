@@ -121,6 +121,7 @@ fn start_worker(
     memory_limit: Option<usize>,
     memory_check_frequency: Option<Duration>,
     shutdown_rx: ShutdownReceiver,
+    unquery: bool,
 ) -> Result<(), anyhow::Error> {
     set_failpoint!(failpoints::START_WORKER);
     let worker = Worker::new(
@@ -132,6 +133,7 @@ fn start_worker(
         memory_limit,
         memory_check_frequency,
         shutdown_rx,
+        unquery,
     )?;
 
     tokio::spawn(maybe_abort_on_panic!(abort_on_task_failure, worker.run()));
@@ -265,6 +267,7 @@ pub(crate) async fn start_instance_inner(
     telemetry_sender: TelemetrySender,
     wait_for_failpoint: bool,
     shutdown_rx: ShutdownReceiver,
+    unquery: bool,
 ) -> Result<Handle, anyhow::Error> {
     let (worker_tx, worker_rx) = tokio::sync::mpsc::channel(16);
     let (controller_tx, controller_rx) = tokio::sync::mpsc::channel(16);
@@ -307,6 +310,7 @@ pub(crate) async fn start_instance_inner(
         memory_limit,
         memory_check_frequency,
         shutdown_rx.clone(),
+        unquery,
     )?;
 
     let our_descriptor = start_controller(
@@ -349,6 +353,7 @@ pub(super) async fn start_instance(
     leader_eligible: bool,
     telemetry_sender: TelemetrySender,
     wait_for_failpoint: bool,
+    unquery: bool,
 ) -> Result<(Handle, ShutdownSender), anyhow::Error> {
     let Config {
         abort_on_task_failure,
@@ -383,6 +388,7 @@ pub(super) async fn start_instance(
         telemetry_sender,
         wait_for_failpoint,
         shutdown_rx,
+        unquery,
     )
     .await?;
 
