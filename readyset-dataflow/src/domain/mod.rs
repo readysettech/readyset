@@ -1676,19 +1676,21 @@ impl Domain {
         }
     }
 
-    fn send_up<P>(
-        txs: &[UnboundedSender<Result<Packet, Box<bincode::ErrorKind>>>],
+    fn send_up<P, S>(
+        shards: usize,
         keys: &mut dyn Iterator<Item = KeyComparison>,
         pkt: P,
+        mut send: S,
     ) -> bool
     where
         P: Fn(Vec<KeyComparison>) -> Packet,
+        S: FnMut(usize, Packet) -> bool,
     {
         let mut all = Vec::new();
-        let mut sharded = vec![Vec::new(); txs.len()];
+        let mut sharded = vec![Vec::new(); shards];
         for (i, m) in keys.enumerate() {
-            assert!(txs.len() == 1 || m.len() == 1);
-            for s in Self::send_shards(&m, txs.len()) {
+            assert!(shards == 1 || m.len() == 1);
+            for s in Self::send_shards(&m, shards) {
                 sharded[s].push(i);
             }
             all.push(m);
@@ -1699,7 +1701,7 @@ impl Domain {
                 true
             } else {
                 let pkt = pkt(keys.into_iter().map(|i| all[i].clone()).collect());
-                txs[shard].send(Ok(pkt)).is_ok()
+                send(shard, pkt)
             }
         })
     }
@@ -1762,14 +1764,16 @@ impl Domain {
         cols: &[usize],
         misses: &mut dyn Iterator<Item = KeyComparison>,
     ) -> bool {
-        Self::send_up(txs, misses, |keys| {
+        let pkt = |keys| {
             Packet::RequestReaderReplay(RequestReaderReplay {
                 node,
                 cols: cols.to_vec(),
                 keys,
                 cache_name: cache_name.clone(),
             })
-        })
+        };
+        let send = |shard: usize, pkt| txs[shard].send(Ok(pkt)).is_ok();
+        Self::send_up(txs.len(), misses, pkt, send)
     }
 
     fn prepare_partial_reader(
