@@ -452,6 +452,7 @@ impl DomainBuilder {
         channel_coordinator: Arc<ChannelCoordinator>,
         state_size: Arc<AtomicUsize>,
         init_state_tx: Sender<MaterializedState>,
+        unquery: bool,
     ) -> Domain {
         // initially, all nodes are not ready
         let not_ready = self
@@ -520,6 +521,7 @@ impl DomainBuilder {
             metrics: domain_metrics::DomainMetrics::new(self.config.verbose_metrics),
 
             eviction_kind: self.config.eviction_kind,
+            unquery_after_eviction: unquery,
             remapped_keys: LenMetric::new_meta("remapped_keys", &meta),
 
             init_state_tx,
@@ -738,6 +740,7 @@ pub struct Domain {
 
     metrics: domain_metrics::DomainMetrics,
     eviction_kind: crate::EvictionKind,
+    unquery_after_eviction: bool,
 
     /// This channel is used to notify the replica that a base node has its persistent state
     /// initialized.
@@ -1774,6 +1777,27 @@ impl Domain {
         Self::send_up(txs.len(), misses, pkt, send)
     }
 
+    fn unquery(
+        ex: &mut dyn Executor,
+        addrs: &[ReplicaAddress],
+        node: LocalNodeIndex,
+        cols: &[usize],
+        keys: &mut dyn Iterator<Item = KeyComparison>,
+    ) -> bool {
+        let pkt = |keys| {
+            Packet::RequestEvictionFromReader(RequestEvictionFromReader::new(
+                node,
+                cols.to_vec(),
+                keys,
+            ))
+        };
+        let send = |shard, pkt| {
+            ex.send(addrs[shard], pkt);
+            true
+        };
+        Self::send_up(addrs.len(), keys, pkt, send)
+    }
+
     fn prepare_partial_reader(
         &mut self,
         node: LocalNodeIndex,
@@ -2644,6 +2668,107 @@ impl Domain {
         Ok(Some(n))
     }
 
+    fn find_tags_and_evict(
+        &mut self,
+        ex: &mut dyn Executor,
+        keys: Vec<KeyComparison>,
+        cols: &[usize],
+        node: LocalNodeIndex,
+    ) -> ReadySetResult<()> {
+        let Some(_) = Self::get_node(&self.nodes, node)? else {
+            return Ok(());
+        };
+
+        let tags = self.find_tags(&keys, cols, Destination(node), Target(node))?;
+
+        for tag in tags {
+            if self.replay_paths[tag].trigger.is_local() {
+                // recursing since we're just forwarding the message, not taking action
+                self.handle_request_eviction(ex, RequestEviction::new(tag, keys.clone()))?;
+            } else {
+                let out =
+                    |_unishard, keys| Packet::RequestEviction(RequestEviction::new(tag, keys));
+                self.send_to_tag(ex, tag, keys.clone(), out)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn handle_request_eviction_reader(
+        &mut self,
+        ex: &mut dyn Executor,
+        pkt: RequestEvictionFromReader,
+    ) -> ReadySetResult<()> {
+        let barrier = pkt
+            .done
+            .map(|done| Barrier::new(ex, done, pkt.barrier, pkt.credits));
+        let res = self.find_tags_and_evict(ex, pkt.keys, &pkt.cols, pkt.node);
+        barrier.map(|b| b.flush(ex));
+        res
+    }
+
+    fn handle_request_eviction_in_barrier(
+        &mut self,
+        ex: &mut dyn Executor,
+        tag: Tag,
+        keys: Vec<KeyComparison>,
+    ) -> ReadySetResult<()> {
+        let (src, index, dst) = self.lookup_replay(tag)?;
+        let Some(node) = Self::get_node(&self.nodes, src)? else {
+            return Ok(());
+        };
+
+        let is_base = node.is_base();
+        drop(node);
+
+        if is_base {
+            self.handle_eviction_keys(ex, dst, tag, keys)?;
+        } else {
+            let cols = &index.columns;
+            let is_generated = self.replay_paths.columns_are_generated(src, cols);
+            let mut evictions: HashMap<_, Vec<KeyComparison>> = Default::default();
+
+            for key in keys {
+                let m = ColumnMiss {
+                    node: src,
+                    column_indices: cols.to_vec(),
+                    missed_keys: vec1![key],
+                };
+                let keys = if is_generated {
+                    // No need to store remapping; if it's not there, we don't have the key.
+                    self.nodes[src].borrow_mut().handle_upquery(m)?
+                } else {
+                    vec![m]
+                };
+
+                for m in keys {
+                    let e = evictions.entry((m.node, m.column_indices)).or_default();
+                    e.extend(m.missed_keys.into_iter());
+                }
+            }
+
+            for ((target, cols), keys) in evictions {
+                self.find_tags_and_evict(ex, keys, &cols, target)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn handle_request_eviction(
+        &mut self,
+        ex: &mut dyn Executor,
+        pkt: RequestEviction,
+    ) -> ReadySetResult<()> {
+        let barrier = pkt
+            .done
+            .map(|done| Barrier::new(ex, done, pkt.barrier, pkt.credits));
+        let res = self.handle_request_eviction_in_barrier(ex, pkt.tag, pkt.keys);
+        barrier.map(|b| b.flush(ex));
+        res
+    }
+
     #[allow(clippy::cognitive_complexity)]
     fn handle(&mut self, m: Packet, executor: &mut dyn Executor) -> ReadySetResult<()> {
         // TODO(eta): better error handling here.
@@ -2777,6 +2902,12 @@ impl Domain {
                     .rec_finish_replay_time(&pkt.cache_name, start.elapsed());
             }
             Packet::Spin => {}
+            Packet::RequestEvictionFromReader(pkt) => {
+                self.handle_request_eviction_reader(executor, pkt)?;
+            }
+            Packet::RequestEviction(pkt) => {
+                self.handle_request_eviction(executor, pkt)?;
+            }
         }
 
         Ok(())
@@ -4228,10 +4359,16 @@ impl Domain {
             if n.is_dropped() {
                 continue; // Node was dropped. Skip.
             } else if let Some(state) = self.reader_write_handles.get_mut(node) {
-                let (bytes, _keys) = state.evict_bytes(num_bytes);
+                let (bytes, mut keys) = state.evict_bytes(num_bytes);
                 freed += bytes;
                 state.publish();
                 state.notify_readers_of_eviction()?;
+
+                if let Some(addrs) = self.trigger_addresses.get(node) {
+                    if self.unquery_after_eviction {
+                        Self::unquery(ex, addrs, node, state.index_columns(), &mut keys);
+                    }
+                }
             } else if let Some(EvictBytesResult {
                 index,
                 keys_evicted,
@@ -4791,17 +4928,22 @@ impl Barrier {
     }
 
     fn send(&self, ex: &mut dyn Executor, rep: ReplicaAddress, mut msg: Packet, credits: u128) {
-        match msg {
-            Packet::Evict(ref mut e) => {
-                e.done = Some(self.done.clone());
-                e.barrier = self.id;
-                e.credits = credits;
+        let (done, barrier, cr) = match msg {
+            Packet::Evict(ref mut e) => (&mut e.done, &mut e.barrier, &mut e.credits),
+            Packet::RequestEvictionFromReader(ref mut e) => {
+                (&mut e.done, &mut e.barrier, &mut e.credits)
             }
+            Packet::RequestEviction(ref mut e) => (&mut e.done, &mut e.barrier, &mut e.credits),
             ref pkt => {
                 warn!("unexpected packet type during eviction: {:?}", pkt);
                 self.rpc(ex, credits);
+                ex.send(rep, msg);
+                return;
             }
-        }
+        };
+        *done = Some(self.done.clone());
+        *barrier = self.id;
+        *cr = credits;
         ex.send(rep, msg);
     }
 }
