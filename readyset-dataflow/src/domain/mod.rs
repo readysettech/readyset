@@ -3,6 +3,7 @@ mod domain_metrics;
 mod replay_paths;
 
 use std::borrow::Cow;
+use std::cell::RefMut;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::convert::{TryFrom, TryInto};
@@ -2625,6 +2626,20 @@ impl Domain {
         ret
     }
 
+    fn get_node(
+        nodes: &DomainNodes,
+        node: LocalNodeIndex,
+    ) -> ReadySetResult<Option<RefMut<'_, Node>>> {
+        let n = nodes
+            .get(node)
+            .ok_or_else(|| ReadySetError::NoSuchNode(node.id()))?
+            .borrow_mut();
+        if n.is_dropped() {
+            return Ok(None);
+        }
+        Ok(Some(n))
+    }
+
     #[allow(clippy::cognitive_complexity)]
     fn handle(&mut self, m: Packet, executor: &mut dyn Executor) -> ReadySetResult<()> {
         // TODO(eta): better error handling here.
@@ -2683,16 +2698,9 @@ impl Domain {
                 self.total_replay_time.start();
                 set_failpoint!(failpoints::UPQUERY_START);
 
-                let mut n = self
-                    .nodes
-                    .get(node)
-                    .ok_or_else(|| ReadySetError::NoSuchNode(node.id()))?
-                    .borrow_mut();
-
-                if n.is_dropped() {
-                    warn!(%node, "Requested replay from dropped reader");
+                let Some(mut n) = Self::get_node(&self.nodes, node)? else {
                     return Ok(());
-                }
+                };
 
                 let r = n.as_mut_reader().ok_or(ReadySetError::InvalidNodeType {
                     node_index: node.id(),
@@ -2944,40 +2952,37 @@ impl Domain {
         Ok((records, found_keys, replay_keys))
     }
 
-    fn seed_all(&mut self, ex: &mut dyn Executor, pkt: RequestPartialReplay) -> ReadySetResult<()> {
-        let (src, index, dst) = match &self.replay_paths[pkt.tag] {
+    // returns (src, index, dst)
+    fn lookup_replay(&self, tag: Tag) -> ReadySetResult<(LocalNodeIndex, Index, LocalNodeIndex)> {
+        match &self.replay_paths[tag] {
             ReplayPath {
                 source: Some(src),
                 trigger: TriggerEndpoint::Start(index) | TriggerEndpoint::Local(index),
                 path,
                 ..
-            } => (*src, index.clone(), path[0].node),
+            } => Ok((*src, index.clone(), path[0].node)),
             _ => internal!(),
-        };
+        }
+    }
 
-        let None = self.nodes.get(src).filter(|n| n.borrow().is_dropped()) else {
-            warn!(
-                ?pkt.tag,
-                node = ?src,
-                domain = ?self.index,
-                "ignoring replay from dropped node"
-            );
+    fn seed_all(&mut self, ex: &mut dyn Executor, pkt: RequestPartialReplay) -> ReadySetResult<()> {
+        let (src, index, dst) = self.lookup_replay(pkt.tag)?;
+        let Some(node) = Self::get_node(&self.nodes, src)? else {
             return Ok(());
         };
 
         let Some(state) = self.state.get(src) else {
             internal!(
-                "migration replay ({:?}) from non-materialized node",
+                "replay requested ({:?}) from non-materialized node",
                 pkt.tag
             );
         };
 
-        if let Some(node) = self.nodes.get(src) {
-            if node.borrow().is_base() {
-                self.metrics
-                    .inc_base_table_lookups(&pkt.cache_name, node.borrow().name());
-            }
+        if node.is_base() {
+            self.metrics
+                .inc_base_table_lookups(&pkt.cache_name, node.name());
         }
+        drop(node);
 
         let keys = pkt.keys.into_iter().collect();
         let (records, found_keys, replay_keys) =
