@@ -474,6 +474,13 @@ impl BuiltinFunction {
                 let expr = next_arg()?;
                 (Self::Ascii { expr, dialect }, DfType::UnsignedInt)
             }
+            "hex" => {
+                if dialect.engine() != SqlEngine::MySQL {
+                    unsupported!("Function {name} does not exist in {}", dialect.engine());
+                }
+                let expr = next_arg()?;
+                (Self::Hex(expr), DfType::Text(Default::default()))
+            }
             _ => unsupported!("Function {name} does not exist"),
         };
 

@@ -1,0 +1,51 @@
+statement ok
+create table hex_test (x text, y int);
+
+statement ok
+insert into hex_test (x, y) values
+('foo\bar', 0),
+('foo\\bar', 1),
+('foo\\\\bar', -1),
+('foo|bar', 2147483647),
+('foobar', -2147483648),
+('foo_bar', 42),
+('foo%bar', 42),
+('foo\_bar', 42),
+('foo\%bar', 42);
+
+query T rowsort
+select hex(y) from hex_test;
+----
+0
+1
+2A
+2A
+2A
+2A
+7FFFFFFF
+FFFFFFFF80000000
+FFFFFFFFFFFFFFFF
+
+query T
+select hex(x) from hex_test where y = 0;
+----
+666F6F086172
+
+query T rowsort
+select hex(x) from hex_test;
+----
+666F6F086172
+666F6F25626172
+666F6F5C25626172
+666F6F5C5C626172
+666F6F5C5F626172
+666F6F5C626172
+666F6F5F626172
+666F6F626172
+666F6F7C626172
+
+query T
+select hex(x) from hex_test where x = ?;
+? = foo\_bar
+----
+666F6F5C5F626172
