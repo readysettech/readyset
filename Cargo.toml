@@ -1,5 +1,8 @@
 [patch.crates-io]
-tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git" }
+mysql_async = { git = "https://github.com/readysettech/mysql_async" }
+postgres-protocol = { git = "https://github.com/readysettech/rust-postgres.git", tag = "readyset-20241114" }
+postgres-types = { git = "https://github.com/readysettech/rust-postgres.git", tag = "readyset-20241114" }
+tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git", tag = "readyset-20241114" }
 
 [workspace]
 members = [
@@ -69,15 +72,15 @@ resolver = "2"
 # will probably delete someday, not worth messing with
 consulrs = { git = "https://github.com/readysettech/consulrs.git", branch = "allow-disabling-rustls-tls-2" }
 
-mysql_async = { git = "https://github.com/readysettech/mysql_async" }
+# overridden in the patch section above
+mysql_async = "0.34.0"
 
-# only postgres-types and tokio-postgres are modified, but cargo misresolves dependencies of
-# dependencies unless we force all of these to our forked repository
-postgres = { git = "https://github.com/readysettech/rust-postgres.git" }
-postgres-native-tls = { git = "https://github.com/readysettech/rust-postgres.git" }
-postgres-protocol = { git = "https://github.com/readysettech/rust-postgres.git" }
-postgres-types = { git = "https://github.com/readysettech/rust-postgres.git" }
-tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git" }
+# some of these are overridden in the patch section above
+postgres = "0.19.9"
+postgres-native-tls = "0.5.0"
+postgres-protocol = "0.6.7"
+postgres-types = "0.2.8"
+tokio-postgres = "0.7.12"
 
 ########################
 # STANDARD DEPENDENCIES
