@@ -46,6 +46,7 @@ members = [
     "readyset-psql",
     "readyset-repl",
     "readyset-server",
+    "readyset-sql",
     "readyset-sql-passes",
     "readyset-telemetry-reporter",
     "readyset-tools",

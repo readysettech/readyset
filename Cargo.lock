@@ -5059,6 +5059,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "readyset-sql"
+version = "0.1.0"
+
+[[package]]
 name = "readyset-sql-passes"
 version = "0.0.1"
 dependencies = [
