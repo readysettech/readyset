@@ -8,7 +8,7 @@ use crate::channel::Channel;
 use crate::error::Error;
 use crate::message::FrontendMessage;
 use crate::protocol::Protocol;
-use crate::{codec, PsqlBackend};
+use crate::PsqlBackend;
 
 /// A helper struct that can be used to run a `Protocol` on a `Backend` and `Channel`.
 pub struct Runner<B: PsqlBackend, C> {
@@ -104,11 +104,7 @@ impl<B: PsqlBackend> Runner<B, tokio::net::TcpStream> {
 }
 
 impl<B: PsqlBackend, C: AsyncRead + AsyncWrite + Unpin> Runner<B, C> {
-    async fn handle_request(
-        &mut self,
-        request: Result<FrontendMessage, codec::DecodeError>,
-    ) -> Result<(), Error> {
-        let request = request?;
+    async fn handle_request(&mut self, request: FrontendMessage) -> Result<(), Error> {
         if self.enable_statement_logging {
             info!(target: "client_statement", "{:?}", request);
         }
@@ -139,20 +135,20 @@ impl<B: PsqlBackend, C: AsyncRead + AsyncWrite + Unpin> Runner<B, C> {
     /// loop so that we can construct a TLS capable `Channel` and restart.
     async fn main_loop(&mut self) -> MainLoopStatus {
         while let Some(message) = self.channel.next().await {
-            match self.handle_request(message).await {
-                Ok(()) => {
-                    // Client requests a TLS channel. We exit so that we can reconstruct a TLS
-                    // capable `Channel`
-                    if self.protocol.is_initiating_ssl_handshake() {
-                        return MainLoopStatus::RestartWithTls;
-                    }
-                }
-                // Return an error message but do not exit the loop
-                Err(e) => {
-                    self.handle_error(e)
-                        .await
-                        .unwrap_or_else(|e| eprintln!("{}", e));
-                }
+            let result = match message {
+                Ok(msg) => self.handle_request(msg).await,
+                Err(e) => Err(Error::from(e)),
+            };
+
+            if let Err(e) = result {
+                self.handle_error(e)
+                    .await
+                    .unwrap_or_else(|e| eprintln!("{}", e));
+                continue;
+            }
+
+            if self.protocol.is_initiating_ssl_handshake() {
+                return MainLoopStatus::RestartWithTls;
             }
         }
         MainLoopStatus::Terminate
