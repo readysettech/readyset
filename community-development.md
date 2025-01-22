@@ -120,7 +120,13 @@ storage.
 To run tests for the project, run the following command:
 
 ```bash
-cargo test --skip integration_serial
+cargo test -- --skip integration_serial
+```
+
+To run a single test for the project, for example [drop::tests::mysql::format_drop_table](https://github.com/readysettech/readyset/blob/beta-2023-08-23/nom-sql/src/drop.rs#L251) run the following command:
+
+```bash
+cargo test --package nom-sql --lib -- drop::tests::mysql::format_drop_table
 ```
 
 **Note:**
