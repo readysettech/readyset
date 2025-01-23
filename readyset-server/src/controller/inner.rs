@@ -244,9 +244,10 @@ impl Leader {
         changelist.changes().for_each(|c| {
             if let Change::CreateCache(cc) = c {
                 if let Some(name) = &cc.name {
-                    info!("creating cache {}", name.display_unquoted());
+                    info!(always = %cc.always, "creating cache {}", name.display_unquoted());
                 } else {
                     info!(
+                        always = %cc.always,
                         "creating cache {}",
                         QueryId::from_select(&cc.statement, &changelist.schema_search_path)
                     );
