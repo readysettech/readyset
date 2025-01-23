@@ -82,6 +82,11 @@ pub struct WorkloadEmulator {
     #[arg(long, value_enum)]
     benchmark_type: BenchmarkType,
 
+    /// The target rate to issue queries at if attainable on this
+    /// machine with up to `threads`.
+    #[arg(long)]
+    target_qps: Option<u64>,
+
     /// Number of worker connections
     #[arg(long, short)]
     workers: u64,
@@ -119,6 +124,8 @@ pub(crate) struct WorkloadThreadParams {
     query_set: Arc<QuerySet>,
     benchmark_type: BenchmarkType,
     query_execution_mode: QueryExecutionMode,
+    target_qps: Option<u64>,
+    workers: u64,
 }
 
 pub enum Sampler {
@@ -211,6 +218,8 @@ impl BenchmarkControl for WorkloadEmulator {
             query_set: Arc::clone(self.query_set.lock().unwrap().deref().as_ref().unwrap()),
             benchmark_type: self.benchmark_type,
             query_execution_mode: self.query_execution_mode,
+            target_qps: self.target_qps,
+            workers: self.workers,
         };
 
         benchmark_counter!(
@@ -483,6 +492,8 @@ impl MultithreadBenchmark for WorkloadEmulator {
             None
         };
 
+        let mut throttle_interval =
+            multi_thread::throttle_interval(params.target_qps, params.workers);
         let mut last_report = Instant::now();
         let mut result_batch = WorkloadResultBatch::new(query_set.queries.len());
 
@@ -493,6 +504,10 @@ impl MultithreadBenchmark for WorkloadEmulator {
                 std::mem::swap(&mut new_results, &mut result_batch);
                 sender.send(new_results)?;
                 last_report = Instant::now();
+            }
+
+            if let Some(interval) = &mut throttle_interval {
+                interval.tick().await;
             }
 
             let query = params.query_set.get_query();
