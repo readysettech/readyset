@@ -573,7 +573,9 @@ impl Leader {
                 return_serialized!(supports)
             }
             (&Method::POST, "/evict_single") => {
-                let body = bincode::deserialize(&body)?;
+                let body = (!body.is_empty())
+                    .then(|| bincode::deserialize(&body))
+                    .transpose()?;
                 let ds = self.dataflow_state_handle.read().await;
                 let key = ds.evict_single(body).await?;
                 return_serialized!(key);
