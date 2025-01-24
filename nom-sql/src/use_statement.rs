@@ -1,31 +1,10 @@
-use std::fmt;
-
 use nom::bytes::complete::tag_no_case;
 use nom_locate::LocatedSpan;
-use readyset_sql::Dialect;
-use serde::{Deserialize, Serialize};
-use test_strategy::Arbitrary;
+use readyset_sql::{ast::*, Dialect};
 
 use crate::dialect::DialectParser;
 use crate::whitespace::whitespace1;
-use crate::{NomSqlResult, SqlIdentifier};
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
-pub struct UseStatement {
-    pub database: SqlIdentifier,
-}
-
-impl UseStatement {
-    fn from_database(database: SqlIdentifier) -> Self {
-        Self { database }
-    }
-}
-
-impl fmt::Display for UseStatement {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "USE {}", self.database)
-    }
-}
+use crate::NomSqlResult;
 
 pub fn use_statement(
     dialect: Dialect,

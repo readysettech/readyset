@@ -93,13 +93,12 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use database_utils::{DatabaseConnection, QueryableConnection};
-use nom_sql::SqlQuery;
+use nom_sql::parse_query;
 use rand::Rng;
 use rand_distr::{Uniform, WeightedAliasIndex};
 use readyset_data::DfValue;
-use readyset_sql::DialectDisplay;
-use serde::{Deserialize, Serialize, Serializer};
-use serde_with::DeserializeAs;
+use readyset_sql::{ast::*, Dialect, DialectDisplay};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use tracing::info;
 use zipf::ZipfDistribution;
 
@@ -166,19 +165,24 @@ pub enum WorkloadDistributionKind {
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WorkloadParam {
-    #[serde(deserialize_with = "serde_with::DisplayFromStr::deserialize_as")]
+    #[serde(deserialize_with = "deserialize_sql_type")]
     #[serde(serialize_with = "serialize_sql_type")]
-    pub sql_type: nom_sql::SqlType,
+    pub sql_type: SqlType,
     pub distribution: String,
     #[serde(default)]
     pub col: usize,
 }
 
-fn serialize_sql_type<S: Serializer>(
-    sql_type: &nom_sql::SqlType,
-    serializer: S,
-) -> Result<S::Ok, S::Error> {
+fn serialize_sql_type<S: Serializer>(sql_type: &SqlType, serializer: S) -> Result<S::Ok, S::Error> {
     serializer.serialize_str(&sql_type.display(readyset_sql::Dialect::MySQL).to_string())
+}
+
+fn deserialize_sql_type<'de, D>(deserializer: D) -> Result<SqlType, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    nom_sql::parse_sql_type(Dialect::MySQL, String::deserialize(deserializer)?)
+        .map_err(serde::de::Error::custom)
 }
 
 impl WorkloadSpec {
@@ -263,7 +267,7 @@ impl WorkloadSpec {
         ) in self.queries.iter().enumerate()
         {
             if *migrate {
-                let stmt = match spec.parse::<SqlQuery>() {
+                let stmt = match parse_query(conn.dialect(), spec) {
                     Ok(SqlQuery::Select(stmt)) => stmt,
                     _ => panic!("Can only migrate SELECT statements"),
                 };
@@ -307,7 +311,7 @@ impl WorkloadSpec {
 
 #[cfg(test)]
 mod test {
-    use nom_sql::SqlType;
+    use SqlType;
 
     use super::*;
 

@@ -1,7 +1,3 @@
-use std::fmt::Display;
-use std::{fmt, str};
-
-use itertools::Itertools;
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::{map, opt};
@@ -9,82 +5,20 @@ use nom::multi::separated_list1;
 use nom::sequence::{terminated, tuple};
 use nom::Parser;
 use nom_locate::LocatedSpan;
-use readyset_sql::Dialect;
-use readyset_util::fmt::fmt_with;
-use serde::{Deserialize, Serialize};
-use test_strategy::Arbitrary;
+use readyset_sql::{ast::*, Dialect};
 
 use crate::common::statement_terminator;
 use crate::dialect::DialectParser;
 use crate::expression::expression;
 use crate::literal::literal;
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{DialectDisplay, Expr, Literal, NomSqlError, NomSqlResult, SqlIdentifier};
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
-pub enum SetStatement {
-    Variable(SetVariables),
-    Names(SetNames),
-    PostgresParameter(SetPostgresParameter),
-}
-
-impl DialectDisplay for SetStatement {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
-        fmt_with(move |f| {
-            write!(f, "SET ")?;
-            match self {
-                Self::Variable(set) => write!(f, "{}", set.display(dialect)),
-                Self::Names(set) => write!(f, "{}", set),
-                Self::PostgresParameter(set) => write!(f, "{}", set.display(dialect)),
-            }
-        })
-    }
-}
-
-impl SetStatement {
-    pub fn variables(&self) -> Option<&[(Variable, Expr)]> {
-        match self {
-            SetStatement::Names(_) | SetStatement::PostgresParameter { .. } => None,
-            SetStatement::Variable(set) => Some(&set.variables),
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
-pub enum PostgresParameterScope {
-    Session,
-    Local,
-}
-
-impl Display for PostgresParameterScope {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            PostgresParameterScope::Session => write!(f, "SESSION"),
-            PostgresParameterScope::Local => write!(f, "LOCAL"),
-        }
-    }
-}
+use crate::{NomSqlError, NomSqlResult};
 
 fn postgres_parameter_scope(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], PostgresParameterScope> {
     alt((
         map(tag_no_case("session"), |_| PostgresParameterScope::Session),
         map(tag_no_case("local"), |_| PostgresParameterScope::Local),
     ))(i)
-}
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
-pub enum SetPostgresParameterValue {
-    Default,
-    Value(PostgresParameterValue),
-}
-
-impl DialectDisplay for SetPostgresParameterValue {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
-        fmt_with(move |f| match self {
-            SetPostgresParameterValue::Default => write!(f, "DEFAULT"),
-            SetPostgresParameterValue::Value(val) => write!(f, "{}", val.display(dialect)),
-        })
-    }
 }
 
 fn set_postgres_parameter_value(
@@ -96,78 +30,6 @@ fn set_postgres_parameter_value(
         }),
         map(postgres_parameter_value, SetPostgresParameterValue::Value),
     ))(i)
-}
-
-/// A *single* value which can be used as the value for a postgres parameter
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
-pub enum PostgresParameterValueInner {
-    Identifier(SqlIdentifier),
-    Literal(Literal),
-}
-
-impl DialectDisplay for PostgresParameterValueInner {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
-        fmt_with(move |f| match self {
-            PostgresParameterValueInner::Identifier(ident) => write!(f, "{}", ident),
-            PostgresParameterValueInner::Literal(lit) => write!(f, "{}", lit.display(dialect)),
-        })
-    }
-}
-
-/// The value for a postgres parameter, which can either be an identifier, a literal, or a list of
-/// those
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
-pub enum PostgresParameterValue {
-    Single(PostgresParameterValueInner),
-    List(Vec<PostgresParameterValueInner>),
-}
-
-impl PostgresParameterValue {
-    /// Construct a [`PostgresParameterValue`] for a single literal
-    pub fn literal<L>(literal: L) -> Self
-    where
-        Literal: From<L>,
-    {
-        Self::Single(PostgresParameterValueInner::Literal(literal.into()))
-    }
-
-    /// Construct a [`PostgresParameterValue`] for a single identifier
-    pub fn identifier<I>(ident: I) -> Self
-    where
-        SqlIdentifier: From<I>,
-    {
-        Self::Single(PostgresParameterValueInner::Identifier(ident.into()))
-    }
-
-    /// Construct a [`PostgresParameterValue`] from a list of literal values
-    pub fn list<L, I>(vals: L) -> Self
-    where
-        L: IntoIterator<Item = I>,
-        Literal: From<I>,
-    {
-        Self::List(
-            vals.into_iter()
-                .map(|v| PostgresParameterValueInner::Literal(v.into()))
-                .collect(),
-        )
-    }
-}
-
-impl DialectDisplay for PostgresParameterValue {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
-        fmt_with(move |f| match self {
-            PostgresParameterValue::Single(v) => write!(f, "{}", v.display(dialect)),
-            PostgresParameterValue::List(l) => {
-                for (i, v) in l.iter().enumerate() {
-                    if i != 0 {
-                        write!(f, ", ")?;
-                    }
-                    write!(f, "{}", v.display(dialect))?;
-                }
-                Ok(())
-            }
-        })
-    }
 }
 
 fn postgres_parameter_value_inner(
@@ -204,28 +66,6 @@ fn postgres_parameter_value(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Postgr
     }
 }
 
-/// Scope for a [`Variable`]
-#[derive(
-    Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Arbitrary,
-)]
-pub enum VariableScope {
-    User,
-    Local,
-    Global,
-    Session,
-}
-
-impl Display for VariableScope {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            VariableScope::User => Ok(()),
-            VariableScope::Local => write!(f, "LOCAL"),
-            VariableScope::Global => write!(f, "GLOBAL"),
-            VariableScope::Session => write!(f, "SESSION"),
-        }
-    }
-}
-
 pub(crate) fn variable_scope_prefix(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], VariableScope> {
     alt((
         map(tag_no_case("@@LOCAL."), |_| VariableScope::Local),
@@ -234,100 +74,6 @@ pub(crate) fn variable_scope_prefix(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8]
         map(tag_no_case("@@"), |_| VariableScope::Session),
         map(tag_no_case("@"), |_| VariableScope::User),
     ))(i)
-}
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Arbitrary)]
-pub struct Variable {
-    pub scope: VariableScope,
-    pub name: SqlIdentifier,
-}
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
-pub struct SetVariables {
-    /// A list of variables and their assigned values
-    pub variables: Vec<(Variable, Expr)>,
-}
-
-impl Variable {
-    /// If the variable is one of Local, Global or Session, returns the variable name
-    pub fn as_non_user_var(&self) -> Option<&str> {
-        if self.scope == VariableScope::User {
-            None
-        } else {
-            Some(&self.name)
-        }
-    }
-
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
-        fmt_with(move |f| {
-            match dialect {
-                Dialect::PostgreSQL => {
-                    // Postgres doesn't have variable scope
-                }
-                Dialect::MySQL => {
-                    if self.scope == VariableScope::User {
-                        write!(f, "@")?;
-                    } else {
-                        write!(f, "@@{}.", self.scope)?;
-                    }
-                }
-            }
-            write!(f, "{}", self.name)
-        })
-    }
-}
-
-impl DialectDisplay for SetVariables {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
-        fmt_with(move |f| {
-            write!(
-                f,
-                "{}",
-                self.variables
-                    .iter()
-                    .map(|(var, value)| format!(
-                        "{} = {}",
-                        var.display(dialect),
-                        value.display(dialect)
-                    ))
-                    .join(", ")
-            )
-        })
-    }
-}
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
-pub struct SetNames {
-    pub charset: String,
-    pub collation: Option<String>,
-}
-
-impl Display for SetNames {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "NAMES '{}'", &self.charset)?;
-        if let Some(collation) = self.collation.as_ref() {
-            write!(f, " COLLATE '{}'", collation)?;
-        }
-        Ok(())
-    }
-}
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
-pub struct SetPostgresParameter {
-    pub scope: Option<PostgresParameterScope>,
-    pub name: SqlIdentifier,
-    pub value: SetPostgresParameterValue,
-}
-
-impl DialectDisplay for SetPostgresParameter {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
-        fmt_with(move |f| {
-            if let Some(scope) = self.scope {
-                write!(f, "{} ", scope)?;
-            }
-            write!(f, "{} = {}", self.name, self.value.display(dialect))
-        })
-    }
 }
 
 fn set_variable_scope_prefix(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], VariableScope> {
@@ -444,6 +190,8 @@ fn set_postgres_parameter(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SetPostg
 
 #[cfg(test)]
 mod tests {
+    use readyset_sql::DialectDisplay;
+
     use super::*;
 
     #[test]
@@ -581,7 +329,7 @@ mod tests {
                     },
                     Expr::BinaryOp {
                         lhs: Box::new(Expr::Literal(100.into())),
-                        op: crate::BinaryOperator::Add,
+                        op: BinaryOperator::Add,
                         rhs: Box::new(Expr::Literal(200.into())),
                     }
                 )),
@@ -604,7 +352,7 @@ mod tests {
                         },
                         Expr::BinaryOp {
                             lhs: Box::new(Expr::Literal(100.into())),
-                            op: crate::BinaryOperator::Add,
+                            op: BinaryOperator::Add,
                             rhs: Box::new(Expr::Literal(200.into())),
                         }
                     ),

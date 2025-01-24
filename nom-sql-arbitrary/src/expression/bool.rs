@@ -1,12 +1,11 @@
 //! Module that holds all the functions to get a proptest [`Strategy`]
 //! that generates [`Expr`]s that resolve to a boolean value.
 
-use nom_sql::{Expr, SqlType};
 use proptest::prop_oneof;
-use proptest::strategy::Strategy;
-use readyset_sql::Dialect;
+use proptest::strategy::{Just, Strategy};
+use readyset_sql::{ast::*, Dialect};
 
-use crate::expression::util::{case_when, cast};
+use crate::expression::util::{case_when, cast, coalesce, if_null};
 use crate::expression::ExprStrategy;
 
 /// Produces a [`Strategy`] that generates a non-base (neither literal nor column) boolean [`Expr`],
@@ -34,11 +33,7 @@ fn bool_cast(es: ExprStrategy) -> impl Strategy<Value = Expr> {
 /// Helper module to group all the [`Strategy`]s that generate boolean [`Expr::Op`].
 // TODO(fran): Add OpAll, OpAny, and operators that predicate over JSON
 mod op {
-    use nom_sql::{BinaryOperator, Expr};
-    use proptest::prop_oneof;
-    use proptest::strategy::{Just, Strategy};
-
-    use crate::expression::ExprStrategy;
+    use super::*;
 
     /// Produces a [`Strategy`] that generates a boolean [`Expr::Op`].
     pub(super) fn op(es: ExprStrategy) -> impl Strategy<Value = Expr> {
@@ -141,13 +136,7 @@ mod op {
 /// Helper module to group all the [`Strategy`]s that produce boolean [`Expr::Call`].
 // TODO(fran): Add JSON functions that return boolean values
 mod call {
-    use nom_sql::Expr;
-    use proptest::prop_oneof;
-    use proptest::strategy::Strategy;
-    use readyset_sql::Dialect;
-
-    use crate::expression::util::{coalesce, if_null};
-    use crate::expression::ExprStrategy;
+    use super::*;
 
     /// Produces a [`Strategy`] that generates a boolean [`Expr::Call`].
     pub(super) fn call(es: ExprStrategy, dialect: &Dialect) -> impl Strategy<Value = Expr> {

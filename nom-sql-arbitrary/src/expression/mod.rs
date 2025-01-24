@@ -1,12 +1,13 @@
 //! Module that provides proptest [`Strategy`]s for
 //! [`Expr`] AST structs.
+
 // TODO(fran): Generate more complex `Expr`:
 //   - Arrays
 //   - JSON
-use nom_sql::Expr;
+
 use proptest::arbitrary::{any, any_with};
 use proptest::strategy::{BoxedStrategy, Just, Strategy};
-use readyset_sql::Dialect;
+use readyset_sql::{ast::*, Dialect};
 
 use crate::expression::bool::generate_bool;
 use crate::expression::expr::{generate_base_expr, ExprSpec};

@@ -2,10 +2,11 @@
 //! Base [`Expr`] are either [`Expr::Literal`] or [`Expr::Column`].
 // TODO(fran): Add a way to configure the columns available to the `Expr` generation, and their
 //  types, so we can use said columns as a base `Expr` of the column type.
-use nom_sql::{Double, Expr, Float, Literal};
+
 use proptest::prelude::BoxedStrategy;
 use proptest::prop_oneof;
 use proptest::strategy::{Just, Strategy};
+use readyset_sql::ast::*;
 
 // TODO(fran): Add configuration to generate `Expr::Column`.
 //  That is tricky because we need to know which columns are available, and which types they have,

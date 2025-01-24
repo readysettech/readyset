@@ -1,4 +1,3 @@
-use std::fmt;
 use std::ops::{Range, RangeFrom, RangeTo};
 use std::str::FromStr;
 
@@ -9,45 +8,14 @@ use nom::combinator::{map, map_res, opt};
 use nom::multi::separated_list0;
 use nom::sequence::{separated_pair, tuple};
 use nom_locate::LocatedSpan;
-use readyset_sql::Dialect;
-use serde::{Deserialize, Serialize};
-use test_strategy::Arbitrary;
+use readyset_sql::{ast::*, Dialect};
 
 use crate::common::{ws_sep_comma, ws_sep_equals};
-use crate::create::{charset_name, collation_name, CharsetName, CollationName};
+use crate::create::{charset_name, collation_name};
 use crate::dialect::DialectParser;
 use crate::literal::integer_literal;
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Literal, NomSqlResult};
-
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, Arbitrary)]
-pub enum CreateTableOption {
-    AutoIncrement(u64),
-    Engine(Option<String>),
-    Charset(CharsetName),
-    Collate(CollationName),
-    Comment(String),
-    DataDirectory(String),
-    /// Any currently uncotegorized option falls here
-    /// TODO: implement other options
-    Other,
-}
-
-impl fmt::Display for CreateTableOption {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            CreateTableOption::AutoIncrement(v) => write!(f, "AUTO_INCREMENT={}", v),
-            CreateTableOption::Engine(e) => {
-                write!(f, "ENGINE={}", e.as_deref().unwrap_or(""))
-            }
-            CreateTableOption::Charset(c) => write!(f, "DEFAULT CHARSET={}", c),
-            CreateTableOption::Collate(c) => write!(f, "COLLATE={}", c),
-            CreateTableOption::Comment(c) => write!(f, "COMMENT='{}'", c),
-            CreateTableOption::DataDirectory(d) => write!(f, "DATA DIRECTORY='{}'", d),
-            CreateTableOption::Other => Ok(()),
-        }
-    }
-}
+use crate::NomSqlResult;
 
 pub fn table_options(
     dialect: Dialect,

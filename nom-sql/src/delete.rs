@@ -1,39 +1,14 @@
-use std::{fmt, str};
-
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
 use nom::sequence::{delimited, tuple};
 use nom_locate::LocatedSpan;
-use readyset_sql::Dialect;
-use readyset_util::fmt::fmt_with;
-use serde::{Deserialize, Serialize};
-use test_strategy::Arbitrary;
+use readyset_sql::{ast::*, Dialect};
 
 use crate::common::statement_terminator;
 use crate::select::where_clause;
-use crate::table::{relation, Relation};
+use crate::table::relation;
 use crate::whitespace::whitespace1;
-use crate::{DialectDisplay, Expr, NomSqlResult};
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
-pub struct DeleteStatement {
-    pub table: Relation,
-    pub where_clause: Option<Expr>,
-}
-
-impl DialectDisplay for DeleteStatement {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
-        fmt_with(move |f| {
-            write!(f, "DELETE FROM {}", self.table.display(dialect))?;
-
-            if let Some(ref where_clause) = self.where_clause {
-                write!(f, " WHERE {}", where_clause.display(dialect))?;
-            }
-
-            Ok(())
-        })
-    }
-}
+use crate::NomSqlResult;
 
 pub fn deletion(
     dialect: Dialect,
@@ -59,10 +34,9 @@ pub fn deletion(
 
 #[cfg(test)]
 mod tests {
+    use readyset_sql::DialectDisplay;
+
     use super::*;
-    use crate::column::Column;
-    use crate::table::Relation;
-    use crate::{BinaryOperator, Literal};
 
     #[test]
     fn simple_delete() {

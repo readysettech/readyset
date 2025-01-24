@@ -1,10 +1,9 @@
 use std::{cmp, iter};
 
 use chrono_tz::Tz;
-use nom_sql::create::CollationName;
 use nom_sql::{
-    BinaryOperator as SqlBinaryOperator, Column, Expr as AstExpr, FunctionExpr, InValue, Relation,
-    UnaryOperator,
+    BinaryOperator as SqlBinaryOperator, CollationName, Column, Expr as AstExpr, FunctionExpr,
+    InValue, Relation, UnaryOperator,
 };
 use readyset_data::dialect::SqlEngine;
 use readyset_data::upstream_system_props::get_system_timezone;

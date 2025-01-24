@@ -17,12 +17,11 @@ use mir::query::{MirBase, MirQuery};
 use mir::DfNodeIndex;
 pub use mir::{Column, NodeIndex};
 use nom_sql::analysis::visit::{walk_expr, Visitor};
-use nom_sql::analysis::ReferredColumns;
 use nom_sql::{
-    analysis, BinaryOperator, CaseWhenBranch, ColumnSpecification, CompoundSelectOperator,
-    CreateTableBody, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, GroupByClause,
-    InValue, LimitClause, Literal, NonReplicatedRelation, OrderBy, OrderClause, OrderType,
-    Relation, SelectStatement, SqlIdentifier, TableExprInner, TableKey, UnaryOperator,
+    BinaryOperator, CaseWhenBranch, ColumnSpecification, CompoundSelectOperator, CreateTableBody,
+    Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, GroupByClause, InValue, LimitClause,
+    Literal, NonReplicatedRelation, OrderBy, OrderClause, OrderType, Relation, SelectStatement,
+    SqlIdentifier, TableExprInner, TableKey, UnaryOperator,
 };
 use petgraph::visit::Reversed;
 use petgraph::Direction;
@@ -31,6 +30,7 @@ use readyset_errors::{
     internal, internal_err, invalid_query, invalid_query_err, invariant, invariant_eq, unsupported,
     unsupported_err, ReadySetError, ReadySetResult,
 };
+use readyset_sql::analysis::{self, ReferredColumns};
 use readyset_sql::DialectDisplay;
 use readyset_sql_passes::{is_correlated, outermost_table_exprs};
 use readyset_util::redacted::Sensitive;

@@ -8,11 +8,11 @@ use std::iter;
 use std::ops::{Deref, DerefMut, Index, IndexMut};
 
 use itertools::Itertools;
-use nom_sql::analysis::ReferredColumns;
 use petgraph::stable_graph::StableGraph;
 use petgraph::visit::{Bfs, EdgeRef, Reversed};
 use petgraph::{Directed, Direction};
 use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
+use readyset_sql::analysis::ReferredColumns;
 use serde::{Deserialize, Serialize};
 
 use crate::node::node_inner::ProjectExpr;

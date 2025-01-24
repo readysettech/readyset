@@ -1,21 +1,14 @@
-use std::fmt::Display;
-use std::{fmt, str};
-
-use itertools::Itertools;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::{map, opt};
 use nom::multi::separated_list1;
 use nom::sequence::preceded;
 use nom_locate::LocatedSpan;
-use readyset_sql::Dialect;
-use readyset_util::fmt::fmt_with;
-use serde::{Deserialize, Serialize};
-use test_strategy::Arbitrary;
+use readyset_sql::{ast::*, Dialect};
 
 use crate::common::{statement_terminator, ws_sep_comma};
-use crate::table::{relation, table_list, Relation};
+use crate::table::{relation, table_list};
 use crate::whitespace::whitespace1;
-use crate::{DialectDisplay, NomSqlResult};
+use crate::NomSqlResult;
 
 fn if_exists(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], bool> {
     map(
@@ -35,33 +28,6 @@ fn restrict_cascade(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], (bool, bool)> 
     Ok((i, (restrict.is_some(), cascade.is_some())))
 }
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
-pub struct DropTableStatement {
-    pub tables: Vec<Relation>,
-    pub if_exists: bool,
-}
-
-impl DialectDisplay for DropTableStatement {
-    fn display(&self, dialect: Dialect) -> impl Display + '_ {
-        fmt_with(move |f| {
-            write!(f, "DROP TABLE ")?;
-
-            if self.if_exists {
-                write!(f, "IF EXISTS ")?;
-            }
-
-            write!(
-                f,
-                "{}",
-                self.tables
-                    .iter()
-                    .map(|t| dialect.quote_identifier(&t.name))
-                    .join(", ")
-            )
-        })
-    }
-}
-
 pub fn drop_table(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], DropTableStatement> {
@@ -76,15 +42,6 @@ pub fn drop_table(
         let (i, _) = statement_terminator(i)?;
 
         Ok((i, DropTableStatement { tables, if_exists }))
-    }
-}
-
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
-pub struct DropAllProxiedQueriesStatement;
-
-impl DialectDisplay for DropAllProxiedQueriesStatement {
-    fn display(&self, _dialect: Dialect) -> impl fmt::Display + '_ {
-        fmt_with(move |f| write!(f, "DROP ALL PROXIED QUERIES"))
     }
 }
 
@@ -103,23 +60,6 @@ pub fn drop_all_proxied_queries(
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
-pub struct DropCacheStatement {
-    pub name: Relation,
-}
-
-impl DialectDisplay for DropCacheStatement {
-    fn display(&self, dialect: Dialect) -> impl Display + '_ {
-        fmt_with(move |f| write!(f, "DROP CACHE {}", self.name.display(dialect)))
-    }
-}
-
-impl DropCacheStatement {
-    pub fn display_unquoted(&self) -> impl Display + Copy + '_ {
-        fmt_with(move |f| write!(f, "DROP CACHE {}", self.name.display_unquoted()))
-    }
-}
-
 pub fn drop_cached_query(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], DropCacheStatement> {
@@ -131,31 +71,6 @@ pub fn drop_cached_query(
         let (i, name) = relation(dialect)(i)?;
         let (i, _) = statement_terminator(i)?;
         Ok((i, DropCacheStatement { name }))
-    }
-}
-
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
-pub struct DropViewStatement {
-    pub views: Vec<Relation>,
-    pub if_exists: bool,
-}
-
-impl DialectDisplay for DropViewStatement {
-    fn display(&self, dialect: Dialect) -> impl Display + '_ {
-        fmt_with(move |f| {
-            write!(f, "DROP VIEW ")?;
-            if self.if_exists {
-                write!(f, "IF EXISTS ")?;
-            }
-            write!(
-                f,
-                "{}",
-                self.views
-                    .iter()
-                    .map(|view| view.display(dialect))
-                    .join(", ")
-            )
-        })
     }
 }
 
@@ -175,15 +90,6 @@ pub fn drop_view(
     }
 }
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
-pub struct DropAllCachesStatement {}
-
-impl Display for DropAllCachesStatement {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "DROP ALL CACHES")
-    }
-}
-
 pub fn drop_all_caches(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], DropAllCachesStatement> {
     let (i, _) = tag_no_case("drop")(i)?;
     let (i, _) = whitespace1(i)?;
@@ -195,8 +101,9 @@ pub fn drop_all_caches(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], DropAllCach
 
 #[cfg(test)]
 mod tests {
+    use readyset_sql::DialectDisplay;
+
     use super::*;
-    use crate::table::Relation;
 
     #[test]
     fn simple_drop_table() {

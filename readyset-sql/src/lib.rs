@@ -1,3 +1,5 @@
+pub mod analysis;
+pub mod ast;
 pub mod dialect;
 pub mod dialect_display;
 

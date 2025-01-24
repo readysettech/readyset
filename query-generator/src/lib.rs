@@ -80,7 +80,6 @@ use data_generator::{
 use derive_more::{Deref, Display, From, Into};
 use itertools::{Either, Itertools};
 use lazy_static::lazy_static;
-use nom_sql::analysis::{contains_aggregate, ReferredColumns};
 use nom_sql::{
     BinaryOperator, Column, ColumnConstraint, ColumnSpecification, CommonTableExpr,
     CreateTableBody, CreateTableStatement, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr,
@@ -94,6 +93,7 @@ use proptest::sample::Select;
 use proptest::strategy::{BoxedStrategy, Strategy};
 use rand::thread_rng;
 use readyset_data::{Collation, DfType, DfValue, Dialect};
+use readyset_sql::analysis::{contains_aggregate, ReferredColumns};
 use readyset_sql::Dialect as ParseDialect;
 use readyset_sql_passes::outermost_table_exprs;
 use readyset_util::intervals::{BoundPair, IterBoundPair};

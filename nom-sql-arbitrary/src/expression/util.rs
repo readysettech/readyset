@@ -1,8 +1,8 @@
 //! Utility macros to be used for common [`Expr`] generation.
 
-use nom_sql::{CaseWhenBranch, Expr, FunctionExpr, Literal, SqlType};
 use proptest::prop_oneof;
 use proptest::strategy::{Just, Strategy};
+use readyset_sql::ast::*;
 
 /// Generates an [`Expr::Cast`] with the form of:
 /// ```sql

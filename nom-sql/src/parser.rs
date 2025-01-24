@@ -1,222 +1,37 @@
-use std::{fmt, str};
+use std::str;
 
 use nom::branch::alt;
 use nom::combinator::{map, opt};
 use nom_locate::LocatedSpan;
-use readyset_sql::Dialect;
-use readyset_util::fmt::fmt_with;
+use readyset_sql::{ast::*, Dialect};
 use readyset_util::redacted::Sensitive;
-use serde::{Deserialize, Serialize};
-use test_strategy::Arbitrary;
 
-use crate::alter::{
-    alter_readyset_statement, alter_table_statement, AlterReadysetStatement, AlterTableStatement,
-};
-use crate::comment::{comment, CommentStatement};
+use crate::alter::{alter_readyset_statement, alter_table_statement};
+use crate::comment::comment;
 use crate::common::statement_terminator;
-use crate::compound_select::{simple_or_compound_selection, CompoundSelectStatement};
+use crate::compound_select::simple_or_compound_selection;
 use crate::create::{
     create_cached_query, create_database, create_table, key_specification, view_creation,
-    CreateCacheStatement, CreateDatabaseStatement, CreateTableStatement, CreateViewStatement,
 };
-use crate::deallocate::{deallocate, DeallocateStatement};
-use crate::delete::{deletion, DeleteStatement};
+use crate::deallocate::deallocate;
+use crate::delete::deletion;
 use crate::drop::{
     drop_all_caches, drop_all_proxied_queries, drop_cached_query, drop_table, drop_view,
-    DropAllProxiedQueriesStatement, DropCacheStatement, DropTableStatement, DropViewStatement,
 };
-use crate::explain::{explain_statement, ExplainStatement};
+use crate::explain::explain_statement;
 use crate::expression::expression;
-use crate::insert::{insertion, InsertStatement};
-use crate::rename::{rename_table, RenameTableStatement};
-use crate::select::{selection, SelectStatement};
-use crate::set::{set, SetStatement};
-use crate::show::{show, ShowStatement};
+use crate::insert::insertion;
+use crate::rename::rename_table;
+use crate::select::selection;
+use crate::set::set;
+use crate::show::show;
 use crate::sql_type::type_identifier;
-use crate::transaction::{
-    commit, rollback, start_transaction, CommitStatement, RollbackStatement,
-    StartTransactionStatement,
-};
-use crate::truncate::{truncate, TruncateStatement};
-use crate::update::{updating, UpdateStatement};
-use crate::use_statement::{use_statement, UseStatement};
+use crate::transaction::{commit, rollback, start_transaction};
+use crate::truncate::truncate;
+use crate::update::updating;
+use crate::use_statement::use_statement;
 use crate::whitespace::whitespace0;
-use crate::{
-    DialectDisplay, DropAllCachesStatement, Expr, NomSqlResult, SelectSpecification, SqlType,
-    TableKey,
-};
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
-#[allow(clippy::large_enum_variant)]
-pub enum SqlQuery {
-    CreateDatabase(CreateDatabaseStatement),
-    CreateTable(CreateTableStatement),
-    CreateView(CreateViewStatement),
-    CreateCache(CreateCacheStatement),
-    DropCache(DropCacheStatement),
-    DropAllCaches(DropAllCachesStatement),
-    DropAllProxiedQueries(DropAllProxiedQueriesStatement),
-    AlterTable(AlterTableStatement),
-    AlterReadySet(AlterReadysetStatement),
-    Insert(InsertStatement),
-    CompoundSelect(CompoundSelectStatement),
-    Select(SelectStatement),
-    Delete(DeleteStatement),
-    DropTable(DropTableStatement),
-    DropView(DropViewStatement),
-    Update(UpdateStatement),
-    Set(SetStatement),
-    StartTransaction(StartTransactionStatement),
-    Commit(CommitStatement),
-    Rollback(RollbackStatement),
-    RenameTable(RenameTableStatement),
-    Use(UseStatement),
-    Show(ShowStatement),
-    Explain(ExplainStatement),
-    Comment(CommentStatement),
-    Deallocate(DeallocateStatement),
-    Truncate(TruncateStatement),
-}
-
-impl DialectDisplay for SqlQuery {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
-        fmt_with(move |f| match self {
-            Self::Select(select) => write!(f, "{}", select.display(dialect)),
-            Self::Insert(insert) => write!(f, "{}", insert.display(dialect)),
-            Self::CreateTable(create) => write!(f, "{}", create.display(dialect)),
-            Self::CreateView(create) => write!(f, "{}", create.display(dialect)),
-            Self::CreateCache(create) => write!(f, "{}", create.display(dialect)),
-            Self::DropCache(drop) => write!(f, "{}", drop.display(dialect)),
-            Self::DropAllCaches(drop) => write!(f, "{}", drop),
-            Self::Delete(delete) => write!(f, "{}", delete.display(dialect)),
-            Self::DropTable(drop) => write!(f, "{}", drop.display(dialect)),
-            Self::DropView(drop) => write!(f, "{}", drop.display(dialect)),
-            Self::Update(update) => write!(f, "{}", update.display(dialect)),
-            Self::Set(set) => write!(f, "{}", set.display(dialect)),
-            Self::AlterTable(alter) => write!(f, "{}", alter.display(dialect)),
-            Self::AlterReadySet(alter) => write!(f, "{}", alter.display(dialect)),
-            Self::CompoundSelect(compound) => write!(f, "{}", compound.display(dialect)),
-            Self::StartTransaction(tx) => write!(f, "{}", tx),
-            Self::Commit(commit) => write!(f, "{}", commit),
-            Self::Rollback(rollback) => write!(f, "{}", rollback),
-            Self::RenameTable(rename) => write!(f, "{}", rename.display(dialect)),
-            Self::Use(use_db) => write!(f, "{}", use_db),
-            Self::Show(show) => write!(f, "{}", show.display(dialect)),
-            Self::Explain(explain) => write!(f, "{}", explain.display(dialect)),
-            Self::Comment(c) => write!(f, "{}", c.display(dialect)),
-            Self::DropAllProxiedQueries(drop) => write!(f, "{}", drop.display(dialect)),
-            Self::Deallocate(dealloc) => write!(f, "{}", dealloc.display(dialect)),
-            Self::Truncate(truncate) => write!(f, "{}", truncate.display(dialect)),
-            Self::CreateDatabase(create) => write!(f, "{}", create.display(dialect)),
-        })
-    }
-}
-
-impl str::FromStr for SqlQuery {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        parse_query(Dialect::MySQL, s)
-    }
-}
-
-impl From<SelectSpecification> for SqlQuery {
-    fn from(s: SelectSpecification) -> Self {
-        match s {
-            SelectSpecification::Simple(s) => SqlQuery::Select(s),
-            SelectSpecification::Compound(c) => SqlQuery::CompoundSelect(c),
-        }
-    }
-}
-
-impl SqlQuery {
-    /// Returns the type of the query, e.g. "CREATE TABLE" or "SELECT"
-    pub fn query_type(&self) -> &'static str {
-        match self {
-            Self::Select(_) => "SELECT",
-            Self::Insert(_) => "INSERT",
-            Self::CreateDatabase(cd) => {
-                if cd.is_schema {
-                    "CREATE SCHEMA"
-                } else {
-                    "CREATE DATABASE"
-                }
-            }
-            Self::CreateTable(_) => "CREATE TABLE",
-            Self::CreateView(_) => "CREATE VIEW",
-            Self::CreateCache(_) => "CREATE CACHE",
-            Self::DropCache(_) => "DROP CACHE",
-            Self::DropAllCaches(_) => "DROP ALL CACHES",
-            Self::DropAllProxiedQueries(_) => "DROP ALL PROXIED QUERIES",
-            Self::Delete(_) => "DELETE",
-            Self::DropTable(_) => "DROP TABLE",
-            Self::DropView(_) => "DROP VIEW",
-            Self::Update(_) => "UPDATE",
-            Self::Set(_) => "SET",
-            Self::AlterTable(_) => "ALTER TABLE",
-            Self::AlterReadySet(_) => "ALTER READYSET",
-            Self::CompoundSelect(_) => "SELECT",
-            Self::StartTransaction(_) => "START TRANSACTION",
-            Self::Commit(_) => "COMMIT",
-            Self::Rollback(_) => "ROLLBACK",
-            Self::RenameTable(_) => "RENAME",
-            Self::Use(_) => "USE",
-            Self::Show(_) => "SHOW",
-            Self::Explain(_) => "EXPLAIN",
-            Self::Comment(_) => "COMMENT",
-            Self::Deallocate(_) => "DEALLOCATE",
-            Self::Truncate(_) => "TRUNCATE",
-        }
-    }
-
-    /// Returns whether the provided SqlQuery is a SELECT or not.
-    pub fn is_select(&self) -> bool {
-        matches!(self, Self::Select(_))
-    }
-
-    /// Returns true if this is a query for a ReadySet extension and not regular SQL.
-    pub fn is_readyset_extension(&self) -> bool {
-        match self {
-            SqlQuery::Explain(_)
-            | SqlQuery::CreateCache(_)
-            | SqlQuery::DropCache(_)
-            | SqlQuery::DropAllCaches(_)
-            | SqlQuery::AlterReadySet(_)
-            | SqlQuery::DropAllProxiedQueries(_) => true,
-            SqlQuery::Show(show_stmt) => match show_stmt {
-                ShowStatement::Events | ShowStatement::Tables(_) => false,
-                ShowStatement::CachedQueries(_)
-                | ShowStatement::ProxiedQueries(_)
-                | ShowStatement::ReadySetStatus
-                | ShowStatement::ReadySetStatusAdapter
-                | ShowStatement::ReadySetMigrationStatus(_)
-                | ShowStatement::ReadySetVersion
-                | ShowStatement::ReadySetTables(..)
-                | ShowStatement::Connections => true,
-            },
-            SqlQuery::CreateDatabase(_)
-            | SqlQuery::CreateTable(_)
-            | SqlQuery::CreateView(_)
-            | SqlQuery::AlterTable(_)
-            | SqlQuery::Insert(_)
-            | SqlQuery::CompoundSelect(_)
-            | SqlQuery::Select(_)
-            | SqlQuery::Deallocate(_)
-            | SqlQuery::Delete(_)
-            | SqlQuery::DropTable(_)
-            | SqlQuery::DropView(_)
-            | SqlQuery::Update(_)
-            | SqlQuery::Set(_)
-            | SqlQuery::StartTransaction(_)
-            | SqlQuery::Commit(_)
-            | SqlQuery::Rollback(_)
-            | SqlQuery::RenameTable(_)
-            | SqlQuery::Use(_)
-            | SqlQuery::Truncate(_)
-            | SqlQuery::Comment(_) => false,
-        }
-    }
-}
+use crate::NomSqlResult;
 
 pub fn sql_query(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlQuery> {
     move |i| {
@@ -338,6 +153,8 @@ export_parser!(
 
 #[cfg(test)]
 mod tests {
+    use readyset_sql::DialectDisplay;
+
     use super::*;
 
     #[test]
@@ -351,9 +168,6 @@ mod tests {
         use std::hash::{Hash, Hasher};
 
         use super::*;
-        use crate::index_hint::IndexHint;
-        use crate::table::Relation;
-        use crate::SqlIdentifier;
 
         #[test]
         fn trim_query() {
@@ -605,8 +419,6 @@ mod tests {
         use std::hash::{Hash, Hasher};
 
         use super::*;
-        use crate::table::Relation;
-        use crate::{FieldDefinitionExpr, TableExpr, TableExprInner};
 
         #[test]
         fn trim_query() {

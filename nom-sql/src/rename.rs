@@ -1,36 +1,12 @@
-use std::fmt::Display;
-use std::str;
-
-use itertools::Itertools;
 use nom::bytes::complete::tag_no_case;
 use nom::multi::separated_list1;
 use nom_locate::LocatedSpan;
-use readyset_sql::Dialect;
-use readyset_util::fmt::fmt_with;
-use serde::{Deserialize, Serialize};
-use test_strategy::Arbitrary;
+use readyset_sql::{ast::*, Dialect};
 
 use crate::common::ws_sep_comma;
-use crate::table::{relation, Relation};
+use crate::table::relation;
 use crate::whitespace::whitespace1;
-use crate::{DialectDisplay, NomSqlResult};
-
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
-pub struct RenameTableStatement {
-    pub ops: Vec<RenameTableOperation>,
-}
-
-impl DialectDisplay for RenameTableStatement {
-    fn display(&self, dialect: Dialect) -> impl Display + '_ {
-        fmt_with(move |f| {
-            write!(
-                f,
-                "RENAME TABLE {}",
-                self.ops.iter().map(|op| op.display(dialect)).join(", ")
-            )
-        })
-    }
-}
+use crate::NomSqlResult;
 
 pub fn rename_table(
     dialect: Dialect,
@@ -42,25 +18,6 @@ pub fn rename_table(
         let (i, _) = whitespace1(i)?;
         let (i, ops) = separated_list1(ws_sep_comma, rename_table_operation(dialect))(i)?;
         Ok((i, RenameTableStatement { ops }))
-    }
-}
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
-pub struct RenameTableOperation {
-    pub from: Relation,
-    pub to: Relation,
-}
-
-impl DialectDisplay for RenameTableOperation {
-    fn display(&self, dialect: Dialect) -> impl Display + '_ {
-        fmt_with(move |f| {
-            write!(
-                f,
-                "{} TO {}",
-                self.from.display(dialect),
-                self.to.display(dialect)
-            )
-        })
     }
 }
 
@@ -79,8 +36,9 @@ fn rename_table_operation(
 
 #[cfg(test)]
 mod tests {
+    use readyset_sql::DialectDisplay;
+
     use super::*;
-    use crate::table::Relation;
 
     mod mysql {
         use super::*;

@@ -8,7 +8,6 @@ use std::{iter, mem};
 
 use common::{DfValue, IndexType};
 use nom_sql::analysis::visit_mut::{walk_expr, VisitorMut};
-use nom_sql::analysis::ReferredColumns;
 use nom_sql::{
     BinaryOperator, Column, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, InValue,
     ItemPlaceholder, JoinConstraint, JoinOperator, JoinRightSide, LimitClause, Literal, OrderBy,
@@ -19,6 +18,7 @@ use readyset_errors::{
     internal, invalid_query, invalid_query_err, invariant, invariant_eq, no_table_for_col,
     unsupported, unsupported_err, ReadySetResult,
 };
+use readyset_sql::analysis::ReferredColumns;
 use readyset_sql::DialectDisplay;
 use readyset_sql_passes::{is_aggregate, is_correlated, is_predicate, map_aggregates, LogicalOp};
 use serde::{Deserialize, Serialize};
@@ -1028,7 +1028,7 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
 
         let (on, extra_preds) = match jc.constraint {
             JoinConstraint::On(cond) => {
-                use nom_sql::analysis::ReferredTables;
+                use readyset_sql::analysis::ReferredTables;
 
                 // find all distinct tables mentioned in the condition
                 // conditions for now.

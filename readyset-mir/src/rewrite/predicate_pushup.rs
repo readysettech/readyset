@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
-use nom_sql::analysis::{ReferredColumns, ReferredColumnsMut};
 use nom_sql::{Expr, SqlIdentifier};
 use petgraph::Direction;
 use readyset_errors::{invariant_eq, unsupported_err, ReadySetResult};
+use readyset_sql::analysis::{ReferredColumns, ReferredColumnsMut};
 use tracing::trace;
 
 use crate::node::MirNodeInner;

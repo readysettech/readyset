@@ -17,7 +17,7 @@ use anyhow::Result;
 use clap::{Parser, ValueEnum};
 use database_utils::{DatabaseConnection, DatabaseStatement, QueryableConnection};
 use metrics::Unit;
-use nom_sql::SqlQuery;
+use nom_sql::{parse_query, SqlQuery};
 use rand::distributions::Uniform;
 use rand_distr::weighted_alias::WeightedAliasIndex;
 use rand_distr::Distribution;
@@ -559,7 +559,12 @@ impl MultithreadBenchmark for WorkloadEmulator {
             .query_set
             .queries
             .iter()
-            .map(|query| matches!(query.spec.parse::<SqlQuery>(), Ok(SqlQuery::Select(_))))
+            .map(|query| {
+                matches!(
+                    parse_query(readyset_sql::Dialect::MySQL, &query.spec),
+                    Ok(SqlQuery::Select(_))
+                )
+            })
             .collect();
 
         loop {

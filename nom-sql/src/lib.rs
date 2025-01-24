@@ -8,56 +8,11 @@ use nom::error::{ErrorKind, FromExternalError, ParseError};
 use nom::{AsBytes, Err, HexDisplay, IResult};
 use nom_locate::LocatedSpan;
 
-pub use self::alter::{
-    AlterColumnOperation, AlterReadysetStatement, AlterTableDefinition, AlterTableStatement,
-    ReplicaIdentity, ResnapshotTableStatement,
-};
-pub use self::column::{Column, ColumnConstraint, ColumnSpecification};
-pub use self::comment::CommentStatement;
-pub use self::common::{FieldDefinitionExpr, FieldReference, IndexType, TableKey, TimestampField};
-pub use self::compound_select::{CompoundSelectOperator, CompoundSelectStatement};
-pub use self::create::{
-    CacheInner, CreateCacheStatement, CreateTableBody, CreateTableStatement, CreateViewStatement,
-    SelectSpecification,
-};
-pub use self::create_table_options::CreateTableOption;
-pub use self::deallocate::{DeallocateStatement, StatementIdentifier};
-pub use self::delete::DeleteStatement;
-pub use self::drop::{
-    DropAllCachesStatement, DropAllProxiedQueriesStatement, DropCacheStatement, DropTableStatement,
-    DropViewStatement,
-};
-pub use self::explain::ExplainStatement;
-pub use self::expression::{
-    BinaryOperator, CaseWhenBranch, Expr, FunctionExpr, InValue, UnaryOperator,
-};
-pub use self::insert::InsertStatement;
-pub use self::join::{JoinConstraint, JoinOperator, JoinRightSide};
 pub use self::literal::{
-    embedded_literal, literal, raw_string_literal, utf8_string_literal, Double, Float,
-    ItemPlaceholder, Literal, QuotingStyle,
+    embedded_literal, literal, raw_string_literal, utf8_string_literal, QuotingStyle,
 };
-pub use self::order::{OrderBy, OrderClause, OrderType};
 pub use self::parser::*;
-pub use self::select::{
-    CommonTableExpr, GroupByClause, JoinClause, LimitClause, LimitValue, SelectStatement,
-};
-pub use self::set::{
-    PostgresParameterScope, PostgresParameterValue, PostgresParameterValueInner, SetNames,
-    SetPostgresParameter, SetPostgresParameterValue, SetStatement, SetVariables, Variable,
-    VariableScope,
-};
-pub use self::show::ShowStatement;
-pub use self::sql_identifier::SqlIdentifier;
-pub use self::sql_type::{EnumVariants, SqlType, SqlTypeArbitraryOptions};
-pub use self::table::{
-    replicator_table_list, NonReplicatedRelation, NotReplicatedReason, Relation, TableExpr,
-    TableExprInner,
-};
-pub use self::transaction::StartTransactionStatement;
-pub use self::truncate::TruncateStatement;
-pub use self::update::UpdateStatement;
-pub use self::use_statement::UseStatement;
+pub use self::table::replicator_table_list;
 
 pub mod parser;
 
@@ -88,7 +43,6 @@ mod rename;
 mod select;
 mod set;
 mod show;
-mod sql_identifier;
 mod sql_type;
 mod table;
 mod transaction;
@@ -97,10 +51,10 @@ mod update;
 mod use_statement;
 pub mod whitespace;
 
-// TODO(mvzink): Delete after finished moving AST
-pub(crate) use readyset_sql::DialectDisplay;
-
 pub type NomSqlResult<I, O> = IResult<LocatedSpan<I>, O, NomSqlError<I>>;
+
+// TODO(mvzink): Remove after switching other crates to readyset-sql
+pub use readyset_sql::ast::*;
 
 #[derive(PartialEq, Eq)]
 pub struct NomSqlError<I: AsBytes> {
