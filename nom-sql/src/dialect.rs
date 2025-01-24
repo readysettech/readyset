@@ -7,13 +7,12 @@ use nom::error::ErrorKind;
 use nom::sequence::{delimited, preceded};
 use nom::{InputLength, InputTake};
 use nom_locate::LocatedSpan;
-use readyset_sql::Dialect;
+use readyset_sql::{ast::*, Dialect};
 
 use crate::keywords::{sql_keyword, sql_keyword_or_builtin_function, POSTGRES_NOT_RESERVED};
 use crate::literal::{raw_string_literal, raw_string_single_quoted_unescaped, QuotingStyle};
-use crate::select::{LimitClause, LimitValue};
 use crate::whitespace::whitespace0;
-use crate::{literal, Literal, NomSqlError, NomSqlResult, SqlIdentifier};
+use crate::{literal, NomSqlError, NomSqlResult};
 
 macro_rules! failed {
     ($input:expr) => {

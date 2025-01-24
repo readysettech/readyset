@@ -5082,11 +5082,20 @@ dependencies = [
 name = "readyset-sql"
 version = "0.1.0"
 dependencies = [
+ "bincode",
+ "bit-vec",
  "clap",
+ "concrete-iter",
+ "derive_more",
+ "eui48",
  "itertools 0.13.0",
+ "proptest",
  "readyset-util",
+ "rust_decimal",
  "serde",
+ "test-strategy",
  "thiserror",
+ "triomphe",
 ]
 
 [[package]]

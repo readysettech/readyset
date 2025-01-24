@@ -1,48 +1,13 @@
-use std::{fmt, str};
-
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
 use nom::sequence::tuple;
 use nom_locate::LocatedSpan;
-use readyset_sql::Dialect;
-use readyset_util::fmt::fmt_with;
-use serde::{Deserialize, Serialize};
-use test_strategy::Arbitrary;
+use readyset_sql::{ast::*, Dialect};
 
 use crate::dialect::DialectParser;
 use crate::whitespace::whitespace1;
 use crate::NomSqlResult;
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
-pub struct DeallocateStatement {
-    pub identifier: StatementIdentifier,
-}
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
-pub enum StatementIdentifier {
-    SingleStatement(String),
-    AllStatements,
-}
-
-impl DeallocateStatement {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
-        fmt_with(move |f| {
-            write!(f, "DEALLOCATE ")?;
-
-            // PREPARE is required for MySQL, but optional in PG (although
-            // hardly used, so ignore it by convention)
-            if dialect == Dialect::MySQL {
-                write!(f, "PREPARE ")?;
-            }
-
-            match &self.identifier {
-                StatementIdentifier::AllStatements => write!(f, "ALL"),
-                StatementIdentifier::SingleStatement(id) => write!(f, "{}", id),
-            }
-        })
-    }
-}
 
 pub fn deallocate(
     dialect: Dialect,

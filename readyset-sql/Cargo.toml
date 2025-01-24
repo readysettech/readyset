@@ -5,8 +5,19 @@ edition = "2021"
 publish = false
 
 [dependencies]
+bit-vec = { workspace = true, features = ["serde"] }
 clap = { workspace = true, features = ["derive"] }
+concrete-iter = { path = "../concrete-iter" }
+derive_more = { workspace = true }
+eui48 = { workspace = true }
 itertools = { workspace = true }
+proptest = { workspace = true }
 readyset-util = { path = "../readyset-util" }
+rust_decimal = { workspace = true, features = ["db-tokio-postgres"] }
 serde = { workspace = true }
+test-strategy = { workspace = true }
 thiserror = { workspace = true }
+triomphe = { workspace = true }
+
+[dev-dependencies]
+bincode = { workspace = true }

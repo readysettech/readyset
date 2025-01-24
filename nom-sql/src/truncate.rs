@@ -1,4 +1,3 @@
-use itertools::Itertools;
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::opt;
@@ -6,60 +5,12 @@ use nom::multi::separated_list1;
 use nom::sequence::tuple;
 use nom::Parser;
 use nom_locate::LocatedSpan;
-use readyset_sql::Dialect;
-use readyset_util::fmt::fmt_with;
-use serde::{Deserialize, Serialize};
-use test_strategy::Arbitrary;
+use readyset_sql::{ast::*, Dialect};
 
 use crate::common::ws_sep_comma;
 use crate::table::relation;
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{DialectDisplay, NomSqlResult, Relation};
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
-
-pub struct TruncateTable {
-    pub relation: Relation,
-    pub only: bool,
-}
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
-pub struct TruncateStatement {
-    pub tables: Vec<TruncateTable>,
-    pub restart_identity: bool,
-    pub cascade: bool,
-}
-
-impl DialectDisplay for TruncateStatement {
-    fn display(&self, dialect: Dialect) -> impl std::fmt::Display + '_ {
-        fmt_with(move |f| {
-            write!(f, "TRUNCATE ")?;
-
-            write!(
-                f,
-                "{}",
-                self.tables
-                    .iter()
-                    .map(|t| format!(
-                        "{}{}",
-                        if t.only { "ONLY " } else { "" },
-                        t.relation.display(dialect)
-                    ))
-                    .join(", ")
-            )?;
-
-            if self.restart_identity {
-                write!(f, " RESTART IDENTITY")?;
-            }
-
-            if self.cascade {
-                write!(f, " CASCADE")?;
-            }
-
-            Ok(())
-        })
-    }
-}
+use crate::NomSqlResult;
 
 /// Parse a TRUNCATE statement.
 ///
@@ -161,6 +112,8 @@ pub fn truncate(
 #[cfg(test)]
 mod tests {
     use std::vec;
+
+    use readyset_sql::DialectDisplay;
 
     use super::*;
 

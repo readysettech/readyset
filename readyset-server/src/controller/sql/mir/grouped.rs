@@ -4,11 +4,10 @@ use dataflow::{PostLookupAggregate, PostLookupAggregateFunction, PostLookupAggre
 use mir::node::node_inner::MirNodeInner;
 use mir::node::ProjectExpr;
 use mir::{Column, NodeIndex};
-use nom_sql::analysis::ReferredColumns;
 use nom_sql::FunctionExpr::*;
 use nom_sql::{self, Expr, FieldDefinitionExpr, Relation, SqlIdentifier};
 use readyset_errors::{unsupported, ReadySetError, ReadySetResult};
-use readyset_sql::DialectDisplay;
+use readyset_sql::{analysis::ReferredColumns, DialectDisplay};
 use readyset_sql_passes::is_aggregate;
 
 use crate::controller::sql::mir::join::make_joins_for_aggregates;

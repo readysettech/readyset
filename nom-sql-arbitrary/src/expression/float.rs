@@ -3,12 +3,11 @@
 //TODO(fran):
 //  - Generate different types of float (double, numeric)
 
-use nom_sql::{BinaryOperator, Expr, Float, Literal, SqlType};
 use proptest::prop_oneof;
 use proptest::strategy::{Just, Strategy};
-use readyset_sql::Dialect;
+use readyset_sql::{ast::*, Dialect};
 
-use crate::expression::util::{case_when, cast};
+use crate::expression::util::{case_when, cast, coalesce, if_null};
 use crate::expression::ExprStrategy;
 
 /// Produces a [`Strategy`] that generates a non-base (neither literal nor column) float [`Expr`],
@@ -65,13 +64,7 @@ fn op(es: ExprStrategy) -> impl Strategy<Value = Expr> {
 
 /// Helper module to group all the [`Strategy`]s that generate float [`Expr::Call`].
 mod call {
-    use nom_sql::{Expr, FunctionExpr};
-    use proptest::prelude::Strategy;
-    use proptest::prop_oneof;
-    use readyset_sql::Dialect;
-
-    use crate::expression::util::{coalesce, if_null};
-    use crate::expression::ExprStrategy;
+    use super::*;
 
     /// Produces a [`Strategy`] that generates a float [`Expr::Call`].
     pub(super) fn call(es: ExprStrategy, dialect: &Dialect) -> impl Strategy<Value = Expr> {

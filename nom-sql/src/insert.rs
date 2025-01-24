@@ -1,60 +1,16 @@
-use std::{fmt, str};
-
-use itertools::Itertools;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::opt;
 use nom::multi::separated_list1;
 use nom::sequence::{delimited, preceded, terminated, tuple};
 use nom_locate::LocatedSpan;
-use readyset_sql::Dialect;
-use readyset_util::fmt::fmt_with;
-use serde::{Deserialize, Serialize};
-use test_strategy::Arbitrary;
+use readyset_sql::{ast::*, Dialect};
 
-use crate::column::Column;
 use crate::common::{
     assignment_expr_list, field_list, statement_terminator, value_list, ws_sep_comma,
 };
-use crate::table::{relation, Relation};
+use crate::table::relation;
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{DialectDisplay, Expr, NomSqlResult};
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
-pub struct InsertStatement {
-    pub table: Relation,
-    pub fields: Option<Vec<Column>>,
-    pub data: Vec<Vec<Expr>>,
-    pub ignore: bool,
-    pub on_duplicate: Option<Vec<(Column, Expr)>>,
-}
-
-impl DialectDisplay for InsertStatement {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
-        fmt_with(move |f| {
-            write!(f, "INSERT INTO {}", self.table.display(dialect))?;
-
-            if let Some(ref fields) = self.fields {
-                write!(
-                    f,
-                    " ({})",
-                    fields
-                        .iter()
-                        .map(|col| dialect.quote_identifier(&col.name))
-                        .join(", ")
-                )?;
-            }
-
-            write!(
-                f,
-                " VALUES {}",
-                self.data
-                    .iter()
-                    .map(|data| format!("({})", data.iter().map(|l| l.display(dialect)).join(", ")))
-                    .join(", ")
-            )
-        })
-    }
-}
+use crate::NomSqlResult;
 
 fn fields(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<Column>> {
     move |i| {
@@ -132,11 +88,9 @@ pub fn insertion(
 
 #[cfg(test)]
 mod tests {
+    use readyset_sql::DialectDisplay;
+
     use super::*;
-    use crate::column::Column;
-    use crate::literal::ItemPlaceholder;
-    use crate::table::Relation;
-    use crate::Literal;
 
     #[test]
     fn insert_with_parameters() {
@@ -160,10 +114,6 @@ mod tests {
 
     mod mysql {
         use super::*;
-        use crate::column::Column;
-        use crate::literal::ItemPlaceholder;
-        use crate::table::Relation;
-        use crate::{BinaryOperator, FunctionExpr};
 
         #[test]
         fn simple_insert() {
@@ -341,9 +291,6 @@ mod tests {
 
     mod postgres {
         use super::*;
-        use crate::column::Column;
-        use crate::table::Relation;
-        use crate::{BinaryOperator, FunctionExpr};
 
         #[test]
         fn simple_insert() {

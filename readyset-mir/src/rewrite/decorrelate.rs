@@ -1,9 +1,9 @@
 use std::iter;
 
 use itertools::{Either, Itertools};
-use nom_sql::analysis::ReferredColumns;
 use nom_sql::{BinaryOperator, Expr};
 use readyset_errors::{internal, invariant, unsupported, ReadySetResult};
+use readyset_sql::analysis::ReferredColumns;
 use tracing::trace;
 
 use crate::node::MirNodeInner;

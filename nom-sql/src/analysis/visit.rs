@@ -10,26 +10,7 @@
 
 #![warn(clippy::todo, clippy::unimplemented)]
 
-use crate::alter::AlterReadysetStatement;
-use crate::create::{CreateDatabaseOption, CreateDatabaseStatement};
-use crate::create_table_options::CreateTableOption;
-use crate::rename::{RenameTableOperation, RenameTableStatement};
-use crate::select::LimitClause;
-use crate::set::Variable;
-use crate::transaction::{CommitStatement, RollbackStatement, StartTransactionStatement};
-use crate::truncate::TruncateStatement;
-use crate::{
-    AlterColumnOperation, AlterTableDefinition, AlterTableStatement, CacheInner, CaseWhenBranch,
-    Column, ColumnConstraint, ColumnSpecification, CommentStatement, CommonTableExpr,
-    CompoundSelectStatement, CreateCacheStatement, CreateTableStatement, CreateViewStatement,
-    DeallocateStatement, DeleteStatement, DropAllCachesStatement, DropAllProxiedQueriesStatement,
-    DropCacheStatement, DropTableStatement, DropViewStatement, ExplainStatement, Expr,
-    FieldDefinitionExpr, FieldReference, FunctionExpr, GroupByClause, InValue, InsertStatement,
-    JoinClause, JoinConstraint, JoinRightSide, Literal, OrderBy, OrderClause, Relation,
-    SelectSpecification, SelectStatement, SetNames, SetPostgresParameter, SetStatement,
-    SetVariables, ShowStatement, SqlIdentifier, SqlQuery, SqlType, TableExpr, TableExprInner,
-    TableKey, UpdateStatement, UseStatement,
-};
+use readyset_sql::ast::*;
 
 /// Each method of the `Visitor` trait is a hook to be potentially overridden when recursively
 /// traversing SQL statements. The default implementation of each method recursively visits the
@@ -1264,11 +1245,10 @@ pub fn walk_comment_statement<'a, V: Visitor<'a>>(
 
 #[cfg(test)]
 mod tests {
-    use readyset_sql::Dialect;
+    use readyset_sql::{ast::*, Dialect};
 
     use super::*;
     use crate::select::selection;
-    use crate::CaseWhenBranch;
 
     #[derive(Default, Debug, PartialEq, Eq)]
     struct NodeCounter(usize);

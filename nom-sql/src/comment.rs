@@ -1,63 +1,14 @@
-use std::{fmt, str};
-
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::map_res;
 use nom::sequence::{delimited, terminated};
 use nom_locate::LocatedSpan;
-use readyset_sql::Dialect;
-use readyset_util::fmt::fmt_with;
-use serde::{Deserialize, Serialize};
-use test_strategy::Arbitrary;
+use readyset_sql::{ast::*, Dialect};
 
 use crate::common::statement_terminator;
 use crate::dialect::DialectParser;
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{literal, DialectDisplay, NomSqlResult, SqlIdentifier};
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
-pub enum CommentStatement {
-    Column {
-        column_name: SqlIdentifier,
-        table_name: SqlIdentifier,
-        comment: String,
-    },
-    Table {
-        table_name: SqlIdentifier,
-        comment: String,
-    },
-}
-
-impl DialectDisplay for CommentStatement {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
-        fmt_with(move |f| match self {
-            Self::Column {
-                column_name,
-                table_name,
-                comment,
-            } => {
-                write!(
-                    f,
-                    "COMMENT ON COLUMN {}.{} IS ",
-                    dialect.quote_identifier(&table_name),
-                    dialect.quote_identifier(&column_name),
-                )?;
-                literal::display_string_literal(f, comment)
-            }
-            Self::Table {
-                table_name,
-                comment,
-            } => {
-                write!(
-                    f,
-                    "COMMENT ON TABLE {} IS ",
-                    dialect.quote_identifier(&table_name),
-                )?;
-                literal::display_string_literal(f, comment)
-            }
-        })
-    }
-}
+use crate::NomSqlResult;
 
 pub fn comment(
     dialect: Dialect,
@@ -126,6 +77,8 @@ fn column_comment(
 
 #[cfg(test)]
 mod tests {
+    use readyset_sql::DialectDisplay;
+
     use super::*;
 
     #[test]

@@ -537,9 +537,9 @@ impl MySqlBinlogConnector {
                                     Err(_) => &mut Vec::new(),
                                 };
                                 options.push(nom_sql::CreateTableOption::Collate(
-                                    nom_sql::create::CollationName::Quoted(
-                                        nom_sql::SqlIdentifier::from(collation.collation()),
-                                    ),
+                                    nom_sql::CollationName::Quoted(nom_sql::SqlIdentifier::from(
+                                        collation.collation(),
+                                    )),
                                 ));
                             }
                             statement.propagate_default_charset(readyset_sql::Dialect::MySQL);

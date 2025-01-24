@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 
-use nom_sql::analysis::ReferredColumns;
 use nom_sql::Column;
+use readyset_sql::analysis::ReferredColumns;
 
 use crate::controller::sql::query_graph::{OutputColumn, QueryGraph, QueryGraphEdge};
 
@@ -153,7 +153,8 @@ mod tests {
     #[test]
     #[allow(clippy::eq_op)]
     fn it_compares_signatures() {
-        use nom_sql::parser::{parse_query, SqlQuery};
+        use nom_sql::parser::parse_query;
+        use readyset_sql::ast::SqlQuery;
 
         use crate::controller::sql::query_graph::to_query_graph;
 

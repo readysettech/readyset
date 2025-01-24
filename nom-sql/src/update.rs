@@ -1,58 +1,14 @@
-use std::{fmt, str};
-
-use itertools::Itertools;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
 use nom::sequence::tuple;
 use nom_locate::LocatedSpan;
-use readyset_sql::Dialect;
-use readyset_util::fmt::fmt_with;
-use serde::{Deserialize, Serialize};
-use test_strategy::Arbitrary;
+use readyset_sql::{ast::*, Dialect};
 
-use crate::column::Column;
 use crate::common::{assignment_expr_list, statement_terminator};
 use crate::select::where_clause;
-use crate::table::{relation, Relation};
+use crate::table::relation;
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{DialectDisplay, Expr, NomSqlResult};
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
-pub struct UpdateStatement {
-    pub table: Relation,
-    pub fields: Vec<(Column, Expr)>,
-    pub where_clause: Option<Expr>,
-}
-
-impl DialectDisplay for UpdateStatement {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
-        fmt_with(move |f| {
-            write!(f, "UPDATE {} ", self.table.display(dialect))?;
-
-            // TODO: Consider using `Vec1`.
-            assert!(!self.fields.is_empty());
-            write!(
-                f,
-                "SET {}",
-                self.fields
-                    .iter()
-                    .map(|(col, literal)| format!(
-                        "{} = {}",
-                        col.display(dialect),
-                        literal.display(dialect)
-                    ))
-                    .join(", ")
-            )?;
-
-            if let Some(ref where_clause) = self.where_clause {
-                write!(f, " WHERE ")?;
-                write!(f, "{}", where_clause.display(dialect))?;
-            }
-
-            Ok(())
-        })
-    }
-}
+use crate::NomSqlResult;
 
 pub fn updating(
     dialect: Dialect,
@@ -83,10 +39,9 @@ pub fn updating(
 
 #[cfg(test)]
 mod tests {
+    use readyset_sql::DialectDisplay;
+
     use super::*;
-    use crate::column::Column;
-    use crate::table::Relation;
-    use crate::{BinaryOperator, ItemPlaceholder, Literal};
 
     #[test]
     fn simple_update() {
@@ -161,9 +116,6 @@ mod tests {
 
     mod mysql {
         use super::*;
-        use crate::column::Column;
-        use crate::table::Relation;
-        use crate::{BinaryOperator, Double, FunctionExpr, ItemPlaceholder};
 
         #[test]
         fn updated_with_neg_float() {
@@ -256,9 +208,6 @@ mod tests {
 
     mod postgres {
         use super::*;
-        use crate::column::Column;
-        use crate::table::Relation;
-        use crate::{BinaryOperator, Double};
 
         #[test]
         fn updated_with_neg_float() {

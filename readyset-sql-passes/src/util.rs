@@ -2,11 +2,11 @@ use std::collections::{HashMap, HashSet};
 use std::iter;
 
 use itertools::Either;
-use nom_sql::analysis::is_aggregate;
 use nom_sql::{
     BinaryOperator, Column, CommonTableExpr, Expr, FieldDefinitionExpr, FunctionExpr, InValue,
     JoinClause, JoinRightSide, Relation, SelectStatement, SqlIdentifier, TableExpr, TableExprInner,
 };
+use readyset_sql::analysis::is_aggregate;
 use readyset_sql::DialectDisplay;
 
 pub(crate) fn join_clause_tables(join: &JoinClause) -> impl Iterator<Item = &TableExpr> {
