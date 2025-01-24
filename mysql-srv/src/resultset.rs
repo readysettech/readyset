@@ -3,10 +3,10 @@ use std::collections::HashMap;
 use std::io;
 use std::sync::Arc;
 
-use tokio::io::AsyncWrite;
+use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::myc::constants::{ColumnFlags, StatusFlags};
-use crate::packet::{PacketWriter, MAX_PACKET_CHUNK_SIZE};
+use crate::packet::{PacketConn, MAX_PACKET_CHUNK_SIZE};
 use crate::value::ToMySqlValue;
 use crate::{writers, Column, ErrorKind, StatementData};
 
@@ -14,11 +14,11 @@ pub(crate) const DEFAULT_ROW_CAPACITY: usize = 4096;
 pub(crate) const MAX_POOL_ROW_CAPACITY: usize = DEFAULT_ROW_CAPACITY * 4;
 
 /// Convenience type for responding to a client `USE <db>` command.
-pub struct InitWriter<'a, W: AsyncWrite + Unpin> {
-    pub(crate) writer: &'a mut PacketWriter<W>,
+pub struct InitWriter<'a, W: AsyncRead + AsyncWrite + Unpin> {
+    pub(crate) writer: &'a mut PacketConn<W>,
 }
 
-impl<'a, W: AsyncWrite + Unpin + 'a> InitWriter<'a, W> {
+impl<'a, W: AsyncRead + AsyncWrite + Unpin + 'a> InitWriter<'a, W> {
     /// Tell client that database context has been changed
     pub async fn ok(self) -> io::Result<()> {
         writers::write_ok_packet(self.writer, 0, 0, StatusFlags::empty()).await
@@ -42,12 +42,12 @@ impl<'a, W: AsyncWrite + Unpin + 'a> InitWriter<'a, W> {
 /// [`reply`](struct.StatementMetaWriter.html#method.reply) or
 /// [`error`](struct.StatementMetaWriter.html#method.error).
 #[must_use]
-pub struct StatementMetaWriter<'a, W: AsyncWrite + Unpin> {
-    pub(crate) writer: &'a mut PacketWriter<W>,
+pub struct StatementMetaWriter<'a, W: AsyncRead +AsyncWrite + Unpin> {
+    pub(crate) writer: &'a mut PacketConn<W>,
     pub(crate) stmts: &'a mut HashMap<u32, StatementData>,
 }
 
-impl<'a, W: AsyncWrite + Unpin + 'a> StatementMetaWriter<'a, W> {
+impl<'a, W: AsyncRead + AsyncWrite + Unpin + 'a> StatementMetaWriter<'a, W> {
     /// Reply to the client with the given meta-information.
     ///
     /// `id` is a statement identifier that the client should supply when it later wants to execute
@@ -112,15 +112,15 @@ enum Finalizer {
 /// program may panic if an I/O error occurs when sending the end-of-records marker to the client.
 /// To handle such errors, call `no_more_results` explicitly.
 #[must_use]
-pub struct QueryResultWriter<'a, W: AsyncWrite + Unpin> {
+pub struct QueryResultWriter<'a, W: AsyncRead + AsyncWrite + Unpin> {
     // XXX: specialization instead?
     pub(crate) is_bin: bool,
-    pub(crate) writer: &'a mut PacketWriter<W>,
+    pub(crate) writer: &'a mut PacketConn<W>,
     last_end: Option<Finalizer>,
 }
 
-impl<'a, W: AsyncWrite + Unpin> QueryResultWriter<'a, W> {
-    pub(crate) fn new(writer: &'a mut PacketWriter<W>, is_bin: bool) -> Self {
+impl<'a, W: AsyncRead + AsyncWrite + Unpin> QueryResultWriter<'a, W> {
+    pub(crate) fn new(writer: &'a mut PacketConn<W>, is_bin: bool) -> Self {
         QueryResultWriter {
             is_bin,
             writer,
@@ -237,7 +237,7 @@ impl<'a, W: AsyncWrite + Unpin> QueryResultWriter<'a, W> {
     }
 }
 
-impl<W: AsyncWrite + Unpin> Drop for QueryResultWriter<'_, W> {
+impl<W: AsyncRead + AsyncWrite + Unpin> Drop for QueryResultWriter<'_, W> {
     fn drop(&mut self) {
         if let Some(x) = self.last_end.take() {
             eprintln!(
@@ -261,7 +261,7 @@ impl<W: AsyncWrite + Unpin> Drop for QueryResultWriter<'_, W> {
 /// if an I/O error occurs when sending the end-of-records marker to the client. To avoid this,
 /// call [`finish`](struct.RowWriter.html#method.finish) explicitly.
 #[must_use]
-pub struct RowWriter<'a, W: AsyncWrite + Unpin> {
+pub struct RowWriter<'a, W: AsyncRead + AsyncWrite + Unpin> {
     result: QueryResultWriter<'a, W>,
     bitmap_len: usize,
     /// The index where the null bitmap for the current row begins
@@ -288,7 +288,7 @@ pub struct RowWriter<'a, W: AsyncWrite + Unpin> {
 
 impl<'a, W> RowWriter<'a, W>
 where
-    W: AsyncWrite + Unpin + 'a,
+    W: AsyncRead + AsyncWrite + Unpin + 'a,
 {
     async fn new(
         result: QueryResultWriter<'a, W>,
@@ -502,7 +502,7 @@ where
     }
 }
 
-impl<'a, W: AsyncWrite + Unpin + 'a> RowWriter<'a, W> {
+impl<'a, W: AsyncRead + AsyncWrite + Unpin + 'a> RowWriter<'a, W> {
     fn finish_inner(&mut self) -> io::Result<()> {
         if self.finished {
             return Ok(());

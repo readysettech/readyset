@@ -7,6 +7,8 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::resultset::MAX_POOL_ROW_CAPACITY;
 
+use crate::tls::StreamType;
+
 /// The maximum size of data we can be sent in a single mysql packet.
 ///
 /// The limit is 24 bits as the mysql header protocol uses 24 bits to encode the length of the packet.
@@ -20,13 +22,18 @@ pub const MAX_PACKET_CHUNK_SIZE: usize = 16_777_215;
 
 const MAX_POOL_BUFFERS: usize = 64;
 
-pub struct PacketWriter<W> {
-    pub seq: u8,
-    w: W,
-    queue: Vec<QueuedPacket>,
+pub struct PacketConn<S> {
+    // read variables
+    // A buffer to hold incoming socket bytes, while building up for a complete packet.
+    buffer: BytesMut,
 
+    // write variables
+    pub seq: u8,
+    queue: Vec<QueuedPacket>,
     /// Reusable packets
     preallocated: Vec<QueuedPacket>,
+
+    pub stream: StreamType<S>,
 }
 
 /// Type for packets being enqueued in the packet writer.
@@ -68,7 +75,7 @@ impl QueuedPacket {
 
 /// A helper function that performes a vector write to completion, since
 /// the `tokio` one is not guaranteed to write all of the data.
-async fn write_all_vectored<'a, W: AsyncWrite + Unpin>(
+async fn write_all_vectored<'a, W: AsyncRead + AsyncWrite + Unpin>(
     w: &'a mut W,
     mut slices: &'a mut [IoSlice<'a>],
 ) -> io::Result<()> {
@@ -130,16 +137,21 @@ fn queued_packet_slices(queue: &[QueuedPacket]) -> Vec<IoSlice<'_>> {
     });
     slices
 }
-impl<W: AsyncWrite + Unpin> PacketWriter<W> {
-    pub fn new(w: W) -> Self {
-        PacketWriter {
+impl<S: AsyncRead + AsyncWrite + Unpin> PacketConn<S> {
+    pub fn new(s: S) -> Self {
+        PacketConn {
+            buffer: BytesMut::with_capacity(4096),
+
             seq: 0,
-            w,
             queue: Vec::new(),
             preallocated: Vec::new(),
+
+            stream: StreamType::new(s)
         }
     }
+}
 
+impl<S: AsyncRead + AsyncWrite + Unpin> PacketConn<S> {
     pub fn set_seq(&mut self, seq: u8) {
         self.seq = seq;
     }
@@ -154,7 +166,7 @@ impl<W: AsyncWrite + Unpin> PacketWriter<W> {
     /// or writes may be lossed.
     pub async fn flush(&mut self) -> Result<(), tokio::io::Error> {
         self.write_queued_packets().await?;
-        self.w.flush().await
+        self.stream.flush().await
     }
 
     #[inline]
@@ -221,7 +233,7 @@ impl<W: AsyncWrite + Unpin> PacketWriter<W> {
     pub async fn write_queued_packets(&mut self) -> Result<(), tokio::io::Error> {
         let mut slices = queued_packet_slices(&self.queue);
         if !slices.is_empty() {
-            write_all_vectored(&mut self.w, &mut slices).await?;
+            write_all_vectored(&mut self.stream, &mut slices).await?;
             self.return_queued_to_pool();
         }
 
@@ -252,21 +264,6 @@ impl<W: AsyncWrite + Unpin> PacketWriter<W> {
             }
         }
         Vec::new()
-    }
-}
-
-pub struct PacketReader<R> {
-    // A buffer to hold incoming socket bytes, while building up for a complete packet.
-    buffer: BytesMut,
-    r: R,
-}
-
-impl<R> PacketReader<R> {
-    pub fn new(r: R) -> Self {
-        PacketReader {
-            buffer: BytesMut::with_capacity(4096),
-            r,
-        }
     }
 }
 
@@ -323,7 +320,7 @@ macro_rules! parse_packet_header {
     }};
 }
 
-impl<R: AsyncRead + Unpin> PacketReader<R> {
+impl<S: AsyncRead + AsyncWrite + Unpin> PacketConn<S> {
     pub async fn next(&mut self) -> io::Result<Option<Packet>> {
         let mut in_progress = None;
 
@@ -332,7 +329,7 @@ impl<R: AsyncRead + Unpin> PacketReader<R> {
                 ParseResult::Complete { packet } => return Ok(Some(packet)),
                 ParseResult::Incomplete { packet } => {
                     in_progress = packet;
-                    let bytes_read = self.r.read_buf(&mut self.buffer).await?;
+                    let bytes_read = self.stream.read_buf(&mut self.buffer).await?;
                     if bytes_read == 0 {
                         return if self.buffer.is_empty() && in_progress.is_none() {
                             Ok(None)

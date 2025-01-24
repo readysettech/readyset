@@ -3056,6 +3056,7 @@ dependencies = [
  "thiserror",
  "time",
  "tokio",
+ "tokio-native-tls",
  "tokio-postgres",
  "tracing",
 ]

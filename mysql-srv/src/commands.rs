@@ -22,6 +22,15 @@ pub struct ClientHandshake<'a> {
 }
 
 #[derive(Debug)]
+pub struct ClientSSLRequest {
+    pub capabilities: CapabilityFlags,
+    #[allow(dead_code)]
+    pub maxps: u32,
+    #[allow(dead_code)]
+    pub charset: u16,
+}
+
+#[derive(Debug)]
 pub struct ClientChangeUser<'a> {
     pub username: &'a str,
     pub password: &'a [u8],
@@ -109,6 +118,23 @@ pub fn change_user(
             auth_plugin_name,
         },
     ))
+}
+
+pub fn is_ssl_request(i: &[u8]) -> bool {
+    i.len() == 32
+}
+
+// <https://dev.mysql.com/doc/dev/mysql-server/8.4.3/page_protocol_connection_phase_packets_protocol_ssl_request.html>
+pub fn ssl_request(i: &[u8]) -> IResult<&[u8], ClientSSLRequest> {
+    let (i, capabilities) = map(le_u32, CapabilityFlags::from_bits_truncate)(i)?;
+    let (i, maxps) = le_u32(i)?;
+    let (i, charset) = le_u8(i)?;
+    let (i, _) = take(23u8)(i)?;
+    Ok((i, ClientSSLRequest {
+        capabilities,
+        maxps,
+        charset: charset.into(),
+    }))
 }
 
 /// <https://dev.mysql.com/doc/internals/en/connection-phase-packets.html#packet-Protocol::HandshakeResponse41>
