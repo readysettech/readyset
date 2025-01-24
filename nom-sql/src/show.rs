@@ -140,6 +140,7 @@ pub fn show(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u
             map(show_tables(dialect), ShowStatement::Tables),
             value(ShowStatement::Events, tag_no_case("events")),
             value(ShowStatement::Connections, tag_no_case("connections")),
+            value(ShowStatement::Databases, tag_no_case("databases")),
         ))(i)?;
         Ok((i, statement))
     }

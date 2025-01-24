@@ -206,7 +206,8 @@ impl<'ast> VisitorMut<'ast> for AnonymizeVisitor<'_> {
             | ShowStatement::ReadySetMigrationStatus(..)
             | ShowStatement::ReadySetVersion
             | ShowStatement::ReadySetTables(..)
-            | ShowStatement::Connections => {}
+            | ShowStatement::Connections
+            | ShowStatement::Databases => {}
         }
         Ok(())
     }

@@ -24,6 +24,7 @@ pub enum ShowStatement {
     ReadySetVersion,
     ReadySetTables(ReadySetTablesOptions),
     Connections,
+    Databases,
 }
 
 impl DialectDisplay for ShowStatement {
@@ -63,6 +64,7 @@ impl DialectDisplay for ShowStatement {
                     }
                 }
                 Self::Connections => write!(f, "CONNECTIONS"),
+                Self::Databases => write!(f, "DATABASES"),
             }
         })
     }
