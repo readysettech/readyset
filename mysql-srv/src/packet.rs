@@ -20,13 +20,18 @@ pub const MAX_PACKET_CHUNK_SIZE: usize = 16_777_215;
 
 const MAX_POOL_BUFFERS: usize = 64;
 
-pub struct PacketWriter<W> {
-    pub seq: u8,
-    w: W,
-    queue: Vec<QueuedPacket>,
+pub struct PacketConn<S> {
+    // read variables
+    // A buffer to hold incoming socket bytes, while building up for a complete packet.
+    read_buffer: BytesMut,
 
+    // write variables
+    pub seq: u8,
+    queue: Vec<QueuedPacket>,
     /// Reusable packets
     preallocated: Vec<QueuedPacket>,
+
+    pub stream: S,
 }
 
 /// Type for packets being enqueued in the packet writer.
@@ -68,14 +73,14 @@ impl QueuedPacket {
 
 /// A helper function that performes a vector write to completion, since
 /// the `tokio` one is not guaranteed to write all of the data.
-async fn write_all_vectored<'a, W: AsyncWrite + Unpin>(
-    w: &'a mut W,
+async fn write_all_vectored<'a, S: AsyncRead + AsyncWrite + Unpin>(
+    s: &'a mut S,
     mut slices: &'a mut [IoSlice<'a>],
 ) -> io::Result<()> {
     let mut n: usize = slices.iter().map(|s| s.len()).sum();
 
     loop {
-        let mut did_write = w.write_vectored(slices).await?;
+        let mut did_write = s.write_vectored(slices).await?;
 
         if did_write == n {
             // Done, yay
@@ -130,16 +135,19 @@ fn queued_packet_slices(queue: &[QueuedPacket]) -> Vec<IoSlice<'_>> {
     });
     slices
 }
-impl<W: AsyncWrite + Unpin> PacketWriter<W> {
-    pub fn new(w: W) -> Self {
-        PacketWriter {
+impl<S: AsyncRead + AsyncWrite + Unpin> PacketConn<S> {
+    pub fn new(s: S) -> Self {
+        PacketConn {
+            read_buffer: BytesMut::with_capacity(4096),
             seq: 0,
-            w,
             queue: Vec::new(),
             preallocated: Vec::new(),
+            stream: s,
         }
     }
+}
 
+impl<S: AsyncRead + AsyncWrite + Unpin> PacketConn<S> {
     pub fn set_seq(&mut self, seq: u8) {
         self.seq = seq;
     }
@@ -154,7 +162,7 @@ impl<W: AsyncWrite + Unpin> PacketWriter<W> {
     /// or writes may be lossed.
     pub async fn flush(&mut self) -> Result<(), tokio::io::Error> {
         self.write_queued_packets().await?;
-        self.w.flush().await
+        self.stream.flush().await
     }
 
     #[inline]
@@ -221,7 +229,7 @@ impl<W: AsyncWrite + Unpin> PacketWriter<W> {
     pub async fn write_queued_packets(&mut self) -> Result<(), tokio::io::Error> {
         let mut slices = queued_packet_slices(&self.queue);
         if !slices.is_empty() {
-            write_all_vectored(&mut self.w, &mut slices).await?;
+            write_all_vectored(&mut self.stream, &mut slices).await?;
             self.return_queued_to_pool();
         }
 
@@ -252,21 +260,6 @@ impl<W: AsyncWrite + Unpin> PacketWriter<W> {
             }
         }
         Vec::new()
-    }
-}
-
-pub struct PacketReader<R> {
-    // A buffer to hold incoming socket bytes, while building up for a complete packet.
-    buffer: BytesMut,
-    r: R,
-}
-
-impl<R> PacketReader<R> {
-    pub fn new(r: R) -> Self {
-        PacketReader {
-            buffer: BytesMut::with_capacity(4096),
-            r,
-        }
     }
 }
 
@@ -323,7 +316,7 @@ macro_rules! parse_packet_header {
     }};
 }
 
-impl<R: AsyncRead + Unpin> PacketReader<R> {
+impl<S: AsyncRead + AsyncWrite + Unpin> PacketConn<S> {
     pub async fn next(&mut self) -> io::Result<Option<Packet>> {
         let mut in_progress = None;
 
@@ -332,14 +325,14 @@ impl<R: AsyncRead + Unpin> PacketReader<R> {
                 ParseResult::Complete { packet } => return Ok(Some(packet)),
                 ParseResult::Incomplete { packet } => {
                     in_progress = packet;
-                    let bytes_read = self.r.read_buf(&mut self.buffer).await?;
+                    let bytes_read = self.stream.read_buf(&mut self.read_buffer).await?;
                     if bytes_read == 0 {
-                        return if self.buffer.is_empty() && in_progress.is_none() {
+                        return if self.read_buffer.is_empty() && in_progress.is_none() {
                             Ok(None)
                         } else {
                             Err(io::Error::new(
                                 io::ErrorKind::UnexpectedEof,
-                                format!("{} unhandled bytes", self.buffer.len()),
+                                format!("{} unhandled bytes", self.read_buffer.len()),
                             ))
                         };
                     }
@@ -356,26 +349,26 @@ impl<R: AsyncRead + Unpin> PacketReader<R> {
         }
 
         // Need at least 4 bytes to parse the header of the packet
-        if self.buffer.len() < 4 {
+        if self.read_buffer.len() < 4 {
             return Ok(ParseResult::Incomplete { packet: None });
         }
 
-        let (length, seq) = parse_packet_header!(self.buffer);
+        let (length, seq) = parse_packet_header!(self.read_buffer);
 
-        if self.buffer.len() < length + 4 {
+        if self.read_buffer.len() < length + 4 {
             return Ok(ParseResult::Incomplete { packet: None });
         }
 
         // Remove header
-        self.buffer.advance(4);
+        self.read_buffer.advance(4);
 
         // Handle large packets (>=16MB) as mysql treats those specially
         if length == MAX_PACKET_CHUNK_SIZE {
-            let packet = Packet::new(self.buffer.split_to(MAX_PACKET_CHUNK_SIZE), seq);
+            let packet = Packet::new(self.read_buffer.split_to(MAX_PACKET_CHUNK_SIZE), seq);
             self.handle_in_progress_packet(packet)
         } else {
             // Regular packet - split off exactly what we need
-            let data = self.buffer.split_to(length);
+            let data = self.read_buffer.split_to(length);
             Ok(ParseResult::Complete {
                 packet: Packet::new(data, seq),
             })
@@ -415,21 +408,21 @@ impl<R: AsyncRead + Unpin> PacketReader<R> {
     }
 
     fn parse_next_segment(&mut self) -> io::Result<Option<Packet>> {
-        if self.buffer.len() < 4 {
+        if self.read_buffer.len() < 4 {
             return Ok(None);
         }
 
-        let (length, seq) = parse_packet_header!(self.buffer);
+        let (length, seq) = parse_packet_header!(self.read_buffer);
 
-        if self.buffer.len() < length + 4 {
+        if self.read_buffer.len() < length + 4 {
             return Ok(None);
         }
 
         // Remove header
-        self.buffer.advance(4);
+        self.read_buffer.advance(4);
 
         // Split off the segment
-        Ok(Some(Packet::new(self.buffer.split_to(length), seq)))
+        Ok(Some(Packet::new(self.read_buffer.split_to(length), seq)))
     }
 }
 
@@ -442,12 +435,12 @@ mod tests {
         let (u_out, u_in) = tokio::net::UnixStream::pair().unwrap();
 
         tokio::spawn(async move {
-            let mut writer = PacketWriter::new(u_out);
+            let mut writer = PacketConn::new(u_out);
             writer.enqueue_packet(vec![0x10]);
             writer.flush().await.unwrap();
         });
 
-        let mut reader = PacketReader::new(u_in);
+        let mut reader = PacketConn::new(u_in);
         let packet = reader.next().await.unwrap().unwrap();
 
         assert_eq!(packet.seq, 0);
@@ -464,12 +457,12 @@ mod tests {
         let data_clone = data.clone();
 
         tokio::spawn(async move {
-            let mut writer = PacketWriter::new(u_out);
+            let mut writer = PacketConn::new(u_out);
             writer.enqueue_packet(data_clone);
             writer.flush().await.unwrap();
         });
 
-        let mut reader = PacketReader::new(u_in);
+        let mut reader = PacketConn::new(u_in);
         let packet = reader.next().await.unwrap().unwrap();
 
         assert_eq!(packet.seq, 0);
@@ -487,12 +480,12 @@ mod tests {
         data.extend_from_slice(&[0x10]);
 
         tokio::spawn(async move {
-            let mut writer = PacketWriter::new(u_out);
+            let mut writer = PacketConn::new(u_out);
             writer.enqueue_packet(data);
             writer.flush().await.unwrap();
         });
 
-        let mut reader = PacketReader::new(u_in);
+        let mut reader = PacketConn::new(u_in);
         let packet = reader.next().await.unwrap().unwrap();
 
         assert_eq!(packet.seq, 0);
@@ -509,7 +502,7 @@ mod tests {
 
     async fn test_large_packet_write_helper<F, Fut>(write_strategy: F)
     where
-        F: FnOnce(PacketWriter<tokio::net::UnixStream>, Vec<Vec<u8>>) -> Fut + Send + 'static,
+        F: FnOnce(PacketConn<tokio::net::UnixStream>, Vec<Vec<u8>>) -> Fut + Send + 'static,
         Fut: std::future::Future<Output = io::Result<()>> + Send,
     {
         let (u_out, u_in) = tokio::net::UnixStream::pair().unwrap();
@@ -526,11 +519,11 @@ mod tests {
 
         let p = packets.clone();
         tokio::spawn(async move {
-            let writer = PacketWriter::new(u_out);
+            let writer = PacketConn::new(u_out);
             write_strategy(writer, p).await.unwrap();
         });
 
-        let mut reader = PacketReader::new(u_in);
+        let mut reader = PacketConn::new(u_in);
 
         // Verify all packets were received correctly
         for expected in &packets {

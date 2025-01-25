@@ -2,69 +2,69 @@ use std::io::{self, Write};
 use std::sync::Arc;
 
 use byteorder::{LittleEndian, WriteBytesExt};
-use tokio::io::AsyncWrite;
+use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::myc::constants::StatusFlags;
 use crate::myc::io::WriteMysqlExt;
-use crate::packet::PacketWriter;
+use crate::packet::PacketConn;
 use crate::{Column, ErrorKind};
 
-pub(crate) async fn write_eof_packet<W: AsyncWrite + Unpin>(
-    w: &mut PacketWriter<W>,
+pub(crate) async fn write_eof_packet<S: AsyncRead + AsyncWrite + Unpin>(
+    conn: &mut PacketConn<S>,
     s: StatusFlags,
 ) -> io::Result<()> {
-    let mut buf = w.get_buffer();
+    let mut buf = conn.get_buffer();
     buf.extend([0xFE, 0x00, 0x00, s.bits() as u8, (s.bits() >> 8) as u8]);
-    w.enqueue_packet(buf);
+    conn.enqueue_packet(buf);
     Ok(())
 }
 
-pub(crate) async fn write_ok_packet<W: AsyncWrite + Unpin>(
-    w: &mut PacketWriter<W>,
+pub(crate) async fn write_ok_packet<S: AsyncRead + AsyncWrite + Unpin>(
+    conn: &mut PacketConn<S>,
     rows: u64,
     last_insert_id: u64,
     s: StatusFlags,
 ) -> io::Result<()> {
     const MAX_OK_PACKET_LEN: usize = 1 + 9 + 9 + 2 + 2;
-    let mut buf = w.get_buffer();
+    let mut buf = conn.get_buffer();
     buf.reserve(MAX_OK_PACKET_LEN);
     buf.write_u8(0x00)?; // OK packet type
     buf.write_lenenc_int(rows)?;
     buf.write_lenenc_int(last_insert_id)?;
     buf.write_u16::<LittleEndian>(s.bits())?;
     buf.write_all(&[0x00, 0x00])?; // no warnings
-    w.enqueue_packet(buf);
+    conn.enqueue_packet(buf);
     Ok(())
 }
 
-pub async fn write_err<W: AsyncWrite + Unpin>(
+pub async fn write_err<S: AsyncRead + AsyncWrite + Unpin>(
     err: ErrorKind,
     msg: &[u8],
-    w: &mut PacketWriter<W>,
+    conn: &mut PacketConn<S>,
 ) -> io::Result<()> {
-    let mut buf = w.get_buffer();
+    let mut buf = conn.get_buffer();
     buf.reserve(4 + 5 + msg.len());
     buf.write_u8(0xFF)?;
     buf.write_u16::<LittleEndian>(err as u16)?;
     buf.write_u8(b'#')?;
     buf.write_all(err.sqlstate())?;
     buf.write_all(msg)?;
-    w.enqueue_packet(buf);
+    conn.enqueue_packet(buf);
     Ok(())
 }
 
-pub(crate) async fn write_prepare_ok<'a, PI, CI, W>(
+pub(crate) async fn write_prepare_ok<'a, PI, CI, S>(
     id: u32,
     params: PI,
     columns: CI,
-    w: &mut PacketWriter<W>,
+    conn: &mut PacketConn<S>,
 ) -> io::Result<()>
 where
     PI: IntoIterator<Item = &'a Column>,
     CI: IntoIterator<Item = &'a Column>,
     <PI as IntoIterator>::IntoIter: ExactSizeIterator,
     <CI as IntoIterator>::IntoIter: ExactSizeIterator,
-    W: AsyncWrite + Unpin,
+    S: AsyncRead + AsyncWrite + Unpin,
 {
     const MAX_PREPARE_OK_PACKET_LEN: usize = 1 + 4 + 2 + 2 + 1 + 2;
 
@@ -72,7 +72,7 @@ where
     let ci = columns.into_iter();
 
     // first, write out COM_STMT_PREPARE_OK
-    let mut buf = w.get_buffer();
+    let mut buf = conn.get_buffer();
     buf.reserve(MAX_PREPARE_OK_PACKET_LEN);
     buf.write_u8(0x00)?;
     buf.write_u32::<LittleEndian>(id)?;
@@ -80,10 +80,10 @@ where
     buf.write_u16::<LittleEndian>(pi.len() as u16)?;
     buf.write_u8(0x00)?;
     buf.write_u16::<LittleEndian>(0)?; // number of warnings
-    w.enqueue_packet(buf);
+    conn.enqueue_packet(buf);
 
-    write_column_definitions(pi, w, true).await?;
-    write_column_definitions(ci, w, true).await
+    write_column_definitions(pi, conn, true).await?;
+    write_column_definitions(ci, conn, true).await
 }
 
 /// Compute the size of the buffer required to encode this buffer
@@ -163,56 +163,56 @@ pub fn prepare_column_definitions(cols: &[Column]) -> Vec<u8> {
     buf
 }
 
-pub(crate) async fn write_column_definitions<'a, I, W>(
+pub(crate) async fn write_column_definitions<'a, I, S>(
     i: I,
-    w: &mut PacketWriter<W>,
+    conn: &mut PacketConn<S>,
     only_eof_on_nonempty: bool,
 ) -> io::Result<()>
 where
     I: IntoIterator<Item = &'a Column>,
-    W: AsyncWrite + Unpin,
+    S: AsyncRead + AsyncWrite + Unpin,
 {
     let mut empty = true;
     for c in i {
-        let mut buf = w.get_buffer();
+        let mut buf = conn.get_buffer();
         buf.reserve(col_enc_len(c));
         write_column_definition(c, &mut buf);
-        w.enqueue_packet(buf);
+        conn.enqueue_packet(buf);
         empty = false;
     }
 
     if empty && only_eof_on_nonempty {
         Ok(())
     } else {
-        write_eof_packet(w, StatusFlags::empty()).await
+        write_eof_packet(conn, StatusFlags::empty()).await
     }
 }
 
-pub(crate) async fn column_definitions<'a, I, W>(i: I, w: &mut PacketWriter<W>) -> io::Result<()>
+pub(crate) async fn column_definitions<'a, I, S>(i: I, conn: &mut PacketConn<S>) -> io::Result<()>
 where
     I: IntoIterator<Item = &'a Column>,
     <I as IntoIterator>::IntoIter: ExactSizeIterator,
-    W: AsyncWrite + Unpin,
+    S: AsyncRead + AsyncWrite + Unpin,
 {
     let i = i.into_iter();
-    let mut buf = w.get_buffer();
+    let mut buf = conn.get_buffer();
     buf.write_lenenc_int(i.len() as u64)?;
-    w.enqueue_packet(buf);
-    write_column_definitions(i, w, false).await
+    conn.enqueue_packet(buf);
+    write_column_definitions(i, conn, false).await
 }
 
-pub(crate) async fn column_definitions_cached<'a, I, W>(
+pub(crate) async fn column_definitions_cached<'a, I, S>(
     i: I,
     cached: Arc<[u8]>,
-    w: &mut PacketWriter<W>,
+    conn: &mut PacketConn<S>,
 ) -> io::Result<()>
 where
     I: IntoIterator<Item = &'a Column>,
     <I as IntoIterator>::IntoIter: ExactSizeIterator,
-    W: AsyncWrite + Unpin,
+    S: AsyncRead + AsyncWrite + Unpin,
 {
     let i = i.into_iter();
-    w.enqueue_raw(cached);
-    w.seq = w.seq.wrapping_add((1 + i.len()) as u8);
-    write_eof_packet(w, StatusFlags::empty()).await
+    conn.enqueue_raw(cached);
+    conn.seq = conn.seq.wrapping_add((1 + i.len()) as u8);
+    write_eof_packet(conn, StatusFlags::empty()).await
 }

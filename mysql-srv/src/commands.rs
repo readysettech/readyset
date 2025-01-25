@@ -252,17 +252,17 @@ mod tests {
 
     use super::*;
     use crate::myc::constants::{CapabilityFlags, UTF8_GENERAL_CI};
-    use crate::packet::PacketReader;
+    use crate::packet::PacketConn;
 
     #[tokio::test]
     async fn it_parses_handshake() {
-        let data = &[
+        let mut data = [
             0x25, 0x00, 0x00, 0x01, 0x85, 0xa6, 0x3f, 0x20, 0x00, 0x00, 0x00, 0x01, 0x21, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x6a, 0x6f, 0x6e, 0x00, 0x00,
         ];
-        let r = Cursor::new(&data[..]);
-        let mut pr = PacketReader::new(r);
+        let r: Cursor<&mut [u8]> = Cursor::new(&mut data[..]);
+        let mut pr = PacketConn::new(r);
         let packet = pr.next().await.unwrap().unwrap();
         let (_, handshake) = client_handshake(&packet.data).unwrap();
         println!("{:?}", handshake);
@@ -285,13 +285,13 @@ mod tests {
 
     #[tokio::test]
     async fn it_parses_request() {
-        let data = &[
+        let mut data = [
             0x21, 0x00, 0x00, 0x00, 0x03, 0x73, 0x65, 0x6c, 0x65, 0x63, 0x74, 0x20, 0x40, 0x40,
             0x76, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x5f, 0x63, 0x6f, 0x6d, 0x6d, 0x65, 0x6e,
             0x74, 0x20, 0x6c, 0x69, 0x6d, 0x69, 0x74, 0x20, 0x31,
         ];
-        let r = Cursor::new(&data[..]);
-        let mut pr = PacketReader::new(r);
+        let r: Cursor<&mut [u8]> = Cursor::new(&mut data[..]);
+        let mut pr = PacketConn::new(r);
         let packet = pr.next().await.unwrap().unwrap();
         let (_, cmd) = parse(&packet.data).unwrap();
         assert_eq!(
@@ -305,13 +305,13 @@ mod tests {
         // mysql_list_fields (CommandByte::COM_FIELD_LIST / 0x04) has been deprecated in mysql 5.7
         // and will be removed in a future version. The mysql command line tool issues one
         // of these commands after switching databases with USE <DB>.
-        let data = &[
+        let mut data = [
             0x21, 0x00, 0x00, 0x00, 0x04, 0x73, 0x65, 0x6c, 0x65, 0x63, 0x74, 0x20, 0x40, 0x40,
             0x76, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x5f, 0x63, 0x6f, 0x6d, 0x6d, 0x65, 0x6e,
             0x74, 0x20, 0x6c, 0x69, 0x6d, 0x69, 0x74, 0x20, 0x31,
         ];
-        let r = Cursor::new(&data[..]);
-        let mut pr = PacketReader::new(r);
+        let r: Cursor<&mut [u8]> = Cursor::new(&mut data[..]);
+        let mut pr = PacketConn::new(r);
         let packet = pr.next().await.unwrap().unwrap();
         let (_, cmd) = parse(&packet.data).unwrap();
         assert_eq!(
@@ -322,13 +322,13 @@ mod tests {
 
     #[tokio::test]
     async fn it_parses_change_user() {
-        let data = &[
+        let mut data = [
             0x24, 0x00, 0x00, 0x00, 0x72, 0x6f, 0x6f, 0x74, 0x00, 0x00, 0x74, 0x65, 0x73, 0x74,
             0x00, 0x2d, 0x00, 0x6d, 0x79, 0x73, 0x71, 0x6c, 0x5f, 0x6e, 0x61, 0x74, 0x69, 0x76,
             0x65, 0x5f, 0x70, 0x61, 0x73, 0x73, 0x77, 0x6f, 0x72, 0x64, 0x00, 0x00,
         ];
-        let r = Cursor::new(&data[..]);
-        let mut pr = PacketReader::new(r);
+        let r: Cursor<&mut [u8]> = Cursor::new(&mut data[..]);
+        let mut pr = PacketConn::new(r);
         let packet = pr.next().await.unwrap().unwrap();
         let capability_flags = CapabilityFlags::CLIENT_PROTOCOL_41
             | CapabilityFlags::CLIENT_SECURE_CONNECTION
@@ -340,15 +340,15 @@ mod tests {
         assert_eq!(changeuser.charset, UTF8MB4_GENERAL_CI);
         assert_eq!(changeuser.auth_plugin_name, "mysql_native_password");
 
-        let data = &[
+        let mut data = [
             0x38, 0x00, 0x00, 0x00, 0x72, 0x6f, 0x6f, 0x74, 0x00, 0x14, 0x95, 0x16, 0xb1, 0x01,
             0x40, 0x6d, 0x7c, 0xc3, 0x17, 0x22, 0xc5, 0x9d, 0x00, 0xf3, 0x5d, 0x37, 0xb9, 0xb5,
             0x6d, 0x0f, 0x74, 0x65, 0x73, 0x74, 0x00, 0x2d, 0x00, 0x6d, 0x79, 0x73, 0x71, 0x6c,
             0x5f, 0x6e, 0x61, 0x74, 0x69, 0x76, 0x65, 0x5f, 0x70, 0x61, 0x73, 0x73, 0x77, 0x6f,
             0x72, 0x64, 0x00, 0x00,
         ];
-        let r = Cursor::new(&data[..]);
-        let mut pr = PacketReader::new(r);
+        let r: Cursor<&mut [u8]> = Cursor::new(&mut data[..]);
+        let mut pr = PacketConn::new(r);
         let packet = pr.next().await.unwrap().unwrap();
         let (_, changeuser) = change_user(&packet.data, capability_flags).unwrap();
         assert_eq!(changeuser.username, "root");

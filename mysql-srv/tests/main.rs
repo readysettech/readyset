@@ -19,8 +19,8 @@ use mysql_srv::{
     QueryResultWriter, QueryResultsResponse, StatementMetaWriter,
 };
 use readyset_adapter_types::DeallocateId;
-use tokio::io::AsyncWrite;
-use tokio::net::tcp::OwnedWriteHalf;
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::net::TcpStream;
 
 static DEFAULT_CHARACTER_SET: u16 = myc::constants::UTF8_GENERAL_CI;
 
@@ -60,7 +60,7 @@ where
             &'a str,
         ) -> Pin<Box<dyn Future<Output = io::Result<()>> + 'a + Send>>
         + Send,
-    W: AsyncWrite + Unpin + Send + 'static,
+    W: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     async fn on_prepare(
         &mut self,
@@ -152,11 +152,11 @@ where
     }
 }
 
-impl<Q, P, E, I, CU> TestingShim<Q, P, E, I, CU, OwnedWriteHalf>
+impl<Q, P, E, I, CU> TestingShim<Q, P, E, I, CU, TcpStream>
 where
     Q: for<'a> FnMut(
             &'a str,
-            QueryResultWriter<'a, OwnedWriteHalf>,
+            QueryResultWriter<'a, TcpStream>,
         ) -> Pin<Box<dyn Future<Output = io::Result<()>> + 'a + Send>>
         + Send
         + 'static,
@@ -164,13 +164,13 @@ where
     E: for<'a> FnMut(
             u32,
             Vec<mysql_srv::ParamValue>,
-            QueryResultWriter<'a, OwnedWriteHalf>,
+            QueryResultWriter<'a, TcpStream>,
         ) -> Pin<Box<dyn Future<Output = io::Result<()>> + 'a + Send>>
         + Send
         + 'static,
     I: for<'a> FnMut(
             &'a str,
-            InitWriter<'a, OwnedWriteHalf>,
+            InitWriter<'a, TcpStream>,
         ) -> Pin<Box<dyn Future<Output = io::Result<()>> + 'a + Send>>
         + Send
         + 'static,
