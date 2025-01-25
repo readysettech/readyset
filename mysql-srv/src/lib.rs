@@ -25,10 +25,10 @@
 //! use mysql::prelude::*;
 //! use mysql_srv::*;
 //! use readyset_adapter_types::DeallocateId;
-//! use tokio::io::AsyncWrite;
+//! use tokio::io::{AsyncRead, AsyncWrite};
 //!
 //! struct Backend;
-//! impl<W: AsyncWrite + Unpin + Send + 'static> MySqlShim<W> for Backend {
+//! impl<W: AsyncRead + AsyncWrite + Unpin + Send + 'static> MySqlShim<W> for Backend {
 //!     async fn on_prepare(
 //!         &mut self,
 //!         _: &str,
@@ -254,7 +254,7 @@ pub enum QueryResultsResponse {
 /// Implementors of this trait can be used to drive a MySQL-compatible database backend.
 // Only used internally
 #[allow(async_fn_in_trait)]
-pub trait MySqlShim<W: AsyncWrite + Unpin + Send> {
+pub trait MySqlShim<S: AsyncRead + AsyncWrite + Unpin + Send> {
     /// Called when the client issues a request to prepare `query` for later execution.
     ///
     /// The provided [`StatementMetaWriter`] should be used to notify the client of the statement id
@@ -263,7 +263,7 @@ pub trait MySqlShim<W: AsyncWrite + Unpin + Send> {
     async fn on_prepare(
         &mut self,
         query: &str,
-        info: StatementMetaWriter<'_, W>,
+        info: StatementMetaWriter<'_, S>,
         schema_cache: &mut HashMap<u32, CachedSchema>,
     ) -> io::Result<()>;
 
@@ -278,7 +278,7 @@ pub trait MySqlShim<W: AsyncWrite + Unpin + Send> {
         &mut self,
         id: u32,
         params: ParamParser<'_>,
-        results: QueryResultWriter<'_, W>,
+        results: QueryResultWriter<'_, S>,
         schema_cache: &mut HashMap<u32, CachedSchema>,
     ) -> io::Result<()>;
 
@@ -292,7 +292,7 @@ pub trait MySqlShim<W: AsyncWrite + Unpin + Send> {
     async fn on_query(
         &mut self,
         query: &str,
-        results: QueryResultWriter<'_, W>,
+        results: QueryResultWriter<'_, S>,
     ) -> QueryResultsResponse;
 
     /// Called when the client issue a ping command.
@@ -302,7 +302,7 @@ pub trait MySqlShim<W: AsyncWrite + Unpin + Send> {
     async fn on_reset(&mut self) -> io::Result<()>;
 
     /// Called when client switches database.
-    async fn on_init(&mut self, _: &str, _: Option<InitWriter<'_, W>>) -> io::Result<()>;
+    async fn on_init(&mut self, _: &str, _: Option<InitWriter<'_, S>>) -> io::Result<()>;
 
     /// Called when client switches user.
     async fn on_change_user(&mut self, _: &str, _: &str, _: &str) -> io::Result<()>;
@@ -330,10 +330,9 @@ pub struct CachedSchema {
 
 /// A server that speaks the MySQL/MariaDB protocol, and can delegate client commands to a backend
 /// that implements [`MySqlShim`].
-pub struct MySqlIntermediary<B, R: AsyncRead + Unpin, W: AsyncWrite + Unpin> {
+pub struct MySqlIntermediary<B, S: AsyncRead + AsyncWrite + Unpin> {
     shim: B,
-    reader: packet::PacketReader<R>,
-    writer: packet::PacketWriter<W>,
+    conn: packet::PacketConn<S>,
     /// A cache of schemas per statement id
     schema_cache: HashMap<u32, CachedSchema>,
     /// Whether to log statements received from a client
@@ -344,9 +343,7 @@ pub struct MySqlIntermediary<B, R: AsyncRead + Unpin, W: AsyncWrite + Unpin> {
     auth_data: [u8; 20],
 }
 
-impl<B: MySqlShim<net::tcp::OwnedWriteHalf> + Send>
-    MySqlIntermediary<B, net::TcpStream, net::TcpStream>
-{
+impl<B: MySqlShim<net::TcpStream> + Send> MySqlIntermediary<B, net::TcpStream> {
     /// Create a new server over a TCP stream and process client commands until the client
     /// disconnects or an error occurs. See also [`MySqlIntermediary::run_on`].
     pub async fn run_on_tcp(
@@ -355,32 +352,29 @@ impl<B: MySqlShim<net::tcp::OwnedWriteHalf> + Send>
         enable_statement_logging: bool,
     ) -> Result<(), io::Error> {
         stream.set_nodelay(true)?;
-        let (reader, writer) = stream.into_split();
-        MySqlIntermediary::run_on(shim, reader, writer, enable_statement_logging).await
+        MySqlIntermediary::run_on(shim, stream, enable_statement_logging).await
     }
 }
 
-impl<B: MySqlShim<S> + Send, S: AsyncRead + AsyncWrite + Clone + Unpin + Send>
-    MySqlIntermediary<B, S, S>
-{
-    /// Create a new server over a two-way stream and process client commands until the client
+impl<B: MySqlShim<S> + Send, S: AsyncRead + AsyncWrite + Unpin + Send> MySqlIntermediary<B, S> {
+    /// Create a new server over a stream and process client commands until the client
     /// disconnects or an error occurs. See also [`MySqlIntermediary::run_on`].
     pub async fn run_on_stream(
         shim: B,
         stream: S,
         enable_statement_logging: bool,
     ) -> Result<(), io::Error> {
-        MySqlIntermediary::run_on(shim, stream.clone(), stream, enable_statement_logging).await
+        MySqlIntermediary::run_on(shim, stream, enable_statement_logging).await
     }
 }
 
 /// Send an error packet to the given stream, then close it
 pub async fn send_immediate_err<S>(stream: S, error_kind: ErrorKind, msg: &[u8]) -> io::Result<()>
 where
-    S: AsyncWrite + Unpin + Send,
+    S: AsyncRead + AsyncWrite + Unpin + Send,
 {
-    let mut w = packet::PacketWriter::new(stream);
-    write_err(error_kind, msg, &mut w).await
+    let mut conn = packet::PacketConn::new(stream);
+    write_err(error_kind, msg, &mut conn).await
 }
 
 #[derive(Default)]
@@ -397,23 +391,17 @@ const CAPABILITIES: u32 = PROTOCOL_41
     | CLIENT_PLUGIN_AUTH
     | CONNECT_WITH_DB;
 
-impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
-    MySqlIntermediary<B, R, W>
-{
-    /// Create a new server over two one-way channels and process client commands until the client
+impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlIntermediary<B, S> {
+    /// Create a new server over a channel and process client commands until the client
     /// disconnects or an error occurs.
     pub async fn run_on(
         shim: B,
-        reader: R,
-        writer: W,
+        stream: S,
         enable_statement_logging: bool,
     ) -> Result<(), io::Error> {
-        let r = packet::PacketReader::new(reader);
-        let w = packet::PacketWriter::new(writer);
         let mut mi = MySqlIntermediary {
             shim,
-            reader: r,
-            writer: w,
+            conn: packet::PacketConn::new(stream),
             schema_cache: HashMap::new(),
             enable_statement_logging,
             client_capabilities: CapabilityFlags::empty(),
@@ -463,10 +451,10 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
         init_packet.extend_from_slice(AUTH_PLUGIN_NAME.as_bytes());
         init_packet.push(0);
 
-        self.writer.enqueue_packet(init_packet);
-        self.writer.flush().await?;
+        self.conn.enqueue_packet(init_packet);
+        self.conn.flush().await?;
 
-        let packet = self.reader.next().await?.ok_or_else(|| {
+        let packet = self.conn.next().await?.ok_or_else(|| {
             // We use the stdlib's "custom" [`io::ErrorKind`] for this expected/benign error that
             // occurs during a Layer 4 network health check, to indicate it can be ignored higher up
             io::Error::new(
@@ -497,7 +485,7 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
             })?
             .1;
 
-        self.writer.set_seq(packet.seq + 1);
+        self.conn.set_seq(packet.seq + 1);
 
         self.client_capabilities = handshake.capabilities;
         let username = handshake.username.to_owned();
@@ -522,7 +510,7 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
                     ErrorKind::ER_NOT_SUPPORTED_AUTH_MODE,
                     b"Client does not support authentication protocol requested by server; \
                       consider upgrading MySQL client",
-                    &mut self.writer,
+                    &mut self.conn,
                 )
                 .await?;
                 return Ok((false, database));
@@ -540,16 +528,16 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
             auth_switch_request_packet.push(0);
             auth_switch_request_packet.extend_from_slice(&auth_data);
             auth_switch_request_packet.push(0);
-            self.writer.enqueue_packet(auth_switch_request_packet);
-            self.writer.flush().await?;
+            self.conn.enqueue_packet(auth_switch_request_packet);
+            self.conn.flush().await?;
 
-            let packet = self.reader.next().await?.ok_or_else(|| {
+            let packet = self.conn.next().await?.ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::ConnectionAborted,
                     "peer terminated connection when asked to switch auth plugin",
                 )
             })?;
-            self.writer.set_seq(packet.seq + 1);
+            self.conn.set_seq(packet.seq + 1);
 
             packet.data.to_vec()
         } else {
@@ -569,17 +557,17 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
 
         if auth_success {
             debug!(%username, "Successfully authenticated client");
-            writers::write_ok_packet(&mut self.writer, 0, 0, StatusFlags::empty()).await?;
+            writers::write_ok_packet(&mut self.conn, 0, 0, StatusFlags::empty()).await?;
         } else {
             debug!(%username, ?client_auth_plugin, "Received incorrect password");
             writers::write_err(
                 ErrorKind::ER_ACCESS_DENIED_ERROR,
                 format!("Access denied for user {}", username).as_bytes(),
-                &mut self.writer,
+                &mut self.conn,
             )
             .await?;
         }
-        self.writer.flush().await?;
+        self.conn.flush().await?;
 
         Ok((auth_success, database))
     }
@@ -588,8 +576,8 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
         use crate::commands::Command;
 
         let mut stmts: HashMap<u32, _> = HashMap::new();
-        while let Some(packet) = self.reader.next().await? {
-            self.writer.set_seq(packet.seq + 1);
+        while let Some(packet) = self.conn.next().await? {
+            self.conn.set_seq(packet.seq + 1);
             let cmd = commands::parse(&packet)
                 .map_err(|e| {
                     other_error(OtherErrorKind::GenericErr {
@@ -631,10 +619,10 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
                                 username, change_user.auth_plugin_name
                             )
                             .as_bytes(),
-                            &mut self.writer,
+                            &mut self.conn,
                         )
                         .await?;
-                        self.writer.flush().await?;
+                        self.conn.flush().await?;
                         continue;
                     }
                     let plain_password = self.shim.password_for_username(&username);
@@ -662,7 +650,7 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
                         {
                             Ok(()) => {
                                 writers::write_ok_packet(
-                                    &mut self.writer,
+                                    &mut self.conn,
                                     0,
                                     0,
                                     StatusFlags::empty(),
@@ -673,7 +661,7 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
                                 writers::write_err(
                                     ErrorKind::ER_ACCESS_DENIED_ERROR,
                                     format!("Access denied for user {}", username).as_bytes(),
-                                    &mut self.writer,
+                                    &mut self.conn,
                                 )
                                 .await?;
                             }
@@ -683,14 +671,14 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
                         writers::write_err(
                             ErrorKind::ER_ACCESS_DENIED_ERROR,
                             format!("Access denied for user {}", username).as_bytes(),
-                            &mut self.writer,
+                            &mut self.conn,
                         )
                         .await?;
                     }
-                    self.writer.flush().await?;
+                    self.conn.flush().await?;
                 }
                 Command::Query(q) => {
-                    let w = QueryResultWriter::new(&mut self.writer, false);
+                    let w = QueryResultWriter::new(&mut self.conn, false);
                     let res = self
                         .shim
                         .on_query(
@@ -710,7 +698,7 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
                                         writers::write_err(
                                             ErrorKind::ER_PARSE_ERROR,
                                             "Unsupported 'DEALLOCATE PREPARE ALL'".as_bytes(),
-                                            &mut self.writer,
+                                            &mut self.conn,
                                         )
                                         .await?;
                                     } else {
@@ -720,7 +708,7 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
                                             self.schema_cache.remove(&id);
                                         }
                                         writers::write_ok_packet(
-                                            &mut self.writer,
+                                            &mut self.conn,
                                             0,
                                             0,
                                             StatusFlags::empty(),
@@ -735,7 +723,7 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
                 }
                 Command::Prepare(q) => {
                     let w = StatementMetaWriter {
-                        writer: &mut self.writer,
+                        conn: &mut self.conn,
                         stmts: &mut stmts,
                     };
                     self.shim
@@ -758,7 +746,7 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
                         })?
                         .long_data
                         .clear();
-                    writers::write_ok_packet(&mut self.writer, 0, 0, StatusFlags::empty()).await?;
+                    writers::write_ok_packet(&mut self.conn, 0, 0, StatusFlags::empty()).await?;
                 }
                 Command::Execute { stmt, params } => {
                     let state = stmts.get_mut(&stmt).ok_or_else(|| {
@@ -769,7 +757,7 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
                     })?;
                     {
                         let params = params::ParamParser::new(params, state);
-                        let w = QueryResultWriter::new(&mut self.writer, true);
+                        let w = QueryResultWriter::new(&mut self.conn, true);
                         self.shim
                             .on_execute(stmt, params, w, &mut self.schema_cache)
                             .await?;
@@ -803,14 +791,14 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
                     writers::write_err(
                         ErrorKind::ER_UNKNOWN_COM_ERROR,
                         "COM_FIELD_LIST is unsupported".as_bytes(),
-                        &mut self.writer,
+                        &mut self.conn,
                     )
                     .await?;
                 }
                 Command::Init(schema) => {
                     debug!(schema = %String::from_utf8_lossy(schema), "Handling COM_INIT_DB");
                     let w = InitWriter {
-                        writer: &mut self.writer,
+                        conn: &mut self.conn,
                     };
                     self.shim
                         .on_init(
@@ -822,8 +810,8 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
                 }
                 Command::Ping => {
                     self.shim.on_ping().await?;
-                    writers::write_ok_packet(&mut self.writer, 0, 0, StatusFlags::empty()).await?;
-                    self.writer.flush().await?;
+                    writers::write_ok_packet(&mut self.conn, 0, 0, StatusFlags::empty()).await?;
+                    self.conn.flush().await?;
                 }
                 Command::ComSetOption(_) => {
                     // Readyset already has multi-statement support for the MySQL protocol, so
@@ -831,20 +819,20 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
                     // statements, so failure with any one will be forwarded to the underlying
                     // database as a single statement, meaning that the underlying database does
                     // not need to have multi-statement support enabled for this connection.
-                    writers::write_ok_packet(&mut self.writer, 0, 0, StatusFlags::empty()).await?;
-                    self.writer.flush().await?;
+                    writers::write_ok_packet(&mut self.conn, 0, 0, StatusFlags::empty()).await?;
+                    self.conn.flush().await?;
                 }
                 Command::Reset => {
                     self.shim.on_reset().await?;
-                    writers::write_ok_packet(&mut self.writer, 0, 0, StatusFlags::empty()).await?;
-                    self.writer.flush().await?;
+                    writers::write_ok_packet(&mut self.conn, 0, 0, StatusFlags::empty()).await?;
+                    self.conn.flush().await?;
                 }
                 Command::Quit => {
                     break;
                 }
             }
 
-            self.writer.flush().await?;
+            self.conn.flush().await?;
         }
 
         Ok(())

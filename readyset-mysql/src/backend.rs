@@ -25,7 +25,7 @@ use readyset_data::{DfType, DfValue, DfValueKind};
 use readyset_errors::{internal, ReadySetError};
 use readyset_util::redacted::Sensitive;
 use streaming_iterator::StreamingIterator;
-use tokio::io::{self, AsyncWrite};
+use tokio::io::{self, AsyncRead, AsyncWrite};
 use tracing::{error, info, trace};
 use upstream::StatementMeta;
 
@@ -53,8 +53,8 @@ impl fmt::Display for BinaryDisplay<'_> {
     }
 }
 
-async fn write_column<W: AsyncWrite + Unpin>(
-    rw: &mut RowWriter<'_, W>,
+async fn write_column<S: AsyncRead + AsyncWrite + Unpin>(
+    rw: &mut RowWriter<'_, S>,
     c: &DfValue,
     cs: &mysql_srv::Column,
     ty: &DfType,
@@ -181,9 +181,9 @@ async fn write_column<W: AsyncWrite + Unpin>(
     Ok(written?)
 }
 
-async fn write_query_results<W: AsyncWrite + Unpin>(
+async fn write_query_results<S: AsyncRead + AsyncWrite + Unpin>(
     r: Result<(u64, u64), Error>,
-    results: QueryResultWriter<'_, W>,
+    results: QueryResultWriter<'_, S>,
     status_flags: Option<StatusFlags>,
 ) -> io::Result<()> {
     match r {
@@ -202,9 +202,9 @@ async fn write_query_results<W: AsyncWrite + Unpin>(
 
 /// Writes a Vec of [`MetaVariable`] as a table with a single row, where the column names correspond
 /// to the variable names and the row values correspond to the variable values
-async fn write_meta_table<W: AsyncWrite + Unpin>(
+async fn write_meta_table<S: AsyncRead + AsyncWrite + Unpin>(
     vars: Vec<MetaVariable>,
-    results: QueryResultWriter<'_, W>,
+    results: QueryResultWriter<'_, S>,
 ) -> io::Result<()> {
     let cols = vars
         .iter()
@@ -229,9 +229,9 @@ async fn write_meta_table<W: AsyncWrite + Unpin>(
 
 /// Writes a Vec of [`MetaVariable`] as a table with two columns, where each row represents one
 /// variable, with the first column being the variable name and the second column its value
-async fn write_meta_variables<W: AsyncWrite + Unpin>(
+async fn write_meta_variables<S: AsyncRead + AsyncWrite + Unpin>(
     vars: Vec<MetaVariable>,
-    results: QueryResultWriter<'_, W>,
+    results: QueryResultWriter<'_, S>,
 ) -> io::Result<()> {
     // Assign column schema to match MySQL
     // [`SHOW STATUS`](https://dev.mysql.com/doc/refman/8.0/en/show-status.html)
@@ -265,9 +265,9 @@ async fn write_meta_variables<W: AsyncWrite + Unpin>(
 /// Writes a Vec of [`MetaVariable`] as a table with a single row, where the column names correspond
 /// to the variable names and the row values correspond to the variable values
 /// The first item in vars serves as the column headers
-async fn write_meta_with_header<W: AsyncWrite + Unpin>(
+async fn write_meta_with_header<S: AsyncRead + AsyncWrite + Unpin>(
     vars: Vec<MetaVariable>,
-    results: QueryResultWriter<'_, W>,
+    results: QueryResultWriter<'_, S>,
 ) -> io::Result<()> {
     let cols = vec![
         Column {
@@ -378,12 +378,12 @@ macro_rules! handle_error {
     };
 }
 
-async fn handle_readyset_result<W>(
+async fn handle_readyset_result<S>(
     result: noria_connector::QueryResult<'_>,
-    writer: QueryResultWriter<'_, W>,
+    writer: QueryResultWriter<'_, S>,
 ) -> io::Result<()>
 where
-    W: AsyncWrite + Unpin,
+    S: AsyncRead + AsyncWrite + Unpin,
 {
     match result {
         noria_connector::QueryResult::Empty => writer.completed(0, 0, None).await,
@@ -445,12 +445,12 @@ where
     }
 }
 
-async fn handle_upstream_result<W>(
+async fn handle_upstream_result<S>(
     result: upstream::QueryResult<'_>,
-    writer: QueryResultWriter<'_, W>,
+    writer: QueryResultWriter<'_, S>,
 ) -> io::Result<()>
 where
-    W: AsyncWrite + Unpin,
+    S: AsyncRead + AsyncWrite + Unpin,
 {
     match result {
         upstream::QueryResult::Command { status_flags } => {
@@ -496,12 +496,12 @@ where
     }
 }
 
-async fn handle_execute_result<W>(
+async fn handle_execute_result<S>(
     result: Result<QueryResult<'_, LazyUpstream<MySqlUpstream>>, Error>,
-    writer: QueryResultWriter<'_, W>,
+    writer: QueryResultWriter<'_, S>,
 ) -> io::Result<()>
 where
-    W: AsyncWrite + Unpin,
+    S: AsyncRead + AsyncWrite + Unpin,
 {
     match result {
         Ok(QueryResult::Noria(result)) => handle_readyset_result(result, writer).await,
@@ -522,12 +522,12 @@ where
     }
 }
 
-async fn handle_query_result<W>(
+async fn handle_query_result<S>(
     result: Result<QueryResult<'_, LazyUpstream<MySqlUpstream>>, Error>,
-    writer: QueryResultWriter<'_, W>,
+    writer: QueryResultWriter<'_, S>,
 ) -> QueryResultsResponse
 where
-    W: AsyncWrite + Unpin,
+    S: AsyncRead + AsyncWrite + Unpin,
 {
     match result {
         Ok(QueryResult::Parser(command)) => QueryResultsResponse::Command(command),
@@ -535,14 +535,14 @@ where
     }
 }
 
-impl<W> MySqlShim<W> for Backend
+impl<S> MySqlShim<S> for Backend
 where
-    W: AsyncWrite + Unpin + Send + 'static,
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     async fn on_prepare(
         &mut self,
         query: &str,
-        info: StatementMetaWriter<'_, W>,
+        info: StatementMetaWriter<'_, S>,
         schema_cache: &mut HashMap<u32, CachedSchema>,
     ) -> io::Result<()> {
         if self.enable_statement_logging {
@@ -648,7 +648,7 @@ where
         &mut self,
         id: u32,
         params: mysql_srv::ParamParser<'_>,
-        results: QueryResultWriter<'_, W>,
+        results: QueryResultWriter<'_, S>,
         schema_cache: &mut HashMap<u32, CachedSchema>,
     ) -> io::Result<()> {
         // TODO(DAN): Param conversions are unnecessary for fallback execution. Params should be
@@ -720,7 +720,7 @@ where
         }
     }
 
-    async fn on_init(&mut self, database: &str, w: Option<InitWriter<'_, W>>) -> io::Result<()> {
+    async fn on_init(&mut self, database: &str, w: Option<InitWriter<'_, S>>) -> io::Result<()> {
         if self.enable_statement_logging {
             info!(target: "client_statement", "database: {database}");
         }
@@ -780,7 +780,7 @@ where
     async fn on_query(
         &mut self,
         query: &str,
-        results: QueryResultWriter<'_, W>,
+        results: QueryResultWriter<'_, S>,
     ) -> QueryResultsResponse {
         if self.enable_statement_logging {
             info!(target: "client_statement", "Query: {query}");
@@ -803,9 +803,9 @@ where
     }
 }
 
-async fn handle_column_write_err<W: AsyncWrite + Unpin>(
+async fn handle_column_write_err<S: AsyncRead + AsyncWrite + Unpin>(
     e: Error,
-    rw: RowWriter<'_, W>,
+    rw: RowWriter<'_, S>,
 ) -> io::Result<()> {
     error!(err = %e, "encountered error while attempting to write column packet");
     match e {

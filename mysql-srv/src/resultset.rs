@@ -3,10 +3,10 @@ use std::collections::HashMap;
 use std::io;
 use std::sync::Arc;
 
-use tokio::io::AsyncWrite;
+use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::myc::constants::{ColumnFlags, StatusFlags};
-use crate::packet::{PacketWriter, MAX_PACKET_CHUNK_SIZE};
+use crate::packet::{PacketConn, MAX_PACKET_CHUNK_SIZE};
 use crate::value::ToMySqlValue;
 use crate::{writers, Column, ErrorKind, StatementData};
 
@@ -14,14 +14,14 @@ pub(crate) const DEFAULT_ROW_CAPACITY: usize = 4096;
 pub(crate) const MAX_POOL_ROW_CAPACITY: usize = DEFAULT_ROW_CAPACITY * 4;
 
 /// Convenience type for responding to a client `USE <db>` command.
-pub struct InitWriter<'a, W: AsyncWrite + Unpin> {
-    pub(crate) writer: &'a mut PacketWriter<W>,
+pub struct InitWriter<'a, S: AsyncRead + AsyncWrite + Unpin> {
+    pub(crate) conn: &'a mut PacketConn<S>,
 }
 
-impl<'a, W: AsyncWrite + Unpin + 'a> InitWriter<'a, W> {
+impl<'a, S: AsyncRead + AsyncWrite + Unpin + 'a> InitWriter<'a, S> {
     /// Tell client that database context has been changed
     pub async fn ok(self) -> io::Result<()> {
-        writers::write_ok_packet(self.writer, 0, 0, StatusFlags::empty()).await
+        writers::write_ok_packet(self.conn, 0, 0, StatusFlags::empty()).await
     }
 
     /// Tell client that there was a problem changing the database context.
@@ -32,7 +32,7 @@ impl<'a, W: AsyncWrite + Unpin + 'a> InitWriter<'a, W> {
     where
         E: Borrow<[u8]> + ?Sized,
     {
-        writers::write_err(kind, msg.borrow(), self.writer).await
+        writers::write_err(kind, msg.borrow(), self.conn).await
     }
 }
 
@@ -42,12 +42,12 @@ impl<'a, W: AsyncWrite + Unpin + 'a> InitWriter<'a, W> {
 /// [`reply`](struct.StatementMetaWriter.html#method.reply) or
 /// [`error`](struct.StatementMetaWriter.html#method.error).
 #[must_use]
-pub struct StatementMetaWriter<'a, W: AsyncWrite + Unpin> {
-    pub(crate) writer: &'a mut PacketWriter<W>,
+pub struct StatementMetaWriter<'a, S: AsyncRead + AsyncWrite + Unpin> {
+    pub(crate) conn: &'a mut PacketConn<S>,
     pub(crate) stmts: &'a mut HashMap<u32, StatementData>,
 }
 
-impl<'a, W: AsyncWrite + Unpin + 'a> StatementMetaWriter<'a, W> {
+impl<'a, S: AsyncRead + AsyncWrite + Unpin + 'a> StatementMetaWriter<'a, S> {
     /// Reply to the client with the given meta-information.
     ///
     /// `id` is a statement identifier that the client should supply when it later wants to execute
@@ -70,7 +70,7 @@ impl<'a, W: AsyncWrite + Unpin + 'a> StatementMetaWriter<'a, W> {
                 ..Default::default()
             },
         );
-        writers::write_prepare_ok(id, params, columns, self.writer).await
+        writers::write_prepare_ok(id, params, columns, self.conn).await
     }
 
     /// Reply to the client's `PREPARE` with an error.
@@ -78,7 +78,7 @@ impl<'a, W: AsyncWrite + Unpin + 'a> StatementMetaWriter<'a, W> {
     where
         E: Borrow<[u8]> + ?Sized,
     {
-        writers::write_err(kind, msg.borrow(), self.writer).await
+        writers::write_err(kind, msg.borrow(), self.conn).await
     }
 }
 
@@ -112,18 +112,18 @@ enum Finalizer {
 /// program may panic if an I/O error occurs when sending the end-of-records marker to the client.
 /// To handle such errors, call `no_more_results` explicitly.
 #[must_use]
-pub struct QueryResultWriter<'a, W: AsyncWrite + Unpin> {
+pub struct QueryResultWriter<'a, S: AsyncRead + AsyncWrite + Unpin> {
     // XXX: specialization instead?
     pub(crate) is_bin: bool,
-    pub(crate) writer: &'a mut PacketWriter<W>,
+    pub(crate) conn: &'a mut PacketConn<S>,
     last_end: Option<Finalizer>,
 }
 
-impl<'a, W: AsyncWrite + Unpin> QueryResultWriter<'a, W> {
-    pub(crate) fn new(writer: &'a mut PacketWriter<W>, is_bin: bool) -> Self {
+impl<'a, S: AsyncRead + AsyncWrite + Unpin> QueryResultWriter<'a, S> {
+    pub(crate) fn new(conn: &'a mut PacketConn<S>, is_bin: bool) -> Self {
         QueryResultWriter {
             is_bin,
-            writer,
+            conn,
             last_end: None,
         }
     }
@@ -153,8 +153,8 @@ impl<'a, W: AsyncWrite + Unpin> QueryResultWriter<'a, W> {
                 rows,
                 last_insert_id,
                 ..
-            }) => writers::write_ok_packet(self.writer, rows, last_insert_id, status).await,
-            Some(Finalizer::Eof { .. }) => writers::write_eof_packet(self.writer, status).await,
+            }) => writers::write_ok_packet(self.conn, rows, last_insert_id, status).await,
+            Some(Finalizer::Eof { .. }) => writers::write_eof_packet(self.conn, status).await,
         }
     }
 
@@ -163,7 +163,7 @@ impl<'a, W: AsyncWrite + Unpin> QueryResultWriter<'a, W> {
     /// Note that if no columns are emitted, any written rows are ignored.
     ///
     /// See [`RowWriter`](struct.RowWriter.html).
-    pub async fn start(mut self, columns: &'a [Column]) -> io::Result<RowWriter<'a, W>> {
+    pub async fn start(mut self, columns: &'a [Column]) -> io::Result<RowWriter<'a, S>> {
         self.finalize(true).await?;
         RowWriter::new(self, columns, None).await
     }
@@ -179,7 +179,7 @@ impl<'a, W: AsyncWrite + Unpin> QueryResultWriter<'a, W> {
         mut self,
         columns: &'a [Column],
         cached: Arc<[u8]>,
-    ) -> io::Result<RowWriter<'a, W>> {
+    ) -> io::Result<RowWriter<'a, S>> {
         self.finalize(true).await?;
         RowWriter::new(self, columns, Some(cached)).await
     }
@@ -193,7 +193,7 @@ impl<'a, W: AsyncWrite + Unpin> QueryResultWriter<'a, W> {
         last_insert_id: u64,
         status_flags: Option<StatusFlags>,
         // return type not Self because https://github.com/rust-lang/rust/issues/61949
-    ) -> io::Result<QueryResultWriter<'a, W>> {
+    ) -> io::Result<QueryResultWriter<'a, S>> {
         self.finalize(true).await?;
         self.last_end = Some(Finalizer::Ok {
             rows,
@@ -226,7 +226,7 @@ impl<'a, W: AsyncWrite + Unpin> QueryResultWriter<'a, W> {
         E: Borrow<[u8]> + ?Sized,
     {
         self.finalize(true).await?;
-        writers::write_err(kind, msg.borrow(), self.writer).await?;
+        writers::write_err(kind, msg.borrow(), self.conn).await?;
         self.no_more_results().await
     }
 
@@ -237,7 +237,7 @@ impl<'a, W: AsyncWrite + Unpin> QueryResultWriter<'a, W> {
     }
 }
 
-impl<W: AsyncWrite + Unpin> Drop for QueryResultWriter<'_, W> {
+impl<S: AsyncRead + AsyncWrite + Unpin> Drop for QueryResultWriter<'_, S> {
     fn drop(&mut self) {
         if let Some(x) = self.last_end.take() {
             eprintln!(
@@ -261,8 +261,8 @@ impl<W: AsyncWrite + Unpin> Drop for QueryResultWriter<'_, W> {
 /// if an I/O error occurs when sending the end-of-records marker to the client. To avoid this,
 /// call [`finish`](struct.RowWriter.html#method.finish) explicitly.
 #[must_use]
-pub struct RowWriter<'a, W: AsyncWrite + Unpin> {
-    result: QueryResultWriter<'a, W>,
+pub struct RowWriter<'a, S: AsyncRead + AsyncWrite + Unpin> {
+    result: QueryResultWriter<'a, S>,
     bitmap_len: usize,
     /// The index where the null bitmap for the current row begins
     bitmap_idx: usize,
@@ -286,15 +286,15 @@ pub struct RowWriter<'a, W: AsyncWrite + Unpin> {
     cur_row_header_idx: usize,
 }
 
-impl<'a, W> RowWriter<'a, W>
+impl<'a, S> RowWriter<'a, S>
 where
-    W: AsyncWrite + Unpin + 'a,
+    S: AsyncRead + AsyncWrite + Unpin + 'a,
 {
     async fn new(
-        result: QueryResultWriter<'a, W>,
+        result: QueryResultWriter<'a, S>,
         columns: &'a [Column],
         cached_column_def: Option<Arc<[u8]>>,
-    ) -> io::Result<RowWriter<'a, W>> {
+    ) -> io::Result<RowWriter<'a, S>> {
         let bitmap_len = (columns.len() + 7 + 2) / 8;
         let mut rw = RowWriter {
             result,
@@ -322,10 +322,10 @@ where
 
         match &self.cached {
             Some(cached) => {
-                writers::column_definitions_cached(self.columns, cached.clone(), self.result.writer)
+                writers::column_definitions_cached(self.columns, cached.clone(), self.result.conn)
                     .await
             }
-            None => writers::column_definitions(self.columns, self.result.writer).await,
+            None => writers::column_definitions(self.columns, self.result.conn).await,
         }
     }
 
@@ -349,7 +349,7 @@ where
         }
 
         let row_data = self.row_data.get_or_insert_with(|| {
-            let mut row_data = self.result.writer.get_buffer();
+            let mut row_data = self.result.conn.get_buffer();
             // We want to preallocate at least *some* capacity for the row, otherwise the
             // incremental writes cause a whole lot of reallocations. Since Vec usually
             // reallocates with exponential growth even small responses require at least
@@ -410,15 +410,15 @@ where
     #[inline]
     async fn finish_normal_packet(&mut self, packet_len: usize) -> io::Result<()> {
         let packet = self.row_data.as_mut().unwrap();
-        let header_bytes = self.result.writer.packet_header_bytes(packet_len);
+        let header_bytes = self.result.conn.packet_header_bytes(packet_len);
         packet[self.cur_row_header_idx..self.cur_row_header_idx + 4].copy_from_slice(&header_bytes);
 
         if packet.len() > MAX_POOL_ROW_CAPACITY {
             // Only take ownership when we need to enqueue
             self.result
-                .writer
+                .conn
                 .enqueue_plain(self.row_data.take().unwrap());
-            self.result.writer.flush().await?;
+            self.result.conn.flush().await?;
         }
         Ok(())
     }
@@ -441,15 +441,15 @@ where
             // we make the assumption that the first section, before the large packet, is smaller than the large packet.
             // thus, we copy that out to a new vector and enqueue it separately. Yes, the copy sucks, but this is a rare case.
             let first_part: Vec<u8> = payload.drain(..self.cur_row_header_idx).collect();
-            self.result.writer.enqueue_plain(first_part);
+            self.result.conn.enqueue_plain(first_part);
             // payload now contains only the remaining (larger) part
         }
 
         // enqueue the rest of the packet, but we need to drop the first 4 bytes as they are the row header.
         payload.drain(..4);
-        self.result.writer.enqueue_large_packet(payload);
+        self.result.conn.enqueue_large_packet(payload);
 
-        self.result.writer.flush().await
+        self.result.conn.flush().await
     }
 
     /// Indicate that no more column data will be written for the current row.
@@ -502,7 +502,7 @@ where
     }
 }
 
-impl<'a, W: AsyncWrite + Unpin + 'a> RowWriter<'a, W> {
+impl<'a, S: AsyncRead + AsyncWrite + Unpin + 'a> RowWriter<'a, S> {
     fn finish_inner(&mut self) -> io::Result<()> {
         if self.finished {
             return Ok(());
@@ -549,14 +549,14 @@ impl<'a, W: AsyncWrite + Unpin + 'a> RowWriter<'a, W> {
     }
 
     /// End this resultset response, and indicate to the client that no more rows are coming.
-    pub async fn finish_one(mut self) -> io::Result<QueryResultWriter<'a, W>> {
+    pub async fn finish_one(mut self) -> io::Result<QueryResultWriter<'a, S>> {
         if !self.columns.is_empty() && self.col != 0 {
             self.end_row().await?;
         }
 
         // if there's any row data left, enqueue it.
         if let Some(packet) = self.row_data.take() {
-            self.result.writer.enqueue_plain(packet);
+            self.result.conn.enqueue_plain(packet);
 
             // as we will have at least an EOF/OK packet that follows the last row packet,
             // we don't need to flush here.
