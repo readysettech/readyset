@@ -22,6 +22,15 @@ pub struct ClientHandshake<'a> {
 }
 
 #[derive(Debug)]
+pub struct ClientSSLRequest {
+    pub capabilities: CapabilityFlags,
+    #[allow(dead_code)]
+    pub maxps: u32,
+    #[allow(dead_code)]
+    pub charset: u16,
+}
+
+#[derive(Debug)]
 pub struct ClientChangeUser<'a> {
     pub username: &'a str,
     pub password: &'a [u8],
@@ -107,6 +116,26 @@ pub fn change_user(
             database,
             charset,
             auth_plugin_name,
+        },
+    ))
+}
+
+pub fn is_ssl_request(i: &[u8]) -> bool {
+    i.len() == 32
+}
+
+// <https://dev.mysql.com/doc/dev/mysql-server/8.4.3/page_protocol_connection_phase_packets_protocol_ssl_request.html>
+pub fn ssl_request(i: &[u8]) -> IResult<&[u8], ClientSSLRequest> {
+    let (i, capabilities) = map(le_u32, CapabilityFlags::from_bits_truncate)(i)?;
+    let (i, maxps) = le_u32(i)?;
+    let (i, charset) = le_u8(i)?;
+    let (i, _) = take(23u8)(i)?;
+    Ok((
+        i,
+        ClientSSLRequest {
+            capabilities,
+            maxps,
+            charset: charset.into(),
         },
     ))
 }
@@ -253,6 +282,33 @@ mod tests {
     use super::*;
     use crate::myc::constants::{CapabilityFlags, UTF8_GENERAL_CI};
     use crate::packet::PacketConn;
+
+    #[tokio::test]
+    async fn it_detects_ssl_request() {
+        let mut data = [
+            0x20, 0x00, 0x00, 0x01, 0x05, 0xae, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01, 0x08, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
+        let r: Cursor<&mut [u8]> = Cursor::new(&mut data[..]);
+        let mut pr = PacketConn::new(r);
+        let packet = pr.next().await.unwrap().unwrap();
+        assert!(is_ssl_request(&packet.data));
+    }
+
+    #[tokio::test]
+    async fn it_parses_ssl_request() {
+        let mut data = [
+            0x20, 0x00, 0x00, 0x01, 0x05, 0xae, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01, 0x08, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
+        let r: Cursor<&mut [u8]> = Cursor::new(&mut data[..]);
+        let mut pr = PacketConn::new(r);
+        let packet = pr.next().await.unwrap().unwrap();
+        let (_, request) = ssl_request(&packet.data).unwrap();
+        assert!(request.capabilities.contains(CapabilityFlags::CLIENT_SSL));
+    }
 
     #[tokio::test]
     async fn it_parses_handshake() {

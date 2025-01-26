@@ -218,7 +218,7 @@ where
                 let _guard = rt.handle().enter();
                 tokio::net::TcpStream::from_std(s).unwrap()
             };
-            rt.block_on(MySqlIntermediary::run_on_tcp(self, s, false))
+            rt.block_on(MySqlIntermediary::run_on_tcp(self, s, false, None))
         });
 
         let mut db = mysql::Conn::new(

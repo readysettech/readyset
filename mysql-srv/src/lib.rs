@@ -133,7 +133,7 @@
 //!                 let _guard = rt.handle().enter();
 //!                 tokio::net::TcpStream::from_std(s).unwrap()
 //!             };
-//!             rt.block_on(MySqlIntermediary::run_on_tcp(Backend, s, false))
+//!             rt.block_on(MySqlIntermediary::run_on_tcp(Backend, s, false, None))
 //!                 .unwrap();
 //!         }
 //!     });
@@ -174,6 +174,7 @@ use std::sync::Arc;
 
 use constants::{
     CLIENT_PLUGIN_AUTH, CONNECT_WITH_DB, LONG_PASSWORD, PROTOCOL_41, RESERVED, SECURE_CONNECTION,
+    SSL,
 };
 use error::{other_error, OtherErrorKind};
 use mysql_common::constants::CapabilityFlags;
@@ -181,6 +182,7 @@ use readyset_adapter_types::{DeallocateId, ParsedCommand};
 use readyset_data::DfType;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net;
+use tokio_native_tls::TlsAcceptor;
 use tracing::{debug, info, trace};
 use writers::write_err;
 
@@ -197,6 +199,7 @@ mod errorcodes;
 mod packet;
 mod params;
 mod resultset;
+mod tls;
 mod value;
 mod writers;
 
@@ -341,6 +344,8 @@ pub struct MySqlIntermediary<B, S: AsyncRead + AsyncWrite + Unpin> {
     client_capabilities: CapabilityFlags,
     /// Auth data sent to client
     auth_data: [u8; 20],
+    /// TLS acceptor
+    tls_acceptor: Option<Arc<TlsAcceptor>>,
 }
 
 impl<B: MySqlShim<net::TcpStream> + Send> MySqlIntermediary<B, net::TcpStream> {
@@ -350,9 +355,10 @@ impl<B: MySqlShim<net::TcpStream> + Send> MySqlIntermediary<B, net::TcpStream> {
         shim: B,
         stream: net::TcpStream,
         enable_statement_logging: bool,
+        tls_acceptor: Option<Arc<TlsAcceptor>>,
     ) -> Result<(), io::Error> {
         stream.set_nodelay(true)?;
-        MySqlIntermediary::run_on(shim, stream, enable_statement_logging).await
+        MySqlIntermediary::run_on(shim, stream, enable_statement_logging, tls_acceptor).await
     }
 }
 
@@ -363,8 +369,9 @@ impl<B: MySqlShim<S> + Send, S: AsyncRead + AsyncWrite + Unpin + Send> MySqlInte
         shim: B,
         stream: S,
         enable_statement_logging: bool,
+        tls_acceptor: Option<Arc<TlsAcceptor>>,
     ) -> Result<(), io::Error> {
-        MySqlIntermediary::run_on(shim, stream, enable_statement_logging).await
+        MySqlIntermediary::run_on(shim, stream, enable_statement_logging, tls_acceptor).await
     }
 }
 
@@ -398,6 +405,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
         shim: B,
         stream: S,
         enable_statement_logging: bool,
+        tls_acceptor: Option<Arc<TlsAcceptor>>,
     ) -> Result<(), io::Error> {
         let mut mi = MySqlIntermediary {
             shim,
@@ -406,6 +414,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
             enable_statement_logging,
             client_capabilities: CapabilityFlags::empty(),
             auth_data: [0; 20],
+            tls_acceptor,
         };
         if let (true, database) = mi.init().await? {
             if let Some(database) = database {
@@ -438,7 +447,16 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
         init_packet.extend_from_slice(&[0x08, 0x00, 0x00, 0x00]); // TODO: connection ID
         init_packet.extend_from_slice(&auth_data[..8]);
         init_packet.push(0);
-        init_packet.extend_from_slice(&CAPABILITIES.to_le_bytes()[..2]);
+
+        // We will check if the pkcs12 file was correctly provided and we have a functioning
+        // a TlsAcceptor. If TlsAcceptor is available, we will add SSL capabilities to the
+        // init packet.
+        let mut capabilities = CAPABILITIES;
+        if self.tls_acceptor.is_some() {
+            capabilities |= SSL; // SSL support flag
+        }
+        init_packet.extend_from_slice(&capabilities.to_le_bytes()[..2]);
+
         init_packet.extend_from_slice(&[0x21]); // UTF8_GENERAL_CI
         init_packet.extend_from_slice(&[0x00, 0x00]); // status flags
         init_packet.extend_from_slice(&CAPABILITIES.to_le_bytes()[2..]);
@@ -454,7 +472,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
         self.conn.enqueue_packet(init_packet);
         self.conn.flush().await?;
 
-        let packet = self.conn.next().await?.ok_or_else(|| {
+        let mut packet = self.conn.next().await?.ok_or_else(|| {
             // We use the stdlib's "custom" [`io::ErrorKind`] for this expected/benign error that
             // occurs during a Layer 4 network health check, to indicate it can be ignored higher up
             io::Error::new(
@@ -462,6 +480,45 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                 "peer terminated connection before sending bytes",
             )
         })?;
+
+        if commands::is_ssl_request(&packet.data) {
+            let ssl_request = commands::ssl_request(&packet.data)
+                .map_err(|e| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("bad client handshake; got {:?}", e),
+                    )
+                })?
+                .1;
+
+            if ssl_request
+                .capabilities
+                .contains(CapabilityFlags::CLIENT_SSL)
+            {
+                // switch to ssl
+                self.tls_acceptor.as_ref().ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidData, "TLS acceptor not set")
+                })?;
+
+                self.conn
+                    .stream
+                    .switch_to_tls(self.tls_acceptor.clone().unwrap())
+                    .await?;
+
+                // The connection has been switched to TLS successfully. Read the handshake
+                // again as per TLS handshake protocol.
+                self.conn.set_seq(packet.seq + 1);
+                packet = self.conn.next().await?.ok_or_else(|| {
+                    // We use the stdlib's "custom" [`io::ErrorKind`] for this expected/benign error that
+                    // occurs during a Layer 4 network health check, to indicate it can be ignored higher up
+                    io::Error::new(
+                        io::ErrorKind::Other,
+                        "peer terminated connection before sending handshake after TLS connection",
+                    )
+                })?;
+            }
+        }
+
         let handshake = commands::client_handshake(&packet.data)
             .map_err(|e| match e {
                 nom::Err::Incomplete(_) => io::Error::new(
