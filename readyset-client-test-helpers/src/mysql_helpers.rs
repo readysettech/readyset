@@ -100,6 +100,7 @@ impl Adapter for MySQLAdapter {
             },
             s,
             false,
+            None,
         )
         .await
         .unwrap()

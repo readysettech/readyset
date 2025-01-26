@@ -7,6 +7,8 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::resultset::MAX_POOL_ROW_CAPACITY;
 
+use crate::tls::SwitchableStream;
+
 /// The maximum size of data we can be sent in a single mysql packet.
 ///
 /// The limit is 24 bits as the mysql header protocol uses 24 bits to encode the length of the packet.
@@ -20,7 +22,7 @@ pub const MAX_PACKET_CHUNK_SIZE: usize = 16_777_215;
 
 const MAX_POOL_BUFFERS: usize = 64;
 
-pub struct PacketConn<S> {
+pub struct PacketConn<S: AsyncRead + AsyncWrite + Unpin> {
     // read variables
     // A buffer to hold incoming socket bytes, while building up for a complete packet.
     read_buffer: BytesMut,
@@ -31,7 +33,7 @@ pub struct PacketConn<S> {
     /// Reusable packets
     preallocated: Vec<QueuedPacket>,
 
-    pub stream: S,
+    pub stream: SwitchableStream<S>,
 }
 
 /// Type for packets being enqueued in the packet writer.
@@ -142,7 +144,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PacketConn<S> {
             seq: 0,
             queue: Vec::new(),
             preallocated: Vec::new(),
-            stream: s,
+            stream: SwitchableStream::new(s),
         }
     }
 }

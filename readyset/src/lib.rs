@@ -63,6 +63,9 @@ use tokio_stream::wrappers::TcpListenerStream;
 use tracing::{debug, debug_span, error, info, info_span, span, warn, Level};
 use tracing_futures::Instrument;
 
+use std::io::Read;
+use tokio_native_tls::{native_tls, TlsAcceptor};
+
 // readyset_alloc initializes the global allocator
 extern crate readyset_alloc;
 
@@ -390,6 +393,25 @@ pub struct Options {
     /// If set, `address` will reject cache ddl statements.
     #[arg(long, env = "CACHE_DDL_ADDRESS", hide = true)]
     cache_ddl_address: Option<SocketAddr>,
+
+    /// The pkcs12 identity file (certificate and key) used by ReadySet for establishing TLS
+    /// connections as the server.
+    ///
+    /// ReadySet will not accept TLS connections if there is no identity file specified.
+    #[arg(long, env = "READYSET_IDENTITY_FILE")]
+    readyset_identity_file: Option<String>,
+
+    /// Password for the pkcs12 identity file used by ReadySet for establishing TLS connections as
+    /// the server.
+    ///
+    /// If password is not provided, ReadySet will try using an empty string to unlock the identity
+    /// file.
+    #[arg(
+        long,
+        requires = "readyset_identity_file",
+        env = "READYSET_IDENTITY_FILE_PASSWORD"
+    )]
+    readyset_identity_file_password: Option<String>,
 }
 
 impl Options {
@@ -460,6 +482,27 @@ impl Options {
                 Ok(dt)
             }
         }
+    }
+
+    pub fn tls_acceptor(&self) -> anyhow::Result<Option<Arc<TlsAcceptor>>> {
+        let Some(ref path) = self.readyset_identity_file else {
+            return Ok(None);
+        };
+
+        let mut identity_file = std::fs::File::open(path)?;
+        let mut identity = vec![];
+        identity_file.read_to_end(&mut identity)?;
+
+        let password = self
+            .readyset_identity_file_password
+            .clone()
+            .unwrap_or_default();
+
+        let tls_identity = native_tls::Identity::from_pkcs12(&identity, &password)?;
+
+        Ok(Some(Arc::new(TlsAcceptor::from(
+            native_tls::TlsAcceptor::new(tls_identity)?,
+        ))))
     }
 }
 

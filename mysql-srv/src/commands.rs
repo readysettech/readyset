@@ -111,6 +111,11 @@ pub fn change_user(
     ))
 }
 
+pub fn is_ssl_request(i: &[u8]) -> IResult<&[u8], bool> {
+    let (i, capabilities) = map(le_u32, CapabilityFlags::from_bits_truncate)(i)?;
+    Ok((i, capabilities.contains(CapabilityFlags::CLIENT_SSL)))
+}
+
 /// <https://dev.mysql.com/doc/internals/en/connection-phase-packets.html#packet-Protocol::HandshakeResponse41>
 pub fn client_handshake(i: &[u8]) -> IResult<&[u8], ClientHandshake<'_>> {
     let (i, capabilities) = map(le_u32, CapabilityFlags::from_bits_truncate)(i)?;
@@ -253,6 +258,19 @@ mod tests {
     use super::*;
     use crate::myc::constants::{CapabilityFlags, UTF8_GENERAL_CI};
     use crate::packet::PacketConn;
+
+    #[tokio::test]
+    async fn it_detects_ssl_request() {
+        let mut data = [
+            0x20, 0x00, 0x00, 0x01, 0x05, 0xae, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01, 0x08, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
+        let r: Cursor<&mut [u8]> = Cursor::new(&mut data[..]);
+        let mut pr = PacketConn::new(r);
+        let packet = pr.next().await.unwrap().unwrap();
+        assert!(is_ssl_request(&packet.data).unwrap().1);
+    }
 
     #[tokio::test]
     async fn it_parses_handshake() {
