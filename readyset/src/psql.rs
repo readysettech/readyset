@@ -1,4 +1,3 @@
-use std::io::Read;
 use std::sync::Arc;
 
 use clap::Parser;
@@ -6,7 +5,7 @@ use readyset_adapter::upstream_database::LazyUpstream;
 use readyset_errors::ReadySetResult;
 use readyset_psql::{AuthenticationMethod, PostgreSqlQueryHandler, PostgreSqlUpstream};
 use tokio::net;
-use tokio_native_tls::{native_tls, TlsAcceptor};
+use tokio_native_tls::TlsAcceptor;
 use tracing::error;
 
 use crate::ConnectionHandler;
@@ -14,21 +13,6 @@ use crate::ConnectionHandler;
 // readyset-psql specific options
 #[derive(Clone, Debug, Parser)]
 pub struct Options {
-    /// The pkcs12 identity file (certificate and key) used by ReadySet for establishing TLS
-    /// connections as the server.
-    ///
-    /// ReadySet will not accept TLS connections if there is no identity file specified.
-    #[arg(long, env = "READYSET_IDENTITY_FILE")]
-    readyset_identity_file: Option<String>,
-
-    /// Password for the pkcs12 identity file used by ReadySet for establishing TLS connections as
-    /// the server.
-    ///
-    /// If password is not provided, ReadySet will try using an empty string to unlock the identity
-    /// file.
-    #[arg(long, requires = "readyset_identity_file")]
-    readyset_identity_file_password: Option<String>,
-
     /// Authentication method to use for PostgreSQL clients
     #[arg(
         long,
@@ -38,10 +22,13 @@ pub struct Options {
     postgres_authentication_method: AuthenticationMethod,
 }
 
-/// Contains psql-srv specific `Options` and whether to enable statement logging.
 pub struct Config {
+    /// Contains psql-srv specific `Options`
     pub options: Options,
+    /// Whether to log statements received by the client
     pub enable_statement_logging: bool,
+    /// Optional struct to accept a TLS handshake and return a `TlsConnection`.
+    pub tls_acceptor: Option<Arc<TlsAcceptor>>,
 }
 
 #[derive(Clone)]
@@ -54,39 +41,12 @@ pub struct PsqlHandler {
     pub tls_acceptor: Option<Arc<TlsAcceptor>>,
 }
 
-/// Load the `native_tls::Identity` from user provided `Config`.
-fn load_pkcs12_identity(options: &Options) -> ReadySetResult<Option<native_tls::Identity>> {
-    let Some(ref path) = options.readyset_identity_file else {
-        return Ok(None);
-    };
-
-    let mut identity_file = std::fs::File::open(path)?;
-    let mut identity = vec![];
-    identity_file.read_to_end(&mut identity)?;
-
-    let password = options
-        .readyset_identity_file_password
-        .clone()
-        .unwrap_or_default();
-
-    Ok(Some(native_tls::Identity::from_pkcs12(
-        &identity, &password,
-    )?))
-}
-
 impl PsqlHandler {
     pub fn new(config: Config) -> ReadySetResult<PsqlHandler> {
-        let tls_acceptor = match load_pkcs12_identity(&config.options)? {
-            Some(identity) => Some(Arc::new(TlsAcceptor::from(native_tls::TlsAcceptor::new(
-                identity,
-            )?))),
-            None => None,
-        };
-
         Ok(PsqlHandler {
             enable_statement_logging: config.enable_statement_logging,
             authentication_method: config.options.postgres_authentication_method,
-            tls_acceptor,
+            tls_acceptor: config.tls_acceptor,
         })
     }
 }

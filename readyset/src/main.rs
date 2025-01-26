@@ -14,6 +14,7 @@ fn main() -> anyhow::Result<()> {
             default_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 3307),
             connection_handler: MySqlHandler {
                 enable_statement_logging: options.tracing.statement_logging,
+                tls_acceptor: options.tls_acceptor()?,
             },
             database_type: DatabaseType::MySQL,
             parse_dialect: nom_sql::Dialect::MySQL,
@@ -26,6 +27,7 @@ fn main() -> anyhow::Result<()> {
             connection_handler: PsqlHandler::new(readyset::psql::Config {
                 options: options.psql_options.clone(),
                 enable_statement_logging: options.tracing.statement_logging,
+                tls_acceptor: options.tls_acceptor()?,
             })?,
             database_type: DatabaseType::PostgreSQL,
             parse_dialect: nom_sql::Dialect::PostgreSQL,

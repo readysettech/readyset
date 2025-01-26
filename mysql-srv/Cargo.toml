@@ -25,6 +25,7 @@ sha-1 = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
+tokio-native-tls = { workspace = true }
 tracing = { workspace = true }
 
 readyset-adapter-types = { path = "../readyset-adapter-types" }

@@ -678,6 +678,7 @@ fn start_adapter(args: SystemBenchArgs) -> anyhow::Result<()> {
                 ),
                 connection_handler: MySqlHandler {
                     enable_statement_logging: false,
+                    tls_acceptor: None,
                 },
                 database_type: DatabaseType::MySQL,
                 parse_dialect: nom_sql::Dialect::MySQL,
