@@ -495,13 +495,11 @@ impl<'a> NoriaAdapter<'a> {
             _ => {}
         }
 
-        info!("MySQL connected");
-        info!(binlog_position = %current_pos);
-
         // Let Controller know that the initial snapshotting is complete. Ignores the error, which
         // will not occur unless the Controller dropped the rx half of this channel.
         let _ = notification_channel.send(ReplicatorMessage::SnapshotDone);
 
+        info!(position = %current_pos, "Streaming replication started");
         adapter
             .main_loop(
                 &mut current_pos,
@@ -758,8 +756,7 @@ impl<'a> NoriaAdapter<'a> {
         // will not occur unless the Controller dropped the rx half of this channel.
         let _ = notification_channel.send(ReplicatorMessage::SnapshotDone);
 
-        info!("Streaming replication started");
-
+        info!(position = %min_pos, "Streaming replication started");
         adapter
             .main_loop(&mut min_pos, None, notification_channel, controller_channel)
             .await?;
