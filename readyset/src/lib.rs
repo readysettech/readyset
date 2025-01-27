@@ -505,12 +505,18 @@ impl Options {
         )?))
     }
 
-    pub fn tls_acceptor(&self) -> Option<Arc<TlsAcceptor>> {
-        match self.load_pkcs12_identity().ok()? {
-            Some(identity) => Some(Arc::new(TlsAcceptor::from(
-                native_tls::TlsAcceptor::new(identity).ok()?,
-            ))),
-            None => None,
+    pub fn tls_acceptor(&self) -> anyhow::Result<Option<Arc<TlsAcceptor>>> {
+        match self.load_pkcs12_identity() {
+            Ok(Some(identity)) => Ok(Some(Arc::new(TlsAcceptor::from(
+                native_tls::TlsAcceptor::new(identity)?,
+            )))),
+            Ok(None) => Ok(None),
+            Err(err) => {
+                bail!(
+                    "Provided --readyset-identity-file could not parsed properly: {:}",
+                    err
+                );
+            }
         }
     }
 }
