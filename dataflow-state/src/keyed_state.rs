@@ -486,7 +486,7 @@ impl KeyedState {
             }};
         }
 
-        let (rs, key) = match *self {
+        let (rs, key) = match self {
             KeyedState::SingleHash(ref mut m) if !m.is_empty() => {
                 let index = seed % m.len();
                 let rows = m.swap_remove_index(index).map(|(k, rs)| (rs, vec![k]));
@@ -570,7 +570,7 @@ impl KeyedState {
             }};
         }
 
-        match *self {
+        match self {
             KeyedState::AllRows(_) => panic!("Empty-column index cannot be partial"),
             KeyedState::SingleBTree(ref mut m) => m.remove(&(key[0])),
             KeyedState::DoubleBTree(ref mut m) => m.remove(&MakeKey::from_key(key)),

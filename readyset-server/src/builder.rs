@@ -27,7 +27,7 @@ pub struct Builder {
     external_addr: SocketAddr,
     leader_eligible: bool,
     domain_scheduling_config: WorkerSchedulingConfig,
-    /// The telelemetry sender
+    /// The telemetry sender
     pub telemetry: TelemetrySender,
     wait_for_failpoint: bool,
     unquery: bool,

@@ -23,13 +23,13 @@ pub enum NodeType {
 
 impl NodeType {
     pub(super) fn take(&mut self) -> Self {
-        match *self {
-            NodeType::Base(ref mut b) => NodeType::Base(b.take()),
-            NodeType::Egress(ref mut e) => NodeType::Egress(e.take()),
-            NodeType::Reader(ref mut r) => NodeType::Reader(r.take()),
-            NodeType::Sharder(ref mut s) => NodeType::Sharder(s.take()),
+        match self {
+            NodeType::Base(b) => NodeType::Base(b.take()),
+            NodeType::Egress(e) => NodeType::Egress(e.take()),
+            NodeType::Reader(r) => NodeType::Reader(r.take()),
+            NodeType::Sharder(s) => NodeType::Sharder(s.take()),
             NodeType::Ingress => NodeType::Ingress,
-            NodeType::Internal(ref mut i) => NodeType::Internal(i.clone()),
+            NodeType::Internal(i) => NodeType::Internal(i.clone()),
             NodeType::Source => NodeType::Source,
             NodeType::Dropped => NodeType::Dropped,
         }
@@ -62,7 +62,7 @@ impl NodeType {
             NodeType::Reader(_) => "R".to_string(),
             NodeType::Sharder(_) => "÷".to_string(),
             NodeType::Ingress => "→|".to_string(),
-            NodeType::Internal(ref i) => Ingredient::description(i, detailed),
+            NodeType::Internal(i) => Ingredient::description(i, detailed),
             NodeType::Source => "⊥".to_string(),
             NodeType::Dropped => "☒".to_string(),
         }

@@ -665,12 +665,11 @@ fn inform_col_changes(
 /// graph until the `Migration` is committed (using `Migration::commit`).
 pub struct Migration<'df> {
     pub(super) dataflow_state: &'df mut DfState,
-    pub(in crate::controller) changes: MigrationNodeChanges,
+    pub(super) changes: MigrationNodeChanges,
     pub(super) columns: Vec<(NodeIndex, ColumnChange)>,
     pub(super) readers: HashMap<NodeIndex, NodeIndex>,
     pub(super) worker: Option<WorkerIdentifier>,
     pub(super) dialect: Dialect,
-
     pub(super) start: Instant,
 }
 

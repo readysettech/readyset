@@ -68,7 +68,6 @@ impl fmt::Display for ExprId {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-// crate viz for tests
 pub(crate) struct Recipe {
     /// Maintains lower-level state, but not the graph itself. Lazily initialized.
     inc: SqlIncorporator,
@@ -119,7 +118,6 @@ impl Recipe {
     }
 
     /// Set the MIR configuration for this recipe
-    // crate viz for tests
     pub(crate) fn set_mir_config(&mut self, mir_config: super::mir::Config) {
         self.inc.set_mir_config(mir_config)
     }
@@ -183,7 +181,6 @@ impl Recipe {
     /// state accordingly.
     /// All the MIR graph changes are added to the [`Migration`], but it's up to the caller
     /// to call [`Migration::commit`] to also update the dataflow state.
-    // crate viz for tests
     pub(crate) fn activate(
         &mut self,
         mig: &mut Migration<'_>,

@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::fmt;
+use std::fmt::{self, Display, Formatter};
 use std::time::Instant;
 
 use dataflow_state::PointKey;
@@ -60,9 +60,9 @@ pub enum NodeOperator {
     TopK(topk::TopK),
 }
 
-impl fmt::Display for NodeOperator {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match *self {
+impl Display for NodeOperator {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
             NodeOperator::Aggregation(_) => write!(f, "Aggregation"),
             NodeOperator::Extremum(_) => write!(f, "Extremum"),
             NodeOperator::Concat(_) => write!(f, "Concat"),
@@ -79,34 +79,34 @@ impl fmt::Display for NodeOperator {
 
 macro_rules! impl_ingredient_fn_mut {
     ($self:ident, $fn:ident, $( $arg:ident ),* ) => {
-        match *$self {
-            NodeOperator::Aggregation(ref mut i) => i.$fn($($arg),*),
-            NodeOperator::Extremum(ref mut i) => i.$fn($($arg),*),
-            NodeOperator::Concat(ref mut i) => i.$fn($($arg),*),
-            NodeOperator::Join(ref mut i) => i.$fn($($arg),*),
-            NodeOperator::Paginate(ref mut i) => i.$fn($($arg),*),
-            NodeOperator::Project(ref mut i) => i.$fn($($arg),*),
-            NodeOperator::Union(ref mut i) => i.$fn($($arg),*),
-            NodeOperator::Identity(ref mut i) => i.$fn($($arg),*),
-            NodeOperator::Filter(ref mut i) => i.$fn($($arg),*),
-            NodeOperator::TopK(ref mut i) => i.$fn($($arg),*),
+        match $self {
+            NodeOperator::Aggregation(i) => i.$fn($($arg),*),
+            NodeOperator::Extremum(i) => i.$fn($($arg),*),
+            NodeOperator::Concat(i) => i.$fn($($arg),*),
+            NodeOperator::Join(i) => i.$fn($($arg),*),
+            NodeOperator::Paginate(i) => i.$fn($($arg),*),
+            NodeOperator::Project(i) => i.$fn($($arg),*),
+            NodeOperator::Union(i) => i.$fn($($arg),*),
+            NodeOperator::Identity(i) => i.$fn($($arg),*),
+            NodeOperator::Filter(i) => i.$fn($($arg),*),
+            NodeOperator::TopK(i) => i.$fn($($arg),*),
         }
     }
 }
 
 macro_rules! impl_ingredient_fn_ref {
     ($self:ident, $fn:ident, $( $arg:ident ),* ) => {
-        match *$self {
-            NodeOperator::Aggregation(ref i) => i.$fn($($arg),*),
-            NodeOperator::Extremum(ref i) => i.$fn($($arg),*),
-            NodeOperator::Concat(ref i) => i.$fn($($arg),*),
-            NodeOperator::Join(ref i) => i.$fn($($arg),*),
-            NodeOperator::Paginate(ref i) => i.$fn($($arg),*),
-            NodeOperator::Project(ref i) => i.$fn($($arg),*),
-            NodeOperator::Union(ref i) => i.$fn($($arg),*),
-            NodeOperator::Identity(ref i) => i.$fn($($arg),*),
-            NodeOperator::Filter(ref i) => i.$fn($($arg),*),
-            NodeOperator::TopK(ref i) => i.$fn($($arg),*),
+        match $self {
+            NodeOperator::Aggregation(i) => i.$fn($($arg),*),
+            NodeOperator::Extremum(i) => i.$fn($($arg),*),
+            NodeOperator::Concat(i) => i.$fn($($arg),*),
+            NodeOperator::Join(i) => i.$fn($($arg),*),
+            NodeOperator::Paginate(i) => i.$fn($($arg),*),
+            NodeOperator::Project(i) => i.$fn($($arg),*),
+            NodeOperator::Union(i) => i.$fn($($arg),*),
+            NodeOperator::Identity(i) => i.$fn($($arg),*),
+            NodeOperator::Filter(i) => i.$fn($($arg),*),
+            NodeOperator::TopK(i) => i.$fn($($arg),*),
         }
     }
 }
