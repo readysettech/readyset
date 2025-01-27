@@ -2,6 +2,7 @@ use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use bytes::Bytes;
 use postgres::SimpleQueryMessage;
 use postgres_protocol::Oid;
 use postgres_types::{Kind, Type};
@@ -17,7 +18,7 @@ use crate::codec::decoder;
 use crate::error::Error;
 use crate::message::BackendMessage::{self, *};
 use crate::message::FrontendMessage::{self, *};
-use crate::message::StatementName::*;
+use crate::message::StatementName::{self, *};
 use crate::message::TransferFormat::{self, *};
 use crate::message::{
     CommandCompleteTag, DeallocationType, FieldDescription, SaslInitialResponse, TransactionState,
@@ -182,6 +183,38 @@ impl Protocol {
         self.allow_tls_connections = true;
     }
 
+    #[inline]
+    fn get_ready_message(version: String) -> smallvec::SmallVec<[BackendMessage; 2]> {
+        smallvec![
+            AuthenticationOk,
+            BackendMessage::ParameterStatus {
+                parameter_name: "client_encoding".to_owned(),
+                parameter_value: "UTF8".to_owned(),
+            },
+            BackendMessage::ParameterStatus {
+                parameter_name: "DateStyle".to_owned(),
+                parameter_value: "ISO".to_owned(),
+            },
+            BackendMessage::ParameterStatus {
+                parameter_name: "TimeZone".to_owned(),
+                parameter_value: "UTC".to_owned(),
+            },
+            BackendMessage::ParameterStatus {
+                parameter_name: "standard_conforming_strings".to_owned(),
+                parameter_value: "on".to_owned(),
+            },
+            BackendMessage::ParameterStatus {
+                parameter_name: "integer_datetimes".to_owned(),
+                parameter_value: "on".to_owned(),
+            },
+            BackendMessage::ParameterStatus {
+                parameter_name: "server_version".to_owned(),
+                parameter_value: version,
+            },
+            BackendMessage::ready_for_query(TransactionState::NotInTransaction),
+        ]
+    }
+
     /// The core implementation of the backend side of the PostgreSQL frontend/backend protocol.
     /// This implementation processes a message received from the frontend, forwards suitable
     /// requests to a `Backend`, and returns appropriate responses as a `Result`.
@@ -204,194 +237,32 @@ impl Protocol {
         channel: &mut Channel<C>,
     ) -> Result<Response<B::Resultset>, Error> {
         trace!(?message, "protocol on_request");
-        let get_ready_message = |version| {
-            smallvec![
-                AuthenticationOk,
-                BackendMessage::ParameterStatus {
-                    parameter_name: "client_encoding".to_owned(),
-                    parameter_value: "UTF8".to_owned(),
-                },
-                BackendMessage::ParameterStatus {
-                    parameter_name: "DateStyle".to_owned(),
-                    parameter_value: "ISO".to_owned(),
-                },
-                BackendMessage::ParameterStatus {
-                    parameter_name: "TimeZone".to_owned(),
-                    parameter_value: "UTC".to_owned(),
-                },
-                BackendMessage::ParameterStatus {
-                    parameter_name: "standard_conforming_strings".to_owned(),
-                    parameter_value: "on".to_owned(),
-                },
-                BackendMessage::ParameterStatus {
-                    parameter_name: "integer_datetimes".to_owned(),
-                    parameter_value: "on".to_owned(),
-                },
-                BackendMessage::ParameterStatus {
-                    parameter_name: "server_version".to_owned(),
-                    parameter_value: version,
-                },
-                BackendMessage::ready_for_query(TransactionState::NotInTransaction),
-            ]
-        };
         match self.state {
             State::StartingUp => match message {
-                // A request for an SSL connection. This will come before a StartupMessage.
-                SSLRequest => {
-                    if self.allow_tls_connections {
-                        // Allow the SSL request. ReadySet responds to the TLS handshake as the
-                        // server, and afterwards returns to `State::StartingUp`.
-                        self.state = State::SslHandshake;
-                        Ok(Response::Message(BackendMessage::ssl_response_willing()))
-                    } else {
-                        Ok(Response::Message(BackendMessage::ssl_response_unwilling()))
-                    }
-                }
-
-                // A request to start up a connection, with some metadata provided.
+                SSLRequest => Ok(Response::Message(self.on_ssl_request())),
                 StartupMessage { database, user, .. } => {
-                    let database = database
-                        .ok_or_else(|| Error::Unsupported("database is required".to_string()))?;
-                    let response = match backend.on_init(database.borrow()).await? {
-                        crate::CredentialsNeeded::None => {
-                            self.state = State::Ready;
-                            get_ready_message(backend.version())
-                        }
-                        crate::CredentialsNeeded::Cleartext => {
-                            self.state = State::AuthenticatingCleartext {
-                                user: user.ok_or(Error::NoUserSpecified)?,
-                            };
-                            smallvec![AuthenticationCleartextPassword]
-                        }
-                        crate::CredentialsNeeded::ScramSha256 => {
-                            self.state =
-                                State::AuthenticatingSasl(SaslState::RequestedAuthentication {
-                                    user: user.ok_or(Error::NoUserSpecified)?,
-                                });
-                            smallvec![AuthenticationSasl {
-                                allow_channel_binding: self.allow_tls_connections
-                            }]
-                        }
-                    };
-
-                    channel.set_start_up_complete();
-                    Ok(Response::Messages(response))
+                    self.on_startup_message(backend, database, user, channel)
+                        .await
                 }
-
                 m => {
                     println!("FAILED TO HANDLE MESSAGE: {m:?}");
                     Err(Error::UnsupportedMessage(m))
                 }
             },
-
             State::AuthenticatingCleartext { ref user } => match message {
                 Authenticate { mut body } => {
-                    let password = decoder::decode_password_message_body(&mut body)?;
-                    backend
-                        .credentials_for_user(user)
-                        .filter(|c| match c {
-                            Credentials::Any => true,
-                            Credentials::CleartextPassword(expected_password) => {
-                                &password == *expected_password
-                            }
-                        })
-                        .ok_or_else(|| Error::AuthenticationFailure {
-                            username: user.to_string(),
-                        })?;
-
-                    self.state = State::Ready;
-
-                    Ok(Response::Messages(get_ready_message(backend.version())))
+                    self.on_authenticate_cleartext(backend, user.clone(), &mut body)
+                        .await
                 }
-
                 m => Err(Error::UnsupportedMessage(m)),
             },
-
             State::AuthenticatingSasl(SaslState::RequestedAuthentication { ref user }) => {
-                let Authenticate { mut body } = message else {
+                let Authenticate { body } = message else {
                     return Err(Error::UnsupportedMessage(message));
                 };
-
-                let password = match backend.credentials_for_user(user) {
-                    None => {
-                        return Err(Error::AuthenticationFailure {
-                            username: user.to_string(),
-                        })
-                    }
-                    Some(Credentials::Any) => {
-                        self.state = State::Ready;
-                        return Ok(Response::Messages(get_ready_message(backend.version())));
-                    }
-                    Some(Credentials::CleartextPassword(pw)) => pw,
-                };
-
-                let SaslInitialResponse {
-                    authentication_mechanism,
-                    scram_data,
-                } = decoder::decode_sasl_initial_response_body(&mut body)?;
-                let client_first_message = ClientFirstMessage::parse(&scram_data)?;
-
-                // > If the flag is set to "y" and the server supports channel binding, the server
-                // > MUST fail authentication.  This is because if the client sets the channel
-                // > binding flag to "y", then the client must have believed that the server did not
-                // > support channel binding -- if the server did in fact support channel binding,
-                // > then this is an indication that there has been a downgrade attack (e.g., an
-                // > attacker changed the server's mechanism list to exclude the -PLUS suffixed
-                // > SCRAM mechanism name(s)).
-                if self.allow_tls_connections
-                    && client_first_message
-                        .channel_binding_support()
-                        .is_supported_but_not_used()
-                {
-                    return Err(Error::Unknown(
-                        "SCRAM supported but not used by client".into(),
-                    ));
-                }
-
-                if ![
-                    SCRAM_SHA_256_AUTHENTICATION_METHOD,
-                    SCRAM_SHA_256_SSL_AUTHENTICATION_METHOD,
-                ]
-                .contains(&authentication_mechanism.as_str())
-                {
-                    return Err(Error::Unsupported(format!(
-                        "Authentication mechanism \"{authentication_mechanism}\""
-                    )));
-                }
-
-                if let ClientChannelBindingSupport::Required(channel_binding_type) =
-                    client_first_message.channel_binding_support()
-                {
-                    if channel_binding_type != "tls-server-end-point" {
-                        return Err(Error::Unsupported(
-                            "channel binding type other than tls-server-end-point".into(),
-                        ));
-                    }
-                }
-
-                let client_first_message_bare = client_first_message.bare().to_owned();
-                let channel_binding_used =
-                    client_first_message.channel_binding_support().is_required();
-
-                let server_first_message =
-                    ServerFirstMessage::new(client_first_message, password.as_bytes())?;
-                let sasl_data = server_first_message.to_string();
-
-                self.state = State::AuthenticatingSasl(SaslState::ChallengeSent {
-                    user: user.clone(),
-                    salted_password: server_first_message.salted_password().to_owned(),
-                    client_first_message_bare,
-                    server_first_message: sasl_data.clone(),
-                    channel_binding_used,
-                });
-
-                Ok(Response::Message(
-                    BackendMessage::AuthenticationSaslContinue {
-                        sasl_data: sasl_data.into(),
-                    },
-                ))
+                self.on_sasl_requested_auth(backend, user.clone(), body)
+                    .await
             }
-
             State::AuthenticatingSasl(SaslState::ChallengeSent {
                 ref user,
                 ref salted_password,
@@ -402,27 +273,20 @@ impl Protocol {
                 let Authenticate { body } = message else {
                     return Err(Error::UnsupportedMessage(message));
                 };
-
-                let client_final_message = ClientFinalMessage::parse(&body)?;
-                if let Some(server_final_message) = client_final_message.verify(
-                    salted_password,
-                    client_first_message_bare,
-                    server_first_message,
-                    channel_binding_used
-                        .then_some(self.tls_server_end_point.as_deref())
-                        .flatten(),
-                )? {
-                    self.state = State::Ready;
-                    let mut messages = vec![BackendMessage::AuthenticationSaslFinal {
-                        sasl_data: server_final_message.to_string().into(),
-                    }];
-                    messages.extend(get_ready_message(backend.version()));
-                    Ok(Response::Messages(messages.into()))
-                } else {
-                    Err(Error::AuthenticationFailure {
-                        username: user.to_string(),
-                    })
-                }
+                let user = user.clone();
+                let salted_password = salted_password.clone();
+                let client_first_message_bare = client_first_message_bare.clone();
+                let server_first_message = server_first_message.clone();
+                self.on_sasl_challenge_sent(
+                    backend,
+                    user,
+                    &salted_password,
+                    &client_first_message_bare,
+                    &server_first_message,
+                    channel_binding_used,
+                    body,
+                )
+                .await
             }
 
             State::Error => match message {
@@ -436,376 +300,39 @@ impl Protocol {
             },
 
             _ => match message {
-                // A request to bind parameters to a prepared statement, creating a portal.
                 Bind {
                     prepared_statement_name,
                     portal_name,
                     params,
                     result_transfer_formats,
                 } => {
-                    let PreparedStatementData {
-                        prepared_statement_id,
-                        row_schema,
-                        ..
-                    } = self
-                        .prepared_statements
-                        .get(prepared_statement_name.borrow() as &str)
-                        .ok_or_else(|| {
-                            Error::MissingPreparedStatement(prepared_statement_name.to_string())
-                        })?;
-                    let n_cols = row_schema.len();
-                    let result_transfer_formats = match result_transfer_formats[..] {
-                        // If no format codes are provided, use the default format (`Text`).
-                        [] => vec![Text; n_cols],
-                        // If only one format code is provided, apply it to all columns.
-                        [f] => vec![f; n_cols],
-                        // Otherwise use the format codes that have been provided, as is.
-                        _ => {
-                            if result_transfer_formats.len() == n_cols {
-                                result_transfer_formats
-                            } else {
-                                return Err(Error::IncorrectFormatCount(n_cols));
-                            }
-                        }
-                    };
-                    self.portals.insert(
-                        portal_name.to_string(),
-                        PortalData {
-                            prepared_statement_id: *prepared_statement_id,
-                            prepared_statement_name: prepared_statement_name.to_string(),
-                            params,
-                            result_transfer_formats: Arc::new(result_transfer_formats),
-                        },
-                    );
-                    Ok(Response::Message(BindComplete))
-                }
-
-                // A request to close (deallocate) either a prepared statement or a portal.
-                Close { name } => {
-                    match name {
-                        Portal(name) => {
-                            self.portals.remove(name.borrow() as &str);
-                        }
-
-                        PreparedStatement(name) => {
-                            if let Some(id) = self
-                                .prepared_statements
-                                .get(name.borrow() as &str)
-                                .map(|d| d.prepared_statement_id)
-                            {
-                                backend.on_close(DeallocateId::Numeric(id)).await?;
-                                channel.clear_statement_param_types(name.borrow() as &str);
-                                self.prepared_statements.remove(name.borrow() as &str);
-                                // TODO Remove all portals referencing this prepared statement.
-                            } else {
-                                // we don't know anything about this statement id, so just
-                                // pass it through to the upstream. This is an unlikely path:
-                                // receiving a command message for a statement we did not prepare.
-                                // The only way it could happen is if the client issued a `PREPARE`
-                                // SQL statement, and then "deallocated" via a Close message.
-                                // :shrug:
-                                backend
-                                    .on_close(DeallocateId::from(name.to_string()))
-                                    .await?;
-                            }
-                        }
-                    };
-                    Ok(Response::Message(CloseComplete))
-                }
-
-                // A request to describe either a prepared statement or a portal.
-                Describe { name } => match name {
-                    Portal(name) => {
-                        let Protocol {
-                            portals,
-                            extended_types,
-                            ..
-                        } = self;
-                        let PortalData {
-                            prepared_statement_name,
-                            result_transfer_formats,
-                            ..
-                        } = portals
-                            .get(name.borrow() as &str)
-                            .ok_or_else(|| Error::MissingPortal(name.to_string()))?;
-                        let PreparedStatementData { row_schema, .. } = self
-                            .prepared_statements
-                            .get(prepared_statement_name)
-                            .ok_or_else(|| {
-                                Error::InternalError("missing prepared statement".to_string())
-                            })?;
-                        debug_assert_eq!(row_schema.len(), result_transfer_formats.len());
-
-                        // row_schema defines the types of columns to be returned. if there's
-                        // no columns to be returned, then there's no rows returned and thus
-                        // `NoData`
-                        if row_schema.is_empty() {
-                            Ok(Response::Message(NoData))
-                        } else {
-                            let mut field_descriptions = Vec::with_capacity(row_schema.len());
-                            for (i, f) in row_schema.iter().zip(result_transfer_formats.iter()) {
-                                field_descriptions.push(
-                                    make_field_description(i, *f, backend, extended_types).await?,
-                                );
-                            }
-                            Ok(Response::Message(RowDescription { field_descriptions }))
-                        }
-                    }
-
-                    PreparedStatement(name) => {
-                        let Protocol {
-                            prepared_statements,
-                            extended_types,
-                            ..
-                        } = self;
-                        let PreparedStatementData {
-                            param_schema,
-                            row_schema,
-                            ..
-                        } = prepared_statements
-                            .get(name.borrow() as &str)
-                            .ok_or_else(|| Error::MissingPreparedStatement(name.to_string()))?;
-
-                        // row_schema defines the types of columns to be returned. if there's
-                        // no columns to be returned, then there's no rows returned and thus
-                        // `NoData`
-                        let data_descriptor = if row_schema.is_empty() {
-                            NoData
-                        } else {
-                            let mut field_descriptions = Vec::with_capacity(row_schema.len());
-                            for i in row_schema {
-                                field_descriptions.push(
-                                    make_field_description(
-                                        i,
-                                        TRANSFER_FORMAT_PLACEHOLDER,
-                                        backend,
-                                        extended_types,
-                                    )
-                                    .await?,
-                                );
-                            }
-                            RowDescription { field_descriptions }
-                        };
-
-                        Ok(Response::Messages(smallvec![
-                            ParameterDescription {
-                                parameter_data_types: param_schema.clone(),
-                            },
-                            data_descriptor,
-                        ]))
-                    }
-                },
-
-                // A request to execute a portal (a combination of a prepared statement with
-                // parameter values).
-                Execute { portal_name, .. } => {
-                    self.state = State::Extended;
-                    let PortalData {
-                        prepared_statement_id,
+                    self.on_bind::<B>(
+                        &prepared_statement_name,
+                        &portal_name,
                         params,
                         result_transfer_formats,
-                        ..
-                    } = self
-                        .portals
-                        .get(portal_name.borrow() as &str)
-                        .ok_or_else(|| Error::MissingPreparedStatement(portal_name.to_string()))?;
-                    let response = backend
-                        .on_execute(*prepared_statement_id, params, result_transfer_formats)
-                        .await?;
-                    let res = if let Select { resultset, .. } = response {
-                        Ok(Response::Stream {
-                            header: None,
-                            resultset,
-                            result_transfer_formats: Some(result_transfer_formats.clone()),
-                            trailer: None,
-                        })
-                    } else {
-                        let command_complete = match response {
-                            Insert(n) => BackendMessage::CommandComplete {
-                                tag: CommandCompleteTag::Insert(n),
-                            },
-                            Update(n) => BackendMessage::CommandComplete {
-                                tag: CommandCompleteTag::Update(n),
-                            },
-                            Delete(n) => BackendMessage::CommandComplete {
-                                tag: CommandCompleteTag::Delete(n),
-                            },
-                            Command(tag) => BackendMessage::PassThroughCommandComplete(tag.into()),
-                            #[allow(clippy::unreachable)]
-                            Select { .. } => {
-                                return Err(Error::InternalError(
-                                    "Received Select response for Execute".to_string(),
-                                ));
-                            }
-                            SimpleQuery(_) => {
-                                return Err(Error::InternalError(
-                                    "Received SimpleQuery response for Execute".to_string(),
-                                ));
-                            }
-                            Deallocate(..) => {
-                                return Err(Error::InternalError(
-                                    "Received Deallocate command for Execute".to_string(),
-                                ));
-                            }
-                            Stream { .. } => {
-                                return Err(Error::InternalError(
-                                    "Received Stream response for Execute".to_string(),
-                                ));
-                            }
-                        };
-                        Ok(Response::Message(command_complete))
-                    };
-                    self.state = State::Ready;
-                    res
+                    )
+                    .await
                 }
-
-                // A request to directly execute a complete SQL statement, without creating a
-                // prepared statement.
-                Query { query } => {
-                    let response = backend.on_query(query.borrow()).await?;
-                    if let Select { schema, resultset } = response {
-                        let mut field_descriptions = Vec::with_capacity(schema.len());
-                        for i in schema {
-                            field_descriptions.push(
-                                make_field_description(&i, Text, backend, &mut self.extended_types)
-                                    .await?,
-                            );
-                        }
-
-                        Ok(Response::Stream {
-                            header: Some(RowDescription { field_descriptions }),
-                            resultset,
-                            result_transfer_formats: None,
-                            trailer: Some(BackendMessage::ready_for_query(
-                                self.transaction_state(backend),
-                            )),
-                        })
-                    } else if let Stream { resultset } = response {
-                        trace!("protocol response stream");
-                        Ok(Response::Stream {
-                            header: None,
-                            resultset,
-                            result_transfer_formats: None,
-                            trailer: Some(BackendMessage::ready_for_query(
-                                self.transaction_state(backend),
-                            )),
-                        })
-                    } else if let SimpleQuery(resp) = response {
-                        let mut messages = smallvec![];
-                        let mut processing_select = false;
-                        for msg in resp {
-                            trace!(?msg, "building simplequery resp");
-                            match msg {
-                                SimpleQueryMessage::Row(row) => {
-                                    if !processing_select {
-                                        // Create a message for the RowDescription. We use the
-                                        // PassThrough version since this message comes directly
-                                        // from tokio-postgres.
-                                        messages.push(BackendMessage::PassThroughRowDescription(
-                                            row.fields().to_vec(),
-                                        ));
-                                        processing_select = true;
-                                    }
-                                    // Create a message for each row
-                                    messages.push(BackendMessage::PassThroughSimpleRow(row))
-                                }
-                                SimpleQueryMessage::CommandComplete(CommandCompleteContents {
-                                    fields,
-                                    tag,
-                                    ..
-                                }) => {
-                                    if let Some(f) = fields {
-                                        messages.push(BackendMessage::PassThroughRowDescription(
-                                            f.to_vec(),
-                                        ));
-                                    }
-                                    messages.push(BackendMessage::PassThroughCommandComplete(tag));
-                                    processing_select = false;
-                                }
-                                _ => {
-                                    return Err(Error::InternalError(
-                                        "Unexpected SimpleQuery message variant".to_string(),
-                                    ));
-                                }
-                            }
-                        }
-                        messages.push(BackendMessage::ready_for_query(
-                            self.transaction_state(backend),
-                        ));
-                        Ok(Response::Messages(messages))
-                    } else {
-                        let command_complete = match response {
-                            Insert(n) => BackendMessage::CommandComplete {
-                                tag: CommandCompleteTag::Insert(n),
-                            },
-                            Update(n) => BackendMessage::CommandComplete {
-                                tag: CommandCompleteTag::Update(n),
-                            },
-                            Delete(n) => BackendMessage::CommandComplete {
-                                tag: CommandCompleteTag::Delete(n),
-                            },
-                            Command(tag) => BackendMessage::PassThroughCommandComplete(tag.into()),
-                            Deallocate(statement_id) => BackendMessage::CommandComplete {
-                                tag: self.on_deallocate(backend, channel, statement_id).await?,
-                            },
-                            // We have already handled these cases above, so they are unexpected
-                            #[allow(clippy::unreachable)]
-                            Select { .. } => {
-                                return Err(Error::InternalError("Unexpected Select".to_string()));
-                            }
-                            SimpleQuery(_) => {
-                                return Err(Error::InternalError(
-                                    "Unexpected SimpleQuery".to_string(),
-                                ));
-                            }
-                            Stream { .. } => {
-                                return Err(Error::InternalError("Unexpected Stream".to_string()));
-                            }
-                        };
-                        Ok(Response::Messages(smallvec![
-                            command_complete,
-                            BackendMessage::ready_for_query(self.transaction_state(backend)),
-                        ]))
-                    }
+                Close { name } => self.on_close(backend, name, channel).await,
+                Describe { name } => self.on_describe(backend, name).await,
+                Execute { portal_name, .. } => {
+                    self.on_execute(backend, portal_name.borrow() as &str).await
                 }
-
-                // A request to create a prepared statement.
+                Query { query } => self.on_query(backend, query.borrow(), channel).await,
                 Parse {
                     prepared_statement_name,
                     query,
                     parameter_data_types,
                 } => {
-                    self.state = State::Extended;
-
-                    if prepared_statement_name.is_empty() {
-                        if let Some(id) = self
-                            .prepared_statements
-                            .remove(prepared_statement_name.borrow() as &str)
-                            .map(|d| d.prepared_statement_id)
-                        {
-                            backend.on_close(DeallocateId::Numeric(id)).await?;
-                            channel.clear_statement_param_types(&prepared_statement_name);
-                        }
-                    }
-
-                    let PrepareResponse {
-                        prepared_statement_id,
-                        param_schema,
-                        row_schema,
-                    } = backend.on_prepare(&query, &parameter_data_types).await?;
-                    channel.set_statement_param_types(
+                    self.on_parse(
+                        backend,
                         prepared_statement_name.borrow() as &str,
-                        param_schema.clone(),
-                    );
-                    self.prepared_statements.insert(
-                        prepared_statement_name.to_string(),
-                        PreparedStatementData {
-                            prepared_statement_id,
-                            param_schema,
-                            row_schema,
-                        },
-                    );
-                    Ok(Response::Message(ParseComplete))
+                        query.borrow(),
+                        parameter_data_types,
+                        channel,
+                    )
+                    .await
                 }
 
                 // A request to synchronize state. Generally sent by the frontend after a query
@@ -827,6 +354,203 @@ impl Protocol {
         }
     }
 
+    // A request for an SSL connection. This will come before a StartupMessage.
+    #[inline]
+    fn on_ssl_request(&mut self) -> BackendMessage {
+        if self.allow_tls_connections {
+            self.state = State::SslHandshake;
+            BackendMessage::ssl_response_willing()
+        } else {
+            BackendMessage::ssl_response_unwilling()
+        }
+    }
+
+    // A request to start up a connection, with some metadata provided.
+    #[inline]
+    async fn on_startup_message<B: PsqlBackend, C: AsyncRead + AsyncWrite + Unpin>(
+        &mut self,
+        backend: &mut B,
+        database: Option<BytesStr>,
+        user: Option<BytesStr>,
+        channel: &mut Channel<C>,
+    ) -> Result<Response<B::Resultset>, Error> {
+        let database =
+            database.ok_or_else(|| Error::Unsupported("database is required".to_string()))?;
+        let response = match backend.on_init(database.borrow()).await? {
+            crate::CredentialsNeeded::None => {
+                self.state = State::Ready;
+                Self::get_ready_message(backend.version())
+            }
+            crate::CredentialsNeeded::Cleartext => {
+                self.state = State::AuthenticatingCleartext {
+                    user: user.ok_or(Error::NoUserSpecified)?,
+                };
+                smallvec![AuthenticationCleartextPassword]
+            }
+            crate::CredentialsNeeded::ScramSha256 => {
+                self.state = State::AuthenticatingSasl(SaslState::RequestedAuthentication {
+                    user: user.ok_or(Error::NoUserSpecified)?,
+                });
+                smallvec![AuthenticationSasl {
+                    allow_channel_binding: self.allow_tls_connections
+                }]
+            }
+        };
+
+        channel.set_start_up_complete();
+        Ok(Response::Messages(response))
+    }
+
+    #[inline]
+    async fn on_authenticate_cleartext<B: PsqlBackend>(
+        &mut self,
+        backend: &mut B,
+        user: BytesStr,
+        body: &mut Bytes,
+    ) -> Result<Response<B::Resultset>, Error> {
+        let password = decoder::decode_password_message_body(body)?;
+        backend
+            .credentials_for_user(&user)
+            .filter(|c| match c {
+                Credentials::Any => true,
+                Credentials::CleartextPassword(expected_password) => {
+                    &password == *expected_password
+                }
+            })
+            .ok_or_else(|| Error::AuthenticationFailure {
+                username: user.to_string(),
+            })?;
+
+        self.state = State::Ready;
+
+        Ok(Response::Messages(Self::get_ready_message(
+            backend.version(),
+        )))
+    }
+
+    #[inline]
+    async fn on_sasl_requested_auth<B: PsqlBackend>(
+        &mut self,
+        backend: &mut B,
+        user: BytesStr,
+        mut body: Bytes,
+    ) -> Result<Response<B::Resultset>, Error> {
+        let password = match backend.credentials_for_user(&user) {
+            None => {
+                return Err(Error::AuthenticationFailure {
+                    username: user.to_string(),
+                })
+            }
+            Some(Credentials::Any) => {
+                self.state = State::Ready;
+                return Ok(Response::Messages(Self::get_ready_message(
+                    backend.version(),
+                )));
+            }
+            Some(Credentials::CleartextPassword(pw)) => pw,
+        };
+
+        let SaslInitialResponse {
+            authentication_mechanism,
+            scram_data,
+        } = decoder::decode_sasl_initial_response_body(&mut body)?;
+        let client_first_message = ClientFirstMessage::parse(&scram_data)?;
+
+        // > If the flag is set to "y" and the server supports channel binding, the server
+        // > MUST fail authentication.  This is because if the client sets the channel
+        // > binding flag to "y", then the client must have believed that the server did not
+        // > support channel binding -- if the server did in fact support channel binding,
+        // > then this is an indication that there has been a downgrade attack (e.g., an
+        // > attacker changed the server's mechanism list to exclude the -PLUS suffixed
+        // > SCRAM mechanism name(s)).
+        if self.allow_tls_connections
+            && client_first_message
+                .channel_binding_support()
+                .is_supported_but_not_used()
+        {
+            return Err(Error::Unknown(
+                "SCRAM supported but not used by client".into(),
+            ));
+        }
+
+        if ![
+            SCRAM_SHA_256_AUTHENTICATION_METHOD,
+            SCRAM_SHA_256_SSL_AUTHENTICATION_METHOD,
+        ]
+        .contains(&authentication_mechanism.as_str())
+        {
+            return Err(Error::Unsupported(format!(
+                "Authentication mechanism \"{authentication_mechanism}\""
+            )));
+        }
+
+        if let ClientChannelBindingSupport::Required(channel_binding_type) =
+            client_first_message.channel_binding_support()
+        {
+            if channel_binding_type != "tls-server-end-point" {
+                return Err(Error::Unsupported(
+                    "channel binding type other than tls-server-end-point".into(),
+                ));
+            }
+        }
+
+        let client_first_message_bare = client_first_message.bare().to_owned();
+        let channel_binding_used = client_first_message.channel_binding_support().is_required();
+
+        let server_first_message =
+            ServerFirstMessage::new(client_first_message, password.as_bytes())?;
+        let sasl_data = server_first_message.to_string();
+
+        self.state = State::AuthenticatingSasl(SaslState::ChallengeSent {
+            user: user.clone(),
+            salted_password: server_first_message.salted_password().to_owned(),
+            client_first_message_bare,
+            server_first_message: sasl_data.clone(),
+            channel_binding_used,
+        });
+
+        Ok(Response::Message(
+            BackendMessage::AuthenticationSaslContinue {
+                sasl_data: sasl_data.into(),
+            },
+        ))
+    }
+
+    #[inline]
+    #[allow(clippy::too_many_arguments)]
+    async fn on_sasl_challenge_sent<B: PsqlBackend>(
+        &mut self,
+        backend: &mut B,
+        user: BytesStr,
+        salted_password: &[u8],
+        client_first_message_bare: &str,
+        server_first_message: &str,
+        channel_binding_used: bool,
+        body: Bytes,
+    ) -> Result<Response<B::Resultset>, Error> {
+        let client_final_message = ClientFinalMessage::parse(&body)?;
+        if let Some(server_final_message) = client_final_message.verify(
+            salted_password,
+            client_first_message_bare,
+            server_first_message,
+            channel_binding_used
+                .then_some(self.tls_server_end_point.as_deref())
+                .flatten(),
+        )? {
+            self.state = State::Ready;
+            let mut messages = vec![BackendMessage::AuthenticationSaslFinal {
+                sasl_data: server_final_message.to_string().into(),
+            }];
+            messages.extend(Self::get_ready_message(backend.version()));
+            Ok(Response::Messages(messages.into()))
+        } else {
+            Err(Error::AuthenticationFailure {
+                username: user.to_string(),
+            })
+        }
+    }
+
+    #[inline]
     async fn on_deallocate<B: PsqlBackend, C: AsyncRead + AsyncWrite + Unpin>(
         &mut self,
         backend: &mut B,
@@ -859,6 +583,396 @@ impl Protocol {
         }
 
         Ok(CommandCompleteTag::Deallocate(DeallocationType::Single))
+    }
+
+    #[inline]
+    // A request to directly execute a complete SQL statement, without creating a
+    // prepared statement.
+    async fn on_query<B: PsqlBackend, C: AsyncRead + AsyncWrite + Unpin>(
+        &mut self,
+        backend: &mut B,
+        query: &str,
+        channel: &mut Channel<C>,
+    ) -> Result<Response<B::Resultset>, Error> {
+        let response = backend.on_query(query).await?;
+        if let Select { schema, resultset } = response {
+            let mut field_descriptions = Vec::with_capacity(schema.len());
+            for i in schema {
+                field_descriptions.push(
+                    make_field_description(&i, Text, backend, &mut self.extended_types).await?,
+                );
+            }
+
+            Ok(Response::Stream {
+                header: Some(RowDescription { field_descriptions }),
+                resultset,
+                result_transfer_formats: None,
+                trailer: Some(BackendMessage::ready_for_query(
+                    self.transaction_state(backend),
+                )),
+            })
+        } else if let Stream { resultset } = response {
+            trace!("protocol response stream");
+            Ok(Response::Stream {
+                header: None,
+                resultset,
+                result_transfer_formats: None,
+                trailer: Some(BackendMessage::ready_for_query(
+                    self.transaction_state(backend),
+                )),
+            })
+        } else if let SimpleQuery(resp) = response {
+            let mut messages = smallvec![];
+            let mut processing_select = false;
+            for msg in resp {
+                trace!(?msg, "building simplequery resp");
+                match msg {
+                    SimpleQueryMessage::Row(row) => {
+                        if !processing_select {
+                            // Create a message for the RowDescription. We use the
+                            // PassThrough version since this message comes directly
+                            // from tokio-postgres.
+                            messages.push(BackendMessage::PassThroughRowDescription(
+                                row.fields().to_vec(),
+                            ));
+                            processing_select = true;
+                        }
+                        // Create a message for each row
+                        messages.push(BackendMessage::PassThroughSimpleRow(row))
+                    }
+                    SimpleQueryMessage::CommandComplete(CommandCompleteContents {
+                        fields,
+                        tag,
+                        ..
+                    }) => {
+                        if let Some(f) = fields {
+                            messages.push(BackendMessage::PassThroughRowDescription(f.to_vec()));
+                        }
+                        messages.push(BackendMessage::PassThroughCommandComplete(tag));
+                        processing_select = false;
+                    }
+                    _ => {
+                        return Err(Error::InternalError(
+                            "Unexpected SimpleQuery message variant".to_string(),
+                        ));
+                    }
+                }
+            }
+            messages.push(BackendMessage::ready_for_query(
+                self.transaction_state(backend),
+            ));
+            Ok(Response::Messages(messages))
+        } else {
+            let command_complete = match response {
+                Insert(n) => BackendMessage::CommandComplete {
+                    tag: CommandCompleteTag::Insert(n),
+                },
+                Update(n) => BackendMessage::CommandComplete {
+                    tag: CommandCompleteTag::Update(n),
+                },
+                Delete(n) => BackendMessage::CommandComplete {
+                    tag: CommandCompleteTag::Delete(n),
+                },
+                Command(tag) => BackendMessage::PassThroughCommandComplete(tag.into()),
+                Deallocate(statement_id) => BackendMessage::CommandComplete {
+                    tag: self.on_deallocate(backend, channel, statement_id).await?,
+                },
+                // We have already handled these cases above, so they are unexpected
+                #[allow(clippy::unreachable)]
+                Select { .. } => {
+                    return Err(Error::InternalError("Unexpected Select".to_string()));
+                }
+                SimpleQuery(_) => {
+                    return Err(Error::InternalError("Unexpected SimpleQuery".to_string()));
+                }
+                Stream { .. } => {
+                    return Err(Error::InternalError("Unexpected Stream".to_string()));
+                }
+            };
+            Ok(Response::Messages(smallvec![
+                command_complete,
+                BackendMessage::ready_for_query(self.transaction_state(backend)),
+            ]))
+        }
+    }
+
+    // A request to create a prepared statement.
+    #[inline]
+    async fn on_parse<B: PsqlBackend, C: AsyncRead + AsyncWrite + Unpin>(
+        &mut self,
+        backend: &mut B,
+        prepared_statement_name: &str,
+        query: &str,
+        parameter_data_types: Vec<Type>,
+        channel: &mut Channel<C>,
+    ) -> Result<Response<B::Resultset>, Error> {
+        self.state = State::Extended;
+
+        if prepared_statement_name.is_empty() {
+            if let Some(id) = self
+                .prepared_statements
+                .remove(prepared_statement_name as &str)
+                .map(|d| d.prepared_statement_id)
+            {
+                backend.on_close(DeallocateId::Numeric(id)).await?;
+                channel.clear_statement_param_types(prepared_statement_name);
+            }
+        }
+
+        let PrepareResponse {
+            prepared_statement_id,
+            param_schema,
+            row_schema,
+        } = backend.on_prepare(query, &parameter_data_types).await?;
+        channel.set_statement_param_types(prepared_statement_name as &str, param_schema.clone());
+        self.prepared_statements.insert(
+            prepared_statement_name.to_string(),
+            PreparedStatementData {
+                prepared_statement_id,
+                param_schema,
+                row_schema,
+            },
+        );
+        Ok(Response::Message(ParseComplete))
+    }
+
+    // A request to bind parameters to a prepared statement, creating a portal.
+    #[inline]
+    async fn on_bind<B: PsqlBackend>(
+        &mut self,
+        prepared_statement_name: &str,
+        portal_name: &str,
+        params: Vec<PsqlValue>,
+        result_transfer_formats: Vec<TransferFormat>,
+    ) -> Result<Response<B::Resultset>, Error> {
+        let PreparedStatementData {
+            prepared_statement_id,
+            row_schema,
+            ..
+        } = self
+            .prepared_statements
+            .get(prepared_statement_name)
+            .ok_or_else(|| Error::MissingPreparedStatement(prepared_statement_name.to_string()))?;
+        let n_cols = row_schema.len();
+        let result_transfer_formats = match result_transfer_formats[..] {
+            // If no format codes are provided, use the default format (`Text`).
+            [] => vec![Text; n_cols],
+            // If only one format code is provided, apply it to all columns.
+            [f] => vec![f; n_cols],
+            // Otherwise use the format codes that have been provided, as is.
+            _ => {
+                if result_transfer_formats.len() == n_cols {
+                    result_transfer_formats
+                } else {
+                    return Err(Error::IncorrectFormatCount(n_cols));
+                }
+            }
+        };
+        self.portals.insert(
+            portal_name.to_string(),
+            PortalData {
+                prepared_statement_id: *prepared_statement_id,
+                prepared_statement_name: prepared_statement_name.to_string(),
+                params,
+                result_transfer_formats: Arc::new(result_transfer_formats),
+            },
+        );
+        Ok(Response::Message(BindComplete))
+    }
+
+    // A request to describe either a prepared statement or a portal.
+    #[inline]
+    async fn on_describe<B: PsqlBackend>(
+        &mut self,
+        backend: &mut B,
+        name: StatementName,
+    ) -> Result<Response<B::Resultset>, Error> {
+        match name {
+            Portal(name) => {
+                let Protocol {
+                    portals,
+                    extended_types,
+                    ..
+                } = self;
+                let PortalData {
+                    prepared_statement_name,
+                    result_transfer_formats,
+                    ..
+                } = portals
+                    .get(name.borrow() as &str)
+                    .ok_or_else(|| Error::MissingPortal(name.to_string()))?;
+                let PreparedStatementData { row_schema, .. } = self
+                    .prepared_statements
+                    .get(prepared_statement_name)
+                    .ok_or_else(|| {
+                        Error::InternalError("missing prepared statement".to_string())
+                    })?;
+                debug_assert_eq!(row_schema.len(), result_transfer_formats.len());
+
+                // row_schema defines the types of columns to be returned. if there's
+                // no columns to be returned, then there's no rows returned and thus
+                // `NoData`
+                if row_schema.is_empty() {
+                    Ok(Response::Message(NoData))
+                } else {
+                    let mut field_descriptions = Vec::with_capacity(row_schema.len());
+                    for (i, f) in row_schema.iter().zip(result_transfer_formats.iter()) {
+                        field_descriptions
+                            .push(make_field_description(i, *f, backend, extended_types).await?);
+                    }
+                    Ok(Response::Message(RowDescription { field_descriptions }))
+                }
+            }
+            PreparedStatement(name) => {
+                let Protocol {
+                    prepared_statements,
+                    extended_types,
+                    ..
+                } = self;
+                let PreparedStatementData {
+                    param_schema,
+                    row_schema,
+                    ..
+                } = prepared_statements
+                    .get(name.borrow() as &str)
+                    .ok_or_else(|| Error::MissingPreparedStatement(name.to_string()))?;
+
+                // row_schema defines the types of columns to be returned. if there's
+                // no columns to be returned, then there's no rows returned and thus
+                // `NoData`
+                let data_descriptor = if row_schema.is_empty() {
+                    NoData
+                } else {
+                    let mut field_descriptions = Vec::with_capacity(row_schema.len());
+                    for i in row_schema {
+                        field_descriptions.push(
+                            make_field_description(
+                                i,
+                                TRANSFER_FORMAT_PLACEHOLDER,
+                                backend,
+                                extended_types,
+                            )
+                            .await?,
+                        );
+                    }
+                    RowDescription { field_descriptions }
+                };
+
+                Ok(Response::Messages(smallvec![
+                    ParameterDescription {
+                        parameter_data_types: param_schema.clone(),
+                    },
+                    data_descriptor,
+                ]))
+            }
+        }
+    }
+
+    // A request to execute a portal (a combination of a prepared statement with
+    // parameter values).
+    #[inline]
+    async fn on_execute<B: PsqlBackend>(
+        &mut self,
+        backend: &mut B,
+        portal_name: &str,
+    ) -> Result<Response<B::Resultset>, Error> {
+        self.state = State::Extended;
+        let PortalData {
+            prepared_statement_id,
+            params,
+            result_transfer_formats,
+            ..
+        } = self
+            .portals
+            .get(portal_name as &str)
+            .ok_or_else(|| Error::MissingPreparedStatement(portal_name.to_string()))?;
+        let response = backend
+            .on_execute(*prepared_statement_id, params, result_transfer_formats)
+            .await?;
+        let res = if let Select { resultset, .. } = response {
+            Ok(Response::Stream {
+                header: None,
+                resultset,
+                result_transfer_formats: Some(result_transfer_formats.clone()),
+                trailer: None,
+            })
+        } else {
+            let command_complete = match response {
+                Insert(n) => BackendMessage::CommandComplete {
+                    tag: CommandCompleteTag::Insert(n),
+                },
+                Update(n) => BackendMessage::CommandComplete {
+                    tag: CommandCompleteTag::Update(n),
+                },
+                Delete(n) => BackendMessage::CommandComplete {
+                    tag: CommandCompleteTag::Delete(n),
+                },
+                Command(tag) => BackendMessage::PassThroughCommandComplete(tag.into()),
+                #[allow(clippy::unreachable)]
+                Select { .. } => {
+                    return Err(Error::InternalError(
+                        "Received Select response for Execute".to_string(),
+                    ));
+                }
+                SimpleQuery(_) => {
+                    return Err(Error::InternalError(
+                        "Received SimpleQuery response for Execute".to_string(),
+                    ));
+                }
+                Deallocate(..) => {
+                    return Err(Error::InternalError(
+                        "Received Deallocate command for Execute".to_string(),
+                    ));
+                }
+                Stream { .. } => {
+                    return Err(Error::InternalError(
+                        "Received Stream response for Execute".to_string(),
+                    ));
+                }
+            };
+            Ok(Response::Message(command_complete))
+        };
+        self.state = State::Ready;
+        res
+    }
+
+    // A request to close (deallocate) either a prepared statement or a portal.
+    #[inline]
+    async fn on_close<B: PsqlBackend, C: AsyncRead + AsyncWrite + Unpin>(
+        &mut self,
+        backend: &mut B,
+        name: StatementName,
+        channel: &mut Channel<C>,
+    ) -> Result<Response<B::Resultset>, Error> {
+        match name {
+            Portal(name) => {
+                self.portals.remove(name.borrow() as &str);
+            }
+
+            PreparedStatement(name) => {
+                if let Some(id) = self
+                    .prepared_statements
+                    .get(name.borrow() as &str)
+                    .map(|d| d.prepared_statement_id)
+                {
+                    backend.on_close(DeallocateId::Numeric(id)).await?;
+                    channel.clear_statement_param_types(name.borrow() as &str);
+                    self.prepared_statements.remove(name.borrow() as &str);
+                    // TODO Remove all portals referencing this prepared statement.
+                } else {
+                    // we don't know anything about this statement id, so just
+                    // pass it through to the upstream. This is an unlikely path:
+                    // receiving a command message for a statement we did not prepare.
+                    // The only way it could happen is if the client issued a `PREPARE`
+                    // SQL statement, and then "deallocated" via a Close message.
+                    // :shrug:
+                    backend
+                        .on_close(DeallocateId::from(name.to_string()))
+                        .await?;
+                }
+            }
+        };
+        Ok(Response::Message(CloseComplete))
     }
 
     /// An error handler producing an `ErrorResponse` message.
