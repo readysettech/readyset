@@ -49,7 +49,7 @@ use crate::{Config, VolumeId};
 mod domain_handle;
 mod inner;
 mod keys;
-pub(crate) mod migrate; // crate viz for tests
+pub(crate) mod migrate;
 mod mir_to_flow;
 pub(crate) mod replication;
 pub(crate) mod schema;

@@ -376,7 +376,6 @@ impl SqlToMirConverter {
         Ok(leaf_node)
     }
 
-    // pub(super) viz for tests
     pub(super) fn get_flow_node_address(&self, name: &Relation) -> Option<DfNodeIndex> {
         self.relations
             .get(name)

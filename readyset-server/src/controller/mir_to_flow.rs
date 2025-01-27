@@ -784,13 +784,13 @@ fn make_join_node(
     // use as our join key
     if on.is_empty() {
         let mut make_cross_join_bogokey = |graph: &MirGraph, node: MirNodeIndex| {
+            let name = format!(
+                "{}_cross_join_bogokey",
+                graph[node].name().display_unquoted()
+            );
             make_project_node(
                 graph,
-                format!(
-                    "{}_cross_join_bogokey",
-                    graph[node].name().display_unquoted()
-                )
-                .into(),
+                name.into(),
                 node,
                 &graph
                     .columns(node)

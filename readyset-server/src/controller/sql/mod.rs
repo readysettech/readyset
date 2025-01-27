@@ -96,7 +96,6 @@ pub(crate) struct BaseSchema {
 /// * [`add_view`][Self::add_view], to add a new `VIEW`
 /// * [`add_query`][Self::add_query], to add a new cached query
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
-// crate viz for tests
 pub(crate) struct SqlIncorporator {
     mir_converter: SqlToMirConverter,
     leaf_addresses: HashMap<Relation, NodeIndex>,
