@@ -7,6 +7,7 @@ use nom_sql::{
     InValue, Relation, UnaryOperator,
 };
 use readyset_data::dialect::SqlEngine;
+use readyset_data::upstream_system_props::get_system_timezone;
 use readyset_data::{Collation, DfType, DfValue};
 use readyset_errors::{
     internal, internal_err, invalid_query, invalid_query_err, unsupported, unsupported_err,
@@ -942,10 +943,6 @@ fn infer_collation(name_opt: Option<CollationName>, ty: &DfType) -> ReadySetResu
     Ok(collation)
 }
 
-fn get_default_time_zone_name() -> String {
-    "Etc/UTC".to_string()
-}
-
 impl Expr {
     fn infer_case_result_type<'a>(
         then_types_it: impl Iterator<Item = &'a DfType>,
@@ -1131,9 +1128,7 @@ impl Expr {
                         }
                     };
 
-                    let default_time_zone = get_default_time_zone_name()
-                        .parse::<Tz>()
-                        .map_err(|_| internal_err!("Could not parse default time zone name"))?;
+                    let default_time_zone = get_system_timezone()?;
 
                     return Ok(Self::AtTimeZone {
                         expr: left,

@@ -28,6 +28,8 @@ pub use connection::{
 };
 pub use error::DatabaseError;
 
+const DEFAULT_TIMEZONE_NAME: &str = "Etc/UTC";
+
 #[allow(missing_docs)] // If we add docs they get added into --help binary text which is confusing
 #[derive(Debug, Clone, Parser, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UpstreamConfig {
@@ -218,6 +220,18 @@ impl UpstreamConfig {
             }
         }
         vec![]
+    }
+
+    pub fn default_timezone_name(&self) -> SqlIdentifier {
+        if let Some(Ok(db_url)) = self
+            .upstream_db_url
+            .as_ref()
+            .map(|url| url.parse::<DatabaseURL>())
+        {
+            db_url.default_timezone_name()
+        } else {
+            DEFAULT_TIMEZONE_NAME.into()
+        }
     }
 }
 
@@ -656,5 +670,9 @@ impl DatabaseURL {
         }
 
         paths
+    }
+
+    pub fn default_timezone_name(&self) -> SqlIdentifier {
+        DEFAULT_TIMEZONE_NAME.into()
     }
 }

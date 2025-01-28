@@ -41,6 +41,7 @@ mod serde;
 mod text;
 mod timestamp;
 mod r#type;
+pub mod upstream_system_props;
 
 pub use ndarray::{ArrayD, IxDyn};
 use proptest::arbitrary::Arbitrary;

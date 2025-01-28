@@ -211,6 +211,8 @@ pub trait UpstreamDatabase: Sized + Send {
     /// supports a multi-element schema search path, the concept of "currently connected database"
     /// in MySQL can be thought of as a schema search path that only has one element
     async fn schema_search_path(&mut self) -> Result<Vec<SqlIdentifier>, Self::Error>;
+
+    async fn timezone_name(&mut self) -> Result<SqlIdentifier, Self::Error>;
 }
 
 pub struct LazyUpstream<U> {
@@ -381,5 +383,9 @@ where
 
     async fn schema_search_path(&mut self) -> Result<Vec<SqlIdentifier>, Self::Error> {
         self.upstream().await?.schema_search_path().await
+    }
+
+    async fn timezone_name(&mut self) -> Result<SqlIdentifier, Self::Error> {
+        self.upstream().await?.timezone_name().await
     }
 }

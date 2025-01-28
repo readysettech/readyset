@@ -175,6 +175,7 @@ notify = { version = "8.0.0", default-features = false, features = [
 ] }
 num-integer = "0.1.46"
 num_cpus = "1.16.0"
+once_cell = "1.20.2"
 opentelemetry = "0.21.0"
 opentelemetry-otlp = "0.14.0"
 opentelemetry-semantic-conventions = "0.13"

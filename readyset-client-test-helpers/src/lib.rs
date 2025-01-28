@@ -19,6 +19,9 @@ use readyset_adapter::{
     ViewsSynchronizer,
 };
 use readyset_client::consensus::{Authority, LocalAuthorityStore};
+use readyset_data::upstream_system_props::{
+    init_system_props, UpstreamSystemProperties, DEFAULT_TIMEZONE_NAME,
+};
 use readyset_data::Dialect;
 use readyset_server::{Builder, DurabilityMode, Handle, LocalAuthority, ReadySetHandle};
 use readyset_util::shared_cache::SharedCache;
@@ -308,11 +311,22 @@ impl TestBuilder {
                         None
                     };
 
-                    let schema_search_path = if let Some(upstream) = &mut upstream {
-                        upstream.schema_search_path().await.unwrap()
+                    let mut sys_props = if let Some(upstream) = &mut upstream {
+                        UpstreamSystemProperties {
+                            search_path: upstream.schema_search_path().await.unwrap(),
+                            timezone_name: upstream.timezone_name().await.unwrap(),
+                        }
                     } else {
-                        Default::default()
+                        UpstreamSystemProperties {
+                            search_path: upstream_config.default_schema_search_path(),
+                            timezone_name: upstream_config.default_timezone_name(),
+                        }
                     };
+
+                    if init_system_props(&sys_props).is_err() {
+                        sys_props.timezone_name = DEFAULT_TIMEZONE_NAME.into();
+                        init_system_props(&sys_props).expect("Should not fail");
+                    }
 
                     let mut rh = ReadySetHandle::new(authority.clone()).await;
                     let adapter_rewrite_params = rh.adapter_rewrite_params().await.unwrap();
@@ -324,7 +338,7 @@ impl TestBuilder {
                         self.read_behavior,
                         A::EXPR_DIALECT,
                         A::DIALECT,
-                        schema_search_path,
+                        sys_props.search_path,
                         adapter_rewrite_params,
                     )
                     .await;

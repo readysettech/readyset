@@ -23,7 +23,7 @@ use failpoint_macros::set_failpoint;
 use futures_util::future::FutureExt;
 use futures_util::stream::{SelectAll, StreamExt};
 use health_reporter::{HealthReporter as AdapterHealthReporter, State as AdapterState};
-use nom_sql::{Relation, SqlIdentifier};
+use nom_sql::Relation;
 use readyset_adapter::backend::noria_connector::{NoriaConnector, ReadBehavior};
 use readyset_adapter::backend::{MigrationMode, UnsupportedSetMode};
 use readyset_adapter::http_router::NoriaAdapterHttpRouter;
@@ -42,6 +42,7 @@ use readyset_client::metrics::recorded;
 use readyset_client::ReadySetHandle;
 use readyset_client_metrics::QueryLogMode;
 use readyset_common::ulimit::maybe_increase_nofile_limit;
+use readyset_data::upstream_system_props::{init_system_props, UpstreamSystemProperties};
 use readyset_dataflow::Readers;
 use readyset_errors::{internal_err, ReadySetError};
 use readyset_server::metrics::{CompositeMetricsRecorder, MetricsRecorder};
@@ -526,21 +527,23 @@ where
     }
 }
 
-/// Spawn a task to query the upstream for its currently-configured schema search path in a loop
-/// until it succeeds, returning a lock that will contain the result when it finishes
+/// Spawn a task to query the upstream for its currently-configured schema search path and timezone name
+/// in a loop until it succeeds, returning a lock that will contain the result when it finishes
 ///
 /// NOTE: when we start tracking all configuration parameters, this should be folded into whatever
 /// loads those initially
-async fn load_schema_search_path<U>(
+async fn load_system_props<U>(
     upstream_config: UpstreamConfig,
     no_upstream_connections: bool,
-) -> Arc<RwLock<Result<Vec<SqlIdentifier>, U::Error>>>
+) -> Arc<RwLock<Result<UpstreamSystemProperties, U::Error>>>
 where
     U: UpstreamDatabase,
 {
     if no_upstream_connections {
-        let default_ssp = upstream_config.default_schema_search_path();
-        return Arc::new(RwLock::new(Ok(default_ssp)));
+        return Arc::new(RwLock::new(Ok(UpstreamSystemProperties {
+            search_path: upstream_config.default_schema_search_path(),
+            timezone_name: upstream_config.default_timezone_name(),
+        })));
     }
 
     let try_load = move |upstream_config: UpstreamConfig| async move {
@@ -548,7 +551,19 @@ where
             connect_upstream::<U>(upstream_config.clone(), no_upstream_connections).await?;
 
         match upstream {
-            Some(mut upstream) => upstream.schema_search_path().await,
+            Some(mut upstream) => {
+                match (
+                    upstream.schema_search_path().await,
+                    upstream.timezone_name().await,
+                ) {
+                    (Ok(search_path), Ok(timezone_name)) => Ok(UpstreamSystemProperties {
+                        search_path,
+                        timezone_name,
+                    }),
+                    (Err(ssp_err), _) => Err(ssp_err),
+                    (_, Err(tzn_err)) => Err(tzn_err),
+                }
+            }
             None => Ok(Default::default()),
         }
     };
@@ -557,7 +572,7 @@ where
     let e = match try_load(upstream_config.clone()).await {
         Ok(res) => return Arc::new(RwLock::new(Ok(res))),
         Err(error) => {
-            warn!(%error, "Loading initial schema search path failed, spawning retry loop");
+            warn!(%error, "Loading initial upstream system properties failed, spawning retry loop");
             error
         }
     };
@@ -959,7 +974,7 @@ where
             rt.block_on(fut);
         }
 
-        let schema_search_path = rt.block_on(load_schema_search_path::<H::UpstreamDatabase>(
+        let sys_props = rt.block_on(load_system_props::<H::UpstreamDatabase>(
             upstream_config.clone(),
             no_upstream_connections,
         ));
@@ -976,24 +991,31 @@ where
             let dry_run = matches!(migration_style, MigrationStyle::Explicit);
             let expr_dialect = self.expr_dialect;
             let parse_dialect = self.parse_dialect;
-            let schema_search_path = Arc::clone(&schema_search_path);
+            let sys_props = Arc::clone(&sys_props);
 
             rs_connect.in_scope(|| info!("Spawning migration handler task"));
             let fut = async move {
                 let connection = span!(Level::INFO, "migration task upstream database connection");
-                let ssp_retry_loop = async {
-                    loop {
-                        if let Ok(ssp) = &*schema_search_path.read().await {
-                            break ssp.clone();
+
+                let sys_props = {
+                    let retry_loop = async {
+                        loop {
+                            if let Ok(v) = &*sys_props.read().await {
+                                break v.clone();
+                            }
+                            sleep(UPSTREAM_CONNECTION_RETRY_INTERVAL).await
                         }
-                        sleep(UPSTREAM_CONNECTION_RETRY_INTERVAL).await
+                    };
+
+                    tokio::select! {
+                            v = retry_loop => v,
+                            _ = shutdown_rx.recv() => return Ok(()),
                     }
                 };
 
-                let schema_search_path = tokio::select! {
-                    schema_search_path = ssp_retry_loop => schema_search_path,
-                    _ = shutdown_rx.recv() => return Ok(()),
-                };
+                if let Err(e) = init_system_props(&sys_props) {
+                    info!("{e}");
+                }
 
                 let noria =
                     NoriaConnector::new(
@@ -1004,7 +1026,7 @@ where
                         noria_read_behavior,
                         expr_dialect,
                         parse_dialect,
-                        schema_search_path,
+                        sys_props.search_path,
                         adapter_rewrite_params,
                     )
                     .instrument(connection.in_scope(|| {
@@ -1161,7 +1183,7 @@ where
             });
 
             let upstream_config = upstream_config.clone();
-            let schema_search_path = Arc::clone(&schema_search_path);
+            let sys_props = Arc::clone(&sys_props);
             let status_reporter_clone = status_reporter.clone();
             let fut = async move {
                 let upstream_res = connect_upstream::<H::UpstreamDatabase>(
@@ -1179,8 +1201,12 @@ where
                             warn!(error = %e, "Failed to send upstream connected metric");
                         }
 
-                        match &*schema_search_path.read().await {
-                            Ok(ssp) => {
+                        match &*sys_props.read().await {
+                            Ok(sys_props) => {
+                                if let Err(e) = init_system_props(sys_props) {
+                                    info!("{e}");
+                                }
+
                                 let noria = NoriaConnector::new_with_local_reads(
                                     rh.clone(),
                                     auto_increments,
@@ -1190,7 +1216,7 @@ where
                                     r,
                                     expr_dialect,
                                     parse_dialect,
-                                    ssp.clone(),
+                                    sys_props.search_path.clone(),
                                     adapter_rewrite_params,
                                 )
                                 .instrument(debug_span!("Building noria connector"))
@@ -1209,13 +1235,13 @@ where
                             Err(error) => {
                                 error!(
                                     %error,
-                                    "Error loading initial schema search path from ~"
+                                    "Error loading initial upstream system properties from ~"
                                 );
                                 connection_handler
                                     .immediate_error(
                                         s,
                                         format!(
-                                            "Error loading initial schema search path from \
+                                            "Error loading initial upstream system properties from \
                                              upstream: {error}"
                                         ),
                                     )

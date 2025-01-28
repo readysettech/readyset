@@ -22,6 +22,10 @@ use readyset_adapter::upstream_database::LazyUpstream;
 use readyset_adapter::{ReadySetStatusReporter, UpstreamConfig, UpstreamDatabase};
 use readyset_client::consensus::{Authority, LocalAuthorityStore};
 use readyset_client::ReadySetHandle;
+use readyset_data::upstream_system_props::{
+    init_system_props, UpstreamSystemProperties, DEFAULT_TIMEZONE_NAME,
+};
+use readyset_data::DfValue;
 use readyset_mysql::{MySqlQueryHandler, MySqlUpstream};
 use readyset_psql::{PostgreSqlQueryHandler, PostgreSqlUpstream};
 use readyset_server::{Builder, LocalAuthority, ReuseConfigType};
@@ -256,14 +260,46 @@ impl TestScript {
         Ok(())
     }
 
+    async fn update_system_timezone(conn: &mut DatabaseConnection) -> anyhow::Result<()> {
+        let timezone_name = if matches!(conn, DatabaseConnection::PostgreSQL(..)) {
+            let res = Vec::<Vec<DfValue>>::try_from(conn.simple_query("show timezone").await?)?;
+            if let Some(row) = res.into_iter().at_most_one()? {
+                let val = row.into_iter().at_most_one()?;
+                match &val {
+                    Some(v) if v.is_string() => v.as_str().unwrap(),
+                    _ => DEFAULT_TIMEZONE_NAME,
+                }
+                .into()
+            } else {
+                DEFAULT_TIMEZONE_NAME.into()
+            }
+        } else {
+            // Have yet to implement system timezone support for MySQL
+            DEFAULT_TIMEZONE_NAME.into()
+        };
+        init_system_props(&UpstreamSystemProperties {
+            timezone_name,
+            ..Default::default()
+        })
+        .map_err(|e| anyhow!(e))
+    }
+
+    fn might_be_timezone_changing_statement(conn: &mut DatabaseConnection, stmt: &str) -> bool {
+        let stmt = stmt.to_lowercase();
+        stmt.contains("set ")
+            && if matches!(conn, DatabaseConnection::PostgreSQL(..)) {
+                stmt.contains("timezone")
+            } else {
+                stmt.contains("time_zone")
+            }
+    }
+
     pub async fn run_on_database(
         &self,
         opts: &RunOptions,
         conn: &mut DatabaseConnection,
         mut noria: Option<ReadySetHandle>,
     ) -> anyhow::Result<()> {
-        let mut prev_was_statement = false;
-
         let is_readyset = noria.is_some();
         let conditional_skip = |conditionals: &[Conditional]| {
             conditionals.iter().any(|s| match s {
@@ -275,6 +311,9 @@ impl TestScript {
             })
         };
 
+        let mut prev_was_statement = false;
+        let mut update_system_timezone = false;
+
         for record in &self.records {
             match record {
                 Record::Statement(stmt) => {
@@ -282,6 +321,9 @@ impl TestScript {
                         continue;
                     }
                     prev_was_statement = true;
+                    if Self::might_be_timezone_changing_statement(conn, stmt.command.as_str()) {
+                        update_system_timezone = true;
+                    }
                     if opts.verbose {
                         eprintln!("     > {}", stmt.command);
                     }
@@ -315,6 +357,13 @@ impl TestScript {
 
                     if opts.verbose {
                         eprintln!("     > {}", query.query);
+                    }
+
+                    if update_system_timezone {
+                        if let Err(e) = Self::update_system_timezone(conn).await {
+                            eprintln!("{e}");
+                        }
+                        update_system_timezone = false;
                     }
 
                     match self

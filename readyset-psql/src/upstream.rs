@@ -469,6 +469,16 @@ impl UpstreamDatabase for PostgreSqlUpstream {
             })
             .collect())
     }
+
+    async fn timezone_name(&mut self) -> Result<SqlIdentifier, Self::Error> {
+        let tz_name = self
+            .client
+            .query_one("SHOW timezone", &[])
+            .await?
+            .get::<_, String>("TimeZone");
+        debug!(%tz_name, "Loaded system timezone from upstream");
+        Ok(tz_name.into())
+    }
 }
 
 impl Drop for PostgreSqlUpstream {

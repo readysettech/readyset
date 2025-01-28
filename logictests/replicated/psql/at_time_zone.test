@@ -1,6 +1,5 @@
-
 statement ok
-ALTER SYSTEM SET timezone = 'Etc/UTC';
+ALTER SYSTEM SET timezone = 'Asia/Tokyo';
 
 statement ok
 SELECT pg_reload_conf();
@@ -17,38 +16,17 @@ insert into test (tm, tmz) values
 query Z rowsort
 SELECT tm AT TIME ZONE 'America/Chicago' from test limit 1;
 ----
-2018-09-02 12:09:19+00
+2018-09-02 21:09:19+09
 
 query Z rowsort
 SELECT tm AT TIME ZONE 'America/Los_Angeles' from test limit 1;
 ----
-2018-09-02 14:09:19+00
+2018-09-02 23:09:19+09
 
 query Z rowsort
 SELECT tm AT TIME ZONE 'Asia/Tokyo' from test limit 1;
 ----
-2018-09-01 22:09:19+00
-
-query Z rowsort
-SELECT tmz::timestamp AT TIME ZONE 'Asia/Tokyo' from test;
-----
-2018-09-02 02:09:19+00
-2018-09-02 03:09:19+00
-2018-09-02 04:09:19+00
-
-query Z rowsort
-SELECT tmz::timestamp AT TIME ZONE 'America/Chicago' from test;
-----
-2018-09-02 16:09:19+00
-2018-09-02 17:09:19+00
-2018-09-02 18:09:19+00
-
-query Z rowsort
-SELECT tmz::timestamp AT TIME ZONE 'America/Los_Angeles' from test;
-----
-2018-09-02 18:09:19+00
-2018-09-02 19:09:19+00
-2018-09-02 20:09:19+00
+2018-09-02 07:09:19+09
 
 query Z rowsort
 SELECT tmz AT TIME ZONE 'America/Chicago' from test;
@@ -58,12 +36,63 @@ SELECT tmz AT TIME ZONE 'America/Chicago' from test;
 2018-09-02 08:09:19
 
 query Z rowsort
-SELECT tmz AT TIME ZONE 'America/Los_Angeles' AT TIME ZONE 'Asia/Tokyo' from test;
+SELECT tmz AT TIME ZONE 'America/Los_Angeles' from test;
 ----
-2018-09-01 19:09:19+00
-2018-09-01 20:09:19+00
-2018-09-01 21:09:19+00
+2018-09-02 04:09:19
+2018-09-02 05:09:19
+2018-09-02 06:09:19
 
+query Z rowsort
+SELECT tmz AT TIME ZONE 'Asia/Tokyo' from test;
+----
+2018-09-02 20:09:19
+2018-09-02 21:09:19
+2018-09-02 22:09:19
 
+query Z rowsort
+SELECT tm AT TIME ZONE 'America/Los_Angeles' AT TIME ZONE 'America/Chicago' from test;
+----
+2018-09-02 09:09:19
+2018-09-02 09:09:19
+2018-09-02 09:09:19
 
+query Z rowsort
+SELECT tm AT TIME ZONE 'America/Chicago' AT TIME ZONE 'America/Chicago' from test;
+----
+2018-09-02 07:09:19
+2018-09-02 07:09:19
+2018-09-02 07:09:19
 
+query Z rowsort
+SELECT tm AT TIME ZONE 'America/Los_Angeles' AT TIME ZONE 'America/Chicago' AT TIME ZONE 'Asia/Tokyo' from test;
+----
+2018-09-02 09:09:19+09
+2018-09-02 09:09:19+09
+2018-09-02 09:09:19+09
+
+query Z rowsort
+SELECT tmz AT TIME ZONE 'America/Los_Angeles' AT TIME ZONE 'America/Chicago' from test;
+----
+2018-09-02 18:09:19+09
+2018-09-02 19:09:19+09
+2018-09-02 20:09:19+09
+
+query Z rowsort
+SELECT tmz AT TIME ZONE 'America/Chicago' AT TIME ZONE 'America/Chicago' from test;
+----
+2018-09-02 20:09:19+09
+2018-09-02 21:09:19+09
+2018-09-02 22:09:19+09
+
+query Z rowsort
+SELECT tmz AT TIME ZONE 'America/Los_Angeles' AT TIME ZONE 'America/Chicago' AT TIME ZONE 'Asia/Tokyo' from test;
+----
+2018-09-02 18:09:19
+2018-09-02 19:09:19
+2018-09-02 20:09:19
+
+statement ok
+ALTER SYSTEM SET timezone = 'Etc/UTC';
+
+statement ok
+SELECT pg_reload_conf();

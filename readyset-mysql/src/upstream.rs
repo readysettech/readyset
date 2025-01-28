@@ -16,6 +16,7 @@ use readyset_adapter::upstream_database::UpstreamDestination;
 use readyset_adapter::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
 use readyset_adapter_types::DeallocateId;
 use readyset_client_metrics::{recorded, QueryDestination};
+use readyset_data::upstream_system_props::DEFAULT_TIMEZONE_NAME;
 use readyset_data::DfValue;
 use readyset_errors::{internal_err, unsupported, ReadySetError, ReadySetResult};
 use tracing::{debug, error, info_span, Instrument};
@@ -433,6 +434,10 @@ impl UpstreamDatabase for MySqlUpstream {
 
     async fn schema_search_path(&mut self) -> Result<Vec<SqlIdentifier>, Self::Error> {
         Ok(self.database().into_iter().map(|s| s.into()).collect())
+    }
+
+    async fn timezone_name(&mut self) -> Result<SqlIdentifier, Self::Error> {
+        Ok(DEFAULT_TIMEZONE_NAME.into())
     }
 }
 
