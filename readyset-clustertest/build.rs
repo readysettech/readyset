@@ -4,8 +4,11 @@ use std::env;
 use std::path::Path;
 
 fn main() -> Result<()> {
-    if env::var("CLIPPY_ARGS").is_ok() {
-        // running via cargo clippy; don't bother compiling test dependencies
+    if env::var("CLIPPY_ARGS").is_ok()
+        || env::var("SKIP_CLUSTERTEST_BUILD").is_ok_and(|val| val.to_lowercase().as_str() == "true")
+    {
+        // running via cargo clippy or something else that isn't actually going to run clustertests,
+        // so don't bother compiling test dependencies
         return Ok(());
     }
     env::set_current_dir(Path::new(".."))?;
@@ -16,7 +19,6 @@ fn main() -> Result<()> {
         "build",
         "--target-dir",
         "target/clustertest",
-        "--release",
         "--bin",
         "readyset",
         "--bin",

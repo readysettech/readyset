@@ -11,6 +11,7 @@ upload_artifacts() {
 export DISABLE_TELEMETRY=true
 export PROPTEST_MAX_SHRINK_TIME=1800000
 export CARGO_TERM_PROGRESS_WHEN=never
+export SKIP_CLUSTERTEST_BUILD=true
 
 # If we aren't actually running run-tests.sh as a parallel job, just follow the
 # "job 0" path.
