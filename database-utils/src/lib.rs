@@ -219,6 +219,20 @@ impl UpstreamConfig {
         }
         vec![]
     }
+
+    pub fn default_timezone_name(&self) -> SqlIdentifier {
+        if self.upstream_db_url.is_some() {
+            if let Ok(ref db_url) = self
+                .upstream_db_url
+                .as_ref()
+                .unwrap()
+                .parse::<DatabaseURL>()
+            {
+                return db_url.default_timezone_name();
+            }
+        }
+        "Etc/UTC".into()
+    }
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
@@ -656,5 +670,9 @@ impl DatabaseURL {
         }
 
         paths
+    }
+
+    pub fn default_timezone_name(&self) -> SqlIdentifier {
+        "Etc/UTC".into()
     }
 }

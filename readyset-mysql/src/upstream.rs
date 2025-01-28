@@ -434,6 +434,10 @@ impl UpstreamDatabase for MySqlUpstream {
     async fn schema_search_path(&mut self) -> Result<Vec<SqlIdentifier>, Self::Error> {
         Ok(self.database().into_iter().map(|s| s.into()).collect())
     }
+
+    async fn timezone_name(&mut self) -> Result<SqlIdentifier, Self::Error> {
+        Ok("Etc/UTC".into())
+    }
 }
 
 impl Drop for MySqlUpstream {
