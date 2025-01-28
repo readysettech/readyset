@@ -105,7 +105,8 @@ mod tests {
         and_simple("1 and 1", "1");
         eq_simple("1 = 1", "1");
         if_null_builtin("ifnull(1, 1)", "1");
-        within_larger_expression("t.x + 4 + 5", "t.x + 9");
+        within_larger_expression_grouped("t.x + (4 + 5)", "t.x + 9");
+        within_larger_expression_left_associative("4 + 5 + t.x", "9 + t.x");
         doc_example("x = ifnull(y, 1 + (4 * 5))", "x = ifnull(y, 21)");
     }
 }
