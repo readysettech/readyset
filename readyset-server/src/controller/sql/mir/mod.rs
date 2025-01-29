@@ -16,7 +16,6 @@ use mir::node::{GroupedNodeType, MirNode, ProjectExpr, ViewKeyColumn};
 use mir::query::{MirBase, MirQuery};
 use mir::DfNodeIndex;
 pub use mir::{Column, NodeIndex};
-use nom_sql::analysis::visit::{walk_expr, Visitor};
 use petgraph::visit::Reversed;
 use petgraph::Direction;
 use readyset_client::ViewPlaceholder;
@@ -24,6 +23,7 @@ use readyset_errors::{
     internal, internal_err, invalid_query, invalid_query_err, invariant, invariant_eq, unsupported,
     unsupported_err, ReadySetError, ReadySetResult,
 };
+use readyset_sql::analysis::visit::{walk_expr, Visitor};
 use readyset_sql::analysis::{self, ReferredColumns};
 use readyset_sql::ast::{
     self, BinaryOperator, CaseWhenBranch, ColumnSpecification, CompoundSelectOperator,

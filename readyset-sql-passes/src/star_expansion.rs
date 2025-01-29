@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 use std::mem;
 
-use nom_sql::analysis::visit_mut::{self, VisitorMut};
 use readyset_errors::{ReadySetError, ReadySetResult};
+use readyset_sql::analysis::visit_mut::{self, VisitorMut};
 use readyset_sql::ast::{
     Column, Expr, FieldDefinitionExpr, NonReplicatedRelation, Relation, SelectStatement,
     SqlIdentifier, SqlQuery,

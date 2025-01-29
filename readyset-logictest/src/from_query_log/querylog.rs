@@ -6,7 +6,7 @@ use std::str::FromStr;
 use anyhow::{bail, Error};
 use chrono::{DateTime, FixedOffset, Utc};
 use enum_display_derive::Display;
-use nom_sql::analysis::visit_mut::VisitorMut;
+use readyset_sql::analysis::visit_mut::VisitorMut;
 use readyset_sql::ast::{Expr, ItemPlaceholder, Literal, SelectStatement, SqlQuery};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, Lines};
 

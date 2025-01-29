@@ -2,10 +2,10 @@ use std::collections::{HashMap, HashSet};
 use std::mem;
 
 use itertools::Itertools;
-use nom_sql::analysis::visit_mut::{
+use readyset_errors::{internal, invalid_query_err, ReadySetError, ReadySetResult};
+use readyset_sql::analysis::visit_mut::{
     walk_group_by_clause, walk_order_clause, walk_select_statement, VisitorMut,
 };
-use readyset_errors::{internal, invalid_query_err, ReadySetError, ReadySetResult};
 use readyset_sql::ast::{
     Column, FieldDefinitionExpr, GroupByClause, OrderClause, Relation, SelectStatement,
     SqlIdentifier, SqlQuery, TableExprInner,

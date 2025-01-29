@@ -3,13 +3,13 @@ use std::convert::{TryFrom, TryInto};
 use std::iter;
 
 use itertools::Itertools;
-use nom_sql::analysis::visit::{self, Visitor};
 use readyset_client::{ColumnSchema, Modification, Operation};
 use readyset_data::{Collation, DfType, DfValue, Dialect, TimestampTz};
 use readyset_errors::{
     bad_request_err, invalid_query, invalid_query_err, invariant, invariant_eq, unsupported,
     unsupported_err, ReadySetResult,
 };
+use readyset_sql::analysis::visit::{self, Visitor};
 use readyset_sql::ast::{
     self, BinaryOperator, Column, ColumnConstraint, CreateTableBody, DeleteStatement, Expr,
     InValue, InsertStatement, Literal, SelectStatement, SqlQuery, TableKey, UpdateStatement,

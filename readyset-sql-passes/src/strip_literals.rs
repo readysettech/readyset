@@ -1,7 +1,7 @@
 use std::borrow::Borrow;
 use std::mem;
 
-use nom_sql::analysis::visit_mut::VisitorMut;
+use readyset_sql::analysis::visit_mut::VisitorMut;
 use readyset_sql::ast::{ItemPlaceholder, Literal, SelectStatement};
 use serde::{Deserialize, Serialize};
 

@@ -3,6 +3,9 @@ use std::iter;
 
 use crate::ast::*;
 
+pub mod visit;
+pub mod visit_mut;
+
 /// Extension trait providing the `referred_tables` method to various parts of the AST
 pub trait ReferredTables {
     /// Return a set of all tables referred to in `self`
