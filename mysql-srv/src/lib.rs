@@ -25,7 +25,7 @@
 //! use database_utils::TlsMode;
 //! use mysql::prelude::*;
 //! use mysql_srv::*;
-//! use readyset_adapter_types::DeallocateId;
+//! use readyset_adapter_types::{DeallocateId, StatementId};
 //! use tokio::io::{AsyncRead, AsyncWrite};
 //!
 //! struct Backend;
@@ -34,16 +34,16 @@
 //!         &mut self,
 //!         _: &str,
 //!         info: StatementMetaWriter<'_, W>,
-//!         schema_cache: &mut HashMap<u32, CachedSchema>,
+//!         schema_cache: &mut HashMap<StatementId, CachedSchema>,
 //!     ) -> io::Result<()> {
-//!         info.reply(42, &[], &[]).await
+//!         info.reply(StatementId::from(42), &[], &[]).await
 //!     }
 //!     async fn on_execute(
 //!         &mut self,
-//!         _: u32,
+//!         _: StatementId,
 //!         _: ParamParser<'_>,
 //!         results: QueryResultWriter<'_, W>,
-//!         schema_cache: &mut HashMap<u32, CachedSchema>,
+//!         schema_cache: &mut HashMap<StatementId, CachedSchema>,
 //!     ) -> io::Result<()> {
 //!         results.completed(0, 0, None).await
 //!     }
@@ -180,7 +180,7 @@ use constants::{
 use database_utils::TlsMode;
 use error::{other_error, OtherErrorKind};
 use mysql_common::constants::CapabilityFlags;
-use readyset_adapter_types::{DeallocateId, ParsedCommand};
+use readyset_adapter_types::{DeallocateId, ParsedCommand, StatementId};
 use readyset_data::DfType;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net;
@@ -269,7 +269,7 @@ pub trait MySqlShim<S: AsyncRead + AsyncWrite + Unpin + Send> {
         &mut self,
         query: &str,
         info: StatementMetaWriter<'_, S>,
-        schema_cache: &mut HashMap<u32, CachedSchema>,
+        schema_cache: &mut HashMap<StatementId, CachedSchema>,
     ) -> io::Result<()>;
 
     /// Provides the server's version information along with Readyset indications
@@ -281,10 +281,10 @@ pub trait MySqlShim<S: AsyncRead + AsyncWrite + Unpin + Send> {
     /// query should be given using the provided [`QueryResultWriter`].
     async fn on_execute(
         &mut self,
-        id: u32,
+        id: StatementId,
         params: ParamParser<'_>,
         results: QueryResultWriter<'_, S>,
-        schema_cache: &mut HashMap<u32, CachedSchema>,
+        schema_cache: &mut HashMap<StatementId, CachedSchema>,
     ) -> io::Result<()>;
 
     /// Called when the client wishes to deallocate resources associated with a previously prepared
@@ -339,7 +339,7 @@ pub struct MySqlIntermediary<B, S: AsyncRead + AsyncWrite + Unpin> {
     shim: B,
     conn: packet::PacketConn<S>,
     /// A cache of schemas per statement id
-    schema_cache: HashMap<u32, CachedSchema>,
+    schema_cache: HashMap<StatementId, CachedSchema>,
     /// Whether to log statements received from a client
     enable_statement_logging: bool,
     /// The capabilities of the client
@@ -663,7 +663,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
     async fn run(mut self) -> Result<(), io::Error> {
         use crate::commands::Command;
 
-        let mut stmts: HashMap<u32, _> = HashMap::new();
+        let mut stmts: HashMap<StatementId, _> = HashMap::new();
         while let Some(packet) = self.conn.next().await? {
             self.conn.set_seq(packet.seq + 1);
             let cmd = commands::parse(&packet)
@@ -825,7 +825,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                 }
                 Command::ResetStmtData(stmt) => {
                     stmts
-                        .get_mut(&stmt)
+                        .get_mut(&stmt.into())
                         .ok_or_else(|| {
                             io::Error::new(
                                 io::ErrorKind::InvalidData,
@@ -837,7 +837,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                     writers::write_ok_packet(&mut self.conn, 0, 0, StatusFlags::empty()).await?;
                 }
                 Command::Execute { stmt, params } => {
-                    let state = stmts.get_mut(&stmt).ok_or_else(|| {
+                    let state = stmts.get_mut(&stmt.into()).ok_or_else(|| {
                         io::Error::new(
                             io::ErrorKind::InvalidData,
                             format!("asked to execute unknown statement {}", stmt),
@@ -847,14 +847,14 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                         let params = params::ParamParser::new(params, state);
                         let w = QueryResultWriter::new(&mut self.conn, true);
                         self.shim
-                            .on_execute(stmt, params, w, &mut self.schema_cache)
+                            .on_execute(stmt.into(), params, w, &mut self.schema_cache)
                             .await?;
                     }
                     state.long_data.clear();
                 }
                 Command::SendLongData { stmt, param, data } => {
                     stmts
-                        .get_mut(&stmt)
+                        .get_mut(&stmt.into())
                         .ok_or_else(|| {
                             io::Error::new(
                                 io::ErrorKind::InvalidData,
@@ -867,9 +867,9 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                         .extend(data);
                 }
                 Command::Close(stmt) => {
-                    self.shim.on_close(DeallocateId::Numeric(stmt)).await;
-                    stmts.remove(&stmt);
-                    self.schema_cache.remove(&stmt);
+                    self.shim.on_close(stmt.into()).await;
+                    stmts.remove(&stmt.into());
+                    self.schema_cache.remove(&stmt.into());
                     // NOTE: spec dictates no response from server
                 }
                 Command::ListFields(_) => {

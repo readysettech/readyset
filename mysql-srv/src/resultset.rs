@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::io;
 use std::sync::Arc;
 
+use readyset_adapter_types::StatementId;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::myc::constants::{ColumnFlags, StatusFlags};
@@ -44,7 +45,7 @@ impl<'a, S: AsyncRead + AsyncWrite + Unpin + 'a> InitWriter<'a, S> {
 #[must_use]
 pub struct StatementMetaWriter<'a, S: AsyncRead + AsyncWrite + Unpin> {
     pub(crate) conn: &'a mut PacketConn<S>,
-    pub(crate) stmts: &'a mut HashMap<u32, StatementData>,
+    pub(crate) stmts: &'a mut HashMap<StatementId, StatementData>,
 }
 
 impl<'a, S: AsyncRead + AsyncWrite + Unpin + 'a> StatementMetaWriter<'a, S> {
@@ -55,13 +56,22 @@ impl<'a, S: AsyncRead + AsyncWrite + Unpin + 'a> StatementMetaWriter<'a, S> {
     /// parameters the client must provide when executing the prepared statement. `columns` is a
     /// second set of [`Column`](struct.Column.html) descriptors for the values that will be
     /// returned in each row then the statement is later executed.
-    pub async fn reply<PI, CI>(self, id: u32, params: PI, columns: CI) -> io::Result<()>
+    pub async fn reply<PI, CI>(self, id: StatementId, params: PI, columns: CI) -> io::Result<()>
     where
         PI: IntoIterator<Item = &'a Column>,
         CI: IntoIterator<Item = &'a Column>,
         <PI as IntoIterator>::IntoIter: ExactSizeIterator,
         <CI as IntoIterator>::IntoIter: ExactSizeIterator,
     {
+        let id_named = match id {
+            StatementId::Named(id) => id,
+            StatementId::Unnamed => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Mysql does not support unnamed statements",
+                ))
+            }
+        };
         let params = params.into_iter();
         self.stmts.insert(
             id,
@@ -70,7 +80,7 @@ impl<'a, S: AsyncRead + AsyncWrite + Unpin + 'a> StatementMetaWriter<'a, S> {
                 ..Default::default()
             },
         );
-        writers::write_prepare_ok(id, params, columns, self.conn).await
+        writers::write_prepare_ok(id_named, params, columns, self.conn).await
     }
 
     /// Reply to the client's `PREPARE` with an error.

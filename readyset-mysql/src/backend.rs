@@ -20,7 +20,7 @@ use readyset_adapter::backend::{
     noria_connector, QueryResult, SinglePrepareResult, UpstreamPrepare,
 };
 use readyset_adapter::upstream_database::LazyUpstream;
-use readyset_adapter_types::DeallocateId;
+use readyset_adapter_types::{DeallocateId, StatementId};
 use readyset_data::{DfType, DfValue, DfValueKind};
 use readyset_errors::{internal, ReadySetError};
 use readyset_util::redacted::Sensitive;
@@ -543,7 +543,7 @@ where
         &mut self,
         query: &str,
         info: StatementMetaWriter<'_, S>,
-        schema_cache: &mut HashMap<u32, CachedSchema>,
+        schema_cache: &mut HashMap<StatementId, CachedSchema>,
     ) -> io::Result<()> {
         if self.enable_statement_logging {
             info!(target: "client_statement", "Prepare: {query}");
@@ -646,10 +646,10 @@ where
 
     async fn on_execute(
         &mut self,
-        id: u32,
+        id: StatementId,
         params: mysql_srv::ParamParser<'_>,
         results: QueryResultWriter<'_, S>,
-        schema_cache: &mut HashMap<u32, CachedSchema>,
+        schema_cache: &mut HashMap<StatementId, CachedSchema>,
     ) -> io::Result<()> {
         // TODO(DAN): Param conversions are unnecessary for fallback execution. Params should be
         // derived directly from ParamParser.

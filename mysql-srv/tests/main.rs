@@ -19,7 +19,7 @@ use mysql_srv::{
     CachedSchema, Column, ErrorKind, InitWriter, MySqlIntermediary, MySqlShim, ParamParser,
     QueryResultWriter, QueryResultsResponse, StatementMetaWriter,
 };
-use readyset_adapter_types::DeallocateId;
+use readyset_adapter_types::{DeallocateId, StatementId};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 
@@ -43,9 +43,9 @@ where
             QueryResultWriter<'a, W>,
         ) -> Pin<Box<dyn Future<Output = io::Result<()>> + 'a + Send>>
         + Send,
-    P: FnMut(&str) -> u32 + Send,
+    P: FnMut(&str) -> StatementId + Send,
     E: for<'a> FnMut(
-            u32,
+            StatementId,
             Vec<mysql_srv::ParamValue>,
             QueryResultWriter<'a, W>,
         ) -> Pin<Box<dyn Future<Output = io::Result<()>> + 'a + Send>>
@@ -67,7 +67,7 @@ where
         &mut self,
         query: &str,
         info: StatementMetaWriter<'_, W>,
-        _schema_cache: &mut HashMap<u32, CachedSchema>,
+        _schema_cache: &mut HashMap<StatementId, CachedSchema>,
     ) -> io::Result<()> {
         let id = (self.on_p)(query);
         info.reply(id, &self.params, &self.columns).await
@@ -75,10 +75,10 @@ where
 
     async fn on_execute(
         &mut self,
-        id: u32,
+        id: StatementId,
         params: ParamParser<'_>,
         results: QueryResultWriter<'_, W>,
-        _schema_cache: &mut HashMap<u32, CachedSchema>,
+        _schema_cache: &mut HashMap<StatementId, CachedSchema>,
     ) -> io::Result<()> {
         let mut extract_params = Vec::new();
         for p in params {
@@ -161,9 +161,9 @@ where
         ) -> Pin<Box<dyn Future<Output = io::Result<()>> + 'a + Send>>
         + Send
         + 'static,
-    P: FnMut(&str) -> u32 + Send + 'static,
+    P: FnMut(&str) -> StatementId + Send + 'static,
     E: for<'a> FnMut(
-            u32,
+            StatementId,
             Vec<mysql_srv::ParamValue>,
             QueryResultWriter<'a, TcpStream>,
         ) -> Pin<Box<dyn Future<Output = io::Result<()>> + 'a + Send>>
@@ -600,10 +600,10 @@ fn it_prepares() {
         |_, _| unreachable!(),
         |q| {
             assert_eq!(q, "SELECT a FROM b WHERE c = ?");
-            41
+            StatementId::from(41)
         },
         move |stmt, params, w| {
-            assert_eq!(stmt, 41);
+            assert_eq!(stmt, StatementId::from(41));
             assert_eq!(params.len(), 1);
             // rust-mysql sends all numbers as LONGLONG
             assert_eq!(
@@ -700,7 +700,7 @@ fn insert_exec() {
 
     TestingShim::new(
         |_, _| unreachable!(),
-        |_| 1,
+        |_| StatementId::from(1),
         move |_, params, w| {
             assert_eq!(params.len(), 7);
             assert_eq!(
@@ -822,10 +822,10 @@ fn send_long() {
         |_, _| unreachable!(),
         |q| {
             assert_eq!(q, "SELECT a FROM b WHERE c = ?");
-            41
+            StatementId::from(41)
         },
         move |stmt, params, w| {
-            assert_eq!(stmt, 41);
+            assert_eq!(stmt, StatementId::from(41));
             assert_eq!(params.len(), 1);
             // rust-mysql sends all strings as VAR_STRING
             assert_eq!(
@@ -885,10 +885,10 @@ fn it_prepares_many() {
         |_, _| unreachable!(),
         |q| {
             assert_eq!(q, "SELECT a, b FROM x");
-            41
+            StatementId::from(41)
         },
         move |stmt, params, w| {
-            assert_eq!(stmt, 41);
+            assert_eq!(stmt, StatementId::from(41));
             assert_eq!(params.len(), 0);
 
             let cols = cols.clone();
@@ -939,7 +939,7 @@ fn prepared_empty() {
 
     TestingShim::new(
         |_, _| unreachable!(),
-        |_| 0,
+        |_| StatementId::from(0),
         move |_, params, w| {
             assert!(!params.is_empty());
             Box::pin(async move { w.completed(0, 0, None).await })
@@ -974,7 +974,7 @@ fn prepared_no_params() {
 
     TestingShim::new(
         |_, _| unreachable!(),
-        |_| 0,
+        |_| StatementId::from(0),
         move |_, params, w| {
             assert!(params.is_empty());
             let cols = cols.clone();
@@ -1038,7 +1038,7 @@ fn prepared_nulls() {
 
     TestingShim::new(
         |_, _| unreachable!(),
-        |_| 0,
+        |_| StatementId::from(0),
         move |_, params, w| {
             assert_eq!(params.len(), 2);
             assert!(params[0].value.is_null());
@@ -1096,7 +1096,7 @@ fn prepared_no_rows() {
     let cols2 = cols.clone();
     TestingShim::new(
         |_, _| unreachable!(),
-        |_| 0,
+        |_| StatementId::from(0),
         move |_, _, w| {
             let cols = cols.clone();
             Box::pin(async move { w.start(&cols[..]).await?.finish().await })
@@ -1119,7 +1119,7 @@ fn prepared_no_rows() {
 fn prepared_no_cols_but_rows() {
     TestingShim::new(
         |_, _| unreachable!(),
-        |_| 0,
+        |_| StatementId::from(0),
         move |_, _, w| {
             Box::pin(async move {
                 let mut w = w.start(&[]).await?;
@@ -1144,7 +1144,7 @@ fn prepared_no_cols_but_rows() {
 fn prepared_no_cols() {
     TestingShim::new(
         |_, _| unreachable!(),
-        |_| 0,
+        |_| StatementId::from(0),
         move |_, _, w| Box::pin(async move { w.start(&[]).await?.finish().await }),
         |_, _| unreachable!(),
         move |_, _, _| unreachable!(),
@@ -1167,7 +1167,7 @@ fn really_long_query() {
             assert_eq!(q, long);
             Box::pin(async move { w.start(&[]).await?.finish().await })
         },
-        |_| 0,
+        |_| StatementId::from(0),
         |_, _, _| unreachable!(),
         |_, _| unreachable!(),
         move |_, _, _| unreachable!(),

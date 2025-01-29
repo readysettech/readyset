@@ -9,7 +9,7 @@ use postgres_types::Type;
 use psql_srv::{
     run_backend, Credentials, CredentialsNeeded, Error, PsqlBackend, PsqlSrvRow, TransferFormat,
 };
-use readyset_adapter_types::DeallocateId;
+use readyset_adapter_types::{DeallocateId, StatementId};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio_native_tls::{native_tls, TlsAcceptor};
@@ -59,7 +59,7 @@ impl PsqlBackend for TestBackend {
 
     async fn on_execute(
         &mut self,
-        _statement_id: u32,
+        _statement_id: StatementId,
         _params: &[psql_srv::PsqlValue],
         _result_transfer_formats: &[TransferFormat],
     ) -> Result<psql_srv::QueryResponse<Self::Resultset>, psql_srv::Error> {

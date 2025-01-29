@@ -28,7 +28,7 @@ use psql_srv::{
     Credentials, CredentialsNeeded, PrepareResponse, PsqlBackend, PsqlSrvRow, QueryResponse,
     TransferFormat,
 };
-use readyset_adapter_types::DeallocateId;
+use readyset_adapter_types::{DeallocateId, StatementId};
 use readyset_data::DfValue;
 use readyset_psql::ParamRef;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -184,7 +184,7 @@ impl PsqlBackend for Backend {
             .map_err(|e| psql_srv::Error::Unknown(e.to_string()))?;
 
         let resp = PrepareResponse {
-            prepared_statement_id: self.statements.len() as _,
+            prepared_statement_id: StatementId::from(self.statements.len()),
             param_schema: stmt.params().to_vec(),
             row_schema: stmt
                 .columns()
@@ -205,14 +205,18 @@ impl PsqlBackend for Backend {
 
     async fn on_execute(
         &mut self,
-        statement_id: u32,
+        statement_id: StatementId,
         params: &[psql_srv::PsqlValue],
         _result_transfer_formats: &[TransferFormat],
     ) -> Result<QueryResponse<Self::Resultset>, psql_srv::Error> {
-        let stmt = self
-            .statements
-            .get(statement_id as usize)
-            .ok_or_else(|| psql_srv::Error::MissingPreparedStatement(statement_id.to_string()))?;
+        let stmt = match statement_id {
+            StatementId::Named(id) => self.statements.get(id as usize).ok_or_else(|| {
+                psql_srv::Error::MissingPreparedStatement(statement_id.to_string())
+            })?,
+            StatementId::Unnamed => {
+                panic!("You are doing benching wrong, please hang up and try again")
+            }
+        };
 
         let mut res = Box::pin(
             self.upstream

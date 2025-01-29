@@ -13,7 +13,7 @@ use mysql_async::{
 use pin_project::pin_project;
 use readyset_adapter::upstream_database::UpstreamDestination;
 use readyset_adapter::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
-use readyset_adapter_types::DeallocateId;
+use readyset_adapter_types::{DeallocateId, StatementId};
 use readyset_client_metrics::{recorded, QueryDestination};
 use readyset_data::upstream_system_props::DEFAULT_TIMEZONE_NAME;
 use readyset_data::DfValue;
@@ -332,17 +332,22 @@ impl UpstreamDatabase for MySqlUpstream {
 
     async fn remove_statement(&mut self, statement_id: DeallocateId) -> Result<(), Self::Error> {
         match statement_id {
-            DeallocateId::Numeric(id) => match self.prepared_statements.remove(&id) {
-                Some(statement) => self.conn.close(statement).await?,
-                None => {
-                    // It's highly unlikely that a numeric statement id was _not_
-                    // prepared via the mysql wire protocol (COM_STMT_PREPARE), but
-                    // send it to the upstream for completeness and let mysql complain
-                    // if the id is not found.
-                    self.conn
-                        .query_drop(format!("DEALLOCATE PREPARE {}", id))
-                        .await?;
+            DeallocateId::Numeric(id) => match id {
+                StatementId::Named(id) => {
+                    match self.prepared_statements.remove(&id) {
+                        Some(statement) => self.conn.close(statement).await?,
+                        None => {
+                            // It's highly unlikely that a numeric statement id was _not_
+                            // prepared via the mysql wire protocol (COM_STMT_PREPARE), but
+                            // send it to the upstream for completeness and let mysql complain
+                            // if the id is not found.
+                            self.conn
+                                .query_drop(format!("DEALLOCATE PREPARE {}", id))
+                                .await?;
+                        }
+                    }
                 }
+                StatementId::Unnamed => unsupported!("Unnamed statements not supported by mysql"),
             },
             DeallocateId::Named(name) => {
                 self.conn

@@ -81,7 +81,7 @@ use crossbeam_skiplist::SkipSet;
 use futures::future::{self, OptionFuture};
 use lru::LruCache;
 use mysql_common::row::convert::{FromRow, FromRowError};
-use readyset_adapter_types::{DeallocateId, ParsedCommand};
+use readyset_adapter_types::{DeallocateId, ParsedCommand, StatementId};
 use readyset_client::consensus::{Authority, AuthorityControl, CacheDDLRequest};
 use readyset_client::consistency::Timestamp;
 use readyset_client::query::*;
@@ -128,9 +128,6 @@ pub use self::noria_connector::NoriaConnector;
 use self::noria_connector::{MetaVariable, PreparedSelectTypes};
 
 const UNSUPPORTED_CACHE_DDL_MSG: &str = "This instance has been provisioned through ReadySet Cloud. Please use the ReadySet Cloud UI to manage caches. You may continue to use the SQL interface to run other 'read' commands.";
-
-/// Unique identifier for a prepared statement, local to a single [`Backend`].
-pub type StatementId = u32;
 
 /// Query metadata used to plan query prepare
 #[allow(clippy::large_enum_variant)]
@@ -1351,16 +1348,7 @@ where
 
         let statement_id = self.state.prepared_statements.insert(PreparedStatement {
             query_id,
-            prep: PrepareResult::new(
-                self.state
-                    .prepared_statements
-                    .vacant_key()
-                    .try_into()
-                    .expect(
-                        "Cannot prepare more than u32::MAX statements with a single connection",
-                    ),
-                prep,
-            ),
+            prep: PrepareResult::new(self.state.prepared_statements.vacant_key().into(), prep),
             migration_state,
             execution_info: None,
             parsed_query,
@@ -1591,16 +1579,19 @@ where
     #[inline]
     pub async fn execute(
         &mut self,
-        id: u32,
+        id: StatementId,
         params: &[DfValue],
         exec_meta: DB::ExecMeta<'_>,
     ) -> Result<QueryResult<'_, DB>, DB::Error> {
         self.last_query = None;
-        let cached_statement = self
-            .state
-            .prepared_statements
-            .get_mut(id as _)
-            .ok_or(PreparedStatementMissing { statement_id: id })?;
+        let cached_statement = match id {
+            StatementId::Named(id) => self
+                .state
+                .prepared_statements
+                .get_mut(id as _)
+                .ok_or(PreparedStatementMissing { statement_id: id })?,
+            StatementId::Unnamed => todo!("implemented in a future patch"),
+        };
 
         let mut event = QueryExecutionEvent::new(EventType::Execute);
         event.query.clone_from(&cached_statement.parsed_query);
@@ -1777,13 +1768,22 @@ where
         let mut dealloc_id = deallocate_id.clone();
         match deallocate_id {
             DeallocateId::Numeric(id) => {
-                if let Some(statement) = self.state.prepared_statements.try_remove(id as usize) {
-                    if let Some(ur) = statement.prep.into_upstream() {
-                        dealloc_id = DeallocateId::Numeric(ur.statement_id);
-                    } else {
-                        // this is the case where a prepared statement was created for readyset
-                        // use, and not prepared/executed on the upstream.
-                        return Ok(());
+                match id {
+                    StatementId::Named(id) => {
+                        if let Some(statement) =
+                            self.state.prepared_statements.try_remove(id as usize)
+                        {
+                            if let Some(ur) = statement.prep.into_upstream() {
+                                dealloc_id = DeallocateId::Numeric(ur.statement_id.into());
+                            }
+                        } else {
+                            // this is the case where a prepared statement was created for readyset
+                            // use, and not prepared/executed on the upstream.
+                            return Ok(());
+                        }
+                    }
+                    StatementId::Unnamed => {
+                        todo!("implemented in a future patch");
                     }
                 }
             }

@@ -34,7 +34,7 @@ use postgres::SimpleQueryMessage;
 use postgres_protocol::Oid;
 use postgres_types::Type;
 use protocol::Protocol;
-use readyset_adapter_types::DeallocateId;
+use readyset_adapter_types::{DeallocateId, StatementId};
 use readyset_sql::ast::SqlIdentifier;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_native_tls::TlsAcceptor;
@@ -114,7 +114,7 @@ pub trait PsqlBackend {
     ///   confirmation (for a write query), or else an `Error` if a failure occurs.
     async fn on_execute(
         &mut self,
-        statement_id: u32,
+        statement_id: StatementId,
         params: &[PsqlValue],
         result_transfer_formats: &[TransferFormat],
     ) -> Result<QueryResponse<Self::Resultset>, Error>;
@@ -158,7 +158,7 @@ impl From<OwnedField> for Column {
 /// prepared statement.
 pub struct PrepareResponse {
     /// An identifier for the new prepared statement.
-    pub prepared_statement_id: u32,
+    pub prepared_statement_id: StatementId,
     /// The schema for parameters to be provided to the prepared statement.
     pub param_schema: Vec<Type>,
     /// The schema for rows to be returned when the prepared statement is executed.

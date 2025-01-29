@@ -11,7 +11,7 @@ use ps::{PsqlValue, TransferFormat};
 use psql_srv as ps;
 use readyset_adapter::backend as cl;
 use readyset_adapter::upstream_database::LazyUpstream;
-use readyset_adapter_types::DeallocateId;
+use readyset_adapter_types::{DeallocateId, StatementId};
 use readyset_data::DfValue;
 use thiserror::Error;
 use tokio_postgres::SimpleQueryMessage;
@@ -108,7 +108,7 @@ impl Backend {
 
     async fn execute(
         &mut self,
-        id: u32,
+        id: StatementId,
         params: &[DfValue],
         result_transfer_formats: &[TransferFormat],
     ) -> Result<QueryResponse<'_>, Error> {
@@ -160,7 +160,7 @@ impl ps::PsqlBackend for Backend {
 
     async fn on_execute(
         &mut self,
-        statement_id: u32,
+        statement_id: StatementId,
         params: &[PsqlValue],
         result_transfer_formats: &[TransferFormat],
     ) -> Result<ps::QueryResponse<Resultset>, ps::Error> {

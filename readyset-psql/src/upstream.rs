@@ -11,7 +11,7 @@ use postgres_types::Kind;
 use psql_srv::{Column, TransferFormat};
 use readyset_adapter::upstream_database::UpstreamDestination;
 use readyset_adapter::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
-use readyset_adapter_types::DeallocateId;
+use readyset_adapter_types::{DeallocateId, StatementId};
 use readyset_client_metrics::recorded;
 use readyset_data::DfValue;
 use readyset_errors::{internal_err, invariant_eq, unsupported, ReadySetError, ReadySetResult};
@@ -385,18 +385,23 @@ impl UpstreamDatabase for PostgreSqlUpstream {
 
     async fn remove_statement(&mut self, statement_id: DeallocateId) -> Result<(), Self::Error> {
         match statement_id {
-            DeallocateId::Numeric(id) => {
-                if let Some(a) = self.prepared_statements.get_mut(id as usize) {
-                    // Note: we don't need to explictly send a close/deallocate message to the
-                    // upstream as that is handled by the Drop impl on the
-                    // Statement object.
-                    *a = None;
-                } else {
-                    self.client
-                        .simple_query(format!("DEALLOCATE {}", id).as_str())
-                        .await?;
+            DeallocateId::Numeric(id) => match id {
+                StatementId::Named(id) => {
+                    if let Some(a) = self.prepared_statements.get_mut(id as usize) {
+                        // Note: we don't need to explictly send a close/deallocate message to the
+                        // upstream as that is handled by the Drop impl on the
+                        // Statement object.
+                        *a = None;
+                    } else {
+                        self.client
+                            .simple_query(format!("DEALLOCATE {}", id).as_str())
+                            .await?;
+                    }
                 }
-            }
+                StatementId::Unnamed => {
+                    unsupported!("Unnamed statements should not be deallocated in this path")
+                }
+            },
             DeallocateId::Named(name) => {
                 self.client
                     .simple_query(format!("DEALLOCATE {}", name).as_str())

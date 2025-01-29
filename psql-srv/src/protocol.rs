@@ -7,7 +7,7 @@ use database_utils::TlsMode;
 use postgres::SimpleQueryMessage;
 use postgres_protocol::Oid;
 use postgres_types::{Kind, Type};
-use readyset_adapter_types::DeallocateId;
+use readyset_adapter_types::{DeallocateId, StatementId};
 use smallvec::smallvec;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_postgres::CommandCompleteContents;
@@ -151,7 +151,7 @@ pub struct Protocol {
 /// contains metadata about a prepared statement that the frontend has requested.
 #[derive(Debug, PartialEq)]
 struct PreparedStatementData {
-    prepared_statement_id: u32,
+    prepared_statement_id: StatementId,
     param_schema: Vec<Type>,
     row_schema: Vec<Column>,
 }
@@ -161,7 +161,7 @@ struct PreparedStatementData {
 /// metadata about the portal.
 #[derive(Debug, PartialEq)]
 struct PortalData {
-    prepared_statement_id: u32,
+    prepared_statement_id: StatementId,
     prepared_statement_name: String,
     params: Vec<PsqlValue>,
     result_transfer_formats: Arc<Vec<TransferFormat>>,
@@ -1232,7 +1232,7 @@ mod tests {
         last_query: Option<String>,
         last_prepare: Option<String>,
         last_close: Option<DeallocateId>,
-        last_execute_id: Option<u32>,
+        last_execute_id: Option<StatementId>,
         last_execute_params: Option<Vec<PsqlValue>>,
         last_transfer_formats: Option<Vec<TransferFormat>>,
         needed_credentials: Option<Credentials<'static>>,
@@ -1316,7 +1316,7 @@ mod tests {
                 Err(Error::InternalError("error requested".to_string()))
             } else {
                 Ok(PrepareResponse {
-                    prepared_statement_id: 0,
+                    prepared_statement_id: StatementId::Named(0),
                     param_schema: vec![Type::FLOAT8, Type::INT4],
                     row_schema: vec![
                         Column::Column {
@@ -1338,7 +1338,7 @@ mod tests {
 
         async fn on_execute(
             &mut self,
-            statement_id: u32,
+            statement_id: StatementId,
             params: &[PsqlValue],
             result_transfer_formats: &[TransferFormat],
         ) -> Result<QueryResponse<Self::Resultset>, Error> {
@@ -1828,7 +1828,7 @@ mod tests {
         assert_eq!(
             *protocol.prepared_statements.get("prepared1").unwrap(),
             PreparedStatementData {
-                prepared_statement_id: 0,
+                prepared_statement_id: StatementId::from(0),
                 param_schema: vec![Type::FLOAT8, Type::INT4],
                 row_schema: vec![
                     Column::Column {
@@ -1906,7 +1906,7 @@ mod tests {
         assert_eq!(
             *protocol.portals.get("portal1").unwrap(),
             PortalData {
-                prepared_statement_id: 0,
+                prepared_statement_id: StatementId::from(0),
                 prepared_statement_name: "prepared1".to_string(),
                 params: vec![PsqlValue::Double(0.8887), PsqlValue::Int(45678)],
                 result_transfer_formats: Arc::new(vec![
@@ -1952,7 +1952,7 @@ mod tests {
         assert_eq!(
             *protocol.portals.get("portal1").unwrap(),
             PortalData {
-                prepared_statement_id: 0,
+                prepared_statement_id: StatementId::from(0),
                 prepared_statement_name: "prepared1".to_string(),
                 params: vec![PsqlValue::Double(0.8887), PsqlValue::Int(45678)],
                 // The transfer formats are set to the default value (Text).
@@ -1996,7 +1996,7 @@ mod tests {
         assert_eq!(
             *protocol.portals.get("portal1").unwrap(),
             PortalData {
-                prepared_statement_id: 0,
+                prepared_statement_id: StatementId::from(0),
                 prepared_statement_name: "prepared1".to_string(),
                 params: vec![PsqlValue::Double(0.8887), PsqlValue::Int(45678)],
                 // The single transfer format is applied to both fields.
@@ -2102,7 +2102,10 @@ mod tests {
             block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap(),
             Response::Message(CloseComplete)
         ));
-        assert_eq!(backend.last_close.unwrap(), DeallocateId::Numeric(0));
+        assert_eq!(
+            backend.last_close.unwrap(),
+            DeallocateId::Numeric(StatementId::from(0))
+        );
         assert!(!protocol.prepared_statements.contains_key("prepared1"));
     }
 
@@ -2434,7 +2437,7 @@ mod tests {
             }
             _ => panic!(),
         }
-        assert_eq!(backend.last_execute_id.unwrap(), 0);
+        assert_eq!(backend.last_execute_id.unwrap(), StatementId::from(0));
         assert_eq!(
             backend.last_execute_params.unwrap(),
             vec![PsqlValue::Double(0.8887), PsqlValue::Int(45678)]
@@ -2530,7 +2533,7 @@ mod tests {
                 tag: CommandCompleteTag::Delete(5)
             })
         ));
-        assert_eq!(backend.last_execute_id.unwrap(), 0);
+        assert_eq!(backend.last_execute_id.unwrap(), StatementId::from(0));
         assert_eq!(
             backend.last_execute_params.unwrap(),
             vec![PsqlValue::Double(0.8887), PsqlValue::Int(45678)]
