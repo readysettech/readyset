@@ -272,7 +272,7 @@ fn where_in_to_placeholders(
             _ => unsupported!(
                 "IN only supported on placeholders, got: {}",
                 // FIXME(REA-2168): Use correct dialect.
-                e.display(nom_sql::Dialect::MySQL)
+                e.display(readyset_sql::Dialect::MySQL)
             ),
         })
         .collect::<ReadySetResult<Vec<_>>>()?;
@@ -550,7 +550,7 @@ fn splice_auto_parameters<'param, T: Clone>(
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::Dialect;
+    use readyset_sql::Dialect;
 
     use super::*;
 
@@ -943,7 +943,7 @@ mod tests {
         fn process_and_make_keys(
             query: &str,
             params: Vec<DfValue>,
-            dialect: nom_sql::Dialect,
+            dialect: readyset_sql::Dialect,
         ) -> (Vec<Vec<DfValue>>, SelectStatement) {
             let mut query = parse_select_statement(query, dialect);
             let processed = process_query(&mut query, PARAMS).unwrap();
@@ -962,31 +962,31 @@ mod tests {
             query: &str,
             params: Vec<DfValue>,
         ) -> (Vec<Vec<DfValue>>, SelectStatement) {
-            process_and_make_keys(query, params, nom_sql::Dialect::PostgreSQL)
+            process_and_make_keys(query, params, readyset_sql::Dialect::PostgreSQL)
         }
 
         fn process_and_make_keys_mysql(
             query: &str,
             params: Vec<DfValue>,
         ) -> (Vec<Vec<DfValue>>, SelectStatement) {
-            process_and_make_keys(query, params, nom_sql::Dialect::MySQL)
+            process_and_make_keys(query, params, readyset_sql::Dialect::MySQL)
         }
 
         fn get_lim_off(
             query: &str,
             params: &[DfValue],
-            dialect: nom_sql::Dialect,
+            dialect: readyset_sql::Dialect,
         ) -> (Option<usize>, Option<usize>) {
             let proc = process_query(&mut parse_select_statement(query, dialect), PARAMS).unwrap();
             proc.limit_offset_params(params).unwrap()
         }
 
         fn get_lim_off_postgres(query: &str, params: &[DfValue]) -> (Option<usize>, Option<usize>) {
-            get_lim_off(query, params, nom_sql::Dialect::PostgreSQL)
+            get_lim_off(query, params, readyset_sql::Dialect::PostgreSQL)
         }
 
         fn get_lim_off_mysql(query: &str, params: &[DfValue]) -> (Option<usize>, Option<usize>) {
-            get_lim_off(query, params, nom_sql::Dialect::MySQL)
+            get_lim_off(query, params, readyset_sql::Dialect::MySQL)
         }
 
         #[test]
@@ -1000,8 +1000,10 @@ mod tests {
 
             process_query(&mut query, PARAMS).expect("Should be able to rewrite query");
             assert_eq!(
-                query.display(nom_sql::Dialect::PostgreSQL).to_string(),
-                expected.display(nom_sql::Dialect::PostgreSQL).to_string()
+                query.display(readyset_sql::Dialect::PostgreSQL).to_string(),
+                expected
+                    .display(readyset_sql::Dialect::PostgreSQL)
+                    .to_string()
             );
         }
 
@@ -1016,8 +1018,10 @@ mod tests {
 
             process_query(&mut query, PARAMS).expect("Should be able to rewrite query");
             assert_eq!(
-                query.display(nom_sql::Dialect::PostgreSQL).to_string(),
-                expected.display(nom_sql::Dialect::PostgreSQL).to_string()
+                query.display(readyset_sql::Dialect::PostgreSQL).to_string(),
+                expected
+                    .display(readyset_sql::Dialect::PostgreSQL)
+                    .to_string()
             );
         }
 
@@ -1216,7 +1220,7 @@ mod tests {
                     "SELECT * FROM t WHERE x = $1 AND y = $2 AND z = $3"
                 ),
                 "{}",
-                query.display(nom_sql::Dialect::PostgreSQL)
+                query.display(readyset_sql::Dialect::PostgreSQL)
             );
 
             assert_eq!(keys, vec![vec!["x".into(), "y".into(), "z".into()]]);
@@ -1235,7 +1239,7 @@ mod tests {
                     "SELECT * FROM t WHERE x = $1 AND y = $2 AND z = $3"
                 ),
                 "{}",
-                query.display(nom_sql::Dialect::PostgreSQL)
+                query.display(readyset_sql::Dialect::PostgreSQL)
             );
 
             assert_eq!(keys, vec![vec!["x".into(), "y".into(), "z".into()]]);
@@ -1254,7 +1258,7 @@ mod tests {
                     "SELECT * FROM t WHERE x = $1 AND y = $2 AND z = $3"
                 ),
                 "{}",
-                query.display(nom_sql::Dialect::PostgreSQL)
+                query.display(readyset_sql::Dialect::PostgreSQL)
             );
 
             assert_eq!(keys, vec![vec!["x".into(), "y".into(), "z".into()]]);
@@ -1271,7 +1275,7 @@ mod tests {
                 query,
                 parse_select_statement_postgres("SELECT * FROM t WHERE x = $1"),
                 "{}",
-                query.display(nom_sql::Dialect::PostgreSQL)
+                query.display(readyset_sql::Dialect::PostgreSQL)
             );
             assert_eq!(keys, vec![vec![1.into()]]);
         }
@@ -1287,7 +1291,7 @@ mod tests {
                 query,
                 parse_select_statement_postgres("SELECT * FROM t WHERE x = $1"),
                 "{}",
-                query.display(nom_sql::Dialect::PostgreSQL)
+                query.display(readyset_sql::Dialect::PostgreSQL)
             );
             assert_eq!(keys, vec![vec![1.into()]]);
         }
@@ -1354,19 +1358,19 @@ mod tests {
 
             try_parse_select_statement(
                 "SELECT * FROM t WHERE x = ? LIMIT 1 OFFSET ALL",
-                nom_sql::Dialect::MySQL,
+                readyset_sql::Dialect::MySQL,
             )
             .unwrap_err();
 
             try_parse_select_statement(
                 "SELECT * FROM t WHERE x = ? LIMIT 1.5 OFFSET 3",
-                nom_sql::Dialect::MySQL,
+                readyset_sql::Dialect::MySQL,
             )
             .unwrap_err();
 
             try_parse_select_statement(
                 "SELECT * FROM t WHERE x = ? LIMIT 2 OFFSET 3.5",
-                nom_sql::Dialect::MySQL,
+                readyset_sql::Dialect::MySQL,
             )
             .unwrap_err();
         }
@@ -1403,13 +1407,13 @@ mod tests {
 
             try_parse_select_statement(
                 "SELECT * FROM t WHERE x = ? LIMIT ALL",
-                nom_sql::Dialect::MySQL,
+                readyset_sql::Dialect::MySQL,
             )
             .unwrap_err();
 
             try_parse_select_statement(
                 "SELECT * FROM t WHERE x = ? LIMIT 1.5",
-                nom_sql::Dialect::MySQL,
+                readyset_sql::Dialect::MySQL,
             )
             .unwrap_err();
         }
@@ -1434,19 +1438,19 @@ mod tests {
             // MySQL doesn't allow offset without limit
             try_parse_select_statement(
                 "SELECT * FROM t WHERE x = ? OFFSET ?",
-                nom_sql::Dialect::MySQL,
+                readyset_sql::Dialect::MySQL,
             )
             .unwrap_err();
 
             // ALL keyword only works for LIMT not offset
             try_parse_select_statement(
                 "SELECT * FROM t WHERE x = $1 OFFSET ALL",
-                nom_sql::Dialect::PostgreSQL,
+                readyset_sql::Dialect::PostgreSQL,
             )
             .unwrap_err();
             try_parse_select_statement(
                 "SELECT * FROM t WHERE x = $1 OFFSET ALL",
-                nom_sql::Dialect::MySQL,
+                readyset_sql::Dialect::MySQL,
             )
             .unwrap_err();
         }
@@ -1457,7 +1461,7 @@ mod tests {
                 get_lim_off(
                     "SELECT * FROM t WHERE x = ? LIMIT ?, ?",
                     &[1.into(), 2.into(), 3.into()],
-                    nom_sql::Dialect::MySQL,
+                    readyset_sql::Dialect::MySQL,
                 ),
                 (Some(3), Some(2))
             );
@@ -1466,7 +1470,7 @@ mod tests {
                 get_lim_off(
                     "SELECT * FROM t WHERE x = ? LIMIT 4, ?",
                     &[1.into(), 2.into()],
-                    nom_sql::Dialect::MySQL,
+                    readyset_sql::Dialect::MySQL,
                 ),
                 (Some(2), Some(4))
             );
@@ -1475,7 +1479,7 @@ mod tests {
                 get_lim_off(
                     "SELECT * FROM t WHERE x = ? LIMIT ?, 4",
                     &[1.into(), 2.into()],
-                    nom_sql::Dialect::MySQL,
+                    readyset_sql::Dialect::MySQL,
                 ),
                 (Some(4), Some(2))
             );
@@ -1483,22 +1487,22 @@ mod tests {
             // PostgreSQL doesn't accept this form at all
             try_parse_select_statement(
                 "SELECT * FROM t WHERE x = $3 LIMIT $2, $1",
-                nom_sql::Dialect::PostgreSQL,
+                readyset_sql::Dialect::PostgreSQL,
             )
             .unwrap_err();
             try_parse_select_statement(
                 "SELECT * FROM t WHERE x = $3 LIMIT 1, $1",
-                nom_sql::Dialect::PostgreSQL,
+                readyset_sql::Dialect::PostgreSQL,
             )
             .unwrap_err();
             try_parse_select_statement(
                 "SELECT * FROM t WHERE x = $3 LIMIT $1, 2",
-                nom_sql::Dialect::PostgreSQL,
+                readyset_sql::Dialect::PostgreSQL,
             )
             .unwrap_err();
             try_parse_select_statement(
                 "SELECT * FROM t WHERE x = $3 LIMIT 1, 2",
-                nom_sql::Dialect::PostgreSQL,
+                readyset_sql::Dialect::PostgreSQL,
             )
             .unwrap_err();
         }
@@ -1514,7 +1518,7 @@ mod tests {
                 query,
                 parse_select_statement_postgres("SELECT * FROM t WHERE x = $1 AND y = $2"),
                 "{}",
-                query.display(nom_sql::Dialect::PostgreSQL)
+                query.display(readyset_sql::Dialect::PostgreSQL)
             );
             assert_eq!(keys, vec![vec![0.into(), 0.into()]]);
         }
@@ -1532,7 +1536,7 @@ mod tests {
                     "SELECT * FROM t WHERE x = $1 AND y = $2 AND z = $3"
                 ),
                 "{}",
-                query.display(nom_sql::Dialect::PostgreSQL)
+                query.display(readyset_sql::Dialect::PostgreSQL)
             );
             assert_eq!(keys, vec![vec![1.into(), 0.into(), 1.into()]]);
         }
@@ -1548,7 +1552,7 @@ mod tests {
                 query,
                 parse_select_statement_postgres("SELECT * FROM t WHERE x = $1 AND y = $2"),
                 "{}",
-                query.display(nom_sql::Dialect::PostgreSQL)
+                query.display(readyset_sql::Dialect::PostgreSQL)
             );
             assert_eq!(
                 keys,

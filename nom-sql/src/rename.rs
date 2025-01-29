@@ -5,6 +5,7 @@ use itertools::Itertools;
 use nom::bytes::complete::tag_no_case;
 use nom::multi::separated_list1;
 use nom_locate::LocatedSpan;
+use readyset_sql::Dialect;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
@@ -12,7 +13,7 @@ use test_strategy::Arbitrary;
 use crate::common::ws_sep_comma;
 use crate::table::{relation, Relation};
 use crate::whitespace::whitespace1;
-use crate::{Dialect, DialectDisplay, NomSqlResult};
+use crate::{DialectDisplay, NomSqlResult};
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct RenameTableStatement {

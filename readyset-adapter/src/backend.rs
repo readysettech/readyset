@@ -83,9 +83,8 @@ use lru::LruCache;
 use mysql_common::row::convert::{FromRow, FromRowError};
 use nom_sql::{
     AlterReadysetStatement, CacheInner, CreateCacheStatement, DeallocateStatement, DeleteStatement,
-    Dialect, DialectDisplay, DropCacheStatement, InsertStatement, Relation, SelectStatement,
-    SetStatement, ShowStatement, SqlIdentifier, SqlQuery, StatementIdentifier, UpdateStatement,
-    UseStatement,
+    DialectDisplay, DropCacheStatement, InsertStatement, Relation, SelectStatement, SetStatement,
+    ShowStatement, SqlIdentifier, SqlQuery, StatementIdentifier, UpdateStatement, UseStatement,
 };
 use readyset_adapter_types::{DeallocateId, ParsedCommand};
 use readyset_client::consensus::{Authority, AuthorityControl, CacheDDLRequest};
@@ -102,6 +101,7 @@ use readyset_client_metrics::{
 use readyset_data::{DfType, DfValue};
 use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
 use readyset_errors::{internal, internal_err, unsupported, unsupported_err, ReadySetResult};
+use readyset_sql::Dialect;
 use readyset_sql_passes::adapter_rewrites::{self, ProcessedQueryParams};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
 use readyset_util::redacted::Sensitive;
@@ -1167,7 +1167,7 @@ where
             Err(e) => {
                 warn!(
                     // FIXME(REA-2168): Use correct dialect.
-                    statement = %Sensitive(&stmt.display(nom_sql::Dialect::MySQL)),
+                    statement = %Sensitive(&stmt.display(readyset_sql::Dialect::MySQL)),
                     "This statement could not be rewritten by ReadySet"
                 );
                 PrepareMeta::FailedToRewrite(e)
@@ -1238,7 +1238,7 @@ where
             Ok(pq) => {
                 debug!(
                     // FIXME(REA-2168): Use correct dialect.
-                    statement = %pq.display(nom_sql::Dialect::MySQL),
+                    statement = %pq.display(readyset_sql::Dialect::MySQL),
                     "Statement cannot be prepared by ReadySet"
                 );
                 PrepareMeta::Unimplemented(unsupported_err!(
@@ -1914,8 +1914,8 @@ where
             if let Some(view_request) = self.noria.view_create_request_from_name(name).await {
                 warn!(
                     // FIXME(REA-2168): Use correct dialect.
-                    statement = %Sensitive(&view_request.statement.display(nom_sql::Dialect::MySQL)),
-                    name = %name.display(nom_sql::Dialect::MySQL),
+                    statement = %Sensitive(&view_request.statement.display(readyset_sql::Dialect::MySQL)),
+                    name = %name.display(readyset_sql::Dialect::MySQL),
                     "Dropping previously cached query",
                 );
                 self.drop_cached_query(name).await?;
@@ -2711,7 +2711,7 @@ where
             Err(e) => {
                 warn!(
                     // FIXME(REA-2168): Use correct dialect.
-                    statement = %Sensitive(&q.statement.display(nom_sql::Dialect::MySQL)),
+                    statement = %Sensitive(&q.statement.display(readyset_sql::Dialect::MySQL)),
                     "This statement could not be rewritten by ReadySet"
                 );
                 (
@@ -2756,7 +2756,7 @@ where
                         }
                         error!(
                             // FIXME(REA-2168): Use correct dialect.
-                            set = %set.display(nom_sql::Dialect::MySQL),
+                            set = %set.display(readyset_sql::Dialect::MySQL),
                             "received unsupported SET statement."
                         );
                         return Err(e.into());
@@ -2764,7 +2764,7 @@ where
                     UnsupportedSetMode::Proxy => {
                         warn!(
                             // FIXME(REA-2168): Use correct dialect.
-                            set = %set.display(nom_sql::Dialect::MySQL),
+                            set = %set.display(readyset_sql::Dialect::MySQL),
                             "received unsupported SET statement."
                         );
                         state.proxy_state = ProxyState::ProxyAlways;
@@ -2777,7 +2777,7 @@ where
                 if !enabled {
                     warn!(
                         // FIXME(REA-2168): Use correct dialect.
-                        set = %set.display(nom_sql::Dialect::MySQL),
+                        set = %set.display(readyset_sql::Dialect::MySQL),
                         "Disabling autocommit is an anti-pattern for use with Readyset, as all queries would then be proxied upstream."
                     );
                 }
@@ -3213,7 +3213,7 @@ where
     /// Prettify queries above an arbitrary length.
     /// Don't do it for MySQL because the terminal client doesn't handle newlines.
     fn format_query_text(query: String) -> String {
-        if DB::SQL_DIALECT != nom_sql::Dialect::MySQL && query.len() > 40 {
+        if DB::SQL_DIALECT != readyset_sql::Dialect::MySQL && query.len() > 40 {
             sqlformat::format(&query, &Default::default(), &Default::default())
         } else {
             query
@@ -3286,7 +3286,7 @@ fn log_query(
         if let Some(query) = &event.query {
             warn!(
                 // FIXME(REA-2168): Use correct dialect.
-                query = %Sensitive(&query.display(nom_sql::Dialect::MySQL)),
+                query = %Sensitive(&query.display(readyset_sql::Dialect::MySQL)),
                 readyset_time = ?readyset_duration,
                 upstream_time = ?event.upstream_duration,
                 "slow query"

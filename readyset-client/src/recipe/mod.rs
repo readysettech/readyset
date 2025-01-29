@@ -118,7 +118,7 @@ impl From<CacheExpr> for CreateCacheStatement {
 }
 
 impl DialectDisplay for CacheExpr {
-    fn display(&self, dialect: nom_sql::Dialect) -> impl std::fmt::Display + '_ {
+    fn display(&self, dialect: readyset_sql::Dialect) -> impl std::fmt::Display + '_ {
         fmt_with(move |f| {
             write!(
                 f,

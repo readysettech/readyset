@@ -152,7 +152,8 @@ impl OrderLimitRemoval for SqlQuery {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{parse_query, ColumnSpecification, CreateTableBody, Dialect, Relation};
+    use nom_sql::{parse_query, ColumnSpecification, CreateTableBody, Relation};
+    use readyset_sql::Dialect;
 
     use super::*;
 

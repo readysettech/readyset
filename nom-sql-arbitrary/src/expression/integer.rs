@@ -4,9 +4,10 @@
 //  - Generate different types of integer (signed, unsigned; tiny, small, etc)
 //  - Have a specific recursive integer generator for negative numbers (to use with ROUND func).
 
-use nom_sql::{BinaryOperator, Dialect, Expr, Literal, SqlType};
+use nom_sql::{BinaryOperator, Expr, Literal, SqlType};
 use proptest::prop_oneof;
 use proptest::strategy::{Just, Strategy};
+use readyset_sql::Dialect;
 
 use crate::expression::util::{case_when, cast};
 use crate::expression::ExprStrategy;
@@ -62,10 +63,11 @@ fn op(es: ExprStrategy) -> impl Strategy<Value = Expr> {
 
 /// Helper module to group all the [`Strategy`]s that produce integer [`Expr::Call`].
 mod call {
-    use nom_sql::{Dialect, Expr, FunctionExpr, Literal};
+    use nom_sql::{Expr, FunctionExpr, Literal};
     use proptest::prelude::Strategy;
     use proptest::prop_oneof;
     use proptest::strategy::Just;
+    use readyset_sql::Dialect;
 
     use crate::expression::util::{coalesce, if_null};
     use crate::expression::ExprStrategy;

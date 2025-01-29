@@ -38,7 +38,7 @@ impl Adapter for PostgreSQLAdapter {
     type Upstream = LazyUpstream<PostgreSqlUpstream>;
     type Handler = PostgreSqlQueryHandler;
 
-    const DIALECT: nom_sql::Dialect = nom_sql::Dialect::PostgreSQL;
+    const DIALECT: readyset_sql::Dialect = readyset_sql::Dialect::PostgreSQL;
 
     const EXPR_DIALECT: readyset_data::Dialect = readyset_data::Dialect::DEFAULT_POSTGRESQL;
 

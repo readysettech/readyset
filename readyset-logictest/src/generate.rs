@@ -10,10 +10,11 @@ use console::style;
 use database_utils::{DatabaseConnection, DatabaseURL, QueryableConnection};
 use itertools::Itertools;
 use nom_sql::{
-    parse_query, BinaryOperator, CreateTableStatement, DeleteStatement, Dialect, DialectDisplay,
-    Expr, SqlQuery, SqlType,
+    parse_query, BinaryOperator, CreateTableStatement, DeleteStatement, DialectDisplay, Expr,
+    SqlQuery, SqlType,
 };
 use query_generator::{GeneratorState, ParameterMode, QuerySeed};
+use readyset_sql::Dialect;
 
 use crate::ast::{
     Conditional, Query, QueryParams, QueryResults, Record, SortMode, Statement, StatementResult,
@@ -128,7 +129,7 @@ async fn run_queries(
 }
 
 impl Seed {
-    pub fn from_seeds<I>(seeds: I, dialect: nom_sql::Dialect) -> anyhow::Result<Self>
+    pub fn from_seeds<I>(seeds: I, dialect: readyset_sql::Dialect) -> anyhow::Result<Self>
     where
         I: IntoIterator<Item = QuerySeed>,
     {
@@ -213,7 +214,7 @@ impl Seed {
 
     pub fn from_generate_opts(
         opts: query_generator::GenerateOpts,
-        dialect: nom_sql::Dialect,
+        dialect: readyset_sql::Dialect,
     ) -> anyhow::Result<Self> {
         Self::from_seeds(opts.into_query_seeds(), dialect)
     }
@@ -221,7 +222,7 @@ impl Seed {
     pub async fn run(
         &mut self,
         opts: GenerateOpts,
-        dialect: nom_sql::Dialect,
+        dialect: readyset_sql::Dialect,
     ) -> anyhow::Result<&TestScript> {
         recreate_test_database(&opts.compare_to).await?;
         let mut conn = opts
@@ -439,10 +440,10 @@ pub struct GenerateOpts {
 }
 
 impl GenerateOpts {
-    pub fn dialect(&self) -> nom_sql::Dialect {
+    pub fn dialect(&self) -> readyset_sql::Dialect {
         match self.compare_to {
-            DatabaseURL::MySQL(_) => nom_sql::Dialect::MySQL,
-            DatabaseURL::PostgreSQL(_) => nom_sql::Dialect::PostgreSQL,
+            DatabaseURL::MySQL(_) => readyset_sql::Dialect::MySQL,
+            DatabaseURL::PostgreSQL(_) => readyset_sql::Dialect::PostgreSQL,
         }
     }
 }

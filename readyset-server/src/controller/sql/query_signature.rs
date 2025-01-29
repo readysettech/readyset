@@ -135,7 +135,8 @@ impl Signature for QueryGraph {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{parse_query, Dialect, SqlQuery};
+    use nom_sql::{parse_query, SqlQuery};
+    use readyset_sql::Dialect;
 
     use super::*;
     use crate::controller::sql::query_graph::to_query_graph;

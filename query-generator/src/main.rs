@@ -12,7 +12,7 @@ struct Opts {
 
     /// SQL dialect to use for displaying queries
     #[arg(long, value_enum, default_value = "mysql")]
-    pub dialect: nom_sql::Dialect,
+    pub dialect: readyset_sql::Dialect,
 
     #[arg(long)]
     ddl_only: bool,

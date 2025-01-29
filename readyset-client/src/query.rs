@@ -155,7 +155,7 @@ impl Hash for Query {
 }
 impl DialectDisplay for Query {
     /// Displays the query using appropriate formatting for the given dialect.
-    fn display(&self, dialect: nom_sql::Dialect) -> impl Display + '_ {
+    fn display(&self, dialect: readyset_sql::Dialect) -> impl Display + '_ {
         fmt_with(move |f| match self {
             Query::Parsed(q) => write!(f, "{}", q.statement.display(dialect)),
             Query::ParseFailed(s) => write!(f, "{s}"),
@@ -174,7 +174,7 @@ impl Query {
                 // NOTE: Without `return`, there is a compile error that `statement` does not live
                 // long enough.
                 // FIXME: Use correct dialect.
-                return statement.display(nom_sql::Dialect::MySQL).to_string();
+                return statement.display(readyset_sql::Dialect::MySQL).to_string();
             }
             Query::ParseFailed(_) => "<redacted: parsing failed>".to_string(),
         }

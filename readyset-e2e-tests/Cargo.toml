@@ -18,6 +18,7 @@ readyset-client-test-helpers = { path = "../readyset-client-test-helpers", featu
     "postgres",
 ] }
 readyset-tracing = { path = "../readyset-tracing" }
+readyset-sql = { path = "../readyset-sql" }
 readyset-util = { path = "../readyset-util" }
 serial_test = { workspace = true }
 test-strategy = { workspace = true }

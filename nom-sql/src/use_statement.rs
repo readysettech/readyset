@@ -2,11 +2,13 @@ use std::fmt;
 
 use nom::bytes::complete::tag_no_case;
 use nom_locate::LocatedSpan;
+use readyset_sql::Dialect;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
+use crate::dialect::DialectParser;
 use crate::whitespace::whitespace1;
-use crate::{Dialect, NomSqlResult, SqlIdentifier};
+use crate::{NomSqlResult, SqlIdentifier};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct UseStatement {

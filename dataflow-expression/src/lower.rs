@@ -1337,7 +1337,7 @@ impl Expr {
             AstExpr::Between { .. } | AstExpr::NestedSelect(_) | AstExpr::In { .. } => {
                 internal!(
                     "Expression should have been desugared earlier: {}",
-                    expr.display(nom_sql::Dialect::MySQL)
+                    expr.display(readyset_sql::Dialect::MySQL)
                 )
             }
         }
@@ -1443,10 +1443,9 @@ impl Expr {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use nom_sql::{
-        parse_expr, BinaryOperator as AstBinaryOperator, Dialect as ParserDialect, Float, Literal,
-    };
+    use nom_sql::{parse_expr, BinaryOperator as AstBinaryOperator, Float, Literal};
     use readyset_data::{Collation, PgEnumMetadata};
+    use readyset_sql::Dialect as ParserDialect;
 
     use super::*;
 

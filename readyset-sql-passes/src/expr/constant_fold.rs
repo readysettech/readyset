@@ -79,12 +79,12 @@ mod tests {
     use super::*;
 
     fn rewrites_to(input: &str, expected: &str) {
-        let mut expr = parse_expr(nom_sql::Dialect::MySQL, input).unwrap();
-        let expected = parse_expr(nom_sql::Dialect::MySQL, expected).unwrap();
+        let mut expr = parse_expr(readyset_sql::Dialect::MySQL, input).unwrap();
+        let expected = parse_expr(readyset_sql::Dialect::MySQL, expected).unwrap();
         constant_fold_expr(&mut expr, Dialect::DEFAULT_MYSQL);
 
-        let expr = expr.display(nom_sql::Dialect::MySQL).to_string();
-        let expected = expected.display(nom_sql::Dialect::MySQL).to_string();
+        let expr = expr.display(readyset_sql::Dialect::MySQL).to_string();
+        let expected = expected.display(readyset_sql::Dialect::MySQL).to_string();
         assert_eq!(expr, expected, "\nExpected; {expected}\n     Got: {expr}");
     }
 

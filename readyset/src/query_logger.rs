@@ -59,7 +59,7 @@ impl QueryLogger {
                 if adapter_rewrites::process_query(&mut stmt, rewrite_params).is_ok() {
                     anonymize_literals(&mut stmt);
                     // FIXME(REA-2168): Use correct dialect.
-                    let query_string = stmt.display(nom_sql::Dialect::MySQL).to_string();
+                    let query_string = stmt.display(readyset_sql::Dialect::MySQL).to_string();
 
                     let query_id = match query_id_wrapper {
                         QueryIdWrapper::Uncalculated(schema_search_path) => {

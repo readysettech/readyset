@@ -64,6 +64,7 @@ dataflow-expression = { path = "../dataflow-expression" }
 readyset-tracing = { path = "../readyset-tracing" }
 readyset-client-metrics = { path = "../readyset-client-metrics" }
 readyset-telemetry-reporter = { path = "../readyset-telemetry-reporter" }
+readyset-sql = { path = "../readyset-sql" }
 readyset-sql-passes = { path = "../readyset-sql-passes" }
 readyset-version = { path = "../readyset-version" }
 health-reporter = { path = "../health-reporter" }
@@ -72,7 +73,7 @@ database-utils = { path = "../database-utils" }
 [dev-dependencies]
 proptest = { workspace = true }
 test-strategy = { workspace = true }
-criterion = { workspace = true } 
+criterion = { workspace = true }
 rand = { workspace = true }
 
 [lib]

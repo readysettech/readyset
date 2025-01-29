@@ -8,15 +8,17 @@ use nom::combinator::{map, opt};
 use nom::multi::separated_list1;
 use nom::sequence::terminated;
 use nom_locate::LocatedSpan;
+use readyset_sql::Dialect;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
 use crate::common::{as_alias, ws_sep_comma};
+use crate::dialect::DialectParser;
 use crate::index_hint::{index_hint_list, IndexHint};
 use crate::select::nested_selection;
 use crate::whitespace::whitespace0;
-use crate::{Dialect, DialectDisplay, NomSqlResult, SelectStatement, SqlIdentifier};
+use crate::{DialectDisplay, NomSqlResult, SelectStatement, SqlIdentifier};
 
 /// A (potentially schema-qualified) name for a relation
 ///
@@ -291,7 +293,7 @@ impl NotReplicatedReason {
                     if let Some(start) = reason.find(prefix) {
                         let start_offset = start + prefix.len();
                         let type_name_raw = &reason[start_offset..];
-                        let type_name = type_name_raw.trim();  // Trim whitespace 
+                        let type_name = type_name_raw.trim();  // Trim whitespace
                         format!("Column type {} is not supported.", type_name)
                     } else {
                         "Column type unknown is not supported.".to_string()

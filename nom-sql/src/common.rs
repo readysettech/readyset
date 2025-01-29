@@ -20,11 +20,12 @@ use test_strategy::Arbitrary;
 
 use crate::column::Column;
 use crate::create::{collation_name, CollationName};
-use crate::dialect::{Dialect, DialectDisplay};
+use crate::dialect::DialectParser;
 use crate::expression::expression;
 use crate::table::Relation;
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Expr, FunctionExpr, Literal, NomSqlResult, SqlIdentifier};
+use crate::{DialectDisplay, Expr, FunctionExpr, Literal, NomSqlResult, SqlIdentifier};
+use readyset_sql::Dialect;
 
 #[cfg(feature = "debug")]
 pub fn debug_print(tag: &str, i: &[u8]) {

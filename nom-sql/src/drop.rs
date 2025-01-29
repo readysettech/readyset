@@ -7,6 +7,7 @@ use nom::combinator::{map, opt};
 use nom::multi::separated_list1;
 use nom::sequence::preceded;
 use nom_locate::LocatedSpan;
+use readyset_sql::Dialect;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
@@ -14,7 +15,7 @@ use test_strategy::Arbitrary;
 use crate::common::{statement_terminator, ws_sep_comma};
 use crate::table::{relation, table_list, Relation};
 use crate::whitespace::whitespace1;
-use crate::{Dialect, DialectDisplay, NomSqlResult};
+use crate::{DialectDisplay, NomSqlResult};
 
 fn if_exists(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], bool> {
     map(

@@ -3,6 +3,7 @@ use std::{fmt, str};
 use nom::branch::alt;
 use nom::combinator::{map, opt};
 use nom_locate::LocatedSpan;
+use readyset_sql::Dialect;
 use readyset_util::fmt::fmt_with;
 use readyset_util::redacted::Sensitive;
 use serde::{Deserialize, Serialize};
@@ -41,8 +42,8 @@ use crate::update::{updating, UpdateStatement};
 use crate::use_statement::{use_statement, UseStatement};
 use crate::whitespace::whitespace0;
 use crate::{
-    Dialect, DialectDisplay, DropAllCachesStatement, Expr, NomSqlResult, SelectSpecification,
-    SqlType, TableKey,
+    DialectDisplay, DropAllCachesStatement, Expr, NomSqlResult, SelectSpecification, SqlType,
+    TableKey,
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]

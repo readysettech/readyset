@@ -47,7 +47,8 @@ use crate::{
 ///
 /// ```
 /// use nom_sql::analysis::visit::Visitor;
-/// use nom_sql::{parse_query, Dialect, Literal, SqlQuery};
+/// use nom_sql::{parse_query, Literal, SqlQuery};
+/// use readyset_sql::Dialect;
 ///
 /// fn count_placeholders(query: &str) -> usize {
 ///     #[derive(Default)]
@@ -1263,9 +1264,11 @@ pub fn walk_comment_statement<'a, V: Visitor<'a>>(
 
 #[cfg(test)]
 mod tests {
+    use readyset_sql::Dialect;
+
     use super::*;
     use crate::select::selection;
-    use crate::{CaseWhenBranch, Dialect};
+    use crate::CaseWhenBranch;
 
     #[derive(Default, Debug, PartialEq, Eq)]
     struct NodeCounter(usize);

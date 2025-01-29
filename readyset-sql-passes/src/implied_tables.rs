@@ -257,9 +257,9 @@ mod tests {
     use std::collections::HashMap;
 
     use nom_sql::{
-        parse_query, Column, Dialect, DialectDisplay, Expr, FieldDefinitionExpr, SqlQuery,
-        TableExpr,
+        parse_query, Column, DialectDisplay, Expr, FieldDefinitionExpr, SqlQuery, TableExpr,
     };
+    use readyset_sql::Dialect;
 
     use super::*;
 
@@ -422,8 +422,8 @@ Dialect::MySQL,
             res,
             expected,
             "{} != {}",
-            res.display(nom_sql::Dialect::MySQL),
-            expected.display(nom_sql::Dialect::MySQL)
+            res.display(readyset_sql::Dialect::MySQL),
+            expected.display(readyset_sql::Dialect::MySQL)
         );
     }
 
@@ -445,8 +445,8 @@ Dialect::MySQL,
             res,
             expected,
             "\n{} != {}",
-            res.display(nom_sql::Dialect::MySQL),
-            expected.display(nom_sql::Dialect::MySQL)
+            res.display(readyset_sql::Dialect::MySQL),
+            expected.display(readyset_sql::Dialect::MySQL)
         );
     }
 
@@ -517,8 +517,8 @@ Dialect::MySQL,
             res,
             expected,
             "\n left: {}\nright: {}",
-            res.display(nom_sql::Dialect::MySQL),
-            expected.display(nom_sql::Dialect::MySQL)
+            res.display(readyset_sql::Dialect::MySQL),
+            expected.display(readyset_sql::Dialect::MySQL)
         );
     }
 
@@ -567,8 +567,8 @@ Dialect::MySQL,
             res,
             expected,
             "\n left: {}\nright: {}",
-            res.display(nom_sql::Dialect::MySQL),
-            expected.display(nom_sql::Dialect::MySQL)
+            res.display(readyset_sql::Dialect::MySQL),
+            expected.display(readyset_sql::Dialect::MySQL)
         );
     }
 
@@ -584,8 +584,8 @@ Dialect::MySQL,
             res,
             expected,
             "\n left: {}\nright: {}",
-            res.display(nom_sql::Dialect::MySQL),
-            expected.display(nom_sql::Dialect::MySQL)
+            res.display(readyset_sql::Dialect::MySQL),
+            expected.display(readyset_sql::Dialect::MySQL)
         );
     }
 }

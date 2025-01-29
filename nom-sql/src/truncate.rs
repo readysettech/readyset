@@ -6,6 +6,7 @@ use nom::multi::separated_list1;
 use nom::sequence::tuple;
 use nom::Parser;
 use nom_locate::LocatedSpan;
+use readyset_sql::Dialect;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
@@ -13,7 +14,7 @@ use test_strategy::Arbitrary;
 use crate::common::ws_sep_comma;
 use crate::table::relation;
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, DialectDisplay, NomSqlResult, Relation};
+use crate::{DialectDisplay, NomSqlResult, Relation};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 

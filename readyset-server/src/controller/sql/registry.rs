@@ -693,7 +693,7 @@ impl TryFrom<CreateViewStatement> for RecipeExpr {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::Dialect;
+    use readyset_sql::Dialect;
 
     use super::*;
 
@@ -718,7 +718,8 @@ mod tests {
     }
 
     mod expression {
-        use nom_sql::{parse_create_table, parse_select_statement, Dialect};
+        use nom_sql::{parse_create_table, parse_select_statement};
+        use readyset_sql::Dialect;
 
         use super::*;
 
@@ -777,7 +778,8 @@ mod tests {
     }
 
     mod registry {
-        use nom_sql::{parse_create_table, parse_select_statement, Dialect};
+        use nom_sql::{parse_create_table, parse_select_statement};
+        use readyset_sql::Dialect;
 
         use super::*;
 
@@ -1148,9 +1150,8 @@ mod tests {
     mod expr_skeleton {
         use std::collections::HashMap;
 
-        use nom_sql::{
-            parse_create_table, parse_select_statement, Dialect, ItemPlaceholder, Literal,
-        };
+        use nom_sql::{parse_create_table, parse_select_statement, ItemPlaceholder, Literal};
+        use readyset_sql::Dialect;
 
         use super::{recipe_expr_cache, ExprRegistry, ExprSkeletons, MatchedCache, RecipeExpr};
 

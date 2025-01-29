@@ -685,10 +685,10 @@ impl Fuzz {
         })
     }
 
-    fn dialect(&self) -> nom_sql::Dialect {
+    fn dialect(&self) -> readyset_sql::Dialect {
         match self.compare_to {
-            DatabaseURL::MySQL(_) => nom_sql::Dialect::MySQL,
-            DatabaseURL::PostgreSQL(_) => nom_sql::Dialect::PostgreSQL,
+            DatabaseURL::MySQL(_) => readyset_sql::Dialect::MySQL,
+            DatabaseURL::PostgreSQL(_) => readyset_sql::Dialect::PostgreSQL,
         }
     }
 }

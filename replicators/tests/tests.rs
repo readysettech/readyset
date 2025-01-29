@@ -443,8 +443,11 @@ impl TestHandle {
                             name: query_name.clone().into(),
                         }),
                         statement: Box::new(
-                            parse_select_statement(nom_sql::Dialect::MySQL, select_stmt.clone())
-                                .unwrap(),
+                            parse_select_statement(
+                                readyset_sql::Dialect::MySQL,
+                                select_stmt.clone(),
+                            )
+                            .unwrap(),
                         ),
                         always: false,
                     }),
@@ -2048,7 +2051,7 @@ async fn postgresql_ddl_replicate_drop_view_internal(url: &str) {
         }),
         statement: Box::new(
             parse_select_statement(
-                nom_sql::Dialect::PostgreSQL,
+                readyset_sql::Dialect::PostgreSQL,
                 "SELECT * FROM public.t2_view;",
             )
             .unwrap(),
@@ -2129,7 +2132,7 @@ async fn postgresql_ddl_replicate_create_view_internal(url: &str) {
                 }),
                 statement: Box::new(
                     parse_select_statement(
-                        nom_sql::Dialect::PostgreSQL,
+                        readyset_sql::Dialect::PostgreSQL,
                         "SELECT * FROM public.t2_view;"
                     )
                     .unwrap()

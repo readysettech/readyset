@@ -1,6 +1,7 @@
-use nom_sql::{Dialect, SqlType};
+use nom_sql::SqlType;
 use proptest::strategy::{Just, Strategy};
 use proptest::{option, prop_oneof};
+use readyset_sql::Dialect;
 use SqlType::*;
 
 /// Returns a proptest strategy to generate *numeric* [`SqlType`]s, optionally filtering to only

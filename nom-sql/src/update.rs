@@ -5,6 +5,7 @@ use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
 use nom::sequence::tuple;
 use nom_locate::LocatedSpan;
+use readyset_sql::Dialect;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
@@ -14,7 +15,7 @@ use crate::common::{assignment_expr_list, statement_terminator};
 use crate::select::where_clause;
 use crate::table::{relation, Relation};
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, DialectDisplay, Expr, NomSqlResult};
+use crate::{DialectDisplay, Expr, NomSqlResult};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct UpdateStatement {

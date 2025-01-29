@@ -222,7 +222,7 @@ impl MySqlReplicator<'_> {
                         db.to_string(),
                         table.to_string(),
                         create_table.clone(),
-                        nom_sql::Dialect::MySQL,
+                        readyset_sql::Dialect::MySQL,
                     );
 
                     future::ready(ChangeList::from_str(create_table, Dialect::DEFAULT_MYSQL))
@@ -274,7 +274,7 @@ impl MySqlReplicator<'_> {
                         db.to_string(),
                         view.to_string(),
                         create_view.clone(),
-                        nom_sql::Dialect::MySQL,
+                        readyset_sql::Dialect::MySQL,
                     );
                     future::ready(ChangeList::from_str(create_view, Dialect::DEFAULT_MYSQL))
                 })
@@ -390,7 +390,7 @@ impl MySqlReplicator<'_> {
         let mut conn = self.pool.get_conn().await?;
         let query = format!(
             "LOCK TABLES {} READ",
-            table.display(nom_sql::Dialect::MySQL)
+            table.display(readyset_sql::Dialect::MySQL)
         );
         conn.query_drop(query).await?;
         Ok(conn)
@@ -629,7 +629,7 @@ impl MySqlReplicator<'_> {
     ) -> ReadySetResult<JoinHandle<(Relation, ReplicationOffset, ReadySetResult<()>)>> {
         let span = info_span!(
             "Snapshotting table",
-            table = %table.display(nom_sql::Dialect::MySQL)
+            table = %table.display(readyset_sql::Dialect::MySQL)
         );
         span.in_scope(|| info!("Acquiring read lock"));
         let mut read_lock = self.lock_table(&table).await?;
@@ -675,7 +675,7 @@ impl MySqlReplicator<'_> {
         while let Some(table) = table_list.pop() {
             if replication_offsets.has_table(&table) {
                 info!(
-                    table = %table.display(nom_sql::Dialect::MySQL),
+                    table = %table.display(readyset_sql::Dialect::MySQL),
                     "Replication offset already exists for table, skipping snapshot"
                 );
             } else {
@@ -698,7 +698,7 @@ impl MySqlReplicator<'_> {
                     compacting_tasks.push(tokio::spawn(async move {
                         let span = info_span!(
                             "Compacting table",
-                            table = %table.display(nom_sql::Dialect::MySQL)
+                            table = %table.display(readyset_sql::Dialect::MySQL)
                         );
                         span.in_scope(|| info!("Setting replication offset"));
                         noria_table
@@ -720,7 +720,7 @@ impl MySqlReplicator<'_> {
                 }
                 (table, _, Err(err)) => {
                     error!(
-                        table = %table.display(nom_sql::Dialect::MySQL),
+                        table = %table.display(readyset_sql::Dialect::MySQL),
                         error = %err,
                         "Replication failed, retrying"
                     );
@@ -736,7 +736,7 @@ impl MySqlReplicator<'_> {
                 let table = table_list.pop().expect("Not empty");
                 if replication_offsets.has_table(&table) {
                     info!(
-                        table = %table.display(nom_sql::Dialect::MySQL),
+                        table = %table.display(readyset_sql::Dialect::MySQL),
                         "Replication offset already exists for table, skipping snapshot"
                     );
                 } else {
@@ -805,7 +805,7 @@ impl MySqlReplicator<'_> {
 
         for table in current_tables.keys() {
             if !snapshot_tables_set.contains(table) {
-                warn!(table = %table.display(nom_sql::Dialect::MySQL), "Dropping table that is not part of snapshot");
+                warn!(table = %table.display(readyset_sql::Dialect::MySQL), "Dropping table that is not part of snapshot");
                 changes.push(Change::Drop {
                     name: table.clone(),
                     if_exists: false,

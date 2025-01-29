@@ -5,12 +5,13 @@ use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::map;
 use nom_locate::LocatedSpan;
+use readyset_sql::Dialect;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
 use crate::column::Column;
-use crate::{Dialect, DialectDisplay, Expr, NomSqlResult, TableExpr};
+use crate::{DialectDisplay, Expr, NomSqlResult, TableExpr};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Arbitrary)]
 pub enum JoinRightSide {
@@ -119,7 +120,7 @@ mod tests {
     use super::*;
     use crate::common::FieldDefinitionExpr;
     use crate::select::{selection, JoinClause, SelectStatement};
-    use crate::{BinaryOperator, Dialect, Relation};
+    use crate::{BinaryOperator, Relation};
 
     mod mysql {
         use super::*;

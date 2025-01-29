@@ -9,15 +9,17 @@ use nom::multi::separated_list1;
 use nom::sequence::{terminated, tuple};
 use nom::Parser;
 use nom_locate::LocatedSpan;
+use readyset_sql::Dialect;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
 use crate::common::statement_terminator;
+use crate::dialect::DialectParser;
 use crate::expression::expression;
 use crate::literal::literal;
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, DialectDisplay, Expr, Literal, NomSqlError, NomSqlResult, SqlIdentifier};
+use crate::{DialectDisplay, Expr, Literal, NomSqlError, NomSqlResult, SqlIdentifier};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum SetStatement {

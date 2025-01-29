@@ -485,7 +485,7 @@ async fn dry_run_evaluates_support() {
     // "pending" status in the proxied query table. Once the dry run
     // is complete, it will have a "yes" status.
     let select_query = match nom_sql::parse_query(
-        nom_sql::Dialect::MySQL,
+        readyset_sql::Dialect::MySQL,
         "SELECT * FROM `t1` WHERE (`uid` = $1)",
     )
     .unwrap()
@@ -566,7 +566,7 @@ async fn proxied_queries_filtering() {
     // "pending" status in the proxied query table. Once the dry run
     // is complete, it will have a "yes" status.
     let select_query = match nom_sql::parse_query(
-        nom_sql::Dialect::MySQL,
+        readyset_sql::Dialect::MySQL,
         "SELECT * FROM `t1` WHERE (`uid` = $1)",
     )
     .unwrap()

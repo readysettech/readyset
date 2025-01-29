@@ -27,6 +27,7 @@ readyset-adapter = { path = "../readyset-adapter" }
 readyset-client = { path = "../readyset-client" }
 readyset-data = { path = "../readyset-data" }
 readyset-util = { path = "../readyset-util", features = ["failure_injection"] }
+readyset-sql = { path = "../readyset-sql" }
 readyset-tracing = { path = "../readyset-tracing" }
 readyset-errors = { path = "../readyset-errors" }
 

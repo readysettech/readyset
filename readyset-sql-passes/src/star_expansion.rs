@@ -169,7 +169,8 @@ impl StarExpansion for SqlQuery {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{parse_query, Dialect, DialectDisplay};
+    use nom_sql::{parse_query, DialectDisplay};
+    use readyset_sql::Dialect;
 
     use super::*;
 
@@ -182,8 +183,8 @@ mod tests {
             res,
             expected,
             "{} != {}",
-            res.display(nom_sql::Dialect::MySQL),
-            expected.display(nom_sql::Dialect::MySQL)
+            res.display(readyset_sql::Dialect::MySQL),
+            expected.display(readyset_sql::Dialect::MySQL)
         );
     }
 

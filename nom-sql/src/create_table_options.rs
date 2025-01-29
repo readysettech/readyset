@@ -9,14 +9,16 @@ use nom::combinator::{map, map_res, opt};
 use nom::multi::separated_list0;
 use nom::sequence::{separated_pair, tuple};
 use nom_locate::LocatedSpan;
+use readyset_sql::Dialect;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
 use crate::common::{ws_sep_comma, ws_sep_equals};
 use crate::create::{charset_name, collation_name, CharsetName, CollationName};
+use crate::dialect::DialectParser;
 use crate::literal::integer_literal;
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, Literal, NomSqlResult};
+use crate::{Literal, NomSqlResult};
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, Arbitrary)]
 pub enum CreateTableOption {

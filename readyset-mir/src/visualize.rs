@@ -205,7 +205,7 @@ impl GraphViz for MirNodeInner {
             }
             MirNodeInner::Filter { ref conditions, .. } => {
                 // FIXME(ENG-2502): Use correct dialect.
-                write!(f, "σ: {}", conditions.display(nom_sql::Dialect::MySQL))
+                write!(f, "σ: {}", conditions.display(readyset_sql::Dialect::MySQL))
             }
             MirNodeInner::ViewKey { ref key } => {
                 write!(f, "σ: {}", key.iter().join(" AND "))

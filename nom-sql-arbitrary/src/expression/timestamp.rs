@@ -1,8 +1,9 @@
 //! Module that holds all the functions to get a proptest [`Strategy`]
 //! that generates [`Expr`]s that resolve to a timestamp value.
-use nom_sql::{Dialect, Expr, SqlType};
+use nom_sql::{Expr, SqlType};
 use proptest::prop_oneof;
 use proptest::strategy::Strategy;
+use readyset_sql::Dialect;
 
 use crate::expression::util::{case_when, cast};
 use crate::expression::ExprStrategy;
@@ -33,9 +34,10 @@ fn timestamp_cast(es: ExprStrategy) -> impl Strategy<Value = Expr> {
 
 /// Helper module to group all the [`Strategy`]s that generate timestamp [`Expr::Call`].
 mod call {
-    use nom_sql::{Dialect, Expr};
+    use nom_sql::Expr;
     use proptest::prelude::Strategy;
     use proptest::prop_oneof;
+    use readyset_sql::Dialect;
 
     use crate::expression::util::{coalesce, if_null};
     use crate::expression::ExprStrategy;

@@ -36,11 +36,11 @@
 //!   TABLE` statement - ReadySet will then know that a `CREATE TABLE` statement for a table that
 //!   already exists should be treated as an alter table.
 //!
-//! [dialect]: nom_sql::Dialect
+//! [dialect]: readyset_sql::Dialect
 
 use nom_sql::{
     parse_query, AlterTableStatement, Column, ColumnConstraint, ColumnSpecification,
-    CreateTableBody, CreateTableStatement, CreateViewStatement, Dialect, NonReplicatedRelation,
+    CreateTableBody, CreateTableStatement, CreateViewStatement, NonReplicatedRelation,
     NotReplicatedReason, Relation, SqlQuery, SqlType, TableKey,
 };
 use pgsql::tls::MakeTlsConnect;
@@ -48,6 +48,7 @@ use readyset_client::recipe::changelist::{AlterTypeChange, Change, PostgresTable
 use readyset_data::{DfType, PgEnumMetadata};
 use readyset_errors::ReadySetError::ReplicationFailed;
 use readyset_errors::ReadySetResult;
+use readyset_sql::Dialect;
 use serde::{Deserialize, Deserializer};
 use tokio_postgres as pgsql;
 use tracing::info;

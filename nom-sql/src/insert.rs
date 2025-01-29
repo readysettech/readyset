@@ -6,6 +6,7 @@ use nom::combinator::opt;
 use nom::multi::separated_list1;
 use nom::sequence::{delimited, preceded, terminated, tuple};
 use nom_locate::LocatedSpan;
+use readyset_sql::Dialect;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
@@ -16,7 +17,7 @@ use crate::common::{
 };
 use crate::table::{relation, Relation};
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, DialectDisplay, Expr, NomSqlResult};
+use crate::{DialectDisplay, Expr, NomSqlResult};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct InsertStatement {

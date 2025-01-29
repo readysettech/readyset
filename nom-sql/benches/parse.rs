@@ -1,6 +1,6 @@
 use criterion::{black_box, criterion_group, criterion_main, Bencher, Criterion};
-use nom_sql::Dialect;
 use pprof::criterion::{Output, PProfProfiler};
+use readyset_sql::Dialect;
 
 fn selects_nom_sql_by_db(c: &mut Criterion, dialect: Dialect) {
     let run_benchmark = |b: &mut Bencher, query: &str| {

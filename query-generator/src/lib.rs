@@ -18,7 +18,8 @@
 //! Generating a simple query, with a single query parameter and a single inner join:
 //!
 //! ```rust
-//! use nom_sql::{Dialect, DialectDisplay, JoinOperator};
+//! use nom_sql::{DialectDisplay, JoinOperator};
+//! use readyset_sql::Dialect;
 //! use query_generator::{GeneratorState, QueryOperation, QuerySeed};
 //!
 //! let mut gen = GeneratorState::default();
@@ -82,11 +83,10 @@ use lazy_static::lazy_static;
 use nom_sql::analysis::{contains_aggregate, ReferredColumns};
 use nom_sql::{
     BinaryOperator, Column, ColumnConstraint, ColumnSpecification, CommonTableExpr,
-    CreateTableBody, CreateTableStatement, Dialect as ParseDialect, Expr, FieldDefinitionExpr,
-    FieldReference, FunctionExpr, InValue, ItemPlaceholder, JoinClause, JoinConstraint,
-    JoinOperator, JoinRightSide, LimitClause, LimitValue, Literal, OrderBy, OrderClause, OrderType,
-    Relation, SelectStatement, SqlIdentifier, SqlType, SqlTypeArbitraryOptions, TableExpr,
-    TableExprInner, TableKey,
+    CreateTableBody, CreateTableStatement, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr,
+    InValue, ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator, JoinRightSide, LimitClause,
+    LimitValue, Literal, OrderBy, OrderClause, OrderType, Relation, SelectStatement, SqlIdentifier,
+    SqlType, SqlTypeArbitraryOptions, TableExpr, TableExprInner, TableKey,
 };
 use parking_lot::Mutex;
 use proptest::arbitrary::{any, any_with, Arbitrary};
@@ -94,6 +94,7 @@ use proptest::sample::Select;
 use proptest::strategy::{BoxedStrategy, Strategy};
 use rand::thread_rng;
 use readyset_data::{Collation, DfType, DfValue, Dialect};
+use readyset_sql::Dialect as ParseDialect;
 use readyset_sql_passes::outermost_table_exprs;
 use readyset_util::intervals::{BoundPair, IterBoundPair};
 use serde::{Deserialize, Serialize};
@@ -2949,7 +2950,7 @@ mod tests {
         let query = gen.generate_query(seed);
         eprintln!(
             "query: {}",
-            query.statement.display(nom_sql::Dialect::MySQL)
+            query.statement.display(readyset_sql::Dialect::MySQL)
         );
         match query.statement.where_clause {
             Some(Expr::In {

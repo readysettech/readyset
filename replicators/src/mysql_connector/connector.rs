@@ -542,13 +542,14 @@ impl MySqlBinlogConnector {
                                     ),
                                 ));
                             }
-                            statement.propagate_default_charset(nom_sql::Dialect::MySQL);
+                            statement.propagate_default_charset(readyset_sql::Dialect::MySQL);
                         }
                     }
                 }
                 changelist.changes
             }
-            Err(error) => match nom_sql::parse_query(nom_sql::Dialect::MySQL, q_event.query()) {
+            Err(error) => match nom_sql::parse_query(readyset_sql::Dialect::MySQL, q_event.query())
+            {
                 Ok(nom_sql::SqlQuery::Insert(insert)) => {
                     self.drop_and_add_non_replicated_table(insert.table, &schema)
                         .await
@@ -592,7 +593,9 @@ impl MySqlBinlogConnector {
         q_event: mysql_common::binlog::events::QueryEvent<'_>,
         is_last: bool,
     ) -> mysql::Result<ReplicationAction> {
-        use nom_sql::{parse_query, Dialect, SqlQuery};
+        use nom_sql::{parse_query, SqlQuery};
+        use readyset_sql::Dialect;
+
         match parse_query(Dialect::MySQL, q_event.query()) {
             Ok(SqlQuery::Commit(_)) if self.report_position_elapsed() || is_last => {
                 Ok(ReplicationAction::LogPosition)

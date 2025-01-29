@@ -5,9 +5,8 @@ use anyhow::anyhow;
 use clap::Parser;
 use database_utils::{DatabaseConnection, DatabaseURL, QueryableConnection};
 use itertools::Itertools;
-use nom_sql::{
-    parse_query, Dialect, DialectDisplay, Expr, FieldDefinitionExpr, FunctionExpr, SqlQuery,
-};
+use nom_sql::{parse_query, DialectDisplay, Expr, FieldDefinitionExpr, FunctionExpr, SqlQuery};
+use readyset_sql::Dialect;
 use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncWriteExt, BufReader};
 
@@ -179,7 +178,7 @@ impl FromQueryLog {
             .collect::<Result<Vec<_>, _>>()?;
 
         // FIXME(REA-2168): Use correct dialect.
-        let stmt_string = stmt.display(nom_sql::Dialect::MySQL).to_string();
+        let stmt_string = stmt.display(readyset_sql::Dialect::MySQL).to_string();
 
         let rows = conn.execute(&stmt_string, &params).await?;
 

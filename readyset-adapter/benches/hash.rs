@@ -14,7 +14,7 @@ fn hash_benchmarks(c: &mut Criterion) {
         .iter()
         .map(|q| {
             Query::Parsed(Arc::new(ViewCreateRequest {
-                statement: parse_select_statement(nom_sql::Dialect::MySQL, q).unwrap(),
+                statement: parse_select_statement(readyset_sql::Dialect::MySQL, q).unwrap(),
                 schema_search_path: vec!["public".into()],
             }))
         })

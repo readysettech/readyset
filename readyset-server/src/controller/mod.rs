@@ -1338,8 +1338,8 @@ mod tests {
 
     use dataflow::DomainIndex;
     use nom_sql::{
-        parse_create_table, parse_select_statement, Dialect, NonReplicatedRelation,
-        NotReplicatedReason, Relation,
+        parse_create_table, parse_select_statement, NonReplicatedRelation, NotReplicatedReason,
+        Relation,
     };
     use readyset_client::debug::info::KeyCount;
     use readyset_client::recipe::changelist::{Change, ChangeList};
@@ -1347,6 +1347,7 @@ mod tests {
         PersistencePoint, TableOperation, TableReplicationStatus, TableStatus, ViewCreateRequest,
     };
     use readyset_data::Dialect as DataDialect;
+    use readyset_sql::Dialect;
     use readyset_util::eventually;
     use replication_offset::ReplicationOffset;
     use replicators::MySqlPosition;

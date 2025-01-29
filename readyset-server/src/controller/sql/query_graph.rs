@@ -761,7 +761,10 @@ fn extract_having_aggregates(
         fn visit_expr(&mut self, expr: &'ast mut Expr) -> Result<(), Self::Error> {
             if matches!(expr, Expr::Call(fun) if is_aggregate(fun)) {
                 // FIXME(REA-2168): Use correct dialect.
-                let name: SqlIdentifier = expr.display(nom_sql::Dialect::MySQL).to_string().into();
+                let name: SqlIdentifier = expr
+                    .display(readyset_sql::Dialect::MySQL)
+                    .to_string()
+                    .into();
                 let col_expr = Expr::Column(nom_sql::Column {
                     name: name.clone(),
                     table: None,
@@ -1222,7 +1225,11 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                 let name: SqlIdentifier = alias
                     .clone()
                     // FIXME(REA-2168): Use correct dialect.
-                    .unwrap_or_else(|| expr.display(nom_sql::Dialect::MySQL).to_string().into());
+                    .unwrap_or_else(|| {
+                        expr.display(readyset_sql::Dialect::MySQL)
+                            .to_string()
+                            .into()
+                    });
                 match expr {
                     Expr::Literal(l) => columns.push(OutputColumn::Literal(LiteralColumn {
                         name,
@@ -1319,14 +1326,19 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                     // aggregate result column
                     aggregates.entry(func.clone()).or_insert_with(|| {
                         // FIXME(REA-2168): Use correct dialect.
-                        func.display(nom_sql::Dialect::MySQL).to_string().into()
+                        func.display(readyset_sql::Dialect::MySQL)
+                            .to_string()
+                            .into()
                     });
                 }
                 FieldReference::Expr(expr) => {
                     // This is an expression that we need to add to the list of projected columns
                     columns.push(OutputColumn::Expr(ExprColumn {
                         // FIXME(REA-2168): Use correct dialect.
-                        name: expr.display(nom_sql::Dialect::MySQL).to_string().into(),
+                        name: expr
+                            .display(readyset_sql::Dialect::MySQL)
+                            .to_string()
+                            .into(),
                         table: None,
                         expression: expr.clone(),
                     }));
@@ -1362,7 +1374,10 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                                 FieldReference::Expr(Expr::Column(col)) => col,
                                 FieldReference::Expr(expr) => Column {
                                     // FIXME(REA-2168): Use correct dialect.
-                                    name: expr.display(nom_sql::Dialect::MySQL).to_string().into(),
+                                    name: expr
+                                        .display(readyset_sql::Dialect::MySQL)
+                                        .to_string()
+                                        .into(),
                                     table: None,
                                 },
                                 FieldReference::Numeric(_) => {
@@ -1462,7 +1477,8 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
 #[allow(clippy::unwrap_used)]
 #[cfg(test)]
 mod tests {
-    use nom_sql::{parse_query, parse_select_statement, Dialect, FunctionExpr, SqlQuery};
+    use nom_sql::{parse_query, parse_select_statement, FunctionExpr, SqlQuery};
+    use readyset_sql::Dialect;
 
     use super::*;
 

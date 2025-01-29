@@ -681,7 +681,7 @@ fn start_adapter(args: SystemBenchArgs) -> anyhow::Result<()> {
                     tls_acceptor: None,
                 },
                 database_type: DatabaseType::MySQL,
-                parse_dialect: nom_sql::Dialect::MySQL,
+                parse_dialect: readyset_sql::Dialect::MySQL,
                 expr_dialect: readyset_data::Dialect::DEFAULT_MYSQL,
             };
 
@@ -700,7 +700,7 @@ fn start_adapter(args: SystemBenchArgs) -> anyhow::Result<()> {
                     enable_statement_logging: false,
                 },
                 database_type: DatabaseType::PostgreSQL,
-                parse_dialect: nom_sql::Dialect::PostgreSQL,
+                parse_dialect: readyset_sql::Dialect::PostgreSQL,
                 expr_dialect: readyset_data::Dialect::DEFAULT_POSTGRESQL,
             };
 

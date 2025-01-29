@@ -2,9 +2,10 @@
 //! that generates [`Expr`]s that resolve to a string value.
 // TODO(fran): Make collation configurable.
 
-use nom_sql::{Dialect, Expr, SqlType};
+use nom_sql::{Expr, SqlType};
 use proptest::prop_oneof;
 use proptest::strategy::Strategy;
+use readyset_sql::Dialect;
 
 use crate::expression::util::{case_when, cast};
 use crate::expression::ExprStrategy;
@@ -28,9 +29,10 @@ fn string_cast(es: ExprStrategy) -> impl Strategy<Value = Expr> {
 
 /// Helper module to group all the [`Strategy`]s that generate string [`Expr::Call`].
 mod call {
-    use nom_sql::{Dialect, Expr, FunctionExpr};
+    use nom_sql::{Expr, FunctionExpr};
     use proptest::prop_oneof;
     use proptest::strategy::Strategy;
+    use readyset_sql::Dialect;
 
     use crate::expression::util::{coalesce, if_null};
     use crate::expression::ExprStrategy;

@@ -108,10 +108,11 @@ impl Writer {
         let view_cache = SharedCache::new();
         let adapter_rewrite_params = ch.adapter_rewrite_params().await?;
         let (dialect, nom_sql_dialect) = match DatabaseURL::from_str(&self.database_url)? {
-            DatabaseURL::MySQL(_) => (Dialect::DEFAULT_MYSQL, nom_sql::Dialect::MySQL),
-            DatabaseURL::PostgreSQL(_) => {
-                (Dialect::DEFAULT_POSTGRESQL, nom_sql::Dialect::PostgreSQL)
-            }
+            DatabaseURL::MySQL(_) => (Dialect::DEFAULT_MYSQL, readyset_sql::Dialect::MySQL),
+            DatabaseURL::PostgreSQL(_) => (
+                Dialect::DEFAULT_POSTGRESQL,
+                readyset_sql::Dialect::PostgreSQL,
+            ),
         };
         let adapter_start_time = SystemTime::now();
         let noria = NoriaConnector::new(

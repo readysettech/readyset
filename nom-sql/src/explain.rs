@@ -5,6 +5,7 @@ use nom::bytes::complete::tag_no_case;
 use nom::combinator::{opt, value};
 use nom::sequence::{terminated, tuple};
 use nom_locate::LocatedSpan;
+use readyset_sql::Dialect;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
@@ -13,7 +14,7 @@ use crate::common::{parse_fallible, statement_terminator, until_statement_termin
 use crate::create::cached_query_inner;
 use crate::table::relation;
 use crate::whitespace::whitespace1;
-use crate::{CacheInner, Dialect, DialectDisplay, NomSqlResult, Relation};
+use crate::{CacheInner, DialectDisplay, NomSqlResult, Relation};
 
 /// EXPLAIN statements
 ///

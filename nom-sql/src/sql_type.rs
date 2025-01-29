@@ -17,6 +17,7 @@ use proptest::arbitrary::Arbitrary;
 use proptest::prelude::any_with;
 use proptest::sample::SizeRange;
 use proptest::strategy::{BoxedStrategy, Strategy};
+use readyset_sql::Dialect;
 #[cfg(feature = "failure_injection")]
 use readyset_util::failpoints;
 use readyset_util::fmt::fmt_with;
@@ -24,9 +25,10 @@ use serde::{Deserialize, Serialize};
 use triomphe::ThinArc;
 
 use crate::common::{ws_sep_comma, Sign};
+use crate::dialect::DialectParser;
 use crate::table::relation;
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, DialectDisplay, NomSqlResult, Relation};
+use crate::{DialectDisplay, NomSqlResult, Relation};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum IntervalFields {

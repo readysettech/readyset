@@ -10,9 +10,7 @@ use futures::FutureExt;
 use metrics::{counter, histogram};
 use mysql::prelude::Queryable;
 use mysql::{OptsBuilder, PoolConstraints, PoolOpts, SslOpts};
-use nom_sql::{
-    Dialect as NonSQLDialect, DialectDisplay, NonReplicatedRelation, NotReplicatedReason, Relation,
-};
+use nom_sql::{DialectDisplay, NonReplicatedRelation, NotReplicatedReason, Relation};
 use postgres_native_tls::MakeTlsConnector;
 use postgres_protocol::escape::escape_literal;
 use readyset_client::consistency::Timestamp;
@@ -22,6 +20,7 @@ use readyset_client::utils::retry_with_exponential_backoff;
 use readyset_client::{ReadySetHandle, Table, TableOperation};
 use readyset_data::Dialect;
 use readyset_errors::{internal_err, set_failpoint_return_err, ReadySetError, ReadySetResult};
+use readyset_sql::Dialect as SQLDialect;
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
 #[cfg(feature = "failure_injection")]
 use readyset_util::failpoints;
@@ -197,8 +196,8 @@ impl<'a> NoriaAdapter<'a> {
             config.replication_tables.take(),
             config.replication_tables_ignore.take(),
             match url.dialect() {
-                NonSQLDialect::MySQL => url.db_name(),
-                NonSQLDialect::PostgreSQL => None,
+                SQLDialect::MySQL => url.db_name(),
+                SQLDialect::PostgreSQL => None,
             },
         )?;
         loop {
@@ -653,7 +652,8 @@ impl<'a> NoriaAdapter<'a> {
             }
         };
 
-        let mut create_schema = CreateSchema::new(dbname.to_string(), nom_sql::Dialect::PostgreSQL);
+        let mut create_schema =
+            CreateSchema::new(dbname.to_string(), readyset_sql::Dialect::PostgreSQL);
 
         if let Some(replication_slot) = replication_slot {
             set_failpoint!(failpoints::POSTGRES_SNAPSHOT_START);
@@ -946,7 +946,7 @@ impl<'a> NoriaAdapter<'a> {
             // a failure.
             if self.warned_missing_tables.insert(table.clone()) {
                 warn!(
-                    table_name = %table.display(nom_sql::Dialect::PostgreSQL),
+                    table_name = %table.display(readyset_sql::Dialect::PostgreSQL),
                     num_actions = actions.len(),
                     position = %pos,
                     "Could not find table, discarding actions"
@@ -1198,7 +1198,7 @@ impl<'a> NoriaAdapter<'a> {
     /// dataflow state (if any).
     async fn remove_table_from_readyset(&mut self, table: Relation) -> ReadySetResult<()> {
         info!(
-            table = %table.display(nom_sql::Dialect::PostgreSQL),
+            table = %table.display(readyset_sql::Dialect::PostgreSQL),
             "Removing table state from readyset"
         );
         self.noria.replication_offsets().await?;
@@ -1236,7 +1236,7 @@ impl<'a> NoriaAdapter<'a> {
         // this currently--if we see this, we should investigate and fix the issue
         // causing a table to not be supported by our replication
         error!(
-            table = %table.display(nom_sql::Dialect::PostgreSQL),
+            table = %table.display(readyset_sql::Dialect::PostgreSQL),
             error = %source,
             "Will stop replicating a table due to table error"
         );
@@ -1246,7 +1246,7 @@ impl<'a> NoriaAdapter<'a> {
             // somewhere. If we don't have a schema at this point, we don't know which
             // table encountered an error, so we fall back to resnapshotting.
             error!(
-                table = %table.display(nom_sql::Dialect::PostgreSQL),
+                table = %table.display(readyset_sql::Dialect::PostgreSQL),
                 "Unable to deny replication for table without schema. Will Re-snapshot"
             );
             ReadySetError::ResnapshotNeeded

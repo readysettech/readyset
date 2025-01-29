@@ -9,8 +9,9 @@ use futures::TryStreamExt;
 use mysql::prelude::AsQuery;
 use mysql::PoolConstraints;
 use mysql_async::prelude::Queryable;
-use nom_sql::{Dialect, SqlType};
+use nom_sql::SqlType;
 use readyset_errors::ReadySetError;
+use readyset_sql::Dialect;
 use {mysql_async as mysql, tokio_postgres as pgsql};
 
 use crate::error::{ConnectionType, DatabaseError};

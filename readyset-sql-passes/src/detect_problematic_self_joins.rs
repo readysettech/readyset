@@ -268,7 +268,8 @@ mod tests {
     use super::*;
 
     mod unsupported {
-        use nom_sql::{parse_query, Dialect};
+        use nom_sql::parse_query;
+        use readyset_sql::Dialect;
 
         use super::*;
 
@@ -368,7 +369,8 @@ mod tests {
     }
 
     mod supported {
-        use nom_sql::{parse_query, Dialect};
+        use nom_sql::parse_query;
+        use readyset_sql::Dialect;
 
         use super::*;
 

@@ -54,7 +54,7 @@ async fn mysql_eval(expr: &str, conn: &mut Conn) -> DfValue {
         .unwrap()
         .unwrap();
     let raw_type: String = col.get("Type").unwrap();
-    let sql_type = parse_sql_type(nom_sql::Dialect::MySQL, raw_type).unwrap();
+    let sql_type = parse_sql_type(readyset_sql::Dialect::MySQL, raw_type).unwrap();
     let target_type = DfType::from_sql_type(
         &sql_type,
         dataflow_expression::Dialect::DEFAULT_MYSQL,
@@ -78,7 +78,7 @@ async fn compare_eval(expr: &str, conn: &mut Conn) {
     let mysql_result = mysql_eval(expr, conn).await;
     let our_result = parse_lower_eval(
         expr,
-        nom_sql::Dialect::MySQL,
+        readyset_sql::Dialect::MySQL,
         dataflow_expression::Dialect::DEFAULT_MYSQL,
     )
     .unwrap_or_else(|e| panic!("Error evaluating `{expr}`: {e}"));

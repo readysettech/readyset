@@ -113,7 +113,7 @@ where
     pub connection_handler: H,
     pub database_type: DatabaseType,
     /// SQL dialect to use when parsing queries
-    pub parse_dialect: nom_sql::Dialect,
+    pub parse_dialect: readyset_sql::Dialect,
     /// Expression evaluation dialect to pass to ReadySet for all migration requests
     pub expr_dialect: readyset_data::Dialect,
 }

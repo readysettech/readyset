@@ -3692,7 +3692,7 @@ async fn finkelstein1982_queries() {
 
         // Add them one by one
         for q in lines.iter() {
-            let q = parse_query(nom_sql::Dialect::MySQL, q).unwrap();
+            let q = parse_query(readyset_sql::Dialect::MySQL, q).unwrap();
             match q {
                 SqlQuery::CreateTable(stmt) => {
                     let stmt = inc
@@ -8842,8 +8842,11 @@ async fn multiple_simultaneous_migrations() {
 
     g.extend_recipe(ChangeList::from_change(
         Change::CreateTable {
-            statement: parse_create_table(nom_sql::Dialect::MySQL, "CREATE TABLE t (x int, y int)")
-                .unwrap(),
+            statement: parse_create_table(
+                readyset_sql::Dialect::MySQL,
+                "CREATE TABLE t (x int, y int)",
+            )
+            .unwrap(),
             pg_meta: None,
         },
         Dialect::DEFAULT_MYSQL,
@@ -8865,8 +8868,11 @@ async fn multiple_simultaneous_migrations() {
             Change::CreateCache(CreateCache {
                 name: Some("q1".into()),
                 statement: Box::new(
-                    parse_select_statement(nom_sql::Dialect::MySQL, "SELECT * FROM t WHERE x = ?")
-                        .unwrap()
+                    parse_select_statement(
+                        readyset_sql::Dialect::MySQL,
+                        "SELECT * FROM t WHERE x = ?"
+                    )
+                    .unwrap()
                 ),
                 always: false,
             }),
@@ -8876,8 +8882,11 @@ async fn multiple_simultaneous_migrations() {
             Change::CreateCache(CreateCache {
                 name: Some("q2".into()),
                 statement: Box::new(
-                    parse_select_statement(nom_sql::Dialect::MySQL, "SELECT * FROM t WHERE y = ?")
-                        .unwrap()
+                    parse_select_statement(
+                        readyset_sql::Dialect::MySQL,
+                        "SELECT * FROM t WHERE y = ?"
+                    )
+                    .unwrap()
                 ),
                 always: false,
             }),
@@ -9277,7 +9286,7 @@ async fn views_out_of_order() {
     g.extend_recipe(ChangeList::from_change(
         Change::CreateView(
             parse_create_view(
-                nom_sql::Dialect::MySQL,
+                readyset_sql::Dialect::MySQL,
                 "CREATE VIEW v2 AS SELECT x FROM v1",
             )
             .unwrap(),
@@ -9290,7 +9299,7 @@ async fn views_out_of_order() {
     g.extend_recipe(ChangeList::from_change(
         Change::CreateView(
             parse_create_view(
-                nom_sql::Dialect::MySQL,
+                readyset_sql::Dialect::MySQL,
                 "CREATE VIEW v1 AS SELECT x FROM t1",
             )
             .unwrap(),
@@ -9303,7 +9312,7 @@ async fn views_out_of_order() {
     g.extend_recipe(ChangeList::from_change(
         Change::create_cache(
             "q",
-            parse_select_statement(nom_sql::Dialect::MySQL, "SELECT x FROM v2").unwrap(),
+            parse_select_statement(readyset_sql::Dialect::MySQL, "SELECT x FROM v2").unwrap(),
             false,
         ),
         Dialect::DEFAULT_MYSQL,
@@ -9328,7 +9337,7 @@ async fn evict_single() {
     g.extend_recipe(ChangeList::from_change(
         Change::create_cache(
             "q",
-            parse_select_statement(nom_sql::Dialect::MySQL, "SELECT x FROM t1 where y = ?")
+            parse_select_statement(readyset_sql::Dialect::MySQL, "SELECT x FROM t1 where y = ?")
                 .unwrap(),
             false,
         ),
@@ -9388,8 +9397,11 @@ async fn evict_single_intermediate_state() {
     g.extend_recipe(ChangeList::from_change(
         Change::create_cache(
             "q",
-            parse_select_statement(nom_sql::Dialect::MySQL, "SELECT sum(x) FROM t1 WHERE y = ?")
-                .unwrap(),
+            parse_select_statement(
+                readyset_sql::Dialect::MySQL,
+                "SELECT sum(x) FROM t1 WHERE y = ?",
+            )
+            .unwrap(),
             false,
         ),
         Dialect::DEFAULT_MYSQL,

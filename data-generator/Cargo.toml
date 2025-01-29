@@ -13,6 +13,7 @@ eui48 = { workspace = true }
 growable-bloom-filter = { workspace = true }
 rand = { workspace = true }
 rand_regex = { workspace = true }
+readyset-sql = { path = "../readyset-sql" }
 rust_decimal = { workspace = true }
 uuid = { workspace = true }
 zipf = { workspace = true }

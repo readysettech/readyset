@@ -15,19 +15,21 @@ use nom_locate::LocatedSpan;
 use pratt::{Affix, Associativity, PrattParser, Precedence};
 use proptest::prelude::Arbitrary;
 use proptest::strategy::BoxedStrategy;
+use readyset_sql::Dialect;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
 use crate::common::{column_identifier_no_alias, function_expr, ws_sep_comma, TimestampField};
 use crate::create::CollationName;
+use crate::dialect::DialectParser;
 use crate::literal::{literal, Double, Float};
 use crate::select::nested_selection;
 use crate::set::{variable_scope_prefix, Variable};
 use crate::sql_type::{mysql_int_cast_targets, type_identifier};
 use crate::whitespace::{whitespace0, whitespace1};
 use crate::{
-    Column, Dialect, DialectDisplay, Literal, NomSqlResult, SelectStatement, SqlIdentifier, SqlType,
+    Column, DialectDisplay, Literal, NomSqlResult, SelectStatement, SqlIdentifier, SqlType,
 };
 
 /// Function call expressions
@@ -2599,8 +2601,9 @@ mod tests {
         }
 
         mod precedence {
+            use readyset_sql::Dialect;
+
             use super::tests::precedence::parses_same;
-            use crate::Dialect;
 
             #[test]
             fn is_and_between() {
@@ -2939,8 +2942,9 @@ mod tests {
         }
 
         mod precedence {
+            use readyset_sql::Dialect;
+
             use super::tests::precedence::parses_same;
-            use crate::Dialect;
 
             #[test]
             fn is_and_between() {

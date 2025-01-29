@@ -17,7 +17,7 @@ fn main() -> anyhow::Result<()> {
                 tls_acceptor: options.tls_acceptor()?,
             },
             database_type: DatabaseType::MySQL,
-            parse_dialect: nom_sql::Dialect::MySQL,
+            parse_dialect: readyset_sql::Dialect::MySQL,
             expr_dialect: readyset_data::Dialect::DEFAULT_MYSQL,
         }
         .run(options),
@@ -30,7 +30,7 @@ fn main() -> anyhow::Result<()> {
                 tls_acceptor: options.tls_acceptor()?,
             })?,
             database_type: DatabaseType::PostgreSQL,
-            parse_dialect: nom_sql::Dialect::PostgreSQL,
+            parse_dialect: readyset_sql::Dialect::PostgreSQL,
             expr_dialect: readyset_data::Dialect::DEFAULT_POSTGRESQL,
         }
         .run(options),

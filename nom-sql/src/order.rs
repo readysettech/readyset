@@ -9,13 +9,14 @@ use nom::combinator::{map, opt, value};
 use nom::multi::separated_list1;
 use nom::sequence::preceded;
 use nom_locate::LocatedSpan;
+use readyset_sql::Dialect;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
 use crate::common::{field_reference, ws_sep_comma};
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, DialectDisplay, FieldReference, NomSqlResult};
+use crate::{DialectDisplay, FieldReference, NomSqlResult};
 
 #[derive(
     Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Arbitrary,

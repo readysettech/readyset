@@ -661,7 +661,10 @@ impl ModelState for DDLModelState {
         match op {
             Operation::CreateTable(table_name, cols) => {
                 let non_pkey_cols = cols.iter().map(|ColumnSpec { name, sql_type, .. }| {
-                    format!("`{name}` {}", sql_type.display(nom_sql::Dialect::MySQL))
+                    format!(
+                        "`{name}` {}",
+                        sql_type.display(readyset_sql::Dialect::MySQL)
+                    )
                 });
                 let col_defs: Vec<String> = once("id INT PRIMARY KEY".to_string())
                     .chain(non_pkey_cols)
@@ -714,7 +717,7 @@ impl ModelState for DDLModelState {
                     "ALTER TABLE `{}` ADD COLUMN `{}` {}",
                     table_name,
                     col_spec.name,
-                    col_spec.sql_type.display(nom_sql::Dialect::MySQL)
+                    col_spec.sql_type.display(readyset_sql::Dialect::MySQL)
                 );
                 rs_conn.query_drop(&query).await.unwrap();
                 mysql_conn.query_drop(&query).await.unwrap();

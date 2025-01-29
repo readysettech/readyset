@@ -93,6 +93,7 @@ reqwest = { workspace = true, features = ["json"] }
 
 # Local dependencies
 failpoint-macros = { path = "../failpoint-macros" }
+readyset-sql = { path = "../readyset-sql" }
 readyset-util = { path = "../readyset-util" }
 mysql-time = { path = "../mysql-time" }
 readyset-errors = { path = "../readyset-errors" }

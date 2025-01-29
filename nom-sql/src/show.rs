@@ -9,13 +9,15 @@ use nom_locate::LocatedSpan;
 use prop::string::string_regex;
 use proptest::option;
 use proptest::prelude::prop;
+use readyset_sql::Dialect;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
+use crate::dialect::DialectParser;
 use crate::expression::expression;
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{literal, Dialect, DialectDisplay, Expr, Literal, NomSqlResult};
+use crate::{literal, DialectDisplay, Expr, Literal, NomSqlResult};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Arbitrary)]
 pub struct ReadySetTablesOptions {

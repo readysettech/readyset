@@ -1,9 +1,10 @@
 //! Module that holds all the functions to get a proptest [`Strategy`]
 //! that generates [`Expr`]s that resolve to a boolean value.
 
-use nom_sql::{Dialect, Expr, SqlType};
+use nom_sql::{Expr, SqlType};
 use proptest::prop_oneof;
 use proptest::strategy::Strategy;
+use readyset_sql::Dialect;
 
 use crate::expression::util::{case_when, cast};
 use crate::expression::ExprStrategy;
@@ -140,9 +141,10 @@ mod op {
 /// Helper module to group all the [`Strategy`]s that produce boolean [`Expr::Call`].
 // TODO(fran): Add JSON functions that return boolean values
 mod call {
-    use nom_sql::{Dialect, Expr};
+    use nom_sql::Expr;
     use proptest::prop_oneof;
     use proptest::strategy::Strategy;
+    use readyset_sql::Dialect;
 
     use crate::expression::util::{coalesce, if_null};
     use crate::expression::ExprStrategy;

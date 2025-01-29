@@ -905,7 +905,7 @@ impl ModelState for DDLModelState {
                 let non_pkey_cols = cols.iter().map(|ColumnSpec { name, sql_type, .. }| {
                     format!(
                         "\"{name}\" {}",
-                        sql_type.display(nom_sql::Dialect::PostgreSQL)
+                        sql_type.display(readyset_sql::Dialect::PostgreSQL)
                     )
                 });
                 let col_defs: Vec<String> = once("id INT PRIMARY KEY".to_string())
@@ -949,7 +949,7 @@ impl ModelState for DDLModelState {
                     "ALTER TABLE \"{}\" ADD COLUMN \"{}\" {}",
                     table_name,
                     col_spec.name,
-                    col_spec.sql_type.display(nom_sql::Dialect::PostgreSQL)
+                    col_spec.sql_type.display(readyset_sql::Dialect::PostgreSQL)
                 );
                 rs_conn.simple_query(&query).await.unwrap();
                 pg_conn.simple_query(&query).await.unwrap();

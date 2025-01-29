@@ -236,10 +236,11 @@ impl AliasRemoval for SqlQuery {
 #[cfg(test)]
 mod tests {
     use nom_sql::{
-        parse_query, parser, BinaryOperator, Column, Dialect, DialectDisplay, Expr,
-        FieldDefinitionExpr, ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator,
-        JoinRightSide, Literal, Relation, SelectStatement, SqlQuery, TableExpr, TableExprInner,
+        parse_query, parser, BinaryOperator, Column, DialectDisplay, Expr, FieldDefinitionExpr,
+        ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator, JoinRightSide, Literal,
+        Relation, SelectStatement, SqlQuery, TableExpr, TableExprInner,
     };
+    use readyset_sql::Dialect;
 
     use super::{AliasRemoval, TableAliasRewrite};
 
@@ -256,8 +257,8 @@ mod tests {
                        but got: {}",
                 $before,
                 // FIXME(REA-2168): Use correct dialect.
-                expected.display(nom_sql::Dialect::MySQL),
-                res.display(nom_sql::Dialect::MySQL),
+                expected.display(readyset_sql::Dialect::MySQL),
+                res.display(readyset_sql::Dialect::MySQL),
             );
         }};
     }
@@ -567,8 +568,8 @@ mod tests {
             expected,
             "\n\n   {}\n!= {}",
             // FIXME(REA-2168): Use correct dialect.
-            res.display(nom_sql::Dialect::MySQL),
-            expected.display(nom_sql::Dialect::MySQL)
+            res.display(readyset_sql::Dialect::MySQL),
+            expected.display(readyset_sql::Dialect::MySQL)
         );
     }
 
