@@ -5,8 +5,8 @@ use std::time::Duration;
 
 use anyhow::Result;
 use database_utils::{DatabaseURL, QueryableConnection};
-use nom_sql::DialectDisplay;
 use readyset_data::DfValue;
+use readyset_sql::DialectDisplay;
 use tracing::info;
 
 pub mod backend;

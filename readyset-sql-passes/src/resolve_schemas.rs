@@ -302,8 +302,8 @@ mod tests {
     use pretty_assertions::assert_eq;
     use std::fmt::Debug;
 
-    use nom_sql::{parse_create_table, DialectDisplay};
-    use readyset_sql::Dialect;
+    use nom_sql::parse_create_table;
+    use readyset_sql::{Dialect, DialectDisplay};
 
     use super::*;
     use crate::util::parse_select_statement;

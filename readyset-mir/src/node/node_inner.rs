@@ -7,11 +7,10 @@ use dataflow::ops::union;
 use dataflow::PostLookupAggregates;
 use derive_more::From;
 use itertools::Itertools;
-use nom_sql::{
-    BinaryOperator, ColumnSpecification, DialectDisplay, Expr, OrderType, Relation, SqlIdentifier,
-};
+use nom_sql::{BinaryOperator, ColumnSpecification, Expr, OrderType, Relation, SqlIdentifier};
 use readyset_client::{PlaceholderIdx, ViewPlaceholder};
 use readyset_errors::{internal, ReadySetResult};
+use readyset_sql::DialectDisplay;
 use serde::{Deserialize, Serialize};
 use vec1::Vec1;
 

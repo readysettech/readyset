@@ -23,7 +23,6 @@ pub use self::create::{
 pub use self::create_table_options::CreateTableOption;
 pub use self::deallocate::{DeallocateStatement, StatementIdentifier};
 pub use self::delete::DeleteStatement;
-pub use self::dialect::DialectDisplay;
 pub use self::drop::{
     DropAllCachesStatement, DropAllProxiedQueriesStatement, DropCacheStatement, DropTableStatement,
     DropViewStatement,
@@ -97,6 +96,9 @@ mod truncate;
 mod update;
 mod use_statement;
 pub mod whitespace;
+
+// TODO(mvzink): Delete after finished moving AST
+pub(crate) use readyset_sql::DialectDisplay;
 
 pub type NomSqlResult<I, O> = IResult<LocatedSpan<I>, O, NomSqlError<I>>;
 

@@ -1,9 +1,9 @@
 use nom_sql::analysis::contains_aggregate;
 use nom_sql::{
-    DialectDisplay, Expr, FieldDefinitionExpr, FieldReference, LimitClause, OrderBy,
-    SelectStatement, SqlQuery,
+    Expr, FieldDefinitionExpr, FieldReference, LimitClause, OrderBy, SelectStatement, SqlQuery,
 };
 use readyset_errors::{ReadySetError, ReadySetResult};
+use readyset_sql::DialectDisplay;
 
 pub trait NormalizeTopKWithAggregate: Sized {
     /// Remove any topk clause (order by, limit, offset) from a query with an aggregate without a

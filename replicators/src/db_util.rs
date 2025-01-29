@@ -3,9 +3,8 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use nom_sql::DialectDisplay;
 use readyset_errors::ReadySetError;
-use readyset_sql::Dialect;
+use readyset_sql::{Dialect, DialectDisplay};
 use readyset_sql_passes::anonymize::{Anonymize, Anonymizer};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
 

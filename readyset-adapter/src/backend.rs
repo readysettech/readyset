@@ -83,8 +83,8 @@ use lru::LruCache;
 use mysql_common::row::convert::{FromRow, FromRowError};
 use nom_sql::{
     AlterReadysetStatement, CacheInner, CreateCacheStatement, DeallocateStatement, DeleteStatement,
-    DialectDisplay, DropCacheStatement, InsertStatement, Relation, SelectStatement, SetStatement,
-    ShowStatement, SqlIdentifier, SqlQuery, StatementIdentifier, UpdateStatement, UseStatement,
+    DropCacheStatement, InsertStatement, Relation, SelectStatement, SetStatement, ShowStatement,
+    SqlIdentifier, SqlQuery, StatementIdentifier, UpdateStatement, UseStatement,
 };
 use readyset_adapter_types::{DeallocateId, ParsedCommand};
 use readyset_client::consensus::{Authority, AuthorityControl, CacheDDLRequest};
@@ -101,7 +101,7 @@ use readyset_client_metrics::{
 use readyset_data::{DfType, DfValue};
 use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
 use readyset_errors::{internal, internal_err, unsupported, unsupported_err, ReadySetResult};
-use readyset_sql::Dialect;
+use readyset_sql::{Dialect, DialectDisplay};
 use readyset_sql_passes::adapter_rewrites::{self, ProcessedQueryParams};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
 use readyset_util::redacted::Sensitive;

@@ -1,6 +1,3 @@
-use std::fmt;
-
-use itertools::Itertools;
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case, take_while1};
 use nom::character::complete::hex_digit0;
@@ -11,7 +8,6 @@ use nom::sequence::{delimited, preceded};
 use nom::{InputLength, InputTake};
 use nom_locate::LocatedSpan;
 use readyset_sql::Dialect;
-use readyset_util::fmt::fmt_with;
 
 use crate::keywords::{sql_keyword, sql_keyword_or_builtin_function, POSTGRES_NOT_RESERVED};
 use crate::literal::{raw_string_literal, raw_string_single_quoted_unescaped, QuotingStyle};
@@ -26,47 +22,6 @@ macro_rules! failed {
             kind: ErrorKind::Fail,
         }))
     };
-}
-
-pub trait DialectDisplay {
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_;
-}
-
-#[derive(Debug)]
-pub struct CommaSeparatedList<'a, T: DialectDisplay>(&'a Vec<T>);
-
-impl<'a, T> From<&'a Vec<T>> for CommaSeparatedList<'a, T>
-where
-    T: DialectDisplay,
-{
-    fn from(value: &'a Vec<T>) -> Self {
-        CommaSeparatedList(value)
-    }
-}
-
-impl<T> DialectDisplay for CommaSeparatedList<'_, T>
-where
-    T: DialectDisplay,
-{
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
-        fmt_with(move |f| {
-            write!(
-                f,
-                "{}",
-                self.0.iter().map(|i| i.display(dialect)).join(", ")
-            )
-        })
-    }
-}
-
-#[cfg(test)]
-impl<T> DialectDisplay for Vec<T>
-where
-    T: DialectDisplay,
-{
-    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
-        self.iter().map(|i| i.display(dialect)).join(", ")
-    }
 }
 
 #[inline]

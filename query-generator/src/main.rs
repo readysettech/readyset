@@ -2,8 +2,8 @@
 
 use anyhow::bail;
 use clap::Parser;
-use nom_sql::DialectDisplay;
 use query_generator::GenerateOpts;
+use readyset_sql::DialectDisplay;
 
 #[derive(Parser)]
 struct Opts {
