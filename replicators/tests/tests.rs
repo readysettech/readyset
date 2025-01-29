@@ -360,7 +360,7 @@ impl TestHandle {
         runtime.spawn(async move {
             let Err(error) = NoriaAdapter::start(
                 controller,
-                Config {
+                &Config {
                     upstream_db_url: Some(url.clone()),
                     cdc_db_url: Some(url),
                     ..config.unwrap_or_default()

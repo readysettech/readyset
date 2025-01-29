@@ -106,13 +106,13 @@ impl ReplicateTableSpec {
 impl TableFilter {
     pub(crate) fn try_new(
         dialect: Dialect,
-        filter_table_list: Option<String>,
-        filter_table_list_ignore: Option<String>,
+        replication_tables: Option<&str>,
+        replication_tables_ignore: Option<&str>,
         default_schema: Option<&str>,
     ) -> ReadySetResult<TableFilter> {
         let default_schema = default_schema.map(SqlIdentifier::from);
 
-        if filter_table_list.is_some() && filter_table_list_ignore.is_some() {
+        if replication_tables.is_some() && replication_tables_ignore.is_some() {
             return Err(ReadySetError::ReplicationFailed(
                 "Cannot use both --replication-tables and --replication-tables-ignore".to_string(),
             ));
@@ -122,10 +122,10 @@ impl TableFilter {
         let mut schemas_ignore: BTreeMap<SqlIdentifier, ReplicateTableSpec> = BTreeMap::new();
 
         let mut filter_list_ignore: Vec<Relation> = Vec::new();
-        match filter_table_list_ignore {
-            None => "".to_string(),
+        match replication_tables_ignore {
+            None => "",
             Some(t) => {
-                if t.as_str() == "*.*" {
+                if t == "*.*" {
                     return Err(ReadySetError::ReplicationFailed(
                         "Cannot filter out all tables".to_string(),
                     ));
@@ -171,7 +171,7 @@ impl TableFilter {
                 replication_denied: schemas_ignore,
             });
         }
-        let filtered = match filter_table_list {
+        let filtered = match replication_tables {
             None => {
                 match default_schema {
                     Some(default) => {
@@ -192,7 +192,7 @@ impl TableFilter {
             Some(t) => t,
         };
 
-        if filtered.as_str() == "*.*" {
+        if filtered == "*.*" {
             return Ok(Self::for_all_tables());
         }
 
@@ -344,7 +344,7 @@ mod tests {
     fn all_schemas_explicit() {
         let filter = TableFilter::try_new(
             readyset_sql::Dialect::MySQL,
-            Some("*.*".to_string()),
+            Some("*.*"),
             None,
             Some("noria"),
         )
@@ -364,7 +364,7 @@ mod tests {
     fn regular_list() {
         let filter = TableFilter::try_new(
             readyset_sql::Dialect::MySQL,
-            Some("t1,t2,t3".to_string()),
+            Some("t1,t2,t3"),
             None,
             Some("noria"),
         )
@@ -381,7 +381,7 @@ mod tests {
     fn mixed_list() {
         let filter = TableFilter::try_new(
             readyset_sql::Dialect::MySQL,
-            Some("t1,noria.t2,readyset.t4,t3".to_string()),
+            Some("t1,noria.t2,readyset.t4,t3"),
             None,
             Some("noria"),
         )
@@ -398,7 +398,7 @@ mod tests {
     fn wildcard() {
         let filter = TableFilter::try_new(
             readyset_sql::Dialect::MySQL,
-            Some("noria.*, readyset.t4, t3".to_string()),
+            Some("noria.*, readyset.t4, t3"),
             None,
             Some("noria"),
         )
@@ -416,7 +416,7 @@ mod tests {
     fn allowed_then_denied() {
         let mut filter = TableFilter::try_new(
             readyset_sql::Dialect::MySQL,
-            Some("noria.*, readyset.t4, t3".to_string()),
+            Some("noria.*, readyset.t4, t3"),
             None,
             Some("noria"),
         )
@@ -440,7 +440,7 @@ mod tests {
         let filter = TableFilter::try_new(
             readyset_sql::Dialect::MySQL,
             None,
-            Some("t1,t2,t3".to_string()),
+            Some("t1,t2,t3"),
             Some("noria"),
         )
         .unwrap();
@@ -457,7 +457,7 @@ mod tests {
         let filter = TableFilter::try_new(
             readyset_sql::Dialect::MySQL,
             None,
-            Some("t1,noria.t2,readyset.t4,t3".to_string()),
+            Some("t1,noria.t2,readyset.t4,t3"),
             Some("noria"),
         )
         .unwrap();
@@ -474,7 +474,7 @@ mod tests {
         let filter = TableFilter::try_new(
             readyset_sql::Dialect::MySQL,
             None,
-            Some("noria.*, readyset.t4, t3".to_string()),
+            Some("noria.*, readyset.t4, t3"),
             Some("noria"),
         )
         .unwrap();

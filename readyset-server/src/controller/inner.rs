@@ -194,7 +194,7 @@ impl Leader {
 
                     match replicators::NoriaAdapter::start(
                         noria,
-                        config.clone(),
+                        &config,
                         &notification_channel,
                         &mut controller_channel,
                         telemetry_sender.clone(),
