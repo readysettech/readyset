@@ -5,6 +5,7 @@ use database_utils::QueryableConnection;
 use mysql_async::prelude::Queryable;
 use readyset_adapter::backend::QueryInfo;
 use readyset_client_metrics::QueryDestination;
+use readyset_sql::ast::SqlQuery;
 use readyset_util::{eventually, failpoints};
 use test_utils::serial;
 use test_utils::slow;
@@ -490,7 +491,7 @@ async fn dry_run_evaluates_support() {
     )
     .unwrap()
     {
-        nom_sql::SqlQuery::Select(s) => s,
+        SqlQuery::Select(s) => s,
         _ => unreachable!(),
     };
     let query_id = QueryId::from(&ViewCreateRequest::new(
@@ -571,7 +572,7 @@ async fn proxied_queries_filtering() {
     )
     .unwrap()
     {
-        nom_sql::SqlQuery::Select(s) => s,
+        SqlQuery::Select(s) => s,
         _ => unreachable!(),
     };
     let query_id = QueryId::from(&ViewCreateRequest::new(

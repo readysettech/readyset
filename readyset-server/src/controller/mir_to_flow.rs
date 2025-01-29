@@ -23,7 +23,6 @@ use mir::node::node_inner::MirNodeInner;
 use mir::node::{GroupedNodeType, ProjectExpr, ViewKeyColumn};
 use mir::query::MirQuery;
 use mir::{Column, DfNodeIndex, NodeIndex as MirNodeIndex};
-use nom_sql::{ColumnConstraint, ColumnSpecification, Expr, OrderType, Relation};
 use petgraph::graph::NodeIndex;
 use petgraph::Direction;
 use readyset_client::internal::{Index, IndexType};
@@ -32,6 +31,7 @@ use readyset_data::{Collation, DfType, Dialect};
 use readyset_errors::{
     internal, internal_err, invariant, invariant_eq, unsupported, ReadySetError, ReadySetResult,
 };
+use readyset_sql::ast::{self, ColumnConstraint, ColumnSpecification, Expr, OrderType, Relation};
 
 use crate::controller::Migration;
 use crate::manual::ops::grouped::aggregate::Aggregation;
@@ -925,7 +925,7 @@ struct LowerContext<'a> {
 }
 
 impl dataflow::LowerContext for LowerContext<'_> {
-    fn resolve_column(&self, col: nom_sql::Column) -> ReadySetResult<(usize, DfType)> {
+    fn resolve_column(&self, col: ast::Column) -> ReadySetResult<(usize, DfType)> {
         let index = self.graph.column_id_for_column(
             self.parent_node_idx,
             &Column::new(col.table.clone(), &col.name),

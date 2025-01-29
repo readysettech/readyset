@@ -1,8 +1,8 @@
 use std::iter;
 
-use nom_sql::Expr;
 use readyset_client::ViewPlaceholder;
 use readyset_errors::{invariant_eq, ReadySetResult};
+use readyset_sql::ast::Expr;
 use tracing::trace;
 
 use crate::node::node_inner::ProjectExpr;
@@ -95,10 +95,12 @@ pub(crate) fn add_bogokey_if_necessary(query: &mut MirQuery<'_>) -> ReadySetResu
 #[cfg(test)]
 mod tests {
     use common::IndexType;
-    use nom_sql::{BinaryOperator, ColumnSpecification, Literal, Relation, SqlType};
     use petgraph::visit::EdgeRef;
     use petgraph::Direction;
     use readyset_client::ViewPlaceholder;
+    use readyset_sql::ast::{
+        self, BinaryOperator, ColumnSpecification, Literal, Relation, SqlType,
+    };
 
     use super::*;
     use crate::graph::MirGraph;
@@ -112,7 +114,7 @@ mod tests {
             "base".into(),
             MirNodeInner::Base {
                 column_specs: vec![ColumnSpecification {
-                    column: nom_sql::Column::from("a"),
+                    column: ast::Column::from("a"),
                     sql_type: SqlType::Int(None),
                     generated: None,
                     constraints: vec![],
@@ -179,7 +181,7 @@ mod tests {
             "base".into(),
             MirNodeInner::Base {
                 column_specs: vec![ColumnSpecification {
-                    column: nom_sql::Column::from("a"),
+                    column: ast::Column::from("a"),
                     sql_type: SqlType::Int(None),
                     generated: None,
                     constraints: vec![],
@@ -260,7 +262,7 @@ mod tests {
             "base".into(),
             MirNodeInner::Base {
                 column_specs: vec![ColumnSpecification {
-                    column: nom_sql::Column::from("a"),
+                    column: ast::Column::from("a"),
                     sql_type: SqlType::Int(None),
                     generated: None,
                     constraints: vec![],

@@ -2,10 +2,10 @@ use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
-pub use nom_sql::{BinaryOperator, Literal, SqlType};
 use readyset_data::dialect::SqlEngine;
 use readyset_data::{Collation, DfType, Dialect};
 use readyset_errors::{invariant, ReadySetResult};
+pub use readyset_sql::ast::{BinaryOperator, Literal, SqlType};
 use serde::{Deserialize, Serialize};
 
 use crate::node::AuxiliaryNodeState;

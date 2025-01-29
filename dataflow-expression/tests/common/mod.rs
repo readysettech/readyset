@@ -1,7 +1,8 @@
 use dataflow_expression::{Expr, LowerContext};
-use nom_sql::{parse_expr, Column, Relation};
+use nom_sql::parse_expr;
 use readyset_data::{DfType, DfValue};
 use readyset_errors::{internal, ReadySetResult};
+use readyset_sql::ast::{Column, Relation};
 
 #[derive(Debug, Clone, Copy)]
 struct TestLowerContext;

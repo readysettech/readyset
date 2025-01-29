@@ -22,12 +22,11 @@ use std::collections::{HashMap, HashSet};
 
 use alias_removal::TableAliasRewrite;
 use dataflow_expression::Dialect;
-use nom_sql::{
+use readyset_errors::ReadySetResult;
+use readyset_sql::ast::{
     CompoundSelectStatement, CreateTableBody, CreateTableStatement, CreateViewStatement,
     NonReplicatedRelation, Relation, SelectSpecification, SelectStatement, SqlIdentifier,
 };
-use readyset_errors::ReadySetResult;
-pub use readyset_sql::analysis::{contains_aggregate, is_aggregate};
 
 pub use crate::alias_removal::AliasRemoval;
 pub use crate::create_table_columns::CreateTableColumns;

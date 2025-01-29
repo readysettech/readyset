@@ -9,12 +9,12 @@ use std::{iter, mem};
 pub use autoparameterize::auto_parameterize_query;
 use itertools::{Either, Itertools};
 use nom_sql::analysis::visit_mut::{self, VisitorMut};
-use nom_sql::{
-    BinaryOperator, Expr, InValue, ItemPlaceholder, LimitClause, Literal, SelectStatement,
-};
 use readyset_data::{DfType, DfValue};
 use readyset_errors::{
     internal_err, invalid_query_err, unsupported, ReadySetError, ReadySetResult,
+};
+use readyset_sql::ast::{
+    BinaryOperator, Expr, InValue, ItemPlaceholder, LimitClause, Literal, SelectStatement,
 };
 use readyset_sql::DialectDisplay;
 use serde::{Deserialize, Serialize};

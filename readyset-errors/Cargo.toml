@@ -12,7 +12,13 @@ futures = { workspace = true }
 hyper = { workspace = true }
 thiserror = { workspace = true }
 mysql_async = { workspace = true }
-tokio-postgres = { workspace = true, features = ["with-chrono-0_4", "with-eui48-1", "with-uuid-0_8", "with-serde_json-1", "with-bit-vec-0_6"] }
+tokio-postgres = { workspace = true, features = [
+    "with-chrono-0_4",
+    "with-eui48-1",
+    "with-uuid-0_8",
+    "with-serde_json-1",
+    "with-bit-vec-0_6",
+] }
 petgraph = { workspace = true, features = ["serde-1"] }
 rmp-serde = { workspace = true }
 tokio-tower = { workspace = true }
@@ -21,7 +27,6 @@ serde_json = { workspace = true, features = ["arbitrary_precision"] }
 derive_more = { workspace = true }
 bincode = { workspace = true }
 serde = { workspace = true, features = ["rc", "derive"] }
-nom-sql = { path = "../nom-sql" }
 vec1 = { workspace = true, features = ["serde"] }
 tikv-jemalloc-ctl = { workspace = true }
 readyset-sql = { path = "../readyset-sql" }

@@ -2,7 +2,7 @@ use std::borrow::Borrow;
 use std::mem;
 
 use nom_sql::analysis::visit_mut::VisitorMut;
-use nom_sql::{ItemPlaceholder, Literal, SelectStatement};
+use readyset_sql::ast::{ItemPlaceholder, Literal, SelectStatement};
 use serde::{Deserialize, Serialize};
 
 /// Visitor used to remove and return all literals in the order that that are visited. Removed
@@ -69,7 +69,8 @@ impl Borrow<SelectStatement> for SelectStatementSkeleton {
 
 #[cfg(test)]
 mod test {
-    use nom_sql::{parse_select_statement, ItemPlaceholder, Literal};
+    use nom_sql::parse_select_statement;
+    use readyset_sql::ast::{ItemPlaceholder, Literal};
     use readyset_sql::Dialect;
 
     use crate::strip_literals::SelectStatementSkeleton;

@@ -10,14 +10,13 @@ use std::time::Instant;
 
 use dataflow_expression::Dialect;
 use metrics::{counter, Counter};
-use nom_sql::Literal;
 use readyset_client::query::{MigrationState, Query, QueryId};
 use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_client::{PlaceholderIdx, ReadySetHandle, ViewCreateRequest};
 use readyset_client_metrics::recorded;
 use readyset_data::DfValue;
 use readyset_errors::{internal_err, ReadySetResult};
-use readyset_sql::DialectDisplay;
+use readyset_sql::{ast::Literal, DialectDisplay};
 use readyset_sql_passes::InlineLiterals;
 use readyset_util::redacted::Sensitive;
 use readyset_util::shutdown::ShutdownReceiver;

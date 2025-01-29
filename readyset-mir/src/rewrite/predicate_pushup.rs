@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
-use nom_sql::{Expr, SqlIdentifier};
 use petgraph::Direction;
 use readyset_errors::{invariant_eq, unsupported_err, ReadySetResult};
 use readyset_sql::analysis::{ReferredColumns, ReferredColumnsMut};
+use readyset_sql::ast::{Expr, SqlIdentifier};
 use tracing::trace;
 
 use crate::node::MirNodeInner;
@@ -222,7 +222,9 @@ pub(crate) fn push_filters_up(query: &mut MirQuery<'_>) -> ReadySetResult<()> {
 #[cfg(test)]
 mod tests {
     use common::IndexType;
-    use nom_sql::{BinaryOperator, ColumnSpecification, Literal, Relation, SqlType};
+    use readyset_sql::ast::{
+        self, BinaryOperator, ColumnSpecification, Literal, Relation, SqlType,
+    };
 
     use super::*;
     use crate::graph::MirGraph;
@@ -240,7 +242,7 @@ mod tests {
             "t1".into(),
             MirNodeInner::Base {
                 column_specs: vec![ColumnSpecification {
-                    column: nom_sql::Column::from("t1.a"),
+                    column: ast::Column::from("t1.a"),
                     sql_type: SqlType::Int(None),
                     generated: None,
                     constraints: vec![],
@@ -257,14 +259,14 @@ mod tests {
             MirNodeInner::Base {
                 column_specs: vec![
                     ColumnSpecification {
-                        column: nom_sql::Column::from("t2.a"),
+                        column: ast::Column::from("t2.a"),
                         sql_type: SqlType::Int(None),
                         generated: None,
                         constraints: vec![],
                         comment: None,
                     },
                     ColumnSpecification {
-                        column: nom_sql::Column::from("t2.b"),
+                        column: ast::Column::from("t2.b"),
                         sql_type: SqlType::Int(None),
                         generated: None,
                         constraints: vec![],
@@ -345,14 +347,14 @@ mod tests {
             MirNodeInner::Base {
                 column_specs: vec![
                     ColumnSpecification {
-                        column: nom_sql::Column::from("t1.a"),
+                        column: ast::Column::from("t1.a"),
                         sql_type: SqlType::Int(None),
                         generated: None,
                         constraints: vec![],
                         comment: None,
                     },
                     ColumnSpecification {
-                        column: nom_sql::Column::from("t1.b"),
+                        column: ast::Column::from("t1.b"),
                         sql_type: SqlType::Int(None),
                         generated: None,
                         constraints: vec![],

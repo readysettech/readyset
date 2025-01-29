@@ -235,7 +235,7 @@ pub const CONNECTION_FROM_BASE: u8 = 1;
 /// connection is *not* originating from a base table domain.
 pub const CONNECTION_FROM_DOMAIN: u8 = 2;
 
-use nom_sql::Relation;
+use readyset_sql::ast::Relation;
 use readyset_tracing::propagation::Instrumented;
 use replication_offset::ReplicationOffset;
 use tokio_tower::multiplex;
@@ -261,7 +261,6 @@ use std::future::Future;
 use std::hash::Hash;
 use std::pin::Pin;
 
-pub use nom_sql::{ColumnConstraint, SqlIdentifier};
 use readyset_data::{DfType, DfValue};
 use readyset_errors::{ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};

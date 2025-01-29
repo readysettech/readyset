@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 use std::fmt::Display;
 
 use itertools::Itertools;
-use nom_sql::OrderType;
+use readyset_sql::ast::OrderType;
 use serde::{Deserialize, Serialize};
 
 use crate::prelude::DfValue;

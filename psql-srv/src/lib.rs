@@ -29,12 +29,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use futures::Stream;
-use nom_sql::SqlIdentifier;
 use postgres::SimpleQueryMessage;
 use postgres_protocol::Oid;
 use postgres_types::Type;
 use protocol::Protocol;
 use readyset_adapter_types::DeallocateId;
+use readyset_sql::ast::SqlIdentifier;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_native_tls::TlsAcceptor;
 use tokio_postgres::OwnedField;

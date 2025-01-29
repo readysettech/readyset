@@ -1,11 +1,11 @@
 use std::{fmt, str};
 
-use nom_sql::{Relation, SelectStatement};
 use petgraph::graph::NodeIndex;
 use readyset_client::recipe::changelist::ChangeList;
 use readyset_client::ViewCreateRequest;
 use readyset_data::Dialect;
 use readyset_errors::ReadySetResult;
+use readyset_sql::ast::{Relation, SelectStatement};
 use readyset_sql_passes::adapter_rewrites::AdapterRewriteParams;
 use readyset_util::hash::hash;
 use serde::{Deserialize, Serialize};

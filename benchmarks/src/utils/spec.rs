@@ -13,9 +13,10 @@ use itertools::{Either, Itertools};
 use nom::multi::many1;
 use nom::sequence::{preceded, terminated};
 use nom_locate::LocatedSpan;
+use nom_sql::sql_query;
 use nom_sql::whitespace::whitespace0;
-use nom_sql::{sql_query, CommentStatement, CreateTableOption, Expr, SqlQuery, VariableScope};
 use query_generator::{TableName, TableSpec};
+use readyset_sql::ast::{CommentStatement, CreateTableOption, Expr, SqlQuery, VariableScope};
 use readyset_sql::{Dialect, DialectDisplay};
 
 /// Set of parameters used to generate a single table's data.

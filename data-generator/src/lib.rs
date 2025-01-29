@@ -6,12 +6,12 @@ use std::sync::Arc;
 use bit_vec::BitVec;
 use chrono::{Duration, FixedOffset, NaiveDate, NaiveTime, TimeZone};
 use eui48::{MacAddress, MacAddressFormat};
-use nom_sql::SqlType;
 use rand::distributions::Standard;
 use rand::prelude::Distribution;
 use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng, RngCore};
 use readyset_data::{DfType, DfValue, Dialect};
+use readyset_sql::ast::SqlType;
 use rust_decimal::Decimal;
 use zipf::ZipfDistribution;
 

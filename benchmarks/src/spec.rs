@@ -272,9 +272,9 @@ impl WorkloadSpec {
                     _ => panic!("Can only migrate SELECT statements"),
                 };
 
-                let create_cache_query = nom_sql::CreateCacheStatement {
+                let create_cache_query = CreateCacheStatement {
                     name: None,
-                    inner: Ok(nom_sql::CacheInner::Statement(Box::new(stmt))),
+                    inner: Ok(CacheInner::Statement(Box::new(stmt))),
                     unparsed_create_cache_statement: None,
                     always: false,
                     concurrently: false,

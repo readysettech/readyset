@@ -1057,8 +1057,8 @@ async fn next_action_replication_failure_ignores_table() {
 #[cfg(feature = "failure_injection")]
 async fn replication_failure_ignores_table(failpoint: &str) {
     readyset_tracing::init_test_logging();
-    use nom_sql::Relation;
     use readyset_errors::ReadySetError;
+    use readyset_sql::ast::Relation;
 
     let (config, mut handle, shutdown_tx) = TestBuilder::default()
         .recreate_database(false)
@@ -1148,8 +1148,8 @@ async fn next_action_replication_failure_retries_if_failed_to_drop() {
 async fn replication_failure_retries_if_failed_to_drop(failpoint: &str) {
     readyset_tracing::init_test_logging();
 
-    use nom_sql::Relation;
     use readyset_errors::ReadySetError;
+    use readyset_sql::ast::Relation;
     use tracing::info;
 
     let (config, mut handle, shutdown_tx) = TestBuilder::default()

@@ -4,10 +4,10 @@ use std::sync::Arc;
 
 use chrono::{DateTime, FixedOffset};
 use dataflow_expression::DateTruncPrecision;
-use nom_sql::TimestampField;
 use postgres::{Client, Config, NoTls};
 use proptest::prelude::*;
 use readyset_data::DfValue;
+use readyset_sql::ast::TimestampField;
 use readyset_util::arbitrary::{arbitrary_date_time_timezone, arbitrary_timestamp_naive_date_time};
 
 use self::common::parse_lower_eval;

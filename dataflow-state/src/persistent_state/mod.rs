@@ -84,9 +84,10 @@ use rand::Rng;
 use readyset_alloc::thread::StdThreadBuildWrapper;
 use readyset_client::debug::info::KeyCount;
 use readyset_client::internal::Index;
-use readyset_client::{KeyComparison, SqlIdentifier};
+use readyset_client::KeyComparison;
 use readyset_data::{Bound, BoundedRange, DfValue};
 use readyset_errors::{internal_err, invariant, ReadySetError, ReadySetResult};
+use readyset_sql::ast::SqlIdentifier;
 use replication_offset::ReplicationOffset;
 use rocksdb::{
     self, BlockBasedOptions, ColumnFamily, ColumnFamilyDescriptor, CompactOptions, IteratorMode,

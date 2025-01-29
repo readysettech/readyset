@@ -28,7 +28,8 @@ use readyset_sql::ast::*;
 ///
 /// ```
 /// use nom_sql::analysis::visit::Visitor;
-/// use nom_sql::{parse_query, Literal, SqlQuery};
+/// use nom_sql::parse_query;
+/// use readyset_sql::ast::{Literal, SqlQuery};
 /// use readyset_sql::Dialect;
 ///
 /// fn count_placeholders(query: &str) -> usize {

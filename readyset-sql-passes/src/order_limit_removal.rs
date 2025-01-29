@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
-use nom_sql::{
+use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
+use readyset_sql::ast::{
     BinaryOperator, Column, ColumnConstraint, CreateTableBody, Expr, LimitClause, Relation,
     SelectStatement, SqlQuery, TableExpr, TableKey,
 };
-use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
 
 pub trait OrderLimitRemoval: Sized {
     /// Remove any LIMIT and ORDER statement belonging to a query that is determined to return at
@@ -152,7 +152,8 @@ impl OrderLimitRemoval for SqlQuery {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{parse_query, ColumnSpecification, CreateTableBody, Relation};
+    use nom_sql::parse_query;
+    use readyset_sql::ast::{ColumnSpecification, CreateTableBody, Relation, SqlType};
     use readyset_sql::Dialect;
 
     use super::*;
@@ -163,7 +164,7 @@ mod tests {
                 name: "c1".into(),
                 table: Some("t".into()),
             },
-            sql_type: nom_sql::SqlType::Bool,
+            sql_type: SqlType::Bool,
             generated: None,
             constraints: vec![],
             comment: None,
@@ -173,7 +174,7 @@ mod tests {
                 name: "c2".into(),
                 table: Some("t".into()),
             },
-            sql_type: nom_sql::SqlType::Bool,
+            sql_type: SqlType::Bool,
             generated: None,
             constraints: vec![ColumnConstraint::Unique],
             comment: None,
@@ -183,7 +184,7 @@ mod tests {
                 name: "c3".into(),
                 table: Some("t".into()),
             },
-            sql_type: nom_sql::SqlType::Bool,
+            sql_type: SqlType::Bool,
             generated: None,
             constraints: vec![],
             comment: None,
@@ -193,7 +194,7 @@ mod tests {
                 name: "c4".into(),
                 table: Some("t".into()),
             },
-            sql_type: nom_sql::SqlType::Bool,
+            sql_type: SqlType::Bool,
             generated: None,
             constraints: vec![],
             comment: None,

@@ -5,10 +5,11 @@ use itertools::Itertools;
 use nom_sql::analysis::visit_mut::{
     walk_group_by_clause, walk_order_clause, walk_select_statement, VisitorMut,
 };
-use nom_sql::{
-    Column, FieldDefinitionExpr, Relation, SelectStatement, SqlIdentifier, SqlQuery, TableExprInner,
-};
 use readyset_errors::{internal, invalid_query_err, ReadySetError, ReadySetResult};
+use readyset_sql::ast::{
+    Column, FieldDefinitionExpr, GroupByClause, OrderClause, Relation, SelectStatement,
+    SqlIdentifier, SqlQuery, TableExprInner,
+};
 use tracing::warn;
 
 use crate::{outermost_table_exprs, util};
@@ -136,10 +137,7 @@ impl<'ast> VisitorMut<'ast> for ExpandImpliedTablesVisitor<'_> {
         Ok(())
     }
 
-    fn visit_order_clause(
-        &mut self,
-        order: &'ast mut nom_sql::OrderClause,
-    ) -> Result<(), Self::Error> {
+    fn visit_order_clause(&mut self, order: &'ast mut OrderClause) -> Result<(), Self::Error> {
         self.can_reference_aliases = true;
         walk_order_clause(self, order)?;
         self.can_reference_aliases = false;
@@ -148,7 +146,7 @@ impl<'ast> VisitorMut<'ast> for ExpandImpliedTablesVisitor<'_> {
 
     fn visit_group_by_clause(
         &mut self,
-        group_by: &'ast mut nom_sql::GroupByClause,
+        group_by: &'ast mut GroupByClause,
     ) -> Result<(), Self::Error> {
         self.can_reference_aliases = true;
         walk_group_by_clause(self, group_by)?;
@@ -256,15 +254,16 @@ impl ImpliedTableExpansion for SqlQuery {
 mod tests {
     use std::collections::HashMap;
 
-    use nom_sql::{parse_query, Column, Expr, FieldDefinitionExpr, SqlQuery, TableExpr};
+    use nom_sql::parse_query;
+    use readyset_sql::ast::{
+        BinaryOperator, Column, Expr, FieldDefinitionExpr, SelectStatement, SqlQuery, TableExpr,
+    };
     use readyset_sql::{Dialect, DialectDisplay};
 
     use super::*;
 
     #[test]
     fn it_expands_implied_tables_for_select() {
-        use nom_sql::{BinaryOperator, SelectStatement};
-
         // SELECT name, title FROM users, articles WHERE users.id = author;
         // -->
         // SELECT users.name, articles.title FROM users, articles WHERE users.id = articles.author;

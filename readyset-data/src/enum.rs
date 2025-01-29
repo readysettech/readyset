@@ -1,5 +1,5 @@
-use nom_sql::EnumVariants;
 use readyset_errors::ReadySetResult;
+use readyset_sql::ast::EnumVariants;
 
 use crate::{integer, DfType, DfValue};
 

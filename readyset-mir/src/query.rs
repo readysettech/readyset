@@ -1,10 +1,10 @@
 use std::marker::PhantomData;
 
 use itertools::Itertools;
-use nom_sql::{Relation, SqlIdentifier};
 use petgraph::visit::{Bfs, EdgeRef, IntoNodeReferences, Reversed};
 use petgraph::Direction;
 use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
+use readyset_sql::ast::{Relation, SqlIdentifier};
 
 use crate::graph::MirGraph;
 use crate::node::{MirNode, MirNodeInner};

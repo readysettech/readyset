@@ -21,7 +21,10 @@ hmac = { workspace = true }
 nom = { workspace = true }
 postgres = { workspace = true }
 postgres-protocol = { workspace = true }
-postgres-types = { workspace = true, features = ["with-chrono-0_4", "with-cidr-0_2"] }
+postgres-types = { workspace = true, features = [
+    "with-chrono-0_4",
+    "with-cidr-0_2",
+] }
 rand = { workspace = true }
 rust_decimal = { workspace = true }
 serde_json = { workspace = true, features = ["arbitrary_precision"] }
@@ -31,14 +34,20 @@ stringprep = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tokio-native-tls = { workspace = true }
-tokio-postgres = { workspace = true, features = ["with-chrono-0_4", "with-eui48-1", "with-uuid-0_8", "with-serde_json-1", "with-bit-vec-0_6"] }
+tokio-postgres = { workspace = true, features = [
+    "with-chrono-0_4",
+    "with-eui48-1",
+    "with-uuid-0_8",
+    "with-serde_json-1",
+    "with-bit-vec-0_6",
+] }
 tokio-util = { workspace = true, features = ["codec"] }
 tracing = { workspace = true }
 uuid = { workspace = true }
 
-nom-sql = { path = "../nom-sql" }
 readyset-adapter-types = { path = "../readyset-adapter-types" }
 readyset-data = { path = "../readyset-data" }
+readyset-sql = { path = "../readyset-sql" }
 readyset-util = { path = "../readyset-util" }
 
 [dev-dependencies]

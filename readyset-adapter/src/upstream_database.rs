@@ -3,11 +3,11 @@ use std::fmt::Debug;
 
 use async_trait::async_trait;
 pub use database_utils::UpstreamConfig;
-use nom_sql::{SqlIdentifier, StartTransactionStatement};
 use readyset_adapter_types::DeallocateId;
 use readyset_client_metrics::QueryDestination;
 use readyset_data::DfValue;
 use readyset_errors::ReadySetError;
+use readyset_sql::ast::{SqlIdentifier, StartTransactionStatement};
 use tracing::debug;
 
 /// Information about a statement that has been prepared in an [`UpstreamDatabase`]

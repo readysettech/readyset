@@ -31,6 +31,7 @@ use readyset_client::metrics::{recorded, MetricsDump};
 use readyset_data::DfValue;
 use readyset_psql::AuthenticationMethod;
 use readyset_server::FrontierStrategy;
+use readyset_sql::ast::DropAllCachesStatement;
 use readyset_util::graphviz::FileFormat;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -716,7 +717,7 @@ async fn drop_cached_queries(database_type: DatabaseType) -> anyhow::Result<()> 
     let mut conn = DatabaseURL::from_str(&readyset_url(database_type))?
         .connect(None)
         .await?;
-    conn.query_drop(nom_sql::DropAllCachesStatement {}.to_string())
+    conn.query_drop(DropAllCachesStatement {}.to_string())
         .await?;
     Ok(())
 }

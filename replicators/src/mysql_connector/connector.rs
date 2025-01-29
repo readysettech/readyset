@@ -23,13 +23,16 @@ use rust_decimal::Decimal;
 use serde_json::Map;
 use tracing::{error, info, warn};
 
-use nom_sql::{NonReplicatedRelation, Relation, SqlIdentifier};
 use readyset_client::metrics::recorded;
 use readyset_client::recipe::changelist::Change;
 use readyset_client::recipe::ChangeList;
 use readyset_client::TableOperation;
 use readyset_data::{Collation as RsCollation, DfValue, Dialect, TimestampTz};
 use readyset_errors::{internal, internal_err, unsupported_err, ReadySetError, ReadySetResult};
+use readyset_sql::ast::{
+    CollationName, CreateTableOption, NonReplicatedRelation, NotReplicatedReason, Relation,
+    SqlIdentifier, SqlQuery,
+};
 use replication_offset::mysql::MySqlPosition;
 use replication_offset::ReplicationOffset;
 
@@ -462,7 +465,7 @@ impl MySqlBinlogConnector {
             },
             Change::AddNonReplicatedRelation(NonReplicatedRelation {
                 name: table,
-                reason: nom_sql::NotReplicatedReason::OtherError(format!(
+                reason: NotReplicatedReason::OtherError(format!(
                     "Event received as binlog_format=STATEMENT. File: {:} - Pos: {:}",
                     self.next_position.binlog_file_name(),
                     self.next_position.position
@@ -536,11 +539,9 @@ impl MySqlBinlogConnector {
                                     Ok(opts) => opts,
                                     Err(_) => &mut Vec::new(),
                                 };
-                                options.push(nom_sql::CreateTableOption::Collate(
-                                    nom_sql::CollationName::Quoted(nom_sql::SqlIdentifier::from(
-                                        collation.collation(),
-                                    )),
-                                ));
+                                options.push(CreateTableOption::Collate(CollationName::Quoted(
+                                    SqlIdentifier::from(collation.collation()),
+                                )));
                             }
                             statement.propagate_default_charset(readyset_sql::Dialect::MySQL);
                         }
@@ -550,19 +551,19 @@ impl MySqlBinlogConnector {
             }
             Err(error) => match nom_sql::parse_query(readyset_sql::Dialect::MySQL, q_event.query())
             {
-                Ok(nom_sql::SqlQuery::Insert(insert)) => {
+                Ok(SqlQuery::Insert(insert)) => {
                     self.drop_and_add_non_replicated_table(insert.table, &schema)
                         .await
                 }
-                Ok(nom_sql::SqlQuery::Update(update)) => {
+                Ok(SqlQuery::Update(update)) => {
                     self.drop_and_add_non_replicated_table(update.table, &schema)
                         .await
                 }
-                Ok(nom_sql::SqlQuery::Delete(delete)) => {
+                Ok(SqlQuery::Delete(delete)) => {
                     self.drop_and_add_non_replicated_table(delete.table, &schema)
                         .await
                 }
-                Ok(nom_sql::SqlQuery::StartTransaction(_)) => {
+                Ok(SqlQuery::StartTransaction(_)) => {
                     return Err(mysql_async::Error::Other(Box::new(
                         ReadySetError::SkipEvent,
                     )));
@@ -593,7 +594,7 @@ impl MySqlBinlogConnector {
         q_event: mysql_common::binlog::events::QueryEvent<'_>,
         is_last: bool,
     ) -> mysql::Result<ReplicationAction> {
-        use nom_sql::{parse_query, SqlQuery};
+        use nom_sql::parse_query;
         use readyset_sql::Dialect;
 
         match parse_query(Dialect::MySQL, q_event.query()) {

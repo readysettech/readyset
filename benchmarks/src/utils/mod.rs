@@ -6,7 +6,7 @@ use std::time::Duration;
 use anyhow::Result;
 use database_utils::{DatabaseURL, QueryableConnection};
 use readyset_data::DfValue;
-use readyset_sql::DialectDisplay;
+use readyset_sql::{ast::ShowStatement, DialectDisplay};
 use tracing::info;
 
 pub mod backend;
@@ -76,7 +76,7 @@ pub async fn readyset_ready(target: &str) -> anyhow::Result<()> {
     };
 
     // Then query status until snapshot is completed
-    let q = nom_sql::ShowStatement::ReadySetStatus;
+    let q = ShowStatement::ReadySetStatus;
     loop {
         // We have to use simple query here because ReadySet does not support preparing `SHOW`
         // queries

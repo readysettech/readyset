@@ -1,6 +1,6 @@
-use nom_sql::BinaryOperator;
 use readyset_client::ViewPlaceholder;
 use readyset_errors::{internal, invariant_eq, unsupported, ReadySetResult};
+use readyset_sql::ast::BinaryOperator;
 use tracing::trace;
 
 use crate::node::{MirNodeInner, ViewKeyColumn};
@@ -116,7 +116,7 @@ pub(crate) fn pull_view_keys_to_leaf(query: &mut MirQuery<'_>) -> ReadySetResult
 #[cfg(test)]
 mod tests {
     use common::IndexType;
-    use nom_sql::{ColumnSpecification, Relation, SqlType};
+    use readyset_sql::ast::{ColumnSpecification, Relation, SqlType};
     use vec1::vec1;
 
     use super::*;

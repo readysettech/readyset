@@ -7,8 +7,8 @@
 use std::convert::{TryFrom, TryInto};
 
 use bytes::Bytes;
-use nom_sql::Relation;
 use readyset_errors::ReadySetError;
+use readyset_sql::ast::Relation;
 use replication_offset::postgres::{CommitLsn, Lsn};
 
 /// An parse error

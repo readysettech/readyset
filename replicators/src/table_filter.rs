@@ -2,8 +2,9 @@ use std::borrow::Borrow;
 use std::collections::{BTreeMap, BTreeSet};
 
 use nom_locate::LocatedSpan;
-use nom_sql::{replicator_table_list, Relation, SqlIdentifier};
+use nom_sql::replicator_table_list;
 use readyset_errors::{ReadySetError, ReadySetResult};
+use readyset_sql::ast::{Relation, SqlIdentifier};
 use readyset_sql::Dialect;
 
 /// A [`TableFilter`] keeps lists of all the tables readyset-server is interested in, as well as a

@@ -18,8 +18,7 @@
 //! Generating a simple query, with a single query parameter and a single inner join:
 //!
 //! ```rust
-//! use nom_sql::JoinOperator;
-//! use readyset_sql::{Dialect, DialectDisplay};
+//! use readyset_sql::{ast::JoinOperator, Dialect, DialectDisplay};
 //! use query_generator::{GeneratorState, QueryOperation, QuerySeed};
 //!
 //! let mut gen = GeneratorState::default();
@@ -80,13 +79,6 @@ use data_generator::{
 use derive_more::{Deref, Display, From, Into};
 use itertools::{Either, Itertools};
 use lazy_static::lazy_static;
-use nom_sql::{
-    BinaryOperator, Column, ColumnConstraint, ColumnSpecification, CommonTableExpr,
-    CreateTableBody, CreateTableStatement, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr,
-    InValue, ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator, JoinRightSide, LimitClause,
-    LimitValue, Literal, OrderBy, OrderClause, OrderType, Relation, SelectStatement, SqlIdentifier,
-    SqlType, SqlTypeArbitraryOptions, TableExpr, TableExprInner, TableKey,
-};
 use parking_lot::Mutex;
 use proptest::arbitrary::{any, any_with, Arbitrary};
 use proptest::sample::Select;
@@ -94,6 +86,13 @@ use proptest::strategy::{BoxedStrategy, Strategy};
 use rand::thread_rng;
 use readyset_data::{Collation, DfType, DfValue, Dialect};
 use readyset_sql::analysis::{contains_aggregate, ReferredColumns};
+use readyset_sql::ast::{
+    BinaryOperator, Column, ColumnConstraint, ColumnSpecification, CommonTableExpr,
+    CreateTableBody, CreateTableStatement, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr,
+    InValue, ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator, JoinRightSide, LimitClause,
+    LimitValue, Literal, OrderBy, OrderClause, OrderType, Relation, SelectStatement, SqlIdentifier,
+    SqlType, SqlTypeArbitraryOptions, TableExpr, TableExprInner, TableKey,
+};
 use readyset_sql::Dialect as ParseDialect;
 use readyset_sql_passes::outermost_table_exprs;
 use readyset_util::intervals::{BoundPair, IterBoundPair};
@@ -212,8 +211,8 @@ impl FromStr for ColumnName {
     }
 }
 
-impl From<nom_sql::Column> for ColumnName {
-    fn from(col: nom_sql::Column) -> Self {
+impl From<Column> for ColumnName {
+    fn from(col: Column) -> Self {
         col.name.into()
     }
 }
@@ -799,7 +798,7 @@ impl<'a> QueryState<'a> {
     }
 
     /// Generate a new, unique column alias for the query
-    pub fn fresh_alias(&mut self) -> nom_sql::SqlIdentifier {
+    pub fn fresh_alias(&mut self) -> SqlIdentifier {
         self.alias_counter += 1;
         format!("alias_{}", self.alias_counter).into()
     }
@@ -2811,7 +2810,7 @@ impl GenerateOpts {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::BinaryOperator;
+    use readyset_sql::ast::BinaryOperator;
     use readyset_sql::DialectDisplay;
 
     use super::*;

@@ -17,11 +17,12 @@ use anyhow::Result;
 use clap::{Parser, ValueEnum};
 use database_utils::{DatabaseConnection, DatabaseStatement, QueryableConnection};
 use metrics::Unit;
-use nom_sql::{parse_query, SqlQuery};
+use nom_sql::parse_query;
 use rand::distributions::Uniform;
 use rand_distr::weighted_alias::WeightedAliasIndex;
 use rand_distr::Distribution;
 use readyset_data::{DfType, DfValue, Dialect};
+use readyset_sql::ast::{SqlQuery, SqlType};
 use redis::{AsyncCommands, SetExpiry, SetOptions};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedSender;
@@ -143,7 +144,7 @@ pub enum Sampler {
 /// Generates parameter data for a single placeholder in the query
 pub(crate) struct ColGenerator {
     pub(crate) dist: Arc<(Vec<Vec<DfValue>>, Sampler)>,
-    pub(crate) sql_type: nom_sql::SqlType,
+    pub(crate) sql_type: SqlType,
     pub(crate) col: usize,
 }
 

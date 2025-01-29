@@ -2,8 +2,8 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::{self, Display};
 use std::ops::{AddAssign, Deref};
 
-use nom_sql::Relation;
 use petgraph::graph::NodeIndex;
+use readyset_sql::ast::Relation;
 use serde::{Deserialize, Serialize};
 use url::Url;
 

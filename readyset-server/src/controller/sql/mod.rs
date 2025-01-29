@@ -5,11 +5,6 @@ use std::vec::Vec;
 use ::mir::visualize::GraphViz;
 use ::mir::DfNodeIndex;
 use ::serde::{Deserialize, Serialize};
-use nom_sql::{
-    CompoundSelectOperator, CompoundSelectStatement, CreateTableBody, CreateTableOption,
-    FieldDefinitionExpr, NonReplicatedRelation, NotReplicatedReason, Relation, SelectSpecification,
-    SelectStatement, SqlIdentifier, SqlType, TableExpr,
-};
 use petgraph::graph::NodeIndex;
 use readyset_client::query::QueryId;
 use readyset_client::recipe::changelist::{AlterTypeChange, Change, PostgresTableMetadata};
@@ -19,6 +14,11 @@ use readyset_data::{DfType, Dialect, PgEnumMetadata};
 use readyset_errors::{
     internal, internal_err, invalid_query_err, invariant, unsupported, ReadySetError,
     ReadySetResult,
+};
+use readyset_sql::ast::{
+    self, CompoundSelectOperator, CompoundSelectStatement, CreateTableBody, CreateTableOption,
+    FieldDefinitionExpr, NonReplicatedRelation, NotReplicatedReason, Relation, SelectSpecification,
+    SelectStatement, SqlIdentifier, SqlType, TableExpr,
 };
 use readyset_sql::DialectDisplay;
 use readyset_sql_passes::alias_removal::TableAliasRewrite;
@@ -853,7 +853,7 @@ impl SqlIncorporator {
     pub(super) fn set_base_column_type(
         &mut self,
         table: &Relation,
-        column: &nom_sql::Column,
+        column: &ast::Column,
         new_ty: DfType,
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<()> {

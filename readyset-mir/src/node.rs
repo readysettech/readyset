@@ -2,8 +2,8 @@ use std::collections::HashSet;
 use std::fmt::{Debug, Display, Error, Formatter};
 
 use dataflow::ops;
-use nom_sql::Relation;
 use readyset_errors::{internal, ReadySetResult};
+use readyset_sql::ast::Relation;
 use serde::{Deserialize, Serialize};
 
 pub use self::node_inner::{MirNodeInner, ProjectExpr, ViewKeyColumn};
@@ -122,8 +122,8 @@ mod tests {
         use dataflow::ops::grouped::aggregate::Aggregation;
         use dataflow::ops::grouped::extremum::Extremum;
         use dataflow::ops::union::DuplicateMode;
-        use nom_sql::{BinaryOperator, ColumnSpecification, Expr, OrderType, SqlType};
         use readyset_client::ViewPlaceholder;
+        use readyset_sql::ast::{BinaryOperator, ColumnSpecification, Expr, OrderType, SqlType};
 
         use super::*;
         use crate::graph::MirGraph;
@@ -497,7 +497,7 @@ mod tests {
 
     mod referenced_columns {
         use dataflow::ops::grouped::aggregate::Aggregation;
-        use nom_sql::{Expr, Literal};
+        use readyset_sql::ast::{Expr, Literal};
 
         use super::*;
         use crate::graph::MirGraph;
@@ -554,7 +554,7 @@ mod tests {
     mod find_source_for_child_column {
         use std::collections::HashSet;
 
-        use nom_sql::{ColumnSpecification, SqlType};
+        use readyset_sql::ast::{self, ColumnSpecification, SqlType};
 
         use crate::graph::MirGraph;
         use crate::node::node_inner::MirNodeInner;
@@ -566,7 +566,7 @@ mod tests {
         #[test]
         fn with_no_alias() {
             let cspec = |n: &str| -> ColumnSpecification {
-                ColumnSpecification::new(nom_sql::Column::from(n), SqlType::Text)
+                ColumnSpecification::new(ast::Column::from(n), SqlType::Text)
             };
 
             let mut graph = MirGraph::new();
@@ -605,7 +605,7 @@ mod tests {
 
             let cspec = |n: &str| -> ColumnSpecification {
                 ColumnSpecification::new(
-                    nom_sql::Column {
+                    ast::Column {
                         name: n.into(),
                         table: Some("table".into()),
                     },
@@ -648,7 +648,7 @@ mod tests {
             };
 
             let cspec = |n: &str| -> ColumnSpecification {
-                ColumnSpecification::new(nom_sql::Column::from(n), SqlType::Text)
+                ColumnSpecification::new(ast::Column::from(n), SqlType::Text)
             };
 
             let mut graph = MirGraph::new();

@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use mir::NodeIndex;
-use nom_sql::Relation;
 use readyset_errors::{internal_err, invariant, unsupported, ReadySetResult};
+use readyset_sql::ast::Relation;
 
 use super::JoinKind;
 use crate::controller::sql::mir::SqlToMirConverter;

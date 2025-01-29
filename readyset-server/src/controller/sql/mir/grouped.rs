@@ -4,11 +4,13 @@ use dataflow::{PostLookupAggregate, PostLookupAggregateFunction, PostLookupAggre
 use mir::node::node_inner::MirNodeInner;
 use mir::node::ProjectExpr;
 use mir::{Column, NodeIndex};
-use nom_sql::FunctionExpr::*;
-use nom_sql::{self, Expr, FieldDefinitionExpr, Relation, SqlIdentifier};
 use readyset_errors::{unsupported, ReadySetError, ReadySetResult};
-use readyset_sql::{analysis::ReferredColumns, DialectDisplay};
-use readyset_sql_passes::is_aggregate;
+use readyset_sql::ast::{self, Expr, FieldDefinitionExpr, FunctionExpr, Relation, SqlIdentifier};
+use readyset_sql::{
+    analysis::{is_aggregate, ReferredColumns},
+    DialectDisplay,
+};
+use FunctionExpr::*;
 
 use crate::controller::sql::mir::join::make_joins_for_aggregates;
 use crate::controller::sql::mir::SqlToMirConverter;
@@ -20,7 +22,7 @@ pub(super) fn make_predicates_above_grouped<'a>(
     query_name: &Relation,
     name: Relation,
     qg: &QueryGraph,
-    column_to_predicates: &HashMap<nom_sql::Column, Vec<&'a Expr>>,
+    column_to_predicates: &HashMap<ast::Column, Vec<&'a Expr>>,
     parent: &mut NodeIndex,
 ) -> ReadySetResult<Vec<&'a Expr>> {
     let mut created_predicates = Vec::new();
@@ -159,7 +161,7 @@ pub(super) fn make_grouped(
             .iter()
             .map(|gb_expr| match gb_expr {
                 Expr::Column(c) => c.clone(),
-                expr => nom_sql::Column {
+                expr => ast::Column {
                     name: expr
                         .display(readyset_sql::Dialect::MySQL)
                         .to_string()

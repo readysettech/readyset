@@ -187,7 +187,7 @@ pub fn error_is_slot_not_found(err: &ReadySetError, slot_name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::SqlIdentifier;
+    use readyset_sql::ast::SqlIdentifier;
 
     use super::*;
 

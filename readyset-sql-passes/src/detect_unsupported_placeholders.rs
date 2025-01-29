@@ -1,8 +1,10 @@
 use std::mem;
 
 use nom_sql::analysis::visit::{self, walk_expr, Visitor};
-use nom_sql::{BinaryOperator, Expr, ItemPlaceholder, Literal, SelectStatement};
 use readyset_errors::{ReadySetError, ReadySetResult};
+use readyset_sql::ast::{
+    BinaryOperator, Expr, ItemPlaceholder, LimitClause, Literal, SelectStatement,
+};
 use vec1::Vec1;
 
 pub trait DetectUnsupportedPlaceholders {
@@ -108,17 +110,14 @@ impl UnsupportedPlaceholderVisitor {
 
 impl<'ast> Visitor<'ast> for UnsupportedPlaceholderVisitor {
     type Error = std::convert::Infallible;
-    fn visit_where_clause(&mut self, expr: &'ast nom_sql::Expr) -> Result<(), Self::Error> {
+    fn visit_where_clause(&mut self, expr: &'ast Expr) -> Result<(), Self::Error> {
         self.context.in_where_clause = true;
         let Ok(_) = self.visit_expr(expr);
         self.context.in_where_clause = false;
         Ok(())
     }
 
-    fn visit_limit_clause(
-        &mut self,
-        _limit_clause: &'ast nom_sql::LimitClause,
-    ) -> Result<(), Self::Error> {
+    fn visit_limit_clause(&mut self, _limit_clause: &'ast LimitClause) -> Result<(), Self::Error> {
         Ok(())
     }
 
@@ -130,7 +129,7 @@ impl<'ast> Visitor<'ast> for UnsupportedPlaceholderVisitor {
     ///
     /// Otherwise, walk the expression and record any placeholder values we find in
     /// `Self::unsupported_placeholders`.
-    fn visit_expr(&mut self, expr: &'ast nom_sql::Expr) -> Result<(), Self::Error> {
+    fn visit_expr(&mut self, expr: &'ast Expr) -> Result<(), Self::Error> {
         // Walk expression if we're not in the WHERE clause of any SELECT statement
         if !self.context.in_where_clause {
             return walk_expr(self, expr);
@@ -207,7 +206,7 @@ impl<'ast> Visitor<'ast> for UnsupportedPlaceholderVisitor {
 
     fn visit_select_statement(
         &mut self,
-        select_statement: &'ast nom_sql::SelectStatement,
+        select_statement: &'ast SelectStatement,
     ) -> Result<(), Self::Error> {
         let was_in_where_clause = mem::replace(&mut self.context.in_where_clause, false);
         visit::walk_select_statement(self, select_statement)?;

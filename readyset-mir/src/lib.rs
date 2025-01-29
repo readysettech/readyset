@@ -45,8 +45,8 @@
 
 pub use column::Column;
 use lazy_static::lazy_static;
-use nom_sql::SqlIdentifier;
 use petgraph::csr::IndexType;
+use readyset_sql::ast::SqlIdentifier;
 use serde::{Deserialize, Serialize};
 
 mod column;

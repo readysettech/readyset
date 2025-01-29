@@ -1,4 +1,4 @@
-use nom_sql::Relation;
+use readyset_sql::ast::Relation;
 
 /// Returns `true` if the given table name is the name of a known table in the postgres system
 /// catalog.

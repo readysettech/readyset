@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 
-use nom_sql::Column;
 use readyset_sql::analysis::ReferredColumns;
+use readyset_sql::ast::Column;
 
 use crate::controller::sql::query_graph::{OutputColumn, QueryGraph, QueryGraphEdge};
 
@@ -135,7 +135,8 @@ impl Signature for QueryGraph {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{parse_query, SqlQuery};
+    use nom_sql::parse_query;
+    use readyset_sql::ast::{SelectStatement, SqlQuery};
     use readyset_sql::Dialect;
 
     use super::*;
@@ -143,7 +144,7 @@ mod tests {
 
     /// Parse a SQL query that is expected to be a SelectQuery. Returns None if
     /// parsing fails *or* if the query is something other than a Select
-    pub fn parse_select<T: AsRef<str>>(input: T) -> Option<nom_sql::SelectStatement> {
+    pub fn parse_select<T: AsRef<str>>(input: T) -> Option<SelectStatement> {
         match parse_query(Dialect::MySQL, input) {
             Ok(SqlQuery::Select(sel)) => Some(sel),
             _ => None,

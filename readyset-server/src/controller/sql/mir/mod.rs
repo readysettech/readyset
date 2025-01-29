@@ -17,12 +17,6 @@ use mir::query::{MirBase, MirQuery};
 use mir::DfNodeIndex;
 pub use mir::{Column, NodeIndex};
 use nom_sql::analysis::visit::{walk_expr, Visitor};
-use nom_sql::{
-    BinaryOperator, CaseWhenBranch, ColumnSpecification, CompoundSelectOperator, CreateTableBody,
-    Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, GroupByClause, InValue, LimitClause,
-    Literal, NonReplicatedRelation, OrderBy, OrderClause, OrderType, Relation, SelectStatement,
-    SqlIdentifier, TableExprInner, TableKey, UnaryOperator,
-};
 use petgraph::visit::Reversed;
 use petgraph::Direction;
 use readyset_client::ViewPlaceholder;
@@ -31,6 +25,12 @@ use readyset_errors::{
     unsupported_err, ReadySetError, ReadySetResult,
 };
 use readyset_sql::analysis::{self, ReferredColumns};
+use readyset_sql::ast::{
+    self, BinaryOperator, CaseWhenBranch, ColumnSpecification, CompoundSelectOperator,
+    CreateTableBody, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, GroupByClause,
+    InValue, LimitClause, Literal, NonReplicatedRelation, OrderBy, OrderClause, OrderType,
+    Relation, SelectStatement, SqlIdentifier, TableExprInner, TableKey, UnaryOperator,
+};
 use readyset_sql::DialectDisplay;
 use readyset_sql_passes::{is_correlated, outermost_table_exprs};
 use readyset_util::redacted::Sensitive;
@@ -769,7 +769,7 @@ impl SqlToMirConverter {
         projected_exprs: &HashMap<Expr, SqlIdentifier>,
     ) -> ReadySetResult<Vec<NodeIndex>> {
         use dataflow::ops::grouped::extremum::Extremum;
-        use nom_sql::FunctionExpr::*;
+        use readyset_sql::ast::FunctionExpr::*;
 
         macro_rules! mk_error {
             ($expression:expr) => {
@@ -782,7 +782,7 @@ impl SqlToMirConverter {
 
         // COUNT(*) is special (see comments below), so we handle it specially before all other
         // aggregates
-        if function == FunctionExpr::CountStar {
+        if function == CountStar {
             // 1. Pick a column to aggregate over
             let parent_cols = self.mir_graph.columns(parent);
             let over_col = parent_cols
@@ -799,10 +799,10 @@ impl SqlToMirConverter {
                 format!("{}_coalesce_over_col", name.display_unquoted()).into(),
                 parent,
                 vec![ProjectExpr::Expr {
-                    expr: Expr::Call(FunctionExpr::Call {
+                    expr: Expr::Call(Call {
                         name: "coalesce".into(),
                         arguments: vec![
-                            Expr::Column(nom_sql::Column {
+                            Expr::Column(ast::Column {
                                 table: over_col.table.clone(),
                                 name: over_col.name.clone(),
                             }),
@@ -860,7 +860,7 @@ impl SqlToMirConverter {
             matches!(expr, Expr::Column(_))
         }
 
-        fn get_column(expr: &Expr) -> &nom_sql::Column {
+        fn get_column(expr: &Expr) -> &ast::Column {
             match expr {
                 Expr::Column(ref col) => col,
                 _ => unreachable!(),
@@ -1161,7 +1161,7 @@ impl SqlToMirConverter {
                     }],
                 );
                 (
-                    nom_sql::Column {
+                    ast::Column {
                         name: label.into(),
                         table: None,
                     },
@@ -1211,7 +1211,7 @@ impl SqlToMirConverter {
             self.generate_label(&format!("{name}_join").into()),
             &[JoinPredicate {
                 left: lhs.clone(),
-                right: nom_sql::Column {
+                right: ast::Column {
                     name: col.name,
                     table: col.table,
                 },
@@ -1511,7 +1511,7 @@ impl SqlToMirConverter {
         lhs: &Expr,
         parent: NodeIndex,
         text_context: &str,
-    ) -> (nom_sql::Column, NodeIndex) {
+    ) -> (ast::Column, NodeIndex) {
         match lhs {
             Expr::Column(col) => (col.clone(), parent),
             expr => {
@@ -1532,7 +1532,7 @@ impl SqlToMirConverter {
                         .collect(),
                 );
                 (
-                    nom_sql::Column {
+                    ast::Column {
                         name: label.into(),
                         table: None,
                     },
@@ -1567,12 +1567,10 @@ impl SqlToMirConverter {
     ///    - if there is at least one comparison of the above format, then
     ///      the rest of the WHERE expression can be anything.
     ///
-    fn collect_local_columns(
-        subquery: &SelectStatement,
-    ) -> ReadySetResult<HashSet<nom_sql::Column>> {
+    fn collect_local_columns(subquery: &SelectStatement) -> ReadySetResult<HashSet<ast::Column>> {
         struct TheVisitor {
             local_tables: HashSet<Relation>,
-            local_columns: HashSet<nom_sql::Column>,
+            local_columns: HashSet<ast::Column>,
             unsupported_operations_depth: i32,
             result: ReadySetResult<()>,
         }
@@ -1592,7 +1590,7 @@ impl SqlToMirConverter {
 
                 macro_rules! is_local_column {
                     ($exp:expr) => {
-                        matches!($exp, Expr::Column(nom_sql::Column { name: _,table: Some(tab) }) if self.local_tables.contains(tab))
+                        matches!($exp, Expr::Column(ast::Column { name: _,table: Some(tab) }) if self.local_tables.contains(tab))
                     };
                 }
 
@@ -1606,7 +1604,7 @@ impl SqlToMirConverter {
                     };
                 }
 
-                fn insert_into(set: &mut HashSet<nom_sql::Column>, col: &nom_sql::Column) {
+                fn insert_into(set: &mut HashSet<ast::Column>, col: &ast::Column) {
                     if !set.contains(col) {
                         set.insert(col.clone());
                     }
@@ -1691,7 +1689,7 @@ impl SqlToMirConverter {
         }
     }
 
-    fn get_groupby_columns(group_by: &GroupByClause) -> ReadySetResult<HashSet<nom_sql::Column>> {
+    fn get_groupby_columns(group_by: &GroupByClause) -> ReadySetResult<HashSet<ast::Column>> {
         let mut columns = HashSet::with_capacity(group_by.fields.len());
         if group_by.fields.iter().all(|f| match f {
             FieldReference::Expr(Expr::Column(col)) => {
@@ -1813,7 +1811,7 @@ impl SqlToMirConverter {
 
         let join_preds = &[JoinPredicate {
             left: lhs,
-            right: nom_sql::Column {
+            right: ast::Column {
                 name: col.name,
                 table: col.table,
             },
@@ -2022,8 +2020,8 @@ impl SqlToMirConverter {
         &mut self,
         query_name: &Relation,
         name: Relation,
-        column_to_predicates: &HashMap<nom_sql::Column, Vec<&'a Expr>>,
-        over_col: &nom_sql::Column,
+        column_to_predicates: &HashMap<ast::Column, Vec<&'a Expr>>,
+        over_col: &ast::Column,
         parent: NodeIndex,
         created_predicates: &mut Vec<&'a Expr>,
     ) -> ReadySetResult<NodeIndex> {
@@ -2225,7 +2223,7 @@ impl SqlToMirConverter {
 
             // 3. Get columns used by each predicate. This will be used to check
             // if we need to reorder predicates before group_by nodes.
-            let mut column_to_predicates: HashMap<nom_sql::Column, Vec<&Expr>> = HashMap::new();
+            let mut column_to_predicates: HashMap<ast::Column, Vec<&Expr>> = HashMap::new();
 
             for rel in &sorted_rels {
                 let qgn = query_graph

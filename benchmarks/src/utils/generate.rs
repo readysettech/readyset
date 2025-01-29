@@ -17,10 +17,11 @@ use nom::sequence::delimited;
 use nom_locate::LocatedSpan;
 use nom_sql::parser::sql_query;
 use nom_sql::whitespace::whitespace0;
-use nom_sql::{Column, Expr, NomSqlResult, Relation};
+use nom_sql::NomSqlResult;
 use query_generator::{ColumnName, TableName, TableSpec};
 use readyset_data::DfValue;
-use readyset_sql::{ast::SqlQuery, Dialect, DialectDisplay};
+use readyset_sql::ast::{Column, Expr, InsertStatement, ItemPlaceholder, Relation, SqlQuery};
+use readyset_sql::{Dialect, DialectDisplay};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::warn;
@@ -229,23 +230,15 @@ fn query_for_prepared_insert(
     rows: usize,
     dialect: Dialect,
 ) -> String {
-    nom_sql::InsertStatement {
+    InsertStatement {
         table: Relation::from(table_name.clone()),
         fields: Some(cols.iter().map(|col| Column::from(col.clone())).collect()),
         data: match dialect {
             Dialect::MySQL => {
-                vec![
-                    vec![
-                        nom_sql::Expr::Literal(nom_sql::ItemPlaceholder::QuestionMark.into());
-                        cols.len()
-                    ];
-                    rows
-                ]
+                vec![vec![Expr::Literal(ItemPlaceholder::QuestionMark.into()); cols.len()]; rows]
             }
             Dialect::PostgreSQL => (1..=(rows * cols.len()))
-                .map(|n| {
-                    nom_sql::Expr::Literal(nom_sql::ItemPlaceholder::DollarNumber(n as u32).into())
-                })
+                .map(|n| Expr::Literal(ItemPlaceholder::DollarNumber(n as u32).into()))
                 .chunks(cols.len())
                 .into_iter()
                 .map(|chunk| chunk.collect())
@@ -396,7 +389,7 @@ pub async fn load_to_backend(db: &mut Backend, mut spec: DatabaseGenerationSpec)
 
         let data = table_spec.table.generate_data(table_spec.num_rows, false);
         let columns = table_spec.table.columns.keys().collect::<Vec<_>>();
-        let insert = nom_sql::InsertStatement {
+        let insert = InsertStatement {
             table: table_name.clone().into(),
             fields: Some(columns.iter().map(|cn| (*cn).clone().into()).collect()),
             data: data

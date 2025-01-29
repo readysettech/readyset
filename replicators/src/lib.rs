@@ -7,10 +7,10 @@ pub(crate) mod table_filter;
 use std::time::Duration;
 
 use metrics::{gauge, Gauge};
-use nom_sql::Relation;
 pub use noria_adapter::{cleanup, NoriaAdapter};
 use readyset_client::metrics::recorded;
 use readyset_errors::ReadySetError;
+use readyset_sql::ast::Relation;
 pub use replication_offset::mysql::MySqlPosition;
 pub use replication_offset::postgres::PostgresPosition;
 use tracing::info;

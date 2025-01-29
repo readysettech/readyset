@@ -1,11 +1,11 @@
 use criterion::{black_box, criterion_group, criterion_main, Bencher, Criterion};
-use nom_sql::SqlQuery;
 use pprof::criterion::{Output, PProfProfiler};
 use readyset::query_logger::QueryLogger;
 use readyset_client::query::QueryId;
 use readyset_client_metrics::{EventType, QueryExecutionEvent, QueryLogMode, SqlQueryType};
 use readyset_client_metrics::{QueryIdWrapper, ReadysetExecutionEvent};
 use readyset_server::PrometheusBuilder;
+use readyset_sql::ast::SqlQuery;
 use readyset_sql::Dialect;
 use readyset_sql_passes::adapter_rewrites::AdapterRewriteParams;
 use std::sync::Arc;

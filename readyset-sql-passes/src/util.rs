@@ -2,11 +2,11 @@ use std::collections::{HashMap, HashSet};
 use std::iter;
 
 use itertools::Either;
-use nom_sql::{
+use readyset_sql::analysis::is_aggregate;
+use readyset_sql::ast::{
     BinaryOperator, Column, CommonTableExpr, Expr, FieldDefinitionExpr, FunctionExpr, InValue,
     JoinClause, JoinRightSide, Relation, SelectStatement, SqlIdentifier, TableExpr, TableExprInner,
 };
-use readyset_sql::analysis::is_aggregate;
 use readyset_sql::DialectDisplay;
 
 pub(crate) fn join_clause_tables(join: &JoinClause) -> impl Iterator<Item = &TableExpr> {
@@ -198,7 +198,8 @@ impl TryFrom<BinaryOperator> for LogicalOp {
 /// [`SelectStatement`]
 #[cfg(test)]
 pub(crate) fn parse_select_statement(q: &str) -> SelectStatement {
-    use nom_sql::{parse_query, SqlQuery};
+    use nom_sql::parse_query;
+    use readyset_sql::ast::SqlQuery;
     use readyset_sql::Dialect;
 
     let q = parse_query(Dialect::MySQL, q).unwrap();

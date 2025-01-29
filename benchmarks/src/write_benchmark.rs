@@ -10,13 +10,13 @@ use clap::{Parser, ValueHint};
 use database_utils::{DatabaseConnection, DatabaseError, DatabaseURL, QueryableConnection};
 use itertools::Itertools;
 use metrics::Unit;
-use nom_sql::{
-    BinaryOperator, CacheInner, CreateCacheStatement, Expr, FieldDefinitionExpr, ItemPlaceholder,
-    Literal, SelectStatement, TableExpr, TableExprInner,
-};
 use parking_lot::Mutex;
 use query_generator::{ColumnName, TableSpec};
 use rand::Rng;
+use readyset_sql::ast::{
+    BinaryOperator, CacheInner, CreateCacheStatement, Expr, FieldDefinitionExpr, InsertStatement,
+    ItemPlaceholder, Literal, SelectStatement, TableExpr, TableExprInner,
+};
 use readyset_sql::{Dialect, DialectDisplay};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{self, UnboundedSender};
@@ -303,7 +303,7 @@ impl MultithreadBenchmark for WriteBenchmark {
                 let table_name = spec.name.clone();
                 let data = spec.generate_data_from_index(1, 0, true);
                 let columns = spec.columns.keys().collect::<Vec<_>>();
-                nom_sql::InsertStatement {
+                InsertStatement {
                     table: table_name.into(),
                     fields: Some(columns.iter().map(|cn| (*cn).clone().into()).collect()),
                     data: data

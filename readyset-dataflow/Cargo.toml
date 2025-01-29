@@ -20,7 +20,6 @@ futures-util = { workspace = true }
 lazy_static = { workspace = true }
 itertools = { workspace = true }
 metrics = { workspace = true }
-nom-sql = { path = "../nom-sql" }
 pin-project = { workspace = true }
 indexmap = { workspace = true }
 rand = { workspace = true }
@@ -54,17 +53,18 @@ timekeeper = { workspace = true }
 
 # local deps
 common = { path = "../readyset-common", package = "readyset-common" }
-readyset-client = { path = "../readyset-client" }
-merging-interval-tree = { path = "../merging-interval-tree" }
-readyset-alloc = { path = "../readyset-alloc" }
-readyset-util = { path = "../readyset-util" }
-readyset-errors = { path = "../readyset-errors" }
-readyset-data = { path = "../readyset-data" }
-reader-map = { path = "../reader-map" }
-partial-map = { path = "../partial-map" }
-failpoint-macros = { path = "../failpoint-macros" }
-dataflow-state = { path = "../dataflow-state" }
 dataflow-expression = { path = "../dataflow-expression" }
+dataflow-state = { path = "../dataflow-state" }
+failpoint-macros = { path = "../failpoint-macros" }
+merging-interval-tree = { path = "../merging-interval-tree" }
+partial-map = { path = "../partial-map" }
+reader-map = { path = "../reader-map" }
+readyset-alloc = { path = "../readyset-alloc" }
+readyset-client = { path = "../readyset-client" }
+readyset-data = { path = "../readyset-data" }
+readyset-errors = { path = "../readyset-errors" }
+readyset-sql = { path = "../readyset-sql" }
+readyset-util = { path = "../readyset-util" }
 replication-offset = { path = "../replication-offset" }
 
 [features]

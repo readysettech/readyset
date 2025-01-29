@@ -1,16 +1,16 @@
 use std::{cmp, iter};
 
 use chrono_tz::Tz;
-use nom_sql::{
-    BinaryOperator as SqlBinaryOperator, CollationName, Column, Expr as AstExpr, FunctionExpr,
-    InValue, Relation, UnaryOperator,
-};
 use readyset_data::dialect::SqlEngine;
 use readyset_data::upstream_system_props::get_system_timezone;
 use readyset_data::{Collation, DfType, DfValue};
 use readyset_errors::{
     internal, internal_err, invalid_query, invalid_query_err, unsupported, unsupported_err,
     ReadySetError, ReadySetResult,
+};
+use readyset_sql::ast::{
+    BinaryOperator as SqlBinaryOperator, CollationName, Column, Expr as AstExpr, FunctionExpr,
+    InValue, Relation, UnaryOperator,
 };
 use readyset_sql::DialectDisplay;
 use readyset_util::redacted::Sensitive;
@@ -985,7 +985,7 @@ impl Expr {
     /// Currently, this involves:
     ///
     /// - Literals being replaced with their corresponding [`DfValue`]
-    /// - [Column references](nom_sql::Column) being resolved into column indices in the parent
+    /// - [Column references](readyset_sql::ast::Column) being resolved into column indices in the parent
     ///   node.
     /// - Function calls being resolved to built-in functions, and arities checked
     /// - Desugaring x IN (y, z, ...) to `x = y OR x = z OR ...` and x NOT IN (y, z, ...) to `x != y
@@ -1443,8 +1443,9 @@ impl Expr {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use nom_sql::{parse_expr, BinaryOperator as AstBinaryOperator, Float, Literal};
+    use nom_sql::parse_expr;
     use readyset_data::{Collation, PgEnumMetadata};
+    use readyset_sql::ast::{BinaryOperator as AstBinaryOperator, Float, Literal};
     use readyset_sql::Dialect as ParserDialect;
 
     use super::*;

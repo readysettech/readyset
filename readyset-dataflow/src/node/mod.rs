@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
-use nom_sql::{ColumnSpecification, Relation, SqlIdentifier};
 use readyset_client::consistency::Timestamp;
 use readyset_data::{Collation, DfType, Dialect};
+use readyset_sql::ast::{ColumnSpecification, Relation, SqlIdentifier};
 use serde::{Deserialize, Serialize};
 
 use crate::ops::grouped::aggregate::AggregatorState;
@@ -49,7 +49,7 @@ impl Column {
         Self { name, ty, source }
     }
 
-    /// Creates a dataflow column from the [`nom_sql`] specification.
+    /// Creates a dataflow column from the [`ColumnSpecification`].
     #[inline]
     pub fn from_spec<F>(
         spec: ColumnSpecification,

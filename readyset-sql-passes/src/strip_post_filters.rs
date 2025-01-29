@@ -1,4 +1,4 @@
-use nom_sql::{
+use readyset_sql::ast::{
     BinaryOperator, DeleteStatement, Expr, Literal, SelectStatement, SqlQuery, UpdateStatement,
 };
 

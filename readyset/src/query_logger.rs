@@ -1,10 +1,11 @@
 use metrics::{counter, gauge, histogram, Counter, SharedString};
-use nom_sql::SqlQuery;
 use readyset_client::query::QueryId;
 use readyset_client_metrics::{
     recorded, DatabaseType, EventType, QueryExecutionEvent, QueryIdWrapper, QueryLogMode,
     ReadysetExecutionEvent,
 };
+use readyset_sql::ast::SqlQuery;
+
 use readyset_sql::DialectDisplay;
 use readyset_sql_passes::adapter_rewrites::{self, AdapterRewriteParams};
 use readyset_sql_passes::anonymize::anonymize_literals;

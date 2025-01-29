@@ -31,7 +31,6 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use itertools::Itertools;
-use nom_sql::SqlType;
 use proptest::prelude::*;
 use proptest::strategy::{BoxedStrategy, Just, Strategy};
 use proptest::{collection, sample};
@@ -43,6 +42,7 @@ use readyset_client_test_helpers::psql_helpers::{self, PostgreSQLAdapter};
 use readyset_client_test_helpers::TestBuilder;
 use readyset_data::{DfValue, TimestampTz};
 use readyset_server::Handle;
+use readyset_sql::ast::SqlType;
 use readyset_sql::DialectDisplay;
 use readyset_util::eventually;
 use readyset_util::shutdown::ShutdownSender;

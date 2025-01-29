@@ -872,8 +872,8 @@ impl FromStr for MigrationStyle {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{SelectStatement, SqlQuery};
     use readyset_client::ViewCreateRequest;
+    use readyset_sql::ast::{SelectStatement, SqlQuery};
     use readyset_util::hash::hash;
     use vec1::Vec1;
 

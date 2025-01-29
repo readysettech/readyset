@@ -5,10 +5,11 @@
 use std::collections::{HashMap, HashSet};
 
 use nom_sql::analysis::visit_mut::{self, VisitorMut};
-use nom_sql::{
-    CreateTableStatement, JoinRightSide, Relation, SelectStatement, SqlIdentifier, SqlType,
-};
 use readyset_errors::{ReadySetError, ReadySetResult};
+use readyset_sql::ast::{
+    CreateTableStatement, JoinClause, JoinRightSide, Relation, SelectStatement, SqlIdentifier,
+    SqlType,
+};
 
 use crate::CanQuery;
 
@@ -77,7 +78,7 @@ impl ResolveSchemaVisitor<'_> {
     /// at the end to avoid cloning it in the loop in `visit_select_statement`.
     fn visit_join_clause_with_extra_aliases(
         &mut self,
-        join: &mut nom_sql::JoinClause,
+        join: &mut JoinClause,
         extra_aliases: HashSet<SqlIdentifier>,
     ) -> Result<HashSet<SqlIdentifier>, ReadySetError> {
         match &mut join.right {
@@ -100,7 +101,7 @@ impl ResolveSchemaVisitor<'_> {
 impl<'ast> VisitorMut<'ast> for ResolveSchemaVisitor<'_> {
     type Error = ReadySetError;
 
-    fn visit_sql_type(&mut self, sql_type: &'ast mut nom_sql::SqlType) -> Result<(), Self::Error> {
+    fn visit_sql_type(&mut self, sql_type: &'ast mut SqlType) -> Result<(), Self::Error> {
         if let SqlType::Other(ty) = sql_type {
             if ty.schema.is_none() {
                 if let Some(schema) = self.search_path.iter().find(|schema| {

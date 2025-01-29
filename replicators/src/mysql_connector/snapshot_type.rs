@@ -1,6 +1,6 @@
 use mysql_async::{self as mysql, Value};
-use nom_sql::{Column, SqlIdentifier};
 use readyset_errors::ReadySetResult;
+use readyset_sql::ast::{Column, SqlIdentifier};
 use readyset_sql::DialectDisplay;
 
 use super::utils::MYSQL_BATCH_SIZE;

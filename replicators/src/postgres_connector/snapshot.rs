@@ -9,16 +9,16 @@ use failpoint_macros::set_failpoint;
 use futures::stream::FuturesUnordered;
 use futures::{pin_mut, StreamExt, TryFutureExt};
 use itertools::Itertools;
-use nom_sql::{
-    parse_key_specification_string, parse_sql_type, Column, ColumnConstraint, ColumnSpecification,
-    CreateTableBody, CreateTableStatement, NonReplicatedRelation, NotReplicatedReason, Relation,
-    SqlIdentifier, TableKey,
-};
+use nom_sql::{parse_key_specification_string, parse_sql_type};
 use postgres_types::{accepts, FromSql, Kind, Type};
 use readyset_client::recipe::changelist::{Change, ChangeList, PostgresTableMetadata};
 use readyset_client::TableOperation;
 use readyset_data::{DfType, DfValue, Dialect as DataDialect, PgEnumMetadata};
 use readyset_errors::{internal, internal_err, unsupported, ReadySetError, ReadySetResult};
+use readyset_sql::ast::{
+    Column, ColumnConstraint, ColumnSpecification, CreateTableBody, CreateTableStatement,
+    NonReplicatedRelation, NotReplicatedReason, Relation, SqlIdentifier, TableKey,
+};
 use readyset_sql::Dialect;
 use readyset_sql::DialectDisplay;
 #[cfg(feature = "failure_injection")]
@@ -1150,7 +1150,8 @@ impl<'a> PostgresReplicator<'a> {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{parse_query, Column, SqlQuery, TableKey};
+    use nom_sql::parse_query;
+    use readyset_sql::ast::{Column, SqlQuery, TableKey};
     use readyset_sql::Dialect;
 
     use super::*;

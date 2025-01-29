@@ -1,5 +1,5 @@
 use nom_sql::analysis::visit_mut::{self, VisitorMut};
-use nom_sql::{BinaryOperator, Expr, UnaryOperator};
+use readyset_sql::ast::{BinaryOperator, Expr, UnaryOperator};
 
 /// Attempt to replace `expr` with the equivalent expression negated. Returns `true` if that was
 /// doable, or `false` if it was impossible. If this function returns `false`, `expr` was not
