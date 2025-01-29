@@ -10,7 +10,7 @@ use futures::FutureExt;
 use metrics::{counter, histogram};
 use mysql::prelude::Queryable;
 use mysql::{OptsBuilder, PoolConstraints, PoolOpts, SslOpts};
-use nom_sql::{DialectDisplay, NonReplicatedRelation, NotReplicatedReason, Relation};
+use nom_sql::{NonReplicatedRelation, NotReplicatedReason, Relation};
 use postgres_native_tls::MakeTlsConnector;
 use postgres_protocol::escape::escape_literal;
 use readyset_client::consistency::Timestamp;
@@ -21,6 +21,7 @@ use readyset_client::{ReadySetHandle, Table, TableOperation};
 use readyset_data::Dialect;
 use readyset_errors::{internal_err, set_failpoint_return_err, ReadySetError, ReadySetResult};
 use readyset_sql::Dialect as SQLDialect;
+use readyset_sql::DialectDisplay;
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
 #[cfg(feature = "failure_injection")]
 use readyset_util::failpoints;

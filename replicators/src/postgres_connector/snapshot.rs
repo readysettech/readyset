@@ -11,8 +11,8 @@ use futures::{pin_mut, StreamExt, TryFutureExt};
 use itertools::Itertools;
 use nom_sql::{
     parse_key_specification_string, parse_sql_type, Column, ColumnConstraint, ColumnSpecification,
-    CreateTableBody, CreateTableStatement, DialectDisplay, NonReplicatedRelation,
-    NotReplicatedReason, Relation, SqlIdentifier, TableKey,
+    CreateTableBody, CreateTableStatement, NonReplicatedRelation, NotReplicatedReason, Relation,
+    SqlIdentifier, TableKey,
 };
 use postgres_types::{accepts, FromSql, Kind, Type};
 use readyset_client::recipe::changelist::{Change, ChangeList, PostgresTableMetadata};
@@ -20,6 +20,7 @@ use readyset_client::TableOperation;
 use readyset_data::{DfType, DfValue, Dialect as DataDialect, PgEnumMetadata};
 use readyset_errors::{internal, internal_err, unsupported, ReadySetError, ReadySetResult};
 use readyset_sql::Dialect;
+use readyset_sql::DialectDisplay;
 #[cfg(feature = "failure_injection")]
 use readyset_util::failpoints;
 use replication_offset::postgres::PostgresPosition;

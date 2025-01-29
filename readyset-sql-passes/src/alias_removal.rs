@@ -236,11 +236,11 @@ impl AliasRemoval for SqlQuery {
 #[cfg(test)]
 mod tests {
     use nom_sql::{
-        parse_query, parser, BinaryOperator, Column, DialectDisplay, Expr, FieldDefinitionExpr,
-        ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator, JoinRightSide, Literal,
-        Relation, SelectStatement, SqlQuery, TableExpr, TableExprInner,
+        parse_query, parser, BinaryOperator, Column, Expr, FieldDefinitionExpr, ItemPlaceholder,
+        JoinClause, JoinConstraint, JoinOperator, JoinRightSide, Literal, Relation,
+        SelectStatement, SqlQuery, TableExpr, TableExprInner,
     };
-    use readyset_sql::Dialect;
+    use readyset_sql::{Dialect, DialectDisplay};
 
     use super::{AliasRemoval, TableAliasRewrite};
 

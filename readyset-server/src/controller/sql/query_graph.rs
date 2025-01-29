@@ -10,16 +10,16 @@ use common::{DfValue, IndexType};
 use nom_sql::analysis::visit_mut::{walk_expr, VisitorMut};
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::{
-    BinaryOperator, Column, DialectDisplay, Expr, FieldDefinitionExpr, FieldReference,
-    FunctionExpr, InValue, ItemPlaceholder, JoinConstraint, JoinOperator, JoinRightSide,
-    LimitClause, Literal, OrderBy, OrderType, Relation, SelectStatement, SqlIdentifier, TableExpr,
-    TableExprInner,
+    BinaryOperator, Column, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, InValue,
+    ItemPlaceholder, JoinConstraint, JoinOperator, JoinRightSide, LimitClause, Literal, OrderBy,
+    OrderType, Relation, SelectStatement, SqlIdentifier, TableExpr, TableExprInner,
 };
 use readyset_client::{PlaceholderIdx, ViewPlaceholder};
 use readyset_errors::{
     internal, invalid_query, invalid_query_err, invariant, invariant_eq, no_table_for_col,
     unsupported, unsupported_err, ReadySetResult,
 };
+use readyset_sql::DialectDisplay;
 use readyset_sql_passes::{is_aggregate, is_correlated, is_predicate, map_aggregates, LogicalOp};
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;

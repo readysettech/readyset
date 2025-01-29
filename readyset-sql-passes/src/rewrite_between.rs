@@ -111,8 +111,8 @@ impl RewriteBetween for SqlQuery {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{parse_query, DialectDisplay};
-    use readyset_sql::Dialect;
+    use nom_sql::parse_query;
+    use readyset_sql::{Dialect, DialectDisplay};
 
     use super::*;
 

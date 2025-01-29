@@ -93,10 +93,11 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use database_utils::{DatabaseConnection, QueryableConnection};
-use nom_sql::{DialectDisplay, SqlQuery};
+use nom_sql::SqlQuery;
 use rand::Rng;
 use rand_distr::{Uniform, WeightedAliasIndex};
 use readyset_data::DfValue;
+use readyset_sql::DialectDisplay;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_with::DeserializeAs;
 use tracing::info;

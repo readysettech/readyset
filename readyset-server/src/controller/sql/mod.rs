@@ -7,8 +7,8 @@ use ::mir::DfNodeIndex;
 use ::serde::{Deserialize, Serialize};
 use nom_sql::{
     CompoundSelectOperator, CompoundSelectStatement, CreateTableBody, CreateTableOption,
-    DialectDisplay, FieldDefinitionExpr, NonReplicatedRelation, NotReplicatedReason, Relation,
-    SelectSpecification, SelectStatement, SqlIdentifier, SqlType, TableExpr,
+    FieldDefinitionExpr, NonReplicatedRelation, NotReplicatedReason, Relation, SelectSpecification,
+    SelectStatement, SqlIdentifier, SqlType, TableExpr,
 };
 use petgraph::graph::NodeIndex;
 use readyset_client::query::QueryId;
@@ -20,6 +20,7 @@ use readyset_errors::{
     internal, internal_err, invalid_query_err, invariant, unsupported, ReadySetError,
     ReadySetResult,
 };
+use readyset_sql::DialectDisplay;
 use readyset_sql_passes::alias_removal::TableAliasRewrite;
 use readyset_sql_passes::{DetectUnsupportedPlaceholders, Rewrite, RewriteContext};
 use readyset_util::redacted::Sensitive;

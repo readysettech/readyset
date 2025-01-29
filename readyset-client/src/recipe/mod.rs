@@ -5,8 +5,9 @@ pub mod changelist;
 use std::borrow::Cow;
 use std::fmt::Display;
 
-use nom_sql::{CacheInner, CreateCacheStatement, DialectDisplay, Relation, SelectStatement};
+use nom_sql::{CacheInner, CreateCacheStatement, Relation, SelectStatement};
 use readyset_errors::ReadySetError;
+use readyset_sql::DialectDisplay;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 

@@ -344,8 +344,7 @@ pub fn auto_parameterize_query(
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::DialectDisplay;
-    use readyset_sql::Dialect;
+    use readyset_sql::{Dialect, DialectDisplay};
 
     use super::*;
 

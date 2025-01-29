@@ -10,11 +10,10 @@ use console::style;
 use database_utils::{DatabaseConnection, DatabaseURL, QueryableConnection};
 use itertools::Itertools;
 use nom_sql::{
-    parse_query, BinaryOperator, CreateTableStatement, DeleteStatement, DialectDisplay, Expr,
-    SqlQuery, SqlType,
+    parse_query, BinaryOperator, CreateTableStatement, DeleteStatement, Expr, SqlQuery, SqlType,
 };
 use query_generator::{GeneratorState, ParameterMode, QuerySeed};
-use readyset_sql::Dialect;
+use readyset_sql::{Dialect, DialectDisplay};
 
 use crate::ast::{
     Conditional, Query, QueryParams, QueryResults, Record, SortMode, Statement, StatementResult,

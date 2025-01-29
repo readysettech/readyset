@@ -6,8 +6,9 @@ use std::error::Error;
 use std::io;
 
 use derive_more::Display;
-use nom_sql::{DialectDisplay, Relation, SelectStatement};
+use nom_sql::{Relation, SelectStatement};
 use petgraph::graph::NodeIndex;
+use readyset_sql::DialectDisplay;
 use readyset_util::redacted::Sensitive;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;

@@ -18,9 +18,9 @@ use anyhow::{anyhow, Result};
 use clap::Parser;
 use data_generator::{ColumnGenerator, DistributionAnnotation};
 use database_utils::{DatabaseConnection, DatabaseStatement, QueryableConnection};
-use nom_sql::{DialectDisplay, Literal, SqlType};
+use nom_sql::{Literal, SqlType};
 use readyset_data::DfValue;
-use readyset_sql::Dialect;
+use readyset_sql::{Dialect, DialectDisplay};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::utils::path::benchmark_path;

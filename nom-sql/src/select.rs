@@ -21,7 +21,7 @@ use crate::common::{
     field_definition_expr, field_list, field_reference_list, terminated_with_statement_terminator,
     ws_sep_comma, FieldDefinitionExpr,
 };
-use crate::dialect::{CommaSeparatedList, DialectParser};
+use crate::dialect::DialectParser;
 use crate::expression::expression;
 use crate::join::{join_operator, JoinConstraint, JoinOperator, JoinRightSide};
 use crate::order::{order_clause, OrderClause};
@@ -31,6 +31,7 @@ use crate::{
     DialectDisplay, Expr, FieldReference, FunctionExpr, Literal, NomSqlError, NomSqlResult,
     SqlIdentifier, TableExpr,
 };
+use readyset_sql::dialect_display::CommaSeparatedList;
 
 #[derive(
     Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Default, Serialize, Deserialize, Arbitrary,

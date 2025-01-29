@@ -6,10 +6,10 @@ use dataflow::ops::union;
 use dataflow::PostLookupAggregateFunction;
 use itertools::Itertools;
 use lazy_static::lazy_static;
-use nom_sql::DialectDisplay;
 use petgraph::visit::EdgeRef;
 use petgraph::Direction;
 use readyset_client::ViewPlaceholder;
+use readyset_sql::DialectDisplay;
 use regex::Regex;
 
 use crate::graph::MirGraph;

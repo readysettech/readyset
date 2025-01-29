@@ -101,8 +101,8 @@ pub fn normalize_negation(expr: &mut Expr) {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{parse_expr, DialectDisplay};
-    use readyset_sql::Dialect;
+    use nom_sql::parse_expr;
+    use readyset_sql::{Dialect, DialectDisplay};
 
     use super::*;
 

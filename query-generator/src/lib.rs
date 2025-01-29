@@ -18,8 +18,8 @@
 //! Generating a simple query, with a single query parameter and a single inner join:
 //!
 //! ```rust
-//! use nom_sql::{DialectDisplay, JoinOperator};
-//! use readyset_sql::Dialect;
+//! use nom_sql::JoinOperator;
+//! use readyset_sql::{Dialect, DialectDisplay};
 //! use query_generator::{GeneratorState, QueryOperation, QuerySeed};
 //!
 //! let mut gen = GeneratorState::default();
@@ -2811,7 +2811,8 @@ impl GenerateOpts {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{BinaryOperator, DialectDisplay};
+    use nom_sql::BinaryOperator;
+    use readyset_sql::DialectDisplay;
 
     use super::*;
 

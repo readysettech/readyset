@@ -7,8 +7,8 @@ use std::time::Instant;
 
 use itertools::Itertools;
 use nom_sql::{
-    self, ColumnConstraint, DeleteStatement, DialectDisplay, Expr, InsertStatement, Relation,
-    SetStatement, SqlIdentifier, SqlQuery, TruncateStatement, UnaryOperator, UpdateStatement,
+    self, ColumnConstraint, DeleteStatement, Expr, InsertStatement, Relation, SetStatement,
+    SqlIdentifier, SqlQuery, TruncateStatement, UnaryOperator, UpdateStatement,
 };
 use readyset_client::consistency::Timestamp;
 use readyset_client::internal::LocalNodeIndex;
@@ -26,6 +26,7 @@ use readyset_errors::{
     ReadySetResult,
 };
 use readyset_server::worker::readers::{CallResult, ReadRequestHandler};
+use readyset_sql::DialectDisplay;
 use readyset_sql_passes::adapter_rewrites::{self, AdapterRewriteParams, ProcessedQueryParams};
 use readyset_util::redacted::Sensitive;
 use readyset_util::shared_cache::{self, LocalCache};

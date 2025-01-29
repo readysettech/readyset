@@ -3,13 +3,14 @@ use std::collections::{HashMap, HashSet};
 
 use lazy_static::lazy_static;
 use nom_sql::{
-    DialectDisplay, Literal, PostgresParameterValue, PostgresParameterValueInner, SetNames,
-    SetPostgresParameter, SetPostgresParameterValue, SetStatement, SqlQuery,
+    Literal, PostgresParameterValue, PostgresParameterValueInner, SetNames, SetPostgresParameter,
+    SetPostgresParameterValue, SetStatement, SqlQuery,
 };
 use readyset_adapter::backend::noria_connector::QueryResult;
 use readyset_adapter::backend::{noria_connector, SelectSchema};
 use readyset_adapter::{QueryHandler, SetBehavior};
 use readyset_errors::ReadySetResult;
+use readyset_sql::DialectDisplay;
 
 enum AllowedParameterValue {
     Literal(PostgresParameterValue),
