@@ -28,6 +28,7 @@ tokio = { workspace = true, features = ["full"] }
 tokio-native-tls = { workspace = true }
 tracing = { workspace = true }
 
+database-utils = { path = "../database-utils" }
 readyset-adapter-types = { path = "../readyset-adapter-types" }
 readyset-data = { path = "../readyset-data" }
 

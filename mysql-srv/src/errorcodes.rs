@@ -1,5 +1,9 @@
 // https://mariadb.com/kb/en/library/mariadb-error-codes/
 // Generated using:
+// Note: Extra error code ER_SECURE_TRANSPORT_REQUIRED is added after the generation
+// More comprehensive list of errors can be found on
+// https://downloads.mysql.com/docs/mysql-errors-8.0-en.a4.pdf
+
 /*
 extern crate reqwest;
 extern crate select;
@@ -2067,6 +2071,8 @@ pub enum ErrorKind {
     /// transactions on master to account for transactions that have been committed on master but
     /// are not included in GTID_EXECUTED.
     ER_SLAVE_HAS_MORE_GTIDS_THAN_MASTER = 1885,
+    /// Connections using insecure transport are prohibited while --require_secure_transport=ON.
+    ER_SECURE_TRANSPORT_REQUIRED = 3159,
 }
 
 impl From<u16> for ErrorKind {
@@ -2960,6 +2966,7 @@ impl From<u16> for ErrorKind {
             1883_u16 => ErrorKind::ER_PLUGIN_CANNOT_BE_UNINSTALLED,
             1884_u16 => ErrorKind::ER_GTID_UNSAFE_BINLOG_SPLITTABLE_STATEMENT_AND_GTID_GROUP,
             1885_u16 => ErrorKind::ER_SLAVE_HAS_MORE_GTIDS_THAN_MASTER,
+            3159_u16 => ErrorKind::ER_SECURE_TRANSPORT_REQUIRED,
             _ => ErrorKind::ER_UNKNOWN_ERROR,
         }
     }
@@ -3856,6 +3863,7 @@ impl From<ErrorKind> for u16 {
             ErrorKind::ER_PLUGIN_CANNOT_BE_UNINSTALLED => 1883_u16,
             ErrorKind::ER_GTID_UNSAFE_BINLOG_SPLITTABLE_STATEMENT_AND_GTID_GROUP => 1884_u16,
             ErrorKind::ER_SLAVE_HAS_MORE_GTIDS_THAN_MASTER => 1885_u16,
+            ErrorKind::ER_SECURE_TRANSPORT_REQUIRED => 3159_u16,
         }
     }
 }
@@ -4758,6 +4766,7 @@ impl ErrorKind {
             ErrorKind::ER_WRONG_NUMBER_OF_COLUMNS_IN_SELECT
             | ErrorKind::ER_OPERAND_COLUMNS
             | ErrorKind::ER_SUBQUERY_NO_1_ROW => b"21000",
+            ErrorKind::ER_SECURE_TRANSPORT_REQUIRED => b"HY000",
         }
     }
 }

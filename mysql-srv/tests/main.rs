@@ -12,6 +12,7 @@ use std::marker::PhantomData;
 use std::pin::Pin;
 use std::{io, net, thread};
 
+use database_utils::TlsMode;
 use mysql::prelude::Queryable;
 use mysql::Row;
 use mysql_srv::{
@@ -218,7 +219,13 @@ where
                 let _guard = rt.handle().enter();
                 tokio::net::TcpStream::from_std(s).unwrap()
             };
-            rt.block_on(MySqlIntermediary::run_on_tcp(self, s, false, None))
+            rt.block_on(MySqlIntermediary::run_on_tcp(
+                self,
+                s,
+                false,
+                None,
+                TlsMode::Optional,
+            ))
         });
 
         let mut db = mysql::Conn::new(

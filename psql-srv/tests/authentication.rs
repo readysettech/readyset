@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::vec;
 
+use database_utils::TlsMode;
 use futures::stream;
 use postgres::config::{ChannelBinding, SslMode};
 use postgres::error::SqlState;
@@ -100,7 +101,7 @@ async fn run_server(backend: ScramSha256Backend) -> u16 {
             .send(listener.local_addr().unwrap().port())
             .unwrap();
         let (socket, _) = listener.accept().await.unwrap();
-        run_backend(backend, socket, false, tls_acceptor).await;
+        run_backend(backend, socket, false, tls_acceptor, TlsMode::Optional).await;
     });
     recv_port.await.unwrap()
 }

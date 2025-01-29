@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::vec;
 
-use database_utils::{DatabaseURL, QueryableConnection};
+use database_utils::{DatabaseURL, QueryableConnection, TlsMode};
 use futures::stream;
 use postgres_protocol::Oid;
 use postgres_types::Type;
@@ -104,7 +104,7 @@ async fn connect() {
             .send(listener.local_addr().unwrap().port())
             .unwrap();
         let (socket, _) = listener.accept().await.unwrap();
-        run_backend(TestBackend, socket, false, tls_acceptor).await;
+        run_backend(TestBackend, socket, false, tls_acceptor, TlsMode::Optional).await;
     });
 
     let port = recv_port.await.unwrap();

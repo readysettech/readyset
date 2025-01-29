@@ -11,7 +11,7 @@ use std::{io, mem};
 
 use anyhow::{anyhow, bail, Context};
 use console::style;
-use database_utils::{DatabaseConnection, DatabaseType, DatabaseURL, QueryableConnection};
+use database_utils::{DatabaseConnection, DatabaseType, DatabaseURL, QueryableConnection, TlsMode};
 use itertools::Itertools;
 use mysql_srv::MySqlIntermediary;
 use readyset_adapter::backend::noria_connector::ReadBehavior;
@@ -679,6 +679,7 @@ impl TestScript {
                     s,
                     false,
                     None,
+                    TlsMode::Optional,
                 )
                 .await
                 .unwrap(),
@@ -692,6 +693,7 @@ impl TestScript {
                         s,
                         false,
                         None,
+                        TlsMode::Optional,
                     )
                     .await
                 }

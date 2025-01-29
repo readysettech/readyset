@@ -19,6 +19,7 @@ use std::task::{Context, Poll};
 use std::{io, vec};
 
 use criterion::{criterion_group, criterion_main, Criterion};
+use database_utils::TlsMode;
 use futures::future::{try_select, Either};
 use futures::stream::Peekable;
 use futures::{ready, Stream, StreamExt, TryStreamExt};
@@ -279,7 +280,13 @@ where
                     .unwrap();
             tokio::spawn(conn);
             let backend = Backend::new(client, streaming);
-            tokio::spawn(psql_srv::run_backend(backend, sock, false, None));
+            tokio::spawn(psql_srv::run_backend(
+                backend,
+                sock,
+                false,
+                None,
+                TlsMode::Optional,
+            ));
         }
     }))
 }

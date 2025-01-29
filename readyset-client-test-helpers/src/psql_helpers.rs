@@ -2,6 +2,7 @@ use std::env;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use database_utils::TlsMode;
 use readyset_adapter::backend::{QueryDestination, QueryInfo};
 use readyset_adapter::upstream_database::LazyUpstream;
 use readyset_adapter::Backend;
@@ -89,7 +90,14 @@ impl Adapter for PostgreSQLAdapter {
     }
 
     async fn run_backend(backend: Backend<Self::Upstream, Self::Handler>, s: TcpStream) {
-        psql_srv::run_backend(readyset_psql::Backend::new(backend), s, false, None).await
+        psql_srv::run_backend(
+            readyset_psql::Backend::new(backend),
+            s,
+            false,
+            None,
+            TlsMode::Optional,
+        )
+        .await
     }
 }
 

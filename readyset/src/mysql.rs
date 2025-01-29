@@ -1,6 +1,7 @@
 use std::io;
 use std::sync::Arc;
 
+use database_utils::TlsMode;
 use mysql_srv::MySqlIntermediary;
 use readyset_adapter::upstream_database::LazyUpstream;
 use readyset_mysql::{MySqlQueryHandler, MySqlUpstream};
@@ -16,6 +17,8 @@ pub struct MySqlHandler {
     pub enable_statement_logging: bool,
     /// Optional struct to accept a TLS handshake and return a `TlsConnection`.
     pub tls_acceptor: Option<Arc<TlsAcceptor>>,
+    /// Indicates which type of client connections are allowed
+    pub tls_mode: TlsMode,
 }
 
 impl ConnectionHandler for MySqlHandler {
@@ -35,6 +38,7 @@ impl ConnectionHandler for MySqlHandler {
             stream,
             self.enable_statement_logging,
             self.tls_acceptor.clone(),
+            self.tls_mode,
         )
         .await
         {

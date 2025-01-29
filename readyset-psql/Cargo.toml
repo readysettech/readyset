@@ -53,6 +53,7 @@ tempfile = { workspace = true }
 
 [dev-dependencies]
 chrono = { workspace = true }
+database-utils = { path = "../database-utils" }
 readyset-server = { path = "../readyset-server/" }
 proptest = { workspace = true }
 test-strategy = { workspace = true }

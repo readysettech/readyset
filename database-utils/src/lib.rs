@@ -678,3 +678,15 @@ impl DatabaseURL {
         DEFAULT_TIMEZONE_NAME.into()
     }
 }
+
+/// Indicates which types of client connections are allowed
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, ValueEnum)]
+pub enum TlsMode {
+    /// client can use either plain or TLS connections
+    #[default]
+    Optional,
+    /// TLS connections are disabled
+    Disabled,
+    /// Only TLS connections are allowed
+    Required,
+}

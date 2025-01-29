@@ -107,6 +107,26 @@ pub(crate) enum TransactionState {
 }
 
 impl BackendMessage {
+    pub fn error(severity: ErrorSeverity, sqlstate: SqlState, message: String) -> BackendMessage {
+        BackendMessage::ErrorResponse {
+            severity,
+            sqlstate,
+            message,
+            detail: None,
+            hint: None,
+            position: None,
+            where_: None,
+            schema: None,
+            table: None,
+            column: None,
+            datatype: None,
+            constraint: None,
+            file: None,
+            line: None,
+            routine: None,
+        }
+    }
+
     pub fn ready_for_query(state: TransactionState) -> BackendMessage {
         let status = match state {
             TransactionState::NotInTransaction => READY_FOR_QUERY_IDLE,

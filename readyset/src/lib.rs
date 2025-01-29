@@ -18,7 +18,7 @@ use anyhow::{anyhow, bail};
 use clap::builder::NonEmptyStringValueParser;
 use clap::{ArgAction, ArgGroup, Parser};
 use crossbeam_skiplist::SkipSet;
-use database_utils::{DatabaseType, DatabaseURL, UpstreamConfig};
+use database_utils::{DatabaseType, DatabaseURL, TlsMode, UpstreamConfig};
 use failpoint_macros::set_failpoint;
 use futures_util::future::FutureExt;
 use futures_util::stream::{SelectAll, StreamExt};
@@ -413,6 +413,16 @@ pub struct Options {
         env = "READYSET_IDENTITY_FILE_PASSWORD"
     )]
     readyset_identity_file_password: Option<String>,
+
+    /// Specifies the types of client connections permitted to connect to Readyset.
+    ///
+    /// The available options are:
+    ///
+    /// * "optional" (default) - Clients can connect using either plain or TLS connections.
+    /// * "disabled" - TLS connections are not allowed; only plain connections are permitted.
+    /// * "required" - Only TLS connections are allowed; plain connections are rejected.
+    #[arg(long, env = "TLS_MODE", default_value = "optional")]
+    pub tls_mode: TlsMode,
 }
 
 impl Options {

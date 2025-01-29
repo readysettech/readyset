@@ -45,6 +45,7 @@ tokio-util = { workspace = true, features = ["codec"] }
 tracing = { workspace = true }
 uuid = { workspace = true }
 
+database-utils = { path = "../database-utils" }
 readyset-adapter-types = { path = "../readyset-adapter-types" }
 readyset-data = { path = "../readyset-data" }
 readyset-sql = { path = "../readyset-sql" }

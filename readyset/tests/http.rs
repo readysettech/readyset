@@ -2,7 +2,7 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
 use clap::Parser;
-use database_utils::DatabaseType;
+use database_utils::{DatabaseType, TlsMode};
 use readyset::psql::PsqlHandler;
 use readyset::{NoriaAdapter, Options};
 use readyset_adapter::ReadySetStatus;
@@ -46,6 +46,7 @@ fn start_adapter(test_db: &str) -> anyhow::Result<()> {
             authentication_method: AuthenticationMethod::Cleartext,
             tls_acceptor: None,
             enable_statement_logging: false,
+            tls_mode: TlsMode::Optional,
         },
         database_type: DatabaseType::PostgreSQL,
         parse_dialect: readyset_sql::Dialect::PostgreSQL,

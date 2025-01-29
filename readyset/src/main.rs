@@ -15,6 +15,7 @@ fn main() -> anyhow::Result<()> {
             connection_handler: MySqlHandler {
                 enable_statement_logging: options.tracing.statement_logging,
                 tls_acceptor: options.tls_acceptor()?,
+                tls_mode: options.tls_mode,
             },
             database_type: DatabaseType::MySQL,
             parse_dialect: readyset_sql::Dialect::MySQL,
@@ -28,6 +29,7 @@ fn main() -> anyhow::Result<()> {
                 options: options.psql_options.clone(),
                 enable_statement_logging: options.tracing.statement_logging,
                 tls_acceptor: options.tls_acceptor()?,
+                tls_mode: options.tls_mode,
             })?,
             database_type: DatabaseType::PostgreSQL,
             parse_dialect: readyset_sql::Dialect::PostgreSQL,

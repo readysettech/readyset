@@ -2,6 +2,7 @@ use std::env;
 use std::fmt::Display;
 
 use async_trait::async_trait;
+use database_utils::TlsMode;
 use mysql_async::prelude::Queryable;
 use mysql_srv::MySqlIntermediary;
 use readyset_adapter::backend::QueryInfo;
@@ -101,6 +102,7 @@ impl Adapter for MySQLAdapter {
             s,
             false,
             None,
+            TlsMode::Optional,
         )
         .await
         .unwrap()

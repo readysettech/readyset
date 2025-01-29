@@ -28,6 +28,7 @@ mod value;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use database_utils::TlsMode;
 use futures::Stream;
 use postgres::SimpleQueryMessage;
 use postgres_protocol::Oid;
@@ -207,8 +208,16 @@ pub async fn run_backend<B: PsqlBackend>(
     channel: tokio::net::TcpStream,
     enable_statement_logging: bool,
     tls_acceptor: Option<Arc<TlsAcceptor>>,
+    tls_mode: TlsMode,
 ) {
-    runner::Runner::run(backend, channel, enable_statement_logging, tls_acceptor).await
+    runner::Runner::run(
+        backend,
+        channel,
+        enable_statement_logging,
+        tls_acceptor,
+        tls_mode,
+    )
+    .await
 }
 
 pub async fn send_immediate_err<B, C>(channel: C, error: Error) -> Result<(), Error>
@@ -216,7 +225,9 @@ where
     B: PsqlBackend,
     C: AsyncRead + AsyncWrite + Unpin,
 {
-    let packet = Protocol::new().on_error::<B>(error, false).await?;
+    let packet = Protocol::new(TlsMode::Optional)
+        .on_error::<B>(error, false)
+        .await?;
     channel::Channel::new(channel).send(packet).await?;
     Ok(())
 }

@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use database_utils::TlsMode;
 use postgres::SimpleQueryMessage;
 use postgres_protocol::Oid;
 use postgres_types::{Kind, Type};
@@ -135,11 +136,14 @@ pub struct Protocol {
     extended_types: HashMap<Oid, i16>,
 
     /// Whether to allow TLS connections.
-    allow_tls_connections: bool,
+    tls_mode: TlsMode,
 
     /// TLS server endpoint data for channel binding as specified by
     /// [RFC5929](https://www.rfc-editor.org/rfc/rfc5929)
     tls_server_end_point: Option<Vec<u8>>,
+
+    /// Whether the client is connected using TLS
+    is_tls: bool,
 }
 
 /// A prepared statement allows a frontend to specify the general form of a SQL statement while
@@ -166,21 +170,16 @@ struct PortalData {
 /// An implementation of the backend side of the PostgreSQL frontend/backend protocol. See
 /// `on_request` for the primary entry point.
 impl Protocol {
-    pub fn new() -> Protocol {
+    pub fn new(tls_mode: TlsMode) -> Protocol {
         Protocol {
             state: State::StartingUp,
             prepared_statements: HashMap::new(),
             portals: HashMap::new(),
             extended_types: HashMap::new(),
-            allow_tls_connections: false,
+            tls_mode,
             tls_server_end_point: None,
+            is_tls: false,
         }
-    }
-
-    /// Instruct the `Protocol` to respond to SslRequest messages from the client with
-    /// ssl_response_willing(), which indicates that the server will accept a TLS handshake.
-    pub fn allow_tls_connections(&mut self) {
-        self.allow_tls_connections = true;
     }
 
     #[inline]
@@ -357,7 +356,7 @@ impl Protocol {
     // A request for an SSL connection. This will come before a StartupMessage.
     #[inline]
     fn on_ssl_request(&mut self) -> BackendMessage {
-        if self.allow_tls_connections {
+        if self.tls_mode != TlsMode::Disabled {
             self.state = State::SslHandshake;
             BackendMessage::ssl_response_willing()
         } else {
@@ -374,6 +373,12 @@ impl Protocol {
         user: Option<BytesStr>,
         channel: &mut Channel<C>,
     ) -> Result<Response<B::Resultset>, Error> {
+        if self.tls_mode == TlsMode::Required && !self.is_tls {
+            return Err(Error::InvalidAuthorizationSpecification(
+                "Clients are only allowed to connect using TLS connections".to_string(),
+            ));
+        }
+
         let database =
             database.ok_or_else(|| Error::Unsupported("database is required".to_string()))?;
         let response = match backend.on_init(database.borrow()).await? {
@@ -392,7 +397,7 @@ impl Protocol {
                     user: user.ok_or(Error::NoUserSpecified)?,
                 });
                 smallvec![AuthenticationSasl {
-                    allow_channel_binding: self.allow_tls_connections
+                    allow_channel_binding: self.is_tls
                 }]
             }
         };
@@ -463,7 +468,7 @@ impl Protocol {
         // > then this is an indication that there has been a downgrade attack (e.g., an
         // > attacker changed the server's mechanism list to exclude the -PLUS suffixed
         // > SCRAM mechanism name(s)).
-        if self.allow_tls_connections
+        if self.tls_mode != TlsMode::Disabled
             && client_first_message
                 .channel_binding_support()
                 .is_supported_but_not_used()
@@ -1017,6 +1022,7 @@ impl Protocol {
     pub fn completed_ssl_handshake(&mut self, server_end_point: Option<Vec<u8>>) {
         self.state = State::StartingUp;
         self.tls_server_end_point = server_end_point;
+        self.is_tls = true;
     }
 
     fn transaction_state<B: PsqlBackend>(&self, backend: &B) -> TransactionState {
@@ -1420,49 +1426,46 @@ mod tests {
 
     #[test]
     fn ssl_request() {
-        let mut protocol = Protocol::new();
-        let request = FrontendMessage::SSLRequest;
-        let mut backend = Backend::new();
-        let mut channel = Channel::<NullBytestream>::new(NullBytestream);
-        // SSLRequest is not allowed by the protocol by default.
-        match block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap() {
-            Response::Message(msg) => match (msg, BackendMessage::ssl_response_unwilling()) {
-                (
-                    BackendMessage::SSLResponse { byte },
-                    BackendMessage::SSLResponse {
-                        byte: expected_byte,
-                    },
-                ) => assert_eq!(byte, expected_byte),
-                _ => panic!(),
-            },
-            _ => panic!(),
-        }
-        // After the SSL handshake completes, we return to `State::StartingUp`.
-        protocol.completed_ssl_handshake(None);
-        assert_eq!(protocol.state, State::StartingUp);
+        // Helper function to test SSLRequest for a given TlsMode
+        fn test_ssl_request(tls_mode: TlsMode, expected_response: BackendMessage) {
+            let mut protocol = Protocol::new(tls_mode);
+            let request = FrontendMessage::SSLRequest;
+            let mut backend = Backend::new();
+            let mut channel = Channel::<NullBytestream>::new(NullBytestream);
 
-        // Try again with SSL allowed
-        let request = FrontendMessage::SSLRequest;
-        protocol.allow_tls_connections();
-        match block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap() {
-            Response::Message(msg) => match (msg, BackendMessage::ssl_response_willing()) {
-                (
-                    BackendMessage::SSLResponse { byte },
-                    BackendMessage::SSLResponse {
-                        byte: expected_byte,
-                    },
-                ) => assert_eq!(byte, expected_byte),
+            match block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap() {
+                Response::Message(msg) => match (msg, expected_response) {
+                    (
+                        BackendMessage::SSLResponse { byte },
+                        BackendMessage::SSLResponse {
+                            byte: expected_byte,
+                        },
+                    ) => assert_eq!(byte, expected_byte),
+                    _ => panic!(),
+                },
                 _ => panic!(),
-            },
-            _ => panic!(),
+            }
+
+            // After the SSL handshake completes, we return to `State::StartingUp`
+            protocol.completed_ssl_handshake(None);
+            assert_eq!(
+                protocol.state,
+                State::StartingUp,
+                "Protocol state should be StartingUp"
+            );
         }
+
+        // Test SSLRequest for each TlsMode
+        test_ssl_request(TlsMode::Disabled, BackendMessage::ssl_response_unwilling());
+        test_ssl_request(TlsMode::Optional, BackendMessage::ssl_response_willing());
+        test_ssl_request(TlsMode::Required, BackendMessage::ssl_response_willing());
     }
 
     #[test]
     fn authentication_flow_successful() {
         let expected_username = bytes_str("user_name");
         let expected_password = "password";
-        let mut protocol = Protocol::new();
+        let mut protocol = Protocol::new(TlsMode::Disabled);
         assert_eq!(protocol.state, State::StartingUp);
         let request = FrontendMessage::StartupMessage {
             protocol_version: 12345,
@@ -1515,7 +1518,7 @@ mod tests {
         let expected_username = bytes_str("user_name");
         let expected_password = "password";
         let provided_password = "incorrect password";
-        let mut protocol = Protocol::new();
+        let mut protocol = Protocol::new(TlsMode::Disabled);
         assert_eq!(protocol.state, State::StartingUp);
         let request = FrontendMessage::StartupMessage {
             protocol_version: 12345,
@@ -1557,7 +1560,7 @@ mod tests {
 
     #[test]
     fn startup_message_without_database() {
-        let mut protocol = Protocol::new();
+        let mut protocol = Protocol::new(TlsMode::Disabled);
         let request = FrontendMessage::StartupMessage {
             protocol_version: 12345,
             user: Some(bytes_str("user_name")),
@@ -1571,7 +1574,7 @@ mod tests {
 
     #[test]
     fn regular_mode_message_without_startup() {
-        let mut protocol = Protocol::new();
+        let mut protocol = Protocol::new(TlsMode::Disabled);
         let request = FrontendMessage::Sync;
         let mut backend = Backend::new();
         let mut channel = Channel::<NullBytestream>::new(NullBytestream);
@@ -1581,7 +1584,7 @@ mod tests {
 
     #[test]
     fn startup_message_repeated() {
-        let mut protocol = Protocol::new();
+        let mut protocol = Protocol::new(TlsMode::Disabled);
         let mut backend = Backend::new();
         let mut channel = Channel::<NullBytestream>::new(NullBytestream);
 
@@ -1603,7 +1606,7 @@ mod tests {
 
     #[test]
     fn sync() {
-        let mut protocol = Protocol::new();
+        let mut protocol = Protocol::new(TlsMode::Disabled);
         let mut backend = Backend::new();
         let mut channel = Channel::<NullBytestream>::new(NullBytestream);
 
@@ -1629,7 +1632,7 @@ mod tests {
 
     #[test]
     fn terminate() {
-        let mut protocol = Protocol::new();
+        let mut protocol = Protocol::new(TlsMode::Disabled);
         let mut backend = Backend::new();
         let mut channel = Channel::<NullBytestream>::new(NullBytestream);
 
@@ -1650,7 +1653,7 @@ mod tests {
 
     #[tokio::test]
     async fn query_read() {
-        let mut protocol = Protocol::new();
+        let mut protocol = Protocol::new(TlsMode::Disabled);
         let mut backend = Backend::new();
         let mut channel = Channel::<NullBytestream>::new(NullBytestream);
 
@@ -1726,7 +1729,7 @@ mod tests {
 
     #[test]
     fn query_error() {
-        let mut protocol = Protocol::new();
+        let mut protocol = Protocol::new(TlsMode::Disabled);
         let mut backend = Backend::new();
         backend.is_query_err = true;
         let mut channel = Channel::<NullBytestream>::new(NullBytestream);
@@ -1756,7 +1759,7 @@ mod tests {
     }
 
     fn query_write(in_transaction: bool) {
-        let mut protocol = Protocol::new();
+        let mut protocol = Protocol::new(TlsMode::Disabled);
         let mut backend = Backend::new();
         backend.set_in_transaction(in_transaction);
         backend.is_query_read = false;
@@ -1796,7 +1799,7 @@ mod tests {
 
     #[test]
     fn parse() {
-        let mut protocol = Protocol::new();
+        let mut protocol = Protocol::new(TlsMode::Disabled);
         let mut backend = Backend::new();
         let mut channel = Channel::<NullBytestream>::new(NullBytestream);
 
@@ -1847,7 +1850,7 @@ mod tests {
 
     #[test]
     fn parse_error() {
-        let mut protocol = Protocol::new();
+        let mut protocol = Protocol::new(TlsMode::Disabled);
         let mut backend = Backend::new();
         backend.is_prepare_err = true;
         let mut channel = Channel::<NullBytestream>::new(NullBytestream);
@@ -1870,7 +1873,7 @@ mod tests {
 
     #[test]
     fn bind() {
-        let mut protocol = Protocol::new();
+        let mut protocol = Protocol::new(TlsMode::Disabled);
         let mut backend = Backend::new();
         let mut channel = Channel::<NullBytestream>::new(NullBytestream);
 
@@ -1916,7 +1919,7 @@ mod tests {
 
     #[test]
     fn bind_no_result_transfer_formats() {
-        let mut protocol = Protocol::new();
+        let mut protocol = Protocol::new(TlsMode::Disabled);
         let mut backend = Backend::new();
         let mut channel = Channel::<NullBytestream>::new(NullBytestream);
 
@@ -1960,7 +1963,7 @@ mod tests {
 
     #[test]
     fn bind_single_result_transfer_format() {
-        let mut protocol = Protocol::new();
+        let mut protocol = Protocol::new(TlsMode::Disabled);
         let mut backend = Backend::new();
         let mut channel = Channel::<NullBytestream>::new(NullBytestream);
 
@@ -2007,7 +2010,7 @@ mod tests {
 
     #[test]
     fn bind_invalid_result_transfer_formats() {
-        let mut protocol = Protocol::new();
+        let mut protocol = Protocol::new(TlsMode::Disabled);
         let mut backend = Backend::new();
         let mut channel = Channel::<NullBytestream>::new(NullBytestream);
 
@@ -2041,7 +2044,7 @@ mod tests {
 
     #[test]
     fn bind_missing_prepared_statement() {
-        let mut protocol = Protocol::new();
+        let mut protocol = Protocol::new(TlsMode::Disabled);
         let mut backend = Backend::new();
         let mut channel = Channel::<NullBytestream>::new(NullBytestream);
 
@@ -2071,7 +2074,7 @@ mod tests {
 
     #[test]
     fn close_prepared_statement() {
-        let mut protocol = Protocol::new();
+        let mut protocol = Protocol::new(TlsMode::Disabled);
         let mut backend = Backend::new();
         let mut channel = Channel::<NullBytestream>::new(NullBytestream);
 
@@ -2105,7 +2108,7 @@ mod tests {
 
     #[test]
     fn close_missing_prepared_statement() {
-        let mut protocol = Protocol::new();
+        let mut protocol = Protocol::new(TlsMode::Disabled);
         let mut backend = Backend::new();
         let mut channel = Channel::<NullBytestream>::new(NullBytestream);
 
@@ -2127,7 +2130,7 @@ mod tests {
 
     #[test]
     fn close_portal() {
-        let mut protocol = Protocol::new();
+        let mut protocol = Protocol::new(TlsMode::Disabled);
         let mut backend = Backend::new();
         let mut channel = Channel::<NullBytestream>::new(NullBytestream);
 
@@ -2170,7 +2173,7 @@ mod tests {
 
     #[test]
     fn close_missing_portal() {
-        let mut protocol = Protocol::new();
+        let mut protocol = Protocol::new(TlsMode::Disabled);
         let mut backend = Backend::new();
         let mut channel = Channel::<NullBytestream>::new(NullBytestream);
 
@@ -2193,7 +2196,7 @@ mod tests {
 
     #[test]
     fn describe_prepared_statement() {
-        let mut protocol = Protocol::new();
+        let mut protocol = Protocol::new(TlsMode::Disabled);
         let mut backend = Backend::new();
         let mut channel = Channel::<NullBytestream>::new(NullBytestream);
 
@@ -2253,7 +2256,7 @@ mod tests {
 
     #[test]
     fn describe_missing_prepared_statement() {
-        let mut protocol = Protocol::new();
+        let mut protocol = Protocol::new(TlsMode::Disabled);
         let mut backend = Backend::new();
         let mut channel = Channel::<NullBytestream>::new(NullBytestream);
 
@@ -2273,7 +2276,7 @@ mod tests {
 
     #[test]
     fn describe_portal() {
-        let mut protocol = Protocol::new();
+        let mut protocol = Protocol::new(TlsMode::Disabled);
         let mut backend = Backend::new();
         let mut channel = Channel::<NullBytestream>::new(NullBytestream);
 
@@ -2339,7 +2342,7 @@ mod tests {
 
     #[test]
     fn describe_missing_portal() {
-        let mut protocol = Protocol::new();
+        let mut protocol = Protocol::new(TlsMode::Disabled);
         let mut backend = Backend::new();
         let mut channel = Channel::<NullBytestream>::new(NullBytestream);
 
@@ -2359,7 +2362,7 @@ mod tests {
 
     #[tokio::test]
     async fn execute_read() {
-        let mut protocol = Protocol::new();
+        let mut protocol = Protocol::new(TlsMode::Disabled);
         let mut backend = Backend::new();
         let mut channel = Channel::<NullBytestream>::new(NullBytestream);
 
@@ -2444,7 +2447,7 @@ mod tests {
 
     #[test]
     fn execute_error() {
-        let mut protocol = Protocol::new();
+        let mut protocol = Protocol::new(TlsMode::Disabled);
         let mut backend = Backend::new();
         backend.is_query_err = true;
         let mut channel = Channel::<NullBytestream>::new(NullBytestream);
@@ -2485,7 +2488,7 @@ mod tests {
 
     #[test]
     fn execute_write() {
-        let mut protocol = Protocol::new();
+        let mut protocol = Protocol::new(TlsMode::Disabled);
         let mut backend = Backend::new();
         backend.is_query_read = false;
         let mut channel = Channel::<NullBytestream>::new(NullBytestream);
@@ -2540,7 +2543,7 @@ mod tests {
 
     #[test]
     fn on_error_starting_up() {
-        let mut protocol = Protocol::new();
+        let mut protocol = Protocol::new(TlsMode::Disabled);
         assert!(matches!(
             block_on(
                 protocol.on_error::<Backend>(Error::InternalError("error requested".to_string()), false)
@@ -2557,7 +2560,7 @@ mod tests {
 
     #[test]
     fn on_error_after_starting_up() {
-        let mut protocol = Protocol::new();
+        let mut protocol = Protocol::new(TlsMode::Disabled);
         protocol.state = State::Ready;
         match block_on(
             protocol
@@ -2596,7 +2599,7 @@ mod tests {
 
     #[test]
     fn on_error_in_extended() {
-        let mut protocol = Protocol::new();
+        let mut protocol = Protocol::new(TlsMode::Disabled);
         protocol.state = State::Extended;
         assert!(matches!(
             block_on(

@@ -22,6 +22,7 @@
 //! use std::collections::HashMap;
 //! use std::iter;
 //!
+//! use database_utils::TlsMode;
 //! use mysql::prelude::*;
 //! use mysql_srv::*;
 //! use readyset_adapter_types::DeallocateId;
@@ -133,7 +134,7 @@
 //!                 let _guard = rt.handle().enter();
 //!                 tokio::net::TcpStream::from_std(s).unwrap()
 //!             };
-//!             rt.block_on(MySqlIntermediary::run_on_tcp(Backend, s, false, None))
+//!             rt.block_on(MySqlIntermediary::run_on_tcp(Backend, s, false, None, TlsMode::Optional))
 //!                 .unwrap();
 //!         }
 //!     });
@@ -176,6 +177,7 @@ use constants::{
     CLIENT_PLUGIN_AUTH, CONNECT_WITH_DB, LONG_PASSWORD, PROTOCOL_41, RESERVED, SECURE_CONNECTION,
     SSL,
 };
+use database_utils::TlsMode;
 use error::{other_error, OtherErrorKind};
 use mysql_common::constants::CapabilityFlags;
 use readyset_adapter_types::{DeallocateId, ParsedCommand};
@@ -346,6 +348,8 @@ pub struct MySqlIntermediary<B, S: AsyncRead + AsyncWrite + Unpin> {
     auth_data: [u8; 20],
     /// TLS acceptor
     tls_acceptor: Option<Arc<TlsAcceptor>>,
+    // Tls mode
+    tls_mode: TlsMode,
 }
 
 impl<B: MySqlShim<net::TcpStream> + Send> MySqlIntermediary<B, net::TcpStream> {
@@ -356,9 +360,17 @@ impl<B: MySqlShim<net::TcpStream> + Send> MySqlIntermediary<B, net::TcpStream> {
         stream: net::TcpStream,
         enable_statement_logging: bool,
         tls_acceptor: Option<Arc<TlsAcceptor>>,
+        tls_mode: TlsMode,
     ) -> Result<(), io::Error> {
         stream.set_nodelay(true)?;
-        MySqlIntermediary::run_on(shim, stream, enable_statement_logging, tls_acceptor).await
+        MySqlIntermediary::run_on(
+            shim,
+            stream,
+            enable_statement_logging,
+            tls_acceptor,
+            tls_mode,
+        )
+        .await
     }
 }
 
@@ -370,8 +382,16 @@ impl<B: MySqlShim<S> + Send, S: AsyncRead + AsyncWrite + Unpin + Send> MySqlInte
         stream: S,
         enable_statement_logging: bool,
         tls_acceptor: Option<Arc<TlsAcceptor>>,
+        tls_mode: TlsMode,
     ) -> Result<(), io::Error> {
-        MySqlIntermediary::run_on(shim, stream, enable_statement_logging, tls_acceptor).await
+        MySqlIntermediary::run_on(
+            shim,
+            stream,
+            enable_statement_logging,
+            tls_acceptor,
+            tls_mode,
+        )
+        .await
     }
 }
 
@@ -406,6 +426,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
         stream: S,
         enable_statement_logging: bool,
         tls_acceptor: Option<Arc<TlsAcceptor>>,
+        tls_mode: TlsMode,
     ) -> Result<(), io::Error> {
         let mut mi = MySqlIntermediary {
             shim,
@@ -415,6 +436,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
             client_capabilities: CapabilityFlags::empty(),
             auth_data: [0; 20],
             tls_acceptor,
+            tls_mode,
         };
         if let (true, database) = mi.init().await? {
             if let Some(database) = database {
@@ -452,7 +474,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
         // a TlsAcceptor. If TlsAcceptor is available, we will add SSL capabilities to the
         // init packet.
         let mut capabilities = CAPABILITIES;
-        if self.tls_acceptor.is_some() {
+        if self.tls_acceptor.is_some() && self.tls_mode != TlsMode::Disabled {
             capabilities |= SSL; // SSL support flag
         }
         init_packet.extend_from_slice(&capabilities.to_le_bytes()[..2]);
@@ -513,6 +535,19 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                     "peer terminated connection before sending handshake after TLS connection",
                 )
             })?;
+        } else {
+            // Client connected using a non encrypted stream. Write an error if TLS mode is required.
+            if self.tls_mode == TlsMode::Required {
+                self.conn.set_seq(packet.seq + 1);
+                writers::write_err(
+                    ErrorKind::ER_SECURE_TRANSPORT_REQUIRED,
+                    b"Connections using insecure transport are prohibited.",
+                    &mut self.conn,
+                )
+                .await?;
+                self.conn.flush().await?;
+                return Ok((false, None));
+            }
         }
 
         let handshake = commands::client_handshake(&packet.data)

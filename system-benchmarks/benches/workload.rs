@@ -18,7 +18,7 @@ use benchmarks::QuerySet;
 use clap::Parser;
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput};
 use database_utils::{
-    DatabaseConnection, DatabaseStatement, DatabaseType, DatabaseURL, QueryableConnection,
+    DatabaseConnection, DatabaseStatement, DatabaseType, DatabaseURL, QueryableConnection, TlsMode,
 };
 use fork::{fork, Fork};
 use futures::stream::FuturesUnordered;
@@ -680,6 +680,7 @@ fn start_adapter(args: SystemBenchArgs) -> anyhow::Result<()> {
                 connection_handler: MySqlHandler {
                     enable_statement_logging: false,
                     tls_acceptor: None,
+                    tls_mode: TlsMode::Optional,
                 },
                 database_type: DatabaseType::MySQL,
                 parse_dialect: readyset_sql::Dialect::MySQL,
@@ -699,6 +700,7 @@ fn start_adapter(args: SystemBenchArgs) -> anyhow::Result<()> {
                     authentication_method: AuthenticationMethod::Cleartext,
                     tls_acceptor: None,
                     enable_statement_logging: false,
+                    tls_mode: TlsMode::Optional,
                 },
                 database_type: DatabaseType::PostgreSQL,
                 parse_dialect: readyset_sql::Dialect::PostgreSQL,

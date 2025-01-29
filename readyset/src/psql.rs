@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use clap::Parser;
+use database_utils::TlsMode;
 use readyset_adapter::upstream_database::LazyUpstream;
 use readyset_errors::ReadySetResult;
 use readyset_psql::{AuthenticationMethod, PostgreSqlQueryHandler, PostgreSqlUpstream};
@@ -29,6 +30,8 @@ pub struct Config {
     pub enable_statement_logging: bool,
     /// Optional struct to accept a TLS handshake and return a `TlsConnection`.
     pub tls_acceptor: Option<Arc<TlsAcceptor>>,
+    /// Indicates which type of client connections are allowed
+    pub tls_mode: TlsMode,
 }
 
 #[derive(Clone)]
@@ -39,6 +42,8 @@ pub struct PsqlHandler {
     pub authentication_method: AuthenticationMethod,
     /// Optional struct to accept a TLS handshake and return a `TlsConnection`.
     pub tls_acceptor: Option<Arc<TlsAcceptor>>,
+    /// Indicates which type of client connections are allowed
+    pub tls_mode: TlsMode,
 }
 
 impl PsqlHandler {
@@ -47,6 +52,7 @@ impl PsqlHandler {
             enable_statement_logging: config.enable_statement_logging,
             authentication_method: config.options.postgres_authentication_method,
             tls_acceptor: config.tls_acceptor,
+            tls_mode: config.tls_mode,
         })
     }
 }
@@ -69,6 +75,7 @@ impl ConnectionHandler for PsqlHandler {
             stream,
             self.enable_statement_logging,
             self.tls_acceptor.clone(),
+            self.tls_mode,
         )
         .await;
     }

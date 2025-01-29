@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_native_tls::TlsAcceptor;
-use tracing::{error, info};
+use tracing::{debug, error, info};
+
+use database_utils::TlsMode;
 
 use crate::channel::Channel;
 use crate::error::Error;
@@ -40,11 +42,15 @@ impl<B: PsqlBackend> Runner<B, tokio::net::TcpStream> {
         byte_channel: tokio::net::TcpStream,
         enable_statement_logging: bool,
         tls_acceptor: Option<Arc<TlsAcceptor>>,
+        tls_mode: TlsMode,
     ) {
-        let mut protocol = Protocol::new();
-        if tls_acceptor.is_some() {
-            protocol.allow_tls_connections()
-        };
+        // If the tls_acceptor is not set, force TlsMode to Disabled
+        let protocol = Protocol::new(if tls_acceptor.is_some() {
+            tls_mode
+        } else {
+            TlsMode::Disabled
+        });
+
         let mut runner = Runner {
             backend,
             channel: Channel::new(byte_channel),
@@ -65,7 +71,7 @@ impl<B: PsqlBackend> Runner<B, tokio::net::TcpStream> {
 
             match stream {
                 Ok(stream) => {
-                    info!("Established TLS connection");
+                    debug!("Established TLS connection");
                     protocol.completed_ssl_handshake(
                         stream
                             .get_ref()
