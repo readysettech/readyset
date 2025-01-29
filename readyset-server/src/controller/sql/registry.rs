@@ -1,11 +1,11 @@
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 
-use nom_sql::analysis::visit::{self, Visitor};
 use readyset_client::query::QueryId;
 use readyset_client::recipe::changelist::PostgresTableMetadata;
 use readyset_client::PlaceholderIdx;
 use readyset_errors::{internal_err, unsupported_err, ReadySetError, ReadySetResult};
+use readyset_sql::analysis::visit::{self, Visitor};
 use readyset_sql::ast::{
     CreateTableBody, CreateTableStatement, CreateViewStatement, ItemPlaceholder, Literal, Relation,
     SelectSpecification, SelectStatement, SqlType,

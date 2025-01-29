@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::mem;
 
 use itertools::Itertools;
-use nom_sql::analysis::visit_mut::{self, walk_select_statement, VisitorMut};
 use readyset_errors::ReadySetResult;
+use readyset_sql::analysis::visit_mut::{self, walk_select_statement, VisitorMut};
 use readyset_sql::ast::{
     Column, CommonTableExpr, JoinRightSide, Relation, SelectStatement, SqlIdentifier, SqlQuery,
     TableExpr, TableExprInner,

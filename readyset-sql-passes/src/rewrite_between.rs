@@ -1,4 +1,4 @@
-use nom_sql::analysis::visit_mut::{self, VisitorMut};
+use readyset_sql::analysis::visit_mut::{self, VisitorMut};
 use readyset_sql::ast::{
     BinaryOperator, DeleteStatement, Expr, SelectStatement, SqlQuery, UnaryOperator,
     UpdateStatement,

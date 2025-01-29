@@ -4,8 +4,8 @@
 
 use std::collections::{HashMap, HashSet};
 
-use nom_sql::analysis::visit_mut::{self, VisitorMut};
 use readyset_errors::{ReadySetError, ReadySetResult};
+use readyset_sql::analysis::visit_mut::{self, VisitorMut};
 use readyset_sql::ast::{
     CreateTableStatement, JoinClause, JoinRightSide, Relation, SelectStatement, SqlIdentifier,
     SqlType,

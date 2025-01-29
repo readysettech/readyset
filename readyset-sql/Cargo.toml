@@ -22,3 +22,4 @@ triomphe = { workspace = true }
 
 [dev-dependencies]
 bincode = { workspace = true }
+readyset-sql-parsing = { path = "../readyset-sql-parsing" }

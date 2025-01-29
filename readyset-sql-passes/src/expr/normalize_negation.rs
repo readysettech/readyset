@@ -1,4 +1,4 @@
-use nom_sql::analysis::visit_mut::{self, VisitorMut};
+use readyset_sql::analysis::visit_mut::{self, VisitorMut};
 use readyset_sql::ast::{BinaryOperator, Expr, UnaryOperator};
 
 /// Attempt to replace `expr` with the equivalent expression negated. Returns `true` if that was

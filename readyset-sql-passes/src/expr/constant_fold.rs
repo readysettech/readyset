@@ -1,7 +1,7 @@
 use dataflow_expression::{Dialect, Expr as DataflowExpr, LowerContext};
-use nom_sql::analysis::visit_mut::{self, VisitorMut};
 use readyset_data::{DfType, DfValue};
 use readyset_errors::{internal, ReadySetResult};
+use readyset_sql::analysis::visit_mut::{self, VisitorMut};
 use readyset_sql::ast::{Column, Expr, Literal, Relation};
 
 /// Statically evaluate the given expression, returning a literal value representing the result.

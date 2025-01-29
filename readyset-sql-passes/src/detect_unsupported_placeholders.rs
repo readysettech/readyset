@@ -1,7 +1,7 @@
 use std::mem;
 
-use nom_sql::analysis::visit::{self, walk_expr, Visitor};
 use readyset_errors::{ReadySetError, ReadySetResult};
+use readyset_sql::analysis::visit::{self, walk_expr, Visitor};
 use readyset_sql::ast::{
     BinaryOperator, Expr, ItemPlaceholder, LimitClause, Literal, SelectStatement,
 };

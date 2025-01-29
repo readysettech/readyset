@@ -1,5 +1,5 @@
 use dataflow_expression::Dialect;
-use nom_sql::analysis::visit_mut::VisitorMut;
+use readyset_sql::analysis::visit_mut::VisitorMut;
 use readyset_sql::ast::{Expr, SelectStatement};
 
 use self::constant_fold::constant_fold_expr;

@@ -3,14 +3,14 @@
 //!
 //! [rustc-ast-visit]: https://doc.rust-lang.org/stable/nightly-rustc/rustc_ast/visit/index.html
 //!
-//! For an equivalent AST walker trait over **shared references**, see [`nom_sql::analysis::visit`].
+//! For an equivalent AST walker trait over **shared references**, see [`readyset_sql::analysis::visit`].
 
 // NOTE: remember that this file is effectively duplicated to `visit.rs` - any changes made here
 // should be mirrored there!
 
 #![warn(clippy::todo, clippy::unimplemented)]
 
-use readyset_sql::ast::*;
+use crate::ast::*;
 
 /// Each method of the `VisitorMut` trait is a hook to be potentially overridden when recursively
 /// traversing SQL statements. The default implementation of each method recursively visits the
@@ -27,10 +27,10 @@ use readyset_sql::ast::*;
 /// statement.
 ///
 /// ```
-/// use nom_sql::analysis::visit_mut::VisitorMut;
-/// use nom_sql::parse_query;
+/// use readyset_sql::analysis::visit_mut::VisitorMut;
 /// use readyset_sql::ast::{Literal, SqlQuery};
 /// use readyset_sql::Dialect;
+/// use readyset_sql_parsing::parse_query;
 ///
 /// fn count_placeholders(query: &str) -> usize {
 ///     #[derive(Default)]
@@ -1267,10 +1267,7 @@ pub fn walk_comment_statement<'a, V: VisitorMut<'a>>(
 
 #[cfg(test)]
 mod tests {
-    use readyset_sql::{ast::*, Dialect};
-
     use super::*;
-    use crate::select::selection;
 
     #[derive(Default, Debug, PartialEq, Eq)]
     struct NodeCounter(usize);
@@ -1385,52 +1382,295 @@ mod tests {
         }
     }
 
-    fn node_count(query: &str) -> usize {
+    fn node_count(mut query: SqlQuery) -> usize {
         let mut counter = NodeCounter::default();
-        counter
-            .visit_select_statement(&mut test_parse!(
-                selection(Dialect::MySQL),
-                query.as_bytes()
-            ))
-            .unwrap();
+        counter.visit_sql_query(&mut query).unwrap();
         counter.0
     }
 
     #[test]
     fn simple_select() {
-        assert_eq!(node_count("SELECT id FROM users"), 6)
+        let query = SqlQuery::Select(SelectStatement {
+            ctes: vec![],
+            distinct: false,
+            fields: vec![FieldDefinitionExpr::Expr {
+                expr: Expr::Column(Column {
+                    name: "id".into(),
+                    table: None,
+                }),
+                alias: None,
+            }],
+            tables: vec![TableExpr {
+                inner: TableExprInner::Table(Relation {
+                    schema: None,
+                    name: "users".into(),
+                }),
+                alias: None,
+                index_hint: None,
+            }],
+            join: vec![],
+            where_clause: None,
+            group_by: None,
+            having: None,
+            order: None,
+            limit_clause: LimitClause::LimitOffset {
+                limit: None,
+                offset: None,
+            },
+        });
+        assert_eq!(node_count(query), 6)
     }
 
     #[test]
     fn binary_op() {
-        assert_eq!(node_count("SELECT id + name FROM users"), 9);
+        let query = SqlQuery::Select(SelectStatement {
+            ctes: vec![],
+            distinct: false,
+            fields: vec![FieldDefinitionExpr::Expr {
+                expr: Expr::BinaryOp {
+                    lhs: Box::new(Expr::Column(Column {
+                        name: "id".into(),
+                        table: None,
+                    })),
+                    op: BinaryOperator::Add,
+                    rhs: Box::new(Expr::Column(Column {
+                        name: "name".into(),
+                        table: None,
+                    })),
+                },
+                alias: None,
+            }],
+            tables: vec![TableExpr {
+                inner: TableExprInner::Table(Relation {
+                    schema: None,
+                    name: "users".into(),
+                }),
+                alias: None,
+                index_hint: None,
+            }],
+            join: vec![],
+            where_clause: None,
+            group_by: None,
+            having: None,
+            order: None,
+            limit_clause: LimitClause::LimitOffset {
+                limit: None,
+                offset: None,
+            },
+        });
+        assert_eq!(node_count(query), 9);
     }
 
     #[test]
     fn join_subquery() {
-        assert_eq!(
-            node_count(
-                "SELECT id, name FROM users join (select id from users) s on users.id = s.id"
-            ),
-            22
-        )
+        let query = SqlQuery::Select(SelectStatement {
+            ctes: vec![],
+            distinct: false,
+            fields: vec![
+                FieldDefinitionExpr::Expr {
+                    expr: Expr::Column(Column {
+                        name: "id".into(),
+                        table: None,
+                    }),
+                    alias: None,
+                },
+                FieldDefinitionExpr::Expr {
+                    expr: Expr::Column(Column {
+                        name: "name".into(),
+                        table: None,
+                    }),
+                    alias: None,
+                },
+            ],
+            tables: vec![TableExpr {
+                inner: TableExprInner::Table(Relation {
+                    schema: None,
+                    name: "users".into(),
+                }),
+                alias: None,
+                index_hint: None,
+            }],
+            join: vec![JoinClause {
+                operator: JoinOperator::Join,
+                right: JoinRightSide::Table(TableExpr {
+                    inner: TableExprInner::Subquery(Box::new(SelectStatement {
+                        ctes: vec![],
+                        distinct: false,
+                        fields: vec![FieldDefinitionExpr::Expr {
+                            expr: Expr::Column(Column {
+                                name: "id".into(),
+                                table: None,
+                            }),
+                            alias: None,
+                        }],
+                        tables: vec![TableExpr {
+                            inner: TableExprInner::Table(Relation {
+                                schema: None,
+                                name: "users".into(),
+                            }),
+                            alias: None,
+                            index_hint: None,
+                        }],
+                        join: vec![],
+                        where_clause: None,
+                        group_by: None,
+                        having: None,
+                        order: None,
+                        limit_clause: LimitClause::LimitOffset {
+                            limit: None,
+                            offset: None,
+                        },
+                    })),
+                    alias: Some("s".into()),
+                    index_hint: None,
+                }),
+                constraint: JoinConstraint::On(Expr::BinaryOp {
+                    lhs: Box::new(Expr::Column(Column {
+                        name: "id".into(),
+                        table: Some(Relation {
+                            schema: None,
+                            name: "users".into(),
+                        }),
+                    })),
+                    op: BinaryOperator::Equal,
+                    rhs: Box::new(Expr::Column(Column {
+                        name: "id".into(),
+                        table: Some(Relation {
+                            schema: None,
+                            name: "s".into(),
+                        }),
+                    })),
+                }),
+            }],
+            where_clause: None,
+            group_by: None,
+            having: None,
+            order: None,
+            limit_clause: LimitClause::LimitOffset {
+                limit: None,
+                offset: None,
+            },
+        });
+        assert_eq!(node_count(query), 22)
     }
 
     #[test]
     fn limit() {
-        assert_eq!(node_count("SELECT id + name FROM users LIMIT 3"), 11);
+        let query = SqlQuery::Select(SelectStatement {
+            ctes: vec![],
+            distinct: false,
+            fields: vec![FieldDefinitionExpr::Expr {
+                expr: Expr::BinaryOp {
+                    lhs: Box::new(Expr::Column(Column {
+                        name: "id".into(),
+                        table: None,
+                    })),
+                    op: BinaryOperator::Add,
+                    rhs: Box::new(Expr::Column(Column {
+                        name: "name".into(),
+                        table: None,
+                    })),
+                },
+                alias: None,
+            }],
+            tables: vec![TableExpr {
+                inner: TableExprInner::Table(Relation {
+                    schema: None,
+                    name: "users".into(),
+                }),
+                alias: None,
+                index_hint: None,
+            }],
+            join: vec![],
+            where_clause: None,
+            group_by: None,
+            having: None,
+            order: None,
+            limit_clause: LimitClause::LimitOffset {
+                limit: Some(LimitValue::Literal(Literal::Integer(3))),
+                offset: None,
+            },
+        });
+        assert_eq!(node_count(query), 11);
     }
 
     #[test]
     fn limit_offset() {
-        assert_eq!(
-            node_count("SELECT id + name FROM users LIMIT 3 OFFSET 5"),
-            13
-        );
+        let query = SqlQuery::Select(SelectStatement {
+            ctes: vec![],
+            distinct: false,
+            fields: vec![FieldDefinitionExpr::Expr {
+                expr: Expr::BinaryOp {
+                    lhs: Box::new(Expr::Column(Column {
+                        name: "id".into(),
+                        table: None,
+                    })),
+                    op: BinaryOperator::Add,
+                    rhs: Box::new(Expr::Column(Column {
+                        name: "name".into(),
+                        table: None,
+                    })),
+                },
+                alias: None,
+            }],
+            tables: vec![TableExpr {
+                inner: TableExprInner::Table(Relation {
+                    schema: None,
+                    name: "users".into(),
+                }),
+                alias: None,
+                index_hint: None,
+            }],
+            join: vec![],
+            where_clause: None,
+            group_by: None,
+            having: None,
+            order: None,
+            limit_clause: LimitClause::LimitOffset {
+                limit: Some(LimitValue::Literal(Literal::Integer(3))),
+                offset: Some(Literal::Integer(5)),
+            },
+        });
+        assert_eq!(node_count(query), 13);
     }
 
     #[test]
     fn limit_comma_offset() {
-        assert_eq!(node_count("SELECT id + name FROM users LIMIT 5, 3"), 13);
+        let query = SqlQuery::Select(SelectStatement {
+            ctes: vec![],
+            distinct: false,
+            fields: vec![FieldDefinitionExpr::Expr {
+                expr: Expr::BinaryOp {
+                    lhs: Box::new(Expr::Column(Column {
+                        name: "id".into(),
+                        table: None,
+                    })),
+                    op: BinaryOperator::Add,
+                    rhs: Box::new(Expr::Column(Column {
+                        name: "name".into(),
+                        table: None,
+                    })),
+                },
+                alias: None,
+            }],
+            tables: vec![TableExpr {
+                inner: TableExprInner::Table(Relation {
+                    schema: None,
+                    name: "users".into(),
+                }),
+                alias: None,
+                index_hint: None,
+            }],
+            join: vec![],
+            where_clause: None,
+            group_by: None,
+            having: None,
+            order: None,
+            limit_clause: LimitClause::OffsetCommaLimit {
+                limit: LimitValue::Literal(Literal::Integer(3)),
+                offset: Literal::Integer(5),
+            },
+        });
+        assert_eq!(node_count(query), 13);
     }
 }

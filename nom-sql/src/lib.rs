@@ -20,7 +20,6 @@ pub mod parser;
 mod macros;
 
 mod alter;
-pub mod analysis;
 mod column;
 mod comment;
 mod common;

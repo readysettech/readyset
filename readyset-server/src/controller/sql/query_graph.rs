@@ -7,12 +7,12 @@ use std::vec::Vec;
 use std::{iter, mem};
 
 use common::{DfValue, IndexType};
-use nom_sql::analysis::visit_mut::{walk_expr, VisitorMut};
 use readyset_client::{PlaceholderIdx, ViewPlaceholder};
 use readyset_errors::{
     internal, invalid_query, invalid_query_err, invariant, invariant_eq, no_table_for_col,
     unsupported, unsupported_err, ReadySetResult,
 };
+use readyset_sql::analysis::visit_mut::{walk_expr, VisitorMut};
 use readyset_sql::analysis::{is_aggregate, ReferredColumns};
 use readyset_sql::ast::{
     self, BinaryOperator, Column, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, InValue,

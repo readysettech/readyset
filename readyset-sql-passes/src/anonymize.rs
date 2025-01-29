@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use nom_sql::analysis::visit_mut::VisitorMut;
+use readyset_sql::analysis::visit_mut::VisitorMut;
 use readyset_sql::ast::{
     CreateTableOption, CreateTableStatement, CreateViewStatement, Literal, SelectStatement,
     ShowStatement, SqlIdentifier,

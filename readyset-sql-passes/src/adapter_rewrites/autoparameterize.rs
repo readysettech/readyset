@@ -1,6 +1,6 @@
 use std::{iter, mem};
 
-use nom_sql::analysis::visit_mut::{self, VisitorMut};
+use readyset_sql::analysis::visit_mut::{self, VisitorMut};
 use readyset_sql::ast::{BinaryOperator, Expr, InValue, ItemPlaceholder, Literal, SelectStatement};
 
 #[derive(Default)]
