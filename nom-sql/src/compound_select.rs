@@ -6,6 +6,7 @@ use nom::combinator::{map, opt};
 use nom::multi::many0;
 use nom::sequence::{delimited, preceded, tuple};
 use nom_locate::LocatedSpan;
+use readyset_sql::Dialect;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
@@ -14,7 +15,7 @@ use crate::common::{opt_delimited, terminated_with_statement_terminator};
 use crate::order::{order_clause, OrderClause};
 use crate::select::{limit_offset_clause, nested_selection, LimitClause, SelectStatement};
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, DialectDisplay, NomSqlResult, SelectSpecification};
+use crate::{DialectDisplay, NomSqlResult, SelectSpecification};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Deserialize, Serialize, Arbitrary)]
 pub enum CompoundSelectOperator {

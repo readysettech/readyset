@@ -27,7 +27,7 @@ impl LowerContext for TestLowerContext {
 
 pub fn parse_lower_eval(
     expr: &str,
-    parser_dialect: nom_sql::Dialect,
+    parser_dialect: readyset_sql::Dialect,
     expr_dialect: dataflow_expression::Dialect,
 ) -> ReadySetResult<DfValue> {
     let ast = parse_expr(parser_dialect, expr).unwrap();

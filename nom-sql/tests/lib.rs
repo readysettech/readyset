@@ -4,7 +4,7 @@ use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
-use nom_sql::Dialect;
+use readyset_sql::Dialect;
 
 fn parse_queryset(dialect: Dialect, queries: Vec<String>) -> (i32, i32) {
     let mut parsed_ok = Vec::new();

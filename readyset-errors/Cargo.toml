@@ -24,6 +24,7 @@ serde = { workspace = true, features = ["rc", "derive"] }
 nom-sql = { path = "../nom-sql" }
 vec1 = { workspace = true, features = ["serde"] }
 tikv-jemalloc-ctl = { workspace = true }
+readyset-sql = { path = "../readyset-sql" }
 readyset-util = { path = "../readyset-util" }
 deadpool-postgres = { workspace = true }
 failpoint-macros = { path = "../failpoint-macros" }

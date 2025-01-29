@@ -1,7 +1,5 @@
 use std::fmt;
-use std::str::{self, FromStr};
 
-use clap::ValueEnum;
 use itertools::Itertools;
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case, take_while1};
@@ -12,9 +10,8 @@ use nom::error::ErrorKind;
 use nom::sequence::{delimited, preceded};
 use nom::{InputLength, InputTake};
 use nom_locate::LocatedSpan;
+use readyset_sql::Dialect;
 use readyset_util::fmt::fmt_with;
-use serde::{Deserialize, Serialize};
-use thiserror::Error;
 
 use crate::keywords::{sql_keyword, sql_keyword_or_builtin_function, POSTGRES_NOT_RESERVED};
 use crate::literal::{raw_string_literal, raw_string_single_quoted_unescaped, QuotingStyle};
@@ -80,6 +77,7 @@ pub(crate) fn is_sql_identifier(chr: u8) -> bool {
 /// Byte array literal value (PostgreSQL)
 fn raw_hex_bytes_psql(input: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<u8>> {
     alt((
+        // TODO(mvzink): Delete this in favor of `DialectParser::string_literal`
         delimited(tag("E'\\\\x"), hex_bytes(1), tag("'::bytea")),
         delimited(tag_no_case("x'"), hex_bytes(1), tag("'")),
     ))(input)
@@ -102,48 +100,62 @@ fn hex_bytes(chunk: usize) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8],
     }
 }
 
-/// Specification for a SQL dialect to use when parsing
-///
-/// Currently, Dialect controls the escape characters used for identifiers, and the quotes used to
-/// surround string literals, but may be extended to cover more dialect differences in the future
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize, ValueEnum)]
-#[value(rename_all = "lower")]
-pub enum Dialect {
-    /// The SQL dialect used by PostgreSQL.
-    ///
-    /// Identifiers are escaped with double quotes (`"`) and strings use only single quotes (`'`)
-    #[value(alias("postgres"))]
-    PostgreSQL,
-
-    /// The SQL dialect used by MySQL.
-    ///
-    /// Identifiers are escaped with backticks (`\``) or square brackets (`[` and `]`) and strings
-    /// use either single quotes (`'`) or double quotes (`"`)
-    MySQL,
-}
-
-#[derive(Debug, PartialEq, Eq, Clone, Error)]
-#[error("Unknown dialect `{0}`, expected one of mysql or postgresql")]
-pub struct UnknownDialect(String);
-
-impl FromStr for Dialect {
-    type Err = UnknownDialect;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "mysql" => Ok(Dialect::MySQL),
-            "postgresql" => Ok(Dialect::PostgreSQL),
-            _ => Err(UnknownDialect(s.to_owned())),
-        }
-    }
-}
-
-impl Dialect {
-    /// All SQL dialects.
-    pub const ALL: &'static [Self] = &[Self::MySQL, Self::PostgreSQL];
-
+pub(crate) trait DialectParser {
     /// Parse a SQL identifier using this Dialect
-    pub fn identifier(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlIdentifier> {
+    fn identifier(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlIdentifier>;
+
+    /// Parse a SQL function identifier using this Dialect
+    fn function_identifier(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], &str>;
+
+    /// Returns the [`QuotingStyle`] for this dialect
+    fn quoting_style(self) -> QuotingStyle;
+
+    /// Parse the raw (byte) content of a string literal using this Dialect
+    fn string_literal(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<u8>>;
+
+    fn utf8_string_literal(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], String>;
+
+    /// Parse the raw (byte) content of a bytes literal using this Dialect.
+    // Naturally syntax and types vary between databases:
+    // - mysql: 0xFFFF | [Xx]'FFFF' -> varbinary; length must be even, 0X... is invalid!
+    // - psql: [Xx]'FFFF' -> bit-string
+    fn bytes_literal(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<u8>>;
+
+    fn limit_offset_literal(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Literal>;
+
+    /// Parse only the `OFFSET <value>` case
+    fn offset_only(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Literal>;
+
+    /// Parse only the `LIMIT <value>` clause ignoring OFFSET
+    fn limit_only(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], LimitValue>;
+
+    /// Posgres and MySQL parses LIMIT and OFFSET quite differently:
+    /// - Postgres' spec for LIMIT/OFFSET is `[ LIMIT { number | ALL } ] [ OFFSET number ]`
+    /// - MySQL's spec is: `[LIMIT {[offset,] row_count | row_count OFFSET offset}]`
+    ///
+    /// In addition to this spec postgres seems to allow `LIMIT NULL` and `OFFSET NULL` as well
+    /// as non-integer values none of which are accepted by MySQL. This difference is handled by
+    /// `Self::limit_offset_literal`.
+    ///
+    /// So with the NULL, ALL and differing datatype cases covered by other dialect functions we
+    /// have the remaining differences:
+    ///  - Postgres allows `OFFSET` without `LIMIT`
+    ///  - MySQL allows for `LIMIT <offset>, <limit>`
+    fn limit_offset(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], LimitClause>;
+
+    /// Parse and remap escape sequences. The difference between Postgres and MySQL is the handling
+    /// of `LIKE` pattern wildcards (% and _). From the [MySQL docs]: "If you use \% or \_ outside
+    /// of pattern-matching contexts, they evaluate to the strings \% and \_, not to % and _."
+    ///
+    /// This effectively means the escape character (backslash) is ignored for MySQL when it
+    /// precedes % or _, and it's handled in [`dataflow_expression::like::LikePattern`].
+    ///
+    /// [MySQL docs]: https://dev.mysql.com/doc/refman/8.4/en/string-literals.html
+    fn escapes(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], &[u8]>;
+}
+
+impl DialectParser for Dialect {
+    fn identifier(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlIdentifier> {
         move |i| match self {
             Dialect::MySQL => {
                 fn quoted_ident_contents(
@@ -175,7 +187,7 @@ impl Dialect {
                         delimited(tag("`"), quoted_ident_contents, tag("`")),
                         delimited(tag("["), take_while1(is_sql_identifier), tag("]")),
                     )),
-                    |v| str::from_utf8(&v).map(|s| s.replace("``", "`").into()),
+                    |v| std::str::from_utf8(&v).map(|s| s.replace("``", "`").into()),
                 )(i)
             }
             Dialect::PostgreSQL => alt((
@@ -191,21 +203,20 @@ impl Dialect {
                         take_while1(is_sql_identifier),
                     ),
                     |v| {
-                        str::from_utf8(&v)
+                        std::str::from_utf8(&v)
                             .map(str::to_ascii_lowercase)
                             .map(Into::into)
                     },
                 ),
                 map_res(
                     delimited(tag("\""), take_while1(|c| c != 0 && c != b'"'), tag("\"")),
-                    |v: LocatedSpan<&[u8]>| str::from_utf8(&v).map(Into::into),
+                    |v: LocatedSpan<&[u8]>| std::str::from_utf8(&v).map(Into::into),
                 ),
             ))(i),
         }
     }
 
-    /// Parse a SQL function identifier using this Dialect
-    pub fn function_identifier(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], &str> {
+    fn function_identifier(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], &str> {
         move |i| match self {
             Dialect::MySQL => map_res(
                 alt((
@@ -213,45 +224,26 @@ impl Dialect {
                     delimited(tag("`"), take_while1(is_sql_identifier), tag("`")),
                     delimited(tag("["), take_while1(is_sql_identifier), tag("]")),
                 )),
-                |i| str::from_utf8(&i),
+                |i| std::str::from_utf8(&i),
             )(i),
             Dialect::PostgreSQL => map_res(
                 alt((
                     preceded(not(peek(sql_keyword)), take_while1(is_sql_identifier)),
                     delimited(tag("\""), take_while1(is_sql_identifier), tag("\"")),
                 )),
-                |i| str::from_utf8(&i),
+                |i| std::str::from_utf8(&i),
             )(i),
         }
     }
 
-    /// Returns the [`QuotingStyle`] for this dialect
-    pub fn quoting_style(self) -> QuotingStyle {
+    fn quoting_style(self) -> QuotingStyle {
         match self {
             Dialect::PostgreSQL => QuotingStyle::Single,
             Dialect::MySQL => QuotingStyle::SingleOrDouble,
         }
     }
 
-    /// Returns the table/column identifier quoting character for this dialect.
-    pub fn quote_identifier_char(self) -> char {
-        match self {
-            Self::PostgreSQL => '"',
-            Self::MySQL => '`',
-        }
-    }
-
-    /// Quotes the table/column identifier appropriately for this dialect.
-    pub fn quote_identifier(self, ident: impl fmt::Display) -> impl fmt::Display {
-        let quote = self.quote_identifier_char();
-        readyset_util::fmt_args!(
-            "{quote}{}{quote}",
-            ident.to_string().replace(quote, &format!("{quote}{quote}"))
-        )
-    }
-
-    /// Parse the raw (byte) content of a string literal using this Dialect
-    pub fn string_literal(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<u8>> {
+    fn string_literal(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<u8>> {
         move |i| match self {
             Dialect::PostgreSQL => {
                 let (i, escape) = opt(tag_no_case("E"))(i)?;
@@ -268,26 +260,18 @@ impl Dialect {
         }
     }
 
-    pub fn utf8_string_literal(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], String> {
+    fn utf8_string_literal(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], String> {
         move |i| map_res(self.string_literal(), String::from_utf8)(i)
     }
 
-    /// Parse the raw (byte) content of a bytes literal using this Dialect.
-    // Naturally syntax and types vary between databases:
-    // - mysql: 0xFFFF | [Xx]'FFFF' -> varbinary; length must be even, 0X... is invalid!
-    // - psql: [Xx]'FFFF' -> bit-string
-    //
-    // FIXME(sac) Postgres escaped string (E'...') parsing is an incomplete hack.
-    pub fn bytes_literal(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<u8>> {
+    fn bytes_literal(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<u8>> {
         move |i| match self {
             Dialect::PostgreSQL => raw_hex_bytes_psql(i),
             Dialect::MySQL => raw_hex_bytes_mysql(i),
         }
     }
 
-    pub fn limit_offset_literal(
-        self,
-    ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Literal> {
+    fn limit_offset_literal(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Literal> {
         move |i| {
             let (i, literal) = literal(self)(i)?;
             let literal = match &literal {
@@ -321,8 +305,7 @@ impl Dialect {
         }
     }
 
-    /// Parse only the `OFFSET <value>` case
-    pub fn offset_only(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Literal> {
+    fn offset_only(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Literal> {
         move |i| {
             let (i, _) = whitespace0(i)?;
             let (i, _) = tag_no_case("offset")(i)?;
@@ -332,8 +315,7 @@ impl Dialect {
         }
     }
 
-    /// Parse only the `LIMIT <value>` clause ignoring OFFSET
-    pub fn limit_only(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], LimitValue> {
+    fn limit_only(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], LimitValue> {
         move |i| {
             let (i, _) = whitespace0(i)?;
             let (i, _) = tag_no_case("limit")(i)?;
@@ -348,19 +330,7 @@ impl Dialect {
         }
     }
 
-    /// Posgres and MySQL parses LIMIT and OFFSET quite differently:
-    /// - Postgres' spec for LIMIT/OFFSET is `[ LIMIT { number | ALL } ] [ OFFSET number ]`
-    /// - MySQL's spec is: `[LIMIT {[offset,] row_count | row_count OFFSET offset}]`
-    ///
-    /// In addition to this spec postgres seems to allow `LIMIT NULL` and `OFFSET NULL` as well
-    /// as non-integer values none of which are accepted by MySQL. This difference is handled by
-    /// `Self::limit_offset_literal`.
-    ///
-    /// So with the NULL, ALL and differing datatype cases covered by other dialect functions we
-    /// have the remaining differences:
-    ///  - Postgres allows `OFFSET` without `LIMIT`
-    ///  - MySQL allows for `LIMIT <offset>, <limit>`
-    pub fn limit_offset(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], LimitClause> {
+    fn limit_offset(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], LimitClause> {
         move |i| {
             let (i, _) = whitespace0(i)?;
             match self {
@@ -406,15 +376,7 @@ impl Dialect {
         }
     }
 
-    /// Parse and remap escape sequences. The difference between Postgres and MySQL is the handling
-    /// of `LIKE` pattern wildcards (% and _). From the [MySQL docs]: "If you use \% or \_ outside
-    /// of pattern-matching contexts, they evaluate to the strings \% and \_, not to % and _."
-    ///
-    /// This effectively means the escape character (backslash) is ignored for MySQL when it
-    /// precedes % or _, and it's handled in [`dataflow_expression::like::LikePattern`].
-    ///
-    /// [MySQL docs]: https://dev.mysql.com/doc/refman/8.4/en/string-literals.html
-    pub fn escapes(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], &[u8]> {
+    fn escapes(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], &[u8]> {
         move |i| {
             let common_escapes = move |i| {
                 alt((

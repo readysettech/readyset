@@ -92,7 +92,7 @@ pub trait UpstreamDatabase: Sized + Send {
     const DEFAULT_DB_VERSION: &'static str;
 
     /// Returns the SQL dialect to use for formatting queries
-    const SQL_DIALECT: nom_sql::Dialect;
+    const SQL_DIALECT: readyset_sql::Dialect;
 
     /// Create a new connection to this upstream database
     ///
@@ -263,7 +263,7 @@ where
     type Error = U::Error;
 
     const DEFAULT_DB_VERSION: &'static str = U::DEFAULT_DB_VERSION;
-    const SQL_DIALECT: nom_sql::Dialect = U::SQL_DIALECT;
+    const SQL_DIALECT: readyset_sql::Dialect = U::SQL_DIALECT;
 
     async fn connect(upstream_config: UpstreamConfig) -> Result<Self, Self::Error> {
         Ok(Self {

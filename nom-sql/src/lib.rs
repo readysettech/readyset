@@ -23,7 +23,7 @@ pub use self::create::{
 pub use self::create_table_options::CreateTableOption;
 pub use self::deallocate::{DeallocateStatement, StatementIdentifier};
 pub use self::delete::DeleteStatement;
-pub use self::dialect::{Dialect, DialectDisplay};
+pub use self::dialect::DialectDisplay;
 pub use self::drop::{
     DropAllCachesStatement, DropAllProxiedQueriesStatement, DropCacheStatement, DropTableStatement,
     DropViewStatement,

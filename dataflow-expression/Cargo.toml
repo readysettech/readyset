@@ -19,6 +19,7 @@ proptest = { workspace = true }
 test-strategy = { workspace = true }
 
 # Local deps
+readyset-sql = { path = "../readyset-sql" }
 readyset-util = { path = "../readyset-util" }
 mysql-time = { path = "../mysql-time" }
 nom-sql = { path = "../nom-sql" }

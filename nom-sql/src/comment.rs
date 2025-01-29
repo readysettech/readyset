@@ -5,13 +5,15 @@ use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::map_res;
 use nom::sequence::{delimited, terminated};
 use nom_locate::LocatedSpan;
+use readyset_sql::Dialect;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
 use crate::common::statement_terminator;
+use crate::dialect::DialectParser;
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{literal, Dialect, DialectDisplay, NomSqlResult, SqlIdentifier};
+use crate::{literal, DialectDisplay, NomSqlResult, SqlIdentifier};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum CommentStatement {

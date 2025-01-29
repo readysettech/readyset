@@ -177,7 +177,7 @@ fn serialize_sql_type<S: Serializer>(
     sql_type: &nom_sql::SqlType,
     serializer: S,
 ) -> Result<S::Ok, S::Error> {
-    serializer.serialize_str(&sql_type.display(nom_sql::Dialect::MySQL).to_string())
+    serializer.serialize_str(&sql_type.display(readyset_sql::Dialect::MySQL).to_string())
 }
 
 impl WorkloadSpec {

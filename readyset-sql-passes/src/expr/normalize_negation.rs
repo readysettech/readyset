@@ -101,7 +101,8 @@ pub fn normalize_negation(expr: &mut Expr) {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{parse_expr, Dialect, DialectDisplay};
+    use nom_sql::{parse_expr, DialectDisplay};
+    use readyset_sql::Dialect;
 
     use super::*;
 
@@ -143,8 +144,8 @@ mod tests {
             expr,
             target,
             "expected = {}\nactual = {}",
-            target.display(nom_sql::Dialect::MySQL),
-            expr.display(nom_sql::Dialect::MySQL)
+            target.display(readyset_sql::Dialect::MySQL),
+            expr.display(readyset_sql::Dialect::MySQL)
         );
     }
 

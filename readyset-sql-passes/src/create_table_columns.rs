@@ -41,7 +41,8 @@ impl CreateTableColumns for CreateTableStatement {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{parse_create_table, Dialect};
+    use nom_sql::parse_create_table;
+    use readyset_sql::Dialect;
 
     use super::*;
 

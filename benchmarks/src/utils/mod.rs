@@ -81,7 +81,7 @@ pub async fn readyset_ready(target: &str) -> anyhow::Result<()> {
         // We have to use simple query here because ReadySet does not support preparing `SHOW`
         // queries
         let res = conn
-            .simple_query(q.display(nom_sql::Dialect::MySQL).to_string())
+            .simple_query(q.display(readyset_sql::Dialect::MySQL).to_string())
             .await;
 
         if let Ok(data) = res {

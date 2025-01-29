@@ -747,7 +747,7 @@ impl SqlToMirConverter {
         trace!(
             name = %name.display_unquoted(),
             // FIXME(REA-2168+2502): Use correct dialect.
-            conditions = %conditions.display(nom_sql::Dialect::MySQL),
+            conditions = %conditions.display(readyset_sql::Dialect::MySQL),
             "Added filter node"
         );
         self.add_query_node(
@@ -1149,7 +1149,7 @@ impl SqlToMirConverter {
             Expr::Column(col) => (col.clone(), parent),
             expr => {
                 // The lhs is a non-column expr, so we need to project it first
-                let label = lhs.display(nom_sql::Dialect::MySQL).to_string();
+                let label = lhs.display(readyset_sql::Dialect::MySQL).to_string();
                 let prj = self.make_project_node(
                     query_name,
                     self.generate_label(&"in_lhs_project".into()),
@@ -1313,7 +1313,7 @@ impl SqlToMirConverter {
                             expr => {
                                 let col = Column::named(
                                     // FIXME(REA-2168+2502): Use correct dialect.
-                                    expr.display(nom_sql::Dialect::MySQL).to_string(),
+                                    expr.display(readyset_sql::Dialect::MySQL).to_string(),
                                 );
                                 if self
                                     .mir_graph
@@ -1350,7 +1350,10 @@ impl SqlToMirConverter {
                     .map(ProjectExpr::Column)
                     .chain(exprs_to_project.into_iter().map(|expr| {
                         // FIXME(ENG-2502): Use correct dialect.
-                        let alias = expr.display(nom_sql::Dialect::MySQL).to_string().into();
+                        let alias = expr
+                            .display(readyset_sql::Dialect::MySQL)
+                            .to_string()
+                            .into();
                         ProjectExpr::Expr { alias, expr }
                     }))
                     .collect(),
@@ -1512,7 +1515,7 @@ impl SqlToMirConverter {
             Expr::Column(col) => (col.clone(), parent),
             expr => {
                 // The lhs is a non-column expr, so we need to project it first
-                let label = lhs.display(nom_sql::Dialect::MySQL).to_string();
+                let label = lhs.display(readyset_sql::Dialect::MySQL).to_string();
                 let prj = self.make_project_node(
                     query_name,
                     self.generate_label(&format!("{}_lhs_project", text_context).into()),
@@ -2525,7 +2528,7 @@ impl SqlToMirConverter {
                                 ..
                             } => Ok(Column::from(c)),
                             FieldDefinitionExpr::Expr { expr, .. } => Ok(Column::named(
-                                expr.display(nom_sql::Dialect::MySQL).to_string(),
+                                expr.display(readyset_sql::Dialect::MySQL).to_string(),
                             )),
                         }
                     })

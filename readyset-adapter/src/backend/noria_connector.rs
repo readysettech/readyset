@@ -291,7 +291,7 @@ pub struct NoriaConnector {
     dialect: Dialect,
 
     /// Dialect to use to parse and format all SQL strings
-    parse_dialect: nom_sql::Dialect,
+    parse_dialect: readyset_sql::Dialect,
 
     /// Currently configured search path for schemas.
     ///
@@ -370,7 +370,7 @@ impl NoriaConnector {
         view_cache: LocalCache<Relation, View>,
         read_behavior: ReadBehavior,
         dialect: Dialect,
-        parse_dialect: nom_sql::Dialect,
+        parse_dialect: readyset_sql::Dialect,
         schema_search_path: Vec<SqlIdentifier>,
         rewrite_params: AdapterRewriteParams,
     ) -> Self {
@@ -398,7 +398,7 @@ impl NoriaConnector {
         read_behavior: ReadBehavior,
         read_request_handler: Option<ReadRequestHandler>,
         dialect: Dialect,
-        parse_dialect: nom_sql::Dialect,
+        parse_dialect: readyset_sql::Dialect,
         schema_search_path: Vec<SqlIdentifier>,
         rewrite_params: AdapterRewriteParams,
     ) -> Self {

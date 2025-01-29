@@ -344,7 +344,8 @@ pub fn auto_parameterize_query(
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{Dialect, DialectDisplay};
+    use nom_sql::DialectDisplay;
+    use readyset_sql::Dialect;
 
     use super::*;
 
@@ -362,7 +363,7 @@ mod tests {
         // These are parameters that are expected to have been added by the autoparameterization
         // rewrite pass
         expected_added_parameters: Vec<(usize, Literal)>,
-        dialect: nom_sql::Dialect,
+        dialect: readyset_sql::Dialect,
         server_supports_mixed_comparisons: bool,
     ) {
         let mut query = parse_select_statement(query, dialect);
@@ -389,7 +390,7 @@ mod tests {
             query,
             expected_query,
             expected_added_parameters,
-            nom_sql::Dialect::MySQL,
+            readyset_sql::Dialect::MySQL,
             false,
         )
     }
@@ -405,7 +406,7 @@ mod tests {
             query,
             expected_query,
             expected_added_parameters,
-            nom_sql::Dialect::PostgreSQL,
+            readyset_sql::Dialect::PostgreSQL,
             false,
         )
     }
@@ -777,7 +778,7 @@ mod tests {
                 query,
                 expected_query,
                 expected_added_parameters,
-                nom_sql::Dialect::MySQL,
+                readyset_sql::Dialect::MySQL,
                 true,
             )
         }

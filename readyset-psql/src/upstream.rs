@@ -172,7 +172,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
     type ExecMeta<'a> = &'a [TransferFormat];
     type Error = Error;
     const DEFAULT_DB_VERSION: &'static str = "13.4 (ReadySet)";
-    const SQL_DIALECT: nom_sql::Dialect = nom_sql::Dialect::PostgreSQL;
+    const SQL_DIALECT: readyset_sql::Dialect = readyset_sql::Dialect::PostgreSQL;
 
     async fn connect(upstream_config: UpstreamConfig) -> Result<Self, Error> {
         let url = upstream_config

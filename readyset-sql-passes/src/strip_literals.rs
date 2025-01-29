@@ -69,7 +69,8 @@ impl Borrow<SelectStatement> for SelectStatementSkeleton {
 
 #[cfg(test)]
 mod test {
-    use nom_sql::{parse_select_statement, Dialect, ItemPlaceholder, Literal};
+    use nom_sql::{parse_select_statement, ItemPlaceholder, Literal};
+    use readyset_sql::Dialect;
 
     use crate::strip_literals::SelectStatementSkeleton;
 

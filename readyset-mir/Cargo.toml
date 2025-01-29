@@ -25,6 +25,7 @@ nom-sql = { path = "../nom-sql" }
 readyset-client = { path = "../readyset-client" }
 readyset-errors = { path = "../readyset-errors" }
 readyset-data = { path = "../readyset-data" }
+readyset-sql = { path = "../readyset-sql" }
 
 [dev-dependencies]
 readyset-tracing = { path = "../readyset-tracing" }

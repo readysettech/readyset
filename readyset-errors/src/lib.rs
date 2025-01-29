@@ -311,7 +311,7 @@ pub enum ReadySetError {
     ViewNotFound(String),
 
     /// A view couldn't be found for the given query.
-    #[error("Could not find view for query {}", Sensitive(&statement.display(nom_sql::Dialect::MySQL)))]
+    #[error("Could not find view for query {}", Sensitive(&statement.display(readyset_sql::Dialect::MySQL)))]
     ViewNotFoundForQuery { statement: SelectStatement },
 
     /// A view couldn't be found in the given pool of worker.

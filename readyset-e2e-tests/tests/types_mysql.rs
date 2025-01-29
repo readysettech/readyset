@@ -4,7 +4,7 @@ use chrono::DateTime;
 use mysql_async::prelude::Queryable;
 use mysql_async::Params;
 use mysql_common::{Row, Value};
-use nom_sql::{Dialect, DialectDisplay, EnumVariants, SqlType, SqlTypeArbitraryOptions};
+use nom_sql::{DialectDisplay, EnumVariants, SqlType, SqlTypeArbitraryOptions};
 use proptest::arbitrary::any;
 use proptest::collection::vec;
 use proptest::prop_oneof;
@@ -14,6 +14,7 @@ use proptest::string::string_regex;
 use proptest::test_runner::Config as ProptestConfig;
 use readyset_client_test_helpers::mysql_helpers::MySQLAdapter;
 use readyset_client_test_helpers::{mysql_helpers, TestBuilder};
+use readyset_sql::Dialect;
 use readyset_util::arbitrary::{
     arbitrary_decimal_bytes_with_digits, arbitrary_json, arbitrary_naive_date_in_range,
     arbitrary_naive_time_with_seconds_fraction,

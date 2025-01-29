@@ -11,12 +11,13 @@ use database_utils::{DatabaseConnection, DatabaseError, DatabaseURL, QueryableCo
 use itertools::Itertools;
 use metrics::Unit;
 use nom_sql::{
-    BinaryOperator, CacheInner, CreateCacheStatement, Dialect, DialectDisplay, Expr,
-    FieldDefinitionExpr, ItemPlaceholder, Literal, SelectStatement, TableExpr, TableExprInner,
+    BinaryOperator, CacheInner, CreateCacheStatement, DialectDisplay, Expr, FieldDefinitionExpr,
+    ItemPlaceholder, Literal, SelectStatement, TableExpr, TableExprInner,
 };
 use parking_lot::Mutex;
 use query_generator::{ColumnName, TableSpec};
 use rand::Rng;
+use readyset_sql::Dialect;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{self, UnboundedSender};
 use tracing::{debug, info};

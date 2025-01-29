@@ -20,6 +20,7 @@ pratt = { workspace = true }
 proptest = { workspace = true }
 test-strategy = { workspace = true }
 readyset-util = { path = "../readyset-util" }
+readyset-sql = { path = "../readyset-sql" }
 thiserror = { workspace = true }
 hex = { workspace = true }
 rust_decimal = { workspace = true, features = ["db-tokio-postgres"] }

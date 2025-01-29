@@ -90,7 +90,7 @@ pub fn map_aggregates(expr: &mut Expr) -> Vec<(FunctionExpr, SqlIdentifier)> {
     let mut ret = Vec::new();
     match expr {
         Expr::Call(f) if is_aggregate(f) => {
-            let name: SqlIdentifier = f.display(nom_sql::Dialect::MySQL).to_string().into();
+            let name: SqlIdentifier = f.display(readyset_sql::Dialect::MySQL).to_string().into();
             ret.push((f.clone(), name.clone()));
             *expr = Expr::Column(Column { name, table: None });
         }
@@ -198,7 +198,8 @@ impl TryFrom<BinaryOperator> for LogicalOp {
 /// [`SelectStatement`]
 #[cfg(test)]
 pub(crate) fn parse_select_statement(q: &str) -> SelectStatement {
-    use nom_sql::{parse_query, Dialect, SqlQuery};
+    use nom_sql::{parse_query, SqlQuery};
+    use readyset_sql::Dialect;
 
     let q = parse_query(Dialect::MySQL, q).unwrap();
     match q {

@@ -214,7 +214,8 @@ impl<'ast> VisitorMut<'ast> for AnonymizeVisitor<'_> {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{CreateTableStatement, Dialect};
+    use nom_sql::CreateTableStatement;
+    use readyset_sql::Dialect;
 
     use super::*;
 

@@ -49,6 +49,7 @@ readyset-server = { path = "../readyset-server/" }
 readyset-sql-passes = { path = "../readyset-sql-passes" }
 readyset-telemetry-reporter = { path = "../readyset-telemetry-reporter" }
 readyset-tracing = { path = "../readyset-tracing" }
+readyset-sql = { path = "../readyset-sql" }
 readyset-util = { path = "../readyset-util" }
 readyset-version = { path = "../readyset-version" }
 replicators = { path = "../replicators" }

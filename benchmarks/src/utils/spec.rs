@@ -15,10 +15,10 @@ use nom::sequence::{preceded, terminated};
 use nom_locate::LocatedSpan;
 use nom_sql::whitespace::whitespace0;
 use nom_sql::{
-    sql_query, CommentStatement, CreateTableOption, Dialect, DialectDisplay, Expr, SqlQuery,
-    VariableScope,
+    sql_query, CommentStatement, CreateTableOption, DialectDisplay, Expr, SqlQuery, VariableScope,
 };
 use query_generator::{TableName, TableSpec};
+use readyset_sql::Dialect;
 
 /// Set of parameters used to generate a single table's data.
 #[derive(Clone)]

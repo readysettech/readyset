@@ -15,6 +15,7 @@ use nom::multi::fold_many0;
 use nom::sequence::{delimited, pair, preceded, terminated, tuple};
 use nom_locate::LocatedSpan;
 use proptest::strategy::Strategy;
+use readyset_sql::Dialect;
 use readyset_util::arbitrary::{
     arbitrary_bitvec, arbitrary_date_time, arbitrary_decimal, arbitrary_ipinet, arbitrary_json,
     arbitrary_naive_time, arbitrary_positive_naive_date, arbitrary_timestamp_naive_date_time,
@@ -25,8 +26,8 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
-use crate::dialect::is_sql_identifier;
-use crate::{Dialect, DialectDisplay, NomSqlResult, SqlType};
+use crate::dialect::{is_sql_identifier, DialectParser};
+use crate::{DialectDisplay, NomSqlResult, SqlType};
 
 #[derive(Clone, Debug, Serialize, Deserialize, Arbitrary)]
 pub struct Float {

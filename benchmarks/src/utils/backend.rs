@@ -5,13 +5,13 @@ use std::time::SystemTime;
 
 use crossbeam_skiplist::SkipSet;
 use database_utils::{DatabaseURL, UpstreamConfig};
-use nom_sql::Dialect;
 use readyset_adapter::backend::{BackendBuilder, NoriaConnector};
 use readyset_adapter::query_status_cache::QueryStatusCache;
 use readyset_adapter::{ReadySetStatusReporter, UpstreamDatabase};
 use readyset_client::consensus::Authority;
 use readyset_mysql::{MySqlQueryHandler, MySqlUpstream};
 use readyset_psql::{PostgreSqlQueryHandler, PostgreSqlUpstream};
+use readyset_sql::Dialect;
 
 /// Represents a ReadySet adapter backend that may be for a MySQL upstream or a Postgres upstream
 pub enum Backend {

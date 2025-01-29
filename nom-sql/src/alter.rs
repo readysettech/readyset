@@ -12,6 +12,7 @@ use nom::combinator::{map, opt, value};
 use nom::multi::separated_list1;
 use nom::sequence::{delimited, preceded, terminated};
 use nom_locate::LocatedSpan;
+use readyset_sql::Dialect;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
@@ -22,10 +23,11 @@ use crate::common::{
     TableKey,
 };
 use crate::create::key_specification;
+use crate::dialect::DialectParser;
 use crate::literal::literal;
 use crate::table::{relation, table_list, Relation};
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, DialectDisplay, Literal, NomSqlResult, SqlIdentifier};
+use crate::{DialectDisplay, Literal, NomSqlResult, SqlIdentifier};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum AlterColumnOperation {
@@ -609,7 +611,7 @@ pub fn alter_readyset_statement(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Column, Dialect, SqlType};
+    use crate::{Column, SqlType};
 
     #[test]
     fn parse_add_column_no_column_tag() {

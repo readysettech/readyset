@@ -11,7 +11,7 @@ use futures::{pin_mut, StreamExt, TryFutureExt};
 use itertools::Itertools;
 use nom_sql::{
     parse_key_specification_string, parse_sql_type, Column, ColumnConstraint, ColumnSpecification,
-    CreateTableBody, CreateTableStatement, Dialect, DialectDisplay, NonReplicatedRelation,
+    CreateTableBody, CreateTableStatement, DialectDisplay, NonReplicatedRelation,
     NotReplicatedReason, Relation, SqlIdentifier, TableKey,
 };
 use postgres_types::{accepts, FromSql, Kind, Type};
@@ -19,6 +19,7 @@ use readyset_client::recipe::changelist::{Change, ChangeList, PostgresTableMetad
 use readyset_client::TableOperation;
 use readyset_data::{DfType, DfValue, Dialect as DataDialect, PgEnumMetadata};
 use readyset_errors::{internal, internal_err, unsupported, ReadySetError, ReadySetResult};
+use readyset_sql::Dialect;
 #[cfg(feature = "failure_injection")]
 use readyset_util::failpoints;
 use replication_offset::postgres::PostgresPosition;
@@ -850,7 +851,7 @@ impl<'a> PostgresReplicator<'a> {
                     )
                 })
                 .and_then(|view| {
-                    debug!(view = %view.display(nom_sql::Dialect::PostgreSQL), "Extending recipe");
+                    debug!(view = %view.display(readyset_sql::Dialect::PostgreSQL), "Extending recipe");
                     self.noria.extend_recipe_no_leader_ready(
                         ChangeList::from_change(
                             Change::CreateView(view),
@@ -1148,7 +1149,8 @@ impl<'a> PostgresReplicator<'a> {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{parse_query, Column, Dialect, SqlQuery, TableKey};
+    use nom_sql::{parse_query, Column, SqlQuery, TableKey};
+    use readyset_sql::Dialect;
 
     use super::*;
 

@@ -2094,7 +2094,8 @@ mod tests {
         use std::net::{IpAddr, Ipv4Addr};
 
         use dataflow_expression::Dialect as DfDialect;
-        use nom_sql::{Column, Dialect};
+        use nom_sql::Column;
+        use readyset_sql::Dialect;
         use vec1::vec1;
 
         use super::*;

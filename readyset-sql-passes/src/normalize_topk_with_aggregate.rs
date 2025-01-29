@@ -66,7 +66,7 @@ impl NormalizeTopKWithAggregate for SelectStatement {
                                 return Err(ReadySetError::ExprNotInGroupBy {
                                     // FIXME(REA-2168): Use correct dialect.
                                     expression: order_field
-                                        .display(nom_sql::Dialect::MySQL)
+                                        .display(readyset_sql::Dialect::MySQL)
                                         .to_string(),
                                     position: "ORDER BY".to_owned(),
                                 });
@@ -106,7 +106,8 @@ impl NormalizeTopKWithAggregate for SqlQuery {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{parse_query, Dialect, Expr, LimitValue, OrderClause, OrderType};
+    use nom_sql::{parse_query, Expr, LimitValue, OrderClause, OrderType};
+    use readyset_sql::Dialect;
 
     use super::*;
 

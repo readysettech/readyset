@@ -70,7 +70,7 @@ impl Adapter for MySQLAdapter {
     type Upstream = LazyUpstream<MySqlUpstream>;
     type Handler = MySqlQueryHandler;
 
-    const DIALECT: nom_sql::Dialect = nom_sql::Dialect::MySQL;
+    const DIALECT: readyset_sql::Dialect = readyset_sql::Dialect::MySQL;
 
     const EXPR_DIALECT: readyset_data::Dialect = readyset_data::Dialect::DEFAULT_MYSQL;
 

@@ -74,7 +74,11 @@ pub(super) fn make_expressions_above_grouped(
         .map(|expr| {
             let x = (
                 // FIXME(ENG-2502): Use correct dialect.
-                SqlIdentifier::from(expr.clone().display(nom_sql::Dialect::MySQL).to_string()),
+                SqlIdentifier::from(
+                    expr.clone()
+                        .display(readyset_sql::Dialect::MySQL)
+                        .to_string(),
+                ),
                 expr,
             );
             x
@@ -96,7 +100,11 @@ pub(super) fn make_expressions_above_grouped(
                 }
                 expr => Some((
                     // FIXME(ENG-2502): Use correct dialect.
-                    SqlIdentifier::from(expr.clone().display(nom_sql::Dialect::MySQL).to_string()),
+                    SqlIdentifier::from(
+                        expr.clone()
+                            .display(readyset_sql::Dialect::MySQL)
+                            .to_string(),
+                    ),
                     expr.clone(),
                 )),
             }
@@ -152,7 +160,10 @@ pub(super) fn make_grouped(
             .map(|gb_expr| match gb_expr {
                 Expr::Column(c) => c.clone(),
                 expr => nom_sql::Column {
-                    name: expr.display(nom_sql::Dialect::MySQL).to_string().into(),
+                    name: expr
+                        .display(readyset_sql::Dialect::MySQL)
+                        .to_string()
+                        .into(),
                     table: None,
                 },
             })
@@ -288,7 +299,7 @@ pub(super) fn post_lookup_aggregates(
                     } => Some(Column::from(col).aliased_as_table(query_name.clone())),
                     FieldDefinitionExpr::Expr { expr, .. } => Some(
                         // FIXME(ENG-2502): Use correct dialect.
-                        Column::named(expr.display(nom_sql::Dialect::MySQL).to_string())
+                        Column::named(expr.display(readyset_sql::Dialect::MySQL).to_string())
                             .aliased_as_table(query_name.clone()),
                     ),
                     _ => None,
@@ -340,7 +351,7 @@ pub(super) fn post_lookup_aggregates(
             .map(|c| {
                 match c {
                     Expr::Column(c) => c.clone().into(),
-                    expr => Column::named(expr.display(nom_sql::Dialect::MySQL).to_string()),
+                    expr => Column::named(expr.display(readyset_sql::Dialect::MySQL).to_string()),
                 }
                 .aliased_as_table(query_name.clone())
             })

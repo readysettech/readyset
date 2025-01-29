@@ -52,7 +52,7 @@ impl SnapshotType {
                 if let Some(name) = name {
                     format!(
                         "FORCE INDEX ({})",
-                        nom_sql::Dialect::MySQL.quote_identifier(name)
+                        readyset_sql::Dialect::MySQL.quote_identifier(name)
                     )
                 } else {
                     "".to_string()
@@ -80,7 +80,7 @@ impl SnapshotType {
             SnapshotType::KeyBased { ref keys, .. } => {
                 let keys = keys
                     .iter()
-                    .map(|key| key.display(nom_sql::Dialect::MySQL).to_string())
+                    .map(|key| key.display(readyset_sql::Dialect::MySQL).to_string())
                     .collect::<Vec<_>>();
                 // ORDER BY col1 ASC, col2 ASC, col3 ASC
                 let order_by = keys.join(" ASC, ") + " ASC";
@@ -101,14 +101,14 @@ impl SnapshotType {
 
                 let initial_query = format!(
                     "SELECT * FROM {} {} ORDER BY {} LIMIT {}",
-                    table.table_name().display(nom_sql::Dialect::MySQL),
+                    table.table_name().display(readyset_sql::Dialect::MySQL),
                     force_index,
                     order_by,
                     MYSQL_BATCH_SIZE
                 );
                 let bound_based_query = format!(
                     "SELECT * FROM {} {} WHERE {} ORDER BY {} LIMIT {}",
-                    table.table_name().display(nom_sql::Dialect::MySQL),
+                    table.table_name().display(readyset_sql::Dialect::MySQL),
                     force_index,
                     next_bound,
                     order_by,
@@ -119,7 +119,7 @@ impl SnapshotType {
             SnapshotType::FullTableScan => {
                 let initial_query = format!(
                     "SELECT * FROM {}",
-                    table.table_name().display(nom_sql::Dialect::MySQL)
+                    table.table_name().display(readyset_sql::Dialect::MySQL)
                 );
                 (initial_query.clone(), initial_query)
             }

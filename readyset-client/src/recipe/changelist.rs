@@ -564,7 +564,8 @@ mod parse {
     use nom::InputTake;
     use nom_locate::LocatedSpan;
     use nom_sql::whitespace::whitespace0;
-    use nom_sql::{sql_query, Dialect, NomSqlError, NomSqlResult, SqlQuery};
+    use nom_sql::{sql_query, NomSqlError, NomSqlResult, SqlQuery};
+    use readyset_sql::Dialect;
 
     /// The canonical SQL dialect used for central ReadySet server recipes. All direct clients of
     /// readyset-server must use this dialect for their SQL recipes, and all adapters and client

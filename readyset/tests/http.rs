@@ -48,7 +48,7 @@ fn start_adapter(test_db: &str) -> anyhow::Result<()> {
             enable_statement_logging: false,
         },
         database_type: DatabaseType::PostgreSQL,
-        parse_dialect: nom_sql::Dialect::PostgreSQL,
+        parse_dialect: readyset_sql::Dialect::PostgreSQL,
         expr_dialect: readyset_data::Dialect::DEFAULT_POSTGRESQL,
     };
 

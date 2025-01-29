@@ -88,6 +88,7 @@ readyset-client = { path = "../readyset-client" }
 failpoint-macros = { path = "../failpoint-macros" }
 readyset-errors = { path = "../readyset-errors" }
 readyset-data = { path = "../readyset-data" }
+readyset-sql = { path = "../readyset-sql" }
 readyset-util = { path = "../readyset-util" }
 replicators = { path = "../replicators" }
 readyset-tracing = { path = "../readyset-tracing" }

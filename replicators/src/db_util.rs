@@ -3,8 +3,9 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use nom_sql::{Dialect, DialectDisplay};
+use nom_sql::DialectDisplay;
 use readyset_errors::ReadySetError;
+use readyset_sql::Dialect;
 use readyset_sql_passes::anonymize::{Anonymize, Anonymizer};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
 
@@ -118,7 +119,9 @@ impl CreateSchema {
                 Ok(mut parsed_table) => {
                     parsed_table.anonymize(anonymizer);
                     // FIXME(ENG-1860): Use correct dialect.
-                    parsed_table.display(nom_sql::Dialect::MySQL).to_string()
+                    parsed_table
+                        .display(readyset_sql::Dialect::MySQL)
+                        .to_string()
                 }
                 // If we fail to parse, fully anonymize the statement.
                 Err(_) => "<anonymized: create table failed to parse>".to_string(),
@@ -132,7 +135,9 @@ impl CreateSchema {
             *view = match nom_sql::parse_create_view(self.dialect, view.clone()) {
                 Ok(mut parsed_view) => {
                     parsed_view.anonymize(anonymizer);
-                    parsed_view.display(nom_sql::Dialect::MySQL).to_string()
+                    parsed_view
+                        .display(readyset_sql::Dialect::MySQL)
+                        .to_string()
                 }
                 // If we fail to parse, fully anonymize the statement.
                 Err(_) => "<anonymized: create view failed to parse>".to_string(),

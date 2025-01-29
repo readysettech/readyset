@@ -1,7 +1,8 @@
 use std::iter;
 
 use criterion::{black_box, criterion_group, criterion_main, Bencher, Criterion};
-use nom_sql::{parse_expr, Dialect, Expr};
+use nom_sql::{parse_expr, Expr};
+use readyset_sql::Dialect;
 
 fn recursive_subexpressions(c: &mut Criterion) {
     let run_benchmark = |b: &mut Bencher, src: &str| {

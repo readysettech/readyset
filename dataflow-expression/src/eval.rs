@@ -367,9 +367,9 @@ impl Expr {
 mod tests {
     use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
     use nom_sql::parse_expr;
-    use nom_sql::Dialect::*;
     use readyset_data::{ArrayD, Collation, DfType, Dialect, IxDyn, PgEnumMetadata};
     use readyset_errors::internal;
+    use readyset_sql::Dialect::*;
     use serde_json::json;
     use Expr::*;
 
@@ -381,7 +381,10 @@ mod tests {
     ///
     /// Note that parsing is expected to succeed, since this is strictly meant to test evaluation.
     #[track_caller]
-    pub(crate) fn try_eval_expr(expr: &str, dialect: nom_sql::Dialect) -> ReadySetResult<DfValue> {
+    pub(crate) fn try_eval_expr(
+        expr: &str,
+        dialect: readyset_sql::Dialect,
+    ) -> ReadySetResult<DfValue> {
         let ast = expr_unwrap(parse_expr(dialect, expr), expr);
 
         let expr_dialect = match dialect {
@@ -395,7 +398,7 @@ mod tests {
 
     /// Returns the value from evaluating an expression, panicking if parsing or evaluation fails.
     #[track_caller]
-    pub(crate) fn eval_expr(expr: &str, dialect: nom_sql::Dialect) -> DfValue {
+    pub(crate) fn eval_expr(expr: &str, dialect: readyset_sql::Dialect) -> DfValue {
         expr_unwrap(try_eval_expr(expr, dialect), expr)
     }
 
@@ -882,34 +885,43 @@ mod tests {
     #[test]
     fn eval_op_any() {
         assert_eq!(
-            eval_expr("1 = any('{1,2,3}')", nom_sql::Dialect::PostgreSQL),
+            eval_expr("1 = any('{1,2,3}')", readyset_sql::Dialect::PostgreSQL),
             true.into()
         );
         assert_eq!(
-            eval_expr("1 = any('{1,2,3}'::int[])", nom_sql::Dialect::PostgreSQL),
+            eval_expr(
+                "1 = any('{1,2,3}'::int[])",
+                readyset_sql::Dialect::PostgreSQL
+            ),
             true.into()
         );
         assert_eq!(
-            eval_expr("4 = any('{1,2,3}')", nom_sql::Dialect::PostgreSQL),
+            eval_expr("4 = any('{1,2,3}')", readyset_sql::Dialect::PostgreSQL),
             false.into()
         );
         assert_eq!(
-            eval_expr("1 = any('{{1,2},{3,4}}')", nom_sql::Dialect::PostgreSQL),
+            eval_expr(
+                "1 = any('{{1,2},{3,4}}')",
+                readyset_sql::Dialect::PostgreSQL
+            ),
             true.into()
         );
         assert_eq!(
-            eval_expr("7 > any('{{1,2},{3,4}}')", nom_sql::Dialect::PostgreSQL),
+            eval_expr(
+                "7 > any('{{1,2},{3,4}}')",
+                readyset_sql::Dialect::PostgreSQL
+            ),
             true.into()
         );
         assert_eq!(
             eval_expr(
                 r#"'abc' ILIKE any('{"aBC","def"}')"#,
-                nom_sql::Dialect::PostgreSQL
+                readyset_sql::Dialect::PostgreSQL
             ),
             true.into()
         );
         assert_eq!(
-            eval_expr("1 = any(null)", nom_sql::Dialect::PostgreSQL),
+            eval_expr("1 = any(null)", readyset_sql::Dialect::PostgreSQL),
             DfValue::None
         );
     }
@@ -917,36 +929,39 @@ mod tests {
     #[test]
     fn eval_op_all() {
         assert_eq!(
-            eval_expr("1 = all('{1,2,3}'::int[])", nom_sql::Dialect::PostgreSQL),
+            eval_expr(
+                "1 = all('{1,2,3}'::int[])",
+                readyset_sql::Dialect::PostgreSQL
+            ),
             false.into()
         );
         assert_eq!(
-            eval_expr("4 = all('{4,4}'::int[])", nom_sql::Dialect::PostgreSQL),
+            eval_expr("4 = all('{4,4}'::int[])", readyset_sql::Dialect::PostgreSQL),
             true.into()
         );
         assert_eq!(
             eval_expr(
                 "1 = all('{{1,1},{1,1}}'::int[])",
-                nom_sql::Dialect::PostgreSQL
+                readyset_sql::Dialect::PostgreSQL
             ),
             true.into()
         );
         assert_eq!(
             eval_expr(
                 "7 > all('{{1,2},{3,4}}'::int[])",
-                nom_sql::Dialect::PostgreSQL
+                readyset_sql::Dialect::PostgreSQL
             ),
             true.into()
         );
         assert_eq!(
             eval_expr(
                 r#"'abc' ILIKE all('{"aBC"}')"#,
-                nom_sql::Dialect::PostgreSQL
+                readyset_sql::Dialect::PostgreSQL
             ),
             true.into()
         );
         assert_eq!(
-            eval_expr("1 = all(null)", nom_sql::Dialect::PostgreSQL),
+            eval_expr("1 = all(null)", readyset_sql::Dialect::PostgreSQL),
             DfValue::None
         );
     }
@@ -967,7 +982,7 @@ mod tests {
     #[test]
     fn cast_to_char_with_multibyte_truncation() {
         assert_eq!(
-            eval_expr("CAST('é' AS CHAR(1))", nom_sql::Dialect::MySQL),
+            eval_expr("CAST('é' AS CHAR(1))", readyset_sql::Dialect::MySQL),
             DfValue::from("é")
         );
     }
@@ -1074,7 +1089,7 @@ mod tests {
     #[test]
     fn like_null() {
         let expr = Expr::lower(
-            parse_expr(nom_sql::Dialect::PostgreSQL, "a LIKE 'abc'").unwrap(),
+            parse_expr(readyset_sql::Dialect::PostgreSQL, "a LIKE 'abc'").unwrap(),
             Dialect::DEFAULT_POSTGRESQL,
             &resolve_columns(|c| {
                 if c == "a".into() {
@@ -1092,7 +1107,7 @@ mod tests {
     #[test]
     fn string_is_null() {
         let expr = Expr::lower(
-            parse_expr(nom_sql::Dialect::MySQL, "'foobar' is null").unwrap(),
+            parse_expr(readyset_sql::Dialect::MySQL, "'foobar' is null").unwrap(),
             Dialect::DEFAULT_MYSQL,
             &no_op_lower_context(),
         )
@@ -1104,7 +1119,7 @@ mod tests {
     #[test]
     fn string_is_not_null() {
         let expr = Expr::lower(
-            parse_expr(nom_sql::Dialect::MySQL, "'foobar' is not null").unwrap(),
+            parse_expr(readyset_sql::Dialect::MySQL, "'foobar' is not null").unwrap(),
             Dialect::DEFAULT_MYSQL,
             &no_op_lower_context(),
         )
@@ -1116,7 +1131,7 @@ mod tests {
     #[test]
     fn null_is_null() {
         let expr = Expr::lower(
-            parse_expr(nom_sql::Dialect::MySQL, "null is null").unwrap(),
+            parse_expr(readyset_sql::Dialect::MySQL, "null is null").unwrap(),
             Dialect::DEFAULT_MYSQL,
             &no_op_lower_context(),
         )
@@ -1128,7 +1143,7 @@ mod tests {
     #[test]
     fn null_is_not_null() {
         let expr = Expr::lower(
-            parse_expr(nom_sql::Dialect::MySQL, "null is not null").unwrap(),
+            parse_expr(readyset_sql::Dialect::MySQL, "null is not null").unwrap(),
             Dialect::DEFAULT_MYSQL,
             &no_op_lower_context(),
         )
@@ -1140,7 +1155,7 @@ mod tests {
     #[test]
     fn enum_eq_string_postgres() {
         let expr = Expr::lower(
-            parse_expr(nom_sql::Dialect::PostgreSQL, "a = 'a'").unwrap(),
+            parse_expr(readyset_sql::Dialect::PostgreSQL, "a = 'a'").unwrap(),
             Dialect::DEFAULT_POSTGRESQL,
             &resolve_columns(|c| {
                 if c == "a".into() {
@@ -1174,7 +1189,7 @@ mod tests {
     fn array_expression() {
         let res = eval_expr(
             "ARRAY[[1, '2'::int], array[3, 4]]",
-            nom_sql::Dialect::PostgreSQL,
+            readyset_sql::Dialect::PostgreSQL,
         );
 
         assert_eq!(

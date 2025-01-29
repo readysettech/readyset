@@ -36,7 +36,7 @@ fn postgres_eval(expr: &str, client: &mut Client) -> Result<DfValue, anyhow::Err
 fn compare_eval(expr: &str, client: &mut Client) {
     let our_result = parse_lower_eval(
         expr,
-        nom_sql::Dialect::PostgreSQL,
+        readyset_sql::Dialect::PostgreSQL,
         dataflow_expression::Dialect::DEFAULT_POSTGRESQL,
     )
     .unwrap_or_else(|e| panic!("Error evaluating `{expr}`: {e}"));
@@ -236,7 +236,7 @@ mod extract {
 
         let our_result = parse_lower_eval(
             expr,
-            nom_sql::Dialect::PostgreSQL,
+            readyset_sql::Dialect::PostgreSQL,
             dataflow_expression::Dialect::DEFAULT_POSTGRESQL,
         );
 

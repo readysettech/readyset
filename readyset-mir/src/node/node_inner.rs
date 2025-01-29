@@ -40,7 +40,7 @@ impl Display for ProjectExpr {
         match self {
             ProjectExpr::Column(col) => write!(f, "{col}"),
             ProjectExpr::Expr { expr, alias } => {
-                write!(f, "{alias}: {}", expr.display(nom_sql::Dialect::MySQL))
+                write!(f, "{alias}: {}", expr.display(readyset_sql::Dialect::MySQL))
             }
         }
     }
@@ -464,7 +464,7 @@ impl MirNodeInner {
                 format!("{} γ[{}]", op_string, group_cols)
             }
             MirNodeInner::Filter { ref conditions, .. } => {
-                format!("σ[{}]", conditions.display(nom_sql::Dialect::MySQL))
+                format!("σ[{}]", conditions.display(readyset_sql::Dialect::MySQL))
             }
             MirNodeInner::ViewKey { ref key } => {
                 format!("σ[{}]", key.iter().join(" AND "))

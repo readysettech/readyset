@@ -25,8 +25,8 @@ impl fmt::Display for SqlEngine {
 /// semantics differ between database implementations, or are configurable at runtime in any way.
 ///
 /// A note on the structure and naming of this type: Currently, this type is functionally identical
-/// to [`nom_sql::Dialect`], but that's mostly indicental - in the future, this type will be
-/// expanded to include things like the MySQL `SQL_MODE` flag, etc. As a rule, [`nom_sql::Dialect`]
+/// to [`readyset_sql::Dialect`], but that's mostly indicental - in the future, this type will be
+/// expanded to include things like the MySQL `SQL_MODE` flag, etc. As a rule, [`readyset_sql::Dialect`]
 /// is for configuring *parsing*, whereas this type is for configuring *semantics of evaluation*.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Dialect {
@@ -132,22 +132,22 @@ impl Dialect {
     }
 }
 
-impl From<Dialect> for nom_sql::Dialect {
+impl From<Dialect> for readyset_sql::Dialect {
     fn from(d: Dialect) -> Self {
         match d.engine {
-            SqlEngine::PostgreSQL => nom_sql::Dialect::PostgreSQL,
-            SqlEngine::MySQL => nom_sql::Dialect::MySQL,
+            SqlEngine::PostgreSQL => readyset_sql::Dialect::PostgreSQL,
+            SqlEngine::MySQL => readyset_sql::Dialect::MySQL,
         }
     }
 }
 
-impl From<nom_sql::Dialect> for Dialect {
-    fn from(d: nom_sql::Dialect) -> Self {
+impl From<readyset_sql::Dialect> for Dialect {
+    fn from(d: readyset_sql::Dialect) -> Self {
         match d {
-            nom_sql::Dialect::PostgreSQL => Self {
+            readyset_sql::Dialect::PostgreSQL => Self {
                 engine: SqlEngine::PostgreSQL,
             },
-            nom_sql::Dialect::MySQL => Self {
+            readyset_sql::Dialect::MySQL => Self {
                 engine: SqlEngine::MySQL,
             },
         }

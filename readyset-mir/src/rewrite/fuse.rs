@@ -131,7 +131,7 @@ pub(crate) fn fuse_project_nodes(query: &mut MirQuery<'_>) -> ReadySetResult<()>
                 }) {
                     trace!(
                         %name,
-                        parent_expr = %parent_expr.display(nom_sql::Dialect::MySQL),
+                        parent_expr = %parent_expr.display(readyset_sql::Dialect::MySQL),
                         "Found column in parent"
                     );
                     *project_expr = ProjectExpr::Expr {

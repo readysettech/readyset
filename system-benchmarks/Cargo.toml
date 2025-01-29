@@ -9,10 +9,16 @@ publish = false
 anyhow = { workspace = true }
 itertools = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
-reqwest = { workspace = true, features = [ "blocking" ] }
+reqwest = { workspace = true, features = ["blocking"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
-tokio-postgres = { workspace = true, features = ["with-chrono-0_4", "with-eui48-1", "with-uuid-0_8", "with-serde_json-1", "with-bit-vec-0_6"] }
+tokio-postgres = { workspace = true, features = [
+    "with-chrono-0_4",
+    "with-eui48-1",
+    "with-uuid-0_8",
+    "with-serde_json-1",
+    "with-bit-vec-0_6",
+] }
 database-utils = { path = "../database-utils" }
 readyset-data = { path = "../readyset-data" }
 clap = { workspace = true, features = ["derive"] }
@@ -25,6 +31,7 @@ readyset-client = { path = "../readyset-client" }
 readyset-mysql = { path = "../readyset-mysql" }
 readyset-psql = { path = "../readyset-psql" }
 readyset-server = { path = "../readyset-server" }
+readyset-sql = { path = "../readyset-sql" }
 readyset-util = { path = "../readyset-util" }
 readyset = { path = "../readyset" }
 

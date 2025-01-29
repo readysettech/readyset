@@ -417,7 +417,8 @@ mod parse {
     use nom::multi::{many1, separated_list1};
     use nom::sequence::{delimited, pair, preceded, terminated, tuple};
     use nom_locate::LocatedSpan;
-    use nom_sql::{embedded_literal, Dialect, NomSqlError, NomSqlResult, QuotingStyle};
+    use nom_sql::{embedded_literal, NomSqlError, NomSqlResult, QuotingStyle};
+    use readyset_sql::Dialect;
 
     use super::Array;
     use crate::DfValue;

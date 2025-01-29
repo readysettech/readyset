@@ -230,7 +230,7 @@ impl UpstreamDatabase for MySqlUpstream {
     type ExecMeta<'a> = ();
     type Error = Error;
     const DEFAULT_DB_VERSION: &'static str = "8.0.26-readyset\0";
-    const SQL_DIALECT: nom_sql::Dialect = nom_sql::Dialect::MySQL;
+    const SQL_DIALECT: readyset_sql::Dialect = readyset_sql::Dialect::MySQL;
 
     async fn connect(upstream_config: UpstreamConfig) -> Result<Self, Error> {
         let (conn, prepared_statements) = Self::connect_inner(upstream_config).await?;

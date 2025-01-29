@@ -44,7 +44,7 @@ pub trait Adapter: Send {
     type Upstream: UpstreamDatabase;
     type Handler: QueryHandler;
 
-    const DIALECT: nom_sql::Dialect;
+    const DIALECT: readyset_sql::Dialect;
 
     const EXPR_DIALECT: readyset_data::Dialect;
 

@@ -388,9 +388,10 @@ impl QueryHandler for PostgreSqlQueryHandler {
                     let value_to_string = |value: &PostgresParameterValueInner| match value {
                         PostgresParameterValueInner::Identifier(id) => id.clone(),
                         PostgresParameterValueInner::Literal(Literal::String(s)) => s.into(),
-                        PostgresParameterValueInner::Literal(lit) => {
-                            lit.display(nom_sql::Dialect::PostgreSQL).to_string().into()
-                        }
+                        PostgresParameterValueInner::Literal(lit) => lit
+                            .display(readyset_sql::Dialect::PostgreSQL)
+                            .to_string()
+                            .into(),
                     };
 
                     let search_path = match value {
@@ -423,7 +424,8 @@ impl QueryHandler for PostgreSqlQueryHandler {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{parse_query, Dialect};
+    use nom_sql::parse_query;
+    use readyset_sql::Dialect;
 
     use super::*;
 

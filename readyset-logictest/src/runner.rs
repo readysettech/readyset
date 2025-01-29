@@ -14,7 +14,7 @@ use console::style;
 use database_utils::{DatabaseConnection, DatabaseType, DatabaseURL, QueryableConnection};
 use itertools::Itertools;
 use mysql_srv::MySqlIntermediary;
-use nom_sql::{Dialect, Relation};
+use nom_sql::Relation;
 use readyset_adapter::backend::noria_connector::ReadBehavior;
 use readyset_adapter::backend::{BackendBuilder, NoriaConnector};
 use readyset_adapter::query_status_cache::QueryStatusCache;
@@ -29,6 +29,7 @@ use readyset_data::DfValue;
 use readyset_mysql::{MySqlQueryHandler, MySqlUpstream};
 use readyset_psql::{PostgreSqlQueryHandler, PostgreSqlUpstream};
 use readyset_server::{Builder, LocalAuthority, ReuseConfigType};
+use readyset_sql::Dialect;
 use readyset_util::shared_cache::SharedCache;
 use readyset_util::shutdown::ShutdownSender;
 use tokio::sync::RwLock;
@@ -617,8 +618,8 @@ impl TestScript {
                     DatabaseType::PostgreSQL => readyset_data::Dialect::DEFAULT_POSTGRESQL,
                 },
                 match database_type {
-                    DatabaseType::MySQL => nom_sql::Dialect::MySQL,
-                    DatabaseType::PostgreSQL => nom_sql::Dialect::PostgreSQL,
+                    DatabaseType::MySQL => readyset_sql::Dialect::MySQL,
+                    DatabaseType::PostgreSQL => readyset_sql::Dialect::PostgreSQL,
                 },
                 match database_type {
                     DatabaseType::MySQL if replication_url.is_some() => vec!["noria".into()],

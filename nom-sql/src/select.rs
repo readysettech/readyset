@@ -12,6 +12,7 @@ use nom_locate::LocatedSpan;
 use proptest::option;
 use proptest::prelude::Arbitrary;
 use proptest::strategy::BoxedStrategy;
+use readyset_sql::Dialect;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
@@ -20,15 +21,15 @@ use crate::common::{
     field_definition_expr, field_list, field_reference_list, terminated_with_statement_terminator,
     ws_sep_comma, FieldDefinitionExpr,
 };
-use crate::dialect::CommaSeparatedList;
+use crate::dialect::{CommaSeparatedList, DialectParser};
 use crate::expression::expression;
 use crate::join::{join_operator, JoinConstraint, JoinOperator, JoinRightSide};
 use crate::order::{order_clause, OrderClause};
 use crate::table::{table_expr, table_expr_list};
 use crate::whitespace::{whitespace0, whitespace1};
 use crate::{
-    Dialect, DialectDisplay, Expr, FieldReference, FunctionExpr, Literal, NomSqlError,
-    NomSqlResult, SqlIdentifier, TableExpr,
+    DialectDisplay, Expr, FieldReference, FunctionExpr, Literal, NomSqlError, NomSqlResult,
+    SqlIdentifier, TableExpr,
 };
 
 #[derive(

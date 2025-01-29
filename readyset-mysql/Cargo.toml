@@ -35,6 +35,7 @@ derive_more = { workspace = true }
 thiserror = { workspace = true }
 mysql_common = { workspace = true }
 itertools = { workspace = true }
+readyset-sql = { path = "../readyset-sql" }
 readyset-util = { path = "../readyset-util" }
 
 [dev-dependencies]

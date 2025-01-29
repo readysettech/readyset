@@ -15,6 +15,7 @@ vec1 = { workspace = true }
 nom-sql = { path = "../nom-sql" }
 readyset-errors = { path = "../readyset-errors" }
 readyset-data = { path = "../readyset-data" }
+readyset-sql = { path = "../readyset-sql" }
 dataflow-expression = { path = "../dataflow-expression" }
 
 [dev-dependencies]

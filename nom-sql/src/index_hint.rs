@@ -7,13 +7,15 @@ use nom::combinator::{map, opt, value};
 use nom::multi::separated_list1;
 use nom::sequence::preceded;
 use nom_locate::LocatedSpan;
+use readyset_sql::Dialect;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
 use crate::common::ws_sep_comma;
+use crate::dialect::DialectParser;
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, DialectDisplay, NomSqlResult, SqlIdentifier};
+use crate::{DialectDisplay, NomSqlResult, SqlIdentifier};
 
 /// Type of index hint.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Arbitrary)]

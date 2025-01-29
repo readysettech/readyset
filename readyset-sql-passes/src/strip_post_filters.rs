@@ -78,7 +78,8 @@ impl StripPostFilters for SqlQuery {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{parse_query, Dialect, DialectDisplay};
+    use nom_sql::{parse_query, DialectDisplay};
+    use readyset_sql::Dialect;
 
     use super::*;
 
@@ -92,7 +93,7 @@ mod tests {
             result,
             expected,
             "result = {}",
-            result.display(nom_sql::Dialect::MySQL)
+            result.display(readyset_sql::Dialect::MySQL)
         );
     }
 
@@ -109,7 +110,7 @@ mod tests {
             result,
             expected,
             "result = {}",
-            result.display(nom_sql::Dialect::MySQL)
+            result.display(readyset_sql::Dialect::MySQL)
         );
     }
 }

@@ -12,6 +12,7 @@ use nom::multi::{separated_list0, separated_list1};
 use nom::sequence::{delimited, preceded, separated_pair, terminated, tuple};
 use nom::{Compare, CompareResult};
 use nom_locate::LocatedSpan;
+use readyset_sql::Dialect;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
@@ -26,12 +27,13 @@ use crate::compound_select::{nested_compound_selection, CompoundSelectStatement}
 use crate::create_table_options::{
     create_option_equals_pair, create_option_spaced_pair, table_options, CreateTableOption,
 };
+use crate::dialect::DialectParser;
 use crate::expression::expression;
 use crate::order::{order_type, OrderType};
 use crate::select::{selection, SelectStatement};
 use crate::table::{relation, Relation};
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{ColumnConstraint, Dialect, DialectDisplay, NomSqlError, NomSqlResult, SqlIdentifier};
+use crate::{ColumnConstraint, DialectDisplay, NomSqlError, NomSqlResult, SqlIdentifier};
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, Arbitrary)]
 pub enum CharsetName {

@@ -5,12 +5,13 @@ use nom::bytes::complete::tag_no_case;
 use nom::combinator::{map, opt};
 use nom::sequence::tuple;
 use nom_locate::LocatedSpan;
+use readyset_sql::Dialect;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
 use crate::common::statement_terminator;
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, NomSqlResult};
+use crate::NomSqlResult;
 
 // TODO(peter): Handle dialect differences.
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]

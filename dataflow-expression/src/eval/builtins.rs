@@ -1411,8 +1411,8 @@ mod tests {
     use chrono_tz::{Asia, Atlantic};
     use lazy_static::lazy_static;
     use nom_sql::parse_expr;
-    use nom_sql::Dialect::*;
     use readyset_errors::{internal, internal_err};
+    use readyset_sql::Dialect::*;
     use readyset_util::arbitrary::{
         arbitrary_timestamp_naive_date_time, arbitrary_timestamp_naive_date_time_for_timezone,
     };
@@ -1443,7 +1443,7 @@ mod tests {
         })
     }
 
-    fn parse_and_lower(expr: &str, dialect: nom_sql::Dialect) -> Expr {
+    fn parse_and_lower(expr: &str, dialect: readyset_sql::Dialect) -> Expr {
         let ast = parse_expr(dialect, expr).unwrap();
         let expr_dialect = match dialect {
             PostgreSQL => crate::Dialect::DEFAULT_POSTGRESQL,

@@ -18,8 +18,9 @@ use anyhow::{anyhow, Result};
 use clap::Parser;
 use data_generator::{ColumnGenerator, DistributionAnnotation};
 use database_utils::{DatabaseConnection, DatabaseStatement, QueryableConnection};
-use nom_sql::{Dialect, DialectDisplay, Literal, SqlType};
+use nom_sql::{DialectDisplay, Literal, SqlType};
 use readyset_data::DfValue;
+use readyset_sql::Dialect;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::utils::path::benchmark_path;
@@ -87,7 +88,7 @@ impl FromStr for QuerySpec {
     type Err = anyhow::Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         // TODO(mc):  Once Postgres is better supported by benchmarks, try parsing it both ways
-        match nom_sql::parse_query(nom_sql::Dialect::MySQL, s) {
+        match nom_sql::parse_query(readyset_sql::Dialect::MySQL, s) {
             Ok(_) => Ok(Self::Query(s.to_owned())),
             Err(_) => Ok(Self::File(QueryFile::from_str(s).map_err(|e| anyhow!("Could not parse '{}' as a query; attempted to load a file at that path, but failed:  {}", s, e))?)),
         }
@@ -204,7 +205,7 @@ impl ArbitraryQueryParameters {
         // Remove any query q if it is exists before migration.
         let _ = self.unmigrate(conn).await;
 
-        let stmt = match nom_sql::parse_query(nom_sql::Dialect::MySQL, self.query.query()) {
+        let stmt = match nom_sql::parse_query(readyset_sql::Dialect::MySQL, self.query.query()) {
             Ok(nom_sql::SqlQuery::Select(stmt)) => stmt,
             _ => panic!("Can only migrate SELECT statements"),
         };
