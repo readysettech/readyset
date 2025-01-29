@@ -120,7 +120,7 @@ impl PostgresWalConnector {
     pub(crate) async fn connect<S: AsRef<str>>(
         mut pg_config: pgsql::Config,
         dbname: S,
-        config: UpstreamConfig,
+        config: &UpstreamConfig,
         next_position: Option<Lsn>,
         tls_connector: MakeTlsConnector,
         repl_slot_name: &str,
@@ -182,7 +182,7 @@ impl PostgresWalConnector {
     async fn create_publication_and_slot(
         &mut self,
         repl_slot_name: &str,
-        config: UpstreamConfig,
+        config: &UpstreamConfig,
     ) -> ReadySetResult<()> {
         let system = self.identify_system().await?;
         debug!(

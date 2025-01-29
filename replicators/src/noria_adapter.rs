@@ -169,7 +169,7 @@ pub struct NoriaAdapter<'a> {
 impl<'a> NoriaAdapter<'a> {
     pub async fn start(
         noria: ReadySetHandle,
-        mut config: UpstreamConfig,
+        config: &UpstreamConfig,
         notification_channel: &UnboundedSender<ReplicatorMessage>,
         controller_channel: &mut UnboundedReceiver<ControllerMessage>,
         telemetry_sender: TelemetrySender,
@@ -190,12 +190,10 @@ impl<'a> NoriaAdapter<'a> {
                 ))
             })?;
 
-        // TODO(marce): We should block access to config.replication_tables and
-        // config.replication_tables_ignore after this point.
         let mut table_filter = TableFilter::try_new(
             url.dialect(),
-            config.replication_tables.take(),
-            config.replication_tables_ignore.take(),
+            config.replication_tables.as_deref(),
+            config.replication_tables_ignore.as_deref(),
             match url.dialect() {
                 SQLDialect::MySQL => url.db_name(),
                 SQLDialect::PostgreSQL => None,
@@ -205,7 +203,6 @@ impl<'a> NoriaAdapter<'a> {
             let Err(err) = match url.clone() {
                 DatabaseURL::MySQL(options) => {
                     let noria = noria.clone();
-                    let config = config.clone();
                     NoriaAdapter::start_inner_mysql(
                         options,
                         noria,
@@ -222,7 +219,6 @@ impl<'a> NoriaAdapter<'a> {
                 }
                 DatabaseURL::PostgreSQL(options) => {
                     let noria = noria.clone();
-                    let config = config.clone();
                     let connector = {
                         let mut builder = native_tls::TlsConnector::builder();
                         if config.disable_upstream_ssl_verification {
@@ -304,7 +300,7 @@ impl<'a> NoriaAdapter<'a> {
     async fn start_inner_mysql(
         mut mysql_options: mysql::Opts,
         mut noria: ReadySetHandle,
-        config: UpstreamConfig,
+        config: &UpstreamConfig,
         notification_channel: &UnboundedSender<ReplicatorMessage>,
         controller_channel: &mut UnboundedReceiver<ControllerMessage>,
         resnapshot: bool,
@@ -448,7 +444,7 @@ impl<'a> NoriaAdapter<'a> {
             .map_err(|_| {
                 ReadySetError::ReplicationFailed(format!(
                     "{} is an invalid server id--it must be a valid u32.",
-                    config.replication_server_id.unwrap()
+                    config.replication_server_id.clone().unwrap()
                 ))
             })?;
 
@@ -522,7 +518,7 @@ impl<'a> NoriaAdapter<'a> {
     async fn start_inner_postgres(
         pgsql_opts: pgsql::Config,
         mut noria: ReadySetHandle,
-        config: UpstreamConfig,
+        config: &UpstreamConfig,
         notification_channel: &UnboundedSender<ReplicatorMessage>,
         controller_channel: &mut UnboundedReceiver<ControllerMessage>,
         resnapshot: bool,
