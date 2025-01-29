@@ -1,5 +1,7 @@
-use nom_sql::{Expr, FieldDefinitionExpr, FieldReference, OrderBy, SelectStatement, SqlQuery};
 use readyset_errors::{internal, invalid_query_err, ReadySetResult};
+use readyset_sql::ast::{
+    Expr, FieldDefinitionExpr, FieldReference, OrderBy, SelectStatement, SqlQuery,
+};
 
 pub trait RemoveNumericFieldReferences: Sized {
     /// Rewrite any [numeric field references][0] in the `GROUP BY` and `ORDER BY` clauses of the
@@ -68,7 +70,7 @@ impl RemoveNumericFieldReferences for SqlQuery {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{Expr, GroupByClause, OrderClause, OrderType};
+    use readyset_sql::ast::{Expr, GroupByClause, OrderClause, OrderType};
 
     use super::*;
     use crate::util::parse_select_statement;

@@ -1,9 +1,9 @@
 #![warn(clippy::panic)]
 
-use nom_sql::{self, ColumnConstraint, Relation};
 use readyset_client::ColumnSchema;
 use readyset_data::DfType;
 use readyset_errors::{unsupported, ReadySetResult};
+use readyset_sql::ast::{ColumnConstraint, Relation};
 use readyset_sql::DialectDisplay;
 
 use crate::constants::DEFAULT_CHARACTER_SET;

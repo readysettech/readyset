@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use nom_sql::analysis::visit_mut::VisitorMut;
-use nom_sql::{ItemPlaceholder, Literal, SelectStatement};
+use readyset_sql::ast::{ItemPlaceholder, Literal, SelectStatement};
 
 struct InlineLiteralsVisitor<'a> {
     placeholder_literal_map: &'a HashMap<usize, Literal>,
@@ -37,7 +37,7 @@ impl InlineLiterals for SelectStatement {
 mod test {
     use std::collections::HashMap;
 
-    use nom_sql::Literal;
+    use readyset_sql::ast::Literal;
 
     use super::InlineLiterals;
     use crate::util::parse_select_statement;

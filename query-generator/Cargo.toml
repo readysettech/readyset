@@ -32,7 +32,6 @@ parking_lot = { workspace = true }
 growable-bloom-filter = { workspace = true }
 
 data-generator = { path = "../data-generator" }
-nom-sql = { path = "../nom-sql" }
 readyset-data = { path = "../readyset-data/" }
 readyset-sql = { path = "../readyset-sql" }
 readyset-sql-passes = { path = "../readyset-sql-passes" }

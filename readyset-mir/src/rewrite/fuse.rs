@@ -1,8 +1,8 @@
 use std::mem::replace;
 
 use nom_sql::analysis::visit_mut::{self, VisitorMut};
-use nom_sql::{BinaryOperator, Expr, Literal};
 use readyset_errors::{internal, invariant_eq, ReadySetResult};
+use readyset_sql::ast::{self, BinaryOperator, Expr, Literal};
 use readyset_sql::DialectDisplay;
 use tracing::trace;
 
@@ -75,7 +75,7 @@ fn inline_expr_references(expr: &mut Expr, parent_emit: &[ProjectExpr]) {
         type Error = std::convert::Infallible;
 
         fn visit_expr(&mut self, expr: &'ast mut Expr) -> Result<(), Self::Error> {
-            if let Expr::Column(nom_sql::Column { name, table: None }) = expr {
+            if let Expr::Column(ast::Column { name, table: None }) = expr {
                 let name = name.clone();
                 if let Some(parent_expr) = self.0.iter().find_map(|expr| match expr {
                     ProjectExpr::Expr { expr, alias } if *alias == name => Some(expr.clone()),

@@ -10,7 +10,6 @@ use mysql_async::{
     ChangeUserOpts, Column, Conn, Opts, OptsBuilder, ResultSetStream, Row, SslOpts, TxOpts,
     UrlError,
 };
-use nom_sql::{SqlIdentifier, StartTransactionStatement};
 use pin_project::pin_project;
 use readyset_adapter::upstream_database::UpstreamDestination;
 use readyset_adapter::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
@@ -19,6 +18,7 @@ use readyset_client_metrics::{recorded, QueryDestination};
 use readyset_data::upstream_system_props::DEFAULT_TIMEZONE_NAME;
 use readyset_data::DfValue;
 use readyset_errors::{internal_err, unsupported, ReadySetError, ReadySetResult};
+use readyset_sql::ast::{SqlIdentifier, StartTransactionStatement};
 use tracing::{debug, error, info_span, Instrument};
 
 use crate::Error;

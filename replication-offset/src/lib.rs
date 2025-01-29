@@ -10,9 +10,9 @@ use std::fmt;
 use std::hash::Hash;
 
 use mysql::MySqlPosition;
-use nom_sql::Relation;
 use postgres::PostgresPosition;
 use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
+use readyset_sql::ast::Relation;
 use serde::{Deserialize, Serialize};
 
 /// A data type representing an offset in a replication log

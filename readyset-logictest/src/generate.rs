@@ -9,10 +9,12 @@ use clap::Parser;
 use console::style;
 use database_utils::{DatabaseConnection, DatabaseURL, QueryableConnection};
 use itertools::Itertools;
-use nom_sql::{
-    parse_query, BinaryOperator, CreateTableStatement, DeleteStatement, Expr, SqlQuery, SqlType,
-};
+use nom_sql::parse_query;
 use query_generator::{GeneratorState, ParameterMode, QuerySeed};
+use readyset_sql::ast::{
+    BinaryOperator, CreateTableStatement, DeleteStatement, Expr, InsertStatement, Relation,
+    SqlQuery, SqlType,
+};
 use readyset_sql::{Dialect, DialectDisplay};
 
 use crate::ast::{
@@ -258,7 +260,7 @@ impl Seed {
             .map(|(table_name, data)| {
                 let spec = self.generator.table(table_name.as_str()).unwrap();
                 let columns = spec.columns.keys().collect::<Vec<_>>();
-                nom_sql::InsertStatement {
+                InsertStatement {
                     table: spec.name.clone().into(),
                     fields: Some(columns.iter().map(|cn| (*cn).clone().into()).collect()),
                     data: data
@@ -334,7 +336,7 @@ impl Seed {
                 .iter()
                 .map(|(table_name, data)| {
                     let spec = self.generator.table(table_name.as_str()).unwrap();
-                    let table: nom_sql::Relation = spec.name.clone().into();
+                    let table: Relation = spec.name.clone().into();
                     let pk = spec.primary_key.clone().ok_or_else(|| {
                         anyhow!(
                             "--include-deletes specified, but table {} missing a primary key",

@@ -1,8 +1,8 @@
-use nom_sql::{
-    Expr, FieldDefinitionExpr, FieldReference, LimitClause, OrderBy, SelectStatement, SqlQuery,
-};
 use readyset_errors::{ReadySetError, ReadySetResult};
 use readyset_sql::analysis::contains_aggregate;
+use readyset_sql::ast::{
+    Expr, FieldDefinitionExpr, FieldReference, LimitClause, OrderBy, SelectStatement, SqlQuery,
+};
 use readyset_sql::DialectDisplay;
 
 pub trait NormalizeTopKWithAggregate: Sized {
@@ -106,7 +106,8 @@ impl NormalizeTopKWithAggregate for SqlQuery {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{parse_query, Expr, LimitValue, OrderClause, OrderType};
+    use nom_sql::parse_query;
+    use readyset_sql::ast::{Expr, LimitValue, OrderClause, OrderType};
     use readyset_sql::Dialect;
 
     use super::*;

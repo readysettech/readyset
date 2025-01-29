@@ -8,19 +8,19 @@ use std::{iter, mem};
 
 use common::{DfValue, IndexType};
 use nom_sql::analysis::visit_mut::{walk_expr, VisitorMut};
-use nom_sql::{
-    BinaryOperator, Column, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, InValue,
-    ItemPlaceholder, JoinConstraint, JoinOperator, JoinRightSide, LimitClause, Literal, OrderBy,
-    OrderType, Relation, SelectStatement, SqlIdentifier, TableExpr, TableExprInner,
-};
 use readyset_client::{PlaceholderIdx, ViewPlaceholder};
 use readyset_errors::{
     internal, invalid_query, invalid_query_err, invariant, invariant_eq, no_table_for_col,
     unsupported, unsupported_err, ReadySetResult,
 };
-use readyset_sql::analysis::ReferredColumns;
+use readyset_sql::analysis::{is_aggregate, ReferredColumns};
+use readyset_sql::ast::{
+    self, BinaryOperator, Column, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, InValue,
+    ItemPlaceholder, JoinConstraint, JoinOperator, JoinRightSide, LimitClause, Literal, OrderBy,
+    OrderType, Relation, SelectStatement, SqlIdentifier, TableExpr, TableExprInner,
+};
 use readyset_sql::DialectDisplay;
-use readyset_sql_passes::{is_aggregate, is_correlated, is_predicate, map_aggregates, LogicalOp};
+use readyset_sql_passes::{is_correlated, is_predicate, map_aggregates, LogicalOp};
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
@@ -200,7 +200,7 @@ pub struct JoinPredicate {
 #[derive(Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Parameter {
     pub col: Column,
-    pub op: nom_sql::BinaryOperator,
+    pub op: BinaryOperator,
     pub placeholder_idx: Option<PlaceholderIdx>,
 }
 
@@ -765,7 +765,7 @@ fn extract_having_aggregates(
                     .display(readyset_sql::Dialect::MySQL)
                     .to_string()
                     .into();
-                let col_expr = Expr::Column(nom_sql::Column {
+                let col_expr = Expr::Column(ast::Column {
                     name: name.clone(),
                     table: None,
                 });
@@ -1477,7 +1477,8 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
 #[allow(clippy::unwrap_used)]
 #[cfg(test)]
 mod tests {
-    use nom_sql::{parse_query, parse_select_statement, FunctionExpr, SqlQuery};
+    use nom_sql::{parse_query, parse_select_statement};
+    use readyset_sql::ast::{FunctionExpr, SqlQuery};
     use readyset_sql::Dialect;
 
     use super::*;

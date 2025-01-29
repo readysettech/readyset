@@ -11,10 +11,10 @@ metrics = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 
-#local dependencies
+# local dependencies
 readyset-client = { path = "../readyset-client" }
 readyset-errors = { path = "../readyset-errors" }
-nom-sql = { path = "../nom-sql" }
+readyset-sql = { path = "../readyset-sql" }
 
 [lib]
 path = "src/lib.rs"

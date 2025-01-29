@@ -2,14 +2,14 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 
 use nom_sql::analysis::visit::{self, Visitor};
-use nom_sql::{
-    CreateTableBody, CreateTableStatement, CreateViewStatement, ItemPlaceholder, Literal, Relation,
-    SelectSpecification, SelectStatement, SqlType,
-};
 use readyset_client::query::QueryId;
 use readyset_client::recipe::changelist::PostgresTableMetadata;
 use readyset_client::PlaceholderIdx;
 use readyset_errors::{internal_err, unsupported_err, ReadySetError, ReadySetResult};
+use readyset_sql::ast::{
+    CreateTableBody, CreateTableStatement, CreateViewStatement, ItemPlaceholder, Literal, Relation,
+    SelectSpecification, SelectStatement, SqlType,
+};
 use readyset_sql_passes::SelectStatementSkeleton;
 use readyset_util::redacted::Sensitive;
 use serde::{Deserialize, Serialize};
@@ -1150,7 +1150,8 @@ mod tests {
     mod expr_skeleton {
         use std::collections::HashMap;
 
-        use nom_sql::{parse_create_table, parse_select_statement, ItemPlaceholder, Literal};
+        use nom_sql::{parse_create_table, parse_select_statement};
+        use readyset_sql::ast::{ItemPlaceholder, Literal};
         use readyset_sql::Dialect;
 
         use super::{recipe_expr_cache, ExprRegistry, ExprSkeletons, MatchedCache, RecipeExpr};

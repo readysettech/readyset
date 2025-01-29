@@ -5,9 +5,9 @@ use std::time::{Duration, Instant};
 
 use clap::ValueEnum;
 use metrics::SharedString;
-use nom_sql::{Relation, SqlIdentifier, SqlQuery};
 use readyset_client::query::QueryId;
 use readyset_errors::ReadySetError;
+use readyset_sql::ast::{Relation, SqlIdentifier, SqlQuery};
 use serde::Serialize;
 
 pub mod recorded;

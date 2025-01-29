@@ -6,4 +6,4 @@ authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
 [dependencies]
-nom-sql = { path = "../nom-sql" }
+readyset-sql = { path = "../readyset-sql" }

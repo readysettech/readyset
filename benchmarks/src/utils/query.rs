@@ -18,8 +18,8 @@ use anyhow::{anyhow, Result};
 use clap::Parser;
 use data_generator::{ColumnGenerator, DistributionAnnotation};
 use database_utils::{DatabaseConnection, DatabaseStatement, QueryableConnection};
-use nom_sql::{Literal, SqlType};
 use readyset_data::DfValue;
+use readyset_sql::ast::{CacheInner, CreateCacheStatement, Literal, SqlQuery, SqlType};
 use readyset_sql::{Dialect, DialectDisplay};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -206,13 +206,13 @@ impl ArbitraryQueryParameters {
         let _ = self.unmigrate(conn).await;
 
         let stmt = match nom_sql::parse_query(readyset_sql::Dialect::MySQL, self.query.query()) {
-            Ok(nom_sql::SqlQuery::Select(stmt)) => stmt,
+            Ok(SqlQuery::Select(stmt)) => stmt,
             _ => panic!("Can only migrate SELECT statements"),
         };
 
-        let create_cache_query = nom_sql::CreateCacheStatement {
+        let create_cache_query = CreateCacheStatement {
             name: Some("q".into()),
-            inner: Ok(nom_sql::CacheInner::Statement(Box::new(stmt))),
+            inner: Ok(CacheInner::Statement(Box::new(stmt))),
             always: false,
             concurrently: false,
             unparsed_create_cache_statement: None,

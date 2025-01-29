@@ -1,7 +1,7 @@
 use chrono_tz::Tz;
-use nom_sql::SqlIdentifier;
 use once_cell::sync::OnceCell;
 use readyset_errors::{internal_err, ReadySetResult};
+use readyset_sql::ast::SqlIdentifier;
 use std::fmt;
 
 #[derive(Default, Clone, Debug)]

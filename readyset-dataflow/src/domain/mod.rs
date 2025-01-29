@@ -29,7 +29,6 @@ pub use internal::{DomainIndex, ReplicaAddress};
 use itertools::Itertools;
 use merging_interval_tree::IntervalTreeSet;
 use metrics::{counter, histogram};
-use nom_sql::Relation;
 use petgraph::graph::NodeIndex;
 use readyset_alloc::StdThreadBuildWrapper;
 use readyset_client::debug::info::KeyCount;
@@ -38,6 +37,7 @@ use readyset_client::metrics::recorded;
 use readyset_client::{KeyComparison, PersistencePoint, ReaderAddress};
 use readyset_data::DfType;
 use readyset_errors::{internal, internal_err, ReadySetError, ReadySetResult};
+use readyset_sql::ast::Relation;
 #[cfg(feature = "failure_injection")]
 use readyset_util::failpoints;
 use readyset_util::futures::abort_on_panic;

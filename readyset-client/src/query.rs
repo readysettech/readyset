@@ -12,9 +12,9 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use nom_sql::{Relation, SelectStatement, SqlIdentifier};
 use readyset_data::DfValue;
 use readyset_errors::ReadySetError;
+use readyset_sql::ast::{Relation, SelectStatement, SqlIdentifier};
 use readyset_sql::DialectDisplay;
 use readyset_sql_passes::anonymize::{Anonymize, Anonymizer};
 use readyset_util::fmt::fmt_with;

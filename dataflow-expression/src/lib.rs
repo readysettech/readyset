@@ -11,9 +11,9 @@ use std::fmt::{self, Display, Formatter};
 use chrono_tz::Tz;
 pub use eval::builtins::DateTruncPrecision;
 use itertools::Itertools;
-use nom_sql::TimestampField;
 pub use readyset_data::{dialect::SqlEngine, Dialect};
 use readyset_data::{Collation, DfType, DfValue};
+use readyset_sql::ast::TimestampField;
 use serde::{Deserialize, Serialize};
 use vec1::Vec1;
 
@@ -363,7 +363,7 @@ impl Display for CaseWhenBranch {
 /// applied during lowering:
 ///
 /// - Literals replaced with their corresponding [`DfValue`]
-/// - [Column references](nom_sql::Column) resolved into column indices in the parent node.
+/// - [Column references](readyset_sql::ast::Column) resolved into column indices in the parent node.
 /// - Function calls resolved, and arities checked
 /// - Desugaring x IN (y, z, ...) to `x = y OR x = z OR ...` and x NOT IN (y, z, ...) to `x != y AND
 ///   x = z AND ...`

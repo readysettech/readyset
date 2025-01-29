@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 
-use nom_sql::BinaryOperator;
+use readyset_sql::ast::BinaryOperator;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 

@@ -594,8 +594,8 @@ fn trace(
 mod tests {
     use dataflow::utils::make_columns;
     use dataflow::{node, ops, Expr};
-    use nom_sql::OrderType;
     use readyset_data::DfType;
+    use readyset_sql::ast::OrderType;
 
     use super::*;
 

@@ -570,7 +570,7 @@ checksum = "37b2a672a2cb129a2e41c10b1224bb368f9f37a2b16b612598138befd7b37eb5"
 name = "catalog-tables"
 version = "0.0.1"
 dependencies = [
- "nom-sql",
+ "readyset-sql",
 ]
 
 [[package]]
@@ -1157,7 +1157,6 @@ dependencies = [
  "eui48",
  "growable-bloom-filter",
  "mysql_async",
- "nom-sql",
  "proptest",
  "rand",
  "rand_regex",
@@ -1183,7 +1182,6 @@ dependencies = [
  "mysql",
  "mysql_async",
  "native-tls",
- "nom-sql",
  "num_cpus",
  "postgres-native-tls",
  "readyset-errors",
@@ -1254,6 +1252,7 @@ dependencies = [
  "readyset-common",
  "readyset-data",
  "readyset-errors",
+ "readyset-sql",
  "readyset-util",
  "replication-offset",
  "rocksdb",
@@ -3277,7 +3276,6 @@ dependencies = [
 name = "nom-sql-arbitrary"
 version = "0.1.0"
 dependencies = [
- "nom-sql",
  "proptest",
  "readyset-sql",
  "readyset-util",
@@ -4039,7 +4037,6 @@ dependencies = [
  "hex",
  "hmac",
  "nom",
- "nom-sql",
  "postgres",
  "postgres-native-tls",
  "postgres-protocol",
@@ -4047,6 +4044,7 @@ dependencies = [
  "rand",
  "readyset-adapter-types",
  "readyset-data",
+ "readyset-sql",
  "readyset-tracing",
  "readyset-util",
  "rust_decimal",
@@ -4095,7 +4093,6 @@ dependencies = [
  "itertools 0.13.0",
  "lazy_static",
  "mysql_async",
- "nom-sql",
  "parking_lot",
  "proptest",
  "rand",
@@ -4521,9 +4518,9 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "metrics",
- "nom-sql",
  "readyset-client",
  "readyset-errors",
+ "readyset-sql",
  "serde",
  "serde_json",
 ]
@@ -4537,7 +4534,6 @@ dependencies = [
  "database-utils",
  "mysql-srv",
  "mysql_async",
- "nom-sql",
  "psql-srv",
  "readyset-adapter",
  "readyset-client",
@@ -4698,7 +4694,6 @@ dependencies = [
  "lazy_static",
  "merging-interval-tree",
  "metrics",
- "nom-sql",
  "partial-map",
  "petgraph",
  "pin-project",
@@ -4710,6 +4705,7 @@ dependencies = [
  "readyset-common",
  "readyset-data",
  "readyset-errors",
+ "readyset-sql",
  "readyset-util",
  "regex",
  "replication-offset",
@@ -4741,7 +4737,6 @@ dependencies = [
  "futures",
  "mysql_async",
  "mysql_common",
- "nom-sql",
  "proptest",
  "readyset-adapter",
  "readyset-client-test-helpers",
@@ -4767,7 +4762,6 @@ dependencies = [
  "futures",
  "hyper 0.14.28",
  "mysql_async",
- "nom-sql",
  "petgraph",
  "readyset-sql",
  "readyset-util",
@@ -5306,8 +5300,8 @@ name = "replication-offset"
 version = "0.1.0"
 dependencies = [
  "bytes",
- "nom-sql",
  "readyset-errors",
+ "readyset-sql",
  "readyset-util",
  "serde",
  "serde_json",
@@ -6264,7 +6258,6 @@ dependencies = [
  "futures",
  "itertools 0.13.0",
  "libc",
- "nom-sql",
  "num_cpus",
  "parking_lot",
  "pprof",

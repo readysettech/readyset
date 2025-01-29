@@ -5,9 +5,9 @@ use std::convert::TryInto;
 
 use dataflow_state::PointKey;
 use itertools::Itertools;
-use nom_sql::OrderType;
 use readyset_client::internal;
 use readyset_errors::{internal, internal_err, invariant, ReadySetResult};
+use readyset_sql::ast::OrderType;
 use readyset_util::Indices;
 use serde::{Deserialize, Serialize};
 use tracing::trace;

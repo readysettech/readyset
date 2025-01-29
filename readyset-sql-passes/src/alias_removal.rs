@@ -3,11 +3,11 @@ use std::mem;
 
 use itertools::Itertools;
 use nom_sql::analysis::visit_mut::{self, walk_select_statement, VisitorMut};
-use nom_sql::{
+use readyset_errors::ReadySetResult;
+use readyset_sql::ast::{
     Column, CommonTableExpr, JoinRightSide, Relation, SelectStatement, SqlIdentifier, SqlQuery,
     TableExpr, TableExprInner,
 };
-use readyset_errors::ReadySetResult;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum TableAliasRewrite {
@@ -235,10 +235,11 @@ impl AliasRemoval for SqlQuery {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{
-        parse_query, parser, BinaryOperator, Column, Expr, FieldDefinitionExpr, ItemPlaceholder,
-        JoinClause, JoinConstraint, JoinOperator, JoinRightSide, Literal, Relation,
-        SelectStatement, SqlQuery, TableExpr, TableExprInner,
+    use nom_sql::{parse_query, parser};
+    use readyset_sql::ast::{
+        BinaryOperator, Column, Expr, FieldDefinitionExpr, ItemPlaceholder, JoinClause,
+        JoinConstraint, JoinOperator, JoinRightSide, Literal, Relation, SelectStatement, SqlQuery,
+        TableExpr, TableExprInner,
     };
     use readyset_sql::{Dialect, DialectDisplay};
 
@@ -333,7 +334,7 @@ mod tests {
 
     #[test]
     fn it_removes_nested_aliases() {
-        use nom_sql::{BinaryOperator, Expr};
+        use readyset_sql::ast::{BinaryOperator, Expr};
 
         let col_small = Column {
             name: "count(t.id)".into(),

@@ -5,9 +5,9 @@
 use std::collections::HashMap;
 
 use nom_sql::analysis::visit_mut::VisitorMut;
-use nom_sql::{
+use readyset_sql::ast::{
     CreateTableOption, CreateTableStatement, CreateViewStatement, Literal, SelectStatement,
-    SqlIdentifier,
+    ShowStatement, SqlIdentifier,
 };
 
 pub trait Anonymize {
@@ -189,24 +189,24 @@ impl<'ast> VisitorMut<'ast> for AnonymizeVisitor<'_> {
 
     fn visit_show_statement(
         &mut self,
-        show_statement: &'ast mut nom_sql::ShowStatement,
+        show_statement: &'ast mut ShowStatement,
     ) -> Result<(), Self::Error> {
         match show_statement {
-            nom_sql::ShowStatement::Tables(ref mut tables) => {
+            ShowStatement::Tables(ref mut tables) => {
                 if let Some(ref mut from_db) = tables.from_db {
                     self.anonymize_string(from_db)
                 }
             }
             // No anonymizaion needed
-            nom_sql::ShowStatement::Events
-            | nom_sql::ShowStatement::CachedQueries(..)
-            | nom_sql::ShowStatement::ProxiedQueries(..)
-            | nom_sql::ShowStatement::ReadySetStatus
-            | nom_sql::ShowStatement::ReadySetStatusAdapter
-            | nom_sql::ShowStatement::ReadySetMigrationStatus(..)
-            | nom_sql::ShowStatement::ReadySetVersion
-            | nom_sql::ShowStatement::ReadySetTables(..)
-            | nom_sql::ShowStatement::Connections => {}
+            ShowStatement::Events
+            | ShowStatement::CachedQueries(..)
+            | ShowStatement::ProxiedQueries(..)
+            | ShowStatement::ReadySetStatus
+            | ShowStatement::ReadySetStatusAdapter
+            | ShowStatement::ReadySetMigrationStatus(..)
+            | ShowStatement::ReadySetVersion
+            | ShowStatement::ReadySetTables(..)
+            | ShowStatement::Connections => {}
         }
         Ok(())
     }
@@ -214,7 +214,6 @@ impl<'ast> VisitorMut<'ast> for AnonymizeVisitor<'_> {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::CreateTableStatement;
     use readyset_sql::Dialect;
 
     use super::*;

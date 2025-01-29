@@ -5,10 +5,10 @@ use std::convert::TryFrom;
 
 use dataflow_state::{MaterializedNodeState, PointKey, SnapshotMode};
 use itertools::Itertools;
-use nom_sql::Relation;
 use readyset_client::{Modification, Operation, TableOperation};
 use readyset_data::{DfValue, DfValueKind};
 use readyset_errors::ReadySetResult;
+use readyset_sql::ast::Relation;
 use readyset_util::redacted::Sensitive;
 use readyset_util::Indices;
 use replication_offset::ReplicationOffset;

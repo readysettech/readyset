@@ -6,8 +6,8 @@
 use std::time::Duration;
 
 use metrics::{counter, gauge, histogram};
-use nom_sql::Relation;
 use readyset_client::metrics::recorded;
+use readyset_sql::ast::Relation;
 
 use crate::{Packet, PacketDiscriminants};
 

@@ -4,15 +4,15 @@ use std::iter;
 
 use itertools::Itertools;
 use nom_sql::analysis::visit::{self, Visitor};
-use nom_sql::{
-    BinaryOperator, Column, ColumnConstraint, CreateTableBody, DeleteStatement, Expr,
-    InsertStatement, Literal, SelectStatement, SqlQuery, TableKey, UpdateStatement,
-};
 use readyset_client::{ColumnSchema, Modification, Operation};
 use readyset_data::{Collation, DfType, DfValue, Dialect, TimestampTz};
 use readyset_errors::{
     bad_request_err, invalid_query, invalid_query_err, invariant, invariant_eq, unsupported,
     unsupported_err, ReadySetResult,
+};
+use readyset_sql::ast::{
+    self, BinaryOperator, Column, ColumnConstraint, CreateTableBody, DeleteStatement, Expr,
+    InValue, InsertStatement, Literal, SelectStatement, SqlQuery, TableKey, UpdateStatement,
 };
 
 fn flatten_column_literal(
@@ -208,7 +208,7 @@ impl<'ast> Visitor<'ast> for BinopsParameterColumnsVisitor<'ast> {
             },
             Expr::In {
                 lhs,
-                rhs: nom_sql::InValue::List(ref exprs),
+                rhs: InValue::List(ref exprs),
                 negated,
             } if exprs
                 .iter()
@@ -596,7 +596,7 @@ pub(crate) fn coerce_params(
 
 pub(crate) fn create_dummy_column(name: &str) -> ColumnSchema {
     ColumnSchema {
-        column: nom_sql::Column {
+        column: ast::Column {
             name: name.into(),
             table: None,
         },
@@ -640,8 +640,8 @@ macro_rules! create_dummy_schema {
 #[cfg(test)]
 mod tests {
 
-    use nom_sql::{self, parse_create_table, SqlQuery};
-    use readyset_sql::Dialect;
+    use nom_sql::{self, parse_create_table};
+    use readyset_sql::{ast::SqlQuery, Dialect};
 
     use super::*;
 

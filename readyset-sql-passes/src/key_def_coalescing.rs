@@ -1,4 +1,4 @@
-use nom_sql::{ColumnConstraint, ColumnSpecification, CreateTableStatement, TableKey};
+use readyset_sql::ast::{ColumnConstraint, ColumnSpecification, CreateTableStatement, TableKey};
 
 pub trait KeyDefinitionCoalescing {
     fn coalesce_key_definitions(self) -> Self;
@@ -48,13 +48,13 @@ impl KeyDefinitionCoalescing for CreateTableStatement {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{Column, CreateTableBody, Relation, SqlType};
+    use readyset_sql::ast::{Column, CreateTableBody, Relation, SqlType};
 
     use super::*;
 
     #[test]
     fn it_coalesces_pkeys() {
-        use nom_sql::CreateTableStatement;
+        use readyset_sql::ast::CreateTableStatement;
 
         // CREATE TABLE t (id text PRIMARY KEY, val text)
         // -->

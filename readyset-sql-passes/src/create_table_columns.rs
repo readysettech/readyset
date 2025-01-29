@@ -1,5 +1,5 @@
 use nom_sql::analysis::visit_mut::{self, VisitorMut};
-use nom_sql::{Column, CreateTableStatement, Relation};
+use readyset_sql::ast::{Column, CreateTableStatement, Relation};
 
 #[derive(Debug, Default)]
 struct CreateTableColumnsVisitor {

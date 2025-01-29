@@ -31,7 +31,6 @@ use failpoint_macros::set_failpoint;
 use futures::stream::{self, FuturesUnordered, StreamExt, TryStreamExt};
 use futures::{FutureExt, TryFutureExt, TryStream};
 use metrics::{gauge, histogram};
-use nom_sql::{NonReplicatedRelation, Relation, SqlIdentifier};
 use petgraph::visit::{Bfs, IntoNodeReferences};
 use petgraph::Direction;
 use rand::Rng;
@@ -53,6 +52,7 @@ use readyset_data::{DfValue, Dialect};
 use readyset_errors::{
     internal, internal_err, invariant_eq, NodeType, ReadySetError, ReadySetResult,
 };
+use readyset_sql::ast::{NonReplicatedRelation, Relation, SqlIdentifier};
 #[cfg(feature = "failure_injection")]
 use readyset_util::failpoints;
 use replication_offset::{ReplicationOffset, ReplicationOffsets};

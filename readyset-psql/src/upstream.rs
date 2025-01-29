@@ -5,7 +5,6 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::StreamExt;
-use nom_sql::{SqlIdentifier, StartTransactionStatement};
 use pgsql::types::Type;
 use pgsql::{GenericResult, ResultStream, Row, SimpleQueryMessage};
 use postgres_types::Kind;
@@ -16,6 +15,7 @@ use readyset_adapter_types::DeallocateId;
 use readyset_client_metrics::recorded;
 use readyset_data::DfValue;
 use readyset_errors::{internal_err, invariant_eq, unsupported, ReadySetError, ReadySetResult};
+use readyset_sql::ast::{SqlIdentifier, StartTransactionStatement};
 use tokio_postgres as pgsql;
 use tokio_postgres::SimpleQueryStream;
 use tracing::{debug, info_span};

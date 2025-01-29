@@ -26,10 +26,7 @@ use dataflow::{
 };
 use futures::{join, StreamExt};
 use itertools::Itertools;
-use nom_sql::{
-    parse_create_table, parse_create_view, parse_query, parse_select_statement, OrderType,
-    Relation, SqlQuery,
-};
+use nom_sql::{parse_create_table, parse_create_view, parse_query, parse_select_statement};
 use readyset_client::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use readyset_client::consistency::Timestamp;
 use readyset_client::internal::LocalNodeIndex;
@@ -37,6 +34,8 @@ use readyset_client::recipe::changelist::{Change, ChangeList, CreateCache};
 use readyset_client::{KeyComparison, Modification, SchemaType, ViewPlaceholder, ViewQuery};
 use readyset_data::{Bound, DfType, DfValue, Dialect, IntoBoundedRange};
 use readyset_errors::ReadySetError::{self, RpcFailed, SelectQueryCreationFailed};
+use readyset_sql::ast;
+use readyset_sql::ast::{OrderType, Relation, SqlQuery};
 use readyset_util::eventually;
 use readyset_util::shutdown::ShutdownSender;
 use rust_decimal::prelude::ToPrimitive;
@@ -1618,7 +1617,7 @@ async fn view_connection_churn() {
 
     let mut builder = Builder::for_tests();
     builder.set_sharding(Some(DEFAULT_SHARDING));
-    builder.set_persistence(get_persistence_params("connection_churn"));
+    builder.set_persistence(get_persistence_params("view_connection_churn"));
     let (mut g, shutdown_tx) = builder.start(authority.clone()).await.unwrap();
 
     g.extend_recipe(
@@ -1643,7 +1642,7 @@ async fn view_connection_churn() {
             tokio::spawn(async move {
                 let mut builder = Builder::for_tests();
                 builder.set_sharding(Some(DEFAULT_SHARDING));
-                builder.set_persistence(get_persistence_params("connection_churn"));
+                builder.set_persistence(get_persistence_params("view_connection_churn"));
                 let (mut g, shutdown_tx) = builder.start(authority.clone()).await.unwrap();
 
                 g.view("AID")
@@ -1677,7 +1676,7 @@ async fn table_connection_churn() {
 
     let mut builder = Builder::for_tests();
     builder.set_sharding(Some(DEFAULT_SHARDING));
-    builder.set_persistence(get_persistence_params("connection_churn"));
+    builder.set_persistence(get_persistence_params("table_connection_churn"));
     let (mut g, shutdown_tx) = builder.start(authority.clone()).await.unwrap();
 
     sleep().await;
@@ -1701,7 +1700,7 @@ async fn table_connection_churn() {
             tokio::spawn(async move {
                 let mut builder = Builder::for_tests();
                 builder.set_sharding(Some(DEFAULT_SHARDING));
-                builder.set_persistence(get_persistence_params("connection_churn"));
+                builder.set_persistence(get_persistence_params("table_connection_churn"));
                 let (mut g, shutdown_tx) = builder.start(authority.clone()).await.unwrap();
 
                 g.table("A")
@@ -4277,10 +4276,7 @@ async fn simple_pagination() {
     assert_eq!(
         q.key_map(),
         &[
-            (
-                ViewPlaceholder::OneToOne(1, nom_sql::BinaryOperator::Equal),
-                1
-            ),
+            (ViewPlaceholder::OneToOne(1, ast::BinaryOperator::Equal), 1),
             (
                 ViewPlaceholder::PageNumber {
                     offset_placeholder: 2,
@@ -7398,20 +7394,14 @@ async fn mixed_inclusive_range_and_equality() {
     assert_eq!(
         q.key_map(),
         &[
+            (ViewPlaceholder::OneToOne(4, ast::BinaryOperator::Equal), 3),
+            (ViewPlaceholder::OneToOne(2, ast::BinaryOperator::Equal), 1),
             (
-                ViewPlaceholder::OneToOne(4, nom_sql::BinaryOperator::Equal),
-                3
-            ),
-            (
-                ViewPlaceholder::OneToOne(2, nom_sql::BinaryOperator::Equal),
-                1
-            ),
-            (
-                ViewPlaceholder::OneToOne(1, nom_sql::BinaryOperator::GreaterOrEqual),
+                ViewPlaceholder::OneToOne(1, ast::BinaryOperator::GreaterOrEqual),
                 0
             ),
             (
-                ViewPlaceholder::OneToOne(3, nom_sql::BinaryOperator::GreaterOrEqual),
+                ViewPlaceholder::OneToOne(3, ast::BinaryOperator::GreaterOrEqual),
                 2
             )
         ]

@@ -81,11 +81,6 @@ use crossbeam_skiplist::SkipSet;
 use futures::future::{self, OptionFuture};
 use lru::LruCache;
 use mysql_common::row::convert::{FromRow, FromRowError};
-use nom_sql::{
-    AlterReadysetStatement, CacheInner, CreateCacheStatement, DeallocateStatement, DeleteStatement,
-    DropCacheStatement, InsertStatement, Relation, SelectStatement, SetStatement, ShowStatement,
-    SqlIdentifier, SqlQuery, StatementIdentifier, UpdateStatement, UseStatement,
-};
 use readyset_adapter_types::{DeallocateId, ParsedCommand};
 use readyset_client::consensus::{Authority, AuthorityControl, CacheDDLRequest};
 use readyset_client::consistency::Timestamp;
@@ -101,6 +96,12 @@ use readyset_client_metrics::{
 use readyset_data::{DfType, DfValue};
 use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
 use readyset_errors::{internal, internal_err, unsupported, unsupported_err, ReadySetResult};
+use readyset_sql::ast::{
+    self, AlterReadysetStatement, CacheInner, CreateCacheStatement, DeallocateStatement,
+    DeleteStatement, DropCacheStatement, ExplainStatement, InsertStatement, Relation,
+    SelectStatement, SetStatement, ShowStatement, SqlIdentifier, SqlQuery, StatementIdentifier,
+    UpdateStatement, UseStatement,
+};
 use readyset_sql::{Dialect, DialectDisplay};
 use readyset_sql_passes::adapter_rewrites::{self, ProcessedQueryParams};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
@@ -155,8 +156,8 @@ enum PrepareMeta {
 
 #[derive(Debug)]
 struct PrepareSelectMeta {
-    stmt: nom_sql::SelectStatement,
-    rewritten: nom_sql::SelectStatement,
+    stmt: SelectStatement,
+    rewritten: SelectStatement,
     must_migrate: bool,
     should_do_noria: bool,
     always: bool,
@@ -1139,7 +1140,7 @@ where
     }
 
     /// Provides metadata required to prepare a select query
-    fn plan_prepare_select(&mut self, stmt: nom_sql::SelectStatement) -> PrepareMeta {
+    fn plan_prepare_select(&mut self, stmt: SelectStatement) -> PrepareMeta {
         match self.rewrite_select_and_check_readyset(&stmt) {
             Ok((rewritten, should_do_readyset)) => {
                 let status = self
@@ -1182,8 +1183,8 @@ where
     /// If the rewrite fails, the option will be None.
     fn rewrite_select_and_check_readyset(
         &mut self,
-        stmt: &nom_sql::SelectStatement,
-    ) -> ReadySetResult<(nom_sql::SelectStatement, bool)> {
+        stmt: &SelectStatement,
+    ) -> ReadySetResult<(SelectStatement, bool)> {
         let mut rewritten = stmt.clone();
         adapter_rewrites::process_query(&mut rewritten, self.noria.rewrite_params())?;
         // Attempt ReadySet unless the query is unsupported or dropped
@@ -2108,7 +2109,7 @@ where
 
             // Add count separately with a different type (UnsignedInt)
             let count_schema = ColumnSchema {
-                column: nom_sql::Column {
+                column: ast::Column {
                     name: "count".into(),
                     table: None,
                 },
@@ -2283,21 +2284,17 @@ where
         let start = Instant::now();
 
         let res = match query {
-            SqlQuery::Explain(nom_sql::ExplainStatement::LastStatement) => {
-                self.explain_last_statement()
-            }
-            SqlQuery::Explain(nom_sql::ExplainStatement::Graphviz {
+            SqlQuery::Explain(ExplainStatement::LastStatement) => self.explain_last_statement(),
+            SqlQuery::Explain(ExplainStatement::Graphviz {
                 simplified,
                 for_cache,
             }) => self.noria.graphviz(*simplified, for_cache.clone()).await,
-            SqlQuery::Explain(nom_sql::ExplainStatement::Domains) => {
-                self.noria.explain_domains().await
-            }
-            SqlQuery::Explain(nom_sql::ExplainStatement::Caches) => self.explain_caches().await,
-            SqlQuery::Explain(nom_sql::ExplainStatement::Materializations) => {
+            SqlQuery::Explain(ExplainStatement::Domains) => self.noria.explain_domains().await,
+            SqlQuery::Explain(ExplainStatement::Caches) => self.explain_caches().await,
+            SqlQuery::Explain(ExplainStatement::Materializations) => {
                 self.noria.explain_materializations().await
             }
-            SqlQuery::Explain(nom_sql::ExplainStatement::CreateCache { inner, .. }) => {
+            SqlQuery::Explain(ExplainStatement::CreateCache { inner, .. }) => {
                 match inner {
                     Ok(inner) => {
                         let view_request = match inner {
@@ -3223,7 +3220,7 @@ where
     fn show_connections(&self) -> Result<noria_connector::QueryResult<'static>, ReadySetError> {
         let schema = SelectSchema {
             schema: Cow::Owned(vec![ColumnSchema {
-                column: nom_sql::Column {
+                column: ast::Column {
                     name: "remote_addr".into(),
                     table: None,
                 },

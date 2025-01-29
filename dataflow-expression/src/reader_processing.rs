@@ -3,10 +3,10 @@ use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use nom_sql::OrderType;
 use partial_map::InsertionOrder;
 use readyset_data::DfValue;
 use readyset_errors::{internal, ReadySetResult};
+use readyset_sql::ast::OrderType;
 use serde::{Deserialize, Serialize};
 
 /// Representation of an aggregate function

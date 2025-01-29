@@ -32,12 +32,13 @@ vec1 = { workspace = true }
 
 # local deps
 common = { path = "../readyset-common", package = "readyset-common" }
+partial-map = { path = "../partial-map" }
 readyset-alloc = { path = "../readyset-alloc" }
-readyset-util = { path = "../readyset-util" }
 readyset-client = { path = "../readyset-client" }
 readyset-data = { path = "../readyset-data" }
 readyset-errors = { path = "../readyset-errors" }
-partial-map = { path = "../partial-map" }
+readyset-sql = { path = "../readyset-sql" }
+readyset-util = { path = "../readyset-util" }
 replication-offset = { path = "../replication-offset" }
 
 [dev-dependencies]

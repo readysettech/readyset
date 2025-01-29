@@ -1,7 +1,6 @@
 use std::borrow::Cow;
 use std::convert::{TryFrom, TryInto};
 
-use nom_sql::SqlIdentifier;
 use psql_srv as ps;
 use readyset_adapter::backend::{
     self as cl, noria_connector, SinglePrepareResult, UpstreamPrepare,
@@ -11,6 +10,7 @@ use readyset_adapter_types::ParsedCommand;
 use readyset_client::results::{ResultIterator, Results};
 use readyset_client::ColumnSchema;
 use readyset_data::DfType;
+use readyset_sql::ast::{self, SqlIdentifier};
 use upstream::StatementMeta;
 
 use crate::resultset::Resultset;
@@ -107,7 +107,7 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                     schema: Cow::Owned(
                         vars.iter()
                             .map(|v| ColumnSchema {
-                                column: nom_sql::Column {
+                                column: ast::Column {
                                     name: v.name.clone(),
                                     table: None,
                                 },
@@ -135,7 +135,7 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                 let select_schema = SelectSchema(readyset_adapter::backend::SelectSchema {
                     schema: Cow::Owned(vec![
                         ColumnSchema {
-                            column: nom_sql::Column {
+                            column: ast::Column {
                                 name: "name".into(),
                                 table: None,
                             },
@@ -143,7 +143,7 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                             base: None,
                         },
                         ColumnSchema {
-                            column: nom_sql::Column {
+                            column: ast::Column {
                                 name: "value".into(),
                                 table: None,
                             },
@@ -173,7 +173,7 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                 let select_schema = SelectSchema(readyset_adapter::backend::SelectSchema {
                     schema: Cow::Owned(vec![
                         ColumnSchema {
-                            column: nom_sql::Column {
+                            column: ast::Column {
                                 name: col1_header.clone(),
                                 table: None,
                             },
@@ -181,7 +181,7 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                             base: None,
                         },
                         ColumnSchema {
-                            column: nom_sql::Column {
+                            column: ast::Column {
                                 name: col2_header.clone(),
                                 table: None,
                             },

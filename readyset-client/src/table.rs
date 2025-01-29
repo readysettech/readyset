@@ -15,12 +15,12 @@ use futures_util::stream::futures_unordered::FuturesUnordered;
 use futures_util::stream::TryStreamExt;
 use futures_util::{future, ready, Stream};
 use itertools::Either;
-use nom_sql::{CreateTableBody, NotReplicatedReason, Relation, SqlIdentifier};
 use petgraph::graph::NodeIndex;
 use readyset_data::DfValue;
 use readyset_errors::{
     internal, internal_err, rpc_err, table_err, unsupported, ReadySetError, ReadySetResult,
 };
+use readyset_sql::ast::{CreateTableBody, NotReplicatedReason, Relation, SqlIdentifier};
 use replication_offset::ReplicationOffset;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;

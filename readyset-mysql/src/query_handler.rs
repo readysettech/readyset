@@ -3,7 +3,6 @@ use std::collections::HashSet;
 use std::str::FromStr;
 
 use lazy_static::lazy_static;
-use nom_sql::{Column, Expr, FieldDefinitionExpr, Literal, SqlIdentifier, SqlQuery, VariableScope};
 use readyset_adapter::backend::noria_connector::QueryResult;
 use readyset_adapter::backend::SelectSchema;
 use readyset_adapter::{QueryHandler, SetBehavior};
@@ -11,6 +10,10 @@ use readyset_client::results::Results;
 use readyset_client::ColumnSchema;
 use readyset_data::{Collation, DfType, DfValue, TinyText};
 use readyset_errors::{ReadySetError, ReadySetResult};
+use readyset_sql::ast::{
+    Column, Expr, FieldDefinitionExpr, Literal, SetStatement, SqlIdentifier, SqlQuery,
+    VariableScope,
+};
 use tracing::warn;
 
 const MAX_ALLOWED_PACKET_VARIABLE_NAME: &str = "max_allowed_packet";
@@ -919,11 +922,11 @@ impl QueryHandler for MySqlQueryHandler {
         }
     }
 
-    fn handle_set_statement(stmt: &nom_sql::SetStatement) -> SetBehavior {
+    fn handle_set_statement(stmt: &SetStatement) -> SetBehavior {
         use SetBehavior::*;
 
         match stmt {
-            nom_sql::SetStatement::Variable(set) => {
+            SetStatement::Variable(set) => {
                 if let Some(val) = set.variables.iter().find_map(|(var, val)| {
                     if var.name.as_str().eq_ignore_ascii_case("autocommit") {
                         Some(val)
@@ -973,18 +976,18 @@ impl QueryHandler for MySqlQueryHandler {
                     }
                 }))
             }
-            nom_sql::SetStatement::Names(names) => SetBehavior::proxy_if(
+            SetStatement::Names(names) => SetBehavior::proxy_if(
                 names.collation.is_none()
                     && matches!(&names.charset[..], "latin1" | "utf8" | "utf8mb4"),
             ),
-            nom_sql::SetStatement::PostgresParameter(_) => Unsupported,
+            SetStatement::PostgresParameter(_) => Unsupported,
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{SetStatement, SetVariables, Variable};
+    use readyset_sql::ast::{SetStatement, SetVariables, Variable};
 
     use super::*;
 

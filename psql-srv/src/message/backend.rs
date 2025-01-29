@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
-use nom_sql::SqlIdentifier;
 use postgres::error::ErrorPosition;
 pub use postgres::error::SqlState;
 use postgres::{Row, SimpleQueryRow};
 use postgres_types::Type;
+use readyset_sql::ast::SqlIdentifier;
 use tokio_postgres::{OwnedField, SimpleQueryMessage};
 
 use crate::message::TransferFormat;

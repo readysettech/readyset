@@ -1,6 +1,5 @@
 use mysql_async::prelude::*;
 use mysql_async::ChangeUserOpts;
-use nom_sql::Relation;
 use readyset_adapter::backend::UnsupportedSetMode;
 use readyset_adapter::BackendBuilder;
 use readyset_client::query::QueryId;
@@ -9,6 +8,7 @@ use readyset_client_test_helpers::mysql_helpers::{last_query_info, MySQLAdapter}
 use readyset_client_test_helpers::{self, sleep, TestBuilder};
 use readyset_server::Handle;
 use readyset_server::NodeIndex;
+use readyset_sql::ast::Relation;
 use readyset_util::eventually;
 use readyset_util::shutdown::ShutdownSender;
 use test_utils::serial;
@@ -876,9 +876,9 @@ async fn switch_database_with_use() {
 async fn replication_failure_ignores_table() {
     readyset_tracing::init_test_logging();
     use mysql::serde_json;
-    use nom_sql::Relation;
     use readyset_adapter::backend::MigrationMode;
     use readyset_errors::ReadySetError;
+    use readyset_sql::ast::Relation;
 
     let (config, mut handle, shutdown_tx) = TestBuilder::default()
         .recreate_database(false)

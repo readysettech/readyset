@@ -12,7 +12,6 @@ use failpoint_macros::set_failpoint;
 use futures::future::Either;
 use hyper::http::{Method, StatusCode};
 use metrics::{counter, gauge, histogram};
-use nom_sql::Relation;
 use readyset_client::consensus::{
     Authority, AuthorityControl, AuthorityWorkerHeartbeatResponse, CacheDDLRequest,
     GetLeaderResult, WorkerDescriptor, WorkerId, WorkerSchedulingConfig,
@@ -24,6 +23,7 @@ use readyset_client::utils::retry_with_exponential_backoff;
 use readyset_client::ControllerDescriptor;
 use readyset_data::Dialect;
 use readyset_errors::{internal, internal_err, ReadySetError, ReadySetResult};
+use readyset_sql::ast::Relation;
 use readyset_telemetry_reporter::TelemetrySender;
 #[cfg(feature = "failure_injection")]
 use readyset_util::failpoints;
@@ -1337,16 +1337,14 @@ mod tests {
     use std::collections::BTreeMap;
 
     use dataflow::DomainIndex;
-    use nom_sql::{
-        parse_create_table, parse_select_statement, NonReplicatedRelation, NotReplicatedReason,
-        Relation,
-    };
+    use nom_sql::{parse_create_table, parse_select_statement};
     use readyset_client::debug::info::KeyCount;
     use readyset_client::recipe::changelist::{Change, ChangeList};
     use readyset_client::{
         PersistencePoint, TableOperation, TableReplicationStatus, TableStatus, ViewCreateRequest,
     };
     use readyset_data::Dialect as DataDialect;
+    use readyset_sql::ast::{NonReplicatedRelation, NotReplicatedReason, Relation};
     use readyset_sql::Dialect;
     use readyset_util::eventually;
     use replication_offset::ReplicationOffset;

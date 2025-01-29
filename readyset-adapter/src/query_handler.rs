@@ -1,5 +1,5 @@
-use nom_sql::{SqlIdentifier, SqlQuery};
 use readyset_errors::ReadySetResult;
+use readyset_sql::ast::{SetStatement, SqlIdentifier, SqlQuery};
 
 use crate::backend::noria_connector;
 
@@ -46,5 +46,5 @@ pub trait QueryHandler: Sized + Send {
     /// Classify the given SET statement based on how we should handle it
     ///
     /// See the documentation of [`SetStatement`] for more information.
-    fn handle_set_statement(stmt: &nom_sql::SetStatement) -> SetBehavior;
+    fn handle_set_statement(stmt: &SetStatement) -> SetBehavior;
 }

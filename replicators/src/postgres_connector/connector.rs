@@ -5,7 +5,6 @@ use database_utils::UpstreamConfig;
 #[cfg(feature = "failure_injection")]
 use failpoint_macros::set_failpoint;
 use futures::FutureExt;
-use nom_sql::Relation;
 use pgsql::SimpleQueryMessage;
 use postgres_native_tls::MakeTlsConnector;
 use postgres_protocol::escape::escape_literal;
@@ -13,6 +12,7 @@ use readyset_client::{PersistencePoint, ReadySetHandle, TableOperation};
 use readyset_errors::{
     invariant, invariant_eq, set_failpoint_return_err, ReadySetError, ReadySetResult,
 };
+use readyset_sql::ast::Relation;
 #[cfg(feature = "failure_injection")]
 use readyset_util::failpoints;
 use readyset_util::select;

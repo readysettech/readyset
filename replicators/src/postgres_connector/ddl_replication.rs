@@ -38,16 +38,17 @@
 //!
 //! [dialect]: readyset_sql::Dialect
 
-use nom_sql::{
-    parse_query, AlterTableStatement, Column, ColumnConstraint, ColumnSpecification,
-    CreateTableBody, CreateTableStatement, CreateViewStatement, NonReplicatedRelation,
-    NotReplicatedReason, Relation, SqlQuery, SqlType, TableKey,
-};
+use nom_sql::parse_query;
 use pgsql::tls::MakeTlsConnect;
 use readyset_client::recipe::changelist::{AlterTypeChange, Change, PostgresTableMetadata};
 use readyset_data::{DfType, PgEnumMetadata};
 use readyset_errors::ReadySetError::ReplicationFailed;
 use readyset_errors::ReadySetResult;
+use readyset_sql::ast::{
+    AlterTableStatement, Column, ColumnConstraint, ColumnSpecification, CreateTableBody,
+    CreateTableStatement, CreateViewStatement, NonReplicatedRelation, NotReplicatedReason,
+    Relation, SqlQuery, SqlType, TableKey,
+};
 use readyset_sql::Dialect;
 use serde::{Deserialize, Deserializer};
 use tokio_postgres as pgsql;
@@ -345,11 +346,11 @@ mod tests {
     use std::ops::{Deref, DerefMut};
     use std::time::Duration;
 
-    use nom_sql::{
-        ColumnSpecification, CreateViewStatement, Expr, FieldDefinitionExpr, Relation,
-        SelectSpecification, SqlType, TableExpr, TableKey,
-    };
     use pgsql::NoTls;
+    use readyset_sql::ast::{
+        AlterTableDefinition, ColumnSpecification, CreateViewStatement, Expr, FieldDefinitionExpr,
+        Relation, SelectSpecification, SqlType, TableExpr, TableKey,
+    };
     use test_utils::serial;
     use tokio::task::JoinHandle;
     use tokio::time::sleep;
@@ -672,9 +673,10 @@ mod tests {
                 assert_eq!(stmt.table.name, "t");
                 assert_eq!(
                     stmt.definitions.unwrap(),
-                    vec![nom_sql::AlterTableDefinition::AddColumn(
-                        ColumnSpecification::new("y".into(), SqlType::Int(None),)
-                    ),]
+                    vec![AlterTableDefinition::AddColumn(ColumnSpecification::new(
+                        "y".into(),
+                        SqlType::Int(None),
+                    )),]
                 );
             }
             _ => panic!("Unexpected DDL event data: {:?}", ddl.data),
@@ -709,7 +711,7 @@ mod tests {
                 assert_eq!(stmt.table.name, "t");
                 assert_eq!(
                     stmt.definitions.unwrap(),
-                    vec![nom_sql::AlterTableDefinition::RenameColumn {
+                    vec![AlterTableDefinition::RenameColumn {
                         name: "x".into(),
                         new_name: "y".into()
                     },]

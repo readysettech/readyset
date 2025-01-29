@@ -3,9 +3,9 @@ use std::fmt::{self, Display};
 
 use dataflow_state::MaterializedNodeState;
 use itertools::Itertools;
-use nom_sql::Relation;
 use readyset_client::{self, KeyComparison, PacketData, PacketTrace};
 use readyset_data::DfType;
+use readyset_sql::ast::Relation;
 use serde::{Deserialize, Serialize};
 use strum_macros::{EnumCount, EnumDiscriminants, EnumIter, IntoStaticStr};
 use url::Url;

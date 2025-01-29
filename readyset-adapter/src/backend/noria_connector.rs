@@ -6,10 +6,6 @@ use std::sync::{atomic, Arc};
 use std::time::Instant;
 
 use itertools::Itertools;
-use nom_sql::{
-    self, ColumnConstraint, DeleteStatement, Expr, InsertStatement, Relation, SetStatement,
-    SqlIdentifier, SqlQuery, TruncateStatement, UnaryOperator, UpdateStatement,
-};
 use readyset_client::consistency::Timestamp;
 use readyset_client::internal::LocalNodeIndex;
 use readyset_client::query::QueryId;
@@ -26,6 +22,11 @@ use readyset_errors::{
     ReadySetResult,
 };
 use readyset_server::worker::readers::{CallResult, ReadRequestHandler};
+use readyset_sql::ast::{
+    self, ColumnConstraint, CreateViewStatement, DeleteStatement, Expr, InsertStatement, Relation,
+    SelectStatement, SetStatement, SqlIdentifier, SqlQuery, TruncateStatement, UnaryOperator,
+    UpdateStatement,
+};
 use readyset_sql::DialectDisplay;
 use readyset_sql_passes::adapter_rewrites::{self, AdapterRewriteParams, ProcessedQueryParams};
 use readyset_util::redacted::Sensitive;
@@ -356,7 +357,7 @@ pub(crate) enum ExecuteSelectContext<'ctx> {
         params: &'ctx [DfValue],
     },
     AdHoc {
-        statement: &'ctx nom_sql::SelectStatement,
+        statement: &'ctx SelectStatement,
         create_if_missing: bool,
         processed_query_params: ProcessedQueryParams,
     },
@@ -449,7 +450,7 @@ impl NoriaConnector {
         let schema = SelectSchema {
             schema: Cow::Owned(vec![
                 ColumnSchema {
-                    column: nom_sql::Column {
+                    column: ast::Column {
                         name: "domain".into(),
                         table: None,
                     },
@@ -457,7 +458,7 @@ impl NoriaConnector {
                     base: None,
                 },
                 ColumnSchema {
-                    column: nom_sql::Column {
+                    column: ast::Column {
                         name: "worker".into(),
                         table: None,
                     },
@@ -515,7 +516,7 @@ impl NoriaConnector {
             schema: cols
                 .iter()
                 .map(|(name, column_type)| ColumnSchema {
-                    column: nom_sql::Column {
+                    column: ast::Column {
                         name: name.into(),
                         table: None,
                     },
@@ -581,10 +582,7 @@ impl NoriaConnector {
         Ok(table_handle.node)
     }
 
-    pub async fn handle_insert(
-        &mut self,
-        q: &nom_sql::InsertStatement,
-    ) -> ReadySetResult<QueryResult<'_>> {
+    pub async fn handle_insert(&mut self, q: &InsertStatement) -> ReadySetResult<QueryResult<'_>> {
         let table = &q.table;
 
         // create a mutator if we don't have one for this table already
@@ -636,7 +634,7 @@ impl NoriaConnector {
 
     pub async fn prepare_insert(
         &mut self,
-        mut statement: nom_sql::InsertStatement,
+        mut statement: InsertStatement,
     ) -> ReadySetResult<PrepareResult> {
         trace!(table = %statement.table.name, "insert::access mutator");
         let mutator = self
@@ -712,7 +710,7 @@ impl NoriaConnector {
 
     pub(crate) async fn handle_delete(
         &mut self,
-        q: &nom_sql::DeleteStatement,
+        q: &DeleteStatement,
     ) -> ReadySetResult<QueryResult<'_>> {
         let cond = q
             .where_clause
@@ -760,7 +758,7 @@ impl NoriaConnector {
 
     pub(crate) async fn handle_update<'a>(
         &'a mut self,
-        q: &nom_sql::UpdateStatement,
+        q: &UpdateStatement,
     ) -> ReadySetResult<QueryResult<'a>> {
         self.do_update(Cow::Borrowed(q), None).await
     }
@@ -924,7 +922,7 @@ impl NoriaConnector {
                 ["table", "status", "description"]
                     .iter()
                     .map(|name| ColumnSchema {
-                        column: nom_sql::Column {
+                        column: ast::Column {
                             name: name.into(),
                             table: None,
                         },
@@ -1032,7 +1030,7 @@ impl NoriaConnector {
     pub async fn handle_create_cached_query(
         &mut self,
         name: &mut Option<Relation>,
-        statement: &nom_sql::SelectStatement,
+        statement: &SelectStatement,
         override_schema_search_path: Option<Vec<SqlIdentifier>>,
         always: bool,
         concurrently: bool,
@@ -1100,7 +1098,7 @@ impl NoriaConnector {
     /// for the name if it is not cached.
     pub(crate) async fn get_view_name_cached(
         &mut self,
-        q: &nom_sql::SelectStatement,
+        q: &SelectStatement,
         is_prepared: bool,
         create_if_not_exist: bool,
         override_schema_search_path: Option<Vec<SqlIdentifier>>,
@@ -1477,7 +1475,7 @@ impl NoriaConnector {
 
     pub(crate) async fn prepare_select(
         &mut self,
-        mut statement: nom_sql::SelectStatement,
+        mut statement: SelectStatement,
         create_if_not_exist: bool,
         override_schema_search_path: Option<Vec<SqlIdentifier>>,
     ) -> ReadySetResult<PrepareResult> {
@@ -1636,7 +1634,7 @@ impl NoriaConnector {
 
     pub(crate) async fn handle_create_view<'a>(
         &'a mut self,
-        q: &nom_sql::CreateViewStatement,
+        q: &CreateViewStatement,
     ) -> ReadySetResult<QueryResult<'a>> {
         // TODO(malte): we should perhaps check our usual caches here, rather than just blindly
         // doing a migration on ReadySet every time. On the other hand, CREATE VIEW is rare...
@@ -1656,7 +1654,7 @@ impl NoriaConnector {
     /// cache for the query.
     pub async fn update_view_cache(
         &mut self,
-        statement: &nom_sql::SelectStatement,
+        statement: &SelectStatement,
         override_schema_search_path: Option<Vec<SqlIdentifier>>,
         create_if_not_exists: bool,
         is_prepared: bool,

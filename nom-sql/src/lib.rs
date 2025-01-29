@@ -53,9 +53,6 @@ pub mod whitespace;
 
 pub type NomSqlResult<I, O> = IResult<LocatedSpan<I>, O, NomSqlError<I>>;
 
-// TODO(mvzink): Remove after switching other crates to readyset-sql
-pub use readyset_sql::ast::*;
-
 #[derive(PartialEq, Eq)]
 pub struct NomSqlError<I: AsBytes> {
     pub input: LocatedSpan<I>,

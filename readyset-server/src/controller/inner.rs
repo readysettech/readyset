@@ -18,7 +18,6 @@ use futures::future::Fuse;
 use futures::{Future, FutureExt};
 use hyper::Method;
 use metrics::gauge;
-use nom_sql::Relation;
 use readyset_client::consensus::{Authority, AuthorityControl};
 use readyset_client::debug::stats::PersistentStats;
 use readyset_client::internal::ReplicaAddress;
@@ -29,6 +28,7 @@ use readyset_client::recipe::{ChangeList, ExtendRecipeResult, ExtendRecipeSpec, 
 use readyset_client::status::{ReadySetControllerStatus, SnapshotStatus};
 use readyset_client::{GraphvizOptions, ViewCreateRequest, WorkerDescriptor};
 use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
+use readyset_sql::ast::Relation;
 use readyset_telemetry_reporter::TelemetrySender;
 #[cfg(feature = "failure_injection")]
 use readyset_util::failpoints;

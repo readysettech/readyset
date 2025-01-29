@@ -7,7 +7,7 @@ use anyhow::{bail, Error};
 use chrono::{DateTime, FixedOffset, Utc};
 use enum_display_derive::Display;
 use nom_sql::analysis::visit_mut::VisitorMut;
-use nom_sql::{Expr, ItemPlaceholder, Literal, SelectStatement, SqlQuery};
+use readyset_sql::ast::{Expr, ItemPlaceholder, Literal, SelectStatement, SqlQuery};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, Lines};
 
 #[derive(Clone, Debug, Display, Eq, PartialEq)]
@@ -281,8 +281,8 @@ impl<R: AsyncBufRead + Unpin> Stream<R> {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{parse_query, Literal};
-    use readyset_sql::Dialect;
+    use nom_sql::parse_query;
+    use readyset_sql::{ast, Dialect};
 
     use super::*;
 
@@ -365,7 +365,7 @@ mod tests {
         assert_eq!(
             values,
             vec![
-                Literal::Double(nom_sql::Double {
+                Literal::Double(ast::Double {
                     value: 3.14,
                     precision: 2,
                 }),

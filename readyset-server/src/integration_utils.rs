@@ -4,11 +4,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use dataflow::{DurabilityMode, PersistenceParameters};
-use nom_sql::Relation;
 use readyset_client::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use readyset_client::metrics::client::MetricsClient;
 use readyset_client::metrics::{DumpedMetric, DumpedMetricValue, MetricsDump};
 use readyset_errors::{ReadySetError, ReadySetResult};
+use readyset_sql::ast::Relation;
 use readyset_util::shutdown::ShutdownSender;
 
 use crate::metrics::{

@@ -37,13 +37,13 @@ use std::hash::{Hash, Hasher};
 
 use dataflow_expression::Dialect;
 use nom_locate::LocatedSpan;
-use nom_sql::{
-    AlterTableStatement, CacheInner, CreateCacheStatement, CreateTableStatement,
-    CreateViewStatement, DropTableStatement, DropViewStatement, NonReplicatedRelation, Relation,
-    SelectStatement, SqlIdentifier, SqlQuery,
-};
 use readyset_data::DfType;
 use readyset_errors::{internal, unsupported, ReadySetError, ReadySetResult};
+use readyset_sql::ast::{
+    AlterTableDefinition, AlterTableStatement, CacheInner, CreateCacheStatement,
+    CreateTableStatement, CreateViewStatement, DropTableStatement, DropViewStatement,
+    NonReplicatedRelation, Relation, SelectStatement, SqlIdentifier, SqlQuery,
+};
 use readyset_sql_passes::adapter_rewrites::{self, AdapterRewriteParams};
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
@@ -433,14 +433,14 @@ impl Change {
             Change::AlterTable(alter_table) => {
                 if let Ok(definitions) = &alter_table.definitions {
                     definitions.iter().any(|def| match def {
-                        nom_sql::AlterTableDefinition::AddColumn(_)
-                        | nom_sql::AlterTableDefinition::AlterColumn { .. }
-                        | nom_sql::AlterTableDefinition::DropColumn { .. }
-                        | nom_sql::AlterTableDefinition::ChangeColumn { .. }
-                        | nom_sql::AlterTableDefinition::RenameColumn { .. }
-                        | nom_sql::AlterTableDefinition::AddKey(_)
-                        | nom_sql::AlterTableDefinition::DropConstraint { .. } => true,
-                        nom_sql::AlterTableDefinition::ReplicaIdentity(_) => false,
+                        AlterTableDefinition::AddColumn(_)
+                        | AlterTableDefinition::AlterColumn { .. }
+                        | AlterTableDefinition::DropColumn { .. }
+                        | AlterTableDefinition::ChangeColumn { .. }
+                        | AlterTableDefinition::RenameColumn { .. }
+                        | AlterTableDefinition::AddKey(_)
+                        | AlterTableDefinition::DropConstraint { .. } => true,
+                        AlterTableDefinition::ReplicaIdentity(_) => false,
                     })
                 } else {
                     // We know it's an alter table, but we couldn't fully parse it.
@@ -564,8 +564,8 @@ mod parse {
     use nom::InputTake;
     use nom_locate::LocatedSpan;
     use nom_sql::whitespace::whitespace0;
-    use nom_sql::{sql_query, NomSqlError, NomSqlResult, SqlQuery};
-    use readyset_sql::Dialect;
+    use nom_sql::{sql_query, NomSqlError, NomSqlResult};
+    use readyset_sql::{ast::SqlQuery, Dialect};
 
     /// The canonical SQL dialect used for central ReadySet server recipes. All direct clients of
     /// readyset-server must use this dialect for their SQL recipes, and all adapters and client

@@ -1,8 +1,7 @@
 use std::env;
 
-use nom_sql::CreateTableStatement;
 use query_generator::{GeneratorState, QueryDialect, QuerySeed};
-use readyset_sql::{Dialect, DialectDisplay};
+use readyset_sql::{ast::CreateTableStatement, Dialect, DialectDisplay};
 use test_strategy::proptest;
 use tokio_postgres::NoTls;
 

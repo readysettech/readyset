@@ -19,10 +19,6 @@ use futures_util::future::TryFutureExt;
 use futures_util::stream::futures_unordered::FuturesUnordered;
 use futures_util::stream::{StreamExt, TryStreamExt};
 use futures_util::{future, ready, Stream};
-use nom_sql::{
-    BinaryOperator, Column, ColumnConstraint, ColumnSpecification, ItemPlaceholder, Literal,
-    Relation, SelectStatement, SqlIdentifier,
-};
 use petgraph::graph::NodeIndex;
 use proptest::arbitrary::Arbitrary;
 use rand::prelude::IteratorRandom;
@@ -32,6 +28,10 @@ use readyset_data::{
 };
 use readyset_errors::{
     internal, internal_err, rpc_err, unsupported, view_err, ReadySetError, ReadySetResult,
+};
+use readyset_sql::ast::{
+    BinaryOperator, Column, ColumnConstraint, ColumnSpecification, ItemPlaceholder, Literal,
+    Relation, SelectStatement, SqlIdentifier,
 };
 use readyset_sql_passes::anonymize::{Anonymize, Anonymizer};
 use readyset_tracing::child_span;
@@ -314,8 +314,8 @@ impl ViewSchema {
     }
 
     /// Get the indices of the columns in the schema that correspond to the list of provided
-    /// [`nom_sql::Column`]. The columns match if either the column name matches (the alias)
-    /// or the real base name
+    /// [`readyset_sql::ast::Column`]. The columns match if either the column name matches (the
+    /// alias) or the real base name
     pub fn indices_for_cols<'a, T>(
         &self,
         cols: T,
@@ -2094,8 +2094,7 @@ mod tests {
         use std::net::{IpAddr, Ipv4Addr};
 
         use dataflow_expression::Dialect as DfDialect;
-        use nom_sql::Column;
-        use readyset_sql::Dialect;
+        use readyset_sql::{ast::Column, Dialect};
         use vec1::vec1;
 
         use super::*;

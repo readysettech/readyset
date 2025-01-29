@@ -6,8 +6,9 @@ use anyhow::{anyhow, bail, Result};
 use clap::Parser;
 use database_utils::QueryableConnection;
 use metrics::Unit;
-use nom_sql::{parse_query, SqlQuery};
+use nom_sql::parse_query;
 use query_generator::{ColumnName, TableName};
+use readyset_sql::ast::SqlQuery;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 

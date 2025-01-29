@@ -7,9 +7,11 @@ use dataflow::ops::union;
 use dataflow::PostLookupAggregates;
 use derive_more::From;
 use itertools::Itertools;
-use nom_sql::{BinaryOperator, ColumnSpecification, Expr, OrderType, Relation, SqlIdentifier};
 use readyset_client::{PlaceholderIdx, ViewPlaceholder};
 use readyset_errors::{internal, ReadySetResult};
+use readyset_sql::ast::{
+    BinaryOperator, ColumnSpecification, Expr, OrderType, Relation, SqlIdentifier,
+};
 use readyset_sql::DialectDisplay;
 use serde::{Deserialize, Serialize};
 use vec1::Vec1;
@@ -30,7 +32,7 @@ pub enum ProjectExpr {
     /// Project an expression, using the given alias to name the resulting column (which will have
     /// no [`table`]). This should probably never contain [`Expr::Column`].
     ///
-    /// [`table`]: nom_sql::Column::table
+    /// [`table`]: readyset_sql::ast::Column::table
     Expr { expr: Expr, alias: SqlIdentifier },
 }
 

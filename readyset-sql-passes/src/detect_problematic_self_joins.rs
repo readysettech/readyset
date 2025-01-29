@@ -2,12 +2,12 @@ use std::collections::{HashMap, HashSet};
 use std::iter;
 
 use itertools::{Either, Itertools};
-use nom_sql::{
-    BinaryOperator, Column, Expr, FieldDefinitionExpr, JoinConstraint, JoinRightSide, Relation,
-    SelectStatement, SqlIdentifier, SqlQuery, TableExpr, TableExprInner,
-};
 use readyset_errors::{
     internal_err, invalid_query_err, unsupported, unsupported_err, ReadySetResult,
+};
+use readyset_sql::ast::{
+    BinaryOperator, Column, Expr, FieldDefinitionExpr, JoinConstraint, JoinRightSide, Relation,
+    SelectStatement, SqlIdentifier, SqlQuery, TableExpr, TableExprInner,
 };
 
 pub trait DetectProblematicSelfJoins: Sized {

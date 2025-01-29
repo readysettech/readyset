@@ -3,8 +3,8 @@ use std::cmp::Ordering;
 use std::sync::Arc;
 
 use dataflow_expression::{Expr, PostLookup, PostLookupAggregates};
-use nom_sql::OrderType;
 use readyset_data::DfValue;
+use readyset_sql::ast::OrderType;
 use smallvec::SmallVec;
 use streaming_iterator::StreamingIterator;
 use tournament_kway::{Comparator, StreamingTournament};

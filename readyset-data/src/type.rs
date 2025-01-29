@@ -2,11 +2,11 @@ use std::fmt;
 
 use enum_kinds::EnumKind;
 use itertools::Itertools;
-use nom_sql::{EnumVariants, Relation, SqlIdentifier, SqlType};
 use proptest::arbitrary::{any, any_with, Arbitrary};
 use proptest::prop_oneof;
 use proptest::strategy::{BoxedStrategy, Just};
 use readyset_errors::{unsupported, unsupported_err, ReadySetResult};
+use readyset_sql::ast::{EnumVariants, Relation, SqlIdentifier, SqlType};
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 

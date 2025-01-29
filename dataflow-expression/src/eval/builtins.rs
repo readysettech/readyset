@@ -11,10 +11,10 @@ use chrono::{
 use chrono_tz::Tz;
 use itertools::Either;
 use mysql_time::MySqlTime;
-use nom_sql::TimestampField;
 use readyset_data::dialect::SqlEngine;
 use readyset_data::{DfType, DfValue, TimestampTz};
 use readyset_errors::{internal, invalid_query_err, unsupported, ReadySetError, ReadySetResult};
+use readyset_sql::ast::TimestampField;
 use readyset_util::math::integer_rnd;
 use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 use rust_decimal::Decimal;

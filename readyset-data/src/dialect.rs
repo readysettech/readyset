@@ -1,6 +1,6 @@
 use std::fmt;
 
-use nom_sql::SqlType;
+use readyset_sql::ast::SqlType;
 use serde::{Deserialize, Serialize};
 
 use crate::DfType;

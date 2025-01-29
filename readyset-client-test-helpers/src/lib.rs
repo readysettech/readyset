@@ -10,7 +10,6 @@ use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
 use database_utils::{DatabaseURL, ReplicationServerId};
-use nom_sql::Relation;
 use readyset_adapter::backend::noria_connector::{NoriaConnector, ReadBehavior};
 use readyset_adapter::backend::{BackendBuilder, MigrationMode};
 use readyset_adapter::query_status_cache::{MigrationStyle, QueryStatusCache};
@@ -24,6 +23,7 @@ use readyset_data::upstream_system_props::{
 };
 use readyset_data::Dialect;
 use readyset_server::{Builder, DurabilityMode, Handle, LocalAuthority, ReadySetHandle};
+use readyset_sql::ast::Relation;
 use readyset_util::shared_cache::SharedCache;
 use readyset_util::shutdown::ShutdownSender;
 use tokio::net::{TcpListener, TcpStream};

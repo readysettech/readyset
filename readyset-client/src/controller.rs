@@ -9,12 +9,12 @@ use std::time::{Duration, Instant};
 
 use futures_util::future;
 use hyper::client::HttpConnector;
-use nom_sql::{NonReplicatedRelation, Relation};
 use parking_lot::RwLock;
 use petgraph::graph::NodeIndex;
 use readyset_errors::{
     internal, internal_err, rpc_err, rpc_err_no_downcast, ReadySetError, ReadySetResult,
 };
+use readyset_sql::ast::{NonReplicatedRelation, Relation};
 use readyset_sql_passes::adapter_rewrites::AdapterRewriteParams;
 use replication_offset::ReplicationOffsets;
 use serde::de::DeserializeOwned;

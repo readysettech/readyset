@@ -3,7 +3,7 @@ use std::fmt::Display;
 use std::{fmt, mem};
 
 use itertools::Itertools;
-use nom_sql::{self, Relation, SqlIdentifier};
+use readyset_sql::ast::{self, Relation, SqlIdentifier};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -92,8 +92,8 @@ impl Column {
     }
 }
 
-impl From<nom_sql::Column> for Column {
-    fn from(c: nom_sql::Column) -> Column {
+impl From<ast::Column> for Column {
+    fn from(c: ast::Column) -> Column {
         Column {
             table: c.table,
             aliases: vec![],
@@ -102,8 +102,8 @@ impl From<nom_sql::Column> for Column {
     }
 }
 
-impl<'a> From<&'a nom_sql::Column> for Column {
-    fn from(c: &'a nom_sql::Column) -> Column {
+impl<'a> From<&'a ast::Column> for Column {
+    fn from(c: &'a ast::Column) -> Column {
         Column {
             table: c.table.clone(),
             aliases: vec![],
@@ -138,8 +138,8 @@ impl PartialEq for Column {
     }
 }
 
-impl PartialEq<nom_sql::Column> for Column {
-    fn eq(&self, other: &nom_sql::Column) -> bool {
+impl PartialEq<ast::Column> for Column {
+    fn eq(&self, other: &ast::Column) -> bool {
         (self.name == other.name && self.table == other.table)
             || self.aliases.iter().any(|c| c == other)
     }
@@ -188,7 +188,7 @@ mod tests {
 
     #[test]
     fn column_from_nomsql_column() {
-        let nsc = nom_sql::Column::from("t.col");
+        let nsc = ast::Column::from("t.col");
         assert_eq!(
             Column::from(nsc),
             Column {
