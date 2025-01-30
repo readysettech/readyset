@@ -221,6 +221,18 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                     resultset: Resultset::from_stream(stream, first_row, field_types),
                 })
             }
+            Upstream(upstream::QueryResult::RowStream { first_row, stream }) => {
+                let field_types = first_row
+                    .columns()
+                    .iter()
+                    .map(|c| c.type_().clone())
+                    .collect();
+
+                Ok(ps::QueryResponse::Select {
+                    schema: vec![], // Schema isn't necessary for upstream execute results
+                    resultset: Resultset::from_row_stream(stream, first_row, field_types),
+                })
+            }
             Upstream(upstream::QueryResult::Write { num_rows_affected }) => {
                 Ok(Insert(num_rows_affected))
             }
