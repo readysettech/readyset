@@ -20,7 +20,7 @@ use readyset_adapter::backend::{
     noria_connector, QueryResult, SinglePrepareResult, UpstreamPrepare,
 };
 use readyset_adapter::upstream_database::LazyUpstream;
-use readyset_adapter_types::{DeallocateId, StatementId};
+use readyset_adapter_types::{DeallocateId, PreparedStatementType, StatementId};
 use readyset_data::{DfType, DfValue, DfValueKind};
 use readyset_errors::{internal, ReadySetError};
 use readyset_util::redacted::Sensitive;
@@ -552,7 +552,7 @@ where
 
         trace!("delegate");
         let prepare_result = self
-            .prepare(query, ())
+            .prepare(query, (), PreparedStatementType::Named)
             .await
             .map(|p| (p.statement_id, p.upstream_biased()));
         let res = match prepare_result {

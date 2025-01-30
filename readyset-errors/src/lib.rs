@@ -364,6 +364,10 @@ pub enum ReadySetError {
         statement_id: u32,
     },
 
+    /// An unnamed prepared statement is missing.
+    #[error("Unnamed prepared statement not found")]
+    UnnamedPreparedStatementMissing,
+
     /// An internal error has occurred
     ///
     /// This is produced by the [`internal!`] and [`invariant!`] macros, as an alternative to

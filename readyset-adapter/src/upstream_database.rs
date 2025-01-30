@@ -3,7 +3,7 @@ use std::fmt::Debug;
 
 use async_trait::async_trait;
 pub use database_utils::UpstreamConfig;
-use readyset_adapter_types::DeallocateId;
+use readyset_adapter_types::{DeallocateId, StatementId};
 use readyset_client_metrics::QueryDestination;
 use readyset_data::DfValue;
 use readyset_errors::ReadySetError;
@@ -12,7 +12,7 @@ use tracing::debug;
 
 /// Information about a statement that has been prepared in an [`UpstreamDatabase`]
 pub struct UpstreamPrepare<DB: UpstreamDatabase> {
-    pub statement_id: u32,
+    pub statement_id: StatementId,
     pub meta: DB::StatementMeta,
 }
 
@@ -73,7 +73,7 @@ pub trait UpstreamDatabase: Sized + Send + 'static {
     /// Extra data passed to [`prepare`] by the protocol shim
     ///
     /// [`prepare`](UpstreamDatabase::prepaare)
-    type PrepareData<'a>: Default + Send;
+    type PrepareData<'a>: Default + Send + Clone;
 
     /// Metadata passed to [`execute`] by the protocol shim
     ///

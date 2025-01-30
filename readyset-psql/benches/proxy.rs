@@ -28,7 +28,7 @@ use psql_srv::{
     Credentials, CredentialsNeeded, PrepareResponse, PsqlBackend, PsqlSrvRow, QueryResponse,
     TransferFormat,
 };
-use readyset_adapter_types::{DeallocateId, StatementId};
+use readyset_adapter_types::{DeallocateId, PreparedStatementType, StatementId};
 use readyset_data::DfValue;
 use readyset_psql::ParamRef;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -176,6 +176,7 @@ impl PsqlBackend for Backend {
         &mut self,
         query: &str,
         _parameter_data_types: &[Type],
+        _stmt_type: PreparedStatementType,
     ) -> Result<PrepareResponse, psql_srv::Error> {
         let stmt = self
             .upstream

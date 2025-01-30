@@ -7,7 +7,7 @@ use database_utils::TlsMode;
 use postgres::SimpleQueryMessage;
 use postgres_protocol::Oid;
 use postgres_types::{Kind, Type};
-use readyset_adapter_types::{DeallocateId, StatementId};
+use readyset_adapter_types::{DeallocateId, PreparedStatementType, StatementId};
 use smallvec::smallvec;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_postgres::CommandCompleteContents;
@@ -713,22 +713,19 @@ impl Protocol {
     ) -> Result<Response<B::Resultset>, Error> {
         self.state = State::Extended;
 
-        if prepared_statement_name.is_empty() {
-            if let Some(id) = self
-                .prepared_statements
-                .remove(prepared_statement_name as &str)
-                .map(|d| d.prepared_statement_id)
-            {
-                backend.on_close(DeallocateId::Numeric(id)).await?;
-                channel.clear_statement_param_types(prepared_statement_name);
-            }
-        }
+        let stmt_type = if prepared_statement_name.is_empty() {
+            PreparedStatementType::Unnamed
+        } else {
+            PreparedStatementType::Named
+        };
 
         let PrepareResponse {
             prepared_statement_id,
             param_schema,
             row_schema,
-        } = backend.on_prepare(query, &parameter_data_types).await?;
+        } = backend
+            .on_prepare(query, &parameter_data_types, stmt_type)
+            .await?;
         channel.set_statement_param_types(prepared_statement_name as &str, param_schema.clone());
         self.prepared_statements.insert(
             prepared_statement_name.to_string(),
@@ -1310,6 +1307,7 @@ mod tests {
             &mut self,
             query: &str,
             _parameter_data_types: &[Type],
+            _stmt_type: PreparedStatementType,
         ) -> Result<PrepareResponse, Error> {
             self.last_prepare = Some(query.to_string());
             if self.is_prepare_err {

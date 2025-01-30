@@ -303,7 +303,7 @@ impl UpstreamDatabase for MySqlUpstream {
             self.conn.close(old_stmt).await?;
         }
         Ok(UpstreamPrepare {
-            statement_id: statement.id(),
+            statement_id: StatementId::Named(statement.id()),
             meta: StatementMeta {
                 params: statement.params().to_owned(),
                 schema: statement.columns().to_owned(),

@@ -339,7 +339,10 @@ impl UpstreamDatabase for PostgreSqlUpstream {
             }
         }
 
-        Ok(UpstreamPrepare { statement_id, meta })
+        Ok(UpstreamPrepare {
+            statement_id: StatementId::Named(statement_id),
+            meta,
+        })
     }
 
     async fn query<'a>(&'a mut self, query: &'a str) -> Result<Self::QueryResult<'a>, Error> {

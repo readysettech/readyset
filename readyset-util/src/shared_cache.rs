@@ -198,6 +198,24 @@ where
         self.local.get_mut(key)
     }
 
+    /// Obtain a shared reference to the value associated with the given key.
+    ///
+    /// The first time this method is called per-[`LocalCache`], it will use synchronization to
+    /// access the key in the shared cache. After that, subsequent lookups will be local
+    pub async fn get<'a, Q>(&'a mut self, key: &Q) -> Option<&'a V>
+    where
+        Q: ?Sized + Hash + Eq + ToOwned<Owned = K>,
+        K: Borrow<Q>,
+    {
+        if !self.local.contains_key(key) {
+            let shared = self.shared.inner.read().await;
+            let v = shared.get(key)?;
+            self.local.insert(key.to_owned(), v.clone());
+        }
+
+        self.local.get(key)
+    }
+
     /// Insert a new key-value pair into the shared and local versions of this cache.
     pub async fn insert(&mut self, key: K, val: V)
     where
