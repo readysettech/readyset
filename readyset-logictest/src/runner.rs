@@ -656,6 +656,7 @@ impl TestScript {
                         Default::default(),
                         authority.clone(),
                     );
+                    let unnamed_metadata = SharedCache::new();
                     BackendBuilder::new()
                         .require_authentication(false)
                         .dialect($dialect)
@@ -666,6 +667,7 @@ impl TestScript {
                             authority,
                             status_reporter,
                             adapter_start_time,
+                            unnamed_metadata.new_local(),
                         )
                 }};
             }

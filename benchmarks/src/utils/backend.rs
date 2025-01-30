@@ -12,6 +12,7 @@ use readyset_client::consensus::Authority;
 use readyset_mysql::{MySqlQueryHandler, MySqlUpstream};
 use readyset_psql::{PostgreSqlQueryHandler, PostgreSqlUpstream};
 use readyset_sql::Dialect;
+use readyset_util::shared_cache::SharedCache;
 
 /// Represents a ReadySet adapter backend that may be for a MySQL upstream or a Postgres upstream
 pub enum Backend {
@@ -40,6 +41,7 @@ impl Backend {
                     authority.clone(),
                 );
 
+                let unnamed_metadata = SharedCache::new();
                 Ok(Self::MySql(
                     BackendBuilder::new()
                         .require_authentication(false)
@@ -52,6 +54,7 @@ impl Backend {
                             authority,
                             status_reporter,
                             adapter_start_time,
+                            unnamed_metadata.new_local(),
                         ),
                 ))
             }
@@ -64,6 +67,7 @@ impl Backend {
                     authority.clone(),
                 );
 
+                let unnamed_metadata = SharedCache::new();
                 Ok(Self::PostgreSql(
                     BackendBuilder::new()
                         .require_authentication(false)
@@ -76,6 +80,7 @@ impl Backend {
                             authority,
                             status_reporter,
                             adapter_start_time,
+                            unnamed_metadata.new_local(),
                         ),
                 ))
             }

@@ -53,7 +53,7 @@ pub trait UpstreamDestination {
 /// [`Reader`]: crate::backend::Reader
 /// [`Writer`]: crate::backend::Writer
 #[async_trait]
-pub trait UpstreamDatabase: Sized + Send {
+pub trait UpstreamDatabase: Sized + Send + 'static {
     /// The result returned by queries. Likely to be implemented as an enum containing a read or a
     /// write result.
     ///
@@ -68,7 +68,7 @@ pub trait UpstreamDatabase: Sized + Send {
     ///
     /// This type is used as a field of [`UpstreamPrepare`], returned from
     /// [`prepare`](UpstreamDatabase::prepaare)
-    type StatementMeta: Debug + Send + Clone + 'static;
+    type StatementMeta: Debug + Send + Sync + Clone + 'static;
 
     /// Extra data passed to [`prepare`] by the protocol shim
     ///
@@ -330,9 +330,11 @@ where
     where
         S: AsRef<str> + Send + Sync + 'a,
     {
-        let UpstreamPrepare { statement_id, meta } =
-            self.upstream().await?.prepare(query, data).await?;
-        Ok(UpstreamPrepare { statement_id, meta })
+        let prep = self.upstream().await?.prepare(query, data).await?;
+        Ok(UpstreamPrepare {
+            statement_id: prep.statement_id,
+            meta: prep.meta,
+        })
     }
 
     async fn execute<'a>(

@@ -264,6 +264,7 @@ impl TestBuilder {
         let auto_increments: Arc<RwLock<HashMap<Relation, AtomicUsize>>> = Arc::default();
         let view_name_cache = SharedCache::new();
         let view_cache = SharedCache::new();
+        let unnamed_metadata = SharedCache::new();
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
 
@@ -359,6 +360,7 @@ impl TestBuilder {
                             authority.clone(),
                             status_reporter,
                             adapter_start_time,
+                            unnamed_metadata.new_local(),
                         );
 
                     let mut backend_shutdown_rx_clone = backend_shutdown_rx_connection.clone();

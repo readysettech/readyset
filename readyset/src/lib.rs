@@ -728,6 +728,7 @@ where
         let auto_increments: Arc<RwLock<HashMap<Relation, AtomicUsize>>> = Arc::default();
         let view_name_cache = SharedCache::new();
         let view_cache = SharedCache::new();
+        let unnamed_prepared_statements = SharedCache::new();
         let connections: Arc<SkipSet<SocketAddr>> = Arc::default();
         let mut health_reporter = AdapterHealthReporter::new();
 
@@ -1156,6 +1157,7 @@ where
             let auto_increments = auto_increments.clone();
             let view_name_cache = view_name_cache.clone();
             let view_cache = view_cache.clone();
+            let unnamed_prepared_statements = unnamed_prepared_statements.clone();
             let mut connection_handler = self.connection_handler.clone();
             // If cache_ddl_address is not set, allow cache ddl from all addresses.
             let local_addr = s.local_addr()?;
@@ -1239,6 +1241,7 @@ where
                                     adapter_authority.clone(),
                                     status_reporter_clone,
                                     adapter_start_time,
+                                    unnamed_prepared_statements.new_local(),
                                 );
                                 connection_handler.process_connection(s, backend).await;
                             }

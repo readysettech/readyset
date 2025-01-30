@@ -106,6 +106,7 @@ use readyset_sql::{Dialect, DialectDisplay};
 use readyset_sql_passes::adapter_rewrites::{self, ProcessedQueryParams};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
 use readyset_util::redacted::Sensitive;
+use readyset_util::shared_cache::LocalCache;
 use readyset_version::READYSET_VERSION;
 use slab::Slab;
 use timestamp_service::client::{TimestampClient, WriteId, WriteKey};
@@ -325,6 +326,7 @@ impl BackendBuilder {
         Self::default()
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn build<DB: UpstreamDatabase, Handler>(
         self,
         noria: NoriaConnector,
@@ -333,6 +335,7 @@ impl BackendBuilder {
         authority: Arc<Authority>,
         status_reporter: ReadySetStatusReporter<DB>,
         adapter_start_time: SystemTime,
+        unnamed_prepared_statements: LocalCache<String, PreparedStatement<DB>>,
     ) -> Backend<DB, Handler> {
         metrics::gauge!(recorded::CONNECTED_CLIENTS).increment(1.0);
         metrics::counter!(recorded::CLIENT_CONNECTIONS_OPENED).increment(1);
@@ -362,6 +365,8 @@ impl BackendBuilder {
                 query_status_cache,
                 ticket: self.ticket,
                 timestamp_client: self.timestamp_client,
+                current_unnamed_prepared_statement: None,
+                unnamed_prepared_statements,
             },
             settings: BackendSettings {
                 slowlog: self.slowlog,
@@ -484,7 +489,7 @@ impl BackendBuilder {
 
 /// A [`PreparedStatement`] stores the data needed for an immediate execution of a prepared
 /// statement on either noria or the upstream connection.
-struct PreparedStatement<DB>
+pub struct PreparedStatement<DB>
 where
     DB: UpstreamDatabase,
 {
@@ -609,6 +614,17 @@ where
     parsed_query_cache: LruCache<String, SqlQuery>,
     // all queries previously prepared on noria or upstream, mapped by their ID.
     prepared_statements: Slab<PreparedStatement<DB>>,
+
+    // A cache of unnamed prepared statement metadata. Since we don't know the input/output types,
+    // we query the upstream to get the metadata *once per query signature*, across all connections,
+    // and stash the result in this cache. This is a slightly different use case versus the
+    // `prepared_statements` cache, which is used for prepared statements that are explicitly
+    // prepared by the client (and will be reused _on the same connection_).
+    #[allow(unused)]
+    unnamed_prepared_statements: LocalCache<String, PreparedStatement<DB>>,
+    // The current unnamed prepared statement.
+    #[allow(unused)]
+    current_unnamed_prepared_statement: Option<PreparedStatement<DB>>,
     /// Current RYW ticket. `None` if RYW is not enabled. This `ticket` will
     /// be updated as the client makes writes so as to be an accurate low watermark timestamp
     /// required to make RYW-consistent reads. On reads, the client will pass in this ticket to be
@@ -839,12 +855,13 @@ where
 /// TODO: The ideal approach for query handling is as follows:
 /// 1. If we know we can't support a query, send it to fallback.
 /// 2. If we think we can support a query, try to send it to ReadySet. If that hits an error that
-///    should be retried, retry.    If not, try fallback without dropping the connection inbetween.
+///    should be retried, retry. If not, try fallback without dropping the connection inbetween.
 /// 3. If that fails and we got a MySQL error code, send that back to the client and keep the
-///    connection open. This is a real correctness bug. 4. If we got another kind of error that is
-///    retryable from fallback, retry. 5. If we got a non-retry related error that's not a MySQL
-///    error code already, convert it to the most appropriate MySQL error code and write    that
-///    back to the caller without dropping the connection.
+///    connection open. This is a real correctness bug.
+/// 4. If we got another kind of error that is retryable from fallback, retry.
+/// 5. If we got a non-retry related error that's not a MySQL error code already, convert it to the
+///    most appropriate MySQL error code and write that back to the caller without dropping the
+///    connection.
 impl<DB, Handler> Backend<DB, Handler>
 where
     DB: 'static + UpstreamDatabase,
