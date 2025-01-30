@@ -11,7 +11,7 @@ use ps::{PsqlValue, TransferFormat};
 use psql_srv as ps;
 use readyset_adapter::backend as cl;
 use readyset_adapter::upstream_database::LazyUpstream;
-use readyset_adapter_types::DeallocateId;
+use readyset_adapter_types::{DeallocateId, PreparedStatementType};
 use readyset_data::DfValue;
 use thiserror::Error;
 use tokio_postgres::SimpleQueryMessage;
@@ -100,9 +100,12 @@ impl Backend {
         &mut self,
         query: &str,
         parameter_data_types: &[Type],
+        statement_type: PreparedStatementType,
     ) -> Result<PrepareResponse<'_>, Error> {
         Ok(PrepareResponse(
-            self.inner.prepare(query, parameter_data_types).await?,
+            self.inner
+                .prepare(query, parameter_data_types, statement_type)
+                .await?,
         ))
     }
 
@@ -152,8 +155,9 @@ impl ps::PsqlBackend for Backend {
         &mut self,
         query: &str,
         parameter_data_types: &[Type],
+        statement_type: PreparedStatementType,
     ) -> Result<ps::PrepareResponse, ps::Error> {
-        self.prepare(query, parameter_data_types)
+        self.prepare(query, parameter_data_types, statement_type)
             .await?
             .try_into_ps()
     }
