@@ -31,6 +31,7 @@ fn sqlparser_dialect_from_readyset_dialect(
 #[cfg(feature = "sqlparser")]
 #[expect(clippy::upper_case_acronyms, reason = "SQL keywords are capitalized")]
 enum ReadysetKeyword {
+    CACHES,
     READYSET,
     SIMPLIFIED,
 }
@@ -39,6 +40,7 @@ enum ReadysetKeyword {
 impl ReadysetKeyword {
     fn as_str(&self) -> &str {
         match self {
+            Self::CACHES => "CACHES",
             Self::READYSET => "READYSET",
             Self::SIMPLIFIED => "SIMPLIFIED",
         }
@@ -158,6 +160,21 @@ fn parse_readyset_show(parser: &mut Parser) -> Result<SqlQuery, ReadysetParsingE
     }
 }
 
+/// Expects `DROP` was already parsed. Attempts to parse a Readyset-specific drop statement,
+/// otherwise falls back to [`Parser::parse_drop`].
+#[cfg(feature = "sqlparser")]
+fn parse_readyset_drop(parser: &mut Parser) -> Result<SqlQuery, ReadysetParsingError> {
+    if parser.parse_keyword(Keyword::ALL) && parse_readyset_keyword(parser, ReadysetKeyword::CACHES)
+    {
+        Ok(SqlQuery::DropAllCaches(
+            readyset_sql::ast::DropAllCachesStatement {},
+        ))
+    } else {
+        Ok(parser.parse_drop()?.try_into()?)
+    }
+}
+
+/// Attempts to parse a Readyset-specific statement, and falls back to [`Parser::parse_statement`] if it fails.
 #[cfg(feature = "sqlparser")]
 fn parse_readyset_query(
     parser: &mut Parser,
@@ -169,6 +186,8 @@ fn parse_readyset_query(
         parse_explain(parser)
     } else if parser.parse_keyword(Keyword::SHOW) {
         parse_readyset_show(parser)
+    } else if parser.parse_keyword(Keyword::DROP) {
+        parse_readyset_drop(parser)
     } else {
         Ok(parser.parse_statement()?.try_into()?)
     }
