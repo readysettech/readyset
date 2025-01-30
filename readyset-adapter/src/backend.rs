@@ -81,7 +81,7 @@ use crossbeam_skiplist::SkipSet;
 use futures::future::{self, OptionFuture};
 use lru::LruCache;
 use mysql_common::row::convert::{FromRow, FromRowError};
-use readyset_adapter_types::{DeallocateId, ParsedCommand};
+use readyset_adapter_types::{DeallocateId, ParsedCommand, PreparedStatementType};
 use readyset_client::consensus::{Authority, AuthorityControl, CacheDDLRequest};
 use readyset_client::consistency::Timestamp;
 use readyset_client::query::*;
@@ -119,6 +119,7 @@ use crate::query_handler::SetBehavior;
 use crate::query_status_cache::QueryStatusCache;
 use crate::status_reporter::ReadySetStatusReporter;
 pub use crate::upstream_database::UpstreamPrepare;
+use crate::upstream_database::UpstreamStatementId;
 use crate::utils::{create_dummy_column, time_or_null};
 use crate::{create_dummy_schema, QueryHandler, UpstreamDatabase, UpstreamDestination};
 
@@ -362,6 +363,7 @@ impl BackendBuilder {
                 proxy_state,
                 parsed_query_cache: LruCache::new(10_000.try_into().expect("10000 is not 0")),
                 prepared_statements: Default::default(),
+                unnamed_prepared_statements: Default::default(),
                 query_status_cache,
                 ticket: self.ticket,
                 timestamp_client: self.timestamp_client,
@@ -610,8 +612,16 @@ where
     query_status_cache: &'static QueryStatusCache,
     // a cache of all previously parsed queries
     parsed_query_cache: LruCache<String, SqlQuery>,
-    // all queries previously prepared on noria or upstream, mapped by their ID.
+    // all queries previously prepared on noria or upstream. The position in the slab is the
+    // id to retrieve the prepared statement.
     prepared_statements: Slab<PreparedStatement<DB>>,
+    /// For unnamed prepared statements, we need to prepare the statement on the upstream in
+    /// order to get the types for the query. We store that metadata in `prepared_statements`,
+    /// just like regular prepared statements. The difference is that the clients are not
+    /// "reusing" that prepared statement, so we only have the query string to identify
+    /// any metadata we've previously prepared and cached. Thus this map is a link from the query
+    /// to the index of the prepared statement in `prepared_statements`.
+    unnamed_prepared_statements: HashMap<String, usize>,
     /// Current RYW ticket. `None` if RYW is not enabled. This `ticket` will
     /// be updated as the client makes writes so as to be an accurate low watermark timestamp
     /// required to make RYW-consistent reads. On reads, the client will pass in this ticket to be
@@ -725,6 +735,19 @@ pub enum PrepareResultInner<DB: UpstreamDatabase> {
     Noria(noria_connector::PrepareResult),
     Upstream(UpstreamPrepare<DB>),
     Both(noria_connector::PrepareResult, UpstreamPrepare<DB>),
+}
+
+impl<DB: UpstreamDatabase> PrepareResultInner<DB> {
+    /// Returns the statement id only if the an upstream database was used to prepare the statement.
+    pub fn upstream_statement_id(&self) -> Option<StatementId> {
+        match self {
+            Self::Noria(_) => None,
+            Self::Upstream(u) | Self::Both(_, u) => match u.statement_id {
+                UpstreamStatementId::Prepared(id) => Some(id),
+                UpstreamStatementId::Unprepared(_) => None,
+            },
+        }
+    }
 }
 
 // Sadly rustc is very confused when trying to derive Clone for UpstreamPrepare, so have to do it
@@ -1352,18 +1375,36 @@ where
         &mut self,
         query: &str,
         data: DB::PrepareData<'_>,
+        statement_type: PreparedStatementType,
     ) -> Result<&PrepareResult<DB>, DB::Error> {
-        self.last_query = None;
-        let mut query_event = QueryExecutionEvent::new(EventType::Prepare);
+        // early return if we're preparing an unnamed statement that we already have the metadata for.
+        // Also, don't bother to record an event for this query as it's not really useful data.
+        if matches!(statement_type, PreparedStatementType::Unnamed)
+            && self.state.unnamed_prepared_statements.contains_key(query)
+        {
+            let id = self.state.unnamed_prepared_statements[query];
+            return Ok(&self.state.prepared_statements[id].prep);
+        }
 
+        let mut query_event = QueryExecutionEvent::new(EventType::Prepare);
         let meta = self.plan_prepare(query, &mut query_event).await;
-        let prep = self
+        let mut prep = self
             .do_prepare(&meta, query, data, &mut query_event)
             .await?;
 
-        // grab the next id from the cache. we do this before creating the `PreparedStatement`
-        // instance as we store the id in the `PrepareResult` instance, which is itself
-        // maintained in the `PreparedStatement`.
+        // Store the ID before we modify the statement type
+        let upstream_statement_id = prep.upstream_statement_id();
+
+        // Update the statement type after we've captured the ID
+        if matches!(statement_type, PreparedStatementType::Unnamed) {
+            match &mut prep {
+                PrepareResultInner::Upstream(p) | PrepareResultInner::Both(_, p) => {
+                    p.make_unnamed(query)
+                }
+                PrepareResultInner::Noria(_) => {}
+            }
+        }
+
         let next_id = self
             .state
             .prepared_statements
@@ -1373,6 +1414,20 @@ where
         let prepared_statement = self.create_prepared_statement(meta, prep, next_id);
         let statement_id = self.state.prepared_statements.insert(prepared_statement);
         assert_eq!(next_id, statement_id as u32);
+
+        if matches!(statement_type, PreparedStatementType::Unnamed) {
+            // we wouldn't have an upstream_statement_id if we only went to noria (readyset);
+            // but we'll always have an upstream_statement_id if we went to the upstream
+            if let Some(upstream_statement_id) = upstream_statement_id {
+                self.remove_statement(DeallocateId::Numeric(upstream_statement_id))
+                    .await?;
+            }
+
+            // For unnamed prepared statements, store the query string mapping
+            self.state
+                .unnamed_prepared_statements
+                .insert(query.to_string(), statement_id);
+        }
 
         // we've already put the prepared statement in the cache, but dig it a reference
         // for both query logging and returning to the caller.
@@ -1450,7 +1505,7 @@ where
         let _t = event.start_upstream_timer();
 
         upstream
-            .execute(prep.statement_id, params, exec_meta)
+            .execute(&prep.statement_id, params, exec_meta)
             .await
             .map(|r| QueryResult::Upstream(r))
     }
@@ -1794,7 +1849,15 @@ where
             DeallocateId::Numeric(id) => {
                 if let Some(statement) = self.state.prepared_statements.try_remove(id as usize) {
                     if let Some(ur) = statement.prep.into_upstream() {
-                        dealloc_id = DeallocateId::Numeric(ur.statement_id);
+                        let upstream_id = match ur.statement_id {
+                            UpstreamStatementId::Prepared(id) => id,
+                            UpstreamStatementId::Unprepared(_) => {
+                                // this is the case where an unnamed prepared statement was referenced,
+                                // but it's already closed.
+                                return Ok(());
+                            }
+                        };
+                        dealloc_id = DeallocateId::Numeric(upstream_id);
                     } else {
                         // this is the case where a prepared statement was created for readyset
                         // use, and not prepared/executed on the upstream.

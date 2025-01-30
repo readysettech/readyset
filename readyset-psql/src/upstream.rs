@@ -5,22 +5,25 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::StreamExt;
-use pgsql::types::Type;
-use pgsql::{GenericResult, ResultStream, Row, SimpleQueryMessage};
 use postgres_types::Kind;
 use psql_srv::{Column, TransferFormat};
-use readyset_adapter::upstream_database::UpstreamDestination;
+use readyset_adapter::upstream_database::{UpstreamDestination, UpstreamStatementId};
 use readyset_adapter::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
 use readyset_adapter_types::DeallocateId;
 use readyset_client_metrics::recorded;
 use readyset_data::DfValue;
 use readyset_errors::{internal_err, invariant_eq, unsupported, ReadySetError, ReadySetResult};
 use readyset_sql::ast::{SqlIdentifier, StartTransactionStatement};
-use tokio_postgres as pgsql;
-use tokio_postgres::SimpleQueryStream;
+use tokio::task::JoinHandle;
+use tokio_postgres::types::Type;
+use tokio_postgres::{
+    Client, Config, GenericResult, ResultStream, Row, RowStream, SimpleQueryMessage,
+    SimpleQueryStream, Statement,
+};
 use tracing::{debug, info_span};
 use tracing_futures::Instrument;
 
+use crate::schema::type_to_pgsql;
 use crate::Error;
 
 /// Indicates the minimum upstream server version that we currently support. Used to error out
@@ -31,11 +34,11 @@ const MIN_UPSTREAM_MINOR_VERSION: u16 = 0;
 /// A connector to an underlying PostgreSQL database
 pub struct PostgreSqlUpstream {
     /// This is the underlying (regular) PostgreSQL client
-    client: pgsql::Client,
+    client: Client,
     /// A tokio task that handles the connection, required by `tokio_postgres` to operate
-    _connection_handle: tokio::task::JoinHandle<Result<(), pgsql::Error>>,
+    _connection_handle: JoinHandle<Result<(), tokio_postgres::Error>>,
     /// Map from prepared statement IDs to prepared statements
-    prepared_statements: Vec<Option<pgsql::Statement>>,
+    prepared_statements: Vec<Option<Statement>>,
     /// ID for the next prepared statement
     statement_id_counter: u32,
     /// The user used to connect to the upstream, if any
@@ -47,6 +50,8 @@ pub struct PostgreSqlUpstream {
 
 pub enum QueryResult {
     EmptyRead,
+    /// A stream of rows from the upstream database; this is the type returned when executing a
+    /// prepared statement.
     Stream {
         // Stashing the first row lets us send a RowDescription before sending data rows
         first_row: Row,
@@ -59,10 +64,19 @@ pub enum QueryResult {
         tag: String,
     },
     SimpleQuery(Vec<SimpleQueryMessage>),
+    /// A stream of rows from the upstream database; this is the type returned when executing a
+    /// simple text query with no parameters.
     SimpleQueryStream {
         // Stashing the first message lets us send a RowDescription before sending data rows
         first_message: SimpleQueryMessage,
         stream: Pin<Box<SimpleQueryStream>>,
+    },
+    /// A stream of rows from the upstream database; this is the type returned when executing an
+    /// unnamed prepared statement (with parameters) over the extended query protocol.
+    RowStream {
+        // Stashing the first row lets us send a RowDescription before sending data rows
+        first_row: Row,
+        stream: Pin<Box<RowStream>>,
     },
 }
 
@@ -76,8 +90,7 @@ impl Debug for QueryResult {
             } => f
                 .debug_struct("Stream")
                 .field("first_row", first_row)
-                .field("stream", &"...")
-                .finish(),
+                .finish_non_exhaustive(),
             Self::Write { num_rows_affected } => f
                 .debug_struct("Write")
                 .field("num_rows_affected", num_rows_affected)
@@ -90,8 +103,14 @@ impl Debug for QueryResult {
             } => f
                 .debug_struct("SimpleQueryStream")
                 .field("first_message", first_message)
-                .field("stream", &"...")
-                .finish(),
+                .finish_non_exhaustive(),
+            Self::RowStream {
+                first_row,
+                stream: _,
+            } => f
+                .debug_struct("RowStream")
+                .field("first_row", first_row)
+                .finish_non_exhaustive(),
         }
     }
 }
@@ -180,7 +199,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
             .as_ref()
             .ok_or(ReadySetError::InvalidUpstreamDatabase)?;
 
-        let pg_config = pgsql::Config::from_str(url)?;
+        let pg_config = Config::from_str(url)?;
         let user = pg_config.get_user().map(|s| s.to_owned());
         let connector = {
             let mut builder = native_tls::TlsConnector::builder();
@@ -317,7 +336,10 @@ impl UpstreamDatabase for PostgreSqlUpstream {
             }
         }
 
-        Ok(UpstreamPrepare { statement_id, meta })
+        Ok(UpstreamPrepare {
+            statement_id: statement_id.into(),
+            meta,
+        })
     }
 
     async fn query<'a>(&'a mut self, query: &'a str) -> Result<Self::QueryResult<'a>, Error> {
@@ -353,32 +375,52 @@ impl UpstreamDatabase for PostgreSqlUpstream {
 
     async fn execute<'a>(
         &'a mut self,
-        statement_id: u32,
+        statement_id: &UpstreamStatementId,
         params: &[DfValue],
         exec_meta: &'_ [TransferFormat],
     ) -> Result<Self::QueryResult<'a>, Error> {
-        let statement = self
-            .prepared_statements
-            .get(statement_id as usize)
-            .and_then(|s| s.as_ref())
-            .ok_or(ReadySetError::PreparedStatementMissing { statement_id })?;
+        match statement_id {
+            UpstreamStatementId::Unprepared(query) => {
+                // we need to get the postgres type for each DfValue parameter, and stuff a tuple of
+                // those into a Vec, which we can then pass to `query_typed_raw()`
+                let mut typed_params = Vec::with_capacity(params.len());
+                for p in params {
+                    let postgres_type = type_to_pgsql(&p.infer_dataflow_type())?;
+                    typed_params.push((p, postgres_type));
+                }
 
-        let mut stream = Box::pin(
-            self.client
-                .generic_query_raw(
-                    statement,
-                    &convert_params_for_upstream(params, statement.params())?,
-                    exec_meta.iter().map(|tf| (*tf).into()),
-                )
-                .await?,
-        );
+                let mut stream = Box::pin(self.client.query_typed_raw(query, typed_params).await?);
+                match stream.next().await {
+                    None => Ok(QueryResult::EmptyRead),
+                    Some(Err(e)) => Err(e.into()),
+                    Some(Ok(first_row)) => Ok(QueryResult::RowStream { first_row, stream }),
+                }
+            }
+            UpstreamStatementId::Prepared(id) => {
+                let statement = self
+                    .prepared_statements
+                    .get(*id as usize)
+                    .and_then(|s| s.as_ref())
+                    .ok_or(ReadySetError::PreparedStatementMissing { statement_id: *id })?;
 
-        match stream.next().await {
-            None => Ok(QueryResult::EmptyRead),
-            Some(Err(e)) => Err(e.into()),
-            Some(Ok(GenericResult::Command(_, tag))) => Ok(QueryResult::Command { tag }),
-            Some(Ok(GenericResult::Row(first_row))) => {
-                Ok(QueryResult::Stream { first_row, stream })
+                let mut stream = Box::pin(
+                    self.client
+                        .generic_query_raw(
+                            statement,
+                            &convert_params_for_upstream(params, statement.params())?,
+                            exec_meta.iter().map(|tf| (*tf).into()),
+                        )
+                        .await?,
+                );
+
+                match stream.next().await {
+                    None => Ok(QueryResult::EmptyRead),
+                    Some(Err(e)) => Err(e.into()),
+                    Some(Ok(GenericResult::Command(_, tag))) => Ok(QueryResult::Command { tag }),
+                    Some(Ok(GenericResult::Row(first_row))) => {
+                        Ok(QueryResult::Stream { first_row, stream })
+                    }
+                }
             }
         }
     }

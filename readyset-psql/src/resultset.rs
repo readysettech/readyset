@@ -7,7 +7,9 @@ use ps::{PsqlSrvRow, PsqlValue};
 use psql_srv as ps;
 use readyset_client::results::ResultIterator;
 use tokio_postgres::types::Type;
-use tokio_postgres::{GenericResult, ResultStream, SimpleQueryMessage, SimpleQueryStream};
+use tokio_postgres::{
+    GenericResult, ResultStream, RowStream, SimpleQueryMessage, SimpleQueryStream,
+};
 
 use crate::schema::{type_to_pgsql, SelectSchema};
 use crate::value::TypedDfValue;
@@ -18,6 +20,10 @@ enum ResultsetInner {
     Stream {
         first_row: Option<tokio_postgres::Row>,
         stream: Pin<Box<ResultStream>>,
+    },
+    RowStream {
+        first_row: Option<tokio_postgres::Row>,
+        stream: Pin<Box<RowStream>>,
     },
     SimpleQueryStream {
         first_message: Option<SimpleQueryMessage>,
@@ -70,6 +76,20 @@ impl Resultset {
     ) -> Self {
         Self {
             results: ResultsetInner::Stream {
+                first_row: Some(first_row),
+                stream,
+            },
+            project_field_types: Arc::new(schema),
+        }
+    }
+
+    pub fn from_row_stream(
+        stream: Pin<Box<RowStream>>,
+        first_row: tokio_postgres::Row,
+        schema: Vec<Type>,
+    ) -> Self {
+        Self {
+            results: ResultsetInner::RowStream {
                 first_row: Some(first_row),
                 stream,
             },
@@ -132,6 +152,17 @@ impl Stream for Resultset {
                     // at the end of all rows in the resultset ...
                     None
                 }
+            }
+            ResultsetInner::RowStream { first_row, stream } => {
+                let row = match first_row.take() {
+                    Some(row) => Some(Ok(row)),
+                    None => match ready!(stream.as_mut().poll_next(cx)) {
+                        None => None,
+                        Some(Err(e)) => Some(Err(psql_srv::Error::from(e))),
+                        Some(Ok(row)) => Some(Ok(row)),
+                    },
+                };
+                row.map(|res| res.map(PsqlSrvRow::RawRow))
             }
             ResultsetInner::Stream { first_row, stream } => {
                 let row = match first_row.take() {
