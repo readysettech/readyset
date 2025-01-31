@@ -63,15 +63,46 @@ fn parse_readyset_keyword(parser: &mut Parser, keyword: ReadysetKeyword) -> bool
     }
 }
 
-// Expects `CREATE CACHE` was already parsed. Attempts to parse a Readyset-specific create cache
-// statement. Will simply error if it fails, since there's no relevant standard SQL to fall back to.
+/// Expects `CREATE CACHE` was already parsed. Attempts to parse a Readyset-specific create cache
+/// statement. Will simply error if it fails, since there's no relevant standard SQL to fall back to.
+///
+/// CREATE CACHE
+///     [cache_option [, cache_option] ...]
+///     [<name>]
+///     FROM
+///     <SELECT statement>
+///
+/// cache_options:
+///     | ALWAYS
+///     | CONCURRENTLY
+///
+/// TODO: support query id instead of select statement
 #[cfg(feature = "sqlparser")]
 fn parse_create_cache(
     parser: &mut Parser,
     input: impl AsRef<str>,
 ) -> Result<SqlQuery, ReadysetParsingError> {
-    let name = parser.parse_object_name(false).ok().map(Into::into);
-    parser.expect_keyword(Keyword::FROM)?;
+    let mut always = false;
+    let mut concurrently = false;
+    match parser.parse_one_of_keywords(&[Keyword::ALWAYS, Keyword::CONCURRENTLY]) {
+        Some(Keyword::ALWAYS) => {
+            always = true;
+            concurrently = parser.parse_keyword(Keyword::CONCURRENTLY);
+        }
+        Some(Keyword::CONCURRENTLY) => {
+            concurrently = true;
+            always = parser.parse_keyword(Keyword::ALWAYS);
+        }
+        _ => {}
+    }
+    let from = parser.parse_keyword(Keyword::FROM);
+    let name = if !from {
+        let name = parser.parse_object_name(false).ok().map(Into::into);
+        parser.expect_keyword(Keyword::FROM)?;
+        name
+    } else {
+        None
+    };
     let query = parser
         .parse_statement()
         .map_err(|e| format!("failed to parse statement: {e}"))
@@ -86,8 +117,8 @@ fn parse_create_cache(
             name,
             inner: query,
             unparsed_create_cache_statement: Some(input.as_ref().to_string()),
-            always: false,
-            concurrently: false,
+            always,
+            concurrently,
         },
     ))
 }
