@@ -1,7 +1,7 @@
 use readyset_sql::{ast::SqlQuery, Dialect};
 
 #[cfg(feature = "sqlparser")]
-use readyset_sql::ast::CacheInner;
+use readyset_sql::ast::{CacheInner, DropCacheStatement};
 #[cfg(feature = "sqlparser")]
 use sqlparser::{
     keywords::Keyword,
@@ -169,6 +169,9 @@ fn parse_readyset_drop(parser: &mut Parser) -> Result<SqlQuery, ReadysetParsingE
         Ok(SqlQuery::DropAllCaches(
             readyset_sql::ast::DropAllCachesStatement {},
         ))
+    } else if parser.parse_keyword(Keyword::CACHE) {
+        let name = parser.parse_object_name(false)?.into();
+        Ok(SqlQuery::DropCache(DropCacheStatement { name }))
     } else {
         Ok(parser.parse_drop()?.try_into()?)
     }
