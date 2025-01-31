@@ -1,6 +1,6 @@
 use pretty_assertions::Comparison;
 use readyset_sql::{
-    ast::{CacheInner, SqlQuery},
+    ast::{CacheInner, DropCacheStatement, SqlQuery},
     Dialect,
 };
 use sqlparser::{
@@ -161,6 +161,9 @@ fn parse_readyset_drop(parser: &mut Parser) -> Result<SqlQuery, ReadysetParsingE
         Ok(SqlQuery::DropAllCaches(
             readyset_sql::ast::DropAllCachesStatement {},
         ))
+    } else if parser.parse_keyword(Keyword::CACHE) {
+        let name = parser.parse_object_name(false)?.into();
+        Ok(SqlQuery::DropCache(DropCacheStatement { name }))
     } else {
         Ok(parser.parse_drop()?.try_into()?)
     }
