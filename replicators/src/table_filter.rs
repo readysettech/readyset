@@ -1,5 +1,4 @@
-use std::borrow::Borrow;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{HashMap, HashSet};
 
 use nom_locate::LocatedSpan;
 use nom_sql::replicator_table_list;
@@ -8,322 +7,215 @@ use readyset_sql::ast::{Relation, SqlIdentifier};
 use readyset_sql::Dialect;
 
 /// A [`TableFilter`] keeps lists of all the tables readyset-server is interested in, as well as a
-/// list of tables that we explicitly want to filter out of replication.
-/// Tables may be filtered from replication in 2 ways:
-/// 1. All tables will be filtered other than the ones provided to the option --replication_tables,
-///    if it is used OR All tables will be replicated other than the ones provided to the option
+/// list of tables that we explicitly want to filter out of replication. Tables may be filtered
+/// from replication in 2 ways:
+///
+/// 1. All tables will be filtered other than the ones provided to the option --replication-tables,
+///    if it is used, or all tables will be replicated other than the ones provided to the option
 ///    --replication-tables-ignore, if it is used.
+///
 /// 2. If we encounter a unrecoverable failure in replication for a table, we can filter out the
 ///    table to keep the process running without that table, which is better than being stuck until
 ///    we fix why that table isn't replicating.
 ///
-/// NOTE: 2. takes precedence over 1. above. So if a table is explicitly replicated with
-/// --replication_tables, but then experiences an error in replication, we will stop replicating
+/// NOTE: 2 takes precedence over 1 above. So if a table is explicitly replicated with
+/// --replication-tables, but then experiences an error in replication, we will stop replicating
 /// that table.
 ///
-/// When a replication event happens, the event is filtered based on its
-/// schema/table before being sent to readyset-server.
-///
-/// `BTreeMap`s are used here, because the assumption is that the number of schemas in a
-/// database is usually small, and their names are short, so a small `BTreeMap` with inlined
-/// `SqlIdentifiers` would perform better than a `HashMap` where a hash is performed on every
-/// lookup.
+/// When a replication event happens, the event is filtered based on its schema/table before being
+/// sent to readyset-server.
 #[derive(Debug, Clone)]
 pub(crate) struct TableFilter {
-    /// A mapping between schema to the list of tables to replicate from that schema.
-    /// Only the tables included in the map will be replicated.
-    /// This is only populated by the --replication-tables option
-    explicitly_replicated: BTreeMap<SqlIdentifier, ReplicateTableSpec>,
-    /// A mapping between schema to the list of tables to *NOT* replicate from that schema.
-    /// Any other valid tables will be replicated, where a valid table is either one of the tables
-    /// in `explicitly_replicated`, or all tables if that is empty.
-    replication_denied: BTreeMap<SqlIdentifier, ReplicateTableSpec>,
+    /// A mapping of schema -> replication strategy for tables in that schema.
+    strategy_by_schema: HashMap<SqlIdentifier, ReplicationStrategy>,
+    /// Whether or not to allow schemas not already in the map.
+    allow_unregistered_schemas: bool,
 }
 
 #[derive(Debug, Clone)]
-/// Within a particular schema, [`ReplicateTablesSpec`] tells us which tables to replicate or filter
-/// out
-///
-/// If we start replicating all tables, adding tables to AllTablesExcept allows us to ignore them
-/// If we start with a specific set of tables to replicate, removing them from Tables also allows us
-/// to no longer replicate them.
-///
-/// Similarly to [`TableFilter`] a `BTreeSet` is used here, because the assumption is that
-/// table names are usually short and not that numerous that a `HashMap` would be slower.
-pub(crate) enum ReplicateTableSpec {
-    AllTablesExcept(BTreeSet<SqlIdentifier>),
-    Tables(BTreeSet<SqlIdentifier>),
+enum ReplicationStrategy {
+    Allowlist(HashSet<SqlIdentifier>),
+    Denylist(HashSet<SqlIdentifier>),
 }
 
-impl ReplicateTableSpec {
-    pub(crate) fn empty() -> Self {
-        Self::Tables(BTreeSet::new())
+impl ReplicationStrategy {
+    fn new(is_allowlist: bool) -> Self {
+        match is_allowlist {
+            true => ReplicationStrategy::Allowlist(HashSet::new()),
+            false => ReplicationStrategy::Denylist(HashSet::new()),
+        }
     }
 
-    pub(crate) fn empty_all_tables() -> Self {
-        Self::AllTablesExcept(BTreeSet::new())
-    }
-
-    pub(crate) fn insert<S: Into<SqlIdentifier>>(&mut self, t: S) {
+    fn allow_table(&mut self, table: &SqlIdentifier) {
         match self {
-            Self::AllTablesExcept(tables) => tables.remove(&t.into()),
-            Self::Tables(tables) => tables.insert(t.into()),
-        };
-    }
-
-    pub(crate) fn remove<S: Into<SqlIdentifier>>(&mut self, t: S) {
-        match self {
-            Self::AllTablesExcept(tables) => tables.insert(t.into()),
-            Self::Tables(tables) => {
-                let ret = tables.remove(&t.into());
-                if tables.is_empty() {
-                    *self = Self::empty();
-                }
-                ret
+            Self::Allowlist(s) => {
+                s.insert(table.clone());
+            }
+            Self::Denylist(s) => {
+                s.remove(table);
             }
         };
     }
 
-    pub(crate) fn contains<S>(&self, t: &S) -> bool
-    where
-        S: Ord + ?Sized,
-        SqlIdentifier: Borrow<S>,
-    {
+    fn deny_table(&mut self, table: &SqlIdentifier) {
         match self {
-            Self::AllTablesExcept(tables) => !tables.contains(t),
-            Self::Tables(tables) => tables.contains(t),
-        }
+            Self::Allowlist(s) => {
+                s.remove(table);
+            }
+            Self::Denylist(s) => {
+                s.insert(table.clone());
+            }
+        };
     }
 
-    pub(crate) fn is_empty(&self) -> bool {
+    fn allows(&self, table: &str) -> bool {
         match self {
-            Self::AllTablesExcept(tables) => tables.is_empty(),
-            Self::Tables(tables) => tables.is_empty(),
+            Self::Allowlist(s) => s.contains(table),
+            Self::Denylist(s) => !s.contains(table),
         }
     }
 }
 
 impl TableFilter {
+    fn allow_all() -> Self {
+        Self {
+            strategy_by_schema: HashMap::new(),
+            allow_unregistered_schemas: true,
+        }
+    }
+
+    fn allow_one_schema(schema: &str, allow_unregistered_schemas: bool) -> Self {
+        Self {
+            strategy_by_schema: HashMap::from([(
+                SqlIdentifier::from(schema),
+                ReplicationStrategy::new(false),
+            )]),
+            allow_unregistered_schemas,
+        }
+    }
+
+    fn allow_tables(
+        default_schema: Option<&str>,
+        tables: Vec<Relation>,
+        allow_unregistered_schemas: bool,
+        is_allowlist: bool,
+    ) -> ReadySetResult<Self> {
+        let mut strategy_by_schema = HashMap::new();
+        for table in tables {
+            let schema = table
+                .schema
+                .or_else(|| default_schema.map(SqlIdentifier::from))
+                .ok_or_else(|| {
+                    ReadySetError::ReplicationFailed(format!(
+                        "No database and no default database for table {}",
+                        table.name
+                    ))
+                })?;
+
+            if table.name == "*" {
+                // An empty allowlist blocks all tables; an empty denylist allows all tables.
+                strategy_by_schema.insert(schema, ReplicationStrategy::new(!is_allowlist));
+            } else {
+                let strategy = strategy_by_schema
+                    .entry(schema)
+                    .or_insert(ReplicationStrategy::new(is_allowlist));
+                if is_allowlist {
+                    strategy.allow_table(&table.name);
+                } else {
+                    strategy.deny_table(&table.name);
+                }
+            }
+        }
+        Ok(Self {
+            strategy_by_schema,
+            allow_unregistered_schemas,
+        })
+    }
+
     pub(crate) fn try_new(
         dialect: Dialect,
         replication_tables: Option<&str>,
         replication_tables_ignore: Option<&str>,
         default_schema: Option<&str>,
     ) -> ReadySetResult<TableFilter> {
-        let default_schema = default_schema.map(SqlIdentifier::from);
-
         if replication_tables.is_some() && replication_tables_ignore.is_some() {
+            // XXX JCD we would need to decide the semantics for what it means to specify both.
             return Err(ReadySetError::ReplicationFailed(
                 "Cannot use both --replication-tables and --replication-tables-ignore".to_string(),
             ));
         }
-
-        let mut schemas: BTreeMap<SqlIdentifier, ReplicateTableSpec> = BTreeMap::new();
-        let mut schemas_ignore: BTreeMap<SqlIdentifier, ReplicateTableSpec> = BTreeMap::new();
-
-        let mut filter_list_ignore: Vec<Relation> = Vec::new();
-        match replication_tables_ignore {
-            None => "",
-            Some(t) => {
-                if t == "*.*" {
-                    return Err(ReadySetError::ReplicationFailed(
-                        "Cannot filter out all tables".to_string(),
-                    ));
-                }
-
-                filter_list_ignore =
-                    match replicator_table_list(dialect)(LocatedSpan::new(t.as_bytes())) {
-                        Ok((rem, tables)) if rem.is_empty() => tables,
-                        _ => {
-                            return Err(ReadySetError::ReplicationFailed(
-                                "Unable to parse filtered ignored tables list".to_string(),
-                            ))
-                        }
-                    };
-                t
-            }
-        };
-
-        for table in filter_list_ignore {
-            let table_name = table.name;
-            let table_schema =
-                table
-                    .schema
-                    .or_else(|| default_schema.clone())
-                    .ok_or_else(|| {
-                        ReadySetError::ReplicationFailed(format!(
-                            "No database and no default database for table {table_name}"
-                        ))
-                    })?;
-
-            if table_name == "*" {
-                schemas_ignore.insert(table_schema, ReplicateTableSpec::empty_all_tables());
-            } else {
-                let tables = schemas_ignore
-                    .entry(table_schema)
-                    .or_insert_with(ReplicateTableSpec::empty);
-                tables.insert(table_name);
-            }
+        if let Some("*.*") = replication_tables {
+            return Ok(Self::allow_all());
         }
-        if !schemas_ignore.is_empty() {
-            return Ok(TableFilter {
-                explicitly_replicated: schemas,
-                replication_denied: schemas_ignore,
-            });
-        }
-        let filtered = match replication_tables {
-            None => {
-                match default_schema {
-                    Some(default) => {
-                        // Will load all tables for the default schema
-                        schemas.insert(default, ReplicateTableSpec::empty_all_tables());
-                        return Ok(TableFilter {
-                            explicitly_replicated: schemas,
-                            replication_denied: schemas_ignore,
-                        });
-                    }
-                    None => {
-                        // We will learn what the tables are by `update_table_list` at snapshot
-                        // time since `for_all_schemas` is true and not explicit exclude table.
-                        return Ok(Self::for_all_tables());
-                    }
-                };
-            }
-            Some(t) => t,
-        };
-
-        if filtered == "*.*" {
-            return Ok(Self::for_all_tables());
+        if let Some("*.*") = replication_tables_ignore {
+            return Err(ReadySetError::ReplicationFailed(
+                "Cannot filter out all tables".to_string(),
+            ));
         }
 
-        let filter_list =
-            match replicator_table_list(dialect)(LocatedSpan::new(filtered.as_bytes())) {
+        let allow_unregistered_schemas = replication_tables.is_none() && default_schema.is_none();
+
+        if let Some(arg) = replication_tables_ignore {
+            let tables = match replicator_table_list(dialect)(LocatedSpan::new(arg.as_bytes())) {
                 Ok((rem, tables)) if rem.is_empty() => tables,
                 _ => {
                     return Err(ReadySetError::ReplicationFailed(
-                        "Unable to parse filtered tables list".to_string(),
+                        "Unable to parse --replication-tables-ignore".to_string(),
                     ))
                 }
             };
+            return Self::allow_tables(default_schema, tables, allow_unregistered_schemas, false);
+        }
 
-        for table in filter_list {
-            let table_name = table.name;
-            let table_schema =
-                table
-                    .schema
-                    .or_else(|| default_schema.clone())
-                    .ok_or_else(|| {
-                        ReadySetError::ReplicationFailed(format!(
-                            "No database and no default database for table {table_name}"
-                        ))
-                    })?;
-
-            if table_name == "*" {
-                schemas.insert(table_schema, ReplicateTableSpec::empty_all_tables());
-            } else {
-                let tables = schemas
-                    .entry(table_schema)
-                    .or_insert_with(ReplicateTableSpec::empty);
-                tables.insert(table_name);
+        if let Some(arg) = replication_tables {
+            let tables = match replicator_table_list(dialect)(LocatedSpan::new(arg.as_bytes())) {
+                Ok((rem, tables)) if rem.is_empty() => tables,
+                _ => {
+                    return Err(ReadySetError::ReplicationFailed(
+                        "Unable to parse --replication-tables".to_string(),
+                    ))
+                }
+            };
+            Self::allow_tables(default_schema, tables, allow_unregistered_schemas, true)
+        } else {
+            match default_schema {
+                Some(schema) => Ok(Self::allow_one_schema(schema, allow_unregistered_schemas)),
+                None => Ok(Self::allow_all()),
             }
         }
-
-        Ok(TableFilter {
-            explicitly_replicated: schemas,
-            replication_denied: schemas_ignore,
-        })
     }
 
-    /// Create a new filter that will pass all tables
-    fn for_all_tables() -> Self {
-        Self {
-            explicitly_replicated: BTreeMap::new(),
-            replication_denied: BTreeMap::new(),
-        }
-    }
-
-    /// Stop replicating the provided table
+    /// Stop replicating the provided table.
     pub(crate) fn deny_replication(&mut self, schema: &str, table: &str) {
         tracing::info!(%schema, %table, "denying replication");
-        if let Some(tables) = self.explicitly_replicated.get_mut(schema) {
-            tables.remove(table);
+        if self.allow_unregistered_schemas {
+            let strategy = self
+                .strategy_by_schema
+                .entry(SqlIdentifier::from(schema))
+                .or_insert(ReplicationStrategy::new(false));
+            strategy.deny_table(&SqlIdentifier::from(table));
+        } else if let Some(strategy) = self.strategy_by_schema.get_mut(schema) {
+            strategy.deny_table(&SqlIdentifier::from(table));
         }
-
-        let tables = self
-            .replication_denied
-            .entry(schema.into())
-            .or_insert_with(ReplicateTableSpec::empty);
-        tables.insert(table);
+        // Do nothing if allow_unregistered_schemas is false and we don't know about this schema.
     }
 
-    /// Start replicating the provided table
+    /// Start replicating the provided table.
     pub(crate) fn allow_replication(&mut self, schema: &str, table: &str) {
         tracing::info!(%schema, %table, "allowing replication");
-        if let Some(tables) = self.replication_denied.get_mut(schema) {
-            tables.remove(table);
-            if self.replication_denied.get(schema).unwrap().is_empty() {
-                self.replication_denied.remove(schema);
-            }
-        }
-
-        if !self.explicitly_replicated.is_empty() {
-            let tables = self
-                .explicitly_replicated
-                .entry(schema.into())
-                .or_insert_with(ReplicateTableSpec::empty);
-            tables.insert(table);
-        }
+        let strategy = self
+            .strategy_by_schema
+            .entry(SqlIdentifier::from(schema))
+            .or_insert(ReplicationStrategy::new(true));
+        strategy.allow_table(&SqlIdentifier::from(table));
     }
 
-    /// Check if a given table should be processed
-    pub(crate) fn should_be_processed<Q1, Q2>(&self, schema: &Q1, table: &Q2) -> bool
-    where
-        Q1: Ord + ?Sized,
-        Q2: Ord + ?Sized,
-        SqlIdentifier: Borrow<Q1> + Borrow<Q2>,
-    {
-        self.explicitly_replicated.is_empty() && !self.is_denied(schema, table)
-            || self.is_explicitly_replicated(schema, table)
-    }
-
-    pub(crate) fn is_explicitly_replicated<Q1, Q2>(&self, schema: &Q1, table: &Q2) -> bool
-    where
-        Q1: Ord + ?Sized,
-        Q2: Ord + ?Sized,
-        SqlIdentifier: Borrow<Q1> + Borrow<Q2>,
-    {
-        let res = match self.explicitly_replicated.get(schema) {
-            Some(tables) => tables.contains(table),
-            None => false,
-        };
-
-        if res {
-            debug_assert!(
-                !self.is_denied(schema, table),
-                "If a table is explicitly replicated, it should not also be denied"
-            );
+    /// Check if a given table should be processed.
+    pub(crate) fn should_be_processed(&self, schema: &str, table: &str) -> bool {
+        if let Some(strategy) = self.strategy_by_schema.get(schema) {
+            return strategy.allows(table);
         }
-        res
-    }
-
-    pub(crate) fn is_denied<Q1, Q2>(&self, schema: &Q1, table: &Q2) -> bool
-    where
-        Q1: Ord + ?Sized,
-        Q2: Ord + ?Sized,
-        SqlIdentifier: Borrow<Q1> + Borrow<Q2>,
-    {
-        let res = match self.replication_denied.get(schema) {
-            Some(tables) => tables.contains(table),
-            None => false,
-        };
-
-        if res {
-            debug_assert!(
-                !self.is_explicitly_replicated(schema, table),
-                "If a table is denied, it should not also be explicitly_replicated"
-            );
-        }
-        res
+        self.allow_unregistered_schemas
     }
 }
 
@@ -428,7 +320,7 @@ mod tests {
 
     #[test]
     fn all_allowed_then_one_denied() {
-        let mut filter = TableFilter::for_all_tables();
+        let mut filter = TableFilter::allow_all();
 
         assert!(filter.should_be_processed("readyset", "t4"));
         filter.deny_replication("readyset", "t4");
@@ -449,7 +341,7 @@ mod tests {
         assert!(!filter.should_be_processed("noria", "t2"));
         assert!(!filter.should_be_processed("noria", "t3"));
         assert!(filter.should_be_processed("noria", "t4"));
-        assert!(filter.should_be_processed("readyset", "table"));
+        assert!(!filter.should_be_processed("readyset", "table"));
     }
 
     #[test]
