@@ -397,8 +397,24 @@ fn make_base_node(
             .collect()
     };
 
-    let primary_key = primary_key.map(cols_from_spec).transpose()?;
+    let mut primary_key = primary_key.map(cols_from_spec).transpose()?;
+    let mut unique_keys = unique_keys.to_vec();
 
+    // If we don't have a primary key but have unique keys, check if any unique key
+    // has all non-null columns and use it as primary key
+    if primary_key.is_none() && !unique_keys.is_empty() {
+        if let Some((i, uk)) = unique_keys.iter().enumerate().find(|(_, uk)| {
+            uk.iter().all(|col| {
+                column_specs
+                    .iter()
+                    .find(|cs| cs.column.name == col.name.as_str())
+                    .is_some_and(|cs| cs.is_not_null())
+            })
+        }) {
+            primary_key = Some(cols_from_spec(uk)?);
+            unique_keys.swap_remove(i);
+        }
+    }
     let unique_keys = unique_keys
         .iter()
         .map(|u| cols_from_spec(u))
