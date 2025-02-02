@@ -167,6 +167,7 @@ async fn write_column<S: AsyncRead + AsyncWrite + Unpin>(
         },
         DfValue::Time(ref t) => rw.write_col(t),
         DfValue::ByteArray(ref bytes) => rw.write_col(BinaryDisplay(bytes.as_ref()).to_string()),
+        DfValue::Default => internal!("Cannot write MySQL column DEFAULT"),
         // These types are PostgreSQL specific
         DfValue::Array(_) => {
             internal!("Cannot write MySQL column: MySQL does not support arrays")

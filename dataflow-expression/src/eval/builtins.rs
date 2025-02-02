@@ -755,6 +755,7 @@ fn ascii(val: &DfValue, dialect: &Dialect, _ty: &DfType) -> ReadySetResult<DfVal
         SqlEngine::MySQL => {
             match val {
                 DfValue::None
+                | DfValue::Default
                 | DfValue::Max
                 | DfValue::BitVector(_)
                 | DfValue::ByteArray(_)
@@ -1352,6 +1353,7 @@ impl BuiltinFunction {
                     }
                     SqlEngine::MySQL => match s {
                         DfValue::None
+                        | DfValue::Default
                         | DfValue::Max
                         | DfValue::PassThrough(_)
                         | DfValue::BitVector(_)

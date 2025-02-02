@@ -128,6 +128,11 @@ pub enum DfValue {
     Array(Arc<Array>),
     /// Container type for arbitrary unserialized, unsupported types
     PassThrough(Arc<PassThrough>),
+    /// A placeholder default value for a column. This should not be inserted into persistent storage.
+    /// This placeholder is an intermediate value used in places like replicators (where we don't have
+    /// table context to retrieve the default value) and will be coerced to the appropriate value when
+    /// the table context is available at Base::process_ops->apply_table_op_coercions
+    Default,
     /// A sentinel maximal value.
     ///
     /// This value is always greater than all other [`DfValue`]s, except itself.
@@ -179,6 +184,7 @@ impl fmt::Display for DfValue {
             DfValue::PassThrough(ref p) => {
                 write!(f, "[{}:{:x?}]", p.ty.name(), p.data)
             }
+            DfValue::Default => f.write_str("DEFAULT"),
             DfValue::Max => f.write_str("MAX"),
         }
     }
@@ -249,6 +255,7 @@ impl DfValue {
                 format: PassThroughFormat::Binary,
                 data: [].into(),
             })),
+            DfValue::Default => DfValue::None,
             DfValue::Max => DfValue::None,
         }
     }
@@ -277,6 +284,7 @@ impl DfValue {
             | DfValue::BitVector(_)
             | DfValue::Array(_)
             | DfValue::PassThrough(_)
+            | DfValue::Default
             | DfValue::Max => DfValue::Max,
         }
     }
@@ -284,6 +292,11 @@ impl DfValue {
     /// Checks if this value is `DfValue::None`.
     pub fn is_none(&self) -> bool {
         matches!(*self, DfValue::None)
+    }
+
+    /// Checks if this value is `DfValue::Default`.
+    pub fn is_default(&self) -> bool {
+        matches!(*self, DfValue::Default)
     }
 
     /// Checks if this value is of an integral data type (i.e., can be converted into integral
@@ -337,7 +350,7 @@ impl DfValue {
     /// ```
     pub fn is_truthy(&self) -> bool {
         match *self {
-            DfValue::None | DfValue::Max => false,
+            DfValue::None | DfValue::Default | DfValue::Max => false,
             DfValue::Int(x) => x != 0,
             DfValue::UnsignedInt(x) => x != 0,
             DfValue::Float(f) => f != 0.0,
@@ -401,7 +414,7 @@ impl DfValue {
     pub fn sql_type(&self) -> Option<SqlType> {
         use SqlType::*;
         match self {
-            Self::None | Self::PassThrough(_) | Self::Max => None,
+            Self::None | Self::PassThrough(_) | Self::Default | Self::Max => None,
             Self::Int(_) => Some(BigInt(None)),
             Self::UnsignedInt(_) => Some(UnsignedBigInt(None)),
             // FIXME: `SqlType::Float` precision can be either single (MySQL) or
@@ -428,7 +441,7 @@ impl DfValue {
         use DfType::*;
 
         match self {
-            Self::None | Self::PassThrough(_) | Self::Max => Unknown,
+            Self::None | Self::PassThrough(_) | Self::Default | Self::Max => Unknown,
             Self::Int(_) => BigInt,
             Self::UnsignedInt(_) => UnsignedBigInt,
             Self::Float(_) => Float,
@@ -584,7 +597,7 @@ impl DfValue {
                 DfType::Bit(/* TODO */ _len) => Ok(self.clone()),
                 _ => Err(mk_err()),
             },
-            DfValue::ByteArray(_) | DfValue::Max => Err(mk_err()),
+            DfValue::ByteArray(_) | DfValue::Default | DfValue::Max => Err(mk_err()),
             DfValue::PassThrough(ref p) => Err(ReadySetError::DfValueConversionError {
                 src_type: format!("PassThrough[{}]", p.ty),
                 target_type: to_ty.to_string(),
@@ -669,6 +682,12 @@ impl DfValue {
         }
 
         Ok(())
+    }
+    /// Applies the given default value if the DfValue is Default
+    pub fn maybe_apply_default(&mut self, defaults: &[DfValue], idx: usize) {
+        if self.is_default() && idx < defaults.len() {
+            *self = defaults[idx].clone();
+        }
     }
 
     /// If `self` represents any integer value, returns the integer.
@@ -933,6 +952,7 @@ impl PartialEq for DfValue {
             }
             (DfValue::Array(vs_a), DfValue::Array(vs_b)) => vs_a == vs_b,
             (&DfValue::None, &DfValue::None) => true,
+            (&DfValue::Default, &DfValue::Default) => true,
             (&DfValue::Max, &DfValue::Max) => true,
             _ => false,
         }
@@ -1097,7 +1117,7 @@ impl Hash for DfValue {
         // rather expensive. This version could (but probably won't) have a higher rate of
         // collisions, but the decreased overhead is worth it.
         match *self {
-            DfValue::None => {}
+            DfValue::None | DfValue::Default => {}
             DfValue::Max => 1i64.hash(state),
             DfValue::Int(n) => n.hash(state),
             DfValue::UnsignedInt(n) => n.hash(state),
@@ -1354,6 +1374,7 @@ impl TryFrom<DfValue> for Literal {
             DfValue::BitVector(ref bits) => Ok(Literal::BitVector(bits.as_ref().clone())),
             DfValue::Array(_) => unsupported!("Arrays not implemented yet"),
             DfValue::PassThrough(_) => internal!("PassThrough has no representation as a literal"),
+            DfValue::Default => internal!("Default has no representation as a literal"),
             DfValue::Max => internal!("MAX has no representation as a literal"),
         }
     }
@@ -1796,7 +1817,7 @@ impl ToSql for DfValue {
         out: &mut BytesMut,
     ) -> Result<IsNull, Box<dyn Error + 'static + Sync + Send>> {
         match (self, ty) {
-            (Self::None | Self::Max, _) => None::<i8>.to_sql(ty, out),
+            (Self::None | Self::Default | Self::Max, _) => None::<i8>.to_sql(ty, out),
             (Self::Int(x), &Type::CHAR) => i8::try_from(*x)?.to_sql(ty, out),
             (Self::UnsignedInt(x), &Type::CHAR) => i8::try_from(*x)?.to_sql(ty, out),
             (Self::Int(x), &Type::INT2) => (*x as i16).to_sql(ty, out),
@@ -2048,7 +2069,7 @@ impl TryFrom<&DfValue> for mysql_common::value::Value {
         use mysql_common::value::Value;
 
         match dt {
-            DfValue::None | DfValue::Max => Ok(Value::NULL),
+            DfValue::None | DfValue::Default | DfValue::Max => Ok(Value::NULL),
             DfValue::Int(val) => Ok(Value::Int(*val)),
             DfValue::UnsignedInt(val) => Ok(Value::UInt(*val)),
             DfValue::Float(val) => Ok(Value::Float(*val)),
@@ -2216,6 +2237,7 @@ impl Arbitrary for DfValue {
         use proptest::prelude::*;
         match opt_kind {
             Some(DfValueKind::None) => Just(DfValue::None).boxed(),
+            Some(DfValueKind::Default) => Just(DfValue::Default).boxed(),
             Some(DfValueKind::Max) => Just(DfValue::Max).boxed(),
             Some(DfValueKind::Int) => any::<i64>().prop_map(DfValue::Int).boxed(),
             Some(DfValueKind::UnsignedInt) => any::<u64>().prop_map(DfValue::UnsignedInt).boxed(),
@@ -2255,6 +2277,7 @@ impl Arbitrary for DfValue {
                 .boxed(),
             None => prop_oneof![
                 Just(DfValue::None),
+                Just(DfValue::Default),
                 Just(DfValue::Max),
                 any::<i64>().prop_map(DfValue::Int),
                 any::<u64>().prop_map(DfValue::UnsignedInt),
@@ -2507,8 +2530,11 @@ mod tests {
                 if t.to_chrono().naive_local().date().year() < 1000
                     || t.to_chrono().naive_local().date().year() > 9999 =>
                 false,
-            DfValue::ByteArray(_) | DfValue::BitVector(_) | DfValue::Array(_) | DfValue::Max =>
-                false,
+            DfValue::ByteArray(_)
+            | DfValue::BitVector(_)
+            | DfValue::Array(_)
+            | DfValue::Default
+            | DfValue::Max => false,
             _ => true,
         });
 
