@@ -152,6 +152,13 @@ impl ColumnSpecification {
         })
     }
 
+    /// Returns true if the column is not nullable
+    pub fn is_not_null(&self) -> bool {
+        self.constraints
+            .iter()
+            .any(|c| matches!(c, ColumnConstraint::NotNull))
+    }
+
     /// Returns the character set for the column, if one is set.
     pub fn get_charset(&self) -> Option<&str> {
         // Character set is a constraint in Text fields only

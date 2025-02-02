@@ -315,7 +315,7 @@ async fn check_query(
             .map(|row| {
                 row.into_iter()
                     .map(|v| match v {
-                        DfValue::None | DfValue::Max => "NULL".to_owned(),
+                        DfValue::None | DfValue::Default | DfValue::Max => "NULL".to_owned(),
                         DfValue::Int(i) => i.to_string(),
                         DfValue::UnsignedInt(i) => i.to_string(),
                         DfValue::Float(f) => f.to_string(),
