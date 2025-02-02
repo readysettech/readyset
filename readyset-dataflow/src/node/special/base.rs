@@ -107,6 +107,10 @@ impl Base {
         self.primary_key.as_deref()
     }
 
+    pub fn defaults(&self) -> &[DfValue] {
+        &self.defaults
+    }
+
     /// Return the list of all unique indices in this base, including the primary key and
     /// the unique keys. If primary key is set it will be the first in the list.
     pub fn all_unique_keys(&self) -> Vec<Box<[usize]>> {
@@ -232,7 +236,7 @@ impl Base {
     ) -> ReadySetResult<BaseWrite> {
         trace!(node = %our_index, base_ops = ?ops);
         for op in ops.iter_mut() {
-            apply_table_op_coercions(op, columns, self.primary_key())?;
+            apply_table_op_coercions(op, columns, self.primary_key(), self.defaults())?;
         }
 
         let db = match state.get(our_index) {
@@ -492,10 +496,12 @@ fn apply_table_op_coercions(
     op: &mut TableOperation,
     columns: &[Column],
     primary_key: Option<&[usize]>,
+    defaults: &[DfValue],
 ) -> ReadySetResult<()> {
     let coerce_row = |row: &mut Vec<DfValue>| {
-        for (val, col) in row.iter_mut().zip(columns) {
+        for (idx, (val, col)) in row.iter_mut().zip(columns).enumerate() {
             val.maybe_coerce_for_table_op(col.ty())?;
+            val.maybe_apply_default(defaults, idx);
         }
         Ok(())
     };

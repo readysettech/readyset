@@ -26,7 +26,7 @@ impl DfValue {
     // make_serialized_row`, every time we make a backwards incompatible change to deserialization
     // of DfValue! Hopefully `test::deserialize_backwards_compatibility` will automatically catch
     // that, but it's worth being extra careful, as that test is not perfect.
-    pub const SERDE_VERSION: u8 = 1;
+    pub const SERDE_VERSION: u8 = 2;
 
     /// Reference example "row" of `DfValue`s to check against for backwards compatible
     /// deserialization.
@@ -55,6 +55,7 @@ impl DfValue {
             DfValue::Numeric(Arc::new(Decimal::MAX)),
             DfValue::BitVector(Arc::new(BitVec::from_bytes(b"aaaaaaaaa"))),
             DfValue::Array(Arc::new(Array::from(vec![DfValue::from("aaaaaaaaa")]))),
+            DfValue::Default,
             DfValue::Max,
         ]
     }
@@ -73,6 +74,7 @@ enum Variant {
     BitVector,
     TimestampTz,
     Array,
+    Default,
     Max,
 }
 
@@ -152,6 +154,11 @@ impl serde::ser::Serialize for DfValue {
                 "PassThrough value of type {} not supported in dataflow graph",
                 v.ty
             ))),
+            DfValue::Default => serializer.serialize_unit_variant(
+                "DfValue",
+                Variant::Default as _,
+                Variant::VARIANTS[Variant::Default as usize],
+            ),
             DfValue::Max => serializer.serialize_unit_variant(
                 "DfValue",
                 Variant::Max as _,
@@ -287,6 +294,9 @@ impl<'de> Deserialize<'de> for DfValue {
                     }
                     (Variant::Max, variant) => {
                         VariantAccess::unit_variant(variant).map(|_| DfValue::Max)
+                    }
+                    (Variant::Default, variant) => {
+                        VariantAccess::unit_variant(variant).map(|_| DfValue::Default)
                     }
                 }
             }
