@@ -1141,64 +1141,42 @@ where
 
     /// Provides metadata required to prepare a select query
     fn plan_prepare_select(&mut self, stmt: SelectStatement) -> PrepareMeta {
-        match self.rewrite_select_and_check_readyset(&stmt) {
-            Ok((rewritten, should_do_readyset)) => {
-                let status = self
-                    .state
-                    .query_status_cache
-                    .query_status(&ViewCreateRequest::new(
-                        rewritten.clone(),
-                        self.noria.schema_search_path().to_owned(),
-                    ));
-                if self.state.proxy_state == ProxyState::ProxyAlways && !status.always {
-                    PrepareMeta::Proxy
-                } else {
-                    PrepareMeta::Select(PrepareSelectMeta {
-                        stmt,
-                        rewritten,
-                        should_do_noria: should_do_readyset,
-                        // For select statements only InRequestPath should trigger migrations
-                        // synchronously, or if no upstream is present.
-                        must_migrate: self.settings.migration_mode == MigrationMode::InRequestPath
-                            || !self.has_fallback(),
-                        always: status.always,
-                    })
-                }
-            }
-            Err(e) => {
+        let mut rewritten = stmt.clone();
+        let _ = adapter_rewrites::process_query(&mut rewritten, self.noria.rewrite_params())
+            .map_err(|e| {
                 warn!(
                     // FIXME(REA-2168): Use correct dialect.
                     statement = %Sensitive(&stmt.display(readyset_sql::Dialect::MySQL)),
                     "This statement could not be rewritten by ReadySet"
                 );
                 PrepareMeta::FailedToRewrite(e)
-            }
-        }
-    }
+            });
 
-    /// Rewrites the provided select, and checks if the select statement should be
-    /// handled by readyset. If so, the second tuple member will be true. If the select should be
-    /// handled by upstream, the second tuple member will be false.
-    ///
-    /// If the rewrite fails, the option will be None.
-    fn rewrite_select_and_check_readyset(
-        &mut self,
-        stmt: &SelectStatement,
-    ) -> ReadySetResult<(SelectStatement, bool)> {
-        let mut rewritten = stmt.clone();
-        adapter_rewrites::process_query(&mut rewritten, self.noria.rewrite_params())?;
-        // Attempt ReadySet unless the query is unsupported or dropped
-        let should_do_readyset = !matches!(
-            self.state
-                .query_status_cache
-                .query_migration_state(&ViewCreateRequest::new(
-                    rewritten.clone(),
-                    self.noria.schema_search_path().to_owned(),
-                ))
-                .1,
-            MigrationState::Unsupported | MigrationState::Dropped
-        );
-        Ok((rewritten, should_do_readyset))
+        let status = self
+            .state
+            .query_status_cache
+            .query_status(&ViewCreateRequest::new(
+                rewritten.clone(),
+                self.noria.schema_search_path().to_owned(),
+            ));
+        if self.state.proxy_state == ProxyState::ProxyAlways && !status.always {
+            PrepareMeta::Proxy
+        } else {
+            let should_do_readyset = !matches!(
+                status.migration_state,
+                MigrationState::Unsupported | MigrationState::Dropped
+            );
+            PrepareMeta::Select(PrepareSelectMeta {
+                stmt,
+                rewritten,
+                should_do_noria: should_do_readyset,
+                // For select statements only InRequestPath should trigger migrations
+                // synchronously, or if no upstream is present.
+                must_migrate: self.settings.migration_mode == MigrationMode::InRequestPath
+                    || !self.has_fallback(),
+                always: status.always,
+            })
+        }
     }
 
     /// Provides metadata required to prepare a query
