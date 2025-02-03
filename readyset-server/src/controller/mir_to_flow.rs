@@ -377,7 +377,15 @@ fn make_base_node(
         .map(|cs| {
             for c in &cs.constraints {
                 if let ColumnConstraint::DefaultValue(Expr::Literal(ref dv)) = *c {
-                    return dv.try_into();
+                    let df: ReadySetResult<DfValue> = dv.try_into();
+                    let df =
+                        df.map_err(|e| internal_err!("Failed to convert default value: {}", e))?;
+                    let dftype_to =
+                        DfType::from_sql_type(&cs.sql_type, mig.dialect, |_| None, None).map_err(
+                            |e| internal_err!("Failed to convert SQL type to DfType: {}", e),
+                        )?;
+                    let dftype_from = df.infer_dataflow_type();
+                    return df.coerce_to(&dftype_to, &dftype_from);
                 }
             }
             Ok(DfValue::None)
