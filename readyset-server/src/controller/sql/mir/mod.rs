@@ -2548,7 +2548,8 @@ impl SqlToMirConverter {
                 for col in parent_columns {
                     if !emit
                         .iter()
-                        .any(|expr| matches!(expr, ProjectExpr::Column(c) if *c == col))
+                        .any(|expr| matches!(expr, ProjectExpr::Column(c) if *c == col) ||
+                            matches!(expr, ProjectExpr::Expr { alias: name, .. } if *name == col.name))
                     {
                         project_order.push(ProjectExpr::Column(col));
                     }
