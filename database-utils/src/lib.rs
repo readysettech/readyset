@@ -119,6 +119,8 @@ pub struct UpstreamConfig {
     /// schema) or `<schema>.*` (all tables in a schema) for Postgres and `<database>.<table>`
     /// for MySQL.
     ///
+    /// You can also specify "*.*" to indicate that no tables should be replicated at all.
+    ///
     /// Tables specified in the list will not be eligible to be used by caches.
     #[arg(long, env = "REPLICATION_TABLES_IGNORE")]
     #[serde(default)]

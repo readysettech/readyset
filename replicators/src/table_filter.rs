@@ -132,6 +132,13 @@ impl TableFilter {
         })
     }
 
+    fn deny_all() -> Self {
+        Self {
+            strategy_by_schema: HashMap::new(),
+            allow_unregistered_schemas: false,
+        }
+    }
+
     pub(crate) fn try_new(
         dialect: Dialect,
         replication_tables: Option<&str>,
@@ -148,9 +155,7 @@ impl TableFilter {
             return Ok(Self::allow_all());
         }
         if let Some("*.*") = replication_tables_ignore {
-            return Err(ReadySetError::ReplicationFailed(
-                "Cannot filter out all tables".to_string(),
-            ));
+            return Ok(Self::deny_all());
         }
 
         let allow_unregistered_schemas = replication_tables.is_none() && default_schema.is_none();
@@ -377,5 +382,17 @@ mod tests {
         assert!(!filter.should_be_processed("noria", "t4"));
         assert!(!filter.should_be_processed("readyset", "t4"));
         assert!(filter.should_be_processed("readyset", "table"));
+    }
+
+    #[test]
+    fn wildcard_deny_list() {
+        let filter = TableFilter::try_new(
+            readyset_sql::Dialect::MySQL,
+            None,
+            Some("*.*"),
+            Some("noria"),
+        )
+        .unwrap();
+        assert!(!filter.should_be_processed("noria", "t1"));
     }
 }
