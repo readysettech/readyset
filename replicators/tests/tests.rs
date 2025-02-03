@@ -3969,3 +3969,111 @@ async fn alter_readyset_add_table_replication_tables_ignore() {
 
     shutdown_tx.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial(mysql)]
+#[slow]
+async fn mysql_minimal_row_based_replication() {
+    readyset_tracing::init_test_logging();
+    let url = mysql_url();
+    let mut client = DbConnection::connect(&url).await.unwrap();
+
+    client.query("DROP TABLE IF EXISTS t; CREATE TABLE no_pk (x int, b char(1) default 'a', c int default null, d int default 1);").await.unwrap();
+    client.query("DROP TABLE IF EXISTS t; CREATE TABLE no_pk_with_uk (x int, b char(1) default 'a', c int default null, d int default 1, unique key (b));").await.unwrap();
+    client.query("DROP TABLE IF EXISTS t; CREATE TABLE pk (x int primary key, b char(1) default 'a', c int default null, d int default 1);").await.unwrap();
+    client
+        .query("SET binlog_row_image = minimal;")
+        .await
+        .unwrap();
+
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
+        .await
+        .unwrap();
+
+    ctx.notification_channel
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+
+    // Insert some data
+    client
+        .query("INSERT INTO no_pk (x) VALUES (1);")
+        .await
+        .unwrap();
+    client
+        .query("INSERT INTO no_pk_with_uk (x) VALUES (1);")
+        .await
+        .unwrap();
+    client
+        .query("INSERT INTO pk (x) VALUES (1);")
+        .await
+        .unwrap();
+
+    // Check that the data is replicated
+    let row = [
+        DfValue::Int(1),
+        DfValue::from_str_and_collation("a", Collation::Citext),
+        DfValue::None,
+        DfValue::Int(1),
+    ];
+    ctx.check_results("no_pk", "no_pk_insert", &[&row])
+        .await
+        .unwrap();
+    ctx.check_results("no_pk_with_uk", "no_pk_with_uk_insert", &[&row])
+        .await
+        .unwrap();
+    ctx.check_results("pk", "pk_insert", &[&row]).await.unwrap();
+
+    // update some of the columns
+    client
+        .query("UPDATE no_pk SET b = 'b' where x = 1;")
+        .await
+        .unwrap();
+    client
+        .query("UPDATE no_pk_with_uk SET b = 'b' where x = 1;")
+        .await
+        .unwrap();
+    client
+        .query("UPDATE pk SET b = 'b' where x = 1;")
+        .await
+        .unwrap();
+
+    // Check that the data is replicated
+    let row = [
+        DfValue::Int(1),
+        DfValue::from_str_and_collation("b", Collation::Citext),
+        DfValue::None,
+        DfValue::Int(1),
+    ];
+    ctx.check_results("no_pk", "no_pk_update", &[&row])
+        .await
+        .unwrap();
+    ctx.check_results("no_pk_with_uk", "no_pk_with_uk_update", &[&row])
+        .await
+        .unwrap();
+    ctx.check_results("pk", "pk_update", &[&row]).await.unwrap();
+
+    // delete the data
+    client
+        .query("DELETE FROM no_pk where x = 1;")
+        .await
+        .unwrap();
+    client
+        .query("DELETE FROM no_pk_with_uk where x = 1;")
+        .await
+        .unwrap();
+    client.query("DELETE FROM pk where x = 1;").await.unwrap();
+
+    // Check that the data is deleted
+    ctx.check_results("no_pk", "no_pk_delete", &[])
+        .await
+        .unwrap();
+    ctx.check_results("no_pk_with_uk", "no_pk_with_uk_delete", &[])
+        .await
+        .unwrap();
+    ctx.check_results("pk", "pk_delete", &[]).await.unwrap();
+
+    shutdown_tx.shutdown().await;
+}

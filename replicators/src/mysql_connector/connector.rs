@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::{io, vec};
 
 use async_trait::async_trait;
+use atoi::atoi;
 use binlog::consts::{BinlogChecksumAlg, EventType};
 use metrics::counter;
 use mysql::binlog::events::{OptionalMetaExtractor, StatusVarVal};
@@ -26,7 +27,7 @@ use tracing::{error, info, warn};
 use readyset_client::metrics::recorded;
 use readyset_client::recipe::changelist::Change;
 use readyset_client::recipe::ChangeList;
-use readyset_client::TableOperation;
+use readyset_client::{Modification, TableOperation};
 use readyset_data::{Collation as RsCollation, DfValue, Dialect, TimestampTz};
 use readyset_errors::{internal, internal_err, unsupported_err, ReadySetError, ReadySetResult};
 use readyset_sql::ast::{
@@ -227,6 +228,48 @@ impl MySqlBinlogConnector {
         Ok(event.unwrap())
     }
 
+    /// Maps partial binlog row values to their correct positions in a full row vector.
+    ///
+    /// When binlog row is partial (minimal row), we receive a binlog row with only
+    /// the columns that have been set, like (col1, col2, col3, col4), might come as
+    /// col[@2,@4] / val [x, y]. This function maps the values to their correct positions
+    /// in the row and leave a `DfValue::Default` for the rest. The replacement of the
+    /// default values is done at readyset-data/src/lib.rs::maybe_apply_default.
+    ///
+    /// # Arguments
+    /// * `row_data` - The binlog row data containing partial column information
+    /// * `tme` - Table map event containing table metadata
+    ///
+    /// # Returns
+    /// A vector of DfValues with values mapped to their correct positions and defaults elsewhere
+    fn map_partial_binlog_row_insert(
+        &self,
+        row_data: &BinlogRow,
+        tme: &binlog::events::TableMapEvent<'static>,
+    ) -> mysql::Result<Vec<DfValue>> {
+        let mut row = vec![DfValue::Default; tme.columns_count() as usize];
+        let mut binlog_iter = binlog_row_to_noria_row(row_data, tme)?.into_iter();
+
+        for col in row_data.columns_ref() {
+            if let Some(idx) = parse_column_index(&col.name_str()) {
+                if let Some(value) = binlog_iter.next() {
+                    row[idx] = value;
+                }
+            } else {
+                warn!(
+                    "Unable to parse column index from column {}",
+                    col.name_str()
+                );
+            }
+        }
+
+        assert!(
+            binlog_iter.next().is_none(),
+            "binlog row has more columns than the table"
+        );
+        Ok(row)
+    }
+
     /// Process a single binlog ROTATE_EVENT.
     /// This occurs when someone issues a FLUSH LOGS statement or the current binary
     /// log file becomes too large. The maximum size is
@@ -294,17 +337,14 @@ impl MySqlBinlogConnector {
         let mut inserted_rows = Vec::new();
 
         for row in wr_event.rows(tme) {
-            // For each row in the event we produce a vector of ReadySet types that
-            // represent that row
+            let row = &row?;
+            let row_data = row.1.as_ref().ok_or_else(|| {
+                mysql_async::Error::Other(Box::new(internal_err!(
+                    "Missing data in WRITE_ROWS_EVENT"
+                )))
+            })?;
             inserted_rows.push(readyset_client::TableOperation::Insert(
-                binlog_row_to_noria_row(
-                    &row?.1.ok_or_else(|| {
-                        mysql_async::Error::Other(Box::new(internal_err!(
-                            "Missing data in WRITE_ROWS_EVENT"
-                        )))
-                    })?,
-                    tme,
-                )?,
+                self.map_partial_binlog_row_insert(row_data, tme)?,
             ));
         }
 
@@ -318,12 +358,150 @@ impl MySqlBinlogConnector {
         })
     }
 
-    /// Process a single binlog UPDATE_ROWS_EVENT.
-    /// This occurs when someone issues a `UPDATE` statement.
+    /// Process a single row update, handling both full and partial row updates
     ///
     /// # Arguments
+    /// * `tme` - Table map event containing table metadata and column information
+    /// * `row` - A tuple containing optional before and after row images
     ///
-    /// * `ur_event` - the update rows event to process
+    /// # Returns
+    /// * `mysql::Result<Vec<TableOperation>>` - A vector of table operations (Delete+Insert for full updates, Update for partial)
+    fn process_update_row(
+        &self,
+        tme: &binlog::events::TableMapEvent<'static>,
+        row: &(Option<BinlogRow>, Option<BinlogRow>),
+    ) -> mysql::Result<Vec<readyset_client::TableOperation>> {
+        let (before_image, after_image) = self.get_before_after_images(tme, row)?;
+
+        if before_image.len() == tme.columns_count() as usize {
+            let after_image = if after_image.len() == tme.columns_count() as usize {
+                after_image
+            } else {
+                let update = self.create_partial_update(tme, row, after_image)?;
+                // iterate over update, each row that has a modification::set, replace the value in the before_image with the new value
+                before_image
+                    .iter()
+                    .zip(update.iter())
+                    .map(|(before, update)| {
+                        if let Modification::Set(value) = update {
+                            value
+                        } else {
+                            before
+                        }
+                    })
+                    .cloned()
+                    .collect()
+            };
+            // Full row update - convert to delete + insert
+            Ok(vec![
+                readyset_client::TableOperation::DeleteRow { row: before_image },
+                readyset_client::TableOperation::Insert(after_image),
+            ])
+        } else {
+            // Partial row update
+            let update = self.create_partial_update(tme, row, after_image)?;
+            Ok(vec![readyset_client::TableOperation::Update {
+                key: before_image,
+                update,
+            }])
+        }
+    }
+
+    /// Extract before and after images from a row update
+    ///
+    /// # Arguments
+    /// * `tme` - Table map event containing table metadata
+    /// * `row` - A tuple containing optional before and after row images
+    ///
+    /// # Returns
+    /// * `mysql::Result<(Vec<DfValue>, Vec<DfValue>)>` - A tuple of (before_image, after_image) as DfValue vectors
+    ///
+    /// # Errors
+    /// Returns an error if either the before or after image is missing or cannot be converted
+    fn get_before_after_images(
+        &self,
+        tme: &binlog::events::TableMapEvent<'static>,
+        row: &(Option<BinlogRow>, Option<BinlogRow>),
+    ) -> mysql::Result<(Vec<DfValue>, Vec<DfValue>)> {
+        let before_image = binlog_row_to_noria_row(
+            row.0.as_ref().ok_or_else(|| {
+                mysql_async::Error::Other(Box::new(internal_err!(
+                    "Missing data in DELETE_ROWS_EVENT before image: {:?}",
+                    row.0
+                )))
+            })?,
+            tme,
+        )?;
+
+        let after_image = binlog_row_to_noria_row(
+            row.1.as_ref().ok_or_else(|| {
+                mysql_async::Error::Other(Box::new(internal_err!(
+                    "Missing data in DELETE_ROWS_EVENT after image: {:?}",
+                    row.1
+                )))
+            })?,
+            tme,
+        )?;
+
+        Ok((before_image, after_image))
+    }
+
+    /// Create a partial update modification vector
+    ///
+    /// # Arguments
+    /// * `tme` - Table map event containing table metadata
+    /// * `row` - A tuple containing optional before and after row images
+    /// * `after_image` - Vector of DfValues representing the new values
+    ///
+    /// # Returns
+    /// * `mysql::Result<Vec<Modification>>` - A vector of modifications to be applied
+    ///
+    /// # Errors
+    /// Returns an error if the after image is missing from the row
+    fn create_partial_update(
+        &self,
+        tme: &binlog::events::TableMapEvent<'static>,
+        row: &(Option<BinlogRow>, Option<BinlogRow>),
+        after_image: Vec<DfValue>,
+    ) -> mysql::Result<Vec<Modification>> {
+        let row_after = row.1.as_ref().ok_or_else(|| {
+            mysql_async::Error::Other(Box::new(internal_err!(
+                "Missing data in UPDATE_ROWS_EVENT after image: {:?}",
+                row.1
+            )))
+        })?;
+
+        let mut update = vec![Modification::None; tme.columns_count() as usize];
+        let mut taken = 0;
+
+        // Process each column in the row
+        for col in row_after.columns_ref() {
+            if let Some(idx) = parse_column_index(&col.name_str()) {
+                if taken < after_image.len() {
+                    update[idx] = Modification::Set(after_image[taken].clone());
+                    taken += 1;
+                }
+            }
+        }
+
+        Ok(update)
+    }
+
+    /// Process a single binlog UPDATE_ROWS_EVENT
+    ///
+    /// # Arguments
+    /// * `ur_event` - The update rows event to process
+    ///
+    /// # Returns
+    /// * `mysql::Result<ReplicationAction>` - The resulting replication action
+    ///   - `ReplicationAction::Empty` if the table should not be processed
+    ///   - `ReplicationAction::TableAction` containing the table operations otherwise
+    ///
+    /// # Errors
+    /// Returns an error if:
+    /// - The table map event is not found
+    /// - Row processing fails
+    /// - Data conversion fails
     async fn process_event_update_rows(
         &mut self,
         ur_event: mysql_common::binlog::events::UpdateRowsEvent<'_>,
@@ -331,6 +509,7 @@ impl MySqlBinlogConnector {
         if self.enable_statement_logging {
             info!(target: "replicator_statement", "{:?}", ur_event);
         }
+
         // Retrieve the corresponding TABLE_MAP_EVENT
         let tme = self.reader.get_tme(ur_event.table_id()).ok_or_else(|| {
             mysql_async::Error::Other(Box::new(internal_err!(
@@ -346,36 +525,12 @@ impl MySqlBinlogConnector {
             return Ok(ReplicationAction::Empty);
         }
 
-        let mut updated_rows = Vec::new();
+        let mut updated_rows = Vec::with_capacity(ur_event.rows(tme).count());
 
+        // Process each row update
         for row in ur_event.rows(tme) {
-            // For each row in the event we produce a pair of ReadySet table operations
-            // to delete the previous entry and insert the new
-            // one
-            let row = &row?;
-            updated_rows.push(readyset_client::TableOperation::DeleteRow {
-                row: binlog_row_to_noria_row(
-                    row.0.as_ref().ok_or_else(|| {
-                        mysql_async::Error::Other(Box::new(internal_err!(
-                            "Missing before rows in UPDATE_ROWS_EVENT {:?}",
-                            row
-                        )))
-                    })?,
-                    tme,
-                )?,
-            });
-
-            updated_rows.push(readyset_client::TableOperation::Insert(
-                binlog_row_to_noria_row(
-                    row.1.as_ref().ok_or_else(|| {
-                        mysql_async::Error::Other(Box::new(internal_err!(
-                            "Missing after rows in UPDATE_ROWS_EVENT {:?}",
-                            row
-                        )))
-                    })?,
-                    tme,
-                )?,
-            ));
+            let row_ops = self.process_update_row(tme, &row?)?;
+            updated_rows.extend(row_ops);
         }
 
         Ok(ReplicationAction::TableAction {
@@ -421,16 +576,25 @@ impl MySqlBinlogConnector {
         for row in dr_event.rows(tme) {
             // For each row in the event we produce a vector of ReadySet types that
             // represent that row
-            deleted_rows.push(readyset_client::TableOperation::DeleteRow {
-                row: binlog_row_to_noria_row(
-                    &row?.0.ok_or_else(|| {
-                        mysql_async::Error::Other(Box::new(internal_err!(
-                            "Missing data in DELETE_ROWS_EVENT"
-                        )))
-                    })?,
-                    tme,
-                )?,
-            });
+            let before_row_image = binlog_row_to_noria_row(
+                &row?.0.ok_or_else(|| {
+                    mysql_async::Error::Other(Box::new(internal_err!(
+                        "Missing data in DELETE_ROWS_EVENT"
+                    )))
+                })?,
+                tme,
+            )?;
+
+            // Partial Row, Before row image is the PKE
+            if tme.columns_count() != before_row_image.len() as u64 {
+                deleted_rows.push(readyset_client::TableOperation::DeleteByKey {
+                    key: before_row_image,
+                });
+            } else {
+                deleted_rows.push(readyset_client::TableOperation::DeleteRow {
+                    row: before_row_image,
+                });
+            }
         }
 
         Ok(ReplicationAction::TableAction {
@@ -1356,6 +1520,23 @@ fn binlog_to_serde_jsonb_value(binlog_val: &jsonb::Value) -> mysql::Result<serde
     }
 }
 
+/// Parse column index from column name by skipping the first character
+///
+/// # Arguments
+/// * `col_name` - Column name string, expected to be in format "@{index}"
+///
+/// # Returns
+/// * `Option<usize>` - The parsed index if valid, None otherwise
+#[inline]
+fn parse_column_index(col_name: &str) -> Option<usize> {
+    let bytes = col_name.as_bytes();
+    if bytes.first() == Some(&b'@') {
+        atoi::<usize>(&bytes[1..])
+    } else {
+        None
+    }
+}
+
 fn binlog_row_to_noria_row(
     binlog_row: &BinlogRow,
     tme: &binlog::events::TableMapEvent<'static>,
@@ -1364,12 +1545,16 @@ fn binlog_row_to_noria_row(
     let mut charset_iter = opt_meta_extractor.iter_charset();
     let mut enum_and_set_charset_iter = opt_meta_extractor.iter_enum_and_set_charset();
     let mut signedness_iter = opt_meta_extractor.iter_signedness();
-    (0..binlog_row.len())
-        .map(|idx| {
+    binlog_row
+        .columns()
+        .iter()
+        .enumerate()
+        .map(|(idx, col)| {
+            let tme_idx = parse_column_index(&col.name_str()).unwrap();
             match binlog_row.as_ref(idx).unwrap() {
                 BinlogValue::Value(val) => {
                     let (kind, meta) = (
-                        tme.get_column_type(idx)
+                        tme.get_column_type(tme_idx)
                             .map_err(|e| {
                                 mysql_async::Error::Other(Box::new(internal_err!(
                                     "Unable to get column type {}",
@@ -1377,7 +1562,7 @@ fn binlog_row_to_noria_row(
                                 )))
                             })?
                             .unwrap(),
-                        tme.get_column_metadata(idx).unwrap(),
+                        tme.get_column_metadata(tme_idx).unwrap(),
                     );
                     let charset = if kind.is_character_type() {
                         charset_iter.next().transpose()?.unwrap_or_default()

@@ -377,7 +377,18 @@ fn make_base_node(
         .map(|cs| {
             for c in &cs.constraints {
                 if let ColumnConstraint::DefaultValue(Expr::Literal(ref dv)) = *c {
-                    return dv.try_into();
+                    let df: DfValue = dv
+                        .try_into()
+                        .map_err(|e| internal_err!("Failed to convert default value: {}", e))?;
+                    let collation = cs.get_collation().map(|collation| {
+                        Collation::from_mysql_collation(collation).unwrap_or(Collation::Utf8)
+                    });
+                    let dftype_to =
+                        DfType::from_sql_type(&cs.sql_type, mig.dialect, |_| None, collation)
+                            .map_err(|e| {
+                                internal_err!("Failed to convert SQL type to DfType: {}", e)
+                            })?;
+                    return df.coerce_to(&dftype_to, &df.infer_dataflow_type());
                 }
             }
             Ok(DfValue::None)
