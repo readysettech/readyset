@@ -138,10 +138,11 @@ impl Decoder for Codec {
                 let portal_name = get_str(msg)?;
                 let prepared_statement_name = get_str(msg)?;
 
-                let n_param_format_codes = get_i16(msg)?;
-                let param_transfer_formats = (0..n_param_format_codes)
-                    .map(|_| get_format(msg))
-                    .collect::<Result<Vec<TransferFormat>, Error>>()?;
+                let n_param_format_codes = usize::try_from(get_i16(msg)?)?;
+                let mut param_transfer_formats = Vec::with_capacity(n_param_format_codes);
+                for _ in 0..n_param_format_codes {
+                    param_transfer_formats.push(get_format(msg)?);
+                }
 
                 let param_data_types = self
                     .statement_param_types
@@ -172,19 +173,21 @@ impl Decoder for Codec {
                         }
                     }
                 };
-                let params = param_data_types
-                    .iter()
-                    .zip(param_transfer_formats.iter())
-                    .map(|(t, f)| match f {
-                        Binary => get_binary_value(msg, t),
-                        Text => get_text_value(msg, t),
-                    })
-                    .collect::<Result<Vec<PsqlValue>, Error>>()?;
+                let mut params = Vec::with_capacity(n_params);
+                for i in 0..n_params {
+                    let t = &param_data_types[i];
+                    let f = &param_transfer_formats[i];
+                    params.push(match f {
+                        Binary => get_binary_value(msg, t)?,
+                        Text => get_text_value(msg, t)?,
+                    });
+                }
 
-                let n_result_format_codes = msg.get_i16();
-                let result_transfer_formats = (0..n_result_format_codes)
-                    .map(|_| get_format(msg))
-                    .collect::<Result<Vec<TransferFormat>, Error>>()?;
+                let n_result_format_codes = usize::try_from(get_i16(msg)?)?;
+                let mut result_transfer_formats = Vec::with_capacity(n_result_format_codes);
+                for _ in 0..n_result_format_codes {
+                    result_transfer_formats.push(get_format(msg)?);
+                }
 
                 Ok(Some(Bind {
                     portal_name,
@@ -224,10 +227,11 @@ impl Decoder for Codec {
             ID_PARSE => {
                 let prepared_statement_name = get_str(msg)?;
                 let query = get_str(msg)?;
-                let n_parameter_data_types = get_i16(msg)?;
-                let parameter_data_types = (0..n_parameter_data_types)
-                    .map(|_| get_type(msg))
-                    .collect::<Result<Vec<Type>, Error>>()?;
+                let n_parameter_data_types = usize::try_from(get_i16(msg)?)?;
+                let mut parameter_data_types = Vec::with_capacity(n_parameter_data_types);
+                for _ in 0..n_parameter_data_types {
+                    parameter_data_types.push(get_type(msg)?);
+                }
                 Ok(Some(Parse {
                     prepared_statement_name,
                     query,
