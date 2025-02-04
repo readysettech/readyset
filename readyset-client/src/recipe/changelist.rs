@@ -37,11 +37,13 @@ use std::hash::{Hash, Hasher};
 
 use dataflow_expression::Dialect;
 use nom_locate::LocatedSpan;
+//use nom_sql::ReplicaIdentity::Default;
 use nom_sql::{
     AlterTableStatement, CacheInner, CreateCacheStatement, CreateTableStatement,
     CreateViewStatement, DropTableStatement, DropViewStatement, NonReplicatedRelation, Relation,
     SelectStatement, SqlIdentifier, SqlQuery,
 };
+use readyset_data::upstream_system_props::DEFAULT_TIMEZONE_NAME;
 use readyset_data::DfType;
 use readyset_errors::{internal, unsupported, ReadySetError, ReadySetResult};
 use readyset_sql_passes::adapter_rewrites::{self, AdapterRewriteParams};
@@ -59,6 +61,8 @@ pub struct ChangeList {
     ///
     /// The changes are stored in the order they were issued.
     pub changes: Vec<Change>,
+
+    pub timezone_name: SqlIdentifier,
 
     /// The schema search path to use to resolve table references within the changelist
     pub schema_search_path: Vec<SqlIdentifier>,
@@ -133,6 +137,7 @@ impl ChangeList {
     pub fn new(dialect: Dialect) -> Self {
         Self {
             changes: vec![],
+            timezone_name: DEFAULT_TIMEZONE_NAME.into(),
             schema_search_path: vec![],
             dialect,
         }
@@ -258,6 +263,7 @@ impl ChangeList {
 
         Ok(ChangeList {
             changes,
+            timezone_name: DEFAULT_TIMEZONE_NAME.into(),
             schema_search_path: vec![],
             dialect,
         })
@@ -275,6 +281,7 @@ impl ChangeList {
     {
         Self {
             changes: changes.into_changes(),
+            timezone_name: DEFAULT_TIMEZONE_NAME.into(),
             schema_search_path: vec![],
             dialect,
         }
@@ -285,10 +292,19 @@ impl ChangeList {
         &self.schema_search_path
     }
 
+    pub fn timezone_name(&self) -> &SqlIdentifier {
+        &self.timezone_name
+    }
+
     /// Construct a new `ChangeList` from `self`, but with the given schema search path
-    pub fn with_schema_search_path(self, schema_search_path: Vec<SqlIdentifier>) -> Self {
+    pub fn with_schema_search_path_and_timezone(
+        self,
+        schema_search_path: Vec<SqlIdentifier>,
+        timezone_name: SqlIdentifier,
+    ) -> Self {
         Self {
             schema_search_path,
+            timezone_name,
             ..self
         }
     }

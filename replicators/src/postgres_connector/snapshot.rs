@@ -17,6 +17,7 @@ use nom_sql::{
 use postgres_types::{accepts, FromSql, Kind, Type};
 use readyset_client::recipe::changelist::{Change, ChangeList, PostgresTableMetadata};
 use readyset_client::TableOperation;
+use readyset_data::upstream_system_props::DEFAULT_TIMEZONE_NAME;
 use readyset_data::{DfType, DfValue, Dialect as DataDialect, PgEnumMetadata};
 use readyset_errors::{internal, internal_err, unsupported, ReadySetError, ReadySetResult};
 #[cfg(feature = "failure_injection")]
@@ -856,7 +857,10 @@ impl<'a> PostgresReplicator<'a> {
                             Change::CreateView(view),
                             DataDialect::DEFAULT_POSTGRESQL,
                         )
-                        .with_schema_search_path(vec![view_schema.clone().into()]),
+                        .with_schema_search_path_and_timezone(
+                            vec![view_schema.clone().into()],
+                            DEFAULT_TIMEZONE_NAME.into(),
+                        ),
                     )
                 })
                 .await;

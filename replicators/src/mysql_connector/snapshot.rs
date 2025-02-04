@@ -33,6 +33,7 @@ use crate::db_util::DatabaseSchemas;
 use crate::mysql_connector::snapshot_type::SnapshotType;
 use crate::table_filter::TableFilter;
 use crate::TablesSnapshottingGaugeGuard;
+use readyset_data::upstream_system_props::DEFAULT_TIMEZONE_NAME;
 use std::collections::HashSet;
 
 const RS_BATCH_SIZE: usize = 1000; // How many queries to buffer before pushing to ReadySet
@@ -229,7 +230,10 @@ impl MySqlReplicator<'_> {
                 })
                 .and_then(|changelist| {
                     noria.extend_recipe_no_leader_ready(
-                        changelist.with_schema_search_path(vec![db.clone().into()]),
+                        changelist.with_schema_search_path_and_timezone(
+                            vec![db.clone().into()],
+                            DEFAULT_TIMEZONE_NAME.into(),
+                        ),
                     )
                 })
                 .await;
@@ -280,7 +284,10 @@ impl MySqlReplicator<'_> {
                 })
                 .and_then(|changelist| {
                     noria.extend_recipe_no_leader_ready(
-                        changelist.with_schema_search_path(vec![db.clone().into()]),
+                        changelist.with_schema_search_path_and_timezone(
+                            vec![db.clone().into()],
+                            DEFAULT_TIMEZONE_NAME.into(),
+                        ),
                     )
                 })
                 .await;

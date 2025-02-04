@@ -8969,7 +8969,7 @@ async fn drop_view_schema_qualified() {
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap()
-        .with_schema_search_path(vec!["public".into()]),
+        .with_schema_search_path_and_timezone(vec!["public".into()]),
     )
     .await
     .unwrap();

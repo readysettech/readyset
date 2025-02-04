@@ -99,6 +99,7 @@ use readyset_client_metrics::{
     recorded, EventType, QueryExecutionEvent, QueryIdWrapper, QueryLogMode, ReadysetExecutionEvent,
     SqlQueryType,
 };
+use readyset_data::upstream_system_props::DEFAULT_TIMEZONE_NAME;
 use readyset_data::{DfType, DfValue};
 use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
 use readyset_errors::{internal, internal_err, unsupported, unsupported_err, ReadySetResult};
@@ -1001,6 +1002,7 @@ where
                 self.state.query_status_cache.update_query_migration_state(
                     &ViewCreateRequest::new(
                         select_meta.rewritten.clone(),
+                        self.noria.timezone_name().to_owned(),
                         self.noria.schema_search_path().to_owned(),
                     ),
                     MigrationState::Successful,
@@ -1012,6 +1014,7 @@ where
                     self.state.query_status_cache.view_not_found_for_query(
                         &ViewCreateRequest::new(
                             select_meta.rewritten.clone(),
+                            self.noria.timezone_name().to_owned(),
                             self.noria.schema_search_path().to_owned(),
                         ),
                     );
@@ -1019,6 +1022,7 @@ where
                     self.state.query_status_cache.update_query_migration_state(
                         &ViewCreateRequest::new(
                             select_meta.rewritten.clone(),
+                            self.noria.timezone_name().to_owned(),
                             self.noria.schema_search_path().to_owned(),
                         ),
                         MigrationState::Unsupported,
@@ -1340,8 +1344,11 @@ where
                 always,
                 ..
             }) => {
-                let request =
-                    ViewCreateRequest::new(rewritten, self.noria.schema_search_path().to_owned());
+                let request = ViewCreateRequest::new(
+                    rewritten,
+                    self.noria.timezone_name().to_owned(),
+                    self.noria.schema_search_path().to_owned(),
+                );
                 let migration_state = self
                     .state
                     .query_status_cache
@@ -1965,11 +1972,19 @@ where
             }
         };
         self.state.query_status_cache.update_query_migration_state(
-            &ViewCreateRequest::new(stmt.clone(), self.noria.schema_search_path().to_owned()),
+            &ViewCreateRequest::new(
+                stmt.clone(),
+                self.noria.timezone_name().to_owned(),
+                self.noria.schema_search_path().to_owned(),
+            ),
             migration_state,
         );
         self.state.query_status_cache.always_attempt_readyset(
-            &ViewCreateRequest::new(stmt.clone(), self.noria.schema_search_path().to_owned()),
+            &ViewCreateRequest::new(
+                stmt.clone(),
+                self.noria.timezone_name().to_owned(),
+                self.noria.schema_search_path().to_owned(),
+            ),
             always,
         );
         Ok(noria_connector::QueryResult::Empty)
@@ -2310,6 +2325,7 @@ where
 
                                 ViewCreateRequest::new(
                                     stmt.clone(),
+                                    self.noria.timezone_name().to_owned(),
                                     self.noria.schema_search_path().to_owned(),
                                 )
                             }
@@ -2367,13 +2383,14 @@ where
                 if !self.allow_cache_ddl {
                     unsupported!("{}", UNSUPPORTED_CACHE_DDL_MSG);
                 }
-                let (stmt, search_path) = match inner {
-                    Ok(CacheInner::Statement(st)) => Ok((*st.clone(), None)),
+                let (stmt, timezone_name, search_path) = match inner {
+                    Ok(CacheInner::Statement(st)) => Ok((*st.clone(), None, None)),
                     Ok(CacheInner::Id(id)) => {
                         match self.state.query_status_cache.query(id.as_str()) {
                             Some(q) => match q {
                                 Query::Parsed(view_request) => Ok((
                                     view_request.statement.clone(),
+                                    Some(view_request.timezone_name.clone()),
                                     Some(view_request.schema_search_path.clone()),
                                 )),
                                 Query::ParseFailed(q) => Err(ReadySetError::UnparseableQuery {
@@ -2402,6 +2419,7 @@ where
                 {
                     let ddl_req = CacheDDLRequest {
                         unparsed_stmt: unparsed_create_cache_statement.clone(),
+                        timezone_name: self.noria.timezone_name().to_owned(),
                         schema_search_path: self.noria.schema_search_path().to_owned(),
                         dialect: self.settings.dialect.into(),
                     };
@@ -2451,6 +2469,7 @@ where
                 }
                 let ddl_req = CacheDDLRequest {
                     unparsed_stmt: drop_cache.display_unquoted().to_string(),
+                    timezone_name: DEFAULT_TIMEZONE_NAME.into(),
                     // drop cache statements explicitly don't use a search path, as the only schema
                     // we need to resolve is the cache name.
                     schema_search_path: vec![],

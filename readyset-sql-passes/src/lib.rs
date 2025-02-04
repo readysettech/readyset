@@ -73,6 +73,8 @@ pub struct RewriteContext<'a> {
     /// Map from schema name to the set of custom types in that schema
     pub custom_types: &'a HashMap<&'a SqlIdentifier, HashSet<&'a SqlIdentifier>>,
 
+    pub timezone_name: &'a SqlIdentifier,
+
     /// Ordered list of schema names to search in when resolving schema names of tables
     pub search_path: &'a [SqlIdentifier],
 

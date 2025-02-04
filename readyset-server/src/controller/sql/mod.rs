@@ -71,6 +71,8 @@ struct UncompiledView {
     /// The definition of the view itself
     definition: SelectSpecification,
 
+    timezone_name: SqlIdentifier,
+
     /// The schema search path that the view was created with
     schema_search_path: Vec<SqlIdentifier>,
 }
@@ -179,6 +181,7 @@ impl SqlIncorporator {
         &self,
         stmt: S,
         query_name: Option<&str>,
+        timezone_name: &SqlIdentifier,
         search_path: &[SqlIdentifier],
         dialect: Dialect,
         invalidating_tables: Option<&mut Vec<Relation>>,
@@ -204,6 +207,7 @@ impl SqlIncorporator {
                     acc.entry(schema).or_default().insert(name);
                     acc
                 }),
+            timezone_name,
             search_path,
             dialect,
             invalidating_tables,
@@ -224,6 +228,7 @@ impl SqlIncorporator {
 
         let ChangeList {
             changes,
+            timezone_name,
             schema_search_path,
             dialect,
         } = changelist;
@@ -234,7 +239,15 @@ impl SqlIncorporator {
                     statement: mut cts,
                     pg_meta,
                 } => {
-                    cts = self.rewrite(cts, None, &schema_search_path, dialect, None, None)?;
+                    cts = self.rewrite(
+                        cts,
+                        None,
+                        &timezone_name,
+                        &schema_search_path,
+                        dialect,
+                        None,
+                        None,
+                    )?;
                     let body = match cts.body {
                         Ok(body) => body,
                         Err(unparsed) => unsupported!(
@@ -403,10 +416,22 @@ impl SqlIncorporator {
                     };
 
                     self.invalidate_queries_for_added_relation(&stmt.name, mig)?;
-                    self.add_view(stmt.name, definition, schema_search_path.clone())?;
+                    self.add_view(
+                        stmt.name,
+                        definition,
+                        timezone_name.clone(),
+                        schema_search_path.clone(),
+                    )?;
                 }
                 Change::CreateCache(cc) => {
-                    self.add_query(cc.name, *cc.statement, cc.always, &schema_search_path, mig)?;
+                    self.add_query(
+                        cc.name,
+                        *cc.statement,
+                        cc.always,
+                        &timezone_name,
+                        &schema_search_path,
+                        mig,
+                    )?;
                 }
                 Change::AlterTable(_) => {
                     // The only ALTER TABLE changes that can end up here (currently) are ones that
@@ -625,6 +650,7 @@ impl SqlIncorporator {
         &mut self,
         name: Relation,
         definition: SelectSpecification,
+        timezone_name: SqlIdentifier,
         schema_search_path: Vec<SqlIdentifier>,
     ) -> ReadySetResult<()> {
         trace!(name = %name.display_unquoted(), "Adding uncompiled view");
@@ -634,6 +660,7 @@ impl SqlIncorporator {
             UncompiledView {
                 name,
                 definition,
+                timezone_name,
                 schema_search_path,
             },
         );
@@ -649,6 +676,7 @@ impl SqlIncorporator {
         name: Option<Relation>,
         mut stmt: SelectStatement,
         always: bool,
+        timezone_name: &SqlIdentifier,
         schema_search_path: &[SqlIdentifier],
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<Relation> {
@@ -666,6 +694,7 @@ impl SqlIncorporator {
                 self.select_query_to_mir(
                     name.clone(),
                     &mut stmt,
+                    timezone_name,
                     schema_search_path,
                     Some(&mut invalidating_tables),
                     LeafBehavior::Leaf,
@@ -682,6 +711,7 @@ impl SqlIncorporator {
                 let rewritten_stmt = self.rewrite(
                     stmt.clone(),
                     Some(&name.name),
+                    timezone_name,
                     schema_search_path,
                     mig.dialect,
                     Some(&mut invalidating_tables),
@@ -1002,6 +1032,7 @@ impl SqlIncorporator {
         &mut self,
         query_name: Relation,
         query: &mut CompoundSelectStatement,
+        timezone_name: &SqlIdentifier,
         search_path: &[SqlIdentifier],
         mut invalidating_tables: Option<&mut Vec<Relation>>,
         leaf_behavior: LeafBehavior,
@@ -1013,6 +1044,7 @@ impl SqlIncorporator {
             subqueries.push(self.select_query_to_mir(
                 query_name.clone(),
                 stmt,
+                timezone_name,
                 search_path,
                 tables.as_mut(),
                 LeafBehavior::Anonymous,
@@ -1041,6 +1073,7 @@ impl SqlIncorporator {
         &mut self,
         query_name: Relation,
         stmt: &mut SelectStatement,
+        timezone_name: &SqlIdentifier,
         search_path: &[SqlIdentifier],
         mut invalidating_tables: Option<&mut Vec<Relation>>,
         leaf_behavior: LeafBehavior,
@@ -1062,6 +1095,7 @@ impl SqlIncorporator {
             let compile_res = self.select_query_to_mir_inner(
                 &query_name,
                 stmt,
+                timezone_name,
                 search_path,
                 invalidating_tables.is_some().then_some(&mut tables),
                 leaf_behavior,
@@ -1111,6 +1145,7 @@ impl SqlIncorporator {
         &mut self,
         query_name: &Relation,
         stmt: &mut SelectStatement,
+        timezone_name: &SqlIdentifier,
         search_path: &[SqlIdentifier],
         invalidating_tables: Option<&mut Vec<Relation>>,
         leaf_behavior: LeafBehavior,
@@ -1122,6 +1157,7 @@ impl SqlIncorporator {
         *stmt = self.rewrite(
             stmt.clone(),
             Some(&query_name.name),
+            timezone_name,
             search_path,
             mig.dialect,
             invalidating_tables,
@@ -1147,6 +1183,7 @@ impl SqlIncorporator {
                     let subquery_leaf = self.select_query_to_mir(
                         query_name.clone(),
                         &mut query,
+                        timezone_name,
                         &[], /* Don't need a schema search path since we're only resolving
                               * one (already qualified) table */
                         None,
@@ -1163,6 +1200,7 @@ impl SqlIncorporator {
                     let subquery_leaf = self.select_query_to_mir(
                         query_name.clone(),
                         for_statement.as_mut(),
+                        timezone_name,
                         search_path,
                         None,
                         LeafBehavior::Anonymous,
@@ -1198,6 +1236,7 @@ impl SqlIncorporator {
         let UncompiledView {
             name,
             mut definition,
+            timezone_name,
             schema_search_path,
         } = uncompiled_view;
 
@@ -1205,6 +1244,7 @@ impl SqlIncorporator {
             SelectSpecification::Compound(stmt) => self.add_compound_query(
                 name.clone(),
                 stmt,
+                &timezone_name,
                 &schema_search_path,
                 None,
                 LeafBehavior::NamedWithoutLeaf,
@@ -1213,6 +1253,7 @@ impl SqlIncorporator {
             SelectSpecification::Simple(stmt) => self.select_query_to_mir(
                 name.clone(),
                 stmt,
+                &timezone_name,
                 &schema_search_path,
                 None,
                 LeafBehavior::NamedWithoutLeaf,

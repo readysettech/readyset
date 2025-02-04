@@ -81,6 +81,8 @@ pub struct ViewCreateRequest {
     /// The query itself, as provided by the user
     pub statement: SelectStatement,
 
+    pub timezone_name: SqlIdentifier,
+
     /// The schema search path to use to resolve table references within the changelist
     ///
     /// This is actually passed as [`recipe::changelist::ChangeList::schema_search_path`] when
@@ -90,18 +92,24 @@ pub struct ViewCreateRequest {
 
 impl ViewCreateRequest {
     /// Initialize a new [`ViewCreateRequest`] with the given query and schema search path
-    pub fn new(statement: SelectStatement, schema_search_path: Vec<SqlIdentifier>) -> Self {
+    pub fn new(
+        statement: SelectStatement,
+        timezone_name: SqlIdentifier,
+        schema_search_path: Vec<SqlIdentifier>,
+    ) -> Self {
         Self {
             statement,
+            timezone_name,
             schema_search_path,
         }
     }
 
-    /// Anonymize the statement and schema_search_path of the ViewCreateRequest in place
+    /// Anonymize the statement, timezone_name and schema_search_path of the ViewCreateRequest in place
     pub fn to_anonymized_string(&self) -> String {
         let mut anon = self.clone();
         let mut anonymizer = Anonymizer::new();
         anon.statement.anonymize(&mut anonymizer);
+        anon.timezone_name.anonymize(&mut anonymizer);
         for id in anon.schema_search_path.iter_mut() {
             id.anonymize(&mut anonymizer);
         }

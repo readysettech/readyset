@@ -299,6 +299,8 @@ pub struct NoriaConnector {
     /// supports a multi-element schema search path, the concept of "currently connected database"
     /// in MySQL can be thought of as a schema search path that only has one element.
     schema_search_path: Vec<SqlIdentifier>,
+
+    timezone_name: SqlIdentifier,
 }
 
 mod request_handler {
@@ -975,6 +977,11 @@ impl NoriaConnector {
         self.schema_search_path.as_ref()
     }
 
+    /// Returns a reference to the currently configured timezone name
+    pub fn timezone_name(&self) -> &SqlIdentifier {
+        self.timezone_name.as_ref()
+    }
+
     pub(crate) async fn resnapshot_table(
         &mut self,
         table: &mut Relation,
@@ -1042,11 +1049,13 @@ impl NoriaConnector {
             }));
         let schema_search_path =
             override_schema_search_path.unwrap_or_else(|| self.schema_search_path.clone());
+        let timezone_name = self.timezone_name().clone();
+
         let changelist = ChangeList::from_change(
             Change::create_cache(name.clone().unwrap(), statement.clone(), always),
             self.dialect,
         )
-        .with_schema_search_path(schema_search_path.clone());
+        .with_schema_search_path_and_timezone(schema_search_path.clone(), timezone_name.clone());
 
         if concurrently {
             let id = noria_await!(
@@ -1065,7 +1074,7 @@ impl NoriaConnector {
             // when we drop it we'll be hitting noria anyway
             self.view_name_cache
                 .insert(
-                    ViewCreateRequest::new(statement.clone(), schema_search_path),
+                    ViewCreateRequest::new(statement.clone(), timezone_name, schema_search_path),
                     name.clone().unwrap(),
                 )
                 .await;
@@ -1086,7 +1095,10 @@ impl NoriaConnector {
             Change::create_cache(id.to_string(), req.statement.clone(), false),
             self.dialect,
         )
-        .with_schema_search_path(req.schema_search_path.clone());
+        .with_schema_search_path_and_timezone(
+            req.schema_search_path.clone(),
+            req.timezone_name.clone(),
+        );
 
         noria_await!(
             self.inner.get_mut()?,
@@ -1106,7 +1118,9 @@ impl NoriaConnector {
     ) -> ReadySetResult<Relation> {
         let search_path =
             override_schema_search_path.unwrap_or_else(|| self.schema_search_path().to_vec());
-        let view_request = ViewCreateRequest::new(q.clone(), search_path.clone());
+        let timezone_name = self.timezone_name().clone();
+        let view_request =
+            ViewCreateRequest::new(q.clone(), timezone_name.clone(), search_path.clone());
         self.view_name_cache
             .get_mut_or_try_insert_with(&view_request, shared_cache::InsertMode::Shared, async {
                 if create_if_not_exist {
@@ -1137,7 +1151,7 @@ impl NoriaConnector {
                         Change::create_cache(qname.clone(), q.clone(), false),
                         self.dialect,
                     )
-                    .with_schema_search_path(search_path);
+                    .with_schema_search_path_and_timezone(search_path, timezone_name);
 
                     if let Err(error) = noria_await!(
                         self.inner.get_mut()?,
@@ -1641,7 +1655,10 @@ impl NoriaConnector {
         // doing a migration on ReadySet every time. On the other hand, CREATE VIEW is rare...
 
         let changelist = ChangeList::from_change(Change::CreateView(q.clone()), self.dialect)
-            .with_schema_search_path(self.schema_search_path.clone());
+            .with_schema_search_path_and_timezone(
+                self.schema_search_path.clone(),
+                self.timezone_name.clone(),
+            );
 
         noria_await!(
             self.inner.get_mut()?,

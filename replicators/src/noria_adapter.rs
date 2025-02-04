@@ -20,6 +20,7 @@ use readyset_client::metrics::recorded::{self, SnapshotStatusTag};
 use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_client::utils::retry_with_exponential_backoff;
 use readyset_client::{ReadySetHandle, Table, TableOperation};
+use readyset_data::upstream_system_props::DEFAULT_TIMEZONE_NAME;
 use readyset_data::Dialect;
 use readyset_errors::{internal_err, set_failpoint_return_err, ReadySetError, ReadySetResult};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
@@ -822,7 +823,10 @@ impl<'a> NoriaAdapter<'a> {
             return Err(ReadySetError::ResnapshotNeeded);
         }
 
-        changelist = changelist.with_schema_search_path(vec![schema.clone().into()]);
+        changelist = changelist.with_schema_search_path_and_timezone(
+            vec![schema.clone().into()],
+            DEFAULT_TIMEZONE_NAME.into(),
+        );
 
         // Collect a list of all tables we're creating for later
         let tables = changelist

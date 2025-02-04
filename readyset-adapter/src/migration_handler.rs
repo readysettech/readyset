@@ -340,7 +340,7 @@ impl MigrationHandler {
             Change::create_cache(qname, view_request.statement.clone(), false),
             self.dialect,
         )
-        .with_schema_search_path(view_request.schema_search_path.clone());
+        .with_schema_search_path_and_timezone(view_request.schema_search_path.clone());
         match controller.dry_run(changelist).await {
             Ok(_) => {
                 self.start_time.remove(view_request);

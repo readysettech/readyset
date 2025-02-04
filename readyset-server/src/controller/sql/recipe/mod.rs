@@ -210,6 +210,7 @@ impl Recipe {
         let statement = self.inc.rewrite(
             query.statement,
             None,
+            &query.timezone_name,
             &query.schema_search_path,
             dialect,
             None,

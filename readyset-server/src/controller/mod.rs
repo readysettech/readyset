@@ -878,6 +878,7 @@ impl Controller {
         let mut current_changes = vec![];
         let mut current_dialect = None;
         let mut current_schema_search_path = None;
+        let mut current_timezone_name = None;
         let mut last_was_drop = false;
 
         for ddl_req in ddl_reqs {
@@ -890,6 +891,7 @@ impl Controller {
                         if !current_changes.is_empty() {
                             changelists.push(ChangeList {
                                 changes: current_changes,
+                                timezone_name: current_timezone_name.unwrap_or_default(),
                                 schema_search_path: current_schema_search_path.unwrap_or_default(),
                                 dialect: ddl_req.dialect,
                             });
@@ -900,6 +902,11 @@ impl Controller {
                             None
                         } else {
                             Some(ddl_req.schema_search_path.clone())
+                        };
+                        current_timezone_name = if is_drop {
+                            None
+                        } else {
+                            Some(ddl_req.timezone_name.clone())
                         };
                     }
 
@@ -915,6 +922,7 @@ impl Controller {
         if !current_changes.is_empty() {
             changelists.push(ChangeList {
                 changes: current_changes,
+                timezone_name: current_timezone_name.unwrap_or_default(),
                 schema_search_path: current_schema_search_path.unwrap_or_default(),
                 dialect: current_dialect.expect("Dialect should be set for the last batch"),
             });
@@ -1548,7 +1556,7 @@ mod tests {
                     DataDialect::DEFAULT_MYSQL,
                 )
                 .unwrap()
-                .with_schema_search_path(schema_search_path.clone()),
+                .with_schema_search_path_and_timezone(schema_search_path.clone()),
             )
             .await
             .unwrap();

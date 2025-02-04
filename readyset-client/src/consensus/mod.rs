@@ -46,6 +46,7 @@ const SCHEMA_REPLICATION_OFFSET_PATH: &str = "schema_replication_offset";
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub struct CacheDDLRequest {
     pub unparsed_stmt: String,
+    pub timezone_name: SqlIdentifier,
     pub schema_search_path: Vec<SqlIdentifier>,
     pub dialect: Dialect,
 }
