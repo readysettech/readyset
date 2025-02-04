@@ -5,7 +5,7 @@ use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
-use crate::{ast::*, Dialect, DialectDisplay};
+use crate::{ast::*, AstConversionError, Dialect, DialectDisplay};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Arbitrary)]
 pub enum JoinRightSide {
@@ -45,11 +45,29 @@ pub enum JoinOperator {
     LeftOuterJoin,
     #[weight(0)]
     RightJoin,
+    #[weight(0)]
+    RightOuterJoin,
     InnerJoin,
     #[weight(0)]
     CrossJoin,
     #[weight(0)]
     StraightJoin,
+}
+
+impl From<&sqlparser::ast::JoinOperator> for JoinOperator {
+    fn from(value: &sqlparser::ast::JoinOperator) -> Self {
+        use sqlparser::ast::JoinOperator as JoinOp;
+        match value {
+            JoinOp::Join(..) => Self::Join,
+            JoinOp::Inner(..) => Self::InnerJoin,
+            JoinOp::Left(..) => Self::LeftJoin,
+            JoinOp::LeftOuter(..) => Self::LeftOuterJoin,
+            JoinOp::Right(..) => Self::RightJoin,
+            JoinOp::RightOuter(..) => Self::RightOuterJoin,
+            JoinOp::CrossJoin => Self::CrossJoin,
+            _ => todo!("unsupported join type {value:?}"),
+        }
+    }
 }
 
 impl JoinOperator {
@@ -65,6 +83,7 @@ impl fmt::Display for JoinOperator {
             JoinOperator::LeftJoin => write!(f, "LEFT JOIN")?,
             JoinOperator::LeftOuterJoin => write!(f, "LEFT OUTER JOIN")?,
             JoinOperator::RightJoin => write!(f, "RIGHT JOIN")?,
+            JoinOperator::RightOuterJoin => write!(f, "RIGHT OUTER JOIN")?,
             JoinOperator::InnerJoin => write!(f, "INNER JOIN")?,
             JoinOperator::CrossJoin => write!(f, "CROSS JOIN")?,
             JoinOperator::StraightJoin => write!(f, "STRAIGHT JOIN")?,
@@ -78,6 +97,45 @@ pub enum JoinConstraint {
     On(Expr),
     Using(Vec<Column>),
     Empty,
+}
+
+impl TryFrom<sqlparser::ast::JoinOperator> for JoinConstraint {
+    type Error = AstConversionError;
+
+    fn try_from(value: sqlparser::ast::JoinOperator) -> Result<Self, Self::Error> {
+        use sqlparser::ast::JoinOperator as JoinOp;
+        match value {
+            JoinOp::Join(constraint)
+            | JoinOp::Inner(constraint)
+            | JoinOp::Left(constraint)
+            | JoinOp::LeftOuter(constraint)
+            | JoinOp::Right(constraint)
+            | JoinOp::RightOuter(constraint)
+            | JoinOp::FullOuter(constraint)
+            | JoinOp::LeftSemi(constraint)
+            | JoinOp::RightSemi(constraint)
+            | JoinOp::LeftAnti(constraint)
+            | JoinOp::RightAnti(constraint)
+            | JoinOp::Semi(constraint)
+            | JoinOp::Anti(constraint)
+            | JoinOp::AsOf { constraint, .. } => constraint.try_into(),
+            JoinOp::CrossJoin | JoinOp::CrossApply | JoinOp::OuterApply => Ok(Self::Empty),
+        }
+    }
+}
+
+impl TryFrom<sqlparser::ast::JoinConstraint> for JoinConstraint {
+    type Error = AstConversionError;
+
+    fn try_from(value: sqlparser::ast::JoinConstraint) -> Result<Self, Self::Error> {
+        use sqlparser::ast::JoinConstraint::*;
+        match value {
+            On(expr) => Ok(Self::On(expr.try_into()?)),
+            Using(idents) => Ok(Self::Using(idents.into_iter().map(Into::into).collect())),
+            None => Ok(Self::Empty),
+            Natural => unsupported!("NATURAL join"),
+        }
+    }
 }
 
 impl DialectDisplay for JoinConstraint {

@@ -5,7 +5,7 @@ use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
-use crate::{ast::*, Dialect, DialectDisplay};
+use crate::{ast::*, AstConversionError, Dialect, DialectDisplay};
 
 /// A (potentially schema-qualified) name for a relation
 ///
@@ -59,6 +59,50 @@ impl From<String> for Relation {
 impl<'a> From<&'a String> for Relation {
     fn from(s: &'a String) -> Self {
         Self::from(s.as_str())
+    }
+}
+
+impl From<sqlparser::ast::ObjectName> for Relation {
+    fn from(value: sqlparser::ast::ObjectName) -> Self {
+        use sqlparser::ast::ObjectNamePart;
+        let mut identifiers = value
+            .0
+            .into_iter()
+            .map(|ObjectNamePart::Identifier(ident)| ident.into());
+        let first = identifiers.next().unwrap_or_default();
+        if let Some(second) = identifiers.next() {
+            Self {
+                name: second,
+                schema: Some(first),
+            }
+        } else {
+            Self {
+                name: first,
+                schema: None,
+            }
+        }
+    }
+}
+
+impl From<sqlparser::ast::FromTable> for Relation {
+    fn from(value: sqlparser::ast::FromTable) -> Self {
+        use sqlparser::ast::FromTable::*;
+        match value {
+            WithFromKeyword(tables) | WithoutKeyword(tables) => tables
+                .into_iter()
+                .map(Into::into)
+                .next()
+                .expect("empty list of tables"),
+        }
+    }
+}
+
+impl From<sqlparser::ast::TableWithJoins> for Relation {
+    fn from(value: sqlparser::ast::TableWithJoins) -> Self {
+        match value.relation {
+            sqlparser::ast::TableFactor::Table { name, .. } => name.into(),
+            _ => todo!("We don't support joins yet"),
+        }
     }
 }
 
@@ -138,6 +182,36 @@ impl From<Relation> for TableExpr {
             inner: TableExprInner::Table(table),
             alias: None,
             index_hint: None,
+        }
+    }
+}
+
+impl TryFrom<sqlparser::ast::TableFactor> for TableExpr {
+    type Error = AstConversionError;
+
+    fn try_from(value: sqlparser::ast::TableFactor) -> Result<Self, Self::Error> {
+        match value {
+            sqlparser::ast::TableFactor::Table { name, alias, .. } => Ok(Self {
+                inner: TableExprInner::Table(name.into()),
+                alias: alias.map(|table_alias| table_alias.name.into()), // XXX we don't support [`TableAlias::columns`]
+                index_hint: None, // TODO(mvzink): Find where this is parsed in sqlparser
+            }),
+            sqlparser::ast::TableFactor::Derived {
+                subquery,
+                alias,
+                lateral: _lateral, // XXX We don't support this
+            } => {
+                if let crate::ast::SqlQuery::Select(subselect) = subquery.try_into()? {
+                    Ok(Self {
+                        inner: TableExprInner::Subquery(Box::new(subselect)),
+                        alias: alias.map(|table_alias| table_alias.name.into()), // XXX we don't support [`TableAlias::columns`]
+                        index_hint: None, // TODO(mvzink): Find where this is parsed in sqlparser
+                    })
+                } else {
+                    failed!("unexpected non-SELECT subquery in table expression")
+                }
+            }
+            _ => unsupported!("table expression {value:?}"),
         }
     }
 }
