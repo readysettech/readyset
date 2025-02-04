@@ -15,7 +15,6 @@ fail = { workspace = true }
 futures-executor = { workspace = true }
 futures-util = { workspace = true }
 lazy_static = { workspace = true }
-nom-sql = { path = "../nom-sql" }
 nom = { workspace = true }
 regex = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
@@ -72,10 +71,11 @@ health-reporter = { path = "../health-reporter" }
 database-utils = { path = "../database-utils" }
 
 [dev-dependencies]
-proptest = { workspace = true }
-test-strategy = { workspace = true }
 criterion = { workspace = true }
+nom-sql = { path = "../nom-sql" }
+proptest = { workspace = true }
 rand = { workspace = true }
+test-strategy = { workspace = true }
 
 [lib]
 path = "src/lib.rs"

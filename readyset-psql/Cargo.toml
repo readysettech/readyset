@@ -18,7 +18,6 @@ readyset-adapter-types = { path = "../readyset-adapter-types" }
 readyset-client-metrics = { path = "../readyset-client-metrics" }
 readyset-version = { path = "../readyset-version" }
 failpoint-macros = { path = "../failpoint-macros" }
-nom-sql = { path = "../nom-sql" }
 readyset-sql = { path = "../readyset-sql" }
 psql-srv = { path = "../psql-srv" }
 anyhow = { workspace = true }
