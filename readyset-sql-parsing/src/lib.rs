@@ -3,7 +3,11 @@ use readyset_sql::{ast::SqlQuery, Dialect};
 #[cfg(feature = "sqlparser")]
 use readyset_sql::ast::CacheInner;
 #[cfg(feature = "sqlparser")]
-use sqlparser::{keywords::Keyword, parser::Parser};
+use sqlparser::{
+    keywords::Keyword,
+    parser::Parser,
+    tokenizer::{Token, TokenWithSpan, Word},
+};
 
 #[cfg(feature = "sqlparser")]
 #[derive(Debug, thiserror::Error)]
@@ -52,12 +56,49 @@ fn parse_create_cache(
 }
 
 #[cfg(feature = "sqlparser")]
+fn parse_explain(parser: &mut Parser) -> Result<SqlQuery, ReadysetParsingError> {
+    if parser.parse_keywords(&[Keyword::LAST, Keyword::STATEMENT]) {
+        return Ok(SqlQuery::Explain(
+            readyset_sql::ast::ExplainStatement::LastStatement,
+        ));
+    }
+    let simplified = match parser.peek_token_ref() {
+        TokenWithSpan {
+            token: Token::Word(Word { value, .. }),
+            ..
+        } if value.eq_ignore_ascii_case("SIMPLIFIED") => {
+            parser.advance_token();
+            true
+        }
+        _ => false,
+    };
+    if parser.parse_keyword(Keyword::GRAPHVIZ) {
+        let for_cache = if parser.parse_keywords(&[Keyword::FOR, Keyword::CACHE]) {
+            Some(parser.parse_object_name(false)?.into())
+        } else {
+            None
+        };
+        return Ok(SqlQuery::Explain(
+            readyset_sql::ast::ExplainStatement::Graphviz {
+                simplified,
+                for_cache,
+            },
+        ));
+    }
+    Ok(parser
+        .parse_explain(sqlparser::ast::DescribeAlias::Explain)?
+        .try_into()?)
+}
+
+#[cfg(feature = "sqlparser")]
 fn parse_readyset_query(
     parser: &mut Parser,
     input: impl AsRef<str>,
 ) -> Result<SqlQuery, ReadysetParsingError> {
     if parser.parse_keywords(&[Keyword::CREATE, Keyword::CACHE]) {
         parse_create_cache(parser, input)
+    } else if parser.parse_keywords(&[Keyword::EXPLAIN]) {
+        parse_explain(parser)
     } else {
         Ok(parser.parse_statement()?.try_into()?)
     }
