@@ -8,13 +8,28 @@ use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
 use crate::dialect_display::CommaSeparatedList;
-use crate::{ast::*, Dialect, DialectDisplay};
+use crate::{ast::*, AstConversionError, Dialect, DialectDisplay};
 
 #[derive(
     Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Default, Serialize, Deserialize, Arbitrary,
 )]
 pub struct GroupByClause {
     pub fields: Vec<FieldReference>,
+}
+
+impl TryFrom<sqlparser::ast::GroupByExpr> for GroupByClause {
+    type Error = AstConversionError;
+
+    fn try_from(value: sqlparser::ast::GroupByExpr) -> Result<Self, Self::Error> {
+        match value {
+            sqlparser::ast::GroupByExpr::Expressions(exprs, _modifiers) => Ok(GroupByClause {
+                fields: exprs.into_iter().map(TryInto::try_into).try_collect()?,
+            }),
+            sqlparser::ast::GroupByExpr::All(_) => {
+                unsupported!("Snowflake/DuckDB/ClickHouse group by syntax {value:?}")
+            }
+        }
+    }
 }
 
 impl DialectDisplay for GroupByClause {
@@ -39,6 +54,18 @@ pub struct JoinClause {
     pub constraint: JoinConstraint,
 }
 
+impl TryFrom<sqlparser::ast::Join> for JoinClause {
+    type Error = AstConversionError;
+
+    fn try_from(value: sqlparser::ast::Join) -> Result<Self, Self::Error> {
+        Ok(Self {
+            operator: (&value.join_operator).into(),
+            constraint: value.join_operator.try_into()?,
+            right: JoinRightSide::Table(value.relation.try_into()?),
+        })
+    }
+}
+
 impl DialectDisplay for JoinClause {
     fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| {
@@ -59,6 +86,17 @@ impl DialectDisplay for JoinClause {
 pub struct CommonTableExpr {
     pub name: SqlIdentifier,
     pub statement: SelectStatement,
+}
+
+impl TryFrom<sqlparser::ast::Cte> for CommonTableExpr {
+    type Error = AstConversionError;
+
+    fn try_from(value: sqlparser::ast::Cte) -> Result<Self, Self::Error> {
+        Ok(Self {
+            name: value.alias.name.into(),
+            statement: (*value.query).try_into()?,
+        })
+    }
 }
 
 impl DialectDisplay for CommonTableExpr {
@@ -300,6 +338,111 @@ impl SelectStatement {
             },
             _ => false,
         })
+    }
+}
+
+impl TryFrom<sqlparser::ast::Query> for SelectStatement {
+    type Error = AstConversionError;
+
+    fn try_from(value: sqlparser::ast::Query) -> Result<Self, Self::Error> {
+        let sqlparser::ast::Query {
+            body,
+            order_by,
+            limit,
+            offset,
+            with,
+            ..
+        } = value;
+        match *body {
+            sqlparser::ast::SetExpr::Select(select) => {
+                let (tables, join_clauses): (
+                    Vec<crate::ast::TableExpr>,
+                    Vec<Vec<crate::ast::JoinClause>>,
+                ) = select
+                    .from
+                    .into_iter()
+                    .map(|table_with_joins| {
+                        Ok((
+                            table_with_joins.relation.try_into()?,
+                            table_with_joins
+                                .joins
+                                .into_iter()
+                                .map(TryInto::try_into)
+                                .try_collect()?,
+                        ))
+                    })
+                    .collect::<Result<Vec<(TableExpr, Vec<JoinClause>)>, _>>()?
+                    .into_iter()
+                    .unzip();
+                let join = join_clauses.into_iter().flatten().collect();
+                Ok(SelectStatement {
+                    ctes: if let Some(sqlparser::ast::With { cte_tables, .. }) = with {
+                        cte_tables
+                            .into_iter()
+                            .map(TryInto::try_into)
+                            .try_collect()?
+                    } else {
+                        Vec::new()
+                    },
+                    distinct: matches!(select.distinct, Some(sqlparser::ast::Distinct::Distinct)),
+                    fields: select
+                        .projection
+                        .into_iter()
+                        .map(TryInto::try_into)
+                        .try_collect()?,
+                    tables,
+                    join,
+                    where_clause: select.selection.map(TryInto::try_into).transpose()?,
+                    group_by: {
+                        let group_by: GroupByClause = select.group_by.try_into()?;
+                        if group_by.fields.is_empty() {
+                            None
+                        } else {
+                            Some(group_by)
+                        }
+                    },
+                    having: select.having.map(TryInto::try_into).transpose()?,
+                    order: order_by.map(TryInto::try_into).transpose()?,
+                    limit_clause: crate::ast::LimitClause::LimitOffset {
+                        limit: limit
+                            .map(|expr| {
+                                if let crate::ast::Expr::Literal(literal) = expr.try_into()? {
+                                    Ok(crate::ast::LimitValue::Literal(literal))
+                                } else {
+                                    not_yet_implemented!("non-literal limit expression")
+                                }
+                            })
+                            .transpose()?,
+                        offset: offset
+                            .map(|sqlparser::ast::Offset { value: expr, .. }| {
+                                if let crate::ast::Expr::Literal(literal) = expr.try_into()? {
+                                    Ok(literal)
+                                } else {
+                                    not_yet_implemented!("non-literal offset expression")
+                                }
+                            })
+                            .transpose()?,
+                    },
+                })
+            }
+            _ => failed!("Should only be called on a SELECT query"),
+        }
+    }
+}
+
+impl TryFrom<Box<sqlparser::ast::Query>> for SelectStatement {
+    type Error = AstConversionError;
+
+    fn try_from(value: Box<sqlparser::ast::Query>) -> Result<Self, Self::Error> {
+        (*value).try_into()
+    }
+}
+
+impl TryFrom<Box<sqlparser::ast::Query>> for Box<SelectStatement> {
+    type Error = AstConversionError;
+
+    fn try_from(value: Box<sqlparser::ast::Query>) -> Result<Self, Self::Error> {
+        Ok(Box::new(value.try_into()?))
     }
 }
 

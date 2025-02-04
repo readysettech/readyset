@@ -917,10 +917,10 @@ mod tests {
 
     #[test]
     fn test_dollar_number_parameter_column_extraction() {
-        let query = "SELECT  `votes`.* FROM `votes` WHERE `votes`.`user_id` = 1 \
-                     AND `votes`.`story_id` = $1 AND `votes`.`comment_id` IS NULL \
-                     ORDER BY `votes`.`id` ASC LIMIT 1";
-        let q = readyset_sql_parsing::parse_query(Dialect::MySQL, query).unwrap();
+        let query = r#"SELECT "votes".* FROM "votes" WHERE "votes"."user_id" = 1
+                       AND "votes"."story_id" = $1 AND "votes"."comment_id" IS NULL
+                       ORDER BY "votes"."id" ASC LIMIT 1"#;
+        let q = readyset_sql_parsing::parse_query(Dialect::PostgreSQL, query).unwrap();
 
         let pc = get_parameter_columns(&q);
 

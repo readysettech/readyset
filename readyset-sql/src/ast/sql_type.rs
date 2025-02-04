@@ -9,7 +9,7 @@ use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use triomphe::ThinArc;
 
-use crate::{ast::*, Dialect, DialectDisplay};
+use crate::{ast::*, AstConversionError, Dialect, DialectDisplay};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum IntervalFields {
@@ -113,6 +113,194 @@ pub enum SqlType {
 
     /// Any other named type
     Other(Relation),
+}
+
+impl TryFrom<sqlparser::ast::DataType> for crate::ast::SqlType {
+    type Error = AstConversionError;
+
+    fn try_from(value: sqlparser::ast::DataType) -> Result<Self, Self::Error> {
+        use sqlparser::ast::DataType::*;
+        match value {
+            Int(len) => Ok(Self::Int(len.map(|n| n as u16))),
+            TinyInt(len) => Ok(Self::TinyInt(len.map(|n| n as u16))),
+            UnsignedBigInt(len) | UnsignedInt8(len) => {
+                Ok(Self::BigIntUnsigned(len.map(|n| n as u16)))
+            }
+            Text => Ok(Self::Text),
+            TinyText => Ok(Self::TinyText),
+            MediumText => Ok(Self::MediumText),
+            LongText => Ok(Self::LongText),
+            Character(len) | Char(len) => Ok(Self::Char(len.and_then(character_length_into_u16))),
+            Varchar(len) | Nvarchar(len) | CharVarying(len) | CharacterVarying(len) => {
+                Ok(Self::VarChar(len.and_then(character_length_into_u16)))
+            }
+            Uuid => Ok(Self::Uuid),
+            CharacterLargeObject(_) | CharLargeObject(_) | Clob(_) => {
+                not_yet_implemented!("character large object type")
+            }
+            Binary(n) => Ok(Self::Binary(n.map(|n| n as u16))),
+            Varbinary(binary_length) => {
+                if let Some(binary_length) = binary_length {
+                    match binary_length {
+                        sqlparser::ast::BinaryLength::IntegerLength { length } => {
+                            Ok(Self::VarBinary(length as u16))
+                        }
+                        sqlparser::ast::BinaryLength::Max => unsupported!("MSSQL VARBINARY(MAX)"),
+                    }
+                } else {
+                    Ok(Self::VarBinary(0))
+                }
+            }
+            // TOOD: technically mysql inspects the size and converts to tiny/medium/long
+            Blob(_) => Ok(Self::Blob),
+            TinyBlob => Ok(Self::TinyBlob),
+            MediumBlob => Ok(Self::MediumBlob),
+            LongBlob => Ok(Self::LongBlob),
+            Bytes(_) => unimplemented!(),
+            Numeric(info) => exact_number_info_into_numeric(info)
+                .map_err(|e| failed_err!("NUMERIC conversion: {e}")),
+            Decimal(info) => exact_number_info_into_decimal(info)
+                .map_err(|e| failed_err!("DECIMAL conversion: {e}")),
+            BigNumeric(info) => exact_number_info_into_numeric(info)
+                .map_err(|e| failed_err!("BIG NUMERIC conversion: {e}")),
+            BigDecimal(info) => exact_number_info_into_decimal(info)
+                .map_err(|e| failed_err!("BIG DECIMAL conversion: {e}")),
+            Dec(info) => {
+                exact_number_info_into_decimal(info).map_err(|e| failed_err!("DEC conversion: {e}"))
+            }
+            Float(_) => Ok(Self::Float),
+            UnsignedTinyInt(n) => Ok(Self::TinyIntUnsigned(n.map(|n| n as u16))),
+            Int2(_) => Ok(Self::Int2),
+            UnsignedInt2(n) => Ok(Self::SmallIntUnsigned(n.map(|n| n as u16))),
+            SmallInt(n) => Ok(Self::SmallInt(n.map(|n| n as u16))),
+            UnsignedSmallInt(n) => Ok(Self::SmallIntUnsigned(n.map(|n| n as u16))),
+            MediumInt(n) => Ok(Self::MediumInt(n.map(|n| n as u16))),
+            UnsignedMediumInt(n) => Ok(Self::MediumIntUnsigned(n.map(|n| n as u16))),
+            Int4(_) => Ok(Self::Int4),
+            Int8(_) => Ok(Self::Int8),
+            Int16 | Int32 | Int64 | Int128 | Int256 => unsupported!("INT<size> type"),
+            Integer(n) => Ok(Self::Int(n.map(|n| n as u16))),
+            UnsignedInt(n) => Ok(Self::IntUnsigned(n.map(|n| n as u16))),
+            UnsignedInt4(n) => Ok(Self::IntUnsigned(n.map(|n| n as u16))),
+            UnsignedInteger(n) => Ok(Self::IntUnsigned(n.map(|n| n as u16))),
+            UInt8 | UInt16 | UInt32 | UInt64 | UInt128 | UInt256 => unsupported!("UINT<size> type"),
+            BigInt(n) => Ok(Self::BigInt(n.map(|n| n as u16))),
+            Float4 | Float8 | Float32 | Float64 => unsupported!("FLOAT<size> type"),
+            Real => Ok(Self::Real),
+            // XXX we don't support precision on doubles; [MySQL] says it's deprecated, but still present as of 9.1
+            // [MySQL]: https://dev.mysql.com/doc/refman/8.4/en/floating-point-types.html
+            Double(_info) => Ok(Self::Double),
+            DoublePrecision => Ok(Self::Double),
+            Bool => Ok(Self::Bool),
+            Boolean => Ok(Self::Bool),
+            Date => Ok(Self::Date),
+            Date32 => unsupported!("DATE32 type"),
+            // TODO: Should we support these options?
+            Time(_, _timezone_info) => Ok(Self::Time),
+            Datetime(n) => Ok(Self::DateTime(n.map(|n| n as u16))),
+            Datetime64(_, _) => unsupported!("DATETIME64 type"),
+            Timestamp(_, _timezone_info) => Ok(Self::Timestamp),
+            Interval => Ok(Self::Time),
+            JSON => Ok(Self::Json),
+            JSONB => Ok(Self::Jsonb),
+            Regclass => unsupported!("REGCLASS type"),
+            String(_) => not_yet_implemented!("STRING type"),
+            FixedString(_) => unsupported!("FIXEDSTRING type"),
+            Bytea => Ok(Self::ByteArray),
+            Bit(n) => Ok(Self::Bit(n.map(|n| n as u16))),
+            BitVarying(n) | VarBit(n) => Ok(Self::VarBit(n.map(|n| n as u16))),
+            Custom(name, _values) => Ok(Self::Other(name.into())),
+            Array(def) => Ok(Self::Array(Box::new(def.try_into()?))),
+            Map(_data_type, _data_type1) => unsupported!("MAP type"),
+            Tuple(_vec) => unsupported!("TUPLE type"),
+            Nested(_vec) => unsupported!("NESTED type"),
+            // XXX bits is a Clickhouse extension for ENUM8/ENUM16
+            Enum(variants, _bits) => Ok(Self::Enum(
+                variants
+                    .into_iter()
+                    .map(|variant| match variant {
+                        sqlparser::ast::EnumMember::Name(s) => s,
+                        // XXX expression is a Clickhouse extension
+                        sqlparser::ast::EnumMember::NamedValue(s, _expr) => s,
+                    })
+                    .collect::<Vec<_>>()
+                    .into(),
+            )),
+            Set(_vec) => unsupported!("SET type"),
+            Struct(_vec, _struct_bracket_kind) => unsupported!("STRUCT type"),
+            Union(_vec) => unsupported!("UNION type"),
+            Nullable(_data_type) => not_yet_implemented!("NULLABLE type"),
+            LowCardinality(_data_type) => unsupported!("LOW_CARDINALITY type"),
+            Unspecified => unsupported!("UNSPECIFIED"),
+            Trigger => skipped!("TRIGGER"),
+            AnyType => unsupported!("ANY TYPE"),
+            Table(_column_definition_list) => unsupported!("TABLE type"),
+        }
+    }
+}
+
+// XXX: Not written as a `TryFrom` impl because the types don't tell us whether this is supposed to
+// be a numeric or a decimal
+fn exact_number_info_into_numeric(
+    info: sqlparser::ast::ExactNumberInfo,
+) -> Result<SqlType, std::num::TryFromIntError> {
+    match info {
+        sqlparser::ast::ExactNumberInfo::None => Ok(SqlType::Numeric(None)),
+        sqlparser::ast::ExactNumberInfo::Precision(precision) => {
+            Ok(SqlType::Numeric(Some((precision.try_into()?, None))))
+        }
+        sqlparser::ast::ExactNumberInfo::PrecisionAndScale(precision, scale) => Ok(
+            SqlType::Numeric(Some((precision.try_into()?, Some(scale.try_into()?)))),
+        ),
+    }
+}
+
+fn exact_number_info_into_decimal(
+    info: sqlparser::ast::ExactNumberInfo,
+) -> Result<SqlType, std::num::TryFromIntError> {
+    match info {
+        // TODO(mvzink): this default of 32 matches nom-sql, which is wrong, and varies by dialect
+        // (and it should actually be optional like [`SqlType::Numeric`] too)
+        sqlparser::ast::ExactNumberInfo::None => Ok(SqlType::Decimal(32, 0)),
+        sqlparser::ast::ExactNumberInfo::Precision(precision) => {
+            Ok(SqlType::Decimal(precision.try_into()?, 0))
+        }
+        sqlparser::ast::ExactNumberInfo::PrecisionAndScale(precision, scale) => {
+            Ok(SqlType::Decimal(precision.try_into()?, scale.try_into()?))
+        }
+    }
+}
+
+fn character_length_into_u16(value: sqlparser::ast::CharacterLength) -> Option<u16> {
+    match value {
+        sqlparser::ast::CharacterLength::IntegerLength { length, unit: _ } => {
+            length.try_into().ok()
+        }
+        sqlparser::ast::CharacterLength::Max => None,
+    }
+}
+
+impl TryFrom<sqlparser::ast::ArrayElemTypeDef> for SqlType {
+    type Error = AstConversionError;
+
+    fn try_from(value: sqlparser::ast::ArrayElemTypeDef) -> Result<Self, Self::Error> {
+        use sqlparser::ast::ArrayElemTypeDef;
+        match value {
+            ArrayElemTypeDef::None => unsupported!("ARRAY<NONE> type"),
+            ArrayElemTypeDef::AngleBracket(data_type) => data_type.try_into(),
+            // TODO: Should we explicitly reject numbers in the square brackets?
+            ArrayElemTypeDef::SquareBracket(data_type, _) => data_type.try_into(),
+            ArrayElemTypeDef::Parenthesis(data_type) => data_type.try_into(),
+        }
+    }
+}
+
+impl TryFrom<Box<sqlparser::ast::DataType>> for crate::ast::SqlType {
+    type Error = AstConversionError;
+
+    fn try_from(value: Box<sqlparser::ast::DataType>) -> Result<Self, Self::Error> {
+        (*value).try_into()
+    }
 }
 
 /// Options for generating arbitrary [`SqlType`]s
