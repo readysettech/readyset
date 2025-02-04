@@ -6,7 +6,7 @@ use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
-use crate::{ast::*, Dialect, DialectDisplay};
+use crate::{ast::*, AstConversionError, Dialect, DialectDisplay};
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, Arbitrary)]
 pub enum CharsetName {
@@ -170,6 +170,36 @@ pub struct CreateTableStatement {
     pub options: Result<Vec<CreateTableOption>, String>,
 }
 
+impl TryFrom<sqlparser::ast::CreateTable> for CreateTableStatement {
+    type Error = AstConversionError;
+
+    fn try_from(value: sqlparser::ast::CreateTable) -> Result<Self, Self::Error> {
+        Ok(Self {
+            if_not_exists: value.if_not_exists,
+            table: value.name.into(),
+            body: Ok(CreateTableBody {
+                fields: value
+                    .columns
+                    .into_iter()
+                    .map(TryInto::try_into)
+                    .try_collect()?,
+                keys: if value.constraints.is_empty() {
+                    None
+                } else {
+                    Some(
+                        value
+                            .constraints
+                            .into_iter()
+                            .map(TryInto::try_into)
+                            .try_collect()?,
+                    )
+                },
+            }),
+            options: Ok(vec![]), // TODO(mvzink): options are individual fields on the sqlparser struct
+        })
+    }
+}
+
 impl DialectDisplay for CreateTableStatement {
     fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| {
@@ -312,6 +342,33 @@ pub struct CreateViewStatement {
     /// statement. If it failed to parse, this will be an `Err` with the remainder [`String`]
     /// that could not be parsed.
     pub definition: Result<Box<SelectSpecification>, String>,
+}
+
+impl TryFrom<sqlparser::ast::Statement> for CreateViewStatement {
+    type Error = AstConversionError;
+
+    fn try_from(value: sqlparser::ast::Statement) -> Result<Self, Self::Error> {
+        if let sqlparser::ast::Statement::CreateView {
+            or_replace,
+            name,
+            columns,
+            query,
+            ..
+        } = value
+        {
+            Ok(Self {
+                name: name.into(),
+                or_replace,
+                fields: columns.into_iter().map(Into::into).collect(),
+                // TODO: handle compound selects, not sure how sqlparser represents them
+                definition: Ok(Box::new(crate::ast::SelectSpecification::Simple(
+                    query.try_into()?,
+                ))),
+            })
+        } else {
+            failed!("Should only be called with a CreateView statement")
+        }
+    }
 }
 
 impl DialectDisplay for CreateViewStatement {

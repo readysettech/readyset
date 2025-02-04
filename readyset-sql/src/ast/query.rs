@@ -4,7 +4,7 @@ use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
-use crate::{ast::*, Dialect, DialectDisplay};
+use crate::{ast::*, AstConversionError, Dialect, DialectDisplay};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 #[allow(clippy::large_enum_variant)]
@@ -78,6 +78,100 @@ impl From<SelectSpecification> for SqlQuery {
             SelectSpecification::Simple(s) => SqlQuery::Select(s),
             SelectSpecification::Compound(c) => SqlQuery::CompoundSelect(c),
         }
+    }
+}
+
+impl TryFrom<sqlparser::ast::Statement> for SqlQuery {
+    type Error = AstConversionError;
+
+    fn try_from(value: sqlparser::ast::Statement) -> Result<Self, Self::Error> {
+        use sqlparser::ast::Statement::*;
+        match value {
+            Query(query) => Ok(query.try_into()?),
+            ShowVariable { .. } => {
+                not_yet_implemented!("unsupported ShowVariables {value:?}")
+            }
+            ShowTables {
+                full,
+                show_options:
+                    sqlparser::ast::ShowStatementOptions {
+                        show_in,
+                        filter_position,
+                        ..
+                    },
+                ..
+            } => Ok(Self::Show(crate::ast::ShowStatement::Tables(
+                crate::ast::show::Tables {
+                    full,
+                    from_db: match show_in {
+                        Some(sqlparser::ast::ShowStatementIn {
+                            parent_name: Some(parent_name),
+                            ..
+                        }) => Some(parent_name.to_string()), // TODO: object name can be multipart
+                        _ => None,
+                    },
+                    filter: match filter_position {
+                        Some(sqlparser::ast::ShowStatementFilterPosition::Infix(filter))
+                        | Some(sqlparser::ast::ShowStatementFilterPosition::Suffix(filter)) => {
+                            Some(filter.try_into()?)
+                        }
+                        None => None,
+                    },
+                },
+            ))),
+            ShowDatabases { .. } => Ok(Self::Show(crate::ast::ShowStatement::Databases)),
+            CreateTable(create) => Ok(Self::CreateTable(create.try_into()?)),
+            Insert(insert) => Ok(Self::Insert(insert.try_into()?)),
+            Delete(delete) => Ok(Self::Delete(delete.try_into()?)),
+            create @ CreateView { .. } => Ok(Self::CreateView(create.try_into()?)),
+            update @ Update { .. } => Ok(Self::Update(update.try_into()?)),
+            Use(use_statement) => Ok(Self::Use(use_statement.into())),
+            set_variable @ SetVariable { .. } => Ok(Self::Set(set_variable.into())),
+            set_names @ SetNames { .. } => Ok(Self::Set(set_names.into())),
+            Drop {
+                object_type,
+                if_exists,
+                names,
+                ..
+            } => match object_type {
+                sqlparser::ast::ObjectType::Table => Ok(Self::DropTable(DropTableStatement {
+                    tables: names.into_iter().map(Into::into).collect(),
+                    if_exists,
+                })),
+                sqlparser::ast::ObjectType::View => Ok(Self::DropView(DropViewStatement {
+                    views: names.into_iter().map(Into::into).collect(),
+                    if_exists,
+                })),
+                _ => not_yet_implemented!("drop statement type: {object_type:?}"),
+            },
+            StartTransaction { begin, .. } => Ok(Self::StartTransaction(if begin {
+                StartTransactionStatement::Begin
+            } else {
+                StartTransactionStatement::Start
+            })),
+            CreateType { .. } => Err(AstConversionError::Skipped(format!("CREATE TYPE: {value}"))),
+            _ => not_yet_implemented!("other query: {value:?}"),
+        }
+    }
+}
+
+impl TryFrom<sqlparser::ast::Query> for SqlQuery {
+    type Error = AstConversionError;
+
+    fn try_from(value: sqlparser::ast::Query) -> Result<Self, Self::Error> {
+        if matches!(*value.body, sqlparser::ast::SetExpr::Select(_)) {
+            Ok(SqlQuery::Select(value.try_into()?))
+        } else {
+            not_yet_implemented!("unsupported non-select query type {value:?}")
+        }
+    }
+}
+
+impl TryFrom<Box<sqlparser::ast::Query>> for SqlQuery {
+    type Error = AstConversionError;
+
+    fn try_from(value: Box<sqlparser::ast::Query>) -> Result<Self, Self::Error> {
+        (*value).try_into()
     }
 }
 
