@@ -27,6 +27,40 @@ fn sqlparser_dialect_from_readyset_dialect(
     }
 }
 
+#[expect(clippy::upper_case_acronyms, reason = "SQL keywords are capitalized")]
+enum ReadysetKeyword {
+    READYSET,
+    SIMPLIFIED,
+}
+
+impl ReadysetKeyword {
+    fn as_str(&self) -> &str {
+        match self {
+            Self::READYSET => "READYSET",
+            Self::SIMPLIFIED => "SIMPLIFIED",
+        }
+    }
+}
+
+/// Returns whether the next token matches the given keyword. Works similarly to
+/// [`Parser::parse_keyword`], but allows for keywords that don't exist in [`Keyword`]: if the next
+/// token matches, it is consumed and `true` is returned; otherwise, it is not consumed and `false`
+/// is returned.
+fn parse_readyset_keyword(parser: &mut Parser, keyword: ReadysetKeyword) -> bool {
+    match parser.peek_token_ref() {
+        TokenWithSpan {
+            token: Token::Word(Word { value, .. }),
+            ..
+        } if value.eq_ignore_ascii_case(keyword.as_str()) => {
+            parser.advance_token();
+            true
+        }
+        _ => false,
+    }
+}
+
+// Expects `CREATE CACHE` was already parsed. Attempts to parse a Readyset-specific create cache
+// statement. Will simply error if it fails, since there's no relevant standard SQL to fall back to.
 fn parse_create_cache(
     parser: &mut Parser,
     input: impl AsRef<str>,
@@ -59,16 +93,7 @@ fn parse_explain(parser: &mut Parser) -> Result<SqlQuery, ReadysetParsingError> 
             readyset_sql::ast::ExplainStatement::LastStatement,
         ));
     }
-    let simplified = match parser.peek_token_ref() {
-        TokenWithSpan {
-            token: Token::Word(Word { value, .. }),
-            ..
-        } if value.eq_ignore_ascii_case("SIMPLIFIED") => {
-            parser.advance_token();
-            true
-        }
-        _ => false,
-    };
+    let simplified = parse_readyset_keyword(parser, ReadysetKeyword::SIMPLIFIED);
     if parser.parse_keyword(Keyword::GRAPHVIZ) {
         let for_cache = if parser.parse_keywords(&[Keyword::FOR, Keyword::CACHE]) {
             Some(parser.parse_object_name(false)?.into())
@@ -87,14 +112,32 @@ fn parse_explain(parser: &mut Parser) -> Result<SqlQuery, ReadysetParsingError> 
         .try_into()?)
 }
 
+/// Expects `SHOW` was already parsed. Attempts to parse a Readyset-specific SHOW statement,
+/// otherwise falls back to [`Parser::parse_show`].
+///
+/// SHOW READYSET VERSION
+fn parse_readyset_show(parser: &mut Parser) -> Result<SqlQuery, ReadysetParsingError> {
+    if parse_readyset_keyword(parser, ReadysetKeyword::READYSET)
+        && parser.parse_keyword(Keyword::VERSION)
+    {
+        Ok(SqlQuery::Show(
+            readyset_sql::ast::ShowStatement::ReadySetVersion,
+        ))
+    } else {
+        Ok(parser.parse_show()?.try_into()?)
+    }
+}
+
 fn parse_readyset_query(
     parser: &mut Parser,
     input: impl AsRef<str>,
 ) -> Result<SqlQuery, ReadysetParsingError> {
     if parser.parse_keywords(&[Keyword::CREATE, Keyword::CACHE]) {
         parse_create_cache(parser, input)
-    } else if parser.parse_keywords(&[Keyword::EXPLAIN]) {
+    } else if parser.parse_keyword(Keyword::EXPLAIN) {
         parse_explain(parser)
+    } else if parser.parse_keyword(Keyword::SHOW) {
+        parse_readyset_show(parser)
     } else {
         Ok(parser.parse_statement()?.try_into()?)
     }
