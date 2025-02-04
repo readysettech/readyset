@@ -8,7 +8,7 @@ use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
-use crate::{ast::*, Dialect, DialectDisplay};
+use crate::{ast::*, AstConversionError, Dialect, DialectDisplay};
 
 /// Function call expressions
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Hash, Serialize, Deserialize, Arbitrary)]
@@ -389,6 +389,64 @@ impl BinaryOperator {
     }
 }
 
+impl From<sqlparser::ast::BinaryOperator> for BinaryOperator {
+    fn from(value: sqlparser::ast::BinaryOperator) -> Self {
+        use sqlparser::ast::BinaryOperator as BinOp;
+        match value {
+            BinOp::And => Self::And,
+            BinOp::Arrow => Self::Arrow1,
+            BinOp::ArrowAt => Self::AtArrowLeft,
+            BinOp::AtArrow => Self::AtArrowRight,
+            BinOp::AtAt => unimplemented!("@@ {value:?}"),
+            BinOp::AtQuestion => unimplemented!("@? {value:?}"),
+            BinOp::BitwiseAnd => unimplemented!("& {value:?}"),
+            BinOp::BitwiseOr => unimplemented!("| {value:?}"),
+            BinOp::BitwiseXor => unimplemented!("^ {value:?}"),
+            BinOp::Custom(_) => unimplemented!("CUSTOM {value:?}"),
+            BinOp::Divide => Self::Divide,
+            BinOp::DuckIntegerDivide => unimplemented!("Duck // {value:?}"),
+            BinOp::Eq => Self::Equal,
+            BinOp::Gt => Self::Greater,
+            BinOp::GtEq => Self::GreaterOrEqual,
+            BinOp::HashArrow => Self::HashArrow1,
+            BinOp::HashLongArrow => Self::HashArrow2,
+            BinOp::HashMinus => Self::HashSubtract,
+            BinOp::LongArrow => Self::Arrow2,
+            BinOp::Lt => Self::Less,
+            BinOp::LtEq => Self::LessOrEqual,
+            BinOp::Minus => Self::Subtract,
+            BinOp::Modulo => unimplemented!("% {value:?}"),
+            BinOp::Multiply => Self::Multiply,
+            BinOp::MyIntegerDivide => unimplemented!("MySQL DIV {value:?}"),
+            BinOp::NotEq => Self::NotEqual,
+            BinOp::Or => Self::Or,
+            BinOp::Overlaps => todo!(),
+            BinOp::PGBitwiseShiftLeft => todo!(),
+            BinOp::PGBitwiseShiftRight => todo!(),
+            BinOp::PGBitwiseXor => todo!(),
+            BinOp::PGCustomBinaryOperator(_vec) => todo!(),
+            BinOp::PGExp => todo!(),
+            BinOp::PGILikeMatch => todo!(),
+            BinOp::PGLikeMatch => todo!(),
+            BinOp::PGNotILikeMatch => todo!(),
+            BinOp::PGNotLikeMatch => todo!(),
+            BinOp::PGOverlap => todo!(),
+            BinOp::PGRegexIMatch => todo!(),
+            BinOp::PGRegexMatch => todo!(),
+            BinOp::PGRegexNotIMatch => todo!(),
+            BinOp::PGRegexNotMatch => todo!(),
+            BinOp::PGStartsWith => todo!(),
+            BinOp::Plus => Self::Add,
+            BinOp::Question => todo!(),
+            BinOp::QuestionAnd => Self::QuestionMarkAnd,
+            BinOp::QuestionPipe => Self::QuestionMarkPipe,
+            BinOp::Spaceship => unimplemented!("<=> {value:?}"),
+            BinOp::StringConcat => todo!(),
+            BinOp::Xor => todo!(),
+        }
+    }
+}
+
 impl fmt::Display for BinaryOperator {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let op = match *self {
@@ -433,6 +491,24 @@ impl fmt::Display for BinaryOperator {
 pub enum UnaryOperator {
     Neg,
     Not,
+}
+
+impl From<sqlparser::ast::UnaryOperator> for UnaryOperator {
+    fn from(value: sqlparser::ast::UnaryOperator) -> Self {
+        use sqlparser::ast::UnaryOperator as UnOp;
+        match value {
+            UnOp::Plus => todo!(),
+            UnOp::Minus => Self::Neg,
+            UnOp::Not => Self::Not,
+            UnOp::PGBitwiseNot
+            | UnOp::PGSquareRoot
+            | UnOp::PGCubeRoot
+            | UnOp::PGPostfixFactorial
+            | UnOp::PGPrefixFactorial
+            | UnOp::PGAbs => unimplemented!("unsupported postgres unary operator"),
+            UnOp::BangNot => unimplemented!("unsupported bang not (!)"),
+        }
+    }
 }
 
 impl fmt::Display for UnaryOperator {
@@ -617,6 +693,435 @@ impl Expr {
         alias = alias.chars().take(64).collect();
 
         Some(alias.into())
+    }
+}
+
+impl TryFrom<sqlparser::ast::Expr> for Expr {
+    type Error = AstConversionError;
+
+    fn try_from(value: sqlparser::ast::Expr) -> Result<Self, Self::Error> {
+        use sqlparser::ast::Expr::*;
+        match value {
+            AllOp {
+                left,
+                compare_op,
+                right,
+            } => Ok(Self::OpAll {
+                lhs: left.try_into()?,
+                op: compare_op.into(),
+                rhs: right.try_into()?,
+            }),
+            AnyOp {
+                left,
+                compare_op,
+                right,
+                is_some: _,
+            } => Ok(Self::OpAny {
+                lhs: left.try_into()?,
+                op: compare_op.into(),
+                rhs: right.try_into()?,
+            }),
+            Array(array) => Ok(Self::Array(
+                array
+                    .elem
+                    .into_iter()
+                    .map(TryInto::try_into)
+                    .try_collect()?,
+            )),
+            AtTimeZone {
+                timestamp,
+                time_zone,
+            } => not_yet_implemented!("{timestamp:?} AT TIMEZONE {time_zone:?}"),
+            Between {
+                expr,
+                negated,
+                low,
+                high,
+            } => Ok(Self::Between {
+                operand: expr.try_into()?,
+                min: low.try_into()?,
+                max: high.try_into()?,
+                negated,
+            }),
+            BinaryOp { left, op, right } => Ok(Self::BinaryOp {
+                lhs: left.try_into()?,
+                op: op.into(),
+                rhs: right.try_into()?,
+            }),
+            Case {
+                operand: None, // XXX do we really not support the CASE operand?
+                conditions,
+                results,
+                else_result,
+            } => Ok(Self::CaseWhen {
+                branches: conditions
+                    .into_iter()
+                    .map(TryInto::try_into)
+                    .zip(results.into_iter().map(TryInto::try_into))
+                    .map(|(condition, result): (Result<Expr, _>, Result<Expr, _>)| {
+                        match (condition, result) {
+                            (Err(e), _) => Err(e),
+                            (_, Err(e)) => Err(e),
+                            (Ok(condition), Ok(result)) => Ok(CaseWhenBranch {
+                                condition,
+                                body: result,
+                            }),
+                        }
+                    })
+                    .try_collect()?,
+                else_expr: else_result.map(TryInto::try_into).transpose()?,
+            }),
+            Case {
+                operand: Some(expr), // XXX do we really not support the CASE operand?
+                conditions: _,
+                results: _,
+                else_result: _,
+            } => not_yet_implemented!("CASE WHEN with operand: {expr:?}"),
+            Cast {
+                kind,
+                expr,
+                data_type,
+                format: _, // TODO: I think this is where we would support `AT TIMEZONE` syntax
+            } => Ok(Self::Cast {
+                expr: expr.try_into()?,
+                ty: data_type.try_into()?,
+                postgres_style: kind == sqlparser::ast::CastKind::DoubleColon,
+            }),
+            Ceil { expr: _, field: _ } => not_yet_implemented!("CEIL"),
+            Collate {
+                expr: _,
+                collation: _,
+            } => not_yet_implemented!("COLLATE"),
+            // TODO: could this be a variable like `@@GLOBAL.foo`, which should go through `ident_into_expr` or similar?
+            CompoundIdentifier(idents) => Ok(Self::Column(idents.into())),
+            Convert {
+                expr: _,
+                data_type: _,
+                charset: _,
+                target_before_value: _,
+                styles: _,
+                is_try: _,
+            } => not_yet_implemented!("CONVERT"),
+            Cube(_vec) => not_yet_implemented!("CUBE"),
+            Dictionary(_vec) => not_yet_implemented!("DICTIONARY"),
+            Exists { subquery, negated } => {
+                if negated {
+                    Ok(Self::UnaryOp {
+                        op: crate::ast::UnaryOperator::Not,
+                        rhs: Box::new(Self::Exists(subquery.try_into()?)),
+                    })
+                } else {
+                    Ok(Self::Exists(subquery.try_into()?))
+                }
+            }
+            Extract {
+                field,
+                syntax: _, // We only support FROM
+                expr,
+            } => Ok(Self::Call(crate::ast::FunctionExpr::Extract {
+                field: field.into(),
+                expr: expr.try_into()?,
+            })),
+            Floor { expr: _, field: _ } => not_yet_implemented!("FLOOR"),
+            Function(function) => function.try_into(),
+            GroupingSets(_vec) => unsupported!("GROUPING SETS"),
+            Identifier(ident) => Ok(ident.into()),
+            ILike {
+                negated: _,
+                expr: _,
+                pattern: _,
+                escape_char: _,
+                any: _,
+            } => not_yet_implemented!("ILIKE"),
+            InList {
+                expr,
+                list,
+                negated,
+            } => Ok(Self::In {
+                lhs: expr.try_into()?,
+                rhs: crate::ast::InValue::List(
+                    list.into_iter().map(TryInto::try_into).try_collect()?,
+                ),
+                negated,
+            }),
+            InSubquery {
+                expr,
+                subquery,
+                negated,
+            } => Ok(Self::In {
+                lhs: expr.try_into()?,
+                rhs: crate::ast::InValue::Subquery(subquery.try_into()?),
+                negated,
+            }),
+            Interval(_interval) => not_yet_implemented!("INTERVAL"),
+            IntroducedString {
+                introducer: _,
+                value: _,
+            } => not_yet_implemented!("IntroducedString"),
+            InUnnest {
+                expr: _,
+                array_expr: _,
+                negated: _,
+            } => not_yet_implemented!("IN UNNEST"),
+            IsDistinctFrom(_expr, _expr1) => not_yet_implemented!("IS DISTINCT FROM"),
+            IsFalse(_expr) => not_yet_implemented!("IS FALSE"),
+            IsNotDistinctFrom(_expr, _expr1) => not_yet_implemented!("IS NOT DISTINCT FROM"),
+            IsNotFalse(_expr) => not_yet_implemented!("IS NOT FALSE"),
+            IsNotNull(expr) => Ok(Self::BinaryOp {
+                lhs: expr.try_into()?,
+                op: crate::ast::BinaryOperator::IsNot,
+                rhs: Box::new(Expr::Literal(crate::ast::Literal::Null)),
+            }),
+            IsNotTrue(_expr) => not_yet_implemented!("IS NOT TRUE"),
+            IsNotUnknown(_expr) => not_yet_implemented!("IS NOT UNKNOWN"),
+            IsNull(expr) => Ok(Self::BinaryOp {
+                lhs: expr.try_into()?,
+                op: crate::ast::BinaryOperator::Is,
+                rhs: Box::new(Expr::Literal(crate::ast::Literal::Null)),
+            }),
+            IsTrue(_expr) => not_yet_implemented!("IS TRUE"),
+            IsUnknown(_expr) => not_yet_implemented!("IS UNKNOWN"),
+            JsonAccess { value: _, path: _ } => not_yet_implemented!("JSON access"),
+            Lambda(_lambda_function) => unsupported!("LAMBDA"),
+            Like {
+                negated,
+                expr,
+                pattern,
+                escape_char: _,
+                any: _,
+            } => {
+                let like = Self::BinaryOp {
+                    lhs: expr.try_into()?,
+                    op: crate::ast::BinaryOperator::Like,
+                    rhs: pattern.try_into()?,
+                };
+                if negated {
+                    Ok(Self::UnaryOp {
+                        op: crate::ast::UnaryOperator::Not,
+                        rhs: Box::new(like),
+                    })
+                } else {
+                    Ok(like)
+                }
+            }
+            Map(_map) => not_yet_implemented!("MAP"),
+            MatchAgainst {
+                columns: _,
+                match_value: _,
+                opt_search_modifier: _,
+            } => not_yet_implemented!("MATCH AGAINST"),
+            Named { expr: _, name: _ } => unsupported!("BigQuery named expression"),
+            Nested(expr) => expr.try_into(),
+            OuterJoin(_expr) => not_yet_implemented!("OUTER JOIN"),
+            Overlay {
+                expr: _,
+                overlay_what: _,
+                overlay_from: _,
+                overlay_for: _,
+            } => unsupported!("OVERLAY"),
+            Position { expr: _, r#in: _ } => not_yet_implemented!("POSITION"),
+            Prior(_expr) => not_yet_implemented!("PRIOR"),
+            QualifiedWildcard(_object_name, _token) => {
+                todo!("Not actually sure how we represent `foo`.* in nom-sql")
+            }
+            RLike {
+                negated: _,
+                expr: _,
+                pattern: _,
+                regexp: _,
+            } => unsupported!("RLIKE"),
+            Rollup(_vec) => unsupported!("ROLLUP"),
+            SimilarTo {
+                negated: _,
+                expr: _,
+                pattern: _,
+                escape_char: _,
+            } => unsupported!("SIMILAR TO"),
+            Struct {
+                values: _,
+                fields: _,
+            } => unsupported!("STRUCT"),
+            Subquery(_query) => not_yet_implemented!("subquery"),
+            Substring {
+                expr: _,
+                substring_from: _,
+                substring_for: _,
+                special: _,
+            } => not_yet_implemented!("SUBSTRING"),
+            Trim {
+                expr: _,
+                trim_where: _,
+                trim_what: _,
+                trim_characters: _,
+            } => not_yet_implemented!("TRIM"),
+            Tuple(_vec) => unsupported!("TUPLE"),
+            TypedString {
+                data_type: _,
+                value: _,
+            } => unsupported!("TYPED STRING"),
+            UnaryOp { op, expr } => Ok(Self::UnaryOp {
+                op: op.into(),
+                rhs: expr.try_into()?,
+            }),
+            Value(value) => Ok(Self::Literal(value.into())),
+            CompoundFieldAccess {
+                root: _,
+                access_chain: _,
+            } => {
+                todo!("foo['bar'].baz[1] - probably unsupported")
+            }
+            Wildcard(_token) => todo!("wildcard expression"),
+            IsNormalized { .. } => unsupported!("IS NORMALIZED"),
+        }
+    }
+}
+
+impl TryFrom<Box<sqlparser::ast::Expr>> for Box<Expr> {
+    type Error = AstConversionError;
+
+    fn try_from(value: Box<sqlparser::ast::Expr>) -> Result<Self, Self::Error> {
+        Ok(Box::new(value.try_into()?))
+    }
+}
+
+impl TryFrom<Box<sqlparser::ast::Expr>> for Expr {
+    type Error = AstConversionError;
+
+    fn try_from(value: Box<sqlparser::ast::Expr>) -> Result<Self, Self::Error> {
+        (*value).try_into()
+    }
+}
+
+/// Convert a sqlparser-rs's `Ident` into a `Expr`; special handling because it might be a variable
+/// or a column and sqlparser doesn't distiguish them.
+///
+/// TODO(mvzink): This may not actually be necessary for recent sqlparser versions: check for usage
+/// of `CompoundIdentifier`; also check whether this needs to know the dialect for re-parsing the
+/// variable name.
+impl From<sqlparser::ast::Ident> for Expr {
+    fn from(value: sqlparser::ast::Ident) -> Self {
+        if value.value.starts_with('@') {
+            Self::Variable(value.into())
+        } else {
+            Self::Column(value.into())
+        }
+    }
+}
+
+/// Convert a function call into an expression.
+///
+/// We don't turn every function into a [`crate::ast::FunctionExpr`], beacuse we have some special
+/// cases that turn into other kinds of expressions, such as `DATE(x)` into `CAST(x AS DATE)`.
+impl TryFrom<sqlparser::ast::Function> for Expr {
+    type Error = AstConversionError;
+
+    fn try_from(value: sqlparser::ast::Function) -> Result<Self, Self::Error> {
+        // TODO: handle null treatment and other stuff
+        let sqlparser::ast::Function { args, mut name, .. } = value;
+        let (exprs, distinct, separator): (Vec<Expr>, bool, Option<String>) = match args {
+            sqlparser::ast::FunctionArguments::List(sqlparser::ast::FunctionArgumentList {
+                args,
+                duplicate_treatment,
+                clauses, // TODO: handle other stuff like order/limit, etc.
+            }) => (
+                args.into_iter().map(TryInto::try_into).try_collect()?,
+                duplicate_treatment == Some(sqlparser::ast::DuplicateTreatment::Distinct),
+                clauses.into_iter().find_map(|clause| match clause {
+                    sqlparser::ast::FunctionArgumentClause::Separator(separator) => {
+                        Some(sqlparser_value_into_string(separator))
+                    }
+                    _ => None,
+                }),
+            ),
+            other => {
+                return not_yet_implemented!("function call args: {other:?}");
+            }
+        };
+        // TODO: if there's not exactly 1 component, it's presumably a UDF or something and we should bail
+        let sqlparser::ast::ObjectNamePart::Identifier(name) = name.0.pop().unwrap();
+        Ok(match name.value.to_lowercase().as_str() {
+            // TODO: fix this unnecessary cloning
+            "avg" => Self::Call(crate::ast::FunctionExpr::Avg {
+                expr: Box::new(exprs[0].clone()),
+                distinct,
+            }),
+            // TODO: check for `count(*)` which we have a separate enum variant for
+            "count" => Self::Call(crate::ast::FunctionExpr::Count {
+                expr: Box::new(exprs[0].clone()),
+                distinct,
+            }),
+            "group_concat" => Self::Call(crate::ast::FunctionExpr::GroupConcat {
+                expr: Box::new(exprs[0].clone()),
+                separator,
+            }),
+            "max" => Self::Call(crate::ast::FunctionExpr::Max(Box::new(exprs[0].clone()))),
+            "min" => Self::Call(crate::ast::FunctionExpr::Min(Box::new(exprs[0].clone()))),
+            "sum" => Self::Call(crate::ast::FunctionExpr::Sum {
+                expr: Box::new(exprs[0].clone()),
+                distinct,
+            }),
+            "date" => Self::Cast {
+                expr: Box::new(exprs[0].clone()),
+                ty: crate::ast::SqlType::Date,
+                postgres_style: false,
+            },
+            "extract" | "substring" => todo!(),
+            _ => Self::Call(crate::ast::FunctionExpr::Call {
+                name: name.into(),
+                arguments: exprs,
+            }),
+        })
+    }
+}
+
+fn sqlparser_value_into_string(value: sqlparser::ast::Value) -> String {
+    use sqlparser::ast::Value::*;
+    match value {
+        Number(s, _)
+        | SingleQuotedString(s)
+        | DollarQuotedString(sqlparser::ast::DollarQuotedString { value: s, .. })
+        | TripleSingleQuotedString(s)
+        | TripleDoubleQuotedString(s)
+        | EscapedStringLiteral(s)
+        | UnicodeStringLiteral(s)
+        | SingleQuotedByteStringLiteral(s)
+        | DoubleQuotedByteStringLiteral(s)
+        | TripleSingleQuotedByteStringLiteral(s)
+        | TripleDoubleQuotedByteStringLiteral(s)
+        | SingleQuotedRawStringLiteral(s)
+        | DoubleQuotedRawStringLiteral(s)
+        | TripleSingleQuotedRawStringLiteral(s)
+        | TripleDoubleQuotedRawStringLiteral(s)
+        | NationalStringLiteral(s)
+        | DoubleQuotedString(s) => s,
+        HexStringLiteral(_) => todo!(),
+        Boolean(_) => todo!(),
+        Null => todo!(),
+        Placeholder(_) => todo!(),
+    }
+}
+
+impl TryFrom<sqlparser::ast::FunctionArg> for Expr {
+    type Error = AstConversionError;
+
+    fn try_from(value: sqlparser::ast::FunctionArg) -> Result<Self, Self::Error> {
+        use sqlparser::ast::FunctionArg::*;
+        match value {
+            Named { arg, .. } | ExprNamed { arg, .. } | Unnamed(arg) => arg.try_into(),
+        }
+    }
+}
+
+impl TryFrom<sqlparser::ast::FunctionArgExpr> for Expr {
+    type Error = AstConversionError;
+
+    fn try_from(value: sqlparser::ast::FunctionArgExpr) -> Result<Self, Self::Error> {
+        use sqlparser::ast::FunctionArgExpr::*;
+        match value {
+            Expr(expr) => expr.try_into(),
+            QualifiedWildcard(object_name) => Ok(Self::Column(object_name.into())),
+            Wildcard => not_yet_implemented!("wildcard expression in function argument"),
+        }
     }
 }
 
