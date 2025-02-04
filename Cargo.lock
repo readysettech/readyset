@@ -5091,9 +5091,11 @@ name = "readyset-sql-parsing"
 version = "0.1.0"
 dependencies = [
  "nom-sql",
+ "pretty_assertions",
  "readyset-sql",
  "sqlparser",
  "thiserror",
+ "tracing",
 ]
 
 [[package]]

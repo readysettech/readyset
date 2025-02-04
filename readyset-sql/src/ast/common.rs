@@ -5,12 +5,21 @@ use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
-use crate::{ast::*, Dialect, DialectDisplay};
+use crate::{ast::*, AstConversionError, Dialect, DialectDisplay};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum IndexType {
     BTree,
     Hash,
+}
+
+impl From<sqlparser::ast::IndexType> for IndexType {
+    fn from(value: sqlparser::ast::IndexType) -> Self {
+        match value {
+            sqlparser::ast::IndexType::BTree => Self::BTree,
+            sqlparser::ast::IndexType::Hash => Self::Hash,
+        }
+    }
 }
 
 impl fmt::Display for IndexType {
@@ -29,6 +38,19 @@ pub enum ReferentialAction {
     Restrict,
     NoAction,
     SetDefault,
+}
+
+impl From<sqlparser::ast::ReferentialAction> for ReferentialAction {
+    fn from(value: sqlparser::ast::ReferentialAction) -> Self {
+        use sqlparser::ast::ReferentialAction::*;
+        match value {
+            Cascade => Self::Cascade,
+            NoAction => Self::NoAction,
+            Restrict => Self::Restrict,
+            SetDefault => Self::SetDefault,
+            SetNull => Self::SetNull,
+        }
+    }
 }
 
 impl fmt::Display for ReferentialAction {
@@ -54,6 +76,27 @@ pub enum ConstraintTiming {
     DeferrableInitiallyImmediate,
     NotDeferrable,
     NotDeferrableInitiallyImmediate,
+}
+
+// TODO: Check that we are correctly representing this matrix, i.e. that deferrable = false +
+// initially = deferred is correctly represented by `Self::NotDeferrable` and we don't need a
+// separate variant for `Self::NotDeferrableInitiallyDeferred` (which doesn't sound like a valid
+// combination)
+impl From<sqlparser::ast::ConstraintCharacteristics> for ConstraintTiming {
+    fn from(value: sqlparser::ast::ConstraintCharacteristics) -> Self {
+        use sqlparser::ast::DeferrableInitial::*;
+        match (value.deferrable, value.initially) {
+            (None, None) => Self::NotDeferrable,
+            (None, Some(Immediate)) => Self::NotDeferrableInitiallyImmediate,
+            (None, Some(Deferred)) => Self::NotDeferrable,
+            (Some(true), None) => Self::Deferrable,
+            (Some(false), None) => Self::NotDeferrable,
+            (Some(true), Some(Immediate)) => Self::DeferrableInitiallyImmediate,
+            (Some(true), Some(Deferred)) => Self::DeferrableInitiallyDeferred,
+            (Some(false), Some(Immediate)) => Self::NotDeferrableInitiallyImmediate,
+            (Some(false), Some(Deferred)) => Self::NotDeferrable,
+        }
+    }
 }
 
 impl fmt::Display for ConstraintTiming {
@@ -128,11 +171,107 @@ pub enum TableKey {
         on_update: Option<ReferentialAction>,
     },
     CheckConstraint {
-        // NOTE: MySQL dosn't allow the `CONSTRAINT (name)` prefix for a CHECK, but Postgres does
+        // NOTE: MySQL doesn't allow the `CONSTRAINT (name)` prefix for a CHECK, but Postgres does
         constraint_name: Option<SqlIdentifier>,
         expr: Expr,
         enforced: Option<bool>,
     },
+}
+
+impl TryFrom<sqlparser::ast::TableConstraint> for TableKey {
+    type Error = AstConversionError;
+
+    fn try_from(value: sqlparser::ast::TableConstraint) -> Result<Self, Self::Error> {
+        use sqlparser::ast::TableConstraint::*;
+        match value {
+            Check { name, expr } => Ok(Self::CheckConstraint {
+                constraint_name: name.map(Into::into),
+                expr: expr.try_into()?,
+                enforced: None, // TODO(mvzink): Find out where this is supposed to come from
+            }),
+            ForeignKey {
+                name,
+                columns,
+                foreign_table,
+                referred_columns,
+                on_delete,
+                on_update,
+                // XXX Not sure why, but we don't support characteristics
+                characteristics: _characteristics,
+            } => Ok(Self::ForeignKey {
+                // TODO(mvzink): Where do these two different names come from for sqlparser?
+                constraint_name: name.clone().map(Into::into),
+                index_name: name.map(Into::into),
+                columns: columns.into_iter().map(Into::into).collect(),
+                target_table: foreign_table.into(),
+                target_columns: referred_columns.into_iter().map(Into::into).collect(),
+                on_delete: on_delete.map(Into::into),
+                on_update: on_update.map(Into::into),
+            }),
+            FulltextOrSpatial {
+                fulltext: true,
+                opt_index_name,
+                columns,
+                index_type_display: _index_type_display,
+            } => Ok(Self::FulltextKey {
+                index_name: opt_index_name.map(Into::into),
+                columns: columns.into_iter().map(Into::into).collect(),
+            }),
+            FulltextOrSpatial {
+                fulltext: false, ..
+            } => unsupported!("full text or spatial index not supported"),
+            Index {
+                name,
+                index_type,
+                columns,
+                display_as_key: _display_as_key,
+            } => Ok(Self::Key {
+                // TODO(mvzink): Where do these two different names come from for sqlparser?
+                constraint_name: name.clone().map(Into::into),
+                index_name: name.map(Into::into),
+                columns: columns.into_iter().map(Into::into).collect(),
+                index_type: index_type.map(Into::into),
+            }),
+            PrimaryKey {
+                name,
+                index_name,
+                columns,
+                characteristics,
+                // XXX: Not sure why, but we don't support any of these
+                index_type: _index_type,
+                index_options: _index_options,
+            } => Ok(Self::PrimaryKey {
+                constraint_name: name.map(Into::into),
+                index_name: index_name.map(Into::into),
+                columns: columns.into_iter().map(Into::into).collect(),
+                constraint_timing: characteristics.map(Into::into),
+            }),
+            Unique {
+                name,
+                index_name,
+                index_type,
+                columns,
+                nulls_distinct,
+                characteristics,
+                // XXX Not sure why, but we don't support any of these
+                index_type_display: _index_type_display,
+                index_options: _index_options,
+            } => Ok(Self::UniqueKey {
+                constraint_name: name.map(Into::into),
+                index_name: index_name.map(Into::into),
+                columns: columns.into_iter().map(Into::into).collect(),
+                index_type: index_type.map(Into::into),
+                constraint_timing: characteristics.map(Into::into),
+                nulls_distinct: match nulls_distinct {
+                    sqlparser::ast::NullsDistinctOption::Distinct => Some(NullsDistinct::Distinct),
+                    sqlparser::ast::NullsDistinctOption::NotDistinct => {
+                        Some(NullsDistinct::NotDistinct)
+                    }
+                    sqlparser::ast::NullsDistinctOption::None => None,
+                },
+            }),
+        }
+    }
 }
 
 impl TableKey {
@@ -387,6 +526,35 @@ impl From<Literal> for FieldDefinitionExpr {
     }
 }
 
+impl TryFrom<sqlparser::ast::SelectItem> for FieldDefinitionExpr {
+    type Error = AstConversionError;
+
+    fn try_from(value: sqlparser::ast::SelectItem) -> Result<Self, Self::Error> {
+        use sqlparser::ast::SelectItem::*;
+        match value {
+            ExprWithAlias { expr, alias } => Ok(FieldDefinitionExpr::Expr {
+                expr: expr.try_into()?,
+                alias: Some(alias.into()),
+            }),
+            UnnamedExpr(expr) => Ok(FieldDefinitionExpr::Expr {
+                expr: expr.try_into()?,
+                alias: None,
+            }),
+            QualifiedWildcard(
+                sqlparser::ast::SelectItemQualifiedWildcardKind::ObjectName(relation),
+                _options,
+            ) => Ok(FieldDefinitionExpr::AllInTable(relation.into())),
+            QualifiedWildcard(
+                sqlparser::ast::SelectItemQualifiedWildcardKind::Expr(_expr),
+                _options,
+            ) => {
+                unsupported!("struct wildcard expansion is not supported by MySQL or Postgres")
+            }
+            Wildcard(_options) => Ok(FieldDefinitionExpr::All),
+        }
+    }
+}
+
 impl DialectDisplay for FieldDefinitionExpr {
     fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| match self {
@@ -418,6 +586,19 @@ pub enum FieldReference {
     Numeric(u64),
     /// An expression
     Expr(Expr),
+}
+
+impl TryFrom<sqlparser::ast::Expr> for FieldReference {
+    type Error = AstConversionError;
+
+    fn try_from(value: sqlparser::ast::Expr) -> Result<Self, Self::Error> {
+        if let sqlparser::ast::Expr::Value(sqlparser::ast::Value::Number(ref n, _)) = value {
+            if let Ok(i) = n.parse() {
+                return Ok(FieldReference::Numeric(i));
+            }
+        }
+        Ok(FieldReference::Expr(value.try_into()?))
+    }
 }
 
 impl DialectDisplay for FieldReference {
@@ -478,6 +659,50 @@ impl TimestampField {
                 | Week
                 | Year
         )
+    }
+}
+
+impl From<sqlparser::ast::DateTimeField> for TimestampField {
+    fn from(value: sqlparser::ast::DateTimeField) -> Self {
+        use sqlparser::ast::DateTimeField;
+        match value {
+            DateTimeField::Century => Self::Century,
+            DateTimeField::Day | DateTimeField::Days => Self::Day,
+            DateTimeField::DayOfWeek => Self::Dow,
+            DateTimeField::DayOfYear => Self::Doy,
+            DateTimeField::Decade => Self::Decade,
+            DateTimeField::Dow => Self::Dow,
+            DateTimeField::Doy => Self::Doy,
+            DateTimeField::Epoch => Self::Epoch,
+            DateTimeField::Hour | DateTimeField::Hours => Self::Hour,
+            DateTimeField::Isodow => Self::Isodow,
+            DateTimeField::Isoyear => Self::Isoyear,
+            DateTimeField::Julian => Self::Julian,
+            DateTimeField::Microsecond | DateTimeField::Microseconds => Self::Microseconds,
+            DateTimeField::Millenium | DateTimeField::Millennium => Self::Millennium,
+            DateTimeField::Millisecond | DateTimeField::Milliseconds => Self::Milliseconds,
+            DateTimeField::Minute | DateTimeField::Minutes => Self::Minute,
+            DateTimeField::Month | DateTimeField::Months => Self::Month,
+            DateTimeField::Quarter => Self::Quarter,
+            DateTimeField::Second | DateTimeField::Seconds => Self::Second,
+            DateTimeField::Timezone => Self::Timezone,
+            DateTimeField::TimezoneHour => Self::TimezoneHour,
+            DateTimeField::TimezoneMinute => Self::TimezoneMinute,
+            DateTimeField::Week(_) | DateTimeField::Weeks => Self::Week, // Optional weekday is only BigQuery
+            DateTimeField::Year | DateTimeField::Years => Self::Year,
+            DateTimeField::Custom(_)
+            | DateTimeField::Date
+            | DateTimeField::Datetime
+            | DateTimeField::IsoWeek
+            | DateTimeField::Nanosecond
+            | DateTimeField::Nanoseconds
+            | DateTimeField::NoDateTime
+            | DateTimeField::Time
+            | DateTimeField::TimezoneAbbr
+            | DateTimeField::TimezoneRegion => {
+                unimplemented!("not supported by MySQL or Postgres")
+            }
+        }
     }
 }
 
