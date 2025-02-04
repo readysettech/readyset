@@ -83,7 +83,7 @@ async fn duplicate_join_key() {
         .await
         .unwrap();
 
-    conn.query_drop("SELECT a.id FROM a JOIN b on b.a_id = a.id WHERE a.id = -1")
+    conn.query_drop("SELECT a.id FROM a JOIN b on b.a_id = a.id WHERE a.id = 42")
         .await
         .unwrap();
 

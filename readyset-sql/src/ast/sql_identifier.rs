@@ -278,6 +278,20 @@ impl From<Cow<'_, str>> for SqlIdentifier {
     }
 }
 
+impl From<sqlparser::ast::Ident> for SqlIdentifier {
+    fn from(value: sqlparser::ast::Ident) -> Self {
+        value.value.into()
+    }
+}
+
+impl From<sqlparser::ast::ObjectNamePart> for SqlIdentifier {
+    fn from(value: sqlparser::ast::ObjectNamePart) -> Self {
+        match value {
+            sqlparser::ast::ObjectNamePart::Identifier(ident) => ident.into(),
+        }
+    }
+}
+
 impl std::ops::Deref for SqlIdentifier {
     type Target = str;
 

@@ -109,6 +109,18 @@ pub enum ItemPlaceholder {
     ColonNumber(u32),
 }
 
+impl From<String> for crate::ast::ItemPlaceholder {
+    fn from(value: String) -> Self {
+        if value == "?" {
+            Self::QuestionMark
+        } else if let Some(number) = value.strip_prefix("$") {
+            Self::DollarNumber(number.parse().unwrap())
+        } else {
+            unimplemented!("ItemPlaceholder::from({value:?}) is not supported")
+        }
+    }
+}
+
 impl fmt::Display for ItemPlaceholder {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
@@ -201,6 +213,42 @@ impl<'a> From<&'a str> for Literal {
 impl From<ItemPlaceholder> for Literal {
     fn from(p: ItemPlaceholder) -> Self {
         Literal::Placeholder(p)
+    }
+}
+
+impl From<sqlparser::ast::Value> for Literal {
+    fn from(value: sqlparser::ast::Value) -> Self {
+        use sqlparser::ast::Value;
+        match value {
+            Value::Placeholder(name) => Self::Placeholder(name.into()),
+            Value::Boolean(b) => Self::Boolean(b),
+            Value::Null => Self::Null,
+            Value::DoubleQuotedString(s)
+            | Value::SingleQuotedString(s)
+            | Value::DoubleQuotedByteStringLiteral(s)
+            | Value::SingleQuotedByteStringLiteral(s) => Self::String(s),
+            Value::DollarQuotedString(sqlparser::ast::DollarQuotedString { value, .. }) => {
+                Self::String(value)
+            }
+            Value::Number(s, _unknown) => {
+                if let Ok(i) = s.parse::<i64>() {
+                    Self::Integer(i)
+                } else if let Ok(i) = s.parse::<u64>() {
+                    Self::UnsignedInteger(i)
+                } else if let Ok(f) = s.parse::<f64>() {
+                    Self::Double(crate::ast::Double {
+                        value: f,
+                        precision: s.find('.').map(|i| (s.len() - i - 1) as u8).unwrap_or(0),
+                    })
+                } else if let Ok(d) = Decimal::from_str_exact(&s) {
+                    // Seems like this will later get re-parsed the same way
+                    Self::Numeric(d.mantissa(), d.scale())
+                } else {
+                    panic!("failed to parse number: {s}") // TODO: remember that 99% of this should be converted to TryFrom
+                }
+            }
+            _ => unimplemented!("unsupported literal {value:?}"),
+        }
     }
 }
 

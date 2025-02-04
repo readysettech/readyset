@@ -6,7 +6,7 @@ use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
-use crate::{ast::*, Dialect, DialectDisplay};
+use crate::{ast::*, AstConversionError, Dialect, DialectDisplay};
 
 #[derive(
     Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Arbitrary,
@@ -78,6 +78,36 @@ pub struct OrderBy {
     pub null_order: Option<NullOrder>,
 }
 
+impl TryFrom<sqlparser::ast::OrderByExpr> for OrderBy {
+    type Error = AstConversionError;
+
+    fn try_from(value: sqlparser::ast::OrderByExpr) -> Result<Self, Self::Error> {
+        let sqlparser::ast::OrderByExpr {
+            expr,
+            asc,
+            nulls_first,
+            ..
+        } = value;
+        Ok(Self {
+            field: expr.try_into()?,
+            order_type: asc.map(|asc| {
+                if asc {
+                    OrderType::OrderAscending
+                } else {
+                    OrderType::OrderDescending
+                }
+            }),
+            null_order: nulls_first.map(|nulls_first| {
+                if nulls_first {
+                    NullOrder::NullsFirst
+                } else {
+                    NullOrder::NullsLast
+                }
+            }),
+        })
+    }
+}
+
 impl OrderBy {
     pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
@@ -94,6 +124,20 @@ impl OrderBy {
 #[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Arbitrary)]
 pub struct OrderClause {
     pub order_by: Vec<OrderBy>,
+}
+
+impl TryFrom<sqlparser::ast::OrderBy> for OrderClause {
+    type Error = AstConversionError;
+
+    fn try_from(value: sqlparser::ast::OrderBy) -> Result<Self, Self::Error> {
+        Ok(OrderClause {
+            order_by: value
+                .exprs
+                .into_iter()
+                .map(TryInto::try_into)
+                .try_collect()?,
+        })
+    }
 }
 
 impl DialectDisplay for OrderClause {

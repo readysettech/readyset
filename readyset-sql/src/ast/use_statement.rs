@@ -16,6 +16,17 @@ impl UseStatement {
     }
 }
 
+impl From<sqlparser::ast::Use> for UseStatement {
+    fn from(value: sqlparser::ast::Use) -> Self {
+        match value {
+            sqlparser::ast::Use::Object(mut object) if object.0.len() == 1 => Self {
+                database: object.0.pop().unwrap().into(),
+            },
+            _ => unimplemented!("unsupported use statement {value:?}"),
+        }
+    }
+}
+
 impl fmt::Display for UseStatement {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "USE {}", self.database)
