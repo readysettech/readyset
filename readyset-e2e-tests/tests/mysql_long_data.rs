@@ -30,10 +30,6 @@ async fn mysql_send_long_data_inner() {
         .await
         .unwrap();
     rs_conn
-        .query_drop("SET SESSION max_execution_time=60000")
-        .await
-        .unwrap();
-    rs_conn
         .exec_drop(
             "INSERT INTO t VALUES (?)",
             vec![Value::Bytes(Vec::from_iter(
