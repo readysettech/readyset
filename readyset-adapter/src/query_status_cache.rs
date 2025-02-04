@@ -885,7 +885,8 @@ mod tests {
     fn select_statement(s: &str) -> anyhow::Result<SelectStatement> {
         match readyset_sql_parsing::parse_query(readyset_sql::Dialect::MySQL, s) {
             Ok(SqlQuery::Select(s)) => Ok(s),
-            _ => Err(anyhow::anyhow!("Invalid SELECT statement")),
+            Ok(q) => Err(anyhow::anyhow!("Not a SELECT statement: {q:?}")),
+            Err(e) => Err(anyhow::anyhow!("Parsing error: {e}")),
         }
     }
 
