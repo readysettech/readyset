@@ -32,7 +32,6 @@ database-utils = { path = "../database-utils" }
 dataflow-state = { path = "../dataflow-state" }
 health-reporter = { path = "../health-reporter" }
 mysql-srv = { path = "../mysql-srv" }
-nom-sql = { path = "../nom-sql" }
 psql-srv = { path = "../psql-srv" }
 readyset-adapter = { path = "../readyset-adapter" }
 readyset-alloc = { path = "../readyset-alloc" }
