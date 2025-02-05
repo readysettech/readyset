@@ -1281,6 +1281,69 @@ where
         }
     }
 
+    #[inline]
+    fn create_prepared_statement(
+        &mut self,
+        prepare_meta: PrepareMeta,
+        prep: PrepareResultInner<DB>,
+        statement_id: StatementId,
+    ) -> PreparedStatement<DB> {
+        match prepare_meta {
+            PrepareMeta::Write { stmt } | PrepareMeta::Transaction { stmt } => PreparedStatement {
+                query_id: None,
+                prep: PrepareResult::new(statement_id, prep),
+                migration_state: MigrationState::Successful,
+                execution_info: None,
+                parsed_query: Some(Arc::new(stmt)),
+                view_request: None,
+                always: false,
+            },
+            PrepareMeta::Set { stmt } => PreparedStatement {
+                query_id: None,
+                prep: PrepareResult::new(statement_id, prep),
+                migration_state: MigrationState::Successful,
+                execution_info: None,
+                parsed_query: Some(Arc::new(SqlQuery::Set(stmt))),
+                view_request: None,
+                always: false,
+            },
+            PrepareMeta::Select(PrepareSelectMeta {
+                stmt,
+                rewritten,
+                always,
+                ..
+            }) => {
+                let request =
+                    ViewCreateRequest::new(rewritten, self.noria.schema_search_path().to_owned());
+                let migration_state = self
+                    .state
+                    .query_status_cache
+                    .query_migration_state(&request);
+                PreparedStatement {
+                    query_id: Some(migration_state.0),
+                    prep: PrepareResult::new(statement_id, prep),
+                    migration_state: migration_state.1,
+                    execution_info: None,
+                    parsed_query: Some(Arc::new(SqlQuery::Select(stmt))),
+                    view_request: Some(request),
+                    always,
+                }
+            }
+            PrepareMeta::Proxy
+            | PrepareMeta::FailedToParse
+            | PrepareMeta::FailedToRewrite(..)
+            | PrepareMeta::Unimplemented(..) => PreparedStatement {
+                query_id: None,
+                prep: PrepareResult::new(statement_id, prep),
+                migration_state: MigrationState::Successful,
+                execution_info: None,
+                parsed_query: None,
+                view_request: None,
+                always: false,
+            },
+        }
+    }
+
     /// Prepares `query` to be executed later using the reader/writer belonging
     /// to the calling `Backend` struct and adds the prepared query
     /// to the calling struct's map of prepared queries with a unique id.
@@ -1297,85 +1360,36 @@ where
             .do_prepare(&meta, query, data, &mut query_event)
             .await?;
 
-        let (query_id, parsed_query, migration_state, view_request, always) = match meta {
-            PrepareMeta::Write { stmt } | PrepareMeta::Transaction { stmt } => (
-                None,
-                Some(Arc::new(stmt)),
-                MigrationState::Successful,
-                None,
-                false,
-            ),
-            PrepareMeta::Set { stmt } => (
-                None,
-                Some(Arc::new(SqlQuery::Set(stmt))),
-                MigrationState::Successful,
-                None,
-                false,
-            ),
-            PrepareMeta::Select(PrepareSelectMeta {
-                stmt,
-                rewritten,
-                always,
-                ..
-            }) => {
-                let request =
-                    ViewCreateRequest::new(rewritten, self.noria.schema_search_path().to_owned());
-                let migration_state = self
-                    .state
-                    .query_status_cache
-                    .query_migration_state(&request);
-                (
-                    Some(migration_state.0),
-                    Some(Arc::new(SqlQuery::Select(stmt))),
-                    migration_state.1,
-                    Some(request),
-                    always,
-                )
-            }
-            PrepareMeta::Proxy
-            | PrepareMeta::FailedToParse
-            | PrepareMeta::FailedToRewrite(..)
-            | PrepareMeta::Unimplemented(..) => {
-                (None, None, MigrationState::Successful, None, false)
-            }
-        };
+        // grab the next id from the cache. we do this before creating the `PreparedStatement`
+        // instance as we store the id in the `PrepareResult` instance, which is itself
+        // maintained in the `PreparedStatement`.
+        let next_id = self
+            .state
+            .prepared_statements
+            .vacant_key()
+            .try_into()
+            .expect("Cannot prepare more than u32::MAX statements with a single connection");
+        let prepared_statement = self.create_prepared_statement(meta, prep, next_id);
+        let statement_id = self.state.prepared_statements.insert(prepared_statement);
+        assert_eq!(next_id, statement_id as u32);
+
+        // we've already put the prepared statement in the cache, but dig it a reference
+        // for both query logging and returning to the caller.
+        let prepared_statement = &self.state.prepared_statements[statement_id];
 
         if let Some(QueryLogMode::Verbose) = self.query_log_mode {
             // We only use the full query in verbose mode, so avoid cloning if we don't need to
-            if let Some(parsed) = &parsed_query {
+            if let Some(parsed) = &prepared_statement.parsed_query {
                 query_event.query = Some(parsed.clone());
             }
         }
 
-        query_event.query_id = query_id.into();
-
-        let statement_id = self.state.prepared_statements.insert(PreparedStatement {
-            query_id,
-            prep: PrepareResult::new(
-                self.state
-                    .prepared_statements
-                    .vacant_key()
-                    .try_into()
-                    .expect(
-                        "Cannot prepare more than u32::MAX statements with a single connection",
-                    ),
-                prep,
-            ),
-            migration_state,
-            execution_info: None,
-            parsed_query,
-            view_request,
-            always,
-        });
-
+        query_event.query_id = prepared_statement.query_id.into();
         let query_log_sender = self.query_log_sender.clone();
         let slowlog = self.settings.slowlog;
         log_query(query_log_sender.as_ref(), query_event, slowlog);
 
-        Ok(
-            // SAFETY: Just inserted!
-            &unsafe { self.state.prepared_statements.get_unchecked(statement_id) }.prep,
-        )
+        Ok(&prepared_statement.prep)
     }
 
     /// Executes a prepared statement on ReadySet
