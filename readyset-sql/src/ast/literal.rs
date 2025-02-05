@@ -231,6 +231,10 @@ impl From<sqlparser::ast::Value> for Literal {
                 Self::String(value)
             }
             Value::Number(s, _unknown) => {
+                // TODO(mvzink): Probably should parse as unsigned first and/or fix nom-sql's
+                // parsing of numeric literals. sqlparser-rs leaves the number as a string, and its
+                // expression parsing will parse `-1` as `UnaryOp::Minus(Value::Number("1"))`.
+                // However, to match nom-sql, we usually want a signed integer.
                 if let Ok(i) = s.parse::<i64>() {
                     Self::Integer(i)
                 } else if let Ok(i) = s.parse::<u64>() {
