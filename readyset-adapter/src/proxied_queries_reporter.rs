@@ -102,9 +102,10 @@ mod tests {
         let query_id = QueryId::from_unparsed_select("test");
         let mut init_q = DeniedQuery {
             id: query_id,
-            query: Query::ParseFailed(Arc::new(
-                "this is easier than making a view create request".to_string(),
-            )),
+            query: Query::ParseFailed(
+                Arc::new("this is easier than making a view create request".to_string()),
+                "Should fail".to_string(),
+            ),
             status: QueryStatus {
                 migration_state: MigrationState::Pending,
                 execution_info: None,
@@ -123,9 +124,10 @@ mod tests {
 
         let mut updated_q = DeniedQuery {
             id: query_id,
-            query: Query::ParseFailed(Arc::new(
-                "this is easier than making a view create request".to_string(),
-            )),
+            query: Query::ParseFailed(
+                Arc::new("this is easier than making a view create request".to_string()),
+                "Should fail".to_string(),
+            ),
             status: QueryStatus {
                 migration_state: MigrationState::Successful,
                 execution_info: None,

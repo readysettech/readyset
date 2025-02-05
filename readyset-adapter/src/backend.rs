@@ -1045,7 +1045,7 @@ where
                             select_meta.rewritten.clone(),
                             self.noria.schema_search_path().to_owned(),
                         ),
-                        MigrationState::Unsupported,
+                        MigrationState::Unsupported(e.unsupported_cause().unwrap_or_default()),
                     );
                 } else {
                     error!(
@@ -1187,7 +1187,7 @@ where
         } else {
             let should_do_readyset = !matches!(
                 status.migration_state,
-                MigrationState::Unsupported | MigrationState::Dropped
+                MigrationState::Unsupported(_) | MigrationState::Dropped
             );
             PrepareMeta::Select(PrepareSelectMeta {
                 stmt,
@@ -1818,7 +1818,7 @@ where
                 // On an unsupported execute we update the query migration state to be unsupported.
                 self.state.query_status_cache.update_query_migration_state(
                     cached_statement.as_view_request()?,
-                    MigrationState::Unsupported,
+                    MigrationState::Unsupported(e.unsupported_cause().unwrap_or_default()),
                 );
             } else if matches!(e, ReadySetError::NoCacheForQuery) {
                 self.state
@@ -2045,7 +2045,9 @@ where
         migration_state: Option<MigrationState>,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         let (supported, migration_state) = match migration_state {
-            Some(m @ MigrationState::Unsupported) | Some(m @ MigrationState::Dropped) => ("no", m),
+            Some(m @ MigrationState::Unsupported(_)) | Some(m @ MigrationState::Dropped) => {
+                ("no", m)
+            }
             // If the migration state is "Inlined", we need to let the migration handler process
             // the inlined migrations in the background until we can report whether the query is
             // supported with certainty
@@ -2060,7 +2062,10 @@ where
                     Ok(_) => ("yes", MigrationState::DryRunSucceeded),
                     // If the root cause of the error is that the query is unsupported, we can
                     // just convey that to the client up front
-                    Err(e) if e.caused_by_unsupported() => ("no", MigrationState::Unsupported),
+                    Err(e) if e.caused_by_unsupported() => (
+                        "no",
+                        MigrationState::Unsupported(e.unsupported_cause().unwrap_or_default()),
+                    ),
                     Err(e) => return Err(e),
                 }
             }
@@ -2185,11 +2190,13 @@ where
                 let s = match status.migration_state {
                     MigrationState::DryRunSucceeded
                     | MigrationState::Successful
-                    | MigrationState::Dropped => "yes",
-                    MigrationState::Pending | MigrationState::Inlined(_) => "pending",
-                    MigrationState::Unsupported => "unsupported",
-                }
-                .to_string();
+                    | MigrationState::Dropped => "yes".to_string(),
+                    MigrationState::Pending | MigrationState::Inlined(_) => "pending".to_string(),
+                    MigrationState::Unsupported(reason) if reason.is_empty() => {
+                        "unsupported: unknown reason".to_string()
+                    }
+                    MigrationState::Unsupported(reason) => format!("unsupported: {}", reason),
+                };
 
                 let mut row = vec![
                     DfValue::from(id.to_string()),
@@ -2213,7 +2220,9 @@ where
         data.sort_by(|a, b| {
             let status_order = |s: &str| match s {
                 "yes" => 0,
-                "unsupported" => 1,
+                // we sometimes provide the reason for unsupported queries
+                // like so "unsupported: xyz"
+                unsupported if unsupported.starts_with("unsupported") => 1,
                 "pending" => 2,
                 _ => 3,
             };
@@ -2369,7 +2378,7 @@ where
                                 match self.state.query_status_cache.query(id.as_str()) {
                                     Some(q) => match q {
                                         Query::Parsed(view_request) => (*view_request).clone(),
-                                        Query::ParseFailed(q) => {
+                                        Query::ParseFailed(q, _) => {
                                             return Err(ReadySetError::UnparseableQuery {
                                                 query: (*q).clone(),
                                             });
@@ -2428,7 +2437,7 @@ where
                                     view_request.statement.clone(),
                                     Some(view_request.schema_search_path.clone()),
                                 )),
-                                Query::ParseFailed(q) => Err(ReadySetError::UnparseableQuery {
+                                Query::ParseFailed(q, _) => Err(ReadySetError::UnparseableQuery {
                                     query: (*q).clone(),
                                 }),
                             },
@@ -2619,15 +2628,10 @@ where
         state: &mut BackendState<DB>,
         original_query: &'a str,
         view_request: &ViewCreateRequest,
-        status: Option<QueryStatus>,
+        mut status: QueryStatus,
         event: &mut QueryExecutionEvent,
         processed_query_params: ProcessedQueryParams,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
-        let mut status = status.unwrap_or(QueryStatus {
-            migration_state: MigrationState::Unsupported,
-            execution_info: None,
-            always: false,
-        });
         let original_status = status.clone();
         let did_work = if let Some(ref mut i) = status.execution_info {
             i.reset_if_exceeded_recovery(
@@ -2644,7 +2648,7 @@ where
             && status.migration_state != MigrationState::Successful;
         let unsupported_or_dropped = matches!(
             &status.migration_state,
-            MigrationState::Unsupported | MigrationState::Dropped
+            MigrationState::Unsupported(_) | MigrationState::Dropped
         );
         let exceeded_network_failure = status
             .execution_info
@@ -2710,7 +2714,9 @@ where
                 if noria_err.caused_by_view_not_found() {
                     status.migration_state = MigrationState::Pending;
                 } else if noria_err.caused_by_unsupported() {
-                    status.migration_state = MigrationState::Unsupported;
+                    status.migration_state = MigrationState::Unsupported(
+                        noria_err.unsupported_cause().unwrap_or_default(),
+                    );
                 };
 
                 let always = status.always;
@@ -2745,11 +2751,7 @@ where
     fn noria_should_try_select(
         &self,
         q: &mut ViewCreateRequest,
-    ) -> (
-        bool,
-        Option<QueryStatus>,
-        ReadySetResult<ProcessedQueryParams>,
-    ) {
+    ) -> ReadySetResult<(bool, QueryStatus, ProcessedQueryParams)> {
         match adapter_rewrites::process_query(&mut q.statement, self.noria.rewrite_params()) {
             Ok(processed_query_params) => {
                 let s = self.state.query_status_cache.query_status(q);
@@ -2758,7 +2760,7 @@ where
                 } else {
                     true
                 };
-                (should_try, Some(s), Ok(processed_query_params))
+                Ok((should_try, s, processed_query_params))
             }
             Err(e) => {
                 warn!(
@@ -2766,14 +2768,7 @@ where
                     statement = %Sensitive(&q.statement.display(readyset_sql::Dialect::MySQL)),
                     "This statement could not be rewritten by ReadySet"
                 );
-                (
-                    matches!(
-                        self.state.proxy_state,
-                        ProxyState::Never | ProxyState::Fallback
-                    ),
-                    None,
-                    Err(e),
-                )
+                Err(e)
             }
         }
     }
@@ -3067,7 +3062,10 @@ where
                 let fallback_res =
                     Self::query_fallback(self.upstream.as_mut(), query, &mut event).await;
                 if fallback_res.is_ok() {
-                    let (id, _) = self.state.query_status_cache.insert(query);
+                    let (id, _) = self
+                        .state
+                        .query_status_cache
+                        .insert(Query::ParseFailed(query.to_string().into(), e.to_string()));
                     if let Some(ref telemetry_sender) = self.telemetry_sender {
                         if let Err(e) = telemetry_sender.send_event_with_payload(
                             TelemetryEvent::QueryParseFailed,
@@ -3158,8 +3156,7 @@ where
                     QueryIdWrapper::Uncalculated(self.noria.schema_search_path().into());
 
                 let (noria_should_try, status, processed_query_params) =
-                    self.noria_should_try_select(&mut view_request);
-                let processed_query_params = processed_query_params?;
+                    self.noria_should_try_select(&mut view_request)?;
 
                 if noria_should_try {
                     Self::query_adhoc_select(

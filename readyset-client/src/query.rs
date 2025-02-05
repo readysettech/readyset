@@ -5,7 +5,6 @@
 //! in the process of being migrated, or whether the migration succeeded or failed
 //! This module contains the types that handle that tracking.
 
-use std::borrow::Borrow;
 use std::fmt::{self, Display};
 use std::hash::{Hash, Hasher};
 use std::str::FromStr;
@@ -92,7 +91,8 @@ pub enum Query {
     /// A Query that was successfully parsed by ReadySet
     Parsed(Arc<ViewCreateRequest>),
     /// A Query that ReadySet failed to parse, but Upstream was able to parse.
-    ParseFailed(Arc<String>),
+    /// The first element is the unparsed query, the second is the error message
+    ParseFailed(Arc<String>, String),
 }
 
 impl From<Arc<ViewCreateRequest>> for Query {
@@ -107,32 +107,9 @@ impl From<ViewCreateRequest> for Query {
     }
 }
 
-impl From<Arc<String>> for Query {
-    fn from(s: Arc<String>) -> Self {
-        Self::ParseFailed(s)
-    }
-}
-
 impl From<String> for Query {
     fn from(s: String) -> Self {
-        Self::ParseFailed(Arc::new(s))
-    }
-}
-
-impl From<&str> for Query {
-    fn from(s: &str) -> Self {
-        Self::from(s.to_owned())
-    }
-}
-
-impl Borrow<String> for Query {
-    fn borrow(&self) -> &String {
-        match self {
-            Query::ParseFailed(str) => str,
-            Query::Parsed(_) => {
-                panic!("cannot borrow a query that was parsed as a string")
-            }
-        }
+        Self::ParseFailed(Arc::new(s), "".to_string())
     }
 }
 
@@ -140,7 +117,7 @@ impl PartialEq for Query {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Parsed(l0), Self::Parsed(r0)) => l0 == r0,
-            (Self::ParseFailed(l0), Self::ParseFailed(r0)) => l0 == r0,
+            (Self::ParseFailed(l0, _), Self::ParseFailed(r0, _)) => l0 == r0,
             _ => false,
         }
     }
@@ -150,7 +127,7 @@ impl Hash for Query {
     fn hash<H: Hasher>(&self, state: &mut H) {
         match self {
             Query::Parsed(stmt) => stmt.hash(state),
-            Query::ParseFailed(str) => str.hash(state),
+            Query::ParseFailed(str, _) => str.hash(state),
         }
     }
 }
@@ -159,7 +136,7 @@ impl DialectDisplay for Query {
     fn display(&self, dialect: readyset_sql::Dialect) -> impl Display + '_ {
         fmt_with(move |f| match self {
             Query::Parsed(q) => write!(f, "{}", q.statement.display(dialect)),
-            Query::ParseFailed(s) => write!(f, "{s}"),
+            Query::ParseFailed(s, _) => write!(f, "{s}"),
         })
     }
 }
@@ -177,7 +154,7 @@ impl Query {
                 // FIXME: Use correct dialect.
                 return statement.display(readyset_sql::Dialect::MySQL).to_string();
             }
-            Query::ParseFailed(_) => "<redacted: parsing failed>".to_string(),
+            Query::ParseFailed(..) => "<redacted: parsing failed>".to_string(),
         }
     }
 
@@ -186,7 +163,7 @@ impl Query {
     pub fn into_parsed(self) -> Option<Arc<ViewCreateRequest>> {
         match self {
             Query::Parsed(vcr) => Some(vcr),
-            Query::ParseFailed(_) => None,
+            Query::ParseFailed(..) => None,
         }
     }
 }
@@ -268,7 +245,7 @@ impl QueryStatus {
     /// [unsupported]: MigrationState::Unsupported
     #[must_use]
     pub fn is_unsupported(&self) -> bool {
-        self.migration_state == MigrationState::Unsupported
+        matches!(self.migration_state, MigrationState::Unsupported(_))
     }
 
     /// Returns true if this query status represents an [dropped][] query
@@ -374,7 +351,7 @@ pub enum MigrationState {
     /// some set of parameters passed on execution.
     Inlined(InlinedState),
     /// This query is not supported and should not be tried against ReadySet.
-    Unsupported,
+    Unsupported(String),
     /// Indicates that a dry run of the query has succeeded. It's very likely but not guaranteed
     /// that migration of the query will succeed if it's attempted.
     DryRunSucceeded,
@@ -392,7 +369,7 @@ impl MigrationState {
     pub fn default_for_query(query: &Query) -> Self {
         match query {
             Query::Parsed { .. } => Self::Pending,
-            Query::ParseFailed(_) => Self::Unsupported,
+            Query::ParseFailed(_, reason) => Self::Unsupported(reason.clone()),
         }
     }
 
@@ -423,7 +400,10 @@ impl Display for MigrationState {
         match self {
             MigrationState::Pending => write!(f, "pending"),
             MigrationState::Successful => write!(f, "successful"),
-            MigrationState::Unsupported => write!(f, "unsupported"),
+            MigrationState::Unsupported(reason) if reason.is_empty() => {
+                write!(f, "unsupported: reason unknown")
+            }
+            MigrationState::Unsupported(reason) => write!(f, "unsupported: {}", reason),
             MigrationState::DryRunSucceeded => write!(f, "dry run succeeded"),
             MigrationState::Inlined(InlinedState { epoch, .. }) => match epoch {
                 0u64 => write!(f, "pending inlining"),

@@ -102,7 +102,7 @@ impl MigrationHandler {
                     }
                     successes += 1;
                 }
-                Query::ParseFailed(_) => {
+                Query::ParseFailed(..) => {
                     error!("Should not be migrating query that failed to parse. Ignoring");
                     failures += 1;
                 }
@@ -248,8 +248,10 @@ impl MigrationHandler {
                 );
 
                 self.start_time.remove(view_request);
-                self.query_status_cache
-                    .update_query_migration_state(view_request, MigrationState::Unsupported);
+                self.query_status_cache.update_query_migration_state(
+                    view_request,
+                    MigrationState::Unsupported(e.unsupported_cause().unwrap_or_default()),
+                );
             }
             // Errors that were not caused by unsupported may be transient, do nothing
             // so we may retry the migration on this query.
@@ -262,8 +264,10 @@ impl MigrationHandler {
                 );
                 if Instant::now() - *self.start_time.get(view_request).unwrap() > self.max_retry {
                     // Query failed for long enough, it is unsupported.
-                    self.query_status_cache
-                        .update_query_migration_state(view_request, MigrationState::Unsupported);
+                    self.query_status_cache.update_query_migration_state(
+                        view_request,
+                        MigrationState::Unsupported(e.unsupported_cause().unwrap_or_default()),
+                    );
                 }
             }
         }
@@ -326,8 +330,10 @@ impl MigrationHandler {
                 self.max_retry,
                 view_request.to_anonymized_string()
             );
-            self.query_status_cache
-                .update_query_migration_state(view_request, MigrationState::Unsupported);
+            self.query_status_cache.update_query_migration_state(
+                view_request,
+                MigrationState::Unsupported("dry run timed out".into()),
+            );
             return;
         }
         let qname = QueryId::from_select(
@@ -359,8 +365,10 @@ impl MigrationHandler {
             }
             Err(e) if e.caused_by_unsupported() => {
                 self.start_time.remove(view_request);
-                self.query_status_cache
-                    .update_query_migration_state(view_request, MigrationState::Unsupported);
+                self.query_status_cache.update_query_migration_state(
+                    view_request,
+                    MigrationState::Unsupported(e.unsupported_cause().unwrap_or_default()),
+                );
             }
             _ => {} // Leave it as pending.
         }
