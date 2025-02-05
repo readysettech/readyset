@@ -766,6 +766,19 @@ impl ReadySetError {
                 .any(move |e| e.any_cause(f.clone()))
     }
 
+    pub fn unsupported_cause(&self) -> Option<String> {
+        self.find_map_cause(|e| {
+            if let ReadySetError::Unsupported(reason) = e {
+                // Example:
+                //  in readyset-server/src/controller/sql/query_graph.rs:1017:13: SELECT statements with no tables are unsupported
+                // might want to trim the file/line/col part later
+                Some(reason.clone())
+            } else {
+                None
+            }
+        })
+    }
+
     fn find_map_cause<'a, F, R: 'a>(&'a self, f: F) -> Option<R>
     where
         F: Fn(&'a Self) -> Option<R>,

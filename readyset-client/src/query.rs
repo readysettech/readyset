@@ -268,7 +268,7 @@ impl QueryStatus {
     /// [unsupported]: MigrationState::Unsupported
     #[must_use]
     pub fn is_unsupported(&self) -> bool {
-        self.migration_state == MigrationState::Unsupported
+        matches!(self.migration_state, MigrationState::Unsupported(_))
     }
 
     /// Returns true if this query status represents an [dropped][] query
@@ -374,7 +374,7 @@ pub enum MigrationState {
     /// some set of parameters passed on execution.
     Inlined(InlinedState),
     /// This query is not supported and should not be tried against ReadySet.
-    Unsupported,
+    Unsupported(String),
     /// Indicates that a dry run of the query has succeeded. It's very likely but not guaranteed
     /// that migration of the query will succeed if it's attempted.
     DryRunSucceeded,
@@ -392,7 +392,7 @@ impl MigrationState {
     pub fn default_for_query(query: &Query) -> Self {
         match query {
             Query::Parsed { .. } => Self::Pending,
-            Query::ParseFailed(_) => Self::Unsupported,
+            Query::ParseFailed(_) => Self::Unsupported("ReadySet failed to parse query".into()),
         }
     }
 
@@ -423,7 +423,10 @@ impl Display for MigrationState {
         match self {
             MigrationState::Pending => write!(f, "pending"),
             MigrationState::Successful => write!(f, "successful"),
-            MigrationState::Unsupported => write!(f, "unsupported"),
+            MigrationState::Unsupported(reason) if reason.is_empty() => {
+                write!(f, "unsupported: reason unknown")
+            }
+            MigrationState::Unsupported(reason) => write!(f, "unsupported: {}", reason),
             MigrationState::DryRunSucceeded => write!(f, "dry run succeeded"),
             MigrationState::Inlined(InlinedState { epoch, .. }) => match epoch {
                 0u64 => write!(f, "pending inlining"),
