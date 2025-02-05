@@ -204,13 +204,7 @@ impl TryFrom<sqlparser::ast::DataType> for crate::ast::SqlType {
             Bytea => Ok(Self::ByteArray),
             Bit(n) => Ok(Self::Bit(n.map(|n| n as u16))),
             BitVarying(n) | VarBit(n) => Ok(Self::VarBit(n.map(|n| n as u16))),
-            Custom(name, values) => {
-                if name.to_string().to_lowercase() == "varbit" {
-                    Ok(Self::VarBit(None))
-                } else {
-                    not_yet_implemented!("custom type name={name:?}, values={values:?}")
-                }
-            }
+            Custom(name, _values) => Ok(Self::Other(name.into())),
             Array(def) => Ok(Self::Array(Box::new(def.try_into()?))),
             Map(_data_type, _data_type1) => unsupported!("MAP type"),
             Tuple(_vec) => unsupported!("TUPLE type"),
