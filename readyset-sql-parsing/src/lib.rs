@@ -16,6 +16,8 @@ pub enum ReadysetParsingError {
     SqlparserError(#[from] sqlparser::parser::ParserError),
     #[error("AST conversion error: {0}")]
     AstConversionError(#[from] readyset_sql::AstConversionError),
+    #[error("readyset parsing error: {0}")]
+    ReadysetParsingError(String),
 }
 
 #[cfg(feature = "sqlparser")]
@@ -32,6 +34,7 @@ fn sqlparser_dialect_from_readyset_dialect(
 #[expect(clippy::upper_case_acronyms, reason = "SQL keywords are capitalized")]
 enum ReadysetKeyword {
     CACHES,
+    MIGRATION,
     READYSET,
     SIMPLIFIED,
 }
@@ -41,6 +44,7 @@ impl ReadysetKeyword {
     fn as_str(&self) -> &str {
         match self {
             Self::CACHES => "CACHES",
+            Self::MIGRATION => "MIGRATION",
             Self::READYSET => "READYSET",
             Self::SIMPLIFIED => "SIMPLIFIED",
         }
@@ -157,12 +161,23 @@ fn parse_explain(parser: &mut Parser) -> Result<SqlQuery, ReadysetParsingError> 
 /// SHOW READYSET VERSION
 #[cfg(feature = "sqlparser")]
 fn parse_show(parser: &mut Parser) -> Result<SqlQuery, ReadysetParsingError> {
-    if parse_readyset_keyword(parser, ReadysetKeyword::READYSET)
-        && parser.parse_keyword(Keyword::VERSION)
-    {
-        Ok(SqlQuery::Show(
-            readyset_sql::ast::ShowStatement::ReadySetVersion,
-        ))
+    if parse_readyset_keyword(parser, ReadysetKeyword::READYSET) {
+        if parser.parse_keyword(Keyword::VERSION) {
+            Ok(SqlQuery::Show(
+                readyset_sql::ast::ShowStatement::ReadySetVersion,
+            ))
+        } else if parse_readyset_keyword(parser, ReadysetKeyword::MIGRATION)
+            && parser.parse_keyword(Keyword::STATUS)
+        {
+            let id = parser.parse_literal_uint()?;
+            Ok(SqlQuery::Show(
+                readyset_sql::ast::ShowStatement::ReadySetMigrationStatus(id),
+            ))
+        } else {
+            Err(ReadysetParsingError::ReadysetParsingError(
+                "expected SHOW READYSET VERSION or SHOW READYSET MIGRATION STATUS".into(),
+            ))
+        }
     } else {
         Ok(parser.parse_show()?.try_into()?)
     }
