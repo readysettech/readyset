@@ -38,7 +38,6 @@
 //!
 //! [dialect]: readyset_sql::Dialect
 
-use nom_sql::parse_query;
 use pgsql::tls::MakeTlsConnect;
 use readyset_client::recipe::changelist::{AlterTypeChange, Change, PostgresTableMetadata};
 use readyset_data::{DfType, PgEnumMetadata};
@@ -50,6 +49,7 @@ use readyset_sql::ast::{
     Relation, SqlQuery, SqlType, TableKey,
 };
 use readyset_sql::Dialect;
+use readyset_sql_parsing::parse_query;
 use serde::{Deserialize, Deserializer};
 use tokio_postgres as pgsql;
 use tracing::info;

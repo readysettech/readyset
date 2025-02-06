@@ -365,6 +365,7 @@ dependencies = [
  "readyset-psql",
  "readyset-server",
  "readyset-sql",
+ "readyset-sql-parsing",
  "readyset-tracing",
  "readyset-util",
  "reqwest",
@@ -4294,6 +4295,7 @@ dependencies = [
  "readyset-psql",
  "readyset-server",
  "readyset-sql",
+ "readyset-sql-parsing",
  "readyset-sql-passes",
  "readyset-telemetry-reporter",
  "readyset-tracing",
@@ -4358,6 +4360,7 @@ dependencies = [
  "readyset-errors",
  "readyset-server",
  "readyset-sql",
+ "readyset-sql-parsing",
  "readyset-sql-passes",
  "readyset-telemetry-reporter",
  "readyset-tracing",
@@ -4553,6 +4556,7 @@ dependencies = [
  "readyset-data",
  "readyset-errors",
  "readyset-sql",
+ "readyset-sql-parsing",
  "readyset-tracing",
  "readyset-util",
  "rust_decimal",
@@ -4798,6 +4802,7 @@ dependencies = [
  "readyset-psql",
  "readyset-server",
  "readyset-sql",
+ "readyset-sql-parsing",
  "readyset-tracing",
  "readyset-util",
  "rust_decimal",
@@ -4918,6 +4923,7 @@ dependencies = [
  "readyset-errors",
  "readyset-server",
  "readyset-sql",
+ "readyset-sql-parsing",
  "readyset-tracing",
  "readyset-util",
  "readyset-version",
@@ -5013,6 +5019,7 @@ dependencies = [
  "readyset-errors",
  "readyset-mir",
  "readyset-sql",
+ "readyset-sql-parsing",
  "readyset-sql-passes",
  "readyset-telemetry-reporter",
  "readyset-tracing",
@@ -5068,9 +5075,20 @@ dependencies = [
  "readyset-util",
  "rust_decimal",
  "serde",
+ "sqlparser",
  "test-strategy",
  "thiserror",
  "triomphe",
+]
+
+[[package]]
+name = "readyset-sql-parsing"
+version = "0.1.0"
+dependencies = [
+ "nom-sql",
+ "readyset-sql",
+ "sqlparser",
+ "thiserror",
 ]
 
 [[package]]
@@ -5085,6 +5103,7 @@ dependencies = [
  "readyset-data",
  "readyset-errors",
  "readyset-sql",
+ "readyset-sql-parsing",
  "serde",
  "tracing",
  "vec1",
@@ -5303,6 +5322,7 @@ dependencies = [
  "readyset-errors",
  "readyset-server",
  "readyset-sql",
+ "readyset-sql-parsing",
  "readyset-sql-passes",
  "readyset-telemetry-reporter",
  "readyset-tracing",

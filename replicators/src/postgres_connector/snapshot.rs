@@ -1150,9 +1150,9 @@ impl<'a> PostgresReplicator<'a> {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::parse_query;
     use readyset_sql::ast::{Column, SqlQuery, TableKey};
     use readyset_sql::Dialect;
+    use readyset_sql_parsing::parse_query;
 
     use super::*;
 

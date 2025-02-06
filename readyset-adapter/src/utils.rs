@@ -649,7 +649,7 @@ mod tests {
     where
         I: Into<DfValue>,
     {
-        let cond = match nom_sql::parse_query(Dialect::MySQL, cond_query).unwrap() {
+        let cond = match readyset_sql_parsing::parse_query(Dialect::MySQL, cond_query).unwrap() {
             SqlQuery::Update(u) => u.where_clause.unwrap(),
             SqlQuery::Delete(d) => d.where_clause.unwrap(),
             _ => unreachable!(),
@@ -909,7 +909,7 @@ mod tests {
         let query = "SELECT  `votes`.* FROM `votes` WHERE `votes`.`user_id` = 1 \
                      AND `votes`.`story_id` = ? AND `votes`.`comment_id` IS NULL \
                      ORDER BY `votes`.`id` ASC LIMIT 1";
-        let q = nom_sql::parse_query(Dialect::MySQL, query).unwrap();
+        let q = readyset_sql_parsing::parse_query(Dialect::MySQL, query).unwrap();
 
         let pc = get_parameter_columns(&q);
 
@@ -921,7 +921,7 @@ mod tests {
         let query = "SELECT  `votes`.* FROM `votes` WHERE `votes`.`user_id` = 1 \
                      AND `votes`.`story_id` = $1 AND `votes`.`comment_id` IS NULL \
                      ORDER BY `votes`.`id` ASC LIMIT 1";
-        let q = nom_sql::parse_query(Dialect::MySQL, query).unwrap();
+        let q = readyset_sql_parsing::parse_query(Dialect::MySQL, query).unwrap();
 
         let pc = get_parameter_columns(&q);
 
@@ -932,8 +932,8 @@ mod tests {
     fn test_unsupported_select_parameter_positions() {
         let having = "SELECT * FROM t GROUP BY a HAVING count(a) > ?";
         let field = "SELECT ? FROM t";
-        let having_query = nom_sql::parse_query(Dialect::MySQL, having).unwrap();
-        let field_query = nom_sql::parse_query(Dialect::MySQL, field).unwrap();
+        let having_query = readyset_sql_parsing::parse_query(Dialect::MySQL, having).unwrap();
+        let field_query = readyset_sql_parsing::parse_query(Dialect::MySQL, field).unwrap();
 
         let pc = get_parameter_columns(&having_query);
         assert!(pc.is_empty());
@@ -944,7 +944,7 @@ mod tests {
     #[test]
     fn test_update_parameter_columns() {
         let update = "UPDATE t SET a = ? WHERE b = ?";
-        let update = nom_sql::parse_query(Dialect::MySQL, update).unwrap();
+        let update = readyset_sql_parsing::parse_query(Dialect::MySQL, update).unwrap();
 
         let pc = get_parameter_columns(&update);
         assert_eq!(

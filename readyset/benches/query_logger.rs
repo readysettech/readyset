@@ -21,7 +21,7 @@ fn create_event(
     let schema_search_path = vec!["my_schema".into()];
     let (query, query_id) = if with_query {
         let stmt = "select max(t2.l) from t1 join t2 on t1.id = t2.id where t1.id in (1, 2, 3) group by t1.id";
-        let sql_stmt = nom_sql::parse_query(Dialect::PostgreSQL, stmt).unwrap();
+        let sql_stmt = readyset_sql_parsing::parse_query(Dialect::PostgreSQL, stmt).unwrap();
         let query = match sql_stmt.clone() {
             SqlQuery::Select(s) => s,
             _ => panic!("Error parsing query"),

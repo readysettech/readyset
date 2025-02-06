@@ -15,6 +15,7 @@ proptest = { workspace = true }
 readyset-util = { path = "../readyset-util" }
 rust_decimal = { workspace = true, features = ["db-tokio-postgres"] }
 serde = { workspace = true }
+sqlparser = { workspace = true }
 test-strategy = { workspace = true }
 thiserror = { workspace = true }
 triomphe = { workspace = true }

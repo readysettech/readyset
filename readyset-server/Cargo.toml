@@ -16,13 +16,18 @@ default = []
 generate_mysql_tests = ["default"]
 profiling = ["timekeeper/default"]
 bench = ["dataflow/bench"]
-failure_injection = ["fail/failpoints", "dataflow/failure_injection", "readyset-util/failure_injection", "replicators/failure_injection"]
+failure_injection = [
+    "fail/failpoints",
+    "dataflow/failure_injection",
+    "readyset-util/failure_injection",
+    "replicators/failure_injection",
+]
 # Redact the display of strings marked sensitive from logs and error messages
 redact_sensitive = ["readyset-util/redact_sensitive"]
 
 
 [dependencies]
-clap = { workspace = true, features = ["derive","env"] }
+clap = { workspace = true, features = ["derive", "env"] }
 anyhow = { workspace = true }
 bimap = { workspace = true, features = ["serde"] }
 thiserror = { workspace = true }
@@ -89,6 +94,7 @@ failpoint-macros = { path = "../failpoint-macros" }
 readyset-errors = { path = "../readyset-errors" }
 readyset-data = { path = "../readyset-data" }
 readyset-sql = { path = "../readyset-sql" }
+readyset-sql-parsing = { path = "../readyset-sql-parsing" }
 readyset-util = { path = "../readyset-util" }
 replicators = { path = "../replicators" }
 readyset-tracing = { path = "../readyset-tracing" }
@@ -104,7 +110,9 @@ replication-offset = { path = "../replication-offset" }
 num_cpus = { workspace = true }
 
 [dev-dependencies]
-dataflow = { path = "../readyset-dataflow", package = "readyset-dataflow", features = ["bench"] }
+dataflow = { path = "../readyset-dataflow", package = "readyset-dataflow", features = [
+    "bench",
+] }
 test-utils = { path = "../test-utils" }
 # Exact version dep here is only to avoid duplicate versions of downstream
 # dependencies

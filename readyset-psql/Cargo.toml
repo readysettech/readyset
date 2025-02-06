@@ -62,6 +62,7 @@ readyset-client-test-helpers = { path = "../readyset-client-test-helpers", featu
     "postgres",
 ] }
 criterion = { workspace = true, features = ["async_tokio"] }
+readyset-sql-parsing = { path = "../readyset-sql-parsing" }
 readyset-tracing = { path = "../readyset-tracing" }
 test-utils = { path = "../test-utils" }
 serial_test = { workspace = true }

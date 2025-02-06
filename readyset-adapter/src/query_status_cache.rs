@@ -880,7 +880,7 @@ mod tests {
     use super::*;
 
     fn select_statement(s: &str) -> anyhow::Result<SelectStatement> {
-        match nom_sql::parse_query(readyset_sql::Dialect::MySQL, s) {
+        match readyset_sql_parsing::parse_query(readyset_sql::Dialect::MySQL, s) {
             Ok(SqlQuery::Select(s)) => Ok(s),
             _ => Err(anyhow::anyhow!("Invalid SELECT statement")),
         }
