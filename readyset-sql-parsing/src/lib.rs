@@ -185,6 +185,10 @@ fn parse_readyset_show(parser: &mut Parser) -> Result<SqlQuery, ReadysetParsingE
             Ok(SqlQuery::Show(
                 readyset_sql::ast::ShowStatement::ReadySetMigrationStatus(id),
             ))
+        } else if parser.parse_keyword(Keyword::STATUS) {
+            Ok(SqlQuery::Show(
+                readyset_sql::ast::ShowStatement::ReadySetStatus,
+            ))
         } else {
             Err(ReadysetParsingError::ReadysetParsingError(
                 "expected SHOW READYSET VERSION or SHOW READYSET MIGRATION STATUS".into(),
