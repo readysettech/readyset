@@ -1060,6 +1060,26 @@ impl TryFrom<sqlparser::ast::Function> for Expr {
     fn try_from(value: sqlparser::ast::Function) -> Result<Self, Self::Error> {
         // TODO: handle null treatment and other stuff
         let sqlparser::ast::Function { args, mut name, .. } = value;
+
+        // TODO: if there's not exactly 1 component, it's presumably a UDF or something and we should bail
+        let sqlparser::ast::ObjectNamePart::Identifier(name) = name.0.pop().unwrap();
+        let name_lowercase = name.value.to_lowercase();
+
+        // Special case for `COUNT(*)`
+        if name_lowercase.as_str() == "count" {
+            use sqlparser::ast::{
+                FunctionArg, FunctionArgExpr, FunctionArgumentList, FunctionArguments,
+            };
+            match args {
+                FunctionArguments::List(FunctionArgumentList { args, .. })
+                    if args == vec![FunctionArg::Unnamed(FunctionArgExpr::Wildcard)] =>
+                {
+                    return Ok(Self::Call(crate::ast::FunctionExpr::CountStar));
+                }
+                _ => {}
+            }
+        }
+
         let (exprs, distinct, separator): (Vec<Expr>, bool, Option<String>) = match args {
             sqlparser::ast::FunctionArguments::List(sqlparser::ast::FunctionArgumentList {
                 args,
@@ -1079,9 +1099,7 @@ impl TryFrom<sqlparser::ast::Function> for Expr {
                 return not_yet_implemented!("function call args: {other:?}");
             }
         };
-        // TODO: if there's not exactly 1 component, it's presumably a UDF or something and we should bail
-        let sqlparser::ast::ObjectNamePart::Identifier(name) = name.0.pop().unwrap();
-        Ok(match name.value.to_lowercase().as_str() {
+        Ok(match name_lowercase.as_str() {
             // TODO: fix this unnecessary cloning
             "avg" => Self::Call(crate::ast::FunctionExpr::Avg {
                 expr: Box::new(exprs[0].clone()),
