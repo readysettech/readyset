@@ -1,6 +1,7 @@
 use pretty_assertions::Comparison;
 use readyset_sql::{
-    ast::{CacheInner, DropCacheStatement, SqlQuery},
+    analysis::visit_mut::VisitorMut,
+    ast::{CacheInner, DropCacheStatement, SqlIdentifier, SqlQuery},
     Dialect,
 };
 use sqlparser::{
@@ -187,14 +188,38 @@ fn parse_readyset_query(
     }
 }
 
+struct LowercaseIdentifiers {}
+
+impl<'ast> VisitorMut<'ast> for LowercaseIdentifiers {
+    type Error = std::convert::Infallible;
+
+    fn visit_sql_identifier(
+        &mut self,
+        sql_ident: &'ast mut SqlIdentifier,
+    ) -> Result<(), Self::Error> {
+        *sql_ident = sql_ident.as_str().to_lowercase().into();
+        Ok(())
+    }
+}
+
 /// Parse SQL using the specified parser implementation and dialect
 pub fn parse_query(dialect: Dialect, input: impl AsRef<str>) -> Result<SqlQuery, String> {
     let nom_result = nom_sql::parse_query(dialect, input.as_ref());
     let sqlparser_dialect = sqlparser_dialect_from_readyset_dialect(dialect);
-    let sqlparser_result = Parser::new(sqlparser_dialect.as_ref())
+    let mut sqlparser_result = Parser::new(sqlparser_dialect.as_ref())
         .try_with_sql(input.as_ref())
         .map_err(Into::into)
         .and_then(|mut p| parse_readyset_query(&mut p, input));
+
+    // XXX(mvzink): There's probably a better way to do this, such as correctly handling case where
+    // it matters instead of mutating every identifier we encounter.
+    if dialect == Dialect::PostgreSQL {
+        let mut visitor = LowercaseIdentifiers {};
+        match sqlparser_result.as_mut() {
+            Ok(q) => visitor.visit_sql_query(q).expect("should not fail"),
+            _ => {}
+        }
+    }
 
     match (&nom_result, sqlparser_result) {
         (Ok(nom_ast), Ok(sqlparser_ast)) => {
