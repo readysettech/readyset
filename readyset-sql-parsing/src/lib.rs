@@ -109,15 +109,7 @@ fn parse_create_cache(
     } else {
         None
     };
-    let query = parser
-        .parse_statement()
-        .map_err(|e| format!("failed to parse statement: {e}"))
-        .and_then(|q| {
-            q.try_into()
-                .map_err(|e| format!("failed to convert AST: {e}"))
-        })
-        .and_then(|q: SqlQuery| q.into_select().ok_or_else(|| "expected SELECT".into()))
-        .map(|q| CacheInner::Statement(Box::new(q)));
+    let query = parse_query_for_create_cache(parser);
     Ok(SqlQuery::CreateCache(
         readyset_sql::ast::CreateCacheStatement {
             name,
@@ -130,7 +122,23 @@ fn parse_create_cache(
 }
 
 #[cfg(feature = "sqlparser")]
-fn parse_explain(parser: &mut Parser) -> Result<SqlQuery, ReadysetParsingError> {
+fn parse_query_for_create_cache(parser: &mut Parser) -> Result<CacheInner, String> {
+    parser
+        .parse_statement()
+        .map_err(|e| format!("failed to parse statement: {e}"))
+        .and_then(|q| {
+            q.try_into()
+                .map_err(|e| format!("failed to convert AST: {e}"))
+        })
+        .and_then(|q: SqlQuery| q.into_select().ok_or_else(|| "expected SELECT".into()))
+        .map(|q| CacheInner::Statement(Box::new(q)))
+}
+
+#[cfg(feature = "sqlparser")]
+fn parse_explain(
+    parser: &mut Parser,
+    input: impl AsRef<str>,
+) -> Result<SqlQuery, ReadysetParsingError> {
     if parser.parse_keywords(&[Keyword::LAST, Keyword::STATEMENT]) {
         return Ok(SqlQuery::Explain(
             readyset_sql::ast::ExplainStatement::LastStatement,
@@ -147,6 +155,22 @@ fn parse_explain(parser: &mut Parser) -> Result<SqlQuery, ReadysetParsingError> 
             readyset_sql::ast::ExplainStatement::Graphviz {
                 simplified,
                 for_cache,
+            },
+        ));
+    } else if simplified {
+        return Err(ReadysetParsingError::ReadysetParsingError(
+            "unexpected SIMPLIFIED without GRAPHVIZ".into(),
+        ));
+    }
+    if parser.parse_keywords(&[Keyword::CREATE, Keyword::CACHE, Keyword::FROM]) {
+        return Ok(SqlQuery::Explain(
+            readyset_sql::ast::ExplainStatement::CreateCache {
+                inner: parse_query_for_create_cache(parser),
+                unparsed_explain_create_cache_statement: input
+                    .as_ref()
+                    .strip_prefix("EXPLAIN ")
+                    .unwrap()
+                    .to_string(),
             },
         ));
     }
@@ -209,7 +233,7 @@ fn parse_readyset_query(
     if parser.parse_keywords(&[Keyword::CREATE, Keyword::CACHE]) {
         parse_create_cache(parser, input)
     } else if parser.parse_keyword(Keyword::EXPLAIN) {
-        parse_explain(parser)
+        parse_explain(parser, input)
     } else if parser.parse_keyword(Keyword::SHOW) {
         parse_show(parser)
     } else if parser.parse_keyword(Keyword::DROP) {
