@@ -34,7 +34,7 @@ use postgres::SimpleQueryMessage;
 use postgres_protocol::Oid;
 use postgres_types::Type;
 use protocol::Protocol;
-use readyset_adapter_types::DeallocateId;
+use readyset_adapter_types::{DeallocateId, PreparedStatementType};
 use readyset_sql::ast::SqlIdentifier;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_native_tls::TlsAcceptor;
@@ -102,6 +102,7 @@ pub trait PsqlBackend {
         &mut self,
         query: &str,
         parameter_data_types: &[Type],
+        statement_type: PreparedStatementType,
     ) -> Result<PrepareResponse, Error>;
 
     /// Executes a previously prepared SQL query using the provided parameters.

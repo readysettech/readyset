@@ -10,7 +10,7 @@ use psql_srv::{
     run_backend, Column, Credentials, CredentialsNeeded, Error, PrepareResponse, PsqlBackend,
     PsqlSrvRow, PsqlValue, QueryResponse, TransferFormat,
 };
-use readyset_adapter_types::DeallocateId;
+use readyset_adapter_types::{DeallocateId, PreparedStatementType};
 use tokio::join;
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
@@ -53,6 +53,7 @@ impl PsqlBackend for ErrorBackend {
         &mut self,
         _query: &str,
         _parameter_data_types: &[Type],
+        _statement_type: PreparedStatementType,
     ) -> Result<PrepareResponse, Error> {
         if self.0 == ErrorPosition::Prepare {
             Err(Error::InternalError("trapped in".to_owned()))
