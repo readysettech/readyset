@@ -5,9 +5,9 @@ use anyhow::anyhow;
 use clap::Parser;
 use database_utils::{DatabaseConnection, DatabaseURL, QueryableConnection};
 use itertools::Itertools;
-use nom_sql::parse_query;
 use readyset_sql::ast::{Expr, FieldDefinitionExpr, FunctionExpr, SqlQuery};
 use readyset_sql::{Dialect, DialectDisplay};
+use readyset_sql_parsing::parse_query;
 use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncWriteExt, BufReader};
 

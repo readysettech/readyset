@@ -26,7 +26,7 @@ use dataflow::{
 };
 use futures::{join, StreamExt};
 use itertools::Itertools;
-use nom_sql::{parse_create_table, parse_create_view, parse_query, parse_select_statement};
+use nom_sql::{parse_create_table, parse_create_view, parse_select_statement};
 use readyset_client::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use readyset_client::consistency::Timestamp;
 use readyset_client::internal::LocalNodeIndex;
@@ -36,6 +36,7 @@ use readyset_data::{Bound, DfType, DfValue, Dialect, IntoBoundedRange};
 use readyset_errors::ReadySetError::{self, RpcFailed, SelectQueryCreationFailed};
 use readyset_sql::ast;
 use readyset_sql::ast::{OrderType, Relation, SqlQuery};
+use readyset_sql_parsing::parse_query;
 use readyset_util::eventually;
 use readyset_util::shutdown::ShutdownSender;
 use rust_decimal::prelude::ToPrimitive;

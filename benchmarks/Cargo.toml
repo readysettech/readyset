@@ -57,8 +57,12 @@ readyset-server = { path = "../readyset-server" }
 readyset-mysql = { path = "../readyset-mysql" }
 readyset-psql = { path = "../readyset-psql" }
 readyset-sql = { path = "../readyset-sql" }
+readyset-sql-parsing = { path = "../readyset-sql-parsing" }
 readyset-tracing = { path = "../readyset-tracing" }
-readyset-client-test-helpers = { path = "../readyset-client-test-helpers", features = ["mysql", "postgres"] }
+readyset-client-test-helpers = { path = "../readyset-client-test-helpers", features = [
+    "mysql",
+    "postgres",
+] }
 readyset-util = { path = "../readyset-util" }
 
 [lib]

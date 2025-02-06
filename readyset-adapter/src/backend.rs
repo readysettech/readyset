@@ -3177,7 +3177,7 @@ where
 
     fn parse_query(&mut self, query: &str) -> ReadySetResult<SqlQuery> {
         trace!(%query, "Parsing query");
-        match nom_sql::parse_query(self.settings.dialect, query) {
+        match readyset_sql_parsing::parse_query(self.settings.dialect, query) {
             Ok(parsed_query) => Ok(parsed_query),
             Err(_) => Err(ReadySetError::UnparseableQuery {
                 query: query.to_string(),

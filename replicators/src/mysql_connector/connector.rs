@@ -549,33 +549,37 @@ impl MySqlBinlogConnector {
                 }
                 changelist.changes
             }
-            Err(error) => match nom_sql::parse_query(readyset_sql::Dialect::MySQL, q_event.query())
-            {
-                Ok(SqlQuery::Insert(insert)) => {
-                    self.drop_and_add_non_replicated_table(insert.table, &schema)
-                        .await
+            Err(error) => {
+                match readyset_sql_parsing::parse_query(
+                    readyset_sql::Dialect::MySQL,
+                    q_event.query(),
+                ) {
+                    Ok(SqlQuery::Insert(insert)) => {
+                        self.drop_and_add_non_replicated_table(insert.table, &schema)
+                            .await
+                    }
+                    Ok(SqlQuery::Update(update)) => {
+                        self.drop_and_add_non_replicated_table(update.table, &schema)
+                            .await
+                    }
+                    Ok(SqlQuery::Delete(delete)) => {
+                        self.drop_and_add_non_replicated_table(delete.table, &schema)
+                            .await
+                    }
+                    Ok(SqlQuery::StartTransaction(_)) => {
+                        return Err(mysql_async::Error::Other(Box::new(
+                            ReadySetError::SkipEvent,
+                        )));
+                    }
+                    _ => {
+                        warn!(%error, "Error extending recipe, DDL statement will not be used");
+                        counter!(recorded::REPLICATOR_FAILURE).increment(1u64);
+                        return Err(mysql_async::Error::Other(Box::new(
+                            ReadySetError::SkipEvent,
+                        )));
+                    }
                 }
-                Ok(SqlQuery::Update(update)) => {
-                    self.drop_and_add_non_replicated_table(update.table, &schema)
-                        .await
-                }
-                Ok(SqlQuery::Delete(delete)) => {
-                    self.drop_and_add_non_replicated_table(delete.table, &schema)
-                        .await
-                }
-                Ok(SqlQuery::StartTransaction(_)) => {
-                    return Err(mysql_async::Error::Other(Box::new(
-                        ReadySetError::SkipEvent,
-                    )));
-                }
-                _ => {
-                    warn!(%error, "Error extending recipe, DDL statement will not be used");
-                    counter!(recorded::REPLICATOR_FAILURE).increment(1u64);
-                    return Err(mysql_async::Error::Other(Box::new(
-                        ReadySetError::SkipEvent,
-                    )));
-                }
-            },
+            }
         };
 
         Ok(ReplicationAction::DdlChange { schema, changes })
@@ -594,8 +598,8 @@ impl MySqlBinlogConnector {
         q_event: mysql_common::binlog::events::QueryEvent<'_>,
         is_last: bool,
     ) -> mysql::Result<ReplicationAction> {
-        use nom_sql::parse_query;
         use readyset_sql::Dialect;
+        use readyset_sql_parsing::parse_query;
 
         match parse_query(Dialect::MySQL, q_event.query()) {
             Ok(SqlQuery::Commit(_)) if self.report_position_elapsed() || is_last => {

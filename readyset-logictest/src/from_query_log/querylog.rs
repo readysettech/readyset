@@ -281,8 +281,8 @@ impl<R: AsyncBufRead + Unpin> Stream<R> {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::parse_query;
     use readyset_sql::{ast, Dialect};
+    use readyset_sql_parsing::parse_query;
 
     use super::*;
 

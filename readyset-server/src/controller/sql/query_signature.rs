@@ -135,9 +135,9 @@ impl Signature for QueryGraph {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::parse_query;
     use readyset_sql::ast::{SelectStatement, SqlQuery};
     use readyset_sql::Dialect;
+    use readyset_sql_parsing::parse_query;
 
     use super::*;
     use crate::controller::sql::query_graph::to_query_graph;
@@ -154,7 +154,6 @@ mod tests {
     #[test]
     #[allow(clippy::eq_op)]
     fn it_compares_signatures() {
-        use nom_sql::parser::parse_query;
         use readyset_sql::ast::SqlQuery;
 
         use crate::controller::sql::query_graph::to_query_graph;

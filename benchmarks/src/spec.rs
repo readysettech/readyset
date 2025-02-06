@@ -93,11 +93,11 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use database_utils::{DatabaseConnection, QueryableConnection};
-use nom_sql::parse_query;
 use rand::Rng;
 use rand_distr::{Uniform, WeightedAliasIndex};
 use readyset_data::DfValue;
 use readyset_sql::{ast::*, Dialect, DialectDisplay};
+use readyset_sql_parsing::parse_query;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use tracing::info;
 use zipf::ZipfDistribution;

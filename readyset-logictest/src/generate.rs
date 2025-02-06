@@ -9,13 +9,13 @@ use clap::Parser;
 use console::style;
 use database_utils::{DatabaseConnection, DatabaseURL, QueryableConnection};
 use itertools::Itertools;
-use nom_sql::parse_query;
 use query_generator::{GeneratorState, ParameterMode, QuerySeed};
 use readyset_sql::ast::{
     BinaryOperator, CreateTableStatement, DeleteStatement, Expr, InsertStatement, Relation,
     SqlQuery, SqlType,
 };
 use readyset_sql::{Dialect, DialectDisplay};
+use readyset_sql_parsing::parse_query;
 
 use crate::ast::{
     Conditional, Query, QueryParams, QueryResults, Record, SortMode, Statement, StatementResult,

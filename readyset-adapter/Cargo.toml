@@ -10,7 +10,7 @@ edition = "2021"
 [dependencies]
 ahash = { workspace = true }
 anyhow = { workspace = true }
-clap = { workspace = true, features = ["derive","env"] }
+clap = { workspace = true, features = ["derive", "env"] }
 fail = { workspace = true }
 futures-executor = { workspace = true }
 futures-util = { workspace = true }
@@ -59,12 +59,13 @@ readyset-client = { path = "../readyset-client/" }
 readyset-errors = { path = "../readyset-errors/" }
 readyset-data = { path = "../readyset-data/" }
 readyset-server = { path = "../readyset-server" }
-timestamp-service = {path= "../timestamp-service/"}
+timestamp-service = { path = "../timestamp-service/" }
 dataflow-expression = { path = "../dataflow-expression" }
 readyset-tracing = { path = "../readyset-tracing" }
 readyset-client-metrics = { path = "../readyset-client-metrics" }
 readyset-telemetry-reporter = { path = "../readyset-telemetry-reporter" }
 readyset-sql = { path = "../readyset-sql" }
+readyset-sql-parsing = { path = "../readyset-sql-parsing" }
 readyset-sql-passes = { path = "../readyset-sql-passes" }
 readyset-version = { path = "../readyset-version" }
 health-reporter = { path = "../health-reporter" }

@@ -60,6 +60,7 @@ serde_json = { workspace = true }
 criterion = { workspace = true, features = ["html_reports"] }
 futures = { workspace = true }
 pprof = { workspace = true, features = ["flamegraph", "criterion"] }
+readyset-sql-parsing = { path = "../readyset-sql-parsing" }
 serial_test = { workspace = true }
 temp-dir = { workspace = true }
 test-utils = { path = "../test-utils" }

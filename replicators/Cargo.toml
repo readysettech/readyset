@@ -51,6 +51,7 @@ mysql-srv = { path = "../mysql-srv" }
 readyset-data = { path = "../readyset-data" }
 database-utils = { path = "../database-utils" }
 failpoint-macros = { path = "../failpoint-macros" }
+readyset-sql-parsing = { path = "../readyset-sql-parsing" }
 readyset-sql-passes = { path = "../readyset-sql-passes" }
 readyset-telemetry-reporter = { path = "../readyset-telemetry-reporter" }
 replication-offset = { path = "../replication-offset" }
@@ -75,8 +76,4 @@ reqwest = { workspace = true }
 
 [features]
 ddl_vertical_tests = []
-failure_injection = [
-    "fail/failpoints",
-    "nom-sql/failure_injection",
-    "readyset-util/failure_injection",
-]
+failure_injection = ["fail/failpoints", "readyset-util/failure_injection"]

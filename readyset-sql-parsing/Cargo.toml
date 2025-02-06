@@ -1,0 +1,12 @@
+[package]
+name = "readyset-sql-parsing"
+version = "0.1.0"
+publish = false
+authors = ["Readyset Technology, Inc. <info@readyset.io>"]
+edition = "2021"
+
+[dependencies]
+nom-sql = { path = "../nom-sql" }
+readyset-sql = { path = "../readyset-sql" }
+sqlparser = { workspace = true }
+thiserror = { workspace = true }

@@ -235,13 +235,13 @@ impl AliasRemoval for SqlQuery {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{parse_query, parser};
     use readyset_sql::ast::{
         BinaryOperator, Column, Expr, FieldDefinitionExpr, ItemPlaceholder, JoinClause,
         JoinConstraint, JoinOperator, JoinRightSide, Literal, Relation, SelectStatement, SqlQuery,
         TableExpr, TableExprInner,
     };
     use readyset_sql::{Dialect, DialectDisplay};
+    use readyset_sql_parsing::parse_query;
 
     use super::{AliasRemoval, TableAliasRewrite};
 
@@ -409,7 +409,7 @@ mod tests {
 
     #[test]
     fn it_rewrites_duplicate_aliases() {
-        let res = parser::parse_query(
+        let res = parse_query(
             Dialect::MySQL,
             "SELECT t1.id, t2.name FROM tab t1 JOIN tab t2 ON (t1.other = t2.id)",
         )
