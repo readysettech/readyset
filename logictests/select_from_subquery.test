@@ -42,3 +42,10 @@ SELECT sq.x, t2.y FROM (SELECT x FROM t1) sq JOIN t2 ON sq.x = t2.x
 100
 1
 100
+
+query I valuesort
+SELECT * FROM (SELECT x + 1 AS a FROM t1) sq;
+----
+2
+2
+3

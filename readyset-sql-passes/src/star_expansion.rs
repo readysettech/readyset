@@ -39,7 +39,7 @@ impl<'ast> VisitorMut<'ast> for ExpandStarsVisitor<'_> {
             &select_statement.tables,
             &select_statement.ctes,
             &select_statement.join,
-        );
+        )?;
 
         let expand_table = |table: Relation, alias: Option<SqlIdentifier>| -> ReadySetResult<_> {
             Ok(if table.schema.is_none() {
@@ -188,6 +188,13 @@ mod tests {
         );
     }
 
+    #[track_caller]
+    fn expand_stars_err(source: &str, schema: HashMap<Relation, Vec<SqlIdentifier>>) {
+        let q = parse_query(Dialect::MySQL, source).unwrap();
+        let res = q.expand_stars(&schema, &Default::default());
+        assert!(res.is_err());
+    }
+
     #[test]
     fn single_table() {
         expands_stars(
@@ -299,6 +306,22 @@ mod tests {
             "SELECT sq.x FROM (SELECT t1.x FROM t1) sq",
             HashMap::from([("t1".into(), vec!["x".into()])]),
         )
+    }
+
+    #[test]
+    fn star_with_complex_subquery() {
+        expands_stars(
+            "SELECT * FROM (SELECT t1.x + 1 AS a FROM t1) sq",
+            "SELECT sq.a FROM (SELECT t1.x + 1 AS a FROM t1) sq",
+            HashMap::from([("t1".into(), vec!["x".into()])]),
+        );
+
+        // We currently require all cols (that are not direct col references)
+        // produced by subqueries to have aliases
+        expand_stars_err(
+            "SELECT * FROM (SELECT t1.x + 1 FROM t1) sq",
+            HashMap::from([("t1".into(), vec!["x".into()])]),
+        );
     }
 
     #[test]

@@ -110,7 +110,7 @@ impl<'ast> VisitorMut<'ast> for ExpandImpliedTablesVisitor<'_> {
                 &select_statement.tables,
                 &select_statement.ctes,
                 &select_statement.join,
-            )
+            )?
             .into_iter()
             .map(|(k, v)| (k.into(), v.into_iter().map(|s| s.into()).collect()))
             .collect(),
