@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::iter;
 
 use itertools::Either;
+use readyset_errors::{unsupported_err, ReadySetResult};
 use readyset_sql::analysis::is_aggregate;
 use readyset_sql::ast::{
     BinaryOperator, Column, CommonTableExpr, Expr, FieldDefinitionExpr, FunctionExpr, InValue,
@@ -44,17 +45,33 @@ pub fn is_correlated(statement: &SelectStatement) -> bool {
         .any(|col| col.table.iter().any(|tbl| !tables.contains(tbl)))
 }
 
-fn field_names(statement: &SelectStatement) -> impl Iterator<Item = &SqlIdentifier> {
-    statement.fields.iter().filter_map(|field| match &field {
-        FieldDefinitionExpr::Expr {
-            alias: Some(alias), ..
-        } => Some(alias),
-        FieldDefinitionExpr::Expr {
-            expr: Expr::Column(Column { name, .. }),
-            ..
-        } => Some(name),
-        _ => None,
-    })
+fn field_names(statement: &SelectStatement) -> ReadySetResult<Vec<&SqlIdentifier>> {
+    statement
+        .fields
+        .iter()
+        .map(|field| match field {
+            FieldDefinitionExpr::Expr {
+                alias: Some(alias), ..
+            } => Ok(alias),
+            FieldDefinitionExpr::Expr {
+                expr: Expr::Column(Column { name, .. }),
+                ..
+            } => Ok(name),
+            FieldDefinitionExpr::Expr { alias, expr } => {
+                alias.as_ref().ok_or(unsupported_err!(
+                    "Expression {} is missing an alias",
+                    expr.display(readyset_sql::Dialect::MySQL) // FIXME: pass the correct
+                                                               // dialect
+                ))
+            }
+            // TODO: Generate an alias when an Expr (that is not simply an Expr::Column)
+            // doesn't have one
+            e => Err(unsupported_err!(
+                "Expression {} not supported",
+                e.display(readyset_sql::Dialect::MySQL)
+            )),
+        })
+        .collect()
 }
 
 /// Returns a map from subquery aliases to vectors of the fields in those subqueries.
@@ -64,7 +81,7 @@ pub(crate) fn subquery_schemas<'a>(
     tables: &'a [TableExpr],
     ctes: &'a [CommonTableExpr],
     join: &'a [JoinClause],
-) -> HashMap<&'a SqlIdentifier, Vec<&'a SqlIdentifier>> {
+) -> ReadySetResult<HashMap<&'a SqlIdentifier, Vec<&'a SqlIdentifier>>> {
     ctes.iter()
         .map(|cte| (&cte.name, &cte.statement))
         .chain(
@@ -81,7 +98,7 @@ pub(crate) fn subquery_schemas<'a>(
                     TableExprInner::Table(_) => None,
                 }),
         )
-        .map(|(name, stmt)| (name, field_names(stmt).collect()))
+        .map(|(name, stmt)| Ok((name, field_names(stmt)?)))
         .collect()
 }
 

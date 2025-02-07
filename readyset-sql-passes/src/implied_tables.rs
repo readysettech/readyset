@@ -110,7 +110,7 @@ impl<'ast> VisitorMut<'ast> for ExpandImpliedTablesVisitor<'_> {
                 &select_statement.tables,
                 &select_statement.ctes,
                 &select_statement.join,
-            )
+            )?
             .into_iter()
             .map(|(k, v)| (k.into(), v.into_iter().map(|s| s.into()).collect()))
             .collect(),
@@ -375,14 +375,14 @@ mod tests {
     fn in_cte() {
         let orig = parse_query(
             Dialect::MySQL,
-            "With votes AS (SELECT COUNT(id), story_id FROM votes GROUP BY story_id )
+            "With votes AS (SELECT COUNT(id) as id_count, story_id FROM votes GROUP BY story_id )
              SELECT title FROM stories JOIN votes ON stories.id = votes.story_id",
         )
         .unwrap();
         let expected = parse_query(
 
 Dialect::MySQL,
-            "With votes AS(SELECT COUNT(votes.id), votes.story_id FROM votes GROUP BY votes.story_id )
+            "With votes AS(SELECT COUNT(votes.id) as id_count, votes.story_id FROM votes GROUP BY votes.story_id )
              SELECT stories.title FROM stories JOIN votes ON stories.id = votes.story_id",
         )
         .unwrap();
