@@ -1755,7 +1755,7 @@ impl PersistentState {
             return Ok(());
         }
 
-        debug!(base = %self.name, index = ?columns, is_unique, "Base creating primary index");
+        info!(base = %self.name, index = ?columns, is_unique, "Base creating primary index");
         let index_params = IndexParams::new(IndexType::HashMap, columns.len());
 
         // add the index to the meta first so even if we fail before we fully reindex we still
@@ -2202,7 +2202,13 @@ impl PersistentState {
                 let key = iter
                     .key()
                     .filter(|k| k.starts_with(&prefix))
-                    .ok_or_else(|| internal_err!("tried removing non-existent row"))?;
+                    .ok_or_else(|| {
+                        internal_err!(
+                            "tried removing non-existent row from {}: {:?}",
+                            self.name,
+                            r
+                        )
+                    })?;
                 let val = deserialize_row(iter.value().unwrap());
                 if val == r {
                     break key.to_vec();
