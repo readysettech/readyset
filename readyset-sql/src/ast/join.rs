@@ -59,7 +59,8 @@ impl From<&sqlparser::ast::JoinOperator> for JoinOperator {
             // TODO(mvzink): Fix these
             JoinOp::Join(..) => Self::Join,
             JoinOp::Inner(..) => Self::InnerJoin,
-            JoinOp::LeftOuter(..) => Self::LeftOuterJoin,
+            // XXX(mvzink): sqlparser adds the OUTER keyword
+            JoinOp::LeftOuter(..) => Self::LeftJoin,
             JoinOp::RightOuter(..) => Self::RightJoin,
             JoinOp::CrossJoin => Self::CrossJoin,
             _ => todo!("unsupported join type {value:?}"),
