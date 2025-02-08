@@ -194,7 +194,14 @@ impl TryFrom<sqlparser::ast::DataType> for crate::ast::SqlType {
             Time(_, _timezone_info) => Ok(Self::Time),
             Datetime(n) => Ok(Self::DateTime(n.map(|n| n as u16))),
             Datetime64(_, _) => unsupported!("DATETIME64 type"),
-            Timestamp(_, _timezone_info) => Ok(Self::Timestamp),
+            // Note: We don't support precision on timestamps; and we don't differentiate
+            // `TIMESTAMPTZ` from `WITH TIME ZONE`.
+            Timestamp(_precision, tz_info) => match tz_info {
+                sqlparser::ast::TimezoneInfo::None => Ok(Self::Timestamp),
+                sqlparser::ast::TimezoneInfo::WithTimeZone => Ok(Self::TimestampTz),
+                sqlparser::ast::TimezoneInfo::WithoutTimeZone => Ok(Self::Timestamp),
+                sqlparser::ast::TimezoneInfo::Tz => Ok(Self::TimestampTz),
+            },
             Interval => Ok(Self::Time),
             JSON => Ok(Self::Json),
             JSONB => Ok(Self::Jsonb),
