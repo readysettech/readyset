@@ -1044,6 +1044,8 @@ impl From<sqlparser::ast::Ident> for Expr {
     fn from(value: sqlparser::ast::Ident) -> Self {
         if value.value.starts_with('@') {
             Self::Variable(value.into())
+        } else if value.quote_style.is_none() && value.value.starts_with('$') {
+            Self::Literal(Literal::Placeholder(value.value.into()))
         } else {
             Self::Column(value.into())
         }
