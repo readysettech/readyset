@@ -1,6 +1,7 @@
 use std::fmt;
 use std::ops::Deref;
 
+use itertools::Itertools;
 use proptest::{
     prelude::{any_with, Arbitrary, BoxedStrategy, Strategy},
     sample::SizeRange,
@@ -216,7 +217,25 @@ impl TryFrom<sqlparser::ast::DataType> for crate::ast::SqlType {
             Bytea => Ok(Self::ByteArray),
             Bit(n) => Ok(Self::Bit(n.map(|n| n as u16))),
             BitVarying(n) | VarBit(n) => Ok(Self::VarBit(n.map(|n| n as u16))),
-            Custom(name, _values) => Ok(Self::Other(name.into())),
+            Custom(name, _values) => match name.0.iter().exactly_one() {
+                Ok(part) => match part.as_ident().map(|ident| ident.value.as_str()) {
+                    Some(name) => {
+                        if name.eq_ignore_ascii_case("citext") {
+                            Ok(Self::Citext)
+                        } else if name.eq_ignore_ascii_case("inet") {
+                            Ok(Self::Inet)
+                        } else if name.eq_ignore_ascii_case("macaddr") {
+                            Ok(Self::MacAddr)
+                        } else if name.eq_ignore_ascii_case("serial") {
+                            Ok(Self::Serial)
+                        } else {
+                            Ok(Self::Other(name.into()))
+                        }
+                    }
+                    None => failed!("invalid custom type name {}", name),
+                },
+                Err(_) => Ok(Self::Other(name.into())),
+            },
             Array(def) => Ok(Self::Array(Box::new(def.try_into()?))),
             Map(_data_type, _data_type1) => unsupported!("MAP type"),
             Tuple(_vec) => unsupported!("TUPLE type"),
