@@ -9,6 +9,9 @@ edition = "2021"
 nom-sql = { path = "../nom-sql" }
 pretty_assertions = { workspace = true }
 readyset-sql = { path = "../readyset-sql" }
-sqlparser = { workspace = true }
+sqlparser = { workspace = true, optional = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+
+[features]
+sqlparser = ["dep:sqlparser"]
