@@ -5,7 +5,6 @@ use std::time::{Duration, Instant};
 
 use anyhow::bail;
 use benchmarks::benchmark::{Benchmark, BenchmarkControl, BenchmarkResults, DeploymentParameters};
-use benchmarks::graph::GraphParams;
 use benchmarks::reporting::ReportMode;
 use benchmarks::utils::readyset_ready;
 use benchmarks::{benchmark_histogram, QUANTILES};
@@ -112,9 +111,6 @@ struct BenchmarkRunner {
     /// Records The commit id to aid potential future analysis
     #[arg(long, hide(true), env = "BUILDKITE_COMMIT")]
     report_commit_id: Option<String>,
-
-    #[command(flatten)]
-    graph_params: GraphParams,
 }
 
 fn make_prometheus_url(base: &str, benchmark_name_label: &str, instance_label: &str) -> String {
@@ -505,29 +501,6 @@ impl BenchmarkRunner {
 
         Ok(results)
     }
-
-    pub async fn run_graph(mut self) -> anyhow::Result<()> {
-        // We need iterations to be set to 1 so that we only have to deal with one result per value
-        // for the x axis
-        if self.iterations != 1 {
-            bail!("Can only run with --graph if --iterations=1");
-        }
-
-        self.load_benchmark_cmd_from_args()?;
-        let mut results = self.graph_params.results_writer()?;
-        for run in self.graph_params.clone().runs() {
-            self.benchmark_cmd
-                .as_mut()
-                .unwrap()
-                .update_from(run.as_args())?;
-            let run_results = self.run().await?;
-
-            assert_eq!(run_results.len(), 1);
-            results.write_result(run.x_value(), run_results.into_iter().next().unwrap())?;
-        }
-
-        Ok(())
-    }
 }
 
 #[tokio::main]
@@ -537,12 +510,7 @@ async fn main() -> anyhow::Result<()> {
         .tracing
         .init("benchmarks", "benchmark-deployment")?;
 
-    if benchmark_cmd_runner.graph_params.graph {
-        benchmark_cmd_runner.run_graph().await?;
-    } else {
-        benchmark_cmd_runner.run().await?;
-    }
-
+    benchmark_cmd_runner.run().await?;
     Ok(())
 }
 
