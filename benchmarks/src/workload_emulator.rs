@@ -28,7 +28,6 @@ use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters,
 use crate::spec::WorkloadSpec;
 use crate::utils::generate::DataGenerator;
 use crate::utils::multi_thread::{self, MultithreadBenchmark};
-use crate::utils::prometheus::ForwardPrometheusMetrics;
 use crate::utils::query::interpolate_params;
 use crate::utils::us_to_ms;
 use crate::{benchmark_counter, benchmark_histogram, benchmark_increment_counter};
@@ -258,10 +257,6 @@ impl BenchmarkControl for WorkloadEmulator {
         }
 
         labels
-    }
-
-    fn forward_metrics(&self, _deployment: &DeploymentParameters) -> Vec<ForwardPrometheusMetrics> {
-        vec![]
     }
 
     fn name(&self) -> &'static str {
