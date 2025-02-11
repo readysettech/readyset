@@ -20,7 +20,6 @@ use enum_dispatch::enum_dispatch;
 use hdrhistogram::Histogram;
 use serde::{Deserialize, Serialize};
 
-use crate::graph::ArgOverride;
 use crate::utils::generate::DataGenerator;
 use crate::utils::prometheus::{ForwardPrometheusMetrics, PrometheusEndpoint};
 use crate::workload_emulator::WorkloadEmulator;
@@ -37,16 +36,6 @@ impl Benchmark {
         match self {
             Self::WorkloadEmulator(_) => "workload_emulator",
         }
-    }
-
-    pub fn update_from(&mut self, args: ArgOverride) -> anyhow::Result<()> {
-        match args {
-            ArgOverride::CliArgs(itr) => match self {
-                Benchmark::WorkloadEmulator(x) => x.update_from(itr),
-            },
-            ArgOverride::Json(json) => self.update_data_generator_from(json)?,
-        }
-        Ok(())
     }
 }
 
