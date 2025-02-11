@@ -12,3 +12,6 @@ readyset-sql = { path = "../readyset-sql" }
 sqlparser = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+
+[features]
+ast-conversion-errors = []
