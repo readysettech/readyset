@@ -20,56 +20,21 @@ use enum_dispatch::enum_dispatch;
 use hdrhistogram::Histogram;
 use serde::{Deserialize, Serialize};
 
-use crate::cache_hit_benchmark::CacheHitBenchmark;
-use crate::eviction_benchmark::EvictionBenchmark;
 use crate::graph::ArgOverride;
-use crate::migration_benchmark::MigrationBenchmark;
-use crate::query_benchmark::QueryBenchmark;
-use crate::read_write_benchmark::ReadWriteBenchmark;
-use crate::scale_connections::ScaleConnections;
-use crate::scale_views::ScaleViews;
-use crate::single_query_benchmark::SingleQueryBenchmark;
-use crate::template::Template;
 use crate::utils::generate::DataGenerator;
 use crate::utils::prometheus::{ForwardPrometheusMetrics, PrometheusEndpoint};
 use crate::workload_emulator::WorkloadEmulator;
-use crate::write_benchmark::WriteBenchmark;
-use crate::write_latency_benchmark::WriteLatencyBenchmark;
 
 #[allow(clippy::large_enum_variant)]
 #[enum_dispatch(BenchmarkControl)]
 #[derive(clap::Subcommand, Serialize, Deserialize)]
 pub enum Benchmark {
-    Template, // Example benchmark that does not execute any commands.
-    /// Basic read benchmark
-    QueryBenchmark,
-    WriteBenchmark,
-    CacheHitBenchmark,
-    ScaleViews,
-    ScaleConnections,
-    /// Measures time required to propagate table writes into Noria views
-    WriteLatencyBenchmark,
-    MigrationBenchmark,
-    EvictionBenchmark,
-    ReadWriteBenchmark,
-    SingleQueryBenchmark,
     WorkloadEmulator,
 }
 
 impl Benchmark {
     pub fn name_label(&self) -> &'static str {
         match self {
-            Self::Template(_) => "template",
-            Self::QueryBenchmark(_) => "query_benchmark",
-            Self::WriteBenchmark(_) => "write_benchmark",
-            Self::CacheHitBenchmark(_) => "cache_hit_benchmark",
-            Self::ScaleViews(_) => "scale_views",
-            Self::ScaleConnections(_) => "scale_connections",
-            Self::WriteLatencyBenchmark(_) => "write_latency",
-            Self::MigrationBenchmark(_) => "migration_benchmark",
-            Self::EvictionBenchmark(_) => "eviction",
-            Self::ReadWriteBenchmark(_) => "read_write_benchmark",
-            Self::SingleQueryBenchmark(_) => "single_query_benchmark",
             Self::WorkloadEmulator(_) => "workload_emulator",
         }
     }
@@ -77,17 +42,6 @@ impl Benchmark {
     pub fn update_from(&mut self, args: ArgOverride) -> anyhow::Result<()> {
         match args {
             ArgOverride::CliArgs(itr) => match self {
-                Benchmark::Template(x) => x.update_from(itr),
-                Benchmark::QueryBenchmark(x) => x.update_from(itr),
-                Benchmark::WriteBenchmark(x) => x.update_from(itr),
-                Benchmark::CacheHitBenchmark(x) => x.update_from(itr),
-                Benchmark::ScaleViews(x) => x.update_from(itr),
-                Benchmark::ScaleConnections(x) => x.update_from(itr),
-                Benchmark::WriteLatencyBenchmark(x) => x.update_from(itr),
-                Benchmark::MigrationBenchmark(x) => x.update_from(itr),
-                Benchmark::EvictionBenchmark(x) => x.update_from(itr),
-                Benchmark::ReadWriteBenchmark(x) => x.update_from(itr),
-                Benchmark::SingleQueryBenchmark(x) => x.update_from(itr),
                 Benchmark::WorkloadEmulator(x) => x.update_from(itr),
             },
             ArgOverride::Json(json) => self.update_data_generator_from(json)?,

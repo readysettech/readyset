@@ -89,21 +89,10 @@ pub mod benchmark;
 pub mod graph;
 pub mod reporting;
 pub mod spec;
-pub mod template;
 pub mod utils;
 
 // Benchmarks
-mod cache_hit_benchmark;
-mod eviction_benchmark;
-mod migration_benchmark;
-mod query_benchmark;
-mod read_write_benchmark;
-mod scale_connections;
-mod scale_views;
-mod single_query_benchmark;
 mod workload_emulator;
-mod write_benchmark;
-mod write_latency_benchmark;
 
 pub use workload_emulator::{QuerySet, WorkloadEmulator};
 
