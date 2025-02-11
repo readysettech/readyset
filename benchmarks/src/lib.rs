@@ -86,7 +86,6 @@
 //! ```
 
 pub mod benchmark;
-pub mod graph;
 pub mod reporting;
 pub mod spec;
 pub mod utils;
