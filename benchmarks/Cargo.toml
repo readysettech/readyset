@@ -6,63 +6,63 @@ authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
 [dependencies]
-crossbeam-skiplist = { workspace = true }
-tokio = { workspace = true, features = ["full"] }
 anyhow = { workspace = true }
-csv = { workspace = true }
-nom = { workspace = true }
-nom_locate = { workspace = true }
-rand = { workspace = true }
-rand_distr = { workspace = true }
-tracing = { workspace = true }
+async-stream = { workspace = true }
 async-trait = { workspace = true }
+atomic-counter = { workspace = true }
+chrono = { workspace = true }
+clap = { workspace = true, features = ["derive", "env"] }
+crossbeam-skiplist = { workspace = true }
+csv = { workspace = true }
 enum_dispatch = { workspace = true }
 futures = { workspace = true }
-vec1 = { workspace = true }
-url = { workspace = true }
 hdrhistogram = { workspace = true }
-zipf = { workspace = true }
-clap = { workspace = true, features = ["derive", "env"] }
-reqwest = { workspace = true, features = ["stream", "native-tls"] }
-chrono = { workspace = true }
-atomic-counter = { workspace = true }
-serde_json = { workspace = true }
-serde_yaml_ng = { workspace = true }
-serde = { workspace = true }
-serde_with = { workspace = true }
-metrics = { workspace = true }
-metrics-util = { workspace = true }
-metrics-exporter-prometheus = { workspace = true }
-itertools = { workspace = true }
-num-integer = { workspace = true }
-lazy_static = { workspace = true }
-thiserror = { workspace = true }
-async-stream = { workspace = true }
-parking_lot = { workspace = true }
 indicatif = { workspace = true }
+itertools = { workspace = true }
+lazy_static = { workspace = true }
+metrics = { workspace = true }
+metrics-exporter-prometheus = { workspace = true }
+metrics-util = { workspace = true }
+nom = { workspace = true }
+nom_locate = { workspace = true }
+num-integer = { workspace = true }
+parking_lot = { workspace = true }
 prometheus-parse = { workspace = true }
-walkdir = { workspace = true }
+rand = { workspace = true }
+rand_distr = { workspace = true }
+reqwest = { workspace = true, features = ["stream", "native-tls"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_with = { workspace = true }
+serde_yaml_ng = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
 tokio-postgres = { workspace = true }
+tracing = { workspace = true }
+url = { workspace = true }
+vec1 = { workspace = true }
+walkdir = { workspace = true }
+zipf = { workspace = true }
 
 # local dependencies
-database-utils = { path = "../database-utils" }
-readyset-client = { path = "../readyset-client" }
-readyset-data = { path = "../readyset-data" }
-readyset-errors = { path = "../readyset-errors" }
-nom-sql = { path = "../nom-sql" }
 data-generator = { path = "../data-generator" }
+database-utils = { path = "../database-utils" }
+nom-sql = { path = "../nom-sql" }
 query-generator = { path = "../query-generator" }
 readyset-adapter = { path = "../readyset-adapter" }
-readyset-server = { path = "../readyset-server" }
-readyset-mysql = { path = "../readyset-mysql" }
-readyset-psql = { path = "../readyset-psql" }
-readyset-sql = { path = "../readyset-sql" }
-readyset-sql-parsing = { path = "../readyset-sql-parsing" }
-readyset-tracing = { path = "../readyset-tracing" }
+readyset-client = { path = "../readyset-client" }
 readyset-client-test-helpers = { path = "../readyset-client-test-helpers", features = [
     "mysql",
     "postgres",
 ] }
+readyset-data = { path = "../readyset-data" }
+readyset-errors = { path = "../readyset-errors" }
+readyset-mysql = { path = "../readyset-mysql" }
+readyset-psql = { path = "../readyset-psql" }
+readyset-server = { path = "../readyset-server" }
+readyset-sql = { path = "../readyset-sql" }
+readyset-sql-parsing = { path = "../readyset-sql-parsing" }
+readyset-tracing = { path = "../readyset-tracing" }
 readyset-util = { path = "../readyset-util" }
 
 [lib]
