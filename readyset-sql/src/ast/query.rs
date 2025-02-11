@@ -243,6 +243,14 @@ impl SqlQuery {
         matches!(self, Self::Select(_))
     }
 
+    /// Returns the query as a select statement, if it is a select statement.
+    pub fn into_select(self) -> Option<SelectStatement> {
+        match self {
+            Self::Select(s) => Some(s),
+            _ => None,
+        }
+    }
+
     /// Returns true if this is a query for a ReadySet extension and not regular SQL.
     pub fn is_readyset_extension(&self) -> bool {
         match self {
