@@ -13,7 +13,6 @@ pub mod backend;
 pub mod generate;
 pub mod multi_thread;
 pub mod path;
-pub mod prometheus;
 pub mod query;
 pub mod spec;
 
