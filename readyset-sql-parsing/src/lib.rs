@@ -15,23 +15,33 @@ fn sqlparser_dialect_from_readyset_dialect(
 pub fn parse_query(dialect: Dialect, input: impl AsRef<str>) -> Result<SqlQuery, String> {
     let nom_result = nom_sql::parse_query(dialect, input.as_ref());
     let sqlparser_dialect = sqlparser_dialect_from_readyset_dialect(dialect);
-    let sqlparser_result = sqlparser::parser::Parser::new(sqlparser_dialect.as_ref())
-        .try_with_sql(input.as_ref())
-        .and_then(|mut p| p.parse_statement())
-        .map_err(|e| format!("failed to parse: {e}"))
-        .and_then(|q| {
-            q.try_into()
-                .map_err(|e| format!("failed to convert AST: {e}"))
-        });
-    match (&nom_result, &sqlparser_result) {
+    let sqlparser_result: Result<SqlQuery, _> =
+        sqlparser::parser::Parser::new(sqlparser_dialect.as_ref())
+            .try_with_sql(input.as_ref())
+            .and_then(|mut p| p.parse_statement())
+            .map_err(|e| format!("failed to parse: {e}"))
+            .and_then(|q| {
+                q.try_into()
+                    .map_err(|e| format!("failed to convert AST: {e}"))
+            });
+    match (&nom_result, sqlparser_result) {
         (Ok(nom_ast), Ok(sqlparser_ast)) => {
-            if nom_ast != sqlparser_ast {
-                let comparison = Comparison::new(nom_ast, sqlparser_ast);
+            if nom_ast != &sqlparser_ast {
+                let comparison = Comparison::new(nom_ast, &sqlparser_ast);
                 warn!("nom-sql AST differs from sqlparser-rs AST:\n{comparison}");
+                #[cfg(feature = "ast-conversion-errors")]
+                pretty_assertions::assert_eq!(
+                    nom_ast,
+                    &sqlparser_ast,
+                    "input: {:?}",
+                    input.as_ref()
+                );
             }
         }
         (Ok(nom_ast), Err(sqlparser_error)) => {
             warn!(%sqlparser_error, ?nom_ast, "nom-sql succeeded but sqlparser-rs failed");
+            #[cfg(feature = "ast-conversion-errors")]
+            panic!("nom-sql succeeded but sqlparser-rs failed: {sqlparser_error}")
         }
         (Err(nom_error), Ok(sqlparser_ast)) => {
             warn!(%nom_error, ?sqlparser_ast, "sqlparser-rs succeeded but nom-sql failed")
