@@ -1,6 +1,4 @@
-use std::io::Write;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::bail;
@@ -10,19 +8,9 @@ use benchmarks::utils::readyset_ready;
 use benchmarks::{benchmark_histogram, QUANTILES};
 use clap::builder::ArgPredicate;
 use clap::{Parser, ValueHint};
-use database_utils::DatabaseType;
-use readyset_adapter::backend::noria_connector::ReadBehavior;
-use readyset_adapter::backend::{MigrationMode, UnsupportedSetMode};
-use readyset_adapter::BackendBuilder;
-use readyset_client_test_helpers::mysql_helpers::MySQLAdapter;
-use readyset_client_test_helpers::psql_helpers::PostgreSQLAdapter;
-use readyset_client_test_helpers::TestBuilder;
-use readyset_server::{DurabilityMode, Handle};
+use readyset_server::Handle;
 use readyset_server::{PrometheusBuilder, PrometheusHandle};
 use readyset_util::shutdown::ShutdownSender;
-use tokio::sync::oneshot;
-use tokio::task::JoinHandle;
-use tokio_postgres::config::Host;
 use tracing::warn;
 
 const PUSH_GATEWAY_PUSH_INTERVAL: Duration = Duration::from_secs(5);
@@ -40,11 +28,6 @@ struct BenchmarkRunner {
     /// The number of times we should run the benchmark.
     #[arg(long, default_value = "1")]
     iterations: u32,
-
-    /// Instead of running the benchmark_cmd, write the parameters to a benchmark_cmd
-    /// specification file, to be run with the from-file subcommand.
-    #[arg(long, value_hint = ValueHint::AnyPath)]
-    only_to_spec: Option<PathBuf>,
 
     #[command(flatten)]
     tracing: readyset_tracing::Options,
@@ -65,36 +48,6 @@ struct BenchmarkRunner {
     /// any benchmark_cmd subcommand passed in.
     #[arg(long, value_hint = ValueHint::AnyPath, required(true))]
     benchmark: Option<PathBuf>,
-
-    /// A file to append the set of benchmark results to, creates the file if it has not yet been
-    /// created.
-    #[arg(long, value_hint = ValueHint::FilePath)]
-    results_file: Option<PathBuf>,
-
-    /// Runs the benchmarks against a noria adapter and server run in the same process. Note that
-    /// some of the benchmarks with certain schemas may not work without an upstream database.
-    /// When using `--local` benchmark results may vary based on compiler optimizations, using
-    /// `--release` will drastically improve results.
-    ///
-    /// If this argument is passed, the deployment parameter is ignored.
-    #[arg(long)]
-    local: bool,
-
-    /// When running the benchmark in `--local` or `--local_with_upstream` mode, by default, the
-    /// data is not persisted to the underlying RocksDB storage (durability = MEMORY_ONLY). To
-    /// enable durability in local mode use the `--store-ephemerally` option. When
-    /// `--store-ephemerally` is specified, data is persisted to RocksDB, but it gets
-    /// automatically deleted when the benchmark finishes.
-    #[arg(long)]
-    store_ephemerally: bool,
-
-    /// Runs the benchmarks against a noria adapter and server run in the same process with the
-    /// provided external upstream database. When using `--local` benchmark results may vary
-    /// based on compiler optimizations, using `--release` will drastically improve results.
-    ///
-    /// If this argument is passed, the deployment parameter is ignored.
-    #[arg(long)]
-    local_with_upstream: Option<String>,
 
     /// Location where benchmark reports are stored, either for validation or storage purposes
     #[arg(long, env = "REPORT_TARGET", requires_ifs([(ArgPredicate::IsPresent, "report_mode"), (ArgPredicate::IsPresent, "report_profile")]))]
@@ -158,125 +111,6 @@ impl BenchmarkRunner {
         Ok(handle)
     }
 
-    pub fn start_metric_readers(&self) -> Option<(JoinHandle<()>, oneshot::Sender<()>)> {
-        let push_gateway = self.deployment_params.prometheus_push_gateway.clone()?;
-        let benchmark = self.benchmark_cmd.as_ref().unwrap();
-        let forward = benchmark.forward_metrics(&self.deployment_params);
-
-        if forward.is_empty() {
-            return None;
-        }
-
-        if self.deployment_params.prometheus_endpoint.is_none() {
-            warn!("No prometheus endpoint passed but this benchmark forwards metrics. The benchmark metrics may be incomplete.");
-            return None;
-        }
-
-        let global_labels = Arc::new(benchmark.labels().into_iter().collect::<Vec<_>>());
-
-        let (tx, mut rx) = oneshot::channel();
-        let handle = tokio::spawn(async move {
-            let mut interval = tokio::time::interval(PUSH_GATEWAY_PUSH_INTERVAL);
-            let client = reqwest::Client::new();
-            loop {
-                tokio::select! {
-                    _ = interval.tick() => {
-                        for item in forward.clone().into_iter() {
-                            let req = client.post(&push_gateway);
-                            if let Err(e) = item.forward(req, global_labels.clone()).await {
-                                warn!("Failed to forward metrics: {}", e);
-                            }
-                        }
-                    },
-                    _ = &mut rx => break
-                }
-            }
-        });
-
-        Some((handle, tx))
-    }
-
-    // Creates a local deployment that may include an external upstream database. This does not
-    // mutate the upstream database when --skip-setup is passed.
-    pub async fn start_local(
-        &self,
-        upstream_addr: Option<String>,
-    ) -> anyhow::Result<(DeploymentParameters, Handle, ShutdownSender)> {
-        let durability_mode = if self.store_ephemerally {
-            DurabilityMode::DeleteOnExit
-        } else {
-            DurabilityMode::MemoryOnly
-        };
-        let mut test_builder = TestBuilder::new(
-            BackendBuilder::default()
-                .unsupported_set_mode(UnsupportedSetMode::Allow)
-                .require_authentication(false),
-        )
-        .recreate_database(false)
-        .migration_mode(MigrationMode::OutOfBand)
-        .read_behavior(ReadBehavior::Blocking)
-        .durability_mode(durability_mode);
-
-        if let Some(addr) = &upstream_addr {
-            test_builder = test_builder.fallback_url(addr.clone());
-        }
-
-        let (target_conn_str, handle, shutdown_tx) = match self.deployment_params.database_type {
-            DatabaseType::MySQL => {
-                if matches!(&upstream_addr, Some(addr) if !addr.starts_with("mysql")) {
-                    bail!("--database-type specifies MySQL but the upstream address does not");
-                }
-
-                let (mysql_opts, handle, shutdown_tx) = test_builder.build::<MySQLAdapter>().await;
-
-                // TODO(REA-2787): We should eventually pass a database name here, but due to a bug
-                // in the way we handle database names for MySQL connections, the
-                // benchmarks don't work if we pass the name here. Since MySQL
-                // supports connecting without an explicit name, we just omit it.
-                let target_conn_str = format!(
-                    "mysql://{}:{}",
-                    mysql_opts.ip_or_hostname(),
-                    mysql_opts.tcp_port(),
-                );
-
-                (target_conn_str, handle, shutdown_tx)
-            }
-            DatabaseType::PostgreSQL => {
-                if matches!(&upstream_addr, Some(addr) if !addr.starts_with("postgres")) {
-                    bail!("--database-type specifies PostgreSQL but the upstream address does not");
-                }
-
-                let (config, handle, shutdown_tx) = test_builder.build::<PostgreSQLAdapter>().await;
-                let host = config
-                    .get_hosts()
-                    .first()
-                    .expect("PostgreSQL URL has no hostname set");
-                let host_str = match host {
-                    Host::Tcp(tcp) => tcp.as_str(),
-                    Host::Unix(p) => p.to_str().expect("Invalid UTF-8 in host"),
-                };
-                let port = config.get_ports()[0];
-                let target_conn_str = format!(
-                    "postgres://{}:{}/{}",
-                    host_str, port, self.deployment_params.database_name,
-                );
-
-                (target_conn_str, handle, shutdown_tx)
-            }
-        };
-        let setup_conn_str = upstream_addr.unwrap_or_else(|| target_conn_str.clone());
-
-        Ok((
-            DeploymentParameters {
-                target_conn_str,
-                setup_conn_str,
-                ..self.deployment_params.clone()
-            },
-            handle,
-            shutdown_tx,
-        ))
-    }
-
     /// Warn if deployment parameters are overwritten by `--local` or `--deployment`.
     pub fn warn_if_deployment_params(&self, reason: &str) {
         let params = &self.deployment_params;
@@ -285,16 +119,15 @@ impl BenchmarkRunner {
             || params.instance_label.as_str() != "local"
         {
             warn!(
-                "--target-conn-str, --setup-conn-str, or --instance-label were provided but will \
+                "--target-conn-str, --setup-conn-str, or --instance-label was provided but will \
                 be overwritten by --{}",
                 reason
             );
         }
 
-        if params.prometheus_push_gateway.is_some() || params.prometheus_endpoint.is_some() {
+        if params.prometheus_push_gateway.is_some() {
             warn!(
-                "--prometheus-push-gateway or --prometheus-endpoint were provided but will be \
-                overwritten by --{}",
+                "--prometheus-push-gateway was provided but will be overwritten by --{}",
                 reason
             );
         }
@@ -328,21 +161,7 @@ impl BenchmarkRunner {
     ) -> anyhow::Result<Option<(Handle, ShutdownSender)>> {
         self.load_benchmark_cmd_from_args()?;
 
-        let (params, handle) = if self.local_with_upstream.is_some() {
-            self.warn_if_deployment_params("local-with-upstream");
-            let (params, h, shutdown_tx) =
-                self.start_local(self.local_with_upstream.clone()).await?;
-            (params, Some((h, shutdown_tx)))
-        } else if self.local {
-            self.warn_if_deployment_params("local");
-
-            if self.skip_setup {
-                warn!("Ignoring --skip-setup as --local requires setup");
-            }
-
-            let (params, h, shutdown_tx) = self.start_local(None).await?;
-            (params, Some((h, shutdown_tx)))
-        } else if let Some(f) = &self.deployment {
+        let (params, handle) = if let Some(f) = &self.deployment {
             // Verify that the deployment is passed through some method.
             self.warn_if_deployment_params("deployment");
             if !f.exists() {
@@ -384,21 +203,13 @@ impl BenchmarkRunner {
         let identifier = format!("{}\n{}\n", cmd_as_yaml, deployment_as_yaml);
         println!("{}", identifier);
 
-        if let Some(f) = &self.only_to_spec {
-            let f = std::fs::File::create(f)?;
-            serde_yaml_ng::to_writer(f, &self.benchmark_cmd.as_ref().unwrap())?;
-            return Ok(vec![]);
-        }
-
         let prometheus_handle = self.init_prometheus().await?;
 
         let benchmark_cmd = self.benchmark_cmd.as_ref().unwrap();
-        if !self.skip_setup || self.local {
+        if !self.skip_setup {
             benchmark_cmd.setup(&self.deployment_params).await?;
             tokio::time::sleep(Duration::from_secs(5)).await;
         }
-
-        let importer = self.start_metric_readers();
 
         // Check that ReadySet has completed snapshotting via the readyset status.
         let readyset_target = format!(
@@ -462,22 +273,6 @@ impl BenchmarkRunner {
                 }
                 println!();
             }
-        }
-
-        // Write human-readable outputs if specified.
-        if let Some(f) = &self.results_file {
-            let mut file = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(f)?;
-            file.write_all(&serde_yaml_ng::to_string(&self.benchmark_cmd)?.into_bytes())?;
-            file.write_all(&serde_yaml_ng::to_string(&self.deployment_params)?.into_bytes())?;
-            file.write_all(format!("{:?}", results).as_bytes())?;
-        }
-
-        if let Some((handle, tx)) = importer {
-            drop(tx);
-            handle.await?;
         }
 
         // Push metrics recorded in the push gateway manually before exiting.

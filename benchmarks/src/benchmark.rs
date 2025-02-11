@@ -21,7 +21,6 @@ use hdrhistogram::Histogram;
 use serde::{Deserialize, Serialize};
 
 use crate::utils::generate::DataGenerator;
-use crate::utils::prometheus::{ForwardPrometheusMetrics, PrometheusEndpoint};
 use crate::workload_emulator::WorkloadEmulator;
 
 #[allow(clippy::large_enum_variant)]
@@ -49,11 +48,6 @@ pub struct DeploymentParameters {
     /// Address of a push gateway for a benchmark's prometheus metrics.
     #[arg(long, env = "PROMETHEUS_PUSH_GATEWAY")]
     pub prometheus_push_gateway: Option<String>,
-
-    /// Noria metrics endpoint; Endpoint that can be used to forward metrics from
-    /// the server. If not specified, no metrics will be forwarded.
-    #[arg(long, env = "PROMETHEUS_SERVER")]
-    pub prometheus_endpoint: Option<PrometheusEndpoint>,
 
     /// Target database connection string. This is the database in the deployment
     /// we are benchmarking operations against.
@@ -229,11 +223,6 @@ pub trait BenchmarkControl {
 
     // Has there been a regression in the benchmarks performance?
     // async fn regression_check(&self) -> Result<bool>;
-
-    /// Set of (endpoint, filter predicate) pairs for metrics to pull in from Prometheus URLs and
-    /// re-export as part of the benchmark's metrics. Only called if `deployment` has a
-    /// PrometheusEndpoint.
-    fn forward_metrics(&self, deployment: &DeploymentParameters) -> Vec<ForwardPrometheusMetrics>;
 
     /// The benchmark template's name
     fn name(&self) -> &'static str;
