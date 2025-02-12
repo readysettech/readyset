@@ -49,3 +49,10 @@ SELECT * FROM (SELECT x + 1 AS a FROM t1) sq;
 2
 2
 3
+
+query I valuesort
+SELECT * FROM (SELECT x + 1 FROM t1) sq;
+----
+2
+2
+3

@@ -86,6 +86,64 @@ pub enum FunctionExpr {
 }
 
 impl FunctionExpr {
+    pub fn alias(&self, dialect: Dialect) -> SqlIdentifier {
+        match self {
+            FunctionExpr::Avg { expr, .. } => format!("avg({})", expr.alias(dialect)),
+            FunctionExpr::Count { expr, .. } => format!("count({})", expr.alias(dialect)),
+            FunctionExpr::Sum { expr, .. } => format!("sum({})", expr.alias(dialect)),
+            FunctionExpr::Max(col) => format!("max({})", col.alias(dialect)),
+            FunctionExpr::Min(col) => format!("min({})", col.alias(dialect)),
+            FunctionExpr::Extract { field, expr } => {
+                format!("extract({field} from {})", expr.alias(dialect))
+            }
+            FunctionExpr::Lower { expr, collation } => format!(
+                "lower({}{})",
+                expr.alias(dialect),
+                if let Some(c) = collation {
+                    format!(" COLLATE \"{}\"", c)
+                } else {
+                    "".to_string()
+                }
+            ),
+            FunctionExpr::Upper { expr, collation } => format!(
+                "upper({}{})",
+                expr.alias(dialect),
+                if let Some(c) = collation {
+                    format!(" COLLATE \"{}\"", c)
+                } else {
+                    "".to_string()
+                }
+            ),
+            FunctionExpr::GroupConcat { expr, separator } => format!(
+                "group_concat({}, {})",
+                expr.alias(dialect),
+                separator
+                    .as_ref()
+                    .map(|s| format!("'{}'", s.replace('\'', "''").replace('\\', "\\\\")))
+                    .unwrap_or_default(),
+            ),
+            FunctionExpr::Substring { string, pos, len } => format!(
+                "substring({}, {}, {})",
+                string.alias(dialect),
+                pos.as_ref()
+                    .map(|pos| pos.alias(dialect))
+                    .unwrap_or_default(),
+                len.as_ref()
+                    .map(|len| len.alias(dialect))
+                    .unwrap_or_default(),
+            ),
+            FunctionExpr::Call { name, arguments } => format!(
+                "{}({})",
+                name,
+                arguments.iter().map(|arg| arg.alias(dialect)).join(", ")
+            ),
+            e => e.display(dialect).to_string(),
+        }
+        .into()
+    }
+}
+
+impl FunctionExpr {
     /// Returns an iterator over all the direct arguments passed to the given function call
     /// expression
     #[concrete_iter]
@@ -531,6 +589,22 @@ pub enum Expr {
 
     /// A variable reference
     Variable(Variable),
+}
+
+impl Expr {
+    pub fn alias(&self, dialect: Dialect) -> SqlIdentifier {
+        // TODO: Match upstream naming (unquoted identifiers, function name without args, etc ..)
+        match self {
+            Expr::Column(col) => col.name.clone(), // strip the table's name
+            Expr::BinaryOp { lhs, op, rhs } => {
+                format!("{} {} {}", lhs.alias(dialect), op, rhs.alias(dialect)).into()
+            }
+            Expr::Call(function) => function.alias(dialect),
+
+            // FIXME: follow dialect's naming convention
+            e => e.display(dialect).to_string().into(),
+        }
+    }
 }
 
 impl DialectDisplay for Expr {

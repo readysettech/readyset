@@ -45,25 +45,22 @@ pub fn is_correlated(statement: &SelectStatement) -> bool {
         .any(|col| col.table.iter().any(|tbl| !tables.contains(tbl)))
 }
 
-fn field_names(statement: &SelectStatement) -> ReadySetResult<Vec<&SqlIdentifier>> {
+fn field_names(statement: &SelectStatement) -> ReadySetResult<Vec<SqlIdentifier>> {
     statement
         .fields
         .iter()
         .map(|field| match field {
             FieldDefinitionExpr::Expr {
                 alias: Some(alias), ..
-            } => Ok(alias),
+            } => Ok(alias.clone()),
             FieldDefinitionExpr::Expr {
                 expr: Expr::Column(Column { name, .. }),
                 ..
-            } => Ok(name),
-            FieldDefinitionExpr::Expr { alias, expr } => {
-                alias.as_ref().ok_or(unsupported_err!(
-                    "Expression {} is missing an alias",
-                    expr.display(readyset_sql::Dialect::MySQL) // FIXME: pass the correct
-                                                               // dialect
-                ))
-            }
+            } => Ok(name.clone()),
+            // FIXME: use correct dialect
+            FieldDefinitionExpr::Expr { alias, expr } => Ok(alias
+                .clone()
+                .unwrap_or(expr.alias(readyset_sql::Dialect::MySQL))),
             // TODO: Generate an alias when an Expr (that is not simply an Expr::Column)
             // doesn't have one
             e => Err(unsupported_err!(
@@ -81,7 +78,7 @@ pub(crate) fn subquery_schemas<'a>(
     tables: &'a [TableExpr],
     ctes: &'a [CommonTableExpr],
     join: &'a [JoinClause],
-) -> ReadySetResult<HashMap<&'a SqlIdentifier, Vec<&'a SqlIdentifier>>> {
+) -> ReadySetResult<HashMap<&'a SqlIdentifier, Vec<SqlIdentifier>>> {
     ctes.iter()
         .map(|cte| (&cte.name, &cte.statement))
         .chain(

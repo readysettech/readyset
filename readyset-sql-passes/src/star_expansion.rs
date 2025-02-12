@@ -48,7 +48,7 @@ impl<'ast> VisitorMut<'ast> for ExpandStarsVisitor<'_> {
             } else {
                 None
             }
-            .or_else(|| self.table_columns.get(&table).map(|fs| fs.iter().collect()))
+            .or_else(|| self.table_columns.get(&table).cloned())
             .ok_or_else(|| {
                 let non_replicated_relation = NonReplicatedRelation::new(table.clone());
                 if self
@@ -188,13 +188,6 @@ mod tests {
         );
     }
 
-    #[track_caller]
-    fn expand_stars_err(source: &str, schema: HashMap<Relation, Vec<SqlIdentifier>>) {
-        let q = parse_query(Dialect::MySQL, source).unwrap();
-        let res = q.expand_stars(&schema, &Default::default());
-        assert!(res.is_err());
-    }
-
     #[test]
     fn single_table() {
         expands_stars(
@@ -311,15 +304,20 @@ mod tests {
     #[test]
     fn star_with_complex_subquery() {
         expands_stars(
-            "SELECT * FROM (SELECT t1.x + 1 AS a FROM t1) sq",
-            "SELECT sq.a FROM (SELECT t1.x + 1 AS a FROM t1) sq",
+            "SELECT * FROM (SELECT t1.x + 1 FROM t1) sq",
+            "SELECT `sq`.`x + 1` FROM (SELECT t1.x + 1 FROM t1) sq",
             HashMap::from([("t1".into(), vec!["x".into()])]),
         );
 
-        // We currently require all cols (that are not direct col references)
-        // produced by subqueries to have aliases
-        expand_stars_err(
-            "SELECT * FROM (SELECT t1.x + 1 FROM t1) sq",
+        expands_stars(
+            "SELECT * FROM (SELECT max(a) FROM t1) sq",
+            "SELECT `sq`.`max(a)` FROM (SELECT max(a) FROM t1) sq",
+            HashMap::from([("t1".into(), vec!["x".into()])]),
+        );
+
+        expands_stars(
+            "SELECT * FROM (SELECT max(a) AS a FROM t1) sq",
+            "SELECT sq.a FROM (SELECT max(a) AS a FROM t1) sq",
             HashMap::from([("t1".into(), vec!["x".into()])]),
         );
     }
