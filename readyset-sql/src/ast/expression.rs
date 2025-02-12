@@ -86,6 +86,67 @@ pub enum FunctionExpr {
 }
 
 impl FunctionExpr {
+    pub fn alias(&self, dialect: Dialect) -> Option<String> {
+        Some(match self {
+            FunctionExpr::Avg { expr, .. } => format!("avg({})", expr.alias(dialect)?),
+            FunctionExpr::Count { expr, .. } => format!("count({})", expr.alias(dialect)?),
+            FunctionExpr::Sum { expr, .. } => format!("sum({})", expr.alias(dialect)?),
+            FunctionExpr::Max(col) => format!("max({})", col.alias(dialect)?),
+            FunctionExpr::Min(col) => format!("min({})", col.alias(dialect)?),
+            FunctionExpr::Extract { field, expr } => {
+                format!("extract({field} from {})", expr.alias(dialect)?)
+            }
+            FunctionExpr::Lower { expr, collation } => format!(
+                "lower({}{})",
+                expr.alias(dialect)?,
+                if let Some(c) = collation {
+                    format!(" COLLATE \"{}\"", c)
+                } else {
+                    "".to_string()
+                }
+            ),
+            FunctionExpr::Upper { expr, collation } => format!(
+                "upper({}{})",
+                expr.alias(dialect)?,
+                if let Some(c) = collation {
+                    format!(" COLLATE \"{}\"", c)
+                } else {
+                    "".to_string()
+                }
+            ),
+            FunctionExpr::GroupConcat { expr, separator } => format!(
+                "group_concat({}, {})",
+                expr.alias(dialect)?,
+                separator
+                    .as_ref()
+                    .map(|s| format!("'{}'", s.replace('\'', "''").replace('\\', "\\\\")))
+                    .unwrap_or_default(),
+            ),
+            FunctionExpr::Substring { string, pos, len } => format!(
+                "substring({}, {}, {})",
+                string.alias(dialect)?,
+                pos.as_ref()
+                    .map(|pos| pos.alias(dialect).unwrap_or_default())
+                    .unwrap_or_default(),
+                len.as_ref()
+                    .map(|len| len.alias(dialect).unwrap_or_default())
+                    .unwrap_or_default(),
+            ),
+            FunctionExpr::Call { name, arguments } => format!(
+                "{}({})",
+                name,
+                arguments
+                    .iter()
+                    .map(|arg| arg.alias(dialect))
+                    .collect::<Option<Vec<_>>>()?
+                    .join(", ") //FIXME
+            ),
+            e => e.display(dialect).to_string(),
+        })
+    }
+}
+
+impl FunctionExpr {
     /// Returns an iterator over all the direct arguments passed to the given function call
     /// expression
     #[concrete_iter]
@@ -531,6 +592,32 @@ pub enum Expr {
 
     /// A variable reference
     Variable(Variable),
+}
+
+impl Expr {
+    pub fn alias(&self, dialect: Dialect) -> Option<SqlIdentifier> {
+        // TODO: Match upstream naming (unquoted identifiers, function name without args, etc ..)
+        let mut alias = match self {
+            Expr::Column(col) => col.name.to_string(), // strip the table's name
+            Expr::BinaryOp { lhs, op, rhs } => {
+                let left = lhs.alias(dialect)?;
+                let right = rhs.alias(dialect)?;
+                format!("{} {} {}", left, op, right)
+            }
+            Expr::Call(function) => function.alias(dialect)?,
+
+            // Placeholders in select are not GA'd, but just in case
+            Expr::Literal(Literal::Placeholder(_)) => return None,
+            Expr::Variable(_) => return None,
+
+            // FIXME: follow dialect's naming convention
+            e => e.display(dialect).to_string(),
+        };
+
+        alias = alias.chars().take(64).collect();
+
+        Some(alias.into())
+    }
 }
 
 impl DialectDisplay for Expr {

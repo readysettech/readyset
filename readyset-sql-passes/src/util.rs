@@ -45,10 +45,10 @@ pub fn is_correlated(statement: &SelectStatement) -> bool {
         .any(|col| col.table.iter().any(|tbl| !tables.contains(tbl)))
 }
 
-fn field_names(statement: &SelectStatement) -> ReadySetResult<Vec<&SqlIdentifier>> {
+fn field_names(statement: &mut SelectStatement) -> ReadySetResult<Vec<&mut SqlIdentifier>> {
     statement
         .fields
-        .iter()
+        .iter_mut()
         .map(|field| match field {
             FieldDefinitionExpr::Expr {
                 alias: Some(alias), ..
@@ -57,12 +57,22 @@ fn field_names(statement: &SelectStatement) -> ReadySetResult<Vec<&SqlIdentifier
                 expr: Expr::Column(Column { name, .. }),
                 ..
             } => Ok(name),
-            FieldDefinitionExpr::Expr { alias, expr } => {
-                alias.as_ref().ok_or(unsupported_err!(
-                    "Expression {} is missing an alias",
-                    expr.display(readyset_sql::Dialect::MySQL) // FIXME: pass the correct
-                                                               // dialect
-                ))
+            // FIXME: use correct dialect
+            FieldDefinitionExpr::Expr {
+                ref mut alias,
+                expr,
+            } => {
+                if let Some(a) = alias {
+                    Ok(a)
+                } else {
+                    *alias = expr.alias(readyset_sql::Dialect::MySQL);
+                    alias.as_mut().ok_or({
+                        unsupported_err!(
+                            "Expression {} not supported",
+                            expr.display(readyset_sql::Dialect::MySQL)
+                        )
+                    })
+                }
             }
             // TODO: Generate an alias when an Expr (that is not simply an Expr::Column)
             // doesn't have one
@@ -78,27 +88,35 @@ fn field_names(statement: &SelectStatement) -> ReadySetResult<Vec<&SqlIdentifier
 ///
 /// Takes only the CTEs and join clause so that it doesn't have to borrow the entire statement.
 pub(crate) fn subquery_schemas<'a>(
-    tables: &'a [TableExpr],
-    ctes: &'a [CommonTableExpr],
-    join: &'a [JoinClause],
+    tables: &'a mut [TableExpr],
+    ctes: &'a mut [CommonTableExpr],
+    join: &'a mut [JoinClause],
 ) -> ReadySetResult<HashMap<&'a SqlIdentifier, Vec<&'a SqlIdentifier>>> {
-    ctes.iter()
-        .map(|cte| (&cte.name, &cte.statement))
+    ctes.iter_mut()
+        .map(|cte| (&cte.name, &mut cte.statement))
         .chain(
             tables
-                .iter()
-                .chain(join.iter().flat_map(|join| match &join.right {
+                .iter_mut()
+                .chain(join.iter_mut().flat_map(|join| match &mut join.right {
                     JoinRightSide::Table(t) => Either::Left(iter::once(t)),
-                    JoinRightSide::Tables(ts) => Either::Right(ts.iter()),
+                    JoinRightSide::Tables(ts) => Either::Right(ts.iter_mut()),
                 }))
-                .filter_map(|te| match &te.inner {
+                .filter_map(|te| match &mut te.inner {
                     TableExprInner::Subquery(sq) => {
-                        te.alias.as_ref().map(|alias| (alias, sq.as_ref()))
+                        te.alias.as_ref().map(|alias| (alias, sq.as_mut()))
                     }
                     TableExprInner::Table(_) => None,
                 }),
         )
-        .map(|(name, stmt)| Ok((name, field_names(stmt)?)))
+        .map(|(name, stmt)| {
+            Ok((
+                name,
+                field_names(stmt)?
+                    .into_iter()
+                    .map(|x| &*x)
+                    .collect::<Vec<&SqlIdentifier>>(),
+            ))
+        })
         .collect()
 }
 
