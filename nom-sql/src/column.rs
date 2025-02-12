@@ -170,16 +170,10 @@ fn generated_column(
         let (i, expr) = delimited(tag("("), expression(dialect), tag(")"))(i)?;
         let (i, stored) = preceded(
             whitespace0,
-            opt(map(
-                alt((tag_no_case("stored"), tag_no_case("virtual"))),
-                |i: LocatedSpan<&[u8]>| {
-                    std::str::from_utf8(i.fragment())
-                        .unwrap()
-                        .to_string()
-                        .to_lowercase()
-                        == "stored"
-                },
-            )),
+            opt(alt((
+                map(tag_no_case("stored"), |_| true),
+                map(tag_no_case("virtual"), |_| false),
+            ))),
         )(i)?;
 
         Ok((
