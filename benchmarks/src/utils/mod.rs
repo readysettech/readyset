@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use database_utils::{DatabaseURL, QueryableConnection};
+use readyset_client::status::CurrentStatus;
 use readyset_data::DfValue;
 use readyset_sql::{ast::ShowStatement, DialectDisplay};
 use tracing::info;
@@ -87,14 +88,14 @@ pub async fn readyset_ready(target: &str) -> anyhow::Result<()> {
             let snapshot_status = Vec::<Vec<DfValue>>::try_from(data)
                 .unwrap()
                 .into_iter()
-                .find(|r| r[0] == "Snapshot Status".into());
+                .find(|r| r[0] == "Status".into());
             let snapshot_status: String = if let Some(s) = snapshot_status {
                 s[1].clone().try_into().unwrap()
             } else {
                 continue;
             };
 
-            if snapshot_status == "Completed" {
+            if snapshot_status == CurrentStatus::Online.to_string() {
                 info!("Database ready!");
                 return Ok(());
             }

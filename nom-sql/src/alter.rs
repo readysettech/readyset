@@ -375,6 +375,34 @@ pub fn add_tables_statement(
     }
 }
 
+pub fn enter_maintenance_mode_statement(
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], AlterReadysetStatement> {
+    move |i| {
+        let (i, _) = tag_no_case("enter")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("maintenance")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("mode")(i)?;
+        let (i, _) = statement_terminator(i)?;
+
+        Ok((i, AlterReadysetStatement::EnterMaintenanceMode))
+    }
+}
+
+pub fn exit_maintenance_mode_statement(
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], AlterReadysetStatement> {
+    move |i| {
+        let (i, _) = tag_no_case("exit")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("maintenance")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("mode")(i)?;
+        let (i, _) = statement_terminator(i)?;
+
+        Ok((i, AlterReadysetStatement::ExitMaintenanceMode))
+    }
+}
+
 pub fn alter_readyset_statement(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], AlterReadysetStatement> {
@@ -386,6 +414,8 @@ pub fn alter_readyset_statement(
         let (i, statement) = alt((
             resnapshot_table_statement(dialect),
             add_tables_statement(dialect),
+            enter_maintenance_mode_statement(),
+            exit_maintenance_mode_statement(),
         ))(i)?;
 
         Ok((i, statement))
@@ -1506,6 +1536,20 @@ mod tests {
                     tables: vec![Relation::from("t1"), Relation::from("t2")]
                 })
             );
+        }
+
+        #[test]
+        fn alter_readyset_enter_maintenance_mode() {
+            let qstring = b"ALTER READYSET ENTER MAINTENANCE MODE;";
+            let res = test_parse!(alter_readyset_statement(Dialect::PostgreSQL), qstring);
+            assert_eq!(res, AlterReadysetStatement::EnterMaintenanceMode);
+        }
+
+        #[test]
+        fn alter_readyset_exit_maintenance_mode() {
+            let qstring = b"ALTER READYSET EXIT MAINTENANCE MODE;";
+            let res = test_parse!(alter_readyset_statement(Dialect::PostgreSQL), qstring);
+            assert_eq!(res, AlterReadysetStatement::ExitMaintenanceMode);
         }
     }
 }

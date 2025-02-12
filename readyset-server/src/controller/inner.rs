@@ -25,7 +25,7 @@ use readyset_client::metrics::recorded;
 use readyset_client::query::QueryId;
 use readyset_client::recipe::changelist::Change;
 use readyset_client::recipe::{ChangeList, ExtendRecipeResult, ExtendRecipeSpec, MigrationStatus};
-use readyset_client::status::{ReadySetControllerStatus, SnapshotStatus};
+use readyset_client::status::{CurrentStatus, ReadySetControllerStatus};
 use readyset_client::{GraphvizOptions, ViewCreateRequest, WorkerDescriptor};
 use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
 use readyset_sql::ast::Relation;
@@ -109,6 +109,8 @@ pub struct Leader {
     /// Controller Sender - This channel is a way to communicate between Controller -> Replication
     /// This lets the replication act on ControllerMessage.
     pub(super) controller_sender: UnboundedSender<ControllerMessage>,
+
+    pub(super) notification_sender: UnboundedSender<ReplicatorMessage>,
 }
 
 impl Leader {
@@ -300,6 +302,7 @@ impl Leader {
         body: hyper::body::Bytes,
         authority: &Arc<Authority>,
         leader_ready: bool,
+        maintenance_mode: bool,
     ) -> ReadySetResult<Vec<u8>> {
         macro_rules! return_serialized {
             ($expr:expr) => {{
@@ -414,6 +417,20 @@ impl Leader {
             }
             (&Method::GET | &Method::POST, "/version") => {
                 return_serialized!(RELEASE_VERSION);
+            }
+            (&Method::GET | &Method::POST, "/enter_maintenance_mode") => {
+                let _ = self
+                    .notification_sender
+                    .send(ReplicatorMessage::EnterMaintenanceMode);
+                warn!("Entering maintenance mode");
+                return_serialized!(());
+            }
+            (&Method::GET | &Method::POST, "/exit_maintenance_mode") => {
+                let _ = self
+                    .notification_sender
+                    .send(ReplicatorMessage::ExitMaintenanceMode);
+                warn!("Exiting maintenance mode");
+                return_serialized!(());
             }
             (&Method::POST, "/tables") => {
                 let ds = self.dataflow_state_handle.read().await;
@@ -574,10 +591,14 @@ impl Leader {
                 let status = ReadySetControllerStatus {
                     // Use whether the leader is ready or not as a proxy for if we have
                     // completed snapshotting.
-                    snapshot_status: if leader_ready {
-                        SnapshotStatus::Completed
+                    current_status: if leader_ready {
+                        if maintenance_mode {
+                            CurrentStatus::MaintenanceMode
+                        } else {
+                            CurrentStatus::Online
+                        }
                     } else {
-                        SnapshotStatus::InProgress
+                        CurrentStatus::SnapshotInProgress
                     },
 
                     max_replication_offset: replication_offsets
@@ -1031,6 +1052,7 @@ impl Leader {
         worker_request_timeout: Duration,
         background_recovery_interval: Duration,
         controller_sender: UnboundedSender<ControllerMessage>,
+        notification_sender: UnboundedSender<ReplicatorMessage>,
     ) -> Self {
         assert_ne!(state.config.min_workers, 0);
 
@@ -1052,6 +1074,7 @@ impl Leader {
             background_task_failed,
             running_recovery: None,
             controller_sender,
+            notification_sender,
         }
     }
 }
