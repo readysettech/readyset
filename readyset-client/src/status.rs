@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 // Consts for variable names.
 
-const SNAPSHOT_STATUS_VARIABLE: &str = "Snapshot Status";
+const STATUS_VARIABLE: &str = "Status";
 const MAX_REPLICATION_OFFSET: &str = "Maximum Replication Offset";
 const MIN_REPLICATION_OFFSET: &str = "Minimum Replication Offset";
 
@@ -26,8 +26,8 @@ const MIN_REPLICATION_OFFSET: &str = "Minimum Replication Offset";
 /// Returned via the /status RPC and SHOW READYSET STATUS.
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub struct ReadySetControllerStatus {
-    /// The snapshot status of the current leader.
-    pub snapshot_status: SnapshotStatus,
+    /// The status of the current leader.
+    pub current_status: CurrentStatus,
     /// The current maximum replication offset known by the leader.
     pub max_replication_offset: Option<ReplicationOffset>,
     /// The current minimum replication offset known by the leader.
@@ -37,8 +37,8 @@ pub struct ReadySetControllerStatus {
 impl From<ReadySetControllerStatus> for Vec<(String, String)> {
     fn from(status: ReadySetControllerStatus) -> Vec<(String, String)> {
         let mut res = vec![(
-            SNAPSHOT_STATUS_VARIABLE.to_string(),
-            status.snapshot_status.to_string(),
+            STATUS_VARIABLE.to_string(),
+            status.current_status.to_string(),
         )];
 
         if let Some(replication_offset) = status.max_replication_offset {
@@ -61,18 +61,21 @@ impl From<ReadySetControllerStatus> for Vec<(String, String)> {
 
 /// Whether or not snapshotting has completed.
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
-pub enum SnapshotStatus {
+pub enum CurrentStatus {
     /// Snapshotting has not yet completed.
-    InProgress,
-    /// Snapshotting has completed.
-    Completed,
+    SnapshotInProgress,
+    /// Node is online and ready to serve traffic.
+    Online,
+    /// Node is in maintenance mode.
+    MaintenanceMode,
 }
 
-impl Display for SnapshotStatus {
+impl Display for CurrentStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
-            SnapshotStatus::InProgress => "In Progress",
-            SnapshotStatus::Completed => "Completed",
+            CurrentStatus::SnapshotInProgress => "Snapshot In Progress",
+            CurrentStatus::Online => "Online",
+            CurrentStatus::MaintenanceMode => "Maintenance Mode",
         };
         write!(f, "{}", s)
     }

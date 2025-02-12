@@ -189,7 +189,6 @@ impl<'a> NoriaAdapter<'a> {
                     "Invalid URL supplied to --upstream-db-url: {e}"
                 ))
             })?;
-
         let mut table_filter = TableFilter::try_new(
             url.dialect(),
             config.replication_tables.as_deref(),

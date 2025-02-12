@@ -1003,6 +1003,8 @@ pub fn walk_alter_readyset_statement<'a, V: VisitorMut<'a>>(
             .tables
             .iter_mut()
             .try_for_each(|table| visitor.visit_table(table)),
+        AlterReadysetStatement::EnterMaintenanceMode => Ok(()),
+        AlterReadysetStatement::ExitMaintenanceMode => Ok(()),
     }
 }
 

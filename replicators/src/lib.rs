@@ -26,6 +26,10 @@ pub enum ReplicatorMessage {
     /// The replicator encountered an error that caused it to restart, but the error could be
     /// recoverable. The controller is notified so that it can update status for the user.
     RecoverableError(ReadySetError),
+    /// The controller requested that the replicator enter maintenance mode
+    EnterMaintenanceMode,
+    /// The controller requested that the replicator exit maintenance mode
+    ExitMaintenanceMode,
 }
 
 /// Event notification sent from the controller to the replicator

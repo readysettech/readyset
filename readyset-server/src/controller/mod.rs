@@ -380,6 +380,9 @@ pub struct Controller {
     /// Whether we are the leader and ready to handle requests.
     leader_ready: Arc<AtomicBool>,
 
+    /// Whether we are in maintenance mode
+    maintenance_mode: Arc<AtomicBool>,
+
     /// Cache ddl statements to re-run after a backwards incompatible upgrade, if relevant
     cache_ddl: Option<Vec<CacheDDLRequest>>,
 
@@ -426,6 +429,7 @@ impl Controller {
             worker_descriptor,
             config,
             leader_ready: Arc::new(AtomicBool::new(false)),
+            maintenance_mode: Arc::new(AtomicBool::new(false)),
             replicator_channel: ReplicatorChannel::new(),
             controller_channel: ControllerChannel::new(),
             telemetry_sender,
@@ -534,6 +538,7 @@ impl Controller {
                     self.config.worker_request_timeout,
                     self.config.background_recovery_interval,
                     self.controller_channel.sender(),
+                    self.replicator_channel.sender(),
                 );
                 self.leader_ready.store(false, Ordering::Release);
 
@@ -600,6 +605,7 @@ impl Controller {
         );
 
         let leader_ready = self.leader_ready.clone();
+        let maintenance_mode = self.maintenance_mode.clone();
         loop {
             // There is either...
             let running_recovery = self
@@ -644,11 +650,13 @@ impl Controller {
                 req = self.http_rx.recv() => {
                     if let Some(req) = req {
                         let leader_ready = leader_ready.load(Ordering::Acquire);
+                        let maintenance_mode = maintenance_mode.load(Ordering::Acquire);
                         tokio::spawn(handle_controller_request(
                             req,
                             self.authority.clone(),
                             self.inner.clone(),
-                            leader_ready
+                            leader_ready,
+                            maintenance_mode,
                         ));
                     }
                     else {
@@ -691,6 +699,12 @@ impl Controller {
                     match req {
                         Some(msg) => match msg {
                             ReplicatorMessage::UnrecoverableError(e) => return Err(e),
+                            ReplicatorMessage::EnterMaintenanceMode => {
+                                self.maintenance_mode.store(true, Ordering::Release);
+                            }
+                            ReplicatorMessage::ExitMaintenanceMode => {
+                                self.maintenance_mode.store(false, Ordering::Release);
+                            }
                             ReplicatorMessage::SnapshotDone => {
                                 self.leader_ready.store(true, Ordering::Release);
 
@@ -1282,6 +1296,7 @@ async fn handle_controller_request(
     authority: Arc<Authority>,
     leader_handle: Arc<LeaderHandle>,
     leader_ready: bool,
+    maintenance_mode: bool,
 ) {
     let ControllerRequest {
         method,
@@ -1297,7 +1312,15 @@ async fn handle_controller_request(
         let resp = {
             if let Some(ref ci) = *guard {
                 Ok(ci
-                    .external_request(method, path.as_ref(), query, body, &authority, leader_ready)
+                    .external_request(
+                        method,
+                        path.as_ref(),
+                        query,
+                        body,
+                        &authority,
+                        leader_ready,
+                        maintenance_mode,
+                    )
                     .await)
             } else {
                 Err(ReadySetError::NotLeader)

@@ -1018,6 +1018,16 @@ impl NoriaConnector {
             .await?;
         Ok(QueryResult::Empty)
     }
+
+    pub(crate) async fn enter_maintenance_mode(&mut self) -> ReadySetResult<QueryResult<'static>> {
+        self.inner.get_mut()?.noria.enter_maintenance_mode().await?;
+        Ok(QueryResult::Empty)
+    }
+
+    pub(crate) async fn exit_maintenance_mode(&mut self) -> ReadySetResult<QueryResult<'static>> {
+        self.inner.get_mut()?.noria.exit_maintenance_mode().await?;
+        Ok(QueryResult::Empty)
+    }
 }
 
 impl NoriaConnector {

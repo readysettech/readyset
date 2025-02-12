@@ -12,6 +12,7 @@ use readyset_adapter::backend::{MigrationMode, QueryInfo};
 use readyset_adapter::proxied_queries_reporter::ProxiedQueriesReporter;
 use readyset_adapter::query_status_cache::{MigrationStyle, QueryStatusCache};
 use readyset_adapter::BackendBuilder;
+use readyset_client::status::CurrentStatus;
 use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::mysql_helpers::{last_query_info, MySQLAdapter};
 use readyset_client_test_helpers::{sleep, TestBuilder};
@@ -1889,8 +1890,11 @@ async fn show_readyset_status() {
     assert_eq!(row.get::<String, _>(0).unwrap(), "Connection Count");
     assert_eq!(row.get::<String, _>(1).unwrap(), "0");
     let row = ret.remove(0);
-    assert_eq!(row.get::<String, _>(0).unwrap(), "Snapshot Status");
-    assert_eq!(row.get::<String, _>(1).unwrap(), "Completed");
+    assert_eq!(row.get::<String, _>(0).unwrap(), "Status");
+    assert_eq!(
+        row.get::<String, _>(1).unwrap(),
+        CurrentStatus::Online.to_string()
+    );
     let row = ret.remove(0);
     assert_eq!(
         row.get::<String, _>(0).unwrap(),
@@ -1912,8 +1916,40 @@ async fn show_readyset_status() {
     let row = ret.remove(0);
     assert_eq!(row.get::<String, _>(0).unwrap(), "Last started replication");
     assert!(valid_timestamp(row.get::<String, _>(1).unwrap()));
-
+    readyset_maintenance_mode(&mut conn).await;
     shutdown_tx.shutdown().await;
+}
+
+async fn readyset_maintenance_mode(conn: &mut mysql_async::Conn) {
+    conn.query_drop("ALTER READYSET ENTER MAINTENANCE MODE;")
+        .await
+        .unwrap();
+    sleep().await;
+    let ret: Vec<mysql::Row> = conn.query("SHOW READYSET STATUS;").await.unwrap();
+    assert_eq!(ret.len(), 8);
+    // find the row with "Status"
+    let row = ret
+        .iter()
+        .find(|r| r.get::<String, _>(0).unwrap() == "Status")
+        .unwrap();
+    assert_eq!(
+        row.get::<String, _>(1).unwrap(),
+        CurrentStatus::MaintenanceMode.to_string()
+    );
+    conn.query_drop("ALTER READYSET EXIT MAINTENANCE MODE;")
+        .await
+        .unwrap();
+    sleep().await;
+    let ret: Vec<mysql::Row> = conn.query("SHOW READYSET STATUS;").await.unwrap();
+    assert_eq!(ret.len(), 8);
+    let row = ret
+        .iter()
+        .find(|r| r.get::<String, _>(0).unwrap() == "Status")
+        .unwrap();
+    assert_eq!(
+        row.get::<String, _>(1).unwrap(),
+        CurrentStatus::Online.to_string()
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
