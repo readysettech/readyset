@@ -25,7 +25,7 @@ use readyset_sql::Dialect;
 /// When a replication event happens, the event is filtered based on its schema/table before being
 /// sent to readyset-server.
 #[derive(Debug, Clone)]
-pub(crate) struct TableFilter {
+pub struct TableFilter {
     /// A mapping of schema -> replication strategy for tables in that schema.
     strategy_by_schema: HashMap<SqlIdentifier, ReplicationStrategy>,
     /// Whether or not to allow schemas not already in the map.
@@ -139,7 +139,7 @@ impl TableFilter {
         }
     }
 
-    pub(crate) fn try_new(
+    pub fn try_new(
         dialect: Dialect,
         replication_tables: Option<&str>,
         replication_tables_ignore: Option<&str>,

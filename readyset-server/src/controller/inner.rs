@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use database_utils::UpstreamConfig;
+use database_utils::{DatabaseURL, UpstreamConfig};
 use dataflow::DomainIndex;
 use failpoint_macros::failpoint;
 use futures::future::Fuse;
@@ -29,6 +29,7 @@ use readyset_client::status::{ReadySetControllerStatus, SnapshotStatus};
 use readyset_client::{GraphvizOptions, ViewCreateRequest, WorkerDescriptor};
 use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
 use readyset_sql::ast::Relation;
+use readyset_sql::Dialect;
 use readyset_telemetry_reporter::TelemetrySender;
 #[cfg(feature = "failure_injection")]
 use readyset_util::failpoints;
@@ -37,6 +38,7 @@ use readyset_util::shutdown::ShutdownReceiver;
 use readyset_util::time_scope;
 use readyset_version::RELEASE_VERSION;
 use replication_offset::ReplicationOffset;
+use replicators::table_filter::TableFilter;
 use replicators::{ControllerMessage, ReplicatorMessage};
 use reqwest::Url;
 use slotmap::{DefaultKey, Key, KeyData, SlotMap};
@@ -173,6 +175,36 @@ impl Leader {
             info!("No primary instance specified");
             return;
         }
+        let url: DatabaseURL = match self.replicator_config.get_cdc_db_url() {
+            Ok(url) => url,
+            Err(e) => {
+                error!("Error in replication config: {e}");
+                if let Err(e) = notification_channel.send(ReplicatorMessage::UnrecoverableError(e))
+                {
+                    error!("Failed to notify controller of replication config error: {e}");
+                }
+                return;
+            }
+        };
+        let mut table_filter = match TableFilter::try_new(
+            url.dialect(),
+            self.replicator_config.replication_tables.as_deref(),
+            self.replicator_config.replication_tables_ignore.as_deref(),
+            match url.dialect() {
+                Dialect::MySQL => url.db_name(),
+                Dialect::PostgreSQL => None,
+            },
+        ) {
+            Ok(table_filter) => table_filter,
+            Err(e) => {
+                error!("Error in replication filter config: {e}");
+                if let Err(e) = notification_channel.send(ReplicatorMessage::UnrecoverableError(e))
+                {
+                    error!("Failed to notify controller of replication filter config error: {e}");
+                }
+                return;
+            }
+        };
 
         let authority = Arc::clone(&self.authority);
         let replicator_restart_timeout = self.replicator_config.replicator_restart_timeout;
@@ -195,6 +227,8 @@ impl Leader {
                     match replicators::NoriaAdapter::start(
                         noria,
                         &config,
+                        &url,
+                        &mut table_filter,
                         &notification_channel,
                         &mut controller_channel,
                         telemetry_sender.clone(),
