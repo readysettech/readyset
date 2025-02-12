@@ -107,12 +107,12 @@ impl<'ast> VisitorMut<'ast> for ExpandImpliedTablesVisitor<'_> {
         let orig_subquery_schemas = mem::replace(
             &mut self.subquery_schemas,
             util::subquery_schemas(
-                &select_statement.tables,
-                &select_statement.ctes,
-                &select_statement.join,
+                &mut select_statement.tables,
+                &mut select_statement.ctes,
+                &mut select_statement.join,
             )?
             .into_iter()
-            .map(|(k, v)| (k.into(), v.into_iter().map(|s| s.into()).collect()))
+            .map(|(k, v)| (k.into(), v.into_iter().cloned().collect()))
             .collect(),
         );
         let orig_aliases = mem::replace(

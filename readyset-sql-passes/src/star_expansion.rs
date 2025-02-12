@@ -35,16 +35,22 @@ impl<'ast> VisitorMut<'ast> for ExpandStarsVisitor<'_> {
         visit_mut::walk_select_statement(self, select_statement)?;
 
         let fields = mem::take(&mut select_statement.fields);
-        let subquery_schemas = util::subquery_schemas(
-            &select_statement.tables,
-            &select_statement.ctes,
-            &select_statement.join,
-        )?;
+
+        let subquery_schemas: HashMap<_, Vec<SqlIdentifier>> = util::subquery_schemas(
+            &mut select_statement.tables,
+            &mut select_statement.ctes,
+            &mut select_statement.join,
+        )?
+        .into_iter()
+        .map(|(k, v)| (k.clone(), v.into_iter().cloned().collect()))
+        .collect();
 
         let expand_table = |table: Relation, alias: Option<SqlIdentifier>| -> ReadySetResult<_> {
             Ok(if table.schema.is_none() {
                 // Can only reference subqueries with tables that don't have a schema
-                subquery_schemas.get(&table.name).cloned()
+                subquery_schemas
+                    .get(&table.name)
+                    .map(|fs| fs.iter().collect::<Vec<_>>())
             } else {
                 None
             }
@@ -188,13 +194,6 @@ mod tests {
         );
     }
 
-    #[track_caller]
-    fn expand_stars_err(source: &str, schema: HashMap<Relation, Vec<SqlIdentifier>>) {
-        let q = parse_query(Dialect::MySQL, source).unwrap();
-        let res = q.expand_stars(&schema, &Default::default());
-        assert!(res.is_err());
-    }
-
     #[test]
     fn single_table() {
         expands_stars(
@@ -311,15 +310,20 @@ mod tests {
     #[test]
     fn star_with_complex_subquery() {
         expands_stars(
-            "SELECT * FROM (SELECT t1.x + 1 AS a FROM t1) sq",
-            "SELECT sq.a FROM (SELECT t1.x + 1 AS a FROM t1) sq",
+            "SELECT * FROM (SELECT t1.x + 1 FROM t1) sq",
+            "SELECT `sq`.`x + 1` FROM (SELECT t1.x + 1 AS `x + 1` FROM t1) sq",
             HashMap::from([("t1".into(), vec!["x".into()])]),
         );
 
-        // We currently require all cols (that are not direct col references)
-        // produced by subqueries to have aliases
-        expand_stars_err(
-            "SELECT * FROM (SELECT t1.x + 1 FROM t1) sq",
+        expands_stars(
+            "SELECT * FROM (SELECT max(a) FROM t1) sq",
+            "SELECT `sq`.`max(a)` FROM (SELECT max(a) AS `max(a)` FROM t1) sq",
+            HashMap::from([("t1".into(), vec!["x".into()])]),
+        );
+
+        expands_stars(
+            "SELECT * FROM (SELECT max(a) AS a FROM t1) sq",
+            "SELECT sq.a FROM (SELECT max(a) AS a FROM t1) sq",
             HashMap::from([("t1".into(), vec!["x".into()])]),
         );
     }
