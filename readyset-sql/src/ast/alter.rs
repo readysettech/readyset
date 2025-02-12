@@ -196,6 +196,8 @@ pub struct AddTablesStatement {
 pub enum AlterReadysetStatement {
     ResnapshotTable(ResnapshotTableStatement),
     AddTables(AddTablesStatement),
+    EnterMaintenanceMode,
+    ExitMaintenanceMode,
 }
 
 impl DialectDisplay for AlterReadysetStatement {
@@ -210,6 +212,12 @@ impl DialectDisplay for AlterReadysetStatement {
                     "ADD TABLEs {}",
                     stmt.tables.iter().map(|t| t.display(dialect)).join(", ")
                 )
+            }
+            Self::EnterMaintenanceMode => {
+                write!(f, "ENTER MAINTENANCE MODE")
+            }
+            Self::ExitMaintenanceMode => {
+                write!(f, "EXIT MAINTENANCE MODE")
             }
         })
     }

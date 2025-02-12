@@ -476,6 +476,16 @@ impl ReadySetHandle {
         add_filter_tables(tables: Vec<&Relation>) -> ()
     );
 
+    simple_request!(
+        /// Enter maintenance mode
+        enter_maintenance_mode() -> ()
+    );
+
+    simple_request!(
+        /// Exit maintenance mode
+        exit_maintenance_mode() -> ()
+    );
+
     /// Return a list of all relations (tables or views) which are known to exist in the upstream
     /// database that we are replicating from, but are not being replicated to ReadySet (which are
     /// recorded via [`Change::AddNonReplicatedRelation`]).
