@@ -20,7 +20,6 @@ use readyset_client::{ReadySetHandle, Table, TableOperation};
 use readyset_data::Dialect;
 use readyset_errors::{internal_err, set_failpoint_return_err, ReadySetError, ReadySetResult};
 use readyset_sql::ast::{NonReplicatedRelation, NotReplicatedReason, Relation};
-use readyset_sql::Dialect as SQLDialect;
 use readyset_sql::DialectDisplay;
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
 #[cfg(feature = "failure_injection")]
@@ -88,14 +87,7 @@ pub(crate) trait Connector {
 /// Cleans up replication related assets on the upstream database as supplied by the
 /// UpstreamConfig.
 pub async fn cleanup(config: UpstreamConfig) -> ReadySetResult<()> {
-    if let DatabaseURL::PostgreSQL(options) = config
-        .get_cdc_db_url()
-        .ok_or_else(|| internal_err!("Replication URL not supplied"))?
-        .parse()
-        .map_err(|e| {
-            ReadySetError::UrlParseFailed(format!("Invalid URL supplied to --upstream-db-url: {e}"))
-        })?
-    {
+    if let DatabaseURL::PostgreSQL(options) = config.get_cdc_db_url()? {
         let connector = {
             let mut builder = native_tls::TlsConnector::builder();
             if config.disable_upstream_ssl_verification {
@@ -167,9 +159,12 @@ pub struct NoriaAdapter<'a> {
 }
 
 impl<'a> NoriaAdapter<'a> {
+    #[allow(clippy::too_many_arguments)]
     pub async fn start(
         noria: ReadySetHandle,
         config: &UpstreamConfig,
+        url: &DatabaseURL,
+        table_filter: &mut TableFilter,
         notification_channel: &UnboundedSender<ReplicatorMessage>,
         controller_channel: &mut UnboundedReceiver<ControllerMessage>,
         telemetry_sender: TelemetrySender,
@@ -180,25 +175,6 @@ impl<'a> NoriaAdapter<'a> {
         // replication-tables config parameter.
         let mut resnapshot = server_startup;
         let mut full_snapshot = false;
-        let url: DatabaseURL = config
-            .get_cdc_db_url()
-            .ok_or_else(|| internal_err!("Replication URL not supplied"))?
-            .parse()
-            .map_err(|e| {
-                ReadySetError::UrlParseFailed(format!(
-                    "Invalid URL supplied to --upstream-db-url: {e}"
-                ))
-            })?;
-
-        let mut table_filter = TableFilter::try_new(
-            url.dialect(),
-            config.replication_tables.as_deref(),
-            config.replication_tables_ignore.as_deref(),
-            match url.dialect() {
-                SQLDialect::MySQL => url.db_name(),
-                SQLDialect::PostgreSQL => None,
-            },
-        )?;
         loop {
             let Err(err) = match url.clone() {
                 DatabaseURL::MySQL(options) => {
@@ -213,7 +189,7 @@ impl<'a> NoriaAdapter<'a> {
                         &telemetry_sender,
                         enable_statement_logging,
                         full_snapshot,
-                        &mut table_filter,
+                        table_filter,
                     )
                     .await
                 }
@@ -257,7 +233,7 @@ impl<'a> NoriaAdapter<'a> {
                         pool,
                         repl_slot_name,
                         enable_statement_logging,
-                        &mut table_filter,
+                        table_filter,
                     )
                     .await
                 }

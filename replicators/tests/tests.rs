@@ -23,6 +23,7 @@ use readyset_util::eventually;
 use readyset_util::redacted::RedactedString;
 use readyset_util::shutdown::ShutdownSender;
 use replicators::db_util::error_is_slot_not_found;
+use replicators::table_filter::TableFilter;
 use replicators::{ControllerMessage, NoriaAdapter, ReplicatorMessage};
 use test_utils::{serial, slow};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -357,14 +358,17 @@ impl TestHandle {
             UnboundedReceiver<ControllerMessage>,
         ) = tokio::sync::mpsc::unbounded_channel();
         self.notification_channel = Some(receiver);
+        let mut table_filter = TableFilter::try_new(self.dialect.into(), None, None, None)?;
         runtime.spawn(async move {
             let Err(error) = NoriaAdapter::start(
                 controller,
                 &Config {
                     upstream_db_url: Some(url.clone()),
-                    cdc_db_url: Some(url),
+                    cdc_db_url: Some(url.clone()),
                     ..config.unwrap_or_default()
                 },
+                &url.parse().unwrap(),
+                &mut table_filter,
                 sender,
                 &mut controll_receiver,
                 telemetry_sender,

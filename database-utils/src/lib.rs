@@ -188,13 +188,22 @@ impl UpstreamConfig {
     ///
     /// # Output
     ///
-    /// - An `Option<RedactedString>` representing the cdc db url if it is set, otherwise the
-    ///   upstream db url
-    pub fn get_cdc_db_url(&self) -> Option<RedactedString> {
-        match self.cdc_db_url.as_ref() {
-            Some(url) => Some(url.clone()),
-            None => self.upstream_db_url.clone(),
-        }
+    /// - A `Result<DatabaseURL>` representing the cdc db url if it is set, otherwise the
+    ///   upstream db url; returns an error if the url is invalid.
+    pub fn get_cdc_db_url(&self) -> ReadySetResult<DatabaseURL> {
+        let (arg, url) = if let Some(url) = &self.cdc_db_url {
+            ("--cdc-db-url", url)
+        } else if let Some(url) = &self.upstream_db_url {
+            ("--upstream-db-url", url)
+        } else {
+            return Err(ReadySetError::UrlParseFailed(
+                "Please provide --cdc-db-url or --upstream-db-url".to_string(),
+            ));
+        };
+
+        url.parse().map_err(|e| {
+            ReadySetError::UrlParseFailed(format!("Invalid URL supplied to {arg}: {e}"))
+        })
     }
 
     pub fn from_url<S: AsRef<str>>(url: S) -> Self {
@@ -381,7 +390,7 @@ impl Display for DatabaseType {
 /// [`DatabaseURL`]s can be constructed directly via the [`From`] implementations, or parsed from a
 /// database URL using the [`FromStr`] implementation. A [`DatabaseConnection`] can be built from a
 /// [`DatabaseURL`] via the [`connect` method](Self::connect).
-#[derive(Debug, Clone, From)]
+#[derive(Eq, PartialEq, Debug, Clone, From)]
 #[allow(clippy::large_enum_variant)]
 pub enum DatabaseURL {
     MySQL(mysql_async::Opts),

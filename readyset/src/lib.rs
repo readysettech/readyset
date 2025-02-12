@@ -447,11 +447,7 @@ impl Options {
     fn check_replication_and_cdc_urls(&self) -> anyhow::Result<()> {
         if let Some(url) = &self.server_worker_options.replicator_config.upstream_db_url {
             let inferred = self.infer_database_type_from_url(url)?;
-            if let Some(cdc_url) = &self
-                .server_worker_options
-                .replicator_config
-                .get_cdc_db_url()
-            {
+            if let Some(cdc_url) = &self.server_worker_options.replicator_config.cdc_db_url {
                 let cdc_inferred = self.infer_database_type_from_url(cdc_url)?;
                 if inferred != cdc_inferred {
                     bail!(
@@ -1460,12 +1456,18 @@ mod tests {
             "--upstream-db-url",
             "mysql://root:password@mysql:3306/readyset",
         ]);
-        let _ = opts.database_type();
         assert_eq!(
-            opts.server_worker_options.replicator_config.upstream_db_url,
+            opts.server_worker_options
+                .replicator_config
+                .upstream_db_url
+                .as_ref()
+                .unwrap()
+                .parse::<DatabaseURL>()
+                .unwrap(),
             opts.server_worker_options
                 .replicator_config
                 .get_cdc_db_url()
+                .unwrap()
         );
 
         let opts = Options::parse_from(vec![
@@ -1476,7 +1478,6 @@ mod tests {
             "mysql://replication:rpl_pwd@mysql:3306/my_app",
         ]);
 
-        let _ = opts.database_type();
         let upstream = opts
             .server_worker_options
             .replicator_config
@@ -1492,7 +1493,7 @@ mod tests {
         let r_upstream: RedactedString = "mysql://app_user:app_password@mysql:3306/my_app"
             .parse()
             .unwrap();
-        let r_cdc: RedactedString = "mysql://replication:rpl_pwd@mysql:3306/my_app"
+        let r_cdc: DatabaseURL = "mysql://replication:rpl_pwd@mysql:3306/my_app"
             .parse()
             .unwrap();
         assert_eq!(*upstream, r_upstream);
