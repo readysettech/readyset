@@ -90,7 +90,7 @@ pub enum MetricGoal {
 pub struct BenchmarkData {
     pub unit: String,
     pub desired_action: MetricGoal,
-    pub values: Vec<f64>,
+    pub values: Histogram<u64>,
 }
 
 impl BenchmarkData {
@@ -98,28 +98,17 @@ impl BenchmarkData {
         Self {
             unit: format!("{:?}", unit),
             desired_action,
-            values: vec![],
+            // TODO(jeb) why 3?
+            values: Histogram::<u64>::new(3).unwrap(),
         }
     }
 
-    pub fn push(&mut self, value: f64) {
-        self.values.push(value);
+    pub fn push(&mut self, value: u64) {
+        self.values.record(value).unwrap();
     }
 
-    pub fn to_histogram(&self, lower: f64, upper: f64) -> Histogram<u64> {
-        let mut data = self.values.clone();
-        data.sort_unstable_by(|a, b| {
-            // We shouldn't have any NaNs/infs
-            a.partial_cmp(b).unwrap()
-        });
-        let data = &data
-            [(((data.len() as f64) * lower) as usize)..(((data.len() as f64) * upper) as usize)];
-
-        let mut hist = Histogram::<u64>::new(3).unwrap();
-        for value in data.iter().copied() {
-            hist.record(value as u64).unwrap();
-        }
-        hist
+    pub fn to_histogram(&self) -> Histogram<u64> {
+        self.values.clone()
     }
 }
 
@@ -135,43 +124,19 @@ impl BenchmarkResults {
         }
     }
 
-    pub fn entry(
+    pub fn push(
         &mut self,
         key: &str,
         unit: metrics::Unit,
         desired_action: MetricGoal,
-    ) -> &mut Vec<f64> {
-        &mut self
-            .results
-            .entry(key.to_string())
-            .or_insert_with(|| BenchmarkData::new(unit, desired_action))
-            .values
-    }
-
-    pub fn push(&mut self, key: &str, unit: metrics::Unit, desired_action: MetricGoal, value: f64) {
+        hist: Histogram<u64>,
+    ) {
         self.results
             .entry(key.to_string())
             .or_insert_with(|| BenchmarkData::new(unit, desired_action))
-            .push(value);
-    }
-
-    #[must_use]
-    pub fn prefix(self, p: &str) -> Self {
-        Self {
-            results: self
-                .results
-                .into_iter()
-                .map(|(k, v)| (format!("{}_{}", p, k), v))
-                .collect(),
-        }
-    }
-
-    pub fn merge(input: Vec<BenchmarkResults>) -> Self {
-        let mut results = HashMap::new();
-        for r in input {
-            results.extend(r.results);
-        }
-        BenchmarkResults { results }
+            .values
+            .add(hist)
+            .unwrap();
     }
 }
 

@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 
 use clap::{Parser, ValueEnum};
 use database_utils::{DatabaseConnection, DatabaseStatement, DatabaseType, QueryableConnection};
+use hdrhistogram::Histogram;
 use metrics::Unit;
 use rand::distributions::Uniform;
 use rand_distr::weighted_alias::WeightedAliasIndex;
@@ -30,9 +31,8 @@ use crate::utils::generate::DataGenerator;
 use crate::utils::multi_thread::{self, MultithreadBenchmark};
 use crate::utils::query::interpolate_params;
 use crate::utils::us_to_ms;
-use crate::{benchmark_counter, benchmark_histogram, benchmark_increment_counter};
 
-const REPORT_RESULTS_INTERVAL: Duration = Duration::from_secs(2);
+const REPORT_RESULTS_INTERVAL: Duration = Duration::from_millis(500);
 
 pub type Distributions = HashMap<String, Arc<(Vec<Vec<DfValue>>, Sampler)>>;
 
@@ -139,27 +139,17 @@ pub(crate) struct ColGenerator {
     pub(crate) col: usize,
 }
 
-#[derive(Debug, Clone, Copy)]
-struct WorkloadResult {
-    /// u32 should suffice for any practical benchmark we run
-    latency_us: u32,
-    /// Probably not gonna run benchmarks with billions of queries
-    query_id: u32,
-}
-
 #[derive(Debug, Clone)]
 /// A batched set of results sent on an interval by the read benchmark thread.
 pub(crate) struct WorkloadResultBatch {
     /// Number of queries tested
-    n: usize,
-    queries: Vec<WorkloadResult>,
+    queries: Vec<Histogram<u64>>,
 }
 
 impl WorkloadResultBatch {
     fn new(n: usize) -> Self {
         Self {
-            n,
-            queries: Vec::new(),
+            queries: vec![Histogram::<u64>::new(3).unwrap(); n],
         }
     }
 }
@@ -220,12 +210,6 @@ impl BenchmarkControl for WorkloadEmulator {
             target_qps: self.target_qps,
             workers: self.workers,
         };
-
-        benchmark_counter!(
-            "workload_emulator.total_query_count",
-            Count,
-            "Total number of queries executed in this benchmark run".into()
-        );
 
         multi_thread::run_multithread_benchmark::<Self>(
             self.workers,
@@ -389,77 +373,52 @@ impl MultithreadBenchmark for WorkloadEmulator {
         interval: std::time::Duration,
         benchmark_results: &mut BenchmarkResults,
     ) -> anyhow::Result<()> {
-        let mut hist = hdrhistogram::Histogram::<u64>::new(3).unwrap();
-
-        let mut per_query_hist = match results.first() {
-            Some(r) => std::iter::repeat(hdrhistogram::Histogram::<u64>::new(3).unwrap())
-                .take(r.n)
-                .collect::<Vec<_>>(),
-            None => return Ok(()),
-        };
-
-        let mut overall = vec![];
-        let mut per_query: HashMap<u32, Vec<f64>> = HashMap::new();
-        for u in results {
-            for WorkloadResult {
-                query_id,
-                latency_us,
-            } in u.queries
-            {
-                overall.push(latency_us as f64);
-                per_query
-                    .entry(query_id)
-                    .or_default()
-                    .push(latency_us as f64);
-                hist.record(latency_us as _).unwrap();
-                per_query_hist[query_id as usize]
-                    .record(latency_us as _)
-                    .unwrap();
-                benchmark_histogram!(
-                    format!("workload_emulator.query_{}_duration", query_id),
-                    Microseconds,
-                    format!("Duration of query {}", query_id).into(),
-                    latency_us as f64
-                );
+        let mut overall = hdrhistogram::Histogram::<u64>::new(3).unwrap();
+        let mut per_query =
+            vec![hdrhistogram::Histogram::<u64>::new(3).unwrap(); results[0].queries.len()];
+        for result in &results {
+            for (i, query) in result.queries.iter().enumerate() {
+                overall.add(query).unwrap();
+                per_query[i].add(query).unwrap();
             }
         }
-        benchmark_results
-            .entry(
-                "duration_overall",
+
+        benchmark_results.push(
+            "duration_overall",
+            Unit::Microseconds,
+            MetricGoal::Decreasing,
+            overall.clone(),
+        );
+        for (i, query) in per_query.iter().enumerate() {
+            benchmark_results.push(
+                &format!("duration_{}", i),
                 Unit::Microseconds,
                 MetricGoal::Decreasing,
-            )
-            .extend(overall);
-        for (query_id, data) in per_query {
-            benchmark_results
-                .entry(
-                    &format!("duration_{}", query_id),
-                    Unit::Microseconds,
-                    MetricGoal::Decreasing,
-                )
-                .extend(data);
+                query.clone(),
+            );
         }
 
-        let qps = hist.len() as f64 / interval.as_secs() as f64;
-        benchmark_increment_counter!("workload_emulator.total_query_count", Count, qps as u64);
+        let qps = overall.len() as f64 / interval.as_secs() as f64;
         info!(
-            "overall -\tqps: {:.0}\tp50: {:.1} ms\tp90: {:.1} ms\tp99: {:.1} ms\tp99.9: {:.1} ms",
-            qps,
-            us_to_ms(hist.value_at_quantile(0.5)),
-            us_to_ms(hist.value_at_quantile(0.9)),
-            us_to_ms(hist.value_at_quantile(0.99)),
-            us_to_ms(hist.value_at_quantile(0.999))
+            "overall -\tqps: {qps:.0}\tp50: {:.1} ms\tp90: {:.1} ms\tp99: {:.1} ms\tp99.9: {:.1} ms",
+            us_to_ms(overall.value_at_quantile(0.5)),
+            us_to_ms(overall.value_at_quantile(0.9)),
+            us_to_ms(overall.value_at_quantile(0.99)),
+            us_to_ms(overall.value_at_quantile(0.999))
         );
 
-        for (i, hist) in per_query_hist.into_iter().enumerate() {
-            let qps = hist.len() as f64 / interval.as_secs() as f64;
-            info!(
-                "  query {i} -\tqps: {qps:.0}\tp50: {:.1} ms\tp90: {:.1} ms\tp99: {:.1} ms\tp99.9: {:.1} ms",
-                us_to_ms(hist.value_at_quantile(0.5)),
-                us_to_ms(hist.value_at_quantile(0.9)),
-                us_to_ms(hist.value_at_quantile(0.99)),
-                us_to_ms(hist.value_at_quantile(0.999))
-            );
+        // only print out per-query stats if there are multiple queries.
+        if per_query.len() > 1 {
+            for (i, query) in per_query.iter().enumerate() {
+                let qps = query.len() as f64 / interval.as_secs() as f64;
+                info!(
+                    "query {i} -\tqps: {qps:.0}\tp50: {:.1} ms\tp90: {:.1} ms\tp99: {:.1} ms\tp99.9: {:.1} ms",
+                    us_to_ms(query.value_at_quantile(0.5)),
+                    us_to_ms(query.value_at_quantile(0.9)),
+                    us_to_ms(query.value_at_quantile(0.99)),
+                    us_to_ms(query.value_at_quantile(0.999))
+                );
+            }
         }
 
         Ok(())
@@ -536,10 +495,9 @@ impl MultithreadBenchmark for WorkloadEmulator {
                 }
             };
 
-            result_batch.queries.push(WorkloadResult {
-                query_id: query.idx as _,
-                latency_us: duration.as_micros() as _,
-            });
+            result_batch.queries[query.idx]
+                .record(duration.as_micros() as u64)
+                .unwrap();
         }
     }
 }

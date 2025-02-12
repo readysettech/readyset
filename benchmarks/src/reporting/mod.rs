@@ -71,8 +71,7 @@ pub async fn report(
         .results
         .iter()
         .map(|(k, v)| {
-            // Take the middle 80%
-            let histogram = v.to_histogram(0.1, 0.9);
+            let histogram = v.to_histogram();
             ProcessedData::new(
                 k.to_string(),
                 v.unit.to_string(),
