@@ -10,10 +10,37 @@ use readyset_errors::ReadySetError;
 use readyset_sql::ast::{SqlIdentifier, StartTransactionStatement};
 use tracing::debug;
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum UpstreamStatementId {
+    /// A reusable id of a statement that has been prepared in an [`UpstreamDatabase`]
+    Prepared(u32),
+    /// A statement that has not been prepared in an [`UpstreamDatabase`]. The intended use case
+    /// for this is (postgres) unnamed prepared statements.
+    Unprepared(String),
+}
+
+impl From<u32> for UpstreamStatementId {
+    fn from(id: u32) -> Self {
+        UpstreamStatementId::Prepared(id)
+    }
+}
+
+impl From<String> for UpstreamStatementId {
+    fn from(id: String) -> Self {
+        UpstreamStatementId::Unprepared(id)
+    }
+}
+
 /// Information about a statement that has been prepared in an [`UpstreamDatabase`]
 pub struct UpstreamPrepare<DB: UpstreamDatabase> {
-    pub statement_id: u32,
+    pub statement_id: UpstreamStatementId,
     pub meta: DB::StatementMeta,
+}
+
+impl<DB: UpstreamDatabase> UpstreamPrepare<DB> {
+    pub fn make_unnamed(&mut self, query: &str) {
+        self.statement_id = UpstreamStatementId::Unprepared(query.to_string());
+    }
 }
 
 impl<DB: UpstreamDatabase> Debug for UpstreamPrepare<DB> {
@@ -28,7 +55,7 @@ impl<DB: UpstreamDatabase> Debug for UpstreamPrepare<DB> {
 impl<DB: UpstreamDatabase> Clone for UpstreamPrepare<DB> {
     fn clone(&self) -> Self {
         UpstreamPrepare {
-            statement_id: self.statement_id,
+            statement_id: self.statement_id.clone(),
             meta: self.meta.clone(),
         }
     }
@@ -153,7 +180,7 @@ pub trait UpstreamDatabase: Sized + Send {
     /// [`Backend::execute`](readyset_client::Backend::execute)
     async fn execute<'a>(
         &'a mut self,
-        statement_id: u32,
+        statement_id: &UpstreamStatementId,
         params: &[DfValue],
         exec_meta: Self::ExecMeta<'_>,
     ) -> Result<Self::QueryResult<'a>, Self::Error>;
@@ -330,7 +357,7 @@ where
 
     async fn execute<'a>(
         &'a mut self,
-        statement_id: u32,
+        statement_id: &UpstreamStatementId,
         params: &[DfValue],
         exec_meta: Self::ExecMeta<'_>,
     ) -> Result<Self::QueryResult<'a>, Self::Error> {

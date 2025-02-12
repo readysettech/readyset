@@ -11,7 +11,7 @@ use mysql_async::{
     UrlError,
 };
 use pin_project::pin_project;
-use readyset_adapter::upstream_database::UpstreamDestination;
+use readyset_adapter::upstream_database::{UpstreamDestination, UpstreamStatementId};
 use readyset_adapter::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
 use readyset_adapter_types::DeallocateId;
 use readyset_client_metrics::{recorded, QueryDestination};
@@ -303,7 +303,7 @@ impl UpstreamDatabase for MySqlUpstream {
             self.conn.close(old_stmt).await?;
         }
         Ok(UpstreamPrepare {
-            statement_id: statement.id(),
+            statement_id: statement.id().into(),
             meta: StatementMeta {
                 params: statement.params().to_owned(),
                 schema: statement.columns().to_owned(),
@@ -313,21 +313,29 @@ impl UpstreamDatabase for MySqlUpstream {
 
     async fn execute<'a>(
         &'a mut self,
-        id: u32,
+        id: &UpstreamStatementId,
         params: &[DfValue],
         _exec_meta: Self::ExecMeta<'_>,
     ) -> Result<Self::QueryResult<'a>, Error> {
-        let params = dt_to_value_params(params)?;
-        let result = self
-            .conn
-            .exec_iter(
-                self.prepared_statements.get(&id).ok_or(Error::ReadySet(
-                    ReadySetError::PreparedStatementMissing { statement_id: id },
-                ))?,
-                params,
-            )
-            .await?;
-        handle_query_result!(result)
+        match id {
+            UpstreamStatementId::Unprepared(_) => {
+                unsupported!("MySQL does not support unnamed prepared statements");
+            }
+            UpstreamStatementId::Prepared(id) => {
+                let params = dt_to_value_params(params)?;
+
+                let result = self
+                    .conn
+                    .exec_iter(
+                        self.prepared_statements.get(id).ok_or(Error::ReadySet(
+                            ReadySetError::PreparedStatementMissing { statement_id: *id },
+                        ))?,
+                        params,
+                    )
+                    .await?;
+                handle_query_result!(result)
+            }
+        }
     }
 
     async fn remove_statement(&mut self, statement_id: DeallocateId) -> Result<(), Self::Error> {

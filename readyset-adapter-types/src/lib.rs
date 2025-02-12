@@ -56,3 +56,9 @@ pub enum ParsedCommand {
     /// A `DEALLOCATE (PREPARE)` SQL command was invoked.
     Deallocate(DeallocateId),
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreparedStatementType {
+    Named,
+    Unnamed,
+}
