@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use anyhow::bail;
-use benchmarks::benchmark::{Benchmark, BenchmarkControl, BenchmarkResults, DeploymentParameters};
+use benchmarks::benchmark::{Benchmark, BenchmarkControl, DeploymentParameters};
 use benchmarks::reporting::ReportMode;
 use benchmarks::utils::readyset_ready;
 use benchmarks::{benchmark_histogram, QUANTILES};
@@ -168,7 +168,7 @@ impl BenchmarkRunner {
         Ok(handle)
     }
 
-    pub async fn run(&mut self) -> anyhow::Result<Vec<BenchmarkResults>> {
+    pub async fn run(&mut self) -> anyhow::Result<()> {
         // Initializes `DeploymentParameters` and `Benchmark` from the set of arguments passed by
         // the user. These arguments need not be passed by the arguments in the flattened structs
         // directly, and instead may be passed via YAML.
@@ -230,20 +230,21 @@ impl BenchmarkRunner {
                 .await?;
                 println!("Regression Analysis: {:?}", analysis);
             }
-            results.push(result);
+            results.push((result, duration));
         }
 
         println!("Benchmark Results -----------------------");
-        for (index, iteration) in results.iter().enumerate() {
+        for (index, (result, duration)) in results.iter().enumerate() {
             let iteration_num = index + 1;
             println!("Iteration {iteration_num} Results:");
-            for (metric, data) in &iteration.results {
-                let hist = data.to_histogram(0.0, 1.0);
+            for (metric, data) in &result.results {
+                let hist = data.to_histogram();
                 let samples = hist.len();
+                let qps = samples as f64 / duration.as_secs() as f64;
                 let min = hist.min();
                 let max = hist.max();
                 let mean = hist.mean();
-                print!("\t{metric} ({} - {:?} goal) - Samples: {samples} - Min: {min} - Max: {max} - Mean: {mean}", data.unit, data.desired_action);
+                print!("\t{metric} ({} - {:?} goal) - Average QPS: {qps} - Min: {min} - Max: {max} - Mean: {mean}", data.unit, data.desired_action);
                 for (label, quantile) in QUANTILES {
                     print!(" - {label}: {}", hist.value_at_quantile(*quantile));
                 }
@@ -270,7 +271,7 @@ impl BenchmarkRunner {
             shutdown_tx.shutdown().await;
         }
 
-        Ok(results)
+        Ok(())
     }
 }
 
