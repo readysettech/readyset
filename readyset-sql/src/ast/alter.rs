@@ -5,12 +5,26 @@ use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
-use crate::{ast::*, Dialect, DialectDisplay};
+use crate::{ast::*, AstConversionError, Dialect, DialectDisplay};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum AlterColumnOperation {
     SetColumnDefault(Literal),
     DropColumnDefault,
+}
+
+impl TryFrom<sqlparser::ast::AlterColumnOperation> for AlterColumnOperation {
+    type Error = AstConversionError;
+
+    fn try_from(value: sqlparser::ast::AlterColumnOperation) -> Result<Self, Self::Error> {
+        match value {
+            sqlparser::ast::AlterColumnOperation::SetDefault {
+                value: sqlparser::ast::Expr::Value(value),
+            } => Ok(Self::SetColumnDefault(value.into())),
+            sqlparser::ast::AlterColumnOperation::DropDefault => Ok(Self::DropColumnDefault),
+            _ => unsupported!("ALTER COLUMN operation {value}"),
+        }
+    }
 }
 
 impl DialectDisplay for AlterColumnOperation {
@@ -28,6 +42,15 @@ impl DialectDisplay for AlterColumnOperation {
 pub enum DropBehavior {
     Cascade,
     Restrict,
+}
+
+impl From<sqlparser::ast::DropBehavior> for DropBehavior {
+    fn from(value: sqlparser::ast::DropBehavior) -> Self {
+        match value {
+            sqlparser::ast::DropBehavior::Cascade => Self::Cascade,
+            sqlparser::ast::DropBehavior::Restrict => Self::Restrict,
+        }
+    }
 }
 
 impl fmt::Display for DropBehavior {
@@ -87,6 +110,68 @@ pub enum AlterTableDefinition {
      * AddTableConstraint(..),
      * TODO(aspen): https://ronsavage.github.io/SQL/sql-2003-2.bnf.html#drop%20table%20constraint%20definition
      * DropTableConstraint(..), */
+}
+
+impl TryFrom<sqlparser::ast::AlterTableOperation> for AlterTableDefinition {
+    type Error = AstConversionError;
+
+    fn try_from(value: sqlparser::ast::AlterTableOperation) -> Result<Self, Self::Error> {
+        use sqlparser::ast::AlterTableOperation::*;
+        match value {
+            AddColumn {
+                column_keyword: _,
+                if_not_exists: _,
+                column_def,
+                column_position: _,
+            } => Ok(Self::AddColumn(column_def.try_into()?)),
+            DropConstraint {
+                if_exists: _,
+                name,
+                drop_behavior,
+            } => Ok(Self::DropConstraint {
+                name: name.into(),
+                drop_behavior: drop_behavior.map(Into::into),
+            }),
+            DropColumn {
+                column_name,
+                if_exists: _,
+                drop_behavior,
+            } => Ok(Self::DropColumn {
+                name: column_name.into(),
+                behavior: drop_behavior.map(Into::into),
+            }),
+            RenameColumn {
+                old_column_name,
+                new_column_name,
+            } => Ok(Self::RenameColumn {
+                name: old_column_name.into(),
+                new_name: new_column_name.into(),
+            }),
+            ChangeColumn {
+                old_name,
+                new_name,
+                data_type,
+                options,
+                column_position: _,
+            } => Ok(Self::ChangeColumn {
+                name: old_name.into(),
+                spec: sqlparser::ast::ColumnDef {
+                    name: new_name,
+                    data_type,
+                    options: options
+                        .into_iter()
+                        .map(|option| sqlparser::ast::ColumnOptionDef { name: None, option })
+                        .collect(),
+                }
+                .try_into()?,
+            }),
+            AlterColumn { column_name, op } => Ok(Self::AlterColumn {
+                name: column_name.into(),
+                operation: op.try_into()?,
+            }),
+            _ => unsupported!("ALTER TABLE definition {value}"),
+        }
+    }
 }
 
 impl DialectDisplay for AlterTableDefinition {
@@ -155,6 +240,36 @@ pub struct AlterTableStatement {
     pub only: bool,
     pub algorithm: Option<String>,
     pub lock: Option<String>,
+}
+
+impl TryFrom<sqlparser::ast::Statement> for AlterTableStatement {
+    type Error = AstConversionError;
+
+    fn try_from(value: sqlparser::ast::Statement) -> Result<Self, Self::Error> {
+        if let sqlparser::ast::Statement::AlterTable {
+            name,
+            if_exists: _,
+            only,
+            operations,
+            location: _,
+            on_cluster: _,
+        } = value
+        {
+            Ok(Self {
+                table: name.into(),
+                definitions: Ok(operations
+                    .into_iter()
+                    .map(TryInto::try_into)
+                    .try_collect()?),
+                only,
+                // TODO: might need to fix sqlparser for algorithm and lock
+                algorithm: None,
+                lock: None,
+            })
+        } else {
+            failed!("Expected ALTER TABLE statement")
+        }
+    }
 }
 
 impl DialectDisplay for AlterTableStatement {
