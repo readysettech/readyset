@@ -152,6 +152,7 @@ impl TryFrom<sqlparser::ast::Statement> for SqlQuery {
             CreateType { .. } => Err(AstConversionError::Skipped(format!("CREATE TYPE: {value}"))),
             Rollback { .. } => Ok(Self::Rollback(RollbackStatement {})),
             Commit { .. } => Ok(Self::Commit(CommitStatement {})),
+            alter @ AlterTable { .. } => Ok(Self::AlterTable(alter.try_into()?)),
             _ => not_yet_implemented!("other query: {value:?}"),
         }
     }
