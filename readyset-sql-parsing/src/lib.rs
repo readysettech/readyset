@@ -33,6 +33,8 @@ fn sqlparser_dialect_from_readyset_dialect(
 enum ReadysetKeyword {
     CACHES,
     MIGRATION,
+    PROXIED,
+    QUERIES,
     READYSET,
     SIMPLIFIED,
 }
@@ -42,6 +44,8 @@ impl ReadysetKeyword {
         match self {
             Self::CACHES => "CACHES",
             Self::MIGRATION => "MIGRATION",
+            Self::PROXIED => "PROXIED",
+            Self::QUERIES => "QUERIES",
             Self::READYSET => "READYSET",
             Self::SIMPLIFIED => "SIMPLIFIED",
         }
@@ -193,12 +197,28 @@ fn parse_readyset_show(parser: &mut Parser) -> Result<SqlQuery, ReadysetParsingE
 
 /// Expects `DROP` was already parsed. Attempts to parse a Readyset-specific drop statement,
 /// otherwise falls back to [`Parser::parse_drop`].
+///
+/// DROP
+///   | ALL PROXIED QUERIES
+///   | ALL CACHES
+///   | CACHE <query_id>
 fn parse_readyset_drop(parser: &mut Parser) -> Result<SqlQuery, ReadysetParsingError> {
-    if parser.parse_keyword(Keyword::ALL) && parse_readyset_keyword(parser, ReadysetKeyword::CACHES)
-    {
-        Ok(SqlQuery::DropAllCaches(
-            readyset_sql::ast::DropAllCachesStatement {},
-        ))
+    if parser.parse_keyword(Keyword::ALL) {
+        if parse_readyset_keyword(parser, ReadysetKeyword::PROXIED)
+            && parse_readyset_keyword(parser, ReadysetKeyword::QUERIES)
+        {
+            Ok(SqlQuery::DropAllProxiedQueries(
+                readyset_sql::ast::DropAllProxiedQueriesStatement {},
+            ))
+        } else if parse_readyset_keyword(parser, ReadysetKeyword::CACHES) {
+            Ok(SqlQuery::DropAllCaches(
+                readyset_sql::ast::DropAllCachesStatement {},
+            ))
+        } else {
+            Err(ReadysetParsingError::ReadysetParsingError(
+                "expected ALL PROXIED QUERIES or ALL CACHES".into(),
+            ))
+        }
     } else if parser.parse_keyword(Keyword::CACHE) {
         let name = parser.parse_object_name(false)?.into();
         Ok(SqlQuery::DropCache(DropCacheStatement { name }))
