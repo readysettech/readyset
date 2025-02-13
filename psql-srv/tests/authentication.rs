@@ -14,6 +14,7 @@ use psql_srv::{
     PsqlValue, QueryResponse, TransferFormat,
 };
 use readyset_adapter_types::{DeallocateId, PreparedStatementType};
+use readyset_util::redacted::RedactedString;
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio_native_tls::{native_tls, TlsAcceptor};
@@ -41,6 +42,7 @@ impl PsqlBackend for ScramSha256Backend {
         "13.4 ReadySet".to_string()
     }
 
+    async fn set_auth_info(&mut self, _user: &str, _password: Option<RedactedString>) {}
     fn credentials_for_user(&self, user: &str) -> Option<Credentials> {
         if self.username == user {
             Some(Credentials::CleartextPassword(self.password))

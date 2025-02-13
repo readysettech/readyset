@@ -23,7 +23,7 @@ use readyset_adapter::upstream_database::LazyUpstream;
 use readyset_adapter_types::{DeallocateId, PreparedStatementType};
 use readyset_data::{DfType, DfValue, DfValueKind};
 use readyset_errors::{internal, ReadySetError};
-use readyset_util::redacted::Sensitive;
+use readyset_util::redacted::{RedactedString, Sensitive};
 use streaming_iterator::StreamingIterator;
 use tokio::io::{self, AsyncRead, AsyncWrite};
 use tracing::{error, info, trace};
@@ -719,6 +719,17 @@ where
             }
             execute_result => handle_execute_result(execute_result, results).await,
         }
+    }
+
+    async fn set_auth_info(
+        &mut self,
+        user: &str,
+        password: Option<RedactedString>,
+    ) -> io::Result<()> {
+        if let Some(password) = password {
+            let _ = self.set_user(user, password).await;
+        }
+        Ok(())
     }
 
     async fn on_init(&mut self, database: &str, w: Option<InitWriter<'_, S>>) -> io::Result<()> {

@@ -228,15 +228,10 @@ pub struct Options {
     #[arg(long, env = "METRICS_ADDRESS", default_value = "0.0.0.0:6034")]
     metrics_address: SocketAddr,
 
-    /// Allow database connections authenticated as this user. Defaults to the username in
-    /// --upstream-db-url if not set. Ignored if --allow-unauthenticated-connections is passed
-    #[arg(long, env = "ALLOWED_USERNAME", short = 'u', hide = true)]
-    username: Option<String>,
-
-    /// Password to authenticate database connections with. Defaults to the password in
-    /// --upstream-db-url if not set. Ignored if --allow-unauthenticated-connections is passed
-    #[arg(long, env = "ALLOWED_PASSWORD", short = 'p', hide = true)]
-    password: Option<RedactedString>,
+    /// Comma list of allowed usernames:passwords to authenticate database connections with.
+    /// If not set, the username and password in --upstream-db-url will be used.
+    #[arg(long, env = "ALLOWED_USERS")]
+    allowed_users: Option<RedactedString>,
 
     /// Enable recording and exposing Prometheus metrics
     #[arg(long, env = "PROMETHEUS_METRICS", default_value = "true", hide = true)]
@@ -522,12 +517,15 @@ where
 {
     if upstream_config.upstream_db_url.is_some() && !no_upstream_connections {
         set_failpoint!(failpoints::UPSTREAM);
-        timeout(UPSTREAM_CONNECTION_TIMEOUT, U::connect(upstream_config))
-            .instrument(debug_span!("Connecting to upstream database"))
-            .await
-            .map_err(|_| internal_err!("Connection timed out").into())
-            .and_then(|r| r)
-            .map(Some)
+        timeout(
+            UPSTREAM_CONNECTION_TIMEOUT,
+            U::connect(upstream_config, None, None),
+        )
+        .instrument(debug_span!("Connecting to upstream database"))
+        .await
+        .map_err(|_| internal_err!("Connection timed out").into())
+        .and_then(|r| r)
+        .map(Some)
     } else {
         Ok(None)
     }
@@ -653,47 +651,48 @@ where
 
         let users: &'static HashMap<String, String> = Box::leak(Box::new(
             if !options.allow_unauthenticated_connections {
-                HashMap::from([{
-                    let upstream_url = upstream_config
-                        .upstream_db_url
-                        .as_ref()
-                        .and_then(|s| s.parse::<DatabaseURL>().ok());
+                let upstream_url = upstream_config
+                    .upstream_db_url
+                    .as_ref()
+                    .and_then(|s| s.parse::<DatabaseURL>().ok());
+                // Parse allowed users from comma-separated "user:pass" pairs
+                let allowed_users = options.allowed_users.as_ref().map(|s| {
+                    s.as_str()
+                        .split(',')
+                        .try_fold(HashMap::new(), |mut acc, pair| {
+                            let mut parts = pair.trim().split(':');
+                            match (parts.next(), parts.next(), parts.next()) {
+                                (Some(user), Some(pass), None) if !user.is_empty() && !pass.is_empty() => {
+                                    acc.insert(user.to_string(), pass.to_string());
+                                    Ok(acc)
+                                }
+                                _ => bail!("Invalid user:password pair format. Expected format: user:password")
+                            }
+                        })
+                }).transpose()?;
 
-                    match (
-                        (options.username, options.password),
-                        (
-                            upstream_url.as_ref().and_then(|url| url.user()),
-                            upstream_url.as_ref().and_then(|url| url.password()),
-                        ),
-                    ) {
-                        // --username and --password
-                        ((Some(user), Some(pass)), _) => (user, pass.0),
-                        // --password, username from url
-                        ((None, Some(pass)), (Some(user), _)) => (user.to_owned(), pass.0),
-                        // username and password from url
-                        (_, (Some(user), Some(pass))) => (user.to_owned(), pass.to_owned()),
-                        _ => {
-                            if upstream_url.is_some() {
-                                bail!(
+                let mut allowed_users = allowed_users.unwrap_or_default();
+
+                let extra_users = match (
+                    upstream_url.as_ref().and_then(|url| url.user()),
+                    upstream_url.as_ref().and_then(|url| url.password()),
+                ) {
+                    (Some(user), Some(pass)) => (user.to_owned(), pass.to_owned()),
+                    _ => {
+                        bail!(
                                     "Failed to infer ReadySet username and password from \
                                     upstream DB URL. Please ensure they are present and \
                                     correctly formatted as follows: \
                                     <protocol>://<username>:<password>@<address>[:<port>][/<database>] \
                                     You can also configure ReadySet to accept credentials \
                                     different from those of your upstream database via \
-                                    --username/-u and --password/-p, or use \
+                                    --allowed-users, or use \
                                     --allow-unauthenticated-connections."
                                 )
-                            } else {
-                                bail!(
-                                    "Must specify --username/-u and --password/-p if one of \
-                                    --allow-unauthenticated-connections or --upstream-db-url is not \
-                                    passed"
-                                )
-                            }
-                        }
                     }
-                }])
+                };
+                allowed_users.insert(extra_users.0, extra_users.1);
+                allowed_users
             } else {
                 HashMap::new()
             },

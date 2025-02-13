@@ -32,7 +32,7 @@ impl Backend {
 
         match DatabaseURL::from_str(url)? {
             DatabaseURL::MySQL(_) => {
-                let upstream = MySqlUpstream::connect(upstream_config.clone()).await?;
+                let upstream = MySqlUpstream::connect(upstream_config.clone(), None, None).await?;
                 let status_reporter = ReadySetStatusReporter::new(
                     upstream_config.clone(),
                     noria.handle(),
@@ -56,7 +56,8 @@ impl Backend {
                 ))
             }
             DatabaseURL::PostgreSQL(_) => {
-                let upstream = PostgreSqlUpstream::connect(upstream_config.clone()).await?;
+                let upstream =
+                    PostgreSqlUpstream::connect(upstream_config.clone(), None, None).await?;
                 let status_reporter = ReadySetStatusReporter::new(
                     upstream_config.clone(),
                     noria.handle(),

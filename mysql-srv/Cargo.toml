@@ -31,6 +31,7 @@ tracing = { workspace = true }
 database-utils = { path = "../database-utils" }
 readyset-adapter-types = { path = "../readyset-adapter-types" }
 readyset-data = { path = "../readyset-data" }
+readyset-util = { path = "../readyset-util" }
 
 [dev-dependencies]
 tokio-postgres = { workspace = true }

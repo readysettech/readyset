@@ -16,6 +16,7 @@ readyset-data = { path = "../readyset-data/" }
 readyset-adapter = { path = "../readyset-adapter" }
 readyset-adapter-types = { path = "../readyset-adapter-types" }
 readyset-client-metrics = { path = "../readyset-client-metrics" }
+readyset-util = { path = "../readyset-util" }
 readyset-version = { path = "../readyset-version" }
 failpoint-macros = { path = "../failpoint-macros" }
 readyset-sql = { path = "../readyset-sql" }

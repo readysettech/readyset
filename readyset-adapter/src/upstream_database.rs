@@ -8,8 +8,8 @@ use readyset_client_metrics::QueryDestination;
 use readyset_data::DfValue;
 use readyset_errors::ReadySetError;
 use readyset_sql::ast::{SqlIdentifier, StartTransactionStatement};
+use readyset_util::redacted::RedactedString;
 use tracing::debug;
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum UpstreamStatementId {
     /// A reusable id of a statement that has been prepared in an [`UpstreamDatabase`]
@@ -124,7 +124,14 @@ pub trait UpstreamDatabase: Sized + Send {
     /// Create a new connection to this upstream database
     ///
     /// Connect will return an error if the upstream database is running an unsupported version.
-    async fn connect(upstream_config: UpstreamConfig) -> Result<Self, Self::Error>;
+    async fn connect(
+        upstream_config: UpstreamConfig,
+        username: Option<String>,
+        password: Option<String>,
+    ) -> Result<Self, Self::Error>;
+
+    /// Set the user for the upstream connection
+    async fn set_user(&mut self, user: &str, password: RedactedString) -> Result<(), Self::Error>;
 
     /// Test the connection with the upstream database
     async fn is_connected(&mut self) -> Result<bool, Self::Error>;
@@ -245,6 +252,8 @@ pub trait UpstreamDatabase: Sized + Send {
 pub struct LazyUpstream<U> {
     upstream: Option<U>,
     upstream_config: UpstreamConfig,
+    username: Option<String>,
+    password: Option<String>,
 }
 
 impl<U> From<UpstreamConfig> for LazyUpstream<U> {
@@ -252,6 +261,8 @@ impl<U> From<UpstreamConfig> for LazyUpstream<U> {
         Self {
             upstream: None,
             upstream_config,
+            username: None,
+            password: None,
         }
     }
 }
@@ -262,7 +273,14 @@ where
 {
     pub async fn connect(&mut self) -> Result<(), U::Error> {
         debug!("LazyUpstream connecting to upstream");
-        self.upstream = Some(U::connect(self.upstream_config.clone()).await?);
+        self.upstream = Some(
+            U::connect(
+                self.upstream_config.clone(),
+                self.username.clone(),
+                self.password.clone(),
+            )
+            .await?,
+        );
         Ok(())
     }
 
@@ -292,11 +310,23 @@ where
     const DEFAULT_DB_VERSION: &'static str = U::DEFAULT_DB_VERSION;
     const SQL_DIALECT: readyset_sql::Dialect = U::SQL_DIALECT;
 
-    async fn connect(upstream_config: UpstreamConfig) -> Result<Self, Self::Error> {
+    async fn connect(
+        upstream_config: UpstreamConfig,
+        username: Option<String>,
+        password: Option<String>,
+    ) -> Result<Self, Self::Error> {
         Ok(Self {
             upstream: None,
             upstream_config,
+            username,
+            password,
         })
+    }
+
+    async fn set_user(&mut self, user: &str, password: RedactedString) -> Result<(), Self::Error> {
+        self.username = Some(user.to_string());
+        self.password = Some(password.to_string());
+        Ok(())
     }
 
     async fn is_connected(&mut self) -> Result<bool, Self::Error> {
