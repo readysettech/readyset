@@ -59,7 +59,9 @@ pub(crate) trait DialectParser {
     fn identifier(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlIdentifier>;
 
     /// Parse a SQL function identifier using this Dialect
-    fn function_identifier(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], &str>;
+    fn function_identifier(
+        self,
+    ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlIdentifier>;
 
     /// Returns the [`QuotingStyle`] for this dialect
     fn quoting_style(self) -> QuotingStyle;
@@ -170,7 +172,9 @@ impl DialectParser for Dialect {
         }
     }
 
-    fn function_identifier(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], &str> {
+    fn function_identifier(
+        self,
+    ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlIdentifier> {
         move |i| match self {
             Dialect::MySQL => map_res(
                 alt((
@@ -178,15 +182,22 @@ impl DialectParser for Dialect {
                     delimited(tag("`"), take_while1(is_sql_identifier), tag("`")),
                     delimited(tag("["), take_while1(is_sql_identifier), tag("]")),
                 )),
-                |i| std::str::from_utf8(&i),
+                |v: LocatedSpan<&[u8]>| std::str::from_utf8(&v).map(Into::into),
             )(i),
-            Dialect::PostgreSQL => map_res(
-                alt((
+            Dialect::PostgreSQL => alt((
+                map_res(
                     preceded(not(peek(sql_keyword)), take_while1(is_sql_identifier)),
+                    |v: LocatedSpan<&[u8]>| {
+                        std::str::from_utf8(&v)
+                            .map(str::to_lowercase)
+                            .map(Into::into)
+                    },
+                ),
+                map_res(
                     delimited(tag("\""), take_while1(is_sql_identifier), tag("\"")),
-                )),
-                |i| std::str::from_utf8(&i),
-            )(i),
+                    |v: LocatedSpan<&[u8]>| std::str::from_utf8(&v).map(Into::into),
+                ),
+            ))(i),
         }
     }
 
