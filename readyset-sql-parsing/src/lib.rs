@@ -167,7 +167,12 @@ fn parse_explain(
 /// Expects `SHOW` was already parsed. Attempts to parse a Readyset-specific SHOW statement,
 /// otherwise falls back to [`Parser::parse_show`].
 ///
-/// SHOW READYSET VERSION
+/// SHOW READYSET
+///     | VERSION
+///     | MIGRATION STATUS <query_id>
+///     | STATUS
+///     | ALL TABLES
+///
 fn parse_readyset_show(parser: &mut Parser) -> Result<SqlQuery, ReadysetParsingError> {
     if parse_readyset_keyword(parser, ReadysetKeyword::READYSET) {
         if parser.parse_keyword(Keyword::VERSION) {
@@ -184,6 +189,18 @@ fn parse_readyset_show(parser: &mut Parser) -> Result<SqlQuery, ReadysetParsingE
         } else if parser.parse_keyword(Keyword::STATUS) {
             Ok(SqlQuery::Show(
                 readyset_sql::ast::ShowStatement::ReadySetStatus,
+            ))
+        } else if parser.parse_keyword(Keyword::TABLES) {
+            Ok(SqlQuery::Show(
+                readyset_sql::ast::ShowStatement::ReadySetTables(
+                    readyset_sql::ast::ReadySetTablesOptions { all: false },
+                ),
+            ))
+        } else if parser.parse_keywords(&[Keyword::ALL, Keyword::TABLES]) {
+            Ok(SqlQuery::Show(
+                readyset_sql::ast::ShowStatement::ReadySetTables(
+                    readyset_sql::ast::ReadySetTablesOptions { all: true },
+                ),
             ))
         } else {
             Err(ReadysetParsingError::ReadysetParsingError(
