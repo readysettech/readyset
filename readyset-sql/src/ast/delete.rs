@@ -4,7 +4,10 @@ use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
-use crate::{ast::*, AstConversionError, Dialect, DialectDisplay};
+use crate::{
+    ast::*, AstConversionError, Dialect, DialectDisplay, IntoDialect, TryFromDialect,
+    TryIntoDialect,
+};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct DeleteStatement {
@@ -12,14 +15,15 @@ pub struct DeleteStatement {
     pub where_clause: Option<Expr>,
 }
 
-impl TryFrom<sqlparser::ast::Delete> for DeleteStatement {
-    type Error = AstConversionError;
-
-    fn try_from(value: sqlparser::ast::Delete) -> Result<Self, Self::Error> {
+impl TryFromDialect<sqlparser::ast::Delete> for DeleteStatement {
+    fn try_from_dialect(
+        value: sqlparser::ast::Delete,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
         Ok(Self {
             // TODO: Support multiple tables (in `value.tables`, or possibly in `FromTable`)
-            table: value.from.into(),
-            where_clause: value.selection.map(TryInto::try_into).transpose()?,
+            table: value.from.into_dialect(dialect),
+            where_clause: value.selection.try_into_dialect(dialect)?,
             // TODO: Support order_by and limit
         })
     }

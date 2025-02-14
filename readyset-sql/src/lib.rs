@@ -83,3 +83,83 @@ pub mod dialect_display;
 
 pub use dialect::Dialect;
 pub use dialect_display::DialectDisplay;
+
+pub trait TryFromDialect<T>: Sized {
+    fn try_from_dialect(value: T, dialect: Dialect) -> Result<Self, AstConversionError>;
+}
+
+pub trait TryIntoDialect<T>: Sized {
+    fn try_into_dialect(self, dialect: Dialect) -> Result<T, AstConversionError>;
+}
+
+impl<T, U> TryIntoDialect<U> for T
+where
+    U: TryFromDialect<T>,
+{
+    #[inline]
+    fn try_into_dialect(self, dialect: Dialect) -> Result<U, AstConversionError> {
+        U::try_from_dialect(self, dialect)
+    }
+}
+
+impl<T, U> TryFromDialect<Option<U>> for Option<T>
+where
+    T: TryFromDialect<U>,
+{
+    #[inline]
+    fn try_from_dialect(value: Option<U>, dialect: Dialect) -> Result<Self, AstConversionError> {
+        value.map(|u| u.try_into_dialect(dialect)).transpose()
+    }
+}
+
+impl<T, U> TryFromDialect<Vec<U>> for Vec<T>
+where
+    T: TryFromDialect<U>,
+{
+    #[inline]
+    fn try_from_dialect(value: Vec<U>, dialect: Dialect) -> Result<Self, AstConversionError> {
+        value
+            .into_iter()
+            .map(|u| u.try_into_dialect(dialect))
+            .collect()
+    }
+}
+
+pub trait FromDialect<T> {
+    fn from_dialect(value: T, dialect: Dialect) -> Self;
+}
+
+pub trait IntoDialect<T>: Sized {
+    #[must_use]
+    fn into_dialect(self, dialect: Dialect) -> T;
+}
+
+impl<T, U> IntoDialect<U> for T
+where
+    U: FromDialect<T>,
+{
+    #[inline]
+    fn into_dialect(self, dialect: Dialect) -> U {
+        U::from_dialect(self, dialect)
+    }
+}
+
+impl<T, U> FromDialect<Option<U>> for Option<T>
+where
+    T: FromDialect<U>,
+{
+    #[inline]
+    fn from_dialect(value: Option<U>, dialect: Dialect) -> Self {
+        value.map(|u| u.into_dialect(dialect))
+    }
+}
+
+impl<T, U> FromDialect<Vec<U>> for Vec<T>
+where
+    T: FromDialect<U>,
+{
+    #[inline]
+    fn from_dialect(value: Vec<U>, dialect: Dialect) -> Self {
+        value.into_iter().map(|u| u.into_dialect(dialect)).collect()
+    }
+}
