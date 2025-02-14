@@ -434,7 +434,7 @@ mod tests {
                     constraints: vec![
                         ColumnConstraint::NotNull,
                         ColumnConstraint::DefaultValue(Expr::Call(FunctionExpr::Call {
-                            name: "NOW".into(),
+                            name: "now".into(),
                             arguments: vec![]
                         })),
                     ]
