@@ -1,7 +1,10 @@
 use readyset_sql::{ast::SqlQuery, Dialect};
 
 #[cfg(feature = "sqlparser")]
-use readyset_sql::ast::{CacheInner, DropCacheStatement};
+use readyset_sql::{
+    ast::{CacheInner, DropCacheStatement},
+    AstConversionError,
+};
 #[cfg(feature = "sqlparser")]
 use sqlparser::{
     keywords::Keyword,
@@ -290,12 +293,19 @@ pub fn parse_query(dialect: Dialect, input: impl AsRef<str>) -> Result<SqlQuery,
             );
         }
         (Ok(nom_ast), Err(sqlparser_error)) => {
-            panic!(
-                "nom-sql succeeded but sqlparser-rs failed: {}\ninput: {}\nnom_ast: {:?}",
+            if !matches!(
                 sqlparser_error,
-                input.as_ref(),
-                nom_ast
-            )
+                ReadysetParsingError::AstConversionError(
+                    AstConversionError::Skipped(_) | AstConversionError::Unsupported(_),
+                ),
+            ) {
+                panic!(
+                    "nom-sql succeeded but sqlparser-rs failed: {}\ninput: {}\nnom_ast: {:?}",
+                    sqlparser_error,
+                    input.as_ref(),
+                    nom_ast
+                )
+            }
         }
         (Err(nom_error), Ok(sqlparser_ast)) => {
             tracing::warn!(%nom_error, ?sqlparser_ast, "sqlparser-rs succeeded but nom-sql failed")
