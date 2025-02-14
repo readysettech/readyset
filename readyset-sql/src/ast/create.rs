@@ -178,6 +178,33 @@ impl TryFromDialect<sqlparser::ast::CreateTable> for CreateTableStatement {
         value: sqlparser::ast::CreateTable,
         dialect: Dialect,
     ) -> Result<Self, AstConversionError> {
+        // XXX: We don't actually care about most table options, and don't cover the DATA DIRECTORY
+        // variant because sqlparser doesn't support it.
+        let mut options = vec![];
+        if let Some(auto_increment) = value.auto_increment_offset {
+            options.push(CreateTableOption::AutoIncrement(auto_increment as u64));
+        }
+        if let Some(engine) = value.engine {
+            options.push(CreateTableOption::Engine(Some(engine.name)));
+        }
+        if let Some(charset) = value.default_charset {
+            options.push(CreateTableOption::Charset(CharsetName::Unquoted(
+                charset.into(),
+            )));
+        }
+        if let Some(collation) = value.collation {
+            options.push(CreateTableOption::Collate(CollationName::Unquoted(
+                collation.into(),
+            )));
+        }
+        if let Some(
+            sqlparser::ast::CommentDef::WithEq(comment)
+            | sqlparser::ast::CommentDef::WithoutEq(comment)
+            | sqlparser::ast::CommentDef::AfterColumnDefsWithoutEq(comment),
+        ) = value.comment
+        {
+            options.push(CreateTableOption::Comment(comment));
+        }
         Ok(Self {
             if_not_exists: value.if_not_exists,
             table: value.name.into_dialect(dialect),
@@ -199,7 +226,7 @@ impl TryFromDialect<sqlparser::ast::CreateTable> for CreateTableStatement {
                     )
                 },
             }),
-            options: Ok(vec![]), // TODO(mvzink): options are individual fields on the sqlparser struct
+            options: Ok(options),
         })
     }
 }
