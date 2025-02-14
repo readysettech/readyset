@@ -5,7 +5,10 @@ use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
-use crate::{ast::*, AstConversionError, Dialect, DialectDisplay};
+use crate::{
+    ast::*, AstConversionError, Dialect, DialectDisplay, IntoDialect, TryFromDialect,
+    TryIntoDialect,
+};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Arbitrary)]
 pub enum JoinRightSide {
@@ -99,10 +102,11 @@ pub enum JoinConstraint {
     Empty,
 }
 
-impl TryFrom<sqlparser::ast::JoinOperator> for JoinConstraint {
-    type Error = AstConversionError;
-
-    fn try_from(value: sqlparser::ast::JoinOperator) -> Result<Self, Self::Error> {
+impl TryFromDialect<sqlparser::ast::JoinOperator> for JoinConstraint {
+    fn try_from_dialect(
+        value: sqlparser::ast::JoinOperator,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
         use sqlparser::ast::JoinOperator as JoinOp;
         match value {
             JoinOp::Join(constraint)
@@ -118,20 +122,26 @@ impl TryFrom<sqlparser::ast::JoinOperator> for JoinConstraint {
             | JoinOp::RightAnti(constraint)
             | JoinOp::Semi(constraint)
             | JoinOp::Anti(constraint)
-            | JoinOp::AsOf { constraint, .. } => constraint.try_into(),
+            | JoinOp::AsOf { constraint, .. } => constraint.try_into_dialect(dialect),
             JoinOp::CrossJoin | JoinOp::CrossApply | JoinOp::OuterApply => Ok(Self::Empty),
         }
     }
 }
 
-impl TryFrom<sqlparser::ast::JoinConstraint> for JoinConstraint {
-    type Error = AstConversionError;
-
-    fn try_from(value: sqlparser::ast::JoinConstraint) -> Result<Self, Self::Error> {
+impl TryFromDialect<sqlparser::ast::JoinConstraint> for JoinConstraint {
+    fn try_from_dialect(
+        value: sqlparser::ast::JoinConstraint,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
         use sqlparser::ast::JoinConstraint::*;
         match value {
-            On(expr) => Ok(Self::On(expr.try_into()?)),
-            Using(idents) => Ok(Self::Using(idents.into_iter().map(Into::into).collect())),
+            On(expr) => Ok(Self::On(expr.try_into_dialect(dialect)?)),
+            Using(idents) => Ok(Self::Using(
+                idents
+                    .into_iter()
+                    .map(|ident| ident.into_dialect(dialect))
+                    .collect(),
+            )),
             None => Ok(Self::Empty),
             Natural => unsupported!("NATURAL join"),
         }

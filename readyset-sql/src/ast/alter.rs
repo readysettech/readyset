@@ -5,7 +5,10 @@ use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
-use crate::{ast::*, AstConversionError, Dialect, DialectDisplay};
+use crate::{
+    ast::*, AstConversionError, Dialect, DialectDisplay, IntoDialect, TryFromDialect,
+    TryIntoDialect,
+};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum AlterColumnOperation {
@@ -112,10 +115,11 @@ pub enum AlterTableDefinition {
      * DropTableConstraint(..), */
 }
 
-impl TryFrom<sqlparser::ast::AlterTableOperation> for AlterTableDefinition {
-    type Error = AstConversionError;
-
-    fn try_from(value: sqlparser::ast::AlterTableOperation) -> Result<Self, Self::Error> {
+impl TryFromDialect<sqlparser::ast::AlterTableOperation> for AlterTableDefinition {
+    fn try_from_dialect(
+        value: sqlparser::ast::AlterTableOperation,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
         use sqlparser::ast::AlterTableOperation::*;
         match value {
             AddColumn {
@@ -123,13 +127,13 @@ impl TryFrom<sqlparser::ast::AlterTableOperation> for AlterTableDefinition {
                 if_not_exists: _,
                 column_def,
                 column_position: _,
-            } => Ok(Self::AddColumn(column_def.try_into()?)),
+            } => Ok(Self::AddColumn(column_def.try_into_dialect(dialect)?)),
             DropConstraint {
                 if_exists: _,
                 name,
                 drop_behavior,
             } => Ok(Self::DropConstraint {
-                name: name.into(),
+                name: name.into_dialect(dialect),
                 drop_behavior: drop_behavior.map(Into::into),
             }),
             DropColumn {
@@ -137,15 +141,15 @@ impl TryFrom<sqlparser::ast::AlterTableOperation> for AlterTableDefinition {
                 if_exists: _,
                 drop_behavior,
             } => Ok(Self::DropColumn {
-                name: column_name.into(),
+                name: column_name.into_dialect(dialect),
                 behavior: drop_behavior.map(Into::into),
             }),
             RenameColumn {
                 old_column_name,
                 new_column_name,
             } => Ok(Self::RenameColumn {
-                name: old_column_name.into(),
-                new_name: new_column_name.into(),
+                name: old_column_name.into_dialect(dialect),
+                new_name: new_column_name.into_dialect(dialect),
             }),
             ChangeColumn {
                 old_name,
@@ -154,7 +158,7 @@ impl TryFrom<sqlparser::ast::AlterTableOperation> for AlterTableDefinition {
                 options,
                 column_position: _,
             } => Ok(Self::ChangeColumn {
-                name: old_name.into(),
+                name: old_name.into_dialect(dialect),
                 spec: sqlparser::ast::ColumnDef {
                     name: new_name,
                     data_type,
@@ -163,10 +167,10 @@ impl TryFrom<sqlparser::ast::AlterTableOperation> for AlterTableDefinition {
                         .map(|option| sqlparser::ast::ColumnOptionDef { name: None, option })
                         .collect(),
                 }
-                .try_into()?,
+                .try_into_dialect(dialect)?,
             }),
             AlterColumn { column_name, op } => Ok(Self::AlterColumn {
-                name: column_name.into(),
+                name: column_name.into_dialect(dialect),
                 operation: op.try_into()?,
             }),
             _ => unsupported!("ALTER TABLE definition {value}"),
@@ -242,10 +246,11 @@ pub struct AlterTableStatement {
     pub lock: Option<String>,
 }
 
-impl TryFrom<sqlparser::ast::Statement> for AlterTableStatement {
-    type Error = AstConversionError;
-
-    fn try_from(value: sqlparser::ast::Statement) -> Result<Self, Self::Error> {
+impl TryFromDialect<sqlparser::ast::Statement> for AlterTableStatement {
+    fn try_from_dialect(
+        value: sqlparser::ast::Statement,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
         if let sqlparser::ast::Statement::AlterTable {
             name,
             if_exists: _,
@@ -256,10 +261,10 @@ impl TryFrom<sqlparser::ast::Statement> for AlterTableStatement {
         } = value
         {
             Ok(Self {
-                table: name.into(),
+                table: name.into_dialect(dialect),
                 definitions: Ok(operations
                     .into_iter()
-                    .map(TryInto::try_into)
+                    .map(|operation| operation.try_into_dialect(dialect))
                     .try_collect()?),
                 only,
                 // TODO: might need to fix sqlparser for algorithm and lock

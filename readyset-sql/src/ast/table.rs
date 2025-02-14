@@ -5,7 +5,10 @@ use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
-use crate::{ast::*, AstConversionError, Dialect, DialectDisplay};
+use crate::{
+    ast::*, AstConversionError, Dialect, DialectDisplay, FromDialect, IntoDialect, TryFromDialect,
+    TryIntoDialect,
+};
 
 /// A (potentially schema-qualified) name for a relation
 ///
@@ -62,13 +65,13 @@ impl<'a> From<&'a String> for Relation {
     }
 }
 
-impl From<sqlparser::ast::ObjectName> for Relation {
-    fn from(value: sqlparser::ast::ObjectName) -> Self {
+impl FromDialect<sqlparser::ast::ObjectName> for Relation {
+    fn from_dialect(value: sqlparser::ast::ObjectName, dialect: Dialect) -> Self {
         use sqlparser::ast::ObjectNamePart;
         let mut identifiers = value
             .0
             .into_iter()
-            .map(|ObjectNamePart::Identifier(ident)| ident.into());
+            .map(|ObjectNamePart::Identifier(ident)| ident.into_dialect(dialect));
         let first = identifiers.next().unwrap_or_default();
         if let Some(second) = identifiers.next() {
             Self {
@@ -84,23 +87,23 @@ impl From<sqlparser::ast::ObjectName> for Relation {
     }
 }
 
-impl From<sqlparser::ast::FromTable> for Relation {
-    fn from(value: sqlparser::ast::FromTable) -> Self {
+impl FromDialect<sqlparser::ast::FromTable> for Relation {
+    fn from_dialect(value: sqlparser::ast::FromTable, dialect: Dialect) -> Self {
         use sqlparser::ast::FromTable::*;
         match value {
             WithFromKeyword(tables) | WithoutKeyword(tables) => tables
                 .into_iter()
-                .map(Into::into)
+                .map(|table| table.into_dialect(dialect))
                 .next()
                 .expect("empty list of tables"),
         }
     }
 }
 
-impl From<sqlparser::ast::TableWithJoins> for Relation {
-    fn from(value: sqlparser::ast::TableWithJoins) -> Self {
+impl FromDialect<sqlparser::ast::TableWithJoins> for Relation {
+    fn from_dialect(value: sqlparser::ast::TableWithJoins, dialect: Dialect) -> Self {
         match value.relation {
-            sqlparser::ast::TableFactor::Table { name, .. } => name.into(),
+            sqlparser::ast::TableFactor::Table { name, .. } => name.into_dialect(dialect),
             _ => todo!("We don't support joins yet"),
         }
     }
@@ -186,14 +189,15 @@ impl From<Relation> for TableExpr {
     }
 }
 
-impl TryFrom<sqlparser::ast::TableFactor> for TableExpr {
-    type Error = AstConversionError;
-
-    fn try_from(value: sqlparser::ast::TableFactor) -> Result<Self, Self::Error> {
+impl TryFromDialect<sqlparser::ast::TableFactor> for TableExpr {
+    fn try_from_dialect(
+        value: sqlparser::ast::TableFactor,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
         match value {
             sqlparser::ast::TableFactor::Table { name, alias, .. } => Ok(Self {
-                inner: TableExprInner::Table(name.into()),
-                alias: alias.map(|table_alias| table_alias.name.into()), // XXX we don't support [`TableAlias::columns`]
+                inner: TableExprInner::Table(name.into_dialect(dialect)),
+                alias: alias.map(|table_alias| table_alias.name.into_dialect(dialect)), // XXX we don't support [`TableAlias::columns`]
                 index_hint: None, // TODO(mvzink): Find where this is parsed in sqlparser
             }),
             sqlparser::ast::TableFactor::Derived {
@@ -201,10 +205,12 @@ impl TryFrom<sqlparser::ast::TableFactor> for TableExpr {
                 alias,
                 lateral: _lateral, // XXX We don't support this
             } => {
-                if let crate::ast::SqlQuery::Select(subselect) = subquery.try_into()? {
+                if let crate::ast::SqlQuery::Select(subselect) =
+                    subquery.try_into_dialect(dialect)?
+                {
                     Ok(Self {
                         inner: TableExprInner::Subquery(Box::new(subselect)),
-                        alias: alias.map(|table_alias| table_alias.name.into()), // XXX we don't support [`TableAlias::columns`]
+                        alias: alias.map(|table_alias| table_alias.name.into_dialect(dialect)), // XXX we don't support [`TableAlias::columns`]
                         index_hint: None, // TODO(mvzink): Find where this is parsed in sqlparser
                     })
                 } else {
