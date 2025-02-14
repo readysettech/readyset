@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use database_utils::{ReplicationServerId, UpstreamConfig as Config};
+use database_utils::{DatabaseURL, ReplicationServerId, UpstreamConfig as Config};
 use itertools::Itertools;
 use mysql_async::prelude::Queryable;
 use mysql_time::MySqlTime;
@@ -20,7 +20,6 @@ use readyset_server::Builder;
 use readyset_sql::ast::{NonReplicatedRelation, Relation};
 use readyset_telemetry_reporter::{TelemetryEvent, TelemetryInitializer, TelemetrySender};
 use readyset_util::eventually;
-use readyset_util::redacted::RedactedString;
 use readyset_util::shutdown::ShutdownSender;
 use replicators::db_util::error_is_slot_not_found;
 use replicators::table_filter::TableFilter;
@@ -351,23 +350,41 @@ impl TestHandle {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let controller = ReadySetHandle::new(Arc::clone(&self.authority)).await;
 
-        let url: RedactedString = self.url.clone().into();
         let (sender, receiver) = TestChannel::new();
         let (controll_sender, mut controll_receiver): (
             UnboundedSender<ControllerMessage>,
             UnboundedReceiver<ControllerMessage>,
         ) = tokio::sync::mpsc::unbounded_channel();
         self.notification_channel = Some(receiver);
-        let mut table_filter = TableFilter::try_new(self.dialect.into(), None, None, None)?;
+        let (replication_tables, replication_tables_ignore) = if let Some(config) = &config {
+            (
+                config.replication_tables.as_deref(),
+                config.replication_tables_ignore.as_deref(),
+            )
+        } else {
+            (None, None)
+        };
+        let url: DatabaseURL = self.url.parse().unwrap();
+        let mut table_filter = TableFilter::try_new(
+            url.dialect(),
+            replication_tables,
+            replication_tables_ignore,
+            match url.dialect() {
+                readyset_sql::Dialect::MySQL => url.db_name(),
+                readyset_sql::Dialect::PostgreSQL => None,
+            },
+        )?;
+        let upstream_db_url = Some(self.url.clone().into());
+        let cdc_db_url = Some(self.url.clone().into());
         runtime.spawn(async move {
             let Err(error) = NoriaAdapter::start(
                 controller,
                 &Config {
-                    upstream_db_url: Some(url.clone()),
-                    cdc_db_url: Some(url.clone()),
+                    upstream_db_url,
+                    cdc_db_url,
                     ..config.unwrap_or_default()
                 },
-                &url.parse().unwrap(),
+                &url,
                 &mut table_filter,
                 sender,
                 &mut controll_receiver,
