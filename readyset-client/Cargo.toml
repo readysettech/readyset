@@ -18,8 +18,6 @@ clap = { workspace = true, features = ["derive", "env"] }
 fail = { workspace = true }
 thiserror = { workspace = true }
 hyper = { workspace = true, features = ["stream", "client", "http2"] }
-nom = { workspace = true }
-nom_locate = { workspace = true }
 serde = { workspace = true, features = ["rc", "derive"] }
 serde_json = { workspace = true, features = ["arbitrary_precision"] }
 serde_with = { workspace = true }
@@ -102,7 +100,7 @@ dataflow-expression = { path = "../dataflow-expression" }
 readyset-tracing = { path = "../readyset-tracing" }
 array2 = { path = "../array2" }
 tournament-kway = { path = "../tournament-kway" }
-nom-sql = { path = "../nom-sql" }
+readyset-sql-parsing = { path = "../readyset-sql-parsing" }
 readyset-sql-passes = { path = "../readyset-sql-passes" }
 replication-offset = { path = "../replication-offset" }
 
