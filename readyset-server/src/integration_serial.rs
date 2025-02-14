@@ -229,8 +229,8 @@ async fn it_works_basic_standalone_impl() {
     let (mut g, shutdown_tx) = start_standalone().await.unwrap();
 
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE a (a int PRIMARY KEY, b int)",
+        ChangeList::from_strings(
+            vec!["CREATE TABLE a (a int PRIMARY KEY, b int)"],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -239,8 +239,8 @@ async fn it_works_basic_standalone_impl() {
     .unwrap();
 
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE b (a int PRIMARY KEY, b int)",
+        ChangeList::from_strings(
+            vec!["CREATE TABLE b (a int PRIMARY KEY, b int)"],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -249,10 +249,11 @@ async fn it_works_basic_standalone_impl() {
     .unwrap();
 
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE VIEW c AS SELECT a,b FROM a WHERE a = ? UNION \
-             SELECT a,b FROM b WHERE a = ? ORDER BY b;
-             CREATE CACHE q FROM SELECT a,b FROM c WHERE a = ?;",
+        ChangeList::from_strings(
+            vec![
+                "CREATE VIEW c AS SELECT a,b FROM a WHERE a = ? UNION (SELECT a,b FROM b WHERE a = ? ORDER BY b);",
+                "CREATE CACHE q FROM SELECT a,b FROM c WHERE a = ?;",
+            ],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),

@@ -279,7 +279,7 @@ async fn check_query(
         .collect();
 
     let (mut g, shutdown_tx) = Builder::default().start_local().await.unwrap();
-    g.extend_recipe(ChangeList::from_str(queries.join("\n"), Dialect::DEFAULT_MYSQL).unwrap())
+    g.extend_recipe(ChangeList::from_strings(queries, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
 

@@ -36,7 +36,6 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
 use dataflow_expression::Dialect;
-use nom_locate::LocatedSpan;
 use readyset_data::DfType;
 use readyset_errors::{internal, unsupported, ReadySetError, ReadySetResult};
 use readyset_sql::ast::{
@@ -44,6 +43,7 @@ use readyset_sql::ast::{
     CreateTableStatement, CreateViewStatement, DropTableStatement, DropViewStatement,
     NonReplicatedRelation, Relation, SelectStatement, SqlIdentifier, SqlQuery,
 };
+use readyset_sql_parsing::parse_query;
 use readyset_sql_passes::adapter_rewrites::{self, AdapterRewriteParams};
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
@@ -138,123 +138,78 @@ impl ChangeList {
         }
     }
 
-    /// Parse a `ChangeList` from the given SQL string, formatted using the canonical SQL dialect,
-    /// but using the given [`Dialect`] for expression evaluation semantics.
-    #[allow(clippy::manual_try_fold)]
-    pub fn from_str<S>(s: S, dialect: Dialect) -> ReadySetResult<Self>
-    where
-        S: AsRef<str>,
-    {
-        let value = s.as_ref();
+    /// Parse a `ChangeList` from the given vector of SQL strings, using the given [`Dialect`]
+    /// for expression evaluation semantics.
+    ///
+    /// This method processes each string in the vector individually and constructs a list of
+    /// changes. If any query fails to parse, the method returns an error.
+    pub fn from_strings(queries: Vec<impl AsRef<str>>, dialect: Dialect) -> ReadySetResult<Self> {
+        let mut changes = Vec::new();
 
-        // We separate the queries first, so that we can parse them one by
-        // one and get a correct error message when an individual query fails to be
-        // parsed.
+        for query_str in queries {
+            let parsed = parse_query(Dialect::DEFAULT_MYSQL.into(), &query_str).map_err(|_| {
+                ReadySetError::UnparseableQuery {
+                    query: query_str.as_ref().to_string(),
+                }
+            })?;
 
-        macro_rules! mk_error {
-            ($str:expr) => {
-                Err(ReadySetError::UnparseableQuery {
-                    query: $str.to_string(),
-                })
-            };
-        }
-
-        // TODO(alex) Include nom-sql error position info in ReadySetError::UnparseableQuery?
-        let queries = match parse::separate_queries(LocatedSpan::new(value.as_bytes())) {
-            Result::Err(nom::Err::Error(e)) => {
-                return mk_error!(std::str::from_utf8(&e.input).unwrap());
-            }
-            Result::Err(nom::Err::Failure(e)) => {
-                return mk_error!(std::str::from_utf8(&e.input).unwrap());
-            }
-            Result::Err(_) => {
-                return mk_error!(value);
-            }
-            Result::Ok((remainder, parsed)) => {
-                if !remainder.is_empty() {
-                    return mk_error!(std::str::from_utf8(&remainder).unwrap());
-                }
-                parsed
-            }
-        };
-        let changes = queries.into_iter().fold(
-            Ok(Vec::new()),
-            |acc: ReadySetResult<Vec<Change>>, query| match parse::query_expr(query) {
-                Result::Err(nom::Err::Error(e)) => {
-                    mk_error!(std::str::from_utf8(&e.input).unwrap())
-                }
-                Result::Err(nom::Err::Failure(e)) => {
-                    mk_error!(std::str::from_utf8(&e.input).unwrap())
-                }
-                Result::Err(_) => mk_error!(value),
-                Result::Ok((remainder, parsed)) => {
-                    if !remainder.is_empty() {
-                        return mk_error!(std::str::from_utf8(&remainder).unwrap());
-                    }
-                    acc.and_then(|mut changes| {
-                        match parsed {
-                            SqlQuery::CreateTable(statement) => changes.push(Change::CreateTable {
-                                statement,
-                                pg_meta: None,
-                            }),
-                            SqlQuery::CreateView(cvs) => changes.push(Change::CreateView(cvs)),
-                            SqlQuery::CreateCache(CreateCacheStatement {
-                                name,
-                                inner,
-                                always,
-                                ..
-                            }) => {
-                                let statement = match inner {
-                                    Ok(CacheInner::Statement(stmt)) => stmt,
-                                    Ok(CacheInner::Id(id)) => {
-                                        error!(
-                                            %id,
-                                            "attempted to issue CREATE CACHE with an id"
-                                        );
-                                        internal!(
-                                            "CREATE CACHE should've had its ID resolved by \
-                                             the adapter"
-                                        );
-                                    }
-                                    Err(query) => {
-                                        return Err(ReadySetError::UnparseableQuery { query })
-                                    }
-                                };
-                                changes.push(Change::CreateCache(CreateCache {
-                                    name,
-                                    statement,
-                                    always,
-                                }))
-                            }
-                            SqlQuery::AlterTable(ats) => changes.push(Change::AlterTable(ats)),
-                            SqlQuery::DropTable(dts) => {
-                                let if_exists = dts.if_exists;
-                                changes.extend(
-                                    dts.tables
-                                        .into_iter()
-                                        .map(|name| Change::Drop { name, if_exists }),
-                                )
-                            }
-                            SqlQuery::DropView(dvs) => {
-                                changes.extend(dvs.views.into_iter().map(|name| Change::Drop {
-                                    name,
-                                    if_exists: dvs.if_exists,
-                                }))
-                            }
-                            SqlQuery::DropCache(dcs) => changes.push(Change::Drop {
-                                name: dcs.name,
-                                if_exists: false,
-                            }),
-                            _ => unsupported!(
-                                "Only DDL statements supported in ChangeList (got {})",
-                                parsed.query_type()
-                            ),
+            match parsed {
+                SqlQuery::CreateTable(statement) => changes.push(Change::CreateTable {
+                    statement,
+                    pg_meta: None,
+                }),
+                SqlQuery::CreateView(cvs) => changes.push(Change::CreateView(cvs)),
+                SqlQuery::CreateCache(CreateCacheStatement {
+                    name,
+                    inner,
+                    always,
+                    ..
+                }) => {
+                    let statement = match inner {
+                        Ok(CacheInner::Statement(stmt)) => stmt,
+                        Ok(CacheInner::Id(id)) => {
+                            error!(
+                                %id,
+                                "attempted to issue CREATE CACHE with an id"
+                            );
+                            internal!(
+                                "CREATE CACHE should've had its ID resolved by \
+                                         the adapter"
+                            );
                         }
-                        Ok(changes)
-                    })
+                        Err(query) => return Err(ReadySetError::UnparseableQuery { query }),
+                    };
+                    changes.push(Change::CreateCache(CreateCache {
+                        name,
+                        statement,
+                        always,
+                    }))
                 }
-            },
-        )?;
+                SqlQuery::AlterTable(ats) => changes.push(Change::AlterTable(ats)),
+                SqlQuery::DropTable(dts) => {
+                    let if_exists = dts.if_exists;
+                    changes.extend(
+                        dts.tables
+                            .into_iter()
+                            .map(|name| Change::Drop { name, if_exists }),
+                    )
+                }
+                SqlQuery::DropView(dvs) => {
+                    changes.extend(dvs.views.into_iter().map(|name| Change::Drop {
+                        name,
+                        if_exists: dvs.if_exists,
+                    }))
+                }
+                SqlQuery::DropCache(dcs) => changes.push(Change::Drop {
+                    name: dcs.name,
+                    if_exists: false,
+                }),
+                _ => unsupported!(
+                    "Only DDL statements supported in ChangeList (got {})",
+                    parsed.query_type()
+                ),
+            }
+        }
 
         Ok(ChangeList {
             changes,
@@ -493,21 +448,12 @@ impl Change {
                 })
             };
         }
-        match parse::query_expr_with_dialect(
-            LocatedSpan::new(ddl_req.unparsed_stmt.as_bytes()),
+        match parse_query(
             ddl_req.dialect.into(),
+            &ddl_req.unparsed_stmt,
         ) {
-            Result::Err(nom::Err::Error(e)) => {
-                mk_error!(std::str::from_utf8(&e.input).unwrap())
-            }
-            Result::Err(nom::Err::Failure(e)) => {
-                mk_error!(std::str::from_utf8(&e.input).unwrap())
-            }
             Result::Err(_) => mk_error!(ddl_req.unparsed_stmt),
-            Result::Ok((remainder, parsed)) => {
-                if !remainder.is_empty() {
-                    return mk_error!(std::str::from_utf8(&remainder).unwrap());
-                }
+            Result::Ok(parsed) => {
                 Ok(match parsed {
                     SqlQuery::CreateCache(CreateCacheStatement {
                         name,
@@ -555,65 +501,6 @@ impl Change {
     }
 }
 
-mod parse {
-    use nom::bytes::complete::{tag, take_until};
-    use nom::combinator::recognize;
-    use nom::error::ErrorKind;
-    use nom::multi::many1;
-    use nom::sequence::{delimited, terminated};
-    use nom::InputTake;
-    use nom_locate::LocatedSpan;
-    use nom_sql::whitespace::whitespace0;
-    use nom_sql::{sql_query, NomSqlError, NomSqlResult};
-    use readyset_sql::{ast::SqlQuery, Dialect};
-
-    /// The canonical SQL dialect used for central ReadySet server recipes. All direct clients of
-    /// readyset-server must use this dialect for their SQL recipes, and all adapters and client
-    /// libraries must translate into this dialect as part of handling requests from users
-    const CANONICAL_DIALECT: Dialect = Dialect::MySQL;
-
-    pub(super) fn query_expr(input: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlQuery> {
-        let (input, _) = whitespace0(input)?;
-        sql_query(CANONICAL_DIALECT)(input)
-    }
-
-    pub(super) fn query_expr_with_dialect(
-        input: LocatedSpan<&[u8]>,
-        dialect: Dialect,
-    ) -> NomSqlResult<&[u8], SqlQuery> {
-        let (input, _) = whitespace0(input)?;
-        sql_query(dialect)(input)
-    }
-
-    pub(super) fn separate_queries(
-        queries: LocatedSpan<&[u8]>,
-    ) -> NomSqlResult<&[u8], Vec<LocatedSpan<&[u8]>>> {
-        many1(delimited(
-            whitespace0,
-            // We only accept SQL queries that end with a semicolon.
-            ends_in_semicolon_or_eof,
-            whitespace0,
-        ))(queries)
-    }
-
-    fn ends_in_semicolon_or_eof(
-        input: LocatedSpan<&[u8]>,
-    ) -> NomSqlResult<&[u8], LocatedSpan<&[u8]>> {
-        match recognize(terminated(take_until(";"), tag(";")))(input) {
-            Ok((input, output)) => Ok((input, output)),
-            Err(nom::Err::Error(NomSqlError {
-                kind: ErrorKind::TakeUntil,
-                ..
-            })) if !input.is_empty() => {
-                // We didn't find a semicolon, so the rest of the input is a query.
-                let (output, input) = input.take_split(0);
-                Ok((input, output))
-            }
-            Err(e) => Err(e),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use readyset_util::hash_laws;
@@ -621,77 +508,6 @@ mod tests {
     use super::*;
 
     hash_laws!(PostgresTableMetadata);
-
-    #[test]
-    fn it_handles_multiple_statements_per_line() {
-        let queries =
-            "  CREATE CACHE q_0 FROM SELECT a FROM b;     CREATE CACHE q_1 FROM SELECT x FROM y;   ";
-
-        let changelist = ChangeList::from_str(queries, Dialect::DEFAULT_MYSQL).unwrap();
-        assert_eq!(
-            changelist
-                .changes
-                .iter()
-                .filter(|c| matches!(c, Change::CreateCache { .. }))
-                .count(),
-            2
-        );
-        assert_eq!(
-            changelist
-                .changes
-                .iter()
-                .filter(|c| matches!(c, Change::Drop { .. }))
-                .count(),
-            0
-        );
-    }
-
-    #[test]
-    fn it_handles_spaces() {
-        let queries = "  CREATE CACHE q_0 FROM SELECT a FROM b;\
-                      CREATE CACHE q_1 FROM SELECT x FROM y;";
-
-        let changelist = ChangeList::from_str(queries, Dialect::DEFAULT_MYSQL).unwrap();
-        assert_eq!(
-            changelist
-                .changes
-                .iter()
-                .filter(|c| matches!(c, Change::CreateCache { .. }))
-                .count(),
-            2
-        );
-        assert_eq!(
-            changelist
-                .changes
-                .iter()
-                .filter(|c| matches!(c, Change::Drop { .. }))
-                .count(),
-            0
-        );
-    }
-
-    #[test]
-    fn it_handles_missing_semicolon() {
-        let queries = "CREATE CACHE q_0 FROM SELECT a FROM b;\nCREATE VIEW q_1 AS SELECT x FROM y";
-
-        let changelist = ChangeList::from_str(queries, Dialect::DEFAULT_MYSQL).unwrap();
-        assert_eq!(
-            changelist
-                .changes
-                .iter()
-                .filter(|c| matches!(c, Change::CreateCache { .. }))
-                .count(),
-            1
-        );
-        assert_eq!(
-            changelist
-                .changes
-                .iter()
-                .filter(|c| matches!(c, Change::CreateView(_)))
-                .count(),
-            1
-        );
-    }
 
     mod requires_resnapshot {
         use super::*;

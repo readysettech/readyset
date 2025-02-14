@@ -4458,9 +4458,6 @@ dependencies = [
  "mysql-time",
  "mysql_async",
  "mysql_common",
- "nom",
- "nom-sql",
- "nom_locate",
  "parking_lot",
  "petgraph",
  "proptest",
@@ -4468,6 +4465,7 @@ dependencies = [
  "readyset-data",
  "readyset-errors",
  "readyset-sql",
+ "readyset-sql-parsing",
  "readyset-sql-passes",
  "readyset-tracing",
  "readyset-util",
@@ -5094,6 +5092,7 @@ dependencies = [
 name = "readyset-sql-parsing"
 version = "0.1.0"
 dependencies = [
+ "itertools 0.13.0",
  "nom-sql",
  "pretty_assertions",
  "readyset-sql",

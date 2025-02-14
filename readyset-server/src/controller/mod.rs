@@ -1380,9 +1380,11 @@ mod tests {
         let (mut noria, shutdown_tx) = start_simple("remove_query").await;
         noria
             .extend_recipe(
-                ChangeList::from_str(
-                    "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);
-                 CREATE CACHE test_query FROM SELECT * FROM users;",
+                ChangeList::from_strings(
+                    vec![
+                        "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);",
+                        "CREATE CACHE test_query FROM SELECT * FROM users;",
+                    ],
                     DataDialect::DEFAULT_MYSQL,
                 )
                 .unwrap(),
@@ -1406,10 +1408,12 @@ mod tests {
         let (mut noria, shutdown_tx) = start_simple("remove_all_queries").await;
         noria
             .extend_recipe(
-                ChangeList::from_str(
-                    "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);
-                 CREATE CACHE q1 FROM SELECT id FROM users;
-                 CREATE CACHE q2 FROM SELECT name FROM users where id = ?;",
+                ChangeList::from_strings(
+                    vec![
+                        "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);",
+                        "CREATE CACHE q1 FROM SELECT id FROM users;",
+                        "CREATE CACHE q2 FROM SELECT name FROM users where id = ?;",
+                    ],
                     DataDialect::DEFAULT_MYSQL,
                 )
                 .unwrap(),
@@ -1443,10 +1447,12 @@ mod tests {
             .unwrap();
         noria
             .extend_recipe(
-                ChangeList::from_str(
-                    "CREATE TABLE t1 (id int);
-                     CREATE TABLE t2 (id int);
-                     CREATE TABLE t3 (id int);",
+                ChangeList::from_strings(
+                    vec![
+                        "CREATE TABLE t1 (id int);",
+                        "CREATE TABLE t2 (id int);",
+                        "CREATE TABLE t3 (id int);",
+                    ],
                     DataDialect::DEFAULT_MYSQL,
                 )
                 .unwrap(),
@@ -1499,9 +1505,11 @@ mod tests {
 
         noria
             .extend_recipe(
-                ChangeList::from_str(
-                    "CREATE TABLE key_count_test (id INT PRIMARY KEY, stuff TEXT);
-                 CREATE CACHE q1 FROM SELECT * FROM key_count_test;",
+                ChangeList::from_strings(
+                    vec![
+                        "CREATE TABLE key_count_test (id INT PRIMARY KEY, stuff TEXT);",
+                        "CREATE CACHE q1 FROM SELECT * FROM key_count_test;",
+                    ],
                     DataDialect::DEFAULT_MYSQL,
                 )
                 .unwrap(),
@@ -1565,8 +1573,11 @@ mod tests {
 
         noria
             .extend_recipe(
-                ChangeList::from_str(
-                    "CREATE TABLE t1 (x int); CREATE CACHE FROM SELECT * FROM t1;",
+                ChangeList::from_strings(
+                    vec![
+                        "CREATE TABLE t1 (x int);",
+                        "CREATE CACHE FROM SELECT * FROM t1;",
+                    ],
                     DataDialect::DEFAULT_MYSQL,
                 )
                 .unwrap()
@@ -1618,8 +1629,11 @@ mod tests {
         // A change in schema_search_path that *does* change the semantics
         noria
             .extend_recipe(
-                ChangeList::from_str("CREATE TABLE s2.t1 (x int)", DataDialect::DEFAULT_MYSQL)
-                    .unwrap(),
+                ChangeList::from_strings(
+                    vec!["CREATE TABLE s2.t1 (x int)"],
+                    DataDialect::DEFAULT_MYSQL,
+                )
+                .unwrap(),
             )
             .await
             .unwrap();
@@ -1873,9 +1887,11 @@ mod tests {
         let (mut noria, shutdown_tx) = start_simple("min_persisted_replication_offset").await;
         noria
             .extend_recipe(
-                ChangeList::from_str(
-                    "CREATE TABLE persisted_offset_test1 (id INT PRIMARY KEY, stuff TEXT);
-                     CREATE TABLE persisted_offset_test2 (id INT PRIMARY KEY, stuff TEXT);",
+                ChangeList::from_strings(
+                    vec![
+                        "CREATE TABLE persisted_offset_test1 (id INT PRIMARY KEY, stuff TEXT)",
+                        "CREATE TABLE persisted_offset_test2 (id INT PRIMARY KEY, stuff TEXT)",
+                    ],
                     DataDialect::DEFAULT_MYSQL,
                 )
                 .unwrap(),

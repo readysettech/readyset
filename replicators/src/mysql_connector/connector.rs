@@ -675,7 +675,8 @@ impl MySqlBinlogConnector {
             _ => return self.try_non_ddl_action_from_query(q_event, is_last),
         };
 
-        let changes = match ChangeList::from_str(q_event.query(), Dialect::DEFAULT_MYSQL) {
+        let changes = match ChangeList::from_strings(vec![q_event.query()], Dialect::DEFAULT_MYSQL)
+        {
             Ok(mut changelist) => {
                 // During replication of DDL, we don't necessarily have the default charset/collation as part of the
                 // query event.

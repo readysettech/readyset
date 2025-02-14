@@ -861,9 +861,11 @@ async fn it_works_deletion() {
 async fn delete_row() {
     let (mut g, shutdown_tx) = start_simple_unsharded("delete_row").await;
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE t1 (x int, y int, z int);
-             CREATE CACHE all_rows FROM SELECT * FROM t1;",
+        ChangeList::from_strings(
+            vec![
+                "CREATE TABLE t1 (x int, y int, z int)",
+                "CREATE CACHE all_rows FROM SELECT * FROM t1;",
+            ],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -907,11 +909,11 @@ async fn delete_row() {
 #[tokio::test(flavor = "multi_thread")]
 async fn it_works_with_sql_recipe() {
     let (mut g, shutdown_tx) = start_simple_unsharded("it_works_with_sql_recipe").await;
-    let sql = "
-        CREATE TABLE Car (id int, brand varchar(255), PRIMARY KEY(id));
-        CREATE CACHE CountCars FROM SELECT COUNT(*) FROM Car WHERE brand = ?;
-    ";
-    g.extend_recipe(ChangeList::from_str(sql, Dialect::DEFAULT_MYSQL).unwrap())
+    let sql = vec![
+        "CREATE TABLE Car (id int, brand varchar(255), PRIMARY KEY(id))",
+        "CREATE CACHE CountCars FROM SELECT COUNT(*) FROM Car WHERE brand = ?",
+    ];
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
 
@@ -949,20 +951,17 @@ async fn it_works_with_sql_recipe() {
 #[tokio::test(flavor = "multi_thread")]
 async fn it_works_with_vote() {
     let (mut g, shutdown_tx) = start_simple_unsharded("it_works_with_vote").await;
-    let sql = "
-        # base tables
-        CREATE TABLE Article (id int, title varchar(255), PRIMARY KEY(id));
-        CREATE TABLE Vote (article_id int, user int);
+    let sql = vec![
+        "CREATE TABLE Article (id int, title varchar(255), PRIMARY KEY(id))",
+        "CREATE TABLE Vote (article_id int, user int)",
+        "CREATE CACHE ArticleWithVoteCount FROM SELECT Article.id, title, VoteCount.votes AS votes
+                    FROM Article
+                    LEFT JOIN (SELECT Vote.article_id, COUNT(user) AS votes
+                               FROM Vote GROUP BY Vote.article_id) AS VoteCount
+                    ON (Article.id = VoteCount.article_id) WHERE Article.id = ?",
+    ];
 
-        # read queries
-        CREATE CACHE ArticleWithVoteCount FROM SELECT Article.id, title, VoteCount.votes AS votes \
-                    FROM Article \
-                    LEFT JOIN (SELECT Vote.article_id, COUNT(user) AS votes \
-                               FROM Vote GROUP BY Vote.article_id) AS VoteCount \
-                    ON (Article.id = VoteCount.article_id) WHERE Article.id = ?;
-    ";
-
-    g.extend_recipe(ChangeList::from_str(sql, Dialect::DEFAULT_MYSQL).unwrap())
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
     let mut article = g.table("Article").await.unwrap();
@@ -1000,13 +999,13 @@ async fn it_works_with_vote() {
 #[tokio::test(flavor = "multi_thread")]
 async fn it_works_with_identical_queries() {
     let (mut g, shutdown_tx) = start_simple_unsharded("it_works_with_identical_queries").await;
-    let sql = "
-        CREATE TABLE Article (aid int, PRIMARY KEY(aid));
-        CREATE CACHE aq1 FROM SELECT Article.* FROM Article WHERE Article.aid = ?;
-        CREATE CACHE aq2 FROM SELECT Article.* FROM Article WHERE Article.aid = ?;
-    ";
+    let sql = vec![
+        "CREATE TABLE Article (aid int, PRIMARY KEY(aid));",
+        "CREATE CACHE aq1 FROM SELECT Article.* FROM Article WHERE Article.aid = ?;",
+        "CREATE CACHE aq2 FROM SELECT Article.* FROM Article WHERE Article.aid = ?;",
+    ];
 
-    g.extend_recipe(ChangeList::from_str(sql, Dialect::DEFAULT_MYSQL).unwrap())
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
     let mut article = g.table("Article").await.unwrap();
@@ -1040,21 +1039,18 @@ async fn it_works_with_identical_queries() {
 #[tokio::test(flavor = "multi_thread")]
 async fn it_works_with_double_query_through() {
     let (mut g, shutdown_tx) = start_simple_unsharded("it_works_with_double_query_through").await;
-    let sql = "
-        # base tables
-        CREATE TABLE A (aid int, other int, PRIMARY KEY(aid));
-        CREATE TABLE B (bid int, PRIMARY KEY(bid));
+    let sql = vec![
+        "CREATE TABLE A (aid int, other int, PRIMARY KEY(aid));",
+        "CREATE TABLE B (bid int, PRIMARY KEY(bid));",
+        "CREATE CACHE ReadJoin FROM SELECT J.aid, J.other
+            FROM B
+            LEFT JOIN (SELECT A.aid, A.other FROM A
+                WHERE A.other = 5) AS J
+            ON (J.aid = B.bid)
+            WHERE J.aid = ?;",
+    ];
 
-        # read queries
-        CREATE CACHE ReadJoin FROM SELECT J.aid, J.other \
-            FROM B \
-            LEFT JOIN (SELECT A.aid, A.other FROM A \
-                WHERE A.other = 5) AS J \
-            ON (J.aid = B.bid) \
-            WHERE J.aid = ?;
-    ";
-
-    g.extend_recipe(ChangeList::from_str(sql, Dialect::DEFAULT_MYSQL).unwrap())
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
     let mut a = g.table("A").await.unwrap();
@@ -1093,29 +1089,31 @@ async fn it_works_with_double_query_through() {
 #[tokio::test(flavor = "multi_thread")]
 async fn it_works_with_duplicate_subquery() {
     let (mut g, shutdown_tx) = start_simple_unsharded("it_works_with_double_query_through").await;
-    let sql = "
-        # base tables
-        CREATE TABLE A (aid int, other int, PRIMARY KEY(aid));
-        CREATE TABLE B (bid int, PRIMARY KEY(bid));
+    let sql = vec![
+        "CREATE TABLE A (aid int, other int, PRIMARY KEY(aid));",
+        "CREATE TABLE B (bid int, PRIMARY KEY(bid));",
+        "CREATE CACHE ReadJoin FROM SELECT J.aid, J.other
+            FROM B
+            LEFT JOIN (SELECT A.aid, A.other FROM A
+                WHERE A.other = 5) AS J
+            ON (J.aid = B.bid)
+            WHERE J.aid = ?;",
+    ];
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
+        .await
+        .unwrap();
 
-        # read queries
-        CREATE CACHE ReadJoin FROM SELECT J.aid, J.other \
-            FROM B \
-            LEFT JOIN (SELECT A.aid, A.other FROM A \
-                WHERE A.other = 5) AS J \
-            ON (J.aid = B.bid) \
-            WHERE J.aid = ?;
+    // Another query, with a subquery identical to the one above but named differently.
+    let sql = vec![
+        "CREATE CACHE ReadJoin2 FROM SELECT J2.aid, J2.other
+            FROM B
+            LEFT JOIN (SELECT A.aid, A.other FROM A
+                WHERE A.other = 5) AS J2
+            ON (J2.aid = B.bid)
+            WHERE J2.aid = ?;",
+    ];
 
-        # Another query, with a subquery identical to the one above but named differently.
-        CREATE CACHE ReadJoin2 FROM SELECT J2.aid, J2.other \
-            FROM B \
-            LEFT JOIN (SELECT A.aid, A.other FROM A \
-                WHERE A.other = 5) AS J2 \
-            ON (J2.aid = B.bid) \
-            WHERE J2.aid = ?;
-    ";
-
-    g.extend_recipe(ChangeList::from_str(sql, Dialect::DEFAULT_MYSQL).unwrap())
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
     let mut a = g.table("A").await.unwrap();
@@ -1154,15 +1152,15 @@ async fn it_works_with_duplicate_subquery() {
 #[tokio::test(flavor = "multi_thread")]
 async fn it_works_with_reads_before_writes() {
     let (mut g, shutdown_tx) = start_simple_unsharded("it_works_with_reads_before_writes").await;
-    let sql = "
-        CREATE TABLE Article (aid int, PRIMARY KEY(aid));
-        CREATE TABLE Vote (aid int, uid int, PRIMARY KEY(aid, uid));
-        CREATE CACHE ArticleVote FROM SELECT Article.aid, Vote.uid \
-            FROM Article, Vote \
-            WHERE Article.aid = Vote.aid AND Article.aid = ?;
-    ";
+    let sql = vec![
+        "CREATE TABLE Article (aid int, PRIMARY KEY(aid));",
+        "CREATE TABLE Vote (aid int, uid int, PRIMARY KEY(aid, uid));",
+        "CREATE CACHE ArticleVote FROM SELECT Article.aid, Vote.uid
+            FROM Article, Vote
+            WHERE Article.aid = Vote.aid AND Article.aid = ?;",
+    ];
 
-    g.extend_recipe(ChangeList::from_str(sql, Dialect::DEFAULT_MYSQL).unwrap())
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
     let mut article = g.table("Article").await.unwrap();
@@ -1202,13 +1200,13 @@ async fn forced_shuffle_despite_same_shard() {
     // multiple trailing replay responses that are simply ignored...
 
     let (mut g, shutdown_tx) = start_simple_unsharded("forced_shuffle_despite_same_shard").await;
-    let sql = "
-        CREATE TABLE Car (cid int, pid int, PRIMARY KEY(pid));
-        CREATE TABLE Price (pid int, price int, PRIMARY KEY(pid));
-        CREATE CACHE CarPrice FROM SELECT cid, price FROM Car \
-            JOIN Price ON Car.pid = Price.pid WHERE cid = ?;
-    ";
-    g.extend_recipe(ChangeList::from_str(sql, Dialect::DEFAULT_MYSQL).unwrap())
+    let sql = vec![
+        "CREATE TABLE Car (cid int, pid int, PRIMARY KEY(pid));",
+        "CREATE TABLE Price (pid int, price int, PRIMARY KEY(pid));",
+        "CREATE CACHE CarPrice FROM SELECT cid, price FROM Car
+            JOIN Price ON Car.pid = Price.pid WHERE cid = ?;",
+    ];
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
 
@@ -1247,13 +1245,13 @@ async fn forced_shuffle_despite_same_shard() {
 #[tokio::test(flavor = "multi_thread")]
 async fn double_shuffle() {
     let (mut g, shutdown_tx) = start_simple_unsharded("double_shuffle").await;
-    let sql = "
-        CREATE TABLE Car (cid int, pid int, PRIMARY KEY(cid));
-        CREATE TABLE Price (pid int, price int, PRIMARY KEY(pid));
-        CREATE CACHE CarPrice FROM SELECT cid, price FROM Car \
-            JOIN Price ON Car.pid = Price.pid WHERE cid = ?;
-    ";
-    g.extend_recipe(ChangeList::from_str(sql, Dialect::DEFAULT_MYSQL).unwrap())
+    let sql = vec![
+        "CREATE TABLE Car (cid int, pid int, PRIMARY KEY(cid));",
+        "CREATE TABLE Price (pid int, price int, PRIMARY KEY(pid));",
+        "CREATE CACHE CarPrice FROM SELECT cid, price FROM Car
+            JOIN Price ON Car.pid = Price.pid WHERE cid = ?;",
+    ];
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
 
@@ -1292,12 +1290,12 @@ async fn double_shuffle() {
 #[tokio::test(flavor = "multi_thread")]
 async fn it_works_with_arithmetic_aliases() {
     let (mut g, shutdown_tx) = start_simple_unsharded("it_works_with_arithmetic_aliases").await;
-    let sql = "
-        CREATE TABLE Price (pid int, cent_price int, PRIMARY KEY(pid));
-        CREATE VIEW ModPrice AS SELECT pid, cent_price / 100 AS price FROM Price;
-        CREATE CACHE AltPrice FROM SELECT pid, price FROM ModPrice WHERE pid = ?;
-    ";
-    g.extend_recipe(ChangeList::from_str(sql, Dialect::DEFAULT_MYSQL).unwrap())
+    let sql = vec![
+        "CREATE TABLE Price (pid int, cent_price int, PRIMARY KEY(pid));",
+        "CREATE VIEW ModPrice AS SELECT pid, cent_price / 100 AS price FROM Price;",
+        "CREATE CACHE AltPrice FROM SELECT pid, price FROM ModPrice WHERE pid = ?;",
+    ];
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
 
@@ -1349,11 +1347,11 @@ async fn it_recovers_persisted_bases() {
         g.backend_ready().await;
 
         {
-            let sql = "
-            CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
-            CREATE CACHE CarPrice FROM SELECT price FROM Car WHERE id = ?;
-        ";
-            g.extend_recipe(ChangeList::from_str(sql, Dialect::DEFAULT_MYSQL).unwrap())
+            let sql = vec![
+                "CREATE TABLE Car (id int, price int, PRIMARY KEY(id));",
+                "CREATE CACHE CarPrice FROM SELECT price FROM Car WHERE id = ?;",
+            ];
+            g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
                 .await
                 .unwrap();
 
@@ -1430,11 +1428,11 @@ async fn it_recovers_persisted_bases_with_volume_id() {
         let (mut g, shutdown_tx) = g.start(authority.clone()).await.unwrap();
         g.backend_ready().await;
         {
-            let sql = "
-            CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
-            CREATE CACHE CarPrice FROM SELECT price FROM Car WHERE id = ?;
-        ";
-            g.extend_recipe(ChangeList::from_str(sql, Dialect::DEFAULT_MYSQL).unwrap())
+            let sql = vec![
+                "CREATE TABLE Car (id int, price int, PRIMARY KEY(id));",
+                "CREATE CACHE CarPrice FROM SELECT price FROM Car WHERE id = ?;",
+            ];
+            g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
                 .await
                 .unwrap();
 
@@ -1506,11 +1504,11 @@ async fn it_doesnt_recover_persisted_bases_with_wrong_volume_id() {
         sleep().await;
 
         {
-            let sql = "
-            CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
-            CREATE CACHE CarPrice FROM SELECT price FROM Car WHERE id = ?;
-        ";
-            g.extend_recipe(ChangeList::from_str(sql, Dialect::DEFAULT_MYSQL).unwrap())
+            let sql = vec![
+                "CREATE TABLE Car (id int, price int, PRIMARY KEY(id));",
+                "CREATE CACHE CarPrice FROM SELECT price FROM Car WHERE id = ?;",
+            ];
+            g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
                 .await
                 .unwrap();
 
@@ -1622,11 +1620,11 @@ async fn view_connection_churn() {
     let (mut g, shutdown_tx) = builder.start(authority.clone()).await.unwrap();
 
     g.extend_recipe(
-        ChangeList::from_str(
-            "
-        CREATE TABLE A (id int, PRIMARY KEY(id));
-        CREATE CACHE AID FROM SELECT id FROM A WHERE id = ?;
-    ",
+        ChangeList::from_strings(
+            vec![
+                "CREATE TABLE A (id int, PRIMARY KEY(id));",
+                "CREATE CACHE AID FROM SELECT id FROM A WHERE id = ?;",
+            ],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -1683,8 +1681,8 @@ async fn table_connection_churn() {
     sleep().await;
 
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE A (id int, PRIMARY KEY(id));",
+        ChangeList::from_strings(
+            vec!["CREATE TABLE A (id int, PRIMARY KEY(id));"],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -1751,16 +1749,15 @@ async fn it_recovers_persisted_bases_w_multiple_nodes() {
         g.backend_ready().await;
 
         {
-            let sql = "
-            CREATE TABLE A (id int, PRIMARY KEY(id));
-            CREATE TABLE B (id int, PRIMARY KEY(id));
-            CREATE TABLE C (id int, PRIMARY KEY(id));
-
-            CREATE CACHE AID FROM SELECT id FROM A WHERE id = ?;
-            CREATE CACHE BID FROM SELECT id FROM B WHERE id = ?;
-            CREATE CACHE CID FROM SELECT id FROM C WHERE id = ?;
-        ";
-            g.extend_recipe(ChangeList::from_str(sql, Dialect::DEFAULT_MYSQL).unwrap())
+            let sql = vec![
+                "CREATE TABLE A (id int, PRIMARY KEY(id));",
+                "CREATE TABLE B (id int, PRIMARY KEY(id));",
+                "CREATE TABLE C (id int, PRIMARY KEY(id));",
+                "CREATE CACHE AID FROM SELECT id FROM A WHERE id = ?;",
+                "CREATE CACHE BID FROM SELECT id FROM B WHERE id = ?;",
+                "CREATE CACHE CID FROM SELECT id FROM C WHERE id = ?;",
+            ];
+            g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
                 .await
                 .unwrap();
             for (i, table) in tables.iter().enumerate() {
@@ -1827,16 +1824,15 @@ async fn it_recovers_persisted_bases_w_multiple_nodes_and_volume_id() {
         g.backend_ready().await;
 
         {
-            let sql = "
-            CREATE TABLE A (id int, PRIMARY KEY(id));
-            CREATE TABLE B (id int, PRIMARY KEY(id));
-            CREATE TABLE C (id int, PRIMARY KEY(id));
-
-            CREATE CACHE AID FROM SELECT id FROM A WHERE id = ?;
-            CREATE CACHE BID FROM SELECT id FROM B WHERE id = ?;
-            CREATE CACHE CID FROM SELECT id FROM C WHERE id = ?;
-        ";
-            g.extend_recipe(ChangeList::from_str(sql, Dialect::DEFAULT_MYSQL).unwrap())
+            let sql = vec![
+                "CREATE TABLE A (id int, PRIMARY KEY(id));",
+                "CREATE TABLE B (id int, PRIMARY KEY(id));",
+                "CREATE TABLE C (id int, PRIMARY KEY(id));",
+                "CREATE CACHE AID FROM SELECT id FROM A WHERE id = ?;",
+                "CREATE CACHE BID FROM SELECT id FROM B WHERE id = ?;",
+                "CREATE CACHE CID FROM SELECT id FROM C WHERE id = ?;",
+            ];
+            g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
                 .await
                 .unwrap();
             for (i, table) in tables.iter().enumerate() {
@@ -1882,9 +1878,11 @@ async fn it_works_with_simple_arithmetic() {
     let (mut g, shutdown_tx) = start_simple_unsharded("it_works_with_simple_arithmetic").await;
 
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
-         CREATE CACHE CarPrice FROM SELECT 2 * price FROM Car WHERE id = ?;",
+        ChangeList::from_strings(
+            vec![
+                "CREATE TABLE Car (id int, price int, PRIMARY KEY(id));",
+                "CREATE CACHE CarPrice FROM SELECT 2 * price FROM Car WHERE id = ?;",
+            ],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -1918,10 +1916,11 @@ async fn it_works_with_simple_arithmetic() {
 async fn it_works_with_multiple_arithmetic_expressions() {
     let (mut g, shutdown_tx) =
         start_simple_unsharded("it_works_with_multiple_arithmetic_expressions").await;
-    let sql = "CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
-               CREATE CACHE CarPrice FROM SELECT 10 * 10, 2 * price, 10 * price FROM Car WHERE id = ?;
-               ";
-    g.extend_recipe(ChangeList::from_str(sql, Dialect::DEFAULT_MYSQL).unwrap())
+    let sql = vec![
+        "CREATE TABLE Car (id int, price int, PRIMARY KEY(id));",
+        "CREATE CACHE CarPrice FROM SELECT 10 * 10, 2 * price, 10 * price FROM Car WHERE id = ?;",
+    ];
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
 
@@ -1952,16 +1951,16 @@ async fn it_works_with_multiple_arithmetic_expressions() {
 #[tokio::test(flavor = "multi_thread")]
 async fn it_works_with_join_arithmetic() {
     let (mut g, shutdown_tx) = start_simple_unsharded("it_works_with_join_arithmetic").await;
-    let sql = "
-        CREATE TABLE Car (car_id int, price_id int, PRIMARY KEY(car_id));
-        CREATE TABLE Price (price_id int, price int, PRIMARY KEY(price_id));
-        CREATE TABLE Sales (sales_id int, price_id int, fraction float, PRIMARY KEY(sales_id));
-        CREATE CACHE CarPrice FROM SELECT price * fraction FROM Car \
-                  JOIN Price ON Car.price_id = Price.price_id \
-                  JOIN Sales ON Price.price_id = Sales.price_id \
-                  WHERE car_id = ?;
-    ";
-    g.extend_recipe(ChangeList::from_str(sql, Dialect::DEFAULT_MYSQL).unwrap())
+    let sql = vec![
+        "CREATE TABLE Car (car_id int, price_id int, PRIMARY KEY(car_id));",
+        "CREATE TABLE Price (price_id int, price int, PRIMARY KEY(price_id));",
+        "CREATE TABLE Sales (sales_id int, price_id int, fraction float, PRIMARY KEY(sales_id));",
+        "CREATE CACHE CarPrice FROM SELECT price * fraction FROM Car
+                  JOIN Price ON Car.price_id = Price.price_id
+                  JOIN Sales ON Price.price_id = Sales.price_id
+                  WHERE car_id = ?;",
+    ];
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
 
@@ -2012,11 +2011,11 @@ async fn it_works_with_join_arithmetic() {
 async fn it_works_with_function_arithmetic() {
     readyset_tracing::init_test_logging();
     let (mut g, shutdown_tx) = start_simple_unsharded("it_works_with_function_arithmetic").await;
-    let sql = "
-        CREATE TABLE Bread (id int, price int, PRIMARY KEY(id));
-        CREATE CACHE Price FROM SELECT 2 * MAX(price) FROM Bread;
-    ";
-    g.extend_recipe(ChangeList::from_str(sql, Dialect::DEFAULT_MYSQL).unwrap())
+    let sql = vec![
+        "CREATE TABLE Bread (id int, price int, PRIMARY KEY(id));",
+        "CREATE CACHE Price FROM SELECT 2 * MAX(price) FROM Bread;",
+    ];
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
 
@@ -2775,10 +2774,11 @@ async fn cascading_replays_with_sharding() {
 async fn replay_multiple_keys_then_write() {
     let (mut g, shutdown_tx) = start_simple_unsharded("replay_multiple_keys_then_write").await;
     g.extend_recipe(
-        ChangeList::from_str(
-            "
-        CREATE TABLE t (id INTEGER PRIMARY KEY, value INTEGER);
-        CREATE CACHE q FROM SELECT id, value FROM t WHERE id = ?;",
+        ChangeList::from_strings(
+            vec![
+                "CREATE TABLE t (id INTEGER PRIMARY KEY, value INTEGER);",
+                "CREATE CACHE q FROM SELECT id, value FROM t WHERE id = ?;",
+            ],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -2901,8 +2901,8 @@ async fn full_aggregation_with_bogokey() {
 async fn pkey_then_full_table_with_bogokey() {
     let (mut g, shutdown_tx) = start_simple_unsharded("pkey_then_full_table_with_bogokey").await;
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE posts (id int, title text)",
+        ChangeList::from_strings(
+            vec!["CREATE TABLE posts (id int, title text)"],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -2910,8 +2910,8 @@ async fn pkey_then_full_table_with_bogokey() {
     .await
     .unwrap();
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE CACHE by_id FROM SELECT id, title FROM posts WHERE id = ?",
+        ChangeList::from_strings(
+            vec!["CREATE CACHE by_id FROM SELECT id, title FROM posts WHERE id = ?"],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -2919,8 +2919,8 @@ async fn pkey_then_full_table_with_bogokey() {
     .await
     .unwrap();
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE CACHE all_posts FROM SELECT id, title FROM posts",
+        ChangeList::from_strings(
+            vec!["CREATE CACHE all_posts FROM SELECT id, title FROM posts"],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -3615,18 +3615,20 @@ async fn state_replay_migration_query() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn recipe_activates_and_migrates() {
-    let r_txt = "CREATE TABLE b (a text, c text, x text);\n";
-    let r1_txt = "CREATE CACHE qa FROM SELECT a FROM b;\n
-                  CREATE CACHE qb FROM SELECT a, c FROM b WHERE a = 42;";
+    let r_txt = vec!["CREATE TABLE b (a text, c text, x text);\n"];
+    let r1_txt = vec![
+        "CREATE CACHE qa FROM SELECT a FROM b;\n",
+        "CREATE CACHE qb FROM SELECT a, c FROM b WHERE a = 42;",
+    ];
 
     let (mut g, shutdown_tx) = start_simple_unsharded("recipe_activates_and_migrates").await;
-    g.extend_recipe(ChangeList::from_str(r_txt, Dialect::DEFAULT_MYSQL).unwrap())
+    g.extend_recipe(ChangeList::from_strings(r_txt, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
     // one base node
     assert_eq!(g.tables().await.unwrap().len(), 1);
 
-    g.extend_recipe(ChangeList::from_str(r1_txt, Dialect::DEFAULT_MYSQL).unwrap())
+    g.extend_recipe(ChangeList::from_strings(r1_txt, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
     // still one base node
@@ -3639,20 +3641,22 @@ async fn recipe_activates_and_migrates() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn recipe_activates_and_migrates_with_join() {
-    let r_txt = "CREATE TABLE a (x int, y int, z int);\n
-                 CREATE TABLE b (r int, s int);\n";
-    let r1_txt = "CREATE CACHE q FROM SELECT y, s FROM a, b WHERE a.x = b.r;";
+    let r_txt = vec![
+        "CREATE TABLE a (x int, y int, z int);\n",
+        "CREATE TABLE b (r int, s int);\n",
+    ];
+    let r1_txt = vec!["CREATE CACHE q FROM SELECT y, s FROM a, b WHERE a.x = b.r;"];
 
     let (mut g, shutdown_tx) =
         start_simple_unsharded("recipe_activates_and_migrates_with_join").await;
-    g.extend_recipe(ChangeList::from_str(r_txt, Dialect::DEFAULT_MYSQL).unwrap())
+    g.extend_recipe(ChangeList::from_strings(r_txt, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
 
     // two base nodes
     assert_eq!(g.tables().await.unwrap().len(), 2);
 
-    g.extend_recipe(ChangeList::from_str(r1_txt, Dialect::DEFAULT_MYSQL).unwrap())
+    g.extend_recipe(ChangeList::from_strings(r1_txt, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
 
@@ -3790,17 +3794,20 @@ async fn node_removal() {
 #[tokio::test(flavor = "multi_thread")]
 async fn remove_query() {
     readyset_tracing::init_test_logging();
-    let r_txt = "CREATE TABLE b (a int, c text, x text);\n
-                 CREATE CACHE qa FROM SELECT a FROM b;\n
-                 CREATE CACHE qb FROM SELECT a, c FROM b WHERE a = 42;";
+    let r_txt = vec![
+        "CREATE TABLE b (a int, c text, x text);",
+        "CREATE CACHE qa FROM SELECT a FROM b;",
+        "CREATE CACHE qb FROM SELECT a, c FROM b WHERE a = 42;",
+    ];
 
-    let r2_txt = "
-        DROP CACHE qb;
-        CREATE TABLE b (a int, c text, x text);
-        CREATE CACHE qa FROM SELECT a FROM b;";
+    let r2_txt = vec![
+        "DROP CACHE qb;",
+        "CREATE TABLE b (a int, c text, x text);",
+        "CREATE CACHE qa FROM SELECT a FROM b;",
+    ];
 
     let (mut g, shutdown_tx) = start_simple_unsharded("remove_query").await;
-    g.extend_recipe(ChangeList::from_str(r_txt, Dialect::DEFAULT_MYSQL).unwrap())
+    g.extend_recipe(ChangeList::from_strings(r_txt, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
     assert_eq!(g.tables().await.unwrap().len(), 1);
@@ -3828,7 +3835,7 @@ async fn remove_query() {
     );
 
     // Remove qb and check that the graph still functions as expected.
-    g.extend_recipe(ChangeList::from_str(r2_txt, Dialect::DEFAULT_MYSQL).unwrap())
+    g.extend_recipe(ChangeList::from_strings(r2_txt, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
     assert_eq!(g.tables().await.unwrap().len(), 1);
@@ -3882,26 +3889,34 @@ macro_rules! get {
 async fn albums() {
     let (mut g, shutdown_tx) = start_simple_unsharded("albums").await;
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE friend (usera int, userb int);
-                 CREATE TABLE album (a_id text, u_id int, public tinyint(1));
-                 CREATE TABLE photo (p_id text, album text);",
+        ChangeList::from_strings(
+            vec![
+                "CREATE TABLE friend (usera int, userb int);",
+                "CREATE TABLE album (a_id text, u_id int, public tinyint(1));",
+                "CREATE TABLE photo (p_id text, album text);",
+            ],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
     )
     .await
     .unwrap();
-    g.extend_recipe(ChangeList::from_str("CREATE VIEW album_friends AS \
-                   (SELECT album.a_id AS aid, friend.userb AS uid FROM album JOIN friend ON (album.u_id = friend.usera) WHERE album.public = 0) \
-                   UNION \
-                   (SELECT album.a_id AS aid, friend.usera AS uid FROM album JOIN friend ON (album.u_id = friend.userb) WHERE album.public = 0) \
-                   UNION \
-                   (SELECT album.a_id AS aid, album.u_id AS uid FROM album WHERE album.public = 0);
-CREATE CACHE private_photos FROM \
-SELECT photo.p_id FROM photo JOIN album_friends ON (photo.album = album_friends.aid) WHERE album_friends.uid = ? AND photo.album = ?;
-CREATE CACHE public_photos FROM \
-SELECT photo.p_id FROM photo JOIN album ON (photo.album = album.a_id) WHERE album.public = 1 AND album.a_id = ?;", Dialect::DEFAULT_MYSQL).unwrap()).await.unwrap();
+
+    let sql = vec![
+        "CREATE VIEW album_friends AS
+            (SELECT album.a_id AS aid, friend.userb AS uid FROM album JOIN friend ON (album.u_id = friend.usera) WHERE album.public = 0)
+            UNION
+            (SELECT album.a_id AS aid, friend.usera AS uid FROM album JOIN friend ON (album.u_id = friend.userb) WHERE album.public = 0)
+            UNION
+            (SELECT album.a_id AS aid, album.u_id AS uid FROM album WHERE album.public = 0);",
+        "CREATE CACHE private_photos FROM
+            SELECT photo.p_id FROM photo JOIN album_friends ON (photo.album = album_friends.aid) WHERE album_friends.uid = ? AND photo.album = ?;",
+        "CREATE CACHE public_photos FROM
+            SELECT photo.p_id FROM photo JOIN album ON (photo.album = album.a_id) WHERE album.public = 1 AND album.a_id = ?;",
+    ];
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
+        .await
+        .unwrap();
 
     let mut friends = g.table("friend").await.unwrap();
     let mut albums = g.table("album").await.unwrap();
@@ -3992,18 +4007,15 @@ async fn union_basic() {
     // Add multiples of 2 to 'twos' and multiples of 3 to 'threes'.
 
     let (mut g, shutdown_tx) = start_simple_unsharded("union_basic").await;
-    g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE twos (id INTEGER PRIMARY KEY);
-         CREATE TABLE threes (id INTEGER PRIMARY KEY);
-         CREATE VIEW twos_union_threes AS (SELECT id FROM twos) UNION (SELECT id FROM threes);
-         CREATE CACHE `query` FROM SELECT id FROM twos_union_threes;",
-            Dialect::DEFAULT_MYSQL,
-        )
-        .unwrap(),
-    )
-    .await
-    .unwrap();
+    let sql = vec![
+        "CREATE TABLE twos (id INTEGER PRIMARY KEY);",
+        "CREATE TABLE threes (id INTEGER PRIMARY KEY);",
+        "CREATE VIEW twos_union_threes AS (SELECT id FROM twos) UNION (SELECT id FROM threes);",
+        "CREATE CACHE `query` FROM SELECT id FROM twos_union_threes;",
+    ];
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
+        .await
+        .unwrap();
 
     let mut twos = g.table("twos").await.unwrap();
     twos.insert_many((0..10).filter(|i: &i32| i % 2 == 0).map(|i| vec![i.into()]))
@@ -4044,18 +4056,15 @@ async fn union_all_basic() {
     // Add multiples of 2 to 'twos' and multiples of 3 to 'threes'.
 
     let (mut g, shutdown_tx) = start_simple_unsharded("union_all_basic").await;
-    g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE twos (id INTEGER PRIMARY KEY);
-         CREATE TABLE threes (id INTEGER PRIMARY KEY);
-         CREATE VIEW twos_union_threes AS (SELECT id FROM twos) UNION ALL (SELECT id FROM threes);
-         CREATE CACHE `query` FROM SELECT id FROM twos_union_threes;",
-            Dialect::DEFAULT_MYSQL,
-        )
-        .unwrap(),
-    )
-    .await
-    .unwrap();
+    let sql = vec![
+        "CREATE TABLE twos (id INTEGER PRIMARY KEY);",
+        "CREATE TABLE threes (id INTEGER PRIMARY KEY);",
+        "CREATE VIEW twos_union_threes AS (SELECT id FROM twos) UNION ALL (SELECT id FROM threes);",
+        "CREATE CACHE `query` FROM SELECT id FROM twos_union_threes;",
+    ];
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
+        .await
+        .unwrap();
 
     let mut twos = g.table("twos").await.unwrap();
     twos.insert_many((0..10).filter(|i: &i32| i % 2 == 0).map(|i| vec![i.into()]))
@@ -4098,16 +4107,17 @@ async fn union_all_basic() {
 async fn between() {
     let (mut g, shutdown_tx) = start_simple_unsharded("between_query").await;
     g.extend_recipe(
-        ChangeList::from_str("CREATE TABLE things (bigness INT);", Dialect::DEFAULT_MYSQL).unwrap(),
+        ChangeList::from_strings(
+            vec!["CREATE TABLE things (bigness INT);"],
+            Dialect::DEFAULT_MYSQL,
+        )
+        .unwrap(),
     )
     .await
     .unwrap();
 
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE CACHE `between` FROM SELECT bigness FROM things WHERE bigness BETWEEN 3 and 5;",
-            Dialect::DEFAULT_MYSQL,
-        )
+        ChangeList::from_strings(vec!["CREATE CACHE `between` FROM SELECT bigness FROM things WHERE bigness BETWEEN 3 and 5;"], Dialect::DEFAULT_MYSQL)
         .unwrap(),
     )
     .await
@@ -4141,14 +4151,18 @@ async fn between_parameterized() {
     let (mut g, shutdown_tx) = start_simple_unsharded("between_parameterized").await;
 
     g.extend_recipe(
-        ChangeList::from_str("CREATE TABLE things (bigness INT);", Dialect::DEFAULT_MYSQL).unwrap(),
+        ChangeList::from_strings(
+            vec!["CREATE TABLE things (bigness INT);"],
+            Dialect::DEFAULT_MYSQL,
+        )
+        .unwrap(),
     )
     .await
     .unwrap();
 
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE CACHE q FROM SELECT bigness FROM things WHERE bigness BETWEEN $1 and $2;",
+        ChangeList::from_strings(
+            vec!["CREATE CACHE q FROM SELECT bigness FROM things WHERE bigness BETWEEN $1 and $2;"],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -4187,11 +4201,12 @@ async fn between_parameterized() {
 async fn topk_updates() {
     let (mut g, shutdown_tx) = start_simple_unsharded("things").await;
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE posts (id INTEGER PRIMARY KEY, number INTEGER);
-
-         CREATE CACHE top_posts FROM
-         SELECT * FROM posts ORDER BY number LIMIT 3;",
+        ChangeList::from_strings(
+            vec![
+                "CREATE TABLE posts (id INTEGER PRIMARY KEY, number INTEGER);",
+                "CREATE CACHE top_posts FROM
+                 SELECT * FROM posts ORDER BY number LIMIT 3;",
+            ],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -4244,16 +4259,13 @@ async fn topk_updates() {
 #[tokio::test(flavor = "multi_thread")]
 async fn simple_pagination() {
     let (mut g, shutdown_tx) = start_simple_unsharded("simple_pagination").await;
-    g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE t (x int, y text);
-            CREATE CACHE q FROM SELECT x, y FROM t WHERE y = $1 ORDER BY x ASC LIMIT 3 OFFSET $2;",
-            Dialect::DEFAULT_MYSQL,
-        )
-        .unwrap(),
-    )
-    .await
-    .unwrap();
+    let sql = vec![
+        "CREATE TABLE t (x int, y text);",
+        "CREATE CACHE q FROM SELECT x, y FROM t WHERE y = $1 ORDER BY x ASC LIMIT 3 OFFSET $2;",
+    ];
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
+        .await
+        .unwrap();
 
     eprintln!("{}", g.graphviz(Default::default()).await.unwrap());
 
@@ -4338,20 +4350,22 @@ async fn simple_pagination() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn correct_nested_view_schema() {
-    let r_txt = "CREATE TABLE votes (story int, user int);
-                 CREATE TABLE stories (id int, content text);
-                 CREATE CACHE swvc FROM
-                 SELECT stories.id, stories.content, COUNT(votes.user) AS vc \
-                     FROM stories \
-                     JOIN votes ON (stories.id = votes.story) \
-                     WHERE stories.id = ? GROUP BY votes.story;";
+    let r_txt = vec![
+        "CREATE TABLE votes (story int, user int)",
+        "CREATE TABLE stories (id int, content text)",
+        "CREATE CACHE swvc FROM
+            SELECT stories.id, stories.content, COUNT(votes.user) AS vc
+                FROM stories
+                JOIN votes ON (stories.id = votes.story)
+                WHERE stories.id = ? GROUP BY votes.story;",
+    ];
 
     let mut b = Builder::for_tests();
     // need to disable partial due to lack of support for key subsumption (#99)
     b.disable_partial();
     b.set_sharding(None);
     let (mut g, shutdown_tx) = b.start_local().await.unwrap();
-    g.extend_recipe(ChangeList::from_str(r_txt, Dialect::DEFAULT_MYSQL).unwrap())
+    g.extend_recipe(ChangeList::from_strings(r_txt, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
 
@@ -4381,22 +4395,16 @@ async fn join_column_projection() {
     let (mut g, shutdown_tx) = start_simple_unsharded("join_column_projection").await;
 
     // NOTE u_id causes panic in stories_authors_explicit; stories_authors_tables_star also paics
-    g.extend_recipe(
-            ChangeList::from_str("CREATE TABLE stories (s_id int, author_id int, s_name text, content text);
-         CREATE TABLE users (u_id int, u_name text, email text);
-         CREATE CACHE stories_authors_explicit FROM SELECT s_id, author_id, s_name, content, u_id, u_name, email
-             FROM stories
-             JOIN users ON (stories.author_id = users.u_id);
-         CREATE CACHE stories_authors_tables_star FROM SELECT stories.*, users.*
-             FROM stories
-             JOIN users ON (stories.author_id = users.u_id);
-         CREATE CACHE stories_authors_star FROM SELECT *
-             FROM stories
-             JOIN users ON (stories.author_id = users.u_id);", Dialect::DEFAULT_MYSQL)
-        .unwrap(),
-    )
-    .await
-    .unwrap();
+    let sql = vec![
+        "CREATE TABLE stories (s_id int, author_id int, s_name text, content text);",
+        "CREATE TABLE users (u_id int, u_name text, email text);",
+        "CREATE CACHE stories_authors_explicit FROM SELECT s_id, author_id, s_name, content, u_id, u_name, email FROM stories JOIN users ON (stories.author_id = users.u_id);",
+        "CREATE CACHE stories_authors_tables_star FROM SELECT stories.*, users.* FROM stories JOIN users ON (stories.author_id = users.u_id);",
+        "CREATE CACHE stories_authors_star FROM SELECT * FROM stories JOIN users ON (stories.author_id = users.u_id);"
+    ];
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
+        .await
+        .unwrap();
 
     let query = g
         .view("stories_authors_explicit")
@@ -4465,12 +4473,14 @@ async fn join_column_projection() {
 async fn test_join_across_shards() {
     let (mut g, shutdown_tx) = start_simple("test_join_across_shards").await;
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE votes (story int, user int);
-         CREATE TABLE recs (story int, other int);
-         CREATE CACHE all_user_recs FROM SELECT votes.user as u, recs.other as s
-             FROM votes \
-             JOIN recs ON (votes.story = recs.story);",
+        ChangeList::from_strings(
+            vec![
+                "CREATE TABLE votes (story int, user int)",
+                "CREATE TABLE recs (story int, other int)",
+                "CREATE CACHE all_user_recs FROM SELECT votes.user as u, recs.other as s
+                    FROM votes
+                    JOIN recs ON (votes.story = recs.story);",
+            ],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -4532,12 +4542,14 @@ async fn test_join_across_shards() {
 async fn test_join_across_shards_with_param() {
     let (mut g, shutdown_tx) = start_simple("test_join_across_shards_with_param").await;
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE votes (story int, user int);
-         CREATE TABLE recs (story int, other int);
-         CREATE CACHE user_recs FROM SELECT votes.user as u, recs.other as s
-             FROM votes \
-             JOIN recs ON (votes.story = recs.story) WHERE votes.user = ?;",
+        ChangeList::from_strings(
+            vec![
+                "CREATE TABLE votes (story int, user int);",
+                "CREATE TABLE recs (story int, other int);",
+                "CREATE CACHE user_recs FROM SELECT votes.user as u, recs.other as s
+         FROM votes
+         JOIN recs ON (votes.story = recs.story) WHERE votes.user = ?;",
+            ],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -4589,12 +4601,14 @@ async fn test_join_across_shards_with_param() {
 async fn test_join_with_reused_column_name() {
     let (mut g, shutdown_tx) = start_simple_unsharded("test_join_with_reused_column_name").await;
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE votes (story int, user int);
-         CREATE TABLE recs (story int, other int);
-         CREATE CACHE all_user_recs FROM SELECT votes.user as user, recs.other as story
-             FROM votes \
-             JOIN recs ON (votes.story = recs.story);",
+        ChangeList::from_strings(
+            vec![
+                "CREATE TABLE votes (story int, user int);",
+                "CREATE TABLE recs (story int, other int);",
+                "CREATE CACHE all_user_recs FROM SELECT votes.user as user, recs.other as story
+         FROM votes
+         JOIN recs ON (votes.story = recs.story);",
+            ],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -4656,12 +4670,14 @@ async fn test_join_with_reused_column_name() {
 async fn test_join_with_reused_column_name_with_param() {
     let (mut g, shutdown_tx) = start_simple_unsharded("test_join_with_reused_column_name").await;
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE votes (story int, user int);
-         CREATE TABLE recs (story int, other int);
-         CREATE CACHE user_recs FROM SELECT votes.user as user, recs.other as story
-             FROM votes \
-             JOIN recs ON (votes.story = recs.story) WHERE votes.user = ?;",
+        ChangeList::from_strings(
+            vec![
+                "CREATE TABLE votes (story int, user int);",
+                "CREATE TABLE recs (story int, other int);",
+                "CREATE CACHE user_recs FROM SELECT votes.user as user, recs.other as story
+         FROM votes
+         JOIN recs ON (votes.story = recs.story) WHERE votes.user = ?;",
+            ],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -4714,12 +4730,14 @@ async fn test_join_with_reused_column_name_with_param() {
 async fn self_join_basic() {
     let (mut g, shutdown_tx) = start_simple_unsharded("self_join_basic").await;
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE votes (story int, user int);
-         CREATE VIEW like_minded AS SELECT v1.user, v2.user AS agreer \
-             FROM votes v1 \
-             JOIN votes v2 ON (v1.story = v2.story);
-         CREATE CACHE follow_on FROM SELECT user, agreer FROM like_minded;",
+        ChangeList::from_strings(
+            vec![
+                "CREATE TABLE votes (story int, user int);",
+                "CREATE VIEW like_minded AS SELECT v1.user, v2.user AS agreer
+         FROM votes v1
+         JOIN votes v2 ON (v1.story = v2.story);",
+                "CREATE CACHE follow_on FROM SELECT user, agreer FROM like_minded;",
+            ],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -4778,15 +4796,17 @@ async fn self_join_basic() {
 async fn self_join_param() {
     let (mut g, shutdown_tx) = start_simple_unsharded("self_join_param").await;
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE users (id int, friend int);
-         CREATE CACHE fof FROM SELECT u1.id AS user, u2.friend AS fof \
-             FROM users u1 \
-             JOIN users u2 ON (u1.friend = u2.id) WHERE u1.id = ?;
-         CREATE VIEW fof2 AS SELECT u1.id AS user, u2.friend AS fof \
-             FROM users u1 \
-             JOIN users u2 ON (u1.friend = u2.id);
-         CREATE CACHE follow_on FROM SELECT * FROM fof2 WHERE user = ?;",
+        ChangeList::from_strings(
+            vec![
+                "CREATE TABLE users (id int, friend int);",
+                "CREATE CACHE fof FROM SELECT u1.id AS user, u2.friend AS fof
+         FROM users u1
+         JOIN users u2 ON (u1.friend = u2.id) WHERE u1.id = ?;",
+                "CREATE VIEW fof2 AS SELECT u1.id AS user, u2.friend AS fof
+         FROM users u1
+         JOIN users u2 ON (u1.friend = u2.id);",
+                "CREATE CACHE follow_on FROM SELECT * FROM fof2 WHERE user = ?;",
+            ],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -5079,10 +5099,12 @@ async fn range_upquery_after_point_queries() {
 async fn query_reuse_aliases() {
     let (mut g, shutdown_tx) = start_simple_unsharded("query_reuse_aliases").await;
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE t1 (a INT, b INT);
-         CREATE CACHE q1 FROM SELECT * FROM t1 WHERE a != 1;
-         CREATE CACHE q2 FROM SELECT * FROM t1 WHERE a != 1;",
+        ChangeList::from_strings(
+            vec![
+                "CREATE TABLE t1 (a INT, b INT);",
+                "CREATE CACHE q1 FROM SELECT * FROM t1 WHERE a != 1;",
+                "CREATE CACHE q2 FROM SELECT * FROM t1 WHERE a != 1;",
+            ],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -5094,8 +5116,8 @@ async fn query_reuse_aliases() {
     g.view("q2").await.unwrap();
 
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE CACHE q3 FROM SELECT * FROM t1 WHERE a != 1",
+        ChangeList::from_strings(
+            vec!["CREATE CACHE q3 FROM SELECT * FROM t1 WHERE a != 1"],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -5110,8 +5132,8 @@ async fn query_reuse_aliases() {
     // query rewriting means this ends up being identical to the above query, even though the source
     // is different - let's make sure that still aliases successfully.
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE CACHE q4 FROM SELECT * FROM t1 WHERE NOT (a = 1)",
+        ChangeList::from_strings(
+            vec!["CREATE CACHE q4 FROM SELECT * FROM t1 WHERE NOT (a = 1)"],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -5131,9 +5153,11 @@ async fn query_reuse_aliases() {
 async fn same_table_columns_inequal() {
     let (mut g, shutdown_tx) = start_simple_unsharded("same_table_columns_inequal").await;
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE t1 (a INT, b INT);
-         CREATE CACHE q FROM SELECT * FROM t1 WHERE t1.a != t1.b;",
+        ChangeList::from_strings(
+            vec![
+                "CREATE TABLE t1 (a INT, b INT);",
+                "CREATE CACHE q FROM SELECT * FROM t1 WHERE t1.a != t1.b;",
+            ],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -5174,12 +5198,14 @@ async fn view_reuse_aliases() {
 
     // NOTE q1 causes panic
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE t1 (a INT, b INT);
-         CREATE VIEW v1 AS SELECT * FROM t1 WHERE a != 1;
-         CREATE VIEW v2 AS SELECT * FROM t1 WHERE a != 1;
-         CREATE CACHE q1 FROM SELECT * FROM v1;
-         CREATE CACHE q2 FROM SELECT * FROM v2;",
+        ChangeList::from_strings(
+            vec![
+                "CREATE TABLE t1 (a INT, b INT);",
+                "CREATE VIEW v1 AS SELECT * FROM t1 WHERE a != 1;",
+                "CREATE VIEW v2 AS SELECT * FROM t1 WHERE a != 1;",
+                "CREATE CACHE q1 FROM SELECT * FROM v1;",
+                "CREATE CACHE q2 FROM SELECT * FROM v2;",
+            ],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -5292,13 +5318,13 @@ async fn post_read_ilike() {
 async fn cast_projection() {
     let (mut g, shutdown_tx) = start_simple_unsharded("cast").await;
 
-    g.extend_recipe(
-            ChangeList::from_str("CREATE TABLE users (id int, created_at timestamp);
-         CREATE CACHE user FROM SELECT id, CAST(created_at AS date) AS created_day FROM users WHERE id = ?;", Dialect::DEFAULT_MYSQL)
-        .unwrap(),
-    )
-    .await
-    .unwrap();
+    let sql = vec![
+        "CREATE TABLE users (id int, created_at timestamp);",
+        "CREATE CACHE user FROM SELECT id, CAST(created_at AS date) AS created_day FROM users WHERE id = ?;"
+    ];
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
+        .await
+        .unwrap();
 
     let mut table = g.table("users").await.unwrap();
     table
@@ -5339,9 +5365,11 @@ async fn aggregate_expression() {
     let (mut g, shutdown_tx) = start_simple_unsharded("aggregate_expression").await;
 
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE t (string_num text);
-         CREATE CACHE q FROM SELECT max(cast(t.string_num as int)) as max_num from t;",
+        ChangeList::from_strings(
+            vec![
+                "CREATE TABLE t (string_num text);",
+                "CREATE CACHE q FROM SELECT max(cast(t.string_num as signed)) as max_num from t;",
+            ],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -5375,15 +5403,15 @@ async fn aggregate_missing_columns() {
     let (mut g, shutdown_tx) = start_simple_unsharded("aggregate_missing_columns").await;
 
     g.extend_recipe(
-        ChangeList::from_str("CREATE TABLE t (id INT);", Dialect::DEFAULT_MYSQL).unwrap(),
+        ChangeList::from_strings(vec!["CREATE TABLE t (id INT);"], Dialect::DEFAULT_MYSQL).unwrap(),
     )
     .await
     .unwrap();
 
     let res = g
         .extend_recipe(
-            ChangeList::from_str(
-                "CREATE CACHE q FROM SELECT max(idd) FROM t",
+            ChangeList::from_strings(
+                vec!["CREATE CACHE q FROM SELECT max(idd) FROM t"],
                 Dialect::DEFAULT_MYSQL,
             )
             .unwrap(),
@@ -5400,14 +5428,16 @@ async fn post_join_filter() {
     let (mut g, shutdown_tx) = start_simple_unsharded("post_join_filter").await;
 
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE t1 (id int, val_1 int);
-         CREATE TABLE t2 (id int, val_2 int);
-         CREATE CACHE q FROM
-            SELECT t1.id AS id_1, t1.val_1 AS val_1, t2.val_2 AS val_2
-            FROM t1
-            JOIN t2 ON t1.id = t2.id
-            WHERE t1.val_1 >= t2.val_2",
+        ChangeList::from_strings(
+            vec![
+                "CREATE TABLE t1 (id int, val_1 int);",
+                "CREATE TABLE t2 (id int, val_2 int);",
+                "CREATE CACHE q FROM
+        SELECT t1.id AS id_1, t1.val_1 AS val_1, t2.val_2 AS val_2
+        FROM t1
+        JOIN t2 ON t1.id = t2.id
+        WHERE t1.val_1 >= t2.val_2",
+            ],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -5460,14 +5490,16 @@ async fn duplicate_column_names() {
     let (mut g, shutdown_tx) = start_simple_unsharded("duplicate_column_names").await;
 
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE t1 (id int, val int);
-         CREATE TABLE t2 (id int, val int);
-         CREATE CACHE q FROM
-            SELECT t1.id AS id_1, t1.val AS val_1, t2.val AS val_2
-            FROM t1
-            JOIN t2 ON t1.id = t2.id
-            WHERE t1.val >= t2.val",
+        ChangeList::from_strings(
+            vec![
+                "CREATE TABLE t1 (id int, val int);",
+                "CREATE TABLE t2 (id int, val int);",
+                "CREATE CACHE q FROM
+        SELECT t1.id AS id_1, t1.val AS val_1, t2.val AS val_2
+        FROM t1
+        JOIN t2 ON t1.id = t2.id
+        WHERE t1.val >= t2.val",
+            ],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -5516,16 +5548,13 @@ async fn duplicate_column_names() {
 async fn filter_on_expression() {
     let (mut g, shutdown_tx) = start_simple_unsharded("filter_on_expression").await;
 
-    g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE users (id int, birthday date);
-         CREATE CACHE friday_babies FROM SELECT id FROM users WHERE dayofweek(birthday) = 6;",
-            Dialect::DEFAULT_MYSQL,
-        )
-        .unwrap(),
-    )
-    .await
-    .unwrap();
+    let sql = vec![
+        "CREATE TABLE users (id int, birthday date);",
+        "CREATE CACHE friday_babies FROM SELECT id FROM users WHERE dayofweek(birthday) = 6;",
+    ];
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
+        .await
+        .unwrap();
 
     let mut t = g.table("users").await.unwrap();
     let mut q = g
@@ -5561,15 +5590,17 @@ async fn filter_on_expression() {
 async fn compound_join_key() {
     let (mut g, shutdown_tx) = start_simple_unsharded("compound_join_key").await;
     g.extend_recipe(
-        ChangeList::from_str(
-            "
-      CREATE TABLE t1 (id_1 int, id_2 int, val_1 int);
-      CREATE TABLE t2 (id_1 int, id_2 int, val_2 int);
-      CREATE CACHE q FROM
-        SELECT t1.val_1, t2.val_2
-        FROM t1
-        JOIN t2
-          ON t1.id_1 = t2.id_1 AND t1.id_2 = t2.id_2;",
+        ChangeList::from_strings(
+            vec![
+                "
+              CREATE TABLE t1 (id_1 int, id_2 int, val_1 int);",
+                "CREATE TABLE t2 (id_1 int, id_2 int, val_2 int);",
+                "CREATE CACHE q FROM
+                SELECT t1.val_1, t2.val_2
+                FROM t1
+                JOIN t2
+                  ON t1.id_1 = t2.id_1 AND t1.id_2 = t2.id_2;",
+            ],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -5656,14 +5687,14 @@ async fn compound_join_key() {
 async fn left_join_null() {
     let (mut g, shutdown_tx) = start_simple_unsharded("left_join_null").await;
 
-    g.extend_recipe(
-            ChangeList::from_str("CREATE TABLE jim (id int, a int);
-         CREATE TABLE bob (id int);
-         CREATE CACHE funky FROM SELECT * FROM jim LEFT JOIN bob ON jim.id = bob.id WHERE bob.id IS NULL;", Dialect::DEFAULT_MYSQL)
-        .unwrap(),
-    )
-    .await
-    .unwrap();
+    let sql = vec![
+        "CREATE TABLE jim (id int, a int);",
+        "CREATE TABLE bob (id int);",
+        "CREATE CACHE funky FROM SELECT * FROM jim LEFT JOIN bob ON jim.id = bob.id WHERE bob.id IS NULL;",
+    ];
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
+        .await
+        .unwrap();
 
     let mut t = g.table("jim").await.unwrap();
     let mut t2 = g.table("bob").await.unwrap();
@@ -5696,10 +5727,13 @@ async fn overlapping_indices() {
     let (mut g, shutdown_tx) = start_simple_unsharded("overlapping_indices").await;
 
     // this creates an aggregation operator indexing on [0, 1], and then a TopK child on [1]
-    g.extend_recipe(ChangeList::from_str("CREATE TABLE test (id int, a int, b int);
-          CREATE CACHE overlapping FROM SELECT SUM(a) as s, id FROM test WHERE b = ? GROUP BY id ORDER BY id LIMIT 2;", Dialect::DEFAULT_MYSQL).unwrap())
-    .await
-    .unwrap();
+    let sql = vec![
+        "CREATE TABLE test (id int, a int, b int);",
+        "CREATE CACHE overlapping FROM SELECT SUM(a) as s, id FROM test WHERE b = ? GROUP BY id ORDER BY id LIMIT 2;",
+    ];
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
+        .await
+        .unwrap();
 
     let mut t = g.table("test").await.unwrap();
     let mut q = g
@@ -5748,9 +5782,11 @@ async fn aggregate_after_filter_non_equality() {
     let (mut g, shutdown_tx) = start_simple_unsharded("aggregate_after_filter_non_equality").await;
 
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE test (number int, value int);
-         CREATE CACHE filteragg FROM SELECT sum(value) AS s FROM test WHERE number > 2;",
+        ChangeList::from_strings(
+            vec![
+                "CREATE TABLE test (number int, value int);",
+                "CREATE CACHE filteragg FROM SELECT sum(value) AS s FROM test WHERE number > 2;",
+            ],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -5797,12 +5833,14 @@ async fn join_simple_cte() {
     let (mut g, shutdown_tx) = start_simple_unsharded("join_simple_cte").await;
 
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE t1 (id int, value int);
-         CREATE TABLE t2 (value int, name text);
-         CREATE CACHE join_simple_cte FROM
-         WITH max_val AS (SELECT max(value) as value FROM t1)
-         SELECT name FROM t2 JOIN max_val ON max_val.value = t2.value;",
+        ChangeList::from_strings(
+            vec![
+                "CREATE TABLE t1 (id int, value int);",
+                "CREATE TABLE t2 (value int, name text);",
+                "CREATE CACHE join_simple_cte FROM
+                 WITH max_val AS (SELECT max(value) as value FROM t1)
+                 SELECT name FROM t2 JOIN max_val ON max_val.value = t2.value;",
+            ],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -5847,14 +5885,13 @@ async fn join_simple_cte() {
 async fn multiple_aggregate_sum() {
     let (mut g, shutdown_tx) = start_simple_unsharded("multiple_aggregate").await;
 
-    g.extend_recipe(
-
-            ChangeList::from_str("CREATE TABLE test (number int, value1 int, value2 int);
-         CREATE CACHE multiagg FROM SELECT sum(value1) AS s1, sum(value2) as s2 FROM test GROUP BY number;", Dialect::DEFAULT_MYSQL)
-        .unwrap(),
-    )
-    .await
-    .unwrap();
+    let sql = vec![
+        "CREATE TABLE test (number int, value1 int, value2 int);",
+        "CREATE CACHE multiagg FROM SELECT sum(value1) AS s1, sum(value2) as s2 FROM test GROUP BY number;",
+    ];
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
+        .await
+        .unwrap();
 
     let mut t = g.table("test").await.unwrap();
     let mut q = g
@@ -5920,14 +5957,13 @@ async fn multiple_aggregate_sum() {
 async fn multiple_aggregate_same_col() {
     let (mut g, shutdown_tx) = start_simple_unsharded("multiple_aggregate_same_col").await;
 
-    g.extend_recipe(ChangeList::from_str(
-
-            "CREATE TABLE test (number int, value int);
-         CREATE CACHE multiaggsamecol FROM SELECT sum(value) AS s, avg(value) AS a FROM test GROUP BY number;", Dialect::DEFAULT_MYSQL)
-        .unwrap(),
-    )
-    .await
-    .unwrap();
+    let sql = vec![
+        "CREATE TABLE test (number int, value int);",
+        "CREATE CACHE multiaggsamecol FROM SELECT sum(value) AS s, avg(value) AS a FROM test GROUP BY number;",
+    ];
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
+        .await
+        .unwrap();
 
     let mut t = g.table("test").await.unwrap();
     let mut q = g
@@ -5974,10 +6010,13 @@ async fn multiple_aggregate_same_col() {
 async fn multiple_aggregate_sum_sharded() {
     let (mut g, shutdown_tx) = start_simple("multiple_aggregate_sharded").await;
 
-    g.extend_recipe(ChangeList::from_str("CREATE TABLE test (number int, value1 int, value2 int);
-         CREATE CACHE multiaggsharded FROM SELECT sum(value1) AS s1, sum(value2) as s2 FROM test GROUP BY number;", Dialect::DEFAULT_MYSQL).unwrap())
-    .await
-    .unwrap();
+    let sql = vec![
+        "CREATE TABLE test (number int, value1 int, value2 int);",
+        "CREATE CACHE multiaggsharded FROM SELECT sum(value1) AS s1, sum(value2) as s2 FROM test GROUP BY number;",
+    ];
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
+        .await
+        .unwrap();
 
     let mut t = g.table("test").await.unwrap();
     let mut q = g
@@ -6044,10 +6083,13 @@ async fn multiple_aggregate_sum_sharded() {
 async fn multiple_aggregate_same_col_sharded() {
     let (mut g, shutdown_tx) = start_simple("multiple_aggregate_same_col_sharded").await;
 
-    g.extend_recipe(ChangeList::from_str("CREATE TABLE test (number int, value int);
-         CREATE CACHE multiaggsamecolsharded FROM SELECT sum(value) AS s, avg(value) AS a FROM test GROUP BY number;", Dialect::DEFAULT_MYSQL).unwrap())
-    .await
-    .unwrap();
+    let sql = vec![
+        "CREATE TABLE test (number int, value int);",
+        "CREATE CACHE multiaggsamecolsharded FROM SELECT sum(value) AS s, avg(value) AS a FROM test GROUP BY number;",
+    ];
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
+        .await
+        .unwrap();
 
     let mut t = g.table("test").await.unwrap();
     let mut q = g
@@ -6094,10 +6136,13 @@ async fn multiple_aggregate_same_col_sharded() {
 async fn multiple_aggregate_over_two() {
     let (mut g, shutdown_tx) = start_simple_unsharded("multiple_aggregate_over_two").await;
 
-    g.extend_recipe(ChangeList::from_str("CREATE TABLE test (number int, value int);
-         CREATE CACHE multiaggovertwo FROM SELECT sum(value) AS s, avg(value) AS a, count(value) AS c, max(value) as m FROM test GROUP BY number;", Dialect::DEFAULT_MYSQL).unwrap())
-    .await
-    .unwrap();
+    let sql = vec![
+        "CREATE TABLE test (number int, value int);",
+        "CREATE CACHE multiaggovertwo FROM SELECT sum(value) AS s, avg(value) AS a, count(value) AS c, max(value) as m FROM test GROUP BY number;",
+    ];
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
+        .await
+        .unwrap();
 
     let mut t = g.table("test").await.unwrap();
     let mut q = g
@@ -6148,10 +6193,13 @@ async fn multiple_aggregate_over_two() {
 async fn multiple_aggregate_over_two_sharded() {
     let (mut g, shutdown_tx) = start_simple("multiple_aggregate_over_two_sharded").await;
 
-    g.extend_recipe(ChangeList::from_str("CREATE TABLE test (number int, value int);
-         CREATE CACHE multiaggovertwosharded FROM SELECT sum(value) AS s, avg(value) AS a, count(value) AS c, max(value) as m FROM test GROUP BY number;", Dialect::DEFAULT_MYSQL).unwrap())
-    .await
-    .unwrap();
+    let sql = vec![
+        "CREATE TABLE test (number int, value int);",
+        "CREATE CACHE multiaggovertwosharded FROM SELECT sum(value) AS s, avg(value) AS a, count(value) AS c, max(value) as m FROM test GROUP BY number;"
+    ];
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
+        .await
+        .unwrap();
 
     let mut t = g.table("test").await.unwrap();
     let mut q = g
@@ -6200,10 +6248,13 @@ async fn multiple_aggregate_over_two_sharded() {
 async fn multiple_aggregate_with_expressions() {
     let (mut g, shutdown_tx) = start_simple_unsharded("multiple_aggregate_with_expressions").await;
 
-    g.extend_recipe(ChangeList::from_str("CREATE TABLE test (number int, value int);
-         CREATE CACHE multiaggwexpressions FROM SELECT sum(value) AS s, 5 * avg(value) AS a FROM test GROUP BY number;", Dialect::DEFAULT_MYSQL).unwrap())
-    .await
-    .unwrap();
+    let sql = vec![
+        "CREATE TABLE test (number int, value int);",
+        "CREATE CACHE multiaggwexpressions FROM SELECT sum(value) AS s, 5 * avg(value) AS a FROM test GROUP BY number;",
+    ];
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
+        .await
+        .unwrap();
 
     let mut t = g.table("test").await.unwrap();
     let mut q = g
@@ -6251,10 +6302,13 @@ async fn multiple_aggregate_with_expressions() {
 async fn multiple_aggregate_with_expressions_sharded() {
     let (mut g, shutdown_tx) = start_simple("multiple_aggregate_with_expressions_sharded").await;
 
-    g.extend_recipe(ChangeList::from_str("CREATE TABLE test (number int, value int);
-         CREATE CACHE multiaggwexpressionssharded FROM SELECT sum(value) AS s, 5 * avg(value) AS a FROM test GROUP BY number;", Dialect::DEFAULT_MYSQL).unwrap())
-    .await
-    .unwrap();
+    let sql = vec![
+        "CREATE TABLE test (number int, value int);",
+        "CREATE CACHE multiaggwexpressionssharded FROM SELECT sum(value) AS s, 5 * avg(value) AS a FROM test GROUP BY number;",
+    ];
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
+        .await
+        .unwrap();
 
     let mut t = g.table("test").await.unwrap();
     let mut q = g
@@ -6301,10 +6355,13 @@ async fn multiple_aggregate_with_expressions_sharded() {
 async fn multiple_aggregate_reuse() {
     let (mut g, shutdown_tx) = start_simple_unsharded("multiple_aggregate_reuse").await;
 
-    g.extend_recipe(ChangeList::from_str("CREATE TABLE test (number int, value int);
-         CREATE CACHE multiaggfirstquery FROM SELECT sum(value) AS s, 5 * avg(value) AS a FROM test GROUP BY number;", Dialect::DEFAULT_MYSQL).unwrap())
-    .await
-    .unwrap();
+    let sql = vec![
+        "CREATE TABLE test (number int, value int);",
+        "CREATE CACHE multiaggfirstquery FROM SELECT sum(value) AS s, 5 * avg(value) AS a FROM test GROUP BY number;",
+    ];
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
+        .await
+        .unwrap();
 
     let mut t = g.table("test").await.unwrap();
     let mut q = g
@@ -6345,9 +6402,10 @@ async fn multiple_aggregate_reuse() {
     // children to update and not be re-used. We're intentionally re-using the same name for the
     // second aggregate so as much is as similar as possible, to rule out names being different
     // forcing a false re-use.
-    g.extend_recipe(ChangeList::from_str("CREATE CACHE multiaggsecondquery FROM SELECT sum(value) AS s, max(value) AS a FROM test GROUP BY number;", Dialect::DEFAULT_MYSQL).unwrap())
-    .await
-    .unwrap();
+    let sql = vec!["CREATE CACHE multiaggsecondquery FROM SELECT sum(value) AS s, max(value) AS a FROM test GROUP BY number;"];
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
+        .await
+        .unwrap();
 
     q = g
         .view("multiaggsecondquery")
@@ -6385,17 +6443,19 @@ async fn reuse_subquery_alias_name() {
 
     // Install two views, 'q1' and 'q2', each using the same subquery alias name 't2_data'.
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE t1 (id int, value int);
-         CREATE TABLE t2 (value int, name text, bio text);
-         CREATE VIEW q1 AS
-            SELECT name
-            FROM t1
-            JOIN (SELECT value, name FROM t2) AS t2_data ON t1.value = t2_data.value;
-         CREATE VIEW q2 AS
-            SELECT bio
-            FROM t1
-            JOIN (SELECT value, name, bio FROM t2) AS t2_data ON t1.value = t2_data.value;",
+        ChangeList::from_strings(
+            vec![
+                "CREATE TABLE t1 (id int, value int);",
+                "CREATE TABLE t2 (value int, name text, bio text);",
+                "CREATE VIEW q1 AS
+        SELECT name
+        FROM t1
+        JOIN (SELECT value, name FROM t2) AS t2_data ON t1.value = t2_data.value;",
+                "CREATE VIEW q2 AS
+        SELECT bio
+        FROM t1
+        JOIN (SELECT value, name, bio FROM t2) AS t2_data ON t1.value = t2_data.value;",
+            ],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -6415,9 +6475,11 @@ async fn col_beginning_with_literal() {
     let (mut g, shutdown_tx) = start_simple_unsharded("col_beginning_with_literal").await;
 
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE t1 (id INT, null_hypothesis INT);
-         CREATE VIEW q1 AS SELECT null_hypothesis FROM t1;",
+        ChangeList::from_strings(
+            vec![
+                "CREATE TABLE t1 (id INT, null_hypothesis INT);",
+                "CREATE VIEW q1 AS SELECT null_hypothesis FROM t1;",
+            ],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -6434,12 +6496,14 @@ async fn col_beginning_with_literal() {
 async fn simple_enum() {
     let (mut g, shutdown_tx) = start_simple_unsharded("simple_enum").await;
 
-    let sql = "
-        CREATE TABLE t1 (id INT, color ENUM('red', 'yellow', 'green'));
-        CREATE CACHE c1 FROM SELECT color FROM t1 WHERE id = ? ORDER BY color;
-    ";
+    let sql = vec![
+        "
+        CREATE TABLE t1 (id INT, color ENUM('red', 'yellow', 'green'));",
+        "CREATE CACHE c1 FROM SELECT color FROM t1 WHERE id = ? ORDER BY color;
+    ",
+    ];
 
-    g.extend_recipe(ChangeList::from_str(sql, Dialect::DEFAULT_MYSQL).unwrap())
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
 
@@ -6502,9 +6566,11 @@ async fn round_int_to_int() {
     let (mut g, shutdown_tx) = start_simple_unsharded("round_int_to_int").await;
 
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE test (value int);
-         CREATE CACHE roundinttoint FROM SELECT round(value, -3) as r FROM test;",
+        ChangeList::from_strings(
+            vec![
+                "CREATE TABLE test (value int);",
+                "CREATE CACHE roundinttoint FROM SELECT round(value, -3) as r FROM test;",
+            ],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -6541,9 +6607,11 @@ async fn round_float_to_float() {
     let (mut g, shutdown_tx) = start_simple_unsharded("round_float_to_float").await;
 
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE test (value double);
-         CREATE CACHE roundfloattofloat FROM SELECT round(value, 2) as r FROM test;",
+        ChangeList::from_strings(
+            vec![
+                "CREATE TABLE test (value double);",
+                "CREATE CACHE roundfloattofloat FROM SELECT round(value, 2) as r FROM test;",
+            ],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -6582,9 +6650,11 @@ async fn round_float() {
     let (mut g, shutdown_tx) = start_simple_unsharded("round_float").await;
 
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE test (value double);
-         CREATE CACHE roundfloat FROM SELECT round(value, 0) as r FROM test;",
+        ChangeList::from_strings(
+            vec![
+                "CREATE TABLE test (value double);",
+                "CREATE CACHE roundfloat FROM SELECT round(value, 0) as r FROM test;",
+            ],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -6625,16 +6695,13 @@ async fn round_float() {
 async fn round_with_precision_float() {
     let (mut g, shutdown_tx) = start_simple_unsharded("round_with_precision_float").await;
 
-    g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE test (value double);
-         CREATE CACHE roundwithprecisionfloat FROM SELECT round(value, -1.0) as r FROM test;",
-            Dialect::DEFAULT_MYSQL,
-        )
-        .unwrap(),
-    )
-    .await
-    .unwrap();
+    let sql = vec![
+        "CREATE TABLE test (value double);",
+        "CREATE CACHE roundwithprecisionfloat FROM SELECT round(value, -1.0) as r FROM test;",
+    ];
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
+        .await
+        .unwrap();
 
     let mut t = g.table("test").await.unwrap();
     let mut q = g
@@ -6667,9 +6734,11 @@ async fn round_bigint_to_bigint() {
     let (mut g, shutdown_tx) = start_simple_unsharded("round_bigint_to_bigint").await;
 
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE test (value bigint);
-         CREATE CACHE roundbiginttobigint FROM SELECT round(value, -3) as r FROM test;",
+        ChangeList::from_strings(
+            vec![
+                "CREATE TABLE test (value bigint);",
+                "CREATE CACHE roundbiginttobigint FROM SELECT round(value, -3) as r FROM test;",
+            ],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -6706,9 +6775,11 @@ async fn round_unsignedint_to_unsignedint() {
     let (mut g, shutdown_tx) = start_simple_unsharded("round_unsignedint_to_unsignedint").await;
 
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE test (value int unsigned);
-         CREATE CACHE roundunsignedtounsigned FROM SELECT round(value, -3) as r FROM test;",
+        ChangeList::from_strings(
+            vec![
+                "CREATE TABLE test (value int unsigned);",
+                "CREATE CACHE roundunsignedtounsigned FROM SELECT round(value, -3) as r FROM test;",
+            ],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -6745,13 +6816,13 @@ async fn round_unsignedbigint_to_unsignedbitint() {
     let (mut g, shutdown_tx) =
         start_simple_unsharded("round_unsignedbigint_to_unsignedbitint").await;
 
-    g.extend_recipe(
-        ChangeList::from_str("CREATE TABLE test (value bigint unsigned);
-         CREATE CACHE roundunsignedbiginttounsignedbigint FROM SELECT round(value, -3) as r FROM test;", Dialect::DEFAULT_MYSQL)
-        .unwrap(),
-    )
-    .await
-    .unwrap();
+    let sql = vec![
+        "CREATE TABLE test (value bigint unsigned);",
+        "CREATE CACHE roundunsignedbiginttounsignedbigint FROM SELECT round(value, -3) as r FROM test;",
+    ];
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
+        .await
+        .unwrap();
 
     let mut t = g.table("test").await.unwrap();
     let mut q = g
@@ -6782,9 +6853,11 @@ async fn round_with_no_precision() {
     let (mut g, shutdown_tx) = start_simple_unsharded("round_with_no_precision").await;
 
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE test (value bigint unsigned);
-         CREATE CACHE roundwithnoprecision FROM SELECT round(value) as r FROM test;",
+        ChangeList::from_strings(
+            vec![
+                "CREATE TABLE test (value bigint unsigned);",
+                "CREATE CACHE roundwithnoprecision FROM SELECT round(value) as r FROM test;",
+            ],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -6823,9 +6896,11 @@ async fn distinct_select_works() {
     let (mut g, shutdown_tx) = start_simple_unsharded("distinct_select_works").await;
 
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE test (value int);
-         CREATE CACHE distinctselect FROM SELECT DISTINCT value as v FROM test;",
+        ChangeList::from_strings(
+            vec![
+                "CREATE TABLE test (value int);",
+                "CREATE CACHE distinctselect FROM SELECT DISTINCT value as v FROM test;",
+            ],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -6871,9 +6946,11 @@ async fn partial_distinct() {
     let (mut g, shutdown_tx) = start_simple_unsharded("partial_distinct").await;
 
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE test (value int, k int);
-          CREATE CACHE distinctselect FROM SELECT DISTINCT value FROM test WHERE k = ?;",
+        ChangeList::from_strings(
+            vec![
+                "CREATE TABLE test (value int, k int);",
+                "CREATE CACHE distinctselect FROM SELECT DISTINCT value FROM test WHERE k = ?;",
+            ],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -6926,12 +7003,13 @@ async fn partial_distinct() {
 async fn partial_distinct_multi() {
     let (mut g, shutdown_tx) = start_simple_unsharded("partial_distinct_multi").await;
 
-    g.extend_recipe(ChangeList::from_str("CREATE TABLE test (value int, number int, k int);
-          CREATE CACHE distinctselectmulti FROM SELECT DISTINCT value, SUM(number) as s FROM test WHERE k = ?;", Dialect::DEFAULT_MYSQL)
-        .unwrap(),
-    )
-    .await
-    .unwrap();
+    let sql = vec![
+        "CREATE TABLE test (value int, number int, k int);",
+        "CREATE CACHE distinctselectmulti FROM SELECT DISTINCT value, SUM(number) as s FROM test WHERE k = ?;",
+    ];
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
+        .await
+        .unwrap();
 
     eprintln!("{}", g.graphviz(Default::default()).await.unwrap());
 
@@ -6976,14 +7054,13 @@ async fn partial_distinct_multi() {
 async fn distinct_select_multi_col() {
     let (mut g, shutdown_tx) = start_simple_unsharded("distinct_select_multi_col").await;
 
-    g.extend_recipe(
-        ChangeList::from_str("CREATE TABLE test (value int, number int);
-         CREATE CACHE distinctselectmulticol FROM SELECT DISTINCT value as v, number as n FROM test;"
-            , Dialect::DEFAULT_MYSQL)
-            .unwrap(),
-    )
-    .await
-    .unwrap();
+    let sql = vec![
+        "CREATE TABLE test (value int, number int);",
+        "CREATE CACHE distinctselectmulticol FROM SELECT DISTINCT value as v, number as n FROM test;",
+    ];
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
+        .await
+        .unwrap();
 
     let mut t = g.table("test").await.unwrap();
     let mut q = g
@@ -7023,14 +7100,14 @@ async fn distinct_select_multi_col() {
 async fn join_straddled_columns() {
     let (mut g, shutdown_tx) = start_simple_unsharded("join_straddled_columns").await;
 
-    g.extend_recipe(ChangeList::from_str(
-            "CREATE TABLE a (a1 int, a2 int);
-         CREATE TABLE b (b1 int, b2 int);
-         CREATE CACHE straddle FROM SELECT * FROM a INNER JOIN b ON a.a2 = b.b1 WHERE a.a1 = ? AND b.b2 = ?;", Dialect::DEFAULT_MYSQL)
-        .unwrap(),
-    )
-    .await
-    .unwrap();
+    let sql = vec![
+        "CREATE TABLE a (a1 int, a2 int);",
+        "CREATE TABLE b (b1 int, b2 int);",
+        "CREATE CACHE straddle FROM SELECT * FROM a INNER JOIN b ON a.a2 = b.b1 WHERE a.a1 = ? AND b.b2 = ?;",
+    ];
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
+        .await
+        .unwrap();
 
     let mut a = g.table("a").await.unwrap();
     let mut b = g.table("b").await.unwrap();
@@ -7078,14 +7155,14 @@ async fn straddled_join_range_query() {
     readyset_tracing::init_test_logging();
     let (mut g, shutdown_tx) = start_simple_unsharded("straddled_join_range_query").await;
 
-    g.extend_recipe(ChangeList::from_str(
-            "CREATE TABLE a (a1 int, a2 int);
-         CREATE TABLE b (b1 int, b2 int);
-         CREATE CACHE straddle FROM SELECT * FROM a INNER JOIN b ON a.a2 = b.b1 WHERE a.a1 > ? AND b.b2 > ?;", Dialect::DEFAULT_MYSQL)
-        .unwrap(),
-    )
-    .await
-    .unwrap();
+    let sql = vec![
+        "CREATE TABLE a (a1 int, a2 int);",
+        "CREATE TABLE b (b1 int, b2 int);",
+        "CREATE CACHE straddle FROM SELECT * FROM a INNER JOIN b ON a.a2 = b.b1 WHERE a.a1 > ? AND b.b2 > ?;",
+    ];
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
+        .await
+        .unwrap();
 
     let mut a = g.table("a").await.unwrap();
     let mut b = g.table("b").await.unwrap();
@@ -7145,9 +7222,11 @@ async fn overlapping_range_queries() {
     let (mut g, shutdown_tx) = start_simple_unsharded("straddled_join_range_query").await;
 
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE t (x int);
-         CREATE CACHE q FROM SELECT x FROM t WHERE x >= ?",
+        ChangeList::from_strings(
+            vec![
+                "CREATE TABLE t (x int);",
+                "CREATE CACHE q FROM SELECT x FROM t WHERE x >= ?",
+            ],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -7215,14 +7294,14 @@ async fn overlapping_remapped_range_queries() {
     readyset_tracing::init_test_logging();
     let (mut g, shutdown_tx) = start_simple_unsharded("overlapping_remapped_range_queries").await;
 
-    g.extend_recipe(ChangeList::from_str(
-            "CREATE TABLE a (a1 int, a2 int);
-         CREATE TABLE b (b1 int, b2 int);
-         CREATE CACHE q FROM SELECT * FROM a INNER JOIN b ON a.a2 = b.b1 WHERE a.a1 > ? AND b.b2 > ?;", Dialect::DEFAULT_MYSQL)
-        .unwrap(),
-    )
-    .await
-    .unwrap();
+    let sql = vec![
+        "CREATE TABLE a (a1 int, a2 int);",
+        "CREATE TABLE b (b1 int, b2 int);",
+        "CREATE CACHE q FROM SELECT * FROM a INNER JOIN b ON a.a2 = b.b1 WHERE a.a1 > ? AND b.b2 > ?;",
+    ];
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
+        .await
+        .unwrap();
 
     let mut a = g.table("a").await.unwrap();
     let mut b = g.table("b").await.unwrap();
@@ -7292,9 +7371,11 @@ async fn range_query_through_union() {
     let (mut g, shutdown_tx) = start_simple_unsharded("range_query_through_union").await;
 
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE t (a int, b int);
-         CREATE CACHE q FROM SELECT a, b FROM t WHERE (a = 1 OR a = 2) AND b > ?",
+        ChangeList::from_strings(
+            vec![
+                "CREATE TABLE t (a int, b int);",
+                "CREATE CACHE q FROM SELECT a, b FROM t WHERE (a = 1 OR a = 2) AND b > ?",
+            ],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -7352,11 +7433,13 @@ async fn mixed_inclusive_range_and_equality() {
     };
 
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE t (x INT, y INT, z INT, w INT);
-         CREATE CACHE q FROM
-         SELECT x, y, z, w FROM t
-         WHERE x >= $1 AND y = $2 AND z >= $3 AND w = $4;",
+        ChangeList::from_strings(
+            vec![
+                "CREATE TABLE t (x INT, y INT, z INT, w INT);",
+                "CREATE CACHE q FROM
+                 SELECT x, y, z, w FROM t
+                 WHERE x >= $1 AND y = $2 AND z >= $3 AND w = $4;",
+            ],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -7454,16 +7537,13 @@ async fn mixed_inclusive_range_and_equality() {
 async fn group_by_agg_col_count() {
     let (mut g, shutdown_tx) = start_simple_unsharded("group_by_agg_col_count").await;
 
-    g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE test (value int, number int);
-         CREATE CACHE groupbyaggcolcount FROM SELECT count(value) as c FROM test GROUP BY value;",
-            Dialect::DEFAULT_MYSQL,
-        )
-        .unwrap(),
-    )
-    .await
-    .unwrap();
+    let sql = vec![
+        "CREATE TABLE test (value int, number int);",
+        "CREATE CACHE groupbyaggcolcount FROM SELECT count(value) as c FROM test GROUP BY value;",
+    ];
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
+        .await
+        .unwrap();
 
     let mut t = g.table("test").await.unwrap();
     let mut q = g
@@ -7506,10 +7586,13 @@ async fn group_by_agg_col_count() {
 async fn group_by_agg_col_multi() {
     let (mut g, shutdown_tx) = start_simple_unsharded("group_by_agg_col_multi").await;
 
-    g.extend_recipe(ChangeList::from_str("CREATE TABLE test (value int, number int);
-         CREATE CACHE groupbyaggcolmulti FROM SELECT count(value) as c, avg(number) as a FROM test GROUP BY value;", Dialect::DEFAULT_MYSQL).unwrap())
-    .await
-    .unwrap();
+    let sql = vec![
+        "CREATE TABLE test (value int, number int);",
+        "CREATE CACHE groupbyaggcolmulti FROM SELECT count(value) as c, avg(number) as a FROM test GROUP BY value;",
+    ];
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
+        .await
+        .unwrap();
 
     let mut t = g.table("test").await.unwrap();
     let mut q = g
@@ -7551,20 +7634,19 @@ async fn group_by_agg_col_multi() {
 #[tokio::test(flavor = "multi_thread")]
 async fn group_by_agg_col_with_join() {
     let (mut g, shutdown_tx) = start_simple_unsharded("group_by_agg_col_with_join").await;
-    let sql = "
-        # base tables
-        CREATE TABLE test (id int, number int, PRIMARY KEY(id));
-        CREATE TABLE test2 (test_id int, value int);
-
-        # read queries
-        CREATE CACHE groupbyaggcolwithjoin FROM SELECT count(number) as c, avg(test2.value) AS a \
-                    FROM test \
-                    INNER JOIN test2 \
+    let sql = vec![
+        "
+        CREATE TABLE test (id int, number int, PRIMARY KEY(id));",
+        "CREATE TABLE test2 (test_id int, value int);",
+        "CREATE CACHE groupbyaggcolwithjoin FROM SELECT count(number) as c, avg(test2.value) AS a
+                    FROM test
+                    INNER JOIN test2
                     ON (test.id = test2.test_id)
                     GROUP BY number;
-    ";
+    ",
+    ];
 
-    g.extend_recipe(ChangeList::from_str(sql, Dialect::DEFAULT_MYSQL).unwrap())
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
     let mut test = g.table("test").await.unwrap();
@@ -7610,18 +7692,10 @@ async fn group_by_agg_col_with_join() {
 #[tokio::test(flavor = "multi_thread")]
 async fn count_emit_zero() {
     let (mut g, shutdown_tx) = start_simple_unsharded("count_emit_zero").await;
-    let sql = "
-        # base tables
-        CREATE TABLE test (id int);
-
-        # read queries
-        CREATE CACHE countemitzero FROM SELECT count(id) as c FROM test GROUP BY id;
-        CREATE CACHE countemitzeronogroup FROM SELECT count(*) as c FROM test;
-        CREATE CACHE countemitzeromultiple FROM SELECT COUNT(id) AS c, COUNT(*) AS c2 FROM test;
-        CREATE CACHE countemitzerowithcolumn FROM SELECT id, COUNT(*) AS c FROM test;
-        CREATE CACHE countemitzerowithotheraggregations FROM SELECT COUNT(*) AS c, SUM(id) AS s, MIN(id) AS m FROM test;
-    ";
-    g.extend_recipe(ChangeList::from_str(sql, Dialect::DEFAULT_MYSQL).unwrap())
+    let sql = vec!["
+        CREATE TABLE test (id int);", "CREATE CACHE countemitzero FROM SELECT count(id) as c FROM test GROUP BY id;", "CREATE CACHE countemitzeronogroup FROM SELECT count(*) as c FROM test;", "CREATE CACHE countemitzeromultiple FROM SELECT COUNT(id) AS c, COUNT(*) AS c2 FROM test;", "CREATE CACHE countemitzerowithcolumn FROM SELECT id, COUNT(*) AS c FROM test;", "CREATE CACHE countemitzerowithotheraggregations FROM SELECT COUNT(*) AS c, SUM(id) AS s, MIN(id) AS m FROM test;
+    "];
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
 
@@ -7782,11 +7856,13 @@ async fn count_emit_zero() {
 async fn partial_join_on_one_parent() {
     let (mut g, shutdown_tx) = start_simple_unsharded("partial_join_on_one_parent").await;
     g.extend_recipe(
-        ChangeList::from_str(
-            "
-        CREATE TABLE t1 (jk INT, val INT);
-        CREATE TABLE t2 (jk INT, pk INT PRIMARY KEY);
-    ",
+        ChangeList::from_strings(
+            vec![
+                "
+                CREATE TABLE t1 (jk INT, val INT);",
+                "CREATE TABLE t2 (jk INT, pk INT PRIMARY KEY);
+            ",
+            ],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -7810,10 +7886,7 @@ async fn partial_join_on_one_parent() {
         .unwrap();
 
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE CACHE q FROM SELECT t1.val FROM t2 JOIN t1 ON t2.jk = t1.jk WHERE t1.val = ?",
-            Dialect::DEFAULT_MYSQL,
-        )
+        ChangeList::from_strings(vec!["CREATE CACHE q FROM SELECT t1.val FROM t2 JOIN t1 ON t2.jk = t1.jk WHERE t1.val = ?"], Dialect::DEFAULT_MYSQL)
         .unwrap(),
     )
     .await
@@ -7852,7 +7925,10 @@ async fn aggressive_eviction_setup() -> (crate::Handle, ShutdownSender) {
     )
     .await;
 
-    g.extend_recipe(ChangeList::from_str(format!(r"
+    let cache_one = format!("CREATE CACHE w FROM SELECT A.id, A.title, A.keywords, A.creation_time, A.short_text, A.url FROM articles AS A, recommendations AS R WHERE ((A.id = R.article_id) AND (R.user_id = ?)) LIMIT {LIMIT};");
+    let cache_two = format!("CREATE CACHE v FROM SELECT A.id, A.title, A.keywords, A.creation_time, A.short_text, A.url FROM articles AS A, recommendations AS R WHERE ((A.id = R.article_id) AND (R.user_id > ?)) LIMIT {LIMIT};");
+    let sql = vec![
+        "
         CREATE TABLE `articles` (
             `id` int(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
             `creation_time` timestamp NOT NULL DEFAULT current_timestamp(),
@@ -7860,24 +7936,20 @@ async fn aggressive_eviction_setup() -> (crate::Handle, ShutdownSender) {
             `title` varchar(128) NOT NULL,
             `short_text` varchar(512) NOT NULL,
             `url` varchar(128) NOT NULL
-        );
-
-        CREATE TABLE `users` (
+        );",
+        "CREATE TABLE `users` (
             `id` int(11) NOT NULL AUTO_INCREMENT PRIMARY KEY
-        );
-
-        CREATE TABLE `recommendations` (
+        );",
+        "CREATE TABLE `recommendations` (
             `user_id` int(11) NOT NULL,
             `article_id` int(11) NOT NULL
-        );
-
-        CREATE CACHE w FROM SELECT A.id, A.title, A.keywords, A.creation_time, A.short_text, A.url FROM articles AS A, recommendations AS R WHERE ((A.id = R.article_id) AND (R.user_id = ?)) LIMIT {LIMIT};
-
-        CREATE CACHE v FROM SELECT A.id, A.title, A.keywords, A.creation_time, A.short_text, A.url FROM articles AS A, recommendations AS R WHERE ((A.id = R.article_id) AND (R.user_id > ?)) LIMIT {LIMIT};
-        "), Dialect::DEFAULT_MYSQL).unwrap()
-    )
-    .await
-    .unwrap();
+        );",
+        cache_one.as_str(),
+        cache_two.as_str(),
+    ];
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
+        .await
+        .unwrap();
 
     let mut users = g.table("users").await.unwrap();
     let mut articles = g.table("articles").await.unwrap();
@@ -7990,21 +8062,27 @@ async fn partial_ingress_above_full_reader() {
     readyset_tracing::init_test_logging();
     let (mut g, shutdown_tx) = start_simple_unsharded("partial_ingress_above_full_reader").await;
     g.extend_recipe(
-        ChangeList::from_str("CREATE TABLE t1 (a INT, b INT);", Dialect::DEFAULT_MYSQL).unwrap(),
+        ChangeList::from_strings(
+            vec!["CREATE TABLE t1 (a INT, b INT);"],
+            Dialect::DEFAULT_MYSQL,
+        )
+        .unwrap(),
     )
     .await
     .unwrap();
     g.extend_recipe(
-        ChangeList::from_str("CREATE TABLE t2 (c int, d int);", Dialect::DEFAULT_MYSQL).unwrap(),
+        ChangeList::from_strings(
+            vec!["CREATE TABLE t2 (c int, d int);"],
+            Dialect::DEFAULT_MYSQL,
+        )
+        .unwrap(),
     )
     .await
     .unwrap();
-    g.extend_recipe(ChangeList::from_str("CREATE CACHE q1 FROM select t1.a, t1.b, t2.c, t2.d from t1 inner join t2 on t1.a = t2.c where t1.b = ?;", Dialect::DEFAULT_MYSQL).unwrap())
+    g.extend_recipe(ChangeList::from_strings(vec!["CREATE CACHE q1 FROM select t1.a, t1.b, t2.c, t2.d from t1 inner join t2 on t1.a = t2.c where t1.b = ?;"], Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
-    g.extend_recipe(ChangeList::from_str(
-        "CREATE CACHE q2 FROM select t1.a, t1.b, t2.c, t2.d from t1 inner join t2 on t1.a = t2.c;"
-            , Dialect::DEFAULT_MYSQL)
+    g.extend_recipe(ChangeList::from_strings(vec!["CREATE CACHE q2 FROM select t1.a, t1.b, t2.c, t2.d from t1 inner join t2 on t1.a = t2.c;"], Dialect::DEFAULT_MYSQL)
             .unwrap(),
     )
     .await
@@ -8050,29 +8128,31 @@ async fn reroutes_recursively() {
     readyset_tracing::init_test_logging();
     let (mut g, shutdown_tx) = start_simple_unsharded("reroutes_twice").await;
 
-    let sql = "
-        create table t1 (a int, b int);
-        create table t2 (c int, d int);
-        create table t3 (e int, f int);
-        create table t4 (g int, h int);
-        ";
-    g.extend_recipe(ChangeList::from_str(sql, Dialect::DEFAULT_MYSQL).unwrap())
+    let sql = vec![
+        "
+        create table t1 (a int, b int);",
+        "create table t2 (c int, d int);",
+        "create table t3 (e int, f int);",
+        "create table t4 (g int, h int);
+        ",
+    ];
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
 
-    let sql = "
-        CREATE CACHE q1 FROM SELECT t2.c, t2.d, t3.e, t3.f FROM t2 INNER JOIN t3 ON t2.c = t3.e WHERE t2.c = ?;
-        CREATE CACHE q2 FROM SELECT t1.a, t1.b, q1.c, q1.d FROM t1 INNER JOIN q1 on t1.a = q1.c WHERE t1.b = ?;
-        CREATE CACHE q3 FROM SELECT t4.g, t4.h, q2.a, q2.b FROM t4 INNER JOIN q2 on t4.g = q2.a WHERE t4.g = ?;
-        ";
-    g.extend_recipe(ChangeList::from_str(sql, Dialect::DEFAULT_MYSQL).unwrap())
+    let sql = vec!["
+        CREATE CACHE q1 FROM SELECT t2.c, t2.d, t3.e, t3.f FROM t2 INNER JOIN t3 ON t2.c = t3.e WHERE t2.c = ?;", "CREATE CACHE q2 FROM SELECT t1.a, t1.b, q1.c, q1.d FROM t1 INNER JOIN q1 on t1.a = q1.c WHERE t1.b = ?;", "CREATE CACHE q3 FROM SELECT t4.g, t4.h, q2.a, q2.b FROM t4 INNER JOIN q2 on t4.g = q2.a WHERE t4.g = ?;
+        "];
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
 
-    let sql2 = "
+    let sql2 = vec![
+        "
         CREATE CACHE q4 FROM SELECT t4.g, t4.h, q2.a, q2.b FROM t4 INNER JOIN q2 on t4.g = q2.a;
-       ";
-    g.extend_recipe(ChangeList::from_str(sql2, Dialect::DEFAULT_MYSQL).unwrap())
+       ",
+    ];
+    g.extend_recipe(ChangeList::from_strings(sql2, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
     eprintln!("{}", g.graphviz(Default::default()).await.unwrap());
@@ -8105,26 +8185,30 @@ async fn reroutes_recursively() {
 async fn reroutes_two_children_at_once() {
     readyset_tracing::init_test_logging();
     let (mut g, shutdown_tx) = start_simple_unsharded("reroutes_two_children_at_once").await;
-    let sql = "
-        create table t1 (a int, b int);
-        create table t2 (c int, d int);
-        ";
-    g.extend_recipe(ChangeList::from_str(sql, Dialect::DEFAULT_MYSQL).unwrap())
+    let sql = vec![
+        "
+        create table t1 (a int, b int);",
+        "create table t2 (c int, d int);
+        ",
+    ];
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
-    let sql1 = "
+    let sql1 = vec!["
         CREATE CACHE q1 FROM SELECT t1.a, t1.b, t2.c, t2.d FROM t1 INNER JOIN t2 ON t1.a = t2.c WHERE t1.b = ?;
-        ";
-    g.extend_recipe(ChangeList::from_str(sql1, Dialect::DEFAULT_MYSQL).unwrap())
+        "];
+    g.extend_recipe(ChangeList::from_strings(sql1, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
     eprintln!("{}", g.graphviz(Default::default()).await.unwrap());
 
-    let sql2 = "
-        CREATE CACHE q2 FROM SELECT t1.a, t1.b, t2.c, t2.d FROM t1 INNER JOIN t2 ON t1.a = t2.c;
-        CREATE CACHE q3 FROM SELECT t1.a, t1.b, t2.d FROM t1 INNER JOIN t2 ON t1.a = t2.c;
-        ";
-    g.extend_recipe(ChangeList::from_str(sql2, Dialect::DEFAULT_MYSQL).unwrap())
+    let sql2 = vec![
+        "
+        CREATE CACHE q2 FROM SELECT t1.a, t1.b, t2.c, t2.d FROM t1 INNER JOIN t2 ON t1.a = t2.c;",
+        "CREATE CACHE q3 FROM SELECT t1.a, t1.b, t2.d FROM t1 INNER JOIN t2 ON t1.a = t2.c;
+        ",
+    ];
+    g.extend_recipe(ChangeList::from_strings(sql2, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
     eprintln!("{}", g.graphviz(Default::default()).await.unwrap());
@@ -8175,14 +8259,10 @@ async fn reroutes_two_children_at_once() {
 async fn reroutes_same_migration() {
     readyset_tracing::init_test_logging();
     let (mut g, shutdown_tx) = start_simple_reuse_unsharded("reroutes_same_migration").await;
-    let sql = "
-        create table t1 (a int, b int);
-        create table t2 (c int, d int);
-        CREATE CACHE q1 FROM SELECT t1.a, t1.b, t2.c, t2.d FROM t1 INNER JOIN t2 ON t1.a = t2.c WHERE t1.b = ?;
-        CREATE CACHE q2 FROM SELECT t1.a, t1.b, t2.c, t2.d FROM t1 INNER JOIN t2 ON t1.a = t2.c;
-        CREATE CACHE q3 FROM SELECT t1.b, t2.d FROM t1 INNER JOIN t2 ON t1.a = t2.c;
-        ";
-    g.extend_recipe(ChangeList::from_str(sql, Dialect::DEFAULT_MYSQL).unwrap())
+    let sql = vec!["
+        create table t1 (a int, b int);", "create table t2 (c int, d int);", "CREATE CACHE q1 FROM SELECT t1.a, t1.b, t2.c, t2.d FROM t1 INNER JOIN t2 ON t1.a = t2.c WHERE t1.b = ?;", "CREATE CACHE q2 FROM SELECT t1.a, t1.b, t2.c, t2.d FROM t1 INNER JOIN t2 ON t1.a = t2.c;", "CREATE CACHE q3 FROM SELECT t1.b, t2.d FROM t1 INNER JOIN t2 ON t1.a = t2.c;
+        "];
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
     eprintln!("{}", g.graphviz(Default::default()).await.unwrap());
@@ -8230,24 +8310,28 @@ async fn reroutes_same_migration() {
 async fn reroutes_dependent_children() {
     readyset_tracing::init_test_logging();
     let (mut g, shutdown_tx) = start_simple_unsharded("reroutes_dependent_children").await;
-    let sql = "
-        create table t1 (a int, b int);
-        create table t2 (c int, d int);
-        ";
-    g.extend_recipe(ChangeList::from_str(sql, Dialect::DEFAULT_MYSQL).unwrap())
+    let sql = vec![
+        "
+        create table t1 (a int, b int);",
+        "create table t2 (c int, d int);
+        ",
+    ];
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
-    let sql1 = "
+    let sql1 = vec!["
         CREATE CACHE q1 FROM SELECT t1.a, t1.b, t2.c, t2.d FROM t1 INNER JOIN t2 ON t1.a = t2.c WHERE t1.b = ?;
-        ";
-    g.extend_recipe(ChangeList::from_str(sql1, Dialect::DEFAULT_MYSQL).unwrap())
+        "];
+    g.extend_recipe(ChangeList::from_strings(sql1, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
-    let sql2 = "
-        CREATE CACHE q2 FROM SELECT t1.a, t1.b, t2.c, t2.d FROM t1 INNER JOIN t2 ON t1.a = t2.c;
-        CREATE CACHE q3 FROM SELECT q2.a, q2.c FROM q2;
-        ";
-    g.extend_recipe(ChangeList::from_str(sql2, Dialect::DEFAULT_MYSQL).unwrap())
+    let sql2 = vec![
+        "
+        CREATE CACHE q2 FROM SELECT t1.a, t1.b, t2.c, t2.d FROM t1 INNER JOIN t2 ON t1.a = t2.c;",
+        "CREATE CACHE q3 FROM SELECT q2.a, q2.c FROM q2;
+        ",
+    ];
+    g.extend_recipe(ChangeList::from_strings(sql2, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
     eprintln!("{}", g.graphviz(Default::default()).await.unwrap());
@@ -8295,16 +8379,20 @@ async fn reroutes_dependent_children() {
 async fn reroutes_count() {
     readyset_tracing::init_test_logging();
     let (mut g, shutdown_tx) = start_simple_reuse_unsharded("reroutes_count").await;
-    let sql = "
-            create table votes (user INT, id INT);
-            CREATE CACHE q1 FROM select count(user) from votes where id = ? group by id;
-            ";
-    g.extend_recipe(ChangeList::from_str(sql, Dialect::DEFAULT_MYSQL).unwrap())
+    let sql = vec![
+        "
+            create table votes (user INT, id INT);",
+        "CREATE CACHE q1 FROM select count(user) from votes where id = ? group by id;
+            ",
+    ];
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
-    let sql2 = "
-            CREATE CACHE q2 FROM select count(user) from votes group by id;";
-    g.extend_recipe(ChangeList::from_str(sql2, Dialect::DEFAULT_MYSQL).unwrap())
+    let sql2 = vec![
+        "
+            CREATE CACHE q2 FROM select count(user) from votes group by id;",
+    ];
+    g.extend_recipe(ChangeList::from_strings(sql2, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
 
@@ -8349,14 +8437,14 @@ async fn forbid_full_materialization() {
             .unwrap()
     };
     g.extend_recipe(
-        ChangeList::from_str("CREATE TABLE t (col INT)", Dialect::DEFAULT_MYSQL).unwrap(),
+        ChangeList::from_strings(vec!["CREATE TABLE t (col INT)"], Dialect::DEFAULT_MYSQL).unwrap(),
     )
     .await
     .unwrap();
     let res = g
         .extend_recipe(
-            ChangeList::from_str(
-                "CREATE CACHE q FROM SELECT * FROM t",
+            ChangeList::from_strings(
+                vec!["CREATE CACHE q FROM SELECT * FROM t"],
                 Dialect::DEFAULT_MYSQL,
             )
             .unwrap(),
@@ -8389,13 +8477,13 @@ async fn overwrite_with_changed_recipe() {
             .unwrap()
     };
     g.extend_recipe(
-        ChangeList::from_str("CREATE TABLE t (col INT)", Dialect::DEFAULT_MYSQL).unwrap(),
+        ChangeList::from_strings(vec!["CREATE TABLE t (col INT)"], Dialect::DEFAULT_MYSQL).unwrap(),
     )
     .await
     .unwrap();
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE CACHE q FROM SELECT * FROM t",
+        ChangeList::from_strings(
+            vec!["CREATE CACHE q FROM SELECT * FROM t"],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -8404,8 +8492,8 @@ async fn overwrite_with_changed_recipe() {
     .unwrap();
     let res = g
         .extend_recipe(
-            ChangeList::from_str(
-                "CREATE TABLE t (col INT COMMENT 'hi')",
+            ChangeList::from_strings(
+                vec!["CREATE TABLE t (col INT COMMENT 'hi')"],
                 Dialect::DEFAULT_MYSQL,
             )
             .unwrap(),
@@ -8447,11 +8535,13 @@ async fn it_recovers_fully_materialized() {
         g.backend_ready().await;
 
         {
-            let sql = "
-                CREATE TABLE t (x INT);
-                CREATE VIEW tv AS SELECT x, COUNT(*) FROM t GROUP BY x ORDER BY x;
-            ";
-            g.extend_recipe(ChangeList::from_str(sql, Dialect::DEFAULT_MYSQL).unwrap())
+            let sql = vec![
+                "
+                CREATE TABLE t (x INT);",
+                "CREATE VIEW tv AS SELECT x, COUNT(*) FROM t GROUP BY x ORDER BY x;
+            ",
+            ];
+            g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
                 .await
                 .unwrap();
 
@@ -8514,22 +8604,23 @@ async fn it_recovers_fully_materialized() {
 async fn simple_drop_tables() {
     let (mut g, shutdown_tx) = start_simple_unsharded("simple_drop_tables").await;
 
-    let create_table = "
-        # base tables
-        CREATE TABLE table_1 (column_1 INT);
-        CREATE TABLE table_2 (column_2 INT);
-        CREATE CACHE t1 FROM SELECT * FROM table_1;
-    ";
-    g.extend_recipe(ChangeList::from_str(create_table, Dialect::DEFAULT_MYSQL).unwrap())
+    let create_table = vec![
+        "
+        CREATE TABLE table_1 (column_1 INT);",
+        "CREATE TABLE table_2 (column_2 INT);",
+        "CREATE CACHE t1 FROM SELECT * FROM table_1;
+    ",
+    ];
+    g.extend_recipe(ChangeList::from_strings(create_table, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
     g.table("table_1").await.unwrap();
     g.table("table_2").await.unwrap();
     g.view("t1").await.unwrap();
 
-    let drop_table = "DROP TABLE table_1, table_2;";
+    let drop_table = vec!["DROP TABLE table_1, table_2;"];
     // let drop_table = "CREATE TABLE table_4 (column_4 INT);";
-    g.extend_recipe(ChangeList::from_str(drop_table, Dialect::DEFAULT_MYSQL).unwrap())
+    g.extend_recipe(ChangeList::from_strings(drop_table, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
 
@@ -8539,8 +8630,8 @@ async fn simple_drop_tables() {
     assert_table_not_found(g.table("table_2").await, "table_2");
     assert_view_not_found(g.view("t1").await, "t1");
 
-    let create_new_table = "CREATE TABLE table_3 (column_3 INT);";
-    g.extend_recipe(ChangeList::from_str(create_new_table, Dialect::DEFAULT_MYSQL).unwrap())
+    let create_new_table = vec!["CREATE TABLE table_3 (column_3 INT);"];
+    g.extend_recipe(ChangeList::from_strings(create_new_table, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
     g.table("table_3").await.unwrap();
@@ -8552,14 +8643,10 @@ async fn simple_drop_tables() {
 async fn join_drop_tables() {
     let (mut g, shutdown_tx) = start_simple_unsharded("simple_drop_tables").await;
 
-    let create_table = "
-        # base tables
-        CREATE TABLE table_1 (column_1 INT, column_2 INT);
-        CREATE TABLE table_2 (column_1 INT, column_2 INT);
-        CREATE TABLE table_3 (column_1 INT, column_2 INT);
-        CREATE CACHE t1 FROM SELECT table_1.column_1, table_3.column_1 FROM table_1 JOIN table_3 ON table_1.column_2 = table_3.column_2;
-    ";
-    g.extend_recipe(ChangeList::from_str(create_table, Dialect::DEFAULT_MYSQL).unwrap())
+    let create_table = vec!["
+        CREATE TABLE table_1 (column_1 INT, column_2 INT);", "CREATE TABLE table_2 (column_1 INT, column_2 INT);", "CREATE TABLE table_3 (column_1 INT, column_2 INT);", "CREATE CACHE t1 FROM SELECT table_1.column_1, table_3.column_1 FROM table_1 JOIN table_3 ON table_1.column_2 = table_3.column_2;
+    "];
+    g.extend_recipe(ChangeList::from_strings(create_table, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
     g.table("table_1").await.unwrap();
@@ -8567,8 +8654,8 @@ async fn join_drop_tables() {
     g.table("table_3").await.unwrap();
     g.view("t1").await.unwrap();
 
-    let drop_table = "DROP TABLE table_1, table_2;";
-    g.extend_recipe(ChangeList::from_str(drop_table, Dialect::DEFAULT_MYSQL).unwrap())
+    let drop_table = vec!["DROP TABLE table_1, table_2;"];
+    g.extend_recipe(ChangeList::from_strings(drop_table, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
 
@@ -8579,8 +8666,8 @@ async fn join_drop_tables() {
     g.table("table_3").await.unwrap();
     assert_view_not_found(g.view("t1").await, "t1");
 
-    let create_new_table = "CREATE TABLE table_1 (column_1 INT);";
-    g.extend_recipe(ChangeList::from_str(create_new_table, Dialect::DEFAULT_MYSQL).unwrap())
+    let create_new_table = vec!["CREATE TABLE table_1 (column_1 INT);"];
+    g.extend_recipe(ChangeList::from_strings(create_new_table, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
     g.table("table_1").await.unwrap();
@@ -8592,13 +8679,14 @@ async fn join_drop_tables() {
 async fn simple_drop_tables_with_data() {
     let (mut g, shutdown_tx) = start_simple_unsharded("simple_drop_tables_with_data").await;
 
-    let create_table = "
-        # base tables
-        CREATE TABLE table_1 (column_1 INT);
-        CREATE TABLE table_2 (column_2 INT);
-        CREATE CACHE t1 FROM SELECT * FROM table_1;
-    ";
-    g.extend_recipe(ChangeList::from_str(create_table, Dialect::DEFAULT_MYSQL).unwrap())
+    let create_table = vec![
+        "
+        CREATE TABLE table_1 (column_1 INT);",
+        "CREATE TABLE table_2 (column_2 INT);",
+        "CREATE CACHE t1 FROM SELECT * FROM table_1;
+    ",
+    ];
+    g.extend_recipe(ChangeList::from_strings(create_table, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
 
@@ -8615,23 +8703,23 @@ async fn simple_drop_tables_with_data() {
         assert_eq!(results[1][0], 12.into());
     });
 
-    let drop_table = "DROP TABLE table_1, table_2;";
-    g.extend_recipe(ChangeList::from_str(drop_table, Dialect::DEFAULT_MYSQL).unwrap())
+    let drop_table = vec!["DROP TABLE table_1, table_2;"];
+    g.extend_recipe(ChangeList::from_strings(drop_table, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
     assert_table_not_found(g.table("table_1").await, "table_1");
     assert_table_not_found(g.table("table_2").await, "table_2");
     assert_view_not_found(g.view("t1").await, "t1");
 
-    let recreate_table = "CREATE TABLE table_1 (column_1 INT);";
-    g.extend_recipe(ChangeList::from_str(recreate_table, Dialect::DEFAULT_MYSQL).unwrap())
+    let recreate_table = vec!["CREATE TABLE table_1 (column_1 INT);"];
+    g.extend_recipe(ChangeList::from_strings(recreate_table, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
     g.table("table_1").await.unwrap();
     assert_view_not_found(g.view("t1").await, "t1");
 
-    let recreate_query = "CREATE CACHE t2 FROM SELECT * FROM table_1";
-    g.extend_recipe(ChangeList::from_str(recreate_query, Dialect::DEFAULT_MYSQL).unwrap())
+    let recreate_query = vec!["CREATE CACHE t2 FROM SELECT * FROM table_1"];
+    g.extend_recipe(ChangeList::from_strings(recreate_query, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
 
@@ -8659,13 +8747,14 @@ async fn simple_drop_tables_with_persisted_data() {
     ));
     let (mut g, shutdown_tx) = builder.start_local().await.unwrap();
 
-    let create_table = "
-        # base tables
-        CREATE TABLE table_1 (column_1 INT);
-        CREATE TABLE table_2 (column_2 INT);
-        CREATE CACHE t1 FROM SELECT * FROM table_1;
-    ";
-    g.extend_recipe(ChangeList::from_str(create_table, Dialect::DEFAULT_MYSQL).unwrap())
+    let create_table = vec![
+        "
+        CREATE TABLE table_1 (column_1 INT);",
+        "CREATE TABLE table_2 (column_2 INT);",
+        "CREATE CACHE t1 FROM SELECT * FROM table_1;
+    ",
+    ];
+    g.extend_recipe(ChangeList::from_strings(create_table, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
 
@@ -8688,8 +8777,8 @@ async fn simple_drop_tables_with_persisted_data() {
     assert_eq!(results[0][0], 11.into());
     assert_eq!(results[1][0], 12.into());
 
-    let drop_table = "DROP TABLE table_1, table_2;";
-    g.extend_recipe(ChangeList::from_str(drop_table, Dialect::DEFAULT_MYSQL).unwrap())
+    let drop_table = vec!["DROP TABLE table_1, table_2;"];
+    g.extend_recipe(ChangeList::from_strings(drop_table, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
     assert_table_not_found(g.table("table_1").await, "table_1");
@@ -8699,15 +8788,15 @@ async fn simple_drop_tables_with_persisted_data() {
     eventually!(!table_1_path.exists());
     eventually!(!table_2_path.exists());
 
-    let recreate_table = "CREATE TABLE table_1 (column_1 INT);";
-    g.extend_recipe(ChangeList::from_str(recreate_table, Dialect::DEFAULT_MYSQL).unwrap())
+    let recreate_table = vec!["CREATE TABLE table_1 (column_1 INT);"];
+    g.extend_recipe(ChangeList::from_strings(recreate_table, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
     g.table("table_1").await.unwrap();
     assert_view_not_found(g.view("t1").await, "t1");
 
-    let recreate_query = "CREATE CACHE t2 FROM SELECT * FROM table_1";
-    g.extend_recipe(ChangeList::from_str(recreate_query, Dialect::DEFAULT_MYSQL).unwrap())
+    let recreate_query = vec!["CREATE CACHE t2 FROM SELECT * FROM table_1"];
+    g.extend_recipe(ChangeList::from_strings(recreate_query, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
 
@@ -8723,16 +8812,17 @@ async fn simple_drop_tables_with_persisted_data() {
 #[tokio::test(flavor = "multi_thread")]
 async fn create_and_drop_table() {
     let (mut g, shutdown_tx) = start_simple_unsharded("create_and_drop_table").await;
-    let create_table = "
-        # base tables
-        CREATE TABLE table_1 (column_1 INT);
-        CREATE TABLE table_2 (column_2 INT);
-        CREATE TABLE table_3 (column_3 INT);
-        DROP TABLE table_1, table_2;
-        CREATE TABLE table_1 (column_1 INT);
-        CREATE TABLE table_4 (column_4 INT);
-    ";
-    g.extend_recipe(ChangeList::from_str(create_table, Dialect::DEFAULT_MYSQL).unwrap())
+    let create_table = vec![
+        "
+        CREATE TABLE table_1 (column_1 INT);",
+        "CREATE TABLE table_2 (column_2 INT);",
+        "CREATE TABLE table_3 (column_3 INT);",
+        "DROP TABLE table_1, table_2;",
+        "CREATE TABLE table_1 (column_1 INT);",
+        "CREATE TABLE table_4 (column_4 INT);
+    ",
+    ];
+    g.extend_recipe(ChangeList::from_strings(create_table, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
 
@@ -8747,15 +8837,15 @@ async fn create_and_drop_table() {
 #[tokio::test(flavor = "multi_thread")]
 async fn drop_and_recreate_different_columns() {
     let (mut g, shutdown_tx) = start_simple_unsharded("create_and_drop_table").await;
-    let create_table = "
-        # base tables
-        CREATE TABLE table_1 (column_1 INT);
-        DROP TABLE table_1;
-        CREATE TABLE table_1 (column_1 INT, column_2 INT);
-
-        CREATE CACHE t1 FROM SELECT * FROM table_1;
-    ";
-    g.extend_recipe(ChangeList::from_str(create_table, Dialect::DEFAULT_MYSQL).unwrap())
+    let create_table = vec![
+        "
+        CREATE TABLE table_1 (column_1 INT);",
+        "DROP TABLE table_1;",
+        "CREATE TABLE table_1 (column_1 INT, column_2 INT);",
+        "CREATE CACHE t1 FROM SELECT * FROM table_1;
+    ",
+    ];
+    g.extend_recipe(ChangeList::from_strings(create_table, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
 
@@ -8780,13 +8870,12 @@ async fn drop_and_recreate_different_columns() {
 #[tokio::test(flavor = "multi_thread")]
 async fn simple_dry_run() {
     let (mut g, shutdown_tx) = start_simple_unsharded("simple_dry_run").await;
-    let query = "
-        # base tables
-        CREATE TABLE table_1 (column_1 INT);
-        CREATE CACHE t1 FROM SELECT * FROM table_1;
-    ";
+    let query = vec![
+        "CREATE TABLE table_1 (column_1 INT);",
+        "CREATE CACHE t1 FROM SELECT * FROM table_1;",
+    ];
     let res = g
-        .dry_run(ChangeList::from_str(query, Dialect::DEFAULT_MYSQL).unwrap())
+        .dry_run(ChangeList::from_strings(query, Dialect::DEFAULT_MYSQL).unwrap())
         .await;
     res.unwrap();
     g.table("table_1").await.unwrap_err();
@@ -8798,21 +8887,22 @@ async fn simple_dry_run() {
 #[tokio::test(flavor = "multi_thread")]
 async fn simple_dry_run_unsupported() {
     let (mut g, shutdown_tx) = start_simple_unsharded("simple_dry_run").await;
-    let query = "
-        # base tables
-        CREATE TABLE table_1 (column_1 INT);
-        CREATE CACHE t1 FROM SELECT * FROM table_1;
-    ";
-    g.extend_recipe(ChangeList::from_str(query, Dialect::DEFAULT_MYSQL).unwrap())
+    let query = vec![
+        "
+        CREATE TABLE table_1 (column_1 INT);",
+        "CREATE CACHE t1 FROM SELECT * FROM table_1;
+    ",
+    ];
+    g.extend_recipe(ChangeList::from_strings(query, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
 
     g.table("table_1").await.unwrap();
     g.view("t1").await.unwrap();
 
-    let unsupported_query = "CREATE CACHE FROM SELECT 1";
+    let unsupported_query = vec!["CREATE CACHE FROM SELECT 1"];
     let res = g
-        .dry_run(ChangeList::from_str(unsupported_query, Dialect::DEFAULT_MYSQL).unwrap())
+        .dry_run(ChangeList::from_strings(unsupported_query, Dialect::DEFAULT_MYSQL).unwrap())
         .await;
     assert!(match res {
         Err(RpcFailed { source, .. }) => match source.as_ref() {
@@ -8904,9 +8994,11 @@ async fn drop_view() {
     let (mut g, shutdown_tx) = start_simple_unsharded("drop_view").await;
 
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE t1 (id int);
-         CREATE CACHE t1_view FROM SELECT * FROM t1;",
+        ChangeList::from_strings(
+            vec![
+                "CREATE TABLE t1 (id int);",
+                "CREATE CACHE t1_view FROM SELECT * FROM t1;",
+            ],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -8915,8 +9007,8 @@ async fn drop_view() {
     .unwrap();
 
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE CACHE t1_select FROM SELECT * FROM t1_view",
+        ChangeList::from_strings(
+            vec!["CREATE CACHE t1_select FROM SELECT * FROM t1_view"],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -8924,18 +9016,22 @@ async fn drop_view() {
     .await
     .unwrap();
 
-    g.extend_recipe(ChangeList::from_str("DROP CACHE t1_select;", Dialect::DEFAULT_MYSQL).unwrap())
-        .await
-        .unwrap();
+    g.extend_recipe(
+        ChangeList::from_strings(vec!["DROP CACHE t1_select;"], Dialect::DEFAULT_MYSQL).unwrap(),
+    )
+    .await
+    .unwrap();
 
-    g.extend_recipe(ChangeList::from_str("DROP VIEW t1_view;", Dialect::DEFAULT_MYSQL).unwrap())
-        .await
-        .unwrap();
+    g.extend_recipe(
+        ChangeList::from_strings(vec!["DROP VIEW t1_view;"], Dialect::DEFAULT_MYSQL).unwrap(),
+    )
+    .await
+    .unwrap();
 
     let select_from_view_res = g
         .extend_recipe(
-            ChangeList::from_str(
-                "CREATE CACHE t1_select FROM SELECT * FROM t1_view",
+            ChangeList::from_strings(
+                vec!["CREATE CACHE t1_select FROM SELECT * FROM t1_view"],
                 Dialect::DEFAULT_MYSQL,
             )
             .unwrap(),
@@ -8953,9 +9049,11 @@ async fn drop_view_schema_qualified() {
     let (mut g, shutdown_tx) = start_simple_unsharded("drop_view_schema_qualified").await;
 
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE public.t1 (id int);
-             CREATE VIEW public.t1_view AS SELECT * FROM public.t1;",
+        ChangeList::from_strings(
+            vec![
+                "CREATE TABLE public.t1 (id int);",
+                "CREATE VIEW public.t1_view AS SELECT * FROM public.t1;",
+            ],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -8964,8 +9062,8 @@ async fn drop_view_schema_qualified() {
     .unwrap();
 
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE CACHE t1_select FROM SELECT * FROM t1_view",
+        ChangeList::from_strings(
+            vec!["CREATE CACHE t1_select FROM SELECT * FROM t1_view"],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap()
@@ -8975,7 +9073,8 @@ async fn drop_view_schema_qualified() {
     .unwrap();
 
     g.extend_recipe(
-        ChangeList::from_str("DROP VIEW public.t1_view;", Dialect::DEFAULT_MYSQL).unwrap(),
+        ChangeList::from_strings(vec!["DROP VIEW public.t1_view;"], Dialect::DEFAULT_MYSQL)
+            .unwrap(),
     )
     .await
     .unwrap();
@@ -8990,9 +9089,11 @@ async fn read_from_dropped_query() {
     let (mut g, shutdown_tx) = start_simple_unsharded("read_from_dropped_query").await;
 
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE t1 (id int);
-         CREATE CACHE q FROM SELECT id FROM t1;",
+        ChangeList::from_strings(
+            vec![
+                "CREATE TABLE t1 (id int);",
+                "CREATE CACHE q FROM SELECT id FROM t1;",
+            ],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -9002,9 +9103,11 @@ async fn read_from_dropped_query() {
 
     let mut view = g.view("q").await.unwrap().into_reader_handle().unwrap();
 
-    g.extend_recipe(ChangeList::from_str("DROP TABLE t1;", Dialect::DEFAULT_MYSQL).unwrap())
-        .await
-        .unwrap();
+    g.extend_recipe(
+        ChangeList::from_strings(vec!["DROP TABLE t1;"], Dialect::DEFAULT_MYSQL).unwrap(),
+    )
+    .await
+    .unwrap();
 
     let view_res = view.lookup(&[0.into()], true).await;
     assert!(view_res.is_err());
@@ -9017,12 +9120,11 @@ async fn read_from_dropped_query() {
 async fn double_create_table_with_multiple_modifications() {
     let (mut g, shutdown_tx) = start_simple_unsharded("double_create_table_add_column").await;
 
-    let create_table = "
-        # base tables
-        CREATE TABLE table_1 (column_1 INT, column_2 TEXT, column_3 TEXT, column_4 TEXT);
-        CREATE CACHE t1 FROM SELECT * FROM table_1;
-    ";
-    g.extend_recipe(ChangeList::from_str(create_table, Dialect::DEFAULT_MYSQL).unwrap())
+    let create_table = vec![
+        "CREATE TABLE table_1 (column_1 INT, column_2 TEXT, column_3 TEXT, column_4 TEXT);",
+        "CREATE CACHE t1 FROM SELECT * FROM table_1;",
+    ];
+    g.extend_recipe(ChangeList::from_strings(create_table, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
 
@@ -9036,16 +9138,16 @@ async fn double_create_table_with_multiple_modifications() {
         .await
         .unwrap();
 
-    let new_table = "CREATE TABLE table_1 (alternative_col_1 TEXT);";
-    g.extend_recipe(ChangeList::from_str(new_table, Dialect::DEFAULT_MYSQL).unwrap())
+    let new_table = vec!["CREATE TABLE table_1 (alternative_col_1 TEXT);"];
+    g.extend_recipe(ChangeList::from_strings(new_table, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
 
     // Altering a table currently means we delete and recreate the whole thing.
     g.view("t1").await.unwrap_err();
 
-    let recreate_view = "CREATE CACHE t1 FROM SELECT * FROM table_1;";
-    g.extend_recipe(ChangeList::from_str(recreate_view, Dialect::DEFAULT_MYSQL).unwrap())
+    let recreate_view = vec!["CREATE CACHE t1 FROM SELECT * FROM table_1;"];
+    g.extend_recipe(ChangeList::from_strings(recreate_view, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
 
@@ -9078,12 +9180,13 @@ async fn double_create_table_with_multiple_modifications() {
 async fn double_identical_create_table() {
     let (mut g, shutdown_tx) = start_simple_unsharded("double_create_table_add_column").await;
 
-    let create_table = "
-        # base tables
-        CREATE TABLE table_1 (column_1 INT);
-        CREATE CACHE t1 FROM SELECT * FROM table_1;
-    ";
-    g.extend_recipe(ChangeList::from_str(create_table, Dialect::DEFAULT_MYSQL).unwrap())
+    let create_table = vec![
+        "
+        CREATE TABLE table_1 (column_1 INT);",
+        "CREATE CACHE t1 FROM SELECT * FROM table_1;
+    ",
+    ];
+    g.extend_recipe(ChangeList::from_strings(create_table, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
 
@@ -9093,8 +9196,8 @@ async fn double_identical_create_table() {
         .await
         .unwrap();
 
-    let new_table = "CREATE TABLE table_1 (column_1 INT);";
-    g.extend_recipe(ChangeList::from_str(new_table, Dialect::DEFAULT_MYSQL).unwrap())
+    let new_table = vec!["CREATE TABLE table_1 (column_1 INT);"];
+    g.extend_recipe(ChangeList::from_strings(new_table, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
 
@@ -9126,13 +9229,15 @@ async fn multiple_schemas_explicit() {
     readyset_tracing::init_test_logging();
     let (mut g, shutdown_tx) = start_simple_unsharded("multiple_schemas_explicit").await;
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE schema_1.t (id int, val int);
-         CREATE TABLE schema_2.t (id int, val int);
-         CREATE CACHE q FROM
-         SELECT schema_1.t.val AS val1, schema_2.t.val as val2
-         FROM schema_1.t JOIN schema_2.t
-         ON schema_1.t.id = schema_2.t.id",
+        ChangeList::from_strings(
+            vec![
+                "CREATE TABLE schema_1.t (id int, val int);",
+                "CREATE TABLE schema_2.t (id int, val int);",
+                "CREATE CACHE q FROM
+                 SELECT schema_1.t.val AS val1, schema_2.t.val as val2
+                 FROM schema_1.t JOIN schema_2.t
+                 ON schema_1.t.id = schema_2.t.id",
+            ],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -9186,10 +9291,12 @@ async fn multiple_schemas_explicit() {
 async fn multiple_aggregates_and_predicates() {
     let (mut g, shutdown_tx) = start_simple_unsharded("multiple_aggregates_and_predicates").await;
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE t (a int, b int, c int);
-            CREATE CACHE q FROM
-                SELECT count(t.a), min(t.b) FROM t WHERE (t.a) = (t.c) AND (t.b) = (t.c)",
+        ChangeList::from_strings(
+            vec![
+                "CREATE TABLE t (a int, b int, c int);",
+                "CREATE CACHE q FROM
+            SELECT count(t.a), min(t.b) FROM t WHERE (t.a) = (t.c) AND (t.b) = (t.c)",
+            ],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -9217,19 +9324,16 @@ async fn multiple_aggregates_and_predicates() {
 #[tokio::test(flavor = "multi_thread")]
 async fn cascade_drop_view() {
     let (mut g, shutdown_tx) = start_simple_unsharded("cascade_drop_view").await;
-    g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE t1 (a int, b int);
-            CREATE TABLE t2 (c int, d int);
-            CREATE TABLE t3 (e int, f int);
-            CREATE VIEW v1 AS SELECT a, b FROM t1;
-            CREATE VIEW v2 AS SELECT a, c FROM v1 JOIN t2 ON v1.b = t2.d;
-            CREATE VIEW v3 AS SELECT a, e FROM v2 JOIN t3 ON v2.c = t3.f;
-            CREATE CACHE q FROM SELECT a, c, e FROM v1 JOIN v2 ON v1.a = v2.a JOIN v3 ON v2.a = v3.a",
-            Dialect::DEFAULT_MYSQL,
-        )
-            .unwrap(),
-    )
+    let sql = vec![
+        "CREATE TABLE t1 (a int, b int);",
+        "CREATE TABLE t2 (c int, d int);",
+        "CREATE TABLE t3 (e int, f int);",
+        "CREATE VIEW v1 AS SELECT a, b FROM t1;",
+        "CREATE VIEW v2 AS SELECT a, c FROM v1 JOIN t2 ON v1.b = t2.d;",
+        "CREATE VIEW v3 AS SELECT a, e FROM v2 JOIN t3 ON v2.c = t3.f;",
+        "CREATE CACHE q FROM SELECT a, c, e FROM v1 JOIN v2 ON v1.a = v2.a JOIN v3 ON v2.a = v3.a",
+    ];
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
 
@@ -9267,7 +9371,7 @@ async fn cascade_drop_view() {
 async fn views_out_of_order() {
     let (mut g, shutdown_tx) = start_simple_unsharded("cascade_drop_view").await;
     g.extend_recipe(
-        ChangeList::from_str("CREATE TABLE t1 (x int);", Dialect::DEFAULT_MYSQL).unwrap(),
+        ChangeList::from_strings(vec!["CREATE TABLE t1 (x int);"], Dialect::DEFAULT_MYSQL).unwrap(),
     )
     .await
     .unwrap();
@@ -9320,7 +9424,11 @@ async fn evict_single() {
     let (mut g, shutdown_tx) = start_simple_unsharded("evict_single").await;
 
     g.extend_recipe(
-        ChangeList::from_str("CREATE TABLE t1 (x int, y int);", Dialect::DEFAULT_MYSQL).unwrap(),
+        ChangeList::from_strings(
+            vec!["CREATE TABLE t1 (x int, y int);"],
+            Dialect::DEFAULT_MYSQL,
+        )
+        .unwrap(),
     )
     .await
     .unwrap();
@@ -9377,7 +9485,11 @@ async fn evict_single_intermediate_state() {
     let (mut g, shutdown_tx) = start_simple_unsharded("evict_single_intermediate_state").await;
 
     g.extend_recipe(
-        ChangeList::from_str("CREATE TABLE t1 (x int, y int);", Dialect::DEFAULT_MYSQL).unwrap(),
+        ChangeList::from_strings(
+            vec!["CREATE TABLE t1 (x int, y int);"],
+            Dialect::DEFAULT_MYSQL,
+        )
+        .unwrap(),
     )
     .await
     .unwrap();
@@ -9454,8 +9566,8 @@ async fn check_supported_mysql_storage_engines() {
     let (mut g, shutdown_tx) = start_simple_unsharded("unsupported_engine").await;
 
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE test (value double) ENGINE=MEMORY;",
+        ChangeList::from_strings(
+            vec!["CREATE TABLE test (value double) ENGINE=MEMORY;"],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
@@ -9464,8 +9576,8 @@ async fn check_supported_mysql_storage_engines() {
     .expect_err("Should not replicate table with unsupported storage engine");
 
     g.extend_recipe(
-        ChangeList::from_str(
-            "CREATE TABLE test (value double) ENGINE=innodb;",
+        ChangeList::from_strings(
+            vec!["CREATE TABLE test (value double) ENGINE=innodb;"],
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),

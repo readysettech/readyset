@@ -226,7 +226,10 @@ impl MySqlReplicator<'_> {
                         readyset_sql::Dialect::MySQL,
                     );
 
-                    future::ready(ChangeList::from_str(create_table, Dialect::DEFAULT_MYSQL))
+                    future::ready(ChangeList::from_strings(
+                        vec![create_table],
+                        Dialect::DEFAULT_MYSQL,
+                    ))
                 })
                 .and_then(|changelist| {
                     noria.extend_recipe_no_leader_ready(
@@ -277,7 +280,10 @@ impl MySqlReplicator<'_> {
                         create_view.clone(),
                         readyset_sql::Dialect::MySQL,
                     );
-                    future::ready(ChangeList::from_str(create_view, Dialect::DEFAULT_MYSQL))
+                    future::ready(ChangeList::from_strings(
+                        vec![create_view],
+                        Dialect::DEFAULT_MYSQL,
+                    ))
                 })
                 .and_then(|changelist| {
                     noria.extend_recipe_no_leader_ready(

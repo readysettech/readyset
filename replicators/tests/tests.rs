@@ -1533,8 +1533,8 @@ async fn replication_filter_inner(url: &str) -> ReadySetResult<()> {
 
     ctx.noria
         .extend_recipe(
-            ChangeList::from_str(
-                "CREATE VIEW public.t4_view AS SELECT * FROM noria2.t4;",
+            ChangeList::from_strings(
+                vec!["CREATE VIEW public.t4_view AS SELECT * FROM noria2.t4;"],
                 Dialect::DEFAULT_MYSQL,
             )
             .unwrap(),
@@ -1624,8 +1624,8 @@ async fn replication_all_schemas_inner(url: &str) -> ReadySetResult<()> {
 
     ctx.noria
         .extend_recipe(
-            ChangeList::from_str(
-                "CREATE VIEW public.t4_view AS SELECT * FROM noria2.t4;",
+            ChangeList::from_strings(
+                vec!["CREATE VIEW public.t4_view AS SELECT * FROM noria2.t4;"],
                 Dialect::DEFAULT_MYSQL,
             )
             .unwrap(),

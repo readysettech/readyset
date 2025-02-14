@@ -1,4 +1,7 @@
-use std::fmt;
+use std::{
+    fmt,
+    hash::{Hash, Hasher},
+};
 
 use derive_more::From;
 use itertools::Itertools;
@@ -452,7 +455,7 @@ pub struct CreateCacheOptions {
 /// `CREATE CACHE [CONCURRENTLY] [ALWAYS] [<name>] FROM ...`
 ///
 /// This is a non-standard ReadySet specific extension to SQL
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
+#[derive(Clone, Debug, Serialize, Deserialize, Arbitrary)]
 pub struct CreateCacheStatement {
     /// The name of the cache. If not provided, a name will be generated based on the statement
     pub name: Option<Relation>,
@@ -464,6 +467,10 @@ pub struct CreateCacheStatement {
     pub inner: Result<CacheInner, String>,
     /// A full copy of the original 'create cache' statement that can be used to re-create the
     /// cache after an upgrade
+    ///
+    /// XXX(mvzink): Not included in hash or equality checks during nom-sql parity testing, since we
+    /// don't divide up the input before starting parsing when using sqlparser-rs. See
+    /// [`readyset_sql_parsing::parse_queries`].
     pub unparsed_create_cache_statement: Option<String>,
     /// If `always` is true, a cached query executed inside a transaction can be served from
     /// a readyset cache.
@@ -471,6 +478,26 @@ pub struct CreateCacheStatement {
     pub always: bool,
     /// Whether the CREATE CACHE STATEMENT should block or run concurrently
     pub concurrently: bool,
+}
+
+impl PartialEq for CreateCacheStatement {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+            && self.inner == other.inner
+            && self.always == other.always
+            && self.concurrently == other.concurrently
+    }
+}
+
+impl Eq for CreateCacheStatement {}
+
+impl Hash for CreateCacheStatement {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.name.hash(state);
+        self.inner.hash(state);
+        self.always.hash(state);
+        self.concurrently.hash(state);
+    }
 }
 
 impl DialectDisplay for CreateCacheStatement {

@@ -1574,8 +1574,8 @@ async fn caches_go_in_authority_list() {
     let (config, _handle, shutdown_tx) = builder.build::<PostgreSQLAdapter>().await;
 
     let queries = [
-        "CREATE TABLE t (x int);",
-        "CREATE CACHE q FROM SELECT x FROM t;",
+        "CREATE TABLE t (x int)",
+        "CREATE CACHE q FROM SELECT x FROM t",
     ];
 
     let conn = connect(config).await;
@@ -1591,7 +1591,7 @@ async fn caches_go_in_authority_list() {
         schema_search_path,
         dialect,
     } = res.first().unwrap();
-    assert_eq!(unparsed_stmt, "CREATE CACHE q FROM SELECT x FROM t;");
+    assert_eq!(unparsed_stmt, "CREATE CACHE q FROM SELECT x FROM t");
     assert_eq!(*dialect, Dialect::DEFAULT_POSTGRESQL);
     assert!(schema_search_path.is_empty());
 

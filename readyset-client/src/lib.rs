@@ -38,9 +38,11 @@
 //!
 //!     // if this is the first time we interact with ReadySet, we must give it the schema
 //!     db.extend_recipe(
-//!         ChangeList::from_str(
-//!             "CREATE TABLE Article (aid int, title varchar(255), url text, PRIMARY KEY(aid));
-//!              CREATE TABLE Vote (aid int, uid int);",
+//!         ChangeList::from_strings(
+//!             vec![
+//!                 "CREATE TABLE Article (aid int, title varchar(255), url text, PRIMARY KEY(aid));",
+//!                 "CREATE TABLE Vote (aid int, uid int);",
+//!             ],
 //!             Dialect::DEFAULT_MYSQL,
 //!         )
 //!         .unwrap(),
@@ -70,15 +72,15 @@
 //!
 //!     // we can also declare views that we want want to query
 //!     db.extend_recipe(
-//!         ChangeList::from_str(
-//!             "
-//!         VoteCount: \
-//!           SELECT Vote.aid, COUNT(uid) AS votes \
-//!           FROM Vote GROUP BY Vote.aid;
-//!         CREATE CACHE ArticleWithVoteCount FROM \
-//!           SELECT Article.aid, title, url, VoteCount.votes AS votes \
-//!           FROM Article LEFT JOIN VoteCount ON (Article.aid = VoteCount.aid) \
-//!           WHERE Article.aid = ?;",
+//!         ChangeList::from_strings(
+//!             vec![
+//!                 "CREATE VIEW VoteCount AS
+//!                     SELECT Vote.aid, COUNT(uid) AS votes FROM Vote GROUP BY Vote.aid;",
+//!                 "CREATE CACHE ArticleWithVoteCount FROM \
+//!                     SELECT Article.aid, title, url, VoteCount.votes AS votes \
+//!                     FROM Article LEFT JOIN VoteCount ON (Article.aid = VoteCount.aid) \
+//!                     WHERE Article.aid = ?;",
+//!             ],
 //!             Dialect::DEFAULT_MYSQL,
 //!         )
 //!         .unwrap(),
