@@ -5,6 +5,8 @@ use std::fmt;
 
 use proptest::arbitrary::Arbitrary;
 
+use crate::{Dialect, FromDialect, IntoDialect};
+
 const TINYTEXT_WIDTH: usize = 14;
 
 /// A String especially optimized for inline storage of short strings, and fast cloning of longer
@@ -278,16 +280,22 @@ impl From<Cow<'_, str>> for SqlIdentifier {
     }
 }
 
-impl From<sqlparser::ast::Ident> for SqlIdentifier {
-    fn from(value: sqlparser::ast::Ident) -> Self {
-        value.value.into()
+impl FromDialect<sqlparser::ast::Ident> for SqlIdentifier {
+    #[inline]
+    fn from_dialect(value: sqlparser::ast::Ident, dialect: Dialect) -> Self {
+        if dialect == Dialect::PostgreSQL && value.quote_style.is_none() {
+            Self::from(value.value.to_lowercase())
+        } else {
+            Self::from(value.value)
+        }
     }
 }
 
-impl From<sqlparser::ast::ObjectNamePart> for SqlIdentifier {
-    fn from(value: sqlparser::ast::ObjectNamePart) -> Self {
+impl FromDialect<sqlparser::ast::ObjectNamePart> for SqlIdentifier {
+    #[inline]
+    fn from_dialect(value: sqlparser::ast::ObjectNamePart, dialect: Dialect) -> Self {
         match value {
-            sqlparser::ast::ObjectNamePart::Identifier(ident) => ident.into(),
+            sqlparser::ast::ObjectNamePart::Identifier(ident) => ident.into_dialect(dialect),
         }
     }
 }

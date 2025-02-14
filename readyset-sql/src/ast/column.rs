@@ -4,7 +4,10 @@ use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
-use crate::{ast::*, AstConversionError, Dialect, DialectDisplay};
+use crate::{
+    ast::*, AstConversionError, Dialect, DialectDisplay, FromDialect, IntoDialect, TryFromDialect,
+    TryIntoDialect,
+};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct Column {
@@ -33,28 +36,28 @@ impl From<&'_ str> for Column {
     }
 }
 
-impl From<sqlparser::ast::Ident> for Column {
-    fn from(value: sqlparser::ast::Ident) -> Self {
+impl FromDialect<sqlparser::ast::Ident> for Column {
+    fn from_dialect(value: sqlparser::ast::Ident, dialect: Dialect) -> Self {
         Self {
-            name: value.into(),
+            name: value.into_dialect(dialect),
             table: None,
         }
     }
 }
 
-impl From<Vec<sqlparser::ast::Ident>> for Column {
-    fn from(mut value: Vec<sqlparser::ast::Ident>) -> Self {
-        let name: SqlIdentifier = value.pop().unwrap().into();
+impl FromDialect<Vec<sqlparser::ast::Ident>> for Column {
+    fn from_dialect(mut value: Vec<sqlparser::ast::Ident>, dialect: Dialect) -> Self {
+        let name: SqlIdentifier = value.pop().unwrap().into_dialect(dialect);
         let table = if let Some(table) = value.pop() {
             if let Some(schema) = value.pop() {
                 Some(Relation {
-                    schema: Some(schema.into()),
-                    name: table.into(),
+                    schema: Some(schema.into_dialect(dialect)),
+                    name: table.into_dialect(dialect),
                 })
             } else {
                 Some(Relation {
                     schema: None,
-                    name: table.into(),
+                    name: table.into_dialect(dialect),
                 })
             }
         } else {
@@ -64,30 +67,32 @@ impl From<Vec<sqlparser::ast::Ident>> for Column {
     }
 }
 
-impl From<sqlparser::ast::ObjectName> for Column {
-    fn from(value: sqlparser::ast::ObjectName) -> Self {
+impl FromDialect<sqlparser::ast::ObjectName> for Column {
+    fn from_dialect(value: sqlparser::ast::ObjectName, dialect: Dialect) -> Self {
         value
             .0
             .into_iter()
             .map(|sqlparser::ast::ObjectNamePart::Identifier(ident)| ident)
             .collect::<Vec<_>>()
-            .into()
+            .into_dialect(dialect)
     }
 }
 
-impl From<sqlparser::ast::ViewColumnDef> for Column {
-    fn from(value: sqlparser::ast::ViewColumnDef) -> Self {
+impl FromDialect<sqlparser::ast::ViewColumnDef> for Column {
+    fn from_dialect(value: sqlparser::ast::ViewColumnDef, dialect: Dialect) -> Self {
         Self {
-            name: value.name.into(),
+            name: value.name.into_dialect(dialect),
             table: None,
         }
     }
 }
 
-impl From<sqlparser::ast::AssignmentTarget> for Column {
-    fn from(value: sqlparser::ast::AssignmentTarget) -> Self {
+impl FromDialect<sqlparser::ast::AssignmentTarget> for Column {
+    fn from_dialect(value: sqlparser::ast::AssignmentTarget, dialect: Dialect) -> Self {
         match value {
-            sqlparser::ast::AssignmentTarget::ColumnName(object_name) => object_name.into(),
+            sqlparser::ast::AssignmentTarget::ColumnName(object_name) => {
+                object_name.into_dialect(dialect)
+            }
             sqlparser::ast::AssignmentTarget::Tuple(_vec) => todo!("tuple assignment syntax"),
         }
     }
@@ -180,10 +185,11 @@ pub struct ColumnSpecification {
     pub comment: Option<String>,
 }
 
-impl TryFrom<sqlparser::ast::ColumnDef> for ColumnSpecification {
-    type Error = AstConversionError;
-
-    fn try_from(value: sqlparser::ast::ColumnDef) -> Result<Self, Self::Error> {
+impl TryFromDialect<sqlparser::ast::ColumnDef> for ColumnSpecification {
+    fn try_from_dialect(
+        value: sqlparser::ast::ColumnDef,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
         use sqlparser::{
             keywords::Keyword,
             tokenizer::{Token, Word},
@@ -198,9 +204,9 @@ impl TryFrom<sqlparser::ast::ColumnDef> for ColumnSpecification {
                 sqlparser::ast::ColumnOption::NotNull => {
                     constraints.push(ColumnConstraint::NotNull)
                 }
-                sqlparser::ast::ColumnOption::Default(expr) => {
-                    constraints.push(ColumnConstraint::DefaultValue(expr.try_into()?))
-                }
+                sqlparser::ast::ColumnOption::Default(expr) => constraints.push(
+                    ColumnConstraint::DefaultValue(expr.try_into_dialect(dialect)?),
+                ),
                 sqlparser::ast::ColumnOption::Unique {
                     is_primary,
                     characteristics,
@@ -250,7 +256,7 @@ impl TryFrom<sqlparser::ast::ColumnDef> for ColumnSpecification {
                 } => {
                     generated = Some(GeneratedColumn {
                         expr: generation_expr
-                            .map(TryInto::try_into)
+                            .map(|expr| expr.try_into_dialect(dialect))
                             .expect("generated expr can't be None")?,
                         stored: generation_expr_mode
                             == Some(sqlparser::ast::GeneratedExpressionMode::Stored),
@@ -270,8 +276,8 @@ impl TryFrom<sqlparser::ast::ColumnDef> for ColumnSpecification {
             }
         }
         Ok(Self {
-            column: value.name.into(),
-            sql_type: value.data_type.try_into()?,
+            column: value.name.into_dialect(dialect),
+            sql_type: value.data_type.try_into_dialect(dialect)?,
             constraints,
             comment,
             generated,

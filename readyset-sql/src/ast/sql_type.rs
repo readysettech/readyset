@@ -10,7 +10,10 @@ use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use triomphe::ThinArc;
 
-use crate::{ast::*, AstConversionError, Dialect, DialectDisplay};
+use crate::{
+    ast::*, AstConversionError, Dialect, DialectDisplay, IntoDialect, TryFromDialect,
+    TryIntoDialect,
+};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum IntervalFields {
@@ -111,10 +114,11 @@ pub enum SqlType {
     Other(Relation),
 }
 
-impl TryFrom<sqlparser::ast::DataType> for crate::ast::SqlType {
-    type Error = AstConversionError;
-
-    fn try_from(value: sqlparser::ast::DataType) -> Result<Self, Self::Error> {
+impl TryFromDialect<sqlparser::ast::DataType> for crate::ast::SqlType {
+    fn try_from_dialect(
+        value: sqlparser::ast::DataType,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
         use sqlparser::ast::DataType::*;
         match value {
             Int(len) => Ok(Self::Int(len.map(|n| n as u16))),
@@ -229,9 +233,9 @@ impl TryFrom<sqlparser::ast::DataType> for crate::ast::SqlType {
                     }
                     None => failed!("invalid custom type name {}", name),
                 },
-                Err(_) => Ok(Self::Other(name.into())),
+                Err(_) => Ok(Self::Other(name.into_dialect(dialect))),
             },
-            Array(def) => Ok(Self::Array(Box::new(def.try_into()?))),
+            Array(def) => Ok(Self::Array(Box::new(def.try_into_dialect(dialect)?))),
             Map(_data_type, _data_type1) => unsupported!("MAP type"),
             Tuple(_vec) => unsupported!("TUPLE type"),
             Nested(_vec) => unsupported!("NESTED type"),
@@ -301,26 +305,28 @@ fn character_length_into_u16(value: sqlparser::ast::CharacterLength) -> Option<u
     }
 }
 
-impl TryFrom<sqlparser::ast::ArrayElemTypeDef> for SqlType {
-    type Error = AstConversionError;
-
-    fn try_from(value: sqlparser::ast::ArrayElemTypeDef) -> Result<Self, Self::Error> {
+impl TryFromDialect<sqlparser::ast::ArrayElemTypeDef> for SqlType {
+    fn try_from_dialect(
+        value: sqlparser::ast::ArrayElemTypeDef,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
         use sqlparser::ast::ArrayElemTypeDef;
         match value {
             ArrayElemTypeDef::None => unsupported!("ARRAY<NONE> type"),
-            ArrayElemTypeDef::AngleBracket(data_type) => data_type.try_into(),
+            ArrayElemTypeDef::AngleBracket(data_type) => data_type.try_into_dialect(dialect),
             // TODO: Should we explicitly reject numbers in the square brackets?
-            ArrayElemTypeDef::SquareBracket(data_type, _) => data_type.try_into(),
-            ArrayElemTypeDef::Parenthesis(data_type) => data_type.try_into(),
+            ArrayElemTypeDef::SquareBracket(data_type, _) => data_type.try_into_dialect(dialect),
+            ArrayElemTypeDef::Parenthesis(data_type) => data_type.try_into_dialect(dialect),
         }
     }
 }
 
-impl TryFrom<Box<sqlparser::ast::DataType>> for crate::ast::SqlType {
-    type Error = AstConversionError;
-
-    fn try_from(value: Box<sqlparser::ast::DataType>) -> Result<Self, Self::Error> {
-        (*value).try_into()
+impl TryFromDialect<Box<sqlparser::ast::DataType>> for crate::ast::SqlType {
+    fn try_from_dialect(
+        value: Box<sqlparser::ast::DataType>,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
+        (*value).try_into_dialect(dialect)
     }
 }
 
