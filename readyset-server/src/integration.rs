@@ -950,11 +950,9 @@ async fn it_works_with_sql_recipe() {
 async fn it_works_with_vote() {
     let (mut g, shutdown_tx) = start_simple_unsharded("it_works_with_vote").await;
     let sql = "
-        # base tables
         CREATE TABLE Article (id int, title varchar(255), PRIMARY KEY(id));
         CREATE TABLE Vote (article_id int, user int);
 
-        # read queries
         CREATE CACHE ArticleWithVoteCount FROM SELECT Article.id, title, VoteCount.votes AS votes \
                     FROM Article \
                     LEFT JOIN (SELECT Vote.article_id, COUNT(user) AS votes \
@@ -1041,11 +1039,9 @@ async fn it_works_with_identical_queries() {
 async fn it_works_with_double_query_through() {
     let (mut g, shutdown_tx) = start_simple_unsharded("it_works_with_double_query_through").await;
     let sql = "
-        # base tables
         CREATE TABLE A (aid int, other int, PRIMARY KEY(aid));
         CREATE TABLE B (bid int, PRIMARY KEY(bid));
 
-        # read queries
         CREATE CACHE ReadJoin FROM SELECT J.aid, J.other \
             FROM B \
             LEFT JOIN (SELECT A.aid, A.other FROM A \
@@ -1094,19 +1090,22 @@ async fn it_works_with_double_query_through() {
 async fn it_works_with_duplicate_subquery() {
     let (mut g, shutdown_tx) = start_simple_unsharded("it_works_with_double_query_through").await;
     let sql = "
-        # base tables
         CREATE TABLE A (aid int, other int, PRIMARY KEY(aid));
         CREATE TABLE B (bid int, PRIMARY KEY(bid));
 
-        # read queries
         CREATE CACHE ReadJoin FROM SELECT J.aid, J.other \
             FROM B \
             LEFT JOIN (SELECT A.aid, A.other FROM A \
                 WHERE A.other = 5) AS J \
             ON (J.aid = B.bid) \
             WHERE J.aid = ?;
+    ";
+    g.extend_recipe(ChangeList::from_str(sql, Dialect::DEFAULT_MYSQL).unwrap())
+        .await
+        .unwrap();
 
-        # Another query, with a subquery identical to the one above but named differently.
+    // Another query, with a subquery identical to the one above but named differently.
+    let sql = "
         CREATE CACHE ReadJoin2 FROM SELECT J2.aid, J2.other \
             FROM B \
             LEFT JOIN (SELECT A.aid, A.other FROM A \
@@ -7552,11 +7551,8 @@ async fn group_by_agg_col_multi() {
 async fn group_by_agg_col_with_join() {
     let (mut g, shutdown_tx) = start_simple_unsharded("group_by_agg_col_with_join").await;
     let sql = "
-        # base tables
         CREATE TABLE test (id int, number int, PRIMARY KEY(id));
         CREATE TABLE test2 (test_id int, value int);
-
-        # read queries
         CREATE CACHE groupbyaggcolwithjoin FROM SELECT count(number) as c, avg(test2.value) AS a \
                     FROM test \
                     INNER JOIN test2 \
@@ -7611,10 +7607,7 @@ async fn group_by_agg_col_with_join() {
 async fn count_emit_zero() {
     let (mut g, shutdown_tx) = start_simple_unsharded("count_emit_zero").await;
     let sql = "
-        # base tables
         CREATE TABLE test (id int);
-
-        # read queries
         CREATE CACHE countemitzero FROM SELECT count(id) as c FROM test GROUP BY id;
         CREATE CACHE countemitzeronogroup FROM SELECT count(*) as c FROM test;
         CREATE CACHE countemitzeromultiple FROM SELECT COUNT(id) AS c, COUNT(*) AS c2 FROM test;
@@ -8515,7 +8508,6 @@ async fn simple_drop_tables() {
     let (mut g, shutdown_tx) = start_simple_unsharded("simple_drop_tables").await;
 
     let create_table = "
-        # base tables
         CREATE TABLE table_1 (column_1 INT);
         CREATE TABLE table_2 (column_2 INT);
         CREATE CACHE t1 FROM SELECT * FROM table_1;
@@ -8553,7 +8545,6 @@ async fn join_drop_tables() {
     let (mut g, shutdown_tx) = start_simple_unsharded("simple_drop_tables").await;
 
     let create_table = "
-        # base tables
         CREATE TABLE table_1 (column_1 INT, column_2 INT);
         CREATE TABLE table_2 (column_1 INT, column_2 INT);
         CREATE TABLE table_3 (column_1 INT, column_2 INT);
@@ -8593,7 +8584,6 @@ async fn simple_drop_tables_with_data() {
     let (mut g, shutdown_tx) = start_simple_unsharded("simple_drop_tables_with_data").await;
 
     let create_table = "
-        # base tables
         CREATE TABLE table_1 (column_1 INT);
         CREATE TABLE table_2 (column_2 INT);
         CREATE CACHE t1 FROM SELECT * FROM table_1;
@@ -8660,7 +8650,6 @@ async fn simple_drop_tables_with_persisted_data() {
     let (mut g, shutdown_tx) = builder.start_local().await.unwrap();
 
     let create_table = "
-        # base tables
         CREATE TABLE table_1 (column_1 INT);
         CREATE TABLE table_2 (column_2 INT);
         CREATE CACHE t1 FROM SELECT * FROM table_1;
@@ -8724,7 +8713,6 @@ async fn simple_drop_tables_with_persisted_data() {
 async fn create_and_drop_table() {
     let (mut g, shutdown_tx) = start_simple_unsharded("create_and_drop_table").await;
     let create_table = "
-        # base tables
         CREATE TABLE table_1 (column_1 INT);
         CREATE TABLE table_2 (column_2 INT);
         CREATE TABLE table_3 (column_3 INT);
@@ -8748,7 +8736,6 @@ async fn create_and_drop_table() {
 async fn drop_and_recreate_different_columns() {
     let (mut g, shutdown_tx) = start_simple_unsharded("create_and_drop_table").await;
     let create_table = "
-        # base tables
         CREATE TABLE table_1 (column_1 INT);
         DROP TABLE table_1;
         CREATE TABLE table_1 (column_1 INT, column_2 INT);
@@ -8781,7 +8768,6 @@ async fn drop_and_recreate_different_columns() {
 async fn simple_dry_run() {
     let (mut g, shutdown_tx) = start_simple_unsharded("simple_dry_run").await;
     let query = "
-        # base tables
         CREATE TABLE table_1 (column_1 INT);
         CREATE CACHE t1 FROM SELECT * FROM table_1;
     ";
@@ -8799,7 +8785,6 @@ async fn simple_dry_run() {
 async fn simple_dry_run_unsupported() {
     let (mut g, shutdown_tx) = start_simple_unsharded("simple_dry_run").await;
     let query = "
-        # base tables
         CREATE TABLE table_1 (column_1 INT);
         CREATE CACHE t1 FROM SELECT * FROM table_1;
     ";
@@ -9018,7 +9003,6 @@ async fn double_create_table_with_multiple_modifications() {
     let (mut g, shutdown_tx) = start_simple_unsharded("double_create_table_add_column").await;
 
     let create_table = "
-        # base tables
         CREATE TABLE table_1 (column_1 INT, column_2 TEXT, column_3 TEXT, column_4 TEXT);
         CREATE CACHE t1 FROM SELECT * FROM table_1;
     ";
@@ -9079,7 +9063,6 @@ async fn double_identical_create_table() {
     let (mut g, shutdown_tx) = start_simple_unsharded("double_create_table_add_column").await;
 
     let create_table = "
-        # base tables
         CREATE TABLE table_1 (column_1 INT);
         CREATE CACHE t1 FROM SELECT * FROM table_1;
     ";

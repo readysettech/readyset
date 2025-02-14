@@ -36,7 +36,6 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
 use dataflow_expression::Dialect;
-use nom_locate::LocatedSpan;
 use readyset_data::DfType;
 use readyset_errors::{internal, unsupported, ReadySetError, ReadySetResult};
 use readyset_sql::ast::{
@@ -44,6 +43,7 @@ use readyset_sql::ast::{
     CreateTableStatement, CreateViewStatement, DropTableStatement, DropViewStatement,
     NonReplicatedRelation, Relation, SelectStatement, SqlIdentifier, SqlQuery,
 };
+use readyset_sql_parsing::parse_query;
 use readyset_sql_passes::adapter_rewrites::{self, AdapterRewriteParams};
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
@@ -159,39 +159,19 @@ impl ChangeList {
             };
         }
 
-        // TODO(alex) Include nom-sql error position info in ReadySetError::UnparseableQuery?
-        let queries = match parse::separate_queries(LocatedSpan::new(value.as_bytes())) {
-            Result::Err(nom::Err::Error(e)) => {
-                return mk_error!(std::str::from_utf8(&e.input).unwrap());
-            }
-            Result::Err(nom::Err::Failure(e)) => {
-                return mk_error!(std::str::from_utf8(&e.input).unwrap());
-            }
-            Result::Err(_) => {
-                return mk_error!(value);
-            }
-            Result::Ok((remainder, parsed)) => {
-                if !remainder.is_empty() {
-                    return mk_error!(std::str::from_utf8(&remainder).unwrap());
-                }
-                parsed
-            }
-        };
-        let changes = queries.into_iter().fold(
-            Ok(Vec::new()),
-            |acc: ReadySetResult<Vec<Change>>, query| match parse::query_expr(query) {
-                Result::Err(nom::Err::Error(e)) => {
-                    mk_error!(std::str::from_utf8(&e.input).unwrap())
-                }
-                Result::Err(nom::Err::Failure(e)) => {
-                    mk_error!(std::str::from_utf8(&e.input).unwrap())
-                }
-                Result::Err(_) => mk_error!(value),
-                Result::Ok((remainder, parsed)) => {
-                    if !remainder.is_empty() {
-                        return mk_error!(std::str::from_utf8(&remainder).unwrap());
-                    }
-                    acc.and_then(|mut changes| {
+        let queries = s
+            .as_ref()
+            .split(';')
+            .map(|query| query.trim())
+            .filter(|query| !query.is_empty())
+            .map(|query| parse_query(dialect.into(), query));
+
+        let changes =
+            queries.fold(
+                Ok(Vec::new()),
+                |acc: ReadySetResult<Vec<Change>>, query| match query {
+                    Err(_) => mk_error!(value),
+                    Ok(parsed) => acc.and_then(|mut changes| {
                         match parsed {
                             SqlQuery::CreateTable(statement) => changes.push(Change::CreateTable {
                                 statement,
@@ -251,10 +231,9 @@ impl ChangeList {
                             ),
                         }
                         Ok(changes)
-                    })
-                }
-            },
-        )?;
+                    }),
+                },
+            )?;
 
         Ok(ChangeList {
             changes,
@@ -493,21 +472,12 @@ impl Change {
                 })
             };
         }
-        match parse::query_expr_with_dialect(
-            LocatedSpan::new(ddl_req.unparsed_stmt.as_bytes()),
+        match parse_query(
             ddl_req.dialect.into(),
+            &ddl_req.unparsed_stmt,
         ) {
-            Result::Err(nom::Err::Error(e)) => {
-                mk_error!(std::str::from_utf8(&e.input).unwrap())
-            }
-            Result::Err(nom::Err::Failure(e)) => {
-                mk_error!(std::str::from_utf8(&e.input).unwrap())
-            }
             Result::Err(_) => mk_error!(ddl_req.unparsed_stmt),
-            Result::Ok((remainder, parsed)) => {
-                if !remainder.is_empty() {
-                    return mk_error!(std::str::from_utf8(&remainder).unwrap());
-                }
+            Result::Ok(parsed) => {
                 Ok(match parsed {
                     SqlQuery::CreateCache(CreateCacheStatement {
                         name,
@@ -551,65 +521,6 @@ impl Change {
                     ),
                 })
             }
-        }
-    }
-}
-
-mod parse {
-    use nom::bytes::complete::{tag, take_until};
-    use nom::combinator::recognize;
-    use nom::error::ErrorKind;
-    use nom::multi::many1;
-    use nom::sequence::{delimited, terminated};
-    use nom::InputTake;
-    use nom_locate::LocatedSpan;
-    use nom_sql::whitespace::whitespace0;
-    use nom_sql::{sql_query, NomSqlError, NomSqlResult};
-    use readyset_sql::{ast::SqlQuery, Dialect};
-
-    /// The canonical SQL dialect used for central ReadySet server recipes. All direct clients of
-    /// readyset-server must use this dialect for their SQL recipes, and all adapters and client
-    /// libraries must translate into this dialect as part of handling requests from users
-    const CANONICAL_DIALECT: Dialect = Dialect::MySQL;
-
-    pub(super) fn query_expr(input: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlQuery> {
-        let (input, _) = whitespace0(input)?;
-        sql_query(CANONICAL_DIALECT)(input)
-    }
-
-    pub(super) fn query_expr_with_dialect(
-        input: LocatedSpan<&[u8]>,
-        dialect: Dialect,
-    ) -> NomSqlResult<&[u8], SqlQuery> {
-        let (input, _) = whitespace0(input)?;
-        sql_query(dialect)(input)
-    }
-
-    pub(super) fn separate_queries(
-        queries: LocatedSpan<&[u8]>,
-    ) -> NomSqlResult<&[u8], Vec<LocatedSpan<&[u8]>>> {
-        many1(delimited(
-            whitespace0,
-            // We only accept SQL queries that end with a semicolon.
-            ends_in_semicolon_or_eof,
-            whitespace0,
-        ))(queries)
-    }
-
-    fn ends_in_semicolon_or_eof(
-        input: LocatedSpan<&[u8]>,
-    ) -> NomSqlResult<&[u8], LocatedSpan<&[u8]>> {
-        match recognize(terminated(take_until(";"), tag(";")))(input) {
-            Ok((input, output)) => Ok((input, output)),
-            Err(nom::Err::Error(NomSqlError {
-                kind: ErrorKind::TakeUntil,
-                ..
-            })) if !input.is_empty() => {
-                // We didn't find a semicolon, so the rest of the input is a query.
-                let (output, input) = input.take_split(0);
-                Ok((input, output))
-            }
-            Err(e) => Err(e),
         }
     }
 }
