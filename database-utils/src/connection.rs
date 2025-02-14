@@ -11,6 +11,7 @@ use mysql::PoolConstraints;
 use mysql_async::prelude::Queryable;
 use readyset_errors::ReadySetError;
 use readyset_sql::{ast::SqlType, Dialect};
+use tokio_postgres::{GenericResult, DEFAULT_RESULT_FORMATS};
 use {mysql_async as mysql, tokio_postgres as pgsql};
 
 use crate::error::{ConnectionType, DatabaseError};
@@ -173,6 +174,12 @@ impl QueryableConnection for DatabaseConnection {
                 client
                     .query_raw(query.as_ref(), Vec::<i8>::new())
                     .await?
+                    .try_filter_map(|result| async move {
+                        match result {
+                            GenericResult::Row(row) => Ok(Some(row)),
+                            GenericResult::Command(_, _) => Ok(None),
+                        }
+                    })
                     .try_collect()
                     .await?,
             )),
@@ -180,6 +187,12 @@ impl QueryableConnection for DatabaseConnection {
                 client
                     .query_raw(query.as_ref(), Vec::<i8>::new())
                     .await?
+                    .try_filter_map(|result| async move {
+                        match result {
+                            GenericResult::Row(row) => Ok(Some(row)),
+                            GenericResult::Command(_, _) => Ok(None),
+                        }
+                    })
                     .try_collect()
                     .await?,
             )),
@@ -221,14 +234,26 @@ impl QueryableConnection for DatabaseConnection {
         match self {
             Self::MySQL(_) => Err(DatabaseError::WrongConnection(ConnectionType::PostgreSQL)),
             Self::PostgreSQL(conn, _) => Ok(QueryResults::Postgres(
-                conn.query_typed_raw(query.as_ref(), params)
+                conn.query_typed_raw(query.as_ref(), params, DEFAULT_RESULT_FORMATS)
                     .await?
+                    .try_filter_map(|result| async move {
+                        match result {
+                            GenericResult::Row(row) => Ok(Some(row)),
+                            GenericResult::Command(_, _) => Ok(None),
+                        }
+                    })
                     .try_collect()
                     .await?,
             )),
             Self::PostgreSQLPool(conn) => Ok(QueryResults::Postgres(
-                conn.query_typed_raw(query.as_ref(), params)
+                conn.query_typed_raw(query.as_ref(), params, DEFAULT_RESULT_FORMATS)
                     .await?
+                    .try_filter_map(|result| async move {
+                        match result {
+                            GenericResult::Row(row) => Ok(Some(row)),
+                            GenericResult::Command(_, _) => Ok(None),
+                        }
+                    })
                     .try_collect()
                     .await?,
             )),
@@ -257,12 +282,24 @@ impl QueryableConnection for DatabaseConnection {
             Self::PostgreSQL(conn, _) => Ok(QueryResults::Postgres(
                 conn.query_raw(stmt.as_postgres_statement()?, params)
                     .await?
+                    .try_filter_map(|result| async move {
+                        match result {
+                            GenericResult::Row(row) => Ok(Some(row)),
+                            GenericResult::Command(_, _) => Ok(None),
+                        }
+                    })
                     .try_collect()
                     .await?,
             )),
             Self::PostgreSQLPool(conn) => Ok(QueryResults::Postgres(
                 conn.query_raw(stmt.as_postgres_statement()?, params)
                     .await?
+                    .try_filter_map(|result| async move {
+                        match result {
+                            GenericResult::Row(row) => Ok(Some(row)),
+                            GenericResult::Command(_, _) => Ok(None),
+                        }
+                    })
                     .try_collect()
                     .await?,
             )),
@@ -778,6 +815,12 @@ impl QueryableConnection for Transaction<'_> {
                 transaction
                     .query_raw(query.as_ref(), Vec::<i8>::new())
                     .await?
+                    .try_filter_map(|result| async move {
+                        match result {
+                            GenericResult::Row(row) => Ok(Some(row)),
+                            GenericResult::Command(_, _) => Ok(None),
+                        }
+                    })
                     .try_collect()
                     .await?,
             )),
@@ -786,6 +829,12 @@ impl QueryableConnection for Transaction<'_> {
                 transaction
                     .query_raw(query.as_ref(), Vec::<i8>::new())
                     .await?
+                    .try_filter_map(|result| async move {
+                        match result {
+                            GenericResult::Row(row) => Ok(Some(row)),
+                            GenericResult::Command(_, _) => Ok(None),
+                        }
+                    })
                     .try_collect()
                     .await?,
             )),
@@ -832,6 +881,12 @@ impl QueryableConnection for Transaction<'_> {
                 transaction
                     .query_typed_raw(query.as_ref(), params)
                     .await?
+                    .try_filter_map(|result| async move {
+                        match result {
+                            GenericResult::Row(row) => Ok(Some(row)),
+                            GenericResult::Command(_, _) => Ok(None),
+                        }
+                    })
                     .try_collect()
                     .await?,
             )),
@@ -839,6 +894,12 @@ impl QueryableConnection for Transaction<'_> {
                 transaction
                     .query_typed_raw(query.as_ref(), params)
                     .await?
+                    .try_filter_map(|result| async move {
+                        match result {
+                            GenericResult::Row(row) => Ok(Some(row)),
+                            GenericResult::Command(_, _) => Ok(None),
+                        }
+                    })
                     .try_collect()
                     .await?,
             )),
@@ -873,6 +934,12 @@ impl QueryableConnection for Transaction<'_> {
                 transaction
                     .query_raw(stmt.as_postgres_statement()?, params)
                     .await?
+                    .try_filter_map(|result| async move {
+                        match result {
+                            GenericResult::Row(row) => Ok(Some(row)),
+                            GenericResult::Command(_, _) => Ok(None),
+                        }
+                    })
                     .try_collect()
                     .await?,
             )),
@@ -880,6 +947,12 @@ impl QueryableConnection for Transaction<'_> {
                 transaction
                     .query_raw(stmt.as_postgres_statement()?, params)
                     .await?
+                    .try_filter_map(|result| async move {
+                        match result {
+                            GenericResult::Row(row) => Ok(Some(row)),
+                            GenericResult::Command(_, _) => Ok(None),
+                        }
+                    })
                     .try_collect()
                     .await?,
             )),

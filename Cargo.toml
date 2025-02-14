@@ -1,8 +1,12 @@
 [patch.crates-io]
 mysql_async = { git = "https://github.com/readysettech/mysql_async" }
-postgres-protocol = { git = "https://github.com/readysettech/rust-postgres.git", tag = "readyset-20241114" }
-postgres-types = { git = "https://github.com/readysettech/rust-postgres.git", tag = "readyset-20241114" }
-tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git", tag = "readyset-20241114" }
+postgres = { git = "https://github.com/readysettech/rust-postgres.git", rev = "4c8a77e8c3879581966f9288c4eea829ca4ea54e" }
+postgres-protocol = { git = "https://github.com/readysettech/rust-postgres.git", rev = "4c8a77e8c3879581966f9288c4eea829ca4ea54e" }
+postgres-types = { git = "https://github.com/readysettech/rust-postgres.git", rev = "4c8a77e8c3879581966f9288c4eea829ca4ea54e" }
+tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git", rev = "4c8a77e8c3879581966f9288c4eea829ca4ea54e" }
+# postgres-protocol = { git = "https://github.com/readysettech/rust-postgres.git", tag = "readyset-20241114" }
+# postgres-types = { git = "https://github.com/readysettech/rust-postgres.git", tag = "readyset-20241114" }
+# tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git", tag = "readyset-20241114" }
 
 [workspace]
 members = [

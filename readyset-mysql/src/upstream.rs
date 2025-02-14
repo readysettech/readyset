@@ -13,7 +13,7 @@ use mysql_async::{
 use pin_project::pin_project;
 use readyset_adapter::upstream_database::{UpstreamDestination, UpstreamStatementId};
 use readyset_adapter::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
-use readyset_adapter_types::DeallocateId;
+use readyset_adapter_types::{DeallocateId, PreparedStatementType};
 use readyset_client_metrics::{recorded, QueryDestination};
 use readyset_data::upstream_system_props::DEFAULT_TIMEZONE_NAME;
 use readyset_data::DfValue;
@@ -291,10 +291,15 @@ impl UpstreamDatabase for MySqlUpstream {
         &'a mut self,
         query: S,
         _: (),
+        statement_type: PreparedStatementType,
     ) -> Result<UpstreamPrepare<Self>, Error>
     where
         S: AsRef<str> + Send + Sync + 'a,
     {
+        if matches!(statement_type, PreparedStatementType::Unnamed) {
+            unsupported!("MySQL does not support unnamed prepared statements");
+        }
+
         let statement = self.conn.prep(query.as_ref()).await?;
         if let Some(old_stmt) = self
             .prepared_statements
@@ -303,7 +308,7 @@ impl UpstreamDatabase for MySqlUpstream {
             self.conn.close(old_stmt).await?;
         }
         Ok(UpstreamPrepare {
-            statement_id: statement.id().into(),
+            statement_id: statement.id(),
             meta: StatementMeta {
                 params: statement.params().to_owned(),
                 schema: statement.columns().to_owned(),
@@ -317,25 +322,18 @@ impl UpstreamDatabase for MySqlUpstream {
         params: &[DfValue],
         _exec_meta: Self::ExecMeta<'_>,
     ) -> Result<Self::QueryResult<'a>, Error> {
-        match id {
-            UpstreamStatementId::Unprepared(_) => {
-                unsupported!("MySQL does not support unnamed prepared statements");
-            }
-            UpstreamStatementId::Prepared(id) => {
-                let params = dt_to_value_params(params)?;
+        let params = dt_to_value_params(params)?;
 
-                let result = self
-                    .conn
-                    .exec_iter(
-                        self.prepared_statements.get(id).ok_or(Error::ReadySet(
-                            ReadySetError::PreparedStatementMissing { statement_id: *id },
-                        ))?,
-                        params,
-                    )
-                    .await?;
-                handle_query_result!(result)
-            }
-        }
+        let result = self
+            .conn
+            .exec_iter(
+                self.prepared_statements.get(id).ok_or(Error::ReadySet(
+                    ReadySetError::PreparedStatementMissing { statement_id: *id },
+                ))?,
+                params,
+            )
+            .await?;
+        handle_query_result!(result)
     }
 
     async fn remove_statement(&mut self, statement_id: DeallocateId) -> Result<(), Self::Error> {
