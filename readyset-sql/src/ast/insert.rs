@@ -5,7 +5,10 @@ use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
-use crate::{ast::*, AstConversionError, Dialect, DialectDisplay};
+use crate::{
+    ast::*, AstConversionError, Dialect, DialectDisplay, IntoDialect, TryFromDialect,
+    TryIntoDialect,
+};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct InsertStatement {
@@ -16,10 +19,11 @@ pub struct InsertStatement {
     pub on_duplicate: Option<Vec<(Column, Expr)>>,
 }
 
-impl TryFrom<sqlparser::ast::Insert> for InsertStatement {
-    type Error = AstConversionError;
-
-    fn try_from(value: sqlparser::ast::Insert) -> Result<Self, Self::Error> {
+impl TryFromDialect<sqlparser::ast::Insert> for InsertStatement {
+    fn try_from_dialect(
+        value: sqlparser::ast::Insert,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
         if let sqlparser::ast::Insert {
             table: sqlparser::ast::TableObject::TableName(name),
             columns,
@@ -29,18 +33,27 @@ impl TryFrom<sqlparser::ast::Insert> for InsertStatement {
         } = value
         {
             Ok(Self {
-                table: name.into(),
+                table: name.into_dialect(dialect),
                 fields: if columns.is_empty() {
                     None
                 } else {
-                    Some(columns.into_iter().map(Into::into).collect())
+                    Some(
+                        columns
+                            .into_iter()
+                            .map(|column| column.into_dialect(dialect))
+                            .collect(),
+                    )
                 },
                 data: if let Some(query) = source {
                     match *query.body {
                         sqlparser::ast::SetExpr::Values(values) => values
                             .rows
                             .into_iter()
-                            .map(|row| row.into_iter().map(TryInto::try_into).try_collect())
+                            .map(|row| {
+                                row.into_iter()
+                                    .map(|value| value.try_into_dialect(dialect))
+                                    .try_collect()
+                            })
                             .try_collect()?,
                         _ => unimplemented!(), // Our AST currently doesn't support anything else
                     }
@@ -52,7 +65,7 @@ impl TryFrom<sqlparser::ast::Insert> for InsertStatement {
                     Some(sqlparser::ast::OnInsert::DuplicateKeyUpdate(assignments)) => Some(
                         assignments
                             .into_iter()
-                            .map(assignment_into_expr)
+                            .map(|assignment| assignment_into_expr(assignment, dialect))
                             .try_collect()?,
                     ),
                     _ => None, // TODO: We could support Postgres' ON CONFLICT too
@@ -66,15 +79,18 @@ impl TryFrom<sqlparser::ast::Insert> for InsertStatement {
 
 fn assignment_into_expr(
     assignment: sqlparser::ast::Assignment,
+    dialect: Dialect,
 ) -> Result<(crate::ast::Column, crate::ast::Expr), AstConversionError> {
     Ok((
         match assignment.target {
-            sqlparser::ast::AssignmentTarget::ColumnName(object_name) => object_name.into(),
+            sqlparser::ast::AssignmentTarget::ColumnName(object_name) => {
+                object_name.into_dialect(dialect)
+            }
             sqlparser::ast::AssignmentTarget::Tuple(_vec) => {
                 return unsupported!("Currently don't support tuple assignment: (a,b) = (1,2)");
             }
         },
-        assignment.value.try_into()?,
+        assignment.value.try_into_dialect(dialect)?,
     ))
 }
 

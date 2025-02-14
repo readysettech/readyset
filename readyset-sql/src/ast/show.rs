@@ -5,7 +5,7 @@ use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
-use crate::{ast::*, AstConversionError, Dialect, DialectDisplay};
+use crate::{ast::*, AstConversionError, Dialect, DialectDisplay, TryFromDialect, TryIntoDialect};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Arbitrary)]
 pub struct ReadySetTablesOptions {
@@ -109,14 +109,15 @@ pub enum FilterPredicate {
     Where(Expr),
 }
 
-impl TryFrom<sqlparser::ast::ShowStatementFilter> for FilterPredicate {
-    type Error = AstConversionError;
-
-    fn try_from(value: sqlparser::ast::ShowStatementFilter) -> Result<Self, Self::Error> {
+impl TryFromDialect<sqlparser::ast::ShowStatementFilter> for FilterPredicate {
+    fn try_from_dialect(
+        value: sqlparser::ast::ShowStatementFilter,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
         use sqlparser::ast::ShowStatementFilter::*;
         match value {
             Like(like) => Ok(Self::Like(like)),
-            Where(expr) => Ok(Self::Where(expr.try_into()?)),
+            Where(expr) => Ok(Self::Where(expr.try_into_dialect(dialect)?)),
             _ => unsupported!(
                 "show statement filter {value:?} is not supported for MySQL or Postgres"
             ),

@@ -5,7 +5,10 @@ use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
-use crate::{ast::*, Dialect, DialectDisplay};
+use crate::{
+    ast::*, AstConversionError, Dialect, DialectDisplay, FromDialect, IntoDialect, TryFromDialect,
+    TryIntoDialect,
+};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum SetStatement {
@@ -17,36 +20,64 @@ pub enum SetStatement {
 /// XXX(mvzink): We don't bother trying to produce `SetVariables` because we don't actually use it
 /// anywhere. It will just get turned into a slightly botched `SetPostgresParameter` (see
 /// [datafusion-sqlparser-rs#1697](https://github.com/apache/datafusion-sqlparser-rs/issues/1697)).
-impl From<sqlparser::ast::Statement> for SetStatement {
-    fn from(value: sqlparser::ast::Statement) -> Self {
+impl TryFromDialect<sqlparser::ast::Statement> for SetStatement {
+    fn try_from_dialect(
+        value: sqlparser::ast::Statement,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
         match value {
             sqlparser::ast::Statement::SetVariable {
                 local,
                 hivevar: _,
                 variables,
                 value,
-            } => {
-                let name = variables
-                    .into_iter()
-                    .exactly_one()
-                    .map(|mut object_name| object_name.0.pop().unwrap())
-                    .expect("Snowflake-style multiple variables not supported")
-                    .into();
-                let value: SetPostgresParameterValue = value.into();
-                let scope = if local {
-                    Some(PostgresParameterScope::Local)
-                } else {
-                    None
-                };
-                Self::PostgresParameter(SetPostgresParameter { scope, name, value })
-            }
+            } => match dialect {
+                Dialect::PostgreSQL => {
+                    let name = variables
+                        .into_iter()
+                        .exactly_one()
+                        .map(|mut object_name| object_name.0.pop().unwrap())
+                        .expect("Snowflake-style multiple variables not supported")
+                        .into_dialect(dialect);
+                    let value: SetPostgresParameterValue = value.into_dialect(dialect);
+                    let scope = if local {
+                        Some(PostgresParameterScope::Local)
+                    } else {
+                        None
+                    };
+                    Ok(Self::PostgresParameter(SetPostgresParameter {
+                        scope,
+                        name,
+                        value,
+                    }))
+                }
+                Dialect::MySQL => {
+                    let name = variables
+                        .into_iter()
+                        .exactly_one()
+                        .map(|mut object_name| match object_name.0.pop().unwrap() {
+                            sqlparser::ast::ObjectNamePart::Identifier(ident) => ident,
+                        })
+                        .expect("Snowflake-style multiple variables not supported");
+                    Ok(Self::Variable(SetVariables {
+                        variables: vec![(
+                            name.value.to_lowercase().into(),
+                            value
+                                .into_iter()
+                                .exactly_one()
+                                .expect("Multiple variable assignments not supported")
+                                .try_into_dialect(dialect)?,
+                        )],
+                    }))
+                }
+            },
             sqlparser::ast::Statement::SetNames {
                 charset_name,
                 collation_name,
-            } => Self::Names(SetNames {
+            } => Ok(Self::Names(SetNames {
                 charset: charset_name,
                 collation: collation_name,
-            }),
+            })),
             _ => todo!("unsupported set statement {value:?} (convert to TryFrom)"),
         }
     }
@@ -95,8 +126,8 @@ pub enum SetPostgresParameterValue {
     Value(PostgresParameterValue),
 }
 
-impl From<Vec<sqlparser::ast::Expr>> for SetPostgresParameterValue {
-    fn from(value: Vec<sqlparser::ast::Expr>) -> Self {
+impl FromDialect<Vec<sqlparser::ast::Expr>> for SetPostgresParameterValue {
+    fn from_dialect(value: Vec<sqlparser::ast::Expr>, dialect: Dialect) -> Self {
         if value.len() == 1 {
             if let sqlparser::ast::Expr::Identifier(sqlparser::ast::Ident { value, .. }) = &value[0]
             {
@@ -105,7 +136,7 @@ impl From<Vec<sqlparser::ast::Expr>> for SetPostgresParameterValue {
                 }
             }
         }
-        let values = value.into_iter().map(|expr| expr.into());
+        let values = value.into_iter().map(|expr| expr.into_dialect(dialect));
         if values.len() == 1 {
             Self::Value(PostgresParameterValue::Single(
                 values.exactly_one().unwrap(),
@@ -132,11 +163,13 @@ pub enum PostgresParameterValueInner {
     Literal(Literal),
 }
 
-impl From<sqlparser::ast::Expr> for PostgresParameterValueInner {
-    fn from(value: sqlparser::ast::Expr) -> Self {
+impl FromDialect<sqlparser::ast::Expr> for PostgresParameterValueInner {
+    fn from_dialect(value: sqlparser::ast::Expr, dialect: Dialect) -> Self {
         match value {
             sqlparser::ast::Expr::Value(value) => Self::Literal(value.into()),
-            sqlparser::ast::Expr::Identifier(ident) => Self::Identifier(ident.into()),
+            sqlparser::ast::Expr::Identifier(ident) => {
+                Self::Identifier(ident.into_dialect(dialect))
+            }
             _ => unimplemented!("unsupported postgres parameter value {value:?}"),
         }
     }
@@ -248,40 +281,46 @@ pub struct Variable {
     pub name: SqlIdentifier,
 }
 
-impl From<sqlparser::ast::Ident> for Variable {
-    fn from(value: sqlparser::ast::Ident) -> Self {
-        let lowered = value.value[..(8.min(value.value.len()))].to_lowercase();
+impl From<String> for Variable {
+    fn from(value: String) -> Self {
+        let lowered = value[..(8.min(value.len()))].to_lowercase();
         if lowered.starts_with("@@local.") {
             Self {
                 scope: VariableScope::Local,
-                name: value.value[8..].into(),
+                name: value[8..].into(),
             }
         } else if lowered.starts_with("@@global.") {
             Self {
                 scope: VariableScope::Global,
-                name: value.value[9..].into(),
+                name: value[9..].into(),
             }
         } else if lowered.starts_with("@@session.") {
             Self {
                 scope: VariableScope::Session,
-                name: value.value[10..].into(),
+                name: value[10..].into(),
             }
         } else if lowered.starts_with("@@") {
             Self {
                 scope: VariableScope::Session,
-                name: value.value[2..].into(),
+                name: value[2..].into(),
             }
         } else if lowered.starts_with("@") {
             Self {
                 scope: VariableScope::User,
-                name: value.value[1..].into(),
+                name: value[1..].into(),
             }
         } else {
             Self {
                 scope: VariableScope::Session,
-                name: value.value.into(),
+                name: value.into(),
             }
         }
+    }
+}
+
+impl From<sqlparser::ast::Ident> for Variable {
+    fn from(value: sqlparser::ast::Ident) -> Self {
+        value.value.into()
     }
 }
 

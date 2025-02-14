@@ -6,7 +6,10 @@ use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
-use crate::{ast::*, AstConversionError, Dialect, DialectDisplay};
+use crate::{
+    ast::*, AstConversionError, Dialect, DialectDisplay, IntoDialect, TryFromDialect,
+    TryIntoDialect,
+};
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, Arbitrary)]
 pub enum CharsetName {
@@ -170,18 +173,19 @@ pub struct CreateTableStatement {
     pub options: Result<Vec<CreateTableOption>, String>,
 }
 
-impl TryFrom<sqlparser::ast::CreateTable> for CreateTableStatement {
-    type Error = AstConversionError;
-
-    fn try_from(value: sqlparser::ast::CreateTable) -> Result<Self, Self::Error> {
+impl TryFromDialect<sqlparser::ast::CreateTable> for CreateTableStatement {
+    fn try_from_dialect(
+        value: sqlparser::ast::CreateTable,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
         Ok(Self {
             if_not_exists: value.if_not_exists,
-            table: value.name.into(),
+            table: value.name.into_dialect(dialect),
             body: Ok(CreateTableBody {
                 fields: value
                     .columns
                     .into_iter()
-                    .map(TryInto::try_into)
+                    .map(|column| column.try_into_dialect(dialect))
                     .try_collect()?,
                 keys: if value.constraints.is_empty() {
                     None
@@ -190,7 +194,7 @@ impl TryFrom<sqlparser::ast::CreateTable> for CreateTableStatement {
                         value
                             .constraints
                             .into_iter()
-                            .map(TryInto::try_into)
+                            .map(|constraint| constraint.try_into_dialect(dialect))
                             .try_collect()?,
                     )
                 },
@@ -344,10 +348,11 @@ pub struct CreateViewStatement {
     pub definition: Result<Box<SelectSpecification>, String>,
 }
 
-impl TryFrom<sqlparser::ast::Statement> for CreateViewStatement {
-    type Error = AstConversionError;
-
-    fn try_from(value: sqlparser::ast::Statement) -> Result<Self, Self::Error> {
+impl TryFromDialect<sqlparser::ast::Statement> for CreateViewStatement {
+    fn try_from_dialect(
+        value: sqlparser::ast::Statement,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
         if let sqlparser::ast::Statement::CreateView {
             or_replace,
             name,
@@ -357,12 +362,15 @@ impl TryFrom<sqlparser::ast::Statement> for CreateViewStatement {
         } = value
         {
             Ok(Self {
-                name: name.into(),
+                name: name.into_dialect(dialect),
                 or_replace,
-                fields: columns.into_iter().map(Into::into).collect(),
+                fields: columns
+                    .into_iter()
+                    .map(|column| column.into_dialect(dialect))
+                    .collect(),
                 // TODO: handle compound selects, not sure how sqlparser represents them
                 definition: Ok(Box::new(crate::ast::SelectSpecification::Simple(
-                    query.try_into()?,
+                    query.try_into_dialect(dialect)?,
                 ))),
             })
         } else {

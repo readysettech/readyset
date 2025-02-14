@@ -83,3 +83,40 @@ pub mod dialect_display;
 
 pub use dialect::Dialect;
 pub use dialect_display::DialectDisplay;
+
+pub trait TryFromDialect<T>: Sized {
+    fn try_from_dialect(value: T, dialect: Dialect) -> Result<Self, AstConversionError>;
+}
+
+pub trait TryIntoDialect<T>: Sized {
+    fn try_into_dialect(self, dialect: Dialect) -> Result<T, AstConversionError>;
+}
+
+impl<T, U> TryIntoDialect<U> for T
+where
+    U: TryFromDialect<T>,
+{
+    #[inline]
+    fn try_into_dialect(self, dialect: Dialect) -> Result<U, AstConversionError> {
+        U::try_from_dialect(self, dialect)
+    }
+}
+
+pub trait FromDialect<T> {
+    fn from_dialect(value: T, dialect: Dialect) -> Self;
+}
+
+pub trait IntoDialect<T>: Sized {
+    #[must_use]
+    fn into_dialect(self, dialect: Dialect) -> T;
+}
+
+impl<T, U> IntoDialect<U> for T
+where
+    U: FromDialect<T>,
+{
+    #[inline]
+    fn into_dialect(self, dialect: Dialect) -> U {
+        U::from_dialect(self, dialect)
+    }
+}

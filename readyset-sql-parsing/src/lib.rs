@@ -3,7 +3,7 @@ use readyset_sql::{ast::SqlQuery, Dialect};
 #[cfg(feature = "sqlparser")]
 use readyset_sql::{
     ast::{CacheInner, DropCacheStatement},
-    AstConversionError,
+    IntoDialect, TryIntoDialect,
 };
 #[cfg(feature = "sqlparser")]
 use sqlparser::{
@@ -85,6 +85,7 @@ fn parse_readyset_keyword(parser: &mut Parser, keyword: ReadysetKeyword) -> bool
 #[cfg(feature = "sqlparser")]
 fn parse_create_cache(
     parser: &mut Parser,
+    dialect: Dialect,
     input: impl AsRef<str>,
 ) -> Result<SqlQuery, ReadysetParsingError> {
     let mut always = false;
@@ -102,13 +103,16 @@ fn parse_create_cache(
     }
     let from = parser.parse_keyword(Keyword::FROM);
     let name = if !from {
-        let name = parser.parse_object_name(false).ok().map(Into::into);
+        let name = parser
+            .parse_object_name(false)
+            .ok()
+            .map(|name| name.into_dialect(dialect));
         parser.expect_keyword(Keyword::FROM)?;
         name
     } else {
         None
     };
-    let query = parse_query_for_create_cache(parser);
+    let query = parse_query_for_create_cache(parser, dialect);
     Ok(SqlQuery::CreateCache(
         readyset_sql::ast::CreateCacheStatement {
             name,
@@ -121,12 +125,15 @@ fn parse_create_cache(
 }
 
 #[cfg(feature = "sqlparser")]
-fn parse_query_for_create_cache(parser: &mut Parser) -> Result<CacheInner, String> {
+fn parse_query_for_create_cache(
+    parser: &mut Parser,
+    dialect: Dialect,
+) -> Result<CacheInner, String> {
     parser
         .parse_statement()
         .map_err(|e| format!("failed to parse statement: {e}"))
         .and_then(|q| {
-            q.try_into()
+            q.try_into_dialect(dialect)
                 .map_err(|e| format!("failed to convert AST: {e}"))
         })
         .and_then(|q: SqlQuery| q.into_select().ok_or_else(|| "expected SELECT".into()))
@@ -136,6 +143,7 @@ fn parse_query_for_create_cache(parser: &mut Parser) -> Result<CacheInner, Strin
 #[cfg(feature = "sqlparser")]
 fn parse_explain(
     parser: &mut Parser,
+    dialect: Dialect,
     input: impl AsRef<str>,
 ) -> Result<SqlQuery, ReadysetParsingError> {
     if parser.parse_keywords(&[Keyword::LAST, Keyword::STATEMENT]) {
@@ -146,7 +154,7 @@ fn parse_explain(
     let simplified = parse_readyset_keyword(parser, ReadysetKeyword::SIMPLIFIED);
     if parser.parse_keyword(Keyword::GRAPHVIZ) {
         let for_cache = if parser.parse_keywords(&[Keyword::FOR, Keyword::CACHE]) {
-            Some(parser.parse_object_name(false)?.into())
+            Some(parser.parse_object_name(false)?.into_dialect(dialect))
         } else {
             None
         };
@@ -160,7 +168,7 @@ fn parse_explain(
     if parser.parse_keywords(&[Keyword::CREATE, Keyword::CACHE, Keyword::FROM]) {
         return Ok(SqlQuery::Explain(
             readyset_sql::ast::ExplainStatement::CreateCache {
-                inner: parse_query_for_create_cache(parser),
+                inner: parse_query_for_create_cache(parser, dialect),
                 unparsed_explain_create_cache_statement: input
                     .as_ref()
                     .strip_prefix("EXPLAIN ")
@@ -171,7 +179,7 @@ fn parse_explain(
     }
     Ok(parser
         .parse_explain(sqlparser::ast::DescribeAlias::Explain)?
-        .try_into()?)
+        .try_into_dialect(dialect)?)
 }
 
 /// Expects `SHOW` was already parsed. Attempts to parse a Readyset-specific SHOW statement,
@@ -183,7 +191,10 @@ fn parse_explain(
 ///     | STATUS
 ///     | ALL TABLES
 #[cfg(feature = "sqlparser")]
-fn parse_readyset_show(parser: &mut Parser) -> Result<SqlQuery, ReadysetParsingError> {
+fn parse_readyset_show(
+    parser: &mut Parser,
+    dialect: Dialect,
+) -> Result<SqlQuery, ReadysetParsingError> {
     if parse_readyset_keyword(parser, ReadysetKeyword::READYSET) {
         if parser.parse_keyword(Keyword::VERSION) {
             Ok(SqlQuery::Show(
@@ -218,7 +229,7 @@ fn parse_readyset_show(parser: &mut Parser) -> Result<SqlQuery, ReadysetParsingE
             ))
         }
     } else {
-        Ok(parser.parse_show()?.try_into()?)
+        Ok(parser.parse_show()?.try_into_dialect(dialect)?)
     }
 }
 
@@ -230,7 +241,10 @@ fn parse_readyset_show(parser: &mut Parser) -> Result<SqlQuery, ReadysetParsingE
 ///   | ALL CACHES
 ///   | CACHE <query_id>
 #[cfg(feature = "sqlparser")]
-fn parse_readyset_drop(parser: &mut Parser) -> Result<SqlQuery, ReadysetParsingError> {
+fn parse_readyset_drop(
+    parser: &mut Parser,
+    dialect: Dialect,
+) -> Result<SqlQuery, ReadysetParsingError> {
     if parser.parse_keyword(Keyword::ALL) {
         if parse_readyset_keyword(parser, ReadysetKeyword::PROXIED)
             && parse_readyset_keyword(parser, ReadysetKeyword::QUERIES)
@@ -248,10 +262,10 @@ fn parse_readyset_drop(parser: &mut Parser) -> Result<SqlQuery, ReadysetParsingE
             ))
         }
     } else if parser.parse_keyword(Keyword::CACHE) {
-        let name = parser.parse_object_name(false)?.into();
+        let name = parser.parse_object_name(false)?.into_dialect(dialect);
         Ok(SqlQuery::DropCache(DropCacheStatement { name }))
     } else {
-        Ok(parser.parse_drop()?.try_into()?)
+        Ok(parser.parse_drop()?.try_into_dialect(dialect)?)
     }
 }
 
@@ -259,18 +273,19 @@ fn parse_readyset_drop(parser: &mut Parser) -> Result<SqlQuery, ReadysetParsingE
 #[cfg(feature = "sqlparser")]
 fn parse_readyset_query(
     parser: &mut Parser,
+    dialect: Dialect,
     input: impl AsRef<str>,
 ) -> Result<SqlQuery, ReadysetParsingError> {
     if parser.parse_keywords(&[Keyword::CREATE, Keyword::CACHE]) {
-        parse_create_cache(parser, input)
+        parse_create_cache(parser, dialect, input)
     } else if parser.parse_keyword(Keyword::EXPLAIN) {
-        parse_explain(parser, input)
+        parse_explain(parser, dialect, input)
     } else if parser.parse_keyword(Keyword::SHOW) {
-        parse_readyset_show(parser)
+        parse_readyset_show(parser, dialect)
     } else if parser.parse_keyword(Keyword::DROP) {
-        parse_readyset_drop(parser)
+        parse_readyset_drop(parser, dialect)
     } else {
-        Ok(parser.parse_statement()?.try_into()?)
+        Ok(parser.parse_statement()?.try_into_dialect(dialect)?)
     }
 }
 
@@ -281,7 +296,7 @@ pub fn parse_query(dialect: Dialect, input: impl AsRef<str>) -> Result<SqlQuery,
     let sqlparser_result = Parser::new(sqlparser_dialect.as_ref())
         .try_with_sql(input.as_ref())
         .map_err(Into::into)
-        .and_then(|mut p| parse_readyset_query(&mut p, input.as_ref()));
+        .and_then(|mut p| parse_readyset_query(&mut p, dialect, input.as_ref()));
 
     match (&nom_result, sqlparser_result) {
         (Ok(nom_ast), Ok(sqlparser_ast)) => {
@@ -296,7 +311,8 @@ pub fn parse_query(dialect: Dialect, input: impl AsRef<str>) -> Result<SqlQuery,
             if !matches!(
                 sqlparser_error,
                 ReadysetParsingError::AstConversionError(
-                    AstConversionError::Skipped(_) | AstConversionError::Unsupported(_),
+                    readyset_sql::AstConversionError::Skipped(_)
+                        | readyset_sql::AstConversionError::Unsupported(_),
                 ),
             ) {
                 panic!(
