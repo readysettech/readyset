@@ -305,13 +305,7 @@ fn function_call(
         let (i, name) = dialect.function_identifier()(i)?;
         let (i, _) = whitespace0(i)?;
         let (i, arguments) = delim_fx_args(dialect)(i)?;
-        Ok((
-            i,
-            FunctionExpr::Call {
-                name: name.into(),
-                arguments,
-            },
-        ))
+        Ok((i, FunctionExpr::Call { name, arguments }))
     }
 }
 
