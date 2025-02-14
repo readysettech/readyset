@@ -1962,7 +1962,7 @@ async fn explain_create_cache() {
     eventually! {
         let res = explain_create_cache("SELECT * FROM t WHERE t.x = RANDOM()", &conn).await;
 
-        res.supported == "no" && res.rewritten_query == r#"SELECT * FROM "t" WHERE ("t"."x" = RANDOM())"#
+        res.supported == "no" && res.rewritten_query == r#"SELECT * FROM "t" WHERE ("t"."x" = random())"#
     }
 
     conn.simple_query("CREATE CACHE FROM SELECT * FROM t WHERE x = 5")
