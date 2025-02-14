@@ -3,7 +3,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
-use crate::ast::*;
+use crate::{ast::*, Dialect, FromDialect, IntoDialect};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct UseStatement {
@@ -16,11 +16,11 @@ impl UseStatement {
     }
 }
 
-impl From<sqlparser::ast::Use> for UseStatement {
-    fn from(value: sqlparser::ast::Use) -> Self {
+impl FromDialect<sqlparser::ast::Use> for UseStatement {
+    fn from_dialect(value: sqlparser::ast::Use, dialect: Dialect) -> Self {
         match value {
             sqlparser::ast::Use::Object(mut object) if object.0.len() == 1 => Self {
-                database: object.0.pop().unwrap().into(),
+                database: object.0.pop().unwrap().into_dialect(dialect),
             },
             _ => unimplemented!("unsupported use statement {value:?}"),
         }

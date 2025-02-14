@@ -8,7 +8,10 @@ use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
-use crate::{ast::*, AstConversionError, Dialect, DialectDisplay};
+use crate::{
+    ast::*, AstConversionError, Dialect, DialectDisplay, FromDialect, IntoDialect, TryFromDialect,
+    TryIntoDialect,
+};
 
 /// Function call expressions
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Hash, Serialize, Deserialize, Arbitrary)]
@@ -738,10 +741,11 @@ impl Expr {
     }
 }
 
-impl TryFrom<sqlparser::ast::Expr> for Expr {
-    type Error = AstConversionError;
-
-    fn try_from(value: sqlparser::ast::Expr) -> Result<Self, Self::Error> {
+impl TryFromDialect<sqlparser::ast::Expr> for Expr {
+    fn try_from_dialect(
+        value: sqlparser::ast::Expr,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
         use sqlparser::ast::Expr::*;
         match value {
             AllOp {
@@ -749,9 +753,9 @@ impl TryFrom<sqlparser::ast::Expr> for Expr {
                 compare_op,
                 right,
             } => Ok(Self::OpAll {
-                lhs: left.try_into()?,
+                lhs: left.try_into_dialect(dialect)?,
                 op: compare_op.into(),
-                rhs: right.try_into()?,
+                rhs: right.try_into_dialect(dialect)?,
             }),
             AnyOp {
                 left,
@@ -759,17 +763,11 @@ impl TryFrom<sqlparser::ast::Expr> for Expr {
                 right,
                 is_some: _,
             } => Ok(Self::OpAny {
-                lhs: left.try_into()?,
+                lhs: left.try_into_dialect(dialect)?,
                 op: compare_op.into(),
-                rhs: right.try_into()?,
+                rhs: right.try_into_dialect(dialect)?,
             }),
-            Array(array) => Ok(Self::Array(
-                array
-                    .elem
-                    .into_iter()
-                    .map(TryInto::try_into)
-                    .try_collect()?,
-            )),
+            Array(array) => Ok(Self::Array(array.elem.try_into_dialect(dialect)?)),
             AtTimeZone {
                 timestamp,
                 time_zone,
@@ -780,15 +778,15 @@ impl TryFrom<sqlparser::ast::Expr> for Expr {
                 low,
                 high,
             } => Ok(Self::Between {
-                operand: expr.try_into()?,
-                min: low.try_into()?,
-                max: high.try_into()?,
+                operand: expr.try_into_dialect(dialect)?,
+                min: low.try_into_dialect(dialect)?,
+                max: high.try_into_dialect(dialect)?,
                 negated,
             }),
             BinaryOp { left, op, right } => Ok(Self::BinaryOp {
-                lhs: left.try_into()?,
+                lhs: left.try_into_dialect(dialect)?,
                 op: op.into(),
-                rhs: right.try_into()?,
+                rhs: right.try_into_dialect(dialect)?,
             }),
             Case {
                 operand: None, // XXX do we really not support the CASE operand?
@@ -798,8 +796,12 @@ impl TryFrom<sqlparser::ast::Expr> for Expr {
             } => Ok(Self::CaseWhen {
                 branches: conditions
                     .into_iter()
-                    .map(TryInto::try_into)
-                    .zip(results.into_iter().map(TryInto::try_into))
+                    .map(|condition| condition.try_into_dialect(dialect))
+                    .zip(
+                        results
+                            .into_iter()
+                            .map(|result| result.try_into_dialect(dialect)),
+                    )
                     .map(|(condition, result): (Result<Expr, _>, Result<Expr, _>)| {
                         match (condition, result) {
                             (Err(e), _) => Err(e),
@@ -811,7 +813,7 @@ impl TryFrom<sqlparser::ast::Expr> for Expr {
                         }
                     })
                     .try_collect()?,
-                else_expr: else_result.map(TryInto::try_into).transpose()?,
+                else_expr: else_result.try_into_dialect(dialect)?,
             }),
             Case {
                 operand: Some(expr), // XXX do we really not support the CASE operand?
@@ -825,8 +827,8 @@ impl TryFrom<sqlparser::ast::Expr> for Expr {
                 data_type,
                 format: _, // TODO: I think this is where we would support `AT TIMEZONE` syntax
             } => Ok(Self::Cast {
-                expr: expr.try_into()?,
-                ty: data_type.try_into()?,
+                expr: expr.try_into_dialect(dialect)?,
+                ty: data_type.try_into_dialect(dialect)?,
                 postgres_style: kind == sqlparser::ast::CastKind::DoubleColon,
             }),
             Ceil { expr: _, field: _ } => not_yet_implemented!("CEIL"),
@@ -835,7 +837,7 @@ impl TryFrom<sqlparser::ast::Expr> for Expr {
                 collation: _,
             } => not_yet_implemented!("COLLATE"),
             // TODO: could this be a variable like `@@GLOBAL.foo`, which should go through `ident_into_expr` or similar?
-            CompoundIdentifier(idents) => Ok(Self::Column(idents.into())),
+            CompoundIdentifier(idents) => Ok(Self::Column(idents.into_dialect(dialect))),
             Convert {
                 expr: _,
                 data_type: _,
@@ -850,10 +852,10 @@ impl TryFrom<sqlparser::ast::Expr> for Expr {
                 if negated {
                     Ok(Self::UnaryOp {
                         op: crate::ast::UnaryOperator::Not,
-                        rhs: Box::new(Self::Exists(subquery.try_into()?)),
+                        rhs: Box::new(Self::Exists(subquery.try_into_dialect(dialect)?)),
                     })
                 } else {
-                    Ok(Self::Exists(subquery.try_into()?))
+                    Ok(Self::Exists(subquery.try_into_dialect(dialect)?))
                 }
             }
             Extract {
@@ -862,12 +864,12 @@ impl TryFrom<sqlparser::ast::Expr> for Expr {
                 expr,
             } => Ok(Self::Call(crate::ast::FunctionExpr::Extract {
                 field: field.into(),
-                expr: expr.try_into()?,
+                expr: expr.try_into_dialect(dialect)?,
             })),
             Floor { expr: _, field: _ } => not_yet_implemented!("FLOOR"),
-            Function(function) => function.try_into(),
+            Function(function) => function.try_into_dialect(dialect),
             GroupingSets(_vec) => unsupported!("GROUPING SETS"),
-            Identifier(ident) => Ok(ident.into()),
+            Identifier(ident) => Ok(ident.into_dialect(dialect)),
             ILike {
                 negated: _,
                 expr: _,
@@ -880,10 +882,8 @@ impl TryFrom<sqlparser::ast::Expr> for Expr {
                 list,
                 negated,
             } => Ok(Self::In {
-                lhs: expr.try_into()?,
-                rhs: crate::ast::InValue::List(
-                    list.into_iter().map(TryInto::try_into).try_collect()?,
-                ),
+                lhs: expr.try_into_dialect(dialect)?,
+                rhs: crate::ast::InValue::List(list.try_into_dialect(dialect)?),
                 negated,
             }),
             InSubquery {
@@ -891,8 +891,8 @@ impl TryFrom<sqlparser::ast::Expr> for Expr {
                 subquery,
                 negated,
             } => Ok(Self::In {
-                lhs: expr.try_into()?,
-                rhs: crate::ast::InValue::Subquery(subquery.try_into()?),
+                lhs: expr.try_into_dialect(dialect)?,
+                rhs: crate::ast::InValue::Subquery(subquery.try_into_dialect(dialect)?),
                 negated,
             }),
             Interval(_interval) => not_yet_implemented!("INTERVAL"),
@@ -910,14 +910,14 @@ impl TryFrom<sqlparser::ast::Expr> for Expr {
             IsNotDistinctFrom(_expr, _expr1) => not_yet_implemented!("IS NOT DISTINCT FROM"),
             IsNotFalse(_expr) => not_yet_implemented!("IS NOT FALSE"),
             IsNotNull(expr) => Ok(Self::BinaryOp {
-                lhs: expr.try_into()?,
+                lhs: expr.try_into_dialect(dialect)?,
                 op: crate::ast::BinaryOperator::IsNot,
                 rhs: Box::new(Expr::Literal(crate::ast::Literal::Null)),
             }),
             IsNotTrue(_expr) => not_yet_implemented!("IS NOT TRUE"),
             IsNotUnknown(_expr) => not_yet_implemented!("IS NOT UNKNOWN"),
             IsNull(expr) => Ok(Self::BinaryOp {
-                lhs: expr.try_into()?,
+                lhs: expr.try_into_dialect(dialect)?,
                 op: crate::ast::BinaryOperator::Is,
                 rhs: Box::new(Expr::Literal(crate::ast::Literal::Null)),
             }),
@@ -933,9 +933,9 @@ impl TryFrom<sqlparser::ast::Expr> for Expr {
                 any: _,
             } => {
                 let like = Self::BinaryOp {
-                    lhs: expr.try_into()?,
+                    lhs: expr.try_into_dialect(dialect)?,
                     op: crate::ast::BinaryOperator::Like,
-                    rhs: pattern.try_into()?,
+                    rhs: pattern.try_into_dialect(dialect)?,
                 };
                 if negated {
                     Ok(Self::UnaryOp {
@@ -953,7 +953,7 @@ impl TryFrom<sqlparser::ast::Expr> for Expr {
                 opt_search_modifier: _,
             } => not_yet_implemented!("MATCH AGAINST"),
             Named { expr: _, name: _ } => unsupported!("BigQuery named expression"),
-            Nested(expr) => expr.try_into(),
+            Nested(expr) => expr.try_into_dialect(dialect),
             OuterJoin(_expr) => not_yet_implemented!("OUTER JOIN"),
             Overlay {
                 expr: _,
@@ -1003,7 +1003,7 @@ impl TryFrom<sqlparser::ast::Expr> for Expr {
             } => unsupported!("TYPED STRING"),
             UnaryOp { op, expr } => Ok(Self::UnaryOp {
                 op: op.into(),
-                rhs: expr.try_into()?,
+                rhs: expr.try_into_dialect(dialect)?,
             }),
             Value(value) => Ok(Self::Literal(value.into())),
             CompoundFieldAccess {
@@ -1018,36 +1018,38 @@ impl TryFrom<sqlparser::ast::Expr> for Expr {
     }
 }
 
-impl TryFrom<Box<sqlparser::ast::Expr>> for Box<Expr> {
-    type Error = AstConversionError;
-
-    fn try_from(value: Box<sqlparser::ast::Expr>) -> Result<Self, Self::Error> {
-        Ok(Box::new(value.try_into()?))
+impl TryFromDialect<Box<sqlparser::ast::Expr>> for Box<Expr> {
+    fn try_from_dialect(
+        value: Box<sqlparser::ast::Expr>,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
+        Ok(Box::new(value.try_into_dialect(dialect)?))
     }
 }
 
-impl TryFrom<Box<sqlparser::ast::Expr>> for Expr {
-    type Error = AstConversionError;
-
-    fn try_from(value: Box<sqlparser::ast::Expr>) -> Result<Self, Self::Error> {
-        (*value).try_into()
+impl TryFromDialect<Box<sqlparser::ast::Expr>> for Expr {
+    fn try_from_dialect(
+        value: Box<sqlparser::ast::Expr>,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
+        (*value).try_into_dialect(dialect)
     }
 }
 
 /// Convert a sqlparser-rs's `Ident` into a `Expr`; special handling because it might be a variable
-/// or a column and sqlparser doesn't distiguish them.
+/// or a column and sqlparser doesn't distinguish them.
 ///
 /// TODO(mvzink): This may not actually be necessary for recent sqlparser versions: check for usage
 /// of `CompoundIdentifier`; also check whether this needs to know the dialect for re-parsing the
 /// variable name.
-impl From<sqlparser::ast::Ident> for Expr {
-    fn from(value: sqlparser::ast::Ident) -> Self {
+impl FromDialect<sqlparser::ast::Ident> for Expr {
+    fn from_dialect(value: sqlparser::ast::Ident, dialect: Dialect) -> Self {
         if value.value.starts_with('@') {
             Self::Variable(value.into())
         } else if value.quote_style.is_none() && value.value.starts_with('$') {
             Self::Literal(Literal::Placeholder(value.value.into()))
         } else {
-            Self::Column(value.into())
+            Self::Column(value.into_dialect(dialect))
         }
     }
 }
@@ -1056,10 +1058,11 @@ impl From<sqlparser::ast::Ident> for Expr {
 ///
 /// We don't turn every function into a [`crate::ast::FunctionExpr`], beacuse we have some special
 /// cases that turn into other kinds of expressions, such as `DATE(x)` into `CAST(x AS DATE)`.
-impl TryFrom<sqlparser::ast::Function> for Expr {
-    type Error = AstConversionError;
-
-    fn try_from(value: sqlparser::ast::Function) -> Result<Self, Self::Error> {
+impl TryFromDialect<sqlparser::ast::Function> for Expr {
+    fn try_from_dialect(
+        value: sqlparser::ast::Function,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
         // TODO: handle null treatment and other stuff
         let sqlparser::ast::Function { args, mut name, .. } = value;
 
@@ -1088,7 +1091,7 @@ impl TryFrom<sqlparser::ast::Function> for Expr {
                 duplicate_treatment,
                 clauses, // TODO: handle other stuff like order/limit, etc.
             }) => (
-                args.into_iter().map(TryInto::try_into).try_collect()?,
+                args.try_into_dialect(dialect)?,
                 duplicate_treatment == Some(sqlparser::ast::DuplicateTreatment::Distinct),
                 clauses.into_iter().find_map(|clause| match clause {
                     sqlparser::ast::FunctionArgumentClause::Separator(separator) => {
@@ -1129,7 +1132,7 @@ impl TryFrom<sqlparser::ast::Function> for Expr {
             },
             "extract" | "substring" => todo!(),
             _ => Self::Call(crate::ast::FunctionExpr::Call {
-                name: name.into(),
+                name: name.into_dialect(dialect),
                 arguments: exprs,
             }),
         })
@@ -1163,25 +1166,29 @@ fn sqlparser_value_into_string(value: sqlparser::ast::Value) -> String {
     }
 }
 
-impl TryFrom<sqlparser::ast::FunctionArg> for Expr {
-    type Error = AstConversionError;
-
-    fn try_from(value: sqlparser::ast::FunctionArg) -> Result<Self, Self::Error> {
+impl TryFromDialect<sqlparser::ast::FunctionArg> for Expr {
+    fn try_from_dialect(
+        value: sqlparser::ast::FunctionArg,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
         use sqlparser::ast::FunctionArg::*;
         match value {
-            Named { arg, .. } | ExprNamed { arg, .. } | Unnamed(arg) => arg.try_into(),
+            Named { arg, .. } | ExprNamed { arg, .. } | Unnamed(arg) => {
+                arg.try_into_dialect(dialect)
+            }
         }
     }
 }
 
-impl TryFrom<sqlparser::ast::FunctionArgExpr> for Expr {
-    type Error = AstConversionError;
-
-    fn try_from(value: sqlparser::ast::FunctionArgExpr) -> Result<Self, Self::Error> {
+impl TryFromDialect<sqlparser::ast::FunctionArgExpr> for Expr {
+    fn try_from_dialect(
+        value: sqlparser::ast::FunctionArgExpr,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
         use sqlparser::ast::FunctionArgExpr::*;
         match value {
-            Expr(expr) => expr.try_into(),
-            QualifiedWildcard(object_name) => Ok(Self::Column(object_name.into())),
+            Expr(expr) => expr.try_into_dialect(dialect),
+            QualifiedWildcard(object_name) => Ok(Self::Column(object_name.into_dialect(dialect))),
             Wildcard => not_yet_implemented!("wildcard expression in function argument"),
         }
     }

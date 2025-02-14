@@ -5,7 +5,10 @@ use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
-use crate::{ast::*, AstConversionError, Dialect, DialectDisplay};
+use crate::{
+    ast::*, AstConversionError, Dialect, DialectDisplay, IntoDialect, TryFromDialect,
+    TryIntoDialect,
+};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum IndexType {
@@ -179,15 +182,16 @@ pub enum TableKey {
     },
 }
 
-impl TryFrom<sqlparser::ast::TableConstraint> for TableKey {
-    type Error = AstConversionError;
-
-    fn try_from(value: sqlparser::ast::TableConstraint) -> Result<Self, Self::Error> {
+impl TryFromDialect<sqlparser::ast::TableConstraint> for TableKey {
+    fn try_from_dialect(
+        value: sqlparser::ast::TableConstraint,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
         use sqlparser::ast::TableConstraint::*;
         match value {
             Check { name, expr } => Ok(Self::CheckConstraint {
-                constraint_name: name.map(Into::into),
-                expr: expr.try_into()?,
+                constraint_name: name.into_dialect(dialect),
+                expr: expr.try_into_dialect(dialect)?,
                 enforced: None, // TODO(mvzink): Find out where this is supposed to come from
             }),
             ForeignKey {
@@ -201,11 +205,11 @@ impl TryFrom<sqlparser::ast::TableConstraint> for TableKey {
                 characteristics: _characteristics,
             } => Ok(Self::ForeignKey {
                 // TODO(mvzink): Where do these two different names come from for sqlparser?
-                constraint_name: name.clone().map(Into::into),
-                index_name: name.map(Into::into),
-                columns: columns.into_iter().map(Into::into).collect(),
-                target_table: foreign_table.into(),
-                target_columns: referred_columns.into_iter().map(Into::into).collect(),
+                constraint_name: name.clone().into_dialect(dialect),
+                index_name: name.into_dialect(dialect),
+                columns: columns.into_dialect(dialect),
+                target_table: foreign_table.into_dialect(dialect),
+                target_columns: referred_columns.into_dialect(dialect),
                 on_delete: on_delete.map(Into::into),
                 on_update: on_update.map(Into::into),
             }),
@@ -215,8 +219,8 @@ impl TryFrom<sqlparser::ast::TableConstraint> for TableKey {
                 columns,
                 index_type_display: _index_type_display,
             } => Ok(Self::FulltextKey {
-                index_name: opt_index_name.map(Into::into),
-                columns: columns.into_iter().map(Into::into).collect(),
+                index_name: opt_index_name.into_dialect(dialect),
+                columns: columns.into_dialect(dialect),
             }),
             FulltextOrSpatial {
                 fulltext: false, ..
@@ -228,9 +232,9 @@ impl TryFrom<sqlparser::ast::TableConstraint> for TableKey {
                 display_as_key: _display_as_key,
             } => Ok(Self::Key {
                 // TODO(mvzink): Where do these two different names come from for sqlparser?
-                constraint_name: name.clone().map(Into::into),
-                index_name: name.map(Into::into),
-                columns: columns.into_iter().map(Into::into).collect(),
+                constraint_name: name.clone().into_dialect(dialect),
+                index_name: name.into_dialect(dialect),
+                columns: columns.into_dialect(dialect),
                 index_type: index_type.map(Into::into),
             }),
             PrimaryKey {
@@ -242,9 +246,9 @@ impl TryFrom<sqlparser::ast::TableConstraint> for TableKey {
                 index_type: _index_type,
                 index_options: _index_options,
             } => Ok(Self::PrimaryKey {
-                constraint_name: name.map(Into::into),
-                index_name: index_name.map(Into::into),
-                columns: columns.into_iter().map(Into::into).collect(),
+                constraint_name: name.into_dialect(dialect),
+                index_name: index_name.into_dialect(dialect),
+                columns: columns.into_dialect(dialect),
                 constraint_timing: characteristics.map(Into::into),
             }),
             Unique {
@@ -258,9 +262,9 @@ impl TryFrom<sqlparser::ast::TableConstraint> for TableKey {
                 index_type_display: _index_type_display,
                 index_options: _index_options,
             } => Ok(Self::UniqueKey {
-                constraint_name: name.map(Into::into),
-                index_name: index_name.map(Into::into),
-                columns: columns.into_iter().map(Into::into).collect(),
+                constraint_name: name.into_dialect(dialect),
+                index_name: index_name.into_dialect(dialect),
+                columns: columns.into_dialect(dialect),
                 index_type: index_type.map(Into::into),
                 constraint_timing: characteristics.map(Into::into),
                 nulls_distinct: match nulls_distinct {
@@ -527,24 +531,27 @@ impl From<Literal> for FieldDefinitionExpr {
     }
 }
 
-impl TryFrom<sqlparser::ast::SelectItem> for FieldDefinitionExpr {
-    type Error = AstConversionError;
-
-    fn try_from(value: sqlparser::ast::SelectItem) -> Result<Self, Self::Error> {
+impl TryFromDialect<sqlparser::ast::SelectItem> for FieldDefinitionExpr {
+    fn try_from_dialect(
+        value: sqlparser::ast::SelectItem,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
         use sqlparser::ast::SelectItem::*;
         match value {
             ExprWithAlias { expr, alias } => Ok(FieldDefinitionExpr::Expr {
-                expr: expr.try_into()?,
-                alias: Some(alias.into()),
+                expr: expr.try_into_dialect(dialect)?,
+                alias: Some(alias.into_dialect(dialect)),
             }),
             UnnamedExpr(expr) => Ok(FieldDefinitionExpr::Expr {
-                expr: expr.try_into()?,
+                expr: expr.try_into_dialect(dialect)?,
                 alias: None,
             }),
             QualifiedWildcard(
                 sqlparser::ast::SelectItemQualifiedWildcardKind::ObjectName(relation),
                 _options,
-            ) => Ok(FieldDefinitionExpr::AllInTable(relation.into())),
+            ) => Ok(FieldDefinitionExpr::AllInTable(
+                relation.into_dialect(dialect),
+            )),
             QualifiedWildcard(
                 sqlparser::ast::SelectItemQualifiedWildcardKind::Expr(_expr),
                 _options,
@@ -589,16 +596,17 @@ pub enum FieldReference {
     Expr(Expr),
 }
 
-impl TryFrom<sqlparser::ast::Expr> for FieldReference {
-    type Error = AstConversionError;
-
-    fn try_from(value: sqlparser::ast::Expr) -> Result<Self, Self::Error> {
+impl TryFromDialect<sqlparser::ast::Expr> for FieldReference {
+    fn try_from_dialect(
+        value: sqlparser::ast::Expr,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
         if let sqlparser::ast::Expr::Value(sqlparser::ast::Value::Number(ref n, _)) = value {
             if let Ok(i) = n.parse() {
                 return Ok(FieldReference::Numeric(i));
             }
         }
-        Ok(FieldReference::Expr(value.try_into()?))
+        Ok(FieldReference::Expr(value.try_into_dialect(dialect)?))
     }
 }
 

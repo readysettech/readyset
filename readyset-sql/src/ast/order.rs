@@ -6,7 +6,7 @@ use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
-use crate::{ast::*, AstConversionError, Dialect, DialectDisplay};
+use crate::{ast::*, AstConversionError, Dialect, DialectDisplay, TryFromDialect, TryIntoDialect};
 
 #[derive(
     Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Arbitrary,
@@ -78,10 +78,11 @@ pub struct OrderBy {
     pub null_order: Option<NullOrder>,
 }
 
-impl TryFrom<sqlparser::ast::OrderByExpr> for OrderBy {
-    type Error = AstConversionError;
-
-    fn try_from(value: sqlparser::ast::OrderByExpr) -> Result<Self, Self::Error> {
+impl TryFromDialect<sqlparser::ast::OrderByExpr> for OrderBy {
+    fn try_from_dialect(
+        value: sqlparser::ast::OrderByExpr,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
         let sqlparser::ast::OrderByExpr {
             expr,
             asc,
@@ -89,7 +90,7 @@ impl TryFrom<sqlparser::ast::OrderByExpr> for OrderBy {
             ..
         } = value;
         Ok(Self {
-            field: expr.try_into()?,
+            field: expr.try_into_dialect(dialect)?,
             order_type: asc.map(|asc| {
                 if asc {
                     OrderType::OrderAscending
@@ -126,16 +127,13 @@ pub struct OrderClause {
     pub order_by: Vec<OrderBy>,
 }
 
-impl TryFrom<sqlparser::ast::OrderBy> for OrderClause {
-    type Error = AstConversionError;
-
-    fn try_from(value: sqlparser::ast::OrderBy) -> Result<Self, Self::Error> {
+impl TryFromDialect<sqlparser::ast::OrderBy> for OrderClause {
+    fn try_from_dialect(
+        value: sqlparser::ast::OrderBy,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
         Ok(OrderClause {
-            order_by: value
-                .exprs
-                .into_iter()
-                .map(TryInto::try_into)
-                .try_collect()?,
+            order_by: value.exprs.try_into_dialect(dialect)?,
         })
     }
 }
