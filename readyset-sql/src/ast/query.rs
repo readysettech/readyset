@@ -4,7 +4,10 @@ use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
-use crate::{ast::*, AstConversionError, Dialect, DialectDisplay};
+use crate::{
+    ast::*, AstConversionError, Dialect, DialectDisplay, IntoDialect, TryFromDialect,
+    TryIntoDialect,
+};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 #[allow(clippy::large_enum_variant)]
@@ -81,14 +84,14 @@ impl From<SelectSpecification> for SqlQuery {
     }
 }
 
-/// TODO: This should be `TryFrom`, but I wanted to hard error with clickable line numbers while hacking
-impl TryFrom<sqlparser::ast::Statement> for SqlQuery {
-    type Error = AstConversionError;
-
-    fn try_from(value: sqlparser::ast::Statement) -> Result<Self, Self::Error> {
+impl TryFromDialect<sqlparser::ast::Statement> for SqlQuery {
+    fn try_from_dialect(
+        value: sqlparser::ast::Statement,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
         use sqlparser::ast::Statement::*;
         match value {
-            Query(query) => Ok(query.try_into()?),
+            Query(query) => Ok(query.try_into_dialect(dialect)?),
             // This is kind of crazy; neither sqlparser-rs nor nom-sql actually support MySQL's `SHOW DATABASES` syntax
             ShowVariable { ref variable } => {
                 let variable = variable
@@ -136,21 +139,23 @@ impl TryFrom<sqlparser::ast::Statement> for SqlQuery {
                     filter: match filter_position {
                         Some(sqlparser::ast::ShowStatementFilterPosition::Infix(filter))
                         | Some(sqlparser::ast::ShowStatementFilterPosition::Suffix(filter)) => {
-                            Some(filter.try_into()?)
+                            Some(filter.try_into_dialect(dialect)?)
                         }
                         None => None,
                     },
                 },
             ))),
             ShowDatabases { .. } => Ok(Self::Show(crate::ast::ShowStatement::Databases)),
-            CreateTable(create) => Ok(Self::CreateTable(create.try_into()?)),
-            Insert(insert) => Ok(Self::Insert(insert.try_into()?)),
-            Delete(delete) => Ok(Self::Delete(delete.try_into()?)),
-            create @ CreateView { .. } => Ok(Self::CreateView(create.try_into()?)),
-            update @ Update { .. } => Ok(Self::Update(update.try_into()?)),
-            Use(use_statement) => Ok(Self::Use(use_statement.into())),
-            set_variable @ SetVariable { .. } => Ok(Self::Set(set_variable.into())),
-            set_names @ SetNames { .. } => Ok(Self::Set(set_names.into())),
+            CreateTable(create) => Ok(Self::CreateTable(create.try_into_dialect(dialect)?)),
+            Insert(insert) => Ok(Self::Insert(insert.try_into_dialect(dialect)?)),
+            Delete(delete) => Ok(Self::Delete(delete.try_into_dialect(dialect)?)),
+            create @ CreateView { .. } => Ok(Self::CreateView(create.try_into_dialect(dialect)?)),
+            update @ Update { .. } => Ok(Self::Update(update.try_into_dialect(dialect)?)),
+            Use(use_statement) => Ok(Self::Use(use_statement.into_dialect(dialect))),
+            set_variable @ SetVariable { .. } => {
+                Ok(Self::Set(set_variable.try_into_dialect(dialect)?))
+            }
+            set_names @ SetNames { .. } => Ok(Self::Set(set_names.try_into_dialect(dialect)?)),
             Drop {
                 object_type,
                 if_exists,
@@ -158,11 +163,17 @@ impl TryFrom<sqlparser::ast::Statement> for SqlQuery {
                 ..
             } => match object_type {
                 sqlparser::ast::ObjectType::Table => Ok(Self::DropTable(DropTableStatement {
-                    tables: names.into_iter().map(Into::into).collect(),
+                    tables: names
+                        .into_iter()
+                        .map(|name| name.into_dialect(dialect))
+                        .collect(),
                     if_exists,
                 })),
                 sqlparser::ast::ObjectType::View => Ok(Self::DropView(DropViewStatement {
-                    views: names.into_iter().map(Into::into).collect(),
+                    views: names
+                        .into_iter()
+                        .map(|name| name.into_dialect(dialect))
+                        .collect(),
                     if_exists,
                 })),
                 _ => not_yet_implemented!("drop statement tye: {object_type:?}"),
@@ -175,29 +186,31 @@ impl TryFrom<sqlparser::ast::Statement> for SqlQuery {
             CreateType { .. } => Err(AstConversionError::Skipped(format!("CREATE TYPE: {value}"))),
             Rollback { .. } => Ok(Self::Rollback(RollbackStatement {})),
             Commit { .. } => Ok(Self::Commit(CommitStatement {})),
-            alter @ AlterTable { .. } => Ok(Self::AlterTable(alter.try_into()?)),
+            alter @ AlterTable { .. } => Ok(Self::AlterTable(alter.try_into_dialect(dialect)?)),
             _ => not_yet_implemented!("other query: {value:?}"),
         }
     }
 }
 
-impl TryFrom<sqlparser::ast::Query> for SqlQuery {
-    type Error = AstConversionError;
-
-    fn try_from(value: sqlparser::ast::Query) -> Result<Self, Self::Error> {
+impl TryFromDialect<sqlparser::ast::Query> for SqlQuery {
+    fn try_from_dialect(
+        value: sqlparser::ast::Query,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
         if matches!(*value.body, sqlparser::ast::SetExpr::Select(_)) {
-            Ok(SqlQuery::Select(value.try_into()?))
+            Ok(SqlQuery::Select(value.try_into_dialect(dialect)?))
         } else {
             not_yet_implemented!("unsupported non-select query type {value:?}")
         }
     }
 }
 
-impl TryFrom<Box<sqlparser::ast::Query>> for SqlQuery {
-    type Error = AstConversionError;
-
-    fn try_from(value: Box<sqlparser::ast::Query>) -> Result<Self, Self::Error> {
-        (*value).try_into()
+impl TryFromDialect<Box<sqlparser::ast::Query>> for SqlQuery {
+    fn try_from_dialect(
+        value: Box<sqlparser::ast::Query>,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
+        (*value).try_into_dialect(dialect)
     }
 }
 
