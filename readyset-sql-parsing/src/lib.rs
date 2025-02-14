@@ -1,7 +1,7 @@
 use pretty_assertions::Comparison;
 use readyset_sql::{
     ast::{CacheInner, DropCacheStatement, SqlQuery},
-    Dialect,
+    AstConversionError, Dialect,
 };
 use sqlparser::{
     keywords::Keyword,
@@ -288,7 +288,14 @@ pub fn parse_query(dialect: Dialect, input: impl AsRef<str>) -> Result<SqlQuery,
         (Ok(nom_ast), Err(sqlparser_error)) => {
             warn!(%sqlparser_error, ?nom_ast, "nom-sql succeeded but sqlparser-rs failed");
             #[cfg(feature = "ast-conversion-errors")]
-            panic!("nom-sql succeeded but sqlparser-rs failed: {sqlparser_error}")
+            if !matches!(
+                sqlparser_error,
+                ReadysetParsingError::AstConversionError(
+                    AstConversionError::Skipped(_) | AstConversionError::Unsupported(_),
+                ),
+            ) {
+                panic!("nom-sql succeeded but sqlparser-rs failed: {sqlparser_error}")
+            }
         }
         (Err(nom_error), Ok(sqlparser_ast)) => {
             warn!(%nom_error, ?sqlparser_ast, "sqlparser-rs succeeded but nom-sql failed")
