@@ -355,6 +355,27 @@ pub enum SelectSpecification {
     Simple(SelectStatement),
 }
 
+impl TryFromDialect<sqlparser::ast::Query> for SelectSpecification {
+    fn try_from_dialect(
+        value: sqlparser::ast::Query,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
+        let sqlparser::ast::Query { ref body, .. } = value;
+        match **body {
+            sqlparser::ast::SetExpr::Select(_) => {
+                Ok(Self::Simple(value.try_into_dialect(dialect)?))
+            }
+            sqlparser::ast::SetExpr::SetOperation { op, .. } => match op {
+                sqlparser::ast::SetOperator::Union => {
+                    Ok(Self::Compound(value.try_into_dialect(dialect)?))
+                }
+                op => unsupported!("Unsupported set operation {op}"),
+            },
+            _ => failed!("Should only be called on a SELECT or UNION statement"),
+        }
+    }
+}
+
 impl DialectDisplay for SelectSpecification {
     fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| match self {
@@ -398,9 +419,7 @@ impl TryFromDialect<sqlparser::ast::Statement> for CreateViewStatement {
                     .map(|column| column.into_dialect(dialect))
                     .collect(),
                 // TODO: handle compound selects, not sure how sqlparser represents them
-                definition: Ok(Box::new(crate::ast::SelectSpecification::Simple(
-                    query.try_into_dialect(dialect)?,
-                ))),
+                definition: Ok(Box::new((*query).try_into_dialect(dialect)?)),
             })
         } else {
             failed!("Should only be called with a CreateView statement")
