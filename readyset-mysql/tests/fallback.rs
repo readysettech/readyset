@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use mysql_async::prelude::*;
 use mysql_async::ChangeUserOpts;
 use readyset_adapter::backend::UnsupportedSetMode;
@@ -811,11 +812,14 @@ async fn valid_sql_parsing_failed_shows_proxied() {
         .unwrap();
     let id = QueryId::from_unparsed_select(&q);
 
-    assert!(
-        proxied_queries.contains(&(id.to_string(), q, "unsupported".to_owned())),
-        "proxied_queries = {:?}",
-        proxied_queries,
-    );
+    let proxied_query = proxied_queries
+        .into_iter()
+        .exactly_one()
+        .expect("only one proxied query expected");
+
+    assert_eq!(proxied_query.0, id.to_string());
+    assert_eq!(proxied_query.1, q);
+    assert!(proxied_query.2.starts_with("unsupported:"));
 
     shutdown_tx.shutdown().await;
 }
