@@ -1,8 +1,10 @@
 use std::io;
+use std::str::FromStr;
 use std::sync::Arc;
 
+use clap::Parser;
 use database_utils::TlsMode;
-use mysql_srv::MySqlIntermediary;
+use mysql_srv::{AuthCache, AuthPlugin, MySqlIntermediary};
 use readyset_adapter::upstream_database::LazyUpstream;
 use readyset_mysql::{MySqlQueryHandler, MySqlUpstream};
 use tokio::net::TcpStream;
@@ -10,6 +12,19 @@ use tokio_native_tls::TlsAcceptor;
 use tracing::{debug, error};
 
 use crate::ConnectionHandler;
+
+// readyset-mysql specific options
+#[derive(Clone, Debug, Parser)]
+pub struct MySqlOptions {
+    /// Authentication method to use for MySQL clients
+    #[arg(
+        long,
+        env = "MYSQL_AUTHENTICATION_METHOD",
+        default_value = "caching_sha2_password",
+        value_parser = AuthPlugin::from_str,
+    )]
+    pub mysql_authentication_method: AuthPlugin,
+}
 
 #[derive(Clone)]
 pub struct MySqlHandler {
@@ -19,6 +34,10 @@ pub struct MySqlHandler {
     pub tls_acceptor: Option<Arc<TlsAcceptor>>,
     /// Indicates which type of client connections are allowed
     pub tls_mode: TlsMode,
+    /// A cache for successful authentication hashes
+    pub auth_cache: Arc<AuthCache>,
+    /// The authentication method to use for MySQL clients
+    pub mysql_authentication_method: AuthPlugin,
 }
 
 impl ConnectionHandler for MySqlHandler {
@@ -39,6 +58,8 @@ impl ConnectionHandler for MySqlHandler {
             self.enable_statement_logging,
             self.tls_acceptor.clone(),
             self.tls_mode,
+            Arc::clone(&self.auth_cache),
+            self.mysql_authentication_method,
         )
         .await
         {

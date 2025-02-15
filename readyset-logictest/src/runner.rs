@@ -13,7 +13,7 @@ use anyhow::{anyhow, bail, Context};
 use console::style;
 use database_utils::{DatabaseConnection, DatabaseType, DatabaseURL, QueryableConnection, TlsMode};
 use itertools::Itertools;
-use mysql_srv::MySqlIntermediary;
+use mysql_srv::{AuthCache, AuthPlugin, MySqlIntermediary};
 use readyset_adapter::backend::noria_connector::ReadBehavior;
 use readyset_adapter::backend::{BackendBuilder, NoriaConnector};
 use readyset_adapter::query_status_cache::QueryStatusCache;
@@ -682,6 +682,8 @@ impl TestScript {
                     false,
                     None,
                     TlsMode::Optional,
+                    AuthCache::new(None),
+                    AuthPlugin::default(),
                 )
                 .await
                 .unwrap(),

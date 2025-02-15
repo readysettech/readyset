@@ -7,7 +7,7 @@ use tokio_native_tls::TlsStream;
 
 use tracing::debug;
 
-pub(crate) struct SwitchableStream<S: AsyncRead + AsyncWrite + Unpin>(Option<Stream<S>>);
+pub struct SwitchableStream<S: AsyncRead + AsyncWrite + Unpin>(Option<Stream<S>>);
 
 enum Stream<S: AsyncRead + AsyncWrite + Unpin> {
     Plain(S),
@@ -43,6 +43,13 @@ impl<S: AsyncRead + AsyncWrite + Unpin> SwitchableStream<S> {
             None => unreachable!(),
         };
         Ok(())
+    }
+
+    pub fn is_secure(&mut self) -> bool {
+        match &mut self.0.as_mut().unwrap() {
+            Stream::Plain(_) => false,
+            Stream::Tls(_) => true,
+        }
     }
 }
 

@@ -139,8 +139,16 @@
 //!                 let _guard = rt.handle().enter();
 //!                 tokio::net::TcpStream::from_std(s).unwrap()
 //!             };
-//!             rt.block_on(MySqlIntermediary::run_on_tcp(Backend, s, false, None, TlsMode::Optional))
-//!                 .unwrap();
+//!             rt.block_on(MySqlIntermediary::run_on_tcp(
+//!                 Backend,
+//!                 s,
+//!                 false,
+//!                 None,
+//!                 TlsMode::Optional,
+//!                 AuthCache::new(None),
+//!                 AuthPlugin::default(),
+//!             ))
+//!             .unwrap();
 //!         }
 //!     });
 //!
@@ -191,10 +199,10 @@ use readyset_util::redacted::RedactedString;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net;
 use tokio_native_tls::TlsAcceptor;
-use tracing::{debug, info, trace};
+use tracing::{debug, info};
 use writers::write_err;
 
-use crate::authentication::{generate_auth_data, hash_password, AUTH_PLUGIN_NAME};
+pub use crate::authentication::{AuthCache, AuthContext, AuthPlugin};
 use crate::commands::change_user;
 pub use crate::myc::constants::{ColumnFlags, ColumnType, StatusFlags};
 pub use crate::writers::prepare_column_definitions;
@@ -357,8 +365,12 @@ pub struct MySqlIntermediary<B, S: AsyncRead + AsyncWrite + Unpin> {
     auth_data: [u8; 20],
     /// TLS acceptor
     tls_acceptor: Option<Arc<TlsAcceptor>>,
-    // Tls mode
+    /// Tls mode
     tls_mode: TlsMode,
+    /// Cached sha2 passwords
+    auth_cache: Arc<AuthCache>,
+    /// Auth plugin
+    auth_plugin: AuthPlugin,
 }
 
 impl<B: MySqlShim<net::TcpStream> + Send> MySqlIntermediary<B, net::TcpStream> {
@@ -370,6 +382,8 @@ impl<B: MySqlShim<net::TcpStream> + Send> MySqlIntermediary<B, net::TcpStream> {
         enable_statement_logging: bool,
         tls_acceptor: Option<Arc<TlsAcceptor>>,
         tls_mode: TlsMode,
+        auth_cache: Arc<AuthCache>,
+        auth_plugin: AuthPlugin,
     ) -> Result<(), io::Error> {
         stream.set_nodelay(true)?;
         MySqlIntermediary::run_on(
@@ -378,6 +392,8 @@ impl<B: MySqlShim<net::TcpStream> + Send> MySqlIntermediary<B, net::TcpStream> {
             enable_statement_logging,
             tls_acceptor,
             tls_mode,
+            auth_cache,
+            auth_plugin,
         )
         .await
     }
@@ -392,6 +408,8 @@ impl<B: MySqlShim<S> + Send, S: AsyncRead + AsyncWrite + Unpin + Send> MySqlInte
         enable_statement_logging: bool,
         tls_acceptor: Option<Arc<TlsAcceptor>>,
         tls_mode: TlsMode,
+        auth_cache: Arc<AuthCache>,
+        auth_plugin: AuthPlugin,
     ) -> Result<(), io::Error> {
         MySqlIntermediary::run_on(
             shim,
@@ -399,6 +417,8 @@ impl<B: MySqlShim<S> + Send, S: AsyncRead + AsyncWrite + Unpin + Send> MySqlInte
             enable_statement_logging,
             tls_acceptor,
             tls_mode,
+            auth_cache,
+            auth_plugin,
         )
         .await
     }
@@ -436,6 +456,8 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
         enable_statement_logging: bool,
         tls_acceptor: Option<Arc<TlsAcceptor>>,
         tls_mode: TlsMode,
+        auth_cache: Arc<AuthCache>,
+        auth_plugin: AuthPlugin,
     ) -> Result<(), io::Error> {
         let mut mi = MySqlIntermediary {
             shim,
@@ -446,6 +468,8 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
             auth_data: [0; 20],
             tls_acceptor,
             tls_mode,
+            auth_cache,
+            auth_plugin,
         };
         if let (true, username, password, database) = mi.init().await? {
             mi.shim.set_auth_info(&username, password).await?;
@@ -470,11 +494,28 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
     async fn init(
         &mut self,
     ) -> Result<(bool, String, Option<RedactedString>, Option<String>), io::Error> {
-        let auth_data =
-            generate_auth_data().map_err(|_| other_error(OtherErrorKind::AuthDataErr))?;
+        let auth_data = self
+            .auth_plugin
+            .generate_auth_data()
+            .map_err(|_| other_error(OtherErrorKind::AuthDataErr))?;
         self.auth_data = auth_data;
         let mut init_packet = Vec::with_capacity(
-            1 + 16 + 4 + 8 + 1 + 2 + 1 + 2 + 2 + 1 + 6 + 4 + 12 + 1 + AUTH_PLUGIN_NAME.len() + 1,
+            1  // Protocol version: always 10
+                + self.shim.version().len() // server version
+                + 4 // connection id
+                + 8 // first 8 bytes of the plugin provided data (scramble)
+                + 1 // 0x00 byte, terminating the first part of a scramble
+                + 2 // The lower 2 bytes of the Capabilities Flags
+                + 1 // default server a_protocol_character_set, only the lower 8-bits
+                + 2 // SERVER_STATUS_flags_enum
+                + 2 // The upper 2 bytes of the Capabilities Flags
+                + 1 // length of the combined auth_plugin_data
+                + 6 // reserved. All 0s.
+                + 4 // reserved. All 0s.
+                + 12 // Rest of the plugin provided data (scramble)
+                + 1 // 0x00 byte
+                + self.auth_plugin.name().len()
+                + 1, // 0x00 byte,
         );
         init_packet.extend_from_slice(&[10]); // protocol 10
         init_packet.extend_from_slice(self.shim.version().as_bytes());
@@ -500,7 +541,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
         init_packet.extend_from_slice(&[0x00; 10][..]); // filler
         init_packet.extend_from_slice(&auth_data[8..]);
         init_packet.push(0);
-        init_packet.extend_from_slice(AUTH_PLUGIN_NAME.as_bytes());
+        init_packet.extend_from_slice(self.auth_plugin.name().as_bytes());
         init_packet.push(0);
 
         self.conn.enqueue_packet(init_packet);
@@ -589,15 +630,14 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
 
         self.client_capabilities = handshake.capabilities;
         let username = handshake.username.to_owned();
-        let password = handshake.password.to_vec();
         let database = handshake.database.map(String::from);
-        let client_auth_plugin = handshake.auth_plugin_name.map(|s| s.to_owned());
+        let client_auth_plugin = handshake.auth_plugin_name.and_then(AuthPlugin::from_name);
 
-        let handshake_password = if client_auth_plugin.iter().all(|apn| apn != AUTH_PLUGIN_NAME)
+        let handshake_password = if client_auth_plugin.is_none()
             // Some clients (at the very least certain versions of PHP's MySQL PDO library) send an
             // empty password response in the initial handshake, even if the auth plugin is set and
             // correct. We want to send a switch-authentication request in that case too
-            || password.is_empty()
+            || (self.shim.require_authentication() && handshake.password.is_empty())
         {
             // Authentication mismatch - try to switch auth plugins
 
@@ -609,7 +649,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                 writers::write_err(
                     ErrorKind::ER_NOT_SUPPORTED_AUTH_MODE,
                     b"Client does not support authentication protocol requested by server; \
-                      consider upgrading MySQL client",
+                    consider upgrading MySQL client",
                     &mut self.conn,
                 )
                 .await?;
@@ -621,14 +661,9 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                 "Client offered incorrect authentication plugin, sending switch request",
             );
 
-            let mut auth_switch_request_packet =
-                Vec::with_capacity(1 + AUTH_PLUGIN_NAME.len() + 1 + auth_data.len() + 1);
-            auth_switch_request_packet.push(0xfe);
-            auth_switch_request_packet.extend_from_slice(AUTH_PLUGIN_NAME.as_bytes());
-            auth_switch_request_packet.push(0);
-            auth_switch_request_packet.extend_from_slice(&auth_data);
-            auth_switch_request_packet.push(0);
-            self.conn.enqueue_packet(auth_switch_request_packet);
+            let auth_plugin = client_auth_plugin.unwrap_or(self.auth_plugin);
+            self.conn
+                .enqueue_packet(auth_plugin.get_switch_packet(&auth_data));
             self.conn.flush().await?;
 
             let packet = self.conn.next().await?.ok_or_else(|| {
@@ -641,18 +676,41 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
 
             packet.data.to_vec()
         } else {
-            password
+            handshake.password.to_vec()
         };
 
         let plain_password = self.shim.password_for_username(&username);
         let require_auth = self.shim.require_authentication();
-        let auth_success = !require_auth
-            || plain_password.as_ref().is_some_and(|password| {
-                let expected = hash_password(password, &auth_data);
-                let actual = handshake_password.as_slice();
-                trace!(?expected, ?actual);
-                expected == actual
-            });
+
+        let auth_success = client_auth_plugin
+            .unwrap_or(self.auth_plugin)
+            .handle_authentication(
+                &AuthContext {
+                    username: &username,
+                    password: &plain_password,
+                    handshake_password: &handshake_password,
+                    auth_data: &self.auth_data,
+                    require_auth,
+                },
+                &mut self.conn,
+                &self.auth_cache,
+            )
+            .await?;
+
+        if auth_success {
+            debug!(%username, "Successfully authenticated client");
+            writers::write_ok_packet(&mut self.conn, 0, 0, StatusFlags::empty()).await?;
+        } else {
+            debug!(%username, "Received incorrect password");
+            writers::write_err(
+                ErrorKind::ER_ACCESS_DENIED_ERROR,
+                format!("Access denied for user {}", username).as_bytes(),
+                &mut self.conn,
+            )
+            .await?;
+        }
+        self.conn.flush().await?;
+
         let plain_password = if require_auth {
             Some(RedactedString::from(
                 plain_password
@@ -662,19 +720,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
         } else {
             None
         };
-        if auth_success {
-            debug!(%username, "Successfully authenticated client");
-            writers::write_ok_packet(&mut self.conn, 0, 0, StatusFlags::empty()).await?;
-        } else {
-            debug!(%username, ?client_auth_plugin, "Received incorrect password");
-            writers::write_err(
-                ErrorKind::ER_ACCESS_DENIED_ERROR,
-                format!("Access denied for user {}", username).as_bytes(),
-                &mut self.conn,
-            )
-            .await?;
-        }
-        self.conn.flush().await?;
+
         Ok((auth_success, username, plain_password, database))
     }
 
@@ -713,32 +759,42 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                         })?
                         .1;
                     let username = change_user.username.to_owned();
-                    let authpassword = change_user.password.to_vec();
+                    let client_auth_plugin = AuthPlugin::from_name(change_user.auth_plugin_name);
+                    let authpassword = if change_user.password.is_empty() {
+                        let auth_plugin = client_auth_plugin.unwrap_or(self.auth_plugin);
+                        self.conn
+                            .enqueue_packet(auth_plugin.get_switch_packet(&self.auth_data));
+                        self.conn.flush().await?;
 
-                    if change_user.auth_plugin_name != AUTH_PLUGIN_NAME {
-                        // This should never happen, as we already accepted a connection using
-                        // AUTH_PLUGIN_NAME
-                        writers::write_err(
-                            ErrorKind::ER_ACCESS_DENIED_ERROR,
-                            format!(
-                                "Access denied for user {}. Incorrect auth plugin {}",
-                                username, change_user.auth_plugin_name
+                        let packet = self.conn.next().await?.ok_or_else(|| {
+                            io::Error::new(
+                                io::ErrorKind::ConnectionAborted,
+                                "peer terminated connection when asked to switch auth plugin",
                             )
-                            .as_bytes(),
+                        })?;
+                        self.conn.set_seq(packet.seq + 1);
+
+                        packet.data.to_vec()
+                    } else {
+                        change_user.password.to_vec()
+                    };
+
+                    let plain_password = self.shim.password_for_username(&username);
+
+                    let auth_success = client_auth_plugin
+                        .unwrap_or(self.auth_plugin)
+                        .handle_authentication(
+                            &AuthContext {
+                                username: &username,
+                                password: &plain_password,
+                                handshake_password: &authpassword,
+                                auth_data: &self.auth_data,
+                                require_auth: self.shim.require_authentication(),
+                            },
                             &mut self.conn,
+                            &self.auth_cache,
                         )
                         .await?;
-                        self.conn.flush().await?;
-                        continue;
-                    }
-                    let plain_password = self.shim.password_for_username(&username);
-                    let auth_success = !self.shim.require_authentication()
-                        || plain_password.as_ref().is_some_and(|password| {
-                            let expected = hash_password(password, &self.auth_data);
-                            let actual = authpassword.as_slice();
-                            trace!(?expected, ?actual);
-                            expected == actual
-                        });
 
                     if auth_success {
                         debug!("Successfully authenticated client");

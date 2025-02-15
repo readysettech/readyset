@@ -4,7 +4,7 @@ use std::fmt::Display;
 use async_trait::async_trait;
 use database_utils::TlsMode;
 use mysql_async::prelude::Queryable;
-use mysql_srv::MySqlIntermediary;
+use mysql_srv::{AuthCache, AuthPlugin, MySqlIntermediary};
 use readyset_adapter::backend::QueryInfo;
 use readyset_adapter::upstream_database::LazyUpstream;
 use readyset_mysql::{Backend, MySqlQueryHandler, MySqlUpstream};
@@ -103,6 +103,8 @@ impl Adapter for MySQLAdapter {
             false,
             None,
             TlsMode::Optional,
+            AuthCache::new(None),
+            AuthPlugin::default(),
         )
         .await
         .unwrap()

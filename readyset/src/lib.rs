@@ -264,7 +264,11 @@ pub struct Options {
 
     /// readyset-psql-specific options
     #[command(flatten)]
-    pub psql_options: psql::Options,
+    pub psql_options: psql::PsqlOptions,
+
+    /// readyset-mysql-specific options
+    #[command(flatten)]
+    pub mysql_options: mysql::MySqlOptions,
 
     /// Configure how ReadySet behaves when receiving unsupported SET statements.
     ///
@@ -612,6 +616,18 @@ impl Options {
 
         Ok(allowed_users)
     }
+
+    pub fn deployment_dir(&self) -> anyhow::Result<PathBuf> {
+        let dir = self
+            .server_worker_options
+            .storage_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(&self.deployment);
+        if !dir.is_dir() {
+            std::fs::create_dir_all(&dir)?;
+        }
+        Ok(dir)
+    }
 }
 
 async fn connect_upstream<U>(
@@ -741,11 +757,7 @@ where
             )?;
         }
 
-        let deployment_dir = options
-            .server_worker_options
-            .storage_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join(&options.deployment);
+        let deployment_dir = options.deployment_dir()?;
 
         let upstream_config = options.server_worker_options.replicator_config.clone();
 

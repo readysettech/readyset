@@ -13,7 +13,7 @@ use crate::ConnectionHandler;
 
 // readyset-psql specific options
 #[derive(Clone, Debug, Parser)]
-pub struct Options {
+pub struct PsqlOptions {
     /// Authentication method to use for PostgreSQL clients
     #[arg(
         long,
@@ -25,7 +25,7 @@ pub struct Options {
 
 pub struct Config {
     /// Contains psql-srv specific `Options`
-    pub options: Options,
+    pub options: PsqlOptions,
     /// Whether to log statements received by the client
     pub enable_statement_logging: bool,
     /// Optional struct to accept a TLS handshake and return a `TlsConnection`.

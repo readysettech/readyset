@@ -21,7 +21,9 @@ mysql-time = { path = "../mysql-time" }
 mysql_async = { workspace = true }
 mysql_common = { workspace = true, features = ["chrono"] }
 nom = { workspace = true }
+openssl = { workspace = true }
 sha-1 = { workspace = true }
+sha2 = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
@@ -32,6 +34,7 @@ database-utils = { path = "../database-utils" }
 readyset-adapter-types = { path = "../readyset-adapter-types" }
 readyset-data = { path = "../readyset-data" }
 readyset-util = { path = "../readyset-util" }
+
 
 [dev-dependencies]
 tokio-postgres = { workspace = true }

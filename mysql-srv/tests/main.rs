@@ -16,8 +16,8 @@ use database_utils::TlsMode;
 use mysql::prelude::Queryable;
 use mysql::Row;
 use mysql_srv::{
-    CachedSchema, Column, ErrorKind, InitWriter, MySqlIntermediary, MySqlShim, ParamParser,
-    QueryResultWriter, QueryResultsResponse, StatementMetaWriter,
+    AuthCache, AuthPlugin, CachedSchema, Column, ErrorKind, InitWriter, MySqlIntermediary,
+    MySqlShim, ParamParser, QueryResultWriter, QueryResultsResponse, StatementMetaWriter,
 };
 use readyset_adapter_types::DeallocateId;
 use readyset_util::redacted::RedactedString;
@@ -234,6 +234,8 @@ where
                 false,
                 None,
                 TlsMode::Optional,
+                AuthCache::new(None),
+                AuthPlugin::default(),
             ))
         });
 
