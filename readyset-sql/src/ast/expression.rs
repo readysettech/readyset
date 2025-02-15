@@ -971,6 +971,24 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                 data_type: _,
                 value: _,
             } => unsupported!("TYPED STRING"),
+            // TODO(mvzink): Remove these negation special cases once we disable nom-sql; they're
+            // just here for checking parity
+            UnaryOp {
+                op: sqlparser::ast::UnaryOperator::Minus,
+                expr,
+            } => match expr.try_into_dialect(dialect)? {
+                Expr::Literal(Literal::Integer(i)) => Ok(Self::Literal(Literal::Integer(-i))),
+                Expr::Literal(Literal::Double(Double { value, precision })) => {
+                    Ok(Self::Literal(Literal::Double(Double {
+                        value: -value,
+                        precision,
+                    })))
+                }
+                expr => Ok(Self::UnaryOp {
+                    op: UnaryOperator::Neg,
+                    rhs: Box::new(expr),
+                }),
+            },
             UnaryOp { op, expr } => Ok(Self::UnaryOp {
                 op: op.into(),
                 rhs: expr.try_into_dialect(dialect)?,
