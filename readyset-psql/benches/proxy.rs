@@ -35,7 +35,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, ToSocketAddrs};
 use tokio::runtime::Runtime;
 use tokio::task::JoinHandle;
-use tokio_postgres::{Client, NoTls, Row, RowStream, Statement};
+use tokio_postgres::{Client, GenericResult, NoTls, Row, RowStream, Statement};
 
 const BUFFER_SIZE: usize = 16 * 1024 * 1024;
 
@@ -99,13 +99,13 @@ impl Stream for ResultStream {
             })),
             ResultStream::Streaming(stream) => {
                 Poll::Ready(ready!(stream.as_mut().poll_next(cx)).map(|res| {
-                    match res {
-                        Ok(r) => (0..r.len())
-                            .map(|i| Ok(r.get(i)))
+                    res.map(|gr| match gr {
+                        GenericResult::Row(row) => (0..row.len())
+                            .map(|i| Ok(row.get(i)))
                             .collect::<Result<_, _>>()
                             .map(PsqlSrvRow::ValueVec),
-                        Err(e) => Err(e.into()),
-                    }
+                        GenericResult::Command(_, _) => Ok(PsqlSrvRow::ValueVec(vec![])),
+                    })?
                 }))
             }
         }
@@ -232,6 +232,10 @@ impl PsqlBackend for Backend {
             .peek()
             .await
             .and_then(|r| r.as_ref().ok())
+            .and_then(|gr| match gr {
+                GenericResult::Row(row) => Some(row),
+                _ => None,
+            })
             .map(|row| {
                 row.columns()
                     .iter()
@@ -248,7 +252,17 @@ impl PsqlBackend for Backend {
         let resultset = if self.streaming {
             ResultStream::Streaming(res)
         } else {
-            ResultStream::Owned(res.try_collect::<Vec<_>>().await?.into_iter())
+            ResultStream::Owned(
+                res.try_filter_map(|result| async move {
+                    match result {
+                        GenericResult::Row(row) => Ok(Some(row)),
+                        GenericResult::Command(_, _) => Ok(None),
+                    }
+                })
+                .try_collect::<Vec<Row>>()
+                .await?
+                .into_iter(),
+            )
         };
 
         Ok(QueryResponse::Select { schema, resultset })

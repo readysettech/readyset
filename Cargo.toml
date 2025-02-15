@@ -1,8 +1,9 @@
 [patch.crates-io]
 mysql_async = { git = "https://github.com/readysettech/mysql_async" }
-postgres-protocol = { git = "https://github.com/readysettech/rust-postgres.git", tag = "readyset-20241114" }
-postgres-types = { git = "https://github.com/readysettech/rust-postgres.git", tag = "readyset-20241114" }
-tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git", tag = "readyset-20241114" }
+postgres = { git = "https://github.com/readysettech/rust-postgres.git", tag = "readyset-20250218" }
+postgres-protocol = { git = "https://github.com/readysettech/rust-postgres.git", tag = "readyset-20250218" }
+postgres-types = { git = "https://github.com/readysettech/rust-postgres.git", tag = "readyset-20250218" }
+tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git", tag = "readyset-20250218" }
 
 [workspace]
 members = [

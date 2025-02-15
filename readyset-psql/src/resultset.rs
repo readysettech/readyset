@@ -156,10 +156,13 @@ impl Stream for Resultset {
             ResultsetInner::RowStream { first_row, stream } => {
                 let row = match first_row.take() {
                     Some(row) => Some(Ok(row)),
-                    None => match ready!(stream.as_mut().poll_next(cx)) {
-                        None => None,
-                        Some(Err(e)) => Some(Err(psql_srv::Error::from(e))),
-                        Some(Ok(row)) => Some(Ok(row)),
+                    None => loop {
+                        match ready!(stream.as_mut().poll_next(cx)) {
+                            None => break None,
+                            Some(Err(e)) => break Some(Err(psql_srv::Error::from(e))),
+                            Some(Ok(GenericResult::Row(row))) => break Some(Ok(row)),
+                            Some(Ok(GenericResult::Command(_, _))) => {}
+                        }
                     },
                 };
                 row.map(|res| res.map(PsqlSrvRow::RawRow))

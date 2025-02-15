@@ -379,6 +379,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         params: &[DfValue],
         exec_meta: &'_ [TransferFormat],
     ) -> Result<Self::QueryResult<'a>, Error> {
+        let result_formats = exec_meta.iter().map(|tf| (*tf).into());
         match statement_id {
             UpstreamStatementId::Unprepared(query) => {
                 // we need to get the postgres type for each DfValue parameter, and stuff a tuple of
@@ -389,11 +390,18 @@ impl UpstreamDatabase for PostgreSqlUpstream {
                     typed_params.push((p, postgres_type));
                 }
 
-                let mut stream = Box::pin(self.client.query_typed_raw(query, typed_params).await?);
+                let mut stream = Box::pin(
+                    self.client
+                        .query_typed_raw(query, typed_params, result_formats)
+                        .await?,
+                );
                 match stream.next().await {
                     None => Ok(QueryResult::EmptyRead),
                     Some(Err(e)) => Err(e.into()),
-                    Some(Ok(first_row)) => Ok(QueryResult::RowStream { first_row, stream }),
+                    Some(Ok(GenericResult::Command(_, tag))) => Ok(QueryResult::Command { tag }),
+                    Some(Ok(GenericResult::Row(first_row))) => {
+                        Ok(QueryResult::RowStream { first_row, stream })
+                    }
                 }
             }
             UpstreamStatementId::Prepared(id) => {
@@ -408,7 +416,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
                         .generic_query_raw(
                             statement,
                             &convert_params_for_upstream(params, statement.params())?,
-                            exec_meta.iter().map(|tf| (*tf).into()),
+                            result_formats,
                         )
                         .await?,
                 );
