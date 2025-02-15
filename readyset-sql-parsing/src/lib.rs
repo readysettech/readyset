@@ -2,7 +2,10 @@ use readyset_sql::{ast::SqlQuery, Dialect};
 
 #[cfg(feature = "sqlparser")]
 use readyset_sql::{
-    ast::{CacheInner, DropCacheStatement},
+    ast::{
+        AddTablesStatement, AlterReadysetStatement, CacheInner, DropCacheStatement,
+        ResnapshotTableStatement,
+    },
     IntoDialect, TryIntoDialect,
 };
 #[cfg(feature = "sqlparser")]
@@ -35,13 +38,18 @@ fn sqlparser_dialect_from_readyset_dialect(
 
 #[cfg(feature = "sqlparser")]
 #[expect(clippy::upper_case_acronyms, reason = "SQL keywords are capitalized")]
+#[derive(Debug, Clone, Copy)]
 enum ReadysetKeyword {
     CACHES,
     MIGRATION,
     PROXIED,
     QUERIES,
     READYSET,
+    RESNAPSHOT,
     SIMPLIFIED,
+    /// To match both Readyset and sqlparser keywords in one go, we want to be able to accept both
+    /// in the same function. So here we just allow falling back to a sqlparser keyword.
+    Standard(sqlparser::keywords::Keyword),
 }
 
 #[cfg(feature = "sqlparser")]
@@ -53,7 +61,11 @@ impl ReadysetKeyword {
             Self::PROXIED => "PROXIED",
             Self::QUERIES => "QUERIES",
             Self::READYSET => "READYSET",
+            Self::RESNAPSHOT => "RESNAPSHOT",
             Self::SIMPLIFIED => "SIMPLIFIED",
+            Self::Standard(_) => panic!(
+                "Standard sqlparser keywords should only be used with `parse_keyword`, not string comparison"
+            ),
         }
     }
 }
@@ -63,16 +75,94 @@ impl ReadysetKeyword {
 /// token matches, it is consumed and `true` is returned; otherwise, it is not consumed and `false`
 /// is returned.
 #[cfg(feature = "sqlparser")]
-fn parse_readyset_keyword(parser: &mut Parser, keyword: ReadysetKeyword) -> bool {
-    match parser.peek_token_ref() {
-        TokenWithSpan {
-            token: Token::Word(Word { value, .. }),
-            ..
-        } if value.eq_ignore_ascii_case(keyword.as_str()) => {
+fn parse_readyset_keyword(parser: &mut Parser, rs_keyword: ReadysetKeyword) -> bool {
+    if let ReadysetKeyword::Standard(keyword) = rs_keyword {
+        parser.parse_keyword(keyword)
+    } else if let TokenWithSpan {
+        token: Token::Word(Word { value, .. }),
+        ..
+    } = parser.peek_token_ref()
+    {
+        if value.eq_ignore_ascii_case(rs_keyword.as_str()) {
             parser.advance_token();
             true
+        } else {
+            false
         }
-        _ => false,
+    } else {
+        false
+    }
+}
+
+/// Returns whether all Readyset keywords have been consumed. The point of this is to atomically
+/// consume all keywords or none of them, so that subsequent parsing can try matching the first
+/// token again.
+///
+/// This is similar to [`Parser::parse_keywords`], but their implementation relies on access to the
+/// private `index` field. Our implementation is a little clunky because it replicates that behavior
+/// but without being able to set `index` directly: instead, we just repeatedly set the token to the
+/// previous one until it's back where we started.
+#[cfg(feature = "sqlparser")]
+fn parse_readyset_keywords(parser: &mut Parser, keywords: &[ReadysetKeyword]) -> bool {
+    // XXX(mvzink): Ideally, we would mirror the rewinding logic in [`Parser::parse_keywords`] and
+    // simply record and reset the [`Parser::index`] field. Since it's private, and the vec of
+    // tokens it points into includes whitespace tokens which the token accessors skip over, we just
+    // count and rewind however many tokens we parsed. This assumes the forward/backward accessors
+    // (`advance_token` and `prev_token`) have symmetrical logic for skipping whitespace tokens.
+    let mut num_tokens_parsed = 0;
+
+    // Try to match all keywords in sequence
+    for &keyword in keywords {
+        if !parse_readyset_keyword(parser, keyword) {
+            // Reset position
+            while num_tokens_parsed > 0 {
+                parser.prev_token();
+                num_tokens_parsed -= 1;
+            }
+            return false;
+        }
+    }
+
+    true
+}
+
+/// Parse a ReadySet `ALTER` statement, or fall back to [`Parser::parse_alter`].
+///
+/// ALTER READYSET
+///     | ADD TABLES
+///     | RESNAPSHOT TABLE
+#[cfg(feature = "sqlparser")]
+fn parse_alter(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, ReadysetParsingError> {
+    if parse_readyset_keyword(parser, ReadysetKeyword::READYSET) {
+        if parse_readyset_keywords(
+            parser,
+            &[
+                ReadysetKeyword::RESNAPSHOT,
+                ReadysetKeyword::Standard(Keyword::TABLE),
+            ],
+        ) {
+            let table_name = parser.parse_object_name(false)?.into_dialect(dialect);
+            Ok(SqlQuery::AlterReadySet(
+                AlterReadysetStatement::ResnapshotTable(ResnapshotTableStatement {
+                    table: table_name,
+                }),
+            ))
+        } else if parser.parse_keywords(&[Keyword::ADD, Keyword::TABLES]) {
+            let tables = parser
+                .parse_comma_separated(|p| p.parse_object_name(false))?
+                .into_iter()
+                .map(|table| table.into_dialect(dialect))
+                .collect();
+            Ok(SqlQuery::AlterReadySet(AlterReadysetStatement::AddTables(
+                AddTablesStatement { tables },
+            )))
+        } else {
+            Err(ReadysetParsingError::ReadysetParsingError(
+                "expected RESNAPSHOT TABLE, or ADD TABLES after READYSET".into(),
+            ))
+        }
+    } else {
+        Ok(parser.parse_alter()?.try_into_dialect(dialect)?)
     }
 }
 
@@ -206,9 +296,13 @@ fn parse_show(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readyse
             Ok(SqlQuery::Show(
                 readyset_sql::ast::ShowStatement::ReadySetVersion,
             ))
-        } else if parse_readyset_keyword(parser, ReadysetKeyword::MIGRATION)
-            && parser.parse_keyword(Keyword::STATUS)
-        {
+        } else if parse_readyset_keywords(
+            parser,
+            &[
+                ReadysetKeyword::MIGRATION,
+                ReadysetKeyword::Standard(Keyword::STATUS),
+            ],
+        ) {
             let id = parser.parse_literal_uint()?;
             Ok(SqlQuery::Show(
                 readyset_sql::ast::ShowStatement::ReadySetMigrationStatus(id),
@@ -231,7 +325,8 @@ fn parse_show(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readyse
             ))
         } else {
             Err(ReadysetParsingError::ReadysetParsingError(
-                "expected SHOW READYSET VERSION or SHOW READYSET MIGRATION STATUS".into(),
+                "expected VERSION, STATUS, TABLES, ALL TABLES, or MIGRATION STATUS after READYSET"
+                    .into(),
             ))
         }
     } else {
@@ -249,9 +344,10 @@ fn parse_show(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readyse
 #[cfg(feature = "sqlparser")]
 fn parse_drop(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, ReadysetParsingError> {
     if parser.parse_keyword(Keyword::ALL) {
-        if parse_readyset_keyword(parser, ReadysetKeyword::PROXIED)
-            && parse_readyset_keyword(parser, ReadysetKeyword::QUERIES)
-        {
+        if parse_readyset_keywords(
+            parser,
+            &[ReadysetKeyword::PROXIED, ReadysetKeyword::QUERIES],
+        ) {
             Ok(SqlQuery::DropAllProxiedQueries(
                 readyset_sql::ast::DropAllProxiedQueriesStatement {},
             ))
@@ -279,14 +375,16 @@ fn parse_readyset_query(
     dialect: Dialect,
     input: impl AsRef<str>,
 ) -> Result<SqlQuery, ReadysetParsingError> {
-    if parser.parse_keywords(&[Keyword::CREATE, Keyword::CACHE]) {
+    if parser.parse_keyword(Keyword::ALTER) {
+        parse_alter(parser, dialect)
+    } else if parser.parse_keywords(&[Keyword::CREATE, Keyword::CACHE]) {
         parse_create_cache(parser, dialect, input)
+    } else if parser.parse_keyword(Keyword::DROP) {
+        parse_drop(parser, dialect)
     } else if parser.parse_keyword(Keyword::EXPLAIN) {
         parse_explain(parser, dialect, input)
     } else if parser.parse_keyword(Keyword::SHOW) {
         parse_show(parser, dialect)
-    } else if parser.parse_keyword(Keyword::DROP) {
-        parse_drop(parser, dialect)
     } else {
         Ok(parser.parse_statement()?.try_into_dialect(dialect)?)
     }
