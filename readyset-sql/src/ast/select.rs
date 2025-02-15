@@ -278,6 +278,36 @@ impl Default for LimitClause {
     }
 }
 
+impl TryFromDialect<(Option<sqlparser::ast::Expr>, Option<sqlparser::ast::Offset>)>
+    for LimitClause
+{
+    fn try_from_dialect(
+        (limit, offset): (Option<sqlparser::ast::Expr>, Option<sqlparser::ast::Offset>),
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
+        Ok(LimitClause::LimitOffset {
+            limit: limit
+                .map(|expr| {
+                    if let crate::ast::Expr::Literal(literal) = expr.try_into_dialect(dialect)? {
+                        Ok(crate::ast::LimitValue::Literal(literal))
+                    } else {
+                        not_yet_implemented!("non-literal limit expression")
+                    }
+                })
+                .transpose()?,
+            offset: offset
+                .map(|sqlparser::ast::Offset { value: expr, .. }| {
+                    if let crate::ast::Expr::Literal(literal) = expr.try_into_dialect(dialect)? {
+                        Ok(literal)
+                    } else {
+                        not_yet_implemented!("non-literal offset expression")
+                    }
+                })
+                .transpose()?,
+        })
+    }
+}
+
 impl DialectDisplay for LimitClause {
     fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| {
@@ -347,6 +377,51 @@ impl SelectStatement {
     }
 }
 
+impl TryFromDialect<sqlparser::ast::Select> for SelectStatement {
+    fn try_from_dialect(
+        value: sqlparser::ast::Select,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
+        let (tables, join_clauses): (Vec<crate::ast::TableExpr>, Vec<Vec<crate::ast::JoinClause>>) =
+            value
+                .from
+                .into_iter()
+                .map(|table_with_joins| {
+                    Ok((
+                        table_with_joins.relation.try_into_dialect(dialect)?,
+                        table_with_joins.joins.try_into_dialect(dialect)?,
+                    ))
+                })
+                .collect::<Result<Vec<(TableExpr, Vec<JoinClause>)>, _>>()?
+                .into_iter()
+                .unzip();
+        let join = join_clauses.into_iter().flatten().collect();
+        Ok(SelectStatement {
+            distinct: matches!(value.distinct, Some(sqlparser::ast::Distinct::Distinct)),
+            fields: value.projection.try_into_dialect(dialect)?,
+            tables,
+            join,
+            where_clause: value.selection.try_into_dialect(dialect)?,
+            group_by: {
+                let group_by: GroupByClause = value.group_by.try_into_dialect(dialect)?;
+                if group_by.fields.is_empty() {
+                    None
+                } else {
+                    Some(group_by)
+                }
+            },
+            having: value.having.try_into_dialect(dialect)?,
+            // CTEs, ORDER BY, LIMIT, and OFFSET come from `Query`, not `Select`
+            ctes: vec![],
+            order: None,
+            limit_clause: crate::ast::LimitClause::LimitOffset {
+                limit: None,
+                offset: None,
+            },
+        })
+    }
+}
+
 impl TryFromDialect<sqlparser::ast::Query> for SelectStatement {
     fn try_from_dialect(
         value: sqlparser::ast::Query,
@@ -362,70 +437,20 @@ impl TryFromDialect<sqlparser::ast::Query> for SelectStatement {
         } = value;
         match *body {
             sqlparser::ast::SetExpr::Select(select) => {
-                let (tables, join_clauses): (
-                    Vec<crate::ast::TableExpr>,
-                    Vec<Vec<crate::ast::JoinClause>>,
-                ) = select
-                    .from
-                    .into_iter()
-                    .map(|table_with_joins| {
-                        Ok((
-                            table_with_joins.relation.try_into_dialect(dialect)?,
-                            table_with_joins.joins.try_into_dialect(dialect)?,
-                        ))
-                    })
-                    .collect::<Result<Vec<(TableExpr, Vec<JoinClause>)>, _>>()?
-                    .into_iter()
-                    .unzip();
-                let join = join_clauses.into_iter().flatten().collect();
-                Ok(SelectStatement {
-                    ctes: if let Some(sqlparser::ast::With { cte_tables, .. }) = with {
-                        cte_tables.try_into_dialect(dialect)?
-                    } else {
-                        Vec::new()
-                    },
-                    distinct: matches!(select.distinct, Some(sqlparser::ast::Distinct::Distinct)),
-                    fields: select.projection.try_into_dialect(dialect)?,
-                    tables,
-                    join,
-                    where_clause: select.selection.try_into_dialect(dialect)?,
-                    group_by: {
-                        let group_by: GroupByClause = select.group_by.try_into_dialect(dialect)?;
-                        if group_by.fields.is_empty() {
-                            None
-                        } else {
-                            Some(group_by)
-                        }
-                    },
-                    having: select.having.try_into_dialect(dialect)?,
-                    order: order_by.try_into_dialect(dialect)?,
-                    limit_clause: crate::ast::LimitClause::LimitOffset {
-                        limit: limit
-                            .map(|expr| {
-                                if let crate::ast::Expr::Literal(literal) =
-                                    expr.try_into_dialect(dialect)?
-                                {
-                                    Ok(crate::ast::LimitValue::Literal(literal))
-                                } else {
-                                    not_yet_implemented!("non-literal limit expression")
-                                }
-                            })
-                            .transpose()?,
-                        offset: offset
-                            .map(|sqlparser::ast::Offset { value: expr, .. }| {
-                                if let crate::ast::Expr::Literal(literal) =
-                                    expr.try_into_dialect(dialect)?
-                                {
-                                    Ok(literal)
-                                } else {
-                                    not_yet_implemented!("non-literal offset expression")
-                                }
-                            })
-                            .transpose()?,
-                    },
-                })
+                let mut select: SelectStatement = (*select).try_into_dialect(dialect)?;
+                select.ctes = if let Some(sqlparser::ast::With { cte_tables, .. }) = with {
+                    cte_tables.try_into_dialect(dialect)?
+                } else {
+                    Vec::new()
+                };
+                select.order = order_by.try_into_dialect(dialect)?;
+                select.limit_clause = (limit, offset).try_into_dialect(dialect)?;
+                Ok(select)
             }
-            _ => failed!("Should only be called on a SELECT query"),
+            // XXX(mvzink): See note in `flatten_set_expr` in `compound_select.rs`: this could be a
+            // compound query nested in a compound query, which readyset-sql's AST doesn't support
+            // directly.
+            _ => failed!("Should only be called on a SELECT query, got: {body:?}"),
         }
     }
 }

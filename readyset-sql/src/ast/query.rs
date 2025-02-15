@@ -176,6 +176,8 @@ impl TryFromDialect<sqlparser::ast::Query> for SqlQuery {
     ) -> Result<Self, AstConversionError> {
         if matches!(*value.body, sqlparser::ast::SetExpr::Select(_)) {
             Ok(SqlQuery::Select(value.try_into_dialect(dialect)?))
+        } else if matches!(*value.body, sqlparser::ast::SetExpr::SetOperation { .. }) {
+            Ok(SqlQuery::CompoundSelect(value.try_into_dialect(dialect)?))
         } else {
             not_yet_implemented!("unsupported non-select query type {value:?}")
         }
