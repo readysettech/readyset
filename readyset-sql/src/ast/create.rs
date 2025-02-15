@@ -205,7 +205,7 @@ impl TryFromDialect<sqlparser::ast::CreateTable> for CreateTableStatement {
         {
             options.push(CreateTableOption::Comment(comment));
         }
-        Ok(Self {
+        let mut create_table = Self {
             if_not_exists: value.if_not_exists,
             table: value.name.into_dialect(dialect),
             body: Ok(CreateTableBody {
@@ -227,7 +227,9 @@ impl TryFromDialect<sqlparser::ast::CreateTable> for CreateTableStatement {
                 },
             }),
             options: Ok(options),
-        })
+        };
+        create_table.propagate_default_charset(dialect);
+        Ok(create_table)
     }
 }
 
