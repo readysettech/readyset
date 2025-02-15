@@ -240,7 +240,7 @@ impl TryFromDialect<sqlparser::ast::TableConstraint> for TableKey {
                 display_as_key: _display_as_key,
             } => Ok(Self::Key {
                 // TODO(mvzink): Where do these two different names come from for sqlparser?
-                constraint_name: name.clone().map(|name| name.into_dialect(dialect)),
+                constraint_name: None,
                 index_name: name.map(|name| name.into_dialect(dialect)),
                 columns: columns
                     .into_iter()
