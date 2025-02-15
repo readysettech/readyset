@@ -224,7 +224,9 @@ impl TryFromDialect<sqlparser::ast::DataType> for crate::ast::SqlType {
             Custom(name, _values) => match name.0.iter().exactly_one() {
                 Ok(part) => match part.as_ident().map(|ident| ident.value.as_str()) {
                     Some(name) => {
-                        if name.eq_ignore_ascii_case("citext") {
+                        if dialect == Dialect::PostgreSQL && name == "char" {
+                            Ok(Self::QuotedChar)
+                        } else if name.eq_ignore_ascii_case("citext") {
                             Ok(Self::Citext)
                         } else if name.eq_ignore_ascii_case("inet") {
                             Ok(Self::Inet)
