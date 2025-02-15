@@ -119,7 +119,6 @@ use crate::query_handler::SetBehavior;
 use crate::query_status_cache::QueryStatusCache;
 use crate::status_reporter::ReadySetStatusReporter;
 pub use crate::upstream_database::UpstreamPrepare;
-use crate::upstream_database::UpstreamStatementId;
 use crate::utils::{create_dummy_column, time_or_null};
 use crate::{create_dummy_schema, QueryHandler, UpstreamDatabase, UpstreamDestination};
 
@@ -737,19 +736,6 @@ pub enum PrepareResultInner<DB: UpstreamDatabase> {
     Both(noria_connector::PrepareResult, UpstreamPrepare<DB>),
 }
 
-impl<DB: UpstreamDatabase> PrepareResultInner<DB> {
-    /// Returns the statement id only if the an upstream database was used to prepare the statement.
-    pub fn upstream_statement_id(&self) -> Option<StatementId> {
-        match self {
-            Self::Noria(_) => None,
-            Self::Upstream(u) | Self::Both(_, u) => match u.statement_id {
-                UpstreamStatementId::Prepared(id) => Some(id),
-                UpstreamStatementId::Unprepared(_) => None,
-            },
-        }
-    }
-}
-
 // Sadly rustc is very confused when trying to derive Clone for UpstreamPrepare, so have to do it
 // manually
 impl<DB: UpstreamDatabase> Clone for PrepareResultInner<DB> {
@@ -965,17 +951,18 @@ where
         result.map(QueryResult::UpstreamBufferedInMemory)
     }
 
-    /// Prepares query on the mysql_backend, if present, when it cannot be parsed or prepared by
+    /// Prepares query on the upstream database, if present, when it cannot be parsed or prepared by
     /// noria.
     pub async fn prepare_fallback(
         &mut self,
         query: &str,
         data: DB::PrepareData<'_>,
+        statement_type: PreparedStatementType,
     ) -> Result<UpstreamPrepare<DB>, DB::Error> {
         let upstream = self.upstream.as_mut().ok_or_else(|| {
             ReadySetError::Internal("This case requires an upstream connector".to_string())
         })?;
-        upstream.prepare(query, data).await
+        upstream.prepare(query, data, statement_type).await
     }
 
     /// Prepares query against ReadySet. If an upstream database exists, the prepare is mirrored to
@@ -988,6 +975,7 @@ where
         select_meta: &PrepareSelectMeta,
         query: &str,
         data: DB::PrepareData<'_>,
+        statement_type: PreparedStatementType,
         event: &mut QueryExecutionEvent,
     ) -> Result<PrepareResultInner<DB>, DB::Error> {
         let do_noria = select_meta.should_do_noria;
@@ -996,7 +984,7 @@ where
         let up_prep: OptionFuture<_> = self
             .upstream
             .as_mut()
-            .map(|u| u.prepare(query, data))
+            .map(|u| u.prepare(query, data, statement_type))
             .into();
         let noria_prep: OptionFuture<_> = do_noria
             .then_some(
@@ -1093,13 +1081,14 @@ where
         query: &str,
         stmt: &SqlQuery,
         data: DB::PrepareData<'_>,
+        statement_type: PreparedStatementType,
         event: &mut QueryExecutionEvent,
     ) -> Result<PrepareResultInner<DB>, DB::Error> {
         event.sql_type = SqlQueryType::Write;
         if let Some(ref mut upstream) = self.upstream {
             let _t = event.start_upstream_timer();
             let res = upstream
-                .prepare(query, data)
+                .prepare(query, data, statement_type)
                 .await
                 .map(PrepareResultInner::Upstream);
             self.last_query = Some(QueryInfo {
@@ -1135,6 +1124,7 @@ where
         stmt: &SetStatement,
         query: &str,
         data: DB::PrepareData<'_>,
+        statement_type: PreparedStatementType,
         event: &mut QueryExecutionEvent,
     ) -> Result<PrepareResultInner<DB>, DB::Error> {
         // if `handle_set()` returns an error, we aren't supposed to process
@@ -1151,7 +1141,7 @@ where
         )?;
         let res = if self.state.proxy_state.should_proxy() && self.upstream.is_some() {
             let upstream = self.upstream.as_mut().unwrap(); // just checked
-            let prep = upstream.prepare(query, data).await?;
+            let prep = upstream.prepare(query, data, statement_type).await?;
             PrepareResultInner::Upstream(prep)
         } else {
             PrepareResultInner::Noria(noria_connector::PrepareResult::Set {
@@ -1266,14 +1256,22 @@ where
         meta: &PrepareMeta,
         query: &str,
         data: DB::PrepareData<'_>,
+        statement_type: PreparedStatementType,
         event: &mut QueryExecutionEvent,
     ) -> Result<PrepareResultInner<DB>, DB::Error> {
         match meta {
             PrepareMeta::Select(select_meta) => {
-                self.mirror_prepare(select_meta, query, data, event).await
+                self.mirror_prepare(select_meta, query, data, statement_type, event)
+                    .await
             }
-            PrepareMeta::Write { stmt } => self.prepare_write(query, stmt, data, event).await,
-            PrepareMeta::Set { stmt } => self.prepare_set(stmt, query, data, event).await,
+            PrepareMeta::Write { stmt } => {
+                self.prepare_write(query, stmt, data, statement_type, event)
+                    .await
+            }
+            PrepareMeta::Set { stmt } => {
+                self.prepare_set(stmt, query, data, statement_type, event)
+                    .await
+            }
             PrepareMeta::Proxy
             | PrepareMeta::FailedToParse
             | PrepareMeta::FailedToRewrite(_)
@@ -1283,7 +1281,7 @@ where
             {
                 let _t = event.start_upstream_timer();
                 let res = self
-                    .prepare_fallback(query, data)
+                    .prepare_fallback(query, data, statement_type)
                     .await
                     .map(PrepareResultInner::Upstream);
 
@@ -1388,22 +1386,9 @@ where
 
         let mut query_event = QueryExecutionEvent::new(EventType::Prepare);
         let meta = self.plan_prepare(query, &mut query_event).await;
-        let mut prep = self
-            .do_prepare(&meta, query, data, &mut query_event)
+        let prep = self
+            .do_prepare(&meta, query, data, statement_type, &mut query_event)
             .await?;
-
-        // Store the ID before we modify the statement type
-        let upstream_statement_id = prep.upstream_statement_id();
-
-        // Update the statement type after we've captured the ID
-        if matches!(statement_type, PreparedStatementType::Unnamed) {
-            match &mut prep {
-                PrepareResultInner::Upstream(p) | PrepareResultInner::Both(_, p) => {
-                    p.make_unnamed(query)
-                }
-                PrepareResultInner::Noria(_) => {}
-            }
-        }
 
         let next_id = self
             .state
@@ -1416,13 +1401,6 @@ where
         assert_eq!(next_id, statement_id as u32);
 
         if matches!(statement_type, PreparedStatementType::Unnamed) {
-            // we wouldn't have an upstream_statement_id if we only went to noria (readyset);
-            // but we'll always have an upstream_statement_id if we went to the upstream
-            if let Some(upstream_statement_id) = upstream_statement_id {
-                self.remove_statement(DeallocateId::Numeric(upstream_statement_id))
-                    .await?;
-            }
-
             // For unnamed prepared statements, store the query string mapping
             self.state
                 .unnamed_prepared_statements
@@ -1849,15 +1827,7 @@ where
             DeallocateId::Numeric(id) => {
                 if let Some(statement) = self.state.prepared_statements.try_remove(id as usize) {
                     if let Some(ur) = statement.prep.into_upstream() {
-                        let upstream_id = match ur.statement_id {
-                            UpstreamStatementId::Prepared(id) => id,
-                            UpstreamStatementId::Unprepared(_) => {
-                                // this is the case where an unnamed prepared statement was referenced,
-                                // but it's already closed.
-                                return Ok(());
-                            }
-                        };
-                        dealloc_id = DeallocateId::Numeric(upstream_id);
+                        dealloc_id = DeallocateId::Numeric(ur.statement_id);
                     } else {
                         // this is the case where a prepared statement was created for readyset
                         // use, and not prepared/executed on the upstream.
