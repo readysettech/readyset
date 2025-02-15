@@ -9,7 +9,7 @@ use postgres_types::Kind;
 use psql_srv::{Column, TransferFormat};
 use readyset_adapter::upstream_database::{UpstreamDestination, UpstreamStatementId};
 use readyset_adapter::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
-use readyset_adapter_types::DeallocateId;
+use readyset_adapter_types::{DeallocateId, PreparedStatementType};
 use readyset_client_metrics::recorded;
 use readyset_data::DfValue;
 use readyset_errors::{internal_err, invariant_eq, unsupported, ReadySetError, ReadySetResult};
@@ -23,13 +23,20 @@ use tokio_postgres::{
 use tracing::{debug, info_span};
 use tracing_futures::Instrument;
 
-use crate::schema::type_to_pgsql;
 use crate::Error;
 
 /// Indicates the minimum upstream server version that we currently support. Used to error out
 /// during connection phase if the version for the upstream server is too low.
 const MIN_UPSTREAM_MAJOR_VERSION: u16 = 13;
 const MIN_UPSTREAM_MINOR_VERSION: u16 = 0;
+
+enum PreparedStatementWrapper {
+    // Wraps an actual, live statement that's been prepared on the upstream postgres.
+    Named(Statement),
+    // Contains the metadata required for executing an unnamed prepared statement
+    // aginst the upstream postgres.
+    Unnamed((String, Vec<Type>)),
+}
 
 /// A connector to an underlying PostgreSQL database
 pub struct PostgreSqlUpstream {
@@ -38,7 +45,7 @@ pub struct PostgreSqlUpstream {
     /// A tokio task that handles the connection, required by `tokio_postgres` to operate
     _connection_handle: JoinHandle<Result<(), tokio_postgres::Error>>,
     /// Map from prepared statement IDs to prepared statements
-    prepared_statements: Vec<Option<Statement>>,
+    prepared_statements: Vec<Option<PreparedStatementWrapper>>,
     /// ID for the next prepared statement
     statement_id_counter: u32,
     /// The user used to connect to the upstream, if any
@@ -294,6 +301,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         &'a mut self,
         query: S,
         parameter_data_types: &[Type],
+        statement_type: PreparedStatementType,
     ) -> Result<UpstreamPrepare<Self>, Error>
     where
         S: AsRef<str> + Send + Sync + 'a,
@@ -320,11 +328,19 @@ impl UpstreamDatabase for PostgreSqlUpstream {
                 .collect::<Result<Vec<_>, _>>()?,
         };
 
+        let pstmt = match statement_type {
+            PreparedStatementType::Unnamed => {
+                let params = statement.params().to_vec();
+                PreparedStatementWrapper::Unnamed((query.to_string(), params))
+            }
+            PreparedStatementType::Named => PreparedStatementWrapper::Named(statement),
+        };
+
         self.statement_id_counter += 1;
         let statement_id = self.statement_id_counter;
         match self.prepared_statements.get_mut(statement_id as usize) {
             Some(existing) => {
-                *existing = Some(statement);
+                *existing = Some(pstmt);
             }
             None => {
                 let diff = (statement_id as usize) - self.prepared_statements.len();
@@ -332,14 +348,11 @@ impl UpstreamDatabase for PostgreSqlUpstream {
                 for _ in 0..diff {
                     self.prepared_statements.push(None);
                 }
-                self.prepared_statements.push(Some(statement));
+                self.prepared_statements.push(Some(pstmt));
             }
         }
 
-        Ok(UpstreamPrepare {
-            statement_id: statement_id.into(),
-            meta,
-        })
+        Ok(UpstreamPrepare { statement_id, meta })
     }
 
     async fn query<'a>(&'a mut self, query: &'a str) -> Result<Self::QueryResult<'a>, Error> {
@@ -380,14 +393,31 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         exec_meta: &'_ [TransferFormat],
     ) -> Result<Self::QueryResult<'a>, Error> {
         let result_formats = exec_meta.iter().map(|tf| (*tf).into());
-        match statement_id {
-            UpstreamStatementId::Unprepared(query) => {
+        let pstmt = self.prepared_statements.get(*statement_id as usize);
+        if pstmt.is_none() {
+            return Err(ReadySetError::PreparedStatementMissing {
+                statement_id: *statement_id,
+            }
+            .into());
+        }
+
+        match &pstmt.unwrap() {
+            Some(PreparedStatementWrapper::Unnamed((query, param_types))) => {
+                if params.len() != param_types.len() {
+                    // this should have been caught way earlier in the stack.
+                    return Err(internal_err!(
+                        "Invalid parameter count: expected {}, got {}",
+                        param_types.len(),
+                        params.len()
+                    )
+                    .into());
+                }
+
                 // we need to get the postgres type for each DfValue parameter, and stuff a tuple of
                 // those into a Vec, which we can then pass to `query_typed_raw()`
                 let mut typed_params = Vec::with_capacity(params.len());
-                for p in params {
-                    let postgres_type = type_to_pgsql(&p.infer_dataflow_type())?;
-                    typed_params.push((p, postgres_type));
+                for (p, postgres_type) in params.iter().zip(param_types.iter()) {
+                    typed_params.push((p, postgres_type.clone()));
                 }
 
                 let mut stream = Box::pin(
@@ -404,13 +434,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
                     }
                 }
             }
-            UpstreamStatementId::Prepared(id) => {
-                let statement = self
-                    .prepared_statements
-                    .get(*id as usize)
-                    .and_then(|s| s.as_ref())
-                    .ok_or(ReadySetError::PreparedStatementMissing { statement_id: *id })?;
-
+            Some(PreparedStatementWrapper::Named(statement)) => {
                 let mut stream = Box::pin(
                     self.client
                         .generic_query_raw(
@@ -430,6 +454,10 @@ impl UpstreamDatabase for PostgreSqlUpstream {
                     }
                 }
             }
+            None => Err(ReadySetError::PreparedStatementMissing {
+                statement_id: *statement_id,
+            }
+            .into()),
         }
     }
 

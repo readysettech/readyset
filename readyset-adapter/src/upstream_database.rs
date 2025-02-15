@@ -3,44 +3,19 @@ use std::fmt::Debug;
 
 use async_trait::async_trait;
 pub use database_utils::UpstreamConfig;
-use readyset_adapter_types::DeallocateId;
+use readyset_adapter_types::{DeallocateId, PreparedStatementType};
 use readyset_client_metrics::QueryDestination;
 use readyset_data::DfValue;
 use readyset_errors::ReadySetError;
 use readyset_sql::ast::{SqlIdentifier, StartTransactionStatement};
 use tracing::debug;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum UpstreamStatementId {
-    /// A reusable id of a statement that has been prepared in an [`UpstreamDatabase`]
-    Prepared(u32),
-    /// A statement that has not been prepared in an [`UpstreamDatabase`]. The intended use case
-    /// for this is (postgres) unnamed prepared statements.
-    Unprepared(String),
-}
-
-impl From<u32> for UpstreamStatementId {
-    fn from(id: u32) -> Self {
-        UpstreamStatementId::Prepared(id)
-    }
-}
-
-impl From<String> for UpstreamStatementId {
-    fn from(id: String) -> Self {
-        UpstreamStatementId::Unprepared(id)
-    }
-}
+pub type UpstreamStatementId = u32;
 
 /// Information about a statement that has been prepared in an [`UpstreamDatabase`]
 pub struct UpstreamPrepare<DB: UpstreamDatabase> {
     pub statement_id: UpstreamStatementId,
     pub meta: DB::StatementMeta,
-}
-
-impl<DB: UpstreamDatabase> UpstreamPrepare<DB> {
-    pub fn make_unnamed(&mut self, query: &str) {
-        self.statement_id = UpstreamStatementId::Unprepared(query.to_string());
-    }
 }
 
 impl<DB: UpstreamDatabase> Debug for UpstreamPrepare<DB> {
@@ -55,7 +30,7 @@ impl<DB: UpstreamDatabase> Debug for UpstreamPrepare<DB> {
 impl<DB: UpstreamDatabase> Clone for UpstreamPrepare<DB> {
     fn clone(&self) -> Self {
         UpstreamPrepare {
-            statement_id: self.statement_id.clone(),
+            statement_id: self.statement_id,
             meta: self.meta.clone(),
         }
     }
@@ -164,6 +139,7 @@ pub trait UpstreamDatabase: Sized + Send {
         &'a mut self,
         query: S,
         data: Self::PrepareData<'b>,
+        statement_type: PreparedStatementType,
     ) -> Result<UpstreamPrepare<Self>, Self::Error>
     where
         S: AsRef<str> + Send + Sync + 'a;
@@ -346,12 +322,16 @@ where
         &'a mut self,
         query: S,
         data: Self::PrepareData<'b>,
+        statement_type: PreparedStatementType,
     ) -> Result<UpstreamPrepare<Self>, Self::Error>
     where
         S: AsRef<str> + Send + Sync + 'a,
     {
-        let UpstreamPrepare { statement_id, meta } =
-            self.upstream().await?.prepare(query, data).await?;
+        let UpstreamPrepare { statement_id, meta } = self
+            .upstream()
+            .await?
+            .prepare(query, data, statement_type)
+            .await?;
         Ok(UpstreamPrepare { statement_id, meta })
     }
 
