@@ -4246,8 +4246,8 @@ async fn simple_pagination() {
     let (mut g, shutdown_tx) = start_simple_unsharded("simple_pagination").await;
     g.extend_recipe(
         ChangeList::from_str(
-            "CREATE TABLE t (x, y);
-         CREATE CACHE q FROM SELECT x, y FROM t WHERE y = $1 ORDER BY x ASC LIMIT 3 OFFSET $2;",
+            "CREATE TABLE t (x int, y text);
+            CREATE CACHE q FROM SELECT x, y FROM t WHERE y = $1 ORDER BY x ASC LIMIT 3 OFFSET $2;",
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),
