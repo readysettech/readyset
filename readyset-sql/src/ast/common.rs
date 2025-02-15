@@ -205,8 +205,8 @@ impl TryFromDialect<sqlparser::ast::TableConstraint> for TableKey {
                 characteristics: _characteristics,
             } => Ok(Self::ForeignKey {
                 // TODO(mvzink): Where do these two different names come from for sqlparser?
-                constraint_name: name.clone().into_dialect(dialect),
-                index_name: name.into_dialect(dialect),
+                constraint_name: name.into_dialect(dialect),
+                index_name: None,
                 columns: columns.into_dialect(dialect),
                 target_table: foreign_table.into_dialect(dialect),
                 target_columns: referred_columns.into_dialect(dialect),
@@ -232,7 +232,7 @@ impl TryFromDialect<sqlparser::ast::TableConstraint> for TableKey {
                 display_as_key: _display_as_key,
             } => Ok(Self::Key {
                 // TODO(mvzink): Where do these two different names come from for sqlparser?
-                constraint_name: name.clone().into_dialect(dialect),
+                constraint_name: None,
                 index_name: name.into_dialect(dialect),
                 columns: columns.into_dialect(dialect),
                 index_type: index_type.map(Into::into),
