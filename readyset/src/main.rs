@@ -1,7 +1,10 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 use clap::Parser;
 use database_utils::DatabaseType;
+use mysql_srv::AuthCache;
 use readyset::mysql::MySqlHandler;
 use readyset::psql::PsqlHandler;
 use readyset::{NoriaAdapter, Options};
@@ -16,6 +19,7 @@ fn main() -> anyhow::Result<()> {
                 enable_statement_logging: options.tracing.statement_logging,
                 tls_acceptor: options.tls_acceptor()?,
                 tls_mode: options.tls_mode,
+                auth_cache: Arc::new(Mutex::new(AuthCache::new())),
             },
             database_type: DatabaseType::MySQL,
             parse_dialect: readyset_sql::Dialect::MySQL,

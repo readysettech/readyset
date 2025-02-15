@@ -2,10 +2,11 @@ use std::io;
 use std::sync::Arc;
 
 use database_utils::TlsMode;
-use mysql_srv::MySqlIntermediary;
+use mysql_srv::{AuthCache, MySqlIntermediary};
 use readyset_adapter::upstream_database::LazyUpstream;
 use readyset_mysql::{MySqlQueryHandler, MySqlUpstream};
 use tokio::net::TcpStream;
+use tokio::sync::Mutex;
 use tokio_native_tls::TlsAcceptor;
 use tracing::{debug, error};
 
@@ -19,6 +20,8 @@ pub struct MySqlHandler {
     pub tls_acceptor: Option<Arc<TlsAcceptor>>,
     /// Indicates which type of client connections are allowed
     pub tls_mode: TlsMode,
+    /// A cache for successful authentication hashes
+    pub auth_cache: Arc<Mutex<AuthCache>>,
 }
 
 impl ConnectionHandler for MySqlHandler {
@@ -39,6 +42,7 @@ impl ConnectionHandler for MySqlHandler {
             self.enable_statement_logging,
             self.tls_acceptor.clone(),
             self.tls_mode,
+            Arc::clone(&self.auth_cache),
         )
         .await
         {

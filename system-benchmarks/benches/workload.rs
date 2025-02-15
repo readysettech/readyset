@@ -23,6 +23,7 @@ use database_utils::{
 use fork::{fork, Fork};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
+use mysql_srv::AuthCache;
 use readyset::mysql::MySqlHandler;
 use readyset::psql::PsqlHandler;
 use readyset::{NoriaAdapter, Options};
@@ -681,6 +682,7 @@ fn start_adapter(args: SystemBenchArgs) -> anyhow::Result<()> {
                     enable_statement_logging: false,
                     tls_acceptor: None,
                     tls_mode: TlsMode::Optional,
+                    auth_cache: Arc::new(Mutex::new(AuthCache::new())),
                 },
                 database_type: DatabaseType::MySQL,
                 parse_dialect: readyset_sql::Dialect::MySQL,

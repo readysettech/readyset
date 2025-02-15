@@ -1,14 +1,16 @@
 use std::env;
 use std::fmt::Display;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use database_utils::TlsMode;
 use mysql_async::prelude::Queryable;
-use mysql_srv::MySqlIntermediary;
+use mysql_srv::{AuthCache, MySqlIntermediary};
 use readyset_adapter::backend::QueryInfo;
 use readyset_adapter::upstream_database::LazyUpstream;
 use readyset_mysql::{Backend, MySqlQueryHandler, MySqlUpstream};
 use tokio::net::TcpStream;
+use tokio::sync::Mutex;
 
 use crate::Adapter;
 
@@ -103,6 +105,7 @@ impl Adapter for MySQLAdapter {
             false,
             None,
             TlsMode::Optional,
+            Arc::new(Mutex::new(AuthCache::new())),
         )
         .await
         .unwrap()

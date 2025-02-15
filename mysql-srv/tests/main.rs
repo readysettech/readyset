@@ -10,18 +10,20 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::marker::PhantomData;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::{io, net, thread};
 
 use database_utils::TlsMode;
 use mysql::prelude::Queryable;
 use mysql::Row;
 use mysql_srv::{
-    CachedSchema, Column, ErrorKind, InitWriter, MySqlIntermediary, MySqlShim, ParamParser,
-    QueryResultWriter, QueryResultsResponse, StatementMetaWriter,
+    AuthCache, CachedSchema, Column, ErrorKind, InitWriter, MySqlIntermediary, MySqlShim,
+    ParamParser, QueryResultWriter, QueryResultsResponse, StatementMetaWriter,
 };
 use readyset_adapter_types::DeallocateId;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
+use tokio::sync::Mutex;
 
 static DEFAULT_CHARACTER_SET: u16 = myc::constants::UTF8_GENERAL_CI;
 
@@ -225,6 +227,7 @@ where
                 false,
                 None,
                 TlsMode::Optional,
+                Arc::new(Mutex::new(AuthCache::new())),
             ))
         });
 

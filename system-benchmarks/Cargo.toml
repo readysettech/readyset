@@ -26,6 +26,7 @@ clap = { workspace = true, features = ["derive"] }
 [dev-dependencies]
 benchmarks = { path = "../benchmarks" }
 
+mysql-srv = { path = "../mysql-srv" }
 readyset-client = { path = "../readyset-client" }
 readyset-mysql = { path = "../readyset-mysql" }
 readyset-psql = { path = "../readyset-psql" }

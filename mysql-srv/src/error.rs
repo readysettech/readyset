@@ -52,6 +52,9 @@ pub enum MsqlSrvError {
     /// Error from mysql_common indicating that the column type is unknown.
     #[error("Unknown column type")]
     UnknownColumnType(#[from] myc::constants::UnknownColumnType),
+    /// Used to propagate errors from RSA password decryption().
+    #[error("Failed to decrypt client password")]
+    DecryptionError,
 }
 
 impl From<MsqlSrvError> for io::Error {

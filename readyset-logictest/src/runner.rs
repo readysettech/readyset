@@ -13,7 +13,7 @@ use anyhow::{anyhow, bail, Context};
 use console::style;
 use database_utils::{DatabaseConnection, DatabaseType, DatabaseURL, QueryableConnection, TlsMode};
 use itertools::Itertools;
-use mysql_srv::MySqlIntermediary;
+use mysql_srv::{AuthCache, MySqlIntermediary};
 use readyset_adapter::backend::noria_connector::ReadBehavior;
 use readyset_adapter::backend::{BackendBuilder, NoriaConnector};
 use readyset_adapter::query_status_cache::QueryStatusCache;
@@ -32,7 +32,7 @@ use readyset_sql::ast::Relation;
 use readyset_sql::Dialect;
 use readyset_util::shared_cache::SharedCache;
 use readyset_util::shutdown::ShutdownSender;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use tokio::time::sleep;
 use {mysql_async as mysql, tokio_postgres as pgsql};
 
@@ -680,6 +680,7 @@ impl TestScript {
                     false,
                     None,
                     TlsMode::Optional,
+                    Arc::new(Mutex::new(AuthCache::new())),
                 )
                 .await
                 .unwrap(),

@@ -44,6 +44,13 @@ impl<S: AsyncRead + AsyncWrite + Unpin> SwitchableStream<S> {
         };
         Ok(())
     }
+
+    pub fn is_secure(&mut self) -> bool {
+        match &mut self.0.as_mut().unwrap() {
+            Stream::Plain(_) => false,
+            Stream::Tls(_) => true,
+        }
+    }
 }
 
 impl<S: AsyncRead + AsyncWrite + Unpin> AsyncRead for SwitchableStream<S> {
