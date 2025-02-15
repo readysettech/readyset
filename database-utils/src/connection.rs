@@ -11,6 +11,7 @@ use mysql::PoolConstraints;
 use mysql_async::prelude::Queryable;
 use readyset_errors::ReadySetError;
 use readyset_sql::{ast::SqlType, Dialect};
+use tokio_postgres::{GenericResult, DEFAULT_RESULT_FORMATS};
 use {mysql_async as mysql, tokio_postgres as pgsql};
 
 use crate::error::{ConnectionType, DatabaseError};
@@ -138,6 +139,21 @@ pub enum DatabaseConnection {
     PostgreSQLPool(deadpool_postgres::Client),
 }
 
+/// Macro to handle collecting PostgreSQL query results into a Vec<Row>, filtering out Command messages
+macro_rules! collect_postgres_rows {
+    ($query_result:expr) => {
+        ($query_result.await?)
+            .try_filter_map(|result| async move {
+                match result {
+                    GenericResult::Row(row) => Ok(Some(row)),
+                    GenericResult::Command(_, _) => Ok(None),
+                }
+            })
+            .try_collect()
+            .await?
+    };
+}
+
 impl QueryableConnection for DatabaseConnection {
     async fn query_drop<Q>(&mut self, stmt: Q) -> Result<(), DatabaseError>
     where
@@ -165,23 +181,10 @@ impl QueryableConnection for DatabaseConnection {
                 conn.query_iter(query).await?.collect().await?,
             )),
             DatabaseConnection::PostgreSQL(client, _jh) => Ok(QueryResults::Postgres(
-                // It is not possible to use `Client::simple_query` here because that method
-                // returns a stream of `SimpleQueryMessage`, which does not implement `FromSql`. It
-                // is only possible to convert `SimpleQueryMessage` to a `&str` (and not, say, a
-                // `DfValue`) because `SimpleQueryMessage`s don't contain any information about the
-                // underlying types of the columns.
-                client
-                    .query_raw(query.as_ref(), Vec::<i8>::new())
-                    .await?
-                    .try_collect()
-                    .await?,
+                collect_postgres_rows!(client.query_raw(query.as_ref(), Vec::<i8>::new())),
             )),
             DatabaseConnection::PostgreSQLPool(client) => Ok(QueryResults::Postgres(
-                client
-                    .query_raw(query.as_ref(), Vec::<i8>::new())
-                    .await?
-                    .try_collect()
-                    .await?,
+                collect_postgres_rows!(client.query_raw(query.as_ref(), Vec::<i8>::new())),
             )),
         }
     }
@@ -220,18 +223,22 @@ impl QueryableConnection for DatabaseConnection {
     {
         match self {
             Self::MySQL(_) => Err(DatabaseError::WrongConnection(ConnectionType::PostgreSQL)),
-            Self::PostgreSQL(conn, _) => Ok(QueryResults::Postgres(
-                conn.query_typed_raw(query.as_ref(), params)
-                    .await?
-                    .try_collect()
-                    .await?,
-            )),
-            Self::PostgreSQLPool(conn) => Ok(QueryResults::Postgres(
-                conn.query_typed_raw(query.as_ref(), params)
-                    .await?
-                    .try_collect()
-                    .await?,
-            )),
+            Self::PostgreSQL(conn, _) => {
+                Ok(QueryResults::Postgres(collect_postgres_rows!(conn
+                    .query_typed_raw(
+                        query.as_ref(),
+                        params,
+                        DEFAULT_RESULT_FORMATS
+                    ))))
+            }
+            Self::PostgreSQLPool(conn) => {
+                Ok(QueryResults::Postgres(collect_postgres_rows!(conn
+                    .query_typed_raw(
+                        query.as_ref(),
+                        params,
+                        DEFAULT_RESULT_FORMATS
+                    ))))
+            }
         }
     }
 
@@ -254,18 +261,12 @@ impl QueryableConnection for DatabaseConnection {
                     .collect()
                     .await?,
             )),
-            Self::PostgreSQL(conn, _) => Ok(QueryResults::Postgres(
+            Self::PostgreSQL(conn, _) => Ok(QueryResults::Postgres(collect_postgres_rows!(
                 conn.query_raw(stmt.as_postgres_statement()?, params)
-                    .await?
-                    .try_collect()
-                    .await?,
-            )),
-            Self::PostgreSQLPool(conn) => Ok(QueryResults::Postgres(
+            ))),
+            Self::PostgreSQLPool(conn) => Ok(QueryResults::Postgres(collect_postgres_rows!(
                 conn.query_raw(stmt.as_postgres_statement()?, params)
-                    .await?
-                    .try_collect()
-                    .await?,
-            )),
+            ))),
         }
     }
 }
@@ -771,23 +772,11 @@ impl QueryableConnection for Transaction<'_> {
             Transaction::MySql(transaction) => Ok(QueryResults::MySql(
                 transaction.query_iter(query).await?.collect().await?,
             )),
-            // TODO: We should use simple_query here instead, because query_raw will still
-            // prepare. simple_query returns a different result type, so may take some work to
-            // get it work properly here.
             Transaction::Postgres(transaction) => Ok(QueryResults::Postgres(
-                transaction
-                    .query_raw(query.as_ref(), Vec::<i8>::new())
-                    .await?
-                    .try_collect()
-                    .await?,
+                collect_postgres_rows!(transaction.query_raw(query.as_ref(), Vec::<i8>::new())),
             )),
-
             Transaction::PostgresPool(transaction) => Ok(QueryResults::Postgres(
-                transaction
-                    .query_raw(query.as_ref(), Vec::<i8>::new())
-                    .await?
-                    .try_collect()
-                    .await?,
+                collect_postgres_rows!(transaction.query_raw(query.as_ref(), Vec::<i8>::new())),
             )),
         }
     }
@@ -829,18 +818,10 @@ impl QueryableConnection for Transaction<'_> {
                 Err(DatabaseError::WrongConnection(ConnectionType::PostgreSQL))
             }
             Transaction::Postgres(transaction) => Ok(QueryResults::Postgres(
-                transaction
-                    .query_typed_raw(query.as_ref(), params)
-                    .await?
-                    .try_collect()
-                    .await?,
+                collect_postgres_rows!(transaction.query_typed_raw(query.as_ref(), params)),
             )),
             Transaction::PostgresPool(transaction) => Ok(QueryResults::Postgres(
-                transaction
-                    .query_typed_raw(query.as_ref(), params)
-                    .await?
-                    .try_collect()
-                    .await?,
+                collect_postgres_rows!(transaction.query_typed_raw(query.as_ref(), params)),
             )),
         }
     }
@@ -869,20 +850,12 @@ impl QueryableConnection for Transaction<'_> {
                     .collect()
                     .await?,
             )),
-            Self::Postgres(transaction) => Ok(QueryResults::Postgres(
-                transaction
-                    .query_raw(stmt.as_postgres_statement()?, params)
-                    .await?
-                    .try_collect()
-                    .await?,
-            )),
-            Self::PostgresPool(transaction) => Ok(QueryResults::Postgres(
-                transaction
-                    .query_raw(stmt.as_postgres_statement()?, params)
-                    .await?
-                    .try_collect()
-                    .await?,
-            )),
+            Self::Postgres(transaction) => Ok(QueryResults::Postgres(collect_postgres_rows!(
+                transaction.query_raw(stmt.as_postgres_statement()?, params)
+            ))),
+            Self::PostgresPool(transaction) => Ok(QueryResults::Postgres(collect_postgres_rows!(
+                transaction.query_raw(stmt.as_postgres_statement()?, params)
+            ))),
         }
     }
 }
