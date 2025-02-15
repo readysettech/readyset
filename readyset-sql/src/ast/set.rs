@@ -55,13 +55,10 @@ impl TryFromDialect<sqlparser::ast::Statement> for SetStatement {
                     let name = variables
                         .into_iter()
                         .exactly_one()
-                        .map(|mut object_name| match object_name.0.pop().unwrap() {
-                            sqlparser::ast::ObjectNamePart::Identifier(ident) => ident,
-                        })
                         .expect("Multiple variable assignments not supported");
                     Ok(Self::Variable(SetVariables {
                         variables: vec![(
-                            name.value.to_lowercase().into(),
+                            name.try_into()?,
                             value
                                 .into_iter()
                                 .exactly_one()
@@ -253,13 +250,24 @@ pub enum VariableScope {
 
 impl From<&str> for VariableScope {
     fn from(value: &str) -> Self {
+        if value.eq_ignore_ascii_case("@@LOCAL") {
+            Self::Local
+        } else if value.eq_ignore_ascii_case("@@GLOBAL") {
+            Self::Global
+        } else if value.eq_ignore_ascii_case("@@SESSION") || value.eq_ignore_ascii_case("@@") {
+            Self::Session
+        } else if value.eq_ignore_ascii_case("@") {
+            Self::User
+        } else {
+            panic!("unexpected variable scope {value}")
+        }
+    }
+}
+
+impl From<sqlparser::ast::ObjectNamePart> for VariableScope {
+    fn from(value: sqlparser::ast::ObjectNamePart) -> Self {
         match value {
-            "@@LOCAL" => Self::Local,
-            "@@GLOBAL" => Self::Global,
-            "@@SESSION" => Self::Session,
-            "@@" => Self::Session,
-            "@" => Self::User,
-            _ => panic!("unexpected variable scope {value}"),
+            sqlparser::ast::ObjectNamePart::Identifier(ident) => ident.value.as_str().into(),
         }
     }
 }
@@ -283,7 +291,7 @@ pub struct Variable {
 
 impl From<String> for Variable {
     fn from(value: String) -> Self {
-        let lowered = value[..(8.min(value.len()))].to_lowercase();
+        let lowered = value[..(10.min(value.len()))].to_lowercase();
         if lowered.starts_with("@@local.") {
             Self {
                 scope: VariableScope::Local,
@@ -311,7 +319,7 @@ impl From<String> for Variable {
             }
         } else {
             Self {
-                scope: VariableScope::Session,
+                scope: VariableScope::Local,
                 name: value.into(),
             }
         }
@@ -321,6 +329,28 @@ impl From<String> for Variable {
 impl From<sqlparser::ast::Ident> for Variable {
     fn from(value: sqlparser::ast::Ident) -> Self {
         value.value.into()
+    }
+}
+
+impl TryFrom<sqlparser::ast::ObjectName> for Variable {
+    type Error = AstConversionError;
+
+    fn try_from(mut value: sqlparser::ast::ObjectName) -> Result<Self, Self::Error> {
+        let name = match value.0.pop().unwrap() {
+            // XXX(mvzink): We lowercase across the board (even ignoring dialect) just to match nom-sql
+            sqlparser::ast::ObjectNamePart::Identifier(ident) => ident.value.to_lowercase(),
+        };
+        if value.0.is_empty() {
+            Ok(name.into())
+        } else if value.0.len() == 1 {
+            let scope = value.0.pop().unwrap().into();
+            Ok(Self {
+                scope,
+                name: name.into(),
+            })
+        } else {
+            failed!("Invalid variable name remainder {value:?} (name: {name:?})")
+        }
     }
 }
 
