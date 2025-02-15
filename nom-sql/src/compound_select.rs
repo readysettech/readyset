@@ -280,4 +280,99 @@ mod tests {
         // TODO:  assert_eq!(res, ...)
         // TODO:  assert_eq!(res.display(Dialect::MySQL).to_string(), ...)
     }
+
+    #[test]
+    #[ignore = "nom-sql is incorrect"]
+    fn union_order_limit_outer() {
+        // This should effectively get parsed like "(SELECT A) UNION (SELECT B) ORDER BY ...", but
+        // nom-sql incorrectly interprets it like "(SELECT A) UNION (SELECT B ORDER BY ...)"
+        let qstr = "SELECT id FROM foo WHERE col = 'abc' UNION SELECT id FROM foo WHERE othercol >= 3 ORDER BY id ASC LIMIT 1;";
+        let res = simple_or_compound_selection(Dialect::MySQL)(LocatedSpan::new(qstr.as_bytes()));
+
+        let first_select = SelectStatement {
+            tables: vec![TableExpr::from(Relation::from("foo"))],
+            fields: vec![FieldDefinitionExpr::from(Column::from("id"))],
+            where_clause: Some(Expr::BinaryOp {
+                lhs: Box::new(Expr::Column(Column::from("col"))),
+                op: BinaryOperator::Equal,
+                rhs: Box::new(Expr::Literal(Literal::String("abc".to_string()))),
+            }),
+            ..Default::default()
+        };
+        let second_select = SelectStatement {
+            tables: vec![TableExpr::from(Relation::from("foo"))],
+            fields: vec![FieldDefinitionExpr::from(Column::from("id"))],
+            where_clause: Some(Expr::BinaryOp {
+                lhs: Box::new(Expr::Column(Column::from("othercol"))),
+                op: BinaryOperator::GreaterOrEqual,
+                rhs: Box::new(Expr::Literal(Literal::Integer(3))),
+            }),
+            ..Default::default()
+        };
+        let expected = CompoundSelectStatement {
+            selects: vec![
+                (None, first_select),
+                (Some(CompoundSelectOperator::DistinctUnion), second_select),
+            ],
+            order: Some(OrderClause {
+                order_by: vec![OrderBy {
+                    field: FieldReference::Expr(Expr::Column(Column::from("id"))),
+                    order_type: Some(OrderType::OrderAscending),
+                    null_order: None,
+                }],
+            }),
+            limit_clause: LimitClause::LimitOffset {
+                limit: Some(LimitValue::Literal(Literal::Integer(1))),
+                offset: None,
+            },
+        };
+
+        assert_eq!(res.unwrap().1, SelectSpecification::Compound(expected));
+    }
+
+    #[test]
+    fn union_order_limit_outer_parens() {
+        let qstr = "SELECT id FROM foo WHERE col = 'abc' UNION (SELECT id FROM foo WHERE othercol >= 3) ORDER BY id ASC LIMIT 1;";
+        let res = simple_or_compound_selection(Dialect::MySQL)(LocatedSpan::new(qstr.as_bytes()));
+
+        let first_select = SelectStatement {
+            tables: vec![TableExpr::from(Relation::from("foo"))],
+            fields: vec![FieldDefinitionExpr::from(Column::from("id"))],
+            where_clause: Some(Expr::BinaryOp {
+                lhs: Box::new(Expr::Column(Column::from("col"))),
+                op: BinaryOperator::Equal,
+                rhs: Box::new(Expr::Literal(Literal::String("abc".to_string()))),
+            }),
+            ..Default::default()
+        };
+        let second_select = SelectStatement {
+            tables: vec![TableExpr::from(Relation::from("foo"))],
+            fields: vec![FieldDefinitionExpr::from(Column::from("id"))],
+            where_clause: Some(Expr::BinaryOp {
+                lhs: Box::new(Expr::Column(Column::from("othercol"))),
+                op: BinaryOperator::GreaterOrEqual,
+                rhs: Box::new(Expr::Literal(Literal::Integer(3))),
+            }),
+            ..Default::default()
+        };
+        let expected = CompoundSelectStatement {
+            selects: vec![
+                (None, first_select),
+                (Some(CompoundSelectOperator::DistinctUnion), second_select),
+            ],
+            order: Some(OrderClause {
+                order_by: vec![OrderBy {
+                    field: FieldReference::Expr(Expr::Column(Column::from("id"))),
+                    order_type: Some(OrderType::OrderAscending),
+                    null_order: None,
+                }],
+            }),
+            limit_clause: LimitClause::LimitOffset {
+                limit: Some(LimitValue::Literal(Literal::Integer(1))),
+                offset: None,
+            },
+        };
+
+        assert_eq!(res.unwrap().1, SelectSpecification::Compound(expected));
+    }
 }
