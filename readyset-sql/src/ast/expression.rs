@@ -1032,7 +1032,7 @@ impl TryFromDialect<Box<sqlparser::ast::Expr>> for Expr {
 /// variable name.
 impl FromDialect<sqlparser::ast::Ident> for Expr {
     fn from_dialect(value: sqlparser::ast::Ident, dialect: Dialect) -> Self {
-        if value.value.starts_with('@') {
+        if value.quote_style.is_none() && value.value.starts_with('@') {
             Self::Variable(value.into())
         } else if value.quote_style.is_none() && value.value.starts_with('$') {
             Self::Literal(Literal::Placeholder(value.value.into()))
