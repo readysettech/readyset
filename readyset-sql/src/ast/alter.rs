@@ -327,7 +327,7 @@ impl DialectDisplay for AlterReadysetStatement {
             Self::AddTables(stmt) => {
                 write!(
                     f,
-                    "ADD TABLEs {}",
+                    "ADD TABLES {}",
                     stmt.tables.iter().map(|t| t.display(dialect)).join(", ")
                 )
             }
