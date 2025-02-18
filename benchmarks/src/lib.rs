@@ -1,6 +1,6 @@
 //! Top-level runner for ReadySet product benchmarks.
 //!
-//! For a concrete example, see `read_benchmark/mod.rs`.  A more minimal example is provided here.
+//! A minimal example of a benchmark implementation is provided here.
 //!
 //! ```
 //! use core::ops::Range;
