@@ -10,6 +10,7 @@ use psql_srv::{
     run_backend, Credentials, CredentialsNeeded, Error, PsqlBackend, PsqlSrvRow, TransferFormat,
 };
 use readyset_adapter_types::{DeallocateId, PreparedStatementType};
+use readyset_util::redacted::RedactedString;
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio_native_tls::{native_tls, TlsAcceptor};
@@ -33,6 +34,8 @@ impl PsqlBackend for TestBackend {
     fn credentials_for_user(&self, _user: &str) -> Option<Credentials> {
         Some(Credentials::Any)
     }
+
+    async fn set_auth_info(&mut self, _user: &str, _password: Option<RedactedString>) {}
 
     async fn on_init(
         &mut self,

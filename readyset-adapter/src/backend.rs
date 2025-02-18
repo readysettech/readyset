@@ -105,7 +105,7 @@ use readyset_sql::ast::{
 use readyset_sql::{Dialect, DialectDisplay};
 use readyset_sql_passes::adapter_rewrites::{self, ProcessedQueryParams};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
-use readyset_util::redacted::Sensitive;
+use readyset_util::redacted::{RedactedString, Sensitive};
 use readyset_version::READYSET_VERSION;
 use slab::Slab;
 use timestamp_service::client::{TimestampClient, WriteId, WriteKey};
@@ -905,6 +905,19 @@ where
         Ok(())
     }
 
+    /// Change the user for the upstream connection, if it exists
+    ///
+    /// This is called when the client authenticates to the server.
+    pub async fn set_user(
+        &mut self,
+        user: &str,
+        password: RedactedString,
+    ) -> Result<(), DB::Error> {
+        if let Some(upstream) = &mut self.upstream {
+            let _ = upstream.set_user(user, password).await;
+        }
+        Ok(())
+    }
     pub async fn change_user(
         &mut self,
         user: &str,

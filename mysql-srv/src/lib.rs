@@ -22,6 +22,7 @@
 //! use std::collections::HashMap;
 //! use std::iter;
 //!
+//! use readyset_util::redacted::RedactedString;
 //! use database_utils::TlsMode;
 //! use mysql::prelude::*;
 //! use mysql_srv::*;
@@ -61,6 +62,10 @@
 //!         w.unwrap().ok().await
 //!     }
 //!     async fn on_change_user(&mut self, _: &str, _: &str, _: &str) -> io::Result<()> {
+//!         Ok(())
+//!     }
+//!
+//!     async fn set_auth_info(&mut self, _: &str, _: Option<RedactedString>) -> io::Result<()> {
 //!         Ok(())
 //!     }
 //!
@@ -182,6 +187,7 @@ use error::{other_error, OtherErrorKind};
 use mysql_common::constants::CapabilityFlags;
 use readyset_adapter_types::{DeallocateId, ParsedCommand};
 use readyset_data::DfType;
+use readyset_util::redacted::RedactedString;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net;
 use tokio_native_tls::TlsAcceptor;
@@ -312,6 +318,9 @@ pub trait MySqlShim<S: AsyncRead + AsyncWrite + Unpin + Send> {
     /// Called when client switches user.
     async fn on_change_user(&mut self, _: &str, _: &str, _: &str) -> io::Result<()>;
 
+    /// Called when client authenticates to inform which users we should use.
+    async fn set_auth_info(&mut self, _: &str, _: Option<RedactedString>) -> io::Result<()>;
+
     /// Retrieve the password for the user with the given username, if any.
     ///
     /// If the user doesn't exist, return [`None`].
@@ -438,7 +447,8 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
             tls_acceptor,
             tls_mode,
         };
-        if let (true, database) = mi.init().await? {
+        if let (true, username, password, database) = mi.init().await? {
+            mi.shim.set_auth_info(&username, password).await?;
             if let Some(database) = database {
                 mi.shim.on_init(&database, None).await?;
             }
@@ -455,9 +465,11 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
     /// sent and received as needed to complete authentication.
     ///
     /// If no errors are encountered, the return value contains a tuple of a boolean to indicate
-    /// whether authentication was successful, and a database name if one was specified by the
-    /// client in the handshake response.
-    async fn init(&mut self) -> Result<(bool, Option<String>), io::Error> {
+    /// whether authentication was successful, the username, the plaintext password if one was
+    /// provided, and a database name if one was specified by the client in the handshake response.
+    async fn init(
+        &mut self,
+    ) -> Result<(bool, String, Option<RedactedString>, Option<String>), io::Error> {
         let auth_data =
             generate_auth_data().map_err(|_| other_error(OtherErrorKind::AuthDataErr))?;
         self.auth_data = auth_data;
@@ -546,7 +558,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                 )
                 .await?;
                 self.conn.flush().await?;
-                return Ok((false, None));
+                return Ok((false, "".to_string(), None, None));
             }
         }
 
@@ -601,7 +613,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                     &mut self.conn,
                 )
                 .await?;
-                return Ok((false, database));
+                return Ok((false, "".to_string(), None, database));
             }
 
             debug!(
@@ -632,17 +644,24 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
             password
         };
 
-        let auth_success = !self.shim.require_authentication()
-            || self
-                .shim
-                .password_for_username(&username)
-                .is_some_and(|password| {
-                    let expected = hash_password(&password, &auth_data);
-                    let actual = handshake_password.as_slice();
-                    trace!(?expected, ?actual);
-                    expected == actual
-                });
-
+        let plain_password = self.shim.password_for_username(&username);
+        let require_auth = self.shim.require_authentication();
+        let auth_success = !require_auth
+            || plain_password.as_ref().is_some_and(|password| {
+                let expected = hash_password(password, &auth_data);
+                let actual = handshake_password.as_slice();
+                trace!(?expected, ?actual);
+                expected == actual
+            });
+        let plain_password = if require_auth {
+            Some(RedactedString::from(
+                plain_password
+                    .map(|p| String::from_utf8_lossy(&p).into_owned())
+                    .unwrap_or_default(),
+            ))
+        } else {
+            None
+        };
         if auth_success {
             debug!(%username, "Successfully authenticated client");
             writers::write_ok_packet(&mut self.conn, 0, 0, StatusFlags::empty()).await?;
@@ -656,8 +675,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
             .await?;
         }
         self.conn.flush().await?;
-
-        Ok((auth_success, database))
+        Ok((auth_success, username, plain_password, database))
     }
 
     async fn run(mut self) -> Result<(), io::Error> {
