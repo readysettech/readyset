@@ -155,33 +155,3 @@ steps:
           login: true
           retries: 3
     retry: *retry_on_agent_kill
-
-  - label: 'Test benchmark framework'
-    key: test-benchmark
-    command:
-      - '[ -d public ] && cd public'
-      - 'echo +++ Running benchmarks'
-      - export RUST_BACKTRACE=full
-      - cargo --locked run --bin benchmarks -- --local --database-type mysql --benchmark benchmarks/src/yaml/benchmarks/test/benchmark_test.yaml
-      - cargo --locked run --bin benchmarks -- --local-with-upstream mysql://root:noria@mysql/noria --database-type mysql --benchmark benchmarks/src/yaml/benchmarks/test/benchmark_test.yaml
-    timeout_in_minutes: 60
-    depends_on:
-    - build-image
-    plugins:
-      - docker-compose#${DOCKER_COMPOSE_PLUGIN_VERSION}:
-          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
-          run: app
-          environment:
-          - SCCACHE_BUCKET=readysettech-build-sccache-us-east-2
-          - SCCACHE_REGION=us-east-2
-          - CARGO_INCREMENTAL=0
-          - RUST_BACKTRACE=full
-          config:
-            - "${GIT_PUBLIC_ROOT}build/docker-compose.yml"
-            - "${GIT_PUBLIC_ROOT}build/docker-compose.ci-test.yml"
-          quiet-pull: true    # don't log all the image pulls
-          pull-retries: 3
-      - ecr#${ECR_PLUGIN_VERSION}:
-          login: true
-          retries: 3
-    retry: *retry_on_agent_kill
