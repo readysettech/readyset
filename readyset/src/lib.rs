@@ -623,12 +623,15 @@ where
 {
     if upstream_config.upstream_db_url.is_some() && !no_upstream_connections {
         set_failpoint!(failpoints::UPSTREAM);
-        timeout(UPSTREAM_CONNECTION_TIMEOUT, U::connect(upstream_config))
-            .instrument(debug_span!("Connecting to upstream database"))
-            .await
-            .map_err(|_| internal_err!("Connection timed out").into())
-            .and_then(|r| r)
-            .map(Some)
+        timeout(
+            UPSTREAM_CONNECTION_TIMEOUT,
+            U::connect(upstream_config, None, None),
+        )
+        .instrument(debug_span!("Connecting to upstream database"))
+        .await
+        .map_err(|_| internal_err!("Connection timed out").into())
+        .and_then(|r| r)
+        .map(Some)
     } else {
         Ok(None)
     }

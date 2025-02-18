@@ -19,6 +19,7 @@ use readyset_data::upstream_system_props::DEFAULT_TIMEZONE_NAME;
 use readyset_data::DfValue;
 use readyset_errors::{internal_err, unsupported, ReadySetError, ReadySetResult};
 use readyset_sql::ast::{SqlIdentifier, StartTransactionStatement};
+use readyset_util::redacted::RedactedString;
 use tracing::{debug, error, info_span, Instrument};
 
 use crate::Error;
@@ -163,6 +164,8 @@ macro_rules! handle_query_result {
 impl MySqlUpstream {
     async fn connect_inner(
         upstream_config: UpstreamConfig,
+        username: Option<String>,
+        password: Option<String>,
     ) -> Result<(Conn, HashMap<StatementID, mysql_async::Statement>), Error> {
         // CLIENT_SESSION_TRACK is required for GTID information to be sent in OK packets on commits
         // GTID information is used for RYW
@@ -181,8 +184,13 @@ impl MySqlUpstream {
             let ssl_opts = SslOpts::default().with_root_certs(vec![cert_path.into()]);
             builder = builder.ssl_opts(ssl_opts);
         }
+        if let Some(username) = username {
+            builder = builder.user(Some(username));
+        }
+        if let Some(password) = password {
+            builder = builder.pass(Some(password));
+        }
         let opts: Opts = builder.into();
-
         let span = info_span!(
             "Connecting to MySQL upstream",
             host = %opts.ip_or_hostname(),
@@ -232,8 +240,13 @@ impl UpstreamDatabase for MySqlUpstream {
     const DEFAULT_DB_VERSION: &'static str = "8.0.26-readyset\0";
     const SQL_DIALECT: readyset_sql::Dialect = readyset_sql::Dialect::MySQL;
 
-    async fn connect(upstream_config: UpstreamConfig) -> Result<Self, Error> {
-        let (conn, prepared_statements) = Self::connect_inner(upstream_config).await?;
+    async fn connect(
+        upstream_config: UpstreamConfig,
+        username: Option<String>,
+        password: Option<String>,
+    ) -> Result<Self, Error> {
+        let (conn, prepared_statements) =
+            Self::connect_inner(upstream_config, username, password).await?;
         Ok(Self {
             conn,
             prepared_statements,
@@ -264,6 +277,14 @@ impl UpstreamDatabase for MySqlUpstream {
 
     async fn ping(&mut self) -> Result<(), Self::Error> {
         self.conn.ping().await.map_err(Error::MySql)?;
+        Ok(())
+    }
+
+    async fn set_user(
+        &mut self,
+        _user: &str,
+        _password: RedactedString,
+    ) -> Result<(), Self::Error> {
         Ok(())
     }
 

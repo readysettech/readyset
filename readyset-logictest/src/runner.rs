@@ -641,6 +641,8 @@ impl TestScript {
                         Some(url) => Some(
                             <LazyUpstream<$upstream> as UpstreamDatabase>::connect(
                                 UpstreamConfig::from_url(url),
+                                None,
+                                None,
                             )
                             .await
                             .unwrap(),

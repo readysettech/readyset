@@ -20,6 +20,7 @@ use mysql_srv::{
     QueryResultWriter, QueryResultsResponse, StatementMetaWriter,
 };
 use readyset_adapter_types::DeallocateId;
+use readyset_util::redacted::RedactedString;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 
@@ -71,6 +72,14 @@ where
     ) -> io::Result<()> {
         let id = (self.on_p)(query);
         info.reply(id, &self.params, &self.columns).await
+    }
+
+    async fn set_auth_info(
+        &mut self,
+        _user: &str,
+        _password: Option<RedactedString>,
+    ) -> io::Result<()> {
+        Ok(())
     }
 
     async fn on_execute(

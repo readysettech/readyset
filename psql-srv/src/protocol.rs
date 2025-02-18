@@ -8,6 +8,7 @@ use postgres::SimpleQueryMessage;
 use postgres_protocol::Oid;
 use postgres_types::{Kind, Type};
 use readyset_adapter_types::{DeallocateId, PreparedStatementType};
+use readyset_util::redacted::RedactedString;
 use smallvec::smallvec;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_postgres::CommandCompleteContents;
@@ -144,6 +145,9 @@ pub struct Protocol {
 
     /// Whether the client is connected using TLS
     is_tls: bool,
+
+    /// The backend password for the current user
+    backend_password: Option<RedactedString>,
 }
 
 /// A prepared statement allows a frontend to specify the general form of a SQL statement while
@@ -179,6 +183,7 @@ impl Protocol {
             tls_mode,
             tls_server_end_point: None,
             is_tls: false,
+            backend_password: None,
         }
     }
 
@@ -428,6 +433,11 @@ impl Protocol {
 
         self.state = State::Ready;
 
+        // Set it here in case the backend gets closed and reconnect
+        self.backend_password = Some(RedactedString::from(password.to_string()));
+        let _ = backend
+            .set_auth_info(&user, Some(RedactedString::from(password.to_string())))
+            .await;
         Ok(Response::Messages(Self::get_ready_message(
             backend.version(),
         )))
@@ -448,11 +458,15 @@ impl Protocol {
             }
             Some(Credentials::Any) => {
                 self.state = State::Ready;
+                self.backend_password = None;
                 return Ok(Response::Messages(Self::get_ready_message(
                     backend.version(),
                 )));
             }
-            Some(Credentials::CleartextPassword(pw)) => pw,
+            Some(Credentials::CleartextPassword(pw)) => {
+                self.backend_password = Some(RedactedString::from(pw.to_string()));
+                pw
+            }
         };
 
         let SaslInitialResponse {
@@ -547,6 +561,14 @@ impl Protocol {
                 sasl_data: server_final_message.to_string().into(),
             }];
             messages.extend(Self::get_ready_message(backend.version()));
+            let _ = backend
+                .set_auth_info(
+                    &user,
+                    self.backend_password
+                        .as_ref()
+                        .map(|password| RedactedString::from(password.to_string())),
+                )
+                .await;
             Ok(Response::Messages(messages.into()))
         } else {
             Err(Error::AuthenticationFailure {
@@ -1260,6 +1282,8 @@ mod tests {
         fn version(&self) -> String {
             "14.5 ReadySet".to_string()
         }
+
+        async fn set_auth_info(&mut self, _user: &str, _password: Option<RedactedString>) {}
 
         async fn on_init(&mut self, database: &str) -> Result<CredentialsNeeded, Error> {
             self.database = Some(database.to_string());

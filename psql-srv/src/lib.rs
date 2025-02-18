@@ -36,6 +36,7 @@ use postgres_types::Type;
 use protocol::Protocol;
 use readyset_adapter_types::{DeallocateId, PreparedStatementType};
 use readyset_sql::ast::SqlIdentifier;
+use readyset_util::redacted::RedactedString;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_native_tls::TlsAcceptor;
 use tokio_postgres::OwnedField;
@@ -76,6 +77,9 @@ pub trait PsqlBackend {
     ///
     /// [libpq-server-version]: https://github.com/postgres/postgres/blob/d22646922d66012705e0e2948cfb5b4a07092a29/src/interfaces/libpq/fe-exec.c#L1146-L1178
     fn version(&self) -> String;
+
+    /// Called when client authenticates to inform which users we should use.
+    async fn set_auth_info(&mut self, user: &str, password: Option<RedactedString>);
 
     /// Initializes the backend.
     ///

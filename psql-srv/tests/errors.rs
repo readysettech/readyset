@@ -11,6 +11,7 @@ use psql_srv::{
     PsqlSrvRow, PsqlValue, QueryResponse, TransferFormat,
 };
 use readyset_adapter_types::{DeallocateId, PreparedStatementType};
+use readyset_util::redacted::RedactedString;
 use tokio::join;
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
@@ -34,6 +35,7 @@ impl PsqlBackend for ErrorBackend {
         Some(Credentials::Any)
     }
 
+    async fn set_auth_info(&mut self, _user: &str, _password: Option<RedactedString>) {}
     async fn on_init(&mut self, _database: &str) -> Result<CredentialsNeeded, Error> {
         Ok(CredentialsNeeded::None)
     }
