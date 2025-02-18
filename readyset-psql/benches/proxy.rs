@@ -31,6 +31,7 @@ use psql_srv::{
 use readyset_adapter_types::{DeallocateId, PreparedStatementType};
 use readyset_data::DfValue;
 use readyset_psql::ParamRef;
+use readyset_util::redacted::RedactedString;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, ToSocketAddrs};
 use tokio::runtime::Runtime;
@@ -138,6 +139,8 @@ impl PsqlBackend for Backend {
     fn credentials_for_user(&self, _user: &str) -> Option<Credentials> {
         Some(Credentials::Any)
     }
+
+    async fn set_auth_info(&mut self, _user: &str, _password: Option<RedactedString>) {}
 
     async fn on_init(&mut self, _database: &str) -> Result<CredentialsNeeded, psql_srv::Error> {
         Ok(CredentialsNeeded::None)

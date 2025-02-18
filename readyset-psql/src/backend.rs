@@ -13,6 +13,7 @@ use readyset_adapter::backend as cl;
 use readyset_adapter::upstream_database::LazyUpstream;
 use readyset_adapter_types::{DeallocateId, PreparedStatementType};
 use readyset_data::DfValue;
+use readyset_util::redacted::RedactedString;
 use thiserror::Error;
 use tokio_postgres::SimpleQueryMessage;
 
@@ -134,6 +135,12 @@ impl ps::PsqlBackend for Backend {
         self.users
             .get(user)
             .map(|pw| ps::Credentials::CleartextPassword(pw))
+    }
+
+    async fn set_auth_info(&mut self, user: &str, password: Option<RedactedString>) {
+        if let Some(password) = password {
+            let _ = self.inner.set_user(user, password).await;
+        }
     }
 
     async fn on_init(&mut self, _database: &str) -> Result<ps::CredentialsNeeded, ps::Error> {

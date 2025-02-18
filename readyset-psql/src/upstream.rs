@@ -14,6 +14,7 @@ use readyset_client_metrics::recorded;
 use readyset_data::DfValue;
 use readyset_errors::{internal_err, invariant_eq, unsupported, ReadySetError, ReadySetResult};
 use readyset_sql::ast::{SqlIdentifier, StartTransactionStatement};
+use readyset_util::redacted::RedactedString;
 use tokio::task::JoinHandle;
 use tokio_postgres::types::Type;
 use tokio_postgres::{
@@ -200,13 +201,23 @@ impl UpstreamDatabase for PostgreSqlUpstream {
     const DEFAULT_DB_VERSION: &'static str = "13.4 (ReadySet)";
     const SQL_DIALECT: readyset_sql::Dialect = readyset_sql::Dialect::PostgreSQL;
 
-    async fn connect(upstream_config: UpstreamConfig) -> Result<Self, Error> {
+    async fn connect(
+        upstream_config: UpstreamConfig,
+        username: Option<String>,
+        password: Option<String>,
+    ) -> Result<Self, Error> {
         let url = upstream_config
             .upstream_db_url
             .as_ref()
             .ok_or(ReadySetError::InvalidUpstreamDatabase)?;
 
-        let pg_config = Config::from_str(url)?;
+        let mut pg_config = Config::from_str(url)?;
+        if let Some(username) = username {
+            pg_config.user(username);
+        }
+        if let Some(password) = password {
+            pg_config.password(password);
+        }
         let user = pg_config.get_user().map(|s| s.to_owned());
         let connector = {
             let mut builder = native_tls::TlsConnector::builder();
@@ -282,6 +293,13 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         Ok(())
     }
 
+    async fn set_user(
+        &mut self,
+        _user: &str,
+        _password: RedactedString,
+    ) -> Result<(), Self::Error> {
+        Ok(())
+    }
     async fn change_user(
         &mut self,
         _user: &str,
