@@ -199,6 +199,10 @@ impl BenchmarkControl for WorkloadEmulator {
             BenchmarkType::Upstream => deployment.connect_to_setup().await?,
         };
 
+        if self.benchmark_type == BenchmarkType::Proxy {
+            conn.query_drop("DROP ALL CACHES").await?;
+        }
+
         let queries = spec.load_queries(&distributions, &mut conn).await?;
         *self.query_set.lock().unwrap() = Some(Arc::new(queries));
 
