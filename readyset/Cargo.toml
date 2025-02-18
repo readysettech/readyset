@@ -14,6 +14,7 @@ anyhow = { workspace = true }
 chrono = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
 crossbeam-skiplist = { workspace = true }
+csv = { workspace = true }
 futures-util = { workspace = true }
 fail = { workspace = true }
 failpoint-macros = { path = "../failpoint-macros" }

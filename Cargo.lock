@@ -4277,6 +4277,7 @@ dependencies = [
  "clap",
  "criterion",
  "crossbeam-skiplist",
+ "csv",
  "database-utils",
  "dataflow-state",
  "fail",
