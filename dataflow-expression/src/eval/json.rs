@@ -292,7 +292,7 @@ pub(crate) fn json_object_from_pairs(
     Ok(result.to_json_string()?.into())
 }
 
-pub(crate) fn json_object_from_keys_and_values(
+pub fn json_object_from_keys_and_values(
     keys: &Array,
     values: &Array,
     allow_duplicate_keys: bool,

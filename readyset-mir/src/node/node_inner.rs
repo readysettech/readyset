@@ -419,6 +419,15 @@ impl MirNodeInner {
                     Aggregation::GroupConcat { separator: ref s } => {
                         format!("||([{}], \"{}\")", on.name.as_str(), s.as_str())
                     }
+                    Aggregation::JsonObjectAgg {
+                        allow_duplicate_keys,
+                    } => {
+                        if allow_duplicate_keys {
+                            format!("JsonObjectAgg({})", on.name.as_str())
+                        } else {
+                            format!("JsonbObjectAgg({})", on.name.as_str())
+                        }
+                    }
                 };
                 let group_cols = group_by
                     .iter()

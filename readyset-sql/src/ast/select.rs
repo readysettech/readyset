@@ -293,6 +293,7 @@ impl SelectStatement {
                         | FunctionExpr::Max(_)
                         | FunctionExpr::Min(_)
                         | FunctionExpr::GroupConcat { .. }
+                        | FunctionExpr::JsonObjectAgg { .. }
                 ),
                 Expr::NestedSelect(select) => select.contains_aggregate_select(),
                 _ => false,

@@ -542,6 +542,10 @@ pub fn walk_function_expr<'ast, V: Visitor<'ast>>(
             }
             Ok(())
         }
+        FunctionExpr::JsonObjectAgg { key, value, .. } => {
+            visitor.visit_expr(key.as_ref())?;
+            visitor.visit_expr(value.as_ref())
+        }
     }
 }
 

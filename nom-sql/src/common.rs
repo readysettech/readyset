@@ -374,6 +374,31 @@ pub fn function_expr(
                     separator,
                 },
             ),
+            map(
+                tuple((
+                    alt((
+                        map(tag_no_case("json_object_agg"), |_| true),
+                        map(tag_no_case("jsonb_object_agg"), |_| false),
+                    )),
+                    preceded(
+                        whitespace0,
+                        delimited(
+                            terminated(tag("("), whitespace0),
+                            tuple((
+                                expression(dialect),
+                                preceded(whitespace0, tag(",")),
+                                expression(dialect),
+                            )),
+                            preceded(whitespace0, tag(")")),
+                        ),
+                    ),
+                )),
+                |(is_json, (key, _, value))| FunctionExpr::JsonObjectAgg {
+                    key: Box::new(key),
+                    value: Box::new(value),
+                    allow_duplicate_keys: is_json,
+                },
+            ),
             extract(dialect),
             lower(dialect),
             upper(dialect),

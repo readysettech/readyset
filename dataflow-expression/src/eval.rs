@@ -19,7 +19,7 @@ macro_rules! non_null {
 }
 
 pub(crate) mod builtins;
-mod json;
+pub mod json;
 
 fn eval_binary_op(op: BinaryOperator, left: &DfValue, right: &DfValue) -> ReadySetResult<DfValue> {
     use BinaryOperator::*;

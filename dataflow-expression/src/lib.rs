@@ -1,5 +1,5 @@
 mod binary_operator;
-mod eval;
+pub mod eval;
 pub mod like;
 mod lower;
 mod promotion;

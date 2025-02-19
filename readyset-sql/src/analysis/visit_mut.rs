@@ -558,6 +558,10 @@ pub fn walk_function_expr<'ast, V: VisitorMut<'ast>>(
             }
             Ok(())
         }
+        FunctionExpr::JsonObjectAgg { key, value, .. } => {
+            visitor.visit_expr(key.as_mut())?;
+            visitor.visit_expr(value.as_mut())
+        }
     }
 }
 

@@ -1,0 +1,36 @@
+statement ok
+CREATE TABLE test (id INT, name TEXT PRIMARY KEY);
+
+statement ok
+INSERT INTO test (id, name) VALUES (1, 'a'), (2, 'b'), (3, 'c'), (2, 'd'), (3, 'e');
+
+query T
+SELECT json_object_agg(id, name) FROM test;
+----
+{"1":"a","2":"b","3":"c","2":"d","3":"e"}
+
+query T
+SELECT jsonb_object_agg(id, name) FROM test;
+----
+{"1":"a","2":"d","3":"e"}
+
+statement ok
+DELETE FROM test WHERE name = 'a';
+
+query T
+SELECT json_object_agg(id, name) FROM test;
+----
+{"2":"b","3":"c","2":"d","3":"e"}
+
+statement ok
+DELETE FROM test WHERE name = 'd';
+
+query T
+SELECT json_object_agg(id, name) FROM test;
+----
+{"2":"b","3":"c","3":"e"}
+
+query T
+SELECT jsonb_object_agg(id, name) FROM test;
+----
+{"2":"b","3":"e"}

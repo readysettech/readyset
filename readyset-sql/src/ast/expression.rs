@@ -78,6 +78,12 @@ pub enum FunctionExpr {
         len: Option<Box<Expr>>,
     },
 
+    JsonObjectAgg {
+        key: Box<Expr>,
+        value: Box<Expr>,
+        allow_duplicate_keys: bool,
+    },
+
     /// Generic function call expression
     Call {
         name: SqlIdentifier,
@@ -132,6 +138,22 @@ impl FunctionExpr {
                     .map(|len| len.alias(dialect).unwrap_or_default())
                     .unwrap_or_default(),
             ),
+            FunctionExpr::JsonObjectAgg {
+                key,
+                value,
+                allow_duplicate_keys,
+            } => {
+                format!(
+                    "{}({}, {})",
+                    if *allow_duplicate_keys {
+                        "json_object_agg"
+                    } else {
+                        "jsonb_object_agg"
+                    },
+                    key.alias(dialect)?,
+                    value.alias(dialect)?
+                )
+            }
             FunctionExpr::Call { name, arguments } => format!(
                 "{}({})",
                 name,
@@ -162,6 +184,9 @@ impl FunctionExpr {
             | FunctionExpr::Lower { expr: arg, .. }
             | FunctionExpr::Upper { expr: arg, .. } => {
                 concrete_iter!(iter::once(arg.as_ref()))
+            }
+            FunctionExpr::JsonObjectAgg { key, value, .. } => {
+                concrete_iter!(iter::once(key.as_ref()).chain(iter::once(value.as_ref())))
             }
             FunctionExpr::CountStar => concrete_iter!(iter::empty()),
             FunctionExpr::Call { arguments, .. } => concrete_iter!(arguments),
@@ -226,6 +251,23 @@ impl DialectDisplay for FunctionExpr {
                 }
 
                 write!(f, ")")
+            }
+            FunctionExpr::JsonObjectAgg {
+                key,
+                value,
+                allow_duplicate_keys,
+            } => {
+                write!(
+                    f,
+                    "{}({}, {})",
+                    if *allow_duplicate_keys {
+                        "json_object_agg"
+                    } else {
+                        "jsonb_object_agg"
+                    },
+                    key.display(dialect),
+                    value.display(dialect)
+                )
             }
             FunctionExpr::Extract { field, expr } => {
                 write!(f, "EXTRACT({field} FROM {})", expr.display(dialect))

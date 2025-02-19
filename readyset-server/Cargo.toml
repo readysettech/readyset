@@ -107,6 +107,7 @@ database-utils = { path = "../database-utils" }
 catalog-tables = { path = "../catalog-tables" }
 replication-offset = { path = "../replication-offset" }
 num_cpus = { workspace = true }
+dataflow-expression = { path = "../dataflow-expression" }
 
 [dev-dependencies]
 assert_approx_eq = { workspace = true }

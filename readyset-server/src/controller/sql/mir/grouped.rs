@@ -1,11 +1,14 @@
 use std::collections::{HashMap, HashSet};
 
 use dataflow::{PostLookupAggregate, PostLookupAggregateFunction, PostLookupAggregates};
+use itertools::Itertools;
 use mir::node::node_inner::MirNodeInner;
 use mir::node::ProjectExpr;
 use mir::{Column, NodeIndex};
 use readyset_errors::{unsupported, ReadySetError, ReadySetResult};
-use readyset_sql::ast::{self, Expr, FieldDefinitionExpr, FunctionExpr, Relation, SqlIdentifier};
+use readyset_sql::ast::{
+    self, Expr, FieldDefinitionExpr, FunctionExpr, Literal, Relation, SqlIdentifier,
+};
 use readyset_sql::{
     analysis::{is_aggregate, ReferredColumns},
     DialectDisplay,
@@ -111,6 +114,24 @@ pub(super) fn make_expressions_above_grouped(
                 )),
             }
         }))
+        .chain(
+            qg.aggregates
+                .keys()
+                .filter(|&f| matches!(f, FunctionExpr::JsonObjectAgg { .. }))
+                .map(|f| {
+                    (
+                        SqlIdentifier::from("__json_object_agg__".to_string()),
+                        Expr::Call(FunctionExpr::Call {
+                            name: "concat".into(),
+                            arguments: f
+                                .arguments()
+                                .cloned()
+                                .interleave(vec![Expr::Literal(Literal::from(","))])
+                                .collect(),
+                        }),
+                    )
+                }),
+        )
         .collect();
 
     if !exprs.is_empty() {
@@ -341,6 +362,10 @@ pub(super) fn post_lookup_aggregates(
                 },
                 Extract { .. } | Call { .. } | Substring { .. } | Lower { .. } | Upper { .. } => {
                     continue
+                }
+                // TODO: should this be supported given the projection workaround we have?
+                JsonObjectAgg { .. } => {
+                    unsupported!("JSON_OBJECT_AGG is not supported as a post-lookup aggregate")
                 }
             },
         });
