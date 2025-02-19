@@ -4984,6 +4984,7 @@ dependencies = [
  "clap",
  "criterion",
  "database-utils",
+ "dataflow-expression",
  "dataflow-state",
  "derive_more",
  "diff",

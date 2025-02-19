@@ -111,6 +111,27 @@ pub(super) fn make_expressions_above_grouped(
                 )),
             }
         }))
+        .chain(qg.aggregates.keys().filter_map(|f| {
+            match f {
+                FunctionExpr::JsonObjectAgg {
+                    key,
+                    value,
+                    allow_duplicate_keys,
+                } => Some((
+                    SqlIdentifier::from("__json_objects__".to_string()),
+                    Expr::Call(FunctionExpr::Call {
+                        name: if *allow_duplicate_keys {
+                            "json_build_object"
+                        } else {
+                            "jsonb_build_object"
+                        }
+                        .into(),
+                        arguments: vec![*key.clone(), *value.clone()],
+                    }),
+                )),
+                _ => None,
+            }
+        }))
         .collect();
 
     if !exprs.is_empty() {
@@ -342,6 +363,13 @@ pub(super) fn post_lookup_aggregates(
                 Extract { .. } | Call { .. } | Substring { .. } | Lower { .. } | Upper { .. } => {
                     continue
                 }
+                // TODO: should this be supported given the projection workaround we have?
+                JsonObjectAgg {
+                    allow_duplicate_keys,
+                    ..
+                } => PostLookupAggregateFunction::JsonObjectAgg {
+                    allow_duplicate_keys: *allow_duplicate_keys,
+                },
             },
         });
     }

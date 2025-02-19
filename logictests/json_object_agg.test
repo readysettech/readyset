@@ -1,0 +1,48 @@
+statement ok
+CREATE TABLE test (id INT, name TEXT PRIMARY KEY);
+
+statement ok
+INSERT INTO test (id, name) VALUES (1, 'a'), (2, 'b'), (3, 'c'), (2, 'd'), (3, 'e');
+
+query T
+SELECT json_object_agg(id, name) FROM test;
+----
+{"1":"a","2":"b","3":"c","2":"d","3":"e"}
+
+query T
+SELECT jsonb_object_agg(id, name) FROM test;
+----
+{"1":"a","2":"d","3":"e"}
+
+statement ok
+DELETE FROM test WHERE name = 'a';
+
+query T
+SELECT json_object_agg(id, name) FROM test;
+----
+{"2":"b","3":"c","2":"d","3":"e"}
+
+statement ok
+DELETE FROM test WHERE name = 'd';
+
+query T
+SELECT json_object_agg(id, name) FROM test;
+----
+{"2":"b","3":"c","3":"e"}
+
+query T
+SELECT jsonb_object_agg(id, name) FROM test;
+----
+{"2":"b","3":"e"}
+
+statement ok
+CREATE TABLE test_commas (name TEXT PRIMARY KEY, id INT);
+
+statement ok
+INSERT INTO test_commas (name, id) VALUES ('Hello, World', 1), (',', 2);
+
+query T
+SELECT json_object_agg(name, id) FROM test_commas;
+----
+{",":2,"Hello, World":1}
+

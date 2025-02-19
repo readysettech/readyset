@@ -19,7 +19,7 @@ macro_rules! non_null {
 }
 
 pub(crate) mod builtins;
-mod json;
+pub mod json;
 
 fn eval_binary_op(op: BinaryOperator, left: &DfValue, right: &DfValue) -> ReadySetResult<DfValue> {
     use BinaryOperator::*;
@@ -718,7 +718,7 @@ mod tests {
         assert_eq!(test_eval(&json_arr1, &json_obj1), expected);
 
         let expected = json!([99, 100]);
-        assert_eq!(test_eval(&json!(99), &json!(100)), expected);
+        assert_eq!(test_eval(&json!([99]), &json!([100])), expected);
 
         // Test error conditions
 

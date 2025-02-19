@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use partial_map::InsertionOrder;
 use readyset_data::DfValue;
-use readyset_errors::{internal, ReadySetResult};
+use readyset_errors::{internal, unsupported, ReadySetResult};
 use readyset_sql::ast::OrderType;
 use serde::{Deserialize, Serialize};
 
@@ -26,6 +26,8 @@ pub enum PostLookupAggregateFunction {
     Max,
     /// Take the minimum input value
     Min,
+    /// Use specified Key-value pair to build a JSON Object
+    JsonObjectAgg { allow_duplicate_keys: bool },
 }
 
 impl PostLookupAggregateFunction {
@@ -45,6 +47,9 @@ impl PostLookupAggregateFunction {
             .into()),
             PostLookupAggregateFunction::Max => Ok(cmp::max(val1, val2).clone()),
             PostLookupAggregateFunction::Min => Ok(cmp::min(val1, val2).clone()),
+            PostLookupAggregateFunction::JsonObjectAgg { .. } => {
+                unsupported!("JsonObjectAgg is not supported as a post-lookup aggregate")
+            }
         }
     }
 }

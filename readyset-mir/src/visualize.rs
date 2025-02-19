@@ -164,6 +164,15 @@ impl GraphViz for MirNodeInner {
                     AggregationKind::GroupConcat { separator: s } => {
                         format!("\\|\\|({}, \\\"{}\\\")", on, s)
                     }
+                    AggregationKind::JsonObjectAgg {
+                        allow_duplicate_keys,
+                    } => {
+                        if *allow_duplicate_keys {
+                            format!("JsonObjectAgg({})", on)
+                        } else {
+                            format!("JsonbObjectAgg({})", on)
+                        }
+                    }
                 };
                 let group_cols = group_by.iter().join(", ");
                 write!(f, "{} | γ: {}", op_string, group_cols)
@@ -278,6 +287,12 @@ impl GraphViz for MirNodeInner {
                                     PostLookupAggregateFunction::GroupConcat { .. } => "GC",
                                     PostLookupAggregateFunction::Max => "Max",
                                     PostLookupAggregateFunction::Min => "Min",
+                                    PostLookupAggregateFunction::JsonObjectAgg {
+                                        allow_duplicate_keys: false,
+                                    } => "JsonObjectAgg",
+                                    PostLookupAggregateFunction::JsonObjectAgg {
+                                        allow_duplicate_keys: true,
+                                    } => "JsonbObjectAgg",
                                 },
                                 &aggregate.column
                             ))

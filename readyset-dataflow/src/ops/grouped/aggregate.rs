@@ -2,6 +2,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
+use dataflow_expression::eval::json;
 use readyset_data::dialect::SqlEngine;
 use readyset_data::{Collation, DfType, Dialect};
 use readyset_errors::{invariant, ReadySetResult};
@@ -22,7 +23,13 @@ pub enum Aggregation {
     /// Average the value of the `over` column. Maintains count and sum in HashMap
     Avg,
     /// Concatenates using the given separator between values.
-    GroupConcat { separator: String },
+    GroupConcat {
+        separator: String,
+    },
+
+    JsonObjectAgg {
+        allow_duplicate_keys: bool,
+    },
 }
 
 impl Aggregation {
@@ -71,6 +78,7 @@ impl Aggregation {
                 }
             }
             Aggregation::GroupConcat { .. } => DfType::Text(/* TODO */ Collation::default()),
+            Aggregation::JsonObjectAgg { .. } => DfType::Text(Collation::default()),
         };
 
         Ok(GroupedOperator::new(
@@ -150,6 +158,12 @@ impl AverageDataPair {
 /// Auxiliary State for an Aggregator node, which is owned by a Domain
 pub struct AggregatorState {
     count_sum_map: HashMap<GroupHash, AverageDataPair>,
+
+    // Store all `json_object_agg` keys and values in vecs and compute the json from them
+    // on-the-fly. This allows for easier handling of distinct (jsonb) behaviour,
+    // especially with deletions.
+    json_agg_keys: Vec<DfValue>,
+    json_agg_vals: Vec<DfValue>,
 }
 
 impl Aggregator {
@@ -222,10 +236,12 @@ impl GroupedOperation for Aggregator {
             }
         };
 
-        let count_sum_map = match auxiliary_node_state {
-            Some(AuxiliaryNodeState::Aggregation(ref mut aggregator_state)) => {
-                &mut aggregator_state.count_sum_map
-            }
+        let (count_sum_map, json_agg_keys, json_agg_vals) = match auxiliary_node_state {
+            Some(AuxiliaryNodeState::Aggregation(ref mut aggregator_state)) => (
+                &mut aggregator_state.count_sum_map,
+                &mut aggregator_state.json_agg_keys,
+                &mut aggregator_state.json_agg_vals,
+            ),
             Some(_) => internal!("Incorrect auxiliary state for Aggregation node"),
             None => internal!("Missing auxiliary state for Aggregation node"),
         };
@@ -240,6 +256,42 @@ impl GroupedOperation for Aggregator {
                 .apply_diff(diff)
         };
 
+        let mut apply_json_object_agg =
+            |_curr, diff: Self::Diff, allow_dups| -> ReadySetResult<DfValue> {
+                let (key, value) = diff
+                    .value
+                    .to_json()?
+                    .as_object()
+                    .ok_or_else(|| {
+                        internal_err!("json_object_agg: json_object value is not an object")
+                    })?
+                    .iter()
+                    .next()
+                    .ok_or_else(|| internal_err!("json_object_agg: json_object is empty"))
+                    .map(|(k, v)| (DfValue::from(k.as_str()), DfValue::from(v)))?;
+
+                if diff.positive {
+                    json_agg_keys.push(key);
+                    json_agg_vals.push(value.clone());
+                } else if let Some(pos) = json_agg_keys
+                    .iter()
+                    .zip(json_agg_vals.iter_mut())
+                    .position(|(k, v)| k == &key && v == &value)
+                {
+                    json_agg_keys.remove(pos);
+                    json_agg_vals.remove(pos);
+                } else {
+                    internal!("json_object_agg: diff removed a non-existant key-value pair")
+                }
+
+                // TODO: Indent the output
+                json::json_object_from_keys_and_values(
+                    &json_agg_keys.clone().into(),
+                    &json_agg_vals.clone().into(),
+                    allow_dups,
+                )
+            };
+
         let apply_diff =
             |curr: ReadySetResult<DfValue>, diff: Self::Diff| -> ReadySetResult<DfValue> {
                 if diff.value.is_none() {
@@ -253,6 +305,9 @@ impl GroupedOperation for Aggregator {
                     Aggregation::GroupConcat { separator: _ } => internal!(
                         "GroupConcats are separate from the other aggregations in the dataflow."
                     ),
+                    Aggregation::JsonObjectAgg {
+                        allow_duplicate_keys,
+                    } => apply_json_object_agg(curr?, diff, allow_duplicate_keys),
                 }
             };
 
@@ -270,6 +325,15 @@ impl GroupedOperation for Aggregator {
                 Aggregation::GroupConcat { separator: ref s } => {
                     format!("||({})", s)
                 }
+                Aggregation::JsonObjectAgg {
+                    allow_duplicate_keys,
+                } => {
+                    if allow_duplicate_keys {
+                        "JsonObjectAgg".to_owned()
+                    } else {
+                        "JsonbObjectAgg".to_owned()
+                    }
+                }
             };
         }
 
@@ -278,6 +342,15 @@ impl GroupedOperation for Aggregator {
             Aggregation::Sum => format!("𝛴({})", self.over),
             Aggregation::Avg => format!("Avg({})", self.over),
             Aggregation::GroupConcat { separator: ref s } => format!("||({}, {})", s, self.over),
+            Aggregation::JsonObjectAgg {
+                allow_duplicate_keys,
+            } => {
+                if allow_duplicate_keys {
+                    format!("JsonObjectAgg({})", self.over)
+                } else {
+                    format!("JsonbObjectAgg({})", self.over)
+                }
+            }
         };
         let group_cols = self
             .group
