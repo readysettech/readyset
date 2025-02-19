@@ -2551,11 +2551,6 @@ mod tests {
 
             test_identity("{}");
             test_identity("[]");
-            test_identity("1");
-            test_identity("2.0");
-            test_identity("true");
-            test_identity("false");
-            test_identity("null");
             test_identity("[null]");
         }
 

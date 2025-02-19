@@ -954,6 +954,16 @@ impl SqlToMirConverter {
                 }),
                 false,
             ),
+            JsonObjectAgg {
+                allow_duplicate_keys,
+                ..
+            } => mknode(
+                Column::named("__json_objects__"),
+                GroupedNodeType::Aggregation(Aggregation::JsonObjectAgg {
+                    allow_duplicate_keys,
+                }),
+                false,
+            ),
             _ => {
                 internal!("not an aggregate: {:?}", Sensitive(&function));
             }

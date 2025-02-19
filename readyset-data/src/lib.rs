@@ -1749,7 +1749,22 @@ impl From<JsonValue> for DfValue {
 
 impl From<&JsonValue> for DfValue {
     fn from(value: &JsonValue) -> Self {
-        value.to_string().into()
+        match value {
+            JsonValue::String(s) => s.clone().into(),
+            JsonValue::Null => DfValue::None,
+            JsonValue::Bool(true) => DfValue::UnsignedInt(1),
+            JsonValue::Bool(false) => DfValue::UnsignedInt(0),
+            JsonValue::Number(number) if number.is_i64() => DfValue::Int(number.as_i64().unwrap()),
+            JsonValue::Number(number) if number.is_u64() => {
+                DfValue::UnsignedInt(number.as_u64().unwrap())
+            }
+            JsonValue::Number(number) if number.is_f64() => {
+                DfValue::Double(number.as_f64().unwrap())
+            }
+            JsonValue::Number(number) => DfValue::from(number.to_string()),
+            // TODO: add DfValue::JSON
+            JsonValue::Object(_) | JsonValue::Array(_) => DfValue::from(value.to_string()),
+        }
     }
 }
 

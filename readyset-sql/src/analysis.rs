@@ -91,6 +91,10 @@ impl<'a> ReferredColumnsIter<'a> {
         match fexpr {
             Avg { expr, .. } => self.visit_expr(expr),
             Count { expr, .. } => self.visit_expr(expr),
+            JsonObjectAgg { key, value, .. } => {
+                self.exprs_to_visit.push(key);
+                self.visit_expr(value)
+            }
             CountStar => None,
             Extract { expr, .. } => self.visit_expr(expr),
             Lower { expr, .. } => self.visit_expr(expr),
@@ -224,6 +228,10 @@ impl<'a> ReferredColumnsMut<'a> {
                     .extend(len.iter_mut().map(|e| e.as_mut()));
                 self.visit_expr(string)
             }
+            JsonObjectAgg { key, value, .. } => {
+                self.exprs_to_visit.push(key);
+                self.visit_expr(value)
+            }
         }
     }
 
@@ -347,7 +355,8 @@ pub fn is_aggregate(function: &FunctionExpr) -> bool {
         | FunctionExpr::Sum { .. }
         | FunctionExpr::Max(_)
         | FunctionExpr::Min(_)
-        | FunctionExpr::GroupConcat { .. } => true,
+        | FunctionExpr::GroupConcat { .. }
+        | FunctionExpr::JsonObjectAgg { .. } => true,
         FunctionExpr::Extract { .. }
         | FunctionExpr::Substring { .. }
         | FunctionExpr::Lower { .. }
