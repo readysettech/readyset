@@ -535,6 +535,8 @@ impl Options {
 
     // Build list of allowed user to connect to Readyset
     fn build_allowed_users(&self) -> Result<HashMap<String, String>, anyhow::Error> {
+        println!("build_allowed_users");
+        println!("Allowed users: {:?}", self.allowed_users);
         let upstream_config = self.server_worker_options.replicator_config.clone();
         let users = if !self.allow_unauthenticated_connections {
             let upstream_url = upstream_config
