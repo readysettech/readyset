@@ -536,86 +536,80 @@ impl Options {
     // Build list of allowed user to connect to Readyset
     fn build_allowed_users(&self) -> Result<HashMap<String, String>, anyhow::Error> {
         let upstream_config = self.server_worker_options.replicator_config.clone();
-        let users = if !self.allow_unauthenticated_connections {
-            let upstream_url = upstream_config
-                .upstream_db_url
-                .as_ref()
-                .and_then(|s| s.parse::<DatabaseURL>().ok());
-            let mut seen_users = std::collections::HashSet::new();
-            // Parse allowed users from comma-separated "user:pass" pairs
-            let mut allowed_users = self
-                .allowed_users
-                .as_ref()
-                .map(|s| {
-                    let mut users = HashMap::new();
-                    let mut current = String::new();
-                    let mut in_quotes = false;
-                    let mut quote_char = None;
+        let upstream_url = upstream_config
+            .upstream_db_url
+            .as_ref()
+            .and_then(|s| s.parse::<DatabaseURL>().ok());
+        let mut seen_users = std::collections::HashSet::new();
+        // Parse allowed users from comma-separated "user:pass" pairs
+        let mut allowed_users = self
+            .allowed_users
+            .as_ref()
+            .map(|s| {
+                let mut users = HashMap::new();
+                let mut current = String::new();
+                let mut in_quotes = false;
+                let mut quote_char = None;
 
-                    // Parse character by character
-                    for (i, c) in s.chars().enumerate() {
-                        match c {
-                            '\'' | '"' if !in_quotes => {
-                                in_quotes = true;
-                                quote_char = Some(c);
-                            }
-                            c if Some(c) == quote_char => {
-                                if let Some(next_c) = s.chars().nth(i + 1) {
-                                    if next_c == c {
-                                        // Handle escaped quote
-                                        current.push(c);
-                                        continue; // Skip next quote
-                                    }
-                                }
-                                in_quotes = false;
-                                quote_char = None;
-                            }
-                            ',' if !in_quotes => {
-                                if !current.is_empty() {
-                                    let (user, pass) =
-                                        self.process_pair(&current, &mut seen_users)?;
-                                    users.insert(user, pass);
-                                    current.clear();
-                                }
-                            }
-                            _ => current.push(c),
+                // Parse character by character
+                for (i, c) in s.chars().enumerate() {
+                    match c {
+                        '\'' | '"' if !in_quotes => {
+                            in_quotes = true;
+                            quote_char = Some(c);
                         }
-                    }
-
-                    // Process the last pair if any
-                    if !current.is_empty() {
-                        let (user, pass) = self.process_pair(&current, &mut seen_users)?;
-                        users.insert(user, pass);
-                    }
-
-                    if in_quotes {
-                        return Err(anyhow::anyhow!("Unclosed quote in input"));
-                    }
-
-                    Ok(users)
-                })
-                .transpose()?
-                .unwrap_or_default();
-
-            match (
-                upstream_url.as_ref().and_then(|url| url.user()),
-                upstream_url.as_ref().and_then(|url| url.password()),
-            ) {
-                (Some(user), Some(pass)) => {
-                    if seen_users.insert(user.to_owned()) {
-                        allowed_users.insert(user.to_owned(), pass.to_owned())
-                    } else {
-                        return Err(anyhow::anyhow!("Duplicate user found: {}", user));
+                        c if Some(c) == quote_char => {
+                            if let Some(next_c) = s.chars().nth(i + 1) {
+                                if next_c == c {
+                                    // Handle escaped quote
+                                    current.push(c);
+                                    continue; // Skip next quote
+                                }
+                            }
+                            in_quotes = false;
+                            quote_char = None;
+                        }
+                        ',' if !in_quotes => {
+                            if !current.is_empty() {
+                                let (user, pass) = self.process_pair(&current, &mut seen_users)?;
+                                users.insert(user, pass);
+                                current.clear();
+                            }
+                        }
+                        _ => current.push(c),
                     }
                 }
-                _ => None,
-            };
 
-            allowed_users
-        } else {
-            HashMap::new()
+                // Process the last pair if any
+                if !current.is_empty() {
+                    let (user, pass) = self.process_pair(&current, &mut seen_users)?;
+                    users.insert(user, pass);
+                }
+
+                if in_quotes {
+                    return Err(anyhow::anyhow!("Unclosed quote in input"));
+                }
+
+                Ok(users)
+            })
+            .transpose()?
+            .unwrap_or_default();
+
+        match (
+            upstream_url.as_ref().and_then(|url| url.user()),
+            upstream_url.as_ref().and_then(|url| url.password()),
+        ) {
+            (Some(user), Some(pass)) => {
+                if seen_users.insert(user.to_owned()) {
+                    allowed_users.insert(user.to_owned(), pass.to_owned())
+                } else {
+                    return Err(anyhow::anyhow!("Duplicate user found: {}", user));
+                }
+            }
+            _ => None,
         };
-        Ok(users)
+
+        Ok(allowed_users)
     }
 }
 
@@ -760,16 +754,20 @@ where
             return rt.block_on(async { self.cleanup(upstream_config, deployment_dir).await });
         }
         let users = options.build_allowed_users()?;
-        let users: &'static HashMap<String, String> = Box::leak(Box::new(users));
-
-        if users.is_empty() && !options.allow_unauthenticated_connections {
-            bail!(
-                "Failed to build authentication map from \
-            upstream DB URL or --allowed-users. Please ensure they are present and \
-            correctly formatted as follows: --upstream-db-url <protocol>://<username>:<password>@<address>[:<port>][/<database>] \
-            or --allowed-users <username:password>[,<username:password>...]"
-            )
-        }
+        let users: &'static HashMap<String, String> = if !options.allow_unauthenticated_connections
+        {
+            if users.is_empty() {
+                bail!(
+                    "Failed to build authentication map from \
+                upstream DB URL or --allowed-users. Please ensure they are present and \
+                correctly formatted as follows: --upstream-db-url <protocol>://<username>:<password>@<address>[:<port>][/<database>] \
+                or --allowed-users <username:password>[,<username:password>...]"
+                )
+            }
+            Box::leak(Box::new(users))
+        } else {
+            Box::leak(Box::new(HashMap::new()))
+        };
 
         info!(version = %VERSION_STR_ONELINE);
 

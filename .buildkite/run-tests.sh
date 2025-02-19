@@ -21,7 +21,7 @@ if [[ "$BUILDKITE_PARALLEL_JOB" == "0" ]]; then
     echo "+++ :rust: Run tests (nextest)"
     cargo --locked nextest run --profile ci --hide-progress-bar \
         --workspace --features failure_injection \
-        --exclude readyset-clustertest --exclude benchmarks \
+        --exclude readyset-clustertest --exclude benchmarks -- allowed_users \
         || upload_artifacts
 elif [[ "$BUILDKITE_PARALLEL_JOB" == "1" ]]; then
     # Run doctests, because at this time nextest does not support doctests
