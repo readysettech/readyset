@@ -735,7 +735,11 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
             AtTimeZone {
                 timestamp,
                 time_zone,
-            } => not_yet_implemented!("{timestamp:?} AT TIMEZONE {time_zone:?}"),
+            } => Ok(Self::BinaryOp {
+                lhs: timestamp.try_into_dialect(dialect)?,
+                op: BinaryOperator::AtTimeZone,
+                rhs: time_zone.try_into_dialect(dialect)?,
+            }),
             Between {
                 expr,
                 negated,
