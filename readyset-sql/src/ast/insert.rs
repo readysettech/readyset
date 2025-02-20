@@ -44,7 +44,7 @@ impl TryFromDialect<sqlparser::ast::Insert> for InsertStatement {
                         sqlparser::ast::SetExpr::Values(values) => {
                             values.rows.try_into_dialect(dialect)?
                         }
-                        _ => unimplemented!(), // Our AST currently doesn't support anything else
+                        body => return unsupported!("Unsupported source type for INSERT: {body}"),
                     }
                 } else {
                     Vec::new()
