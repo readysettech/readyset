@@ -959,11 +959,19 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
             } => unsupported!("STRUCT"),
             Subquery(_query) => not_yet_implemented!("subquery"),
             Substring {
-                expr: _,
-                substring_from: _,
-                substring_for: _,
+                expr,
+                substring_from,
+                substring_for,
                 special: _,
-            } => not_yet_implemented!("SUBSTRING"),
+            } => Ok(Self::Call(FunctionExpr::Substring {
+                string: expr.try_into_dialect(dialect)?,
+                pos: substring_from
+                    .map(|expr| expr.try_into_dialect(dialect))
+                    .transpose()?,
+                len: substring_for
+                    .map(|expr| expr.try_into_dialect(dialect))
+                    .transpose()?,
+            })),
             Trim {
                 expr: _,
                 trim_where: _,
@@ -1124,7 +1132,6 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
                 ty: crate::ast::SqlType::Date,
                 postgres_style: false,
             },
-            "extract" | "substring" => todo!(),
             // TODO(mvzink): support COLLATE for upper and lower. nom-sql doesn't seem to parse
             // collation here, and in the case of sqlparser-rs we would have to pull it out of the
             // inner expression
@@ -1136,6 +1143,9 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
                 expr: Box::new(exprs[0].clone()),
                 collation: None,
             }),
+            name @ ("extract" | "substring") => {
+                return failed!("{name} should have been converted earlier")
+            }
             _ => Self::Call(FunctionExpr::Call {
                 name: name.into_dialect(dialect),
                 arguments: exprs,
