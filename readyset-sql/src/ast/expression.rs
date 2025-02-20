@@ -840,8 +840,19 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                 expr: _,
                 collation: _,
             } => not_yet_implemented!("COLLATE"),
-            // TODO: could this be a variable like `@@GLOBAL.foo`, which should go through `ident_into_expr` or similar?
-            CompoundIdentifier(idents) => Ok(Self::Column(idents.into_dialect(dialect))),
+            CompoundIdentifier(idents) => {
+                let is_variable = if let Some(first) = idents.first() {
+                    first.quote_style.is_none() && first.value.starts_with('@')
+                } else {
+                    false
+                };
+                if is_variable {
+                    Ok(Self::Variable(idents.try_into()?))
+                } else {
+                    let column: Column = idents.into_dialect(dialect);
+                    Ok(Self::Column(column))
+                }
+            }
             Convert {
                 expr: _,
                 data_type: _,
@@ -1035,7 +1046,7 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                 op: op.into(),
                 rhs: expr.try_into_dialect(dialect)?,
             }),
-            Value(value) => Ok(Self::Literal(value.into())),
+            Value(value) => Ok(Self::Literal(value.try_into()?)),
             CompoundFieldAccess {
                 root: _,
                 access_chain: _,
