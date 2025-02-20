@@ -1005,7 +1005,7 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                 op: op.into(),
                 rhs: expr.try_into_dialect(dialect)?,
             }),
-            Value(value) => Ok(Self::Literal(value.into())),
+            Value(value) => Ok(Self::Literal(value.try_into()?)),
             CompoundFieldAccess {
                 root: _,
                 access_chain: _,

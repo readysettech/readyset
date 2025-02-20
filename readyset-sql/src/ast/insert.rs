@@ -55,7 +55,7 @@ impl TryFromDialect<sqlparser::ast::Insert> for InsertStatement {
                                     .try_collect()
                             })
                             .try_collect()?,
-                        _ => unimplemented!(), // Our AST currently doesn't support anything else
+                        body => return unsupported!("Unsupported source type for INSERT: {body}"),
                     }
                 } else {
                     Vec::new()

@@ -23,7 +23,7 @@ impl TryFrom<sqlparser::ast::AlterColumnOperation> for AlterColumnOperation {
         match value {
             sqlparser::ast::AlterColumnOperation::SetDefault {
                 value: sqlparser::ast::Expr::Value(value),
-            } => Ok(Self::SetColumnDefault(value.into())),
+            } => Ok(Self::SetColumnDefault(value.try_into()?)),
             sqlparser::ast::AlterColumnOperation::DropDefault => Ok(Self::DropColumnDefault),
             _ => unsupported!("ALTER COLUMN operation {value}"),
         }

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
 use crate::{
-    ast::*, AstConversionError, Dialect, DialectDisplay, FromDialect, IntoDialect, TryFromDialect,
+    ast::*, AstConversionError, Dialect, DialectDisplay, IntoDialect, TryFromDialect,
     TryIntoDialect,
 };
 
@@ -39,7 +39,7 @@ impl TryFromDialect<sqlparser::ast::Statement> for SetStatement {
                         .map(|mut object_name| object_name.0.pop().unwrap())
                         .expect("Snowflake-style multiple variables not supported")
                         .into_dialect(dialect);
-                    let value: SetPostgresParameterValue = value.into_dialect(dialect);
+                    let value: SetPostgresParameterValue = value.try_into_dialect(dialect)?;
                     let scope = if local {
                         Some(PostgresParameterScope::Local)
                     } else {
@@ -123,23 +123,28 @@ pub enum SetPostgresParameterValue {
     Value(PostgresParameterValue),
 }
 
-impl FromDialect<Vec<sqlparser::ast::Expr>> for SetPostgresParameterValue {
-    fn from_dialect(value: Vec<sqlparser::ast::Expr>, dialect: Dialect) -> Self {
+impl TryFromDialect<Vec<sqlparser::ast::Expr>> for SetPostgresParameterValue {
+    fn try_from_dialect(
+        value: Vec<sqlparser::ast::Expr>,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
         if value.len() == 1 {
             if let sqlparser::ast::Expr::Identifier(sqlparser::ast::Ident { value, .. }) = &value[0]
             {
                 if value.eq_ignore_ascii_case("DEFAULT") {
-                    return Self::Default;
+                    return Ok(Self::Default);
                 }
             }
         }
-        let values = value.into_iter().map(|expr| expr.into_dialect(dialect));
+        let values = value.into_iter().map(|expr| expr.try_into_dialect(dialect));
         if values.len() == 1 {
-            Self::Value(PostgresParameterValue::Single(
-                values.exactly_one().unwrap(),
-            ))
+            Ok(Self::Value(PostgresParameterValue::Single(
+                values.exactly_one().unwrap()?,
+            )))
         } else {
-            Self::Value(PostgresParameterValue::List(values.collect()))
+            Ok(Self::Value(PostgresParameterValue::List(
+                values.try_collect()?,
+            )))
         }
     }
 }
@@ -160,14 +165,17 @@ pub enum PostgresParameterValueInner {
     Literal(Literal),
 }
 
-impl FromDialect<sqlparser::ast::Expr> for PostgresParameterValueInner {
-    fn from_dialect(value: sqlparser::ast::Expr, dialect: Dialect) -> Self {
+impl TryFromDialect<sqlparser::ast::Expr> for PostgresParameterValueInner {
+    fn try_from_dialect(
+        value: sqlparser::ast::Expr,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
         match value {
-            sqlparser::ast::Expr::Value(value) => Self::Literal(value.into()),
+            sqlparser::ast::Expr::Value(value) => Ok(Self::Literal(value.try_into()?)),
             sqlparser::ast::Expr::Identifier(ident) => {
-                Self::Identifier(ident.into_dialect(dialect))
+                Ok(Self::Identifier(ident.into_dialect(dialect)))
             }
-            _ => unimplemented!("unsupported postgres parameter value {value:?}"),
+            _ => unsupported!("unsupported Postgres parameter value {value:?}"),
         }
     }
 }

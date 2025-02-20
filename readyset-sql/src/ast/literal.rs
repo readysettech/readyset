@@ -16,7 +16,7 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
-use crate::{ast::*, Dialect, DialectDisplay};
+use crate::{ast::*, AstConversionError, Dialect, DialectDisplay};
 
 #[derive(Clone, Debug, Serialize, Deserialize, Arbitrary)]
 pub struct Float {
@@ -216,19 +216,21 @@ impl From<ItemPlaceholder> for Literal {
     }
 }
 
-impl From<sqlparser::ast::Value> for Literal {
-    fn from(value: sqlparser::ast::Value) -> Self {
+impl TryFrom<sqlparser::ast::Value> for Literal {
+    type Error = AstConversionError;
+
+    fn try_from(value: sqlparser::ast::Value) -> Result<Self, Self::Error> {
         use sqlparser::ast::Value;
         match value {
-            Value::Placeholder(name) => Self::Placeholder(name.into()),
-            Value::Boolean(b) => Self::Boolean(b),
-            Value::Null => Self::Null,
+            Value::Placeholder(name) => Ok(Self::Placeholder(name.into())),
+            Value::Boolean(b) => Ok(Self::Boolean(b)),
+            Value::Null => Ok(Self::Null),
             Value::DoubleQuotedString(s)
             | Value::SingleQuotedString(s)
             | Value::DoubleQuotedByteStringLiteral(s)
-            | Value::SingleQuotedByteStringLiteral(s) => Self::String(s),
+            | Value::SingleQuotedByteStringLiteral(s) => Ok(Self::String(s)),
             Value::DollarQuotedString(sqlparser::ast::DollarQuotedString { value, .. }) => {
-                Self::String(value)
+                Ok(Self::String(value))
             }
             Value::Number(s, _unknown) => {
                 // TODO(mvzink): Probably should parse as unsigned first and/or fix nom-sql's
@@ -236,22 +238,23 @@ impl From<sqlparser::ast::Value> for Literal {
                 // expression parsing will parse `-1` as `UnaryOp::Minus(Value::Number("1"))`.
                 // However, to match nom-sql, we usually want a signed integer.
                 if let Ok(i) = s.parse::<i64>() {
-                    Self::Integer(i)
+                    Ok(Self::Integer(i))
                 } else if let Ok(i) = s.parse::<u64>() {
-                    Self::UnsignedInteger(i)
+                    Ok(Self::UnsignedInteger(i))
                 } else if let Ok(f) = s.parse::<f64>() {
-                    Self::Double(crate::ast::Double {
+                    Ok(Self::Double(crate::ast::Double {
                         value: f,
                         precision: s.find('.').map(|i| (s.len() - i - 1) as u8).unwrap_or(0),
-                    })
+                    }))
                 } else if let Ok(d) = Decimal::from_str_exact(&s) {
                     // Seems like this will later get re-parsed the same way
-                    Self::Numeric(d.mantissa(), d.scale())
+                    Ok(Self::Numeric(d.mantissa(), d.scale()))
                 } else {
-                    panic!("failed to parse number: {s}") // TODO: remember that 99% of this should be converted to TryFrom
+                    failed!("failed to parse number: {s}")
                 }
             }
-            _ => unimplemented!("unsupported literal {value:?}"),
+            Value::EscapedStringLiteral(s) => Ok(Self::String(s)),
+            _ => failed!("unsupported literal {value:?}"),
         }
     }
 }
