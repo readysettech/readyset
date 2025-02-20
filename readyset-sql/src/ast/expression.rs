@@ -866,7 +866,7 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                 field,
                 syntax: _, // We only support FROM
                 expr,
-            } => Ok(Self::Call(crate::ast::FunctionExpr::Extract {
+            } => Ok(Self::Call(FunctionExpr::Extract {
                 field: field.into(),
                 expr: expr.try_into_dialect(dialect)?,
             })),
@@ -1078,7 +1078,7 @@ impl FromDialect<sqlparser::ast::Ident> for Expr {
 
 /// Convert a function call into an expression.
 ///
-/// We don't turn every function into a [`crate::ast::FunctionExpr`], beacuse we have some special
+/// We don't turn every function into a [`FunctionExpr`], beacuse we have some special
 /// cases that turn into other kinds of expressions, such as `DATE(x)` into `CAST(x AS DATE)`.
 impl TryFromDialect<sqlparser::ast::Function> for Expr {
     fn try_from_dialect(
@@ -1101,7 +1101,7 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
                 FunctionArguments::List(FunctionArgumentList { args, .. })
                     if args == vec![FunctionArg::Unnamed(FunctionArgExpr::Wildcard)] =>
                 {
-                    return Ok(Self::Call(crate::ast::FunctionExpr::CountStar));
+                    return Ok(Self::Call(FunctionExpr::CountStar));
                 }
                 _ => {}
             }
@@ -1128,22 +1128,22 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
         };
         Ok(match name_lowercase.as_str() {
             // TODO: fix this unnecessary cloning
-            "avg" => Self::Call(crate::ast::FunctionExpr::Avg {
+            "avg" => Self::Call(FunctionExpr::Avg {
                 expr: Box::new(exprs[0].clone()),
                 distinct,
             }),
             // TODO: check for `count(*)` which we have a separate enum variant for
-            "count" => Self::Call(crate::ast::FunctionExpr::Count {
+            "count" => Self::Call(FunctionExpr::Count {
                 expr: Box::new(exprs[0].clone()),
                 distinct,
             }),
-            "group_concat" => Self::Call(crate::ast::FunctionExpr::GroupConcat {
+            "group_concat" => Self::Call(FunctionExpr::GroupConcat {
                 expr: Box::new(exprs[0].clone()),
                 separator,
             }),
-            "max" => Self::Call(crate::ast::FunctionExpr::Max(Box::new(exprs[0].clone()))),
-            "min" => Self::Call(crate::ast::FunctionExpr::Min(Box::new(exprs[0].clone()))),
-            "sum" => Self::Call(crate::ast::FunctionExpr::Sum {
+            "max" => Self::Call(FunctionExpr::Max(Box::new(exprs[0].clone()))),
+            "min" => Self::Call(FunctionExpr::Min(Box::new(exprs[0].clone()))),
+            "sum" => Self::Call(FunctionExpr::Sum {
                 expr: Box::new(exprs[0].clone()),
                 distinct,
             }),
@@ -1153,7 +1153,18 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
                 postgres_style: false,
             },
             "extract" | "substring" => todo!(),
-            _ => Self::Call(crate::ast::FunctionExpr::Call {
+            // TODO(mvzink): support COLLATE for upper and lower. nom-sql doesn't seem to parse
+            // collation here, and in the case of sqlparser-rs we would have to pull it out of the
+            // inner expression
+            "lower" => Self::Call(FunctionExpr::Lower {
+                expr: Box::new(exprs[0].clone()),
+                collation: None,
+            }),
+            "upper" => Self::Call(FunctionExpr::Upper {
+                expr: Box::new(exprs[0].clone()),
+                collation: None,
+            }),
+            _ => Self::Call(FunctionExpr::Call {
                 name: name.into_dialect(dialect),
                 arguments: exprs,
             }),
