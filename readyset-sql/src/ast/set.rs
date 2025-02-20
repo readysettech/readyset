@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
 use crate::{
-    ast::*, AstConversionError, Dialect, DialectDisplay, FromDialect, IntoDialect, TryFromDialect,
+    ast::*, AstConversionError, Dialect, DialectDisplay, IntoDialect, TryFromDialect,
     TryIntoDialect,
 };
 
@@ -36,10 +36,12 @@ impl TryFromDialect<sqlparser::ast::Statement> for SetStatement {
                     let name = variables
                         .into_iter()
                         .exactly_one()
-                        .map(|mut object_name| object_name.0.pop().unwrap())
-                        .expect("Snowflake-style multiple variables not supported")
+                        .map_err(|_| failed_err!("Missing variable name"))?
+                        .0
+                        .pop()
+                        .unwrap()
                         .into_dialect(dialect);
-                    let value: SetPostgresParameterValue = value.into_dialect(dialect);
+                    let value: SetPostgresParameterValue = value.try_into_dialect(dialect)?;
                     let scope = if local {
                         Some(PostgresParameterScope::Local)
                     } else {
@@ -52,17 +54,18 @@ impl TryFromDialect<sqlparser::ast::Statement> for SetStatement {
                     }))
                 }
                 Dialect::MySQL => {
-                    let name = variables
-                        .into_iter()
-                        .exactly_one()
-                        .expect("Snowflake-style multiple variables not supported");
+                    let name = variables.into_iter().exactly_one().map_err(|_| {
+                        unsupported_err!("Only single variable assignment supported")
+                    })?;
                     Ok(Self::Variable(SetVariables {
                         variables: vec![(
                             name.try_into()?,
                             value
                                 .into_iter()
                                 .exactly_one()
-                                .expect("Multiple variable assignments not supported")
+                                .map_err(|_| {
+                                    unsupported_err!("Only single variable assignment supported")
+                                })?
                                 .try_into_dialect(dialect)?,
                         )],
                     }))
@@ -123,23 +126,28 @@ pub enum SetPostgresParameterValue {
     Value(PostgresParameterValue),
 }
 
-impl FromDialect<Vec<sqlparser::ast::Expr>> for SetPostgresParameterValue {
-    fn from_dialect(value: Vec<sqlparser::ast::Expr>, dialect: Dialect) -> Self {
+impl TryFromDialect<Vec<sqlparser::ast::Expr>> for SetPostgresParameterValue {
+    fn try_from_dialect(
+        value: Vec<sqlparser::ast::Expr>,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
         if value.len() == 1 {
             if let sqlparser::ast::Expr::Identifier(sqlparser::ast::Ident { value, .. }) = &value[0]
             {
                 if value.eq_ignore_ascii_case("DEFAULT") {
-                    return Self::Default;
+                    return Ok(Self::Default);
                 }
             }
         }
-        let values = value.into_iter().map(|expr| expr.into_dialect(dialect));
+        let values = value.into_iter().map(|expr| expr.try_into_dialect(dialect));
         if values.len() == 1 {
-            Self::Value(PostgresParameterValue::Single(
-                values.exactly_one().unwrap(),
-            ))
+            Ok(Self::Value(PostgresParameterValue::Single(
+                values.exactly_one().unwrap()?,
+            )))
         } else {
-            Self::Value(PostgresParameterValue::List(values.collect()))
+            Ok(Self::Value(PostgresParameterValue::List(
+                values.try_collect()?,
+            )))
         }
     }
 }
@@ -160,14 +168,17 @@ pub enum PostgresParameterValueInner {
     Literal(Literal),
 }
 
-impl FromDialect<sqlparser::ast::Expr> for PostgresParameterValueInner {
-    fn from_dialect(value: sqlparser::ast::Expr, dialect: Dialect) -> Self {
+impl TryFromDialect<sqlparser::ast::Expr> for PostgresParameterValueInner {
+    fn try_from_dialect(
+        value: sqlparser::ast::Expr,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
         match value {
-            sqlparser::ast::Expr::Value(value) => Self::Literal(value.into()),
+            sqlparser::ast::Expr::Value(value) => Ok(Self::Literal(value.try_into()?)),
             sqlparser::ast::Expr::Identifier(ident) => {
-                Self::Identifier(ident.into_dialect(dialect))
+                Ok(Self::Identifier(ident.into_dialect(dialect)))
             }
-            _ => unimplemented!("unsupported postgres parameter value {value:?}"),
+            _ => unsupported!("unsupported Postgres parameter value {value:?}"),
         }
     }
 }
@@ -332,18 +343,20 @@ impl From<sqlparser::ast::Ident> for Variable {
     }
 }
 
-impl TryFrom<sqlparser::ast::ObjectName> for Variable {
+impl TryFrom<Vec<sqlparser::ast::Ident>> for Variable {
     type Error = AstConversionError;
 
-    fn try_from(mut value: sqlparser::ast::ObjectName) -> Result<Self, Self::Error> {
-        let name = match value.0.pop().unwrap() {
-            // XXX(mvzink): We lowercase across the board (even ignoring dialect) just to match nom-sql
-            sqlparser::ast::ObjectNamePart::Identifier(ident) => ident.value.to_lowercase(),
-        };
-        if value.0.is_empty() {
+    fn try_from(mut value: Vec<sqlparser::ast::Ident>) -> Result<Self, Self::Error> {
+        // XXX(mvzink): We lowercase across the board (even ignoring dialect) just to match nom-sql
+        let name = value
+            .pop()
+            .ok_or_else(|| failed_err!("Empty variable name"))?
+            .value
+            .to_lowercase();
+        if value.is_empty() {
             Ok(name.into())
-        } else if value.0.len() == 1 {
-            let scope = value.0.pop().unwrap().into();
+        } else if value.len() == 1 {
+            let scope = value.pop().unwrap().value.as_str().into();
             Ok(Self {
                 scope,
                 name: name.into(),
@@ -351,6 +364,21 @@ impl TryFrom<sqlparser::ast::ObjectName> for Variable {
         } else {
             failed!("Invalid variable name remainder {value:?} (name: {name:?})")
         }
+    }
+}
+
+impl TryFrom<sqlparser::ast::ObjectName> for Variable {
+    type Error = AstConversionError;
+
+    fn try_from(value: sqlparser::ast::ObjectName) -> Result<Self, Self::Error> {
+        value
+            .0
+            .into_iter()
+            .map(|part| match part {
+                sqlparser::ast::ObjectNamePart::Identifier(ident) => ident,
+            })
+            .collect::<Vec<_>>()
+            .try_into()
     }
 }
 
