@@ -998,7 +998,7 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                 values: _,
                 fields: _,
             } => unsupported!("STRUCT"),
-            Subquery(_query) => not_yet_implemented!("subquery"),
+            Subquery(query) => Ok(Self::NestedSelect(query.try_into_dialect(dialect)?)),
             Substring {
                 expr,
                 substring_from,
