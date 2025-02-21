@@ -20,7 +20,7 @@ use readyset_data::DfValue;
 use readyset_errors::{internal_err, unsupported, ReadySetError, ReadySetResult};
 use readyset_sql::ast::{SqlIdentifier, StartTransactionStatement};
 use readyset_util::redacted::RedactedString;
-use tracing::{debug, error, info_span, Instrument};
+use tracing::{debug, error, info_span, warn, Instrument};
 
 use crate::Error;
 
@@ -180,10 +180,24 @@ impl MySqlUpstream {
             OptsBuilder::from_opts(opts).stmt_cache_size(0)
         };
 
+        let mut ssl_opts = SslOpts::default();
+
         if let Some(cert_path) = upstream_config.ssl_root_cert.clone() {
-            let ssl_opts = SslOpts::default().with_root_certs(vec![cert_path.into()]);
+            if cert_path.exists() {
+                ssl_opts = ssl_opts.with_root_certs(vec![cert_path.into()]);
+            } else {
+                warn!("SSL root cert file does not exist: {}", cert_path.display());
+            }
+        }
+
+        if upstream_config.disable_upstream_ssl_verification {
+            ssl_opts = ssl_opts.with_danger_accept_invalid_certs(true);
+        }
+
+        if ssl_opts != SslOpts::default() {
             builder = builder.ssl_opts(ssl_opts);
         }
+
         if let Some(username) = username {
             builder = builder.user(Some(username));
         }
