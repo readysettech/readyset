@@ -817,8 +817,9 @@ impl IntoIterator for QueryParams {
             QueryParams::NumberedParams(np) if np.is_empty() => Empty,
             QueryParams::PositionalParams(ps) => Positional(ps.into_iter()),
             QueryParams::NumberedParams(np) => {
+                let min_val = np.keys().min().unwrap();
                 let max_val = np.keys().max().unwrap();
-                Numbered(0..=*max_val, np)
+                Numbered(*min_val..=*max_val, np)
             }
         }
     }
