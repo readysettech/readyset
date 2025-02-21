@@ -225,10 +225,7 @@ impl TryFrom<sqlparser::ast::Value> for Literal {
             Value::Placeholder(name) => Ok(Self::Placeholder(name.into())),
             Value::Boolean(b) => Ok(Self::Boolean(b)),
             Value::Null => Ok(Self::Null),
-            Value::DoubleQuotedString(s)
-            | Value::SingleQuotedString(s)
-            | Value::DoubleQuotedByteStringLiteral(s)
-            | Value::SingleQuotedByteStringLiteral(s) => Ok(Self::String(s)),
+            Value::DoubleQuotedString(s) | Value::SingleQuotedString(s) => Ok(Self::String(s)),
             Value::DollarQuotedString(sqlparser::ast::DollarQuotedString { value, .. }) => {
                 Ok(Self::String(value))
             }
@@ -254,6 +251,13 @@ impl TryFrom<sqlparser::ast::Value> for Literal {
                 }
             }
             Value::EscapedStringLiteral(s) => Ok(Self::String(s)),
+            Value::SingleQuotedByteStringLiteral(s) => {
+                let mut bitvec = BitVec::new();
+                for byte in s.as_bytes() {
+                    bitvec.push(*byte == b'1');
+                }
+                Ok(Self::BitVector(bitvec))
+            }
             _ => failed!("unsupported literal {value:?}"),
         }
     }
