@@ -177,10 +177,20 @@ impl MySqlUpstream {
             OptsBuilder::from_opts(opts).stmt_cache_size(0)
         };
 
+        let mut ssl_opts = SslOpts::default();
+
         if let Some(cert_path) = upstream_config.ssl_root_cert.clone() {
-            let ssl_opts = SslOpts::default().with_root_certs(vec![cert_path.into()]);
+            ssl_opts = ssl_opts.with_root_certs(vec![cert_path.into()]);
+        }
+
+        if upstream_config.disable_upstream_ssl_verification {
+            ssl_opts = ssl_opts.with_danger_accept_invalid_certs(true);
+        }
+
+        if ssl_opts != SslOpts::default() {
             builder = builder.ssl_opts(ssl_opts);
         }
+
         let opts: Opts = builder.into();
 
         let span = info_span!(
