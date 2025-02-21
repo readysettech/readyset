@@ -262,6 +262,9 @@ impl TryFromDialect<sqlparser::ast::DataType> for crate::ast::SqlType {
             Trigger => skipped!("TRIGGER"),
             AnyType => unsupported!("ANY TYPE"),
             Table(_column_definition_list) => unsupported!("TABLE type"),
+            GeometricType(geometric_type_kind) => {
+                unsupported!("geometric type {geometric_type_kind}")
+            }
         }
     }
 }
