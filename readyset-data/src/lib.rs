@@ -149,6 +149,32 @@ pub enum DfValue {
     //   - The `example_row` in `src/serde.rs`
 }
 
+impl TryFrom<DfValue> for JsonValue {
+    type Error = ReadySetError;
+
+    fn try_from(value: DfValue) -> Result<Self, ReadySetError> {
+        Ok(match value {
+            // FIXME: serde_json doesn't support f32, this causes precision errors when using
+            // floats
+            DfValue::Float(f) => JsonValue::Number(serde_json::Number::from_f64(f as f64).unwrap()),
+            DfValue::Double(f) => JsonValue::Number(serde_json::Number::from_f64(f).unwrap()),
+            DfValue::Int(i) => JsonValue::Number(i.into()),
+            DfValue::UnsignedInt(i) => JsonValue::Number(i.into()),
+            DfValue::Text(text) => JsonValue::String(text.as_str().to_string()),
+            DfValue::TinyText(tiny_text) => JsonValue::String(tiny_text.as_str().to_string()),
+            DfValue::TimestampTz(timestamp_tz) => JsonValue::String(timestamp_tz.to_string()),
+            DfValue::Time(my_sql_time) => JsonValue::String(my_sql_time.to_string()),
+            DfValue::Numeric(decimal) => JsonValue::String(decimal.to_string()),
+            DfValue::BitVector(_) | DfValue::Array(_) | DfValue::ByteArray(_) => {
+                unsupported!("Arrays can't be used as json values yet")
+            }
+            DfValue::PassThrough(_) | DfValue::Default | DfValue::Max | DfValue::None => {
+                JsonValue::Null
+            }
+        })
+    }
+}
+
 impl Eq for DfValue {}
 
 impl fmt::Display for DfValue {

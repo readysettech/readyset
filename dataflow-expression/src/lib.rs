@@ -60,6 +60,14 @@ pub enum BuiltinFunction {
         /// `json_object` allows for duplicate keys whereas `jsonb_object` does not.
         allow_duplicate_keys: bool,
     },
+    /// [`json[b]_build_object`](https://www.postgresql.org/docs/current/functions-json.html)
+    /// [`json_object`](https://dev.mysql.com/doc/refman/8.4/en/json-creation-functions.html#function_json-object)
+    JsonBuildObject {
+        args: Vec<Expr>,
+
+        /// `json_build_object` allows for duplicate keys whereas `jsonb_build_object` does not.
+        allow_duplicate_keys: bool,
+    },
     /// [`json[b]_array_length`](https://www.postgresql.org/docs/current/functions-json.html)
     JsonArrayLength(Expr),
     /// [`json[b]_strip_nulls`](https://www.postgresql.org/docs/current/functions-json.html)
@@ -188,6 +196,8 @@ impl BuiltinFunction {
             Lower { .. } => "lower",
             Upper { .. } => "upper",
             Hex { .. } => "hex",
+            // TODO: name differs based on dialect
+            JsonBuildObject { .. } => "json_build_object",
         }
     }
 }
@@ -320,6 +330,7 @@ impl Display for BuiltinFunction {
             Hex(expr) => {
                 write!(f, "({})", expr)
             }
+            JsonBuildObject { args, .. } => write!(f, "({})", args.iter().join(", ")),
         }
     }
 }

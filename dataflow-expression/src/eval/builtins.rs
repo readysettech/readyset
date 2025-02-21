@@ -9,10 +9,10 @@ use chrono::{
     Timelike, Weekday,
 };
 use chrono_tz::Tz;
-use itertools::Either;
+use itertools::{Either, Itertools};
 use mysql_time::MySqlTime;
 use readyset_data::dialect::SqlEngine;
-use readyset_data::{DfType, DfValue, TimestampTz};
+use readyset_data::{Array, DfType, DfValue, TimestampTz};
 use readyset_errors::{internal, invalid_query_err, unsupported, ReadySetError, ReadySetResult};
 use readyset_sql::ast::TimestampField;
 use readyset_util::math::integer_rnd;
@@ -1022,6 +1022,39 @@ impl BuiltinFunction {
                 non_null!(values.eval(record)?).as_array()?,
                 *allow_duplicate_keys,
             ),
+            BuiltinFunction::JsonBuildObject {
+                args,
+                allow_duplicate_keys,
+            } => {
+                let (keys, values): (Vec<_>, Vec<_>) =
+                    args.iter().enumerate().partition_map(|(i, arg)| {
+                        if i % 2 == 0 {
+                            Either::Left(arg)
+                        } else {
+                            Either::Right(arg)
+                        }
+                    });
+
+                let k = keys
+                    .iter()
+                    .map(|k| k.eval(record))
+                    .collect::<ReadySetResult<Vec<_>>>()?
+                    .iter()
+                    // As per the JSON specs, keys must be strings
+                    .map(|k| k.coerce_to(&DfType::Text(Default::default()), &DfType::Unknown))
+                    .collect::<ReadySetResult<Vec<_>>>()?;
+
+                let v = values
+                    .iter()
+                    .map(|v| v.eval(record))
+                    .collect::<ReadySetResult<Vec<_>>>()?;
+
+                crate::eval::json::json_object_from_keys_and_values(
+                    &Array::from(k),
+                    &Array::from(v),
+                    *allow_duplicate_keys,
+                )
+            }
             BuiltinFunction::JsonTypeof(expr) => {
                 let json = non_null!(expr.eval(record)?).to_json()?;
                 Ok(get_json_value_type(&json).into())
