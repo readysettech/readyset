@@ -187,6 +187,7 @@ impl TryFromDialect<sqlparser::ast::Statement> for SqlQuery {
             Rollback { .. } => Ok(Self::Rollback(RollbackStatement {})),
             Commit { .. } => Ok(Self::Commit(CommitStatement {})),
             alter @ AlterTable { .. } => Ok(Self::AlterTable(alter.try_into_dialect(dialect)?)),
+            truncate @ Truncate { .. } => Ok(Self::Truncate(truncate.try_into_dialect(dialect)?)),
             CreateDatabase { .. } => skipped!("CREATE DATABASE"),
             _ => not_yet_implemented!("other query: {value:?}"),
         }
