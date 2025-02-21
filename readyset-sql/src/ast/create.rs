@@ -179,13 +179,15 @@ impl TryFromDialect<sqlparser::ast::CreateTable> for CreateTableStatement {
         dialect: Dialect,
     ) -> Result<Self, AstConversionError> {
         // XXX: We don't actually care about most table options, and don't cover the DATA DIRECTORY
-        // variant because sqlparser doesn't support it.
+        // variant because sqlparser doesn't support it. Note that this is likely change the
+        // ordering of the options compared to the original SQL, since sqlparser stores them as
+        // individual fields instead of a list of options.
         let mut options = vec![];
-        if let Some(auto_increment) = value.auto_increment_offset {
-            options.push(CreateTableOption::AutoIncrement(auto_increment as u64));
-        }
         if let Some(engine) = value.engine {
             options.push(CreateTableOption::Engine(Some(engine.name)));
+        }
+        if let Some(auto_increment) = value.auto_increment_offset {
+            options.push(CreateTableOption::AutoIncrement(auto_increment as u64));
         }
         if let Some(charset) = value.default_charset {
             options.push(CreateTableOption::Charset(CharsetName::Unquoted(
