@@ -178,14 +178,21 @@ impl TryFromDialect<sqlparser::ast::CreateTable> for CreateTableStatement {
         value: sqlparser::ast::CreateTable,
         dialect: Dialect,
     ) -> Result<Self, AstConversionError> {
-        // XXX: We don't actually care about most table options, and don't cover the DATA DIRECTORY
-        // variant because sqlparser doesn't support it.
+        // TODO(mvzink): We don't actually care about most table options, and don't cover the DATA
+        // DIRECTORY variant because sqlparser doesn't support it. We will have to either upstream a
+        // fix or wait for [sqlparser#1747] to go through to support DATA DIRECTORY.
+        //
+        // Also note that this is likely to change the ordering of the options compared to the
+        // original SQL, since sqlparser stores them as individual fields instead of a list of
+        // options.
+        //
+        // [sqlparser#1747]: https://github.com/apache/datafusion-sqlparser-rs/pull/1747
         let mut options = vec![];
-        if let Some(auto_increment) = value.auto_increment_offset {
-            options.push(CreateTableOption::AutoIncrement(auto_increment as u64));
-        }
         if let Some(engine) = value.engine {
             options.push(CreateTableOption::Engine(Some(engine.name)));
+        }
+        if let Some(auto_increment) = value.auto_increment_offset {
+            options.push(CreateTableOption::AutoIncrement(auto_increment as u64));
         }
         if let Some(charset) = value.default_charset {
             options.push(CreateTableOption::Charset(CharsetName::Unquoted(
