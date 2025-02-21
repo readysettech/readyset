@@ -212,7 +212,7 @@ fn parse_create_cache(
         readyset_sql::ast::CreateCacheStatement {
             name,
             inner: query,
-            unparsed_create_cache_statement: Some(input.as_ref().to_string()),
+            unparsed_create_cache_statement: Some(input.as_ref().trim().to_string()),
             always,
             concurrently,
         },
@@ -272,6 +272,7 @@ fn parse_explain(
                     .as_ref()
                     .strip_prefix("EXPLAIN ")
                     .unwrap()
+                    .trim()
                     .to_string(),
             },
         ));
