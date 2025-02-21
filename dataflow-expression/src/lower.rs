@@ -256,7 +256,21 @@ impl BuiltinFunction {
             ),
             "json_object" => match dialect.engine() {
                 // TODO(ENG-1536): https://dev.mysql.com/doc/refman/8.0/en/json-creation-functions.html#function_json-object
-                SqlEngine::MySQL => unsupported!("MySQL 'json_object' not yet supported"),
+                SqlEngine::MySQL => {
+                    let exprs: Vec<_> = args.by_ref().collect();
+
+                    if exprs.is_empty() || exprs.len() % 2 != 0 {
+                        return Err(arity_error());
+                    }
+
+                    (
+                        Self::JsonBuildObject {
+                            args: exprs,
+                            allow_duplicate_keys: false,
+                        },
+                        DfType::Json,
+                    )
+                }
                 SqlEngine::PostgreSQL => (
                     Self::JsonObject {
                         arg1: next_arg()?,
@@ -266,6 +280,36 @@ impl BuiltinFunction {
                     DfType::Json,
                 ),
             },
+            "json_build_object" => {
+                let exprs: Vec<_> = args.by_ref().collect();
+
+                if exprs.is_empty() || exprs.len() % 2 != 0 {
+                    return Err(arity_error());
+                }
+
+                (
+                    Self::JsonBuildObject {
+                        args: args.by_ref().collect(),
+                        allow_duplicate_keys: true,
+                    },
+                    DfType::Json,
+                )
+            }
+            "jsonb_build_object" => {
+                let exprs: Vec<_> = args.by_ref().collect();
+
+                if exprs.is_empty() || exprs.len() % 2 != 0 {
+                    return Err(arity_error());
+                }
+
+                (
+                    Self::JsonBuildObject {
+                        args: args.by_ref().collect(),
+                        allow_duplicate_keys: false,
+                    },
+                    DfType::Json,
+                )
+            }
             "jsonb_object" => (
                 Self::JsonObject {
                     arg1: next_arg()?,

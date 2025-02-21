@@ -12,7 +12,7 @@ use chrono_tz::Tz;
 use itertools::Either;
 use mysql_time::MySqlTime;
 use readyset_data::dialect::SqlEngine;
-use readyset_data::{DfType, DfValue, TimestampTz};
+use readyset_data::{Array, DfType, DfValue, TimestampTz};
 use readyset_errors::{internal, invalid_query_err, unsupported, ReadySetError, ReadySetResult};
 use readyset_sql::ast::TimestampField;
 use readyset_util::math::integer_rnd;
@@ -1022,6 +1022,30 @@ impl BuiltinFunction {
                 non_null!(values.eval(record)?).as_array()?,
                 *allow_duplicate_keys,
             ),
+            BuiltinFunction::JsonBuildObject {
+                args,
+                allow_duplicate_keys,
+            } => {
+                let mut keys = Vec::with_capacity(args.len() / 2);
+                let mut values = Vec::with_capacity(args.len() / 2);
+
+                for (i, arg) in args.iter().enumerate() {
+                    if i % 2 == 0 {
+                        keys.push(
+                            arg.eval(record)?
+                                .coerce_to(&DfType::Text(Default::default()), &DfType::Unknown)?,
+                        );
+                    } else {
+                        values.push(arg.eval(record)?);
+                    }
+                }
+
+                crate::eval::json::json_object_from_keys_and_values(
+                    &Array::from(keys),
+                    &Array::from(values),
+                    *allow_duplicate_keys,
+                )
+            }
             BuiltinFunction::JsonTypeof(expr) => {
                 let json = non_null!(expr.eval(record)?).to_json()?;
                 Ok(get_json_value_type(&json).into())

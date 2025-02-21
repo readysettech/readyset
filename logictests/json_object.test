@@ -1,0 +1,22 @@
+statement ok
+CREATE TABLE t1 (a TEXT, b DOUBLE, c INT, d BOOL);
+
+statement ok
+INSERT INTO t1 VALUES ("abc", 3.14, 1, true), ("xyz", 2.71, 2, false);
+
+query T
+SELECT json_object(a, c) FROM t1;
+----
+{"abc":1}
+{"xyz":2}
+
+# test variadic arguments
+query T
+SELECT json_object(a, b, c, d) FROM t1;
+----
+{"1":1,"abc":3.14}
+{"2":0,"xyz":2.71}
+
+# Requires even number of arguments
+statement error
+SELECT json_object(a, b, c) FROM t1;

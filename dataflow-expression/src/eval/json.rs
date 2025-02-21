@@ -311,10 +311,10 @@ pub(crate) fn json_object_from_keys_and_values(
     }
 
     let mut result =
-        EitherPairs::<&str, &str>::with_capacity(keys.total_len(), allow_duplicate_keys);
+        EitherPairs::<&str, JsonValue>::with_capacity(keys.total_len(), allow_duplicate_keys);
 
     for (k, v) in keys.values().zip(values.values()) {
-        result.insert(<&str>::try_from(k)?, <&str>::try_from(v)?);
+        result.insert(<&str>::try_from(k)?, v.clone().try_into()?);
     }
 
     Ok(result.to_json_string()?.into())
