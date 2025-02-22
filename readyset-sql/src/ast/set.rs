@@ -75,7 +75,7 @@ impl TryFromDialect<sqlparser::ast::Statement> for SetStatement {
                 charset_name,
                 collation_name,
             } => Ok(Self::Names(SetNames {
-                charset: charset_name,
+                charset: charset_name.value,
                 collation: collation_name,
             })),
             _ => todo!("unsupported set statement {value:?} (convert to TryFrom)"),

@@ -485,9 +485,25 @@ impl From<sqlparser::ast::BinaryOperator> for BinaryOperator {
             BinOp::Question => todo!(),
             BinOp::QuestionAnd => Self::QuestionMarkAnd,
             BinOp::QuestionPipe => Self::QuestionMarkPipe,
-            BinOp::Spaceship => unimplemented!("<=> {value:?}"),
+            BinOp::Spaceship => todo!(),
             BinOp::StringConcat => todo!(),
             BinOp::Xor => todo!(),
+            BinOp::DoubleHash => todo!(),
+            BinOp::LtDashGt => todo!(),
+            BinOp::AndLt => todo!(),
+            BinOp::AndGt => todo!(),
+            BinOp::LtLtPipe => todo!(),
+            BinOp::PipeGtGt => todo!(),
+            BinOp::AndLtPipe => todo!(),
+            BinOp::PipeAndGt => todo!(),
+            BinOp::LtCaret => todo!(),
+            BinOp::GtCaret => todo!(),
+            BinOp::QuestionHash => todo!(),
+            BinOp::QuestionDash => todo!(),
+            BinOp::QuestionDashPipe => todo!(),
+            BinOp::QuestionDoublePipe => todo!(),
+            BinOp::At => todo!(),
+            BinOp::TildeEq => todo!(),
         }
     }
 }
@@ -538,20 +554,27 @@ pub enum UnaryOperator {
     Not,
 }
 
-impl From<sqlparser::ast::UnaryOperator> for UnaryOperator {
-    fn from(value: sqlparser::ast::UnaryOperator) -> Self {
+impl TryFrom<sqlparser::ast::UnaryOperator> for UnaryOperator {
+    type Error = AstConversionError;
+
+    fn try_from(value: sqlparser::ast::UnaryOperator) -> Result<Self, Self::Error> {
         use sqlparser::ast::UnaryOperator as UnOp;
         match value {
-            UnOp::Plus => todo!(),
-            UnOp::Minus => Self::Neg,
-            UnOp::Not => Self::Not,
+            UnOp::Plus => not_yet_implemented!("Unary + operator"),
+            UnOp::Minus => Ok(Self::Neg),
+            UnOp::Not => Ok(Self::Not),
             UnOp::PGBitwiseNot
             | UnOp::PGSquareRoot
             | UnOp::PGCubeRoot
             | UnOp::PGPostfixFactorial
             | UnOp::PGPrefixFactorial
-            | UnOp::PGAbs => unimplemented!("unsupported postgres unary operator"),
-            UnOp::BangNot => unimplemented!("unsupported bang not (!)"),
+            | UnOp::PGAbs => unsupported!("unsupported postgres unary operator"),
+            UnOp::BangNot
+            | UnOp::Hash
+            | UnOp::AtDashAt
+            | UnOp::DoubleAt
+            | UnOp::QuestionDash
+            | UnOp::QuestionPipe => unsupported!("unsupported unary operator {value}"),
         }
     }
 }
@@ -795,26 +818,15 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
             Case {
                 operand: None, // XXX do we really not support the CASE operand?
                 conditions,
-                results,
                 else_result,
             } => Ok(Self::CaseWhen {
                 branches: conditions
                     .into_iter()
-                    .map(|condition| condition.try_into_dialect(dialect))
-                    .zip(
-                        results
-                            .into_iter()
-                            .map(|result| result.try_into_dialect(dialect)),
-                    )
-                    .map(|(condition, result): (Result<Expr, _>, Result<Expr, _>)| {
-                        match (condition, result) {
-                            (Err(e), _) => Err(e),
-                            (_, Err(e)) => Err(e),
-                            (Ok(condition), Ok(result)) => Ok(CaseWhenBranch {
-                                condition,
-                                body: result,
-                            }),
-                        }
+                    .map(|condition| {
+                        Ok(CaseWhenBranch {
+                            condition: condition.condition.try_into_dialect(dialect)?,
+                            body: condition.result.try_into_dialect(dialect)?,
+                        })
                     })
                     .try_collect()?,
                 else_expr: else_result.try_into_dialect(dialect)?,
@@ -822,7 +834,6 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
             Case {
                 operand: Some(expr), // XXX do we really not support the CASE operand?
                 conditions: _,
-                results: _,
                 else_result: _,
             } => not_yet_implemented!("CASE WHEN with operand: {expr:?}"),
             Cast {
@@ -1043,7 +1054,7 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                 }),
             },
             UnaryOp { op, expr } => Ok(Self::UnaryOp {
-                op: op.into(),
+                op: op.try_into()?,
                 rhs: expr.try_into_dialect(dialect)?,
             }),
             Value(value) => Ok(Self::Literal(value.try_into()?)),

@@ -128,7 +128,7 @@ impl TryFromDialect<sqlparser::ast::DataType> for crate::ast::SqlType {
         match value {
             Int(len) => Ok(Self::Int(len.map(|n| n as u16))),
             TinyInt(len) => Ok(Self::TinyInt(len.map(|n| n as u16))),
-            UnsignedBigInt(len) | UnsignedInt8(len) => {
+            BigIntUnsigned(len) | Int8Unsigned(len) => {
                 Ok(Self::BigIntUnsigned(len.map(|n| n as u16)))
             }
             Text => Ok(Self::Text),
@@ -174,22 +174,26 @@ impl TryFromDialect<sqlparser::ast::DataType> for crate::ast::SqlType {
                 exact_number_info_into_decimal(info).map_err(|e| failed_err!("DEC conversion: {e}"))
             }
             Float(_) => Ok(Self::Float),
-            UnsignedTinyInt(n) => Ok(Self::TinyIntUnsigned(n.map(|n| n as u16))),
+            TinyIntUnsigned(n) => Ok(Self::TinyIntUnsigned(n.map(|n| n as u16))),
             Int2(_) => Ok(Self::Int2),
-            UnsignedInt2(n) => Ok(Self::SmallIntUnsigned(n.map(|n| n as u16))),
+            Int2Unsigned(n) => Ok(Self::SmallIntUnsigned(n.map(|n| n as u16))),
             SmallInt(n) => Ok(Self::SmallInt(n.map(|n| n as u16))),
-            UnsignedSmallInt(n) => Ok(Self::SmallIntUnsigned(n.map(|n| n as u16))),
+            SmallIntUnsigned(n) => Ok(Self::SmallIntUnsigned(n.map(|n| n as u16))),
             MediumInt(n) => Ok(Self::MediumInt(n.map(|n| n as u16))),
-            UnsignedMediumInt(n) => Ok(Self::MediumIntUnsigned(n.map(|n| n as u16))),
+            MediumIntUnsigned(n) => Ok(Self::MediumIntUnsigned(n.map(|n| n as u16))),
             Int4(_) => Ok(Self::Int4),
             Int8(_) => Ok(Self::Int8),
             Int16 | Int32 | Int64 | Int128 | Int256 => unsupported!("INT<size> type"),
             Integer(n) => Ok(Self::Int(n.map(|n| n as u16))),
-            UnsignedInt(n) => Ok(Self::IntUnsigned(n.map(|n| n as u16))),
-            UnsignedInt4(n) => Ok(Self::IntUnsigned(n.map(|n| n as u16))),
-            UnsignedInteger(n) => Ok(Self::IntUnsigned(n.map(|n| n as u16))),
+            IntUnsigned(n) => Ok(Self::IntUnsigned(n.map(|n| n as u16))),
+            Int4Unsigned(n) => Ok(Self::IntUnsigned(n.map(|n| n as u16))),
+            IntegerUnsigned(n) => Ok(Self::IntUnsigned(n.map(|n| n as u16))),
             UInt8 | UInt16 | UInt32 | UInt64 | UInt128 | UInt256 => unsupported!("UINT<size> type"),
             BigInt(n) => Ok(Self::BigInt(n.map(|n| n as u16))),
+            Signed => Ok(Self::Signed),
+            SignedInteger => Ok(Self::SignedInteger),
+            Unsigned => Ok(Self::Unsigned),
+            UnsignedInteger => Ok(Self::UnsignedInteger),
             Float4 | Float8 | Float32 | Float64 => unsupported!("FLOAT<size> type"),
             Real => Ok(Self::Real),
             // XXX we don't support precision on doubles; [MySQL] says it's deprecated, but still present as of 9.1
@@ -267,6 +271,9 @@ impl TryFromDialect<sqlparser::ast::DataType> for crate::ast::SqlType {
             Trigger => skipped!("TRIGGER"),
             AnyType => unsupported!("ANY TYPE"),
             Table(_column_definition_list) => unsupported!("TABLE type"),
+            GeometricType(geometric_type_kind) => {
+                unsupported!("geometric type {geometric_type_kind}")
+            }
         }
     }
 }

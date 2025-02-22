@@ -601,7 +601,11 @@ impl TryFromDialect<sqlparser::ast::Expr> for FieldReference {
         value: sqlparser::ast::Expr,
         dialect: Dialect,
     ) -> Result<Self, AstConversionError> {
-        if let sqlparser::ast::Expr::Value(sqlparser::ast::Value::Number(ref n, _)) = value {
+        if let sqlparser::ast::Expr::Value(sqlparser::ast::ValueWithSpan {
+            value: sqlparser::ast::Value::Number(ref n, _),
+            ..
+        }) = value
+        {
             if let Ok(i) = n.parse() {
                 return Ok(FieldReference::Numeric(i));
             }
