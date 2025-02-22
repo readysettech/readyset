@@ -85,20 +85,19 @@ impl TryFromDialect<sqlparser::ast::OrderByExpr> for OrderBy {
     ) -> Result<Self, AstConversionError> {
         let sqlparser::ast::OrderByExpr {
             expr,
-            asc,
-            nulls_first,
-            ..
+            options,
+            with_fill: _,
         } = value;
         Ok(Self {
             field: expr.try_into_dialect(dialect)?,
-            order_type: asc.map(|asc| {
+            order_type: options.asc.map(|asc| {
                 if asc {
                     OrderType::OrderAscending
                 } else {
                     OrderType::OrderDescending
                 }
             }),
-            null_order: nulls_first.map(|nulls_first| {
+            null_order: options.nulls_first.map(|nulls_first| {
                 if nulls_first {
                     NullOrder::NullsFirst
                 } else {
@@ -132,13 +131,17 @@ impl TryFromDialect<sqlparser::ast::OrderBy> for OrderClause {
         value: sqlparser::ast::OrderBy,
         dialect: Dialect,
     ) -> Result<Self, AstConversionError> {
-        Ok(OrderClause {
-            order_by: value
-                .exprs
-                .into_iter()
-                .map(|expr| expr.try_into_dialect(dialect))
-                .try_collect()?,
-        })
+        match value.kind {
+            sqlparser::ast::OrderByKind::All(_order_by_options) => {
+                unsupported!("DuckDB/Clickhouse ORDER BY ALL")
+            }
+            sqlparser::ast::OrderByKind::Expressions(exprs) => Ok(OrderClause {
+                order_by: exprs
+                    .into_iter()
+                    .map(|expr| expr.try_into_dialect(dialect))
+                    .try_collect()?,
+            }),
+        }
     }
 }
 

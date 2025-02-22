@@ -5340,7 +5340,7 @@ async fn aggregate_expression() {
     g.extend_recipe(
         ChangeList::from_str(
             "CREATE TABLE t (string_num text);
-         CREATE CACHE q FROM SELECT max(cast(t.string_num as int)) as max_num from t;",
+         CREATE CACHE q FROM SELECT max(cast(t.string_num as signed)) as max_num from t;",
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap(),

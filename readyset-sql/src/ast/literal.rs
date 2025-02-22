@@ -263,6 +263,14 @@ impl TryFrom<sqlparser::ast::Value> for Literal {
     }
 }
 
+impl TryFrom<sqlparser::ast::ValueWithSpan> for Literal {
+    type Error = AstConversionError;
+
+    fn try_from(value: sqlparser::ast::ValueWithSpan) -> Result<Self, Self::Error> {
+        value.value.try_into()
+    }
+}
+
 impl DialectDisplay for Literal {
     fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| {
