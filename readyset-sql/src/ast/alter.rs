@@ -124,7 +124,7 @@ impl DialectDisplay for AlterTableDefinition {
             Self::RenameColumn { name, new_name } => {
                 write!(
                     f,
-                    "RENAME COLUMN {} {}",
+                    "RENAME COLUMN {} TO {}",
                     dialect.quote_identifier(name),
                     dialect.quote_identifier(new_name)
                 )
