@@ -20,6 +20,7 @@ use itertools::Itertools;
 use mysql_common::chrono::NaiveDateTime;
 use mysql_time::MySqlTime;
 use pgsql::types::to_sql_checked;
+use pgsql::types::Type as pgType;
 use readyset_data::{DfValue, TIMESTAMP_FORMAT};
 use readyset_sql::ast::{Literal, SqlQuery};
 use rust_decimal::prelude::ToPrimitive;
@@ -115,6 +116,7 @@ pub enum Type {
     TimestampTz,
     ByteArray,
     BitVec,
+    Row,
 }
 
 impl Type {
@@ -136,6 +138,7 @@ impl Type {
 impl Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Row => write!(f, "X"),
             Self::Text => write!(f, "T"),
             Self::Integer => write!(f, "I"),
             Self::UnsignedInteger => write!(f, "UI"),
@@ -204,6 +207,26 @@ pub enum Value {
     Numeric(Decimal),
     Null,
     BitVector(BitVec),
+    Row(Vec<Value>),
+}
+
+impl From<&Value> for &pgType {
+    fn from(value: &Value) -> Self {
+        match value {
+            Value::Text(_) => &pgType::TEXT,
+            Value::Integer(_) => &pgType::INT8,
+            Value::UnsignedInteger(_) => &pgType::INT8,
+            Value::Real(_, _) => &pgType::NUMERIC,
+            Value::Date(_) => &pgType::DATE,
+            Value::Time(_) => &pgType::TIME,
+            Value::TimestampTz(_) => &pgType::TIMESTAMPTZ,
+            Value::ByteArray(_) => &pgType::BYTEA_ARRAY,
+            Value::Numeric(_) => &pgType::NUMERIC,
+            Value::Null => &pgType::ANY,
+            Value::BitVector(_) => &pgType::BIT_ARRAY,
+            Value::Row(_) => &pgType::RECORD,
+        }
+    }
 }
 
 #[derive(Error, Debug)]
@@ -326,6 +349,7 @@ impl From<Value> for mysql_async::Value {
             // These types are PostgreSQL-specific
             Value::ByteArray(_) => unimplemented!(),
             Value::TimestampTz(_) => unimplemented!(),
+            Value::Row(_) => unimplemented!(),
         }
     }
 }
@@ -333,7 +357,7 @@ impl From<Value> for mysql_async::Value {
 impl pgsql::types::ToSql for Value {
     fn to_sql(
         &self,
-        ty: &pgsql::types::Type,
+        ty: &pgType,
         out: &mut bytes::BytesMut,
     ) -> Result<pgsql::types::IsNull, Box<dyn Error + Sync + Send>> {
         match self {
@@ -348,6 +372,14 @@ impl pgsql::types::ToSql for Value {
             Value::Null => None::<i8>.to_sql(ty, out),
             Value::BitVector(b) => b.to_sql(ty, out),
             Value::TimestampTz(ts) => ts.to_sql(ty, out),
+            Value::Row(v) => {
+                let _ = v
+                    .iter()
+                    .map(|a| a.to_sql(a.into(), out))
+                    .collect::<Result<Vec<_>, _>>()
+                    .unwrap();
+                Ok(pgsql::types::IsNull::No)
+            }
         }
     }
 
@@ -366,7 +398,8 @@ impl pgsql::types::ToSql for Value {
             | Type::TEXT
             | Type::DATE
             | Type::TIME
-            | Type::BIT => true,
+            | Type::BIT
+            | Type::RECORD => true,
             ref ty if ty.name() == "citext" => true,
             _ => false,
         }
@@ -455,7 +488,12 @@ impl TryFrom<DfValue> for Value {
             DfValue::ByteArray(t) => Ok(Value::ByteArray(t.as_ref().clone())),
             DfValue::Numeric(ref d) => Ok(Value::Numeric(*d.as_ref())),
             DfValue::BitVector(ref b) => Ok(Value::BitVector(b.as_ref().clone())),
-            DfValue::Array(_) => bail!("Arrays not supported"),
+            DfValue::Array(a) => Ok(Value::Row(
+                a.values()
+                    .cloned()
+                    .map(Value::try_from)
+                    .collect::<Result<_, _>>()?,
+            )),
             DfValue::PassThrough(_) => unimplemented!(),
         }
     }
@@ -507,6 +545,9 @@ impl Display for Value {
                 )
             }
             Self::TimestampTz(ts) => write!(f, "{}", ts),
+            Self::Row(values) => {
+                write!(f, "({:?})", values.iter().map(|v| v.to_string()).join(","))
+            }
         }
     }
 }
@@ -558,6 +599,7 @@ impl Value {
             Self::Null => None,
             Self::BitVector(_) => Some(Type::BitVec),
             Self::TimestampTz(_) => Some(Type::TimestampTz),
+            Self::Row(_) => Some(Type::Row),
         }
     }
 
@@ -610,6 +652,7 @@ impl Value {
             // These types are PostgreSQL specific.
             Type::ByteArray => unimplemented!(),
             Type::TimestampTz => unimplemented!(),
+            Type::Row => unimplemented!(),
         }
     }
 
@@ -623,6 +666,7 @@ impl Value {
             | (Self::Time(_), Type::Time)
             | (Self::TimestampTz(_), Type::TimestampTz)
             | (Self::BitVector(_), Type::BitVec)
+            | (Self::Row(_), Type::Row)
             | (Self::Null, _) => Ok(Cow::Borrowed(self)),
             (Self::Integer(i), Type::UnsignedInteger) => {
                 Ok(Cow::Owned(Self::UnsignedInteger((*i).try_into()?)))
@@ -666,6 +710,7 @@ impl Value {
             (Self::Date(ndt), Type::TimestampTz) => Ok(Cow::Owned(Self::TimestampTz(
                 FixedOffset::east_opt(0).unwrap().from_utc_datetime(ndt),
             ))),
+            (Self::Row(_), Type::Text) => Ok(Cow::Owned(Self::Text(format!("{}", self)))),
             (v, t) => {
                 todo!("{v:?} {t:?}")
             }

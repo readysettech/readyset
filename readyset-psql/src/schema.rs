@@ -179,8 +179,9 @@ pub fn type_to_pgsql(col_type: &DfType) -> Result<pgsql::types::Type, Error> {
                 DfType::Uuid => Ok(Type::UUID_ARRAY),
                 DfType::Bit(_) => Ok(Type::BIT_ARRAY),
                 DfType::VarBit(_) => Ok(Type::VARBIT_ARRAY),
-                DfType::Array(_) => unsupported_type!(),
+                DfType::Array(_) | DfType::Row => unsupported_type!(),
             }
         }
+        DfType::Row => Ok(Type::RECORD),
     }
 }

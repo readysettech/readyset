@@ -384,10 +384,16 @@ impl Display for CaseWhenBranch {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Expr {
     /// A reference to a column, by index, in the parent node
-    Column { index: usize, ty: DfType },
+    Column {
+        index: usize,
+        ty: DfType,
+    },
 
     /// A literal DfValue value
-    Literal { val: DfValue, ty: DfType },
+    Literal {
+        val: DfValue,
+        ty: DfType,
+    },
 
     /// A binary operation
     Op {
@@ -398,7 +404,10 @@ pub enum Expr {
     },
 
     /// Boolean negation
-    Not { expr: Box<Expr>, ty: DfType },
+    Not {
+        expr: Box<Expr>,
+        ty: DfType,
+    },
 
     /// Test if the LHS satisfies OP for any element in the RHS, which must evaluate to some kind
     /// of array.
@@ -457,6 +466,11 @@ pub enum Expr {
         shape: Vec<usize>,
         ty: DfType,
     },
+
+    // Row/tuple is not homogeneous
+    Row {
+        elements: Vec<Expr>,
+    },
 }
 
 impl Display for Expr {
@@ -510,6 +524,9 @@ impl Display for Expr {
             } => {
                 write!(f, "{} AT TIME ZONE '{}'", expr, at_time_zone.name())
             }
+            Row { elements } => {
+                write!(f, "ROW({})", elements.iter().join(","))
+            }
         }
     }
 }
@@ -528,6 +545,7 @@ impl Expr {
             | Expr::Cast { ty, .. }
             | Expr::Array { ty, .. }
             | Expr::AtTimeZone { ty, .. } => ty,
+            Expr::Row { .. } => &DfType::Row,
         }
     }
 }

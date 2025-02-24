@@ -2428,7 +2428,8 @@ mod arbitrary {
             | Some(DfType::Json)
             | Some(DfType::MacAddr)
             | Some(DfType::Uuid)
-            | Some(DfType::Inet) => Just(DfValue::None).boxed(),
+            | Some(DfType::Inet)
+            | Some(DfType::Row) => Just(DfValue::None).boxed(),
         }
     }
 }

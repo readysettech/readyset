@@ -569,6 +569,8 @@ fn put_binary_value(val: &PsqlValue, dst: &mut BytesMut) -> Result<(), Error> {
         PsqlValue::PassThrough(p) => {
             dst.put(&p.data[..]);
         }
+        // FIXME: is this even correct (i.e. is this actually how psql does it)?
+        PsqlValue::Record(v) => v.iter().try_for_each(|v| put_binary_value(v, dst))?,
     };
     // Update the length field to match the recently serialized data length in `dst`. The 4 byte
     // length field itself is excluded from the length calculation.
@@ -681,7 +683,13 @@ fn put_text_value(val: &PsqlValue, dst: &mut BytesMut) -> Result<(), Error> {
                 p.ty
             )));
         }
+        PsqlValue::Record(v) => {
+            dst.write_str("ROW(")?;
+            v.iter().try_for_each(|v| put_text_value(v, dst))?;
+            dst.write_str(")")?;
+        }
     };
+
     // Update the length field to match the recently serialized data length in `dst`. The 4 byte
     // length field itself is excluded from the length calculation.
     let value_len = dst.len() - start_ofs - 4;

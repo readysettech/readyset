@@ -23,6 +23,34 @@ pub(crate) struct TypedDfValue<'a> {
     pub value: DfValue,
 }
 
+impl From<&DfValue> for TypedDfValue<'_> {
+    fn from(value: &DfValue) -> Self {
+        let ty = match value {
+            DfValue::None => &Type::ANY,
+            DfValue::Int(_) => &Type::INT8,
+            DfValue::UnsignedInt(_) => &Type::INT8,
+            DfValue::Float(_) => &Type::FLOAT4,
+            DfValue::Double(_) => &Type::FLOAT8,
+            DfValue::Text(_) => &Type::TEXT,
+            DfValue::TinyText(_) => &Type::TEXT,
+            DfValue::TimestampTz(_) => &Type::TIMESTAMPTZ,
+            DfValue::Time(_) => &Type::TIME,
+            DfValue::ByteArray(_) => &Type::BYTEA_ARRAY,
+            DfValue::Numeric(_) => &Type::NUMERIC,
+            DfValue::BitVector(_) => &Type::BIT_ARRAY,
+            DfValue::Array(_) => &Type::ANYARRAY, // TODO: Do we need to fetch the datatype
+            DfValue::PassThrough(_) => &Type::ANY,
+            DfValue::Default => &Type::ANY,
+            DfValue::Max => &Type::ANY,
+        };
+
+        TypedDfValue {
+            col_type: ty,
+            value: value.clone(),
+        }
+    }
+}
+
 impl TryFrom<TypedDfValue<'_>> for PsqlValue {
     type Error = ps::Error;
 
@@ -122,6 +150,12 @@ impl TryFrom<TypedDfValue<'_>> for PsqlValue {
             }
             (&Type::BIT, DfValue::BitVector(ref b)) => Ok(PsqlValue::Bit(b.as_ref().clone())),
             (&Type::VARBIT, DfValue::BitVector(ref b)) => Ok(PsqlValue::VarBit(b.as_ref().clone())),
+            (&Type::RECORD, DfValue::Array(ref a)) => Ok(PsqlValue::Record(
+                a.values()
+                    .map(TypedDfValue::from)
+                    .map(PsqlValue::try_from)
+                    .collect::<Result<_, _>>()?,
+            )),
             (t, DfValue::Array(ref arr)) => {
                 if let Kind::Array(member) = t.kind() {
                     let mut arr = (**arr).clone();

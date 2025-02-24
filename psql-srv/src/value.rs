@@ -40,6 +40,7 @@ pub enum PsqlValue {
     Bit(BitVec),
     VarBit(BitVec),
     Array(Array, Type),
+    Record(Vec<PsqlValue>),
     PassThrough(readyset_data::PassThrough),
 }
 
@@ -104,6 +105,7 @@ impl<'a> FromSql<'a> for PsqlValue {
                 Type::UUID => Uuid::from_sql(ty, raw).map(PsqlValue::Uuid),
                 Type::JSON => serde_json::Value::from_sql(ty, raw).map(PsqlValue::Json),
                 Type::JSONB => serde_json::Value::from_sql(ty, raw).map(PsqlValue::Jsonb),
+                Type::RECORD => Ok(PsqlValue::Record(Vec::from_sql(ty, raw)?)),
                 Type::BIT => BitVec::from_sql(ty, raw).map(PsqlValue::Bit),
                 Type::VARBIT => BitVec::from_sql(ty, raw).map(PsqlValue::VarBit),
                 _ => Ok(PsqlValue::PassThrough(readyset_data::PassThrough {

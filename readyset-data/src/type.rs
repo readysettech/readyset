@@ -194,6 +194,11 @@ pub enum DfType {
 
     /// [PostgreSQL `jsonb`](https://www.postgresql.org/docs/current/datatype-json.html).
     Jsonb,
+
+    /// A logical type used by the parser to represent tuples.
+    /// Also have an explicit constructor in
+    /// [PostgreSQL](https://www.postgresql.org/docs/current/sql-expressions.html#SQL-SYNTAX-ROW-CONSTRUCTORS)
+    Row,
 }
 
 /// Defaults.
@@ -373,6 +378,7 @@ impl DfType {
             | DfType::Timestamp { .. }
             | DfType::TimestampTz { .. } => PgTypeCategory::DateTime,
             DfType::MacAddr | DfType::Inet => PgTypeCategory::NetworkAddress,
+            DfType::Row => PgTypeCategory::Composite,
             DfType::Uuid | DfType::Enum { .. } | DfType::Json | DfType::Jsonb => {
                 PgTypeCategory::UserDefined
             }
@@ -777,7 +783,8 @@ impl fmt::Display for DfType {
             | Self::MacAddr
             | Self::Uuid
             | Self::Json
-            | Self::Jsonb => write!(f, "{kind:?}"),
+            | Self::Jsonb
+            | Self::Row => write!(f, "{kind:?}"),
 
             Self::Text(collation) => {
                 write!(f, "Text")?;

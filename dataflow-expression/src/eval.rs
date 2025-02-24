@@ -319,6 +319,13 @@ impl Expr {
                     })?,
                 )))
             }
+            // At this point, arrays are no longer homogenous and therefore there is no difference
+            Expr::Row { elements } => Ok(DfValue::from(Array::from(
+                elements
+                    .iter()
+                    .map(|expr| expr.eval(record))
+                    .collect::<Result<Vec<_>, _>>()?,
+            ))),
             Expr::AtTimeZone {
                 expr,
                 at_time_zone,

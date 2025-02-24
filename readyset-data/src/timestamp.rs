@@ -546,7 +546,8 @@ impl TimestampTz {
             | DfType::Uuid
             | DfType::Bit(_)
             | DfType::VarBit(_)
-            | DfType::Array(_) => Err(ReadySetError::DfValueConversionError {
+            | DfType::Array(_)
+            | DfType::Row => Err(ReadySetError::DfValueConversionError {
                 src_type: "DfValue::TimestampTz".to_string(),
                 target_type: format!("{:?}", to_ty),
                 details: "Not allowed".to_string(),

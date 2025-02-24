@@ -257,6 +257,13 @@ impl TryFrom<ParamRef<'_>> for DfValue {
             PsqlValue::Bit(bits) | PsqlValue::VarBit(bits) => Ok(DfValue::from(bits.clone())),
             PsqlValue::Array(arr, _) => Ok(DfValue::from(arr.clone())),
             PsqlValue::PassThrough(p) => Ok(DfValue::PassThrough(Arc::new(p.clone()))),
+            PsqlValue::Record(v) => Ok(DfValue::Array(Arc::new(
+                v.iter()
+                    .map(ParamRef)
+                    .map(DfValue::try_from)
+                    .collect::<Result<Vec<_>, _>>()?
+                    .into(),
+            ))),
         }
     }
 }

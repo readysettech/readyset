@@ -198,7 +198,8 @@ where
         | DfType::Inet
         | DfType::Uuid
         | DfType::VarBit(_)
-        | DfType::Array(_) => Err(ReadySetError::DfValueConversionError {
+        | DfType::Array(_)
+        | DfType::Row => Err(ReadySetError::DfValueConversionError {
             src_type: from_ty.to_string(),
             target_type: to_ty.to_string(),
             details: "Not allowed".to_string(),

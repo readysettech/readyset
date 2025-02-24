@@ -19,7 +19,7 @@ use nom::character::complete::{
     alphanumeric1, anychar, char, digit1, line_ending, not_line_ending, one_of, space0, space1,
 };
 use nom::combinator::{complete, eof, map, map_opt, map_parser, opt, peek, recognize};
-use nom::multi::{count, fold_many1, many0, many1, many_till};
+use nom::multi::{count, fold_many1, many0, many1, many_till, separated_list1};
 use nom::sequence::{delimited, pair, preceded, terminated, tuple};
 use nom::IResult;
 use nom_locate::LocatedSpan;
@@ -107,6 +107,7 @@ fn statement(i: &[u8]) -> IResult<&[u8], Statement> {
 
 fn column_type(i: &[u8]) -> IResult<&[u8], Type> {
     alt((
+        map(tag("X"), |_| Type::Row),
         map(tag("T"), |_| Type::Text),
         map(tag("I"), |_| Type::Integer),
         map(tag("UI"), |_| Type::UnsignedInteger),
@@ -188,71 +189,68 @@ fn empty_string(i: &[u8]) -> IResult<&[u8], Value> {
     Ok((i, Value::Text(String::new())))
 }
 
-fn value(i: &[u8]) -> IResult<&[u8], Value> {
+fn single_value(i: &[u8]) -> IResult<&[u8], Value> {
     alt((
-        map(terminated(tag("NULL"), line_ending), |_| Value::Null),
-        terminated(empty_string, line_ending),
-        terminated(complete(float), line_ending),
-        map(terminated(integer, line_ending), Value::Integer),
         map(
-            terminated(unsigned_integer, line_ending),
-            Value::UnsignedInteger,
+            delimited(
+                tag("("),
+                separated_list1(tag(","), preceded(space0, single_value)),
+                tag(")"),
+            ),
+            Value::Row,
         ),
-        terminated(
-            map_opt(not_line_ending, |s: &[u8]| {
-                let ts = String::from_utf8_lossy(s);
-                // TimestampTz::from_str() will handle BC dates correctly
-                match TimestampTz::from_str(ts.as_ref()) {
-                    Ok(ts) => {
-                        if ts.has_timezone() {
-                            Some(Value::TimestampTz(ts.to_chrono()))
-                        } else {
-                            Some(Value::Date(ts.to_chrono().naive_utc()))
-                        }
-                    }
-                    Err(_) => None,
-                }
-            }),
-            line_ending,
-        ),
-        terminated(
-            map_opt(not_line_ending, |s: &[u8]| {
-                Some(Value::Time(
-                    MySqlTime::from_str(String::from_utf8_lossy(s).as_ref()).ok()?,
-                ))
-            }),
-            line_ending,
-        ),
+        map(tag("NULL"), |_| Value::Null),
+        empty_string,
+        complete(float),
+        map(integer, Value::Integer),
+        map(unsigned_integer, Value::UnsignedInteger),
+        map_opt(not_line_ending, |s: &[u8]| {
+            let ts = String::from_utf8_lossy(s);
+            match TimestampTz::from_str(ts.as_ref()) {
+                Ok(ts) => Some(if ts.has_timezone() {
+                    Value::TimestampTz(ts.to_chrono())
+                } else {
+                    Value::Date(ts.to_chrono().naive_utc())
+                }),
+                Err(_) => None,
+            }
+        }),
+        map_opt(not_line_ending, |s: &[u8]| {
+            Some(Value::Time(
+                MySqlTime::from_str(String::from_utf8_lossy(s).as_ref()).ok()?,
+            ))
+        }),
         map(
-            terminated(
-                delimited(
-                    tag_no_case("b'"),
-                    fold_many1(alt((char('0'), char('1'))), BitVec::new, |mut bv, c| {
-                        bv.push(c == '1');
-                        bv
-                    }),
-                    tag("'"),
-                ),
-                line_ending,
+            delimited(
+                tag_no_case("b'"),
+                fold_many1(alt((char('0'), char('1'))), BitVec::new, |mut bv, c| {
+                    bv.push(c == '1');
+                    bv
+                }),
+                tag("'"),
             ),
             Value::BitVector,
         ),
         map(
-            terminated(
-                map_opt(not_line_ending, |s: &[u8]| {
-                    if s.is_empty() {
-                        None
-                    } else {
-                        String::from_utf8(s.into()).ok()
-                    }
-                }),
-                line_ending,
-            ),
+            map_opt(not_line_ending, |s: &[u8]| {
+                if s.is_empty() {
+                    None
+                } else {
+                    String::from_utf8(s.into()).ok()
+                }
+            }),
             Value::Text,
         ),
     ))(i)
 }
 
+fn single_value_with_newline(i: &[u8]) -> IResult<&[u8], Value> {
+    terminated(single_value, line_ending)(i)
+}
+
+fn value(i: &[u8]) -> IResult<&[u8], Value> {
+    single_value_with_newline(i)
+}
 fn positional_param(i: &[u8]) -> IResult<&[u8], Value> {
     let (i, _) = tag("?")(i)?;
     let (i, _) = to_nom_result(whitespace1(LocatedSpan::new(i)))?;
