@@ -164,13 +164,8 @@ fn rename_column(
 
         let (i, name) = dialect.identifier()(i)?;
 
-        let i = if dialect == Dialect::PostgreSQL {
-            let (i, _) = whitespace1(i)?;
-            let (i, _) = tag_no_case("to")(i)?;
-            i
-        } else {
-            i
-        };
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("to")(i)?;
 
         let (i, _) = whitespace1(i)?;
         let (i, new_name) = dialect.identifier()(i)?;
