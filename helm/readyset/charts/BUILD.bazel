@@ -1,7 +1,0 @@
-filegroup(
-    name = "chart_charts",
-    srcs = [
-        "consul-1.2.0.tgz",
-    ],
-    visibility = ["//visibility:public"],
-)
