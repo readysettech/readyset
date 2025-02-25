@@ -21,6 +21,7 @@ const ID_BIND_COMPLETE: u8 = b'2';
 const ID_CLOSE_COMPLETE: u8 = b'3';
 const ID_COMMAND_COMPLETE: u8 = b'C';
 const ID_DATA_ROW: u8 = b'D';
+const ID_EMPTY_QUERY_RESPONSE: u8 = b'I';
 const ID_ERROR_RESPONSE: u8 = b'E';
 const ID_PARAMETER_DESCRIPTION: u8 = b't';
 const ID_PARAMETER_STATUS: u8 = b'S';
@@ -107,7 +108,6 @@ fn encode(message: BackendMessage, dst: &mut BytesMut) -> Result<(), Error> {
             put_i32(LENGTH_PLACEHOLDER, dst);
             put_i32(AUTHENTICATION_CLEARTEXT_REQUIRED, dst);
         }
-
         AuthenticationSasl {
             allow_channel_binding,
         } => {
@@ -120,37 +120,31 @@ fn encode(message: BackendMessage, dst: &mut BytesMut) -> Result<(), Error> {
             put_str(SCRAM_SHA_256_AUTHENTICATION_METHOD, dst);
             put_u8(NUL_BYTE, dst);
         }
-
         AuthenticationSaslContinue { sasl_data } => {
             put_u8(ID_AUTHENTICATION_REQUEST, dst);
             put_i32(LENGTH_PLACEHOLDER, dst);
             put_i32(AUTHENTICATION_SASL_CHALLENGE, dst);
             dst.extend_from_slice(&sasl_data);
         }
-
         AuthenticationSaslFinal { sasl_data } => {
             put_u8(ID_AUTHENTICATION_REQUEST, dst);
             put_i32(LENGTH_PLACEHOLDER, dst);
             put_i32(AUTHENTICATION_SASL_COMPLETED, dst);
             dst.extend_from_slice(&sasl_data);
         }
-
         AuthenticationOk => {
             put_u8(ID_AUTHENTICATION_REQUEST, dst);
             put_i32(LENGTH_PLACEHOLDER, dst);
             put_i32(AUTHENTICATION_OK_SUCCESS, dst);
         }
-
         BindComplete => {
             put_u8(ID_BIND_COMPLETE, dst);
             put_i32(LENGTH_PLACEHOLDER, dst);
         }
-
         CloseComplete => {
             put_u8(ID_CLOSE_COMPLETE, dst);
             put_i32(LENGTH_PLACEHOLDER, dst);
         }
-
         CommandComplete { tag } => {
             put_u8(ID_COMMAND_COMPLETE, dst);
             put_i32(LENGTH_PLACEHOLDER, dst);
@@ -192,14 +186,12 @@ fn encode(message: BackendMessage, dst: &mut BytesMut) -> Result<(), Error> {
                 dst,
             );
         }
-
         PassThroughCommandComplete(tag) => {
             put_u8(ID_COMMAND_COMPLETE, dst);
             let tag_str = std::str::from_utf8(&tag)?;
             put_i32(tag_str.len() as i32 + 4, dst);
             put_str(tag_str, dst);
         }
-
         DataRow {
             values,
             explicit_transfer_formats,
@@ -229,12 +221,10 @@ fn encode(message: BackendMessage, dst: &mut BytesMut) -> Result<(), Error> {
             // Update the value count field to match the number of values just serialized.
             set_i16(i16::try_from(n_values)?, dst, start_ofs + 5)?;
         }
-
         NoData => {
             put_u8(ID_NO_DATA, dst);
             put_i32(LENGTH_PLACEHOLDER, dst);
         }
-
         PassThroughSimpleRow(row) => {
             put_u8(ID_DATA_ROW, dst);
             // Put the length of this row in bytes. The length is equal to the length of the data,
@@ -246,7 +236,6 @@ fn encode(message: BackendMessage, dst: &mut BytesMut) -> Result<(), Error> {
             // Put the data
             put_slice(row.body().buffer(), dst);
         }
-
         PassThroughDataRow(row) => {
             // Note that this body is the same as that of the match arm for PassThroughSimpleRow,
             // but we need to duplicate it since `row` is a different type in each variant - they
@@ -261,7 +250,10 @@ fn encode(message: BackendMessage, dst: &mut BytesMut) -> Result<(), Error> {
             // Put the data
             put_slice(row.body().buffer(), dst);
         }
-
+        EmptyQueryResponse => {
+            put_u8(ID_EMPTY_QUERY_RESPONSE, dst);
+            put_i32(4, dst);
+        }
         ErrorResponse {
             severity,
             sqlstate,
@@ -354,7 +346,6 @@ fn encode(message: BackendMessage, dst: &mut BytesMut) -> Result<(), Error> {
             }
             put_u8(ERROR_RESPONSE_TERMINATOR, dst);
         }
-
         ParameterDescription {
             parameter_data_types,
         } => {
@@ -365,7 +356,6 @@ fn encode(message: BackendMessage, dst: &mut BytesMut) -> Result<(), Error> {
                 put_type(t, dst)?;
             }
         }
-
         ParameterStatus {
             parameter_name,
             parameter_value,
@@ -375,18 +365,15 @@ fn encode(message: BackendMessage, dst: &mut BytesMut) -> Result<(), Error> {
             put_str(&parameter_name, dst);
             put_str(&parameter_value, dst);
         }
-
         ParseComplete => {
             put_u8(ID_PARSE_COMPLETE, dst);
             put_i32(LENGTH_PLACEHOLDER, dst);
         }
-
         ReadyForQuery { status } => {
             put_u8(ID_READY_FOR_QUERY, dst);
             put_i32(LENGTH_PLACEHOLDER, dst);
             put_u8(status, dst);
         }
-
         RowDescription { field_descriptions } => {
             put_u8(ID_ROW_DESCRIPTION, dst);
             put_i32(LENGTH_PLACEHOLDER, dst);
@@ -401,7 +388,6 @@ fn encode(message: BackendMessage, dst: &mut BytesMut) -> Result<(), Error> {
                 put_format(d.transfer_format, dst);
             }
         }
-
         PassThroughRowDescription(field_descriptions) => {
             put_u8(ID_ROW_DESCRIPTION, dst);
             put_i32(LENGTH_PLACEHOLDER, dst);
@@ -416,7 +402,6 @@ fn encode(message: BackendMessage, dst: &mut BytesMut) -> Result<(), Error> {
                 put_i16(d.format(), dst);
             }
         }
-
         #[allow(clippy::unreachable)]
         SSLResponse { .. } => {
             unreachable!("SSLResponse is handled as a special case above.")

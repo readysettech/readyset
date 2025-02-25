@@ -56,6 +56,7 @@ pub enum BackendMessage {
         values: Vec<PsqlValue>,
         explicit_transfer_formats: Option<Arc<Vec<TransferFormat>>>,
     },
+    EmptyQueryResponse,
     ErrorResponse {
         severity: ErrorSeverity,
         sqlstate: SqlState,

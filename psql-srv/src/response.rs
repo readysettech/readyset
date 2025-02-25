@@ -71,7 +71,7 @@ where
                 // number of associated rows in the stream itself. Otherwise, we keep track of
                 // them and send our own command complete message for our single result set.
                 let mut n_rows = 0;
-                let mut sent_command_complete = false;
+                let mut sent_response = false;
                 // We send a row description for each batch of rows, then the rows themselves, then
                 // a command complete
                 let mut sent_row_description = false;
@@ -113,6 +113,19 @@ where
                                     sink.feed(BackendMessage::PassThroughSimpleRow(r)).await?;
                                 }
                                 SimpleQueryMessage::CommandComplete(c) => {
+                                    if c.rows == 0 && c.fields.is_none() && c.tag.is_empty() {
+                                        // XXX JCD tokio_postgres does not provide the expected
+                                        // EmptyQueryResponse message when processing empty
+                                        // queries and instead gives a CommandComplete message with
+                                        // no rows, no fields, and an empty tag.  I believe
+                                        // PostgreSQL always supplies a tag for a valid
+                                        // CommandComplete message.  Now that we've detected an
+                                        // empty query response, send the appropriate message to
+                                        // our client.
+                                        sink.feed(BackendMessage::EmptyQueryResponse).await?;
+                                        sent_response = true;
+                                        continue;
+                                    }
                                     if let Some(fields) = &c.fields {
                                         sink.feed(BackendMessage::PassThroughRowDescription(
                                             fields.to_vec(),
@@ -127,7 +140,7 @@ where
                                     // We may have sent a row description, but it was for this
                                     // batch, so reset it for the next batch
                                     sent_row_description = false;
-                                    sent_command_complete = true;
+                                    sent_response = true;
                                 }
                                 _ => {
                                     unimplemented!("Unhandled variant of SimpleQueryMessage added")
@@ -137,7 +150,7 @@ where
                     }
                 }
 
-                if !sent_command_complete {
+                if !sent_response {
                     trace!("Sending command complete: {:?}", n_rows);
                     sink.feed(BackendMessage::CommandComplete {
                         tag: CommandCompleteTag::Select(n_rows),
@@ -161,6 +174,7 @@ mod tests {
     use std::vec;
 
     use smallvec::smallvec;
+    use tokio_postgres::CommandCompleteContents;
     use tokio_test::block_on;
 
     use super::*;
@@ -180,6 +194,7 @@ mod tests {
         });
         futures::pin_mut!(validating_sink);
         block_on(response.write(&mut validating_sink)).unwrap();
+        block_on(validating_sink.flush()).unwrap();
     }
 
     #[test]
@@ -197,6 +212,7 @@ mod tests {
         });
         futures::pin_mut!(validating_sink);
         block_on(response.write(&mut validating_sink)).unwrap();
+        block_on(validating_sink.flush()).unwrap();
     }
 
     #[test]
@@ -218,25 +234,27 @@ mod tests {
         });
         futures::pin_mut!(validating_sink);
         block_on(response.write(&mut validating_sink)).unwrap();
+        block_on(validating_sink.flush()).unwrap();
     }
 
     #[test]
-    fn write_select_simple_empty() {
+    fn write_empty_query() {
         let response = TestResponse::Stream {
             header: None,
-            resultset: stream::iter(vec![]),
+            resultset: stream::iter(vec![Ok(PsqlSrvRow::SimpleQueryMessage(
+                SimpleQueryMessage::CommandComplete(CommandCompleteContents {
+                    fields: None,
+                    rows: 0,
+                    tag: "".into(),
+                }),
+            ))]),
             result_transfer_formats: None,
             trailer: None,
         };
         let validating_sink = sink::unfold(0, |i, m: BackendMessage| {
             async move {
                 match i {
-                    0 => assert!(matches!(
-                        m,
-                        BackendMessage::CommandComplete {
-                            tag: CommandCompleteTag::Select(0)
-                        }
-                    )),
+                    0 => assert!(matches!(m, BackendMessage::EmptyQueryResponse)),
                     // No further messages are expected.
                     _ => panic!(),
                 }
@@ -245,6 +263,7 @@ mod tests {
         });
         futures::pin_mut!(validating_sink);
         block_on(response.write(&mut validating_sink)).unwrap();
+        block_on(validating_sink.flush()).unwrap();
     }
 
     #[test]
@@ -326,5 +345,6 @@ mod tests {
         });
         futures::pin_mut!(validating_sink);
         block_on(response.write(&mut validating_sink)).unwrap();
+        block_on(validating_sink.flush()).unwrap();
     }
 }
