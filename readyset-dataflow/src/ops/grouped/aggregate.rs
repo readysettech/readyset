@@ -47,7 +47,7 @@ impl Aggregation {
         dialect: &Dialect,
     ) -> ReadySetResult<GroupedOperator<Aggregator>> {
         let out_ty = match &self {
-            Aggregation::Count { .. } => DfType::BigInt,
+            Aggregation::Count => DfType::BigInt,
             Aggregation::Sum => match dialect.engine() {
                 SqlEngine::MySQL => {
                     if over_col_ty.is_any_float() {
@@ -299,7 +299,7 @@ impl GroupedOperation for Aggregator {
                 }
 
                 match self.op {
-                    Aggregation::Count { .. } => apply_count(curr?, diff),
+                    Aggregation::Count => apply_count(curr?, diff),
                     Aggregation::Sum => apply_sum(curr?, diff),
                     Aggregation::Avg => apply_avg(curr?, diff),
                     Aggregation::GroupConcat { separator: _ } => internal!(
@@ -319,7 +319,7 @@ impl GroupedOperation for Aggregator {
     fn description(&self, detailed: bool) -> String {
         if !detailed {
             return match self.op {
-                Aggregation::Count { .. } => "+".to_owned(),
+                Aggregation::Count => "+".to_owned(),
                 Aggregation::Sum => "𝛴".to_owned(),
                 Aggregation::Avg => "Avg".to_owned(),
                 Aggregation::GroupConcat { separator: ref s } => {
@@ -338,7 +338,7 @@ impl GroupedOperation for Aggregator {
         }
 
         let op_string = match self.op {
-            Aggregation::Count { .. } => "|*|".to_owned(),
+            Aggregation::Count => "|*|".to_owned(),
             Aggregation::Sum => format!("𝛴({})", self.over),
             Aggregation::Avg => format!("Avg({})", self.over),
             Aggregation::GroupConcat { separator: ref s } => format!("||({}, {})", s, self.over),
@@ -371,16 +371,14 @@ impl GroupedOperation for Aggregator {
 
     fn empty_value(&self) -> Option<DfValue> {
         match self.op {
-            Aggregation::Count { .. } => Some(0.into()),
+            Aggregation::Count => Some(0.into()),
             _ => None,
         }
     }
 
     fn emit_empty(&self) -> bool {
         match self.op {
-            Aggregation::Count { .. } | Aggregation::GroupConcat { .. } => {
-                self.group_by().is_empty()
-            }
+            Aggregation::Count | Aggregation::GroupConcat { .. } => self.group_by().is_empty(),
             _ => false,
         }
     }

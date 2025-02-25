@@ -119,7 +119,10 @@ pub(crate) fn coerce_f64(val: f64, to_ty: &DfType, from_ty: &DfType) -> ReadySet
         DfType::Char(l, ..) => {
             let mut val = val.to_string();
             val.truncate(l as usize);
-            val.extend(std::iter::repeat(' ').take((l as usize).saturating_sub(val.len())));
+            val.extend(std::iter::repeat_n(
+                ' ',
+                (l as usize).saturating_sub(val.len()),
+            ));
             Ok(val.into())
         }
 
@@ -134,7 +137,10 @@ pub(crate) fn coerce_f64(val: f64, to_ty: &DfType, from_ty: &DfType) -> ReadySet
         DfType::Binary(l) => {
             let mut val = val.to_string();
             val.truncate(l as usize);
-            val.extend(std::iter::repeat(' ').take((l as usize).saturating_sub(val.len())));
+            val.extend(std::iter::repeat_n(
+                ' ',
+                (l as usize).saturating_sub(val.len()),
+            ));
             Ok(val.into_bytes().into())
         }
 
@@ -233,7 +239,10 @@ pub(crate) fn coerce_decimal(
         DfType::Char(l, ..) => {
             let mut val = val.to_string();
             val.truncate(l as usize);
-            val.extend(std::iter::repeat(' ').take((l as usize).saturating_sub(val.len())));
+            val.extend(std::iter::repeat_n(
+                ' ',
+                (l as usize).saturating_sub(val.len()),
+            ));
             Ok(val.into())
         }
 
@@ -248,7 +257,10 @@ pub(crate) fn coerce_decimal(
         DfType::Binary(l) => {
             let mut val = val.to_string();
             val.truncate(l as usize);
-            val.extend(std::iter::repeat(' ').take((l as usize).saturating_sub(val.len())));
+            val.extend(std::iter::repeat_n(
+                ' ',
+                (l as usize).saturating_sub(val.len()),
+            ));
             Ok(val.into_bytes().into())
         }
 

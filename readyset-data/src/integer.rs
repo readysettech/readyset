@@ -103,7 +103,10 @@ where
         DfType::Char(l, ..) => {
             let mut val = val.to_string();
             val.truncate(l as usize);
-            val.extend(std::iter::repeat(' ').take((l as usize).saturating_sub(val.len())));
+            val.extend(std::iter::repeat_n(
+                ' ',
+                (l as usize).saturating_sub(val.len()),
+            ));
             Ok(val.into())
         }
 
@@ -118,7 +121,10 @@ where
         DfType::Binary(l) => {
             let mut val = val.to_string();
             val.truncate(l as usize);
-            val.extend(std::iter::repeat(' ').take((l as usize).saturating_sub(val.len())));
+            val.extend(std::iter::repeat_n(
+                ' ',
+                (l as usize).saturating_sub(val.len()),
+            ));
             Ok(val.into_bytes().into())
         }
 

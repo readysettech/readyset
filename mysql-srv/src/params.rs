@@ -63,7 +63,7 @@ impl<'a> Iterator for Params<'a> {
     type Item = Result<ParamValue<'a>, MsqlSrvError>;
     fn next(&mut self) -> Option<Self::Item> {
         if self.nullmap.is_none() {
-            let nullmap_len = (self.params as usize + 7) / 8;
+            let nullmap_len = (self.params as usize).div_ceil(8);
             let (nullmap, rest) = self.input.split_at(nullmap_len);
             self.nullmap = Some(nullmap);
             self.input = rest;

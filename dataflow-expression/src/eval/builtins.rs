@@ -2483,13 +2483,11 @@ mod tests {
 
             #[test]
             fn deeply_nested_array() {
-                use std::iter::repeat;
-
                 // Recursion limit for parsing.
                 let depth = 127;
 
-                let json: String = (repeat('[').take(depth))
-                    .chain(repeat(']').take(depth))
+                let json: String = std::iter::repeat_n('[', depth)
+                    .chain(std::iter::repeat_n(']', depth))
                     .collect();
 
                 test(&json, depth);
@@ -2497,14 +2495,12 @@ mod tests {
 
             #[test]
             fn deeply_nested_object() {
-                use std::iter::repeat;
-
                 // Recursion limit for parsing.
                 let depth = 127;
 
-                let json: String = (repeat("{\"a\": ").take(depth - 1))
+                let json: String = std::iter::repeat_n("{\"a\": ", depth - 1)
                     .chain(Some("{")) // innermost
-                    .chain(repeat("}").take(depth))
+                    .chain(std::iter::repeat_n("}", depth))
                     .collect();
 
                 test(&json, depth);

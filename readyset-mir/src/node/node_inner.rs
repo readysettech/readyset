@@ -413,7 +413,7 @@ impl MirNodeInner {
                 ..
             } => {
                 let op_string = match *kind {
-                    Aggregation::Count { .. } => format!("|*|({})", on.name.as_str()),
+                    Aggregation::Count => format!("|*|({})", on.name.as_str()),
                     Aggregation::Sum => format!("𝛴({})", on.name.as_str()),
                     Aggregation::Avg => format!("AVG({})", on.name.as_str()),
                     Aggregation::GroupConcat { separator: ref s } => {

@@ -27,7 +27,7 @@ pub(crate) fn coerce_enum(
                     // Char, but len is greater than current string, have to pad with whitespace
                     let mut new_string = String::with_capacity(*l as usize);
                     new_string += s;
-                    new_string.extend(std::iter::repeat(' ').take(*l as usize - s.len()));
+                    new_string.extend(std::iter::repeat_n(' ', *l as usize - s.len()));
                     Ok(DfValue::from(new_string))
                 }
                 DfType::Char(l, ..) | DfType::VarChar(l, ..) if (*l as usize) < s.len() => {

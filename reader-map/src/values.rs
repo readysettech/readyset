@@ -331,16 +331,14 @@ where
 
         *cache = if insert {
             Some(i.unwrap_or_else(|x| x))
-        } else if let Ok(x) = i {
-            Some(x)
         } else {
             // Option<usize> doesn't permit us to encode for the second side "we searched for
             // this the first time, but didn't find it," so if the workload deletes non-
             // existent keys, we will repeat the search in vain the second time.  But since
             // that's not the workload, we're okay here.  (But proptests do generate deletions
             // of non-existent values.)
-            None
-        }
+            i.ok()
+        };
     }
 
     /// Checks if the value is present.  Used in tests only.
@@ -496,7 +494,7 @@ where
     {
         Arc::new(
             map.iter()
-                .flat_map(|(wrapped, count)| std::iter::repeat(wrapped.value.clone()).take(*count))
+                .flat_map(|(wrapped, count)| std::iter::repeat_n(wrapped.value.clone(), *count))
                 .collect(),
         )
     }

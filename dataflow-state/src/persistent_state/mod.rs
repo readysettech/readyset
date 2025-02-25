@@ -669,7 +669,7 @@ impl State for PersistentState {
         // Streamline the records by eliminating pairs that would negate each other.
         records.remove_deleted();
 
-        if records.len() == 0 && replication_offset.is_none() {
+        if records.is_empty() && replication_offset.is_none() {
             return Ok(());
         }
 

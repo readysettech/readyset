@@ -2713,7 +2713,7 @@ async fn drop_all_proxied_queries() {
         .await
         .unwrap()
         .into_iter()
-        .last()
+        .next_back()
         .unwrap();
     assert!(matches!(
         command,
@@ -2727,7 +2727,7 @@ async fn drop_all_proxied_queries() {
         .await
         .unwrap()
         .into_iter()
-        .last()
+        .next_back()
         .unwrap();
     assert!(matches!(
         command,
@@ -2765,7 +2765,7 @@ async fn numeric_inf_nan() {
         .await
         .unwrap()
         .into_iter()
-        .last()
+        .next_back()
         .unwrap();
 
     // We expect to see all rows because the table was dropped since we don't support NaN/Infinity
@@ -2825,7 +2825,7 @@ async fn numeric_snapshot_nan() {
                     None
                 }
             })
-            .last()
+            .next_back()
             .unwrap().1;
         AssertUnwindSafe(|| result)
     }, then_assert: |result| {

@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
-use std::iter;
 
 use itertools::Itertools;
 use readyset_client::{ColumnSchema, Modification, Operation};
@@ -221,7 +220,7 @@ impl<'ast> Visitor<'ast> for BinopsParameterColumnsVisitor<'ast> {
                         BinaryOperator::Equal
                     };
                     self.parameter_cols
-                        .extend(iter::repeat((c, op)).take(exprs.len()));
+                        .extend(std::iter::repeat_n((c, op), exprs.len()));
                     return Ok(());
                 }
             }

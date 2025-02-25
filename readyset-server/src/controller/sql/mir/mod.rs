@@ -1572,8 +1572,8 @@ impl SqlToMirConverter {
     /// Returns Ok if:
     ///    - there are no OR nodes;
     ///    - all comparisons are:
-    ///          - local columns = outer column;
-    ///          - local column = constant;
+    ///      - local columns = outer column;
+    ///      - local column = constant;
     ///    - if there is at least one comparison of the above format, then
     ///      the rest of the WHERE expression can be anything.
     ///

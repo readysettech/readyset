@@ -1126,9 +1126,11 @@ async fn replication_catch_up_inner(url: &str) -> ReadySetResult<()> {
         .unwrap();
     let mut client = inserter.await.unwrap()?;
 
-    let rs: Vec<_> = std::iter::repeat([DfValue::from(100), DfValue::from("I am a teapot")])
-        .take(TOTAL_INSERTS)
-        .collect();
+    let rs: Vec<_> = std::iter::repeat_n(
+        [DfValue::from(100), DfValue::from("I am a teapot")],
+        TOTAL_INSERTS,
+    )
+    .collect();
     let rs: Vec<&[DfValue]> = rs.iter().map(|r| r.as_slice()).collect();
     ctx.check_results("catch_up_view", "Catch up", rs.as_slice())
         .await

@@ -36,9 +36,10 @@ async fn mysql_send_long_data_inner() {
     rs_conn
         .exec_drop(
             "INSERT INTO t VALUES (?)",
-            vec![Value::Bytes(Vec::from_iter(
-                std::iter::repeat(0).take(MAX_PAYLOAD_LEN * 2),
-            ))],
+            vec![Value::Bytes(Vec::from_iter(std::iter::repeat_n(
+                0,
+                MAX_PAYLOAD_LEN * 2,
+            )))],
         )
         .await
         .unwrap();

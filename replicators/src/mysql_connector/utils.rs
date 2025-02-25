@@ -32,7 +32,7 @@ pub fn mysql_pad_collation_column(
         CollationId::BINARY => {
             if val.len() < col_len {
                 let mut padded = val.to_owned();
-                padded.extend(std::iter::repeat(0).take(col_len - val.len()));
+                padded.extend(std::iter::repeat_n(0, col_len - val.len()));
                 return Ok(DfValue::ByteArray(Arc::new(padded)));
             }
             Ok(DfValue::ByteArray(Arc::new(val.to_vec())))
@@ -46,7 +46,7 @@ pub fn mysql_pad_collation_column(
             )
             .unwrap_or_default();
             if str_len < column_length_characters {
-                str.extend(std::iter::repeat(' ').take(column_length_characters - str_len));
+                str.extend(std::iter::repeat_n(' ', column_length_characters - str_len));
             }
             Ok(DfValue::from_str_and_collation(str.as_str(), rs_collation))
         }

@@ -874,7 +874,7 @@ impl MySqlBinlogConnector {
                         }
                         Err(err) => return Err(err),
                         Ok(action) => match action {
-                            ReplicationAction::LogPosition { .. } => {
+                            ReplicationAction::LogPosition => {
                                 continue;
                             }
                             _ => {

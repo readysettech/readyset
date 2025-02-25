@@ -133,7 +133,7 @@ where
             pos += games;
             // The number of games at each level is half of that at the previous level, rounded up
             // for uneven number of games
-            games = (games + 1) / 2;
+            games = games.div_ceil(2);
         }
     }
 
@@ -193,7 +193,7 @@ where
 
         self.tree[winner / 2] = self.play_game(Some(winner), Some(contestant));
 
-        let mut games = (self.contestants.len() + 1) / 2;
+        let mut games = self.contestants.len().div_ceil(2);
         let mut pos = 0;
         while games > 1 {
             winner /= 2;
@@ -210,7 +210,7 @@ where
             self.tree[pos + games + winner / 2] = new_winner;
 
             pos += games;
-            games = (games + 1) / 2;
+            games = games.div_ceil(2);
         }
     }
 

@@ -158,7 +158,7 @@ impl GraphViz for MirNodeInner {
                 ..
             } => {
                 let op_string = match kind {
-                    AggregationKind::Count { .. } => format!("\\|*\\|({})", on),
+                    AggregationKind::Count => format!("\\|*\\|({})", on),
                     AggregationKind::Sum => format!("𝛴({})", on),
                     AggregationKind::Avg => format!("AVG({})", on),
                     AggregationKind::GroupConcat { separator: s } => {

@@ -1,4 +1,4 @@
-use std::{iter, mem};
+use std::mem;
 
 use readyset_sql::analysis::visit_mut::{self, VisitorMut};
 use readyset_sql::ast::{BinaryOperator, Expr, InValue, ItemPlaceholder, Literal, SelectStatement};
@@ -116,10 +116,12 @@ impl<'ast> VisitorMut<'ast> for AutoParameterizeVisitor {
                         if self.autoparameterize_equals {
                             let exprs = mem::replace(
                                 exprs,
-                                iter::repeat(Expr::Literal(Literal::Placeholder(
-                                    ItemPlaceholder::QuestionMark,
-                                )))
-                                .take(exprs.len())
+                                std::iter::repeat_n(
+                                    Expr::Literal(Literal::Placeholder(
+                                        ItemPlaceholder::QuestionMark,
+                                    )),
+                                    exprs.len(),
+                                )
                                 .collect(),
                             );
                             let num_exprs = exprs.len();

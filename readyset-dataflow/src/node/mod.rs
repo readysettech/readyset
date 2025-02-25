@@ -690,7 +690,7 @@ impl Node {
     }
 
     pub fn is_source(&self) -> bool {
-        matches!(self.inner, NodeType::Source { .. })
+        matches!(self.inner, NodeType::Source)
     }
 
     pub fn is_sharder(&self) -> bool {

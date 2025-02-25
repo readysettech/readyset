@@ -63,8 +63,8 @@ pub fn normalize_json(json: &str) -> String {
 /// Not intended for use outside of tests.
 #[cfg(test)]
 pub fn empty_array_expr(dimensions: usize) -> String {
-    (std::iter::repeat("array[").take(dimensions))
-        .chain(std::iter::repeat("]").take(dimensions))
+    std::iter::repeat_n("array[", dimensions)
+        .chain(std::iter::repeat_n("]", dimensions))
         .collect()
 }
 

@@ -35,7 +35,7 @@ impl SizeOf for DfValue {
     fn deep_size_of(&self) -> usize {
         let inner = match self {
             DfValue::Text(t) => size_of_val(t) + t.as_bytes().len(),
-            DfValue::BitVector(t) => size_of_val(t) + (t.len() + 7) / 8,
+            DfValue::BitVector(t) => size_of_val(t) + t.len().div_ceil(8),
             DfValue::ByteArray(t) => size_of_val(t) + t.len(),
             _ => 0,
         };

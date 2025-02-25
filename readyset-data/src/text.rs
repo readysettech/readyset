@@ -418,7 +418,7 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
                 // Char, but length is greater than the current string, have to pad with whitespace
                 let mut new_string = String::with_capacity(l as usize);
                 new_string += str;
-                new_string.extend(std::iter::repeat(' ').take(l as usize - str.chars().count()));
+                new_string.extend(std::iter::repeat_n(' ', l as usize - str.chars().count()));
                 Ok(DfValue::from_str_and_collation(
                     new_string.as_str(),
                     collation,
@@ -448,7 +448,7 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
                 // Binary is longer than string, pad with zero bytes
                 let mut new_vec = Vec::with_capacity(l as usize);
                 new_vec.extend_from_slice(str.as_bytes());
-                new_vec.extend(std::iter::repeat(0).take(l as usize - str.len()));
+                new_vec.extend(std::iter::repeat_n(0, l as usize - str.len()));
                 Ok(DfValue::ByteArray(new_vec.into()))
             }
 
