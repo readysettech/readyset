@@ -15,9 +15,9 @@ What did you do? Describe in your own words.
 
 If possible, provide steps to reproduce the behavior:
 
-1. Set up ReadySet ...
+1. Set up Readyset ...
 2. Cache a query ...
-3. Look at ReadySet dashboard / log file / client app ...
+3. Look at Readyset dashboard / log file / client app ...
 4. See error
 
 **Expected behavior**
@@ -30,8 +30,8 @@ of the supporting tables.
 If applicable, add screenshots to help explain your problem.
 
 **Environment**
- - ReadySet version [e.g., beta-2022-11-02]
- - ReadySet deployment method [e.g, local orchestrator, Helm chart, binaries]
+ - Readyset version [e.g., stable-250123]
+ - Readyset deployment method [e.g, Docker container, distro packages, binaries]
  - Upstream database and version [e.g., Postgres 14]
  - Client app [e.g., `psql`, `mysql`, SQLAlchemy, TypeORM]
 
