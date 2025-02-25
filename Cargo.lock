@@ -5190,6 +5190,7 @@ dependencies = [
  "exponential-backoff",
  "fail",
  "futures",
+ "paste",
  "postgres",
  "pprof",
  "proptest",

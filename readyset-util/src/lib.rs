@@ -10,6 +10,7 @@ pub mod failpoints;
 
 pub mod arbitrary;
 pub mod display;
+pub mod flags;
 pub mod fmt;
 pub mod futures;
 pub mod graphviz;

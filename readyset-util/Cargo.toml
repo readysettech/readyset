@@ -26,6 +26,7 @@ serde = { workspace = true, features = ["derive"] }
 async-stream = { workspace = true }
 cidr = { workspace = true }
 thiserror = { workspace = true }
+paste = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true }
