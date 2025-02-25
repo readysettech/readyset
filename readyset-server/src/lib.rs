@@ -562,6 +562,10 @@ pub struct WorkerOptions {
     #[arg(long = "no-unquery", hide = true)]
     pub no_unquery: bool,
 
+    /// Disable query graph node reuse
+    #[arg(long = "no-reuse", hide = true)]
+    pub no_reuse: bool,
+
     /// Disable partial
     #[arg(long = "nopartial", hide = true)]
     pub no_partial: bool,

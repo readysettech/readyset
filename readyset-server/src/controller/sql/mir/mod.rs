@@ -16,7 +16,7 @@ use mir::node::{GroupedNodeType, MirNode, ProjectExpr, ViewKeyColumn};
 use mir::query::{MirBase, MirQuery};
 use mir::DfNodeIndex;
 pub use mir::{Column, NodeIndex};
-use petgraph::visit::Reversed;
+use petgraph::visit::{EdgeRef, Reversed};
 use petgraph::Direction;
 use readyset_client::ViewPlaceholder;
 use readyset_errors::{
@@ -33,6 +33,7 @@ use readyset_sql::ast::{
 };
 use readyset_sql::DialectDisplay;
 use readyset_sql_passes::{is_correlated, outermost_table_exprs};
+use readyset_util::flags;
 use readyset_util::redacted::Sensitive;
 use tracing::{debug, trace};
 use Expr::NestedSelect;
@@ -492,12 +493,32 @@ impl SqlToMirConverter {
         mut node: MirNode,
         parents: &[NodeIndex],
     ) -> NodeIndex {
-        node.add_owner(query_name);
-        let node_idx = self.mir_graph.add_node(node);
-        for (i, &parent) in parents.iter().enumerate() {
-            self.mir_graph.add_edge(parent, node_idx, i);
+        let graph = &mut self.mir_graph;
+        let parents = parents.iter().cloned().collect::<HashSet<_>>();
+        let reuse_enabled = flags::get().reuse();
+
+        let reuse = graph.node_indices().find(|idx| node == graph[*idx]);
+        let p = reuse
+            .map(|idx| {
+                graph
+                    .edges_directed(idx, Direction::Incoming)
+                    .map(|e| e.source())
+                    .collect::<HashSet<_>>()
+            })
+            .unwrap_or_default();
+
+        if let (Some(idx), true, true) = (reuse, parents == p, reuse_enabled) {
+            let reuse = &mut graph[idx];
+            reuse.add_owner(query_name);
+            idx
+        } else {
+            node.add_owner(query_name);
+            let idx = graph.add_node(node);
+            for (i, &parent) in parents.iter().enumerate() {
+                graph.add_edge(parent, idx, i);
+            }
+            idx
         }
-        node_idx
     }
 
     /// Removes all the nodes that depend on the one provided, and the provided node itself (except

@@ -52,6 +52,7 @@ use readyset_sql_passes::adapter_rewrites::AdapterRewriteParams;
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetryInitializer};
 #[cfg(feature = "failure_injection")]
 use readyset_util::failpoints;
+use readyset_util::flags::Flags;
 use readyset_util::futures::abort_on_panic;
 use readyset_util::redacted::RedactedString;
 use readyset_util::shared_cache::SharedCache;
@@ -618,6 +619,10 @@ where
     H: ConnectionHandler + Clone + Send + Sync + 'static,
 {
     pub fn run(&mut self, options: Options) -> anyhow::Result<()> {
+        let mut flags = Flags::default();
+        flags.set_reuse(!options.server_worker_options.no_reuse);
+        flags.commit();
+
         let rt = tokio::runtime::Builder::new_multi_thread()
             .with_sys_hooks()
             .enable_all()

@@ -24,7 +24,7 @@ use crate::Column;
 /// aliases.
 ///
 /// [`Project`]: MirNodeInner::Project
-#[derive(Clone, Debug, Serialize, Deserialize, From)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, From)]
 pub enum ProjectExpr {
     /// Emit a (named) column verbatim from the parent
     Column(Column),
@@ -50,7 +50,7 @@ impl Display for ProjectExpr {
 /// An individual column in the `key` of a [`ViewKey`]
 ///
 /// [`ViewKey`]: MirNodeInner::ViewKey
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewKeyColumn {
     pub column: Column,
     pub op: BinaryOperator,
@@ -68,7 +68,7 @@ impl Display for ViewKeyColumn {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MirNodeInner {
     /// Node that computes an aggregate function on a column grouped by another set of columns,
     /// outputting its result as an additional column.

@@ -113,6 +113,14 @@ impl Display for MirNode {
     }
 }
 
+impl PartialEq for MirNode {
+    fn eq(&self, other: &Self) -> bool {
+        self.inner == other.inner
+    }
+}
+
+impl Eq for MirNode {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
