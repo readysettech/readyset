@@ -289,7 +289,7 @@ impl BuiltinFunction {
 
                 (
                     Self::JsonBuildObject {
-                        args: args.by_ref().collect(),
+                        args: exprs,
                         allow_duplicate_keys: true,
                     },
                     DfType::Json,
@@ -304,7 +304,7 @@ impl BuiltinFunction {
 
                 (
                     Self::JsonBuildObject {
-                        args: args.by_ref().collect(),
+                        args: exprs,
                         allow_duplicate_keys: false,
                     },
                     DfType::Json,

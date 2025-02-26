@@ -20,3 +20,20 @@ SELECT json_object(a, b, c, d) FROM t1;
 # Requires even number of arguments
 statement error
 SELECT json_object(a, b, c) FROM t1;
+
+query T
+SELECT json_build_object(a, b, c, d) FROM t1;
+----
+{"abc":3.14,"1":1}
+{"xyz":2.71,"2":0}
+
+statement ok
+CREATE TABLE t2 (a TEXT, b DOUBLE, c TEXT, d BOOL);
+
+statement ok
+INSERT INTO t2 VALUES ("abc", 3.14, "abc", true);
+
+query T
+SELECT jsonb_build_object(a, b, c, d) FROM t2;
+----
+{"abc":1}
