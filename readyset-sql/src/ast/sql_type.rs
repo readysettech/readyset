@@ -230,6 +230,8 @@ impl TryFromDialect<sqlparser::ast::DataType> for crate::ast::SqlType {
                     Some(name) => {
                         if dialect == Dialect::PostgreSQL && name == "char" {
                             Ok(Self::QuotedChar)
+                        } else if name.eq_ignore_ascii_case("bigserial") {
+                            Ok(Self::BigSerial)
                         } else if name.eq_ignore_ascii_case("citext") {
                             Ok(Self::Citext)
                         } else if name.eq_ignore_ascii_case("inet") {
