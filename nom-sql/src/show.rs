@@ -123,6 +123,16 @@ fn readyset_tables() -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ShowS
     }
 }
 
+/// Parses READYSET CACHING_SHA2_PASSWORD RSA statements.
+pub fn readyset_caching_sha2_rsa(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ShowStatement> {
+    let (i, _) = tag_no_case("readyset")(i)?;
+    let (i, _) = whitespace1(i)?;
+    let (i, _) = tag_no_case("caching_sha2_password")(i)?;
+    let (i, _) = whitespace1(i)?;
+    let (i, _) = tag_no_case("rsa")(i)?;
+    Ok((i, ShowStatement::ReadySetCachingSha2Rsa))
+}
+
 pub fn show(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ShowStatement> {
     move |i| {
         let (i, _) = tag_no_case("show")(i)?;
@@ -132,6 +142,7 @@ pub fn show(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u
             proxied_queries(dialect),
             readyset_migration_status,
             readyset_status(),
+            readyset_caching_sha2_rsa,
             value(
                 ShowStatement::ReadySetVersion,
                 tuple((tag_no_case("readyset"), whitespace1, tag_no_case("version"))),

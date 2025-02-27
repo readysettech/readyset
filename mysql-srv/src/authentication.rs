@@ -11,7 +11,7 @@ use std::fs::File;
 use std::io;
 use std::io::{Read, Write};
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use getrandom::getrandom;
 use openssl::pkey::{PKey, Private};
@@ -42,6 +42,8 @@ const CACHING_SHA2_PASSWORD_AUTH_STATUS_FULL_AUTH: u8 = 0x04;
 
 const RSA_KEY_FILE_NAME: &str = "caching_sha2_rsa.pem";
 
+static PUB_KEY_PEM: OnceLock<Mutex<String>> = OnceLock::new();
+
 /// AuthCache saves the hashes of successful authentication  
 /// attempts. These are used for sha2_caching_password fast
 /// authentication.
@@ -62,6 +64,9 @@ impl AuthCache {
                 .expect("failed to encode public key"),
         )
         .expect("invalid PEM encoding");
+
+        let mut pub_key_string = Self::get_pub_key_string().lock().unwrap();
+        *pub_key_string = pub_key_pem.clone();
 
         Arc::new(Self {
             cache: RwLock::new(HashMap::new()),
@@ -107,6 +112,11 @@ impl AuthCache {
     /// Get the public key in PEM format
     pub fn public_key_pem(&self) -> String {
         self.pub_key_pem.to_string()
+    }
+
+    /// Get the static public key
+    pub fn get_pub_key_string() -> &'static Mutex<String> {
+        PUB_KEY_PEM.get_or_init(|| Mutex::new(String::from("RSA key is not available")))
     }
 
     fn generate_fast_digest(&self, password: &[u8]) -> [u8; 32] {

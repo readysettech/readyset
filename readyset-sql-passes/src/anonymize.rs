@@ -201,6 +201,7 @@ impl<'ast> VisitorMut<'ast> for AnonymizeVisitor<'_> {
             ShowStatement::Events
             | ShowStatement::CachedQueries(..)
             | ShowStatement::ProxiedQueries(..)
+            | ShowStatement::ReadySetCachingSha2Rsa
             | ShowStatement::ReadySetStatus
             | ShowStatement::ReadySetStatusAdapter
             | ShowStatement::ReadySetMigrationStatus(..)

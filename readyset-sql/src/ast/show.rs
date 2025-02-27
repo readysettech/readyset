@@ -19,6 +19,7 @@ pub enum ShowStatement {
     CachedQueries(Option<String>),
     ProxiedQueries(ProxiedQueriesOptions),
     ReadySetStatus,
+    ReadySetCachingSha2Rsa,
     ReadySetStatusAdapter,
     ReadySetMigrationStatus(u64),
     ReadySetVersion,
@@ -52,6 +53,7 @@ impl DialectDisplay for ShowStatement {
                         write!(f, "QUERIES")
                     }
                 }
+                Self::ReadySetCachingSha2Rsa => write!(f, "READYSET CACHING_SHA2_PASSWORD RSA"),
                 Self::ReadySetStatus => write!(f, "READYSET STATUS"),
                 Self::ReadySetStatusAdapter => write!(f, "READYSET STATUS ADAPTER"),
                 Self::ReadySetMigrationStatus(id) => write!(f, "READYSET MIGRATION STATUS {}", id),

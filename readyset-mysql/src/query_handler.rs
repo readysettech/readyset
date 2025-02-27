@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use std::str::FromStr;
 
 use lazy_static::lazy_static;
+use mysql_srv::AuthCache;
 use readyset_adapter::backend::noria_connector::QueryResult;
 use readyset_adapter::backend::SelectSchema;
 use readyset_adapter::{QueryHandler, SetBehavior};
@@ -11,8 +12,8 @@ use readyset_client::ColumnSchema;
 use readyset_data::{Collation, DfType, DfValue, TinyText};
 use readyset_errors::{ReadySetError, ReadySetResult};
 use readyset_sql::ast::{
-    Column, Expr, FieldDefinitionExpr, Literal, SetStatement, SqlIdentifier, SqlQuery,
-    VariableScope,
+    Column, Expr, FieldDefinitionExpr, Literal, SetStatement, ShowStatement, SqlIdentifier,
+    SqlQuery, VariableScope,
 };
 use tracing::warn;
 
@@ -838,6 +839,7 @@ impl QueryHandler for MySqlQueryHandler {
                 FieldDefinitionExpr::Expr { expr, .. } => expr.contains_vars(),
                 _ => false,
             }),
+            SqlQuery::Show(ShowStatement::ReadySetCachingSha2Rsa) => true,
             _ => false,
         }
     }
@@ -851,6 +853,7 @@ impl QueryHandler for MySqlQueryHandler {
                     ..
                 } if var.as_non_user_var() == Some(VERSION_COMMENT_VARIABLE_NAME) && stmt.fields.len() == 1)
             }),
+            SqlQuery::Show(ShowStatement::ReadySetCachingSha2Rsa) => true,
             _ => false,
         }
     }
@@ -866,6 +869,22 @@ impl QueryHandler for MySqlQueryHandler {
         // hardcoded value.
         // * If none of the above rules apply, we return an empty set of rows.
         match query {
+            SqlQuery::Show(ShowStatement::ReadySetCachingSha2Rsa) => {
+                Ok(QueryResult::from_owned(
+                    SelectSchema {
+                        schema: Cow::Owned(vec![ColumnSchema {
+                            column: Column {
+                                name: "CACHING_SHA2_PASSWORD RSA".into(),
+                                table: None,
+                            },
+                            column_type: DfType::Text(Collation::default()),
+                            base: None,
+                        }]),
+                        columns: Cow::Owned(vec!["CACHING_SHA2_PASSWORD RSA".into()]),
+                    },
+                    vec![Results::new(vec![vec![AuthCache::get_pub_key_string().lock().unwrap().clone().into()]]),],
+                ))
+            }
             SqlQuery::Select(stmt)
                 if stmt.fields.iter().any(|field| {
                     matches!(field, FieldDefinitionExpr::Expr {
