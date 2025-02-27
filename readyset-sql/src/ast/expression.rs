@@ -444,7 +444,7 @@ impl From<sqlparser::ast::BinaryOperator> for BinaryOperator {
             BinOp::QuestionAnd => Self::QuestionMarkAnd,
             BinOp::QuestionPipe => Self::QuestionMarkPipe,
             BinOp::Spaceship => todo!(),
-            BinOp::StringConcat => todo!(),
+            BinOp::StringConcat => Self::DoublePipe,
             BinOp::Xor => todo!(),
             BinOp::DoubleHash => todo!(),
             BinOp::LtDashGt => todo!(),
@@ -1028,11 +1028,11 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                 rhs: expr.try_into_dialect(dialect)?,
             }),
             Value(value) => Ok(Self::Literal(value.try_into()?)),
-            CompoundFieldAccess {
+            cfa @ CompoundFieldAccess {
                 root: _,
                 access_chain: _,
             } => {
-                todo!("foo['bar'].baz[1] - probably unsupported")
+                unsupported!("Compound field access a la `foo['bar'].baz[1]`: `{cfa}` = {cfa:?}")
             }
             Wildcard(_token) => todo!("wildcard expression"),
             IsNormalized { .. } => unsupported!("IS NORMALIZED"),
@@ -1124,6 +1124,7 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
                     _ => None,
                 }),
             ),
+            sqlparser::ast::FunctionArguments::None => (vec![], false, None),
             other => {
                 return not_yet_implemented!("function call args: {other:?}");
             }
