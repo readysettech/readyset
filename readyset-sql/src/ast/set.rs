@@ -339,7 +339,8 @@ impl From<String> for Variable {
 
 impl From<sqlparser::ast::Ident> for Variable {
     fn from(value: sqlparser::ast::Ident) -> Self {
-        value.value.into()
+        // XXX(mvzink): We lowercase across the board (even ignoring dialect) just to match nom-sql
+        value.value.to_lowercase().into()
     }
 }
 
