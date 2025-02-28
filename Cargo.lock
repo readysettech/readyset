@@ -6035,8 +6035,8 @@ dependencies = [
 
 [[package]]
 name = "sqlparser"
-version = "0.54.0"
-source = "git+https://github.com/mvzink/datafusion-sqlparser-rs?rev=165b271ef801b323b6feb0a4d7a3171dbf597a78#165b271ef801b323b6feb0a4d7a3171dbf597a78"
+version = "0.55.0"
+source = "git+https://github.com/mvzink/datafusion-sqlparser-rs?rev=d5eeaf49f213dd2270e80c50529ce45a657f849f#d5eeaf49f213dd2270e80c50529ce45a657f849f"
 dependencies = [
  "log",
  "recursive",
