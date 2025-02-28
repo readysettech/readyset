@@ -343,23 +343,27 @@ fn parse_show(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readyse
 ///   | CACHE <query_id>
 #[cfg(feature = "sqlparser")]
 fn parse_drop(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, ReadysetParsingError> {
-    if parser.parse_keyword(Keyword::ALL) {
-        if parse_readyset_keywords(
-            parser,
-            &[ReadysetKeyword::PROXIED, ReadysetKeyword::QUERIES],
-        ) {
-            Ok(SqlQuery::DropAllProxiedQueries(
-                readyset_sql::ast::DropAllProxiedQueriesStatement {},
-            ))
-        } else if parse_readyset_keyword(parser, ReadysetKeyword::CACHES) {
-            Ok(SqlQuery::DropAllCaches(
-                readyset_sql::ast::DropAllCachesStatement {},
-            ))
-        } else {
-            Err(ReadysetParsingError::ReadysetParsingError(
-                "expected ALL PROXIED QUERIES or ALL CACHES".into(),
-            ))
-        }
+    if parse_readyset_keywords(
+        parser,
+        &[
+            ReadysetKeyword::Standard(Keyword::ALL),
+            ReadysetKeyword::PROXIED,
+            ReadysetKeyword::QUERIES,
+        ],
+    ) {
+        Ok(SqlQuery::DropAllProxiedQueries(
+            readyset_sql::ast::DropAllProxiedQueriesStatement {},
+        ))
+    } else if parse_readyset_keywords(
+        parser,
+        &[
+            ReadysetKeyword::Standard(Keyword::ALL),
+            ReadysetKeyword::CACHES,
+        ],
+    ) {
+        Ok(SqlQuery::DropAllCaches(
+            readyset_sql::ast::DropAllCachesStatement {},
+        ))
     } else if parser.parse_keyword(Keyword::CACHE) {
         let name = parser.parse_object_name(false)?.into_dialect(dialect);
         Ok(SqlQuery::DropCache(DropCacheStatement { name }))
