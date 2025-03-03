@@ -739,6 +739,8 @@ impl Ingredient for Join {
                 // don't include columns in the right that also come from the left
                 .filter_map(|(idx, col)| col.filter(|_| left_cols[idx].is_none()))
                 .collect::<Vec<_>>();
+            let mut join_right_cols = right_cols.clone();
+            join_right_cols.extend(self.on.iter().map(|(_, col)| *col));
             let left_cols = left_cols.into_iter().flatten().collect::<Vec<_>>();
             ColumnSource::GeneratedFromColumns(vec1![
                 ColumnRef {
@@ -748,6 +750,10 @@ impl Ingredient for Join {
                 ColumnRef {
                     node: self.right.as_global(),
                     columns: right_cols
+                },
+                ColumnRef {
+                    node: self.right.as_global(),
+                    columns: join_right_cols
                 },
             ])
         }
